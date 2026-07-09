@@ -75,16 +75,14 @@ func main() {
 		raw, err := local.Local(ctx, local.Req{Prompt: string(promptBytes), Input: r.Input, Schema: json.RawMessage(schemaBytes), Model: *model})
 		if err != nil {
 			if *jsonl {
-				line, _ := json.Marshal(map[string]any{"meta": r.Meta, "expected": r.Expected, "error": err.Error()})
-				fmt.Println(string(line))
+				printJSONLine(i, map[string]any{"meta": r.Meta, "expected": r.Expected, "error": err.Error()})
 				continue
 			}
 			fmt.Printf("%2d  ERR  %v\n", i+1, err)
 			continue
 		}
 		if *jsonl {
-			line, _ := json.Marshal(map[string]any{"meta": r.Meta, "expected": r.Expected, "output": json.RawMessage(raw)})
-			fmt.Println(string(line))
+			printJSONLine(i, map[string]any{"meta": r.Meta, "expected": r.Expected, "output": json.RawMessage(raw)})
 			continue
 		}
 		vmark := verbatimMark(raw, r.Input, *verbatim, &quoted)
@@ -100,13 +98,10 @@ func main() {
 	if *jsonl {
 		return
 	}
-	rate := 0.0
-	if len(rows) > 0 {
-		rate = float64(pass) / float64(len(rows))
-	}
+	rate := rate0(pass, len(rows))
 	fmt.Printf("\nscore: %d/%d (%.0f%%)\n", pass, len(rows), rate*100)
 	if *verbatim != "" {
-		fmt.Printf("verbatim %s: %d/%d (%.0f%%)\n", *verbatim, quoted, len(rows), float64(quoted)/float64(len(rows))*100)
+		fmt.Printf("verbatim %s: %d/%d (%.0f%%)\n", *verbatim, quoted, len(rows), rate0(quoted, len(rows))*100)
 	}
 	if rate >= 0.8 {
 		fmt.Println("verdict: GO for local")
@@ -158,11 +153,31 @@ func verbatimMark(raw json.RawMessage, input, field string, quoted *int) string 
 		return ""
 	}
 	got := normalize(fieldOf(raw, field))
-	if got == "" || normalize(input) == "" || !strings.Contains(normalize(input), got) {
+	normInput := normalize(input)
+	if got == "" || normInput == "" || !strings.Contains(normInput, got) {
 		return "✗"
 	}
 	*quoted++
 	return "✓"
+}
+
+// printJSONLine emits one -jsonl row, surfacing a marshal failure on stderr
+// instead of silently writing an empty line into a scripted pipeline.
+func printJSONLine(i int, row map[string]any) {
+	line, err := json.Marshal(row)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%2d  ERR  encode row: %v\n", i+1, err)
+		return
+	}
+	fmt.Println(string(line))
+}
+
+// rate0 is n/d with a zero denominator reading as 0, not NaN.
+func rate0(n, d int) float64 {
+	if d == 0 {
+		return 0
+	}
+	return float64(n) / float64(d)
 }
 
 // normalize lowercases and reduces text to space-separated alphanumeric runs,

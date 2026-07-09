@@ -93,7 +93,8 @@ jobs:
         run: |
           mod=github.com/itsHabib/workbench
           fail=0
-          for tool in $(ls cmd); do
+          for tooldir in cmd/*/; do
+            tool=$(basename "$tooldir")
             deps=$(go list -deps ./cmd/$tool/... | grep "^${mod}/cmd/" || true)
             bad=$(echo "$deps" | grep -Ev "^${mod}/cmd/${tool}(/|\$)" || true)
             if [ -n "$bad" ]; then
