@@ -102,6 +102,9 @@ func (c Config) validate() error {
 	if c.CatchAll == "" {
 		return errors.New("catch_all channel is required: an unrouted event must not be silently dropped")
 	}
+	if c.catchAllDrops() {
+		return errors.New("catch_all must notify somewhere: it cannot be a drop channel, or an unrouted event reads as calm")
+	}
 	if err := c.checkChannel(c.CatchAll); err != nil {
 		return fmt.Errorf("catch_all: %w", err)
 	}
@@ -159,4 +162,15 @@ func (c Config) checkChannel(name string) error {
 		return fmt.Errorf("channel %q not defined", name)
 	}
 	return nil
+}
+
+// catchAllDrops reports whether the configured catch_all would silence events
+// instead of notifying — the literal drop channel, or a configured channel of
+// type drop. The catch_all exists so an unrouted event still pages; a dropping
+// catch_all would defeat that invariant.
+func (c Config) catchAllDrops() bool {
+	if c.CatchAll == ChannelDrop {
+		return true
+	}
+	return c.Channels[c.CatchAll].Type == ChannelDrop
 }

@@ -152,10 +152,14 @@ func dispatch(cfg config.Config, j *journal.Journal, r *route.Router, ev event.E
 		entry.Kind = journal.Throttled
 		return journalOK(j, entry)
 	}
-	if d.Channel == config.ChannelDrop {
+	if d.Channel == config.ChannelDrop || cfg.Channels[d.Channel].Type == config.ChannelDrop {
 		entry.Kind = journal.Dropped
 		return journalOK(j, entry)
 	}
+	// Send before journaling: at-least-once by design. Journaling a delivery
+	// before the send could record one that never happened — a real block
+	// silently un-paged — which is the worse failure for a push sink. A
+	// duplicate page (journal fails after a good send) is the safe way to err.
 	if err := notify.Send(cfg.Channels[d.Channel], ev); err != nil {
 		entry.Kind = journal.Errored
 		entry.Note = err.Error()
