@@ -1,3 +1,10 @@
 *.exe
 coverage.out
 .demo-state/
+
+.env
+.env.*
+*.pem
+*.key
+credentials*
+secrets/

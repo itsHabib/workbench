@@ -2,6 +2,15 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## `local` CLI name shadows the bash/zsh builtin
+
+At a top-level bash/zsh prompt, `local` resolves to the shell builtin before
+`$PATH`, so a bare invocation fails with "can only be used in a function". The
+README quick-start uses `env local` to sidestep it. If real adoption friction
+shows up (users tripping on it past the quick-start), consider a distinct
+binary name — operator's call; renaming a CLI is a breaking change to every
+skill that shells to it.
+
 ## Lazy-migration queue (graduate in when next touched)
 
 New planes are born here; existing tools migrate in when next in hand, not as a
