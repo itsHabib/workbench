@@ -1,0 +1,3 @@
+# Store and check out text files with LF everywhere, so gofmt and tooling stay
+# consistent across platforms (no CRLF churn on Windows checkouts).
+* text=auto eol=lf
