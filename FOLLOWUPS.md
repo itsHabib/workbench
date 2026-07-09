@@ -14,7 +14,9 @@ owner — not this repo's work to force.
   gate's `internal/verify` and is conformance-tested against the schema.
 - **triage** — adopt `contracts`; drop its hand-parsed verdict copy.
 - **tracelens** — adopt `contracts`; drop its hand-parsed verdict copy.
-- **local** — adopt `contracts` where it reads verdicts.
+- **local** — migrated in 2026-07-09 (the second tenant; going public touched
+  it). `contracts` adoption is owed only if/when it reads verdicts — nothing in
+  it does today.
 - **huddle, sense** — graduate in when next touched.
 
 ## flare migration — choices made
@@ -28,6 +30,21 @@ owner — not this repo's work to force.
 - **flare's own follow-ups** live at `cmd/flare/docs/FOLLOWUPS.md`; its
   integration asks to the ship/gate owners are unchanged. The envelope-schema
   ask there is now largely paid by `contracts`.
+
+## local migration — choices made (2026-07-09)
+
+- **Plain copy again** (the flare precedent): the import path changed everywhere
+  anyway (`itsHabib/local` → `itsHabib/workbench/local`); history stays in the
+  standalone `pers/local` repo, kept as an archive.
+- **`local/` is a top-level mechanism package**, not a tool under `cmd/` — see
+  the charter's shared-mechanism amendment; CI leaf-checks it alongside
+  `contracts`.
+- **`cmd/demo` did not migrate** — folded into `local/example_test.go`.
+- **`cmd/eval/ci-lines.jsonl` scanned line-by-line** before entering a
+  to-be-public repo: 10 CI log lines, no tokens, no creds, no employer refs.
+- Consumers on the `replace github.com/itsHabib/local` directive
+  (local-poc/reviewer-triage, local-poc/local) repointed at the workbench
+  module.
 
 ## Deferred: split `contracts` into its own module
 

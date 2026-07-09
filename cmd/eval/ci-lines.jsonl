@@ -1,0 +1,10 @@
+{"input":"Error: connect ETIMEDOUT registry.npmjs.org:443","expected":"infra"}
+{"input":"FAIL src/auth.test.ts: expected 200 but got 401 in 'rejects expired token'","expected":"real-break"}
+{"input":"npm ERR! 429 Too Many Requests - GET https://registry.npmjs.org/lodash","expected":"infra"}
+{"input":"Test timeout of 30000ms exceeded on attempt 1; passed on retry","expected":"flake"}
+{"input":"TypeError: Cannot read properties of undefined (reading 'id') at handler.ts:42","expected":"real-break"}
+{"input":"The self-hosted runner received a shutdown signal and disconnected","expected":"infra"}
+{"input":"Statements coverage 84.9% is below the required 85% threshold","expected":"real-break"}
+{"input":"Playwright: element not visible after 5s, retried and passed on rerun","expected":"flake"}
+{"input":"fatal: unable to access 'https://github.com/itsHabib/ship': Could not resolve host","expected":"infra"}
+{"input":"AssertionError: expected array to have length 3 but got 2","expected":"real-break"}

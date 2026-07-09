@@ -29,8 +29,8 @@ not a refactor.
 ## What's in, what's out
 
 **In:** gate, triage, tracelens, local, flare, huddle, sense, future planes, and
-new infra POCs by default. Today the repo holds `contracts` + `flare`; the rest
-migrate in lazily (see below).
+new infra POCs by default. Today the repo holds `contracts`, `local`, and
+`flare`; the rest migrate in lazily (see below).
 
 **Out — do not migrate:**
 
@@ -62,6 +62,19 @@ stays in the tool that owns the decision. The verdict type's behavioral source
 of truth is gate's `internal/verify`; `contracts` mirrors that shape and
 conformance-tests against the schema, but never copies the `Reduce` function.
 
+## Shared mechanism packages
+
+`local` (structured local-model calls + the escalate-on-uncertainty gate) is not
+a tool like flare — it is a shared *mechanism* library plus CLIs, so the library
+lives as a top-level package like `contracts`. The amendment the migration made:
+a shared mechanism package is allowed when it carries **no tool's decision
+logic** — pure plumbing any tool may call, never a place a routing rule or a
+reducer can hide — and CI leaf-checks it like `contracts` (it may import at most
+`contracts`, and today imports nothing in the module). Migrating local *in* is
+also what keeps the contracts-split trigger unpulled: an outside-the-module Go
+consumer of the shared types would force `contracts` into its own module; an
+inside one is the point of the repo.
+
 ## Lazy migration, not big-bang
 
 New planes are born here. Existing tools graduate in **when next touched** —
@@ -73,7 +86,9 @@ when that tool is next in hand, never as a stop-the-world sweep.
 flare is the founding tenant: unpushed and small, it was the cheapest first
 migration, and rewiring it to `contracts` deleted the third hand-rolled copy of
 the verdict parser — the debt this repo was stood up to pay (redesign
-RED-TEAM #7).
+RED-TEAM #7). local is the second: going public touched it, so it graduated in
+as the shared mechanism library (see above) plus its `cmd/local` and `cmd/eval`
+faces.
 
 ## When to split `contracts` into its own module
 

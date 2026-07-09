@@ -57,7 +57,8 @@ jobs:
 
   # The boundary law, enforced mechanically instead of by discipline:
   # "share contracts, not call stacks." contracts imports nothing else in the
-  # module; no tool imports another tool's decision code. A breach fails here.
+  # module; local (a shared mechanism package) imports at most contracts; no
+  # tool imports another tool's decision code. A breach fails here.
   hygiene:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -78,11 +79,22 @@ jobs:
             exit 1
           fi
           echo "contracts is a leaf ✓"
+      - name: local is a mechanism leaf
+        run: |
+          mod=github.com/itsHabib/workbench
+          deps=$(go list -deps ./local | grep "^${mod}/" | grep -Ev "^${mod}/(local|contracts)$" || true)
+          if [ -n "$deps" ]; then
+            echo "local is a shared mechanism and may import at most contracts, but pulls in:" >&2
+            echo "$deps" >&2
+            exit 1
+          fi
+          echo "local is a mechanism leaf ✓"
       - name: no tool imports another tool's code
         run: |
           mod=github.com/itsHabib/workbench
           fail=0
-          for tool in $(ls cmd); do
+          for tooldir in cmd/*/; do
+            tool=$(basename "$tooldir")
             deps=$(go list -deps ./cmd/$tool/... | grep "^${mod}/cmd/" || true)
             bad=$(echo "$deps" | grep -Ev "^${mod}/cmd/${tool}(/|\$)" || true)
             if [ -n "$bad" ]; then

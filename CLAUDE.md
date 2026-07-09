@@ -15,9 +15,15 @@ triggers that would later split `contracts` into its own module.
   verifier emits, and the artifact envelope every producer writes. A **leaf**
   package that imports nothing else in the module and carries no decision logic.
   This is the debt payment — one source of truth instead of a parser per tool.
+- `local/` — the shared local-model mechanism: structured Ollama calls + an
+  escalate-on-uncertainty gate. A top-level *mechanism* package — carries no
+  tool's decision logic, leaf-checked like `contracts` (may import at most
+  `contracts`). See `local/README.md` for the eval verdicts and the
+  when-to-route-local rule. Its CLIs live at `cmd/local` and `cmd/eval`.
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
   `cmd/<tool>/internal/`. Each tool keeps its own `CLAUDE.md` + `docs/DESIGN.md`.
-  Today: `flare` (the escalation-routing plane).
+  Today: `flare` (the escalation-routing plane), plus `local`'s CLIs (`local`,
+  `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.
 
