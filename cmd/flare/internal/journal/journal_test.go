@@ -25,15 +25,37 @@ func TestSeenSettlesDeliveredDroppedThrottledButRetriesErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if !seen[id] {
+		if !seen[SeenKey("", id)] {
 			t.Fatalf("%s must be settled", id)
 		}
 	}
-	if seen["d"] {
+	if seen[SeenKey("", "d")] {
 		t.Fatal("an errored delivery must stay unsettled so it retries")
 	}
-	if seen["e"] {
+	if seen[SeenKey("", "e")] {
 		t.Fatal("a cursor-alert entry is not an event settlement")
+	}
+}
+
+func TestSeenIsScopedBySource(t *testing.T) {
+	// The same producer-local event ID from two sources is two distinct facts:
+	// settling one must not mark the other as already seen.
+	j, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Entry{Time: time.Now(), Kind: Delivered, Source: "gate-prod", EventID: "vrd_1"}); err != nil {
+		t.Fatal(err)
+	}
+	seen, err := j.Seen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seen[SeenKey("gate-prod", "vrd_1")] {
+		t.Fatal("the delivered event must be settled for its own source")
+	}
+	if seen[SeenKey("gate-staging", "vrd_1")] {
+		t.Fatal("the same ID from another source must not be treated as seen")
 	}
 }
 

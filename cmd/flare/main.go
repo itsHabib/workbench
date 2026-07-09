@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
@@ -93,30 +94,44 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	if err != nil {
 		return err
 	}
+	var failed []string
 	for _, src := range cfg.Sources {
 		next, err := pollSource(cfg, j, r, src, cur.Sources[src.Name], seen)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "flare: %v\n", err)
+			failed = append(failed, src.Name)
 			continue
 		}
 		cur.Sources[src.Name] = next
 	}
 	cur.LastPoll = time.Now()
-	return j.SaveCursors(cur)
+	if err := j.SaveCursors(cur); err != nil {
+		return err
+	}
+	// A source that failed to read is a swept-clean lie: surface it so `sweep`
+	// exits non-zero (its CLI contract). The successful sources still advanced
+	// and LastPoll still records liveness for the watch loop.
+	if len(failed) > 0 {
+		return fmt.Errorf("source(s) failed to poll: %s", strings.Join(failed, ", "))
+	}
+	return nil
 }
 
 func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src config.Source, cur source.Cursor, seen map[string]bool) (source.Cursor, error) {
+	// Read may return events AND an error together (a pending integrity alert
+	// alongside a parse failure). Deliver what it produced before surfacing the
+	// error, so an alert is never lost to the failure it arrived with.
 	events, next, err := source.Read(src, cur)
-	if err != nil {
-		return cur, err
-	}
 	for _, ev := range events {
-		if seen[ev.ID] {
+		if seen[journal.SeenKey(ev.Source, ev.ID)] {
 			continue
 		}
 		if !dispatch(cfg, j, r, ev) {
-			return cur, nil // hold the cursor; retry next cycle
+			return cur, err // delivery failed: hold the cursor, retry next cycle
 		}
+	}
+	if err != nil {
+		return cur, err // read failed: hold the cursor and surface it
 	}
 	return next, nil
 }

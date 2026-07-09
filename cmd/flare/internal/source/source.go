@@ -6,6 +6,7 @@ package source
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strings"
 	"time"
@@ -49,7 +50,10 @@ func Read(src config.Source, cur Cursor) ([]event.Event, Cursor, error) {
 	}
 	events, last, err := parse(src, lines)
 	if err != nil {
-		return nil, cur, err
+		// A parse failure must not swallow a pending integrity alert: return it
+		// so the caller still routes the cursor-alert (a broken chain reaching
+		// only stderr is the silent failure this guards against).
+		return alerts, cur, err
 	}
 	next := Cursor{Offset: cur.Offset + size, LastHash: last}
 	if next.LastHash == "" {
@@ -101,10 +105,15 @@ func parse(src config.Source, lines []string) ([]event.Event, string, error) {
 	return parseGateLog(src, lines)
 }
 
+// alert builds a cursor-integrity event. Its ID is a stable hash of the note,
+// not a timestamp: the same failure re-detected on a held cursor produces the
+// same ID, so dedupe suppresses it and a persistent chain break pages once, not
+// every poll. A genuinely different failure yields a different note, hence a
+// different ID, and pages.
 func alert(src config.Source, note string) event.Event {
 	return event.Event{
 		Source:   src.Name,
-		ID:       fmt.Sprintf("cursor-alert:%s:%d", src.Name, time.Now().UnixNano()),
+		ID:       fmt.Sprintf("cursor-alert:%s:%08x", src.Name, noteHash(note)),
 		Kind:     "cursor-alert",
 		Time:     time.Now(),
 		Severity: event.SevEscalate,
@@ -112,4 +121,10 @@ func alert(src config.Source, note string) event.Event {
 		Body:     note,
 		Fields:   map[string]string{},
 	}
+}
+
+func noteHash(note string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(note))
+	return h.Sum32()
 }

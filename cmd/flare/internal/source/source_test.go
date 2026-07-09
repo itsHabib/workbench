@@ -115,3 +115,48 @@ func TestCorruptGateLineFailsTheRead(t *testing.T) {
 		t.Fatal("a corrupt artifact line must fail the read, not read as quiet")
 	}
 }
+
+func TestCorruptVerdictBodyFailsTheRead(t *testing.T) {
+	// A valid envelope whose verdict body will not decode (decision is a number,
+	// not a string) must fail the read loudly — exactly like a corrupt envelope
+	// line — never vanish and let a block/escalate go unpaged.
+	bad := `{"id":"vrd_x","kind":"verdict","run":"r","time":"2026-07-08T16:00:00Z","body":{"subject":{"repo":"x","number":1},"decision":123,"tier":"T1","why":"?"},"prev":"h0","hash":"h1"}`
+	src := gateFile(t, bad+"\n")
+	if _, _, err := Read(src, Cursor{}); err == nil {
+		t.Fatal("a verdict body that will not decode must fail the read, not read as quiet")
+	}
+}
+
+func TestParseErrorStillDeliversPendingAlert(t *testing.T) {
+	// A truncation fires a cursor-alert and resweeps; when the resweep then hits
+	// a corrupt line, Read must still surface the alert alongside the error, so
+	// the integrity notification reaches the routing path, not only stderr.
+	src := gateFile(t, "not json\n")
+	events, _, err := Read(src, Cursor{Offset: 10_000})
+	if err == nil {
+		t.Fatal("a corrupt line in the resweep must fail the read")
+	}
+	if len(events) != 1 || events[0].Kind != "cursor-alert" {
+		t.Fatalf("the pending truncation alert must survive the parse error, got %+v", events)
+	}
+}
+
+func TestCursorAlertIDIsStableForSameFailure(t *testing.T) {
+	// The dedupe ID must be stable for the same integrity failure, so a held
+	// cursor does not re-page the same break every poll.
+	src := gateFile(t, escLine+"\n")
+	e1, _, err := Read(src, Cursor{Offset: 10_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, _, err := Read(src, Cursor{Offset: 10_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e1[0].Kind != "cursor-alert" || e2[0].Kind != "cursor-alert" {
+		t.Fatalf("expected leading cursor-alerts, got %+v / %+v", e1[0], e2[0])
+	}
+	if e1[0].ID != e2[0].ID {
+		t.Fatalf("cursor-alert ID must be stable for the same failure: %q != %q", e1[0].ID, e2[0].ID)
+	}
+}

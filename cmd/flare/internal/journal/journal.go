@@ -27,6 +27,14 @@ const (
 // re-notified, errored ones are retried because the cursor holds.
 var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true}
 
+// SeenKey composes an event's dedupe key. Event IDs are only unique within a
+// single source's log (a gate artifact ID, a receipt key+outcome), so dedupe is
+// scoped by source: the same producer-local ID from two configured sources is
+// two distinct facts, not a duplicate to suppress.
+func SeenKey(source, id string) string {
+	return source + "\x00" + id
+}
+
 // Entry is one journaled delivery fact.
 type Entry struct {
 	Time     time.Time `json:"time"`
@@ -70,9 +78,10 @@ func (j *Journal) Append(e Entry) error {
 	return nil
 }
 
-// Seen replays the journal into the set of settled event IDs. Rebuilding
-// from the journal keeps dedupe truthful across restarts and resweeps: only
-// what was actually delivered (or explicitly dropped/throttled) is skipped.
+// Seen replays the journal into the set of settled event keys (see SeenKey).
+// Rebuilding from the journal keeps dedupe truthful across restarts and
+// resweeps: only what was actually delivered (or explicitly dropped/throttled)
+// is skipped.
 func (j *Journal) Seen() (map[string]bool, error) {
 	f, err := os.Open(j.path())
 	if os.IsNotExist(err) {
@@ -91,7 +100,7 @@ func (j *Journal) Seen() (map[string]bool, error) {
 			continue // a torn tail line must not brick dedupe
 		}
 		if seen[e.Kind] {
-			ids[e.EventID] = true
+			ids[SeenKey(e.Source, e.EventID)] = true
 		}
 	}
 	if err := sc.Err(); err != nil {

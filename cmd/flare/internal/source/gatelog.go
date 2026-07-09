@@ -34,7 +34,10 @@ func parseGateLog(src config.Source, lines []string) ([]event.Event, string, err
 			return nil, "", fmt.Errorf("source %s: bad artifact line: %w", src.Name, err)
 		}
 		last = env.Hash
-		ev, ok := gateEvent(src, env)
+		ev, ok, err := gateEvent(src, env)
+		if err != nil {
+			return nil, "", fmt.Errorf("source %s: %w", src.Name, err)
+		}
 		if !ok {
 			continue
 		}
@@ -47,15 +50,24 @@ func parseGateLog(src config.Source, lines []string) ([]event.Event, string, err
 // contract's job (Envelope.Verdict); deciding whether a verdict is page-worthy
 // is flare's. That split is the whole point of the shared package: flare no
 // longer hand-parses the verdict schema.
-func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool) {
+//
+// A verdict whose body will not decode is a corrupt artifact, not a non-event:
+// it fails the read loudly (like a corrupt envelope line), so a block/escalate
+// can never vanish quietly and go unpaged. Only ok=false — a kind that is not a
+// verdict at all — is a legitimate skip.
+func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, error) {
 	if env.Kind == contracts.KindEscalation {
-		return escalationEvent(src, env), true
+		return escalationEvent(src, env), true, nil
 	}
 	v, ok, err := env.Verdict()
-	if !ok || err != nil {
-		return event.Event{}, false
+	if err != nil {
+		return event.Event{}, false, fmt.Errorf("verdict %s: %w", env.ID, err)
 	}
-	return verdictEvent(src, env, v)
+	if !ok {
+		return event.Event{}, false, nil
+	}
+	ev, page := verdictEvent(src, env, v)
+	return ev, page, nil
 }
 
 func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
