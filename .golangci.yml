@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+# Enforces the engineering principles in CLAUDE.md. The enabled set is exactly
+# the four linters CLAUDE.md names — nothing more, so the config and the
+# documented promise stay in lockstep. Broader hygiene linters (errcheck,
+# staticcheck) are deliberate follow-ups, not silently bundled here.
+linters:
+  default: none
+  enable:
+    - gocognit # cognitive complexity — keep functions small
+    - nestif # nested-if depth — the ≤2-nesting principle
+    - cyclop # cyclomatic complexity — branch count ceiling
+    - revive # style meta-linter — early return, naming, error strings
+  settings:
+    gocognit:
+      # 30 is golangci-lint's conventional default; the tree passes here today.
+      min-complexity: 30
+    nestif:
+      min-complexity: 5
+    cyclop:
+      # 20 guards today's watermark against regression. Ratchet toward 15 as
+      # any hot path is split under its own change.
+      max-complexity: 20

@@ -1,0 +1,83 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # Claude posts review comments back to the PR
+      issues: write # Claude posts comments back on tagged issues
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      # The action diffs via `git hash-object <path>` against the working
+      # tree, so files a PR adds must exist on disk — a main checkout (any
+      # fetch depth) lacks them and the review dies before it starts. Check
+      # out the PR head instead, but ONLY when the head lives in this repo:
+      # in-repo branches require push access, so their content is as trusted
+      # as the commenter the action already gates on. A fork head never
+      # replaces the trusted workspace — fork PRs keep the main checkout.
+      - name: Resolve review ref (PR head for same-repo PRs)
+        id: review_ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: >-
+            ${{
+              (github.event_name == 'issue_comment' && github.event.issue.pull_request
+                && github.event.issue.number)
+              || ((github.event_name == 'pull_request_review'
+                  || github.event_name == 'pull_request_review_comment')
+                && github.event.pull_request.number)
+              || ''
+            }}
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF}"
+          if [ -n "${PR_NUMBER}" ]; then
+            same_repo=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq '.head.repo.full_name == .base.repo.full_name')
+            if [ "${same_repo}" = "true" ]; then
+              ref="refs/pull/${PR_NUMBER}/head"
+            fi
+          fi
+          echo "resolved review ref: ${ref}"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 — audited 2026-06-12
+        with:
+          ref: ${{ steps.review_ref.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@0cb4f3e5e764d2e00407d29b6bf0aa9df0976d88 # v1 — audited 2026-06-12
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
+          # prompt: 'Update the pull request description to include a summary of changes.'
+
+          # Optional: Add claude_args to customize behavior and configuration
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          # claude_args: '--allowed-tools Bash(gh pr *)'

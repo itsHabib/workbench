@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One module, so `check` runs the whole tree: a shared `contracts` change must
+# retest every consumer, and module-wide `go test` is faster + safer than
+# path-filtering that could green a tool whose contract shifted under it.
+# Per-tool path-filtered jobs are a documented follow-up (FOLLOWUPS.md), owed
+# only once the tool count or test time makes module-wide retest wasteful.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "unformatted files:" && echo "$out" && exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+      - name: go test
+        run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+      - name: coverage summary
+        if: always()
+        run: |
+          echo "## Coverage" >> $GITHUB_STEP_SUMMARY
+          if [ -f coverage.out ]; then
+            go tool cover -func=coverage.out | tail -n 1 >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_no coverage profile produced — see test step for failure details_" >> $GITHUB_STEP_SUMMARY
+          fi
+      - name: upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          retention-days: 30
+          if-no-files-found: ignore
+          path: coverage.out
+      - name: go build
+        run: go build ./...
+
+  # The boundary law, enforced mechanically instead of by discipline:
+  # "share contracts, not call stacks." contracts imports nothing else in the
+  # module; no tool imports another tool's decision code. A breach fails here.
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: contracts is a leaf
+        run: |
+          mod=github.com/itsHabib/workbench
+          deps=$(go list -deps ./contracts | grep "^${mod}/" | grep -v "^${mod}/contracts$" || true)
+          if [ -n "$deps" ]; then
+            echo "contracts must import nothing else in the module, but pulls in:" >&2
+            echo "$deps" >&2
+            exit 1
+          fi
+          echo "contracts is a leaf ✓"
+      - name: no tool imports another tool's code
+        run: |
+          mod=github.com/itsHabib/workbench
+          fail=0
+          for tool in $(ls cmd); do
+            deps=$(go list -deps ./cmd/$tool/... | grep "^${mod}/cmd/" || true)
+            bad=$(echo "$deps" | grep -Ev "^${mod}/cmd/${tool}(/|\$)" || true)
+            if [ -n "$bad" ]; then
+              echo "cmd/$tool reaches into another tool's tree:" >&2
+              echo "$bad" >&2
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 0 ]; then echo "no cross-tool imports ✓"; fi
+          exit $fail
