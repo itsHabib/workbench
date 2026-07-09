@@ -151,11 +151,14 @@ func matches(got, expected string) bool {
 
 // verbatimMark checks the named output field appears in the input after
 // normalization, bumps the counter, and returns a one-rune result marker.
+// A missing or empty field is a failed check — an empty string is a substring
+// of anything, which would count a non-answer as a quote.
 func verbatimMark(raw json.RawMessage, input, field string, quoted *int) string {
 	if field == "" {
 		return ""
 	}
-	if normalize(input) == "" || !strings.Contains(normalize(input), normalize(fieldOf(raw, field))) {
+	got := normalize(fieldOf(raw, field))
+	if got == "" || normalize(input) == "" || !strings.Contains(normalize(input), got) {
 		return "✗"
 	}
 	*quoted++

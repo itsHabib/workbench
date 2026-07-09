@@ -52,11 +52,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	out, _ := json.Marshal(struct {
+	out, err := json.Marshal(struct {
 		Source string          `json:"source"`
 		Reason string          `json:"reason,omitempty"`
 		Result json.RawMessage `json:"result"`
 	}{res.Source, res.Reason, res.Raw})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "encode result:", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(out))
 }
 

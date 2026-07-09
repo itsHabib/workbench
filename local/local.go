@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -133,6 +134,11 @@ func Local(ctx context.Context, r Req) (json.RawMessage, error) {
 		return nil, fmt.Errorf("ollama unreachable (is it running?): %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ollama: %s: %s", resp.Status, bytes.TrimSpace(msg))
+	}
 
 	var out struct {
 		Message struct {
