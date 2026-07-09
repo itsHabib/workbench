@@ -15,8 +15,13 @@ go install github.com/itsHabib/workbench/cmd/<tool>@latest
   verifier emits, and the artifact envelope every producer writes. A leaf
   package that imports nothing else in the module. This is the debt payment:
   one source of truth instead of a hand-rolled parser per tool.
+- `local/` — the shared local-model mechanism: structured Ollama calls + an
+  escalate-on-uncertainty gate. A top-level *mechanism* package (it carries no
+  tool's decision logic), leaf-checked like `contracts`. Its faces are
+  `cmd/local` (agent co-processor) and `cmd/eval` (the local-exportability
+  oracle).
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
-  `cmd/<tool>/internal/`. Today: `flare`.
+  `cmd/<tool>/internal/`. Today: `flare`, `local`, `eval`.
 - `docs/DESIGN.md` — the repo's charter: the single-module decision and why,
   what's in and out, the boundary law, the lazy-migration policy, and the
   triggers that would later split `contracts` into its own module.
