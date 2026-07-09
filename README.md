@@ -9,6 +9,20 @@ decision code.
 go install github.com/itsHabib/workbench/cmd/<tool>@latest
 ```
 
+A taste — the `local` primitive classifying a CI log line on a local model
+(needs [Ollama](https://ollama.com) running), and flare's one-shot catch-up pass:
+
+```
+$ echo "Error: connect ETIMEDOUT registry.npmjs.org:443" | \
+    local -prompt "Classify this CI line: flake, infra, or real-break." \
+          -schema '{"type":"object","properties":{"class":{"type":"string"}},"required":["class"]}'
+{"source":"local","result":{"class":"infra"}}
+
+$ flare sweep        # tail the artifact logs once, notify on anything that blocked
+```
+
+Each tool's README carries its full surface — see the layout below.
+
 ## Layout
 
 - `contracts/` — the shared vocabulary: the verdict schema + Go types every

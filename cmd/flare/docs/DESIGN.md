@@ -119,8 +119,8 @@ needs delivery facts to reconstruct a decision.
   "version": 1,
   "poll_seconds": 60,
   "sources": [
-    {"name": "gate", "kind": "gate-log", "path": "C:/Users/MichaelHabib/pers/gate/state/log.jsonl"},
-    {"name": "ship", "kind": "ship-receipts", "path": "C:/Users/MichaelHabib/AppData/Roaming/ship/receipts.jsonl"}
+    {"name": "gate", "kind": "gate-log", "path": "C:/Users/<you>/pers/gate/state/log.jsonl"},
+    {"name": "ship", "kind": "ship-receipts", "path": "C:/Users/<you>/AppData/Roaming/ship/receipts.jsonl"}
   ],
   "channels": {
     "toast": {"type": "toast"},
