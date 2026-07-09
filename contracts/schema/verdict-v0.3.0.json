@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/verdict/v0.3.0",
+  "title": "Verdict",
+  "x-version": "0.3.0",
+  "x-source-of-truth": "gate internal/verify/verify.go (type Verdict) — the PROMOTED type; the reducer there is the behavioral source of truth. The workbench-redesign POC copy is ancestral and stale (string producer).",
+  "x-versioning-note": "First versioned expression of the contract (pays the redesign RED-TEAM #7 unimportable/unversioned debt). Per the gate steward: this schema must be conformance-tested against gate's verify.Verdict and should graduate to live next to that type in gate — never maintained as an independent copy. v0.2.0: producer is a structured {class, impl} object. v0.3.0 (ci-classify design, gate PR #10): Finding gains an optional `evidence` field — the verbatim log line / diff span a finding quotes, the substrate the extract-shaped verifiers check; omitempty so existing rungs are unaffected.",
+  "description": "The one artifact body every verifier emits — code, local-model, or judgment. Two orthogonal axes: `decision` (block > escalate > pass) is INDEPENDENT of `tier` (risk band). Composition is monotone (Reduce): worst decision wins, max tier wins, min confidence carries. Ladder law: a local-model producer may only pass or escalate — a `block` from it is a structural violation (ErrLocalBlock), which is what makes 'a local classifier never gates a merge' free.",
+  "type": "object",
+  "required": ["subject", "source", "producer", "decision", "tier", "confidence", "why"],
+  "additionalProperties": false,
+  "properties": {
+    "subject": {
+      "type": "object",
+      "description": "What the verdict is about. PR-shaped today; a CI verdict is really about a run but reuses the PR subject.",
+      "required": ["repo", "number"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string" },
+        "number": { "type": "integer" },
+        "head_sha": { "type": "string" }
+      }
+    },
+    "source": {
+      "type": "string",
+      "description": "The verifier that produced this verdict, e.g. 'triage-floor', 'review-consolidation', 'ci-classify'."
+    },
+    "producer": {
+      "type": "object",
+      "description": "Who stands behind the verdict. Class carries the ladder semantics (the only values the reducer accepts); impl names the specific implementation for provenance only — nothing may branch on it.",
+      "required": ["class"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "type": "string", "enum": ["code", "local-model", "judgment"] },
+        "impl": { "type": "string" }
+      }
+    },
+    "decision": { "type": "string", "enum": ["block", "escalate", "pass"] },
+    "tier": {
+      "type": "string",
+      "description": "Risk band; unknown values rank highest (fail closed).",
+      "pattern": "^T[0-9]+$"
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "severity": { "type": "string" },
+          "locus": { "type": "string" },
+          "evidence": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "why": { "type": "string" }
+  }
+}
