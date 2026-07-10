@@ -212,8 +212,8 @@ Each property names four things in the test: the valid input domain, the law, th
 
 | Seam | Required laws | Technique |
 |---|---|---|
-| Skill catalog / `skill-sync` | check/dry-run never mutates; declared portable sync is idempotent; undeclared same-name divergence is never overwritten; resolved paths remain inside the declared source/target roots | deterministic generated directory trees plus filesystem snapshots |
-| `ReviewFindingsV1` / Ship address boundary | exact-head mismatch always refuses; empty/unsourced `address` never dispatches; consuming the same artifact/digest twice dispatches at most once; unknown major refuses while unknown optional fields preserve the known projection | generated artifacts plus model-based command sequences |
+| Skill catalog / `skill-sync` | check/dry-run never mutates; declared portable sync is idempotent; undeclared same-name divergence is never overwritten; resolved paths remain inside the declared source/target roots. Projection: the set of created/modified relative paths and their content hashes—not metadata/order/timestamps | deterministic generated directory trees plus filesystem snapshots |
+| `ReviewFindingsV1` / Ship address boundary | exact-head mismatch always refuses; empty/unsourced `address` never dispatches; consuming the same artifact/digest twice dispatches at most once; unknown major refuses while unknown optional fields preserve the routing projection: schema major, exact subject, decision/cycle, finding identity/severity/source/evidence presence, and panel requested/completed/missing | generated artifacts plus model-based command sequences |
 | Ship workflow/liveness | every successful transition is legal; terminal state never regresses; one truthful terminal result wins cancel/result races; advancing fake time cannot restore an exhausted budget without a defined recovery event | existing `fast-check` state-machine design, fake clocks, bounded event sequences |
 | Verdict codec | marshal/decode preserves known fields; unknown optional fields are tolerated; malformed/truncated input never panics or yields an authorizing verdict; unknown major/class/decision fails closed | Go fuzz targets with checked-in seed corpus plus generated valid values |
 | Gate reducer authorization projection | code block remains block under any additional valid evidence; missing code floor never passes; adding a verdict cannot lower tier or increase minimum confidence; duplicate non-judgment evidence cannot improve authorization; permutation invariance applies after the multiple-judgment rule below is resolved | Go `testing/quick`/deterministic generators over valid verdict sets |
@@ -223,7 +223,7 @@ Each property names four things in the test: the valid input domain, the law, th
 
 Use each ecosystem's native, already-earned tool: Go standard-library `testing/quick` and fuzzing in Workbench/Gate/Triage/Tracelens; Ship's existing `@fast-check/vitest` design; Dossier's existing Rust `proptest` design. Workbench does not gain a shared cross-language property framework.
 
-**Multiple-judgment hold:** Gate's reducer says verdict order does not matter, but today more than one judgment verdict is resolved by the last slice element. Do not encode that accident as a property or hide it by generating at most one judgment. Before contract convergence, choose and test one structural rule: reject multiple judgments, or reduce them by an explicit deterministic order/join carried in the artifact. Only then does permutation invariance become a required Gate law.
+**Multiple-judgment hold:** Gate's reducer says verdict order does not matter, but today more than one judgment verdict is resolved by the last slice element. Do not encode that accident as a property or hide it by generating at most one judgment. The fail-closed default is to reject multiple judgments and escalate; a deterministic order/join may replace that default only after its identity, supersession, and conflict semantics are explicitly designed and tested. Only then does permutation invariance become a required Gate law.
 
 ## 5. Data model
 
@@ -513,7 +513,7 @@ Proceed to the program only if a fresh Codex seat and a fresh Claude seat each c
 5. **GitHub enforcement:** required check from a GitHub Action, GitHub App, or a controlled local identity? Choose the smallest option that genuinely removes governed-agent bypass.
 6. **Review experiment baseline:** the existing four-reviewer panel is flaky. Define denominators from requested, actually-started, and completed reviewers separately so silent no-shows do not make the alternative look artificially cheap or weak.
 7. **Provider-neutral liveness:** which event projection is semantically meaningful across Cursor, Claude, and Codex? Each provider may need an adapter; the policy must not collapse to the weakest/noisiest shared field.
-8. **Multiple Gate judgments:** reject more than one judgment verdict, or add explicit ordering/identity and a deterministic join? Current last-slice-wins behavior contradicts the reducer's order-independence claim and must not survive contract convergence accidentally.
+8. **Multiple Gate judgments:** keep the fail-closed default (reject more than one judgment and escalate), or earn explicit ordering/identity and a deterministic join? Current last-slice-wins behavior contradicts the reducer's order-independence claim and must not survive contract convergence accidentally.
 
 ## 11. Validation plan
 
@@ -523,10 +523,10 @@ Property testing is phase-local: a contract's laws land with the PR that creates
 or migrates that contract, not in a later testing sweep. Every new suite must:
 
 1. name its valid domain, law, and compared authorization/state projection;
-2. run at least 100 deterministic generated cases per property in normal PR CI, within the repository's <2-minute added-runtime budget;
+2. run at least 100 deterministic generated cases per property in normal PR CI, within the repository's <2-minute added-runtime budget; this floor applies to generated-valid/model cases, while fuzz targets replay their checked-in corpus in PR CI and reserve time-boxed exploration for scheduled/manual runs;
 3. print a reproducible seed and minimized counterexample on failure;
 4. include checked-in fuzz seeds for parser boundaries; time-boxed discovery fuzzing may run scheduled/manual;
-5. demonstrate once, before merge, that a deliberate opposite mutation is caught, then revert the mutation;
+5. demonstrate once, before merge, that a deliberate opposite mutation is caught, then revert the mutation; any later generator change that narrows or otherwise changes the valid domain reactivates this demonstration for the affected properties;
 6. preserve named example tests and promote every real minimized failure into one.
 
 An unseeded random loop, a property that reimplements production as its oracle,
