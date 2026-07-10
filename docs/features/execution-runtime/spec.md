@@ -31,7 +31,7 @@ The missing primitive is not another agent framework. It is a small execution co
 - Make placement an explicit caller choice, not hidden routing policy.
 - Make workspace, inputs, hooks, secrets, outputs, deadline, and cleanup policy explicit.
 - Distinguish controller start, backend allocation, workload readiness, workload execution, collection, cleanup, and terminal completion.
-- Produce hashable, shareable run directories that survive the execution process.
+- Produce hashable run directories that separate shareable Runway-authored metadata from workload-owned inputs/logs/artifacts whose sensitivity remains explicit.
 - Prove the contract first with local processes and Rooms.
 
 ### Non-goals
@@ -192,6 +192,8 @@ cmd/runway/
 
 Captured stdout/stderr replace exact resolved secret byte sequences with `[REDACTED]` before persistence, including matches split across read chunks. This protects against accidental direct echo; it is not a claim that Runway can prevent a workload from transforming or exfiltrating a secret it is authorized to receive.
 
+Collected workload artifacts remain exact bytes so their digests are truthful; Runway does not redact them. A workload authorized to receive a secret can therefore make its run directory sensitive by writing that secret into an artifact. Such a run must not be exported as shareable merely because Runway-authored metadata is clean.
+
 **Alternative:** inline environment values with a `secret: true` flag. Rejected: redaction is not containment.
 
 ### D9 - No automatic retry in Runway
@@ -208,7 +210,7 @@ Captured stdout/stderr replace exact resolved secret byte sequences with `[REDAC
 
 ### D11 - Lifecycle journal and workload streams are distinct
 
-**Choice:** `events.ndjson` contains low-volume canonical lifecycle transitions only. `stdout.log` and `stderr.log` are ordered, buffered byte records that `runway logs --follow` may tail with bounded delivery latency while the controller is healthy. Provider event files remain declared workload artifacts; v0 permits a backend to expose them live or only at terminal collection, and records that delivery mode in the placement receipt.
+**Choice:** `events.ndjson` contains low-volume canonical lifecycle transitions only. `stdout.log` and `stderr.log` are ordered, buffered byte records that `runway logs --follow` may tail with bounded delivery latency while the controller is healthy; that bound includes the rolling tail needed for cross-chunk secret redaction. Provider event files remain declared workload artifacts. v0 records only `terminal_replay` or `none`; `live` is reserved until a separate design defines where and how callers consume a live workload stream.
 
 **Alternative:** journal every output line as `workload_output` with a durable flush. Rejected: agent streams can emit hundreds of events and would turn lifecycle correctness into an fsync-per-line bottleneck. Phase 3 must either tolerate the Rooms backend's existing terminal replay semantics or add a separate Rooms streaming capability before removing Ship's direct local runner.
 
@@ -247,6 +249,8 @@ Captured stdout/stderr replace exact resolved secret byte sequences with `[REDAC
 ```
 
 `work.json` and every `inputs[].source` are files beneath the submitted bundle root. `command.executable` is either `{name}` for placement-PATH lookup or a structured `{path}` reference; `command.args` is an ordered union of `{literal: string}` and `{path: {root, value}}`. Runway never invokes a shell or performs string interpolation. Roots are `workspace`, `inputs`, and `out`. The backend expands structured executable/path arguments and cwd to native Windows or Linux paths immediately before process start.
+
+Every backend also sets `RUNWAY_WORKSPACE`, `RUNWAY_INPUTS`, and `RUNWAY_OUT` to those expanded native roots. Workloads may use these environment variables for root discovery; structured path arguments remain the preferred way for callers to pass known file operands.
 
 ### Placed run request v0.1
 
@@ -362,7 +366,7 @@ Terminal statuses are `succeeded`, `failed`, `timed_out`, and `cancelled`. Stabl
 - `controller_lost`
 - `placement_unavailable`
 
-`causes` is an ordered array of prior `{phase, reason_code, message?}` values when a later failure becomes primary, such as cleanup failure after deadline expiry. `diagnostics` is an array of structured `{code, message, details?}` records and may name an uncertain allocation without changing primary status. `stream_delivery` is `live`, `terminal_replay`, or `none` for declared provider/workload event artifacts; it does not describe stdout/stderr log tailing. Neither field may contain resolved secret values. Human-readable messages are diagnostic only. Callers branch on status, phase, and reason code.
+`causes` is an ordered array of prior `{phase, reason_code, message?}` values when a later failure becomes primary, such as cleanup failure after deadline expiry. `diagnostics` is an array of structured `{code, message, details?}` records and may name an uncertain allocation without changing primary status. In v0, `stream_delivery` is `terminal_replay` or `none` for declared provider/workload event artifacts; reserved value `live` cannot be emitted until a live-stream access contract exists. It does not describe stdout/stderr log tailing. Neither field may contain resolved secret values. Human-readable messages are diagnostic only. Callers branch on status, phase, and reason code.
 
 ### Run directory
 
@@ -383,7 +387,7 @@ Terminal statuses are `succeeded`, `failed`, `timed_out`, and `cancelled`. Stabl
     backend.json            opaque backend handle, mode 0600
 ```
 
-The public directory is shareable after terminal completion. `private/` is host-local and excluded from exported run bundles, but it remains subject to the same no-secret-at-rest invariant and validation scan.
+Runway-authored public metadata is shareable after terminal completion. Workload-owned `inputs/`, `logs/`, and `artifacts/` may make the directory sensitive; export tooling must treat them as untrusted content rather than infer safety from terminal status. `private/` is host-local and excluded from exported run bundles, but it remains subject to the no-secret-at-rest invariant and validation scan.
 
 ## 6. API contract
 
@@ -446,13 +450,14 @@ Phase 2 cannot start against the current human-log-only surface. Rooms must firs
 2. Mint run ID; create the run directory with restrictive permissions.
 3. Persist exact request bytes and emit `run_accepted`.
 4. Resolve/materialize workspace and declared inputs; verify digests.
-5. Resolve secrets at backend start and keep values in process memory only.
-6. Start backend; record placement allocation.
-7. Record workload readiness separately from backend process/VM start.
-8. Run until exit, cancellation, or deadline.
-9. Collect declared outputs and verify required files/digests.
-10. Cleanup backend allocation.
-11. Atomically write `result.json`; append `run_terminal` as the final event. If the controller dies between those writes, `reconcile` treats the immutable result as authoritative and appends only the missing terminal event.
+5. Expand native roots/path arguments and set `RUNWAY_WORKSPACE`, `RUNWAY_INPUTS`, and `RUNWAY_OUT`.
+6. Resolve secrets at backend start and keep values in process memory only.
+7. Start backend; record placement allocation.
+8. Record workload readiness separately from backend process/VM start.
+9. Run until exit, cancellation, or deadline.
+10. Collect declared outputs and verify required files/digests without rewriting artifact bytes.
+11. Cleanup backend allocation.
+12. Atomically write `result.json`; append `run_terminal` as the final event. If the controller dies between those writes, `reconcile` treats the immutable result as authoritative and appends only the missing terminal event.
 
 ### Flow B - placement backpressure
 
@@ -532,7 +537,7 @@ v0 does not promise automatic adoption after host/process restart, automatic dis
 | --- | --- | --- | --- | --- | --- |
 | 0 - Contract | Freeze portable vocabulary before executable code. | Add four JSON Schemas, partitioned Go types, semantic admission validators, golden valid/invalid fixtures, and a pure history reducer/model test package. | None | 500-750 across 1-2 PRs | Schemas/types agree on shape; Go validation rejects path/secret/profile law violations; reducer tests prove valid transition/result combinations without claiming JSON Schema enforces history. |
 | 1 - Local controller | Prove lifecycle truth without virtualization. | Implement bundle materialization, native path expansion, run directory, journal, local backend, logs, deadline, cancel, result, writer claim, watch, manual reconcile, and CLI docs. | Phase 0 | 1,100-1,600 across 3 PRs | Fixtures prove success, nonzero exit, missing output, timeout, cancel race, controller loss, concurrent reconcile, one terminal result, and zero orphan process groups. |
-| 2 - Rooms adapter | Prove placement neutrality against the real microVM substrate. | First add structured lifecycle/pool-full output to Rooms; then translate the placed request to Rooms CLI, map lifecycle/artifacts/cleanup, preserve the resolved profile receipt, and add live gated tests. | Phase 1; Rooms PR #67; Rooms structured-lifecycle prerequisite | 700-1,100 across repos | **PREREQUISITE GATE:** identical work digest/policy runs through local/default and rooms/agent-cursor with equivalent terminal semantics; run-at-capacity rejects N+1; timeout/cancel leave zero Rooms residue. |
+| 2 - Rooms adapter | Prove placement neutrality against the real microVM substrate. | First add structured lifecycle/pool-full output to Rooms; then translate the placed request to Rooms CLI, map lifecycle/artifacts/cleanup, preserve the resolved profile receipt, and add host-gated tests. | Phase 1; Rooms PR #67; Rooms structured-lifecycle prerequisite | 700-1,100 across repos | **PREREQUISITE GATE:** identical work digest/policy runs through local/default and rooms/agent-cursor with equivalent terminal semantics; run-at-capacity rejects N+1; timeout/cancel leave zero Rooms residue. |
 | 3 - Ship compiler | Test the actual portfolio thesis without changing Ship policy. | Compile AgentRunInput into bundle/work/request; invoke Runway; map lifecycle/result and existing terminal event replay; keep feature flag/fallback; delete direct placement assembly only after parity. | Phase 2 GO | Cross-repo, 800-1,200 | **THESIS GATE:** local and Rooms Ship runs preserve required liveness/terminal semantics and branch artifacts; no Ship code invokes Rooms or interprets placement lifecycle; rollback path remains until parity corpus passes. |
 | 4 - Reusable environment bundles | Make hooks/skills/agent definitions content-addressed and shareable across requests. | Define reusable bundle manifest/CAS convention, materializer, digest receipt, and workbench-hook fixture on top of the Phase 1 local bundle seam. | Phase 2 GO; demand from Phase 3 | 450-700 | Same reusable bundle digest materializes locally and in Rooms; missing/mutated content fails before workload start. |
 | 5 - Earned extensions | Add only capabilities pulled by evidence. | Consider detached submit, remote artifact URIs, cloud adapter, snapshot/fork refs, or extraction to its own module/repo. | Measured demand | Unscoped | Separate TDD per capability. |
@@ -545,7 +550,7 @@ Phases 0-2 establish that the mechanism is plausible; they do not prove Ship can
 2. **Envelope reuse:** should `RunEvent` be the body of Workbench's hash-chained `Envelope`, or remain a standalone line with `run_id`/`seq`? Reusing the envelope adds integrity and parent links but also verdict-era fields that may not help execution.
 3. **Profile storage:** should backend profiles live in one Workbench config file or be resolved by each adapter from its existing substrate configuration? The request contract deliberately does not expose profile internals.
 4. **Controller loss on Windows:** which process-start identity, process-group mechanism, and atomic writer-claim primitive provide PID-reuse and concurrent-reconcile safety without adding a service?
-5. **Stream parity:** is terminal replay of provider event artifacts sufficient for the first Ship-on-Runway Rooms integration, or must Rooms add a live opaque byte stream before Phase 3 can remove the direct adapter?
+5. **Stream parity:** is terminal replay of provider event artifacts sufficient for the first Ship-on-Runway Rooms integration, or must a separate design add a live opaque byte-stream access surface before Phase 3 can remove the direct adapter? Reserved `stream_delivery: live` creates no v0 access mechanism.
 6. **Schema publication:** should TypeScript and Rust consumers vendor the schema/semantic fixture corpus at a pinned commit, fetch release artifacts in CI, or consume a generated package? Direct cross-repo source imports are out.
 
 ## 11. Validation plan
@@ -557,6 +562,7 @@ Golden fixtures and generated cases prove:
 - schemas and Go types agree on wire shape;
 - Go admission validation rejects absolute/traversing bundle sources, cwd/path arguments, input targets, and outputs;
 - structured path arguments expand to native Windows and Linux fixture paths without changing `work.json`;
+- every backend sets the three root-discovery environment variables to the same native roots used for structured path expansion;
 - profile names remain logical and contain no controller/backend host path;
 - secret references must match `^env:[A-Za-z_][A-Za-z0-9_]*$` in both schema and Go validation; inline or malformed references reject;
 - a request digest changes when any exact submitted byte changes;
@@ -593,8 +599,10 @@ This gate compares lifecycle and result semantics, not isolation strength or res
 4. with a pool of N, N runs are admitted and an overlapping N+1 request returns structured admission backpressure without a hidden retry;
 5. cancellation and timeout preserve partial events/artifacts;
 6. every terminal path leaves `rooms ls` empty and zero Firecracker/tap/slot residue;
-7. no request, event, result, log, process argv, exported bundle, or `private/` file contains resolved secret values;
+7. no Runway-authored request, lifecycle event, result, redacted log, process argv, or `private/` file contains the fixture secret value;
 8. controller and public contract packages contain no Rooms name checks or parsing; Rooms-specific lifecycle translation and residue assertions remain in the adapter/gate harness.
+
+The Gate C fixture must not intentionally write its secret into a declared workload artifact. Artifact bytes are workload-owned and digest-preserved; a secret found there is fixture/workload leakage and makes that run unsafe to export, not evidence that Runway serialized the secret into its own contract surfaces.
 
 **GO:** all eight pass on a fresh `rooms-host` rebuild, and neither backend requires a caller to branch on backend-specific text.
 
@@ -611,7 +619,8 @@ The existing Dossier connector is not exposed in this Codex session. Do not hand
 1. resolve the existing `workbench` project;
 2. add six phase stubs mirroring §9;
 3. materialize tasks only for Phases 0-2, through the placement prerequisite gate;
-4. link this file as a `doc` artifact and the design PR as a `pr` artifact;
-5. leave Phases 3-5 task-less until Gate C passes.
+4. create and link a Rooms task for the structured lifecycle/pool-full surface required before Phase 2;
+5. link this file as a `doc` artifact and the design PR as a `pr` artifact;
+6. leave Phases 3-5 task-less until Gate C passes.
 
 Recommended task tiers: Phase 0 schema/conformance tasks `sonnet/extra`; Phase 1 state machine, cancellation, and controller-loss work `opus/max`; Phase 2 Rooms adapter `opus/extra` with an `ultracode` adversarial validation pass.
