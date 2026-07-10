@@ -20,9 +20,9 @@ This fragmentation has concrete costs. Ship's Rooms adapter knows `sudo -E rooms
 
 The missing primitive is not another agent framework. It is a small execution contract that says:
 
-> one explicit work request, one placed run, one ordered event history, and one terminal receipt.
+> one explicit work bundle, one placement binding, one ordered lifecycle, and one terminal receipt.
 
-**Hypothesis:** if a caller can compile work into one versioned request and receive semantically equivalent events/results from both a local-process backend and Rooms, then Ship and future tools can stop owning placement-specific lifecycle code. If the contract cannot make those two backends equivalent without leaking their internals, it has not earned cloud backends, a daemon, or a standalone repository.
+**Hypothesis:** if a caller can compile domain intent into one portable, versioned work bundle and bind it to either a local-process or Rooms placement while receiving the same lifecycle/result semantics, then Ship and future tools can stop owning placement-specific lifecycle code. Placement choice and profile remain caller policy; backend invocation, observation, cancellation, collection, and cleanup become Runway mechanism. Phase 2 proves that the contract can span both backends. Only Phase 3, where Ship deletes its direct placement lifecycle assembly, can close the portfolio thesis.
 
 ### Goals
 
@@ -48,35 +48,35 @@ The missing primitive is not another agent framework. It is a small execution co
 
 ### Functional requirements
 
-- **FR1 - Explicit request:** a run request declares command, logical workspace, materialized inputs, secret references, expected outputs, placement, deadline, and cancellation grace.
+- **FR1 - Explicit request:** a run request contains a portable work specification, execution policy, and a separate placement binding.
 - **FR2 - Provider neutrality:** the contract contains no Cursor, Claude, Codex, model, prompt, MCP, or subagent fields. An agent system compiles those into command, inputs, and secret references.
-- **FR3 - Logical paths:** request paths are relative to named logical roots. Host paths and guest paths never appear as portable workspace identity.
+- **FR3 - Logical paths:** cwd, argv path values, inputs, and outputs use structured references to named logical roots. The selected backend expands them to native paths.
 - **FR4 - Explicit materialization:** hooks, skills, runner scripts, task files, and agent definitions enter a run only as declared inputs or as content baked into the selected image.
-- **FR5 - Placement receipt:** the result records what backend and immutable inputs actually ran, including request digest, workspace revision, image digest when available, and backend allocation identity.
+- **FR5 - Placement receipt:** the result records what backend profile and immutable inputs actually ran, including request/work digests, workspace revision, image digest when applicable, enforced constraints, and allocation identity.
 - **FR6 - Ordered lifecycle:** every durable event has a run ID and strictly increasing sequence number. A watcher can resume after a sequence without parsing logs.
 - **FR7 - One terminal receipt:** every schema-valid accepted request produces at most one terminal `result.json`. Malformed requests fail before admission and produce no run.
 - **FR8 - Distinct failure phase:** admission, preparation, startup, workload, collection, cleanup, timeout, cancellation, and controller-loss failures are distinguishable without message matching.
-- **FR9 - Deadline enforcement:** the controller enforces one absolute work deadline independently of an agent SDK's own timeout.
+- **FR9 - Deadline enforcement:** while the foreground controller is alive and responsive, it enforces one absolute work deadline independently of an agent SDK's own timeout.
 - **FR10 - Cancellation:** cancellation is idempotent, records operator intent separately from timeout, and preserves partial events/artifacts.
 - **FR11 - Durable observation:** `watch` and `result` read the run directory, not controller memory. Stdout is never the only copy of an event or result.
 - **FR12 - Secret safety:** requests contain opaque secret references, never secret values. Events, diagnostics, receipts, and backend descriptors never contain resolved values.
 - **FR13 - Backend isolation:** backend implementations are private to `cmd/runway`; callers consume contracts and process/artifact surfaces, not backend call stacks.
 - **FR14 - Tolerant readers:** additive fields do not break older readers of the same major schema. Unknown major versions fail loudly.
-- **FR15 - Portable references:** requests name bundle inputs and images by logical reference plus digest. Backend configuration, not the request, maps those references to host paths.
+- **FR15 - Portable references:** work specs name bundle inputs by logical source plus digest. Placement bindings name backend-local profiles; backend configuration maps profiles to images, network policy, resources, and host paths.
 
 ### Non-functional requirements
 
 | Property | Target |
 | --- | --- |
 | Simplicity | Phase 0-2 add no daemon, queue, database, network listener, or third-party Go dependency. |
-| Durability | Request and each event append are flushed before the next externally visible transition; `result.json` is written atomically. |
+| Durability | Request and canonical lifecycle events are flushed before the next externally visible transition; `result.json` is written atomically. Stdout/stderr are buffered byte streams, not canonical events. |
 | Ordering | One active controller is the sole event writer. Sequence numbers are contiguous from 1 through terminal. |
 | Cancellation | A cancel request reaches a live controller within 1 second locally; the terminal receipt appears within configured grace plus 5 seconds. |
-| Timeout | A deadline overrun cannot remain `running`; it terminates as `timed_out` even if the underlying runner is still noisy. |
+| Timeout | A healthy controller cannot leave a deadline overrun `running`; it terminates as `timed_out` even if the workload remains noisy. Controller loss requires explicit reconciliation. |
 | Security | No resolved secret value is written to argv, request, events, result, backend state, or diagnostics. Backend-private state is mode `0600`. |
-| Portability | The same fixture request runs through local and Rooms backends with the same terminal status, declared outputs, and phase vocabulary. |
+| Portability | The same work digest and policy run through local and Rooms placement bindings with the same terminal status, declared outputs, and phase vocabulary. |
 | Operability | A run is diagnosable from its directory after the controller and backend processes exit. |
-| Compatibility | JSON Schema draft 2020-12 is canonical; Go types are conformance-tested. TypeScript/Rust consumers use the schema, not Go imports. |
+| Compatibility | JSON Schema draft 2020-12 defines wire shape; Go admission validation defines semantic laws. Conformance tests bind schema and Go types. TypeScript/Rust consumers use the schema plus published semantic fixtures, not Go imports. |
 | Scope | Each implementation PR stays below roughly 700 weighted LOC; a larger slice needs a no-split argument. |
 
 ## 3. Architecture overview
@@ -87,7 +87,7 @@ The missing primitive is not another agent framework. It is a small execution co
           compile domain intent
                     |
                     v
-        execution Request v0.1 (JSON)
+      work bundle + placed Request v0.1
                     |
                     v
          cmd/runway controller process
@@ -110,9 +110,10 @@ The missing primitive is not another agent framework. It is a small execution co
 ### Repository layout
 
 ```text
-contracts/
+contracts/execution/
   execution.go
   execution_conformance_test.go
+  schema/work-spec-v0.1.0.json
   schema/execution-request-v0.1.0.json
   schema/execution-event-v0.1.0.json
   schema/execution-result-v0.1.0.json
@@ -131,7 +132,7 @@ cmd/runway/
       rooms/
 ```
 
-`contracts` owns vocabulary only. `cmd/runway/internal/controller` owns lifecycle policy: validation, phase transitions, deadline, cancellation, terminal truth, and cleanup ordering. Backend packages own process/Rooms mechanisms and translate backend signals into controller observations. No other Workbench command imports Runway internals.
+`contracts/execution` owns vocabulary only. `cmd/runway/internal/controller` owns lifecycle policy: validation, phase transitions, deadline, cancellation, terminal truth, and cleanup ordering. Backend packages own process/Rooms mechanisms and translate backend signals into controller observations. No other Workbench command imports Runway internals.
 
 ### What is reused
 
@@ -145,9 +146,9 @@ cmd/runway/
 
 ### D1 - Workbench feature, not standalone project
 
-**Choice:** execution schemas live in `contracts`; the executable lives at `cmd/runway`. This is a new infra primitive and pure mechanism, which Workbench explicitly accepts by default.
+**Choice:** execution schemas live in their own `contracts/execution` domain; the executable lives at `cmd/runway`. This is a new infra primitive and pure mechanism, which Workbench explicitly accepts by default. Nothing else in Workbench composes with Runway yet; Workbench is its home for shared mechanism and contract conventions, not runtime composition.
 
-**Alternative:** create a standalone Runway repository now. Rejected: there is no independent consumer requiring a Go module/version, no separate release cadence, and no proven executable yet. Extract only when an outside Go consumer needs to pin it or Runway develops an independent public future.
+**Alternative:** create a standalone Runway repository now. Rejected: there is no independent consumer requiring a Go module/version, no separate release cadence, and no proven executable yet. Extract when a non-Workbench implementation needs to version the execution contract independently, an outside Go consumer needs to pin it, or Runway develops an independent public future. Keeping execution schemas partitioned avoids coupling their release surface to verdict contracts in the meantime.
 
 ### D2 - Generic command contract, not agent contract
 
@@ -157,25 +158,25 @@ cmd/runway/
 
 ### D3 - Foreground controller before detached submission
 
-**Choice:** v0 implements `runway run`, which owns one run until terminal. Other processes can call `watch`, `cancel`, and `result` through durable state. Callers may background `runway run`, but Runway does not create a resident service or detached supervisor in the pre-gate phases.
+**Choice:** v0 implements `runway run`, which owns one run until terminal. Other processes can call `watch`, `cancel`, and `result` through durable state. Reliable detached execution is unsupported: backgrounding the process does not create adoption, host-restart, or orphan-cleanup guarantees. `reconcile` is an explicit operator/caller recovery action for one known run ID; v0 never scans for abandoned runs.
 
 **Alternative:** start with `submit` backed by a daemon or self-detached controller. Rejected: daemon lifecycle, upgrades, orphan adoption, and authentication would dominate the contract proof. If callers repeatedly need reliable detached submission after Phase 2, design it from evidence.
 
 ### D4 - Caller chooses placement
 
-**Choice:** `placement.backend` is explicit in the request. Runway validates capabilities and executes; it does not decide whether work deserves local, Rooms, or cloud compute.
+**Choice:** `placement.backend` and a logical `placement.profile` are explicit in the request but separate from portable `work` and `policy`. Runway resolves the profile from backend-local configuration, validates it, and executes; it does not decide whether work deserves local, Rooms, or cloud compute. A backend name is an open string resolved against configured adapters, not a schema enum.
 
 **Alternative:** Runway routes by cost, risk, or resource availability. Rejected: those are caller policy and would turn the mechanism into an orchestrator.
 
 ### D5 - Exact submitted bytes are hashed
 
-**Choice:** `request_sha256` hashes the exact accepted request bytes. Input and image digests are independently recorded. Semantic idempotency is not inferred from the request digest.
+**Choice:** `request_sha256` hashes the exact accepted request bytes; `work_sha256` hashes the exact submitted `work.json` bytes. Input and resolved placement/image digests are independently recorded. Cross-placement equivalence compares `work_sha256` plus policy fields, not whole-request identity. Semantic idempotency is not inferred from either digest.
 
 **Alternative:** mandate cross-language canonical JSON. Rejected for v0: RFC 8785 implementations add complexity and likely dependencies before any consumer needs semantic deduplication.
 
 ### D6 - One lifecycle stream, backend details as receipts
 
-**Choice:** Runway emits canonical phases while preserving backend-specific allocation details in a non-authoritative receipt object. Consumers may display backend details but cannot use them to infer generic state.
+**Choice:** Runway emits canonical lifecycle phases while preserving backend-specific allocation details in a non-authoritative receipt object. Consumers may display backend details but cannot use them to infer generic state. Workload stdout/stderr and provider-origin events are data streams, not lifecycle events; they do not share the fsync-per-transition guarantee.
 
 **Alternative:** expose Rooms logs and Cursor events as two peer streams. Rejected: the experiment showed that callers then cannot distinguish `InstanceStart` from guest readiness without backend knowledge.
 
@@ -187,7 +188,9 @@ cmd/runway/
 
 ### D8 - Secret references only
 
-**Choice:** the request carries `{name, ref}`. The backend resolves `ref` at the latest safe boundary and injects the value without writing it to argv or durable state. v0 defines `env:NAME` as the first resolver convention but treats the reference string as opaque contract data.
+**Choice:** the request carries `{name, ref}`. The controller resolves `ref` at the latest safe boundary and passes the value to a backend-supported in-memory channel without writing it to argv or durable state. v0 defines `env:NAME` as the first resolver convention. Each placement profile declares allowed secret names and transport capability; admission rejects unsupported names. The initial Rooms profile supports only the existing SSH `SendEnv` allowlist (`CURSOR_API_KEY` and `ANTHROPIC_API_KEY`); generic guest secret transport is out of scope.
+
+Captured stdout/stderr replace exact resolved secret byte sequences with `[REDACTED]` before persistence, including matches split across read chunks. This protects against accidental direct echo; it is not a claim that Runway can prevent a workload from transforming or exfiltrating a secret it is authorized to receive.
 
 **Alternative:** inline environment values with a `secret: true` flag. Rejected: redaction is not containment.
 
@@ -203,50 +206,61 @@ cmd/runway/
 
 **Alternative:** model snapshots now because Rooms can eventually support them. Rejected: no snapshot implementation or compatibility contract exists yet.
 
+### D11 - Lifecycle journal and workload streams are distinct
+
+**Choice:** `events.ndjson` contains low-volume canonical lifecycle transitions only. `stdout.log` and `stderr.log` are ordered, buffered byte records that `runway logs --follow` may tail with bounded delivery latency while the controller is healthy. Provider event files remain declared workload artifacts; v0 permits a backend to expose them live or only at terminal collection, and records that delivery mode in the placement receipt.
+
+**Alternative:** journal every output line as `workload_output` with a durable flush. Rejected: agent streams can emit hundreds of events and would turn lifecycle correctness into an fsync-per-line bottleneck. Phase 3 must either tolerate the Rooms backend's existing terminal replay semantics or add a separate Rooms streaming capability before removing Ship's direct local runner.
+
 ## 5. Data model
 
-### Request v0.1
+### Portable work spec v0.1
+
+```json
+{
+  "schema_version": "0.1.0",
+  "command": {
+    "executable": {"name": "node"},
+    "args": [
+      {"path": {"root": "inputs", "value": "runner.js"}},
+      {"path": {"root": "inputs", "value": "task.md"}}
+    ]
+  },
+  "cwd": {"root": "workspace", "value": "."},
+  "workspace": {
+    "kind": "git",
+    "url": "https://github.com/itsHabib/agent-sandbox",
+    "revision": "57aa8b2c7a9531d5d6ba060a77247f9bfca0470f"
+  },
+  "inputs": [
+    {"name": "runner", "source": "runner.js", "target": "runner.js", "sha256": "hex"},
+    {"name": "task", "source": "task.md", "target": "task.md", "sha256": "hex"}
+  ],
+  "secrets": [
+    {"name": "CURSOR_API_KEY", "ref": "env:CURSOR_API_KEY"}
+  ],
+  "outputs": [
+    {"name": "result", "path": "result.json", "required": true},
+    {"name": "agent_events", "path": "events.ndjson", "required": false}
+  ]
+}
+```
+
+`work.json` and every `inputs[].source` are files beneath the submitted bundle root. `command.executable` is either `{name}` for placement-PATH lookup or a structured `{path}` reference; `command.args` is an ordered union of `{literal: string}` and `{path: {root, value}}`. Runway never invokes a shell or performs string interpolation. Roots are `workspace`, `inputs`, and `out`. The backend expands structured executable/path arguments and cwd to native Windows or Linux paths immediately before process start.
+
+### Placed run request v0.1
 
 ```json
 {
   "schema_version": "0.1.0",
   "request_id": "req_opaque",
   "work": {
-    "command": ["node", "/runway/inputs/runner.js"],
-    "cwd": "workspace",
-    "workspace": {
-      "kind": "git",
-      "url": "https://github.com/itsHabib/agent-sandbox",
-      "revision": "57aa8b2c7a9531d5d6ba060a77247f9bfca0470f"
-    },
-    "inputs": [
-      {
-        "name": "runner",
-        "source": "bundle/runner.js",
-        "target": "inputs/runner.js",
-        "sha256": "hex"
-      },
-      {
-        "name": "task",
-        "source": "bundle/task.md",
-        "target": "inputs/task.md",
-        "sha256": "hex"
-      }
-    ],
-    "secrets": [
-      {"name": "CURSOR_API_KEY", "ref": "env:CURSOR_API_KEY"}
-    ],
-    "outputs": [
-      {"name": "result", "path": "out/result.json", "required": true},
-      {"name": "events", "path": "out/events.ndjson", "required": false}
-    ]
+    "manifest": "work.json",
+    "sha256": "hex"
   },
   "placement": {
     "backend": "rooms",
-    "image_ref": "agent-alpine-cursor",
-    "image_sha256": "16ce6e5dca8ebbc60b08bd5a2ef0d805f459c93c37158eb6ee06ec11304719b6",
-    "network": "egress",
-    "resources": {"cpu": 1, "memory_mib": 512}
+    "profile": "agent-cursor"
   },
   "policy": {
     "deadline_ms": 300000,
@@ -258,11 +272,13 @@ cmd/runway/
 Rules:
 
 - `request_id` is caller correlation, not run identity and not an idempotency key.
-- `cwd`, input sources/targets, and output paths are logical-root-relative and traversal-safe. `source` resolves beneath the submitted request-bundle root; it is never an arbitrary controller path.
-- Backends expose the same runtime roots (`/runway/workspace`, `/runway/inputs`, and `/runway/out`) and set `RUNWAY_WORKSPACE`, `RUNWAY_INPUTS`, and `RUNWAY_OUT`. These are contract paths inside the workload, not host or allocation identity.
+- `work.manifest` and input sources resolve beneath `--bundle`; they are never arbitrary controller paths. Their declared digests are verified before admission completes.
+- Cwd and argv path values are structured logical references. Input targets and output paths are relative to their fixed `inputs` and `out` roots. Traversal and absolute paths are rejected.
+- A named executable resolves through the placement profile's PATH, never an arbitrary host path. A workload that requires a custom executable declares it as an input and uses a structured executable path.
 - `workspace.revision` must be immutable for `git` workspaces; symbolic refs are rejected by the portable contract.
-- A backend may reject unsupported placement fields but may not silently ignore a requested security/resource constraint.
-- `image_ref` is a logical name resolved by backend-local configuration; `image_sha256` records the required immutable identity. Neither field reveals the backing host path.
+- `placement.backend` is open vocabulary resolved against installed adapters. `placement.profile` is backend-local configuration, not portable work identity.
+- Profiles pin enforceable network/resource/image policy and allowed secret names. Their resolved values appear in the placement receipt; callers cannot override individual constraints in v0.
+- The equivalent local binding is `{"backend":"local","profile":"default"}`. A local profile has no image identity and records that field as absent; it never pretends to enforce Rooms isolation or resource controls.
 
 ### Run event v0.1
 
@@ -285,13 +301,12 @@ Canonical phases are `admission`, `preparation`, `startup`, `workload`, `collect
 - `placement_allocated`
 - `workload_ready`
 - `workload_started`
-- `workload_output`
 - `workload_exited`
 - `artifact_collected`
 - `cleanup_completed`
 - `run_terminal`
 
-Backends need not emit every informational kind, but phase ordering cannot move backward. `run_terminal` is always last.
+Backends need not emit every informational kind, but phase ordering cannot move backward. `run_terminal` is always last. Output bytes never become canonical lifecycle events merely because they contain newlines; they are written to `logs/` and observed with `runway logs`.
 
 ### Result v0.1
 
@@ -301,6 +316,7 @@ Backends need not emit every informational kind, but phase ordering cannot move 
   "run_id": "run_opaque",
   "request_id": "req_opaque",
   "request_sha256": "hex",
+  "work_sha256": "hex",
   "status": "succeeded",
   "terminal_phase": "terminal",
   "reason_code": "completed",
@@ -309,10 +325,19 @@ Backends need not emit every informational kind, but phase ordering cannot move 
   "workload_exit_code": 0,
   "placement": {
     "backend": "rooms",
+    "profile": "agent-cursor",
     "allocation_id": "01kx6ed7rze1sba5fm5sqy3rvz",
     "image_sha256": "hex",
+    "stream_delivery": "terminal_replay",
+    "enforced": {
+      "network": "egress",
+      "cpu": 1,
+      "memory_mib": 512
+    },
     "details": {"slot": 2}
   },
+  "causes": [],
+  "diagnostics": [],
   "artifacts": [
     {
       "name": "result",
@@ -337,13 +362,15 @@ Terminal statuses are `succeeded`, `failed`, `timed_out`, and `cancelled`. Stabl
 - `cleanup_failed`
 - `controller_lost`
 
-Human-readable messages are diagnostic only. Callers branch on status, phase, and reason code.
+`causes` is an ordered array of prior `{phase, reason_code, message?}` values when a later failure becomes primary, such as cleanup failure after deadline expiry. `diagnostics` is an array of structured `{code, message, details?}` records and may name an uncertain allocation without changing primary status. `stream_delivery` is `live`, `terminal_replay`, or `none` for declared provider/workload event artifacts; it does not describe stdout/stderr log tailing. Neither field may contain resolved secret values. Human-readable messages are diagnostic only. Callers branch on status, phase, and reason code.
 
 ### Run directory
 
 ```text
 <state>/runs/<run-id>/
   request.json              exact accepted bytes
+  work.json                 exact verified portable work manifest
+  inputs/                   exact verified declared bundle inputs
   events.ndjson             append-only canonical events
   result.json               atomic terminal singleton
   logs/
@@ -356,25 +383,29 @@ Human-readable messages are diagnostic only. Callers branch on status, phase, an
     backend.json            opaque backend handle, mode 0600
 ```
 
-The public directory is shareable after terminal completion. `private/` is host-local and excluded from exported run bundles.
+The public directory is shareable after terminal completion. `private/` is host-local and excluded from exported run bundles, but it remains subject to the same no-secret-at-rest invariant and validation scan.
 
 ## 6. API contract
 
 ### CLI v0
 
 ```text
-runway run --spec <request.json> [--state <dir>] [--json]
-runway watch <run-id> [--after <seq>] [--follow] [--json]
-runway cancel <run-id> [--json]
-runway result <run-id> [--wait] [--json]
-runway reconcile <run-id> [--json]
+runway run --spec <request.json> --bundle <dir> [--state <dir>] [--json]
+runway watch <run-id> [--state <dir>] [--after <seq>] [--follow] [--json]
+runway logs <run-id> [--state <dir>] [--stream stdout|stderr] [--follow]
+runway cancel <run-id> [--state <dir>] [--json]
+runway result <run-id> [--state <dir>] [--wait --timeout <duration>] [--json]
+runway reconcile <run-id> [--state <dir>] [--json]
 ```
 
-- `run` validates the request, allocates a run ID, writes `request.json`, records `run_accepted`, and blocks until terminal.
+- `run` validates the request and bundle, allocates a run ID, writes exact `request.json` and `work.json`, records `run_accepted`, and blocks until terminal.
 - `watch` reads durable events and never attaches to backend stdout directly.
+- `logs` tails buffered workload bytes. Delivery is ordered per stream but may lose the final unflushed tail on abrupt controller loss.
 - `cancel` verifies controller PID plus process-start identity before signaling it. Repetition is a successful no-op once cancellation or terminal state is recorded.
-- `result` returns the atomic terminal receipt. With `--wait`, it watches durable state rather than polling a backend.
-- `reconcile` detects a dead/reused controller identity. It writes `controller_lost` only after proving no active writer remains, then invokes backend-specific best-effort cleanup.
+- `result` returns the atomic terminal receipt. With `--wait`, `--timeout` is mandatory; it watches durable state rather than polling a backend and never reconciles implicitly.
+- `reconcile` detects a dead/reused controller identity, atomically acquires the run's writer claim, then invokes backend-specific best-effort cleanup. It writes `controller_lost` only while holding that claim. Concurrent reconcilers return the existing owner/result and do not touch the journal.
+
+The state root defaults from one documented environment/config value, but every run-addressing command accepts `--state`. Reliable `nohup`, CI adoption, periodic reconciliation scans, and host-restart recovery are unsupported in v0.
 
 Stdout is machine output only under `--json`; diagnostics go to stderr. The result schema is authoritative over process exit codes.
 
@@ -403,13 +434,15 @@ type Backend interface {
 
 `Handle` is opaque outside its backend package. `Emit` proposes observations to the controller; only the controller assigns canonical sequence numbers and writes events. Backend errors are mechanism values mapped by controller policy into stable phase/reason codes.
 
-The local backend starts one process group with explicit cwd/env and captures stdout/stderr. The Rooms backend shells out to the existing Rooms CLI in Phase 2; it does not import Rooms code or duplicate Firecracker lifecycle logic.
+The local backend expands logical paths to native paths, starts one process group with explicit cwd/env, and captures stdout/stderr. The Rooms backend shells out to the Rooms CLI in Phase 2; it does not import Rooms code or duplicate Firecracker lifecycle logic.
+
+Phase 2 cannot start against the current human-log-only surface. Rooms must first expose a machine-readable lifecycle stream that distinguishes allocation, VM start, guest/workload readiness, workload exit, collection, and cleanup, plus structured `pool_full`. The recommended surface is a host-side NDJSON file selected by `rooms run --lifecycle <path>`. This is an explicit Rooms prerequisite, separate from PR #67. The first Rooms placement profile may use the existing environment plus SSH `SendEnv` transport only for its allowlisted secret names; a generic secret channel is not implied.
 
 ## 7. Key flows
 
 ### Flow A - successful run
 
-1. Validate schema, paths, immutable revision, supported placement, and secret references without resolving secret values.
+1. Validate schema shape, semantic path laws, exact bundle/work/input digests, immutable revision, placement profile, and supported secret names without resolving secret values.
 2. Mint run ID; create the run directory with restrictive permissions.
 3. Persist exact request bytes and emit `run_accepted`.
 4. Resolve/materialize workspace and declared inputs; verify digests.
@@ -427,6 +460,8 @@ The local backend starts one process group with explicit cwd/env and captures st
 2. Rooms returns `pool_full` or another explicit admission refusal.
 3. Controller emits phase `admission`, writes status `failed`, reason `admission_unavailable`, and exits 4.
 4. Runway does not retry. The caller decides whether and when to create another run.
+
+Exit code 4 is an admission result, not a retry instruction. Callers may retry only as explicit new attempts in their own workflow state; Runway supplies no queue, sleep, retry budget, or eventual-admission guarantee.
 
 ### Flow C - deadline
 
@@ -456,15 +491,16 @@ The local backend starts one process group with explicit cwd/env and captures st
 
 1. `watch` observes no result and no new events but makes no liveness claim.
 2. `reconcile` verifies controller PID/start identity is absent or reused.
-3. Backend adapter probes only what it can prove and performs best-effort cleanup.
-4. With no active writer, reconcile appends `controller_lost` and atomically writes a failed terminal receipt.
-5. Uncertain backend liveness fails closed and names the remaining allocation in diagnostics; it is never reported clean.
+3. It atomically acquires the per-run writer claim; failure means another controller/reconciler owns the run and this invocation exits without mutation.
+4. Backend adapter probes only what it can prove and performs best-effort cleanup.
+5. While holding the writer claim, reconcile appends `controller_lost` and atomically writes a failed terminal receipt.
+6. Uncertain backend liveness fails closed and names the remaining allocation in diagnostics; it is never reported clean.
 
 ## 8. Concurrency, consistency, and failure model
 
 ### One writer per run
 
-The foreground controller is the sole canonical event/result writer. `watch` is read-only. `cancel` writes only a cancellation request marker and signals the verified controller. `reconcile` may become writer only after proving the original controller identity is dead.
+The foreground controller holds an exclusive per-run writer claim and is the sole canonical event/result writer. `watch` is read-only. `cancel` writes only a cancellation request marker and signals the verified controller. `reconcile` may become writer only after proving the original controller identity is dead and atomically acquiring the same claim. Claim acquisition is tested under concurrent reconcilers; PID checks alone are never treated as exclusivity.
 
 ### Event guarantees
 
@@ -488,30 +524,29 @@ Runway never retries work. The caller may issue a new request with a new run ID 
 
 ### Crash model
 
-v0 does not promise automatic adoption after host/process restart. It promises truthful detection via process-start identity and `reconcile`, preservation of all flushed events, and no false terminal success. Automatic per-run supervisors or a daemon are post-gate designs.
+v0 does not promise automatic adoption after host/process restart, automatic discovery of abandoned runs, or recovery from a live but wedged controller. It promises truthful detection via process-start identity and explicit `reconcile`, preservation of all flushed lifecycle events, and no false terminal success. A crash after successful workload/cleanup but before terminal rename may therefore reconcile as `controller_lost`; prior events distinguish that uncertainty from workload failure. Automatic per-run supervisors or a daemon are post-gate designs.
 
 ## 9. Rollout / implementation plan
 
 | Phase | Goal | High-level tasks | Depends on | Scope | Gate |
 | --- | --- | --- | --- | --- | --- |
-| 0 - Contract | Freeze the portable vocabulary before executable code. | Add three JSON Schemas, Go types, schema/type conformance, golden valid/invalid fixtures, path/secret/state invariants. | None | 350-550 weighted LOC | Schemas reject host-path leaks, inline secrets, invalid phase/status combinations, and traversal; Go round-trips golden fixtures. |
-| 1 - Local controller | Prove lifecycle truth without virtualization. | Implement run directory, journal, local backend, deadline, cancel, result, watch, reconcile, CLI docs. | Phase 0 | 900-1,300 across 2-3 PRs | Fixture commands prove success, nonzero exit, missing required output, timeout, cancel race, controller loss, one terminal result, zero orphan process groups. |
-| 2 - Rooms adapter | Prove placement neutrality against the real microVM substrate. | Translate Request to Rooms CLI, map pool-full/readiness/artifacts/cleanup, preserve backend receipt, add live gated tests. | Phase 1; Rooms PR #67 | 500-800 across 1-2 PRs | **VALIDATION GATE:** the same two fixture requests run local and Rooms with equivalent statuses/outputs/phase laws; N=2 concurrent Rooms runs; timeout/cancel leave zero rooms, Firecracker processes, taps, or slots. |
-| 3 - Ship compiler | Remove placement-specific execution assembly from Ship without changing Ship policy. | Compile AgentRunInput to Request; invoke Runway process surface; map RunEvents/Result to AgentRunHandle/Result; keep feature flag/fallback. | Phase 2 GO | Cross-repo, 700-1,100 | One local and one Rooms Ship run produce existing Ship terminal semantics and branch artifacts; old direct adapter remains rollback path until parity corpus passes. |
-| 4 - Explicit environment bundles | Make hooks/skills/agent definitions portable inputs. | Define content-addressed bundle convention, materializer, digest receipt, fixture for workbench hooks. | Phase 2 GO; demand from Phase 3 | 450-700 | Same bundle digest materializes locally and in Rooms; missing/mutated input fails before workload start. |
+| 0 - Contract | Freeze portable vocabulary before executable code. | Add four JSON Schemas, partitioned Go types, semantic admission validators, golden valid/invalid fixtures, and a pure history reducer/model test package. | None | 500-750 across 1-2 PRs | Schemas/types agree on shape; Go validation rejects path/secret/profile law violations; reducer tests prove valid transition/result combinations without claiming JSON Schema enforces history. |
+| 1 - Local controller | Prove lifecycle truth without virtualization. | Implement bundle materialization, native path expansion, run directory, journal, local backend, logs, deadline, cancel, result, writer claim, watch, manual reconcile, and CLI docs. | Phase 0 | 1,100-1,600 across 3 PRs | Fixtures prove success, nonzero exit, missing output, timeout, cancel race, controller loss, concurrent reconcile, one terminal result, and zero orphan process groups. |
+| 2 - Rooms adapter | Prove placement neutrality against the real microVM substrate. | First add structured lifecycle/pool-full output to Rooms; then translate the placed request to Rooms CLI, map lifecycle/artifacts/cleanup, preserve the resolved profile receipt, and add live gated tests. | Phase 1; Rooms PR #67; Rooms structured-lifecycle prerequisite | 700-1,100 across repos | **PREREQUISITE GATE:** identical work digest/policy runs through local/default and rooms/agent-cursor with equivalent terminal semantics; run-at-capacity rejects N+1; timeout/cancel leave zero Rooms residue. |
+| 3 - Ship compiler | Test the actual portfolio thesis without changing Ship policy. | Compile AgentRunInput into bundle/work/request; invoke Runway; map lifecycle/result and existing terminal event replay; keep feature flag/fallback; delete direct placement assembly only after parity. | Phase 2 GO | Cross-repo, 800-1,200 | **THESIS GATE:** local and Rooms Ship runs preserve required liveness/terminal semantics and branch artifacts; no Ship code invokes Rooms or interprets placement lifecycle; rollback path remains until parity corpus passes. |
+| 4 - Reusable environment bundles | Make hooks/skills/agent definitions content-addressed and shareable across requests. | Define reusable bundle manifest/CAS convention, materializer, digest receipt, and workbench-hook fixture on top of the Phase 1 local bundle seam. | Phase 2 GO; demand from Phase 3 | 450-700 | Same reusable bundle digest materializes locally and in Rooms; missing/mutated content fails before workload start. |
 | 5 - Earned extensions | Add only capabilities pulled by evidence. | Consider detached submit, remote artifact URIs, cloud adapter, snapshot/fork refs, or extraction to its own module/repo. | Measured demand | Unscoped | Separate TDD per capability. |
 
-Phases 0-2 are the thesis test. Phase 3 and later are not committed until the Rooms validation gate passes. Phase 0 should split schemas/types from state-machine property tests if it crosses one reviewable PR.
+Phases 0-2 establish that the mechanism is plausible; they do not prove Ship can surrender lifecycle ownership. Phase 3 is the thesis test and remains uncommitted until the Rooms prerequisite gate passes. Phase 0 should split schema/type shape from semantic validator/reducer tests if it crosses one reviewable PR.
 
 ## 10. Open questions
 
 1. **CLI name:** `runway` is the current recommendation. Does it fit the Workbench vocabulary, or should the executable be the literal `spawn`/`exec`?
 2. **Envelope reuse:** should `RunEvent` be the body of Workbench's hash-chained `Envelope`, or remain a standalone line with `run_id`/`seq`? Reusing the envelope adds integrity and parent links but also verdict-era fields that may not help execution.
-3. **Network policy vocabulary:** is `none | egress` sufficient for the Rooms gate, or must the first schema distinguish allowlisted egress and host-service access?
-4. **Resource constraints:** should an unsupported CPU/memory constraint reject admission in v0, or may local placement report it as unenforced? The recommended answer is reject any requested constraint the backend cannot prove.
-5. **Controller loss on Windows:** which process-start identity and process-group mechanism provide the same PID-reuse safety as Linux `/proc/<pid>/stat` without adding a service?
-6. **Rooms readiness:** should Phase 2 consume new structured Rooms lifecycle events, or infer readiness from current stderr plus SSH acceptance? The contract should not force Rooms to expose an API it has not earned, but parsing human logs is not acceptable production behavior.
-7. **Schema publication:** should TypeScript and Rust consumers vendor the schema at a pinned commit, fetch it in CI, or consume a release artifact? Direct cross-repo source imports are out.
+3. **Profile storage:** should backend profiles live in one Workbench config file or be resolved by each adapter from its existing substrate configuration? The request contract deliberately does not expose profile internals.
+4. **Controller loss on Windows:** which process-start identity, process-group mechanism, and atomic writer-claim primitive provide PID-reuse and concurrent-reconcile safety without adding a service?
+5. **Stream parity:** is terminal replay of provider event artifacts sufficient for the first Ship-on-Runway Rooms integration, or must Rooms add a live opaque byte stream before Phase 3 can remove the direct adapter?
+6. **Schema publication:** should TypeScript and Rust consumers vendor the schema/semantic fixture corpus at a pinned commit, fetch release artifacts in CI, or consume a generated package? Direct cross-repo source imports are out.
 
 ## 11. Validation plan
 
@@ -519,14 +554,15 @@ Phases 0-2 are the thesis test. Phase 3 and later are not committed until the Ro
 
 Golden fixtures and generated cases prove:
 
-- accepted requests contain no absolute cwd/output/target paths;
-- bundle input sources and targets cannot be absolute or traverse logical roots;
-- image references remain logical and contain no controller or backend host path;
+- schemas and Go types agree on wire shape;
+- Go admission validation rejects absolute/traversing bundle sources, cwd/path arguments, input targets, and outputs;
+- structured path arguments expand to native Windows and Linux fixture paths without changing `work.json`;
+- profile names remain logical and contain no controller/backend host path;
 - secret values cannot be represented, only references;
 - a request digest changes when any exact submitted byte changes;
-- event sequence is contiguous and phase-monotone;
-- one run has at most one terminal event/result;
-- terminal status/reason/phase combinations are valid;
+- a work digest remains identical across local and Rooms placed requests;
+- pure reducer/model tests enforce contiguous, phase-monotone histories and at most one terminal event/result;
+- Go semantic validation enforces terminal status/reason/phase/cause combinations;
 - unknown additive fields decode, unknown major versions reject;
 - schema and Go types remain structurally identical.
 
@@ -541,32 +577,40 @@ A deterministic fixture suite runs commands that:
 - race normal completion against cancellation;
 - ignore graceful termination and require escalation;
 - lose the controller and reconcile without PID-reuse mistakes.
+- race at least two reconcilers and prove only one acquires the writer claim or mutates events/result.
 
-PASS requires truthful terminal receipts, contiguous event histories, no secret values in a recursive run-directory scan, and no orphan process groups.
+PASS requires truthful terminal receipts, contiguous event histories, no secret values in a recursive scan including `private/`, and no orphan process groups. Abrupt controller loss may require an explicit `reconcile`; no test assumes automatic discovery.
 
-### Gate C - placement equivalence (Phase 2, program gate)
+### Gate C - placement prerequisite (Phase 2)
 
-Run the same success and timeout requests through `local` and `rooms`:
+Run identical `work.json` bytes and policy through separate `local/default` and `rooms/agent-cursor` placed requests. The test environment must keep the foreground controller alive except in explicit controller-loss cases; v0 does not claim automatic orphan adoption.
 
-1. statuses, reason codes, declared artifact names/digests, and phase order are equivalent;
-2. placement receipts differ only in backend-specific details;
+This gate compares lifecycle and result semantics, not isolation strength or resource policy. Those truthfully differ by placement profile and are reported, never normalized away.
+
+1. `work_sha256`, statuses, reason codes, declared artifact names/digests, and phase order are equivalent;
+2. placement receipts truthfully differ in profile, enforced constraints, image identity, stream-delivery mode, and backend details;
 3. two Rooms requests overlap on distinct slots and complete independently;
-4. pool-full returns admission backpressure without a hidden retry;
+4. with a pool of N, N runs are admitted and an overlapping N+1 request returns structured admission backpressure without a hidden retry;
 5. cancellation and timeout preserve partial events/artifacts;
 6. every terminal path leaves `rooms ls` empty and zero Firecracker/tap/slot residue;
-7. no request, event, result, log, process argv, or exported bundle contains resolved secret values.
+7. no request, event, result, log, process argv, exported bundle, or `private/` file contains resolved secret values;
+8. controller and public contract packages contain no Rooms name checks or parsing; Rooms-specific lifecycle translation and residue assertions remain in the adapter/gate harness.
 
-**GO:** all seven pass on a fresh `rooms-host` rebuild, and neither backend requires a caller to branch on backend-specific text.
+**GO:** all eight pass on a fresh `rooms-host` rebuild, and neither backend requires a caller to branch on backend-specific text.
 
-**NO-GO / reshape:** if equivalent semantics require Runway to understand Cursor, Ship, Firecracker slots, or provider events, keep the shared schemas smaller and leave orchestration in the existing adapters. If foreground control makes cancellation/recovery unusable, design a per-run supervisor only after documenting the exact failed flow.
+**NO-GO / reshape:** if equivalent terminal semantics require the controller/public contracts to understand Cursor, Ship, Firecracker slots, or provider events, keep the shared schemas smaller and leave orchestration in the existing adapters. If foreground control makes cancellation/recovery unusable under the stated lifetime precondition, design a per-run supervisor only after documenting the exact failed flow.
+
+### Gate D - Ship thesis (Phase 3)
+
+Run equivalent local and Rooms Ship workflows through Runway behind a feature flag. PASS requires existing cancellation, duration-cap, event-ordering, terminal classification, branch, and artifact behavior; Ship contains no `rooms run`, Rooms artifact parsing, slot/readiness logic, or placement-specific cleanup. Terminal replay is acceptable only if it matches the current Rooms runner contract; any local live-event regression blocks removal of the direct local runner. This is the first gate that can validate or kill the portfolio hypothesis.
 
 ## 12. Dossier seeding handoff
 
 The existing Dossier connector is not exposed in this Codex session. Do not hand-edit the corpus as a substitute. A Dossier-capable follow-up should:
 
 1. resolve the existing `workbench` project;
-2. add five phase stubs mirroring §9;
-3. materialize tasks only for Phases 0-2, through the validation gate;
+2. add six phase stubs mirroring §9;
+3. materialize tasks only for Phases 0-2, through the placement prerequisite gate;
 4. link this file as a `doc` artifact and the design PR as a `pr` artifact;
 5. leave Phases 3-5 task-less until Gate C passes.
 
