@@ -28,7 +28,7 @@ The remaining problem is closure, not another architecture. The current system i
 - **Capability is only partially enforcing.** A local grant disciplines Gate's sanctioned path and creates an audit trail; it does not stop an agent holding a merge-capable GitHub token from bypassing Gate. Branch rules and credential custody are the actual enforcement boundary.
 - **Review and local-routing policies are still exploratory.** Four reviewers every cycle is expensive and failure-prone; correlated review is not the same as an adversarial invariant pass. “Enum-valid” local output verifies shape, not semantic correctness. Self-reported confidence is weak evidence.
 
-**Hypothesis:** the workbench becomes trustworthy across model generations when its durable center is a small set of versioned artifacts and engine guarantees, while harness-specific skills are installed projections over one canonical workflow. If Claude and Codex can drive the same real review-fix-to-land loop, recover from provider and host failures, and produce comparable receipts without manual branch surgery, the redesign has crossed from a good personal workflow into a portable agentic workbench.
+**Hypothesis:** the workbench becomes trustworthy across model generations when its durable center is a small set of versioned artifacts and engine guarantees, while harness-specific skills are installed projections over one canonical workflow. If Claude and Codex can each drive the same real review-fix-to-land loop, recover from provider and host failures, and produce comparable receipts without manual branch surgery, the redesign has crossed from a good personal workflow into a portable agentic workbench.
 
 ### Goals
 
@@ -224,13 +224,13 @@ The sync report adds observed hashes and one of: `missing`, `identical`, `source
 ```json
 {
   "schema": "review-findings/v1",
+  "id": "rvf_<stable-content-id>",
   "subject": {
     "kind": "pr",
     "repo": "itsHabib/ship",
     "number": 184,
     "revision": "<reviewed-head-sha>"
   },
-  "cycle": 1,
   "producer": {
     "class": "review-coordinator",
     "harness": "claude|codex|other",
@@ -254,8 +254,9 @@ The sync report adds observed hashes and one of: `missing`, `identical`, `source
 Required invariants:
 
 - `revision` equals the PR head that reviewers inspected; a mismatch refuses or parks before dispatch.
+- `id` is stable for identical normalized content; Ship records the consumed id/digest so a repeated address call cannot dispatch twice.
 - Every finding has source evidence or is explicitly marked `evidence_unavailable` and cannot independently produce a critical gate.
-- Cycle is checked against Ship's engine-owned `reviewCycles`; the artifact cannot extend the cap.
+- The artifact does not declare Ship's review cycle. Ship owns `reviewCycles`, checks remaining capacity at consumption, and records the cycle it assigns to the address attempt. Coordinators never read driver state merely to author valid findings.
 - Unknown schema major refuses. Unknown optional fields are ignored by tolerant readers.
 
 ### 5.3 Verdict subject v1
@@ -316,9 +317,9 @@ ship driver address <driver> --stream <stream> --findings <path>
 ship driver run <driver>
 ```
 
-The coordinator name is illustrative; any producer may emit the schema. Ship validates the schema/head/cycle at the command boundary before dispatch once Phase 1 proves that validation belongs in the engine. The first dogfood may use an external validator to avoid changing Ship and skill choreography simultaneously.
+The coordinator name is illustrative; any producer may emit the schema. Phase 1 adds the minimum checks at Ship's command boundary before the portability gate can pass: supported schema, exact reviewed head, remaining engine-owned cycle capacity, and unused artifact id/digest. An external validator may be used during development, but cannot satisfy Gate B or substitute for the engine boundary in the live dogfood.
 
-Structured refusals retain C10's engine codes and add only contract-shaped errors when earned: `findings-schema-unsupported`, `findings-head-mismatch`, `findings-cycle-mismatch`.
+Structured refusals retain C10's engine codes and add only contract-shaped errors when earned: `findings-schema-unsupported`, `findings-head-mismatch`, `findings-duplicate`. Cycle exhaustion keeps C10's existing `cycle-exhausted` code.
 
 ### 6.3 Liveness policy
 
@@ -352,9 +353,10 @@ func Reduce(subject contracts.Subject, verdicts []contracts.Verdict) (contracts.
 3. Missing + supported → stage copy/render in a temp directory.
 4. Same-name identical → no-op.
 5. Same-name divergent + `manual`/undeclared → emit collision, make no change.
-6. Validate staged skill and all relative references.
-7. Rename staged directory into place atomically for missing/replacement-authorized targets.
-8. Emit report; a fresh harness session is the activation boundary.
+6. Same-name divergent + explicit `replace`/declared adapter → stage the replacement and bind the apply to the target hash observed during check; if the target changes before rename, refuse and re-check.
+7. Validate staged skill and all relative references.
+8. Rename staged directory into place atomically for missing/replacement-authorized targets; retain enough report metadata to identify the replaced hash.
+9. Emit report; a fresh harness session is the activation boundary.
 
 The 2026-07-10 raw import performed steps 2–5 manually: 23 missing copies installed, 13 collisions preserved. Phase 0 turns that one-off into an auditable mechanism and classifies semantic compatibility.
 
@@ -362,8 +364,8 @@ The 2026-07-10 raw import performed steps 2–5 manually: 23 missing copies inst
 
 1. Ship cloud stream succeeds and opens/updates a PR.
 2. Reviewers inspect exact `head_sha`.
-3. Claude or Codex coordinator emits `ReviewFindingsV1` with verbatim sources.
-4. Validate schema, head, and cycle; refusal parks with a coded reason.
+3. Claude or Codex coordinator emits `ReviewFindingsV1` with verbatim sources and no driver-owned cycle field.
+4. Ship validates schema, head, unused artifact id/digest, and remaining cycle capacity; refusal parks with a coded reason.
 5. `driver address` re-dispatches onto the existing PR branch.
 6. `driver run` harvests terminal state; fresh head is pushed by the agent run.
 7. Re-request risk-appropriate review on the new head.
@@ -412,9 +414,9 @@ No step checks out or manually pushes the cloud PR branch in the operator seat.
 
 ### Review artifacts
 
-- Findings are immutable for one `(repo, pr, revision, cycle)` tuple.
+- Findings are immutable for one `(artifact id, repo, pr, revision)` tuple.
 - A new head always requires a new artifact/review cycle. Reusing findings across revisions refuses.
-- Duplicate delivery is safe: stable subject/cycle plus engine cycle checks prevent double-address from incrementing or dispatching silently.
+- Duplicate delivery is safe: stable artifact id/digest plus the engine's consumed-artifact record prevents double-address from incrementing or dispatching silently.
 - Reviewer absence is recorded as absence/pending. It never becomes clean evidence.
 
 ### Provider liveness and auth
@@ -437,7 +439,7 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 | Phase | Goal | High-level tasks | Depends on | Gate | Scope / recommended model |
 |---|---|---|---|---|---|
 | **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; choose canonical/private/public/install ownership; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; implement `sync-skills --check`; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–3 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
-| **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-driven cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 2–4 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
+| **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; add Ship boundary validation + consumed-artifact dedupe; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-produced and one Claude-produced cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 3–5 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
 | **2 — Long-run reliability** | Stop killing productive or renewable runs | Merge duplicate liveness tasks; reviewed phase doc; refresh-aware Claude auth; four-budget liveness; meaningful-progress persistence; fault matrix; `driver_address` MCP parity as a separate small PR | 1 | post-gate, already earned by live P1s | 3–5 PRs; Sol/high for state/races, Terra/medium for MCP registration |
 | **3 — Contract convergence** | One verdict source | Graduate Gate into Workbench without behavior change; make reducer consume `contracts.Verdict`; add cross-consumer conformance; separately design/migrate subject v1 | 1 | post-gate | 2–4 PRs; Sol/high |
 | **4 — Enforcing Gate** | Make grants/checks more than advisory discipline | Publish exact-head GitHub check; require it in branch rules; separate merge-capable identity; prove bypass denied; document emergency operator path | 3 | security gate | 2–4 PRs; Sol/max + targeted adversarial review |
@@ -447,7 +449,7 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 
 ### Validation-gate decision after Phase 1
 
-Proceed to the program only if a fresh Codex seat completes one real actionable-review loop without manual branch checkout/push, using an artifact the Claude path can also consume, and every catalog collision is visible rather than overwritten. If the portable skill core becomes mostly target conditionals or the findings artifact needs deep Ship engine state, stop and keep separate harness skills over the existing CLI instead of building a compatibility framework.
+Proceed to the program only if a fresh Codex seat and a fresh Claude seat each complete one real actionable-review loop without manual branch checkout/push, both through the same Ship artifact validator and address boundary, and every catalog collision is visible rather than overwritten. The two seats produce separate artifacts for separate exact PR heads; schema identity alone is not the proof. If the portable skill core becomes mostly target conditionals or the findings artifact needs coordinator access to deep Ship engine state, stop and keep separate harness skills over the existing CLI instead of building a compatibility framework.
 
 ## 10. Open questions
 
@@ -475,18 +477,18 @@ Binary criteria:
 
 ### Gate B — cross-harness loop closure (Phase 1, program gate)
 
-On one real Ship cloud PR with at least one actionable finding:
+On two real Ship cloud PRs with at least one actionable finding each:
 
-1. a Codex seat produces valid `ReviewFindingsV1` for the exact reviewed head;
-2. `driver address` continues the existing PR branch;
-3. `driver run` reaches terminal success and the PR head changes;
-4. a fresh review runs on the new head;
-5. Gate and `driver land` complete without manual branch checkout/push;
-6. closure receipt contains linked run/PR/Gate refs plus seat/model/effort/review cycles;
-7. the same artifact validates under the Claude-installed workflow;
-8. stale-head, cycle-exhausted, missing-reviewer, and duplicate-address probes all fail closed.
+1. a fresh Codex seat produces valid `ReviewFindingsV1` for PR A's exact reviewed head and drives it through the shared Ship boundary;
+2. a fresh Claude seat independently produces valid `ReviewFindingsV1` for PR B's exact reviewed head and drives it through the same boundary;
+3. each `driver address` continues its existing PR branch;
+4. each `driver run` reaches terminal success and changes that PR's head;
+5. a fresh review runs on each new head;
+6. Gate and `driver land` complete both PRs without manual branch checkout/push;
+7. each closure receipt contains linked run/PR/Gate refs plus seat/model/effort/review cycles;
+8. Ship itself rejects stale-head, cycle-exhausted, missing-reviewer, and duplicate-address probes before dispatch; an external pre-validator is not counted.
 
-**GO:** all eight hold, with at most one human intervention for genuine judgment and zero manual mechanism repair.
+**GO:** all eight hold for both harnesses, with at most one human intervention per PR for genuine judgment and zero manual mechanism repair.
 
 **NO-GO / reshape:** if target-specific skill prose dominates the core, keep independent adapters and standardize only the artifact/CLI; if Ship needs coordinator internals, keep validation outside the engine until another producer proves the need.
 
