@@ -3,10 +3,10 @@
 **Status:** draft / proposal — **NOT a build commitment.** This is the artifact we decide from.
 **Owner:** @itsHabib
 **Date:** 2026-07-10
-**Revision:** v0 — first Codex-authored synthesis of the post-C10 kickoff, the Fable-era redesign, its red-team, the current Workbench charter, and the operator's two workbench essays.
-**Related:** [`docs/DESIGN.md`](../../DESIGN.md), [`FOLLOWUPS.md`](../../../FOLLOWUPS.md), `pers/docs/kickoff-post-c10-gpt56-2026-07-10.md`, `pers/workbench-redesign/DESIGN.md`, `pers/workbench-redesign/VERDICT.md`, `pers/workbench-redesign/RED-TEAM.md`, `pers/writer/drafts/embrace-the-slop.md`, `pers/writer/drafts/rebuilding-the-workbench.md`.
+**Revision:** v1 — adds the cross-cutting property/model/fuzz testing strategy and names the authorization invariants each contract must preserve.
+**Related:** [`docs/DESIGN.md`](../../DESIGN.md), [`FOLLOWUPS.md`](../../../FOLLOWUPS.md), `pers/docs/kickoff-post-c10-gpt56-2026-07-10.md`, `pers/workbench-redesign/DESIGN.md`, `pers/workbench-redesign/VERDICT.md`, `pers/workbench-redesign/RED-TEAM.md`, `pers/writer/drafts/embrace-the-slop.md`, `pers/writer/drafts/rebuilding-the-workbench.md`, `pers/ship/docs/features/qe-sdet/phases/03-property-based-state-machine.md`, `pers/dossier/docs/features/advanced-testing/spec.md`.
 
-> **Reviewers — focus areas:** (1) the canonical-source and collision rules for Claude/Codex skills in §4 D1–D3, (2) whether `ReviewFindingsV1` is the smallest sufficient cross-harness seam in §5.2, (3) the Phase 1 binary validation gate in §9/§11, and (4) whether Gate should graduate into Workbench rather than force `contracts` into a separate module (§4 D5).
+> **Reviewers — amendment focus:** (1) whether D13's properties describe authorization semantics rather than accidental output formatting, (2) whether the Gate reducer's multiple-judgment ambiguity must be resolved before permutation invariance is enforced, and (3) whether the phase-local property gates in §9/§11 are strong enough without creating a testing big-bang.
 
 ---
 
@@ -67,6 +67,7 @@ The remaining problem is closure, not another architecture. The current system i
 - **FR12 — Risk-scaled review:** review posture depends on risk/invariant class; reviewer count alone is never the safety argument.
 - **FR13 — Evidence-shaped local work:** local-model output may influence a gate only when semantic evidence is deterministically checked or error is escalate-safe. Schema validity and self-confidence alone never authorize an effect.
 - **FR14 — Receipts:** every closed-loop run records harness, model, effort, provider, review cycles, human interventions, failure/recovery events, and final Git/GitHub refs.
+- **FR15 — Executable contract laws:** every safety-critical deterministic contract names its invariants and carries example tests plus property/model/fuzz tests appropriate to the seam. A schema or migration cannot be called converged when its examples pass but its laws are untested.
 
 ### Non-functional requirements
 
@@ -75,7 +76,8 @@ The remaining problem is closure, not another architecture. The current system i
 | Safety | Unknown skill collision, verdict field/class, reviewer absence, remote liveness, or Gate state fails closed; absence never reads as green. |
 | Portability | Claude and Codex can both perform the Phase 1 flow from a fresh session using documented/installable surfaces. |
 | Recovery | A process restart preserves the latest meaningful remote progress and does not reset an inactivity budget or lose the PR branch. |
-| Determinism | Skill sync `--check`, schema conformance, reducer laws, and fault-injection tests produce machine-readable verdicts. |
+| Determinism | Skill sync `--check`, schema conformance, reducer laws, and fault-injection tests produce machine-readable verdicts. Property runs are reproducible from a printed seed/counterexample. |
+| Test runtime | PR property suites use a bounded deterministic run count and add <2 minutes to each affected repository's CI; longer fuzzing runs on a separate scheduled/manual lane. |
 | Auditability | A run is explainable from artifacts/receipts plus GitHub state; no required decision exists only in chat prose. |
 | Operability | No new daemon for skill sync or the review seam. CLI/script first; MCP only after live pull. |
 | Cost | Static four-reviewer panels are not required for low-risk work. Premium judgment is reserved for ambiguity, disagreement, or high-risk gates. |
@@ -201,6 +203,27 @@ The migration order is operational, not architectural: Tracelens is already a co
 ### D12 — Join identities before considering store unification
 
 **Choice:** stable provenance refs connect Dossier tasks, Ship runs/streams, review artifacts, Gate runs, PRs, commits, and notifications. Physical store convergence remains parked until duplicated facts cause measured correctness or operator cost.
+
+### D13 — Test laws at deterministic seams; evaluate stochastic judgment with corpora
+
+**Choice:** property testing supplements, and never replaces, named example tests. Use it where the contract makes a universal claim over a pure reducer, codec, state machine, capability, or filesystem projection. Keep hand-written examples for intent and regressions; keep live fault injection for provider/GitHub behavior; keep labeled evaluation corpora for model quality. Do not property-test prose quality or pretend randomized inputs can prove an LLM judgment correct.
+
+Each property names four things in the test: the valid input domain, the law, the authorization projection being compared, and the reproduction mechanism. Compare decisions/tier/confidence/state—not incidental reason ordering, timestamps, generated IDs, or display text—unless those fields are themselves public contract. A failing randomized case prints a seed and minimized counterexample, then graduates into a named example regression test.
+
+| Seam | Required laws | Technique |
+|---|---|---|
+| Skill catalog / `skill-sync` | check/dry-run never mutates; declared portable sync is idempotent; undeclared same-name divergence is never overwritten; resolved paths remain inside the declared source/target roots. Projection: the set of created/modified relative paths and their content hashes—not metadata/order/timestamps | deterministic generated directory trees plus filesystem snapshots |
+| `ReviewFindingsV1` / Ship address boundary | exact-head mismatch always refuses; empty/unsourced `address` never dispatches; consuming the same artifact/digest twice dispatches at most once; unknown major refuses while unknown optional fields preserve the routing projection: schema major, exact subject, decision/cycle, finding identity/severity/source/evidence presence, and panel requested/completed/missing | generated artifacts plus model-based command sequences |
+| Ship workflow/liveness | every successful transition is legal; terminal state never regresses; one truthful terminal result wins cancel/result races; advancing fake time cannot restore an exhausted budget without a defined recovery event | existing `fast-check` state-machine design, fake clocks, bounded event sequences |
+| Verdict codec | marshal/decode preserves known fields; unknown optional fields are tolerated; malformed/truncated input never panics or yields an authorizing verdict; unknown major/class/decision fails closed | Go fuzz targets with checked-in seed corpus plus generated valid values |
+| Gate reducer authorization projection | code block remains block under any additional valid evidence; missing code floor never passes; adding a verdict cannot lower tier or increase minimum confidence; duplicate non-judgment evidence cannot improve authorization; permutation invariance applies after the multiple-judgment rule below is resolved | Go `testing/quick`/deterministic generators over valid verdict sets |
+| Grants and append-only state | changing any signed field invalidates the grant; scope mismatch never validates; advancing time cannot revive expiry; widening the requested tier/cycle cannot turn refusal into authorization; mutating a recorded artifact breaks chain verification | generated grants/artifacts and bounded tamper mutations |
+| Triage | final tier is never below the deterministic floor; advisory failure/uncertainty can only preserve or escalate; identical diff/config produces identical floor output | generated diff feature sets plus the held-out labeled corpus |
+| Tracelens | identical trace/config produces the same diagnostic projection; malformed/partial traces never panic or manufacture a pass; adding an observed failure cannot improve the authorization projection | Go fuzzing for parsers plus generated trace/event sequences |
+
+Use each ecosystem's native, already-earned tool: Go standard-library `testing/quick` and fuzzing in Workbench/Gate/Triage/Tracelens; Ship's existing `@fast-check/vitest` design; Dossier's existing Rust `proptest` design. Workbench does not gain a shared cross-language property framework.
+
+**Multiple-judgment hold:** Gate's reducer says verdict order does not matter, but today more than one judgment verdict is resolved by the last slice element. Do not encode that accident as a property or hide it by generating at most one judgment. The fail-closed default is to reject multiple judgments and escalate; a deterministic order/join may replace that default only after its identity, supersession, and conflict semantics are explicitly designed and tested. Only then does permutation invariance become a required Gate law.
 
 ## 5. Data model
 
@@ -459,6 +482,8 @@ No step checks out or manually pushes the cloud PR branch in the operator seat.
 - Schema majors are explicit. Unknown major refuses; unknown optional fields within a supported major are tolerated.
 - Conformance tests live with the type/schema and are exercised by every in-module consumer.
 - Migration of Gate is a code move/import change, not a behavioral rewrite. Reducer tests must be identical before and after.
+- Every new property failure is reproducible from its seed/minimized counterexample and is promoted into the checked-in regression corpus before the fix merges.
+- Property generators are versioned with the contract they exercise. A generator that excludes an inconvenient valid state is a test bug, not a waiver.
 
 ## 9. Rollout / implementation plan
 
@@ -466,12 +491,12 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Scope / recommended model |
 |---|---|---|---|---|---|
-| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; use `cc-skills` as canonical private catalog and `skills` as reviewed public projection; add Codex + manifest policy to `skill-sync`; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; spike the smallest honest Codex review producer; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–4 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
-| **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; add Ship boundary validation + consumed-artifact dedupe; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-produced and one Claude-produced cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 3–5 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
-| **2 — Long-run reliability** | Stop killing productive or renewable runs | Merge duplicate liveness tasks; reviewed phase doc; refresh-aware Claude auth; four-budget liveness; meaningful-progress persistence; fault matrix; `driver_address` MCP parity as a separate small PR | 1 | post-gate, already earned by live P1s | 3–5 PRs; Sol/high for state/races, Terra/medium for MCP registration |
-| **3 — Workbench contract convergence** | One verdict source across independent tenants | Graduate Tracelens and land it green to prove module/import/CI mechanics; only then capture a green original-repo Gate reducer baseline and open the coordinated Gate + Triage migration; make all consume/emit `contracts.Verdict`; preserve Gate tests and Triage's evaluation corpus; add cross-consumer conformance; separately design/migrate subject v1 | 1 | Gate/Triage PRs remain unopened until Tracelens is merged green and Gate's original reducer baseline passes | 3–5 PRs; Sol/high |
-| **4 — Enforcing Gate** | Make grants/checks more than advisory discipline | Publish exact-head GitHub check; require it in branch rules; separate merge-capable identity; prove bypass denied; document emergency operator path | 3 | security gate | 2–4 PRs; Sol/max + targeted adversarial review |
-| **5 — Risk-scaled verification** | Spend review effort where it adds assurance | Instrument reviewer yield; implement tier/invariant-based panel policy; semantic evidence rule for local outputs; keep confidence diagnostic; compare against current panel | 1, enough receipts | experiment gate | 2–3 PRs + corpus; Sol/high judgment, Terra/medium mechanics |
+| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; use `cc-skills` as canonical private catalog and `skills` as reviewed public projection; add Codex + manifest policy to `skill-sync`; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; add non-mutation/idempotence/path-confinement properties; spike the smallest honest Codex review producer; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–4 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
+| **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; add Ship boundary validation + consumed-artifact dedupe; property-test exact-head/refusal/dedupe laws; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-produced and one Claude-produced cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 3–5 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
+| **2 — Long-run reliability** | Stop killing productive or renewable runs | Merge duplicate liveness tasks; reviewed phase doc; refresh-aware Claude auth; four-budget liveness; meaningful-progress persistence; bounded fake-clock/event-sequence properties; fault matrix; `driver_address` MCP parity as a separate small PR | 1 | post-gate, already earned by live P1s | 3–5 PRs; Sol/high for state/races, Terra/medium for MCP registration |
+| **3 — Workbench contract convergence** | One verdict source across independent tenants | Graduate Tracelens and land it green with parser/determinism properties; only then capture a green original-repo Gate reducer law suite, resolve multiple judgments, and open the coordinated Gate + Triage migration; make all consume/emit `contracts.Verdict`; preserve Gate properties and Triage's floor/advisory corpus; add cross-consumer conformance; separately design/migrate subject v1 | 1 | Gate/Triage PRs remain unopened until Tracelens is merged green and Gate's original reducer example + property suites pass | 3–5 PRs; Sol/high |
+| **4 — Enforcing Gate** | Make grants/checks more than advisory discipline | Property-test signed-field tamper, scope, TTL, tier, and cycle laws; publish exact-head GitHub check; require it in branch rules; separate merge-capable identity; prove bypass denied; document emergency operator path | 3 | security gate | 2–4 PRs; Sol/max + targeted adversarial review |
+| **5 — Risk-scaled verification** | Spend review effort where it adds assurance | Instrument reviewer yield; enforce the Triage final-tier ≥ deterministic-floor property; implement tier/invariant-based panel policy; semantic evidence rule for local outputs; keep confidence diagnostic; compare against current panel | 1, enough receipts | experiment gate | 2–3 PRs + corpus; Sol/high judgment, Terra/medium mechanics |
 | **6 — Unattended closure trial** | Test the north star | Run a small varied corpus across Claude and Codex/off-box providers; inject red CI, missing reviewer, auth failure, restart, high-risk grant exceed; measure §11 | 2, 4, 5 | go/no-go for further autonomy | test program, not one PR; Sol/ultra for adversarial orchestration only where justified |
 | **7 — Identity joins, not store unification** | Improve explainability without a platform | Stable refs across Dossier/Ship/review/Gate/GitHub/Flare; extend existing receipts/views; revisit physical convergence only on measured double-book cost | 6 | demand-gated | unestimated; breadth only |
 
@@ -488,8 +513,25 @@ Proceed to the program only if a fresh Codex seat and a fresh Claude seat each c
 5. **GitHub enforcement:** required check from a GitHub Action, GitHub App, or a controlled local identity? Choose the smallest option that genuinely removes governed-agent bypass.
 6. **Review experiment baseline:** the existing four-reviewer panel is flaky. Define denominators from requested, actually-started, and completed reviewers separately so silent no-shows do not make the alternative look artificially cheap or weak.
 7. **Provider-neutral liveness:** which event projection is semantically meaningful across Cursor, Claude, and Codex? Each provider may need an adapter; the policy must not collapse to the weakest/noisiest shared field.
+8. **Multiple Gate judgments:** keep the fail-closed default (reject more than one judgment and escalate), or earn explicit ordering/identity and a deterministic join? Current last-slice-wins behavior contradicts the reducer's order-independence claim and must not survive contract convergence accidentally.
 
 ## 11. Validation plan
+
+### Cross-cutting invariant-suite acceptance
+
+Property testing is phase-local: a contract's laws land with the PR that creates
+or migrates that contract, not in a later testing sweep. Every new suite must:
+
+1. name its valid domain, law, and compared authorization/state projection;
+2. run at least 100 deterministic generated cases per property in normal PR CI, within the repository's <2-minute added-runtime budget; this floor applies to generated-valid/model cases, while fuzz targets replay their checked-in corpus in PR CI and reserve time-boxed exploration for scheduled/manual runs;
+3. print a reproducible seed and minimized counterexample on failure;
+4. include checked-in fuzz seeds for parser boundaries; time-boxed discovery fuzzing may run scheduled/manual;
+5. demonstrate once, before merge, that a deliberate opposite mutation is caught, then revert the mutation; any later generator change that narrows or otherwise changes the valid domain reactivates this demonstration for the affected properties;
+6. preserve named example tests and promote every real minimized failure into one.
+
+An unseeded random loop, a property that reimplements production as its oracle,
+or a generator that excludes a valid troublesome state does not satisfy this
+gate.
 
 ### Gate A — skill catalog integrity (Phase 0)
 
@@ -506,6 +548,7 @@ Binary criteria:
 - `skill-sync status --manifest <catalog-policy> --json` reports zero unknown collisions;
 - missing relative references and invalid frontmatter fail the check;
 - applying to a temp Codex home never overwrites a divergent same-name skill;
+- generated catalog trees prove check/dry-run non-mutation, declared portable-sync idempotence, and path confinement;
 - after one documented `skill-sync sync` to a temp Claude home, a fresh Claude session discovers and invokes `/tdd`, `/review-coordinator`, and the adapted `/work-driver` with the same operator-facing commands and no new per-invocation ceremony; the existing live Claude home is not replaced before this passes;
 - a fresh Codex task discovers `/tdd`, the chosen native review producer, `/wip`, `/shipped`, and the target-adapted `/work-driver` as intended.
 
@@ -521,10 +564,11 @@ On two real Ship cloud PRs with at least one actionable finding each:
 6. Gate and `driver land` complete both PRs without manual branch checkout/push;
 7. each closure receipt contains linked run/PR/Gate refs, seat/model/effort/review cycles, the native review producer id, the skill-catalog revision/hash that installed it, and typed intervention events sufficient to compute the GO condition;
 8. Ship itself rejects stale-head, cycle-exhausted, empty/unsourced address artifacts, source/panel inconsistency, and duplicate-address probes before dispatch; the later review/Gate path parks rather than treating `panel.missing` as clean. An external pre-validator is not counted.
+9. the `ReviewFindingsV1`/address property suite proves those refusal and at-most-once laws over generated valid/invalid artifacts and bounded repeated-consumption sequences.
 
 **Intervention taxonomy:** every intervention is a typed receipt event with `time`, `kind`, `reason_code`, `actor`, and (for judgment) the recorded escalation/question ref. `genuine-judgment` is only an action requested because the system explicitly recognized ambiguity (unknown risk class, reviewer disagreement, grant ceiling exceeded, or another recorded escalation question). `mechanism-repair` is any operator action needed because a required automated behavior was absent or wrong, including manual head/cycle correction, branch checkout/push, credential refresh, collision resolution during apply, or recovery from an untruthful state. If an event is missing, lacks a question ref for claimed judgment, or cannot be classified unambiguously, count it as mechanism repair.
 
-**GO:** all eight hold for both harnesses, with at most one `genuine-judgment` intervention per PR and zero `mechanism-repair` interventions.
+**GO:** all nine hold for both harnesses, with at most one `genuine-judgment` intervention per PR and zero `mechanism-repair` interventions.
 
 **NO-GO / reshape:** if target-specific skill prose dominates the core, keep independent adapters and standardize only the artifact/CLI; if Ship needs coordinator internals, keep validation outside the engine until another producer proves the need.
 
@@ -537,7 +581,8 @@ Scripted fake-clock/provider tests plus one live long run prove:
 - sleep/resume and process restart preserve correct remaining budgets;
 - expired credentials refresh without leaking token material;
 - result-vs-cancel produces one truthful terminal receipt;
-- absolute backstop still stops an endlessly noisy runaway.
+- absolute backstop still stops an endlessly noisy runaway;
+- bounded generated fake-clock/event sequences preserve terminal-state and budget monotonicity laws.
 
 ### Gate D — measured autonomy corpus (Phases 5–6)
 
