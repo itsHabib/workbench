@@ -240,6 +240,12 @@ The sync report adds observed hashes and one of: `missing`, `identical`, `source
     "harness": "claude|codex|other",
     "impl": "<skill-or-model>"
   },
+  "panel": {
+    "expected": ["codex", "claude", "cursor"],
+    "started": ["codex", "cursor"],
+    "completed": ["codex", "cursor"],
+    "missing": ["claude"]
+  },
   "decision": "address",
   "findings": [
     {
@@ -259,7 +265,9 @@ Required invariants:
 
 - `revision` equals the PR head that reviewers inspected; a mismatch refuses or parks before dispatch.
 - `id` is stable for identical normalized content; Ship records the consumed id/digest so a repeated address call cannot dispatch twice.
+- `decision: address` requires at least one finding. An empty findings array refuses; it cannot manufacture a review-fix cycle.
 - Every finding has source evidence or is explicitly marked `evidence_unavailable` and cannot independently produce a critical gate.
+- Every named finding source appears in `panel.completed`. Expected-but-absent reviewers remain explicit in `panel.missing`; their absence is not clean evidence.
 - The artifact does not declare Ship's review cycle. Ship owns `reviewCycles`, checks remaining capacity at consumption, and records the cycle it assigns to the address attempt. Coordinators never read driver state merely to author valid findings.
 - Unknown schema major refuses. Unknown optional fields are ignored by tolerant readers.
 
@@ -293,7 +301,15 @@ Extend existing receipts/artifacts where their owner permits; do not create a ne
   "review_producer": "codex:github-plugin",
   "skill_catalog_revision": "<git-sha-or-manifest-hash>",
   "review_cycles": 2,
-  "human_interventions": 1,
+  "interventions": [
+    {
+      "time": "2026-07-10T00:00:00Z",
+      "kind": "genuine-judgment",
+      "reason_code": "reviewer-disagreement",
+      "question_ref": "esc_...",
+      "actor": "human:michael"
+    }
+  ],
   "recoveries": ["auth-refresh"],
   "outcome": "merged"
 }
@@ -323,11 +339,11 @@ ship driver address <driver> --stream <stream> --findings <path>
 ship driver run <driver>
 ```
 
-The coordinator name is illustrative; any producer may emit the schema. Phase 1 adds the minimum checks at Ship's command boundary before the portability gate can pass: supported schema, exact reviewed head, remaining engine-owned cycle capacity, and unused artifact id/digest. An external validator may be used during development, but cannot satisfy Gate B or substitute for the engine boundary in the live dogfood.
+The coordinator name is illustrative; any producer may emit the schema. Phase 1 adds the minimum checks at Ship's command boundary before the portability gate can pass: supported schema, exact reviewed head, non-empty sourced findings for `decision: address`, source/panel consistency, remaining engine-owned cycle capacity, and unused artifact id/digest. An external validator may be used during development, but cannot satisfy Gate B or substitute for the engine boundary in the live dogfood.
 
 **Claude non-regression sequencing:** the existing Claude coordinator output and operator path remain unchanged while it emits `ReviewFindingsV1` as a parallel/shadow artifact. Ship exercises the new artifact path on the Phase 1 dogfood, but the old output is not removed or made dependent on the new schema until both harness closures pass Gate B. Codex chooses its smallest honest native producer in a Phase 0 spike (adapted skill versus direct GitHub-plugin ingestion); shared prose is not required.
 
-Structured refusals retain C10's engine codes and add only contract-shaped errors when earned: `findings-schema-unsupported`, `findings-head-mismatch`, `findings-duplicate`. Cycle exhaustion keeps C10's existing `cycle-exhausted` code.
+Structured refusals retain C10's engine codes and add only contract-shaped errors when earned: `findings-schema-unsupported`, `findings-head-mismatch`, `findings-empty`, `findings-source-incomplete`, `findings-duplicate`. Cycle exhaustion keeps C10's existing `cycle-exhausted` code. `panel.missing` does **not** prevent addressing valid findings already received; it prevents the later review/Gate path from treating the panel as complete or clean without an explicit recorded escalation/waiver.
 
 ### 6.3 Liveness policy
 
@@ -422,10 +438,10 @@ No step checks out or manually pushes the cloud PR branch in the operator seat.
 
 ### Review artifacts
 
-- Findings are immutable for one `(artifact id, repo, pr, revision)` tuple.
+- Findings and panel state are immutable for one `(artifact id, repo, pr, revision)` tuple.
 - A new head always requires a new artifact/review cycle. Reusing findings across revisions refuses.
 - Duplicate delivery is safe: stable artifact id/digest plus the engine's consumed-artifact record prevents double-address from incrementing or dispatching silently.
-- Reviewer absence is recorded as absence/pending. It never becomes clean evidence.
+- Reviewer absence is recorded as absence/pending. It never becomes clean evidence. Addressing known findings may proceed, but a merge-ready verdict may not infer panel completeness from that address artifact.
 
 ### Provider liveness and auth
 
@@ -494,10 +510,10 @@ On two real Ship cloud PRs with at least one actionable finding each:
 4. each `driver run` reaches terminal success and changes that PR's head;
 5. a fresh review runs on each new head;
 6. Gate and `driver land` complete both PRs without manual branch checkout/push;
-7. each closure receipt contains linked run/PR/Gate refs, seat/model/effort/review cycles, the native review producer id, and the skill-catalog revision/hash that installed it;
-8. Ship itself rejects stale-head, cycle-exhausted, missing-reviewer, and duplicate-address probes before dispatch; an external pre-validator is not counted.
+7. each closure receipt contains linked run/PR/Gate refs, seat/model/effort/review cycles, the native review producer id, the skill-catalog revision/hash that installed it, and typed intervention events sufficient to compute the GO condition;
+8. Ship itself rejects stale-head, cycle-exhausted, empty/unsourced address artifacts, source/panel inconsistency, and duplicate-address probes before dispatch; the later review/Gate path parks rather than treating `panel.missing` as clean. An external pre-validator is not counted.
 
-**Intervention taxonomy:** `genuine-judgment` is only an action requested because the system explicitly recognized ambiguity (unknown risk class, reviewer disagreement, grant ceiling exceeded, or another recorded escalation question). `mechanism-repair` is any operator action needed because a required automated behavior was absent or wrong, including manual head/cycle correction, branch checkout/push, credential refresh, collision resolution during apply, or recovery from an untruthful state. If an action cannot be classified unambiguously from the receipt, count it as mechanism repair.
+**Intervention taxonomy:** every intervention is a typed receipt event with `time`, `kind`, `reason_code`, `actor`, and (for judgment) the recorded escalation/question ref. `genuine-judgment` is only an action requested because the system explicitly recognized ambiguity (unknown risk class, reviewer disagreement, grant ceiling exceeded, or another recorded escalation question). `mechanism-repair` is any operator action needed because a required automated behavior was absent or wrong, including manual head/cycle correction, branch checkout/push, credential refresh, collision resolution during apply, or recovery from an untruthful state. If an event is missing, lacks a question ref for claimed judgment, or cannot be classified unambiguously, count it as mechanism repair.
 
 **GO:** all eight hold for both harnesses, with at most one `genuine-judgment` intervention per PR and zero `mechanism-repair` interventions.
 
