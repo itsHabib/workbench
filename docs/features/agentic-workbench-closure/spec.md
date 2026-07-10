@@ -56,7 +56,7 @@ The remaining problem is closure, not another architecture. The current system i
 - **FR1 — Catalog:** every personal skill has one catalog entry with owner, canonical source, visibility, supported harnesses, compatibility state, and installation policy.
 - **FR2 — Collision safety:** an import/sync operation never overwrites a same-name target silently. It reports `identical`, `target-adapted`, `source-newer`, `target-newer`, or `manual`.
 - **FR3 — Repo-first authorship:** `~/.claude/skills` and `~/.codex/skills` are installed projections. Durable edits originate in a versioned repository.
-- **FR4 — Portable workflow core:** portable skills express outcome, artifacts, commands, and failure semantics without assuming Claude `Workflow`, chips, or Codex thread tools. Harness adapters own those product-specific operations.
+- **FR4 — Portable workflow contract:** harness-native skills share artifact schemas, commands, outcomes, and failure semantics without assuming identical prose or lifecycle primitives. Claude `Workflow`/chips and Codex thread/plugin operations remain native implementation details.
 - **FR5 — Review artifact:** reviewer/coordinator implementations emit one versioned `ReviewFindingsV1` artifact. `driver address` consumes its file path without knowing which harness produced it.
 - **FR6 — C10 closure:** a cloud PR with actionable findings can go review → address → re-tick → re-review → gate → land without manual checkout/push of its PR branch.
 - **FR7 — Long-run liveness:** active remote/provider progress resets inactivity; local event-pump heartbeats do not. Startup, inactivity, expected-duration, and absolute-backstop budgets are distinct.
@@ -96,7 +96,7 @@ The remaining problem is closure, not another architecture. The current system i
           target adapter + installed skill projection
                         │
                         ▼
-             portable workflow core (skills)
+        portable workflow contract (artifacts + CLI semantics)
                  │          │          │
                  ▼          ▼          ▼
               Dossier      Ship       GitHub
@@ -141,11 +141,13 @@ The diagram is deliberately not a new runtime platform. Existing tools remain in
 
 The public projection may carry public-only metadata or redactions; sync must render/patch it intentionally rather than wholesale-copying the private directory.
 
-### D2 — Portable core by default; explicit harness adapters when earned
+### D2 — Native implementations, compatible artifacts
 
-**Choice:** a skill's core workflow describes outcomes, artifacts, commands, and failure handling. Claude-only operations (`Workflow`, chip/session conventions) and Codex-only operations (task/thread tools, plugins) live in named adapters or target entrypoints.
+**Choice:** Claude and Codex may have independent skill bodies. Portability means they produce and consume the same versioned artifacts, invoke the same engine/CLI contracts, and preserve the same failure semantics. Shared prose/references are an opportunistic deduplication only where the lifecycle primitive is genuinely identical; they are not a design target. Claude-only operations (`Workflow`, chip/session conventions) and Codex-only operations (task/thread tools, plugins) stay native.
 
-**Alternative:** force textual identity across harnesses. Rejected: identical prose can be semantically wrong when the products expose different lifecycle primitives.
+**Alternative A:** one shared skill body with target prefix/suffix adapters. Rejected as the default: the adapter can become the entire implementation and shared prose can degrade into harness conditionals.
+
+**Alternative B:** force textual identity across harnesses. Rejected: identical prose can be semantically wrong when the products expose different lifecycle primitives.
 
 ### D3 — No silent collision winner
 
@@ -160,6 +162,8 @@ The public projection may carry public-only metadata or redactions; sync must re
 ### D5 — Graduate Gate into Workbench; do not split `contracts` yet
 
 **Choice:** after the Phase 1 closure gate, migrate Gate into the Workbench Go module as another independent `cmd/gate` tenant. Its reducer consumes `contracts.Verdict`; the schema lives once beside that type. Gate keeps its private decision packages and artifact-mediated integration.
+
+**Fallback trigger:** at Phase 3 start, use a temporary standalone `contracts` module for that cycle only when Gate has an in-flight feature PR whose rebase/review cost across the repo move is estimated larger than the migration itself. Otherwise migrate Gate directly. After that feature lands, re-evaluate and remove the temporary module by graduating Gate; the fallback is not a permanent third-home decision.
 
 **Alternative A:** leave Gate separate with mirrored types. Rejected: two sources stay green independently while drifting.
 
@@ -319,6 +323,8 @@ ship driver run <driver>
 
 The coordinator name is illustrative; any producer may emit the schema. Phase 1 adds the minimum checks at Ship's command boundary before the portability gate can pass: supported schema, exact reviewed head, remaining engine-owned cycle capacity, and unused artifact id/digest. An external validator may be used during development, but cannot satisfy Gate B or substitute for the engine boundary in the live dogfood.
 
+**Claude non-regression sequencing:** the existing Claude coordinator output and operator path remain unchanged while it emits `ReviewFindingsV1` as a parallel/shadow artifact. Ship exercises the new artifact path on the Phase 1 dogfood, but the old output is not removed or made dependent on the new schema until both harness closures pass Gate B. Codex chooses its smallest honest native producer in a Phase 0 spike (adapted skill versus direct GitHub-plugin ingestion); shared prose is not required.
+
 Structured refusals retain C10's engine codes and add only contract-shaped errors when earned: `findings-schema-unsupported`, `findings-head-mismatch`, `findings-duplicate`. Cycle exhaustion keeps C10's existing `cycle-exhausted` code.
 
 ### 6.3 Liveness policy
@@ -438,7 +444,7 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Scope / recommended model |
 |---|---|---|---|---|---|
-| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; choose canonical/private/public/install ownership; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; implement `sync-skills --check`; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–3 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
+| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; choose canonical/private/public/install ownership; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; implement `sync-skills --check`; spike the smallest honest Codex review producer; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–4 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
 | **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; add Ship boundary validation + consumed-artifact dedupe; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-produced and one Claude-produced cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 3–5 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
 | **2 — Long-run reliability** | Stop killing productive or renewable runs | Merge duplicate liveness tasks; reviewed phase doc; refresh-aware Claude auth; four-budget liveness; meaningful-progress persistence; fault matrix; `driver_address` MCP parity as a separate small PR | 1 | post-gate, already earned by live P1s | 3–5 PRs; Sol/high for state/races, Terra/medium for MCP registration |
 | **3 — Contract convergence** | One verdict source | Graduate Gate into Workbench without behavior change; make reducer consume `contracts.Verdict`; add cross-consumer conformance; separately design/migrate subject v1 | 1 | post-gate | 2–4 PRs; Sol/high |
@@ -449,12 +455,12 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 
 ### Validation-gate decision after Phase 1
 
-Proceed to the program only if a fresh Codex seat and a fresh Claude seat each complete one real actionable-review loop without manual branch checkout/push, both through the same Ship artifact validator and address boundary, and every catalog collision is visible rather than overwritten. The two seats produce separate artifacts for separate exact PR heads; schema identity alone is not the proof. If the portable skill core becomes mostly target conditionals or the findings artifact needs coordinator access to deep Ship engine state, stop and keep separate harness skills over the existing CLI instead of building a compatibility framework.
+Proceed to the program only if a fresh Codex seat and a fresh Claude seat each complete one real actionable-review loop without manual branch checkout/push, both through the same Ship artifact validator and address boundary, and every catalog collision is visible rather than overwritten. The two seats produce separate artifacts for separate exact PR heads; schema identity alone is not the proof. If the catalog/sync layer starts encoding workflow behavior or the findings artifact needs coordinator access to deep Ship engine state, stop at independent harness-native skills over the shared artifact/CLI contract instead of building a compatibility framework.
 
 ## 10. Open questions
 
 1. **Canonical catalog repo:** this TDD chooses `cc-skills` as private source and `skills` as public projection. Confirm before Phase 0 mutates either history; their current extra metadata may argue for a neutral source directory shared by both.
-2. **Codex coordinator shape:** port `review-coordinator` as a Codex-adapted skill, or let Codex emit `ReviewFindingsV1` directly from the GitHub plugin? Phase 1 should compare the smallest honest implementations rather than assume textual porting.
+2. **Codex coordinator implementation:** use a native Codex skill or direct GitHub-plugin ingestion? Phase 0 spikes the smallest honest implementation. D2 is already settled: artifact/CLI compatibility, not textual porting, is the portable boundary.
 3. **Skill activation boundary:** does Codex reliably reload copied personal skills on the next task, or require app restart for some entries? Pin the real behavior in Phase 0 documentation.
 4. **Dossier project:** this TDD assumes the existing `workbench` project. The current Codex session has no dossier connector, so phases/tasks/doc artifact are not seeded yet. The first Dossier-capable seat should reconcile rather than create a duplicate project.
 5. **Gate migration timing:** if active Gate feature work makes a repo move disruptive after Phase 1, should it first import a short-lived standalone `contracts` module? Default remains “migrate Gate,” but operational sequencing may override.
@@ -473,7 +479,8 @@ Binary criteria:
 - `sync-skills --check --json` reports zero unknown collisions;
 - missing relative references and invalid frontmatter fail the check;
 - applying to a temp Codex home never overwrites a divergent same-name skill;
-- a fresh Codex task discovers `/tdd`, `/review-coordinator`, `/wip`, `/shipped`, and the target-adapted `/work-driver` as intended.
+- after one documented `sync-skills --apply` to a temp Claude home, a fresh Claude session discovers and invokes `/tdd`, `/review-coordinator`, and the adapted `/work-driver` with the same operator-facing commands and no new per-invocation ceremony; the existing live Claude home is not replaced before this passes;
+- a fresh Codex task discovers `/tdd`, the chosen native review producer, `/wip`, `/shipped`, and the target-adapted `/work-driver` as intended.
 
 ### Gate B — cross-harness loop closure (Phase 1, program gate)
 
@@ -488,7 +495,9 @@ On two real Ship cloud PRs with at least one actionable finding each:
 7. each closure receipt contains linked run/PR/Gate refs plus seat/model/effort/review cycles;
 8. Ship itself rejects stale-head, cycle-exhausted, missing-reviewer, and duplicate-address probes before dispatch; an external pre-validator is not counted.
 
-**GO:** all eight hold for both harnesses, with at most one human intervention per PR for genuine judgment and zero manual mechanism repair.
+**Intervention taxonomy:** `genuine-judgment` is only an action requested because the system explicitly recognized ambiguity (unknown risk class, reviewer disagreement, grant ceiling exceeded, or another recorded escalation question). `mechanism-repair` is any operator action needed because a required automated behavior was absent or wrong, including manual head/cycle correction, branch checkout/push, credential refresh, collision resolution during apply, or recovery from an untruthful state. If an action cannot be classified unambiguously from the receipt, count it as mechanism repair.
+
+**GO:** all eight hold for both harnesses, with at most one `genuine-judgment` intervention per PR and zero `mechanism-repair` interventions.
 
 **NO-GO / reshape:** if target-specific skill prose dominates the core, keep independent adapters and standardize only the artifact/CLI; if Ship needs coordinator internals, keep validation outside the engine until another producer proves the need.
 
