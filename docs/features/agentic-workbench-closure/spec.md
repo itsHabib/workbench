@@ -118,7 +118,7 @@ The diagram is deliberately not a new runtime platform. Existing tools remain in
 ### New surfaces
 
 1. **Skill catalog/compatibility manifest** — source and install truth, not a new skill runtime.
-2. **Collision-aware sync/check script** — mechanical projection from repository to harness homes.
+2. **Collision-aware `skill-sync` policy** — extend the existing provider-neutral synchronizer; do not create a second sync script in Workbench.
 3. **`ReviewFindingsV1`** — the normalized artifact at the review → address seam.
 4. **Measurement receipt fields** — extensions to existing receipts/artifacts where possible, not a new analytics store.
 
@@ -126,6 +126,7 @@ The diagram is deliberately not a new runtime platform. Existing tools remain in
 
 - Ship driver state machine and `driver address` / `driver run` / `driver land`.
 - Gate's verifier ladder, grants, exit codes, and artifact log.
+- `skill-sync`'s provider registry, directory projections, status/diff engine, and additive writes.
 - Workbench `contracts` and `local` packages.
 - Flare's best-effort notification over authoritative producer artifacts.
 - GitHub PRs, checks, branch rules, and exact-head merge protection.
@@ -159,15 +160,17 @@ The public projection may carry public-only metadata or redactions; sync must re
 
 **Alternative:** keep free-form markdown per harness. Rejected: it makes the most frequent loop seam untestable and encourages another set of convention keys.
 
-### D5 — Graduate Gate into Workbench; do not split `contracts` yet
+### D5 — Graduate verdict consumers into Workbench; do not split `contracts` yet
 
-**Choice:** after the Phase 1 closure gate, migrate Gate into the Workbench Go module as another independent `cmd/gate` tenant. Its reducer consumes `contracts.Verdict`; the schema lives once beside that type. Gate keeps its private decision packages and artifact-mediated integration.
+**Choice:** after the Phase 1 closure gate, graduate the remaining Go verdict consumers into the Workbench module without combining them into one application. Migrate Tracelens first as the low-risk rehearsal, then migrate Gate and Triage as one coordinated wave because Gate invokes the live `triage-floor` command. Gate's reducer consumes `contracts.Verdict`; Tracelens and Triage emit that type. Each keeps independent commands, private decision packages, tests, and artifact-mediated integration.
 
-**Fallback trigger:** at Phase 3 start, use a temporary standalone `contracts` module for that cycle only when Gate has an in-flight feature PR whose rebase/review cost across the repo move is estimated larger than the migration itself. Otherwise migrate Gate directly. After that feature lands, re-evaluate and remove the temporary module by graduating Gate; the fallback is not a permanent third-home decision.
+The migration order is operational, not architectural: Tracelens is already a compact deterministic artifact consumer and can prove the tenant move cheaply. Gate and Triage move together so installation/path changes cannot strand Gate between repositories. Triage's label and held-out evaluation corpus migrates with its policy code; it is part of the correctness oracle, not disposable repository history.
+
+**Fallback trigger:** at Phase 3 start, use a temporary standalone `contracts` module for that cycle only when Gate or Triage has in-flight feature work whose rebase/review cost across the paired repo move is estimated larger than the migration itself. Otherwise migrate them directly. After that work lands, re-evaluate and remove the temporary module by completing the coordinated graduation; the fallback is not a permanent third-home decision.
 
 **Alternative A:** leave Gate separate with mirrored types. Rejected: two sources stay green independently while drifting.
 
-**Alternative B:** publish `contracts` as a standalone module now. Rejected while Gate is the only outside Go producer and is already on the Workbench migration queue; a third module is distribution overhead without an external consumer that cannot migrate.
+**Alternative B:** publish `contracts` as a standalone module now. Rejected while the outside Go producers are already on the Workbench migration queue; a third module is distribution overhead without an external consumer that cannot migrate.
 
 ### D6 — Generalize subject identity before broad schema adoption
 
@@ -319,16 +322,17 @@ Extend existing receipts/artifacts where their owner permits; do not create a ne
 
 ### 6.1 Skill catalog check/sync
 
-No MCP is added. A repository script exposes two modes:
+No MCP and no second synchronizer are added. Extend the existing `skill-sync`
+CLI with a Codex provider plus an optional catalog policy manifest:
 
 ```text
-sync-skills --target claude|codex|all --check [--json]
-sync-skills --target claude|codex|all --apply
+skill-sync status --source-dir <catalog> --targets claude,codex --manifest <path> [--json]
+skill-sync sync   --source-dir <catalog> --targets claude,codex --manifest <path> [--dry-run]
 ```
 
-- `--check` is read-only. Exit 0 = catalog and installed projections match policy; 1 = drift/collision; 2 = invalid catalog/source.
-- `--apply` copies missing/declared portable skills and renders declared adapters. It never deletes an untracked target and never resolves `manual` automatically.
-- Every apply writes a machine-readable report outside the installed skill dirs or prints it to stdout; the report never includes secret file contents.
+- `status` is read-only. Exit 0 = catalog and installed projections match policy; 1 = drift/collision; 2 = invalid catalog/source or policy.
+- `sync` copies missing/declared portable skills and target-declared implementations. It never deletes an untracked target, overwrites an undeclared same-name difference, or resolves `manual` automatically.
+- Every sync writes a machine-readable report outside the installed skill dirs or prints it to stdout; the report never includes secret file contents.
 - A post-copy check verifies required `SKILL.md`, referenced relative files, frontmatter name/description, and source/target hashes.
 
 ### 6.2 Review/address
@@ -462,10 +466,10 @@ The first validation gate sits after Phase 1. Phases 0–1 test the central port
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Scope / recommended model |
 |---|---|---|---|---|---|
-| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; choose canonical/private/public/install ownership; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; implement `sync-skills --check`; spike the smallest honest Codex review producer; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–4 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
+| **0 — Skill catalog baseline** | Make imports explicit and safe | Inventory all personal skills; use `cc-skills` as canonical private catalog and `skills` as reviewed public projection; add Codex + manifest policy to `skill-sync`; catalog 36 Claude + Codex-native entries; classify 13 collisions; validate the 23 copied baselines; spike the smallest honest Codex review producer; port `/tdd` references away from Claude-only assumptions where needed | — | pre-gate, no-regret | 2–4 PRs, each <500 wLOC; Terra/medium for inventory/script, Sol/high for compatibility review |
 | **1 — Cross-harness C10 closure** | Prove Claude and Codex share one real loop | Define `ReviewFindingsV1`; add Ship boundary validation + consumed-artifact dedupe; update canonical `work-driver` and coordinator producers; install/render both harness targets; dogfood one Codex-produced and one Claude-produced cloud PR through address → re-review → Gate → land; record interventions | 0, Ship C10 | **VALIDATION GATE** | 3–5 PRs, each <700; Sol/high implementation + Sol/max adversarial verification |
 | **2 — Long-run reliability** | Stop killing productive or renewable runs | Merge duplicate liveness tasks; reviewed phase doc; refresh-aware Claude auth; four-budget liveness; meaningful-progress persistence; fault matrix; `driver_address` MCP parity as a separate small PR | 1 | post-gate, already earned by live P1s | 3–5 PRs; Sol/high for state/races, Terra/medium for MCP registration |
-| **3 — Contract convergence** | One verdict source | Graduate Gate into Workbench without behavior change; make reducer consume `contracts.Verdict`; add cross-consumer conformance; separately design/migrate subject v1 | 1 | post-gate | 2–4 PRs; Sol/high |
+| **3 — Workbench contract convergence** | One verdict source across independent tenants | Graduate Tracelens as the migration rehearsal; then graduate Gate + Triage as a coordinated wave without behavior change; make all consume/emit `contracts.Verdict`; preserve Triage's evaluation corpus; add cross-consumer conformance; separately design/migrate subject v1 | 1 | post-gate | 3–5 PRs; Sol/high |
 | **4 — Enforcing Gate** | Make grants/checks more than advisory discipline | Publish exact-head GitHub check; require it in branch rules; separate merge-capable identity; prove bypass denied; document emergency operator path | 3 | security gate | 2–4 PRs; Sol/max + targeted adversarial review |
 | **5 — Risk-scaled verification** | Spend review effort where it adds assurance | Instrument reviewer yield; implement tier/invariant-based panel policy; semantic evidence rule for local outputs; keep confidence diagnostic; compare against current panel | 1, enough receipts | experiment gate | 2–3 PRs + corpus; Sol/high judgment, Terra/medium mechanics |
 | **6 — Unattended closure trial** | Test the north star | Run a small varied corpus across Claude and Codex/off-box providers; inject red CI, missing reviewer, auth failure, restart, high-risk grant exceed; measure §11 | 2, 4, 5 | go/no-go for further autonomy | test program, not one PR; Sol/ultra for adversarial orchestration only where justified |
@@ -477,14 +481,13 @@ Proceed to the program only if a fresh Codex seat and a fresh Claude seat each c
 
 ## 10. Open questions
 
-1. **Canonical catalog repo:** this TDD chooses `cc-skills` as private source and `skills` as public projection. Confirm before Phase 0 mutates either history; their current extra metadata may argue for a neutral source directory shared by both.
-2. **Codex coordinator implementation:** use a native Codex skill or direct GitHub-plugin ingestion? Phase 0 spikes the smallest honest implementation. D2 is already settled: artifact/CLI compatibility, not textual porting, is the portable boundary.
-3. **Skill activation boundary:** does Codex reliably reload copied personal skills on the next task, or require app restart for some entries? Pin the real behavior in Phase 0 documentation.
-4. **Dossier project:** this TDD assumes the existing `workbench` project. The current Codex session has no dossier connector, so phases/tasks/doc artifact are not seeded yet. The first Dossier-capable seat should reconcile rather than create a duplicate project.
-5. **Gate migration timing:** if active Gate feature work makes a repo move disruptive after Phase 1, should it first import a short-lived standalone `contracts` module? Default remains “migrate Gate,” but operational sequencing may override.
-6. **GitHub enforcement:** required check from a GitHub Action, GitHub App, or a controlled local identity? Choose the smallest option that genuinely removes governed-agent bypass.
-7. **Review experiment baseline:** the existing four-reviewer panel is flaky. Define denominators from requested, actually-started, and completed reviewers separately so silent no-shows do not make the alternative look artificially cheap or weak.
-8. **Provider-neutral liveness:** which event projection is semantically meaningful across Cursor, Claude, and Codex? Each provider may need an adapter; the policy must not collapse to the weakest/noisiest shared field.
+1. **Codex coordinator implementation:** use a native Codex skill or direct GitHub-plugin ingestion? Phase 0 spikes the smallest honest implementation. D2 is already settled: artifact/CLI compatibility, not textual porting, is the portable boundary.
+2. **Skill activation boundary:** does Codex reliably reload copied personal skills on the next task, or require app restart for some entries? Pin the real behavior in Phase 0 documentation.
+3. **Dossier project:** this TDD assumes the existing `workbench` project. The current Codex session has no dossier connector, so phases/tasks/doc artifact are not seeded yet. The first Dossier-capable seat should reconcile rather than create a duplicate project.
+4. **Gate migration timing:** if active Gate feature work makes the paired Gate/Triage move disruptive after Phase 1, should they first import a short-lived standalone `contracts` module? Default remains coordinated graduation; operational sequencing may override.
+5. **GitHub enforcement:** required check from a GitHub Action, GitHub App, or a controlled local identity? Choose the smallest option that genuinely removes governed-agent bypass.
+6. **Review experiment baseline:** the existing four-reviewer panel is flaky. Define denominators from requested, actually-started, and completed reviewers separately so silent no-shows do not make the alternative look artificially cheap or weak.
+7. **Provider-neutral liveness:** which event projection is semantically meaningful across Cursor, Claude, and Codex? Each provider may need an adapter; the policy must not collapse to the weakest/noisiest shared field.
 
 ## 11. Validation plan
 
@@ -494,10 +497,10 @@ Binary criteria:
 
 - all personal skills appear exactly once in the catalog;
 - every installed Claude/Codex directory is owned, external/system, or explicitly unmanaged;
-- `sync-skills --check --json` reports zero unknown collisions;
+- `skill-sync status --manifest <catalog-policy> --json` reports zero unknown collisions;
 - missing relative references and invalid frontmatter fail the check;
 - applying to a temp Codex home never overwrites a divergent same-name skill;
-- after one documented `sync-skills --apply` to a temp Claude home, a fresh Claude session discovers and invokes `/tdd`, `/review-coordinator`, and the adapted `/work-driver` with the same operator-facing commands and no new per-invocation ceremony; the existing live Claude home is not replaced before this passes;
+- after one documented `skill-sync sync` to a temp Claude home, a fresh Claude session discovers and invokes `/tdd`, `/review-coordinator`, and the adapted `/work-driver` with the same operator-facing commands and no new per-invocation ceremony; the existing live Claude home is not replaced before this passes;
 - a fresh Codex task discovers `/tdd`, the chosen native review producer, `/wip`, `/shipped`, and the target-adapted `/work-driver` as intended.
 
 ### Gate B — cross-harness loop closure (Phase 1, program gate)
