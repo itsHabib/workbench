@@ -188,7 +188,7 @@ cmd/runway/
 
 ### D8 - Secret references only
 
-**Choice:** the request carries `{name, ref}`. The controller resolves `ref` at the latest safe boundary and passes the value to a backend-supported in-memory channel without writing it to argv or durable state. v0 defines `env:NAME` as the first resolver convention. Each placement profile declares allowed secret names and transport capability; admission rejects unsupported names. The initial Rooms profile supports only the existing SSH `SendEnv` allowlist (`CURSOR_API_KEY` and `ANTHROPIC_API_KEY`); generic guest secret transport is out of scope.
+**Choice:** the request carries `{name, ref}`. The controller resolves `ref` at the latest safe boundary and passes the value to a backend-supported in-memory channel without writing it to argv or durable state. v0 accepts only `env:NAME`, enforced in JSON Schema with `^env:[A-Za-z_][A-Za-z0-9_]*$` and repeated by Go admission validation. Each placement profile declares allowed secret names and transport capability; admission rejects unsupported names. The initial Rooms profile supports only the existing SSH `SendEnv` allowlist (`CURSOR_API_KEY` and `ANTHROPIC_API_KEY`); generic guest secret transport is out of scope.
 
 Captured stdout/stderr replace exact resolved secret byte sequences with `[REDACTED]` before persistence, including matches split across read chunks. This protects against accidental direct echo; it is not a claim that Runway can prevent a workload from transforming or exfiltrating a secret it is authorized to receive.
 
@@ -352,7 +352,6 @@ Backends need not emit every informational kind, but phase ordering cannot move 
 Terminal statuses are `succeeded`, `failed`, `timed_out`, and `cancelled`. Stable reason codes include:
 
 - `completed`
-- `admission_unavailable`
 - `preparation_failed`
 - `startup_failed`
 - `workload_failed`
@@ -361,6 +360,7 @@ Terminal statuses are `succeeded`, `failed`, `timed_out`, and `cancelled`. Stabl
 - `collection_failed`
 - `cleanup_failed`
 - `controller_lost`
+- `placement_unavailable`
 
 `causes` is an ordered array of prior `{phase, reason_code, message?}` values when a later failure becomes primary, such as cleanup failure after deadline expiry. `diagnostics` is an array of structured `{code, message, details?}` records and may name an uncertain allocation without changing primary status. `stream_delivery` is `live`, `terminal_replay`, or `none` for declared provider/workload event artifacts; it does not describe stdout/stderr log tailing. Neither field may contain resolved secret values. Human-readable messages are diagnostic only. Callers branch on status, phase, and reason code.
 
@@ -403,7 +403,7 @@ runway reconcile <run-id> [--state <dir>] [--json]
 - `logs` tails buffered workload bytes. Delivery is ordered per stream but may lose the final unflushed tail on abrupt controller loss.
 - `cancel` verifies controller PID plus process-start identity before signaling it. Repetition is a successful no-op once cancellation or terminal state is recorded.
 - `result` returns the atomic terminal receipt. With `--wait`, `--timeout` is mandatory; it watches durable state rather than polling a backend and never reconciles implicitly.
-- `reconcile` detects a dead/reused controller identity, atomically acquires the run's writer claim, then invokes backend-specific best-effort cleanup. It writes `controller_lost` only while holding that claim. Concurrent reconcilers return the existing owner/result and do not touch the journal.
+- `reconcile` detects a dead/reused controller identity, atomically acquires the run's writer claim, then invokes backend-specific best-effort cleanup. It records `controller_lost` only while holding that claim. Concurrent reconcilers return the existing owner/result and do not touch the journal.
 
 The state root defaults from one documented environment/config value, but every run-addressing command accepts `--state`. Reliable `nohup`, CI adoption, periodic reconciliation scans, and host-restart recovery are unsupported in v0.
 
@@ -416,7 +416,7 @@ Suggested exit codes:
 | 0 | terminal success or successful read/cancel no-op |
 | 2 | invalid request/CLI usage; no run admitted |
 | 3 | terminal failed |
-| 4 | admission unavailable/backpressure |
+| 4 | placement unavailable/backpressure |
 | 124 | timed out |
 | 130 | cancelled |
 
@@ -454,14 +454,14 @@ Phase 2 cannot start against the current human-log-only surface. Rooms must firs
 10. Cleanup backend allocation.
 11. Atomically write `result.json`; append `run_terminal` as the final event. If the controller dies between those writes, `reconcile` treats the immutable result as authoritative and appends only the missing terminal event.
 
-### Flow B - admission backpressure
+### Flow B - placement backpressure
 
 1. Request is schema-valid, so a run ID and durable directory exist.
-2. Rooms returns `pool_full` or another explicit admission refusal.
-3. Controller emits phase `admission`, writes status `failed`, reason `admission_unavailable`, and exits 4.
+2. Work preparation may already have completed when Rooms returns structured `pool_full` from backend start.
+3. Controller preserves monotone phase order: it writes status `failed`, terminal phase `startup`, reason `placement_unavailable`, and exits 4. It never emits a late `admission` event after `preparation`.
 4. Runway does not retry. The caller decides whether and when to create another run.
 
-Exit code 4 is an admission result, not a retry instruction. Callers may retry only as explicit new attempts in their own workflow state; Runway supplies no queue, sleep, retry budget, or eventual-admission guarantee.
+Exit code 4 is a placement result, not a retry instruction. Callers may retry only as explicit new attempts in their own workflow state; Runway supplies no queue, sleep, retry budget, or eventual-admission guarantee.
 
 ### Flow C - deadline
 
@@ -493,7 +493,7 @@ Exit code 4 is an admission result, not a retry instruction. Callers may retry o
 2. `reconcile` verifies controller PID/start identity is absent or reused.
 3. It atomically acquires the per-run writer claim; failure means another controller/reconciler owns the run and this invocation exits without mutation.
 4. Backend adapter probes only what it can prove and performs best-effort cleanup.
-5. While holding the writer claim, reconcile appends `controller_lost` and atomically writes a failed terminal receipt.
+5. While holding the writer claim, reconcile atomically writes a failed terminal receipt with reason `controller_lost`, then appends `run_terminal`. Controller loss is a reason in the receipt/final event, not a separate pre-result event.
 6. Uncertain backend liveness fails closed and names the remaining allocation in diagnostics; it is never reported clean.
 
 ## 8. Concurrency, consistency, and failure model
@@ -514,7 +514,7 @@ The foreground controller holds an exclusive per-run writer claim and is the sol
 
 - `result.json` is created via temp file, flush, and atomic rename.
 - Existing terminal result is immutable.
-- A result without `run_terminal` is the only repairable partial terminal state. Reconciliation may append that event from the immutable result but may not rewrite the result or append any other event.
+- A result without `run_terminal` is the only repairable partial terminal state. Reconciliation may append that event deterministically from the immutable result but may not rewrite the result or append any other event.
 - A success result requires workload success, every required artifact, and proven cleanup.
 - Backend uncertainty is failure, not success with a warning.
 
@@ -558,7 +558,7 @@ Golden fixtures and generated cases prove:
 - Go admission validation rejects absolute/traversing bundle sources, cwd/path arguments, input targets, and outputs;
 - structured path arguments expand to native Windows and Linux fixture paths without changing `work.json`;
 - profile names remain logical and contain no controller/backend host path;
-- secret values cannot be represented, only references;
+- secret references must match `^env:[A-Za-z_][A-Za-z0-9_]*$` in both schema and Go validation; inline or malformed references reject;
 - a request digest changes when any exact submitted byte changes;
 - a work digest remains identical across local and Rooms placed requests;
 - pure reducer/model tests enforce contiguous, phase-monotone histories and at most one terminal event/result;
