@@ -290,6 +290,8 @@ Extend existing receipts/artifacts where their owner permits; do not create a ne
   "model": "gpt-5.6-sol",
   "effort": "high",
   "provider": "openai",
+  "review_producer": "codex:github-plugin",
+  "skill_catalog_revision": "<git-sha-or-manifest-hash>",
   "review_cycles": 2,
   "human_interventions": 1,
   "recoveries": ["auth-refresh"],
@@ -370,7 +372,7 @@ The 2026-07-10 raw import performed steps 2–5 manually: 23 missing copies inst
 
 1. Ship cloud stream succeeds and opens/updates a PR.
 2. Reviewers inspect exact `head_sha`.
-3. Claude or Codex coordinator emits `ReviewFindingsV1` with verbatim sources and no driver-owned cycle field.
+3. The seat invokes its catalog-declared, installed native review producer; that producer emits `ReviewFindingsV1` with verbatim sources and no driver-owned cycle field. A hand-authored JSON file is valid for schema smoke tests but cannot satisfy Gate B.
 4. Ship validates schema, head, unused artifact id/digest, and remaining cycle capacity; refusal parks with a coded reason.
 5. `driver address` re-dispatches onto the existing PR branch.
 6. `driver run` harvests terminal state; fresh head is pushed by the agent run.
@@ -486,13 +488,13 @@ Binary criteria:
 
 On two real Ship cloud PRs with at least one actionable finding each:
 
-1. a fresh Codex seat produces valid `ReviewFindingsV1` for PR A's exact reviewed head and drives it through the shared Ship boundary;
-2. a fresh Claude seat independently produces valid `ReviewFindingsV1` for PR B's exact reviewed head and drives it through the same boundary;
+1. a fresh Codex seat invokes the catalog-declared installed Codex review producer, which produces valid `ReviewFindingsV1` for PR A's exact reviewed head, then drives it through the shared Ship boundary; ad hoc JSON or a direct CLI-only sequence does not count;
+2. a fresh Claude seat independently invokes the catalog-declared installed Claude review producer, which produces valid `ReviewFindingsV1` for PR B's exact reviewed head, then drives it through the same boundary; ad hoc JSON or a direct CLI-only sequence does not count;
 3. each `driver address` continues its existing PR branch;
 4. each `driver run` reaches terminal success and changes that PR's head;
 5. a fresh review runs on each new head;
 6. Gate and `driver land` complete both PRs without manual branch checkout/push;
-7. each closure receipt contains linked run/PR/Gate refs plus seat/model/effort/review cycles;
+7. each closure receipt contains linked run/PR/Gate refs, seat/model/effort/review cycles, the native review producer id, and the skill-catalog revision/hash that installed it;
 8. Ship itself rejects stale-head, cycle-exhausted, missing-reviewer, and duplicate-address probes before dispatch; an external pre-validator is not counted.
 
 **Intervention taxonomy:** `genuine-judgment` is only an action requested because the system explicitly recognized ambiguity (unknown risk class, reviewer disagreement, grant ceiling exceeded, or another recorded escalation question). `mechanism-repair` is any operator action needed because a required automated behavior was absent or wrong, including manual head/cycle correction, branch checkout/push, credential refresh, collision resolution during apply, or recovery from an untruthful state. If an action cannot be classified unambiguously from the receipt, count it as mechanism repair.
