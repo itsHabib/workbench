@@ -25,7 +25,7 @@ Enforce in Go the semantic laws JSON Schema cannot express, closing Gate A of th
 
 Pure functions over the types from `runway-contract-schemas-types` — no I/O, no decision logic beyond the contract laws themselves (this is contract-law validation, permitted in the leaf package; routing/lifecycle policy stays in the future `cmd/runway`):
 
-- **Path laws (FR3, Gate A):** reject absolute paths and `..` traversal in bundle `source`s, input `target`s, output `path`s, structured `cwd`/argv `path` values; roots restricted to `workspace | inputs | out`.
+- **Path laws (FR3, Gate A):** reject absolute paths and `..` traversal in bundle `source`s, input `target`s, output `path`s, the top-level `cwd` `{root, value}` reference, and every `{path: {root, value}}` variant inside `command.args`/`command.executable`; roots restricted to `workspace | inputs | out`.
 - **Secret ref grammar (D8):** refs must match `^env:[A-Za-z_][A-Za-z0-9_]*$`; anything else — inline values, malformed refs, empty names — rejects. Secret *values* must be unrepresentable by construction.
 - **Profile hygiene (FR15):** `placement.backend` and `placement.profile` are logical names — reject anything containing path separators, `..`, or host-path shapes. `backend` remains open vocabulary (no allowlist here; adapter resolution is the controller's job).
 - **Workspace immutability:** `git` workspaces require a full 40-hex revision; symbolic refs reject.
@@ -34,7 +34,7 @@ Pure functions over the types from `runway-contract-schemas-types` — no I/O, n
 
 ### Pure history reducer/model tests
 
-A reducer `Reduce([]RunEvent) (HistoryState, error)` (or equivalent pure model) plus property-style tests proving, with zero controller code:
+A reducer `Reduce([]RunEvent) (HistoryState, error)` living in `contracts/execution` itself (`reduce.go` + `reduce_test.go`, same package — no test-only sub-package), where `HistoryState` is a small struct holding the reduced view: current phase, last seq, whether terminal was reached, and the terminal event if any. Property-style tests prove, with zero controller code:
 
 - `seq` contiguous from 1; duplicates and gaps reject.
 - Phase order monotone over the canonical phase enum; regression rejects.
@@ -54,13 +54,13 @@ Per the TDD Phase 0 gate: these tests prove transition/result combinations **wit
 
 ## Acceptance
 
-- `go test ./contracts/execution/...` green; every Gate A bullet above has at least one failing-case test.
+- `go test ./contracts/execution/` green (everything lives in the one package — no sub-packages); every Gate A bullet above has at least one failing-case test.
 - Leaf-package law holds (imports at most stdlib; CI `hygiene` green).
 - A fixture pair (identical `work.json`, different `placement`) proves `work_sha256` equality across placements.
 
 ## Test plan
 
-Table-driven `TestValidateWorkSpec_*` / `TestValidateRequest_*` / `TestValidateResult_*` rejection suites; `TestReduce_*` history suites including generated mutations (shuffle seq, regress phase, double-terminal).
+Table-driven `TestValidateWorkSpec_*` / `TestValidateRequest_*` / `TestValidateResult_*` rejection suites; `TestReduce_*` history suites including generated mutations (shuffle seq, regress phase, double-terminal). No `ValidateEvent` is expected: discrete event-field validation is JSON Schema's job (prior task); ordering laws are the reducer's. The work-digest-equality-across-placements law is owned by a `TestWorkDigestPlacementInvariant` fixture-pair test here.
 
 ## Non-goals
 

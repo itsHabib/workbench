@@ -34,7 +34,7 @@ Add `contracts/execution/` containing:
 
 3. **Shape conformance tests** in `contracts/execution/execution_conformance_test.go` — the existing recursive `objSchema` walk pattern from `contracts/conformance_test.go`: property names, required fields, nested shapes, and enums structurally identical between schema and Go types, for all four documents.
 
-4. **Golden fixtures** — one valid instance per schema (use the TDD §5 examples verbatim as the seed) plus representative invalid instances (wrong major version, missing required field, enum violation). Round-trip the valid fixtures through the Go types.
+4. **Golden fixtures** — one valid instance per schema (use the TDD §5 examples verbatim as the seed) plus representative invalid instances (wrong major version, missing required field, enum violation). Round-trip the valid fixtures through the Go types. Work-spec fixtures must cover **both** `executable` variants — `{name}` and `{path: {root, value}}` — so the XOR branch has schema and round-trip coverage. Note the shape precisely: `cwd` is a single top-level `{root, value}` reference; path-typed values inside `command.args` are discriminated-union variants — the two are distinct positions, not one concept.
 
 Boundary law applies: `contracts/execution` is a leaf package — it imports nothing else in the module (CI `hygiene` enforces). No decision logic; types, schemas, and tolerant decoders only.
 
