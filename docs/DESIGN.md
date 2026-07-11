@@ -62,6 +62,15 @@ stays in the tool that owns the decision. The verdict type's behavioral source
 of truth is gate's `internal/verify`; `contracts` mirrors that shape and
 conformance-tests against the schema, but never copies the `Reduce` function.
 
+One deliberate carve-out: **contract-law validation** is vocabulary, not
+decision logic. Pure, stdlib-only, I/O-free invariant functions over a
+contracts domain's own types (e.g. `contracts/execution/validate.go` rejecting
+path traversal, malformed secret refs, or invalid status/reason/phase
+combinations) live beside the types they constrain — they define what a valid
+instance *is*, for every consumer identically. Anything that decides what to
+*do* with a valid instance (routing, lifecycle, retries) stays in the owning
+tool.
+
 ## Shared mechanism packages
 
 `local` (structured local-model calls + the escalate-on-uncertainty gate) is not
