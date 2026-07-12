@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1.0",
+  "request_id": "req_placement_pair",
+  "work": {
+    "manifest": "work.json",
+    "sha256": "21b67c09d357cc50e8f41f7bf9a06f455621d5025ea6f0126834ab7d616ede6f"
+  },
+  "placement": {
+    "backend": "rooms",
+    "profile": "agent-cursor"
+  },
+  "policy": {
+    "deadline_ms": 300000,
+    "cancel_grace_ms": 5000
+  }
+}
