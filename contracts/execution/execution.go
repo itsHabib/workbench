@@ -9,6 +9,14 @@
 // belong to cmd/runway. Types here are the ergonomic view of the embedded
 // JSON Schemas; the conformance tests keep the two in lockstep.
 //
+// The admission validators (validate.go) and the pure history reducer
+// (reduce.go) are contract law, not decisions: they enforce the vocabulary's
+// own laws — path and secret grammar, profile hygiene, terminal combinations,
+// contiguous phase-monotone single-terminal histories — and return values.
+// They never choose a transition, a backend, or a retry; Reduce validates a
+// recorded history and derives a read-only view, it does not drive a state
+// machine.
+//
 // Readers are tolerant (FR14): unknown additive fields decode without error,
 // and an unrecognized schema_version rejects loudly via the Decode functions.
 // The contract is provider-neutral by law (FR2): no agent, provider, or
