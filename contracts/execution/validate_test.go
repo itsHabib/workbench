@@ -148,6 +148,17 @@ func TestValidateRequest_Rejections(t *testing.T) {
 	}
 }
 
+// TestValidateRequest_ColonNameIsLogical pins the hygiene boundary: only the
+// single-letter drive prefix is a host-path shape (FR15); multi-character
+// colon names stay legal — backend is open vocabulary.
+func TestValidateRequest_ColonNameIsLogical(t *testing.T) {
+	r := decodeRequestFixture(t, "request.json")
+	r.Placement.Backend = "rooms:v2"
+	if err := ValidateRequest(r); err != nil {
+		t.Fatalf("a colon-separated logical name must admit: %v", err)
+	}
+}
+
 func TestValidateResult_Valid(t *testing.T) {
 	if err := ValidateResult(decodeResultFixture(t, "result.json")); err != nil {
 		t.Errorf("golden fixture must admit: %v", err)
@@ -171,6 +182,7 @@ func TestValidateResult_TerminalLaws(t *testing.T) {
 		{StatusFailed, PhaseTerminal, ReasonControllerLost},       // Flow F
 		{StatusTimedOut, PhaseWorkload, ReasonDeadlineExceeded},   // Flow C
 		{StatusTimedOut, PhaseCleanup, ReasonDeadlineExceeded},    // Flow C, late expiry
+		{StatusTimedOut, PhaseAdmission, ReasonDeadlineExceeded},  // any-phase set: interruption phase is not pinned
 		{StatusCancelled, PhaseStartup, ReasonCancelRequested},    // Flow D
 		{StatusCancelled, PhaseWorkload, ReasonCancelRequested},   // Flow D
 	}
@@ -214,10 +226,15 @@ func TestValidateResult_Rejections(t *testing.T) {
 		name   string
 		mutate func(*Result)
 	}{
+		{"empty run_id", func(r *Result) { r.RunID = "" }},
+		{"empty request_id", func(r *Result) { r.RequestID = "" }},
 		{"request digest not 64-hex", func(r *Result) { r.RequestSHA256 = "hex" }},
 		{"work digest not 64-hex", func(r *Result) { r.WorkSHA256 = "hex" }},
+		{"succeeded without workload exit code", func(r *Result) { r.WorkloadExitCode = nil }},
+		{"succeeded with nonzero workload exit code", func(r *Result) { code := int64(3); r.WorkloadExitCode = &code }},
 		{"cause with unknown phase", func(r *Result) { r.Causes = []Cause{{Phase: "warmup", ReasonCode: ReasonDeadlineExceeded}} }},
 		{"cause with unknown reason", func(r *Result) { r.Causes = []Cause{{Phase: PhaseWorkload, ReasonCode: "gremlins"}} }},
+		{"cause phase illegal for its reason", func(r *Result) { r.Causes = []Cause{{Phase: PhaseWorkload, ReasonCode: ReasonPreparationFailed}} }},
 		{"reserved live stream delivery", func(r *Result) { r.Placement.StreamDelivery = "live" }},
 		{"empty stream delivery", func(r *Result) { r.Placement.StreamDelivery = "" }},
 		{"image digest not 64-hex", func(r *Result) { r.Placement.ImageSHA256 = "sha256:abc" }},
@@ -260,6 +277,9 @@ func TestValidateResult_CausesAndAbsentImage(t *testing.T) {
 // computes them to prove the law over a fixture pair differing only in
 // placement.
 func TestWorkDigestPlacementInvariant(t *testing.T) {
+	// work is the exact byte sequence whose SHA-256 both fixture files embed
+	// as work.sha256. Any re-encode or whitespace change breaks the match —
+	// that is the point of D5: digests are over exact submitted bytes.
 	work := []byte(`{"schema_version":"0.1.0","command":{"executable":{"name":"node"},"args":[{"path":{"root":"inputs","value":"runner.js"}}]},"cwd":{"root":"workspace","value":"."},"workspace":{"kind":"git","url":"https://github.com/itsHabib/agent-sandbox","revision":"57aa8b2c7a9531d5d6ba060a77247f9bfca0470f"}}`)
 	digest := fmt.Sprintf("%x", sha256.Sum256(work))
 

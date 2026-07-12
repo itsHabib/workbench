@@ -97,6 +97,12 @@ func ValidateResult(r Result) error {
 	if err := checkVersion(r.SchemaVersion); err != nil {
 		return err
 	}
+	if r.RunID == "" {
+		return fmt.Errorf("execution: run_id is empty; a result without identity cannot be correlated")
+	}
+	if r.RequestID == "" {
+		return fmt.Errorf("execution: request_id is empty; a result without identity cannot be correlated")
+	}
 	if err := checkHex64("request_sha256", r.RequestSHA256); err != nil {
 		return err
 	}
@@ -105,6 +111,9 @@ func ValidateResult(r Result) error {
 	}
 	if err := checkTerminalCombination(r.Status, r.TerminalPhase, r.ReasonCode); err != nil {
 		return err
+	}
+	if r.Status == StatusSucceeded && (r.WorkloadExitCode == nil || *r.WorkloadExitCode != 0) {
+		return fmt.Errorf("execution: a succeeded result requires workload_exit_code 0; workload exit is necessary but not sufficient for success (D7)")
 	}
 	if err := checkPlacementReceipt(r.Placement); err != nil {
 		return err
@@ -222,7 +231,9 @@ func checkOutput(i int, o Output) error {
 }
 
 // checkLogicalName is profile hygiene (FR15): placement backend and profile
-// are logical names resolved by configuration, never paths.
+// are logical names resolved by configuration, never paths. A colon counts
+// as a host-path shape only as a single-letter drive prefix; multi-character
+// colon names (rooms:v2) remain legal open vocabulary.
 func checkLogicalName(position, name string) error {
 	if name == "" {
 		return fmt.Errorf("execution: %s is empty", position)
@@ -281,15 +292,20 @@ func checkTerminalCombination(status, phase, reason string) error {
 	return nil
 }
 
-// checkCause admits a prior (phase, reason_code) pair: both must be canonical
-// vocabulary. The combination table does not apply — a cause carries no
-// status of its own.
+// checkCause admits a prior (phase, reason_code) pair: canonical vocabulary,
+// with the phase anchored to the reason by the same table the primary triple
+// uses. A cause carries no status of its own, so only the phase half of the
+// law applies — and the nil phase sets stay any-phase for deadline/cancel.
 func checkCause(i int, c Cause) error {
 	if _, ok := phaseRank[c.Phase]; !ok {
 		return fmt.Errorf("execution: causes[%d].phase %q is not a canonical phase", i, c.Phase)
 	}
-	if _, ok := terminalLaws[c.ReasonCode]; !ok {
+	law, ok := terminalLaws[c.ReasonCode]
+	if !ok {
 		return fmt.Errorf("execution: causes[%d].reason_code %q is not a stable reason", i, c.ReasonCode)
+	}
+	if law.phases != nil && !law.phases[c.Phase] {
+		return fmt.Errorf("execution: causes[%d] phase %q is illegal for reason %q", i, c.Phase, c.ReasonCode)
 	}
 	return nil
 }
