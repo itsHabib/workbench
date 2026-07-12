@@ -1,7 +1,6 @@
 package execution
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +24,7 @@ type objSchema struct {
 	Properties map[string]objSchema `json:"properties"`
 	Items      *objSchema           `json:"items"`
 	Enum       []string             `json:"enum"`
+	Const      string               `json:"const"`
 	OneOf      []objSchema          `json:"oneOf"`
 }
 
@@ -162,6 +162,11 @@ func assertUnionBranch(t *testing.T, name string, branch objSchema, fields map[s
 	}
 	if len(branch.Required) != 1 {
 		t.Errorf("%s: branch requires %v, want exactly one discriminant", name, branch.Required)
+	}
+	if len(branch.Required) == 1 {
+		if _, ok := branch.Properties[branch.Required[0]]; !ok {
+			t.Errorf("%s: discriminant %q is required but absent from properties", name, branch.Required[0])
+		}
 	}
 	for prop := range branch.Properties {
 		seen[prop] = true
@@ -336,15 +341,20 @@ func TestSchemaVersions(t *testing.T) {
 		"result":    ResultSchema,
 	}
 	for name, raw := range docs {
-		if v := loadSchemaDoc(t, raw).XVersion; v != SchemaVersion {
+		doc := loadSchemaDoc(t, raw)
+		if v := doc.XVersion; v != SchemaVersion {
 			t.Errorf("%s schema x-version = %q, want %q", name, v, SchemaVersion)
+		}
+		if c := doc.child(t, "schema_version").Const; c != SchemaVersion {
+			t.Errorf("%s schema_version const = %q, want %q — schema validators and the Go gate must agree on version validity", name, c, SchemaVersion)
 		}
 	}
 }
 
 // TestVersionGate is the FR14 loud half: the reader accepts exactly the one
-// version these schemas ship and rejects anything else — across all four
-// documents, plus the golden unknown-version and garbage-version fixtures.
+// version these schemas ship and rejects anything else — an unrecognized
+// version and a garbage string, across all four documents, plus the golden
+// unknown-version and garbage-version fixtures.
 func TestVersionGate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -356,19 +366,12 @@ func TestVersionGate(t *testing.T) {
 		{"event", "event.json", func(b []byte) error { _, err := DecodeEvent(b); return err }},
 		{"result", "result.json", func(b []byte) error { _, err := DecodeResult(b); return err }},
 	}
-	current := []byte(`"schema_version": "0.1.0"`)
 	for _, c := range cases {
 		raw := readFixture(t, c.fixture)
-		if !bytes.Contains(raw, current) {
-			t.Fatalf("%s: fixture carries no current schema_version to bump", c.name)
-		}
 		if err := c.decode(raw); err != nil {
 			t.Errorf("%s: current version must decode: %v", c.name, err)
 		}
-		bumped := bytes.Replace(raw, current, []byte(`"schema_version": "0.2.0"`), 1)
-		if err := c.decode(bumped); !errors.Is(err, ErrUnknownSchemaVersion) {
-			t.Errorf("%s: unrecognized version must reject loudly, got %v", c.name, err)
-		}
+		assertRejectsVersions(t, c.name, raw, c.decode)
 	}
 
 	for _, fixture := range []string{"invalid-work-spec-unknown-version.json", "invalid-work-spec-garbage-version.json"} {
@@ -376,6 +379,32 @@ func TestVersionGate(t *testing.T) {
 			t.Errorf("%s: must reject via the version gate, got %v", fixture, err)
 		}
 	}
+}
+
+func assertRejectsVersions(t *testing.T, name string, raw []byte, decode func([]byte) error) {
+	t.Helper()
+	for _, v := range []string{"0.2.0", "not-a-version"} {
+		if err := decode(withVersion(t, raw, v)); !errors.Is(err, ErrUnknownSchemaVersion) {
+			t.Errorf("%s: version %q must reject loudly, got %v", name, v, err)
+		}
+	}
+}
+
+// withVersion re-encodes a fixture with its schema_version replaced —
+// structure-aware, so fixture formatting can change freely without silently
+// defusing the gate tests.
+func withVersion(t *testing.T, raw []byte, version string) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	doc["schema_version"] = version
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("re-encode fixture: %v", err)
+	}
+	return out
 }
 
 // TestGoldenRoundTrip proves each valid fixture survives decode and re-encode
@@ -472,9 +501,14 @@ func TestTolerantDecodeDefersToAdmission(t *testing.T) {
 }
 
 // TestNoProviderLeakage is the FR2 guard: no provider vocabulary anywhere in
-// the four schema documents. Backend openness is pinned by
-// TestOpenVocabularies; host-path absence is structural (every path position
-// is a logical-root reference or a fixed-root relative string).
+// the four schema documents — the normative contract surface. Backend
+// openness is pinned by TestOpenVocabularies; host-path absence is structural
+// (every path position is a logical-root reference or a fixed-root relative
+// string). Fixture VALUES under testdata/ are deliberately out of scope: they
+// mirror the TDD §5 examples, where provider identity appears only as opaque
+// payload values (a secret name, a backend/profile string) — that is FR2
+// working as intended: an agent system compiles provider concerns INTO
+// neutral fields, and the contract never models them as fields of its own.
 func TestNoProviderLeakage(t *testing.T) {
 	docs := map[string][]byte{
 		"work-spec": WorkSpecSchema,

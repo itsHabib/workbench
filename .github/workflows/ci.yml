@@ -87,9 +87,12 @@ jobs:
           if [ "$fail" -eq 0 ]; then echo "contracts domains are leaves ✓"; fi
           exit $fail
       - name: local is a mechanism leaf
+        # "at most contracts" means any contracts domain — root or a
+        # sub-domain like contracts/execution. Shared vocabulary is importable
+        # by law; decision code never lives there, so nothing extra leaks in.
         run: |
           mod=github.com/itsHabib/workbench
-          deps=$(go list -deps ./local | grep "^${mod}/" | grep -Ev "^${mod}/(local|contracts)$" || true)
+          deps=$(go list -deps ./local | grep "^${mod}/" | grep -Ev "^${mod}/(local|contracts(/.*)?)$" || true)
           if [ -n "$deps" ]; then
             echo "local is a shared mechanism and may import at most contracts, but pulls in:" >&2
             echo "$deps" >&2

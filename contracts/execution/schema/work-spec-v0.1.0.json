@@ -8,7 +8,7 @@
   "required": ["schema_version", "command", "cwd", "workspace"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "type": "string" },
+    "schema_version": { "type": "string", "const": "0.1.0" },
     "command": {
       "type": "object",
       "description": "Structured argv — never a shell line.",

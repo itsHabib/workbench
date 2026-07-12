@@ -8,7 +8,7 @@
   "required": ["schema_version", "run_id", "seq", "time", "phase", "kind"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "type": "string" },
+    "schema_version": { "type": "string", "const": "0.1.0" },
     "run_id": { "type": "string" },
     "seq": { "type": "integer", "minimum": 1 },
     "time": { "type": "string", "format": "date-time" },
