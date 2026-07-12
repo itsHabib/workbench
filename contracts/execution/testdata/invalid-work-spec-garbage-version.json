@@ -1,0 +1,12 @@
+{
+  "schema_version": "not-a-version",
+  "command": {
+    "executable": {"name": "node"}
+  },
+  "cwd": {"root": "workspace", "value": "."},
+  "workspace": {
+    "kind": "git",
+    "url": "https://github.com/itsHabib/agent-sandbox",
+    "revision": "57aa8b2c7a9531d5d6ba060a77247f9bfca0470f"
+  }
+}

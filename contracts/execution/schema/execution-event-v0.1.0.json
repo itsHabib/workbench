@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/execution/execution-event/v0.1.0",
+  "title": "RunEvent",
+  "x-version": "0.1.0",
+  "description": "One canonical lifecycle event. Durable file order defines canonical order; seq is contiguous from 1; phase order is monotone; run_terminal is always last (FR6). Workload output bytes never become lifecycle events (D11).",
+  "type": "object",
+  "required": ["schema_version", "run_id", "seq", "time", "phase", "kind"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string" },
+    "run_id": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 1 },
+    "time": { "type": "string", "format": "date-time" },
+    "phase": { "type": "string", "enum": ["admission", "preparation", "startup", "workload", "collection", "cleanup", "terminal"] },
+    "kind": { "type": "string", "description": "Open vocabulary — kinds are additive within a major schema, so this is deliberately NOT an enum. Required v0 kinds: run_accepted, placement_allocated, workload_ready, workload_started, workload_exited, artifact_collected, cleanup_completed, run_terminal." },
+    "message": { "type": "string", "description": "Human-readable, diagnostic only — consumers branch on phase and kind." },
+    "details": { "type": "object" }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/execution/execution-result/v0.1.0",
+  "title": "Result",
+  "x-version": "0.1.0",
+  "description": "Terminal receipt — at most one per accepted request (FR7). Callers branch on status, terminal_phase, and reason_code, never on human-readable messages (FR8). Semantic combination laws (which status/phase/reason triples are legal) are Go admission validation's job.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "request_id", "request_sha256", "work_sha256", "status", "terminal_phase", "reason_code", "started_at", "ended_at", "placement", "causes", "diagnostics", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string" },
+    "run_id": { "type": "string" },
+    "request_id": { "type": "string" },
+    "request_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Digest of the exact accepted request bytes (D5) — no canonical re-encode." },
+    "work_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Digest of the exact submitted work.json bytes (D5); identical across placements of the same work." },
+    "status": { "type": "string", "enum": ["succeeded", "failed", "timed_out", "cancelled"] },
+    "terminal_phase": { "type": "string", "enum": ["admission", "preparation", "startup", "workload", "collection", "cleanup", "terminal"] },
+    "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "workload_exit_code": { "type": "integer", "description": "Absent when no workload process ran. Zero is not sufficient for success (D7)." },
+    "placement": {
+      "type": "object",
+      "description": "Non-authoritative placement receipt (D6): what backend profile and immutable inputs actually ran. Consumers may display these details but cannot infer generic state from them.",
+      "required": ["backend", "profile", "allocation_id", "stream_delivery"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "type": "string" },
+        "profile": { "type": "string" },
+        "allocation_id": { "type": "string" },
+        "image_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Absent for placements with no image identity." },
+        "stream_delivery": { "type": "string", "enum": ["terminal_replay", "none"], "description": "Delivery mode for declared workload event artifacts, not stdout/stderr tailing. 'live' is reserved and NOT valid in v0 (D11)." },
+        "enforced": { "type": "object", "description": "Resolved profile constraints actually enforced; shape is backend-specific." },
+        "details": { "type": "object", "description": "Opaque backend detail; never a source of generic state." }
+      }
+    },
+    "causes": {
+      "type": "array",
+      "description": "Ordered prior {phase, reason_code} values when a later failure became primary, such as cleanup failure after deadline expiry.",
+      "items": {
+        "type": "object",
+        "required": ["phase", "reason_code"],
+        "additionalProperties": false,
+        "properties": {
+          "phase": { "type": "string", "enum": ["admission", "preparation", "startup", "workload", "collection", "cleanup", "terminal"] },
+          "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable"] },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Structured records that may name an uncertain allocation without changing primary status.",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "sha256", "size"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
