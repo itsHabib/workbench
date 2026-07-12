@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1.0",
+  "command": {
+    "executable": {"path": {"root": "inputs", "value": "bin/runner"}},
+    "args": [
+      {"literal": "--verbose"},
+      {"literal": ""},
+      {"path": {"root": "workspace", "value": "task.md"}}
+    ]
+  },
+  "cwd": {"root": "out", "value": "."},
+  "workspace": {
+    "kind": "git",
+    "url": "https://github.com/itsHabib/agent-sandbox",
+    "revision": "57aa8b2c7a9531d5d6ba060a77247f9bfca0470f"
+  },
+  "inputs": [
+    {"name": "runner", "source": "bin/runner", "target": "bin/runner", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+  ],
+  "outputs": [
+    {"name": "result", "path": "result.json", "required": true}
+  ]
+}

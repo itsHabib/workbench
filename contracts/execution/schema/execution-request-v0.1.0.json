@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/execution/execution-request/v0.1.0",
+  "title": "Request",
+  "x-version": "0.1.0",
+  "description": "Placed run request — portable work plus execution policy plus an explicit placement binding (FR1). request_id is caller correlation, not run identity and not an idempotency key.",
+  "type": "object",
+  "required": ["schema_version", "request_id", "work", "placement", "policy"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "0.1.0" },
+    "request_id": { "type": "string" },
+    "work": {
+      "type": "object",
+      "required": ["manifest", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "manifest": { "type": "string", "description": "Path to work.json beneath the submitted bundle root, never an arbitrary controller path." },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Digest of the exact submitted work.json bytes (D5) — no canonical re-encode." }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "required": ["backend", "profile"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "type": "string", "description": "Open vocabulary resolved against installed adapters — deliberately NOT an enum (D4)." },
+        "profile": { "type": "string", "description": "Backend-local logical profile name, not portable work identity." }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["deadline_ms", "cancel_grace_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "deadline_ms": { "type": "integer", "minimum": 1 },
+        "cancel_grace_ms": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

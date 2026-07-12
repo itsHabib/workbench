@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/execution/work-spec/v0.1.0",
+  "title": "WorkSpec",
+  "x-version": "0.1.0",
+  "description": "Portable work spec — one explicit work bundle: a structured command over logical roots, an immutable workspace, and declared inputs, secret references, and outputs. Wire shape only: semantic laws (path traversal, workspace immutability, digest shape) are Go admission validation's job. Provider-neutral by law (FR2). Runway never invokes a shell or performs string interpolation.",
+  "type": "object",
+  "required": ["schema_version", "command", "cwd", "workspace"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "0.1.0" },
+    "command": {
+      "type": "object",
+      "description": "Structured argv — never a shell line.",
+      "required": ["executable"],
+      "additionalProperties": false,
+      "properties": {
+        "executable": {
+          "description": "Exactly one of: a name resolved through the placement profile's PATH, or a structured path reference into a logical root — never a raw host path.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": { "name": { "type": "string" } }
+            },
+            {
+              "type": "object",
+              "required": ["path"],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "object",
+                  "required": ["root", "value"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "root": { "type": "string", "enum": ["workspace", "inputs", "out"] },
+                    "value": { "type": "string" }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "args": {
+          "type": "array",
+          "description": "Ordered union of literal strings and structured path references.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["literal"],
+                "additionalProperties": false,
+                "properties": { "literal": { "type": "string" } }
+              },
+              {
+                "type": "object",
+                "required": ["path"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "object",
+                    "required": ["root", "value"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "root": { "type": "string", "enum": ["workspace", "inputs", "out"] },
+                      "value": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "cwd": {
+      "type": "object",
+      "description": "Structured reference into a logical root; the selected backend expands it to a native path (FR3).",
+      "required": ["root", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "root": { "type": "string", "enum": ["workspace", "inputs", "out"] },
+        "value": { "type": "string" }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["kind", "url", "revision"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["git"] },
+        "url": { "type": "string" },
+        "revision": { "type": "string", "description": "Immutable revision — a full 40-hex commit for git; symbolic refs reject at admission." }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "source", "target", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "source": { "type": "string", "description": "Relative path beneath the submitted bundle root — a bare string, not a {root, value} reference." },
+          "target": { "type": "string", "description": "Relative path beneath the fixed inputs root — a bare string, not a {root, value} reference." },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "ref"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "ref": { "type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$", "description": "Opaque secret reference, never a value (D8). v0 accepts only env:NAME." }
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "required"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string", "description": "Relative path beneath the fixed out root — a bare string, not a {root, value} reference." },
+          "required": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "command": {
+    "executable": {"name": "node"}
+  },
+  "cwd": {"root": "workspace", "value": "."}
+}

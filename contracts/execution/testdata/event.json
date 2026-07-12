@@ -1,0 +1,10 @@
+{
+  "schema_version": "0.1.0",
+  "run_id": "run_opaque",
+  "seq": 6,
+  "time": "2026-07-10T16:40:13.585Z",
+  "phase": "startup",
+  "kind": "workload_ready",
+  "message": "guest transport ready",
+  "details": {"transport": "ssh"}
+}
