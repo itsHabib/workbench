@@ -27,6 +27,6 @@ func pidExists(pid int) bool {
 
 // cleanupDeadLeader cannot enumerate a Windows process group after the
 // leader is gone — report Uncertain rather than claiming clean.
-func cleanupDeadLeader(alloc Allocation, id string) (CleanupResult, error) {
+func cleanupDeadLeader(_ Allocation, id string) (CleanupResult, error) {
 	return CleanupResult{Uncertain: true, AllocationID: id}, nil
 }
