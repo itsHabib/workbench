@@ -42,12 +42,12 @@ The hypothesis is that a storeless, read-mostly local control room can make the 
 | Concern | Target |
 |---|---|
 | Startup | First demo snapshot rendered within 1 second on the target laptop; real mode shell visible within 2 seconds and progressively settles sources. |
-| Refresh | Each source has an independent timeout (default 10 seconds); total refresh deadline 15 seconds; overlapping refreshes are cancelled. |
+| Refresh | Core sources publish within a 15-second deadline. Slow diagnostic enrichers have a separate 35-second deadline and may publish a later immutable generation. Overlapping generations are cancelled. |
 | Partial failure | One failed source never removes successful panels. Last successful in-memory snapshot may remain with an explicit stale badge until process exit. |
 | Freshness | Every source and derived item carries `observed_at`; policy-derived stale labels name the threshold used. |
 | Security | Bind `127.0.0.1` only; no mutation routes; strict CSP; escape text; redact process errors; no arbitrary-file serving; no secrets/raw traces committed. |
 | Runtime dependencies | Production Go remains standard-library-only. Existing local CLIs are optional real-mode dependencies discovered from explicit config. |
-| Test dependencies | Pinned Playwright is permitted only under `cmd/controlroom/e2e`; it is not linked into the production binary. |
+| Test dependencies | Playwright is an explicit Node/CI infrastructure cost permitted only under `cmd/controlroom/e2e`; an exact version and lockfile are maintained there and never linked into the production binary. |
 | Determinism | Demo fixtures, ranking, source degradation, and screenshots are clock-injected and repeatable. |
 | Portability | Windows is the verified v1 host; path/process abstractions and fixtures remain OS-neutral where practical. |
 
@@ -96,7 +96,7 @@ cmd/controlroom/
     source/        ship, dossier, github, tracelens, friction, tower adapters
     model/         normalized ephemeral read model
     attention/     deterministic ranking policy
-    web/           handlers, templates, embedded assets
+    web/           handlers and embedded static assets
   testdata/contracts/<source>/
   testdata/demo/
   e2e/             Playwright-only package, tests, screenshot helper
@@ -127,11 +127,11 @@ docs/features/portfolio-control-room/
 
 **Alternative:** import sibling packages, read SQLite/markdown directly, or copy artifacts to a neutral directory. Rejected by Workbench's boundary law and because it duplicates producer parsing/semantics. Paths and commands are explicit config, never guessed from source internals.
 
-### D4 — Add Ship driver listing at the owner seam
+### D4 — Close Ship discovery and observability gaps at the owner seam
 
-**Choice:** add additive `ship driver list --json` and `list_driver_runs` MCP reads backed by existing `DriverService.listDriverRuns()`. Include current durable run/stream fields and timestamps; do not expose mutation/tick behavior.
+**Choice:** add additive `ship driver list --json`, backed by existing `DriverService.listDriverRuns()`, as the single Control Room consumer contract. Include current durable run/stream fields and timestamps; do not expose mutation/tick behavior. Also enrich Ship workflow list/detail JSON with owner-normalized runtime, provider, model, duration, and evidence availability across local, cloud, and rooms runs.
 
-**Alternative:** scan `driver.md`, query Ship SQLite, or call `driver_run` to refresh. Rejected: the first two bypass Ship's contract; the last mutates tick leases and can dispatch work. This is the only prerequisite source-contract change in v1.
+**Alternative:** scan `driver.md`, query Ship SQLite, call `driver_run` to refresh, or parse `result.json` in Control Room. Rejected: direct store/artifact parsing bypasses Ship's semantics and `driver_run` mutates tick leases and can dispatch work. The two Ship changes are prerequisite owner contracts, delivered as separate PR-sized tasks.
 
 ### D5 — GitHub owns the PR panel; Tower is supplemental
 
@@ -141,13 +141,13 @@ docs/features/portfolio-control-room/
 
 ### D6 — Tracelens remains stateless
 
-**Choice:** discover recent Ship traces, invoke `tracelens ship -json <run>` on demand, and cache results only in the current snapshot. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
+**Choice:** analyze up to the five newest eligible Ship traces in the slow enrichment lane and retain results only in the current snapshot. Drill-down reuses that diagnosis or invokes `tracelens ship -json <run>` synchronously with a 10-second bound and a visible loading state. A timeout yields an unavailable diagnosis. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
 
 **Alternative:** invent recent-analysis or provider-comparison APIs. Rejected: Tracelens exposes neither. Current Ship decoders do not record per-step cost/tokens/latency, so cost hotspots and honest provider comparison remain unavailable for those traces.
 
 ### D7 — Stdlib production UI; Playwright test-only exception
 
-**Choice:** `net/http`, `html/template`, `embed`, vanilla ES modules, and CSS. Pin Playwright only inside the E2E harness and CI job.
+**Choice:** `net/http`, `embed`, a static application shell, vanilla ES modules, and CSS. Static assets contain no inline scripts or styles and fetch the versioned JSON API. Playwright is an acknowledged Node/CI dependency: `cmd/controlroom/e2e` owns an exact package version and `package-lock.json`; Control Room maintainers update it through explicit dependency PRs that must keep E2E green.
 
 **Alternative:** React/Vite production dependencies or non-browser handler tests only. Rejected: the former is unnecessary for a single dense local surface; the latter cannot satisfy the required browser-flow validation. The repository charter is amended narrowly: production remains stdlib-only, browser verification may use pinned Playwright.
 
@@ -178,7 +178,7 @@ type Snapshot struct {
 
 type SourceReceipt struct {
     Source     string    `json:"source"`
-    State      string    `json:"state"` // ok | degraded | unavailable
+    State      string    `json:"state"` // loading | ok | degraded | unavailable | stale
     ObservedAt time.Time `json:"observed_at"`
     DurationMS int64     `json:"duration_ms"`
     ErrorCode  string    `json:"error_code,omitempty"`
@@ -189,14 +189,30 @@ type Availability[T any] struct {
     State string `json:"state"` // available | unknown | unavailable
     Value *T     `json:"value,omitempty"`
 }
+
+type Diagnosis struct {
+    RunID       string                `json:"run_id"`
+    Verdict     string                `json:"verdict"`
+    Tier        string                `json:"tier"`
+    Dialect     string                `json:"dialect"`
+    Findings    []Finding             `json:"findings"`
+    Report      Availability[SafeLink] `json:"report"`
+    Evidence    []SafeLink             `json:"evidence"`
+    InputTokens Availability[int64]    `json:"input_tokens"`
+    OutputTokens Availability[int64]   `json:"output_tokens"`
+    CostUSD     Availability[float64]  `json:"cost_usd"`
+    LatencyMS   Availability[int64]    `json:"latency_ms"`
+}
 ```
 
 Normalized records carry stable IDs, source ownership, safe links, and `observed_at`. Fields not present in the producer use `Availability`, never zero-value inference.
 
+A receipt is current only when it was observed in the publishing generation and its state is `ok` or `degraded`; `degraded` means the source returned a current, explicitly partial result. Retained records always use `stale`, even when the latest collection attempt is also represented by a separate `unavailable` receipt.
+
 - `Run`: workflow/driver ID, source kind, repo/project/task/spec, branch, durable status, phase, requested/actual runtime-provider-model when present, created/updated/started/ended, derived duration, derived liveness label, failure category/detail, evidence links.
 - `Task`: Dossier ID/slug/title/project/phase/status/assignee, dependencies, reverse blockers, timestamps, artifact links, derived liveness label.
 - `PullRequest`: repo/number/title/url/author/head/base, draft, created/updated, checks, review decision, outstanding reviewer requests, unresolved thread count, mergeability, next factual condition.
-- `Diagnosis`: run ID, Tracelens verdict/tier/findings, dialect, report/evidence pointer, availability of cost/token/latency fields.
+- `Diagnosis`: the explicit shape above; absent cost/token/latency telemetry remains `unknown` or `unavailable`, never numeric zero.
 - `ToolHealth`: tool, worst severity, recurrence, last occurrence, pain lines, and `kind = accumulated_friction`; it never masquerades as a live incident.
 - `AttentionItem`: stable ID, category, score, rule ID, title, reason, repo/project, and links.
 
@@ -220,6 +236,8 @@ controlroom snapshot --mode demo|real --json
 
 Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them.
 
+Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when the startup version check fails. The GitHub adapter ignores additive fields it does not understand and treats missing known fields as `unknown` instead of failing the whole response.
+
 ### HTTP API
 
 All routes are GET/HEAD; any mutation method returns `405`.
@@ -238,11 +256,11 @@ GET /healthz                  process liveness only
 
 | Source | Read contract | Notes |
 |---|---|---|
-| Ship workflows | `ship list --json`, `ship status <wf> --json` | Additive-field tolerant; no direct DB. |
-| Ship drivers | proposed `ship driver list --json`, `list_driver_runs`; existing point `driver status --json` | Read-only owner change; no tick/dispatch calls. |
-| Dossier | stdio MCP `project.list`, `project.overview`, `phase.list`, `task.list`, `task.get`, `artifact.list` | Spawn `dossier serve --corpus`; no markdown fallback. |
+| Ship workflows | enriched `ship list --json`, `ship status <wf> --json` | Owner-normalized runtime/provider/model/duration/evidence availability for local, cloud, and rooms; additive-field tolerant; no `result.json` or DB fallback. |
+| Ship drivers | proposed `ship driver list --json`; existing point `driver status --json` | CLI JSON is the Control Room consumer contract; no tick/dispatch calls. |
+| Dossier | stdio MCP `project.list`, `project.overview`, `phase.list`, `task.list`, `task.get`, `artifact.list` | `serve` keeps one long-lived, handshaken child; `snapshot` starts one child and closes it. EOF/exit/call failure marks unavailable and schedules a bounded single-flight restart on the next refresh. No markdown fallback. |
 | GitHub | `gh search prs --json`, `gh pr view --json`, paginated GraphQL review threads | GitHub is authoritative for PR inventory/detail. |
-| Tracelens | `tracelens ship -json <run-ref>` and optional `report` | No recent-analysis index; analysis is on demand. |
+| Tracelens | `tracelens ship -json <run-ref>` and optional `report` | Analyze at most five recent eligible traces per diagnostic generation; no recent-analysis index or durable cache. |
 | Tool health | existing `toolhealth.exe` board; fixture-backed tolerant parser | Degrade if unavailable or its text contract drifts; do not duplicate its local-model bucketing. |
 | Tower | optional `tower ls --json --no-reconcile` | Supplemental local branch/path context only; unavailable is normal in v1. |
 
@@ -257,18 +275,20 @@ GET /healthz                  process liveness only
 
 ### Real refresh with partial failure
 
-1. Collector starts independent bounded calls for Ship, Dossier, GitHub, Tracelens discovery, toolhealth, and optional Tower.
+1. Collector assigns a monotonically increasing generation token and starts bounded core calls for Ship, Dossier, GitHub, and optional Tower.
 2. Each adapter returns records plus a `SourceReceipt`; errors are sanitized and typed.
-3. Successful records normalize immediately. A failed source contributes an unavailable receipt and, if present, its last successful in-memory records marked stale.
-4. Ranking runs only after the refresh deadline or all adapters settle. Missing facts never produce a positive readiness conclusion.
-5. UI updates panels independently and announces degraded sources without blanking healthy data.
+3. Core calls publish an immutable snapshot through `atomic.Pointer[Snapshot]` when all settle or at the 15-second deadline. A failed source contributes an unavailable receipt and, if present, last-successful records marked stale.
+4. Tracelens and toolhealth then run as diagnostic enrichers with a 35-second bound. They may publish one later immutable snapshot only if their generation token is still current; a newer refresh cancels and supersedes them. Their receipts remain `loading` meanwhile.
+5. Ranking runs for each publish. Missing facts never produce a positive readiness conclusion, and stale retained records are excluded from fresh action conclusions.
+6. UI updates panels independently and announces degraded sources without blanking healthy data.
 
 ### Run and Tracelens drill-down
 
 1. User opens a run row.
-2. API validates the run ID against the current snapshot, resolves only the configured Ship runs directory, and invokes Tracelens by ID/path.
-3. UI shows verdict, ranked findings, evidence locus, repair text when available, and explicit telemetry gaps.
-4. The raw trace is never returned to the browser.
+2. API validates the run ID against the current snapshot and resolves only the configured Ship runs directory.
+3. If the snapshot already contains a diagnosis, the API returns it. Otherwise the UI shows loading while the API invokes Tracelens with a 10-second bound; there is no second cache. Timeout or unsupported input returns a typed unavailable diagnosis.
+4. UI shows verdict, ranked findings, evidence locus, repair text when available, and explicit telemetry gaps.
+5. The raw trace is never returned to the browser.
 
 ### PR drill-down
 
@@ -284,15 +304,17 @@ GET /healthz                  process liveness only
 
 ## 8. Concurrency, consistency, and failure model
 
-- Collection is fan-out/fan-in with a per-source timeout and one global refresh deadline. At most one refresh generation may publish.
-- Snapshots are immutable after publication and swapped atomically. Readers never observe a half-updated slice.
+- Core collection is fan-out/fan-in with per-source bounds and a 15-second deadline; diagnostic enrichment has a 35-second deadline. A generation token prevents superseded work from publishing.
+- Snapshots are immutable after publication and swapped through `atomic.Pointer[Snapshot]`. Readers never observe a half-updated slice.
 - No cross-source transaction exists. `generated_at` is not an assertion that producer reads were simultaneous; each `SourceReceipt.observed_at` is authoritative for freshness.
 - Dossier MCP corruption/unavailability fails the Dossier panel; there is no alternate markdown parser.
-- Ship CLI/store skew, missing result/event files, or malformed additive records degrade affected fields/rows, not unrelated sources. A completely malformed list response fails the Ship source rather than undercounting silently.
+- Ship CLI/store skew, missing owner-reported evidence, or malformed additive records degrade affected fields/rows, not unrelated sources. A completely malformed list response fails the Ship source rather than undercounting silently.
 - GitHub rate/auth failures retain stale PR data with an unavailable receipt; mergeability/review unknowns never rank as ready-to-merge.
 - Tracelens input/dialect failure creates an unavailable diagnosis for that run; it does not change Ship's run status.
 - Toolhealth/Tower missing from the host is a normal degraded state. The UI explains how the source was configured and what remains available.
-- Deep links accept only current-snapshot IDs/URLs and validated workspace-contained paths. No route accepts an arbitrary filesystem path or command.
+- Deep links accept only current-snapshot IDs/URLs and validated workspace-contained paths. Path validation requires an existing absolute path, applies `filepath.Abs`, `filepath.Clean`, and `filepath.EvalSymlinks` to it and the configured workspace root, then uses `filepath.Rel`; it rejects different volumes, `..`, and any relative path beginning with `..` plus a separator. No route accepts an arbitrary filesystem path or command.
+- The application shell contains no inline script or style. Every response sets `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`.
+- Raw child-process stderr never enters a snapshot. The browser receives a typed error code, optional exit code, and an allowlisted summary after absolute paths, usernames, and credential/token-like substrings are removed and the result is truncated to 200 characters.
 
 ## 9. Deterministic liveness and attention policy
 
@@ -316,10 +338,11 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `run.retry_loop` | urgent | 100 | Repeated same-doc failures; includes count/window/latest cause. |
 | `run.stalled_active` | urgent | 95 | Active/pending run exceeds the no-update threshold. |
 | `pr.ci_failed` | urgent | 90 | At least one completed required/visible check failed. |
-| `pr.critical_review` | urgent | 85 | Unresolved critical/high bot or human finding is recorded. |
+| `pr.changes_requested` | urgent | 85 | GitHub reports `reviewDecision == CHANGES_REQUESTED`. |
 | `task.blocked_no_path` | urgent | 80 | Blocked with no resolvable dependency/path. |
+| `pr.unresolved_threads` | actionable | 75 | GitHub reports one or more unresolved review threads. |
 | `pr.review_needed` | actionable | 70 | CI non-failing, not draft, review missing or requested. |
-| `pr.merge_ready` | actionable | 65 | CI green, mergeable, required review satisfied, no unresolved threads. Unknown never qualifies. |
+| `pr.merge_ready` | actionable | 65 | Non-draft; every visible check completed successfully; `reviewDecision == APPROVED`; `mergeable == MERGEABLE`; unresolved thread count is zero; GitHub receipt is current. Empty or unknown never qualifies. |
 | `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
 | `task.ready` | actionable | 40 | Todo task has no unresolved dependencies. |
 | `pr.checks_running` | waiting | 30 | Work is externally in progress. |
@@ -327,26 +350,27 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 
 `tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when the last occurrence is at most 3 days old, 1 when it is 4–14 days old, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
 
-Source unavailability generates a separate degraded-source item. It may be urgent only when it prevents verifying another item that otherwise looks merge-ready; it never fabricates a problem inside the absent source.
+An attention item is current only when every source receipt supporting its conclusion is current. If any supporting receipt is retained/stale, the item is suppressed from urgent, actionable, and waiting queues and replaced by an informational `source.stale` item that asks the operator to revalidate the source. Source unavailability likewise generates an informational degraded-source item; it never fabricates a problem or readiness conclusion inside an absent source.
 
 ## 10. Rollout / implementation plan
 
 | Phase | Goal | High-level tasks | Depends on | Scope | Gate |
 |---|---|---|---|---:|---|
-| 1 — Source contracts | Close the one owner-contract gap and pin fixture contracts. | Add Ship `driver list` CLI/MCP read; capture sanitized Ship/Dossier/GitHub/Tracelens/toolhealth/Tower fixtures; document config and privacy boundaries. | Design merged | 450–700 weighted LOC | Ship checks + contract tests green. |
-| 2 — Vertical demo slice | Prove the complete visual story through the real read model. | Scaffold `cmd/controlroom`; model/source receipts; ranking engine; deterministic demo fixture; responsive six-panel UI; run/PR drawers. | Phase 1 | 700–950 weighted LOC across reviewable PRs | **VALIDATION GATE:** five-minute demo story passes in browser; ranking golden tests pass; on-fire/healthy/degraded screenshots are coherent. |
-| 3 — Real adapters | Read current local state and degrade source-by-source. | Ship CLI/artifact adapter; Dossier MCP client; GitHub + unresolved-thread adapter; Tracelens on-demand adapter; toolhealth and optional Tower adapters; refresh coalescing. | Phase 2 GO | 700–950 weighted LOC across reviewable PRs | Real mode reads available local sources; injected source failures preserve healthy panels. |
-| 4 — Hardening and handoff | Make the default-branch product reproducible and demonstrable. | Playwright flows; CI job; security/path tests; clean-start runbook; committed screenshots/demo script; fresh-checkout verification; trace analysis and retrospective. | Phase 3 | 450–700 weighted LOC | All checks green, substantive reviews resolved, review-coordinator GO, merged main verified. |
+| 1 — Source contracts | Close owner-contract gaps and pin fixtures. | Separate Ship PRs for driver discovery and workflow observability enrichment; capture sanitized source fixtures; document config/privacy. | Design merged | 550–850 weighted LOC | Both Ship contracts merged and contract tests green. Phase 2 may start once their schemas are frozen, but Phase 4 cannot pass before merge. No artifact-parser fallback. |
+| 2 — Read model and policy | Lock the presentation contract before UI/adapters diverge. | `Snapshot`, `SourceReceipt`, `Availability`, `Diagnosis`, attention/liveness policy, deterministic demo scenario, golden tests. | Phase 1 schemas frozen | 450–700 weighted LOC | JSON schema and ranking goldens reviewed; stale-source safety tests pass. |
+| 3 — Vertical demo UI | Prove the complete visual story through the locked read model. | Static application shell; responsive six-panel UI; filters/refresh; run and PR drawers; loading/empty/degraded/disconnected states. | Phase 2 | 700–1000 weighted LOC | **VALIDATION GATE:** five-minute demo passes in browser; healthy/on-fire/degraded screenshots are coherent. This is the highest-risk phase. |
+| 4 — Per-source real adapters | Read current local truth and fail independently. | One PR-sized task and contract/failure gate per source: Ship, Dossier, GitHub, Tracelens, toolhealth, optional Tower. | Phase 3 GO; both Ship PRs merged for Ship adapter | 700–1050 weighted LOC total | Every adapter passes its own fixtures, timeout, malformed-input, and source-receipt tests. Tasks are parallel-safe by source directory. |
+| 5 — Composition and degraded mode | Join adapters without hiding partial truth. | Serialized adapter composition; core/enrichment generations; cancellation/coalescing; cross-source joins; stale suppression; real-mode smoke. | Phase 4 adapters | 450–700 weighted LOC | Injected source failures preserve healthy panels; superseded enrichers cannot publish; real mode reads available tools. |
+| 6 — Hardening and handoff | Make default-branch product reproducible and demonstrable. | Playwright flows and pinned Node CI; security/path tests; runbook; demo script/screenshots; fresh-checkout verification; trace analysis and retrospective. | Phase 5 | 450–700 weighted LOC | CI green; every actionable canonical-reviewer finding resolved, or deferred to a linked Dossier task with independent reviewer acknowledgment; review-coordinator GO; merged main verified. |
 
-Every implementation task remains PR-sized. Phase 2 UI and model/ranking work may run in parallel only after fixture/schema ownership is partitioned; adapters in Phase 3 are parallel-safe by source directory, with integration composition serialized afterward.
+Every implementation task remains PR-sized. Phase 4 adapters are parallel-safe only inside their assigned source directories. Phase 5 owns the sole cross-source composition seam and is therefore serialized.
 
 ## 11. Open questions
 
-1. **Ship enrichment breadth:** Phase 1 must expose driver listing. Whether workflow list/detail also gains provider/runtime/duration/evidence-path enrichment should be decided in Ship review; the Control Room can derive some fields from `result.json`, but owner-side enrichment may be the cleaner long-term contract.
-2. **Toolhealth machine output:** v1 may consume the existing human board with a tolerant fixture-backed parser. If review rejects text parsing as too fragile, add `toolhealth -json` at its owner seam before the real adapter; do not reimplement the local-model bucketing in Control Room.
-3. **Tower freshness:** v1 can treat Tower as optional and unavailable by default because its executable is not currently installed and its cached GitHub freshness is not exposed. A future owner change may add canonical repo identity and `observed_at`.
+1. **Toolhealth machine output:** v1 may consume the existing human board with a tolerant fixture-backed parser. If implementation review rejects text parsing as too fragile, add `toolhealth -json` at its owner seam before the real adapter; do not reimplement the local-model bucketing in Control Room.
+2. **Tower freshness:** v1 can treat Tower as optional and unavailable by default because its executable is not currently installed and its cached GitHub freshness is not exposed. A future owner change may add canonical repo identity and `observed_at`.
 
-None of these changes the product direction or blocks the vertical demo slice.
+Neither changes the product direction or blocks Phase 3's vertical demo.
 
 ## 12. Validation plan
 
@@ -361,6 +385,9 @@ None of these changes the product direction or blocks the vertical demo slice.
 
 - Fake executable/MCP harness composes at least Ship + Dossier + GitHub + Tracelens into one snapshot.
 - One source fails/corrupts/times out while other panels and attention items remain correct.
+- Dossier child EOF and process exit produce one unavailable receipt; the next refresh performs one bounded restart even under concurrent requests.
+- GitHub fixtures cover the minimum-version failure, additive fields, and missing known fields without converting unknown state into readiness.
+- A superseded diagnostic generation cannot replace a newer core snapshot.
 - Real-mode smoke against explicit temporary fixtures proves no dependency on sibling source code or databases.
 
 ### Browser tests
