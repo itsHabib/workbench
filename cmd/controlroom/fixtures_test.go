@@ -110,7 +110,6 @@ var shipForbiddenDriverStreamKeys = []string{
 }
 
 func TestFixtureInventoryCoverage(t *testing.T) {
-	t.Helper()
 	root := fixturesRoot
 	for _, source := range requiredSources {
 		dir := filepath.Join(root, source)
@@ -137,6 +136,30 @@ func TestFixtureInventoryCoverage(t *testing.T) {
 	readme := filepath.Join(root, "README.md")
 	if _, err := os.Stat(readme); err != nil {
 		t.Fatalf("missing fixture inventory readme: %v", err)
+	}
+}
+
+func TestAllFixturePathsAreSanitized(t *testing.T) {
+	err := filepath.WalkDir(fixturesRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return err
+		}
+		assertNoAbsolutePaths(t, path, doc)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -247,7 +270,6 @@ func TestShipFixtureContracts(t *testing.T) {
 			t.Fatalf("%s: %v", path, err)
 		}
 		assertNoForbiddenKeys(t, path, doc, shipForbiddenKeys)
-		assertNoAbsolutePaths(t, path, doc)
 	}
 	assertShipWorkflowList(t, filepath.Join(shipDir, "workflow-list-healthy.json"))
 	assertShipDriverList(t, filepath.Join(shipDir, "driver-list-healthy.json"))
@@ -259,6 +281,7 @@ func TestDemoClockAnchoredHealthyFixtures(t *testing.T) {
 		filepath.Join(fixturesRoot, "ship", "workflow-status-healthy.json"),
 		filepath.Join(fixturesRoot, "ship", "driver-list-healthy.json"),
 		filepath.Join(fixturesRoot, "dossier", "task-get-healthy.json"),
+		filepath.Join(fixturesRoot, "dossier", "task-list-healthy.json"),
 		filepath.Join(fixturesRoot, "github", "graphql-inventory-healthy.json"),
 		filepath.Join(fixturesRoot, "tracelens", "analysis-findings.json"),
 		filepath.Join(fixturesRoot, "tower", "ls-available.json"),
@@ -372,7 +395,7 @@ func isPlaceholderSecret(match string) bool {
 
 func homePathPatterns() []*regexp.Regexp {
 	return []*regexp.Regexp{
-		regexp.MustCompile(`[A-Za-z]:\\Users\\[^\\]+\\`),
+		regexp.MustCompile(`[A-Za-z]:\\{1,2}Users\\{1,2}[^\\]+\\{1,2}`),
 		regexp.MustCompile(`/home/[^/\s]+/`),
 		regexp.MustCompile(`/Users/[^/\s]+/`),
 	}
@@ -403,12 +426,11 @@ func assertNoForbiddenKeys(t *testing.T, path string, v any, forbidden []string)
 
 func assertNoAbsolutePaths(t *testing.T, path string, v any) {
 	t.Helper()
-	absPath := regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
 	switch x := v.(type) {
 	case map[string]any:
 		for k, child := range x {
 			if s, ok := child.(string); ok {
-				if k == "path" && absPath.MatchString(s) && !strings.HasPrefix(s, "/tmp/") {
+				if (k == "path" || k == "url") && isDisallowedAbsolutePath(s) {
 					t.Errorf("%s: absolute path in %q: %s", path, k, s)
 				}
 			}
@@ -419,6 +441,19 @@ func assertNoAbsolutePaths(t *testing.T, path string, v any) {
 			assertNoAbsolutePaths(t, path, child)
 		}
 	}
+}
+
+func isDisallowedAbsolutePath(value string) bool {
+	path := strings.TrimPrefix(value, "file://")
+	if path == value && strings.Contains(value, "://") {
+		return false
+	}
+	if strings.HasPrefix(path, "/tmp/") {
+		return false
+	}
+	return strings.HasPrefix(path, "/") ||
+		regexp.MustCompile(`^[A-Za-z]:[\\/]`).MatchString(path) ||
+		strings.HasPrefix(path, `\\`)
 }
 
 func assertShipWorkflowList(t *testing.T, path string) {
@@ -483,7 +518,8 @@ func assertShipDriverRun(t *testing.T, run map[string]any) {
 	}
 	batches, ok := run["batches"].([]any)
 	if !ok || len(batches) == 0 {
-		t.Fatal("driver run must include batches")
+		t.Error("driver run must include batches")
+		return
 	}
 	for _, batch := range batches {
 		assertShipDriverBatch(t, batch)
@@ -494,11 +530,17 @@ func assertShipDriverBatch(t *testing.T, batch any) {
 	t.Helper()
 	batchMap, ok := batch.(map[string]any)
 	if !ok {
-		t.Fatal("driver batch must be an object")
+		t.Error("driver batch must be an object")
+		return
+	}
+	batchIndex, _ := batchMap["batchIndex"].(float64)
+	if batchIndex < 1 {
+		t.Error("driver batchIndex must follow Ship's one-based contract")
 	}
 	streams, ok := batchMap["streams"].([]any)
 	if !ok || len(streams) == 0 {
-		t.Fatal("driver batch must include streams")
+		t.Error("driver batch must include streams")
+		return
 	}
 	for _, stream := range streams {
 		assertShipDriverStream(t, stream)
@@ -509,16 +551,22 @@ func assertShipDriverStream(t *testing.T, stream any) {
 	t.Helper()
 	streamMap, ok := stream.(map[string]any)
 	if !ok {
-		t.Fatal("driver stream must be an object")
+		t.Error("driver stream must be an object")
+		return
 	}
 	for _, key := range shipForbiddenDriverStreamKeys {
 		if _, ok := streamMap[key]; ok {
 			t.Errorf("driver stream must not expose %q", key)
 		}
 	}
+	streamIndex, ok := streamMap["streamIndex"].(float64)
+	if !ok || streamIndex < 0 {
+		t.Error("driver streamIndex must follow Ship's zero-based contract")
+	}
 	specPath, _ := streamMap["specPath"].(string)
 	if specPath == "" {
-		t.Fatal("driver stream must include specPath linkage")
+		t.Error("driver stream must include specPath linkage")
+		return
 	}
 	if !strings.HasPrefix(specPath, "docs/") {
 		t.Fatalf("specPath must be neutral relative, got %q", specPath)

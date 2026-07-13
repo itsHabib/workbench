@@ -43,6 +43,10 @@ Tests do not execute these commands.
 | Tool health board | `toolhealth` (text board, no `-json` yet) | operator-local | n/a | provisional text contract |
 | Tower worktrees | `tower ls --json --no-reconcile` | Tower repository | main @ authoring time | flat JSON array |
 
+Ship's owner contract intentionally uses one-based `batchIndex` values and
+zero-based `streamIndex` values; the mixed convention in the driver fixture is
+producer fidelity, not fixture normalization.
+
 ## Privacy
 
 Fixtures contain no real operator usernames, credentials, absolute home paths,

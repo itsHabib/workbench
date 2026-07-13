@@ -16,7 +16,6 @@ fields fail closed at startup.
   "v": 1,
   "mode": "demo",
   "workspace_root": "%USERPROFILE%/pers",
-  "dossier_corpus": "%USERPROFILE%/pers/dossier-state",
   "sources": {
     "ship": {
       "enabled": true,
@@ -95,6 +94,7 @@ fields fail closed at startup.
 | `v` | Must be `1`. Unknown versions fail closed. |
 | `mode` | `demo` or `real`. Demo ignores subprocess configuration. |
 | `workspace_root` | Absolute or `%USERPROFILE%`-anchored workspace root for path validation. Never derived from sibling stores. |
+| `sources.dossier.corpus` | The sole Dossier corpus setting. Required when Dossier is enabled; no root-level fallback or override exists. |
 | `sources.<name>.enabled` | Boolean. Optional sources (`tower`) default `false`. |
 | `sources.<name>.executable` | Command name or absolute path. When `discover_path` is true, search `PATH` only — never infer sibling package locations. |
 | `sources.github.scopes` | Real mode: one to four entries, each `user:<login>`, `org:<login>`, or `repo:<owner/name>`. Zero or more than four is a startup error. |
