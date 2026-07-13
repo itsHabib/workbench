@@ -207,8 +207,11 @@ func closeAll(files ...*os.File) {
 	}
 }
 
-func capture(r io.Reader, w io.Writer, secrets [][]byte, h *handle) {
+// capture owns its pipe read end and closes it when the stream drains, so
+// repeated runs cannot accumulate descriptors waiting on GC finalizers.
+func capture(r *os.File, w io.Writer, secrets [][]byte, h *handle) {
 	defer h.wg.Done()
+	defer r.Close()
 	redacted := newRedactor(w, secrets)
 	_, copyErr := io.Copy(redacted, r)
 	closeErr := redacted.Close()

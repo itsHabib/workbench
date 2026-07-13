@@ -85,9 +85,12 @@ func main() {
 		t.Fatal(err)
 	}
 	stateRoot := filepath.Join(dir, "state")
-	runID, err := runOnce(spec, bundleDir, stateRoot)
+	runID, exitCode, err := runOnce(spec, bundleDir, stateRoot)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("golden workload exit code = %d, want 0", exitCode)
 	}
 	runDir := filepath.Join(stateRoot, "runs", runID)
 	for _, rel := range []string{
@@ -116,7 +119,9 @@ func main() {
 	if st.Terminal {
 		t.Fatal("PR1 leaves the run open; Reduce must report Terminal=false")
 	}
-	if st.LastSeq < 4 || st.Phase != execution.PhaseWorkload {
+	// Exactly the PR 1 canonical sequence: run_accepted, placement_allocated,
+	// workload_ready, workload_started, workload_exited.
+	if st.LastSeq != 5 || st.Phase != execution.PhaseWorkload {
 		t.Fatalf("unexpected open history: %+v events=%+v", st, events)
 	}
 	stdout, err := os.ReadFile(filepath.Join(runDir, "logs", "stdout.log"))
@@ -158,7 +163,7 @@ func TestRunRejectsNonDefaultProfile(t *testing.T) {
 	if err := os.WriteFile(spec, req, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = runOnce(spec, bundleDir, filepath.Join(dir, "state"))
+	_, _, err = runOnce(spec, bundleDir, filepath.Join(dir, "state"))
 	if err == nil {
 		t.Fatal("non-default profile must be rejected")
 	}

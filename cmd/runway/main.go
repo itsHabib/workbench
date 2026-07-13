@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
@@ -52,7 +53,14 @@ func cmdRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: runway run --spec <request.json> --bundle <dir> [--state <dir>]")
 		return 2
 	}
-	runID, err := runOnce(*spec, *bundleDir, *stateDir)
+	// A relative state root would leak into RUNWAY_* env and expanded path
+	// arguments while the child runs with cwd=workspace; canonicalize once.
+	stateAbs, err := filepath.Abs(*stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "runway: resolve state root: %v\n", err)
+		return 2
+	}
+	runID, code, err := runOnce(*spec, *bundleDir, stateAbs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if runID != "" {
@@ -60,39 +68,47 @@ func cmdRun(args []string) int {
 		}
 		return 1
 	}
+	if code != 0 {
+		// PR 2 replaces this with the §6 exit-code table once result.json
+		// and run_terminal exist; until then a failed workload must not
+		// masquerade as success.
+		fmt.Fprintf(os.Stderr, "runway: run_id=%s workload exited with code %d (open; no result.json in this PR)\n", runID, code)
+		return 1
+	}
 	fmt.Fprintf(os.Stderr, "runway: run_id=%s workload finished (open; no result.json in this PR)\n", runID)
 	return 0
 }
 
-// runOnce executes Flow A steps 1–8 and returns the run ID. The journal is
-// left open (Terminal=false under execution.Reduce).
-func runOnce(specPath, bundleDir, stateRoot string) (string, error) {
+// runOnce executes Flow A steps 1–8 and returns the run ID plus the
+// workload's exit code. The journal is left open (Terminal=false under
+// execution.Reduce).
+func runOnce(specPath, bundleDir, stateRoot string) (string, int, error) {
 	adm, err := bundle.Admit(specPath, bundleDir)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if adm.Request.Placement.Backend != "local" {
-		return "", fmt.Errorf("runway: placement.backend %q is not installed in this PR (local only)", adm.Request.Placement.Backend)
+		return "", 0, fmt.Errorf("runway: placement.backend %q is not installed in this PR (local only)", adm.Request.Placement.Backend)
 	}
 	if adm.Request.Placement.Profile != "default" {
-		return "", fmt.Errorf("runway: placement.profile %q is not installed in this PR (default only)", adm.Request.Placement.Profile)
+		return "", 0, fmt.Errorf("runway: placement.profile %q is not installed in this PR (default only)", adm.Request.Placement.Profile)
 	}
 
 	runID, err := mintRunID()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	run, err := state.Create(stateRoot, runID)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if err := os.WriteFile(run.RequestPath(), adm.RequestBytes, 0o600); err != nil {
-		return runID, fmt.Errorf("runway: write request.json: %w", err)
+		return runID, 0, fmt.Errorf("runway: write request.json: %w", err)
 	}
 
 	j, err := journal.Create(run.EventsPath(), runID)
 	if err != nil {
-		return runID, err
+		return runID, 0, err
 	}
 	defer j.Close()
 
@@ -103,20 +119,20 @@ func runOnce(specPath, bundleDir, stateRoot string) (string, error) {
 	if err := emit(execution.PhaseAdmission, execution.KindRunAccepted, map[string]any{
 		"request_id": adm.Request.RequestID,
 	}); err != nil {
-		return runID, err
+		return runID, 0, err
 	}
 	if err := bundle.Materialize(adm, run); err != nil {
-		return runID, err
+		return runID, 0, err
 	}
 
 	roots := expand.NewRoots(run.WorkspaceDir(), run.InputsDir(), run.ArtifactsDir())
 	prep, err := expand.Command(roots, adm.Work)
 	if err != nil {
-		return runID, err
+		return runID, 0, err
 	}
 	secrets, secretBytes, err := resolveSecrets(adm.Work.Secrets)
 	if err != nil {
-		return runID, err
+		return runID, 0, err
 	}
 	childEnv := mergeEnv(os.Environ(), prep.Env, secrets)
 
@@ -132,16 +148,17 @@ func runOnce(specPath, bundleDir, stateRoot string) (string, error) {
 		Secrets:    secretBytes,
 	}, emit)
 	if err != nil {
-		return runID, err
+		return runID, 0, err
 	}
-	if _, err := be.Wait(ctx, h, emit); err != nil {
+	exit, err := be.Wait(ctx, h, emit)
+	if err != nil {
 		_ = be.Cleanup(ctx, h)
-		return runID, err
+		return runID, 0, err
 	}
 	if err := be.Cleanup(ctx, h); err != nil {
-		return runID, err
+		return runID, 0, err
 	}
-	return runID, nil
+	return runID, exit.Code, nil
 }
 
 func mintRunID() (string, error) {
