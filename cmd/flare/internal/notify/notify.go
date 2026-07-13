@@ -7,12 +7,21 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
+)
+
+const (
+	slackPostMessageURL = "https://slack.com/api/chat.postMessage"
+	slackTextLimit      = 4000
 )
 
 // Send delivers one event to one channel; the drop channel succeeds without
@@ -23,10 +32,93 @@ func Send(ch config.Channel, ev event.Event) error {
 		return toast(ev)
 	case config.ChannelWebhook:
 		return webhook(ch.URL, ev)
+	case config.ChannelSlack:
+		return slack(ch.Token, ch.Channel, ev)
 	case config.ChannelDrop:
 		return nil
 	}
 	return fmt.Errorf("notify: unknown channel type %q", ch.Type)
+}
+
+type slackRequest struct {
+	Channel string `json:"channel"`
+	Text    string `json:"text"`
+}
+
+type slackResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error"`
+}
+
+func slack(token, channel string, ev event.Event) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+	return postSlack(client, slackPostMessageURL, token, channel, ev)
+}
+
+func postSlack(client *http.Client, endpoint, token, channel string, ev event.Event) error {
+	body, err := json.Marshal(slackRequest{Channel: channel, Text: renderSlackText(ev)})
+	if err != nil {
+		return fmt.Errorf("notify: slack channel %q: encode message: %w", channel, err)
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("notify: slack channel %q: build request", channel)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("notify: slack channel %q: request: %w", channel, requestCause(err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("notify: slack channel %q: status %s", channel, resp.Status)
+	}
+	var result slackResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("notify: slack channel %q: decode response: %w", channel, err)
+	}
+	if !result.OK {
+		return fmt.Errorf("notify: slack channel %q: API error %q", channel, result.Error)
+	}
+	return nil
+}
+
+func requestCause(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
+func renderSlackText(ev event.Event) string {
+	source := compact(ev.Source)
+	title := compact(ev.Title)
+	title = strings.TrimSpace(strings.TrimPrefix(title, source+":"))
+	detail := title
+	why := compact(ev.Body)
+	if detail == "" {
+		detail = why
+		why = ""
+	}
+	if why != "" && why != detail {
+		detail += " — " + why
+	}
+	text := fmt.Sprintf("[%s] %s: %s", ev.Severity.String(), source, detail)
+	return truncate(text, slackTextLimit)
+}
+
+func compact(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncate(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:limit-1]) + "…"
 }
 
 func webhook(url string, ev event.Event) error {

@@ -24,6 +24,7 @@ const (
 
 	ChannelToast   = "toast"
 	ChannelWebhook = "webhook"
+	ChannelSlack   = "slack"
 	ChannelDrop    = "drop"
 )
 
@@ -37,8 +38,10 @@ type Source struct {
 
 // Channel is a named delivery target events route to.
 type Channel struct {
-	Type string `json:"type"`
-	URL  string `json:"url,omitempty"`
+	Type    string `json:"type"`
+	URL     string `json:"url,omitempty"`
+	Token   string `json:"token,omitempty"`
+	Channel string `json:"channel,omitempty"`
 }
 
 // Match selects events. Every set field must match; omitted means any.
@@ -148,6 +151,14 @@ func checkChannelDef(name string, ch Channel) error {
 	case ChannelWebhook:
 		if ch.URL == "" {
 			return fmt.Errorf("channel %q: webhook requires url", name)
+		}
+		return nil
+	case ChannelSlack:
+		if ch.Token == "" {
+			return fmt.Errorf("channel %q: slack requires token", name)
+		}
+		if ch.Channel == "" {
+			return fmt.Errorf("channel %q: slack requires channel", name)
 		}
 		return nil
 	}
