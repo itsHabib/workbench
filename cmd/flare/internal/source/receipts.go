@@ -71,6 +71,11 @@ func receiptSeverity(outcome string) (event.Severity, bool) {
 		return event.SevFailed, true
 	case "cancelled":
 		return event.SevCancelled, true
+	case "parked":
+		// A driver run parked at awaiting_judgment — the ship-side analogue of a
+		// gate escalation ("a producer parked for judgment"): page-worthy, above
+		// failed. Emitted by ship's receipts writer as outcome "parked".
+		return event.SevEscalate, true
 	}
 	return 0, false
 }
