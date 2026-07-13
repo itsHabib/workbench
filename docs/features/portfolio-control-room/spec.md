@@ -9,7 +9,7 @@
 
 ## 1. Problem & hypothesis
 
-The portfolio's operating truth is split across Ship workflow and driver state, Dossier tasks, GitHub pull requests, Tracelens reports, Tower worktree observations, and the append-only friction log. The existing `/wip`, `/health`, and `/status` skills join some of those stores on demand, but Michael still has no single visual surface that answers what is running, what is stuck, what needs review, what agents are doing badly, and what deserves attention next.
+The portfolio's operating truth is split across Ship workflow and driver state, Dossier tasks, GitHub pull requests, Tracelens reports, Tower worktree observations, and the append-only friction log. The existing `/wip`, `/health`, and `/status` skills join some of those stores on demand, but the operator still has no single visual surface that answers what is running, what is stuck, what needs review, what agents are doing badly, and what deserves attention next.
 
 The hypothesis is that a storeless, read-mostly local control room can make the portfolio legible without creating another owner of work or orchestration state. The product earns its place if a five-minute demo tells the complete healthy-to-on-fire story from deterministic fixtures, then switches to real local state while showing unavailable and stale fields honestly.
 
@@ -210,8 +210,8 @@ No raw events, prompts, secrets, or arbitrary local file contents enter the snap
 controlroom serve \
   --mode demo|real \
   --addr 127.0.0.1:4317 \
-  --workspace-root C:\Users\MichaelHabib\pers \
-  --dossier-corpus C:\Users\MichaelHabib\pers\dossier-state \
+  --workspace-root %USERPROFILE%\pers \
+  --dossier-corpus %USERPROFILE%\pers\dossier-state \
   --refresh 60s \
   --config <optional-json>
 
@@ -232,7 +232,7 @@ GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` returns one `Snapshot`. Filters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces concurrent identical refreshes.
+`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces concurrent identical refreshes.
 
 ### Source contracts
 
@@ -323,7 +323,9 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
 | `task.ready` | actionable | 40 | Todo task has no unresolved dependencies. |
 | `pr.checks_running` | waiting | 30 | Work is externally in progress. |
-| `tool.accumulated_friction` | informational | 10–25 | Severity + recurrence + recency; explicitly not live incident. |
+| `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
+
+`tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when the last occurrence is at most 3 days old, 1 when it is 4–14 days old, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
 
 Source unavailability generates a separate degraded-source item. It may be urgent only when it prevents verifying another item that otherwise looks merge-ready; it never fabricates a problem inside the absent source.
 
