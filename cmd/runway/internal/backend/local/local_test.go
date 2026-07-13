@@ -168,8 +168,10 @@ func TestEmitsWorkloadReady(t *testing.T) {
 		return nil
 	}
 	h, err := be.Start(ctx, backend.PreparedRun{
-		Cwd:        dir,
-		Argv:       []string{"true"},
+		Cwd: dir,
+		// "go version" is a cross-platform no-op workload; "true" has no
+		// Windows analog on PATH.
+		Argv:       []string{"go", "version"},
 		Env:        os.Environ(),
 		StdoutPath: stdout,
 		StderrPath: stderr,
