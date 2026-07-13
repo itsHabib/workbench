@@ -10,11 +10,12 @@
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---:|---:|
 | Contract fixtures | `cmd/controlroom/testdata/contracts/{ship,dossier,github,tracelens,toolhealth,tower}/**` plus a fixture inventory/readme | ~330 | ~165 |
-| Configuration/privacy contract | `docs/features/portfolio-control-room/source-config.md` | ~180 | ~180 |
-| Validation | fixture JSON/JSONL syntax and secret/path sanitization tests or a small validation script that stays outside the future production package | ~120 | ~60 |
-| **Total** | | **~630** | **~405** |
+| Configuration/privacy contract | `docs/features/portfolio-control-room/source-config.md`; full weight because executable boundaries, scope validation, and privacy rules require design judgment | ~180 | ~180 |
+| Provenance/envelope research | Fixture inventory with exact producer command, PR/SHA, version, and public-key provenance | ~50 | ~50 |
+| Validation | `cmd/controlroom/fixtures_test.go` for JSON/JSONL syntax, inventory coverage, and secret/path sanitization | ~200 | ~200 |
+| **Total** | | **~760** | **~595** |
 
-Band: **amazing** per the repository PR-sizing convention.
+Band: **ideal** per the repository PR-sizing convention.
 
 ## Functional
 
@@ -31,11 +32,11 @@ This task is docs/fixtures-only. Do not create the `cmd/controlroom` binary or p
 - Preserve producer envelopes instead of designing adapter-owned convenience shapes. Normalization belongs to Phase 2/4.
 - Commit deterministic synthetic fixtures rather than snapshots of live operator state. Live captures may be used only as a shape reference and must be rewritten/sanitized before commit.
 - Toolhealth may remain a tolerant text fixture until its owner exposes JSON; document that provisional seam rather than reimplementing its local-model bucketing.
-- Tower stays supplemental. Missing Tower is a normal unavailable state, never a startup failure.
+- Tower stays supplemental. Its available and unavailable fixtures are required contract coverage; Tower's runtime presence remains optional and missing Tower is never a startup failure.
 
 ## EDs
 
-- Ship fixtures reflect the merged owner contracts from PR #193 (`ship driver list --json`) and PR #194 (`ship list/status --json` observability); no SQLite, manifest, or result-artifact fixture is permitted.
+- Ship fixtures reflect the merged owner contracts from PR #193 (`ship driver list --json`) and PR #194 (`ship list/status --json` observability); no SQLite, manifest, or result-artifact fixture is permitted. Include owner-issued workflow `docPath` and driver `specPath` identities using neutral relative values such as `docs/features/example-feature/spec.md`; they are required linkage fields, not operator metadata.
 - Dossier fixtures model the long-lived stdio MCP session and JSON-RPC result/error framing, not direct markdown corpus reads.
 - GitHub config accepts one to four explicit `user:`, `org:`, or `repo:` scopes. Fixtures model the four-page/200-PR cap and `detail_state = complete | truncated | unknown` rules.
 - Every unavailable/degraded case has a typed fixture receipt or expected error descriptor; raw child stderr is never a browser-facing fixture.
@@ -45,10 +46,20 @@ This task is docs/fixtures-only. Do not create the `cmd/controlroom` binary or p
 ## Validation
 
 - Parse every `.json` document and every `.jsonl` line in a repository test or validation command.
-- Scan committed fixtures/docs for GitHub/Cursor/OpenAI/Anthropic token patterns, private-key headers, environment assignments containing secrets, `MichaelHabib`, and real `%USERPROFILE%`/home prefixes.
+- Scan committed fixtures/docs for the configured `OPERATOR_DISPLAY_NAME`, private-key headers, environment assignments containing secrets, expanded Windows home paths matching `[A-Z]:\\Users\\`, and Unix/macOS home prefixes matching `/home/<name>/` or `/Users/<name>/`. `%USERPROFILE%` is a neutral placeholder and is allowed only in documentation, never as if it were an observed absolute path.
 - Assert the inventory contains all six source directories, healthy coverage for every required source, and unavailable/degraded coverage for every required or optional source.
 - Verify Ship fixture keys match the merged PR #193/#194 public envelopes and exclude `sourceJson`, `manifestPath`, `artifactsDir`, raw trace content, and absolute paths.
 - Run `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and the repository lint/build gates. Docs-only additions must not break the existing module.
+
+The deterministic credential scan uses this minimum pattern table; implementations may add stricter patterns but must keep synthetic fixtures from accidentally matching them:
+
+| Secret class | Required detection |
+|---|---|
+| GitHub | prefixes `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, or `github_pat_` followed by a non-placeholder value |
+| Cursor | `CURSOR_API_KEY=` with a non-placeholder value and bearer-style authorization values |
+| OpenAI / Anthropic | non-placeholder values beginning `sk-` or `sk-ant-` |
+| Generic environment | case-insensitive variable names containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, or `CREDENTIAL`, followed by `=` and a non-placeholder value |
+| Private keys | `BEGIN ... PRIVATE KEY` PEM headers |
 
 ## Risks
 

@@ -23,13 +23,23 @@ batches:
         runtime: cloud
         model: sonnet
         effort: extra
-        touches: [cmd/controlroom/testdata/contracts, docs/features/portfolio-control-room/source-config.md]
+        touches: [cmd/controlroom/testdata/contracts, cmd/controlroom/fixtures_test.go, docs/features/portfolio-control-room/source-config.md]
         status: pending
 
 conflict_notes:
   - kind: none
     tasks: [control-room-contract-fixtures-config]
     note: "Single docs/fixtures stream; no implementation overlap. Phase 2 begins only after fixture/config review freezes the producer shapes."
+  - kind: external_prerequisite
+    repo: ship
+    pr_number: 193
+    merge_commit: 66d1f49bd526632d03873ad887243eb3199ae3da
+    note: "Owner contract: ship driver list --json."
+  - kind: external_prerequisite
+    repo: ship
+    pr_number: 194
+    merge_commit: e76a8dd40514e8ac0ecc483b7bbe64085aecc6ec
+    note: "Owner contract: ship list/status --json observability."
 ---
 
 # Portfolio Control Room Phase 1 — driver manifest
