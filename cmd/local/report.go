@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -149,13 +148,19 @@ func printUsageReport(w io.Writer, rep usageReport) {
 	}
 }
 
+// repoShortName reduces a ledger cwd to its last path segment. The ledger may
+// hold paths written on any OS, so both separators are handled regardless of
+// the host (filepath.ToSlash is a no-op for `\` on Linux).
 func repoShortName(cwd string) string {
-	cwd = filepath.ToSlash(cwd)
-	cwd = strings.TrimSuffix(cwd, "/")
+	cwd = strings.ReplaceAll(cwd, `\`, "/")
+	cwd = strings.TrimRight(cwd, "/")
 	if cwd == "" {
 		return ""
 	}
-	return filepath.Base(cwd)
+	if i := strings.LastIndexByte(cwd, '/'); i >= 0 {
+		return cwd[i+1:]
+	}
+	return cwd
 }
 
 func repoShortCount(repos map[string]int, short string) int {
