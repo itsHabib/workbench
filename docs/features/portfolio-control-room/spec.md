@@ -340,7 +340,7 @@ Derived labels are explicitly Control Room policy, not producer state.
 
 ### Ranking rules
 
-Scores are additive; ties sort by newest factual update, then stable ID.
+For each normalized run, task, or pull request, evaluate non-informational rules in descending score order and emit only the first match; one entity cannot occupy conflicting consequence queues. Informational source/detail context may coexist. Ties across entities sort by newest factual update, then stable ID.
 
 | Rule ID | Category | Score | Condition / explanation |
 |---|---:|---:|---|
@@ -354,7 +354,7 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `pr.merge_ready` | actionable | 65 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; at least one visible check exists and every visible check completed successfully; `reviewDecision == APPROVED`; requested reviewer count is zero; `mergeable == MERGEABLE`; unresolved thread count is zero. Empty or unknown never qualifies, so this cannot overlap `pr.review_needed`. |
 | `task.stale_claim` | actionable | 55 | Dossier reports `claimed|in_progress`, `updated_at` is older than 14 days, and no explicitly linked open PR or current Ship run was updated within 14 days. |
 | `task.ready` | actionable | 40 | Dossier reports `status == "todo"` and every explicitly declared dependency is terminal-done. Missing/unknown dependency state never qualifies. |
-| `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
+| `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS`; no completed visible check failed; `reviewDecision != CHANGES_REQUESTED`; and unresolved thread count is zero. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
 | `source.unavailable` | informational | 8 | Current-generation source receipt is `unavailable`; reason is the sanitized source error, never an inferred record problem. |
 | `source.stale` | informational | 7 | A panel is displaying retained records or diagnostic payload from an earlier generation; asks the operator to revalidate. |
@@ -390,7 +390,7 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
-- Golden ranking tests for every table rule (including informational source/detail rules), tie-breaker, missing-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
+- Golden ranking tests for every table rule (including informational source/detail rules), per-entity precedence/exclusivity, tie-breaker, missing-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
 - `httptest` coverage for method restrictions, CSP/Host validation, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
