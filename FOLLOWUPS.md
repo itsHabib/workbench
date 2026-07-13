@@ -17,16 +17,21 @@ New planes are born here; existing tools migrate in when next in hand, not as a
 sweep. Order is by convenience, not priority. Each is handed to that tool's
 owner — not this repo's work to force.
 
+Scope decision (operator, 2026-07-13): the queue is **gate, triage, tracelens**
+— the actual workbench work. huddle is out. sense is a lean-no; revisit only if
+a concrete pull appears (e.g. a ballot reducer needing the verdict contract).
+
 - **gate** — the verdict type's behavioral source of truth. When next touched,
   graduate it in and have it *import* `contracts` for the shared type, so the
   conformance test guards drift from the inside. Until then `contracts` mirrors
   gate's `internal/verify` and is conformance-tested against the schema.
 - **triage** — adopt `contracts`; drop its hand-parsed verdict copy.
 - **tracelens** — adopt `contracts`; drop its hand-parsed verdict copy.
+  Unblocked 2026-07-13 (tracelens PR #6 merged); dossier task
+  `tracelens/migrate-into-workbench` tracks it.
 - **local** — migrated in 2026-07-09 (the second tenant; going public touched
   it). `contracts` adoption is owed only if/when it reads verdicts — nothing in
   it does today.
-- **huddle, sense** — graduate in when next touched.
 
 ## flare migration — choices made
 
