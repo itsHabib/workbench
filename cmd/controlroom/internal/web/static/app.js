@@ -232,7 +232,8 @@ function renderRuns(rows) {
 }
 
 function runRow(run) {
-  return actionRow(`Open run ${run.id}`, () => openRun(run), [
+  const diagnosis = state.snapshot?.reliability.find((item) => item.run_id === run.id);
+  return actionRow(`Open run ${run.id}`, () => openRun(run, diagnosis), [
     ["Run", `${run.kind} · ${run.id}`], ["Repository / project", run.repository || run.project || "Unknown"],
     ["Producer status", run.status], ["Operator state", run.operator_state || "unknown"], ["Current stage", run.phase || "Unknown"],
     ["Last durable update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"], ["Failure class", run.failure || "None"],
@@ -318,8 +319,9 @@ function cell(label, value) {
 
 function statusClass(value) {
   const normalized = String(value).toLowerCase();
+  const tokens = normalized.split(/[^a-z0-9_]+/).filter(Boolean);
   for (const [needle, suffix] of [["on_fire", "on-fire"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
-    if (normalized.includes(needle)) return `status status-${suffix}`;
+    if (tokens.includes(needle)) return `status status-${suffix}`;
   }
   return "";
 }
@@ -363,14 +365,20 @@ function highestSeverity(findings) {
 }
 function sourceUsability(value) { return value === "unavailable" ? "Other source panels remain usable" : value === "stale" ? "Retained rows remain visible with stale qualification" : value === "degraded" ? "Qualified data remains usable" : "Current source facts are usable"; }
 
-function openRun(run) {
+function openRun(run, diagnosis) {
+  const diagnosisRows = diagnosis ? [
+    ["Tracelens verdict", `${diagnosis.verdict} · ${diagnosis.tier} · ${diagnosis.dialect}`],
+    ["Tracelens findings", diagnosis.findings.length ? diagnosis.findings.map((finding) => `${finding.severity}: ${finding.title} — ${finding.evidence}`).join("; ") : "None"],
+    ["Input tokens", availability(diagnosis.input_tokens)], ["Output tokens", availability(diagnosis.output_tokens)],
+    ["Cost USD", availability(diagnosis.cost_usd)], ["Latency ms", availability(diagnosis.latency_ms)],
+  ] : [["Tracelens diagnosis", "Unavailable for this run"]];
   openDrawer("Run details", "Control Room policy + producer facts", [
     ["ID", run.id], ["Kind", run.kind], ["Repository", run.repository || "Unknown"], ["Project", run.project || "Unknown"],
     ["Producer status", run.status], ["Operator state", run.operator_state || "Unknown"], ["Control Room policy liveness", run.liveness || "Unknown"], ["Current stage", run.phase || "Unknown"],
     ["Last durable owner update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"],
     ["Requested runtime", availability(run.requested.runtime)], ["Requested provider", availability(run.requested.provider)],
     ["Actual runtime", availability(run.actual.runtime)], ["Actual provider", availability(run.actual.provider)],
-    ["Failure class", run.failure || "None"], ["Evidence", linksText(run.evidence)],
+    ["Failure class", run.failure || "None"], ["Evidence", linksText(run.evidence)], ...diagnosisRows,
   ], { type: "run", id: run.id });
 }
 

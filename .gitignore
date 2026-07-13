@@ -1,6 +1,9 @@
 *.exe
 coverage.out
 .demo-state/
+cmd/controlroom/e2e/node_modules/
+cmd/controlroom/e2e/playwright-report/
+cmd/controlroom/e2e/test-results/
 
 .env
 .env.*

@@ -279,7 +279,7 @@ func awaitResults(ctx context.Context, input <-chan namedResult, sources []strin
 	for len(output) < len(sources) {
 		select {
 		case value := <-input:
-			if _, expected := output[value.source]; !expected {
+			if _, alreadyPresent := output[value.source]; !alreadyPresent {
 				output[value.source] = normalizeResult(value.source, value.result, now())
 			}
 		case <-ctx.Done():

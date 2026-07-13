@@ -124,6 +124,8 @@ func TestRefreshRejectsEveryInvalidLayerWithoutCallback(t *testing.T) {
 		{"unknown body field", "application/json", "http://" + testHost, token, token, `{"mode":"demo","trigger":"manual","extra":true}`},
 		{"wrong mode", "application/json", "http://" + testHost, token, token, `{"mode":"real","trigger":"manual"}`},
 		{"wrong trigger", "application/json", "http://" + testHost, token, token, `{"mode":"demo","trigger":"automatic"}`},
+		{"trailing JSON", "application/json", "http://" + testHost, token, token, validRefreshBody() + `{}`},
+		{"oversized body", "application/json", "http://" + testHost, token, token, strings.Repeat(" ", 1025) + validRefreshBody()},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -260,7 +262,7 @@ func TestEmbeddedShellAndScriptContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := string(appBytes)
-	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]", "operator_state", "next_action", "formatTime(run.updated_at)", "X-Control-Room-CSRF", `refresh("auto")`, "60000", "attempt < 110", "diagnostic sources remained loading"} {
+	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]", "operator_state", "next_action", "formatTime(run.updated_at)", "Tracelens findings", "tokens.includes(needle)", "X-Control-Room-CSRF", `refresh("auto")`, "60000", "attempt < 110", "diagnostic sources remained loading"} {
 		if !strings.Contains(app, required) {
 			t.Errorf("app missing interaction contract %q", required)
 		}

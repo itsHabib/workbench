@@ -154,6 +154,8 @@ func TestEnrichersRendezvousBeforeOneFinalPublish(t *testing.T) {
 	}
 	waitForVersion(t, coordinator, receipt.BaselineVersion+1)
 	close(traceRelease)
+	// This asserts a non-event: one enricher finishing has no deterministic
+	// publication barrier because publication must wait for both enrichers.
 	time.Sleep(10 * time.Millisecond)
 	if got := coordinator.Snapshot().Version; got != receipt.BaselineVersion+1 {
 		t.Fatalf("partial enrichment published version %d", got)
