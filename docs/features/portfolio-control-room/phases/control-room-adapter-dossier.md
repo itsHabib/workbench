@@ -22,15 +22,17 @@ Read project, phase, task, and artifact truth through Dossier's stdio MCP owner 
 ## Behavior / fix
 
 - Add only `cmd/controlroom/internal/adapters/dossier`. Implement MCP `initialize`, `notifications/initialized`, request ID correlation, structured/text tool result decoding, and bounded calls to `project.list`, `project.overview`, `phase.list`, `task.list`, `task.get`, and `artifact.list`.
+- The package may import but must not modify `cmd/controlroom/internal/model`. Export a source-local `Result` containing `[]model.Task` plus `model.SourceReceipt`; if a required shared model type is absent, stop and escalate rather than extending the locked package.
 - Expose a lifecycle-safe adapter seam: `serve` can retain one handshaken child across collections; one-shot snapshot collection can start and close one child. Serialize calls unless the protocol owner explicitly guarantees multiplexing.
-- EOF, child exit, handshake timeout, malformed JSON-RPC, mismatched response ID, and call errors fail only Dossier and terminate/replace the child safely.
-- On each refresh, make at most one start attempt. After three consecutive start, handshake, or first-call failures, pause automatic probes for five minutes. One manual refresh may perform one half-open probe; success resets the breaker and failure reopens it. Inject the clock and process factory for deterministic tests.
+- EOF, child exit, handshake timeout, malformed JSON-RPC, mismatched response ID, and call errors fail only Dossier and invalidate the child. Cleanup closes stdin, waits up to one second for natural exit, then kills and waits/reaps the process; all timings and process operations are injectable. Replacement is attempted only on the next eligible refresh, never again in the same refresh cycle.
+- On each refresh, make at most one start attempt, and let the whole refresh cycle contribute at most one failure to the consecutive count regardless of which or how many lifecycle stages fail. After three consecutive start, handshake, or first-call failure cycles, pause automatic probes for five minutes. While open, automatic calls return immediately with `state=unavailable` and `error_code=breaker_open` without starting a child.
+- One manual refresh may begin one half-open probe. A mutex/singleflight guard makes every concurrent manual caller join that same probe and receive the same result; no second child starts. Automatic callers remain suppressed while it is in flight. Success resets the breaker; failure counts as one failed cycle and reopens it for five minutes. Inject the clock and process factory for deterministic tests.
 - Normalize exact tasks, dependencies, blockers, phases, assignees, timestamps, and artifact refs into the locked model. Ignore additive fields; never parse Dossier markdown or its `.dossier` store as fallback.
 - Sanitize all process/protocol failures into typed receipts and never place raw stderr or JSON-RPC bodies into the snapshot.
 
 ## Acceptance
 
-Healthy, empty, additive, EOF, malformed response, child exit, handshake/call timeout, restart, breaker-open, automatic suppression, manual half-open, and recovery cases produce deterministic rows and isolated receipts. The child is reaped on cancellation/shutdown, calls cannot cross-correlate, and success resets the full failure counter.
+Healthy, empty, additive, EOF, malformed response, child exit, handshake/call timeout, restart, breaker-open, automatic suppression, concurrent manual half-open, and recovery cases produce deterministic rows and isolated receipts. The child is reaped on cancellation/shutdown, one refresh increments the breaker at most once, calls cannot cross-correlate, and success resets the full failure counter.
 
 ## Test plan
 

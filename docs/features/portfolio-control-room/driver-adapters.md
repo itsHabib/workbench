@@ -10,6 +10,10 @@ repo_url: https://github.com/itsHabib/workbench
 branch_prefix: control-room-adapter-
 default_runtime: local
 
+runtime_notes:
+  precedence: "Per-stream runtime is authoritative; default_runtime documents the all-local batch default."
+  model_tiers: "Opus is reserved for lifecycle/pagination/multi-command adapters (Ship, Dossier, GitHub); Sonnet covers bounded single-command parsers (Tracelens, tool-health, Tower)."
+
 batches:
   - id: 1
     label: source-isolated real adapters
@@ -106,6 +110,8 @@ Consumed by `/work-driver docs/features/portfolio-control-room/driver-adapters.m
 ## Batch 1 — source-isolated real adapters
 
 All six streams are parallel-safe by file and semantics. Local runtime is recommended because every adapter is fake-executable/unit-test driven, operator credentials are unnecessary, and the configured Ship/Cursor credential required by the driver runtime is currently unavailable; the manifest still records the canonical dispatch intent and can fall back to isolated manual worktrees with truthful failed receipts.
+
+Per-stream `runtime` values are authoritative; `default_runtime: local` documents the batch-wide default. Opus is assigned to Ship, Dossier, and GitHub because they contain multi-command enrichment, a stateful MCP lifecycle/breaker, or bounded GraphQL pagination. Sonnet is assigned to the smaller stateless/single-command Tracelens, tool-health, and Tower parsers.
 
 ## Invocation
 

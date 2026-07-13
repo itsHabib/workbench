@@ -22,8 +22,9 @@ Populate the authoritative PR inventory through one bounded, explicitly scoped G
 ## Behavior / fix
 
 - Add only `cmd/controlroom/internal/adapters/github`. Validate one to four unique scopes, each exactly `user:<login>`, `org:<login>`, or `repo:<owner/name>`; reject ambiguous/unscoped input before execution.
+- The package may import but must not modify `cmd/controlroom/internal/model`. Export a source-local `Result` containing `[]model.PullRequest` plus `model.SourceReceipt`; if a required shared model type is absent, stop and escalate rather than extending the locked package.
 - Require `gh >= 2.90.0`, resolve the authenticated login with `gh api user --jq .login`, and invoke the accepted embedded/versioned query only through `gh api graphql`.
-- Query `is:pr is:open author:<authenticated-login> archived:false` plus each explicit scope. Page scopes in stable round-robin order, at most four total pages of 50 PRs within ten seconds, and deduplicate by node ID.
+- Query `is:pr is:open author:<authenticated-login> archived:false` plus each explicit scope. Page scopes in stable round-robin order, at most four total pages of 50 PRs under the source's single 10-second collection context deadline (not ten seconds per page), and deduplicate by node ID.
 - Normalize repository, number, title/URL, author, branches/head OID, draft/state/times, checks, review decision/requests, review threads, mergeability, and merge-state facts into the locked model. Missing known fields are unknown; additive fields are ignored.
 - If an unvisited inventory page remains after the cap, return current partial data with `degraded/inventory_truncated`. Retain completed pages when a later page fails. Saturated check/thread connections set `detail_state=truncated`; observed negative evidence remains available but positive readiness facts stay suppressed by the existing policy.
 - Use injected command seams and sanitized typed failures. Never execute `gh pr view` or one subprocess per PR.

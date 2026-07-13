@@ -21,9 +21,10 @@ Consume the existing tool-health friction rollup without duplicating its local-m
 
 ## Behavior / fix
 
-- Add only `cmd/controlroom/internal/adapters/toolhealth`. Execute the configured `toolhealth.exe` board command once per diagnostic collection with a bounded context.
+- Add only `cmd/controlroom/internal/adapters/toolhealth`. The package may import but must not modify `cmd/controlroom/internal/model`. Export a source-local `Result` containing `[]model.ToolHealth` plus `model.SourceReceipt`; if a required shared model type is absent, stop and escalate rather than extending the locked package. Execute the configured `toolhealth.exe` board command once per diagnostic collection with a bounded context.
 - Parse only fixture-backed fields: tool, worst severity, recurrence/session count, last occurrence, pain lines, and accumulated-friction label. Accept additive lines and reordered sections; missing optional values remain unknown.
-- Missing executable, timeout, nonzero exit, or loss of the required text anchors produces a sanitized degraded/unavailable receipt. Retain parseable rows only when the response remains unambiguous; never turn absence into zeros.
+- The Phase 1 fixtures `cmd/controlroom/testdata/contracts/toolhealth/accumulated-friction.txt` and `live-incident.txt` define the only accepted anchors. Both require `Tool Health Board` and `Generated:`. Accumulated friction additionally requires the `Tool | Severity | Sessions | Last seen | Pain` table header and `Kind: accumulated_friction`; a live incident requires `!!! ACTIVE INCIDENT !!!`, `Tool:`, `Severity:`, `Started:`, `Status:`, and `Kind: live_incident`. `Action:` and the background-friction subsection are optional.
+- Missing executable, timeout, nonzero exit, or loss of those required text anchors produces a sanitized degraded/unavailable receipt. Retain parseable rows only when the response remains unambiguous; never turn absence into zeros.
 - Do not invoke Ollama/local-model classification, read the friction store, or reproduce tool-health bucketing in Control Room.
 
 ## Acceptance

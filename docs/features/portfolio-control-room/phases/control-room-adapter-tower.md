@@ -21,18 +21,18 @@ Expose optional supplemental worktree/branch context while making Tower's absenc
 
 ## Behavior / fix
 
-- Add only `cmd/controlroom/internal/adapters/tower`. When configured, execute exactly `tower ls --json --no-reconcile` with a bounded context; executable absence returns a normal unavailable Tower receipt and no rows.
-- Normalize only stable repository/worktree/branch identity and supplemental path facts that fit the locked model. Tower never owns PR/check/review freshness.
-- Ignore additive fields. Malformed output, timeout, nonzero exit, duplicate/ambiguous repository identity, and unsafe paths fail or qualify only Tower.
-- Preserve paths as internal evidence for Phase 6 containment work; do not emit arbitrary absolute paths or local deep links to the browser. No mutation flag or reconcile-capable path may be configurable.
+- Add only `cmd/controlroom/internal/adapters/tower`. The package may import but must not modify `cmd/controlroom/internal/model`; if a required shared type is absent, stop and escalate. Export a source-local `Result` containing adapter-local `[]Worktree` records plus `model.SourceReceipt`, so Phase 5 can compose supplemental facts without adding a Tower type to the shared model. When configured, execute exactly `tower ls --json --no-reconcile` with a bounded context; executable absence returns a normal unavailable Tower receipt and no rows.
+- Normalize only stable repository/worktree/branch identity. Retain Tower path values as opaque adapter-local strings, never turn them into `model.SafeLink`, never access the filesystem, and never emit them directly to the browser. Phase 6 owns `filepath.Abs/Clean/EvalSymlinks/Rel` workspace containment before any path becomes actionable. Tower never owns PR/check/review freshness.
+- Ignore additive fields. Malformed output, timeout, nonzero exit, and duplicate/ambiguous repository identity fail or qualify only Tower. Opaque paths do not fail Phase 4 collection solely because they are absolute or outside the workspace.
+- No mutation flag or reconcile-capable path may be configurable.
 
 ## Acceptance
 
-Healthy, empty, additive, malformed, timeout, nonzero-exit, missing-executable, duplicate identity, and unsafe-path fixtures produce deterministic supplemental rows or an isolated unavailable receipt. Exact argv always includes `--no-reconcile`.
+Healthy, empty, additive, malformed, timeout, nonzero-exit, missing-executable, duplicate identity, and arbitrary opaque-path fixtures produce deterministic supplemental rows or an isolated unavailable receipt. Exact argv always includes `--no-reconcile`, and no path is promoted to a safe/actionable link.
 
 ## Test plan
 
-Use a fake executable. Assert argv, cancellation, stable identity/order, optional-source semantics, path redaction/qualification, sanitization, and absence of mutation flags. Run the full Go gates.
+Use a fake executable. Assert argv, cancellation, stable identity/order, optional-source semantics, opaque-path pass-through without filesystem access or `SafeLink` promotion, sanitization, and absence of mutation flags. Run the full Go gates.
 
 ## Non-goals
 

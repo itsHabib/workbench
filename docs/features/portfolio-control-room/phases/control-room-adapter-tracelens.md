@@ -21,14 +21,15 @@ Add bounded reliability context from Tracelens owner output without importing an
 
 ## Behavior / fix
 
-- Add only `cmd/controlroom/internal/adapters/tracelens`. From an injected eligible-run list, select at most five recent runs using deterministic time/ID ordering and execute `tracelens ship -json <run-ref>` with a ten-second per-call bound.
+- Add only `cmd/controlroom/internal/adapters/tracelens`. The package may import but must not modify `cmd/controlroom/internal/model`. Export a source-local `Result` containing `[]model.Diagnosis` plus `model.SourceReceipt`; if a required shared model type is absent, stop and escalate rather than extending the locked package.
+- Accept normalized Ship runs plus its current `model.SourceReceipt` and apply eligibility inside the adapter: the Ship receipt must be `ok`; the subject must be a workflow run rather than a driver container; its producer status must be terminal; trace evidence availability must be `available`; and `updated_at` must fall within the preceding 14 days relative to the injected clock. Sort eligible runs by `updated_at` descending then ID ascending, take at most five, and execute `tracelens ship -json <run-ref>` with a ten-second per-call bound. An ineligible input must never start a process.
 - Normalize verdict, tier, dialect, findings/severity, evidence locus, repair text, and explicit token/cost/latency availability into existing diagnosis shapes. Optionally consume the configured owner `report` contract without creating a second cache.
 - Unsupported input/dialect, malformed JSON, timeout, nonzero exit, and unavailable telemetry create qualified diagnosis/source receipts only. They never rewrite or reinterpret Ship status.
 - Ignore additive JSON fields, sanitize typed errors, and prohibit raw trace, stderr, credential-like strings, usernames, and absolute operator paths from snapshot output.
 
 ## Acceptance
 
-Healthy, empty, unsupported input/dialect, malformed, timeout, nonzero-exit, unavailable-telemetry, and mixed-run fixtures yield deterministic diagnoses. The five-run cap and ordering are exact, telemetry unknown never renders as zero, and failures remain source-local.
+Healthy, empty, stale/nonterminal/driver/no-trace/incomplete-Ship inputs, unsupported input/dialect, malformed, timeout, nonzero-exit, unavailable-telemetry, and mixed-run fixtures yield deterministic diagnoses. The eligibility gate, five-run cap, and ordering are exact, telemetry unknown never renders as zero, and failures remain source-local.
 
 ## Test plan
 
