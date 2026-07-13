@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os/exec"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,11 @@ import (
 )
 
 const defaultTimeout = 20 * time.Second
+
+var (
+	idRemainderPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	sensitiveFailure   = regexp.MustCompile(`(?i)([a-z]:\\|(?:^|\W)(?:token|password|secret|api[_-]?key|key)\s*=|bearer\s+|authorization\s*:|[a-z][a-z0-9+.-]*://[^/\s:@]+:[^@\s/]+@|-----begin [^-]*private key-----)`)
+)
 
 // Result is Ship's source-local collection result.
 type Result struct {
@@ -73,6 +79,8 @@ func (a *Adapter) Collect(ctx context.Context) Result {
 	var workflowList struct {
 		Runs []workflowWire `json:"runs"`
 	}
+	// The frozen Ship contract requires `runs` to be an array; null is
+	// malformed rather than an empty inventory so undercounting fails closed.
 	if err := json.Unmarshal(workflowJSON, &workflowList); err != nil || workflowList.Runs == nil {
 		return finish(model.SourceUnavailable, "malformed_inventory", "Ship returned malformed workflow inventory", nil)
 	}
@@ -84,6 +92,7 @@ func (a *Adapter) Collect(ctx context.Context) Result {
 	var driverList struct {
 		Runs []driverWire `json:"runs"`
 	}
+	// Driver inventory follows the same required-array contract.
 	if err := json.Unmarshal(driverJSON, &driverList); err != nil || driverList.Runs == nil {
 		return finish(model.SourceUnavailable, "malformed_inventory", "Ship returned malformed driver inventory", nil)
 	}
@@ -143,19 +152,18 @@ func (a *Adapter) collectDrivers(ctx context.Context, inventory []driverWire) ([
 }
 
 type workflowWire struct {
-	ID              string          `json:"id"`
-	Repo            string          `json:"repo"`
-	DocPath         string          `json:"docPath"`
-	Status          string          `json:"status"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
-	EndedAt         *time.Time      `json:"endedAt"`
-	FailureCategory string          `json:"failureCategory"`
-	ErrorMessage    string          `json:"errorMessage"`
-	Worktree        *worktreeWire   `json:"worktree"`
-	Phases          []phaseWire     `json:"phases"`
-	Observability   *observability  `json:"observability"`
-	Extra           json.RawMessage `json:"-"`
+	ID              string         `json:"id"`
+	Repo            string         `json:"repo"`
+	DocPath         string         `json:"docPath"`
+	Status          string         `json:"status"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
+	EndedAt         *time.Time     `json:"endedAt"`
+	FailureCategory string         `json:"failureCategory"`
+	ErrorMessage    string         `json:"errorMessage"`
+	Worktree        *worktreeWire  `json:"worktree"`
+	Phases          []phaseWire    `json:"phases"`
+	Observability   *observability `json:"observability"`
 }
 
 type worktreeWire struct {
@@ -284,6 +292,9 @@ func normalizeWorkflow(w workflowWire) model.Run {
 			// Tracelens eligibility gate without exposing prompt or raw-trace refs.
 			run.Evidence = make([]model.SafeLink, 0)
 		}
+		if o.EndedAt == nil {
+			run.EndedAt = availabilityTime(w.EndedAt)
+		}
 	}
 	run.Failure = sanitizeFailure(firstNonempty(w.FailureCategory, w.ErrorMessage))
 	return run
@@ -300,11 +311,12 @@ func normalizeDriver(w driverWire) []model.Run {
 		for _, stream := range batch.Streams {
 			requested := missingRuntime()
 			requested.Runtime, requested.Provider, requested.Model = availabilityString(stream.Runtime), availabilityString(stream.Provider), availabilityString(stream.ModelTier)
+			startedAt, endedAt, duration := attemptTimes(stream.Attempts)
 			rows = append(rows, model.Run{
 				ID: stream.ID, Kind: "driver", Repository: w.Repo, Project: w.Project, Task: firstNonempty(stream.TaskSlug, stream.TaskID),
 				SpecPath: availabilityPath(stream.SpecPath), DocPath: model.Missing[string](), Branch: stream.Branch, Status: stream.Status, Phase: w.Phase,
 				Requested: requested, Actual: missingRuntime(), CreatedAt: stream.CreatedAt, UpdatedAt: stream.UpdatedAt,
-				StartedAt: model.Missing[time.Time](), EndedAt: model.Missing[time.Time](), DurationMS: model.Missing[int64](),
+				StartedAt: startedAt, EndedAt: endedAt, DurationMS: duration,
 				Failure: sanitizeFailure(stream.ErrorMessage), Evidence: []model.SafeLink{}, Liveness: model.LivenessUnknown,
 			})
 		}
@@ -312,7 +324,29 @@ func normalizeDriver(w driverWire) []model.Run {
 	return rows
 }
 
-func validID(id, prefix string) bool { return strings.HasPrefix(id, prefix) && len(id) > len(prefix) }
+func validID(id, prefix string) bool {
+	return strings.HasPrefix(id, prefix) && idRemainderPattern.MatchString(strings.TrimPrefix(id, prefix))
+}
+
+func attemptTimes(attempts []driverAttempt) (model.Availability[time.Time], model.Availability[time.Time], model.Availability[int64]) {
+	var started, ended *time.Time
+	for i := range attempts {
+		attempt := &attempts[i]
+		if !attempt.DispatchedAt.IsZero() && (started == nil || attempt.DispatchedAt.Before(*started)) {
+			value := attempt.DispatchedAt
+			started = &value
+		}
+		if attempt.Terminal && attempt.EndedAt != nil && (ended == nil || attempt.EndedAt.After(*ended)) {
+			value := *attempt.EndedAt
+			ended = &value
+		}
+	}
+	duration := model.Missing[int64]()
+	if started != nil && ended != nil && !ended.Before(*started) {
+		duration = model.Known(ended.Sub(*started).Milliseconds())
+	}
+	return availabilityTime(started), availabilityTime(ended), duration
+}
 
 func availabilityPath(value string) model.Availability[string] {
 	value = strings.TrimSpace(value)
@@ -363,7 +397,7 @@ func firstNonempty(values ...string) string {
 
 func sanitizeFailure(value string) string {
 	value = strings.TrimSpace(value)
-	if strings.Contains(value, `:\`) || strings.Contains(strings.ToLower(value), "token=") || strings.Contains(strings.ToLower(value), "password=") {
+	if sensitiveFailure.MatchString(value) {
 		return "failure detail redacted"
 	}
 	if len(value) > 300 {

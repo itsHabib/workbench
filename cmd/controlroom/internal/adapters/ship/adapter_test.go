@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/controlroom/internal/model"
 )
@@ -69,13 +71,67 @@ func TestCollectFailsClosedOnMalformedInventory(t *testing.T) {
 	}
 }
 
-func stringsJoin(args []string) string {
-	result := ""
-	for i, arg := range args {
-		if i > 0 {
-			result += " "
-		}
-		result += arg
+func TestCollectDegradesWhenWorkflowDetailFails(t *testing.T) {
+	f := &fakeRunner{outputs: map[string][]byte{
+		"list --json":        []byte(`{"runs":[{"id":"wf_1","status":"failed"}]}`),
+		"driver list --json": []byte(`{"runs":[]}`),
+	}}
+	a := New("ship")
+	a.runner = f
+	got := a.Collect(context.Background())
+	if got.Receipt.State != model.SourceDegraded || got.Receipt.ErrorCode != "partial_detail" || len(got.Runs) != 1 {
+		t.Fatalf("unexpected result: %#v", got)
 	}
-	return result
+}
+
+func TestCollectDriverDetailNormalizesAttemptTimeline(t *testing.T) {
+	f := &fakeRunner{outputs: map[string][]byte{
+		"list --json":                []byte(`{"runs":[]}`),
+		"driver list --json":         []byte(`{"runs":[{"driverRunId":"drv_1","status":"running","repo":"repo","project":"project","phase":"phase","createdAt":"2026-07-13T09:00:00Z","updatedAt":"2026-07-13T12:00:00Z","manifestRef":"docs/driver.md","batches":[{"streams":[{"streamId":"ds_1","status":"done","createdAt":"2026-07-13T09:00:00Z","updatedAt":"2026-07-13T11:00:00Z"}]}]}]}`),
+		"driver status drv_1 --json": []byte(`{"driverRunId":"drv_1","status":"running","repo":"repo","project":"project","phase":"phase","createdAt":"2026-07-13T09:00:00Z","updatedAt":"2026-07-13T12:00:00Z","manifestRef":"docs/driver.md","batches":[{"streams":[{"streamId":"ds_1","status":"done","createdAt":"2026-07-13T09:00:00Z","updatedAt":"2026-07-13T11:00:00Z","attempts":[{"dispatchedAt":"2026-07-13T09:30:00Z","terminal":true,"endedAt":"2026-07-13T10:00:00Z"}]}]}]}`),
+	}}
+	a := New("ship")
+	a.runner = f
+	got := a.Collect(context.Background())
+	if got.Receipt.State != model.SourceOK || len(got.Runs) != 2 {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+	var child model.Run
+	for _, run := range got.Runs {
+		if run.ID == "ds_1" {
+			child = run
+		}
+	}
+	if child.StartedAt.State != model.Available || child.EndedAt.State != model.Available || child.DurationMS.Value == nil || *child.DurationMS.Value != int64(30*time.Minute/time.Millisecond) {
+		t.Fatalf("attempt timeline missing: %#v", child)
+	}
+}
+
+func TestNormalizeWorkflowFallsBackToOwnerEndTime(t *testing.T) {
+	ended := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	run := normalizeWorkflow(workflowWire{ID: "wf_1", EndedAt: &ended, Observability: &observability{}})
+	if run.EndedAt.State != model.Available || run.EndedAt.Value == nil || !run.EndedAt.Value.Equal(ended) {
+		t.Fatalf("end time was discarded: %#v", run.EndedAt)
+	}
+}
+
+func TestCollectUnconfiguredAndSanitization(t *testing.T) {
+	got := New("").Collect(context.Background())
+	if got.Receipt.ErrorCode != "not_configured" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+	for _, failure := range []string{"token=secret", "api_key=secret", "Bearer secret", "Authorization: secret", "https://user:pass@example.com"} {
+		if sanitizeFailure(failure) != "failure detail redacted" {
+			t.Fatalf("failure was not redacted: %q", failure)
+		}
+	}
+	for _, id := range []string{"wf_ --delete", "wf_a/b", "wf_"} {
+		if validID(id, "wf_") {
+			t.Fatalf("unsafe ID accepted: %q", id)
+		}
+	}
+}
+
+func stringsJoin(args []string) string {
+	return strings.Join(args, " ")
 }
