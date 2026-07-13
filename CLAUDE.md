@@ -62,7 +62,9 @@ go test ./...
 
 CI (`.github/workflows/ci.yml`) additionally runs `go test -race` and the
 `hygiene` boundary-law assertions. Standard library only; no third-party
-dependencies.
+dependencies in production. Exception: `cmd/controlroom/e2e` may use an exact,
+lockfile-pinned Playwright version as a test-only Node dependency; it is never
+linked into a production binary.
 
 <!-- local-offload:start -->
 ## Local-first offload

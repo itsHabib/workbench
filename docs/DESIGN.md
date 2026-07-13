@@ -9,8 +9,11 @@ boundary law, how tools migrate in, and the triggers that would later split
 
 ## One repo, one Go module
 
-One `go.mod` at the root (one `go.sum` once there are third-party deps to pin;
-today there are none). Not multi-module. No `go.work`.
+One `go.mod` at the root (one `go.sum` once production Go has third-party deps
+to pin; today it has none). Not multi-module. No `go.work`. Test-only tooling is
+separate from this module rule: `cmd/controlroom/e2e` may own an exact,
+lockfile-pinned Playwright Node dependency for browser verification, never
+linked into a production binary.
 
 `go install github.com/itsHabib/workbench/cmd/<tool>@latest` works cleanly from a
 single module.
