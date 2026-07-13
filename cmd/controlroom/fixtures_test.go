@@ -316,6 +316,7 @@ func TestDemoClockAnchoredHealthyFixtures(t *testing.T) {
 		filepath.Join(fixturesRoot, "dossier", "task-get-healthy.json"),
 		filepath.Join(fixturesRoot, "dossier", "task-list-healthy.json"),
 		filepath.Join(fixturesRoot, "github", "graphql-inventory-healthy.json"),
+		filepath.Join(fixturesRoot, "github", "pr-detail-complete.json"),
 		filepath.Join(fixturesRoot, "tracelens", "analysis-findings.json"),
 		filepath.Join(fixturesRoot, "tower", "ls-available.json"),
 	}
