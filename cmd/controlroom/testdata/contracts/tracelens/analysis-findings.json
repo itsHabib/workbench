@@ -1,0 +1,65 @@
+{
+  "run_id": "wf_demo_01",
+  "analyzed_at": "2026-07-13T12:00:00.000Z",
+  "verdict": "escalate",
+  "tier": "T2",
+  "dialect": "ship-trace-v1",
+  "subject": {
+    "repo": "example-repo",
+    "number": 0,
+    "head_sha": "abc123def4567890abcdef1234567890abcdef12"
+  },
+  "source": "tracelens",
+  "producer": {
+    "class": "code",
+    "impl": "tracelens"
+  },
+  "decision": "escalate",
+  "confidence": 0.82,
+  "findings": [
+    {
+      "title": "Retry loop detected",
+      "severity": "high",
+      "locus": "phase:implement",
+      "evidence": "agent retried the same tool call three times within 120 seconds",
+      "confidence": 0.9
+    },
+    {
+      "title": "Long idle gap",
+      "severity": "medium",
+      "locus": "timeline",
+      "evidence": "no tool activity for 8 minutes during running phase",
+      "confidence": 0.75
+    }
+  ],
+  "why": "Trace shows repeated failure pattern with insufficient recovery",
+  "report": {
+    "state": "available",
+    "value": {
+      "label": "tracelens report",
+      "url": "file:///tmp/tracelens-demo-report.md"
+    }
+  },
+  "evidence": [
+    {
+      "label": "trace summary",
+      "url": "file:///tmp/tracelens-demo-summary.json"
+    }
+  ],
+  "input_tokens": {
+    "state": "available",
+    "value": 12400
+  },
+  "output_tokens": {
+    "state": "available",
+    "value": 3200
+  },
+  "cost_usd": {
+    "state": "available",
+    "value": 0.42
+  },
+  "latency_ms": {
+    "state": "available",
+    "value": 18500
+  }
+}

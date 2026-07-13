@@ -1,0 +1,8 @@
+{
+  "source": "tracelens",
+  "state": "unavailable",
+  "observed_at": "2026-07-13T12:00:00.000Z",
+  "duration_ms": 10000,
+  "error_code": "analysis_timeout",
+  "message": "tracelens analysis exceeded 10 second bound"
+}

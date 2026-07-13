@@ -1,0 +1,54 @@
+{
+  "v": 1,
+  "runs": [
+    {
+      "driverRunId": "drv_demo_01",
+      "status": "running",
+      "repo": "example-repo",
+      "project": "portfolio-control-room",
+      "phase": "source-contracts",
+      "createdAt": "2026-07-13T12:00:00.000Z",
+      "updatedAt": "2026-07-13T12:10:00.000Z",
+      "sourceHash": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+      "manifestRef": "docs/features/portfolio-control-room/driver.md",
+      "batches": [
+        {
+          "batchId": "db_demo_01",
+          "batchIndex": 1,
+          "label": "contract fixtures",
+          "status": "running",
+          "dependsOn": [],
+          "streams": [
+            {
+              "streamId": "ds_demo_01",
+              "streamIndex": 0,
+              "taskId": "tsk_demo_01",
+              "taskSlug": "control-room-contract-fixtures-config",
+              "specPath": "docs/features/example-feature/spec.md",
+              "branch": "control-room-contract-fixtures-config",
+              "runtime": "cloud",
+              "status": "dispatched",
+              "touches": [
+                "cmd/controlroom/testdata/contracts"
+              ],
+              "createdAt": "2026-07-13T12:00:00.000Z",
+              "updatedAt": "2026-07-13T12:10:00.000Z",
+              "provider": "cursor",
+              "modelTier": "sonnet",
+              "effortTier": "extra",
+              "workflowRunId": "wf_demo_01",
+              "cycles": 1,
+              "attempts": [
+                {
+                  "dispatchedAt": "2026-07-13T12:02:00.000Z",
+                  "terminal": false,
+                  "workflowRunId": "wf_demo_01"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

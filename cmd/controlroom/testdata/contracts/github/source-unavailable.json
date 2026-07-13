@@ -1,0 +1,8 @@
+{
+  "source": "github",
+  "state": "unavailable",
+  "observed_at": "2026-07-13T12:00:00.000Z",
+  "duration_ms": 1500,
+  "error_code": "gh_version_unsupported",
+  "message": "GitHub CLI version below minimum 2.90.0"
+}

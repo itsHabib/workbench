@@ -1,0 +1,485 @@
+package controlroom_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+const (
+	fixturesRoot        = "testdata/contracts"
+	demoClockAnchor     = "2026-07-13T12:00:00.000Z"
+	operatorDisplayName = "itsHabib"
+)
+
+var requiredSources = []string{
+	"ship",
+	"dossier",
+	"github",
+	"tracelens",
+	"toolhealth",
+	"tower",
+}
+
+type sourceCoverage struct {
+	healthy   []string
+	degraded  []string
+	shipRules bool
+}
+
+var inventory = map[string]sourceCoverage{
+	"ship": {
+		healthy: []string{
+			"workflow-list-healthy.json",
+			"workflow-status-healthy.json",
+			"driver-list-healthy.json",
+		},
+		degraded: []string{
+			"workflow-list-empty.json",
+			"workflow-list-malformed.json",
+			"source-unavailable.json",
+		},
+		shipRules: true,
+	},
+	"dossier": {
+		healthy: []string{
+			"task-get-healthy.json",
+			"task-list-healthy.json",
+		},
+		degraded: []string{
+			"session-failure.json",
+		},
+	},
+	"github": {
+		healthy: []string{
+			"graphql-inventory-healthy.json",
+			"pr-detail-complete.json",
+		},
+		degraded: []string{
+			"receipt-inventory-truncated.json",
+			"pr-detail-truncated.json",
+			"source-unavailable.json",
+		},
+	},
+	"tracelens": {
+		healthy: []string{
+			"analysis-findings.json",
+		},
+		degraded: []string{
+			"analysis-unavailable-telemetry.json",
+			"source-unavailable.json",
+		},
+	},
+	"toolhealth": {
+		healthy: []string{
+			"accumulated-friction.txt",
+		},
+		degraded: []string{
+			"live-incident.txt",
+			"source-unavailable.json",
+		},
+	},
+	"tower": {
+		healthy: []string{
+			"ls-available.json",
+		},
+		degraded: []string{
+			"source-unavailable.json",
+		},
+	},
+}
+
+var shipForbiddenKeys = []string{
+	"sourceJson",
+	"manifestPath",
+	"artifactsDir",
+}
+
+var shipForbiddenDriverRunKeys = []string{
+	"id",
+	"tickStartedAt",
+	"tickEndedAt",
+}
+
+var shipForbiddenDriverStreamKeys = []string{
+	"driverBatchId",
+	"driverRunId",
+	"workOnCurrentBranch",
+}
+
+func TestFixtureInventoryCoverage(t *testing.T) {
+	t.Helper()
+	root := fixturesRoot
+	for _, source := range requiredSources {
+		dir := filepath.Join(root, source)
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("missing source directory %s: %v", dir, err)
+		}
+		cov, ok := inventory[source]
+		if !ok {
+			t.Fatalf("inventory missing entry for source %q", source)
+		}
+		for _, name := range cov.healthy {
+			path := filepath.Join(dir, name)
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("missing healthy fixture %s: %v", path, err)
+			}
+		}
+		for _, name := range cov.degraded {
+			path := filepath.Join(dir, name)
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("missing degraded/unavailable fixture %s: %v", path, err)
+			}
+		}
+	}
+	readme := filepath.Join(root, "README.md")
+	if _, err := os.Stat(readme); err != nil {
+		t.Fatalf("missing fixture inventory readme: %v", err)
+	}
+}
+
+func TestFixtureJSONSyntax(t *testing.T) {
+	err := filepath.WalkDir(fixturesRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".json":
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if !json.Valid(data) {
+				t.Errorf("%s: invalid JSON", path)
+			}
+		case ".jsonl":
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			for i, line := range lines {
+				if line == "" {
+					continue
+				}
+				if !json.Valid([]byte(line)) {
+					t.Errorf("%s:%d: invalid JSONL line", path, i+1)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFixturePrivacySanitization(t *testing.T) {
+	patterns := secretPatterns()
+	homePatterns := homePathPatterns()
+	err := filepath.WalkDir(fixturesRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := filepath.Ext(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		if ext == ".json" || ext == ".txt" {
+			if strings.Contains(content, operatorDisplayName) {
+				t.Errorf("%s: contains operator display name %q", path, operatorDisplayName)
+			}
+		}
+		for _, p := range patterns {
+			for _, match := range p.re.FindAllString(content, -1) {
+				if isPlaceholderSecret(match) {
+					continue
+				}
+				t.Errorf("%s: matches secret pattern %s (%q)", path, p.name, match)
+			}
+		}
+		for _, p := range homePatterns {
+			if p.MatchString(content) {
+				t.Errorf("%s: matches operator home path pattern", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShipFixtureContracts(t *testing.T) {
+	shipDir := filepath.Join(fixturesRoot, "ship")
+	files, err := filepath.Glob(filepath.Join(shipDir, "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		assertNoForbiddenKeys(t, path, doc, shipForbiddenKeys)
+		assertNoAbsolutePaths(t, path, doc)
+	}
+	assertShipWorkflowList(t, filepath.Join(shipDir, "workflow-list-healthy.json"))
+	assertShipDriverList(t, filepath.Join(shipDir, "driver-list-healthy.json"))
+}
+
+func TestDemoClockAnchoredHealthyFixtures(t *testing.T) {
+	healthyJSON := []string{
+		filepath.Join(fixturesRoot, "ship", "workflow-list-healthy.json"),
+		filepath.Join(fixturesRoot, "ship", "workflow-status-healthy.json"),
+		filepath.Join(fixturesRoot, "ship", "driver-list-healthy.json"),
+		filepath.Join(fixturesRoot, "dossier", "task-get-healthy.json"),
+		filepath.Join(fixturesRoot, "github", "graphql-inventory-healthy.json"),
+		filepath.Join(fixturesRoot, "tracelens", "analysis-findings.json"),
+		filepath.Join(fixturesRoot, "tower", "ls-available.json"),
+	}
+	for _, path := range healthyJSON {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), demoClockAnchor[:10]) {
+			t.Errorf("%s: healthy fixture should anchor timestamps to demo clock date 2026-07-13", path)
+		}
+	}
+}
+
+func TestToolhealthFixturesDistinguishFrictionAndIncident(t *testing.T) {
+	friction, err := os.ReadFile(filepath.Join(fixturesRoot, "toolhealth", "accumulated-friction.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(friction), "accumulated_friction") {
+		t.Fatal("accumulated-friction.txt must declare accumulated_friction kind")
+	}
+	if strings.Contains(string(friction), "LIVE INCIDENT") {
+		t.Fatal("accumulated-friction.txt must not declare a live incident")
+	}
+	incident, err := os.ReadFile(filepath.Join(fixturesRoot, "toolhealth", "live-incident.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(incident), "live_incident") {
+		t.Fatal("live-incident.txt must declare live_incident kind")
+	}
+	if !strings.Contains(string(incident), "LIVE INCIDENT") {
+		t.Fatal("live-incident.txt must visibly mark an active incident")
+	}
+}
+
+func TestDossierFixturesUseJSONRPCFraming(t *testing.T) {
+	for _, name := range []string{"task-get-healthy.json", "task-list-healthy.json", "session-failure.json"} {
+		path := filepath.Join(fixturesRoot, "dossier", name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if envelope["jsonrpc"] == nil {
+			t.Errorf("%s: missing jsonrpc field", path)
+		}
+		if envelope["result"] == nil && envelope["error"] == nil {
+			t.Errorf("%s: JSON-RPC envelope needs result or error", path)
+		}
+	}
+}
+
+func TestGitHubDetailStateFixtures(t *testing.T) {
+	complete, err := os.ReadFile(filepath.Join(fixturesRoot, "github", "pr-detail-complete.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(complete), `"detail_state": "complete"`) {
+		t.Fatal("pr-detail-complete.json must set detail_state complete")
+	}
+	truncated, err := os.ReadFile(filepath.Join(fixturesRoot, "github", "pr-detail-truncated.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(truncated), `"detail_state": "truncated"`) {
+		t.Fatal("pr-detail-truncated.json must set detail_state truncated")
+	}
+}
+
+type secretPattern struct {
+	name string
+	re   *regexp.Regexp
+}
+
+func secretPatterns() []secretPattern {
+	return []secretPattern{
+		{name: "github_token", re: regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9]{20,}`)},
+		{name: "cursor_api_key", re: regexp.MustCompile(`(?i)CURSOR_API_KEY\s*=\s*[^\s#]+`)},
+		{name: "bearer_token", re: regexp.MustCompile(`(?i)authorization:\s*bearer\s+[A-Za-z0-9._-]{20,}`)},
+		{name: "openai_anthropic_key", re: regexp.MustCompile(`sk-(?:ant-)?[A-Za-z0-9]{20,}`)},
+		{
+			name: "generic_env_secret",
+			re:   regexp.MustCompile(`(?i)(?:^|[\s;])(?:[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*=\s*[^\s#]+`),
+		},
+		{name: "private_key_pem", re: regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
+	}
+}
+
+func isPlaceholderSecret(match string) bool {
+	lower := strings.ToLower(match)
+	for _, ok := range []string{"<redacted>", "<placeholder>", "example", "synthetic", "{", "your_", "xxx"} {
+		if strings.Contains(lower, ok) {
+			return true
+		}
+	}
+	if strings.HasSuffix(strings.TrimSpace(match), "=") {
+		return true
+	}
+	val := match
+	if i := strings.Index(match, "="); i >= 0 {
+		val = strings.TrimSpace(match[i+1:])
+	}
+	return val == "" || val == "..." || val == "redacted"
+}
+
+func homePathPatterns() []*regexp.Regexp {
+	return []*regexp.Regexp{
+		regexp.MustCompile(`[A-Za-z]:\\Users\\[^\\]+\\`),
+		regexp.MustCompile(`/home/[^/\s]+/`),
+		regexp.MustCompile(`/Users/[^/\s]+/`),
+	}
+}
+
+func assertNoForbiddenKeys(t *testing.T, path string, v any, forbidden []string) {
+	t.Helper()
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			for _, f := range forbidden {
+				if k == f {
+					t.Errorf("%s: forbidden key %q", path, k)
+				}
+			}
+			assertNoForbiddenKeys(t, path, child, forbidden)
+		}
+	case []any:
+		for _, child := range x {
+			assertNoForbiddenKeys(t, path, child, forbidden)
+		}
+	}
+}
+
+func assertNoAbsolutePaths(t *testing.T, path string, v any) {
+	t.Helper()
+	absPath := regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			if s, ok := child.(string); ok {
+				if k == "path" && absPath.MatchString(s) && !strings.HasPrefix(s, "/tmp/") {
+					t.Errorf("%s: absolute path in %q: %s", path, k, s)
+				}
+			}
+			assertNoAbsolutePaths(t, path, child)
+		}
+	case []any:
+		for _, child := range x {
+			assertNoAbsolutePaths(t, path, child)
+		}
+	}
+}
+
+func assertShipWorkflowList(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Runs []struct {
+			ID      string `json:"id"`
+			Repo    string `json:"repo"`
+			DocPath string `json:"docPath"`
+			Status  string `json:"status"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Runs) == 0 {
+		t.Fatal("workflow-list-healthy.json must contain runs")
+	}
+	run := envelope.Runs[0]
+	if run.DocPath == "" {
+		t.Fatal("workflow run must include docPath linkage")
+	}
+	if !strings.HasPrefix(run.DocPath, "docs/") {
+		t.Fatalf("docPath must be a neutral relative path, got %q", run.DocPath)
+	}
+}
+
+func assertShipDriverList(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		V    int              `json:"v"`
+		Runs []map[string]any `json:"runs"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.V != 1 {
+		t.Fatalf("driver list envelope version want 1 got %d", envelope.V)
+	}
+	if len(envelope.Runs) == 0 {
+		t.Fatal("driver-list-healthy.json must contain runs")
+	}
+	for _, run := range envelope.Runs {
+		for _, k := range shipForbiddenDriverRunKeys {
+			if _, ok := run[k]; ok {
+				t.Errorf("driver run must not expose %q", k)
+			}
+		}
+		batches, _ := run["batches"].([]any)
+		for _, batch := range batches {
+			bm, _ := batch.(map[string]any)
+			streams, _ := bm["streams"].([]any)
+			for _, stream := range streams {
+				sm, _ := stream.(map[string]any)
+				for _, k := range shipForbiddenDriverStreamKeys {
+					if _, ok := sm[k]; ok {
+						t.Errorf("driver stream must not expose %q", k)
+					}
+				}
+				specPath, _ := sm["specPath"].(string)
+				if specPath == "" {
+					t.Fatal("driver stream must include specPath linkage")
+				}
+				if !strings.HasPrefix(specPath, "docs/") {
+					t.Fatalf("specPath must be neutral relative, got %q", specPath)
+				}
+			}
+		}
+	}
+}

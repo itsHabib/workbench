@@ -1,0 +1,52 @@
+{
+  "repository": {
+    "nameWithOwner": "example-org/example-repo"
+  },
+  "number": 55,
+  "title": "Large change with many checks",
+  "url": "https://github.com/example-org/example-repo/pull/55",
+  "author": {
+    "login": "synthetic-author"
+  },
+  "baseRefName": "main",
+  "headRefName": "feature/large-change",
+  "headRefOid": "fedcba9876543210fedcba9876543210fedcba98",
+  "isDraft": false,
+  "state": "OPEN",
+  "createdAt": "2026-07-13T09:00:00.000Z",
+  "updatedAt": "2026-07-13T12:00:00.000Z",
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "BLOCKED",
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviewRequests": {
+    "totalCount": 0
+  },
+  "detail_state": "truncated",
+  "statusCheckRollup": {
+    "contexts": {
+      "pageInfo": {
+        "hasNextPage": true,
+        "endCursor": "Y3Vyc29yOmNoZWNrczoxMDA="
+      },
+      "nodes": [
+        {
+          "__typename": "CheckRun",
+          "name": "ci",
+          "status": "COMPLETED",
+          "conclusion": "FAILURE"
+        }
+      ]
+    }
+  },
+  "reviewThreads": {
+    "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+    },
+    "nodes": [
+      {
+        "isResolved": false
+      }
+    ]
+  }
+}

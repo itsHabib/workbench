@@ -1,0 +1,18 @@
+Tool Health Board — LIVE INCIDENT
+Generated: 2026-07-13T12:00:00.000Z
+
+!!! ACTIVE INCIDENT !!!
+Tool: github
+Severity: P1
+Started: 2026-07-13T11:55:00.000Z
+Status: auth failure — token rejected by API
+
+Recent events:
+- 2026-07-13T11:55:00Z github: authentication failed (HTTP 401)
+- 2026-07-13T11:56:00Z github: retry failed
+
+Kind: live_incident
+Action: refresh credentials and retry gh auth login
+
+Accumulated friction (background):
+| ship | P3 | 1 | 2026-07-11T10:00:00Z | Minor CLI flag confusion |
