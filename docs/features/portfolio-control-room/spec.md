@@ -141,7 +141,7 @@ docs/features/portfolio-control-room/
 
 ### D6 — Tracelens remains stateless
 
-**Choice:** analyze up to the five newest eligible Ship traces in the slow enrichment lane and retain results only in the current snapshot. Drill-down reuses that diagnosis or invokes `tracelens ship -json <run>` synchronously with a 10-second bound and a visible loading state. A timeout yields an unavailable diagnosis. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
+**Choice:** analyze up to the five newest eligible Ship traces in the slow enrichment lane and retain results only in the current snapshot. A trace is eligible when it belongs to a normalized workflow run (not a driver container), the Ship receipt is current, the run is terminal, Ship reports trace evidence available, and `updated_at` is within the preceding 14 days. Selection sorts `updated_at` descending, then stable run ID. Drill-down reuses that diagnosis or invokes `tracelens ship -json <run>` synchronously with a 10-second bound and a visible loading state. A timeout yields an unavailable diagnosis. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
 
 **Alternative:** invent recent-analysis or provider-comparison APIs. Rejected: Tracelens exposes neither. Current Ship decoders do not record per-step cost/tokens/latency, so cost hotspots and honest provider comparison remain unavailable for those traces.
 
@@ -326,7 +326,7 @@ Derived labels are explicitly Control Room policy, not producer state.
 - `on_fire/stalled_active`: `pending|running|dispatching|dispatched` with no `updated_at` movement for 15 minutes. The UI labels this “Control Room policy: no source update for 15m,” not “Ship stale.”
 - `live`: source movement within 3 days, an active run, or a linked open PR.
 - `idle`: open work with no movement for 3–14 days.
-- `stale_claim`: Dossier `claimed|in_progress` older than 14 days with no linked open PR/recent run.
+- `stale_claim`: Dossier `claimed|in_progress` whose `updated_at` is older than 14 days with no linked open PR and no linked current Ship run updated within the preceding 14 days. Linkage is explicit: a run's owner-reported task/spec identity equals the Dossier task ID or slug, or the task carries an artifact URL for that exact PR/run. Title/body substring guesses never create a link.
 - `blocked_no_path`: blocked task with no resolvable dependency/artifact explaining a path forward.
 
 ### Ranking rules
@@ -345,7 +345,7 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `pr.merge_ready` | actionable | 65 | Non-draft; every visible check completed successfully; `reviewDecision == APPROVED`; `mergeable == MERGEABLE`; unresolved thread count is zero; GitHub receipt is current. Empty or unknown never qualifies. |
 | `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
 | `task.ready` | actionable | 40 | Todo task has no unresolved dependencies. |
-| `pr.checks_running` | waiting | 30 | Work is externally in progress. |
+| `pr.checks_running` | waiting | 30 | GitHub receipt is current; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
 
 `tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when elapsed time since the last occurrence is at most 72 hours, 1 when it is greater than 72 and at most 336 hours, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
