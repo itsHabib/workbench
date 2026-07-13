@@ -70,10 +70,11 @@ func TestRunOperatorStatePrecedenceForUnattendedRuns(t *testing.T) {
 		{ID: "status-wait", Status: "waiting", Phase: "review_gate", UpdatedAt: now.Add(-time.Hour)},
 		{ID: "stalled", Status: "running", UpdatedAt: now.Add(-15 * time.Minute)},
 		{ID: "failed", Status: "failed", UpdatedAt: now},
+		{ID: "timed-out", Status: "timed_out", UpdatedAt: now},
 		{ID: "done", Status: "done", UpdatedAt: now},
 	}
 	got := policy.ApplyPolicy(snapshot, now)
-	want := []model.OperatorState{model.OperatorProgressing, model.OperatorWaiting, model.OperatorWaiting, model.OperatorStalled, model.OperatorFailed, model.OperatorDone}
+	want := []model.OperatorState{model.OperatorProgressing, model.OperatorWaiting, model.OperatorWaiting, model.OperatorStalled, model.OperatorFailed, model.OperatorFailed, model.OperatorDone}
 	for i := range want {
 		if got.Runs[i].OperatorState != want[i] || got.Runs[i].NextAction == "" {
 			t.Fatalf("run %s = state %q action %q", got.Runs[i].ID, got.Runs[i].OperatorState, got.Runs[i].NextAction)

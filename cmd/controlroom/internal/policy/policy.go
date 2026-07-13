@@ -110,7 +110,7 @@ func waitToken(value string) bool {
 
 func terminalRun(status string) (model.OperatorState, bool) {
 	switch strings.ToLower(status) {
-	case "failed", "error", "cancelled", "canceled":
+	case "failed", "error", "cancelled", "canceled", "timed_out":
 		return model.OperatorFailed, true
 	case "done", "completed", "succeeded", "success":
 		return model.OperatorDone, true
