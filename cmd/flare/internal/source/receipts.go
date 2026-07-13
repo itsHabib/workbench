@@ -20,7 +20,7 @@ type receipt struct {
 	TerminalAt string `json:"terminal_at"`
 }
 
-// parseReceipts lifts failed and cancelled ship receipts. A receipt's key
+// parseReceipts lifts failed, cancelled, and parked ship receipts. A receipt's key
 // repeats across outcomes (pending -> merged), so the dedupe ID is
 // key+outcome. Receipts carry no hash chain; the returned last-hash is "".
 func parseReceipts(src config.Source, lines []string) ([]event.Event, string, error) {
@@ -71,6 +71,11 @@ func receiptSeverity(outcome string) (event.Severity, bool) {
 		return event.SevFailed, true
 	case "cancelled":
 		return event.SevCancelled, true
+	case "parked":
+		// A driver run parked at awaiting_judgment — the ship-side analogue of a
+		// gate escalation ("a producer parked for judgment"): page-worthy, above
+		// failed. Emitted by ship's receipts writer as outcome "parked".
+		return event.SevEscalate, true
 	}
 	return 0, false
 }

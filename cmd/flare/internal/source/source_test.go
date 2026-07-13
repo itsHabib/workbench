@@ -87,9 +87,9 @@ func TestTruncationAlertsAndResweeps(t *testing.T) {
 	}
 }
 
-func TestReceiptsLiftFailedAndCancelledOnly(t *testing.T) {
+func TestReceiptsLiftFailedCancelledAndParked(t *testing.T) {
 	lines := ""
-	for _, o := range []string{"succeeded", "failed", "cancelled", "merged", "pending"} {
+	for _, o := range []string{"succeeded", "failed", "cancelled", "merged", "pending", "parked"} {
 		lines += fmt.Sprintf(`{"key":"wf_%s","source":"ship-run","outcome":"%s"}`+"\n", o, o)
 	}
 	p := filepath.Join(t.TempDir(), "receipts.jsonl")
@@ -101,11 +101,34 @@ func TestReceiptsLiftFailedAndCancelledOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("want failed + cancelled, got %d: %+v", len(events), events)
+	// failed, cancelled, parked lift; succeeded/merged/pending stay dropped.
+	if len(events) != 3 {
+		t.Fatalf("want failed + cancelled + parked, got %d: %+v", len(events), events)
 	}
-	if events[0].ID != "wf_failed:failed" {
-		t.Fatalf("receipt dedupe ID must be key+outcome, got %q", events[0].ID)
+	byID := make(map[string]event.Event, len(events))
+	for _, e := range events {
+		byID[e.ID] = e
+	}
+	failed, ok := byID["wf_failed:failed"]
+	if !ok {
+		t.Fatalf("failed receipt must still lift; got %+v", events)
+	}
+	if failed.Severity != event.SevFailed {
+		t.Fatalf("failed severity must stay SevFailed, got %v", failed.Severity)
+	}
+	cancelled, ok := byID["wf_cancelled:cancelled"]
+	if !ok {
+		t.Fatalf("cancelled receipt must still lift; got %+v", events)
+	}
+	if cancelled.Severity != event.SevCancelled {
+		t.Fatalf("cancelled severity must stay SevCancelled, got %v", cancelled.Severity)
+	}
+	parked, ok := byID["wf_parked:parked"]
+	if !ok {
+		t.Fatalf("park receipt must lift with dedupe ID key+outcome; got %+v", events)
+	}
+	if parked.Severity != event.SevEscalate {
+		t.Fatalf("a park is page-worthy (SevEscalate), got %v", parked.Severity)
 	}
 }
 
