@@ -25,9 +25,29 @@ Prove that the locked Phase 2 model can tell the complete healthy-to-on-fire por
 
 Add a `main` package at `cmd/controlroom` and a command-private `cmd/controlroom/internal/web` package. `web` may import `internal/model` and accept a snapshot supplier; `main` may import `internal/demo` and `internal/web`. Neither package imports Ship, Dossier, GitHub, Tracelens, toolhealth, Tower, or their stores.
 
-Production code remains standard-library-only: `net/http`, `embed`, `encoding/json`, `flag`, and normal synchronization primitives are allowed. The shell uses one external JavaScript module and one external stylesheet embedded in the binary. Do not add React, Vite, npm, a CDN, inline script/style, a database, filesystem asset serving, or a generic UI framework.
+Production code remains standard-library-only: `net/http`, `embed`, `encoding/json`, `flag`, and normal synchronization primitives are allowed. The shell loads one JavaScript ES module (`/static/app.js`) and one stylesheet (`/static/styles.css`) as separate same-origin requests; both assets are embedded in the binary. Do not add React, Vite, npm, a CDN, inline script/style, a database, filesystem asset serving, or a generic UI framework.
 
 Phase 3 owns the demo command, static presentation, and the minimum versioned HTTP seam needed to exercise it. Phase 5 will replace the synchronous demo publisher with real collection/coalescing and immutable-generation orchestration. Keep that seam narrow: the browser consumes a snapshot supplier and a refresh callback, not global demo state.
+
+The `web` package owns these seams so Phase 5 can substitute its publisher without changing handlers or browser code:
+
+```go
+type SnapshotSupplier func() model.Snapshot
+
+type RefreshRequest struct {
+    Mode    string
+    Trigger string
+}
+
+type RefreshReceipt struct {
+    BaselineVersion uint64
+    Status          string // started | joined
+}
+
+type RefreshFunc func(context.Context, RefreshRequest) (RefreshReceipt, error)
+```
+
+The Phase 3 demo callback synchronously republishes before returning `status = "started"`; Phase 5 may start or join background collection behind the same receipt contract. The handler obtains snapshots only through `SnapshotSupplier` and performs refresh work only through `RefreshFunc`.
 
 ## Command contract
 
@@ -44,7 +64,7 @@ Keep command parsing behind a testable `run(args, stdout, stderr)`-style seam. D
 
 ## Demo HTTP seam
 
-The server owns an injected snapshot supplier and a tiny demo-only monotonic publisher. The initial immutable demo snapshot is version 1. Each accepted refresh republishes the same fixed-clock story at the next version; it does not mutate producer state or read the wall clock.
+`main` wires an injected snapshot supplier and a tiny demo-only monotonic publisher into the server. The initial immutable demo snapshot is version 1. Each accepted refresh republishes the same fixed-clock story at the next version; it does not mutate producer state or read the wall clock.
 
 Required routes:
 
@@ -62,12 +82,14 @@ Every other path returns `404`; unsupported methods return `405` with `Allow`. H
 Implement the accepted shell security posture now because the browser contract depends on it:
 
 - reject any HTTP `Host` other than the bound `127.0.0.1:<port>`;
-- set the exact CSP from the TDD (`default-src 'none'`; self-only script/style/connect; data images; no base/form/frame ancestors);
+- set `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 - create a process-random 256-bit `controlroom_csrf` cookie with `SameSite=Strict; Path=/` and no `HttpOnly`;
-- require POST JSON content type, exact loopback `Origin`, matching cookie/header using constant-time comparison, and body `{"mode":"demo","trigger":"manual"}`;
+- validate POSTs in this order: exact JSON media type, exact loopback `Origin`, matching cookie/header using constant-time comparison, then body `{"mode":"demo","trigger":"manual"}`; return `403` at the first failure and do not read or validate later layers;
 - emit no CORS headers and execute no callback on a rejected request.
 
 Tests inject the token source. Runtime token generation failure is fatal at construction. Phase 6 will adversarially expand this coverage; Phase 3 must not knowingly introduce an insecure temporary route.
+
+The fixed cookie name is the accepted v1 contract and cookies are host-scoped rather than port-scoped. Manual/browser validation therefore runs one Control Room server per browser profile; concurrent `:0` instances use separate temporary profiles or private contexts. Go handler tests remain independently cookie-scoped through separate clients.
 
 ## Application shell
 
@@ -79,10 +101,10 @@ The shell has four persistent regions:
 
 1. A compact masthead: product name, `DEMO` badge, generated time/version, source-health summary, refresh button, and live-region refresh status.
 2. A filter rail: repository, status/liveness, severity/category, and a clear-filters action. Filters are client-side presentation filters over the current immutable snapshot and never alter API queries.
-3. A prioritized attention band: counts for urgent/actionable/waiting/informational and the top three items with score, policy label, reason, repository/project, and safe evidence links.
+3. A prioritized attention band: counts for urgent/actionable/waiting/informational and up to three current consequence items (urgent, actionable, then waiting) with score, policy label, reason, repository/project, and safe evidence links. Show every qualifying consequence item when fewer than three exist. When no urgent/actionable/waiting item exists, keep the count strip visible and render “Nothing urgent in this snapshot”; informational items remain discoverable in their source panels rather than being promoted into the consequence band.
 4. A six-panel grid, in this order: Runs, Tasks, Pull requests, Reliability, Tool health, Sources.
 
-At desktop width the grid uses two columns with attention spanning both. At widths below 760px it becomes one column; the masthead/filter controls wrap without horizontal page scrolling. Tables may turn into labeled row cards rather than forcing a tiny table. Use a restrained dark observability palette, high-contrast type, tabular numerals for scores/times, and category color as a redundant accent rather than the sole status signal. Honor `prefers-reduced-motion`.
+At desktop width the grid uses two columns with attention spanning both. At widths below 760px it becomes one column; the masthead/filter controls wrap without horizontal page scrolling, and tabular rows must render as labeled row cards. Use a restrained dark observability palette, high-contrast type, tabular numerals for scores/times, and category color as a redundant accent. Status is conveyed by a text label first; no color-only or icon-only encoding is permitted. Honor `prefers-reduced-motion`.
 
 ### Panel content
 
@@ -97,11 +119,13 @@ Every derived liveness/attention label is visibly prefixed or described as “Co
 
 ### Drawers and interaction
 
-Clicking a run or PR row opens a keyboard-accessible native `<dialog>` drawer. Enter/Space activates the row action, Escape closes, focus returns to the opener, a visible close button is first in the dialog, and the background is not keyboard-reachable while modal.
+Clicking a run or PR row opens a keyboard-accessible native `<dialog>` drawer through `showModal()`. Enter/Space activates the row action, Escape closes, focus returns to the opener, a visible close button is first in the dialog, and the background is not keyboard-reachable while modal. Rely on the native dialog focus trap; do not layer a custom focus trap on top of it.
 
-The run drawer shows normalized run fields, requested/actual runtime availability, evidence links, failure facts, and any matching diagnosis/findings already present in the snapshot. It never invokes Tracelens. The PR drawer shows the normalized PR, checks, review/merge facts, truncation state, next factual condition, and its safe HTTPS link. Do not add hidden GETs or subprocess-backed detail routes in Phase 3.
+The run drawer shows normalized run fields, requested/actual runtime availability, evidence links, failure facts, and any matching diagnosis/findings already present in the snapshot. It never invokes Tracelens. The PR drawer is client-side-only and renders the normalized PR, checks, review/merge facts, truncation state, next factual condition, and safe HTTPS link from the snapshot entity already in browser memory. Neither drawer makes an additional API call. Do not add hidden GETs or subprocess-backed detail routes in Phase 3.
 
-Refresh disables the button, announces progress, POSTs with the cookie/header, then polls snapshot GET from 250ms up to 2s until the version exceeds the baseline. A failed request leaves the previous snapshot visible, marks the shell disconnected, and offers retry. Successful refresh preserves valid filters and closes a drawer only if its exact entity no longer exists.
+On `DOMContentLoaded`, the shell renders loading state, reads the CSRF cookie, and immediately performs the `demo/manual` refresh POST before fetching or rendering panel data. Refresh disables the button, announces progress, POSTs with the cookie/header, then polls snapshot GET from 250ms up to 2s until the version exceeds the returned baseline. A failed request leaves any previous snapshot visible, marks the shell disconnected, and offers retry.
+
+Successful refresh rebuilds repository/status/severity filter options from values present in the new snapshot. A selected filter remains valid only when its exact value still appears in that dimension; an invalid value resets to `all` and the clear action remains available. A valid filter that happens to produce no cross-dimension matches is retained and renders filtered-empty. Refresh closes a drawer only if its exact entity no longer exists.
 
 ## Loading, empty, degraded, and disconnected behavior
 
@@ -121,7 +145,7 @@ All displayed relative ages are computed from `snapshot.generated_at`, not `Date
 
 Minimum accessibility contract:
 
-- one `h1`, ordered heading levels, landmark regions, explicit labels for every control, and a skip link;
+- one `h1`, ordered heading levels, landmark regions, explicit labels for every control, and a “Skip to main content” link targeting `#main-content` as the first focusable element;
 - visible `:focus-visible` treatment and full keyboard operation;
 - `aria-live="polite"` for refresh/disconnect status, not for whole-panel churn;
 - buttons remain buttons and row actions have accessible names;
@@ -134,18 +158,19 @@ Add Go tests for:
 - command parsing, demo-only rejection, loopback enforcement, `:0` canonical URL, and indented snapshot JSON;
 - exact route/method matrix, HEAD behavior, content types, no-store/nosniff/CSP headers, Host rejection, and no directory traversal;
 - CSRF cookie shape; missing/wrong origin, content type, cookie, header, body, and token; accepted refresh version bump; rejected requests do not call refresh;
-- snapshot supplier errors/encoding failures fail safely without leaking internals;
+- snapshot JSON encoding failures fail safely without leaking internals;
 - embedded shell contains no inline script/style, references only embedded assets, exposes all six named panels, and includes required semantic/accessibility anchors;
 - source strings containing HTML are encoded in JSON and never embedded into server-rendered markup;
+- an automated source scan confirms `app.js` contains no `innerHTML`, `outerHTML`, or `insertAdjacentHTML` data-rendering escape hatch;
 - deterministic demo command output still equals the Phase 2 contract.
 
 Run:
 
 ```text
 gofmt -l .
+go vet ./...
 golangci-lint run ./...
 go test ./...
-go vet ./...
 go build ./...
 git diff --check
 ```
@@ -169,7 +194,7 @@ Temporary screenshots may be attached to the implementation PR for review. Commi
 - On-demand diagnosis POST/GET, PR detail GET, Tracelens invocation, report generation, or arbitrary run/PR lookups outside the current snapshot.
 - Persistent storage, analytics, telemetry, authentication, remote binding, CORS, WebSocket, SSE, service installation, or automatic browser launch.
 - `vscode://file/`, `file://`, arbitrary filesystem paths, workspace symlink resolution, or copy-to-clipboard APIs.
-- Playwright/npm/Node files, committed final screenshots, runbook, demo script, fresh-checkout proof, or retrospective; Phase 6 owns those deliverables.
+- Playwright/npm/Node files, committed final screenshots, runbook, demo script, fresh-checkout proof, or retrospective. Phase 6 owns Playwright-level adversarial security flows and `filepath`/symlink path-containment integration tests; Phase 3 still owns the Go `httptest` CSRF, Host, method, and CSP coverage listed above.
 
 ## Conflict scan and runtime
 
