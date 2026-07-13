@@ -1,4 +1,4 @@
-**Status**: proposed
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-real-composition` (id: `tsk_01KXDW31W2ZBY7SJ84SMCXJ2EF`), [`../spec.md`](../spec.md), Phase 4 adapter contracts
