@@ -232,7 +232,8 @@ function renderRuns(rows) {
 }
 
 function runRow(run) {
-  return actionRow(`Open run ${run.id}`, () => openRun(run), [
+  const diagnosis = runDiagnosis(state.snapshot, run.id);
+  return actionRow(`Open run ${run.id}`, () => openRun(run, diagnosis), [
     ["Run", `${run.kind} · ${run.id}`], ["Repository / project", run.repository || run.project || "Unknown"],
     ["Producer status", run.status], ["Operator state", run.operator_state || "unknown"], ["Current stage", run.phase || "Unknown"],
     ["Last durable update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"], ["Failure class", run.failure || "None"],
@@ -318,8 +319,9 @@ function cell(label, value) {
 
 function statusClass(value) {
   const normalized = String(value).toLowerCase();
-  for (const [needle, suffix] of [["on_fire", "on-fire"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
-    if (normalized.includes(needle)) return `status status-${suffix}`;
+  const tokens = normalized.split(/[^a-z0-9_]+/).filter(Boolean);
+  for (const [needle, suffix] of [["on_fire", "on-fire"], ["blocked_no_path", "blocked"], ["stale_claim", "stale"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
+    if (tokens.includes(needle)) return `status status-${suffix}`;
   }
   return "";
 }
@@ -363,14 +365,33 @@ function highestSeverity(findings) {
 }
 function sourceUsability(value) { return value === "unavailable" ? "Other source panels remain usable" : value === "stale" ? "Retained rows remain visible with stale qualification" : value === "degraded" ? "Qualified data remains usable" : "Current source facts are usable"; }
 
-function openRun(run) {
+function runDiagnosis(snapshot, runID) {
+  const record = snapshot?.reliability.find((item) => item.run_id === runID);
+  if (!record) return null;
+  const receipts = snapshot.sources.filter((source) => source.source === "tracelens");
+  const current = receipts.length === 1 && ["ok", "degraded"].includes(receipts[0].state);
+  return {
+    record,
+    freshness: current ? "Current diagnosis" : "Stale retained diagnosis — do not treat as current generation",
+  };
+}
+
+function openRun(run, diagnosis) {
+  const record = diagnosis?.record;
+  const diagnosisRows = record ? [
+    ["Tracelens freshness", diagnosis.freshness],
+    ["Tracelens verdict", `${record.verdict} · ${record.tier} · ${record.dialect}`],
+    ["Tracelens findings", record.findings.length ? record.findings.map((finding) => `${finding.severity}: ${finding.title} — ${finding.evidence}`).join("; ") : "None"],
+    ["Input tokens", availability(record.input_tokens)], ["Output tokens", availability(record.output_tokens)],
+    ["Cost USD", availability(record.cost_usd)], ["Latency ms", availability(record.latency_ms)],
+  ] : [["Tracelens diagnosis", "Unavailable for this run"]];
   openDrawer("Run details", "Control Room policy + producer facts", [
     ["ID", run.id], ["Kind", run.kind], ["Repository", run.repository || "Unknown"], ["Project", run.project || "Unknown"],
     ["Producer status", run.status], ["Operator state", run.operator_state || "Unknown"], ["Control Room policy liveness", run.liveness || "Unknown"], ["Current stage", run.phase || "Unknown"],
     ["Last durable owner update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"],
     ["Requested runtime", availability(run.requested.runtime)], ["Requested provider", availability(run.requested.provider)],
     ["Actual runtime", availability(run.actual.runtime)], ["Actual provider", availability(run.actual.provider)],
-    ["Failure class", run.failure || "None"], ["Evidence", linksText(run.evidence)],
+    ["Failure class", run.failure || "None"], ["Evidence", linksText(run.evidence)], ...diagnosisRows,
   ], { type: "run", id: run.id });
 }
 
@@ -385,8 +406,9 @@ function openPullRequest(pr) {
 }
 
 function openDrawer(title, kicker, rows, entity) {
-  state.opener = document.activeElement;
   const drawer = byId("drawer");
+  const opening = !drawer.open;
+  if (opening) state.opener = document.activeElement;
   drawer.dataset.entityType = entity.type;
   drawer.dataset.entityId = entity.id;
   byId("drawer-title").textContent = title;
@@ -400,8 +422,10 @@ function openDrawer(title, kicker, rows, entity) {
     list.append(detail);
   });
   replaceChildren(byId("drawer-body"), list);
-  drawer.showModal();
-  byId("drawer-close").focus();
+  if (opening) {
+    drawer.showModal();
+    byId("drawer-close").focus();
+  }
 }
 
 function closeDrawer() { byId("drawer").close(); }
@@ -410,13 +434,20 @@ function restoreDrawerFocus() { if (state.opener && state.opener.isConnected) st
 function reconcileOpenDrawer(snapshot) {
   const drawer = byId("drawer");
   if (!drawer.open) return;
-  const collections = { run: snapshot.runs, pr: snapshot.pull_requests };
-  const collection = collections[drawer.dataset.entityType];
-  if (!collection) {
-    closeDrawer();
+  if (drawer.dataset.entityType === "run") {
+    const run = snapshot.runs.find((entity) => entity.id === drawer.dataset.entityId);
+    if (!run) return closeDrawer();
+    const diagnosis = runDiagnosis(snapshot, run.id);
+    openRun(run, diagnosis);
     return;
   }
-  if (!collection.some((entity) => entity.id === drawer.dataset.entityId)) closeDrawer();
+  if (drawer.dataset.entityType === "pr") {
+    const pr = snapshot.pull_requests.find((entity) => entity.id === drawer.dataset.entityId);
+    if (!pr) return closeDrawer();
+    openPullRequest(pr);
+    return;
+  }
+  closeDrawer();
 }
 
 function safeLink(link) {

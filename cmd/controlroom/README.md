@@ -37,7 +37,7 @@ Use the same source flags with `snapshot --mode real --json` for one bounded col
 
 Production code uses only the Go standard library and embedded same-origin assets. The browser reads an immutable snapshot supplier and calls a narrow refresh callback. Source adapters invoke owner CLIs/MCP but never read producer stores directly, mutate planning or workflow state, or expose arbitrary local files.
 
-Runs expose owner status alongside operator state, current stage, exact and relative last durable update, failure class, evidence, and a conservative next action. Waiting owner boundaries take precedence over the stall timer; failures never imply retry or resume is safe. Pinned Playwright automation, committed screenshots, and the full operator runbook are part of final hardening.
+Runs expose owner status alongside operator state, current stage, exact and relative last durable update, failure class, evidence, and a conservative next action. Waiting owner boundaries take precedence over the stall timer; failures never imply retry or resume is safe. Pinned Playwright automation, committed screenshots, and the full [operator runbook](../../docs/features/portfolio-control-room/runbook.md) live with the feature documentation.
 
 ## Validate
 
@@ -47,5 +47,9 @@ go vet ./...
 golangci-lint run ./...
 go test ./...
 go build ./...
+npm --prefix cmd/controlroom/e2e ci
+npm --prefix cmd/controlroom/e2e test
 git diff --check
 ```
+
+The browser suite runs both a 1440×900 laptop viewport and a 390×844 narrow viewport. It covers demo and real-mode shells, staged core/enrichment publication, filters, drawers, partial failure, disconnection, and unattended-run operator states. Regenerate the three release screenshots with `npm --prefix cmd/controlroom/e2e run screenshots`.
