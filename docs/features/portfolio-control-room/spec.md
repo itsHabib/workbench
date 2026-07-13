@@ -35,7 +35,7 @@ The hypothesis is that a storeless, read-mostly local control room can make the 
 7. Filter by repository/project and status/severity; support manual refresh and safe 60-second automatic refresh.
 8. Provide useful loading, empty, degraded, disconnected, and partial-source-failure states.
 9. Deep-link to HTTPS PRs/reports, expose copyable local paths, and offer `vscode://file/` links only for validated workspace paths.
-10. Support `demo` mode from deterministic fixtures and `real` mode from local tools, with no write endpoints in either mode.
+10. Support `demo` mode from deterministic fixtures and `real` mode from local tools, with no producer-write endpoints in either mode; the only POST control action requests a read refresh.
 
 ### Non-functional requirements
 
@@ -45,7 +45,7 @@ The hypothesis is that a storeless, read-mostly local control room can make the 
 | Refresh | Core sources publish within a 15-second deadline. Slow diagnostic enrichers have a separate 35-second deadline and may publish a later immutable generation. Overlapping generations are cancelled. |
 | Partial failure | One failed source never removes successful panels. Last successful in-memory snapshot may remain with an explicit stale badge until process exit. |
 | Freshness | Every source and derived item carries `observed_at`; policy-derived stale labels name the threshold used. |
-| Security | Bind `127.0.0.1` only; no mutation routes; strict CSP; escape text; redact process errors; no arbitrary-file serving; no secrets/raw traces committed. |
+| Security | Bind `127.0.0.1` only; no producer mutation routes; CSRF-protect refresh; strict CSP; escape text; redact process errors; no arbitrary-file serving; no secrets/raw traces committed. |
 | Runtime dependencies | Production Go remains standard-library-only. Existing local CLIs are optional real-mode dependencies discovered from explicit config. |
 | Test dependencies | Playwright is an explicit Node/CI infrastructure cost permitted only under `cmd/controlroom/e2e`; an exact version and lockfile are maintained there and never linked into the production binary. |
 | Determinism | Demo fixtures, ranking, source degradation, and screenshots are clock-injected and repeatable. |
@@ -241,17 +241,20 @@ Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when
 
 ### HTTP API
 
-All routes are GET/HEAD; any mutation method returns `405`.
+Snapshot/detail routes are pure GET/HEAD. The sole POST is the CSRF-protected read-refresh control action; it never writes to a producer. Every other method returns `405`.
 
 ```text
 GET /                         embedded application shell
-GET /api/v1/snapshot?mode=demo|real&trigger=auto|manual&repository=&status=&severity=
+GET /api/v1/snapshot?repository=&status=&severity=
+POST /api/v1/refresh          application/json: {"mode":"demo|real","trigger":"auto|manual"}
 GET /api/v1/runs/{id}/diagnosis
 GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. `trigger` is required: the timer sends `auto`, while the refresh button sends `manual`; only `manual` may request the one Dossier breaker half-open probe. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+`snapshot` only returns the latest published `Snapshot`; its parameters are presentation filters applied after collection and cannot change source queries or state. `refresh` selects the configured adapter set (`demo` fixtures or `real` tools). Its required `trigger` distinguishes timer `auto` from button `manual`; only `manual` may request the one Dossier breaker half-open probe. A refresh cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+
+On the application-shell response, the server sets a process-random 256-bit `controlroom_csrf` cookie with `SameSite=Strict; Path=/`. Refresh requires `Content-Type: application/json`, an exact `Origin` match for the canonical `http://127.0.0.1:<port>`, and `X-Control-Room-CSRF` equal to the cookie using constant-time comparison. Missing `Origin`, token, or JSON content type returns `403` before collection or breaker state changes. No CORS headers are emitted; preflight and cross-origin requests are rejected.
 
 ### Source contracts
 
@@ -275,7 +278,7 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 
 ### Initial demo load
 
-1. Browser requests demo snapshot.
+1. Browser loads the static shell, reads the same-site CSRF cookie, and POSTs a `demo/manual` refresh with the matching header.
 2. Fixture adapter loads one healthy run, one policy-stale/on-fire run, one failed-CI PR, one blocked task, Tracelens findings, and friction records using an injected clock.
 3. Normalizer produces the same read model used by real mode.
 4. Attention policy ranks the items and the UI paints the control-room overview, source freshness, and top three actions.
@@ -307,7 +310,7 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 
 ### Automatic refresh
 
-1. Browser schedules the next refresh only after the previous one settles.
+1. Browser schedules the next CSRF-protected `auto` refresh POST only after the previous one settles.
 2. Hidden tabs pause automatic refresh; manual refresh remains available.
 3. Server coalesces duplicate calls and cancels superseded work through context.
 
@@ -391,7 +394,7 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
 - Golden ranking tests for every table rule (including informational source/detail rules), per-entity precedence/exclusivity, tie-breaker, missing-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
-- `httptest` coverage for method restrictions, CSP/Host validation, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
+- `httptest` coverage for pure snapshot GET, method restrictions, CSP/Host validation, cookie/header/Origin/content-type CSRF failures before collection, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
 
