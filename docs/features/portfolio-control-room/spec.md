@@ -228,13 +228,14 @@ controlroom serve \
   --addr 127.0.0.1:4317 \
   --workspace-root %USERPROFILE%\pers \
   --dossier-corpus %USERPROFILE%\pers\dossier-state \
+  --github-scope owner:<login> \
   --refresh 60s \
   --config <optional-json>
 
 controlroom snapshot --mode demo|real --json
 ```
 
-Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
+Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. Real mode requires one to four GitHub scope entries, each `owner:<login>` or `repo:<owner/name>`; no unscoped PR search is permitted. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
 
 Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when the startup version check fails. The GitHub adapter ignores additive fields it does not understand and treats missing known fields as `unknown` instead of failing the whole response.
 
@@ -266,9 +267,9 @@ GET /healthz                  process liveness only
 
 #### GitHub batched query
 
-After resolving the authenticated login once, the adapter pages GraphQL `search(type: ISSUE, query: "is:pr is:open author:<login>", first: 50, after: $cursor)` through `gh api graphql`. The embedded, versioned query selects each pull request's repository `nameWithOwner`, number, title, URL, author, base/head names and head OID, draft/state/timestamps, `mergeable`, `mergeStateStatus`, `reviewDecision`, `reviewRequests(first: 1) { totalCount }`, latest commit `statusCheckRollup.contexts(first: 100)` with `pageInfo`, and `reviewThreads(first: 100)` with each thread's `isResolved` plus `pageInfo`.
+After resolving the authenticated login once, the adapter pages GraphQL search through `gh api graphql` once per configured scope: `"is:pr is:open author:<login> archived:false user:<owner>"` or `"is:pr is:open author:<login> archived:false repo:<owner/name>"`. It never issues an unscoped author query, and de-duplicates node IDs across scopes. The embedded, versioned query uses `search(type: ISSUE, first: 50, after: $cursor)` and selects each pull request's repository `nameWithOwner`, number, title, URL, author, base/head names and head OID, draft/state/timestamps, `mergeable`, `mergeStateStatus`, `reviewDecision`, `reviewRequests(first: 1) { totalCount }`, latest commit `statusCheckRollup.contexts(first: 100)` with `pageInfo`, and `reviewThreads(first: 100)` with each thread's `isResolved` plus `pageInfo`.
 
-The adapter fetches at most four sequential 50-PR pages under the source's 10-second bound. A fifth page marks the GitHub receipt `degraded/truncated`; PRs beyond 200 are not represented and no aggregate claims completeness. A failed/timed-out later page retains completed pages, marks the receipt degraded, and emits an informational source item. A PR whose checks or review-thread connection reports `hasNextPage` is retained with `detail_state = truncated`: factual negative evidence already present may trigger `ci_failed`, `changes_requested`, or `unresolved_threads`, but review-needed, waiting, and merge-ready rules cannot fire; an informational `pr.detail_truncated` item explains the gap. This avoids per-PR subprocesses, unbounded nested pagination, and silent completeness assumptions at GitHub's 100-context ceiling.
+The adapter fetches scopes in stable order and pages them round-robin, at most four total 50-PR pages under the source's 10-second bound. An unvisited next page marks the GitHub receipt `degraded/truncated`; PRs beyond 200 are not represented and no aggregate claims completeness. A failed/timed-out later page retains completed pages, marks the receipt degraded, and emits an informational source item. A PR whose checks or review-thread connection reports `hasNextPage` is retained with `detail_state = truncated`: factual negative evidence already present may trigger `ci_failed`, `changes_requested`, or `unresolved_threads`, but review-needed, waiting, and merge-ready rules cannot fire; an informational `pr.detail_truncated` item explains the gap. This avoids per-PR subprocesses, unbounded nested pagination, unrelated repositories, and silent completeness assumptions at GitHub's 100-context ceiling.
 
 ## 7. Key flows
 
@@ -284,7 +285,7 @@ The adapter fetches at most four sequential 50-PR pages under the source's 10-se
 1. Collector assigns a monotonically increasing generation token and starts bounded core calls for Ship, Dossier, GitHub, and optional Tower.
 2. Each adapter returns records plus a `SourceReceipt`; errors are sanitized and typed.
 3. Core calls publish an immutable snapshot through `atomic.Pointer[Snapshot]` when all settle or at the 15-second deadline. A failed source contributes an unavailable receipt and, if present, last-successful records marked stale.
-4. Tracelens and toolhealth then run as diagnostic enrichers with a 35-second bound. They may publish one later immutable snapshot only if their generation token is still current; a newer refresh cancels and supersedes them. Their receipts remain `loading` meanwhile.
+4. Tracelens and toolhealth then run as diagnostic enrichers with a 35-second bound. The core publish carries their last-successful payloads forward as `stale` while separate current-generation receipts read `loading`; if no prior payload exists, their panels show loading-empty. They may publish one later immutable snapshot only if their generation token is still current; a newer refresh cancels and supersedes them.
 5. Ranking runs for each publish. Missing facts never produce a positive readiness conclusion, and stale retained records are excluded from fresh action conclusions.
 6. UI updates panels independently and announces degraded sources without blanking healthy data.
 
@@ -393,8 +394,9 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 - Fake executable/MCP harness composes at least Ship + Dossier + GitHub + Tracelens into one snapshot.
 - One source fails/corrupts/times out while other panels and attention items remain correct.
 - Dossier child EOF and process exit produce one unavailable receipt; concurrent refreshes perform one restart attempt; three failed sessions open the five-minute breaker; one manual half-open probe and success reset are covered.
-- GitHub fixtures cover the minimum-version failure, additive/missing fields, four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
+- GitHub fixtures cover required scope validation, owner/repo isolation, minimum-version failure, additive/missing fields, round-robin four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
 - A superseded diagnostic generation cannot replace a newer core snapshot.
+- A core refresh retains prior Tracelens/toolhealth payloads as stale while the new diagnostic receipts are loading; first load remains honestly empty.
 - Real-mode smoke against explicit temporary fixtures proves no dependency on sibling source code or databases.
 
 ### Browser tests
