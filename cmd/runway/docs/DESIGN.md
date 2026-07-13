@@ -18,8 +18,10 @@ contiguous sequence numbers and writes the journal.
 
 While the foreground controller lives it is the sole canonical event/result
 writer for its run. `watch` / `logs` / `result` are read-only over durable
-state. `cancel` writes only `private/cancel.request` and signals the verified
-controller identity — it never appends lifecycle events.
+state. `cancel` writes only `private/cancel.request` and best-effort wakes the
+verified controller identity — it never appends lifecycle events. The marker
+is authoritative; on Windows the wake is a no-op, so cancel latency equals the
+controller's marker poll interval (`cancelPollInterval`).
 
 Terminal transition is exclusive in-process: `result.json` is written via
 temp file + `Sync` + atomic rename, then `run_terminal` is appended. An

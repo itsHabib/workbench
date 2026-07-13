@@ -211,16 +211,15 @@ func main() {}
 
 func TestFlowC_DeadlineNoisyWorkload(t *testing.T) {
 	h := newHarness(t)
+	// Portable busy-loop fixture: no unix-only SIGTERM ignore. Cancel/cleanup
+	// must still terminate the workload (SIGKILL / taskkill) after deadline.
 	h.writeProg("main.go", `package main
 import (
   "fmt"
   "os"
-  "os/signal"
-  "syscall"
   "time"
 )
 func main() {
-  signal.Ignore(syscall.SIGTERM)
   for {
     fmt.Fprintln(os.Stderr, "noisy")
     time.Sleep(50 * time.Millisecond)
@@ -244,22 +243,21 @@ func main() {
 
 func TestFlowC_CleanupFailureEscalation(t *testing.T) {
 	h := newHarness(t)
+	// Long sleep so deadline fires first; backend Cancel/Cleanup own termination
+	// (no unix-only signal.Ignore in the fixture).
 	h.writeProg("main.go", `package main
-import (
-  "os/signal"
-  "syscall"
-  "time"
-)
+import "time"
 func main() {
-  signal.Ignore(syscall.SIGTERM)
   time.Sleep(10 * time.Second)
 }
 `)
 	work := goRunWork(h, "main.go", nil)
 	be := &failCleanup{inner: local.New()}
-	out := h.runWith(work, execution.Policy{DeadlineMS: 300, CancelGraceMS: 50}, controller.Options{Backend: be})
+	// Deadline must clear fixture startup (go run compile) on every GOOS,
+	// then fire during the long sleep so Cleanup runs under failCleanup.
+	out := h.runWith(work, execution.Policy{DeadlineMS: 2000, CancelGraceMS: 50}, controller.Options{Backend: be})
 	if out.Result.Status != execution.StatusFailed || out.Result.ReasonCode != execution.ReasonCleanupFailed {
-		t.Fatalf("want failed/cleanup_failed, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+		t.Fatalf("want failed/cleanup_failed, got %s/%s phase=%s causes=%+v", out.Result.Status, out.Result.ReasonCode, out.Result.TerminalPhase, out.Result.Causes)
 	}
 	if out.Result.TerminalPhase != execution.PhaseCleanup {
 		t.Fatalf("phase=%s", out.Result.TerminalPhase)

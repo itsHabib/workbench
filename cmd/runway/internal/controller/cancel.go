@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/journal"
@@ -44,8 +43,10 @@ func RequestCancel(stateRoot, runID string) (CancelOutcome, error) {
 	if err := writeCancelMarker(run); err != nil {
 		return CancelOutcome{}, err
 	}
-	// Best-effort wake; the controller also polls the marker.
-	_ = syscall.Kill(id.PID, syscall.SIGUSR1)
+	// Best-effort wake; the controller also polls the marker
+	// (cancelPollInterval). On Windows the wake is a no-op, so cancel
+	// latency is bounded by that poll interval.
+	_ = wakeController(id.PID)
 	return CancelOutcome{}, nil
 }
 

@@ -44,7 +44,9 @@ The result schema is authoritative over process exit codes.
 - `logs` tails buffered workload bytes; ordered per stream, may lose the
   unflushed tail on abrupt controller loss.
 - `cancel` verifies recorded controller PID + process-start identity, writes
-  an atomic cancel-request marker, and signals the controller. Repeat cancel
+  an atomic cancel-request marker, and best-effort wakes the controller. The
+  marker is authoritative; on Windows there is no wake signal, so cancel
+  latency is the controller's marker poll interval (~50ms). Repeat cancel
   after intent or terminal state is a successful no-op.
 - `result --wait` requires `--timeout`. It watches durable state and never
   reconciles implicitly (`reconcile` is PR 3).

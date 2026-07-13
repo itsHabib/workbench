@@ -11,10 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
@@ -240,10 +238,16 @@ func (c *ctrl) interrupt(h backend.Handle, waitCh <-chan waitOutcome, reason str
 	}
 }
 
+// cancelPollInterval is how often the controller re-checks the cancel-request
+// marker. The marker is authoritative; SIGUSR1 (unix) is only a best-effort
+// wake. On Windows there is no wake signal, so observed cancel latency is
+// bounded by this interval.
+const cancelPollInterval = 50 * time.Millisecond
+
 func (c *ctrl) watchCancel() <-chan struct{} {
 	ch := make(chan struct{}, 1)
 	go func() {
-		ticker := time.NewTicker(50 * time.Millisecond)
+		ticker := time.NewTicker(cancelPollInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			if !cancelRequested(c.run) {
@@ -411,27 +415,6 @@ func (c *ctrl) failEarly(phase, reason string, cause error) (Outcome, error) {
 
 func (c *ctrl) deadlineExceeded() bool {
 	return !time.Now().Before(c.deadline)
-}
-
-// ignoreCancelSignal drains SIGUSR1 so cancel's wake-up signal cannot kill
-// the foreground controller. The cancel-request marker remains authoritative.
-func ignoreCancelSignal() func() {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGUSR1)
-	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ch:
-			case <-done:
-				return
-			}
-		}
-	}()
-	return func() {
-		signal.Stop(ch)
-		close(done)
-	}
 }
 
 func checkLocalDefault(p execution.Placement) error {
