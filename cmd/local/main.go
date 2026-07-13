@@ -21,6 +21,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "usage" {
+		os.Exit(runUsage(os.Args[2:], os.Stdout))
+	}
+
 	prompt := flag.String("prompt", "", "system instruction (the task)")
 	schema := flag.String("schema", "", "JSON Schema for the output (inline, or @file)")
 	minConf := flag.Float64("min-confidence", 0, "flag the result if its confidence is below this")
