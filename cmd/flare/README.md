@@ -3,8 +3,8 @@
 One stdlib-only Go binary that pushes a notification when something in the
 workbench blocks or escalates. It tails the artifact logs other tools already
 emit — gate's state log, ship's run receipts — matches events against a small
-routes table, and raises a Windows toast or posts a webhook. A parked run
-should not have to wait for someone to ask.
+routes table, and raises a Windows toast, posts a webhook, or sends a Slack
+message. A parked run should not have to wait for someone to ask.
 
 flare is a pure sink: it never gates, never blocks, and never writes into any
 producer's state. **It is best-effort push over an authoritative pull — the
@@ -25,6 +25,13 @@ Config lives at `~/.flare/routes.json` (`-config` overrides); flare's own
 state (delivery journal, cursors) at `~/.flare/` (`-state` overrides). See
 `docs/DESIGN.md` for the config shape.
 
+Slack delivery uses a bot token and channel ID, posts through
+`chat.postMessage`, and treats the delivery as successful only when Slack
+returns HTTP 200 with `{"ok":true}`. Keep the real credential only in the
+local routes file; a channel definition looks like
+`{"type":"slack","token":"<bot-token>","channel":"<channel-id>"}`. The bot
+needs `chat:write` and membership in the target channel.
+
 ## Develop
 
 ```
@@ -37,7 +44,7 @@ go test ./...
 Constraints that are design decisions, not omissions:
 
 - **Standard library only.** The toast shells to `powershell.exe`; the
-  webhook is a `net/http` POST. Nothing else.
+  webhook and Slack channels are `net/http` POSTs. Nothing else.
 - **Reads are raw and read-only.** No producer lock is taken, torn final
   lines wait for the next poll, watched paths are explicit config.
 - **Nothing is silently dropped.** Unrouted events hit a required catch-all

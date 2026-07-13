@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +34,38 @@ func TestValidCatchAllLoads(t *testing.T) {
 		`"channels":{"toast":{"type":"toast"}},"catch_all":"toast"}`
 	if _, err := Load(writeConfig(t, body)); err != nil {
 		t.Fatalf("a valid config must load: %v", err)
+	}
+}
+
+func TestSlackRequiresCredentialAndChannel(t *testing.T) {
+	tests := []struct {
+		name    string
+		slack   string
+		wantErr string
+	}{
+		{name: "token", slack: `{"type":"slack","channel":"C123"}`, wantErr: "slack requires token"},
+		{name: "channel", slack: `{"type":"slack","token":"placeholder"}`, wantErr: "slack requires channel"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"version":1,"sources":[{"name":"gate","kind":"gate-log","path":"/x"}],` +
+				`"channels":{"phone":` + tt.slack + `},"catch_all":"phone"}`
+			_, err := Load(writeConfig(t, body))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidSlackChannelLoads(t *testing.T) {
+	body := `{"version":1,"sources":[{"name":"gate","kind":"gate-log","path":"/x"}],` +
+		`"channels":{"phone":{"type":"slack","token":"placeholder","channel":"C123"}},"catch_all":"phone"}`
+	cfg, err := Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("a valid Slack channel must load: %v", err)
+	}
+	if cfg.Channels["phone"].ChannelID != "C123" {
+		t.Fatalf("Slack channel = %q, want C123", cfg.Channels["phone"].ChannelID)
 	}
 }

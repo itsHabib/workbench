@@ -14,8 +14,8 @@ RED-TEAM #9). The gate's own backtest showed parking is the *hot* path (5/7 real
 silence-until-polled is the standing failure mode.
 
 flare closes the seam: it watches the artifact logs those planes already emit and pushes a
-notification (Windows toast, webhook) when something blocks or escalates. It is the push half;
-`/wip` and `/status` remain the pull half.
+notification (Windows toast, webhook, or Slack message) when something blocks or escalates. It
+is the push half; `/wip` and `/status` remain the pull half.
 
 **Posture, stated plainly: flare is best-effort push over an authoritative pull. The artifact
 logs remain the source of truth; flare only shrinks time-to-notice.**
@@ -89,9 +89,13 @@ their own shapes; `decision`/`tier` are never required of them.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.
-- `webhook` — `net/http` POST of the event JSON to a configured URL (ntfy/Slack-shaped; the
-  phone rung is one URL away, not a service). **No default URL; nothing leaves the box unless
-  the operator configures it.**
+- `webhook` — `net/http` POST of the event JSON to a configured URL. **No default URL; nothing
+  leaves the box unless the operator configures it.**
+- `slack` — `net/http` POST to Slack's `chat.postMessage` using a configured bot token and
+  channel ID. The event becomes one compact text line; delivery requires HTTP 200 and an
+  `{"ok":true}` response because Slack reports API errors in HTTP 200 bodies. The bot needs
+  `chat:write` and membership in the target channel. The token lives only in the operator's
+  local routes file and is never written to errors or logs.
 - `drop` — explicit silence (the only way to silence a matched event).
 
 Delivery is at-least-once-attempted, best-effort. A channel failure is journaled and the event
@@ -124,10 +128,10 @@ needs delivery facts to reconstruct a decision.
   ],
   "channels": {
     "toast": {"type": "toast"},
-    "phone": {"type": "webhook", "url": "https://ntfy.sh/<topic>"}
+    "phone": {"type": "slack", "token": "<bot-token>", "channel": "<channel-id>"}
   },
   "routes": [
-    {"match": {"source": "gate", "kind": "escalation"}, "channel": "toast"},
+    {"match": {"source": "gate", "kind": "escalation"}, "channel": "phone"},
     {"match": {"source": "gate", "kind": "verdict", "decision": "block|escalate"}, "channel": "toast", "throttle_seconds": 600},
     {"match": {"source": "ship", "outcome": "failed|cancelled"}, "channel": "toast", "throttle_seconds": 300}
   ],
