@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -74,14 +75,20 @@ func TestParseUsageLedger_malformedLines(t *testing.T) {
 func TestUsageReportFromPath_missingAndEmpty(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.jsonl")
-		rep := usageReportFromPath(path)
+		rep, err := usageReportFromPath(path)
+		if err != nil {
+			t.Fatalf("missing log err = %v, want nil", err)
+		}
 		if rep.TotalInvocations != 0 {
 			t.Fatalf("missing log = %+v, want zero report", rep)
 		}
 	})
 
 	t.Run("empty path", func(t *testing.T) {
-		rep := usageReportFromPath("")
+		rep, err := usageReportFromPath("")
+		if err != nil {
+			t.Fatalf("empty path err = %v, want nil", err)
+		}
 		if rep.TotalInvocations != 0 {
 			t.Fatalf("empty path = %+v, want zero report", rep)
 		}
@@ -92,11 +99,51 @@ func TestUsageReportFromPath_missingAndEmpty(t *testing.T) {
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
 			t.Fatalf("write empty log: %v", err)
 		}
-		rep := usageReportFromPath(path)
+		rep, err := usageReportFromPath(path)
+		if err != nil {
+			t.Fatalf("empty file err = %v, want nil", err)
+		}
 		if rep.TotalInvocations != 0 {
 			t.Fatalf("empty file = %+v, want zero report", rep)
 		}
 	})
+
+	t.Run("unreadable file", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("mode 0o000 does not block opens on windows")
+		}
+		path := filepath.Join(t.TempDir(), "usage.jsonl")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o000); err != nil {
+			t.Fatalf("write unreadable log: %v", err)
+		}
+		if _, err := usageReportFromPath(path); err == nil {
+			t.Fatal("unreadable ledger = nil error, want surfaced open failure")
+		}
+	})
+}
+
+func TestParseUsageLedger_mixedOffsetSpan(t *testing.T) {
+	// The -05:00 record is 2026-07-11T04:00:00Z — the later instant even though
+	// it sorts earlier as a string.
+	ledger := strings.Join([]string{
+		`{"ts":"2026-07-10T23:00:00-05:00","cwd":"/repos/a","source":"local"}`,
+		`{"ts":"2026-07-11T01:00:00Z","cwd":"/repos/a","source":"local"}`,
+	}, "\n") + "\n"
+
+	rep := parseUsageLedger(strings.NewReader(ledger))
+	if rep.FirstTS != "2026-07-11T01:00:00Z" {
+		t.Fatalf("first = %q, want the earlier instant, not the earlier string", rep.FirstTS)
+	}
+	if rep.LastTS != "2026-07-10T23:00:00-05:00" {
+		t.Fatalf("last = %q, want the offset record recognized as later", rep.LastTS)
+	}
+}
+
+func TestRunUsage_parseError(t *testing.T) {
+	var out bytes.Buffer
+	if code := runUsage([]string{"-definitely-not-a-flag"}, &out); code != 2 {
+		t.Fatalf("runUsage bad flag exit = %d, want 2", code)
+	}
 }
 
 func TestRunUsage_textAndJSON(t *testing.T) {

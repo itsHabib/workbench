@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,19 +35,22 @@ func emptyUsageReport() usageReport {
 	}
 }
 
-func usageReportFromPath(path string) usageReport {
+// usageReportFromPath rolls up the ledger at path. A missing log is an answer
+// (zero report), but any other open failure is surfaced — a silent zero on a
+// permissions error would misreport adoption.
+func usageReportFromPath(path string) (usageReport, error) {
 	if path == "" {
-		return emptyUsageReport()
+		return emptyUsageReport(), nil
 	}
 	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return emptyUsageReport(), nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return emptyUsageReport()
-		}
-		return emptyUsageReport()
+		return usageReport{}, fmt.Errorf("open usage log: %w", err)
 	}
 	defer f.Close()
-	return parseUsageLedger(f)
+	return parseUsageLedger(f), nil
 }
 
 func parseUsageLedger(r io.Reader) usageReport {
@@ -67,10 +71,10 @@ func parseUsageLedger(r io.Reader) usageReport {
 			continue
 		}
 		rep.TotalInvocations++
-		if rep.FirstTS == "" || rec.TS < rep.FirstTS {
+		if rep.FirstTS == "" || tsBefore(rec.TS, rep.FirstTS) {
 			rep.FirstTS = rec.TS
 		}
-		if rec.TS > rep.LastTS {
+		if rep.LastTS == "" || tsBefore(rep.LastTS, rec.TS) {
 			rep.LastTS = rec.TS
 		}
 		if rec.CWD != "" {
@@ -95,6 +99,18 @@ func parseUsageLedger(r io.Reader) usageReport {
 	return rep
 }
 
+// tsBefore reports whether a sorts before b as RFC 3339 instants, so spans are
+// correct across mixed UTC offsets; it falls back to string order when either
+// side fails to parse.
+func tsBefore(a, b string) bool {
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	if errA != nil || errB != nil {
+		return a < b
+	}
+	return ta.Before(tb)
+}
+
 func dayFromTS(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -104,12 +120,16 @@ func dayFromTS(ts string) string {
 }
 
 func runUsage(args []string, stdout io.Writer) int {
-	fs := flag.NewFlagSet("usage", flag.ExitOnError)
+	fs := flag.NewFlagSet("usage", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit report as JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	rep := usageReportFromPath(usageLogPath())
+	rep, err := usageReportFromPath(usageLogPath())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if *asJSON {
 		out, err := json.Marshal(rep)
 		if err != nil {
