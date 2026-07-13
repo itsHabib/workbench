@@ -112,6 +112,7 @@ var shipForbiddenDriverStreamKeys = []string{
 var (
 	fixtureSecretPatterns = secretPatterns()
 	fixtureHomePatterns   = homePathPatterns()
+	windowsAbsolutePath   = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 )
 
 func TestFixtureInventoryCoverage(t *testing.T) {
@@ -485,7 +486,7 @@ func isDisallowedAbsolutePath(value string) bool {
 		return false
 	}
 	return strings.HasPrefix(path, "/") ||
-		regexp.MustCompile(`^[A-Za-z]:[\\/]`).MatchString(path) ||
+		windowsAbsolutePath.MatchString(path) ||
 		strings.HasPrefix(path, `\\`)
 }
 

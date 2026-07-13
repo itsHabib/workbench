@@ -237,13 +237,13 @@ toolhealth
 tower ls --json --no-reconcile
 ```
 
-Fixture inventory: [`cmd/controlroom/testdata/contracts/README.md`](../../cmd/controlroom/testdata/contracts/README.md).
+Fixture inventory: [`cmd/controlroom/testdata/contracts/README.md`](../../../cmd/controlroom/testdata/contracts/README.md).
 
 ## Demo vs real mode
 
 | Mode | Behavior |
 |---|---|
-| `demo` | Load fixtures from `cmd/controlroom/testdata/contracts/` and `testdata/demo/` (Phase 3). No subprocesses. |
+| `demo` | Load Phase 1 contracts from `cmd/controlroom/testdata/contracts/`; Phase 3 will add the deterministic `testdata/demo/` scenario. No subprocesses. |
 | `real` | Execute configured adapters with explicit timeouts. Partial failure retains last-successful records as stale. |
 
 ## Validation
