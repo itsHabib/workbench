@@ -30,6 +30,7 @@ func Snapshot() model.Snapshot {
 		},
 		Runs: []model.Run{
 			{ID: "wf_demo_live", Kind: "workflow", Repository: "example-repo", Status: "succeeded", DocPath: model.Known("docs/live/spec.md"), SpecPath: unknown, UpdatedAt: Clock.Add(-time.Hour), CreatedAt: Clock.Add(-2 * time.Hour), Evidence: []model.SafeLink{}},
+			{ID: "drv_demo_waiting", Kind: "driver", Repository: "example-repo", Project: "workbench", Status: "running", Phase: "awaiting_judgment", SpecPath: model.Known("docs/waiting/spec.md"), DocPath: unknown, UpdatedAt: Clock.Add(-time.Hour), CreatedAt: Clock.Add(-2 * time.Hour), Evidence: []model.SafeLink{}},
 			{ID: "wf_demo_stalled", Kind: "workflow", Repository: "example-repo", Status: "running", DocPath: model.Known("docs/stalled/spec.md"), SpecPath: unknown, UpdatedAt: Clock.Add(-20 * time.Minute), CreatedAt: Clock.Add(-time.Hour), Evidence: []model.SafeLink{}},
 			{ID: "wf_demo_fail_1", Kind: "workflow", Repository: "example-repo", Status: "failed", DocPath: doc, SpecPath: unknown, UpdatedAt: Clock.Add(-48 * time.Hour), CreatedAt: Clock.Add(-49 * time.Hour), Failure: "test failure", Evidence: []model.SafeLink{}},
 			{ID: "wf_demo_fail_2", Kind: "workflow", Repository: "example-repo", Status: "failed", DocPath: doc, SpecPath: unknown, UpdatedAt: Clock.Add(-24 * time.Hour), CreatedAt: Clock.Add(-25 * time.Hour), Failure: "test failure", Evidence: []model.SafeLink{}},

@@ -136,7 +136,7 @@ func TestRefreshRejectsEveryInvalidLayerWithoutCallback(t *testing.T) {
 				req.Header.Set("Origin", test.origin)
 			}
 			if test.header != "" {
-				req.Header.Set("X-Controlroom-CSRF", test.header)
+				req.Header.Set("X-Control-Room-CSRF", test.header)
 			}
 			if test.cookie != "" {
 				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: test.cookie})
@@ -173,7 +173,7 @@ func TestAcceptedRefreshReturnsReceiptAndBumpsSnapshot(t *testing.T) {
 	req.Host = testHost
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://"+testHost)
-	req.Header.Set("X-Controlroom-CSRF", token)
+	req.Header.Set("X-Control-Room-CSRF", token)
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: token})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
@@ -186,6 +186,42 @@ func TestAcceptedRefreshReturnsReceiptAndBumpsSnapshot(t *testing.T) {
 	}
 	if receipt.BaselineVersion != 1 || receipt.Status != "started" || version != 2 {
 		t.Fatalf("receipt = %+v, version = %d", receipt, version)
+	}
+}
+
+func TestRealAutomaticRefreshUsesServerMode(t *testing.T) {
+	called := false
+	handler, err := New(Config{
+		Host: testHost, Mode: "real", Snapshot: demo.Snapshot,
+		Refresh: func(_ context.Context, request RefreshRequest) (RefreshReceipt, error) {
+			called = request.Mode == "real" && request.Trigger == "auto"
+			return RefreshReceipt{BaselineVersion: 1, Status: "started"}, nil
+		},
+		TokenSource: func(buffer []byte) (int, error) {
+			for i := range buffer {
+				buffer[i] = 0x5a
+			}
+			return len(buffer), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := request(t, handler, http.MethodGet, "/", nil)
+	token := shell.Result().Cookies()[0].Value
+	if !strings.Contains(shell.Body.String(), `data-control-room-mode="real"`) || !strings.Contains(shell.Body.String(), ">REAL</span>") {
+		t.Fatalf("real shell mode was not rendered: %s", shell.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://"+testHost+"/api/v1/refresh", strings.NewReader(`{"mode":"real","trigger":"auto"}`))
+	req.Host = testHost
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+testHost)
+	req.Header.Set("X-Control-Room-CSRF", token)
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: token})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusAccepted || !called {
+		t.Fatalf("response=%d called=%v body=%q", recorder.Code, called, recorder.Body.String())
 	}
 }
 
@@ -224,7 +260,7 @@ func TestEmbeddedShellAndScriptContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := string(appBytes)
-	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]"} {
+	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]", "operator_state", "next_action", "formatTime(run.updated_at)", "X-Control-Room-CSRF", `refresh("auto")`, "60000", "attempt < 110", "diagnostic sources remained loading"} {
 		if !strings.Contains(app, required) {
 			t.Errorf("app missing interaction contract %q", required)
 		}
@@ -267,7 +303,7 @@ func testHandler(t *testing.T, snapshot SnapshotSupplier, refresh RefreshFunc) (
 		}
 	}
 	handler, err := New(Config{
-		Host: testHost, Snapshot: snapshot, Refresh: refresh,
+		Host: testHost, Mode: "demo", Snapshot: snapshot, Refresh: refresh,
 		TokenSource: func(buffer []byte) (int, error) {
 			for i := range buffer {
 				buffer[i] = 0x5a

@@ -114,6 +114,34 @@ func TestDemoPublisherBumpsMonotonically(t *testing.T) {
 	}
 }
 
+func TestConfigFingerprintIsIndependentOfScopeAndMapOrder(t *testing.T) {
+	first := configFingerprint(`C:\portfolio`, `C:\dossier`, []string{"repo:b/b", "user:a"}, map[string]string{"ship": `C:\bin\ship.exe`, "github": `C:\bin\gh.exe`})
+	second := configFingerprint(`C:\portfolio`, `C:\dossier`, []string{"user:a", "repo:b/b"}, map[string]string{"github": `C:\bin\gh.exe`, "ship": `C:\bin\ship.exe`})
+	if first != second || first == "" {
+		t.Fatalf("fingerprints differ: %q %q", first, second)
+	}
+}
+
+func TestRealPublisherAllowsMissingQualifiedSourceExecutables(t *testing.T) {
+	directory := t.TempDir()
+	publisher, err := newRealPublisher(realFlags{
+		workspaceRoot: directory, dossierCorpus: directory, githubScopes: stringList{"user:synthetic-author"},
+		ship: "go", dossier: "go", github: "go", tracelens: "go",
+		toolhealth: "control-room-missing-toolhealth", tower: "control-room-missing-tower",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher.Close()
+}
+
+func TestSourceExecutablePreservesUnresolvedConfigurationIdentity(t *testing.T) {
+	runtimePath, identity := sourceExecutable("control-room-definitely-missing")
+	if runtimePath != "control-room-definitely-missing" || identity != "unresolved:control-room-definitely-missing" {
+		t.Fatalf("runtime=%q identity=%q", runtimePath, identity)
+	}
+}
+
 func structRefreshRequest() web.RefreshRequest {
 	return web.RefreshRequest{Mode: "demo", Trigger: "manual"}
 }

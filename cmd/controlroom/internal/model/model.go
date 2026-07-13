@@ -130,6 +130,25 @@ const (
 	LivenessBlockedNoPath Liveness = "blocked_no_path"
 )
 
+// OperatorState translates producer state into the durable condition an
+// unattended-run operator needs to reason about.
+type OperatorState string
+
+const (
+	// OperatorProgressing means an active owner update is newer than the stall threshold.
+	OperatorProgressing OperatorState = "progressing"
+	// OperatorWaiting means the owner named a durable external decision boundary.
+	OperatorWaiting OperatorState = "waiting"
+	// OperatorStalled means active work has no owner update within the threshold.
+	OperatorStalled OperatorState = "stalled"
+	// OperatorFailed means the producer reports a terminal failure.
+	OperatorFailed OperatorState = "failed"
+	// OperatorDone means the producer reports terminal success.
+	OperatorDone OperatorState = "done"
+	// OperatorUnknown means current owner truth is insufficient for intervention.
+	OperatorUnknown OperatorState = "unknown"
+)
+
 // Snapshot is the immutable, source-neutral read model consumed by the UI.
 type Snapshot struct {
 	Version      uint64          `json:"version"`
@@ -206,27 +225,29 @@ type RuntimeDetails struct {
 
 // Run represents a Ship workflow or driver run.
 type Run struct {
-	ID         string                  `json:"id"`
-	Kind       string                  `json:"kind"`
-	Repository string                  `json:"repository,omitempty"`
-	Project    string                  `json:"project,omitempty"`
-	Task       string                  `json:"task,omitempty"`
-	Spec       string                  `json:"spec,omitempty"`
-	DocPath    Availability[string]    `json:"doc_path"`
-	SpecPath   Availability[string]    `json:"spec_path"`
-	Branch     string                  `json:"branch,omitempty"`
-	Status     string                  `json:"status"`
-	Phase      string                  `json:"phase,omitempty"`
-	Requested  RuntimeDetails          `json:"requested"`
-	Actual     RuntimeDetails          `json:"actual"`
-	CreatedAt  time.Time               `json:"created_at"`
-	UpdatedAt  time.Time               `json:"updated_at"`
-	StartedAt  Availability[time.Time] `json:"started_at"`
-	EndedAt    Availability[time.Time] `json:"ended_at"`
-	DurationMS Availability[int64]     `json:"duration_ms"`
-	Failure    string                  `json:"failure,omitempty"`
-	Evidence   []SafeLink              `json:"evidence"`
-	Liveness   Liveness                `json:"liveness"`
+	ID            string                  `json:"id"`
+	Kind          string                  `json:"kind"`
+	Repository    string                  `json:"repository,omitempty"`
+	Project       string                  `json:"project,omitempty"`
+	Task          string                  `json:"task,omitempty"`
+	Spec          string                  `json:"spec,omitempty"`
+	DocPath       Availability[string]    `json:"doc_path"`
+	SpecPath      Availability[string]    `json:"spec_path"`
+	Branch        string                  `json:"branch,omitempty"`
+	Status        string                  `json:"status"`
+	Phase         string                  `json:"phase,omitempty"`
+	Requested     RuntimeDetails          `json:"requested"`
+	Actual        RuntimeDetails          `json:"actual"`
+	CreatedAt     time.Time               `json:"created_at"`
+	UpdatedAt     time.Time               `json:"updated_at"`
+	StartedAt     Availability[time.Time] `json:"started_at"`
+	EndedAt       Availability[time.Time] `json:"ended_at"`
+	DurationMS    Availability[int64]     `json:"duration_ms"`
+	Failure       string                  `json:"failure,omitempty"`
+	Evidence      []SafeLink              `json:"evidence"`
+	Liveness      Liveness                `json:"liveness"`
+	OperatorState OperatorState           `json:"operator_state"`
+	NextAction    string                  `json:"next_action"`
 }
 
 // Task represents one Dossier task and its dependency evidence.

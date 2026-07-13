@@ -1,5 +1,7 @@
 const state = {
   snapshot: null,
+  mode: document.documentElement.dataset.controlRoomMode,
+  autoTimer: null,
   filters: { repository: "all", status: "all", severity: "all" },
   opener: null,
 };
@@ -8,8 +10,8 @@ const byId = (id) => document.getElementById(id);
 const panels = ["runs", "tasks", "pull-requests", "reliability", "tool-health", "sources"];
 
 document.addEventListener("DOMContentLoaded", () => {
-  byId("refresh").addEventListener("click", refresh);
-  byId("retry").addEventListener("click", refresh);
+  byId("refresh").addEventListener("click", () => refresh("manual"));
+  byId("retry").addEventListener("click", () => refresh("manual"));
   byId("clear-filters").addEventListener("click", clearFilters);
   byId("drawer-close").addEventListener("click", closeDrawer);
   byId("drawer").addEventListener("cancel", (event) => {
@@ -26,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindFilter("status");
   bindFilter("severity");
   renderLoading();
-  refresh();
+  refresh("manual");
 });
 
 function bindFilter(name) {
@@ -41,12 +43,14 @@ function renderLoading() {
   panels.forEach((id) => replaceChildren(byId(id), paragraph("placeholder", `Loading ${id.replace("-", " ")}…`)));
 }
 
-async function refresh() {
+async function refresh(trigger) {
+  if (state.autoTimer) window.clearTimeout(state.autoTimer);
+  state.autoTimer = null;
   const button = byId("refresh");
   button.disabled = true;
   announce("Refreshing snapshot");
   try {
-    const receipt = await requestRefresh();
+    const receipt = await requestRefresh(trigger);
     const snapshot = await waitForSnapshot(receipt.baseline_version);
     state.snapshot = snapshot;
     reconcileFilters(snapshot);
@@ -58,38 +62,54 @@ async function refresh() {
     announce(`Refresh failed: ${safeError(error)}`);
   } finally {
     button.disabled = false;
+    state.autoTimer = window.setTimeout(() => refresh("auto"), 60000);
   }
 }
 
-async function requestRefresh() {
+async function requestRefresh(trigger) {
   const token = readCookie("controlroom_csrf");
   if (!token) throw new Error("missing refresh token");
   const response = await fetch("/api/v1/refresh", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Controlroom-CSRF": token },
-    body: JSON.stringify({ mode: "demo", trigger: "manual" }),
+    headers: { "Content-Type": "application/json", "X-Control-Room-CSRF": token },
+    body: JSON.stringify({ mode: state.mode, trigger }),
   });
   if (!response.ok) throw new Error(`refresh returned ${response.status}`);
   return response.json();
 }
 
 async function waitForSnapshot(baseline) {
-  // The final interval is trimmed so the complete stepped sequence stays within the Phase 3 five-second bound.
-  const delays = [250, 500, 1000, 2000, 1250];
   let lastError = null;
-  for (const delay of delays) {
-    await pause(delay);
+  let latest = null;
+  // Four fast probes plus 106 half-second probes cover the 50-second real-mode
+  // core + enrichment deadline with margin for publication and HTTP polling.
+  for (let attempt = 0; attempt < 110; attempt += 1) {
+    await pause(attempt < 4 ? 250 : 500);
     try {
       const response = await fetch("/api/v1/snapshot", { headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error(`snapshot returned ${response.status}`);
       const snapshot = await response.json();
-      if (snapshot.version > baseline) return snapshot;
+      if (snapshot.version > baseline) {
+        latest = snapshot;
+        state.snapshot = snapshot;
+        reconcileFilters(snapshot);
+        renderSnapshot();
+        if (diagnosticsSettled(snapshot.sources)) return snapshot;
+      }
     } catch (error) {
       lastError = error;
     }
   }
+  if (latest) throw new Error("diagnostic sources remained loading beyond the collection deadline");
   if (lastError) throw lastError;
-  throw new Error("no newer snapshot arrived within 5 seconds");
+  throw new Error("no newer snapshot arrived within the collection deadline");
+}
+
+function diagnosticsSettled(sources) {
+  return ["tracelens", "toolhealth"].every((name) => {
+    const owned = sources.filter((source) => source.source === name);
+    return owned.length > 0 && owned.every((source) => source.state !== "loading");
+  });
 }
 
 function pause(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
@@ -120,7 +140,7 @@ function filterValues(snapshot) {
   const repository = new Set(snapshot.repositories || []);
   const status = new Set();
   const severity = new Set();
-  snapshot.runs.forEach((row) => { if (row.repository) repository.add(row.repository); add(status, row.status, row.liveness); });
+  snapshot.runs.forEach((row) => { if (row.repository) repository.add(row.repository); add(status, row.status, row.liveness, row.operator_state); });
   snapshot.tasks.forEach((row) => add(status, row.status, row.liveness));
   snapshot.pull_requests.forEach((row) => { repository.add(row.repository); add(status, row.state, row.review_decision, row.merge_state_status); });
   snapshot.attention.forEach((row) => add(severity, row.category));
@@ -171,7 +191,8 @@ function renderSnapshot() {
 
 function sourceSummary(sources) {
   const qualified = sources.filter((source) => source.state !== "ok");
-  return qualified.length ? `${sources.length} sources · ${qualified.length} qualified` : `${sources.length} sources current`;
+  const count = new Set(sources.map((source) => source.source)).size;
+  return qualified.length ? `${count} sources · ${qualified.length} qualifications` : `${count} sources current`;
 }
 
 function renderAttention(snapshot) {
@@ -207,14 +228,14 @@ function matchesAttention(item) {
 }
 
 function renderRuns(rows) {
-  renderCollection("runs", rows.filter((row) => matchesRepository(row.repository) && matchesStatus(row.status, row.liveness)), "runs", runRow);
+  renderCollection("runs", rows.filter((row) => matchesRepository(row.repository) && matchesStatus(row.status, row.liveness, row.operator_state)), "runs", runRow);
 }
 
 function runRow(run) {
   return actionRow(`Open run ${run.id}`, () => openRun(run), [
     ["Run", `${run.kind} · ${run.id}`], ["Repository / project", run.repository || run.project || "Unknown"],
-    ["Producer status", run.status], ["Control Room policy", run.liveness || "unknown"], ["Phase", run.phase || "Unknown"],
-    ["Runtime", availability(run.actual.runtime)], ["Age", age(run.updated_at)], ["Failure", run.failure || "None"],
+    ["Producer status", run.status], ["Operator state", run.operator_state || "unknown"], ["Current stage", run.phase || "Unknown"],
+    ["Last durable update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"], ["Failure class", run.failure || "None"],
   ]);
 }
 
@@ -246,12 +267,12 @@ function renderReliability(rows) {
 }
 
 function renderToolHealth(rows, sources) {
-  const source = sources.find((item) => item.source === "toolhealth");
+  const sourceStale = sources.some((item) => item.source === "toolhealth" && item.state === "stale");
   const filtered = rows.filter((row) => matchesSeverity(row.worst_severity));
   renderCollection("tool-health", filtered, "tool-health records", (health) => staticRow([
     ["Tool", health.tool], ["Worst severity", health.worst_severity || "Unknown"], ["Recurrence", `${health.session_count} sessions`],
     ["Last occurrence", `${formatTime(health.last_occurrence)} · ${age(health.last_occurrence)}`], ["Pain", listText(health.pain)],
-    ["Label", health.kind === "accumulated_friction" ? "Accumulated friction" : health.kind], ["Freshness", health.stale || source?.state === "stale" ? "Stale retained data" : "Current"],
+    ["Label", health.kind === "accumulated_friction" ? "Accumulated friction" : health.kind], ["Freshness", health.stale || sourceStale ? "Stale retained data" : "Current"],
   ]));
 }
 
@@ -345,10 +366,11 @@ function sourceUsability(value) { return value === "unavailable" ? "Other source
 function openRun(run) {
   openDrawer("Run details", "Control Room policy + producer facts", [
     ["ID", run.id], ["Kind", run.kind], ["Repository", run.repository || "Unknown"], ["Project", run.project || "Unknown"],
-    ["Producer status", run.status], ["Control Room policy liveness", run.liveness || "Unknown"], ["Phase", run.phase || "Unknown"],
+    ["Producer status", run.status], ["Operator state", run.operator_state || "Unknown"], ["Control Room policy liveness", run.liveness || "Unknown"], ["Current stage", run.phase || "Unknown"],
+    ["Last durable owner update", `${formatTime(run.updated_at)} · ${age(run.updated_at)}`], ["Next action", run.next_action || "Revalidate source truth"],
     ["Requested runtime", availability(run.requested.runtime)], ["Requested provider", availability(run.requested.provider)],
     ["Actual runtime", availability(run.actual.runtime)], ["Actual provider", availability(run.actual.provider)],
-    ["Failure", run.failure || "None"], ["Evidence", linksText(run.evidence)],
+    ["Failure class", run.failure || "None"], ["Evidence", linksText(run.evidence)],
   ], { type: "run", id: run.id });
 }
 
