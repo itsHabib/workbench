@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { test } from "@playwright/test";
-import { repoRoot } from "../playwright.config";
+import { demoURL, repoRoot } from "../playwright.config";
 import { copy, demoSnapshot, mockSnapshots, waitForLoaded, type Snapshot } from "./helpers";
 
 const output = path.join(repoRoot, "docs/features/portfolio-control-room/screenshots");
@@ -22,7 +22,7 @@ test("capture deterministic healthy, degraded, and on-fire states", async ({ bro
   for (const [name, snapshot] of variants) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: "dark", reducedMotion: "reduce" });
     await mockSnapshots(page, "demo", [snapshot]);
-    await page.goto("http://127.0.0.1:43171/");
+    await page.goto(`${demoURL}/`);
     await waitForLoaded(page, snapshot.version);
     await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true });
     await page.close();
