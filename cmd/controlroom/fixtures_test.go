@@ -456,30 +456,57 @@ func assertShipDriverList(t *testing.T, path string) {
 		t.Fatal("driver-list-healthy.json must contain runs")
 	}
 	for _, run := range envelope.Runs {
-		for _, k := range shipForbiddenDriverRunKeys {
-			if _, ok := run[k]; ok {
-				t.Errorf("driver run must not expose %q", k)
-			}
+		assertShipDriverRun(t, run)
+	}
+}
+
+func assertShipDriverRun(t *testing.T, run map[string]any) {
+	t.Helper()
+	for _, key := range shipForbiddenDriverRunKeys {
+		if _, ok := run[key]; ok {
+			t.Errorf("driver run must not expose %q", key)
 		}
-		batches, _ := run["batches"].([]any)
-		for _, batch := range batches {
-			bm, _ := batch.(map[string]any)
-			streams, _ := bm["streams"].([]any)
-			for _, stream := range streams {
-				sm, _ := stream.(map[string]any)
-				for _, k := range shipForbiddenDriverStreamKeys {
-					if _, ok := sm[k]; ok {
-						t.Errorf("driver stream must not expose %q", k)
-					}
-				}
-				specPath, _ := sm["specPath"].(string)
-				if specPath == "" {
-					t.Fatal("driver stream must include specPath linkage")
-				}
-				if !strings.HasPrefix(specPath, "docs/") {
-					t.Fatalf("specPath must be neutral relative, got %q", specPath)
-				}
-			}
+	}
+	batches, ok := run["batches"].([]any)
+	if !ok || len(batches) == 0 {
+		t.Fatal("driver run must include batches")
+	}
+	for _, batch := range batches {
+		assertShipDriverBatch(t, batch)
+	}
+}
+
+func assertShipDriverBatch(t *testing.T, batch any) {
+	t.Helper()
+	batchMap, ok := batch.(map[string]any)
+	if !ok {
+		t.Fatal("driver batch must be an object")
+	}
+	streams, ok := batchMap["streams"].([]any)
+	if !ok || len(streams) == 0 {
+		t.Fatal("driver batch must include streams")
+	}
+	for _, stream := range streams {
+		assertShipDriverStream(t, stream)
+	}
+}
+
+func assertShipDriverStream(t *testing.T, stream any) {
+	t.Helper()
+	streamMap, ok := stream.(map[string]any)
+	if !ok {
+		t.Fatal("driver stream must be an object")
+	}
+	for _, key := range shipForbiddenDriverStreamKeys {
+		if _, ok := streamMap[key]; ok {
+			t.Errorf("driver stream must not expose %q", key)
 		}
+	}
+	specPath, _ := streamMap["specPath"].(string)
+	if specPath == "" {
+		t.Fatal("driver stream must include specPath linkage")
+	}
+	if !strings.HasPrefix(specPath, "docs/") {
+		t.Fatalf("specPath must be neutral relative, got %q", specPath)
 	}
 }
