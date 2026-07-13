@@ -228,14 +228,14 @@ controlroom serve \
   --addr 127.0.0.1:4317 \
   --workspace-root %USERPROFILE%\pers \
   --dossier-corpus %USERPROFILE%\pers\dossier-state \
-  --github-scope owner:<login> \
+  --github-scope user:<login> \
   --refresh 60s \
   --config <optional-json>
 
 controlroom snapshot --mode demo|real --json
 ```
 
-Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. Real mode requires one to four GitHub scope entries, each `owner:<login>` or `repo:<owner/name>`; no unscoped PR search is permitted. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
+Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. Real mode requires one to four GitHub scope entries, each `user:<login>`, `org:<login>`, or `repo:<owner/name>`; no ambiguous owner kind or unscoped PR search is permitted. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
 
 Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when the startup version check fails. The GitHub adapter ignores additive fields it does not understand and treats missing known fields as `unknown` instead of failing the whole response.
 
@@ -245,13 +245,13 @@ All routes are GET/HEAD; any mutation method returns `405`.
 
 ```text
 GET /                         embedded application shell
-GET /api/v1/snapshot?mode=demo|real&repository=&status=&severity=
+GET /api/v1/snapshot?mode=demo|real&trigger=auto|manual&repository=&status=&severity=
 GET /api/v1/runs/{id}/diagnosis
 GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode plus a stable configured-adapter fingerprint. Demo and real collections can never share an in-flight result.
+`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. `trigger` is required: the timer sends `auto`, while the refresh button sends `manual`; only `manual` may request the one Dossier breaker half-open probe. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and a stable configured-adapter fingerprint. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
 
 ### Source contracts
 
@@ -267,7 +267,7 @@ GET /healthz                  process liveness only
 
 #### GitHub batched query
 
-After resolving the authenticated login once, the adapter pages GraphQL search through `gh api graphql` once per configured scope: `"is:pr is:open author:<login> archived:false user:<owner>"` or `"is:pr is:open author:<login> archived:false repo:<owner/name>"`. It never issues an unscoped author query, and de-duplicates node IDs across scopes. The embedded, versioned query uses `search(type: ISSUE, first: 50, after: $cursor)` and selects each pull request's repository `nameWithOwner`, number, title, URL, author, base/head names and head OID, draft/state/timestamps, `mergeable`, `mergeStateStatus`, `reviewDecision`, `reviewRequests(first: 1) { totalCount }`, latest commit `statusCheckRollup.contexts(first: 100)` with `pageInfo`, and `reviewThreads(first: 100)` with each thread's `isResolved` plus `pageInfo`.
+After resolving the authenticated login once, the adapter pages GraphQL search through `gh api graphql` once per configured scope, preserving its explicit qualifier: `user:<login>`, `org:<login>`, or `repo:<owner/name>`, always combined with `is:pr is:open author:<login> archived:false`. It never issues an unscoped author query, and de-duplicates node IDs across scopes. The embedded, versioned query uses `search(type: ISSUE, first: 50, after: $cursor)` and selects each pull request's repository `nameWithOwner`, number, title, URL, author, base/head names and head OID, draft/state/timestamps, `mergeable`, `mergeStateStatus`, `reviewDecision`, `reviewRequests(first: 1) { totalCount }`, latest commit `statusCheckRollup.contexts(first: 100)` with `pageInfo`, and `reviewThreads(first: 100)` with each thread's `isResolved` plus `pageInfo`.
 
 The adapter fetches scopes in stable order and pages them round-robin, at most four total 50-PR pages under the source's 10-second bound. An unvisited next page marks the GitHub receipt `degraded/truncated`; PRs beyond 200 are not represented and no aggregate claims completeness. A failed/timed-out later page retains completed pages, marks the receipt degraded, and emits an informational source item. A PR whose checks or review-thread connection reports `hasNextPage` is retained with `detail_state = truncated`: factual negative evidence already present may trigger `ci_failed`, `changes_requested`, or `unresolved_threads`, but review-needed, waiting, and merge-ready rules cannot fire; an informational `pr.detail_truncated` item explains the gap. This avoids per-PR subprocesses, unbounded nested pagination, unrelated repositories, and silent completeness assumptions at GitHub's 100-context ceiling.
 
@@ -387,14 +387,14 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
 - Golden ranking tests for every rule, tie-breaker, missing-source behavior, retry-loop grouping, and stale thresholds.
-- `httptest` coverage for method restrictions, CSP, path validation, filters, refresh cancellation/coalescing, and deep-link allowlists.
+- `httptest` coverage for method restrictions, CSP/Host validation, path validation, filters, required auto/manual trigger, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
 
 - Fake executable/MCP harness composes at least Ship + Dossier + GitHub + Tracelens into one snapshot.
 - One source fails/corrupts/times out while other panels and attention items remain correct.
 - Dossier child EOF and process exit produce one unavailable receipt; concurrent refreshes perform one restart attempt; three failed sessions open the five-minute breaker; one manual half-open probe and success reset are covered.
-- GitHub fixtures cover required scope validation, owner/repo isolation, minimum-version failure, additive/missing fields, round-robin four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
+- GitHub fixtures cover required `user`/`org`/`repo` scope validation and isolation, minimum-version failure, additive/missing fields, round-robin four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
 - A superseded diagnostic generation cannot replace a newer core snapshot.
 - A core refresh retains prior Tracelens/toolhealth payloads as stale while the new diagnostic receipts are loading; first load remains honestly empty.
 - Real-mode smoke against explicit temporary fixtures proves no dependency on sibling source code or databases.
