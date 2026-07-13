@@ -32,7 +32,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .badge { display: inline-flex; vertical-align: middle; padding: .2rem .42rem; border-radius: .3rem; font-size: .65rem; letter-spacing: .08em; }
 .badge-demo { background: #2a1f42; color: #d8ccff; }
 .masthead-facts { display: flex; gap: .45rem 1rem; flex-wrap: wrap; color: var(--muted); font-size: .82rem; font-variant-numeric: tabular-nums; }
-.sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .reconnect { margin: 1rem clamp(1rem, 4vw, 3.5rem) 0; padding: .8rem 1rem; border: 1px solid var(--urgent); background: #2a141a; border-radius: .55rem; }
 .reconnect button { margin-left: .75rem; }
 .filters { display: flex; align-items: end; gap: .75rem; flex-wrap: wrap; padding: 1rem clamp(1rem, 4vw, 3.5rem); border-bottom: 1px solid var(--line); }
@@ -66,6 +66,7 @@ main { padding: 1rem clamp(1rem, 4vw, 3.5rem) 3rem; }
 .status { display: inline-block; padding: .15rem .38rem; border: 1px solid var(--line); border-radius: 999px; color: var(--text); }
 .status-urgent, .status-failed, .status-on-fire { border-color: var(--urgent); color: #ffb2b9; }
 .status-actionable, .status-blocked { border-color: var(--actionable); color: #ffd38c; }
+.status-stale { border-color: var(--actionable); color: #ffd38c; }
 .status-ok, .status-live, .status-ready { border-color: var(--ok); color: #a9efc8; }
 .status-waiting, .status-running { border-color: var(--waiting); color: #b5ccff; }
 .stale { color: #ffd38c; }

@@ -8,10 +8,18 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/controlroom/internal/demo"
 	"github.com/itsHabib/workbench/cmd/controlroom/internal/web"
 )
+
+func TestHTTPServerTimeouts(t *testing.T) {
+	server := newHTTPServer(http.NotFoundHandler())
+	if server.ReadHeaderTimeout != 5*time.Second || server.ReadTimeout != 30*time.Second || server.WriteTimeout != 30*time.Second {
+		t.Fatalf("unexpected HTTP timeouts: header=%s read=%s write=%s", server.ReadHeaderTimeout, server.ReadTimeout, server.WriteTimeout)
+	}
+}
 
 func TestSnapshotCommandMatchesDemoContract(t *testing.T) {
 	var stdout, stderr bytes.Buffer

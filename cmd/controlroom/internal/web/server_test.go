@@ -224,7 +224,7 @@ func TestEmbeddedShellAndScriptContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := string(appBytes)
-	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id"} {
+	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]"} {
 		if !strings.Contains(app, required) {
 			t.Errorf("app missing interaction contract %q", required)
 		}
@@ -301,6 +301,9 @@ func assertSecurityHeaders(t *testing.T, recorder *httptest.ResponseRecorder) {
 	t.Helper()
 	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff")
+	}
+	if recorder.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("missing no-referrer policy")
 	}
 	if recorder.Header().Get("Content-Security-Policy") != csp {
 		t.Fatal("missing CSP")

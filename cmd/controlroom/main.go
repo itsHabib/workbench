@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/controlroom/internal/demo"
 	"github.com/itsHabib/workbench/cmd/controlroom/internal/model"
@@ -38,9 +38,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return runWith(args, stdout, stderr, dependencies{
 		listen: net.Listen,
 		serve: func(listener net.Listener, handler http.Handler) error {
-			return (&http.Server{Handler: handler}).Serve(listener)
+			return newHTTPServer(handler).Serve(listener)
 		},
 	})
+}
+
+func newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
 }
 
 func runWith(args []string, stdout, stderr io.Writer, deps dependencies) error {
@@ -119,7 +128,7 @@ func validateAddr(addr string) error {
 	if ip == nil || !ip.Equal(net.IPv4(127, 0, 0, 1)) {
 		return fmt.Errorf("host must be IPv4 loopback 127.0.0.1")
 	}
-	if port == "" || strings.Contains(port, "+") {
+	if port == "" {
 		return fmt.Errorf("port is required")
 	}
 	number, err := strconv.Atoi(port)

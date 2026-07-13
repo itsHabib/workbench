@@ -105,6 +105,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func setSecurityHeaders(header http.Header) {
 	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("Content-Security-Policy", csp)
 }
 
@@ -207,6 +208,7 @@ func (s *server) authorizeRefresh(r *http.Request) bool {
 }
 
 func secureEqual(left, right string) bool {
+	// Runtime tokens are fixed-length base64url strings, so length is public.
 	if len(left) != len(right) {
 		return false
 	}

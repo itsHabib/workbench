@@ -74,6 +74,7 @@ async function requestRefresh() {
 }
 
 async function waitForSnapshot(baseline) {
+  // The final interval is trimmed so the complete stepped sequence stays within the Phase 3 five-second bound.
   const delays = [250, 500, 1000, 2000, 1250];
   let lastError = null;
   for (const delay of delays) {
@@ -296,7 +297,7 @@ function cell(label, value) {
 
 function statusClass(value) {
   const normalized = String(value).toLowerCase();
-  for (const [needle, suffix] of [["on_fire", "on-fire"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
+  for (const [needle, suffix] of [["on_fire", "on-fire"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
     if (normalized.includes(needle)) return `status status-${suffix}`;
   }
   return "";
@@ -331,7 +332,14 @@ function age(value) {
 function listText(values) { return values && values.length ? values.join(", ") : "None"; }
 function linksText(values) { return values && values.length ? values.map((link) => link.label || link.url || link.path).join(", ") : "None"; }
 function checksText(checks) { return checks && checks.length ? checks.map((check) => `${check.name}: ${check.conclusion || check.status}`).join(", ") : "Unknown"; }
-function highestSeverity(findings) { return findings.map((finding) => finding.severity).filter(Boolean)[0] || "Unknown"; }
+function highestSeverity(findings) {
+  const ranks = { critical: 4, high: 3, medium: 2, low: 1 };
+  return findings.map((finding) => finding.severity).filter(Boolean).reduce((highest, candidate) => {
+    const candidateRank = ranks[String(candidate).toLowerCase()] || 0;
+    const highestRank = ranks[String(highest).toLowerCase()] || 0;
+    return candidateRank > highestRank ? candidate : highest;
+  }, "") || "Unknown";
+}
 function sourceUsability(value) { return value === "unavailable" ? "Other source panels remain usable" : value === "stale" ? "Retained rows remain visible with stale qualification" : value === "degraded" ? "Qualified data remains usable" : "Current source facts are usable"; }
 
 function openRun(run) {
@@ -380,7 +388,12 @@ function restoreDrawerFocus() { if (state.opener && state.opener.isConnected) st
 function reconcileOpenDrawer(snapshot) {
   const drawer = byId("drawer");
   if (!drawer.open) return;
-  const collection = drawer.dataset.entityType === "run" ? snapshot.runs : snapshot.pull_requests;
+  const collections = { run: snapshot.runs, pr: snapshot.pull_requests };
+  const collection = collections[drawer.dataset.entityType];
+  if (!collection) {
+    closeDrawer();
+    return;
+  }
   if (!collection.some((entity) => entity.id === drawer.dataset.entityId)) closeDrawer();
 }
 
