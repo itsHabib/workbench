@@ -40,6 +40,35 @@ func TestBundleRejectsDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestBundleRejectsInputDigestMismatch(t *testing.T) {
+	dir := t.TempDir()
+	bundleDir := filepath.Join(dir, "bundle")
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "in.txt"), []byte("real-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	work := []byte(`{
+  "schema_version": "0.1.0",
+  "command": {"executable": {"name": "true"}},
+  "cwd": {"root": "workspace", "value": "."},
+  "workspace": {"kind": "git", "url": "https://example.invalid/repo.git", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "inputs": [{"name": "in", "source": "in.txt", "target": "in.txt", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]
+}`)
+	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := placedRequest(t, work)
+	spec := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(spec, req, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.Admit(spec, bundleDir); err == nil {
+		t.Fatal("input digest mismatch must fail admission before a workload starts")
+	}
+}
+
 func TestBundleRejectsSourceEscape(t *testing.T) {
 	dir := t.TempDir()
 	bundleDir := filepath.Join(dir, "bundle")
