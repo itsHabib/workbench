@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -198,7 +199,7 @@ func cmdResult(args []string) int {
 	res, err := controller.ReadResult(stateAbs, fs.Arg(0), *wait, timeout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		if *wait && *timeoutStr != "" {
+		if errors.Is(err, controller.ErrWaitTimeout) {
 			return controller.ExitTimedOut
 		}
 		return mapObserveErr(err)
@@ -220,5 +221,5 @@ func mapObserveErr(err error) int {
 	if os.IsNotExist(err) {
 		return controller.ExitUsage
 	}
-	return controller.ExitUsage
+	return controller.ExitFailed
 }

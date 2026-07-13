@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
@@ -112,13 +113,26 @@ type ctrl struct {
 	gate     *terminalGate
 
 	allocID string
-	phase   string // last canonical phase progressed into
+
+	emitMu sync.Mutex
+	phase  string // last canonical phase progressed into (emitMu)
 }
 
+// emit serializes every journal write and phase advance. Backend Wait and the
+// controller interrupt path may call this concurrently; the lock is the sole
+// funnel so seq/NDJSON stay contiguous and phase reads are coherent.
 func (c *ctrl) emit(phase, kind string, details map[string]any) error {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
 	c.phase = phase
 	_, err := c.j.Append(phase, kind, details)
 	return err
+}
+
+func (c *ctrl) currentPhase() string {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
+	return c.phase
 }
 
 func (c *ctrl) execute() (Outcome, error) {
@@ -131,9 +145,9 @@ func (c *ctrl) execute() (Outcome, error) {
 		return Outcome{}, err
 	}
 
-	// Absolute deadline is armed before preparation (Flow C).
-	if err := c.prepare(); err != nil {
-		return c.failEarly(execution.PhasePreparation, execution.ReasonPreparationFailed, err)
+	// Absolute deadline is armed before preparation (Flow C / FR9).
+	if out, done, err := c.prepare(); done {
+		return out, err
 	}
 	if c.deadlineExceeded() {
 		return c.failEarly(execution.PhasePreparation, execution.ReasonDeadlineExceeded, fmt.Errorf("deadline exceeded during preparation"))
@@ -146,13 +160,40 @@ func (c *ctrl) execute() (Outcome, error) {
 	return c.runWorkload(h)
 }
 
-func (c *ctrl) prepare() error {
-	if err := bundle.Materialize(c.adm, c.run); err != nil {
-		return err
+// prepare materializes the bundle under the absolute deadline and cancel
+// marker. A hung git clone/checkout cannot run past policy.deadline_ms.
+// Abandoning Materialize is best-effort: the temp-dir clone (if any) is
+// cleaned by deferred RemoveAll; an orphaned git child may linger (DESIGN.md).
+func (c *ctrl) prepare() (Outcome, bool, error) {
+	done := make(chan struct{})
+	defer close(done)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- bundle.Materialize(c.adm, c.run)
+	}()
+
+	deadlineCh := time.After(time.Until(c.deadline))
+	cancelCh := c.watchCancel(done)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			out, e := c.failEarly(execution.PhasePreparation, execution.ReasonPreparationFailed, err)
+			return out, true, e
+		}
+		if err := c.emit(execution.PhasePreparation, "inputs_materialized", map[string]any{
+			"inputs": len(c.adm.Work.Inputs),
+		}); err != nil {
+			return Outcome{}, true, err
+		}
+		return Outcome{}, false, nil
+	case <-deadlineCh:
+		out, err := c.failEarly(execution.PhasePreparation, execution.ReasonDeadlineExceeded, fmt.Errorf("deadline exceeded during preparation"))
+		return out, true, err
+	case <-cancelCh:
+		out, err := c.failEarly(execution.PhasePreparation, execution.ReasonCancelRequested, fmt.Errorf("cancel requested during preparation"))
+		return out, true, err
 	}
-	return c.emit(execution.PhasePreparation, "inputs_materialized", map[string]any{
-		"inputs": len(c.adm.Work.Inputs),
-	})
 }
 
 func (c *ctrl) startBackend() (backend.Handle, error) {
@@ -186,9 +227,10 @@ func (c *ctrl) startBackend() (backend.Handle, error) {
 }
 
 type waitOutcome struct {
-	exit   backend.Exit
-	err    error
-	intent string // "", deadline, cancel
+	exit          backend.Exit
+	err           error
+	intent        string // "", deadline_exceeded, cancel_requested
+	terminalPhase string // canonical phase captured at interrupt intent
 }
 
 func (c *ctrl) runWorkload(h backend.Handle) (Outcome, error) {
@@ -201,14 +243,16 @@ func (c *ctrl) runWorkload(h backend.Handle) (Outcome, error) {
 	wo := c.awaitWorkload(h, waitCh)
 	if wo.err != nil && wo.intent == "" {
 		_ = c.be.Cleanup(context.Background(), h)
-		return c.failEarly(execution.PhaseWorkload, execution.ReasonStartupFailed, wo.err)
+		return c.failEarly(execution.PhaseWorkload, execution.ReasonWorkloadFailed, wo.err)
 	}
 	return c.finalize(h, wo)
 }
 
 func (c *ctrl) awaitWorkload(h backend.Handle, waitCh <-chan waitOutcome) waitOutcome {
+	done := make(chan struct{})
+	defer close(done)
 	deadlineCh := time.After(time.Until(c.deadline))
-	cancelCh := c.watchCancel()
+	cancelCh := c.watchCancel(done)
 	for {
 		select {
 		case wo := <-waitCh:
@@ -223,17 +267,20 @@ func (c *ctrl) awaitWorkload(h backend.Handle, waitCh <-chan waitOutcome) waitOu
 
 func (c *ctrl) interrupt(h backend.Handle, waitCh <-chan waitOutcome, reason string) waitOutcome {
 	_ = c.emit(execution.PhaseWorkload, reason, map[string]any{"reason_code": reason})
+	phase := c.currentPhase()
 	_ = c.be.Cancel(context.Background(), h)
 	timer := time.NewTimer(c.grace)
 	defer timer.Stop()
 	select {
 	case wo := <-waitCh:
 		wo.intent = reason
+		wo.terminalPhase = phase
 		return wo
 	case <-timer.C:
 		_ = c.be.Cleanup(context.Background(), h)
 		wo := <-waitCh
 		wo.intent = reason
+		wo.terminalPhase = phase
 		return wo
 	}
 }
@@ -244,17 +291,23 @@ func (c *ctrl) interrupt(h backend.Handle, waitCh <-chan waitOutcome, reason str
 // bounded by this interval.
 const cancelPollInterval = 50 * time.Millisecond
 
-func (c *ctrl) watchCancel() <-chan struct{} {
+// watchCancel polls the cancel-request marker until it appears or done closes.
+func (c *ctrl) watchCancel(done <-chan struct{}) <-chan struct{} {
 	ch := make(chan struct{}, 1)
 	go func() {
 		ticker := time.NewTicker(cancelPollInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			if !cancelRequested(c.run) {
-				continue
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if !cancelRequested(c.run) {
+					continue
+				}
+				ch <- struct{}{}
+				return
 			}
-			ch <- struct{}{}
-			return
 		}
 	}()
 	return ch
@@ -281,7 +334,7 @@ func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
 		_ = c.emit(execution.PhaseCleanup, execution.KindCleanupCompleted, nil)
 	}
 
-	res := c.buildResult(exitCode, arts, wo.intent, collectErr, cleanupErr)
+	res := c.buildResult(exitCode, arts, wo, collectErr, cleanupErr)
 	committed, _, err := c.gate.commit(c.run, c.j, res)
 	if err != nil {
 		return Outcome{}, err
@@ -289,7 +342,7 @@ func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
 	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
 }
 
-func (c *ctrl) buildResult(exitCode int, arts []execution.Artifact, intent string, collectErr, cleanupErr error) execution.Result {
+func (c *ctrl) buildResult(exitCode int, arts []execution.Artifact, wo waitOutcome, collectErr, cleanupErr error) execution.Result {
 	ended := time.Now().UTC()
 	code := int64(exitCode)
 	res := execution.Result{
@@ -309,12 +362,27 @@ func (c *ctrl) buildResult(exitCode int, arts []execution.Artifact, intent strin
 	if arts == nil {
 		res.Artifacts = []execution.Artifact{}
 	}
-	applyTerminalTruth(&res, exitCode, intent, collectErr, cleanupErr, c.phase)
+	phase := wo.terminalPhase
+	if phase == "" {
+		phase = c.currentPhase()
+	}
+	applyTerminalTruth(&res, exitCode, wo.intent, collectErr, cleanupErr, phase)
 	return res
 }
 
 func applyTerminalTruth(res *execution.Result, exitCode int, intent string, collectErr, cleanupErr error, phase string) {
-	// Flow C escalation: cleanup cannot prove isolation after deadline.
+	attachCollectDiag := func() {
+		if collectErr == nil {
+			return
+		}
+		res.Diagnostics = append(res.Diagnostics, execution.Diagnostic{
+			Code:    execution.ReasonCollectionFailed,
+			Message: collectErr.Error(),
+		})
+	}
+
+	// Isolation truth is global (TDD §8): cleanup failure always escalates,
+	// including after cancel — cancelled+cleanupErr becomes failed/cleanup.
 	if intent == execution.ReasonDeadlineExceeded && cleanupErr != nil {
 		res.Status = execution.StatusFailed
 		res.TerminalPhase = execution.PhaseCleanup
@@ -323,18 +391,32 @@ func applyTerminalTruth(res *execution.Result, exitCode int, intent string, coll
 			Phase:      execution.PhaseWorkload,
 			ReasonCode: execution.ReasonDeadlineExceeded,
 		}}
+		attachCollectDiag()
+		return
+	}
+	if intent == execution.ReasonCancelRequested && cleanupErr != nil {
+		res.Status = execution.StatusFailed
+		res.TerminalPhase = execution.PhaseCleanup
+		res.ReasonCode = execution.ReasonCleanupFailed
+		res.Causes = []execution.Cause{{
+			Phase:      execution.PhaseWorkload,
+			ReasonCode: execution.ReasonCancelRequested,
+		}}
+		attachCollectDiag()
 		return
 	}
 	if intent == execution.ReasonDeadlineExceeded {
 		res.Status = execution.StatusTimedOut
 		res.TerminalPhase = phaseOr(phase, execution.PhaseWorkload)
 		res.ReasonCode = execution.ReasonDeadlineExceeded
+		attachCollectDiag()
 		return
 	}
 	if intent == execution.ReasonCancelRequested {
 		res.Status = execution.StatusCancelled
 		res.TerminalPhase = phaseOr(phase, execution.PhaseWorkload)
 		res.ReasonCode = execution.ReasonCancelRequested
+		attachCollectDiag()
 		return
 	}
 	if collectErr != nil {
@@ -404,6 +486,10 @@ func (c *ctrl) failEarly(phase, reason string, cause error) (Outcome, error) {
 	}
 	if reason == execution.ReasonDeadlineExceeded {
 		res.Status = execution.StatusTimedOut
+		res.TerminalPhase = phase
+	}
+	if reason == execution.ReasonCancelRequested {
+		res.Status = execution.StatusCancelled
 		res.TerminalPhase = phase
 	}
 	committed, _, err := c.gate.commit(c.run, c.j, res)

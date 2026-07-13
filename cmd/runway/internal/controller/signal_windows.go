@@ -5,7 +5,7 @@ package controller
 // wakeController is a no-op on Windows: there is no portable SIGUSR1 equivalent
 // that the controller installs a drain for. Cancel remains marker-authoritative;
 // latency is bounded by cancelPollInterval.
-func wakeController(pid int) error {
+func wakeController(_ int) error {
 	return nil
 }
 

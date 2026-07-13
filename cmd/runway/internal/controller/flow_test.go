@@ -6,10 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -232,13 +236,37 @@ func main() {
 	if out.Result.Status != execution.StatusTimedOut || out.Result.ReasonCode != execution.ReasonDeadlineExceeded {
 		t.Fatalf("want timed_out/deadline_exceeded, got %s/%s", out.Result.Status, out.Result.ReasonCode)
 	}
+	if out.Result.TerminalPhase != execution.PhaseWorkload {
+		t.Fatalf("terminal_phase=%s want workload (interrupt capture, not cleanup)", out.Result.TerminalPhase)
+	}
 	if out.ExitCode != controller.ExitTimedOut {
 		t.Fatalf("exit=%d", out.ExitCode)
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("deadline path too slow: %s", time.Since(start))
 	}
-	assertNoOrphans(t)
+	assertNoOrphans(t, out.Result.Placement.AllocationID)
+}
+
+func TestFlowC_TimedOutMissingOutput(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+import "time"
+func main() { time.Sleep(10 * time.Second) }
+`)
+	work := goRunWork(h, "main.go", []execution.Output{{
+		Name: "missing", Path: "nope.txt", Required: true,
+	}})
+	out := h.runWith(work, execution.Policy{DeadlineMS: 400, CancelGraceMS: 100}, controller.Options{})
+	if out.Result.Status != execution.StatusTimedOut || out.Result.ReasonCode != execution.ReasonDeadlineExceeded {
+		t.Fatalf("want timed_out/deadline_exceeded, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.Result.TerminalPhase != execution.PhaseWorkload {
+		t.Fatalf("phase=%s", out.Result.TerminalPhase)
+	}
+	if !hasDiagnostic(out.Result, execution.ReasonCollectionFailed) {
+		t.Fatalf("want collection_failed diagnostic, got %+v", out.Result.Diagnostics)
+	}
 }
 
 func TestFlowC_CleanupFailureEscalation(t *testing.T) {
@@ -267,6 +295,58 @@ func main() {
 	}
 }
 
+func TestFlowD_CancelCleanupFailureEscalation(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+import "time"
+func main() { time.Sleep(10 * time.Second) }
+`)
+	work := goRunWork(h, "main.go", nil)
+	workBytes, _ := json.Marshal(work)
+	_ = os.WriteFile(filepath.Join(h.bundleDir, "work.json"), workBytes, 0o600)
+	req := execution.Request{
+		SchemaVersion: execution.SchemaVersion,
+		RequestID:     "req_cancel_cleanup",
+		Work:          execution.Work{Manifest: "work.json", SHA256: sha256Hex(workBytes)},
+		Placement:     execution.Placement{Backend: "local", Profile: "default"},
+		Policy:        execution.Policy{DeadlineMS: 30000, CancelGraceMS: 50},
+	}
+	reqBytes, _ := json.Marshal(req)
+	spec := filepath.Join(h.dir, "request.json")
+	_ = os.WriteFile(spec, reqBytes, 0o600)
+
+	be := &failCleanup{inner: local.New()}
+	var (
+		out    controller.Outcome
+		runErr error
+		wg     sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		out, runErr = controller.Run(spec, h.bundleDir, h.stateRoot, controller.Options{Backend: be})
+	}()
+
+	runID := waitForRunID(t, h.stateRoot, 15*time.Second)
+	if _, err := controller.RequestCancel(h.stateRoot, runID); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	assertTerminalTruth(t, h.stateRoot, out)
+	if out.Result.Status != execution.StatusFailed || out.Result.ReasonCode != execution.ReasonCleanupFailed {
+		t.Fatalf("want failed/cleanup_failed, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.Result.TerminalPhase != execution.PhaseCleanup {
+		t.Fatalf("phase=%s", out.Result.TerminalPhase)
+	}
+	if len(out.Result.Causes) != 1 || out.Result.Causes[0].ReasonCode != execution.ReasonCancelRequested {
+		t.Fatalf("causes=%+v", out.Result.Causes)
+	}
+}
+
 type failCleanup struct {
 	inner backend.Backend
 }
@@ -286,6 +366,100 @@ func (f *failCleanup) Collect(ctx context.Context, h backend.Handle, outDir stri
 func (f *failCleanup) Cleanup(ctx context.Context, h backend.Handle) error {
 	_ = f.inner.Cleanup(ctx, h)
 	return fmt.Errorf("simulated isolation failure")
+}
+
+func TestWaitErrorProducesDurableFailedReceipt(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 100}, controller.Options{Backend: &immediateWaitErr{}})
+	if out.Result.Status != execution.StatusFailed || out.Result.ReasonCode != execution.ReasonWorkloadFailed {
+		t.Fatalf("want failed/workload_failed, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.Result.TerminalPhase != execution.PhaseWorkload {
+		t.Fatalf("phase=%s", out.Result.TerminalPhase)
+	}
+	if out.ExitCode != controller.ExitFailed {
+		t.Fatalf("exit=%d", out.ExitCode)
+	}
+}
+
+type immediateWaitErr struct{}
+
+func (b *immediateWaitErr) Start(_ context.Context, _ backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+	if err := emit(execution.PhaseStartup, execution.KindPlacementAllocated, map[string]any{"allocation_id": "imm"}); err != nil {
+		return nil, err
+	}
+	if err := emit(execution.PhaseStartup, execution.KindWorkloadReady, nil); err != nil {
+		return nil, err
+	}
+	if err := emit(execution.PhaseWorkload, execution.KindWorkloadStarted, nil); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
+}
+func (b *immediateWaitErr) Wait(_ context.Context, _ backend.Handle, _ backend.Emit) (backend.Exit, error) {
+	return backend.Exit{}, fmt.Errorf("backend wait boom")
+}
+func (b *immediateWaitErr) Cancel(_ context.Context, _ backend.Handle) error { return nil }
+func (b *immediateWaitErr) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return nil, nil
+}
+func (b *immediateWaitErr) Cleanup(_ context.Context, _ backend.Handle) error { return nil }
+
+// raceBackend exits and accepts cancel at the same moment so Wait's
+// workload_exited emit races the controller's deadline_exceeded emit.
+type raceBackend struct {
+	release chan struct{}
+}
+
+func (b *raceBackend) Start(_ context.Context, _ backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+	if err := emit(execution.PhaseStartup, execution.KindPlacementAllocated, map[string]any{"allocation_id": "race"}); err != nil {
+		return nil, err
+	}
+	if err := emit(execution.PhaseStartup, execution.KindWorkloadReady, nil); err != nil {
+		return nil, err
+	}
+	if err := emit(execution.PhaseWorkload, execution.KindWorkloadStarted, nil); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
+}
+func (b *raceBackend) Wait(_ context.Context, _ backend.Handle, emit backend.Emit) (backend.Exit, error) {
+	<-b.release
+	if err := emit(execution.PhaseWorkload, execution.KindWorkloadExited, map[string]any{"exit_code": 0}); err != nil {
+		return backend.Exit{}, err
+	}
+	return backend.Exit{Code: 0}, nil
+}
+func (b *raceBackend) Cancel(_ context.Context, _ backend.Handle) error {
+	select {
+	case <-b.release:
+	default:
+		close(b.release)
+	}
+	return nil
+}
+func (b *raceBackend) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return nil, nil
+}
+func (b *raceBackend) Cleanup(_ context.Context, _ backend.Handle) error { return nil }
+
+func TestEmitRace_WorkloadExitAndDeadline(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	be := &raceBackend{release: make(chan struct{})}
+	// Deadline must clear prepare (git checkout) then fire while Wait blocks,
+	// so Cancel releases Wait and workload_exited races deadline_exceeded.
+	out := h.runWith(work, execution.Policy{DeadlineMS: 2000, CancelGraceMS: 50}, controller.Options{Backend: be})
+	if out.Result.Status != execution.StatusTimedOut {
+		t.Fatalf("want timed_out, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
 }
 
 func TestFlowD_CancelRace(t *testing.T) {
@@ -503,6 +677,85 @@ func TestResultWaitTimeoutMandatory(t *testing.T) {
 	}
 }
 
+func TestResultWaitTimeoutIsDistinct(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+import "time"
+func main() { time.Sleep(5 * time.Second) }
+`)
+	work := goRunWork(h, "main.go", nil)
+	workBytes, _ := json.Marshal(work)
+	_ = os.WriteFile(filepath.Join(h.bundleDir, "work.json"), workBytes, 0o600)
+	req := execution.Request{
+		SchemaVersion: execution.SchemaVersion,
+		RequestID:     "req_wait",
+		Work:          execution.Work{Manifest: "work.json", SHA256: sha256Hex(workBytes)},
+		Placement:     execution.Placement{Backend: "local", Profile: "default"},
+		Policy:        execution.Policy{DeadlineMS: 30000, CancelGraceMS: 100},
+	}
+	reqBytes, _ := json.Marshal(req)
+	spec := filepath.Join(h.dir, "request.json")
+	_ = os.WriteFile(spec, reqBytes, 0o600)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := controller.Run(spec, h.bundleDir, h.stateRoot, controller.Options{})
+		errCh <- err
+	}()
+	runID := waitForRunID(t, h.stateRoot, 15*time.Second)
+	_, err := controller.ReadResult(h.stateRoot, runID, true, 50*time.Millisecond)
+	if err == nil || !errors.Is(err, controller.ErrWaitTimeout) {
+		t.Fatalf("want ErrWaitTimeout, got %v", err)
+	}
+	// Missing run is not a timeout.
+	_, err = controller.ReadResult(h.stateRoot, "run_does_not_exist", false, 0)
+	if err == nil || errors.Is(err, controller.ErrWaitTimeout) {
+		t.Fatalf("missing run must not be ErrWaitTimeout, got %v", err)
+	}
+	_, _ = controller.RequestCancel(h.stateRoot, runID)
+	_ = <-errCh
+}
+
+func TestWatchFollowResultFallback(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 100}, controller.Options{})
+	run, err := state.Open(h.stateRoot, out.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate crash between result rename and run_terminal: truncate journal
+	// after removing the terminal event while keeping result.json.
+	events, err := journal.ReadHistory(run.EventsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[len(events)-1].Kind != execution.KindRunTerminal {
+		t.Fatalf("precondition: need run_terminal, got %d events", len(events))
+	}
+	trimmed := events[:len(events)-1]
+	f, err := os.Create(run.EventsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := json.NewEncoder(f)
+	for _, ev := range trimmed {
+		if err := enc.Encode(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := controller.Watch(h.stateRoot, out.RunID, 0, true, &buf); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExitCodes(t *testing.T) {
 	cases := []struct {
 		status string
@@ -526,11 +779,76 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-func assertNoOrphans(t *testing.T) {
+func assertNoOrphans(t *testing.T, allocationID string) {
 	t.Helper()
-	// Best-effort: nothing in this package's process group children should remain
-	// from the noisy workload. Local Cleanup uses killGroup; Wait also kills.
-	// Presence of the test itself is fine — we only check the fixture returned.
+	pid, ok := parseAllocPID(allocationID)
+	if !ok {
+		t.Fatalf("assertNoOrphans: cannot parse allocation_id %q", allocationID)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !pidAlive(pid) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("orphan pid %d still alive after deadline cleanup", pid)
+}
+
+func parseAllocPID(allocationID string) (int, bool) {
+	const prefix = "pid:"
+	if !strings.HasPrefix(allocationID, prefix) {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimPrefix(allocationID, prefix))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
+func pidAlive(pid int) bool {
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(string(out), strconv.Itoa(pid))
+	}
+	return exec.Command("kill", "-0", strconv.Itoa(pid)).Run() == nil
+}
+
+func hasDiagnostic(res execution.Result, code string) bool {
+	for _, d := range res.Diagnostics {
+		if d.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForRunID(t *testing.T, stateRoot string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		entries, _ := os.ReadDir(filepath.Join(stateRoot, "runs"))
+		if len(entries) != 1 {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		runID := entries[0].Name()
+		run, err := state.Open(stateRoot, runID)
+		if err != nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		if _, err := os.Stat(run.ControllerPath()); err == nil {
+			return runID
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("run never appeared")
+	return ""
 }
 
 func sha256Hex(b []byte) string {

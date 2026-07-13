@@ -3,6 +3,7 @@ package controller
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,11 @@ import (
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
 	"github.com/itsHabib/workbench/contracts/execution"
 )
+
+// ErrWaitTimeout is returned by ReadResult only when --wait's poll deadline
+// elapses without a terminal receipt. Other observe failures (missing run,
+// corrupt state) are distinct errors so callers can map exit 124 vs 3.
+var ErrWaitTimeout = errors.New("controller: timed out waiting for result")
 
 // Watch reads durable events.ndjson only — never backend stdout (FR11).
 // after < 0 means start from the beginning; follow polls until terminal when
@@ -23,7 +29,7 @@ func Watch(stateRoot, runID string, after int64, follow bool, w io.Writer) error
 	}
 	last := after
 	for {
-		n, term, err := writeEventsAfter(run.EventsPath(), last, w)
+		n, term, err := writeEventsAfter(run, last, w)
 		if err != nil {
 			return err
 		}
@@ -37,8 +43,8 @@ func Watch(stateRoot, runID string, after int64, follow bool, w io.Writer) error
 	}
 }
 
-func writeEventsAfter(path string, after int64, w io.Writer) (int64, bool, error) {
-	events, err := journal.ReadHistory(path)
+func writeEventsAfter(run state.RunDir, after int64, w io.Writer) (int64, bool, error) {
+	events, err := journal.ReadHistory(run.EventsPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return after, false, nil
@@ -63,7 +69,18 @@ func writeEventsAfter(path string, after int64, w io.Writer) (int64, bool, error
 		}
 		last = ev.Seq
 	}
-	return last, st.Terminal, nil
+	if st.Terminal {
+		return last, true, nil
+	}
+	// result.json presence is a terminal fallback when the journal lacks
+	// run_terminal (crash between atomic rename and the terminal append —
+	// section-8 repairable partial state; writer order stays result-first).
+	if _, ok, err := readResultIfPresent(run); err != nil {
+		return last, false, err
+	} else if ok {
+		return last, true, nil
+	}
+	return last, false, nil
 }
 
 // TailLogs copies buffered workload log bytes. follow polls until result.json
@@ -153,7 +170,7 @@ func ReadResult(stateRoot, runID string, wait bool, timeout time.Duration) (exec
 			return res, nil
 		}
 		if !time.Now().Before(deadline) {
-			return execution.Result{}, fmt.Errorf("controller: timed out waiting for result")
+			return execution.Result{}, ErrWaitTimeout
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
