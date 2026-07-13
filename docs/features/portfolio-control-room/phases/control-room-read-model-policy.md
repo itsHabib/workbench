@@ -44,6 +44,8 @@ Use named string types and constants for externally serialized enumerations. JSO
 
 `Snapshot.Sources` contains exactly one effective receipt per configured source name. In Phase 2, a receipt “belongs to the evaluated snapshot” precisely when it is that source's receipt in the `Snapshot.Sources` slice passed to `ApplyPolicy`; no timestamp freshness window is inferred. It is current only when its state is `ok` or `degraded`. `degraded` is current-but-explicitly-partial. `loading`, `unavailable`, missing, duplicate, or `stale` receipts are not current and fail closed. Phase 5's publisher is responsible for placing only current-generation receipts into a newly published snapshot and for marking retained payload `stale`; a latest failed attempt may appear separately only in the later composition input, before it is reduced to the one effective snapshot receipt.
 
+A general `degraded` receipt does not create a new attention rule: its partial state remains visible in `Snapshot.Sources`, and source-specific informational rules such as `pr.detail_truncated` explain known consequences. Do not invent `source.degraded`; the accepted ranking table is exhaustive.
+
 ### Pure policy seam
 
 Expose one pure policy entry point equivalent to:
@@ -72,6 +74,8 @@ Implement the accepted thresholds exactly, with boundary tests:
 All elapsed-time comparisons use `now.Sub(factual_timestamp)` in hours, not calendar days; future timestamps clamp to zero elapsed time. The exact partition is `live <= 72h`, `idle > 72h && <= 336h`, and stale-claim age `> 336h`.
 
 Derived entity liveness is safe only with a current supporting source receipt. If that receipt is `loading`, `unavailable`, missing, duplicate, or `stale`, preserve the producer status/timestamps but set the entity liveness label to `unknown`. Stale receipts therefore suppress both consequence attention items and direct entity liveness labels; `source.stale` carries the explanation.
+
+Liveness is first-match with kind-specific precedence. Runs evaluate `retry_loop`, `stalled_active`, `live`, `idle`, then `unknown`. Tasks evaluate `done`, `blocked_no_path`, `stale_claim`, `live`, `idle`, then `unknown`. This makes terminal completion stable, lets blocked/stale policy outrank mere age, and prevents active or linked work from being labeled idle.
 
 Linkage is exact and owner-issued. A run's task/spec identity may equal a task ID or slug, and an artifact may name the exact PR/run. Title/body substring guesses never link entities.
 
