@@ -47,6 +47,15 @@ Ship's owner contract intentionally uses one-based `batchIndex` values and
 zero-based `streamIndex` values; the mixed convention in the driver fixture is
 producer fidelity, not fixture normalization.
 
+GitHub's `graphql-inventory-healthy.json` is the raw GraphQL producer envelope.
+The `pr-detail-*.json` fixtures are adapter-augmented shapes: Control Room adds
+`detail_state`; `gh` does not emit that field.
+
+Tracelens intentionally emits `subject.number: 0` when a trace has no pull
+request context; its owner contract uses a non-nullable integer to remain
+byte-compatible with Gate. Fixture links use neutral HTTPS values because raw
+local `file://` report locations are never browser-facing Control Room links.
+
 ## Privacy
 
 Fixtures contain no real operator usernames, credentials, absolute home paths,

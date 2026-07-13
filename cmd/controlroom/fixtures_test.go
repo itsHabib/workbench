@@ -109,6 +109,11 @@ var shipForbiddenDriverStreamKeys = []string{
 	"workOnCurrentBranch",
 }
 
+var (
+	fixtureSecretPatterns = secretPatterns()
+	fixtureHomePatterns   = homePathPatterns()
+)
+
 func TestFixtureInventoryCoverage(t *testing.T) {
 	root := fixturesRoot
 	for _, source := range requiredSources {
@@ -160,6 +165,32 @@ func TestAllFixturePathsAreSanitized(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUnavailableReceiptContract(t *testing.T) {
+	// Dossier's session-failure fixture intentionally preserves MCP error framing;
+	// the remaining sources use the shared adapter receipt envelope.
+	for _, source := range []string{"ship", "github", "tracelens", "toolhealth", "tower"} {
+		path := filepath.Join(fixturesRoot, source, "source-unavailable.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt struct {
+			Source     string `json:"source"`
+			State      string `json:"state"`
+			ObservedAt string `json:"observed_at"`
+			ErrorCode  string `json:"error_code"`
+			Message    string `json:"message"`
+		}
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.Source != source || receipt.State != "unavailable" || receipt.ObservedAt == "" ||
+			receipt.ErrorCode == "" || receipt.Message == "" {
+			t.Errorf("%s: incomplete unavailable receipt", path)
+		}
 	}
 }
 
@@ -238,14 +269,14 @@ func scanPrivacyFile(t *testing.T, path, content, operatorDisplayName string) {
 	if operatorDisplayName != "" && strings.Contains(content, operatorDisplayName) {
 		t.Errorf("%s: contains configured operator display name", path)
 	}
-	for _, p := range secretPatterns() {
+	for _, p := range fixtureSecretPatterns {
 		for _, match := range p.re.FindAllString(content, -1) {
 			if !isPlaceholderSecret(match) {
 				t.Errorf("%s: matches secret pattern %s (%q)", path, p.name, match)
 			}
 		}
 	}
-	for _, p := range homePathPatterns() {
+	for _, p := range fixtureHomePatterns {
 		for _, match := range p.FindAllString(content, -1) {
 			if !isPlaceholderPath(match) {
 				t.Errorf("%s: matches operator home path pattern", path)
@@ -272,6 +303,7 @@ func TestShipFixtureContracts(t *testing.T) {
 		assertNoForbiddenKeys(t, path, doc, shipForbiddenKeys)
 	}
 	assertShipWorkflowList(t, filepath.Join(shipDir, "workflow-list-healthy.json"))
+	assertShipWorkflowStatus(t, filepath.Join(shipDir, "workflow-status-healthy.json"))
 	assertShipDriverList(t, filepath.Join(shipDir, "driver-list-healthy.json"))
 }
 
@@ -430,7 +462,8 @@ func assertNoAbsolutePaths(t *testing.T, path string, v any) {
 	case map[string]any:
 		for k, child := range x {
 			if s, ok := child.(string); ok {
-				if (k == "path" || k == "url") && isDisallowedAbsolutePath(s) {
+				fileURL := k == "url" && strings.HasPrefix(s, "file://")
+				if (k == "path" || k == "url") && (fileURL || isDisallowedAbsolutePath(s)) {
 					t.Errorf("%s: absolute path in %q: %s", path, k, s)
 				}
 			}
@@ -482,6 +515,27 @@ func assertShipWorkflowList(t *testing.T, path string) {
 	}
 	if !strings.HasPrefix(run.DocPath, "docs/") {
 		t.Fatalf("docPath must be a neutral relative path, got %q", run.DocPath)
+	}
+}
+
+func assertShipWorkflowStatus(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run struct {
+		ID      string `json:"id"`
+		DocPath string `json:"docPath"`
+	}
+	if err := json.Unmarshal(data, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.ID == "" {
+		t.Error("workflow status must include id")
+	}
+	if !strings.HasPrefix(run.DocPath, "docs/") {
+		t.Errorf("workflow status docPath must be neutral relative, got %q", run.DocPath)
 	}
 }
 

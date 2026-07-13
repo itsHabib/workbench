@@ -37,13 +37,13 @@
     "state": "available",
     "value": {
       "label": "tracelens report",
-      "url": "file:///tmp/tracelens-demo-report.md"
+      "url": "https://example.invalid/tracelens/report"
     }
   },
   "evidence": [
     {
       "label": "trace summary",
-      "url": "file:///tmp/tracelens-demo-summary.json"
+      "url": "https://example.invalid/tracelens/summary"
     }
   ],
   "input_tokens": {

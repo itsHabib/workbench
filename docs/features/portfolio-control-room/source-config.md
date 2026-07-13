@@ -97,6 +97,7 @@ fields fail closed at startup.
 | `sources.dossier.corpus` | The sole Dossier corpus setting. Required when Dossier is enabled; no root-level fallback or override exists. |
 | `sources.<name>.enabled` | Boolean. Optional sources (`tower`) default `false`. |
 | `sources.<name>.executable` | Command name or absolute path. When `discover_path` is true, search `PATH` only — never infer sibling package locations. |
+| `sources.<name>.argv` | Command arguments or named argument templates. An empty array is valid for no-argument commands such as toolhealth. |
 | `sources.github.scopes` | Real mode: one to four entries, each `user:<login>`, `org:<login>`, or `repo:<owner/name>`. Zero or more than four is a startup error. |
 
 ### Executable discovery
