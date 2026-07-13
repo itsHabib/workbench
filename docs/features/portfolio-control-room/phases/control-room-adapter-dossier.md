@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-adapter-dossier` (id: `tsk_01KXDPT2H72M69NA57PV4FWB0W`), [`../spec.md`](../spec.md), Dossier MCP protocol

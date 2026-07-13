@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-adapter-ship` (id: `tsk_01KXDPT2G8G86R70NYXMHKNP7V`), [`../spec.md`](../spec.md), Ship contract PRs #193–#195

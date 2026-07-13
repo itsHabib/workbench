@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-adapter-tracelens` (id: `tsk_01KXDPT2JA5TSC9T3GWK6A1082`), [`../spec.md`](../spec.md)

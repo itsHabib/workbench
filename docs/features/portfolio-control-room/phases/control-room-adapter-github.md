@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-adapter-github` (id: `tsk_01KXDPT2HSGBT2MCD292F2DAQ2`), [`../spec.md`](../spec.md)

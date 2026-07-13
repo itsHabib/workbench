@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: @codex:control-room
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-adapter-toolhealth` (id: `tsk_01KXDPT2JW0F4TSGH6SFM8Q9TQ`), [`../spec.md`](../spec.md)
