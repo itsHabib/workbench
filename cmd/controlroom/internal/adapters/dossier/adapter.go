@@ -10,7 +10,6 @@ import (
 	"io"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,8 +77,9 @@ func (p *execProcess) Wait() error           { return p.cmd.Wait() }
 func (p *execProcess) Kill() error           { return p.cmd.Process.Kill() }
 
 type probeCall struct {
-	done   chan struct{}
-	result Result
+	done    chan struct{}
+	result  Result
+	waiters int
 }
 
 // Adapter supervises one handshaken child and exact breaker state.
@@ -129,6 +129,7 @@ func (a *Adapter) collect(ctx context.Context, manual bool) Result {
 		if open && manual {
 			if a.probe != nil {
 				probe := a.probe
+				probe.waiters++
 				a.stateMu.Unlock()
 				select {
 				case <-ctx.Done():
@@ -140,16 +141,7 @@ func (a *Adapter) collect(ctx context.Context, manual bool) Result {
 			probe := &probeCall{done: make(chan struct{})}
 			a.probe = probe
 			a.stateMu.Unlock()
-			a.cycleMu.Lock()
-			result, breakerFailure := a.collectCycle(ctx)
-			a.cycleMu.Unlock()
-			a.stateMu.Lock()
-			a.record(result, breakerFailure)
-			probe.result = result
-			close(probe.done)
-			a.probe = nil
-			a.stateMu.Unlock()
-			return result
+			return a.runProbe(ctx, probe)
 		}
 		a.stateMu.Unlock()
 
@@ -168,6 +160,25 @@ func (a *Adapter) collect(ctx context.Context, manual bool) Result {
 		a.cycleMu.Unlock()
 		return result
 	}
+}
+
+func (a *Adapter) runProbe(ctx context.Context, probe *probeCall) (result Result) {
+	result = unavailable(a.now(), "probe_panicked", "Dossier manual probe did not complete")
+	defer func() {
+		a.stateMu.Lock()
+		probe.result = result
+		close(probe.done)
+		a.probe = nil
+		a.stateMu.Unlock()
+	}()
+	a.cycleMu.Lock()
+	defer a.cycleMu.Unlock()
+	var breakerFailure bool
+	result, breakerFailure = a.collectCycle(ctx)
+	a.stateMu.Lock()
+	a.record(result, breakerFailure)
+	a.stateMu.Unlock()
+	return result
 }
 
 func (a *Adapter) record(result Result, breakerFailure bool) {
@@ -216,9 +227,14 @@ func (a *Adapter) collectCycle(ctx context.Context) (Result, bool) {
 	allTasks := make([]taskWire, 0)
 	artifacts := make([]artifactWire, 0)
 	for _, project := range projects.Projects {
+		if len(allTasks) >= maxTasks {
+			break
+		}
 		if project.Slug == "" {
 			continue
 		}
+		// Keep the accepted owner-read sequence explicit. Overview and phase
+		// inventory verify project context before task/detail access.
 		var discard json.RawMessage
 		if err := a.session.call(cycleCtx, "project.overview", map[string]any{"slug": project.Slug}, &discard); err != nil {
 			_ = a.invalidateSession()
@@ -296,6 +312,8 @@ func (s *session) call(ctx context.Context, name string, arguments map[string]an
 	return s.exchange(ctx, request, target)
 }
 
+// exchange may leave its reader goroutine consuming until child shutdown when
+// ctx fires. Callers must invalidate the session after every error return.
 func (s *session) exchange(ctx context.Context, request rpcRequest, target any) error {
 	if err := s.write(request); err != nil {
 		return err
@@ -320,9 +338,13 @@ func (s *session) exchange(ctx context.Context, request rpcRequest, target any) 
 	}
 	var response rpcResponse
 	if err := json.Unmarshal(result.line, &response); err != nil {
-		return fmt.Errorf("malformed json-rpc response")
+		return fmt.Errorf("malformed json-rpc response: %w", err)
 	}
-	if strings.TrimSpace(string(response.ID)) != strconv.Itoa(request.ID) {
+	var responseID int
+	if err := json.Unmarshal(response.ID, &responseID); err != nil {
+		return fmt.Errorf("invalid json-rpc response id: %w", err)
+	}
+	if responseID != request.ID {
 		return fmt.Errorf("mismatched json-rpc response id")
 	}
 	if response.Error != nil {
@@ -347,7 +369,7 @@ func (s *session) exchange(ctx context.Context, request rpcRequest, target any) 
 		return fmt.Errorf("mcp tool result had no structured content")
 	}
 	if err := json.Unmarshal(payload, target); err != nil {
-		return fmt.Errorf("malformed mcp tool content")
+		return fmt.Errorf("malformed mcp tool content: %w", err)
 	}
 	return nil
 }
@@ -458,6 +480,7 @@ func normalizeTasks(tasks []taskWire, artifacts []artifactWire) []model.Task {
 		if project == "" {
 			project = task.Project
 		}
+		// Liveness is derived centrally after cross-source composition.
 		row := model.Task{ID: task.ID, Slug: task.Slug, Title: task.Title, Project: project, Phase: task.Phase, Status: task.Status, Assignee: task.Assignee, Dependencies: append([]string(nil), task.Dependencies...), Blockers: []string{}, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, Artifacts: []model.SafeLink{}, Liveness: model.LivenessUnknown}
 		index[row.ID] = len(rows)
 		rows = append(rows, row)

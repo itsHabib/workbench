@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,17 +22,29 @@ type fakeFactory struct {
 	fail    bool
 	lines   string
 	process *fakeProcess
+	gate    <-chan struct{}
+	started chan struct{}
+	once    sync.Once
 }
 
 func (f *fakeFactory) Start(_ string, _ ...string) (process, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.starts++
-	if f.fail {
+	fail, lines, gate, started := f.fail, f.lines, f.gate, f.started
+	f.mu.Unlock()
+	if started != nil {
+		f.once.Do(func() { close(started) })
+	}
+	if gate != nil {
+		<-gate
+	}
+	if fail {
 		return nil, errors.New("start failed")
 	}
-	p := newFakeProcess(f.lines)
+	p := newFakeProcess(lines)
+	f.mu.Lock()
 	f.process = p
+	f.mu.Unlock()
 	return p, nil
 }
 
@@ -120,6 +133,53 @@ func TestManualHalfOpenSuccessResetsBreaker(t *testing.T) {
 	}
 	if a.failures != 0 || !a.openUntil.IsZero() {
 		t.Fatalf("breaker did not reset: failures=%d open=%s", a.failures, a.openUntil)
+	}
+}
+
+func TestConcurrentManualHalfOpenCallersJoinOneProbe(t *testing.T) {
+	factory := &fakeFactory{fail: true}
+	a := New("dossier", "corpus")
+	a.factory = factory
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return now }
+	for i := 0; i < 3; i++ {
+		a.Collect(context.Background())
+	}
+	gate := make(chan struct{})
+	started := make(chan struct{})
+	factory.mu.Lock()
+	factory.fail, factory.lines, factory.gate, factory.started = false, healthyScript(), gate, started
+	factory.mu.Unlock()
+	results := make(chan Result, 2)
+	go func() { results <- a.CollectManual(context.Background()) }()
+	<-started
+	go func() { results <- a.CollectManual(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		a.stateMu.Lock()
+		joined := a.probe != nil && a.probe.waiters == 1
+		a.stateMu.Unlock()
+		if joined {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second manual caller did not join the probe")
+		}
+		runtime.Gosched()
+	}
+	close(gate)
+	first, second := <-results, <-results
+	if first.Receipt.State != model.SourceOK || second.Receipt.State != model.SourceOK || len(first.Tasks) != 1 || len(second.Tasks) != 1 {
+		t.Fatalf("joiners differed: first=%#v second=%#v", first, second)
+	}
+	factory.mu.Lock()
+	starts := factory.starts
+	factory.mu.Unlock()
+	if starts != 4 {
+		t.Fatalf("starts = %d, want exactly one half-open start after three failures", starts)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
