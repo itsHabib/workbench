@@ -134,6 +134,37 @@ func TestRetryGroupsRequireExactAvailableIdentity(t *testing.T) {
 	}
 }
 
+func TestRetryLoopDoesNotRelabelOldFailures(t *testing.T) {
+	snapshot := base()
+	doc := model.Known("docs/a.md")
+	snapshot.Runs = []model.Run{
+		{ID: "old", Kind: "workflow", Status: "failed", UpdatedAt: now.Add(-100 * time.Hour), DocPath: doc},
+		{ID: "one", Kind: "workflow", Status: "failed", UpdatedAt: now, DocPath: doc},
+		{ID: "two", Kind: "workflow", Status: "failed", UpdatedAt: now.Add(-time.Hour), DocPath: doc},
+		{ID: "three", Kind: "workflow", Status: "failed", UpdatedAt: now.Add(-2 * time.Hour), DocPath: doc},
+	}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Runs[0].Liveness != model.LivenessIdle {
+		t.Fatalf("old run liveness = %s", got.Runs[0].Liveness)
+	}
+	for _, attention := range got.Attention {
+		if attention.ID == "run.retry_loop:old" {
+			t.Fatal("old run received retry-loop attention")
+		}
+	}
+}
+
+func TestOpenPullRequestKeepsOldRunLive(t *testing.T) {
+	snapshot := base()
+	prURL := "https://example.invalid/pr/1"
+	snapshot.Runs = []model.Run{{ID: "run", Kind: "workflow", Status: "failed", UpdatedAt: now.Add(-100 * time.Hour), DocPath: model.Known("docs/a.md"), Evidence: []model.SafeLink{{URL: prURL}}}}
+	snapshot.PullRequests = []model.PullRequest{{ID: "pr", URL: prURL, State: "open"}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Runs[0].Liveness != model.LivenessLive {
+		t.Fatalf("run liveness = %s", got.Runs[0].Liveness)
+	}
+}
+
 func TestTaskBoundariesAndFailClosedStaleClaim(t *testing.T) {
 	snapshot := base()
 	snapshot.Tasks = []model.Task{
@@ -177,6 +208,15 @@ func TestLiveLinkageRequiresCurrentSupportingSource(t *testing.T) {
 	}
 }
 
+func TestBlockedTaskArtifactProvidesPath(t *testing.T) {
+	snapshot := base()
+	snapshot.Tasks = []model.Task{{ID: "blocked", Status: "blocked", UpdatedAt: now.Add(-100 * time.Hour), Artifacts: []model.SafeLink{{Path: "docs/unblock.md"}}}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Tasks[0].Liveness != model.LivenessIdle || hasRule(got, "task.blocked_no_path") {
+		t.Fatalf("task result = %+v", got)
+	}
+}
+
 func TestStaleClaimExactLinkageAnd336HourBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -204,32 +244,6 @@ func TestStaleClaimExactLinkageAnd336HourBoundary(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBlockedTaskPathRequiresExactOpenPR(t *testing.T) {
-	t.Run("doc artifact does not suppress no-path", func(t *testing.T) {
-		snapshot := base()
-		snapshot.Tasks = []model.Task{{
-			ID: "blocked", Slug: "blocked", Status: "blocked", UpdatedAt: now,
-			Artifacts: []model.SafeLink{{Label: "spec", Path: "docs/features/example/spec.md"}},
-		}}
-		got := policy.ApplyPolicy(snapshot, now)
-		if got.Tasks[0].Liveness != model.LivenessBlockedNoPath {
-			t.Fatalf("liveness = %s want %s", got.Tasks[0].Liveness, model.LivenessBlockedNoPath)
-		}
-	})
-	t.Run("exact open pr suppresses no-path", func(t *testing.T) {
-		snapshot := base()
-		snapshot.Tasks = []model.Task{{
-			ID: "blocked", Slug: "blocked", Status: "blocked", UpdatedAt: now,
-			Artifacts: []model.SafeLink{{URL: "https://example.invalid/pr/1"}},
-		}}
-		snapshot.PullRequests = []model.PullRequest{{ID: "pr", URL: "https://example.invalid/pr/1", State: "open"}}
-		got := policy.ApplyPolicy(snapshot, now)
-		if got.Tasks[0].Liveness == model.LivenessBlockedNoPath {
-			t.Fatalf("liveness = %s", got.Tasks[0].Liveness)
-		}
-	})
 }
 
 func TestPRRulesFailClosedAndPreserveNegativeEvidence(t *testing.T) {
@@ -273,6 +287,35 @@ func TestPullRequestRankingRulesAndScores(t *testing.T) {
 			snapshot.PullRequests = []model.PullRequest{test.pr}
 			got := policy.ApplyPolicy(snapshot, now)
 			if len(got.Attention) != 1 || got.Attention[0].RuleID != test.rule || got.Attention[0].Score != test.score {
+				t.Fatalf("attention = %+v", got.Attention)
+			}
+		})
+	}
+}
+
+func TestPullRequestPrecedenceAndSkippedChecks(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   model.PullRequest
+		want string
+	}{
+		{name: "changes beats running", pr: model.PullRequest{DetailState: "complete", ReviewDecision: "CHANGES_REQUESTED", Checks: []model.Check{{Status: "IN_PROGRESS"}}}, want: "pr.changes_requested"},
+		{name: "threads suppress merge", pr: model.PullRequest{DetailState: "complete", ReviewDecision: "APPROVED", UnresolvedThreads: 1, Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", Checks: []model.Check{{Status: "COMPLETED", Conclusion: "SUCCESS"}}}, want: "pr.unresolved_threads"},
+		{name: "skipped fails closed", pr: model.PullRequest{DetailState: "complete", ReviewDecision: "APPROVED", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", Checks: []model.Check{{Status: "COMPLETED", Conclusion: "SKIPPED"}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := base()
+			test.pr.ID, test.pr.UpdatedAt = test.name, now
+			snapshot.PullRequests = []model.PullRequest{test.pr}
+			got := policy.ApplyPolicy(snapshot, now)
+			if test.want == "" {
+				if len(got.Attention) != 0 {
+					t.Fatalf("attention = %+v", got.Attention)
+				}
+				return
+			}
+			if len(got.Attention) != 1 || got.Attention[0].RuleID != test.want {
 				t.Fatalf("attention = %+v", got.Attention)
 			}
 		})
@@ -405,6 +448,17 @@ func TestStaleFrictionUsesOccurrenceAndRemainsVisible(t *testing.T) {
 	}
 }
 
+func TestDuplicateStaleToolHealthReceiptsFailClosed(t *testing.T) {
+	snapshot := base()
+	snapshot.Sources[4] = receipt("toolhealth", model.SourceStale)
+	snapshot.Sources = append(snapshot.Sources, receipt("toolhealth", model.SourceStale))
+	snapshot.ToolHealth = []model.ToolHealth{{Tool: "ship", Kind: "accumulated_friction", LastOccurrence: now}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if hasRule(got, "tool.accumulated_friction") || hasRule(got, "source.stale") {
+		t.Fatalf("ambiguous duplicate receipts emitted items: %+v", got.Attention)
+	}
+}
+
 func TestAttentionOrderUsesScoreTimeThenID(t *testing.T) {
 	snapshot := base()
 	snapshot.ToolHealth = []model.ToolHealth{
@@ -432,5 +486,14 @@ func TestTaskReadyRequiresKnownDoneDependencies(t *testing.T) {
 		if item.ID == "task.ready:unknown" {
 			t.Fatal("missing dependency qualified")
 		}
+	}
+}
+
+func TestTaskReadyWithNoDependencies(t *testing.T) {
+	snapshot := base()
+	snapshot.Tasks = []model.Task{{ID: "ready", Status: "todo", UpdatedAt: now}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if len(got.Attention) != 1 || got.Attention[0].RuleID != "task.ready" {
+		t.Fatalf("attention = %+v", got.Attention)
 	}
 }

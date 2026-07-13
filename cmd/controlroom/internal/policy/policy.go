@@ -116,11 +116,11 @@ func applyRunLiveness(runs []model.Run, prs []model.PullRequest, r receipts, now
 		if !r.current(shipSource) {
 			continue
 		}
-		if identity := runIdentity(*run); identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed") {
+		age, ok := elapsedKnown(now, run.UpdatedAt)
+		if identity := runIdentity(*run); ok && identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed") && age <= 72*time.Hour {
 			run.Liveness = model.LivenessRetryLoop
 			continue
 		}
-		age, ok := elapsedKnown(now, run.UpdatedAt)
 		if ok && activeRun(run.Status) && age >= 15*time.Minute {
 			run.Liveness = model.LivenessStalledActive
 			continue
@@ -151,19 +151,17 @@ func applyTaskLiveness(tasks []model.Task, runs []model.Run, prs []model.PullReq
 			task.Liveness = model.LivenessDone
 			continue
 		}
-		if task.Status == "blocked" && !taskHasPath(*task, knownTasks, prs, r.current(githubSource)) {
+		if task.Status == "blocked" && !taskHasPath(*task, knownTasks) {
 			task.Liveness = model.LivenessBlockedNoPath
 			continue
 		}
 		age, ok := elapsedKnown(now, task.UpdatedAt)
 		if ok && (task.Status == "claimed" || task.Status == "in_progress") && age > 336*time.Hour &&
-			r.current(shipSource) && r.bySource[shipSource].State == model.SourceOK &&
-			r.current(githubSource) && r.bySource[githubSource].State == model.SourceOK &&
-			r.bySource[dossierSource].State == model.SourceOK && !taskHasRecentWork(*task, runs, prs, now) {
+			staleClaimSourcesOK(r) && !taskHasRecentWork(*task, runs, prs, now) {
 			task.Liveness = model.LivenessStaleClaim
 			continue
 		}
-		if ok && age <= 72*time.Hour || r.current(githubSource) && taskHasOpenPR(*task, prs) || r.current(shipSource) && taskHasCurrentRun(*task, runs, now) {
+		if taskIsLive(*task, runs, prs, r, now, age, ok) {
 			task.Liveness = model.LivenessLive
 			continue
 		}
@@ -173,23 +171,34 @@ func applyTaskLiveness(tasks []model.Task, runs []model.Run, prs []model.PullReq
 	}
 }
 
-func taskHasPath(task model.Task, known map[string]bool, prs []model.PullRequest, githubCurrent bool) bool {
+func taskIsLive(task model.Task, runs []model.Run, prs []model.PullRequest, r receipts, now time.Time, age time.Duration, ageKnown bool) bool {
+	recentTask := ageKnown && age <= 72*time.Hour
+	linkedPR := r.current(githubSource) && taskHasOpenPR(task, prs)
+	linkedRun := r.current(shipSource) && taskHasCurrentRun(task, runs, now)
+	return recentTask || linkedPR || linkedRun
+}
+
+func staleClaimSourcesOK(r receipts) bool {
+	for _, source := range []string{dossierSource, shipSource, githubSource} {
+		if !r.current(source) || r.bySource[source].State != model.SourceOK {
+			return false
+		}
+	}
+	return true
+}
+
+func taskHasPath(task model.Task, known map[string]bool) bool {
 	for _, dependency := range task.Dependencies {
 		if known[dependency] {
 			return true
 		}
 	}
-	hasURLArtifact := false
 	for _, artifact := range task.Artifacts {
-		if artifact.URL == "" {
-			continue
+		if artifact.URL != "" || artifact.Path != "" {
+			return true
 		}
-		hasURLArtifact = true
 	}
-	if hasURLArtifact && !githubCurrent {
-		return true
-	}
-	return githubCurrent && taskHasOpenPR(task, prs)
+	return false
 }
 
 func taskMatchesRun(task model.Task, run model.Run) bool {
@@ -265,7 +274,7 @@ func runAttention(runs []model.Run, r receipts, now time.Time) []model.Attention
 		age, ok := elapsedKnown(now, run.UpdatedAt)
 		identity := runIdentity(run)
 		switch {
-		case identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed"):
+		case ok && identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed") && age <= 72*time.Hour:
 			items = append(items, item("run.retry_loop", run.ID, "urgent", 100, "Repeated run failures", fmt.Sprintf("%d failures for %s within 72h", groups[identity], identity), run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
 		case ok && activeRun(run.Status) && age >= 15*time.Minute:
 			items = append(items, item("run.stalled_active", run.ID, "urgent", 95, "Active run has stalled", "Control Room policy: no source update for 15m", run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
@@ -322,7 +331,7 @@ func pullRequestNeedsReview(pr model.PullRequest, allSuccess bool) bool {
 func pullRequestMergeReady(pr model.PullRequest, allSuccess bool) bool {
 	approved := pr.ReviewDecision == "APPROVED" && pr.RequestedReviewers == 0
 	mergeable := pr.Mergeable == "MERGEABLE" && pr.MergeStateStatus == "CLEAN"
-	return pr.DetailState == "complete" && !pr.Draft && allSuccess && approved && mergeable
+	return pr.DetailState == "complete" && !pr.Draft && allSuccess && approved && mergeable && pr.UnresolvedThreads == 0
 }
 
 func pullRequestChecksRunning(pr model.PullRequest, running bool) bool {
@@ -356,7 +365,7 @@ func taskAttention(tasks []model.Task, r receipts) []model.AttentionItem {
 }
 
 func toolAttention(healthRows []model.ToolHealth, r receipts, now time.Time) []model.AttentionItem {
-	toolStale := r.bySource[toolhealthSource].State == model.SourceStale
+	toolStale := r.counts[toolhealthSource] == 1 && r.bySource[toolhealthSource].State == model.SourceStale
 	if !r.current(toolhealthSource) && !toolStale {
 		return nil
 	}
@@ -373,9 +382,9 @@ func toolAttention(healthRows []model.ToolHealth, r receipts, now time.Time) []m
 	return items
 }
 
-func sourceAttention(receipts []model.SourceReceipt, r receipts) []model.AttentionItem {
+func sourceAttention(sources []model.SourceReceipt, r receipts) []model.AttentionItem {
 	items := make([]model.AttentionItem, 0)
-	for _, receipt := range receipts {
+	for _, receipt := range sources {
 		if r.counts[receipt.Source] != 1 {
 			continue
 		}
