@@ -232,7 +232,7 @@ function renderRuns(rows) {
 }
 
 function runRow(run) {
-  const diagnosis = state.snapshot?.reliability.find((item) => item.run_id === run.id);
+  const diagnosis = runDiagnosis(state.snapshot, run.id);
   return actionRow(`Open run ${run.id}`, () => openRun(run, diagnosis), [
     ["Run", `${run.kind} · ${run.id}`], ["Repository / project", run.repository || run.project || "Unknown"],
     ["Producer status", run.status], ["Operator state", run.operator_state || "unknown"], ["Current stage", run.phase || "Unknown"],
@@ -365,12 +365,25 @@ function highestSeverity(findings) {
 }
 function sourceUsability(value) { return value === "unavailable" ? "Other source panels remain usable" : value === "stale" ? "Retained rows remain visible with stale qualification" : value === "degraded" ? "Qualified data remains usable" : "Current source facts are usable"; }
 
+function runDiagnosis(snapshot, runID) {
+  const record = snapshot?.reliability.find((item) => item.run_id === runID);
+  if (!record) return null;
+  const receipts = snapshot.sources.filter((source) => source.source === "tracelens");
+  const current = receipts.length === 1 && ["ok", "degraded"].includes(receipts[0].state);
+  return {
+    record,
+    freshness: current ? "Current diagnosis" : "Stale retained diagnosis — do not treat as current generation",
+  };
+}
+
 function openRun(run, diagnosis) {
-  const diagnosisRows = diagnosis ? [
-    ["Tracelens verdict", `${diagnosis.verdict} · ${diagnosis.tier} · ${diagnosis.dialect}`],
-    ["Tracelens findings", diagnosis.findings.length ? diagnosis.findings.map((finding) => `${finding.severity}: ${finding.title} — ${finding.evidence}`).join("; ") : "None"],
-    ["Input tokens", availability(diagnosis.input_tokens)], ["Output tokens", availability(diagnosis.output_tokens)],
-    ["Cost USD", availability(diagnosis.cost_usd)], ["Latency ms", availability(diagnosis.latency_ms)],
+  const record = diagnosis?.record;
+  const diagnosisRows = record ? [
+    ["Tracelens freshness", diagnosis.freshness],
+    ["Tracelens verdict", `${record.verdict} · ${record.tier} · ${record.dialect}`],
+    ["Tracelens findings", record.findings.length ? record.findings.map((finding) => `${finding.severity}: ${finding.title} — ${finding.evidence}`).join("; ") : "None"],
+    ["Input tokens", availability(record.input_tokens)], ["Output tokens", availability(record.output_tokens)],
+    ["Cost USD", availability(record.cost_usd)], ["Latency ms", availability(record.latency_ms)],
   ] : [["Tracelens diagnosis", "Unavailable for this run"]];
   openDrawer("Run details", "Control Room policy + producer facts", [
     ["ID", run.id], ["Kind", run.kind], ["Repository", run.repository || "Unknown"], ["Project", run.project || "Unknown"],
@@ -424,7 +437,7 @@ function reconcileOpenDrawer(snapshot) {
   if (drawer.dataset.entityType === "run") {
     const run = snapshot.runs.find((entity) => entity.id === drawer.dataset.entityId);
     if (!run) return closeDrawer();
-    const diagnosis = snapshot.reliability.find((item) => item.run_id === run.id);
+    const diagnosis = runDiagnosis(snapshot, run.id);
     openRun(run, diagnosis);
     return;
   }

@@ -47,6 +47,7 @@ test("filters and drill-downs preserve failed CI, review, reliability, and wait 
   await page.getByRole("button", { name: "Close details" }).click();
 
   await page.getByRole("button", { name: "Open run wf_demo_fail_3" }).click();
+  await expect(page.locator("#drawer[open]")).toContainText("Current diagnosis");
   await expect(page.locator("#drawer[open]")).toContainText("high: Retry loop detected — three related failures");
   await expect(page.locator("#drawer[open]")).toContainText("Cost USD");
   await expect(page.locator("#drawer[open]")).toContainText("Unavailable");
@@ -119,32 +120,34 @@ test("real mode renders a core generation before independently settled diagnosti
   const core = copy(seed);
   core.mode = "real";
   core.version = 1;
-  core.reliability = [];
-  core.sources = core.sources.map((source: Record<string, any>) => ({
-    ...source,
-    state: ["tracelens", "toolhealth"].includes(source.source) ? "loading" : "ok",
-    error_code: "",
-    message: "",
-  }));
+  core.reliability = seed.reliability;
+  core.sources = core.sources.flatMap((source: Record<string, any>) => {
+    const receipt = { ...source, state: ["tracelens", "toolhealth"].includes(source.source) ? "loading" : "ok", error_code: "", message: "" };
+    return source.source === "tracelens" ? [receipt, { ...source, state: "stale", message: "retained prior diagnosis" }] : [receipt];
+  });
   const settled = copy(core);
   settled.version = 2;
   settled.sources = settled.sources.map((source: Record<string, any>) => ({
     ...source,
     state: source.source === "tracelens" ? "degraded" : source.source === "toolhealth" ? "stale" : "ok",
   }));
+  settled.sources = settled.sources.filter((source: Record<string, any>, index: number, values: Array<Record<string, any>>) =>
+    values.findIndex((candidate) => candidate.source === source.source) === index,
+  );
   settled.reliability = seed.reliability;
   const mock = await mockSnapshots(page, "real", [core, settled], 750);
 
   await page.goto(realURL);
   await expect(page.locator("#snapshot-version")).toHaveText("Version 1");
   await page.getByRole("button", { name: "Open run wf_demo_fail_3" }).click();
-  await expect(page.locator("#drawer[open]")).toContainText("Unavailable for this run");
+  await expect(page.locator("#drawer[open]")).toContainText("Stale retained diagnosis — do not treat as current generation");
   await waitForLoaded(page, 2);
   mock.assertRequests();
   expect(mock.reads()).toBeGreaterThanOrEqual(2);
   await expect(page.locator("html")).toHaveAttribute("data-control-room-mode", "real");
   await expect(page.getByRole("heading", { name: /Control Room REAL/ })).toBeVisible();
   await expect(page.locator("#sources")).not.toContainText("loading");
+  await expect(page.locator("#drawer[open]")).toContainText("Current diagnosis");
   await expect(page.locator("#drawer[open]")).toContainText("high: Retry loop detected — three related failures");
 });
 
