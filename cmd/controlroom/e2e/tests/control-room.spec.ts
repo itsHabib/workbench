@@ -12,6 +12,9 @@ test("loads the deterministic demo and reports qualified source freshness", asyn
   await expect(page.locator("#source-summary")).toHaveText("6 sources · 3 qualifications");
   await expect(page.locator("#sources")).toContainText("Retained rows remain visible with stale qualification");
   await expect(page.locator("#sources")).toContainText("Other source panels remain usable");
+  await expect(page.locator("#tasks .cell").filter({ hasText: "Control Room policy" }).locator(".status-blocked")).toHaveCount(1);
+  await expect(page.locator("#tool-health .cell").filter({ hasText: "Freshness" }).locator(".status-stale")).toHaveCount(1);
+  await expect(page.locator("#sources .cell").filter({ hasText: "State" }).locator(".status-stale")).toHaveCount(1);
 });
 
 test("manual demo refresh publishes exactly one newer version", async ({ page }) => {
@@ -57,6 +60,17 @@ test("filters and drill-downs preserve failed CI, review, reliability, and wait 
 test("unattended run rows distinguish progress and terminal timeout without promising retry", async ({ page, request }) => {
   const snapshot = await demoSnapshot(request);
   snapshot.version = 2;
+  snapshot.tasks.unshift({
+    id: "tsk_stale_claim",
+    slug: "stale-claim",
+    title: "Stale unattended claim",
+    project: "workbench",
+    status: "claimed",
+    liveness: "stale_claim",
+    updated_at: "2026-06-28T12:00:00Z",
+    created_at: "2026-06-27T12:00:00Z",
+    dependencies: [], blockers: [], artifacts: [],
+  });
   snapshot.runs.unshift(
     {
       id: "wf_progressing",
@@ -91,6 +105,7 @@ test("unattended run rows distinguish progress and terminal timeout without prom
   await page.goto("/");
   await waitForLoaded(page, 2);
   mock.assertRequests();
+  await expect(page.locator("#tasks .cell").filter({ hasText: "Control Room policy" }).locator(".status-stale")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Open run wf_progressing" })).toContainText("Monitor for the next durable update");
   await expect(page.getByRole("button", { name: "Open run wf_timed_out" })).toContainText("deadline_exceeded");
   await page.getByRole("button", { name: "Open run wf_timed_out" }).click();

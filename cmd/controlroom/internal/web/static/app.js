@@ -320,7 +320,7 @@ function cell(label, value) {
 function statusClass(value) {
   const normalized = String(value).toLowerCase();
   const tokens = normalized.split(/[^a-z0-9_]+/).filter(Boolean);
-  for (const [needle, suffix] of [["on_fire", "on-fire"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
+  for (const [needle, suffix] of [["on_fire", "on-fire"], ["blocked_no_path", "blocked"], ["stale_claim", "stale"], ["failed", "failed"], ["urgent", "urgent"], ["blocked", "blocked"], ["actionable", "actionable"], ["stale", "stale"], ["live", "live"], ["ready", "ready"], ["ok", "ok"], ["running", "running"], ["waiting", "waiting"]]) {
     if (tokens.includes(needle)) return `status status-${suffix}`;
   }
   return "";
