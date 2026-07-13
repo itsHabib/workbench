@@ -309,16 +309,13 @@ func TestShipFixtureContracts(t *testing.T) {
 }
 
 func TestDemoClockAnchoredHealthyFixtures(t *testing.T) {
-	healthyJSON := []string{
-		filepath.Join(fixturesRoot, "ship", "workflow-list-healthy.json"),
-		filepath.Join(fixturesRoot, "ship", "workflow-status-healthy.json"),
-		filepath.Join(fixturesRoot, "ship", "driver-list-healthy.json"),
-		filepath.Join(fixturesRoot, "dossier", "task-get-healthy.json"),
-		filepath.Join(fixturesRoot, "dossier", "task-list-healthy.json"),
-		filepath.Join(fixturesRoot, "github", "graphql-inventory-healthy.json"),
-		filepath.Join(fixturesRoot, "github", "pr-detail-complete.json"),
-		filepath.Join(fixturesRoot, "tracelens", "analysis-findings.json"),
-		filepath.Join(fixturesRoot, "tower", "ls-available.json"),
+	var healthyJSON []string
+	for source, coverage := range inventory {
+		for _, name := range coverage.healthy {
+			if filepath.Ext(name) == ".json" {
+				healthyJSON = append(healthyJSON, filepath.Join(fixturesRoot, source, name))
+			}
+		}
 	}
 	for _, path := range healthyJSON {
 		data, err := os.ReadFile(path)
