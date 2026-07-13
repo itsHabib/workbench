@@ -235,7 +235,7 @@ controlroom serve \
 controlroom snapshot --mode demo|real --json
 ```
 
-Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. Real mode requires one to four GitHub scope entries, each `user:<login>`, `org:<login>`, or `repo:<owner/name>`; no ambiguous owner kind or unscoped PR search is permitted. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
+Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. Real mode requires one to four GitHub scope entries, each `user:<login>`, `org:<login>`, or `repo:<owner/name>`; zero or more than four is a startup configuration error, and no ambiguous owner kind or unscoped PR search is permitted. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
 
 Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when the startup version check fails. The GitHub adapter ignores additive fields it does not understand and treats missing known fields as `unknown` instead of failing the whole response.
 
@@ -352,7 +352,7 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `pr.unresolved_threads` | actionable | 75 | Current GitHub data returns one or more unresolved review threads; the observed negative fact remains valid if later thread pages are truncated. |
 | `pr.review_needed` | actionable | 70 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; at least one visible check exists and every visible check completed successfully; and `reviewDecision == REVIEW_REQUIRED` or requested reviewers are non-empty. Unknown or empty checks never qualify. |
 | `pr.merge_ready` | actionable | 65 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; at least one visible check exists and every visible check completed successfully; `reviewDecision == APPROVED`; requested reviewer count is zero; `mergeable == MERGEABLE`; unresolved thread count is zero. Empty or unknown never qualifies, so this cannot overlap `pr.review_needed`. |
-| `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
+| `task.stale_claim` | actionable | 55 | Dossier reports `claimed|in_progress`, `updated_at` is older than 14 days, and no explicitly linked open PR or current Ship run was updated within 14 days. |
 | `task.ready` | actionable | 40 | Dossier reports `status == "todo"` and every explicitly declared dependency is terminal-done. Missing/unknown dependency state never qualifies. |
 | `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
