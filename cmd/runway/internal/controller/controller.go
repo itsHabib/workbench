@@ -1,0 +1,512 @@
+// Package controller is the Runway lifecycle POLICY layer: phase transitions,
+// absolute deadline, idempotent cancellation, collection/cleanup ordering
+// (D7), and the atomic terminal receipt. Backends stay dumb mechanisms.
+package controller
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
+	"github.com/itsHabib/workbench/cmd/runway/internal/backend/local"
+	"github.com/itsHabib/workbench/cmd/runway/internal/bundle"
+	"github.com/itsHabib/workbench/cmd/runway/internal/expand"
+	"github.com/itsHabib/workbench/cmd/runway/internal/journal"
+	"github.com/itsHabib/workbench/cmd/runway/internal/state"
+	"github.com/itsHabib/workbench/contracts/execution"
+)
+
+// Outcome is one finished foreground run: the validated receipt and §6 exit.
+type Outcome struct {
+	RunID    string
+	Result   execution.Result
+	ExitCode int
+}
+
+// Options configures a foreground controller run. Zero value uses the local
+// backend. Tests inject Backend to force cleanup isolation failures.
+type Options struct {
+	Backend backend.Backend
+}
+
+// Run executes one admitted request to a single terminal receipt (Flows A–E).
+// Admission failures before a run directory exists return ExitUsage with no
+// Outcome. Controllers that die mid-run leave an open history — reconcile is
+// PR 3.
+func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
+	adm, err := bundle.Admit(specPath, bundleDir)
+	if err != nil {
+		return Outcome{}, usageErr(err)
+	}
+	if err := checkLocalDefault(adm.Request.Placement); err != nil {
+		return Outcome{}, usageErr(err)
+	}
+	runID, err := mintRunID()
+	if err != nil {
+		return Outcome{}, err
+	}
+	run, err := state.Create(stateRoot, runID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err := os.WriteFile(run.RequestPath(), adm.RequestBytes, 0o600); err != nil {
+		return Outcome{}, fmt.Errorf("controller: write request.json: %w", err)
+	}
+	if _, err := writeIdentity(run); err != nil {
+		return Outcome{}, err
+	}
+
+	j, err := journal.Create(run.EventsPath(), runID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	defer j.Close()
+
+	c := &ctrl{
+		run:      run,
+		runID:    runID,
+		adm:      adm,
+		j:        j,
+		started:  time.Now().UTC(),
+		deadline: time.Now().Add(time.Duration(adm.Request.Policy.DeadlineMS) * time.Millisecond),
+		grace:    time.Duration(adm.Request.Policy.CancelGraceMS) * time.Millisecond,
+		be:       opts.Backend,
+		gate:     &terminalGate{},
+	}
+	if c.be == nil {
+		c.be = local.New()
+	}
+	return c.execute()
+}
+
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+func (e usageError) Unwrap() error { return e.err }
+
+func usageErr(err error) error { return usageError{err: err} }
+
+// IsUsage reports whether err is an admission/CLI usage failure (exit 2).
+func IsUsage(err error) bool {
+	var u usageError
+	return errors.As(err, &u)
+}
+
+type ctrl struct {
+	run      state.RunDir
+	runID    string
+	adm      bundle.Admitted
+	j        *journal.Writer
+	started  time.Time
+	deadline time.Time
+	grace    time.Duration
+	be       backend.Backend
+	gate     *terminalGate
+
+	allocID string
+	phase   string // last canonical phase progressed into
+}
+
+func (c *ctrl) emit(phase, kind string, details map[string]any) error {
+	c.phase = phase
+	_, err := c.j.Append(phase, kind, details)
+	return err
+}
+
+func (c *ctrl) execute() (Outcome, error) {
+	stopSignals := ignoreCancelSignal()
+	defer stopSignals()
+
+	if err := c.emit(execution.PhaseAdmission, execution.KindRunAccepted, map[string]any{
+		"request_id": c.adm.Request.RequestID,
+	}); err != nil {
+		return Outcome{}, err
+	}
+
+	// Absolute deadline is armed before preparation (Flow C).
+	if err := c.prepare(); err != nil {
+		return c.failEarly(execution.PhasePreparation, execution.ReasonPreparationFailed, err)
+	}
+	if c.deadlineExceeded() {
+		return c.failEarly(execution.PhasePreparation, execution.ReasonDeadlineExceeded, fmt.Errorf("deadline exceeded during preparation"))
+	}
+
+	h, err := c.startBackend()
+	if err != nil {
+		return c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, err)
+	}
+	return c.runWorkload(h)
+}
+
+func (c *ctrl) prepare() error {
+	if err := bundle.Materialize(c.adm, c.run); err != nil {
+		return err
+	}
+	return c.emit(execution.PhasePreparation, "inputs_materialized", map[string]any{
+		"inputs": len(c.adm.Work.Inputs),
+	})
+}
+
+func (c *ctrl) startBackend() (backend.Handle, error) {
+	roots := expand.NewRoots(c.run.WorkspaceDir(), c.run.InputsDir(), c.run.ArtifactsDir())
+	prep, err := expand.Command(roots, c.adm.Work)
+	if err != nil {
+		return nil, err
+	}
+	secrets, secretBytes, err := resolveSecrets(c.adm.Work.Secrets)
+	if err != nil {
+		return nil, err
+	}
+	childEnv := mergeEnv(os.Environ(), prep.Env, secrets)
+	emit := func(phase, kind string, details map[string]any) error {
+		if kind == execution.KindPlacementAllocated {
+			if id, ok := details["allocation_id"].(string); ok {
+				c.allocID = id
+			}
+		}
+		return c.emit(phase, kind, details)
+	}
+	return c.be.Start(context.Background(), backend.PreparedRun{
+		RunID:      c.runID,
+		Cwd:        prep.Cwd,
+		Argv:       prep.Argv,
+		Env:        childEnv,
+		StdoutPath: c.run.StdoutLog(),
+		StderrPath: c.run.StderrLog(),
+		Secrets:    secretBytes,
+	}, emit)
+}
+
+type waitOutcome struct {
+	exit   backend.Exit
+	err    error
+	intent string // "", deadline, cancel
+}
+
+func (c *ctrl) runWorkload(h backend.Handle) (Outcome, error) {
+	waitCh := make(chan waitOutcome, 1)
+	go func() {
+		exit, err := c.be.Wait(context.Background(), h, c.emit)
+		waitCh <- waitOutcome{exit: exit, err: err}
+	}()
+
+	wo := c.awaitWorkload(h, waitCh)
+	if wo.err != nil && wo.intent == "" {
+		_ = c.be.Cleanup(context.Background(), h)
+		return c.failEarly(execution.PhaseWorkload, execution.ReasonStartupFailed, wo.err)
+	}
+	return c.finalize(h, wo)
+}
+
+func (c *ctrl) awaitWorkload(h backend.Handle, waitCh <-chan waitOutcome) waitOutcome {
+	deadlineCh := time.After(time.Until(c.deadline))
+	cancelCh := c.watchCancel()
+	for {
+		select {
+		case wo := <-waitCh:
+			return wo
+		case <-deadlineCh:
+			return c.interrupt(h, waitCh, execution.ReasonDeadlineExceeded)
+		case <-cancelCh:
+			return c.interrupt(h, waitCh, execution.ReasonCancelRequested)
+		}
+	}
+}
+
+func (c *ctrl) interrupt(h backend.Handle, waitCh <-chan waitOutcome, reason string) waitOutcome {
+	_ = c.emit(execution.PhaseWorkload, reason, map[string]any{"reason_code": reason})
+	_ = c.be.Cancel(context.Background(), h)
+	timer := time.NewTimer(c.grace)
+	defer timer.Stop()
+	select {
+	case wo := <-waitCh:
+		wo.intent = reason
+		return wo
+	case <-timer.C:
+		_ = c.be.Cleanup(context.Background(), h)
+		wo := <-waitCh
+		wo.intent = reason
+		return wo
+	}
+}
+
+func (c *ctrl) watchCancel() <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			if !cancelRequested(c.run) {
+				continue
+			}
+			ch <- struct{}{}
+			return
+		}
+	}()
+	return ch
+}
+
+func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
+	exitCode := wo.exit.Code
+	arts, collectErr := collectOutputs(c.run.ArtifactsDir(), c.adm.Work.Outputs)
+	if collectErr == nil {
+		for _, a := range arts {
+			_ = c.emit(execution.PhaseCollection, execution.KindArtifactCollected, map[string]any{
+				"name": a.Name, "path": a.Path, "sha256": a.SHA256, "size": a.Size,
+			})
+		}
+	}
+	if collectErr != nil {
+		_ = c.emit(execution.PhaseCollection, execution.ReasonCollectionFailed, map[string]any{
+			"error": collectErr.Error(),
+		})
+	}
+
+	cleanupErr := c.be.Cleanup(context.Background(), h)
+	if cleanupErr == nil {
+		_ = c.emit(execution.PhaseCleanup, execution.KindCleanupCompleted, nil)
+	}
+
+	res := c.buildResult(exitCode, arts, wo.intent, collectErr, cleanupErr)
+	committed, _, err := c.gate.commit(c.run, c.j, res)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
+}
+
+func (c *ctrl) buildResult(exitCode int, arts []execution.Artifact, intent string, collectErr, cleanupErr error) execution.Result {
+	ended := time.Now().UTC()
+	code := int64(exitCode)
+	res := execution.Result{
+		SchemaVersion:    execution.SchemaVersion,
+		RunID:            c.runID,
+		RequestID:        c.adm.Request.RequestID,
+		RequestSHA256:    sha256Hex(c.adm.RequestBytes),
+		WorkSHA256:       sha256Hex(c.adm.WorkBytes),
+		StartedAt:        c.started.Format(time.RFC3339Nano),
+		EndedAt:          ended.Format(time.RFC3339Nano),
+		WorkloadExitCode: &code,
+		Placement:        c.placementReceipt(),
+		Causes:           []execution.Cause{},
+		Diagnostics:      []execution.Diagnostic{},
+		Artifacts:        arts,
+	}
+	if arts == nil {
+		res.Artifacts = []execution.Artifact{}
+	}
+	applyTerminalTruth(&res, exitCode, intent, collectErr, cleanupErr, c.phase)
+	return res
+}
+
+func applyTerminalTruth(res *execution.Result, exitCode int, intent string, collectErr, cleanupErr error, phase string) {
+	// Flow C escalation: cleanup cannot prove isolation after deadline.
+	if intent == execution.ReasonDeadlineExceeded && cleanupErr != nil {
+		res.Status = execution.StatusFailed
+		res.TerminalPhase = execution.PhaseCleanup
+		res.ReasonCode = execution.ReasonCleanupFailed
+		res.Causes = []execution.Cause{{
+			Phase:      execution.PhaseWorkload,
+			ReasonCode: execution.ReasonDeadlineExceeded,
+		}}
+		return
+	}
+	if intent == execution.ReasonDeadlineExceeded {
+		res.Status = execution.StatusTimedOut
+		res.TerminalPhase = phaseOr(phase, execution.PhaseWorkload)
+		res.ReasonCode = execution.ReasonDeadlineExceeded
+		return
+	}
+	if intent == execution.ReasonCancelRequested {
+		res.Status = execution.StatusCancelled
+		res.TerminalPhase = phaseOr(phase, execution.PhaseWorkload)
+		res.ReasonCode = execution.ReasonCancelRequested
+		return
+	}
+	if collectErr != nil {
+		res.Status = execution.StatusFailed
+		res.TerminalPhase = execution.PhaseCollection
+		res.ReasonCode = execution.ReasonCollectionFailed
+		return
+	}
+	if cleanupErr != nil {
+		res.Status = execution.StatusFailed
+		res.TerminalPhase = execution.PhaseCleanup
+		res.ReasonCode = execution.ReasonCleanupFailed
+		return
+	}
+	if exitCode != 0 {
+		res.Status = execution.StatusFailed
+		res.TerminalPhase = execution.PhaseWorkload
+		res.ReasonCode = execution.ReasonWorkloadFailed
+		return
+	}
+	res.Status = execution.StatusSucceeded
+	res.TerminalPhase = execution.PhaseTerminal
+	res.ReasonCode = execution.ReasonCompleted
+}
+
+func phaseOr(phase, fallback string) string {
+	if phase == "" {
+		return fallback
+	}
+	return phase
+}
+
+func (c *ctrl) placementReceipt() execution.PlacementReceipt {
+	alloc := c.allocID
+	if alloc == "" {
+		alloc = "none"
+	}
+	return execution.PlacementReceipt{
+		Backend:        c.adm.Request.Placement.Backend,
+		Profile:        c.adm.Request.Placement.Profile,
+		AllocationID:   alloc,
+		StreamDelivery: execution.StreamDeliveryNone,
+	}
+}
+
+func (c *ctrl) failEarly(phase, reason string, cause error) (Outcome, error) {
+	_ = c.emit(phase, reason, map[string]any{"error": cause.Error()})
+	ended := time.Now().UTC()
+	res := execution.Result{
+		SchemaVersion: execution.SchemaVersion,
+		RunID:         c.runID,
+		RequestID:     c.adm.Request.RequestID,
+		RequestSHA256: sha256Hex(c.adm.RequestBytes),
+		WorkSHA256:    sha256Hex(c.adm.WorkBytes),
+		Status:        execution.StatusFailed,
+		TerminalPhase: phase,
+		ReasonCode:    reason,
+		StartedAt:     c.started.Format(time.RFC3339Nano),
+		EndedAt:       ended.Format(time.RFC3339Nano),
+		Placement:     c.placementReceipt(),
+		Causes:        []execution.Cause{},
+		Diagnostics: []execution.Diagnostic{{
+			Code:    reason,
+			Message: cause.Error(),
+		}},
+		Artifacts: []execution.Artifact{},
+	}
+	if reason == execution.ReasonDeadlineExceeded {
+		res.Status = execution.StatusTimedOut
+		res.TerminalPhase = phase
+	}
+	committed, _, err := c.gate.commit(c.run, c.j, res)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
+}
+
+func (c *ctrl) deadlineExceeded() bool {
+	return !time.Now().Before(c.deadline)
+}
+
+// ignoreCancelSignal drains SIGUSR1 so cancel's wake-up signal cannot kill
+// the foreground controller. The cancel-request marker remains authoritative.
+func ignoreCancelSignal() func() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR1)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ch:
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		close(done)
+	}
+}
+
+func checkLocalDefault(p execution.Placement) error {
+	if p.Backend != "local" {
+		return fmt.Errorf("controller: placement.backend %q is not installed (local only)", p.Backend)
+	}
+	if p.Profile != "default" {
+		return fmt.Errorf("controller: placement.profile %q is not installed (default only)", p.Profile)
+	}
+	return nil
+}
+
+func mintRunID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("controller: mint run id: %w", err)
+	}
+	return "run_" + hex.EncodeToString(b[:]), nil
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func resolveSecrets(secrets []execution.Secret) (map[string]string, [][]byte, error) {
+	out := make(map[string]string, len(secrets))
+	vals := make([][]byte, 0, len(secrets))
+	for i, s := range secrets {
+		name, ok := strings.CutPrefix(s.Ref, "env:")
+		if !ok {
+			return nil, nil, fmt.Errorf("controller: secrets[%d].ref %q is not env:NAME", i, s.Ref)
+		}
+		v, ok := os.LookupEnv(name)
+		if !ok {
+			return nil, nil, fmt.Errorf("controller: secret env %q is unset", name)
+		}
+		out[s.Name] = v
+		vals = append(vals, []byte(v))
+	}
+	return out, vals, nil
+}
+
+func mergeEnv(base []string, roots map[string]string, secrets map[string]string) []string {
+	index := map[string]int{}
+	out := make([]string, 0, len(base)+len(roots)+len(secrets))
+	for _, kv := range base {
+		k, _, _ := strings.Cut(kv, "=")
+		index[k] = len(out)
+		out = append(out, kv)
+	}
+	set := func(k, v string) {
+		entry := k + "=" + v
+		if i, ok := index[k]; ok {
+			out[i] = entry
+			return
+		}
+		index[k] = len(out)
+		out = append(out, entry)
+	}
+	for k, v := range roots {
+		set(k, v)
+	}
+	for k, v := range secrets {
+		set(k, v)
+	}
+	return out
+}
+
+// AbsStateRoot canonicalizes the state root so RUNWAY_* env and expanded
+// paths remain absolute while the child runs with cwd=workspace.
+func AbsStateRoot(stateDir string) (string, error) {
+	abs, err := filepath.Abs(stateDir)
+	if err != nil {
+		return "", fmt.Errorf("controller: resolve state root: %w", err)
+	}
+	return abs, nil
+}
