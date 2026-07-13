@@ -109,8 +109,19 @@ func TestReceiptsLiftFailedCancelledAndParked(t *testing.T) {
 	for _, e := range events {
 		byID[e.ID] = e
 	}
-	if _, ok := byID["wf_failed:failed"]; !ok {
+	failed, ok := byID["wf_failed:failed"]
+	if !ok {
 		t.Fatalf("failed receipt must still lift; got %+v", events)
+	}
+	if failed.Severity != event.SevFailed {
+		t.Fatalf("failed severity must stay SevFailed, got %v", failed.Severity)
+	}
+	cancelled, ok := byID["wf_cancelled:cancelled"]
+	if !ok {
+		t.Fatalf("cancelled receipt must still lift; got %+v", events)
+	}
+	if cancelled.Severity != event.SevCancelled {
+		t.Fatalf("cancelled severity must stay SevCancelled, got %v", cancelled.Severity)
 	}
 	parked, ok := byID["wf_parked:parked"]
 	if !ok {
