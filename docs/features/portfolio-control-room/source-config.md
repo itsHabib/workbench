@@ -1,7 +1,7 @@
 # Control Room source configuration and privacy
 
 **Status:** draft (Phase 1 contract)
-**Owner:** @itsHabib
+**Owner:** Workbench maintainers
 **Date:** 2026-07-13
 **Related:** [`spec.md`](spec.md), [`phases/control-room-contract-fixtures-config.md`](phases/control-room-contract-fixtures-config.md)
 

@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	fixturesRoot        = "testdata/contracts"
-	demoClockAnchor     = "2026-07-13T12:00:00.000Z"
-	operatorDisplayName = "itsHabib"
+	fixturesRoot    = "testdata/contracts"
+	demoClockAnchor = "2026-07-13T12:00:00.000Z"
 )
 
 var requiredSources = []string{
@@ -181,43 +180,54 @@ func TestFixtureJSONSyntax(t *testing.T) {
 }
 
 func TestFixturePrivacySanitization(t *testing.T) {
-	patterns := secretPatterns()
-	homePatterns := homePathPatterns()
-	err := filepath.WalkDir(fixturesRoot, func(path string, d os.DirEntry, walkErr error) error {
+	operatorDisplayName := os.Getenv("OPERATOR_DISPLAY_NAME")
+	scanRoots := []string{
+		fixturesRoot,
+		filepath.Join("..", "..", "docs", "features", "portfolio-control-room"),
+	}
+	for _, root := range scanRoots {
+		if err := scanPrivacyRoot(t, root, operatorDisplayName); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func scanPrivacyRoot(t *testing.T, root, operatorDisplayName string) error {
+	t.Helper()
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
-		ext := filepath.Ext(path)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		content := string(data)
-		if ext == ".json" || ext == ".txt" {
-			if strings.Contains(content, operatorDisplayName) {
-				t.Errorf("%s: contains operator display name %q", path, operatorDisplayName)
-			}
-		}
-		for _, p := range patterns {
-			for _, match := range p.re.FindAllString(content, -1) {
-				if isPlaceholderSecret(match) {
-					continue
-				}
+		scanPrivacyFile(t, path, string(data), operatorDisplayName)
+		return nil
+	})
+}
+
+func scanPrivacyFile(t *testing.T, path, content, operatorDisplayName string) {
+	t.Helper()
+	if operatorDisplayName != "" && strings.Contains(content, operatorDisplayName) {
+		t.Errorf("%s: contains configured operator display name", path)
+	}
+	for _, p := range secretPatterns() {
+		for _, match := range p.re.FindAllString(content, -1) {
+			if !isPlaceholderSecret(match) {
 				t.Errorf("%s: matches secret pattern %s (%q)", path, p.name, match)
 			}
 		}
-		for _, p := range homePatterns {
-			if p.MatchString(content) {
+	}
+	for _, p := range homePathPatterns() {
+		for _, match := range p.FindAllString(content, -1) {
+			if !isPlaceholderPath(match) {
 				t.Errorf("%s: matches operator home path pattern", path)
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -332,7 +342,7 @@ type secretPattern struct {
 func secretPatterns() []secretPattern {
 	return []secretPattern{
 		{name: "github_token", re: regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9]{20,}`)},
-		{name: "cursor_api_key", re: regexp.MustCompile(`(?i)CURSOR_API_KEY\s*=\s*[^\s#]+`)},
+		{name: "cursor_api_key", re: regexp.MustCompile("(?i)CURSOR_API_KEY\\s*=\\s*[^\\s#`]+")},
 		{name: "bearer_token", re: regexp.MustCompile(`(?i)authorization:\s*bearer\s+[A-Za-z0-9._-]{20,}`)},
 		{name: "openai_anthropic_key", re: regexp.MustCompile(`sk-(?:ant-)?[A-Za-z0-9]{20,}`)},
 		{
@@ -366,6 +376,10 @@ func homePathPatterns() []*regexp.Regexp {
 		regexp.MustCompile(`/home/[^/\s]+/`),
 		regexp.MustCompile(`/Users/[^/\s]+/`),
 	}
+}
+
+func isPlaceholderPath(match string) bool {
+	return strings.Contains(match, "<") || strings.Contains(match, "{") || strings.Contains(match, "...")
 }
 
 func assertNoForbiddenKeys(t *testing.T, path string, v any, forbidden []string) {

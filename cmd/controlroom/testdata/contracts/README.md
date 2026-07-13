@@ -35,13 +35,13 @@ Tests do not execute these commands.
 
 | Fixture group | Producer command | Owner repo | PR / SHA | Version |
 |---|---|---|---|---|
-| Ship workflow list/status | `ship list --json`; `ship status wf_demo_01 --json` | `itsHabib/ship` | PR #194 / `e76a8dd40514e8ac0ecc483b7bbe64085aecc6ec` | merged 2026-07-13 |
-| Ship driver list | `ship driver list --json` | `itsHabib/ship` | PR #193 / `66d1f49bd526632d03873ad887243eb3199ae3da` | merged 2026-07-13 |
-| Dossier task reads | `dossier serve --corpus <path>` then MCP `tools/call` for `task.get`, `task.list` | `itsHabib/dossier` | main @ authoring time | stdio MCP JSON-RPC |
+| Ship workflow list/status | `ship list --json`; `ship status wf_demo_01 --json` | Ship repository | PR #194 / `e76a8dd40514e8ac0ecc483b7bbe64085aecc6ec` | merged 2026-07-13 |
+| Ship driver list | `ship driver list --json` | Ship repository | PR #193 / `66d1f49bd526632d03873ad887243eb3199ae3da` | merged 2026-07-13 |
+| Dossier task reads | `dossier serve --corpus <path>` then MCP `tools/call` for `task.get`, `task.list` | Dossier repository | main @ authoring time | stdio MCP JSON-RPC |
 | GitHub PR inventory | `gh api graphql -f query=@inventory.graphql` with scoped search | `cli/cli` (gh) | gh >= 2.90.0 | GraphQL search API |
-| Tracelens analysis | `tracelens ship -json wf_demo_01` | `itsHabib/tracelens` | main @ authoring time | verdict + telemetry availability |
+| Tracelens analysis | `tracelens ship -json wf_demo_01` | Tracelens repository | main @ authoring time | verdict + telemetry availability |
 | Tool health board | `toolhealth` (text board, no `-json` yet) | operator-local | n/a | provisional text contract |
-| Tower worktrees | `tower ls --json --no-reconcile` | `itsHabib/tower` | main @ authoring time | flat JSON array |
+| Tower worktrees | `tower ls --json --no-reconcile` | Tower repository | main @ authoring time | flat JSON array |
 
 ## Privacy
 

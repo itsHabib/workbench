@@ -1,5 +1,5 @@
 **Status**: draft
-**Owner**: @itsHabib
+**Owner**: Workbench maintainers
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-contract-fixtures-config` (id: `tsk_01KXCY4CGWVB7132RF1CA0QK7M`); [`../spec.md`](../spec.md); Ship PRs #193 and #194
 
