@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -400,7 +401,11 @@ func rewriteJournal(t *testing.T, path string, events []execution.RunEvent) {
 
 func buildRunway(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "runway")
+	name := "runway"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
 	if err != nil {
 		t.Fatal(err)
