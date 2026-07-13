@@ -1,6 +1,7 @@
 package bundle_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -200,7 +201,7 @@ func TestBundleMaterializeRejectsDigestChangedSinceAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = bundle.Materialize(adm, run)
+	err = bundle.Materialize(context.Background(), adm, run)
 	if err == nil {
 		t.Fatal("digest change since admission must fail materialize")
 	}
@@ -259,7 +260,7 @@ func TestBundleMaterializeCopiesExactBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bundle.Materialize(adm, run); err != nil {
+	if err := bundle.Materialize(context.Background(), adm, run); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(run.InputsDir(), "in.txt"))

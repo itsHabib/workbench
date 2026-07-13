@@ -37,12 +37,11 @@ partial state; writer order stays result-first).
 
 `policy.deadline_ms` is absolute and armed before preparation (FR9). Bundle
 materialization (including `git clone`/`checkout`) runs under the same
-deadline and cancel-marker select. On interrupt during preparation the receipt
-is `timed_out`/`cancelled` with `terminal_phase=preparation`. Abandoning a
-hung materialize is best-effort for v0: the temp-dir clone sits outside the
-workspace and is cleaned by deferred `RemoveAll`, but an orphaned `git` child
-may linger until the OS reaps it — Runway does not kill that process in this
-PR.
+deadline and cancel-marker select. On interrupt during preparation the
+controller cancels Materialize's context — `CommandContext` kills in-flight
+git, the input-copy loop stops between files — then joins the materialize
+goroutine before emitting the `timed_out`/`cancelled` receipt with
+`terminal_phase=preparation`. No writer remains in the run dir (zero-orphan).
 
 ## Process-start identity
 

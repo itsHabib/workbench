@@ -162,15 +162,19 @@ func (c *ctrl) execute() (Outcome, error) {
 
 // prepare materializes the bundle under the absolute deadline and cancel
 // marker. A hung git clone/checkout cannot run past policy.deadline_ms.
-// Abandoning Materialize is best-effort: the temp-dir clone (if any) is
-// cleaned by deferred RemoveAll; an orphaned git child may linger (DESIGN.md).
+// On interrupt, prepare cancels Materialize's context (killing in-flight
+// git via CommandContext) and joins the goroutine before failEarly so no
+// writer remains in the run dir (DESIGN.md).
 func (c *ctrl) prepare() (Outcome, bool, error) {
 	done := make(chan struct{})
 	defer close(done)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- bundle.Materialize(c.adm, c.run)
+		errCh <- bundle.Materialize(ctx, c.adm, c.run)
 	}()
 
 	deadlineCh := time.After(time.Until(c.deadline))
@@ -188,9 +192,13 @@ func (c *ctrl) prepare() (Outcome, bool, error) {
 		}
 		return Outcome{}, false, nil
 	case <-deadlineCh:
+		cancel()
+		<-errCh // join: git dies under CommandContext; no orphan writer
 		out, err := c.failEarly(execution.PhasePreparation, execution.ReasonDeadlineExceeded, fmt.Errorf("deadline exceeded during preparation"))
 		return out, true, err
 	case <-cancelCh:
+		cancel()
+		<-errCh // join: git dies under CommandContext; no orphan writer
 		out, err := c.failEarly(execution.PhasePreparation, execution.ReasonCancelRequested, fmt.Errorf("cancel requested during preparation"))
 		return out, true, err
 	}
