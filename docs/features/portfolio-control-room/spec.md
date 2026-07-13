@@ -129,7 +129,7 @@ docs/features/portfolio-control-room/
 
 ### D4 — Close Ship discovery and observability gaps at the owner seam
 
-**Choice:** add additive `ship driver list --json`, backed by existing `DriverService.listDriverRuns()`, as the single Control Room consumer contract. Include current durable run/stream fields and timestamps; do not expose mutation/tick behavior. Also enrich Ship workflow list/detail JSON with owner-normalized runtime, provider, model, duration, and evidence availability across local, cloud, and rooms runs.
+**Choice:** add additive `ship driver list --json`, backed by existing `DriverService.listDriverRuns()`, as the single Control Room consumer contract. Include durable run/stream fields, each stream's exact `specPath`, and timestamps; do not expose mutation/tick behavior. Also enrich Ship workflow list/detail JSON with exact `docPath` plus owner-normalized runtime, provider, model, duration, and evidence availability across local, cloud, and rooms runs.
 
 **Alternative:** scan `driver.md`, query Ship SQLite, call `driver_run` to refresh, or parse `result.json` in Control Room. Rejected: direct store/artifact parsing bypasses Ship's semantics and `driver_run` mutates tick leases and can dispatch work. The two Ship changes are prerequisite owner contracts, delivered as separate PR-sized tasks.
 
@@ -211,7 +211,7 @@ A receipt is current only when it was observed in the publishing generation and 
 
 - `Run`: workflow/driver ID, source kind, repo/project/task/spec, branch, durable status, phase, requested/actual runtime-provider-model when present, created/updated/started/ended, derived duration, derived liveness label, failure category/detail, evidence links.
 - `Task`: Dossier ID/slug/title/project/phase/status/assignee, dependencies, reverse blockers, timestamps, artifact links, derived liveness label.
-- `PullRequest`: repo/number/title/url/author/head/base, draft, created/updated, checks, review decision, outstanding reviewer requests, unresolved thread count, mergeability, next factual condition.
+- `PullRequest`: repo/number/title/url/author/head/base, draft, created/updated, checks, review decision, outstanding reviewer requests, unresolved thread count, mergeability, `detail_state = complete | truncated | unknown`, and next factual condition.
 - `Diagnosis`: the explicit shape above; absent cost/token/latency telemetry remains `unknown` or `unavailable`, never numeric zero.
 - `ToolHealth`: tool, worst severity, recurrence, last occurrence, pain lines, and `kind = accumulated_friction`; it never masquerades as a live incident.
 - `AttentionItem`: stable ID, category, score, rule ID, title, reason, repo/project, and links.
@@ -234,7 +234,7 @@ controlroom serve \
 controlroom snapshot --mode demo|real --json
 ```
 
-Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them.
+Configuration names executable paths/argv and source timeouts explicitly. Defaults may locate executables on `PATH`, but never derive sibling store paths. `serve` refuses non-loopback addresses unless a future separately reviewed flag authorizes them. It prints the canonical `http://127.0.0.1:<port>` URL and rejects any other HTTP `Host` value; `localhost` is deliberately not an accepted alias.
 
 Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when the startup version check fails. The GitHub adapter ignores additive fields it does not understand and treats missing known fields as `unknown` instead of failing the whole response.
 
@@ -258,11 +258,17 @@ GET /healthz                  process liveness only
 |---|---|---|
 | Ship workflows | enriched `ship list --json`, `ship status <wf> --json` | Owner-normalized runtime/provider/model/duration/evidence availability for local, cloud, and rooms; additive-field tolerant; no `result.json` or DB fallback. |
 | Ship drivers | proposed `ship driver list --json`; existing point `driver status --json` | CLI JSON is the Control Room consumer contract; no tick/dispatch calls. |
-| Dossier | stdio MCP `project.list`, `project.overview`, `phase.list`, `task.list`, `task.get`, `artifact.list` | `serve` keeps one long-lived, handshaken child; `snapshot` starts one child and closes it. EOF/exit/call failure marks unavailable and schedules a bounded single-flight restart on the next refresh. No markdown fallback. |
-| GitHub | inventory: `gh search prs --author @me --state open --limit 1000 --json repository,number,title,url,author,createdAt,updatedAt,isDraft,state`; detail: `gh pr view <number> --repo <owner/repo> --json number,title,url,author,baseRefName,headRefName,headRefOid,isDraft,createdAt,updatedAt,state,mergeable,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup`; review threads: paginated GraphQL `reviewThreads(first:100, after:$cursor)` | GitHub is authoritative. `gh search` performs its own bounded pagination; exactly 1000 results marks inventory `degraded/truncated`. GraphQL follows `pageInfo` to exhaustion per PR. |
+| Dossier | stdio MCP `project.list`, `project.overview`, `phase.list`, `task.list`, `task.get`, `artifact.list` | `serve` keeps one long-lived, handshaken child; `snapshot` starts one child and closes it. EOF/exit/call failure marks unavailable; the next refresh makes at most one start attempt. After three consecutive start/handshake/first-call failures, automatic probes pause for five minutes; one manual refresh may perform one half-open probe. Success resets the breaker. No markdown fallback. |
+| GitHub | `gh api user --jq .login`; then the versioned batched GraphQL query defined below through `gh api graphql` | GitHub is authoritative; no per-PR `gh pr view` subprocess fan-out. |
 | Tracelens | `tracelens ship -json <run-ref>` and optional `report` | Analyze at most five recent eligible traces per diagnostic generation; no recent-analysis index or durable cache. |
 | Tool health | existing `toolhealth.exe` board; fixture-backed tolerant parser | Degrade if unavailable or its text contract drifts; do not duplicate its local-model bucketing. |
 | Tower | optional `tower ls --json --no-reconcile` | Supplemental local branch/path context only; unavailable is normal in v1. |
+
+#### GitHub batched query
+
+After resolving the authenticated login once, the adapter pages GraphQL `search(type: ISSUE, query: "is:pr is:open author:<login>", first: 50, after: $cursor)` through `gh api graphql`. The embedded, versioned query selects each pull request's repository `nameWithOwner`, number, title, URL, author, base/head names and head OID, draft/state/timestamps, `mergeable`, `mergeStateStatus`, `reviewDecision`, `reviewRequests(first: 1) { totalCount }`, latest commit `statusCheckRollup.contexts(first: 100)` with `pageInfo`, and `reviewThreads(first: 100)` with each thread's `isResolved` plus `pageInfo`.
+
+The adapter fetches at most four sequential 50-PR pages under the source's 10-second bound. A fifth page marks the GitHub receipt `degraded/truncated`; PRs beyond 200 are not represented and no aggregate claims completeness. A failed/timed-out later page retains completed pages, marks the receipt degraded, and emits an informational source item. A PR whose checks or review-thread connection reports `hasNextPage` is retained with `detail_state = truncated`: factual negative evidence already present may trigger `ci_failed`, `changes_requested`, or `unresolved_threads`, but review-needed, waiting, and merge-ready rules cannot fire; an informational `pr.detail_truncated` item explains the gap. This avoids per-PR subprocesses, unbounded nested pagination, and silent completeness assumptions at GitHub's 100-context ceiling.
 
 ## 7. Key flows
 
@@ -293,8 +299,9 @@ GET /healthz                  process liveness only
 ### PR drill-down
 
 1. User opens a PR row.
-2. API resolves the already-known owner/repo/number and returns checks, reviews, outstanding reviewer requests, unresolved thread count, merge state, and safe GitHub URLs.
-3. Failed CI and unresolved findings remain separate conditions; empty/unknown review state does not become approval.
+2. API resolves the already-known owner/repo/number from the immutable snapshot; drill-down does not perform a hidden live collection.
+3. The response envelope includes the pull request, its GitHub `SourceReceipt`, and an explicit `stale` flag alongside checks, reviews, outstanding reviewer requests, unresolved thread count, merge state, and safe GitHub URLs.
+4. Failed CI and unresolved findings remain separate conditions; stale, truncated, empty, or unknown review state does not become approval or an actionable readiness label.
 
 ### Automatic refresh
 
@@ -307,7 +314,7 @@ GET /healthz                  process liveness only
 - Core collection is fan-out/fan-in with per-source bounds and a 15-second deadline; diagnostic enrichment has a 35-second deadline. A generation token prevents superseded work from publishing.
 - Snapshots are immutable after publication and swapped through `atomic.Pointer[Snapshot]`. Readers never observe a half-updated slice.
 - No cross-source transaction exists. `generated_at` is not an assertion that producer reads were simultaneous; each `SourceReceipt.observed_at` is authoritative for freshness.
-- Dossier MCP corruption/unavailability fails the Dossier panel; there is no alternate markdown parser.
+- Dossier MCP corruption/unavailability fails the Dossier panel; there is no alternate markdown parser. Restart behavior follows the exact one-attempt/three-failure/five-minute breaker in §6.
 - Ship CLI/store skew, missing owner-reported evidence, or malformed additive records degrade affected fields/rows, not unrelated sources. A completely malformed list response fails the Ship source rather than undercounting silently.
 - GitHub rate/auth failures retain stale PR data with an unavailable receipt; mergeability/review unknowns never rank as ready-to-merge.
 - Tracelens input/dialect failure creates an unavailable diagnosis for that run; it does not change Ship's run status.
@@ -337,15 +344,15 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 |---|---:|---:|---|
 | `run.retry_loop` | urgent | 100 | Repeated same-doc failures; includes count/window/latest cause. |
 | `run.stalled_active` | urgent | 95 | Active/pending run exceeds the no-update threshold. |
-| `pr.ci_failed` | urgent | 90 | At least one completed required/visible check failed. |
-| `pr.changes_requested` | urgent | 85 | GitHub reports `reviewDecision == CHANGES_REQUESTED`. |
+| `pr.ci_failed` | urgent | 90 | GitHub receipt is current and at least one returned visible check completed with a failure conclusion; this negative fact remains valid if another detail connection is truncated. |
+| `pr.changes_requested` | urgent | 85 | Current GitHub data reports `reviewDecision == CHANGES_REQUESTED`. |
 | `task.blocked_no_path` | urgent | 80 | Blocked with no resolvable dependency/path. |
-| `pr.unresolved_threads` | actionable | 75 | GitHub reports one or more unresolved review threads. |
-| `pr.review_needed` | actionable | 70 | GitHub receipt is current; PR is non-draft; every visible check completed successfully; and `reviewDecision == REVIEW_REQUIRED` or requested reviewers are non-empty. Unknown never qualifies. |
-| `pr.merge_ready` | actionable | 65 | Non-draft; every visible check completed successfully; `reviewDecision == APPROVED`; `mergeable == MERGEABLE`; unresolved thread count is zero; GitHub receipt is current. Empty or unknown never qualifies. |
+| `pr.unresolved_threads` | actionable | 75 | Current GitHub data returns one or more unresolved review threads; the observed negative fact remains valid if later thread pages are truncated. |
+| `pr.review_needed` | actionable | 70 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; every visible check completed successfully; and `reviewDecision == REVIEW_REQUIRED` or requested reviewers are non-empty. Unknown never qualifies. |
+| `pr.merge_ready` | actionable | 65 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; every visible check completed successfully; `reviewDecision == APPROVED`; `mergeable == MERGEABLE`; unresolved thread count is zero. Empty or unknown never qualifies. |
 | `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
-| `task.ready` | actionable | 40 | Todo task has no unresolved dependencies. |
-| `pr.checks_running` | waiting | 30 | GitHub receipt is current; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
+| `task.ready` | actionable | 40 | Dossier reports `status == "todo"` and every explicitly declared dependency is terminal-done. Missing/unknown dependency state never qualifies. |
+| `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
 
 `tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when elapsed time since the last occurrence is at most 72 hours, 1 when it is greater than 72 and at most 336 hours, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
@@ -361,7 +368,7 @@ An attention item is current only when every source receipt supporting its concl
 | 3 — Vertical demo UI | Prove the complete visual story through the locked read model. | Static application shell; responsive six-panel UI; filters/refresh; run and PR drawers; loading/empty/degraded/disconnected states. | Phase 2 | 700–1000 weighted LOC | **VALIDATION GATE:** five-minute demo passes in browser; healthy/on-fire/degraded screenshots are coherent. This is the highest-risk phase. |
 | 4 — Per-source real adapters | Read current local truth and fail independently. | One PR-sized task and contract/failure gate per source: Ship, Dossier, GitHub, Tracelens, toolhealth, optional Tower. | Phase 3 GO; both Ship PRs merged for Ship adapter | 700–1050 weighted LOC total | Every adapter passes its own fixtures, timeout, malformed-input, and source-receipt tests. Tasks are parallel-safe by source directory. |
 | 5 — Composition and degraded mode | Join adapters without hiding partial truth. | Serialized adapter composition; core/enrichment generations; cancellation/coalescing; cross-source joins; stale suppression; real-mode smoke. | Phase 4 adapters | 450–700 weighted LOC | Injected source failures preserve healthy panels; superseded enrichers cannot publish; real mode reads available tools. |
-| 6 — Hardening and handoff | Make default-branch product reproducible and demonstrable. | Playwright flows and pinned Node CI; security/path tests; runbook; demo script/screenshots; fresh-checkout verification; trace analysis and retrospective. | Phase 5 | 450–700 weighted LOC | CI green; every actionable canonical-reviewer finding resolved, or deferred to a linked Dossier task with independent reviewer acknowledgment; review-coordinator GO; merged main verified. |
+| 6 — Hardening and handoff | Make default-branch product reproducible and demonstrable. | Playwright flows and pinned Node CI; security/path tests; runbook; demo script/screenshots; fresh-checkout verification; trace analysis and retrospective. | Phase 5 | 450–700 weighted LOC | CI green; every actionable canonical-reviewer finding resolved, or deferred to a linked Dossier task with independent reviewer acknowledgment; `agent:codex` runs the review-coordinator gate and records GO; merged main verified. |
 
 Every implementation task remains PR-sized. Phase 4 adapters are parallel-safe only inside their assigned source directories. Phase 5 owns the sole cross-source composition seam and is therefore serialized.
 
@@ -385,8 +392,8 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 
 - Fake executable/MCP harness composes at least Ship + Dossier + GitHub + Tracelens into one snapshot.
 - One source fails/corrupts/times out while other panels and attention items remain correct.
-- Dossier child EOF and process exit produce one unavailable receipt; the next refresh performs one bounded restart even under concurrent requests.
-- GitHub fixtures cover the minimum-version failure, additive fields, and missing known fields without converting unknown state into readiness.
+- Dossier child EOF and process exit produce one unavailable receipt; concurrent refreshes perform one restart attempt; three failed sessions open the five-minute breaker; one manual half-open probe and success reset are covered.
+- GitHub fixtures cover the minimum-version failure, additive/missing fields, four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
 - A superseded diagnostic generation cannot replace a newer core snapshot.
 - Real-mode smoke against explicit temporary fixtures proves no dependency on sibling source code or databases.
 
