@@ -122,6 +122,26 @@ func TestConfigFingerprintIsIndependentOfScopeAndMapOrder(t *testing.T) {
 	}
 }
 
+func TestRealPublisherAllowsMissingQualifiedSourceExecutables(t *testing.T) {
+	directory := t.TempDir()
+	publisher, err := newRealPublisher(realFlags{
+		workspaceRoot: directory, dossierCorpus: directory, githubScopes: stringList{"user:synthetic-author"},
+		ship: "go", dossier: "go", github: "go", tracelens: "go",
+		toolhealth: "control-room-missing-toolhealth", tower: "control-room-missing-tower",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher.Close()
+}
+
+func TestSourceExecutablePreservesUnresolvedConfigurationIdentity(t *testing.T) {
+	runtimePath, identity := sourceExecutable("control-room-definitely-missing")
+	if runtimePath != "control-room-definitely-missing" || identity != "unresolved:control-room-definitely-missing" {
+		t.Fatalf("runtime=%q identity=%q", runtimePath, identity)
+	}
+}
+
 func structRefreshRequest() web.RefreshRequest {
 	return web.RefreshRequest{Mode: "demo", Trigger: "manual"}
 }

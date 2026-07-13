@@ -221,21 +221,20 @@ func newRealPublisher(flags realFlags) (*realPublisher, error) {
 	if len(flags.githubScopes) < 1 || len(flags.githubScopes) > 4 {
 		return nil, fmt.Errorf("one to four --github-scope values are required")
 	}
-	executables := map[string]string{}
-	for name, value := range map[string]string{
+	configured := map[string]string{
 		"ship": flags.ship, "dossier": flags.dossier, "github": flags.github,
 		"tracelens": flags.tracelens, "toolhealth": flags.toolhealth,
-	} {
-		executables[name], err = resolveExecutable(value)
-		if err != nil {
-			return nil, fmt.Errorf("%s executable: %w", name, err)
+	}
+	for name, value := range configured {
+		if strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("%s executable command is required", name)
 		}
 	}
-	if flags.tower != "" {
-		executables["tower"], err = resolveExecutable(flags.tower)
-		if err != nil {
-			return nil, fmt.Errorf("tower executable: %w", err)
-		}
+	configured["tower"] = flags.tower
+	executables := make(map[string]string, len(configured))
+	executableIdentities := make(map[string]string, len(configured))
+	for name, value := range configured {
+		executables[name], executableIdentities[name] = sourceExecutable(value)
 	}
 	shipAdapter := ship.New(executables["ship"])
 	dossierAdapter := dossier.New(executables["dossier"], corpus)
@@ -246,7 +245,7 @@ func newRealPublisher(flags realFlags) (*realPublisher, error) {
 	towerAdapter := tower.New(executables["tower"])
 	tracelensAdapter := tracelens.New(executables["tracelens"])
 	toolhealthAdapter := toolhealth.New(executables["toolhealth"])
-	fingerprint := configFingerprint(workspace, corpus, flags.githubScopes, executables)
+	fingerprint := configFingerprint(workspace, corpus, flags.githubScopes, executableIdentities)
 	coordinator, err := app.New(app.Config{Mode: "real", Fingerprint: fingerprint, Collectors: app.Collectors{
 		Ship: func(ctx context.Context) app.Result {
 			result := shipAdapter.Collect(ctx)
@@ -297,15 +296,19 @@ func requiredAbsoluteDirectory(label, value string) (string, error) {
 	return clean, nil
 }
 
-func resolveExecutable(value string) (string, error) {
+func sourceExecutable(value string) (runtimePath, identity string) {
 	if value == "" {
-		return "", fmt.Errorf("path is empty")
+		return "", "disabled"
 	}
 	resolved, err := exec.LookPath(value)
 	if err != nil {
-		return "", fmt.Errorf("not found on PATH: %w", err)
+		return value, "unresolved:" + value
 	}
-	return filepath.Abs(resolved)
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return resolved, "resolved:" + resolved
+	}
+	return absolute, absolute
 }
 
 func configFingerprint(workspace, corpus string, scopes []string, executables map[string]string) string {
