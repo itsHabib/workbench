@@ -23,14 +23,14 @@ batches:
         runtime: cloud
         model: opus
         effort: extra
-        touches: [cmd/controlroom/model.go, cmd/controlroom/policy.go, cmd/controlroom/demo.go, cmd/controlroom/model_test.go, cmd/controlroom/policy_test.go, cmd/controlroom/demo_test.go, cmd/controlroom/testdata/demo]
+        touches: [cmd/controlroom/internal/model, cmd/controlroom/internal/policy, cmd/controlroom/internal/demo]
         status: pending
 
 conflict_notes:
   - kind: none
     tasks: [control-room-read-model-policy]
     note: "Single foundational stream; Phase 3 consumes the merged snapshot/policy contract and must not begin before this gate."
-  - kind: dependency
+  - kind: dep_signal
     from: control-room-read-model-policy
     to: control-room-contract-fixtures-config
     task_id: tsk_01KXCY4CGWVB7132RF1CA0QK7M

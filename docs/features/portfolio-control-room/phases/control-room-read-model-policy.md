@@ -9,10 +9,10 @@
 
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---:|---:|
-| Presentation model | `cmd/controlroom/model.go` — versioned snapshot, normalized entities, availability, receipts, diagnoses, and safe links | ~190 | ~190 |
-| Deterministic policy | `cmd/controlroom/policy.go` — liveness, ranking, precedence, stale suppression, linkage, and friction score | ~230 | ~230 |
-| Demo scenario | `cmd/controlroom/demo.go` plus one deterministic golden snapshot under `cmd/controlroom/testdata/demo/` | ~100 | ~75 |
-| Model/policy tests | `cmd/controlroom/{model,policy,demo}_test.go` and JSON goldens | ~290 | ~145 |
+| Presentation model | `cmd/controlroom/internal/model/**` — versioned snapshot, normalized entities, availability, receipts, diagnoses, and safe links | ~190 | ~190 |
+| Deterministic policy | `cmd/controlroom/internal/policy/**` — liveness, ranking, precedence, stale suppression, linkage, and friction score | ~230 | ~230 |
+| Demo scenario | `cmd/controlroom/internal/demo/**` plus one deterministic golden snapshot under that package's `testdata/` | ~100 | ~75 |
+| Model/policy tests | Tests colocated in the three `cmd/controlroom/internal/*` packages and JSON goldens | ~290 | ~145 |
 | **Total** | | **~810** | **~640** |
 
 Band: **ideal** per the repository PR-sizing convention and the accepted TDD's Phase 2 budget of 450–700 weighted LOC.
@@ -23,7 +23,7 @@ Give every later UI, adapter, and orchestration task one private, presentation-o
 
 ## Functional contract
 
-Create production package `controlroom` under `cmd/controlroom`; keep it private to the command and do not promote these types into Workbench `contracts`.
+Create three command-private packages: `cmd/controlroom/internal/model`, `cmd/controlroom/internal/policy`, and `cmd/controlroom/internal/demo`. Go's `internal` import rule must enforce the boundary; do not leave the model in an importable top-level `cmd/controlroom` library package and do not promote these types into Workbench `contracts`. `policy` may import `model`; `demo` may import `model` and `policy`; neither lower layer imports upward. The Phase 3 command/server may consume all three.
 
 ### Snapshot and source truth
 
