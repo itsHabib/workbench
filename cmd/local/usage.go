@@ -36,6 +36,9 @@ func logUsage(prompt, source string, flagged bool) {
 		return
 	}
 
+	// O_APPEND with one small single-Write record per invocation: concurrent
+	// `local` calls interleave whole lines, not bytes — good enough for
+	// best-effort telemetry, chosen deliberately over locking.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
@@ -68,10 +71,15 @@ func usageLogPath() string {
 	return filepath.Join(home, ".local", "state", "local", "usage.jsonl")
 }
 
-// truncate caps s at n bytes so a long prompt can't bloat the log line.
+// truncate caps s at n bytes so a long prompt can't bloat the log line,
+// backing up to the nearest rune boundary so a multi-byte character is
+// dropped whole rather than split into invalid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && s[n]&0xC0 == 0x80 {
+		n--
 	}
 	return s[:n]
 }

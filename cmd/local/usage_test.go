@@ -20,6 +20,9 @@ func TestTruncate(t *testing.T) {
 		{"equal to cap", "abcde", 5, "abcde"},
 		{"longer than cap", "abcdefgh", 5, "abcde"},
 		{"zero cap", "abc", 0, ""},
+		{"multi-byte rune not split", "ab日本語", 5, "ab日"}, // 日 ends at byte 5
+		{"cap lands mid-rune backs up", "ab日本語", 6, "ab日"},
+		{"emoji dropped whole", "a😀b", 3, "a"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -80,6 +83,9 @@ func TestLogUsageAppendsRecord(t *testing.T) {
 			t.Fatalf("unmarshal line %q: %v", scan.Text(), err)
 		}
 		recs = append(recs, r)
+	}
+	if err := scan.Err(); err != nil {
+		t.Fatalf("scan log: %v", err)
 	}
 
 	if len(recs) != 2 {
