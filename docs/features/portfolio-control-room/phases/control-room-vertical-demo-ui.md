@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: accepted
 **Owner**: Workbench maintainers
 **Date**: 2026-07-13
 **Related**: dossier task `control-room-vertical-demo-ui` (id: `tsk_01KXDJYJYXATHZ5ACZB5DGHABT`); [`../spec.md`](../spec.md); Phase 2 PR #18 (`e04d61d024b8508847be10952e84a9ccc1b6cf49`)
@@ -123,7 +123,7 @@ Clicking a run or PR row opens a keyboard-accessible native `<dialog>` drawer th
 
 The run drawer shows normalized run fields, requested/actual runtime availability, evidence links, failure facts, and any matching diagnosis/findings already present in the snapshot. It never invokes Tracelens. The PR drawer is client-side-only and renders the normalized PR, checks, review/merge facts, truncation state, next factual condition, and safe HTTPS link from the snapshot entity already in browser memory. Neither drawer makes an additional API call. Do not add hidden GETs or subprocess-backed detail routes in Phase 3.
 
-On `DOMContentLoaded`, the shell renders loading state, reads the CSRF cookie, and immediately performs the `demo/manual` refresh POST before fetching or rendering panel data. Refresh disables the button, announces progress, POSTs with the cookie/header, then polls snapshot GET from 250ms up to 2s until the version exceeds the returned baseline. A failed request leaves any previous snapshot visible, marks the shell disconnected, and offers retry.
+On `DOMContentLoaded`, the shell renders loading state, reads the CSRF cookie, and immediately performs the `demo/manual` refresh POST before fetching or rendering panel data. Refresh disables the button, announces progress, POSTs with the cookie/header, then polls snapshot GET after 250ms and doubles the interval to 500ms, 1s, and a 2s cap until the version exceeds the returned baseline. Phase 3 marks the shell disconnected if no higher version arrives within 5s; Phase 5 replaces that demo bound with the accepted 35-second enrichment settle rule. A failed request leaves any previous snapshot visible, marks the shell disconnected, and offers retry.
 
 Successful refresh rebuilds repository/status/severity filter options from values present in the new snapshot. A selected filter remains valid only when its exact value still appears in that dimension; an invalid value resets to `all` and the clear action remains available. A valid filter that happens to produce no cross-dimension matches is retained and renders filtered-empty. Refresh closes a drawer only if its exact entity no longer exists.
 
