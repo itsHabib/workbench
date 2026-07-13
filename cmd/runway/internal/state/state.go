@@ -99,3 +99,33 @@ func (r RunDir) WritePrivate(name string, data []byte) error {
 	}
 	return nil
 }
+
+// ResultPath is the atomic terminal receipt.
+func (r RunDir) ResultPath() string { return filepath.Join(r.Root, "result.json") }
+
+// ControllerPath is private/controller.json — PID + process-start identity.
+func (r RunDir) ControllerPath() string {
+	return filepath.Join(r.PrivateDir(), "controller.json")
+}
+
+// CancelRequestPath is the cancel-request marker written by `runway cancel`.
+func (r RunDir) CancelRequestPath() string {
+	return filepath.Join(r.PrivateDir(), "cancel.request")
+}
+
+// Open resolves an existing run directory under the state root. It does not
+// create anything — missing or non-directory paths fail.
+func Open(stateRoot, runID string) (RunDir, error) {
+	if runID == "" {
+		return RunDir{}, fmt.Errorf("state: run id is empty")
+	}
+	root := filepath.Join(stateRoot, "runs", runID)
+	fi, err := os.Stat(root)
+	if err != nil {
+		return RunDir{}, fmt.Errorf("state: open run: %w", err)
+	}
+	if !fi.IsDir() {
+		return RunDir{}, fmt.Errorf("state: open run: %s is not a directory", root)
+	}
+	return RunDir{Root: root}, nil
+}

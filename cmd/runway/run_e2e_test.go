@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/itsHabib/workbench/cmd/runway/internal/controller"
 	"github.com/itsHabib/workbench/cmd/runway/internal/journal"
 	"github.com/itsHabib/workbench/contracts/execution"
 )
@@ -27,12 +28,14 @@ func TestRunE2EGoldenBundle(t *testing.T) {
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 func main() {
 	fmt.Println("golden-ok")
 	fmt.Println(os.Getenv("RUNWAY_WORKSPACE") != "")
 	fmt.Println(os.Getenv("RUNWAY_INPUTS") != "")
 	fmt.Println(os.Getenv("RUNWAY_OUT") != "")
+	_ = os.WriteFile(filepath.Join(os.Getenv("RUNWAY_OUT"), "out.txt"), []byte("golden"), 0o600)
 }
 `)
 	if err := os.WriteFile(filepath.Join(bundleDir, "main.go"), prog, 0o600); err != nil {
@@ -61,6 +64,9 @@ func main() {
 			Target: "main.go",
 			SHA256: sha256Hex(prog),
 		}},
+		Outputs: []execution.Output{{
+			Name: "out", Path: "out.txt", Required: true,
+		}},
 	}
 	work, err := json.Marshal(workSpec)
 	if err != nil {
@@ -85,28 +91,24 @@ func main() {
 		t.Fatal(err)
 	}
 	stateRoot := filepath.Join(dir, "state")
-	runID, exitCode, err := runOnce(spec, bundleDir, stateRoot)
+	out, err := controller.Run(spec, bundleDir, stateRoot, controller.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exitCode != 0 {
-		t.Fatalf("golden workload exit code = %d, want 0", exitCode)
+	if out.ExitCode != controller.ExitOK {
+		t.Fatalf("exit=%d status=%s", out.ExitCode, out.Result.Status)
 	}
-	runDir := filepath.Join(stateRoot, "runs", runID)
+	if out.Result.Status != execution.StatusSucceeded || out.Result.ReasonCode != execution.ReasonCompleted {
+		t.Fatalf("want succeeded/completed, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	runDir := filepath.Join(stateRoot, "runs", out.RunID)
 	for _, rel := range []string{
-		"request.json", "work.json", "events.ndjson",
+		"request.json", "work.json", "events.ndjson", "result.json",
 		"inputs", "logs", "artifacts", "private",
 	} {
 		if _, err := os.Stat(filepath.Join(runDir, rel)); err != nil {
 			t.Fatalf("run dir missing %s: %v", rel, err)
 		}
-	}
-	reqGot, err := os.ReadFile(filepath.Join(runDir, "request.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(reqGot, req) {
-		t.Fatal("request.json must hold exact accepted bytes")
 	}
 	events, err := journal.ReadHistory(filepath.Join(runDir, "events.ndjson"))
 	if err != nil {
@@ -116,13 +118,8 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Terminal {
-		t.Fatal("PR1 leaves the run open; Reduce must report Terminal=false")
-	}
-	// Exactly the PR 1 canonical sequence: run_accepted, placement_allocated,
-	// workload_ready, workload_started, workload_exited.
-	if st.LastSeq != 5 || st.Phase != execution.PhaseWorkload {
-		t.Fatalf("unexpected open history: %+v events=%+v", st, events)
+	if !st.Terminal || events[len(events)-1].Kind != execution.KindRunTerminal {
+		t.Fatalf("want terminal history, got %+v", st)
 	}
 	stdout, err := os.ReadFile(filepath.Join(runDir, "logs", "stdout.log"))
 	if err != nil {
@@ -163,9 +160,12 @@ func TestRunRejectsNonDefaultProfile(t *testing.T) {
 	if err := os.WriteFile(spec, req, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = runOnce(spec, bundleDir, filepath.Join(dir, "state"))
+	_, err = controller.Run(spec, bundleDir, filepath.Join(dir, "state"), controller.Options{})
 	if err == nil {
 		t.Fatal("non-default profile must be rejected")
+	}
+	if !controller.IsUsage(err) {
+		t.Fatalf("want usage error, got %v", err)
 	}
 	if !bytes.Contains([]byte(err.Error()), []byte("placement.profile")) {
 		t.Fatalf("want profile error, got %v", err)

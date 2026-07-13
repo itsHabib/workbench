@@ -5,11 +5,11 @@
 package bundle
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -88,16 +88,22 @@ func Admit(specPath, bundleDir string) (Admitted, error) {
 
 // Materialize copies exact verified work.json and input bytes into the run
 // directory and checks out the immutable workspace revision via git.
-func Materialize(adm Admitted, run state.RunDir) error {
+// ctx cancellation stops the input-copy loop and kills in-flight git
+// clone/checkout/rev-parse so the caller can join with no writer left in
+// the run dir.
+func Materialize(ctx context.Context, adm Admitted, run state.RunDir) error {
 	if err := os.WriteFile(run.WorkPath(), adm.WorkBytes, 0o600); err != nil {
 		return fmt.Errorf("bundle: write work.json: %w", err)
 	}
 	for i, in := range adm.Work.Inputs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := materializeInput(adm.BundleDir, run.InputsDir(), i, in); err != nil {
 			return err
 		}
 	}
-	return checkoutWorkspace(adm.Work.Workspace, run.WorkspaceDir())
+	return checkoutWorkspace(ctx, adm.Work.Workspace, run.WorkspaceDir())
 }
 
 func materializeInput(bundleDir, inputsDir string, i int, in execution.Input) error {
@@ -125,7 +131,7 @@ func materializeInput(bundleDir, inputsDir string, i int, in execution.Input) er
 	return nil
 }
 
-func checkoutWorkspace(ws execution.Workspace, dest string) error {
+func checkoutWorkspace(ctx context.Context, ws execution.Workspace, dest string) error {
 	// git clone into a temp sibling, then rename — keeps a failed clone from
 	// leaving a half-populated workspace dir the controller might trust.
 	parent := filepath.Dir(dest)
@@ -139,15 +145,15 @@ func checkoutWorkspace(ws execution.Workspace, dest string) error {
 		}
 	}()
 
-	clone := exec.Command("git", "clone", "--quiet", ws.URL, tmp)
+	clone := gitCommand(ctx, "clone", "--quiet", ws.URL, tmp)
 	if out, err := clone.CombinedOutput(); err != nil {
 		return fmt.Errorf("bundle: git clone: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	checkout := exec.Command("git", "-C", tmp, "checkout", "--quiet", ws.Revision)
+	checkout := gitCommand(ctx, "-C", tmp, "checkout", "--quiet", ws.Revision)
 	if out, err := checkout.CombinedOutput(); err != nil {
 		return fmt.Errorf("bundle: git checkout %s: %w: %s", ws.Revision, err, strings.TrimSpace(string(out)))
 	}
-	head := exec.Command("git", "-C", tmp, "rev-parse", "HEAD")
+	head := gitCommand(ctx, "-C", tmp, "rev-parse", "HEAD")
 	out, err := head.Output()
 	if err != nil {
 		return fmt.Errorf("bundle: git rev-parse: %w", err)
