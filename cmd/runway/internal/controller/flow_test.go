@@ -232,7 +232,10 @@ func main() {
 `)
 	work := goRunWork(h, "main.go", nil)
 	start := time.Now()
-	out := h.runWith(work, execution.Policy{DeadlineMS: 400, CancelGraceMS: 200}, controller.Options{})
+	// Preparation is deadline-cancellable since adac4ae; 400ms raced the git
+	// clone on slower hosts and timed out in the WRONG phase. 2500ms lets
+	// prep complete so the deadline provably lands mid-workload.
+	out := h.runWith(work, execution.Policy{DeadlineMS: 2500, CancelGraceMS: 200}, controller.Options{})
 	if out.Result.Status != execution.StatusTimedOut || out.Result.ReasonCode != execution.ReasonDeadlineExceeded {
 		t.Fatalf("want timed_out/deadline_exceeded, got %s/%s", out.Result.Status, out.Result.ReasonCode)
 	}
@@ -242,7 +245,7 @@ func main() {
 	if out.ExitCode != controller.ExitTimedOut {
 		t.Fatalf("exit=%d", out.ExitCode)
 	}
-	if time.Since(start) > 5*time.Second {
+	if time.Since(start) > 10*time.Second {
 		t.Fatalf("deadline path too slow: %s", time.Since(start))
 	}
 	assertNoOrphans(t, out.Result.Placement.AllocationID)
@@ -257,7 +260,9 @@ func main() { time.Sleep(10 * time.Second) }
 	work := goRunWork(h, "main.go", []execution.Output{{
 		Name: "missing", Path: "nope.txt", Required: true,
 	}})
-	out := h.runWith(work, execution.Policy{DeadlineMS: 400, CancelGraceMS: 100}, controller.Options{})
+	// 2500ms (not 400ms): prep must complete so the timeout lands in the
+	// workload phase — see TestFlowC_DeadlineNoisyWorkload.
+	out := h.runWith(work, execution.Policy{DeadlineMS: 2500, CancelGraceMS: 100}, controller.Options{})
 	if out.Result.Status != execution.StatusTimedOut || out.Result.ReasonCode != execution.ReasonDeadlineExceeded {
 		t.Fatalf("want timed_out/deadline_exceeded, got %s/%s", out.Result.Status, out.Result.ReasonCode)
 	}
@@ -328,6 +333,10 @@ func main() { time.Sleep(10 * time.Second) }
 	}()
 
 	runID := waitForRunID(t, h.stateRoot, 15*time.Second)
+	// The escalation under test requires the cancel to land AFTER the backend
+	// started (preparation is cancellable since adac4ae, and a prep-phase
+	// cancel never invokes backend Cleanup). Wait for workload_started.
+	waitForEventKind(t, h.stateRoot, runID, execution.KindWorkloadStarted, 15*time.Second)
 	if _, err := controller.RequestCancel(h.stateRoot, runID); err != nil {
 		t.Fatal(err)
 	}
@@ -849,6 +858,30 @@ func waitForRunID(t *testing.T, stateRoot string, timeout time.Duration) string 
 	}
 	t.Fatal("run never appeared")
 	return ""
+}
+
+// waitForEventKind blocks until the run's durable journal contains an event
+// of the given kind — for fixtures whose interleaving must land in a specific
+// phase (e.g. cancel after workload_started, not during preparation).
+func waitForEventKind(t *testing.T, stateRoot, runID, kind string, timeout time.Duration) {
+	t.Helper()
+	run, err := state.Open(stateRoot, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		events, err := journal.ReadHistory(run.EventsPath())
+		if err == nil {
+			for _, ev := range events {
+				if ev.Kind == kind {
+					return
+				}
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("event %q never appeared in %s", kind, runID)
 }
 
 func sha256Hex(b []byte) string {
