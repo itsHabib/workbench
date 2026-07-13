@@ -81,7 +81,9 @@ async function requestRefresh(trigger) {
 async function waitForSnapshot(baseline) {
   let lastError = null;
   let latest = null;
-  for (let attempt = 0; attempt < 70; attempt += 1) {
+  // Four fast probes plus 106 half-second probes cover the 50-second real-mode
+  // core + enrichment deadline with margin for publication and HTTP polling.
+  for (let attempt = 0; attempt < 110; attempt += 1) {
     await pause(attempt < 4 ? 250 : 500);
     try {
       const response = await fetch("/api/v1/snapshot", { headers: { Accept: "application/json" } });
@@ -99,7 +101,7 @@ async function waitForSnapshot(baseline) {
     }
   }
   if (lastError) throw lastError;
-  if (latest) return latest;
+  if (latest) throw new Error("diagnostic sources remained loading beyond the collection deadline");
   throw new Error("no newer snapshot arrived within the collection deadline");
 }
 
