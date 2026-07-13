@@ -61,10 +61,14 @@ go test ./...
 ```
 
 CI (`.github/workflows/ci.yml`) additionally runs `go test -race` and the
-`hygiene` boundary-law assertions. Standard library only; no third-party
-dependencies in production. Exception: `cmd/controlroom/e2e` may use an exact,
-lockfile-pinned Playwright version as a test-only Node dependency; it is never
-linked into a production binary.
+`hygiene` boundary-law assertions.
+
+Dependency posture: **stdlib-first as a default, not a ban** (operator,
+2026-07-13). A trivial HTTP call or JSON body never justifies a dependency; an
+official SDK, a protocol implementation, or crypto that carries real weight
+does. Decide on merits in the PR — never cite this posture as the reason by
+itself. Test-only deps follow the same judgment (`cmd/controlroom/e2e` pins an
+exact Playwright version; it is never linked into a production binary).
 
 <!-- local-offload:start -->
 ## Local-first offload
