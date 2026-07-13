@@ -80,6 +80,15 @@ func TestSlackNetworkFailureIsAnError(t *testing.T) {
 	assertSafeSlackError(t, err, token, endpoint, channel, "request")
 }
 
+func TestSlackBuildRequestFailureIsSafe(t *testing.T) {
+	const token = "test-token"
+	const channel = "C123"
+	const endpoint = "://secret-endpoint"
+
+	err := postSlack(http.DefaultClient, endpoint, token, channel, event.Event{Source: "gate"})
+	assertSafeSlackError(t, err, token, endpoint, channel, "build request")
+}
+
 func TestSlackTextIsTruncated(t *testing.T) {
 	text := renderSlackText(event.Event{
 		Source:   "gate",
@@ -95,6 +104,13 @@ func TestSlackTextIsTruncated(t *testing.T) {
 	}
 }
 
+func TestSlackTextWithoutDetailHasNoTrailingSeparator(t *testing.T) {
+	text := renderSlackText(event.Event{Source: "gate", Severity: event.SevInfo})
+	if text != "[info] gate" {
+		t.Fatalf("text = %q, want %q", text, "[info] gate")
+	}
+}
+
 func assertSafeSlackError(t *testing.T, err error, token, endpoint, channel, want string) {
 	t.Helper()
 	if err == nil {
@@ -105,9 +121,9 @@ func assertSafeSlackError(t *testing.T, err error, token, endpoint, channel, wan
 			t.Fatalf("error leaks secret or endpoint %q: %v", secret, err)
 		}
 	}
-	for _, want := range []string{channel, want} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %v, want %q", err, want)
+	for _, substring := range []string{channel, want} {
+		if !strings.Contains(err.Error(), substring) {
+			t.Fatalf("error = %v, want %q", err, substring)
 		}
 	}
 }

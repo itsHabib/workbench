@@ -38,10 +38,10 @@ type Source struct {
 
 // Channel is a named delivery target events route to.
 type Channel struct {
-	Type    string `json:"type"`
-	URL     string `json:"url,omitempty"`
-	Token   string `json:"token,omitempty"`
-	Channel string `json:"channel,omitempty"`
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	Token     string `json:"token,omitempty"`
+	ChannelID string `json:"channel,omitempty"`
 }
 
 // Match selects events. Every set field must match; omitted means any.
@@ -157,7 +157,7 @@ func checkChannelDef(name string, ch Channel) error {
 		if ch.Token == "" {
 			return fmt.Errorf("channel %q: slack requires token", name)
 		}
-		if ch.Channel == "" {
+		if ch.ChannelID == "" {
 			return fmt.Errorf("channel %q: slack requires channel", name)
 		}
 		return nil

@@ -33,7 +33,7 @@ func Send(ch config.Channel, ev event.Event) error {
 	case config.ChannelWebhook:
 		return webhook(ch.URL, ev)
 	case config.ChannelSlack:
-		return slack(ch.Token, ch.Channel, ev)
+		return slack(ch.Token, ch.ChannelID, ev)
 	case config.ChannelDrop:
 		return nil
 	}
@@ -62,7 +62,7 @@ func postSlack(client *http.Client, endpoint, token, channel string, ev event.Ev
 	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("notify: slack channel %q: build request", channel)
+		return fmt.Errorf("notify: slack channel %q: build request: %w", channel, requestCause(err))
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -105,20 +105,26 @@ func renderSlackText(ev event.Event) string {
 	if why != "" && why != detail {
 		detail += " — " + why
 	}
-	text := fmt.Sprintf("[%s] %s: %s", ev.Severity.String(), source, detail)
-	return truncate(text, slackTextLimit)
+	text := fmt.Sprintf("[%s]", ev.Severity.String())
+	if source != "" {
+		text += " " + source
+	}
+	if detail != "" {
+		text += ": " + detail
+	}
+	return truncateSlackText(text)
 }
 
 func compact(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func truncate(s string, limit int) string {
-	if utf8.RuneCountInString(s) <= limit {
+func truncateSlackText(s string) string {
+	if utf8.RuneCountInString(s) <= slackTextLimit {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:limit-1]) + "…"
+	return string(runes[:slackTextLimit-1]) + "…"
 }
 
 func webhook(url string, ev event.Event) error {

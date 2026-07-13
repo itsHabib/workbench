@@ -65,7 +65,7 @@ func TestValidSlackChannelLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a valid Slack channel must load: %v", err)
 	}
-	if cfg.Channels["phone"].Channel != "C123" {
-		t.Fatalf("Slack channel = %q, want C123", cfg.Channels["phone"].Channel)
+	if cfg.Channels["phone"].ChannelID != "C123" {
+		t.Fatalf("Slack channel = %q, want C123", cfg.Channels["phone"].ChannelID)
 	}
 }
