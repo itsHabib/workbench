@@ -22,6 +22,7 @@ const (
 type receipts struct {
 	bySource map[string]model.SourceReceipt
 	counts   map[string]int
+	states   map[string]map[model.SourceState]int
 }
 
 // ApplyPolicy returns a copy of snapshot with deterministic liveness and attention.
@@ -36,18 +37,32 @@ func ApplyPolicy(snapshot model.Snapshot, now time.Time) model.Snapshot {
 	out.Repositories = slices.Clone(snapshot.Repositories)
 	r := indexReceipts(out.Sources)
 	applyRunLiveness(out.Runs, out.PullRequests, r, now)
+	applyRunOperatorState(out.Runs, r, now)
 	applyTaskLiveness(out.Tasks, out.Runs, out.PullRequests, r, now)
 	out.Attention = rank(out, r, now)
 	return out
 }
 
 func indexReceipts(values []model.SourceReceipt) receipts {
-	r := receipts{bySource: make(map[string]model.SourceReceipt), counts: make(map[string]int)}
+	r := receipts{bySource: make(map[string]model.SourceReceipt), counts: make(map[string]int), states: make(map[string]map[model.SourceState]int)}
 	for _, value := range values {
 		r.counts[value.Source]++
 		r.bySource[value.Source] = value
+		if r.states[value.Source] == nil {
+			r.states[value.Source] = make(map[model.SourceState]int)
+		}
+		r.states[value.Source][value.State]++
 	}
 	return r
+}
+
+func (r receipts) retained(source string) bool {
+	states := r.states[source]
+	if states[model.SourceStale] != 1 {
+		return false
+	}
+	return r.counts[source] == 1 || r.counts[source] == 2 &&
+		(states[model.SourceLoading] == 1 || states[model.SourceUnavailable] == 1)
 }
 
 func (r receipts) current(source string) bool {
@@ -76,6 +91,31 @@ func activeRun(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func waitRun(run model.Run) bool {
+	return waitToken(run.Status) || waitToken(run.Phase)
+}
+
+func waitToken(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "waiting", "awaiting_review", "awaiting_judgment", "blocked_on_merges", "merge_ready_awaiting_authority", "review", "approval", "judgment":
+		return true
+	default:
+		return false
+	}
+}
+
+func terminalRun(status string) (model.OperatorState, bool) {
+	switch strings.ToLower(status) {
+	case "failed", "error", "cancelled", "canceled":
+		return model.OperatorFailed, true
+	case "done", "completed", "succeeded", "success":
+		return model.OperatorDone, true
+	default:
+		return "", false
 	}
 }
 
@@ -121,6 +161,10 @@ func applyRunLiveness(runs []model.Run, prs []model.PullRequest, r receipts, now
 			run.Liveness = model.LivenessRetryLoop
 			continue
 		}
+		if waitRun(*run) {
+			run.Liveness = model.LivenessLive
+			continue
+		}
 		if ok && activeRun(run.Status) && age >= 15*time.Minute {
 			run.Liveness = model.LivenessStalledActive
 			continue
@@ -131,6 +175,41 @@ func applyRunLiveness(runs []model.Run, prs []model.PullRequest, r receipts, now
 		}
 		if ok && age <= 336*time.Hour {
 			run.Liveness = model.LivenessIdle
+		}
+	}
+}
+
+func applyRunOperatorState(runs []model.Run, r receipts, now time.Time) {
+	for i := range runs {
+		run := &runs[i]
+		run.OperatorState = model.OperatorUnknown
+		run.NextAction = "Revalidate Ship source truth before acting"
+		if !r.current(shipSource) {
+			continue
+		}
+		if state, terminal := terminalRun(run.Status); terminal {
+			run.OperatorState = state
+			if state == model.OperatorDone {
+				run.NextAction = "No action required"
+			} else {
+				run.NextAction = "Inspect failure evidence and ownership before deciding whether retry is safe"
+			}
+			continue
+		}
+		if waitRun(*run) {
+			run.OperatorState = model.OperatorWaiting
+			run.NextAction = "Inspect the named wait boundary and its owner"
+			continue
+		}
+		age, known := elapsedKnown(now, run.UpdatedAt)
+		if known && activeRun(run.Status) && age >= 15*time.Minute {
+			run.OperatorState = model.OperatorStalled
+			run.NextAction = "Inspect current phase evidence and owner before intervention"
+			continue
+		}
+		if known && activeRun(run.Status) && age < 15*time.Minute {
+			run.OperatorState = model.OperatorProgressing
+			run.NextAction = "Monitor for the next durable update"
 		}
 	}
 }
@@ -276,6 +355,8 @@ func runAttention(runs []model.Run, r receipts, now time.Time) []model.Attention
 		switch {
 		case ok && identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed") && age <= 72*time.Hour:
 			items = append(items, item("run.retry_loop", run.ID, "urgent", 100, "Repeated run failures", fmt.Sprintf("%d failures for %s within 72h", groups[identity], identity), run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
+		case waitRun(run):
+			continue
 		case ok && activeRun(run.Status) && age >= 15*time.Minute:
 			items = append(items, item("run.stalled_active", run.ID, "urgent", 95, "Active run has stalled", "Control Room policy: no source update for 15m", run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
 		}
@@ -365,7 +446,7 @@ func taskAttention(tasks []model.Task, r receipts) []model.AttentionItem {
 }
 
 func toolAttention(healthRows []model.ToolHealth, r receipts, now time.Time) []model.AttentionItem {
-	toolStale := r.counts[toolhealthSource] == 1 && r.bySource[toolhealthSource].State == model.SourceStale
+	toolStale := r.retained(toolhealthSource)
 	if !r.current(toolhealthSource) && !toolStale {
 		return nil
 	}
@@ -385,7 +466,7 @@ func toolAttention(healthRows []model.ToolHealth, r receipts, now time.Time) []m
 func sourceAttention(sources []model.SourceReceipt, r receipts) []model.AttentionItem {
 	items := make([]model.AttentionItem, 0)
 	for _, receipt := range sources {
-		if r.counts[receipt.Source] != 1 {
+		if r.states[receipt.Source][receipt.State] != 1 {
 			continue
 		}
 		switch receipt.State {

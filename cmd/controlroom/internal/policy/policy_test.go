@@ -62,6 +62,46 @@ func TestRunThresholdsAndRetryGrouping(t *testing.T) {
 	}
 }
 
+func TestRunOperatorStatePrecedenceForUnattendedRuns(t *testing.T) {
+	snapshot := base()
+	snapshot.Runs = []model.Run{
+		{ID: "progress", Status: "running", UpdatedAt: now.Add(-time.Minute)},
+		{ID: "wait", Status: "running", Phase: "awaiting_judgment", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "status-wait", Status: "waiting", Phase: "review_gate", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "stalled", Status: "running", UpdatedAt: now.Add(-15 * time.Minute)},
+		{ID: "failed", Status: "failed", UpdatedAt: now},
+		{ID: "done", Status: "done", UpdatedAt: now},
+	}
+	got := policy.ApplyPolicy(snapshot, now)
+	want := []model.OperatorState{model.OperatorProgressing, model.OperatorWaiting, model.OperatorWaiting, model.OperatorStalled, model.OperatorFailed, model.OperatorDone}
+	for i := range want {
+		if got.Runs[i].OperatorState != want[i] || got.Runs[i].NextAction == "" {
+			t.Fatalf("run %s = state %q action %q", got.Runs[i].ID, got.Runs[i].OperatorState, got.Runs[i].NextAction)
+		}
+	}
+	if got.Runs[1].Liveness != model.LivenessLive {
+		t.Fatalf("wait boundary mislabeled as stalled: %+v", got.Runs[1])
+	}
+	if got.Runs[2].Liveness != model.LivenessLive {
+		t.Fatalf("status wait boundary mislabeled: %+v", got.Runs[2])
+	}
+	for _, item := range got.Attention {
+		if item.ID == "run.stalled_active:wait" {
+			t.Fatalf("wait boundary emitted stalled attention: %+v", item)
+		}
+	}
+}
+
+func TestRunOperatorStateFailsClosedWithNoncurrentShip(t *testing.T) {
+	snapshot := base()
+	snapshot.Sources[0].State = model.SourceUnavailable
+	snapshot.Runs = []model.Run{{ID: "run", Status: "running", UpdatedAt: now}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Runs[0].OperatorState != model.OperatorUnknown {
+		t.Fatalf("operator state = %q", got.Runs[0].OperatorState)
+	}
+}
+
 func TestApplyPolicyDoesNotMutateCallerSlices(t *testing.T) {
 	snapshot := base()
 	snapshot.Runs = []model.Run{{ID: "run", Kind: "workflow", Status: "running", UpdatedAt: now, DocPath: model.Known("docs/a.md")}}
@@ -396,6 +436,16 @@ func TestUnavailableSourcesDoNotSuppressHealthySources(t *testing.T) {
 	snapshot.PullRequests = []model.PullRequest{{ID: "failed", UpdatedAt: now, Checks: []model.Check{{Status: "COMPLETED", Conclusion: "FAILURE"}}}}
 	got := policy.ApplyPolicy(snapshot, now)
 	if !hasRule(got, "source.unavailable") || !hasRule(got, "pr.ci_failed") {
+		t.Fatalf("rules = %v", ruleIDs(got))
+	}
+}
+
+func TestRetainedPayloadDualReceiptsEmitBothQualifications(t *testing.T) {
+	snapshot := base()
+	snapshot.Sources[0] = receipt("ship", model.SourceUnavailable)
+	snapshot.Sources = append(snapshot.Sources, receipt("ship", model.SourceStale))
+	got := policy.ApplyPolicy(snapshot, now)
+	if !hasRule(got, "source.unavailable") || !hasRule(got, "source.stale") {
 		t.Fatalf("rules = %v", ruleIDs(got))
 	}
 }

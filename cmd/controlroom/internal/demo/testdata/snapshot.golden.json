@@ -89,7 +89,61 @@
         "state": "unknown"
       },
       "evidence": [],
-      "liveness": "live"
+      "liveness": "live",
+      "operator_state": "done",
+      "next_action": "No action required"
+    },
+    {
+      "id": "drv_demo_waiting",
+      "kind": "driver",
+      "repository": "example-repo",
+      "project": "workbench",
+      "doc_path": {
+        "state": "unknown"
+      },
+      "spec_path": {
+        "state": "available",
+        "value": "docs/waiting/spec.md"
+      },
+      "status": "running",
+      "phase": "awaiting_judgment",
+      "requested": {
+        "runtime": {
+          "state": "unknown"
+        },
+        "provider": {
+          "state": "unknown"
+        },
+        "model": {
+          "state": "unknown"
+        }
+      },
+      "actual": {
+        "runtime": {
+          "state": "unknown"
+        },
+        "provider": {
+          "state": "unknown"
+        },
+        "model": {
+          "state": "unknown"
+        }
+      },
+      "created_at": "2026-07-13T10:00:00Z",
+      "updated_at": "2026-07-13T11:00:00Z",
+      "started_at": {
+        "state": "unknown"
+      },
+      "ended_at": {
+        "state": "unknown"
+      },
+      "duration_ms": {
+        "state": "unknown"
+      },
+      "evidence": [],
+      "liveness": "live",
+      "operator_state": "waiting",
+      "next_action": "Inspect the named wait boundary and its owner"
     },
     {
       "id": "wf_demo_stalled",
@@ -137,7 +191,9 @@
         "state": "unknown"
       },
       "evidence": [],
-      "liveness": "on_fire/stalled_active"
+      "liveness": "on_fire/stalled_active",
+      "operator_state": "stalled",
+      "next_action": "Inspect current phase evidence and owner before intervention"
     },
     {
       "id": "wf_demo_fail_1",
@@ -186,7 +242,9 @@
       },
       "failure": "test failure",
       "evidence": [],
-      "liveness": "on_fire/retry_loop"
+      "liveness": "on_fire/retry_loop",
+      "operator_state": "failed",
+      "next_action": "Inspect failure evidence and ownership before deciding whether retry is safe"
     },
     {
       "id": "wf_demo_fail_2",
@@ -235,7 +293,9 @@
       },
       "failure": "test failure",
       "evidence": [],
-      "liveness": "on_fire/retry_loop"
+      "liveness": "on_fire/retry_loop",
+      "operator_state": "failed",
+      "next_action": "Inspect failure evidence and ownership before deciding whether retry is safe"
     },
     {
       "id": "wf_demo_fail_3",
@@ -284,7 +344,9 @@
       },
       "failure": "test failure",
       "evidence": [],
-      "liveness": "on_fire/retry_loop"
+      "liveness": "on_fire/retry_loop",
+      "operator_state": "failed",
+      "next_action": "Inspect failure evidence and ownership before deciding whether retry is safe"
     }
   ],
   "tasks": [

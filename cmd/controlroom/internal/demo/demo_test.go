@@ -58,4 +58,13 @@ func TestSnapshotContainsRequiredStory(t *testing.T) {
 	if len(snapshot.Reliability) == 0 || snapshot.Reliability[0].InputTokens.State != "unknown" {
 		t.Fatal("demo must include diagnosis with unknown telemetry")
 	}
+	operatorStates := make(map[string]bool)
+	for _, run := range snapshot.Runs {
+		operatorStates[string(run.OperatorState)] = true
+	}
+	for _, required := range []string{"waiting", "stalled", "failed", "done"} {
+		if !operatorStates[required] {
+			t.Errorf("demo missing unattended-run operator state %s", required)
+		}
+	}
 }

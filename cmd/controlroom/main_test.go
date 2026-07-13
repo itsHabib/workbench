@@ -114,6 +114,14 @@ func TestDemoPublisherBumpsMonotonically(t *testing.T) {
 	}
 }
 
+func TestConfigFingerprintIsIndependentOfScopeAndMapOrder(t *testing.T) {
+	first := configFingerprint(`C:\portfolio`, `C:\dossier`, []string{"repo:b/b", "user:a"}, map[string]string{"ship": `C:\bin\ship.exe`, "github": `C:\bin\gh.exe`})
+	second := configFingerprint(`C:\portfolio`, `C:\dossier`, []string{"user:a", "repo:b/b"}, map[string]string{"github": `C:\bin\gh.exe`, "ship": `C:\bin\ship.exe`})
+	if first != second || first == "" {
+		t.Fatalf("fingerprints differ: %q %q", first, second)
+	}
+}
+
 func structRefreshRequest() web.RefreshRequest {
 	return web.RefreshRequest{Mode: "demo", Trigger: "manual"}
 }

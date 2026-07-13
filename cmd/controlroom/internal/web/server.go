@@ -47,6 +47,7 @@ type RefreshFunc func(context.Context, RefreshRequest) (RefreshReceipt, error)
 // Config supplies the narrow publication seams owned by the web package.
 type Config struct {
 	Host        string
+	Mode        string
 	Snapshot    SnapshotSupplier
 	Refresh     RefreshFunc
 	TokenSource func([]byte) (int, error)
@@ -54,6 +55,7 @@ type Config struct {
 
 type server struct {
 	host     string
+	mode     string
 	snapshot SnapshotSupplier
 	refresh  RefreshFunc
 	token    string
@@ -61,8 +63,8 @@ type server struct {
 
 // New builds a host-locked handler and generates its process-scoped CSRF token.
 func New(config Config) (http.Handler, error) {
-	if config.Host == "" || config.Snapshot == nil || config.Refresh == nil {
-		return nil, fmt.Errorf("host, snapshot supplier, and refresh callback are required")
+	if config.Host == "" || config.Snapshot == nil || config.Refresh == nil || config.Mode != "demo" && config.Mode != "real" {
+		return nil, fmt.Errorf("host, demo or real mode, snapshot supplier, and refresh callback are required")
 	}
 	source := config.TokenSource
 	if source == nil {
@@ -74,7 +76,7 @@ func New(config Config) (http.Handler, error) {
 		return nil, fmt.Errorf("generate CSRF token: %w", errors.Join(err, io.ErrUnexpectedEOF))
 	}
 	return &server{
-		host: config.Host, snapshot: config.Snapshot, refresh: config.Refresh,
+		host: config.Host, mode: config.Mode, snapshot: config.Snapshot, refresh: config.Refresh,
 		token: base64.RawURLEncoding.EncodeToString(raw),
 	}, nil
 }
@@ -133,6 +135,8 @@ func (s *server) serveAsset(w http.ResponseWriter, r *http.Request, name, conten
 	}
 	w.Header().Set("Content-Type", contentType)
 	if shell {
+		body = bytes.ReplaceAll(body, []byte("__CONTROL_ROOM_MODE__"), []byte(s.mode))
+		body = bytes.ReplaceAll(body, []byte("__CONTROL_ROOM_MODE_LABEL__"), []byte(strings.ToUpper(s.mode)))
 		w.Header().Set("Cache-Control", "no-store")
 		http.SetCookie(w, &http.Cookie{Name: csrfCookie, Value: s.token, Path: "/", SameSite: http.SameSiteStrictMode})
 	}
@@ -176,7 +180,7 @@ func (s *server) serveRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request, ok := decodeRefresh(r.Body)
-	if !ok || request.Mode != "demo" || request.Trigger != "manual" {
+	if !ok || request.Mode != s.mode || request.Trigger != "manual" && request.Trigger != "auto" {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -203,7 +207,7 @@ func (s *server) authorizeRefresh(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	header := r.Header.Get("X-Controlroom-CSRF")
+	header := r.Header.Get("X-Control-Room-CSRF")
 	return secureEqual(cookie.Value, s.token) && secureEqual(header, s.token)
 }
 

@@ -1,6 +1,6 @@
 # Portfolio Control Room
 
-Control Room is a local, read-only portfolio operations surface. The Phase 3 command serves a deterministic demo snapshot so the full healthy-to-on-fire story can be reviewed before real source adapters are connected.
+Control Room is a local, read-only portfolio operations surface. It can serve a deterministic demo or compose current observations from Ship, Dossier, GitHub, Tracelens, tool-health, and optional Tower adapters.
 
 ## Run the demo
 
@@ -20,11 +20,24 @@ go run ./cmd/controlroom snapshot --mode demo --json
 
 The command writes the same policy-applied snapshot consumed by the browser. Its clock and relative ages are fixed, so output and screenshots remain reproducible.
 
+## Run against real sources
+
+Real mode requires explicit absolute workspace and Dossier corpus paths plus one to four GitHub scopes. Executable flags default to PATH names; Tower is disabled unless its executable is supplied.
+
+```powershell
+go run ./cmd/controlroom serve --mode real --addr 127.0.0.1:4317 `
+  --workspace-root C:\portfolio `
+  --dossier-corpus C:\portfolio\dossier-state `
+  --github-scope user:synthetic-author
+```
+
+Use the same source flags with `snapshot --mode real --json` for one bounded collection without the browser timer. A source failure does not hide healthy panels: the current attempt is marked unavailable and any retained payload is separately marked stale.
+
 ## Current boundary
 
-Production code uses only the Go standard library and embedded same-origin assets. The browser reads a snapshot supplier and calls a narrow refresh callback; it does not import producer packages, read producer stores, launch subprocesses, mutate planning or workflow state, or expose arbitrary local files.
+Production code uses only the Go standard library and embedded same-origin assets. The browser reads an immutable snapshot supplier and calls a narrow refresh callback. Source adapters invoke owner CLIs/MCP but never read producer stores directly, mutate planning or workflow state, or expose arbitrary local files.
 
-Phase 3 accepts only demo mode. Real Ship, Dossier, GitHub, TraceLens, tool-health, and optional Tower adapters arrive in the next phase; background generation coordination arrives after that. Pinned Playwright automation, committed screenshots, and the operator runbook are part of final hardening.
+Runs expose owner status alongside operator state, current stage, exact and relative last durable update, failure class, evidence, and a conservative next action. Waiting owner boundaries take precedence over the stall timer; failures never imply retry or resume is safe. Pinned Playwright automation, committed screenshots, and the full operator runbook are part of final hardening.
 
 ## Validate
 
