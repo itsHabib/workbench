@@ -99,10 +99,14 @@ func parseIncident(text string) ([]model.ToolHealth, bool, string) {
 		}
 	}
 	fields := make(map[string]string)
-	for _, line := range strings.Split(text, "\n") {
+	incident := strings.SplitN(text, "!!! ACTIVE INCIDENT !!!", 2)[1]
+	for _, line := range strings.Split(incident, "\n") {
 		for _, key := range []string{"Tool", "Severity", "Started", "Status"} {
 			prefix := key + ":"
 			if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+				if _, exists := fields[key]; exists {
+					return nil, false, "contract_drift"
+				}
 				fields[key] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), prefix))
 			}
 		}
@@ -112,6 +116,7 @@ func parseIncident(text string) ([]model.ToolHealth, bool, string) {
 		return nil, false, "contract_drift"
 	}
 	return []model.ToolHealth{{
+		// A live incident is one active event, not an accumulated session count.
 		Tool: fields["Tool"], WorstSeverity: fields["Severity"], SessionCount: 1,
 		LastOccurrence: started, Pain: []string{fields["Status"]}, Kind: "live_incident",
 	}}, false, ""
@@ -125,7 +130,7 @@ func parseAccumulated(text string) ([]model.ToolHealth, bool, string) {
 	partial := false
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "|") || strings.Contains(line, "Tool ") || strings.Contains(line, "---") {
+		if !strings.HasPrefix(line, "|") || strings.Contains(line, "| Tool |") || strings.Contains(line, "---") {
 			continue
 		}
 		parts := strings.Split(strings.Trim(line, "|"), "|")

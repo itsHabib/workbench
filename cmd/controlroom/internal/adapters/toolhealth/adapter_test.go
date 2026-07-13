@@ -63,3 +63,39 @@ func TestCollectFailsClosedOnAnchorDrift(t *testing.T) {
 		t.Fatalf("unexpected result: %#v", got)
 	}
 }
+
+func TestCollectDegradedOnPartialRows(t *testing.T) {
+	a := New("toolhealth")
+	a.runner = &fakeRunner{stdout: []byte(`Tool Health Board — accumulated friction
+Generated: 2026-07-13T12:00:00Z
+| Tool | Severity | Sessions | Last seen | Pain |
+|---|---|---|---|---|
+| Build Tool | P2 | 4 | 2026-07-13T11:30:00Z | contention |
+| zero | P3 | 0 | 2026-07-13T10:00:00Z | unknown count |
+| broken row |
+Kind: accumulated_friction`)}
+	got := a.Collect(context.Background())
+	if got.Receipt.State != model.SourceDegraded || got.Receipt.ErrorCode != "partial_parse" {
+		t.Fatalf("expected degraded receipt: %#v", got)
+	}
+	if len(got.Tools) != 1 || got.Tools[0].Tool != "Build Tool" {
+		t.Fatalf("valid row was not preserved: %#v", got.Tools)
+	}
+}
+
+func TestCollectRejectsRepeatedIncidentKeys(t *testing.T) {
+	a := New("toolhealth")
+	a.runner = &fakeRunner{stdout: []byte(`Tool Health Board — LIVE INCIDENT
+Generated: 2026-07-13T12:00:00Z
+!!! ACTIVE INCIDENT !!!
+Tool: github
+Tool: ship
+Severity: P1
+Started: 2026-07-13T11:55:00Z
+Status: auth failure
+Kind: live_incident`)}
+	got := a.Collect(context.Background())
+	if got.Receipt.ErrorCode != "contract_drift" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+}
