@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
+    "test": "playwright test tests/control-room.spec.ts",
     "screenshots": "playwright test tests/screenshots.spec.ts --project=chromium-laptop"
   },
   "devDependencies": {

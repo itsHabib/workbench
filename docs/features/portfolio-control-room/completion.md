@@ -10,7 +10,7 @@
 
 ## Browser evidence
 
-The automated matrix passes 15 tests across both viewports; the canonical screenshot test runs only at laptop size. A separate in-app browser smoke verified:
+The automated CI matrix passes 14 behavior tests across both viewports and never writes the checked-in evidence. A separate explicit screenshot command passes one canonical laptop capture test. A separate in-app browser smoke verified:
 
 - version/source facts and partial-source qualifications on the live demo server;
 - the failed-run drawer's policy, failure, Tracelens finding, and unavailable telemetry;
