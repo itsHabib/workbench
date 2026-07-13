@@ -52,6 +52,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	logUsage(*prompt, res.Source, res.Reason != "")
+
 	out, err := json.Marshal(struct {
 		Source string          `json:"source"`
 		Reason string          `json:"reason,omitempty"`
