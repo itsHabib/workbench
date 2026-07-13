@@ -5,7 +5,7 @@
 package journal
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,19 +36,23 @@ func Create(path, runID string) (*Writer, error) {
 }
 
 // OpenAppend opens an existing journal for sole-writer append, continuing
-// contiguous seq from the last durable event. Used by reconcile to repair a
-// missing run_terminal or append after controller loss — never truncates.
+// contiguous seq from the last durable event. A torn partial trailing line
+// (tolerated by ReadHistory) is truncated first so the next Append cannot
+// fuse onto corrupt bytes.
 func OpenAppend(path, runID string) (*Writer, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("journal: run id is empty")
 	}
-	events, err := ReadHistory(path)
+	events, validEnd, err := readHistory(path)
 	if err != nil {
 		return nil, err
 	}
 	var seq int64
 	if n := len(events); n > 0 {
 		seq = events[n-1].Seq
+	}
+	if err := os.Truncate(path, validEnd); err != nil {
+		return nil, fmt.Errorf("journal: truncate torn tail: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -99,37 +103,57 @@ func (w *Writer) Close() error {
 // ReadHistory loads a run's events and verifies them with execution.Reduce —
 // ordering laws are never re-implemented here.
 func ReadHistory(path string) ([]execution.RunEvent, error) {
-	f, err := os.Open(path)
+	events, _, err := readHistory(path)
+	return events, err
+}
+
+// readHistory returns events and the byte offset of the end of the last
+// valid event line (suitable for Truncate before OpenAppend).
+func readHistory(path string) ([]execution.RunEvent, int64, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("journal: open history: %w", err)
+		return nil, 0, fmt.Errorf("journal: open history: %w", err)
 	}
-	defer f.Close()
 
 	var events []execution.RunEvent
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
+	var validEnd int64
+	start := 0
+	for start < len(data) {
+		nl := bytes.IndexByte(data[start:], '\n')
+		if nl < 0 {
+			line := data[start:]
+			if len(line) == 0 {
+				break
+			}
+			ev, err := execution.DecodeEvent(line)
+			if err != nil {
+				// Torn unflushed tail at EOF — keep prior validEnd.
+				break
+			}
+			events = append(events, ev)
+			validEnd = int64(len(data))
+			break
+		}
+		line := data[start : start+nl]
+		next := start + nl + 1
 		if len(line) == 0 {
+			start = next
 			continue
 		}
 		ev, err := execution.DecodeEvent(line)
 		if err != nil {
-			// More lines after a bad line => durable mid-journal corruption.
-			// EOF after a bad line => torn unflushed tail (or empty history
-			// when the first line itself was torn).
-			if sc.Scan() {
-				return nil, fmt.Errorf("journal: corrupt mid-journal: %w", err)
+			// More bytes after a bad line => durable mid-journal corruption.
+			if next < len(data) {
+				return nil, 0, fmt.Errorf("journal: corrupt mid-journal: %w", err)
 			}
 			break
 		}
 		events = append(events, ev)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("journal: scan: %w", err)
+		validEnd = int64(next)
+		start = next
 	}
 	if _, err := execution.Reduce(events); err != nil {
-		return nil, fmt.Errorf("journal: reduce: %w", err)
+		return nil, 0, fmt.Errorf("journal: reduce: %w", err)
 	}
-	return events, nil
+	return events, validEnd, nil
 }

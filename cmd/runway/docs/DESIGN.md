@@ -70,8 +70,8 @@ goroutine before emitting the `timed_out`/`cancelled` receipt with
 Cancel and reconcile verify recorded controller PID plus process-start
 identity. The claim package owns the tick primitive; controller identity and
 claim owner records share it. Other Unix GOOS (darwin, freebsd, …) compile
-but return StartTicks 0 — liveMatches / LiveMatches fail closed rather than
-trusting PID alone.
+but return StartTicks 0 — LiveMatches / liveMatches fall back to pid
+existence so a still-alive unverifiable owner cannot be stolen.
 
 ## Flow F — controller loss
 

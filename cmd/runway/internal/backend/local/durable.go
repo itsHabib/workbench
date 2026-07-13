@@ -28,13 +28,16 @@ type CleanupResult struct {
 const backendFile = "backend.json"
 
 // writeAllocation persists the process-group identity under private/.
+// An already-exited short-lived child makes StartTicks fail; record
+// StartTicks 0 (degraded, unverifiable) and proceed so Wait can report the
+// real exit. CleanupDurable fails closed on such allocations.
 func writeAllocation(privateDir string, pid, pgid int) error {
 	if privateDir == "" {
 		return nil
 	}
 	ticks, err := claim.StartTicks(pid)
 	if err != nil {
-		return fmt.Errorf("local: allocation start ticks: %w", err)
+		ticks = 0
 	}
 	alloc := Allocation{PID: pid, PGID: pgid, StartTicks: ticks}
 	data, err := json.Marshal(alloc)
@@ -68,25 +71,52 @@ func CleanupDurable(privateDir string) (CleanupResult, error) {
 		return CleanupResult{}, nil
 	}
 	id := fmt.Sprintf("pid:%d", alloc.PID)
-	if !allocationLive(alloc) {
-		return CleanupResult{}, nil
+	switch probeAllocation(alloc) {
+	case livenessLive:
+		return cleanupLiveAllocation(alloc, id)
+	case livenessUncertain:
+		return CleanupResult{Uncertain: true, AllocationID: id}, nil
+	default:
+		return cleanupDeadLeader(alloc, id)
 	}
+}
+
+func cleanupLiveAllocation(alloc Allocation, id string) (CleanupResult, error) {
 	_ = killGroup(alloc.PGID)
-	if !allocationLive(alloc) {
+	if probeAllocation(alloc) != livenessLive {
 		return CleanupResult{}, nil
 	}
 	return CleanupResult{Uncertain: true, AllocationID: id}, nil
 }
 
-func allocationLive(alloc Allocation) bool {
+type liveness int
+
+const (
+	livenessDead liveness = iota
+	livenessLive
+	livenessUncertain
+)
+
+// probeAllocation classifies leader liveness. StartTicks errors that are not
+// definitive process-gone, and StartTicks 0 with a still-existing PID, are
+// uncertain — never clean.
+func probeAllocation(alloc Allocation) liveness {
 	if alloc.StartTicks == 0 {
-		// Unverifiable start identity — treat as uncertain live if the PID
-		// exists at all (fail closed for reconcile diagnostics).
-		return pidExists(alloc.PID)
+		if pidExists(alloc.PID) {
+			return livenessUncertain
+		}
+		return livenessDead
 	}
 	got, err := claim.StartTicks(alloc.PID)
 	if err != nil {
-		return false
+		if pidExists(alloc.PID) {
+			return livenessUncertain
+		}
+		return livenessDead
 	}
-	return got == alloc.StartTicks
+	if got == alloc.StartTicks {
+		return livenessLive
+	}
+	// PID reused under a different start identity — recorded leader is gone.
+	return livenessDead
 }

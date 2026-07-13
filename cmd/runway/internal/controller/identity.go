@@ -50,18 +50,12 @@ func readIdentity(run state.RunDir) (Identity, error) {
 }
 
 // liveMatches reports whether pid still refers to the same process-start
-// identity recorded at controller start. StartTicks 0 means the identity was
-// recorded on a platform without a start-time source (unix && !linux) — an
-// unverifiable identity fails closed: cancel never signals on a bare PID.
+// identity recorded at controller start. StartTicks 0 (unix && !linux, or a
+// degraded record) falls back to pid existence — refuse takeover / cancel
+// signaling against a still-alive unverifiable owner rather than treating it
+// as dead.
 func liveMatches(id Identity) bool {
-	if id.StartTicks == 0 {
-		return false
-	}
-	got, err := identityOf(id.PID)
-	if err != nil {
-		return false
-	}
-	return got.PID == id.PID && got.StartTicks == id.StartTicks
+	return claim.LiveMatches(claim.Owner{PID: id.PID, StartTicks: id.StartTicks, Generation: 1})
 }
 
 func selfIdentity() (Identity, error) {

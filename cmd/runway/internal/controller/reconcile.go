@@ -68,12 +68,17 @@ func reconcileAlreadyTerminal(run state.RunDir) (ReconcileOutcome, bool, error) 
 	if err != nil {
 		return ReconcileOutcome{}, true, err
 	}
-	if hasResult && term {
+	if term && hasResult {
 		return ReconcileOutcome{
 			NoOp:     true,
 			Result:   &res,
 			ExitCode: ExitFromResult(res),
 		}, true, nil
+	}
+	if term {
+		// Terminal journal without result is corrupt — do not append a second
+		// run_terminal or invent a receipt (run_terminal-is-final invariant).
+		return ReconcileOutcome{}, true, fmt.Errorf("controller: corrupt run state: terminal journal without result")
 	}
 	return ReconcileOutcome{}, false, nil
 }
@@ -117,7 +122,7 @@ func reconcileAppendTerminal(run state.RunDir, runID string, res execution.Resul
 	if term {
 		return ReconcileOutcome{NoOp: true, Result: &res, ExitCode: ExitFromResult(res)}, nil
 	}
-	j, err := journal.OpenAppend(run.EventsPath(), runID)
+	j, err := openJournalForReconcile(run, runID)
 	if err != nil {
 		return ReconcileOutcome{}, err
 	}

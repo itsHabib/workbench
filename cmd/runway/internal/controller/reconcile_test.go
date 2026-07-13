@@ -189,28 +189,94 @@ func TestReconcileRace_OneWinner(t *testing.T) {
 }
 
 func TestReconcileFailsClosedOnUncertainBackend(t *testing.T) {
+	t.Run("live_leader_unkillable", func(t *testing.T) {
+		h := newHarness(t)
+		runID, run := seedDeadControllerRun(t, h, false)
+
+		ticks, err := claim.StartTicks(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ticks == 0 {
+			t.Skip("process-start identity unsupported on this GOOS")
+		}
+		// Live PID + matching start ticks, but pgid 0 so killGroup is a no-op —
+		// allocation remains live → uncertain.
+		alloc := local.Allocation{PID: os.Getpid(), PGID: 0, StartTicks: ticks}
+		data, _ := json.Marshal(alloc)
+		if err := os.WriteFile(run.BackendPath(), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := controller.Reconcile(h.stateRoot, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertCleanupFailedDiagnostic(t, out, os.Getpid())
+	})
+
+	t.Run("leader_dead_descendants_unknown", func(t *testing.T) {
+		h := newHarness(t)
+		runID, run := seedDeadControllerRun(t, h, false)
+
+		pgid := deadLeaderProbePGID(t)
+		// Dead leader PID with a still-reachable process group — must not
+		// report clean (unix: kill(-pgid,0) succeeds ⇒ Uncertain; windows:
+		// no group enumeration ⇒ Uncertain).
+		alloc := local.Allocation{PID: 999999, PGID: pgid, StartTicks: 1}
+		data, _ := json.Marshal(alloc)
+		if err := os.WriteFile(run.BackendPath(), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := controller.Reconcile(h.stateRoot, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertCleanupFailedDiagnostic(t, out, 999999)
+	})
+}
+
+func TestReconcileTerminalJournalWithoutResult(t *testing.T) {
 	h := newHarness(t)
-	runID, run := seedDeadControllerRun(t, h, false)
+	runID, run := seedDeadControllerRun(t, h, true)
 
-	ticks, err := claim.StartTicks(os.Getpid())
+	j, err := journal.OpenAppend(run.EventsPath(), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ticks == 0 {
-		t.Skip("process-start identity unsupported on this GOOS")
-	}
-	// Live PID + matching start ticks, but pgid 0 so killGroup is a no-op —
-	// allocation remains live → uncertain.
-	alloc := local.Allocation{PID: os.Getpid(), PGID: 0, StartTicks: ticks}
-	data, _ := json.Marshal(alloc)
-	if err := os.WriteFile(run.BackendPath(), data, 0o600); err != nil {
+	if _, err := j.Append(execution.PhaseTerminal, execution.KindRunTerminal, map[string]any{
+		"status": "failed",
+	}); err != nil {
 		t.Fatal(err)
 	}
-
-	out, err := controller.Reconcile(h.stateRoot, runID)
+	_ = j.Close()
+	before, err := os.ReadFile(run.EventsPath())
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	_, err = controller.Reconcile(h.stateRoot, runID)
+	if err == nil {
+		t.Fatal("terminal journal without result must error")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("terminal journal without result")) {
+		t.Fatalf("want corrupt-state error, got %v", err)
+	}
+	after, err := os.ReadFile(run.EventsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("reconcile must not mutate journal on corrupt terminal-without-result")
+	}
+	if _, err := os.Stat(run.ResultPath()); !os.IsNotExist(err) {
+		t.Fatal("reconcile must not invent result.json")
+	}
+}
+
+func assertCleanupFailedDiagnostic(t *testing.T, out controller.ReconcileOutcome, pid int) {
+	t.Helper()
 	if out.Result == nil || out.Result.ReasonCode != execution.ReasonControllerLost {
 		t.Fatalf("want controller_lost, got %+v", out.Result)
 	}
@@ -223,7 +289,7 @@ func TestReconcileFailsClosedOnUncertainBackend(t *testing.T) {
 			continue
 		}
 		found = true
-		if d.Details["allocation_id"] != "pid:"+strconv.Itoa(os.Getpid()) {
+		if d.Details["allocation_id"] != "pid:"+strconv.Itoa(pid) {
 			t.Fatalf("diagnostics details=%v", d.Details)
 		}
 	}

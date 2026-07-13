@@ -128,17 +128,21 @@ func takeoverOnce(privateDir string) (Owner, error) {
 
 // clearStaleTakeover removes a takeover file whose recorded owner is dead so
 // a crashed reconciler cannot leave a stuck lock. Live owners yield ErrBusy.
+// Corrupt or unreadable content is removed and retried — a crash mid-write
+// must not permanently block reconcile (exclusivity is O_EXCL, not content).
 func clearStaleTakeover(takeoverPath string) error {
 	data, err := os.ReadFile(takeoverPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return ErrBusy
+		_ = os.Remove(takeoverPath)
+		return errStaleTakeover
 	}
 	var o Owner
 	if err := json.Unmarshal(data, &o); err != nil {
-		return ErrBusy
+		_ = os.Remove(takeoverPath)
+		return errStaleTakeover
 	}
 	if LiveMatches(o) {
 		return ErrBusy
@@ -164,10 +168,14 @@ func Read(privateDir string) (Owner, error) {
 }
 
 // LiveMatches reports whether o still refers to a live process with the same
-// start identity. StartTicks 0 fails closed (unverifiable platform).
+// start identity. StartTicks 0 (unverifiable platform or degraded record)
+// falls back to pid existence so a live owner cannot be stolen.
 func LiveMatches(o Owner) bool {
-	if o.PID <= 0 || o.StartTicks == 0 {
+	if o.PID <= 0 {
 		return false
+	}
+	if o.StartTicks == 0 {
+		return pidExists(o.PID)
 	}
 	got, err := identityOf(o.PID)
 	if err != nil {

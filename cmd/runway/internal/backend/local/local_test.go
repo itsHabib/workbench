@@ -156,6 +156,61 @@ func main() {
 	t.Fatalf("orphan grandchild pid %d still alive after cleanup", childPID)
 }
 
+func TestStartSucceedsForImmediateExit(t *testing.T) {
+	dir := t.TempDir()
+	private := filepath.Join(dir, "private")
+	if err := os.MkdirAll(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prog := filepath.Join(dir, "exit42.go")
+	src := "package main\nimport \"os\"\nfunc main() { os.Exit(42) }\n"
+	if err := os.WriteFile(prog, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "exit42")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, prog).CombinedOutput(); err != nil {
+		t.Fatalf("build exit42: %v: %s", err, out)
+	}
+	stdout := filepath.Join(dir, "stdout.log")
+	stderr := filepath.Join(dir, "stderr.log")
+	be := local.New()
+	ctx := context.Background()
+	emit := func(_, _ string, _ map[string]any) error { return nil }
+
+	// Immediately-exiting workload: Start must succeed even if StartTicks
+	// fails for the unreaped/exited child, and Wait must report the exit.
+	h, err := be.Start(ctx, backend.PreparedRun{
+		Cwd:        dir,
+		Argv:       []string{bin},
+		Env:        os.Environ(),
+		StdoutPath: stdout,
+		StderrPath: stderr,
+		PrivateDir: private,
+	}, emit)
+	if err != nil {
+		t.Fatalf("Start must succeed for immediate exit: %v", err)
+	}
+	exit, err := be.Wait(ctx, h, emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit.Code != 42 {
+		t.Fatalf("exit code=%d want 42", exit.Code)
+	}
+	_ = be.Cleanup(ctx, h)
+
+	raw, err := os.ReadFile(filepath.Join(private, "backend.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"pid"`)) {
+		t.Fatalf("backend.json missing pid: %s", raw)
+	}
+}
+
 func TestEmitsWorkloadReady(t *testing.T) {
 	dir := t.TempDir()
 	stdout := filepath.Join(dir, "stdout.log")

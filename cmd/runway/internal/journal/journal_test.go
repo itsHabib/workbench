@@ -128,6 +128,55 @@ func TestJournalAppendAfterCloseErrors(t *testing.T) {
 	}
 }
 
+func TestJournalOpenAppendAfterTornTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.ndjson")
+	w, err := journal.Create(path, "run_torn_append")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Append(execution.PhaseAdmission, execution.KindRunAccepted, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Append(execution.PhaseStartup, execution.KindPlacementAllocated, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"schema_version":"0.1.0","run_id":"run_torn_append","seq":3,"time":"t","phase":"workload","kind":"workload_star`); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	aw, err := journal.OpenAppend(path, "run_torn_append")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aw.Append(execution.PhaseTerminal, execution.KindRunTerminal, map[string]any{
+		"status": "failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = aw.Close()
+
+	events, err := journal.ReadHistory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("want 2 prior + terminal, got %d", len(events))
+	}
+	if events[2].Kind != execution.KindRunTerminal {
+		t.Fatalf("last=%s want run_terminal", events[2].Kind)
+	}
+	if events[2].Seq != 3 {
+		t.Fatalf("seq=%d want 3", events[2].Seq)
+	}
+}
+
 func TestJournalTornFirstLineYieldsEmptyHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.ndjson")
 	// Torn first line at EOF — no durable events yet.
