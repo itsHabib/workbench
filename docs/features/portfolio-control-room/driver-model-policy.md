@@ -35,7 +35,7 @@ conflict_notes:
     to: control-room-contract-fixtures-config
     task_id: tsk_01KXCY4CGWVB7132RF1CA0QK7M
     merge_commit: e0477d08d76dc57f3f0f86724063a8e1e8eb52f0
-    note: "Phase 1 producer fixtures and configuration are merged and the Dossier dependency is done."
+    note: "Phase 1 producer fixtures and configuration are merged and the Dossier dependency is done. Dependency entries in this manifest must retain task_id; slugs are descriptive, not identity keys."
 ---
 
 # Portfolio Control Room Phase 2 — driver manifest

@@ -31,8 +31,8 @@ Implement the TDD §5 model, including:
 
 - `Snapshot`: `version`, `mode`, `generated_at`, source receipts, runs, tasks, pull requests, diagnoses/reliability, tool health, attention items, and stable repository options.
 - `SourceReceipt`: source, `loading | ok | degraded | unavailable | stale`, observation time, duration, and sanitized typed error fields.
-- Generic `Availability[T]`: `available | unknown | unavailable`; absent producer values never become useful zero values.
-- `Run`: stable workflow/driver ID and kind, repository/project/task/spec identity, branch/status/phase, requested and actual runtime/provider/model availability, source timestamps, failure facts, evidence links, and derived liveness.
+- Generic `Availability[T]`: `available | unknown | unavailable`; absent producer values never become useful zero values. The Go zero value (`State == ""`, `Value == nil`) must behave and serialize as `unknown`, never `available`.
+- `Run`: stable workflow/driver ID and kind, repository/project/task/spec identity, explicit owner-issued `DocPath` and `SpecPath` availability, branch/status/phase, requested and actual runtime/provider/model availability, source timestamps, failure facts, evidence links, and derived liveness.
 - `Task`: Dossier identity, project/phase/status/assignee, declared dependencies and reverse blockers, timestamps, artifact links, and derived liveness.
 - `PullRequest`: repository/number/title/HTTPS URL/author/refs, draft and timestamps, visible checks, review decision, requested-reviewer count, unresolved-thread count, mergeability/state, `complete | truncated | unknown` detail state, and next factual condition.
 - `Diagnosis`: the exact availability-bearing verdict, findings, report/evidence, token, cost, and latency shape in TDD §5. Raw traces never enter the model.
@@ -42,7 +42,7 @@ Implement the TDD §5 model, including:
 
 Use named string types and constants for externally serialized enumerations. JSON remains readable and additive-field tolerant: marshaling emits the documented snake-case contract; unmarshaling ignores unknown fields. Constructors or validation helpers must make invalid availability combinations and receipt states difficult to create, while unknown future fields do not fail a whole fixture.
 
-A receipt is current only when its observation belongs to the evaluated snapshot and state is `ok` or `degraded`. `degraded` is current-but-explicitly-partial. Retained payload is `stale`; a latest failed attempt may appear separately as `unavailable`.
+`Snapshot.Sources` contains exactly one effective receipt per configured source name. In Phase 2, a receipt “belongs to the evaluated snapshot” precisely when it is that source's receipt in the `Snapshot.Sources` slice passed to `ApplyPolicy`; no timestamp freshness window is inferred. It is current only when its state is `ok` or `degraded`. `degraded` is current-but-explicitly-partial. `loading`, `unavailable`, missing, duplicate, or `stale` receipts are not current and fail closed. Phase 5's publisher is responsible for placing only current-generation receipts into a newly published snapshot and for marking retained payload `stale`; a latest failed attempt may appear separately only in the later composition input, before it is reduced to the one effective snapshot receipt.
 
 ### Pure policy seam
 
@@ -60,12 +60,18 @@ The implementation may use smaller internal reducers, but keep factual normaliza
 
 Implement the accepted thresholds exactly, with boundary tests:
 
-- `on_fire/retry_loop`: at least three failed runs of the same kind and same owner-issued normalized input identity in the preceding 72 hours, including the boundary. Workflow and driver groups never mix. Explain count, window, and latest cause.
+- `on_fire/retry_loop`: at least three failed runs in the preceding 72 hours, including the boundary. The exact grouping key is `(Run.Kind, input_document)`: workflows use a non-empty available `Run.DocPath`; drivers use a non-empty available `Run.SpecPath`. Missing/unknown identity suppresses the rule. Workflow and driver groups never mix. Explain count, window, and latest cause.
 - `on_fire/stalled_active`: `pending | running | dispatching | dispatched` with no source movement for at least 15 minutes. Explain the 15-minute Control Room threshold.
-- `live`: source movement within three days, any active run, or an explicitly linked open pull request.
-- `idle`: open work with movement older than three days and no older than 14 days.
-- `stale_claim`: a Dossier `claimed | in_progress` task older than 14 days with neither an explicitly linked open PR nor a current Ship run updated within 14 days. Evaluate only when Dossier, GitHub inventory, and Ship inventory receipts are all `ok`; `degraded`, `stale`, missing, or unavailable suppresses the conclusion.
-- `blocked_no_path`: a blocked task without a resolvable declared dependency or exact artifact link that explains a path forward.
+- `live`: source movement no more than 72 hours old, any active run, or an explicitly linked open pull request.
+- `idle`: open work with movement older than 72 hours and no more than 336 hours old.
+- `stale_claim`: a Dossier `claimed | in_progress` task strictly older than 336 hours with neither an explicitly linked open PR nor a current Ship run updated within the preceding 336 hours (the 336-hour boundary is recent and suppresses staleness). Evaluate only when Dossier, GitHub inventory, and Ship inventory receipts are all `ok`; `degraded`, `stale`, missing, or unavailable suppresses the conclusion.
+- `blocked_no_path`: a task whose exact Dossier status is `blocked` and which has no resolvable declared dependency or exact artifact link explaining a path forward.
+- `done`: a task whose exact Dossier status is `done`, when its Dossier receipt is current.
+- `unknown`: the required fallback for every run or task when no rule above qualifies, identity/time facts are missing, the entity's supporting receipt is not current, or a terminal status has no dedicated liveness rule. The JSON liveness field is never omitted.
+
+All elapsed-time comparisons use `now.Sub(factual_timestamp)` in hours, not calendar days; future timestamps clamp to zero elapsed time. The exact partition is `live <= 72h`, `idle > 72h && <= 336h`, and stale-claim age `> 336h`.
+
+Derived entity liveness is safe only with a current supporting source receipt. If that receipt is `loading`, `unavailable`, missing, duplicate, or `stale`, preserve the producer status/timestamps but set the entity liveness label to `unknown`. Stale receipts therefore suppress both consequence attention items and direct entity liveness labels; `source.stale` carries the explanation.
 
 Linkage is exact and owner-issued. A run's task/spec identity may equal a task ID or slug, and an artifact may name the exact PR/run. Title/body substring guesses never link entities.
 
@@ -99,7 +105,9 @@ For each normalized run, task, or PR, evaluate non-informational rules in descen
 
 Positive readiness/waiting conclusions fail closed. Empty or unknown checks never qualify as success. `detail_state != complete` suppresses `review_needed`, `merge_ready`, and `checks_running`; negative facts already returned may still produce `ci_failed`, `changes_requested`, or `unresolved_threads`.
 
-An urgent, actionable, or waiting item is current only when every supporting receipt is current. If a supporting receipt is stale, suppress the consequence and emit `source.stale`. Informational retained items may remain visible with `stale: true`, accompanied by `source.stale`. Source unavailability yields `source.unavailable`; it never fabricates a record-level problem or readiness conclusion.
+An urgent, actionable, or waiting item is current only when every supporting receipt is current. If a supporting receipt is stale, suppress the consequence and emit exactly one `source.stale` item per stale source, with stable ID `source.stale:<source>`; never emit one per retained entity. Informational retained items may remain visible with `stale: true`, accompanied by that source-level item. Source unavailability yields exactly one `source.unavailable:<source>` item; it never fabricates a record-level problem or readiness conclusion.
+
+Friction recency always uses `now - ToolHealth.LastOccurrence`, including for retained stale friction. It never uses receipt observation time; stale state changes visibility/currentness, not the historical occurrence timestamp or score inputs.
 
 ## Deterministic demo scenario
 
@@ -124,16 +132,19 @@ Add table-driven and golden tests, with names or equivalent coverage for:
 
 - JSON round-trip of the snapshot contract, unknown additive fields, and `Availability` available/unknown/unavailable semantics.
 - Every ranking rule and exact score, including all threshold boundaries.
+- Liveness fallback: current Dossier `done` maps to `done`; unmatched, missing-fact, terminal-other, and non-current entities map to `unknown` without omitting the field.
+- Receipt membership/currentness: unique in-snapshot `ok|degraded` receipts qualify; missing, duplicate, loading, unavailable, and stale receipts suppress dependent liveness and consequence items.
 - Per-entity precedence/exclusivity (failed CI beats review/merge/waiting; changes-requested beats later PR rules; retry-loop beats stalled-active where both could describe a run).
 - Stable order by score, newest factual update, then ID.
 - Workflow/driver retry groups never combine; different `docPath`/`specPath` identities never combine.
-- `stale_claim` requires all three inventories `ok`, exact linkage, and a truly absent recent linked PR/run.
+- `stale_claim` requires all three inventories `ok`, exact linkage, and a truly absent recent linked PR/run, including exact 336-hour boundary cases.
 - Missing dependency state prevents `task.ready`; all known terminal dependencies allow it.
 - Empty/unknown checks and truncated/unknown detail never create positive PR readiness.
 - Truncated details retain returned negative evidence and add `pr.detail_truncated`.
 - Stale supporting receipts suppress urgent/actionable/waiting items and add `source.stale`.
+- Multiple retained entities from one source emit one stable source-level stale item; two stale sources emit two.
 - Unavailable sources create only `source.unavailable`; unrelated healthy source items survive.
-- Friction scoring for P1/P2/P3/unknown, recurrence cap, 72-hour and 336-hour boundaries, and stale informational visibility.
+- Friction scoring for P1/P2/P3/unknown, recurrence cap, 72-hour and 336-hour boundaries, `now - last occurrence` under stale receipts, and stale informational visibility.
 - Demo snapshot equals the committed golden and contains the required story beats.
 
 Run:
@@ -149,7 +160,7 @@ git diff --check
 
 ## Tradeoffs and risks
 
-- Keep the model explicit even if it is verbose. Availability-bearing fields and stable rule IDs cost lines but prevent dangerous zero-value inference and UI/adaptor drift.
+- Keep the model explicit even if it is verbose. Availability-bearing fields and stable rule IDs cost lines but prevent dangerous zero-value inference and UI/adapter drift.
 - Do not create a generic rules engine. Straight-line, table-tested Go policy is easier to audit and change.
 - Do not parse all producer envelopes in production here. Phase 4 owns per-source adapters; Phase 2 may use small test helpers or the deterministic demo builder to prove the model.
 - Do not introduce `atomic.Pointer`, goroutines, HTTP, embedded UI assets, CLI flags, subprocesses, MCP, GitHub pagination, or path resolution. Those belong to later serialized phases.
