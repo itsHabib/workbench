@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 type fakeRunner struct {
 	pages [][]byte
+	errs  []error
 	calls [][]string
 }
 
@@ -23,6 +25,13 @@ func (f *fakeRunner) Run(_ context.Context, executable string, args ...string) (
 	case joined == "api user --jq .login":
 		return []byte("operator\n"), nil
 	case strings.HasPrefix(joined, "api graphql"):
+		if len(f.errs) > 0 {
+			err := f.errs[0]
+			f.errs = f.errs[1:]
+			if err != nil {
+				return nil, err
+			}
+		}
 		if len(f.pages) == 0 {
 			return nil, fmt.Errorf("no page")
 		}
@@ -95,6 +104,50 @@ func TestCollectRequiresMinimumVersion(t *testing.T) {
 	got := a.Collect(context.Background())
 	if got.Receipt.ErrorCode != "unsupported_version" {
 		t.Fatalf("unexpected result: %#v", got)
+	}
+}
+
+func TestCollectPageFailureStates(t *testing.T) {
+	t.Run("first page unavailable", func(t *testing.T) {
+		a, _ := New("gh", []string{"user:a"})
+		a.runner = &fakeRunner{errs: []error{errors.New("network")}}
+		got := a.Collect(context.Background())
+		if got.Receipt.State != model.SourceUnavailable || got.Receipt.ErrorCode != "command_failed" || len(got.PullRequests) != 0 {
+			t.Fatalf("unexpected result: %#v", got)
+		}
+	})
+	t.Run("later page retains completed data", func(t *testing.T) {
+		page := []byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"PR_1","repository":{"nameWithOwner":"o/r"},"number":1,"title":"one","url":"https://github.com/o/r/pull/1","author":{"login":"a"},"baseRefName":"main","headRefName":"feat","state":"OPEN","createdAt":"2026-07-13T10:00:00Z","updatedAt":"2026-07-13T11:00:00Z","reviewRequests":{"totalCount":0},"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}`)
+		a, _ := New("gh", []string{"org:a", "user:z"})
+		a.runner = &fakeRunner{pages: [][]byte{page}, errs: []error{nil, errors.New("network")}}
+		got := a.Collect(context.Background())
+		if got.Receipt.State != model.SourceDegraded || len(got.PullRequests) != 1 || got.PullRequests[0].ID != "PR_1" {
+			t.Fatalf("unexpected result: %#v", got)
+		}
+	})
+}
+
+func TestCollectSingleScopeStopsAtFourPages(t *testing.T) {
+	page := func(cursor string) []byte {
+		return []byte(fmt.Sprintf(`{"data":{"search":{"pageInfo":{"hasNextPage":true,"endCursor":%q},"nodes":[]}}}`, cursor))
+	}
+	a, _ := New("gh", []string{"user:a"})
+	f := &fakeRunner{pages: [][]byte{page("1"), page("2"), page("3"), page("4"), page("5")}}
+	a.runner = f
+	got := a.Collect(context.Background())
+	if got.Receipt.ErrorCode != "inventory_truncated" || len(f.calls) != 6 || len(f.pages) != 1 {
+		t.Fatalf("unexpected cap result: %#v calls=%d pages-left=%d", got, len(f.calls), len(f.pages))
+	}
+}
+
+func TestCollectFourScopesUsesOnePageEach(t *testing.T) {
+	empty := []byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`)
+	a, _ := New("gh", []string{"user:d", "user:c", "user:b", "user:a"})
+	f := &fakeRunner{pages: [][]byte{empty, empty, empty, empty}}
+	a.runner = f
+	got := a.Collect(context.Background())
+	if got.Receipt.State != model.SourceOK || len(f.calls) != 6 {
+		t.Fatalf("unexpected result: %#v calls=%d", got, len(f.calls))
 	}
 }
 

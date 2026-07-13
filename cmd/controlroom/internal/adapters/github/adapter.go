@@ -24,11 +24,11 @@ const (
 	graphQLQuery   = `# control-room-pr-inventory-v1
 query ControlRoomPullRequests($q: String!, $first: Int!, $after: String) {
   search(query: $q, type: ISSUE, first: $first, after: $after) {
-    issueCount pageInfo { hasNextPage endCursor }
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         id repository { nameWithOwner } number title url author { login }
-        baseRefName headRefName headRefOid isDraft state createdAt updatedAt
+        baseRefName headRefName isDraft state createdAt updatedAt
         mergeable mergeStateStatus reviewDecision reviewRequests { totalCount }
         statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes { __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } }
         reviewThreads(first: 100) { pageInfo { hasNextPage endCursor } nodes { isResolved } }
@@ -183,7 +183,7 @@ func (a *Adapter) collectScopePage(ctx context.Context, login string, state *sco
 		return true, commandCode(ctx, err), "GitHub inventory page failed"
 	}
 	var page graphQLResponse
-	if json.Unmarshal(out, &page) != nil || page.Data.Search.Nodes == nil {
+	if json.Unmarshal(out, &page) != nil {
 		return true, "malformed_page", "GitHub returned a malformed inventory page"
 	}
 	for _, node := range page.Data.Search.Nodes {
@@ -232,6 +232,8 @@ func validateScopes(scopes []string) ([]string, error) {
 		seen[scope] = struct{}{}
 		validated = append(validated, scope)
 	}
+	// Scope priority is deliberately lexical so identical configurations
+	// produce the same round-robin order regardless of caller map iteration.
 	sort.Strings(validated)
 	return validated, nil
 }
@@ -282,7 +284,6 @@ type prWire struct {
 	} `json:"author"`
 	Base             string    `json:"baseRefName"`
 	Head             string    `json:"headRefName"`
-	HeadOID          string    `json:"headRefOid"`
 	Draft            bool      `json:"isDraft"`
 	State            string    `json:"state"`
 	CreatedAt        time.Time `json:"createdAt"`
