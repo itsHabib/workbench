@@ -52,6 +52,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Reason is set only when the gate flagged the result (low confidence /
+	// escalation) — if Ask ever populates it for anything else, pass an
+	// explicit flagged bool through instead of piggybacking on this field.
+	logUsage(*prompt, res.Source, res.Reason != "")
+
 	out, err := json.Marshal(struct {
 		Source string          `json:"source"`
 		Reason string          `json:"reason,omitempty"`
