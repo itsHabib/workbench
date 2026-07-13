@@ -251,7 +251,7 @@ GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. `trigger` is required: the timer sends `auto`, while the refresh button sends `manual`; only `manual` may request the one Dossier breaker half-open probe. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and a stable configured-adapter fingerprint. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. `trigger` is required: the timer sends `auto`, while the refresh button sends `manual`; only `manual` may request the one Dossier breaker half-open probe. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
 
 ### Source contracts
 
@@ -285,9 +285,10 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 1. Collector assigns a monotonically increasing generation token and starts bounded core calls for Ship, Dossier, GitHub, and optional Tower.
 2. Each adapter returns records plus a `SourceReceipt`; errors are sanitized and typed.
 3. Core calls publish an immutable snapshot through `atomic.Pointer[Snapshot]` when all settle or at the 15-second deadline. A failed source contributes an unavailable receipt and, if present, last-successful records marked stale.
-4. Tracelens and toolhealth then run as diagnostic enrichers with a 35-second bound. The core publish carries their last-successful payloads forward as `stale` while separate current-generation receipts read `loading`; if no prior payload exists, their panels show loading-empty. They may publish one later immutable snapshot only if their generation token is still current; a newer refresh cancels and supersedes them.
-5. Ranking runs for each publish. Missing facts never produce a positive readiness conclusion, and stale retained records are excluded from fresh action conclusions.
-6. UI updates panels independently and announces degraded sources without blanking healthy data.
+4. Tracelens and toolhealth then run as diagnostic enrichers with a shared 35-second bound. The core publish carries their last-successful payloads forward as `stale` while separate current-generation receipts read `loading`; if no prior payload exists, their panels show loading-empty.
+5. One enrichment coordinator uses `sync.WaitGroup` plus buffered per-enricher result channels to rendezvous both calls or the deadline. It cancels an unsettled call, overlays settled results onto the immutable core-generation base, retains stale payload for any failed/timed-out enricher, and performs exactly one `atomic.Pointer[Snapshot].Store` if the generation token is still current. A newer refresh cancels and supersedes the coordinator.
+6. Ranking runs for each publish. Missing facts never produce a positive readiness conclusion, and stale retained records are excluded from fresh action conclusions.
+7. UI updates panels independently and announces degraded sources without blanking healthy data.
 
 ### Run and Tracelens drill-down
 
@@ -355,10 +356,13 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `task.ready` | actionable | 40 | Dossier reports `status == "todo"` and every explicitly declared dependency is terminal-done. Missing/unknown dependency state never qualifies. |
 | `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS` status; and no completed visible check has failed. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
+| `source.unavailable` | informational | 8 | Current-generation source receipt is `unavailable`; reason is the sanitized source error, never an inferred record problem. |
+| `source.stale` | informational | 7 | A panel is displaying retained records or diagnostic payload from an earlier generation; asks the operator to revalidate. |
+| `pr.detail_truncated` | informational | 6 | GitHub receipt is current and the PR has `detail_state == truncated`; names the saturated connection and suppresses positive readiness rules. |
 
 `tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when elapsed time since the last occurrence is at most 72 hours, 1 when it is greater than 72 and at most 336 hours, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
 
-An attention item is current only when every source receipt supporting its conclusion is current. If any supporting receipt is retained/stale, the item is suppressed from urgent, actionable, and waiting queues and replaced by an informational `source.stale` item that asks the operator to revalidate the source. Source unavailability likewise generates an informational degraded-source item; it never fabricates a problem or readiness conclusion inside an absent source.
+An attention item is current only when every source receipt supporting its conclusion is current. If any supporting receipt is retained/stale, the item is suppressed from urgent, actionable, and waiting queues and replaced by `source.stale`. Informational items derived from retained records, including accumulated friction, remain visible with `stale = true`; they cannot affect a higher-consequence queue, and `source.stale` always accompanies them. Source unavailability generates `source.unavailable`; it never fabricates a problem or readiness conclusion inside an absent source.
 
 ## 10. Rollout / implementation plan
 
@@ -386,8 +390,8 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
-- Golden ranking tests for every rule, tie-breaker, missing-source behavior, retry-loop grouping, and stale thresholds.
-- `httptest` coverage for method restrictions, CSP/Host validation, path validation, filters, required auto/manual trigger, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
+- Golden ranking tests for every table rule (including informational source/detail rules), tie-breaker, missing-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
+- `httptest` coverage for method restrictions, CSP/Host validation, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
 
@@ -397,6 +401,7 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 - GitHub fixtures cover required `user`/`org`/`repo` scope validation and isolation, minimum-version failure, additive/missing fields, round-robin four-page cap, later-page timeout, saturated check/thread connections, and negative-evidence-vs-readiness policy.
 - A superseded diagnostic generation cannot replace a newer core snapshot.
 - A core refresh retains prior Tracelens/toolhealth payloads as stale while the new diagnostic receipts are loading; first load remains honestly empty.
+- Enrichers completing in either order or timing out produce one generation-checked store without one result overwriting the other.
 - Real-mode smoke against explicit temporary fixtures proves no dependency on sibling source code or databases.
 
 ### Browser tests
