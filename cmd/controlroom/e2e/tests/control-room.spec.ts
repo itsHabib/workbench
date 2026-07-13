@@ -104,6 +104,7 @@ test("real mode renders a core generation before independently settled diagnosti
   const core = copy(seed);
   core.mode = "real";
   core.version = 1;
+  core.reliability = [];
   core.sources = core.sources.map((source: Record<string, any>) => ({
     ...source,
     state: ["tracelens", "toolhealth"].includes(source.source) ? "loading" : "ok",
@@ -116,15 +117,20 @@ test("real mode renders a core generation before independently settled diagnosti
     ...source,
     state: source.source === "tracelens" ? "degraded" : source.source === "toolhealth" ? "stale" : "ok",
   }));
-  const mock = await mockSnapshots(page, "real", [core, settled]);
+  settled.reliability = seed.reliability;
+  const mock = await mockSnapshots(page, "real", [core, settled], 750);
 
   await page.goto(realURL);
+  await expect(page.locator("#snapshot-version")).toHaveText("Version 1");
+  await page.getByRole("button", { name: "Open run wf_demo_fail_3" }).click();
+  await expect(page.locator("#drawer[open]")).toContainText("Unavailable for this run");
   await waitForLoaded(page, 2);
   mock.assertRequests();
   expect(mock.reads()).toBeGreaterThanOrEqual(2);
   await expect(page.locator("html")).toHaveAttribute("data-control-room-mode", "real");
   await expect(page.getByRole("heading", { name: /Control Room REAL/ })).toBeVisible();
   await expect(page.locator("#sources")).not.toContainText("loading");
+  await expect(page.locator("#drawer[open]")).toContainText("high: Retry loop detected — three related failures");
 });
 
 test("failed initial refresh exposes a disconnected state without fabricated rows", async ({ page }) => {

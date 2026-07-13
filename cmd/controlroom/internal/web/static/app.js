@@ -393,8 +393,9 @@ function openPullRequest(pr) {
 }
 
 function openDrawer(title, kicker, rows, entity) {
-  state.opener = document.activeElement;
   const drawer = byId("drawer");
+  const opening = !drawer.open;
+  if (opening) state.opener = document.activeElement;
   drawer.dataset.entityType = entity.type;
   drawer.dataset.entityId = entity.id;
   byId("drawer-title").textContent = title;
@@ -408,8 +409,10 @@ function openDrawer(title, kicker, rows, entity) {
     list.append(detail);
   });
   replaceChildren(byId("drawer-body"), list);
-  drawer.showModal();
-  byId("drawer-close").focus();
+  if (opening) {
+    drawer.showModal();
+    byId("drawer-close").focus();
+  }
 }
 
 function closeDrawer() { byId("drawer").close(); }
@@ -418,13 +421,20 @@ function restoreDrawerFocus() { if (state.opener && state.opener.isConnected) st
 function reconcileOpenDrawer(snapshot) {
   const drawer = byId("drawer");
   if (!drawer.open) return;
-  const collections = { run: snapshot.runs, pr: snapshot.pull_requests };
-  const collection = collections[drawer.dataset.entityType];
-  if (!collection) {
-    closeDrawer();
+  if (drawer.dataset.entityType === "run") {
+    const run = snapshot.runs.find((entity) => entity.id === drawer.dataset.entityId);
+    if (!run) return closeDrawer();
+    const diagnosis = snapshot.reliability.find((item) => item.run_id === run.id);
+    openRun(run, diagnosis);
     return;
   }
-  if (!collection.some((entity) => entity.id === drawer.dataset.entityId)) closeDrawer();
+  if (drawer.dataset.entityType === "pr") {
+    const pr = snapshot.pull_requests.find((entity) => entity.id === drawer.dataset.entityId);
+    if (!pr) return closeDrawer();
+    openPullRequest(pr);
+    return;
+  }
+  closeDrawer();
 }
 
 function safeLink(link) {

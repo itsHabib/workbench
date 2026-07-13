@@ -13,7 +13,7 @@ export function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
-export async function mockSnapshots(page: Page, mode: "demo" | "real", snapshots: Snapshot[]) {
+export async function mockSnapshots(page: Page, mode: "demo" | "real", snapshots: Snapshot[], afterFirstDelayMS = 0) {
   let reads = 0;
   const refreshes: Array<Record<string, string>> = [];
   await page.route("**/api/v1/refresh", async (route) => {
@@ -26,8 +26,10 @@ export async function mockSnapshots(page: Page, mode: "demo" | "real", snapshots
     });
   });
   await page.route("**/api/v1/snapshot", async (route) => {
-    const snapshot = snapshots[Math.min(reads, snapshots.length - 1)];
+    const read = reads;
+    const snapshot = snapshots[Math.min(read, snapshots.length - 1)];
     reads += 1;
+    if (read > 0 && afterFirstDelayMS > 0) await new Promise((resolve) => setTimeout(resolve, afterFirstDelayMS));
     await route.fulfill({ status: 200, contentType: "application/json", json: snapshot });
   });
   return {

@@ -262,7 +262,7 @@ func TestEmbeddedShellAndScriptContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := string(appBytes)
-	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "collections[drawer.dataset.entityType]", "operator_state", "next_action", "formatTime(run.updated_at)", "Tracelens findings", "tokens.includes(needle)", "X-Control-Room-CSRF", `refresh("auto")`, "60000", "attempt < 110", "diagnostic sources remained loading"} {
+	for _, required := range []string{`addEventListener("cancel"`, `addEventListener("keydown"`, `event.key !== "Escape"`, "item.rule_id", "item.id", "critical: 4", "drawer.dataset.entityType", "snapshot.reliability.find", "operator_state", "next_action", "formatTime(run.updated_at)", "Tracelens findings", "tokens.includes(needle)", "X-Control-Room-CSRF", `refresh("auto")`, "60000", "attempt < 110", "diagnostic sources remained loading"} {
 		if !strings.Contains(app, required) {
 			t.Errorf("app missing interaction contract %q", required)
 		}
