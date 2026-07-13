@@ -163,7 +163,7 @@ The read model is presentation-owned and stays private to `cmd/controlroom`; it 
 
 ```go
 type Snapshot struct {
-    Version      int             `json:"version"`
+    Version      uint64          `json:"version"` // monotonic publish generation; bootstrap = 0
     Mode         string          `json:"mode"` // demo | real
     GeneratedAt  time.Time       `json:"generated_at"`
     Sources      []SourceReceipt `json:"sources"`
@@ -246,14 +246,18 @@ Snapshot/detail routes are pure GET/HEAD. The only POSTs are CSRF-protected read
 ```text
 GET /                         embedded application shell
 GET /api/v1/snapshot?repository=&status=&severity=
-POST /api/v1/refresh          application/json: {"mode":"demo|real","trigger":"auto|manual"}
+POST /api/v1/refresh          application/json: {"mode":"demo|real","trigger":"auto|manual"}; returns 202
 GET /api/v1/runs/{id}/diagnosis
 POST /api/v1/runs/{id}/diagnose application/json: {}
 GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` only returns the latest published `Snapshot`; its parameters are presentation filters applied after collection and cannot change source queries or state. Before the first publish it returns `200` with an empty bootstrap snapshot (`mode = ""`) and one `loading` receipt per configured source. `refresh` selects the configured adapter set (`demo` fixtures or `real` tools). Its required `trigger` distinguishes timer `auto` from button `manual`; only `manual` may request the one Dossier breaker half-open probe. A request with the same collection identity joins the in-flight result; only a different-identity request cancels it and starts fresh. Collection identity is mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+`snapshot` only returns the latest published `Snapshot`; its parameters are presentation filters applied after collection and cannot change source queries or state. `Version` is a process-local monotonically increasing publish generation, incremented on every `atomic.Pointer[Snapshot].Store`; the bootstrap snapshot is version 0. Before the first publish, GET returns `200` with that empty bootstrap (`mode = ""`) and one `loading` receipt per configured source.
+
+`refresh` validates, starts or joins background collection, and immediately returns `202 {"baseline_version":<current>,"status":"started|joined"}`. Its required `mode` selects the adapter set and `trigger` distinguishes timer `auto` from button `manual`; only `manual` may request the one Dossier breaker half-open probe. A request with the same collection identity joins the in-flight result; only a different-identity request cancels it and starts fresh. Collection identity is mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+
+After a `202`, the browser polls pure snapshot GET with exponential cadence from 250 milliseconds to 2 seconds. It paints core data when `version > baseline_version` and mode matches, then continues until diagnostic receipts leave `loading` or 35 seconds elapse; each higher version is rendered. Only then does the normal 60-second auto-refresh interval begin. There is no SSE or WebSocket in v1.
 
 On the application-shell response, the server sets a process-random 256-bit `controlroom_csrf` cookie with `SameSite=Strict; Path=/` and deliberately without `HttpOnly`, because same-origin JavaScript must copy it into a header. Every POST control action requires `Content-Type: application/json`, an exact `Origin` match for the canonical `http://127.0.0.1:<port>`, and `X-Control-Room-CSRF` equal to the cookie using constant-time comparison. Missing `Origin`, token, or JSON content type returns `403` before process execution, collection, or breaker state changes. No CORS headers are emitted; preflight and cross-origin requests are rejected.
 
@@ -281,8 +285,9 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 
 1. Browser loads the static shell, reads the same-site CSRF cookie, and POSTs a `demo/manual` refresh with the matching header.
 2. Fixture adapter loads one healthy run, one policy-stale/on-fire run, one failed-CI PR, one blocked task, Tracelens findings, and friction records using an injected clock.
-3. Normalizer produces the same read model used by real mode.
-4. Attention policy ranks the items and the UI paints the control-room overview, source freshness, and top three actions.
+3. Demo loads core and diagnostic fixtures synchronously and bypasses the real-mode two-lane coordinator, producing one immutable publish within the one-second NFR.
+4. Normalizer produces the same read model used by real mode.
+5. Attention policy ranks the items and the UI paints the control-room overview, source freshness, and top three actions.
 
 ### Real refresh with partial failure
 
@@ -311,7 +316,7 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 
 ### Automatic refresh
 
-1. Browser schedules the next CSRF-protected `auto` refresh POST only after the previous one settles.
+1. Browser schedules the next CSRF-protected `auto` refresh POST 60 seconds after polling observes the previous collection's diagnostic receipts settle or reach their 35-second deadline.
 2. Hidden tabs pause automatic refresh; manual refresh remains available.
 3. Server coalesces duplicate calls and cancels superseded work through context.
 
@@ -395,7 +400,7 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
 - Golden ranking tests for every table rule (including informational source/detail rules), per-entity precedence/exclusivity, tie-breaker, missing/truncated-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
-- `httptest` coverage for bootstrap/pure snapshot GET, pure diagnosis GET, method restrictions, CSP/Host validation, readable CSRF cookie plus cookie/header/Origin/content-type failures on every POST before process execution, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
+- `httptest` coverage for version-0 bootstrap/pure snapshot GET, monotonic publish versions, refresh `202` started/joined responses, pure diagnosis GET, method restrictions, CSP/Host validation, readable CSRF cookie plus cookie/header/Origin/content-type failures on every POST before process execution, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
 
@@ -411,6 +416,7 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 ### Browser tests
 
 - Initial demo load and source freshness.
+- Demo single-publish behavior plus real-mode core/enricher polling through terminal receipts.
 - Repository/status/severity filtering.
 - Degraded and disconnected source states.
 - PR drill-down with failed CI and missing review.
