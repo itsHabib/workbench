@@ -12,8 +12,8 @@
 | Composition and publication | `cmd/controlroom/internal/app/*.go` | ~300 | ~300 |
 | CLI and web wiring | `cmd/controlroom/main.go`, `cmd/controlroom/internal/web/*` | ~140 | ~140 |
 | Operator presentation | `cmd/controlroom/internal/model/*`, `policy/*`, `web/static/*` | ~120 | ~120 |
-| Tests and smoke fixtures | matching `_test.go` / `testdata` | ~300 | ~150 |
-| **Total** | | **~860** | **~710** |
+| Tests and smoke fixtures | matching `_test.go` / `testdata` | ~280 | ~140 |
+| **Total** | | **~840** | **~700** |
 
 Band: **stretch**. Phase 5 owns the single serialized cross-source seam; splitting it would create two temporary publishers or duplicate freshness policy.
 
@@ -31,15 +31,19 @@ Turn the six isolated adapters into one storeless real-mode projection that rema
 ## Immutable generations
 
 - The bootstrap snapshot is version 0 with one `loading` receipt per configured source. Every successful store increments a process-local version; published values are deep-copied/owned and never mutated after storage.
-- Each collection receives an internal epoch distinct from the visible version. A core publish is accepted only for the current epoch. Each enricher may publish one later snapshot for that same epoch; completion order is irrelevant. A canceled or superseded epoch can never publish, even if its process ignores cancellation briefly.
-- The core publish contains current core receipts plus `loading` diagnostic receipts. Prior Tracelens/toolhealth payloads may be retained only with `stale` receipts and stale flags while the new diagnostic result is pending. A successful or explicitly degraded current result replaces retained data. An unavailable result retains prior payload as stale when present; without retained payload it remains unavailable.
-- A failed core source never removes another source's current payload. Its own prior successful payload may remain only under exactly one `stale` receipt; the current failed attempt is represented by the stale receipt's sanitized error code/message rather than a duplicate receipt. Policy therefore sees exactly one receipt per source and cannot mistake retained evidence for current truth.
+- Each collection receives an internal monotonically increasing epoch distinct from the visible version. One coordinator mutex owns `activeEpoch`, `inFlight`, the accepted-enricher set, the version counter, and publication. Under that mutex, a store first compares its epoch with `activeEpoch`; only an accepted store increments version and swaps the snapshot. Rejected/canceled attempts neither publish nor consume a version, so visible skips cannot be caused by superseded work.
+- The coordinator records `inFlight` and the epoch's fixed `baselineVersion` under the mutex before dispatching any collector. Each enricher gets at most one accepted store per source per epoch: the first result (success, degraded, or unavailable) is final, and duplicate/retry results are dropped. Tracelens and toolhealth completion order is irrelevant.
+- The core publish contains current core receipts plus `loading` diagnostic receipts. If a diagnostic payload was previously current, the core publish carries both a `loading` current-attempt receipt and a `stale` retained-data receipt, matching the accepted TDD. A settled unavailable result likewise carries the unavailable attempt receipt plus the retained stale receipt/payload. Success or explicit degradation replaces retained data and emits only the current receipt.
+- A failed core source never removes another source's current payload. For that source, a current `unavailable` receipt is always emitted. A retained payload adds one separate `stale` receipt drawn only from the coordinator's `lastCurrent[source]` cache—the most recent accepted `ok|degraded` payload—not from an earlier stale snapshot. A source that has never succeeded in this process emits no stale receipt. Repeated failures cannot refresh or flatten the retained payload's original `observed_at`.
+- Receipt grouping is structural, not a final dedup guess: publication builds a mutex-local `map[source][]SourceReceipt`, permits at most one current-attempt receipt and one retained-stale receipt, then flattens sources in stable source/state order. `policy.ApplyPolicy` indexes the grouped states: a source is current only when it has one `ok|degraded` receipt and no stale/unavailable/loading receipt; retained+failed sources produce both `source.unavailable` and `source.stale` informational items and no higher-consequence conclusion.
+- Deep ownership is tested in both directions: mutate every nested slice in a fake collector result after collection, and mutate every nested slice in a snapshot returned by the supplier. Neither mutation may alter the subsequently returned/published snapshot. The store deep-clones on ingress and the supplier deep-clones on egress.
 
 ## Refresh identity, joining, and cancellation
 
-- `Refresh` validates `mode=demo|real` and `trigger=auto|manual`, computes the accepted SHA-256 identity from mode, trigger class, adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root, then returns immediately with `202` semantics.
-- An identical in-flight identity returns `joined` and its existing baseline. A different identity cancels the old epoch, starts a new one, and returns `started`. Presentation filters never enter the identity.
-- Only a manual real refresh calls Dossier's `CollectManual`; automatic refresh uses `Collect`, preserving the owner's one-half-open-probe breaker contract. Joining happens above the adapter so concurrent identical manual requests cannot create extra source calls.
+- `Refresh` validates `mode=demo|real` and `trigger=auto|manual`, computes the accepted SHA-256 identity from mode, trigger class, stable source IDs, absolute executable paths, argv, timeouts, sorted GitHub scopes, Dossier corpus, and workspace root, then returns immediately with `202` semantics. Stable source IDs (`ship`, `dossier`, and so on) identify result ownership and are independent of executable basenames; paths identify the actual configured binary, so both belong in the identity.
+- The coordinator mutex makes check/join/cancel/start atomic. An identical in-flight identity returns `joined` and the epoch's fixed `baselineVersion` captured before any of its publishes—not the version at join time. A different identity cancels the old epoch, records the new epoch/baseline, then dispatches collectors and returns `started`. Presentation filters never enter the identity.
+- Trigger class intentionally prevents auto/manual joining because they invoke different Dossier behavior. A manual request supersedes an in-flight auto epoch; a different-identity auto request can supersede manual, but the browser never schedules its next automatic request until the manual epoch's diagnostics settle or time out. This preserves the accepted “different identity cancels” TDD rule without a timer routinely interrupting operator probes.
+- Only a manual real refresh calls Dossier's `CollectManual`; automatic refresh uses `Collect`. The inherited owner contract is: after three consecutive start/handshake/first-call failure cycles, automatic probes pause for five minutes; one concurrent manual half-open probe is admitted; one failed manual probe counts as one failed cycle and reopens the five-minute pause; success resets the counter. Composition neither reads nor modifies breaker state. Epoch recording precedes adapter dispatch, so concurrent identical manual requests join before any Dossier call can start.
 - Demo refresh remains a deterministic single publish. Real `snapshot --json` performs one bounded collection and waits for diagnostic settlement or deadline; it never starts a timer or durable cache.
 
 ## Cross-source joins and stale safety
@@ -48,18 +52,15 @@ Turn the six isolated adapters into one storeless real-mode projection that rema
 - Exact joins only: Dossier task ID/slug to Ship task/spec; HTTPS artifact URL to GitHub PR URL; canonical repository plus branch to optional Tower rows. Do not title-match or guess repository ownership.
 - Current means exactly one receipt in `ok|degraded`. A stale, loading, unavailable, duplicated, or absent supporting receipt suppresses urgent/actionable/waiting conclusions that depend on it. Retained tool friction may remain informational with `stale=true`; every retained panel produces `source.stale`.
 - GitHub negative evidence already observed on a current degraded page remains usable under the Phase 2 policy; positive readiness continues to require complete detail. Composition must not weaken that distinction.
+- “No direct store reads” means no reads of Ship, Dossier, Tower, or other producer backing files/databases. Composition is explicitly allowed to read and join the normalized payloads returned by adapter interfaces.
+- Error code/message handling remains adapter-owned: Phase 4's typed, bounded, credential/path-sanitized receipts pass through unchanged. Composition may replace a message only with a fixed operator-safe composition error and must never append raw subprocess/protocol text. `NextAction` branches on typed state/code allowlists, never arbitrary message substrings.
 
 ## Unattended-run operator contract
 
-- Extend the presentation-owned `Run` model with a compact `OperatorState` and `NextAction`; preserve `UpdatedAt` as the authoritative last durable update and `Phase` as the owner-reported stage. Allowed operator states are `progressing`, `waiting`, `stalled`, `failed`, `done`, and `unknown`.
-- Derive operator state only after current-source liveness policy:
-  - active plus a recent durable update => `progressing`;
-  - owner status/phase explicitly denotes review, approval, judgment, or another wait boundary => `waiting`;
-  - `on_fire/stalled_active` => `stalled`;
-  - terminal failed or retry loop => `failed`;
-  - terminal success/done => `done`;
-  - stale/absent owner evidence => `unknown`.
+- Extend the presentation-owned `Run` model with a compact `OperatorState` and `NextAction`; preserve `UpdatedAt` as Ship's authoritative last durable owner update and `Phase` as its owner-reported stage. When Ship becomes stale, retained runs keep the exact last Ship-current `UpdatedAt`; composition never replaces it with a snapshot publication time. Allowed operator states are `progressing`, `waiting`, `stalled`, `failed`, `done`, and `unknown`.
+- Re-derive operator state from scratch on every publish; never carry a prior derived state forward. Evaluate this exclusive precedence chain after liveness policy: (1) stale/loading/unavailable Ship support => `unknown`; (2) terminal `failed|error|cancelled` or `on_fire/retry_loop` => `failed`; (3) terminal `done|completed|succeeded|success` => `done`; (4) `on_fire/stalled_active` => `stalled`; (5) status or phase equal-fold matches the explicit wait allowlist `waiting|awaiting_review|review|approval|judgment|blocked` => `waiting`; (6) active `pending|running|dispatching|dispatched` with `UpdatedAt` newer than the Phase 2 15-minute no-update threshold => `progressing`; otherwise => `unknown`. Exact normalized tokens are used—no substring/keyword guessing.
 - `NextAction` is factual and non-mutating: monitor until the next durable update; inspect the named judgment/review boundary; inspect owner evidence and failure class before deciding whether to retry; revalidate a stale source; or no action for terminal success. Never claim “resume” or “retry” is safe unless a future owner contract explicitly supplies that capability.
+- Map `NextAction` from the final exclusive state: `progressing` => monitor until the next durable owner update; `waiting` => inspect the named owner wait boundary; `stalled` => inspect owner evidence for stall signals; `failed` => inspect owner evidence and failure class before deciding whether to retry; `done` => no action; `unknown` => revalidate Ship/source truth. The 15-minute transition prevents an indefinitely unchanged run from retaining `progressing`.
 - Run rows and drawers show status plus operator state, phase/current stage, relative age and exact last-update timestamp, failure class, evidence availability, and next action. A bare `running` label without recency is forbidden. Stale data is visually and textually qualified.
 
 ## CLI and HTTP wiring
@@ -74,10 +75,11 @@ Turn the six isolated adapters into one storeless real-mode projection that rema
 - Identical refreshes join once; different identities cancel; a superseded core or enricher cannot publish. Tracelens and toolhealth can complete in either order without overwriting each other.
 - Manual refresh is the only path to Dossier half-open probing. Real snapshot and serve modes use explicit configuration and available owner tools without direct store reads or producer writes.
 - Every active unattended run exposes durable stage, exact/relative last update, progressing/waiting/stalled classification, terminal failure class where known, evidence, and a conservative next action. Unknown and stale owner facts remain visibly unknown/stale.
+- If non-test `internal/app` composition exceeds 500 LOC at the checkpoint before CLI/web wiring, stop and split diagnostic-enricher settlement into a second serialized PR. The first PR must still publish core snapshots with truthful `loading` plus retained-stale diagnostic receipts; no stale or generation edge case may be cut to stay in one PR.
 
 ## Test plan
 
-- Unit tests: bootstrap, monotonic versions, immutable copies, identity determinism, join/cancel, current-epoch gates, stale retention, exact joins, repository set, operator-state/next-action matrix, and no false retry/resume claim.
+- Unit tests: bootstrap, accepted-store-only monotonic versions, nested immutable copies, identity determinism, mutex-atomic join/cancel, fixed joined baseline, current-epoch and one-result-per-enricher gates, never-succeeded/repeated-failure stale provenance, dual receipt policy, exact joins, repository set, exclusive operator-state/next-action matrix, and no false retry/resume claim.
 - Integration tests: injected Ship+Dossier+GitHub+Tower core results; each source failing independently; diagnostic completion permutations/timeouts; superseded late results; Dossier manual/auto dispatch; real-mode fake executable/MCP smoke.
 - HTTP/browser tests: both modes and triggers, auto-refresh cadence, progressive generations, loading/stale/unavailable labels, unattended-run row/drawer fields, CSRF-before-collection, and no ambiguous running label.
 - Run formatting, vet, lint, repository tests with coverage, build, current-head CI, canonical reviewer requests, digest, and review-coordinator GO.
