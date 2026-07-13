@@ -1,6 +1,6 @@
 # Portfolio Control Room — Technical Design Document
 
-**Status:** draft / proposal — the reviewed design this initiative builds from
+**Status:** accepted — reviewed implementation foundation
 **Owner:** @itsHabib
 **Date:** 2026-07-12
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md), portfolio-root `docs/portfolio-as-tools.md` (operator-local corpus), dossier project `workbench`, Ship `docs/features/observability/spec.md`, Tracelens `docs/features/agent-reliability-lab/completion.md`
