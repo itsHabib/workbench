@@ -250,7 +250,7 @@ GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces concurrent identical refreshes.
+`snapshot` returns one `Snapshot`. `mode` selects the configured adapter set (`demo` fixtures or `real` tools) before collection. The repository, status, and severity parameters are presentation filters applied after collection; they cannot change source queries or state. A refresh request cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode plus a stable configured-adapter fingerprint. Demo and real collections can never share an in-flight result.
 
 ### Source contracts
 
@@ -322,7 +322,7 @@ Derived labels are explicitly Control Room policy, not producer state.
 
 ### Liveness rules
 
-- `on_fire/retry_loop`: at least 3 failed workflow runs for the same normalized `docPath` within 72 hours.
+- `on_fire/retry_loop`: at least 3 failed runs of the same kind within 72 hours, grouped by the owner-reported normalized input-document identity (`docPath` for workflows; task/spec document path for drivers). Workflow and driver runs never combine into one count.
 - `on_fire/stalled_active`: `pending|running|dispatching|dispatched` with no `updated_at` movement for 15 minutes. The UI labels this “Control Room policy: no source update for 15m,” not “Ship stale.”
 - `live`: source movement within 3 days, an active run, or a linked open PR.
 - `idle`: open work with no movement for 3–14 days.
@@ -341,14 +341,14 @@ Scores are additive; ties sort by newest factual update, then stable ID.
 | `pr.changes_requested` | urgent | 85 | GitHub reports `reviewDecision == CHANGES_REQUESTED`. |
 | `task.blocked_no_path` | urgent | 80 | Blocked with no resolvable dependency/path. |
 | `pr.unresolved_threads` | actionable | 75 | GitHub reports one or more unresolved review threads. |
-| `pr.review_needed` | actionable | 70 | CI non-failing, not draft, review missing or requested. |
+| `pr.review_needed` | actionable | 70 | GitHub receipt is current; PR is non-draft; every visible check completed successfully; and `reviewDecision == REVIEW_REQUIRED` or requested reviewers are non-empty. Unknown never qualifies. |
 | `pr.merge_ready` | actionable | 65 | Non-draft; every visible check completed successfully; `reviewDecision == APPROVED`; `mergeable == MERGEABLE`; unresolved thread count is zero; GitHub receipt is current. Empty or unknown never qualifies. |
 | `task.stale_claim` | actionable | 55 | Reconciliation is needed. |
 | `task.ready` | actionable | 40 | Todo task has no unresolved dependencies. |
 | `pr.checks_running` | waiting | 30 | Work is externally in progress. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
 
-`tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when the last occurrence is at most 3 days old, 1 when it is 4–14 days old, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
+`tool.accumulated_friction` uses `min(25, 10 + severity + recurrence + recency)`, where severity is P1=8, P2=5, P3=2, or unknown=0; recurrence is `min(4, max(0, session_count - 1))`; and recency is 3 when elapsed time since the last occurrence is at most 72 hours, 1 when it is greater than 72 and at most 336 hours, otherwise 0. The injected clock makes every term and tie-break reproducible in golden tests.
 
 An attention item is current only when every source receipt supporting its conclusion is current. If any supporting receipt is retained/stale, the item is suppressed from urgent, actionable, and waiting queues and replaced by an informational `source.stale` item that asks the operator to revalidate the source. Source unavailability likewise generates an informational degraded-source item; it never fabricates a problem or readiness conclusion inside an absent source.
 
