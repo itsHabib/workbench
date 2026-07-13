@@ -1,0 +1,37 @@
+{
+  "run_id": "wf_demo_02",
+  "analyzed_at": "2026-07-13T12:00:00.000Z",
+  "verdict": "pass",
+  "tier": "T0",
+  "dialect": "ship-trace-v1",
+  "subject": {
+    "repo": "example-repo",
+    "number": 0
+  },
+  "source": "tracelens",
+  "producer": {
+    "class": "code",
+    "impl": "tracelens"
+  },
+  "decision": "pass",
+  "confidence": 0.6,
+  "findings": [],
+  "why": "Trace analyzed with limited telemetry",
+  "report": {
+    "state": "unavailable",
+    "value": null
+  },
+  "evidence": [],
+  "input_tokens": {
+    "state": "unknown"
+  },
+  "output_tokens": {
+    "state": "unknown"
+  },
+  "cost_usd": {
+    "state": "unavailable"
+  },
+  "latency_ms": {
+    "state": "unavailable"
+  }
+}

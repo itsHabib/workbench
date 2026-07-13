@@ -1,0 +1,8 @@
+{
+  "source": "toolhealth",
+  "state": "unavailable",
+  "observed_at": "2026-07-13T12:00:00.000Z",
+  "duration_ms": 500,
+  "error_code": "executable_not_found",
+  "message": "toolhealth executable not found on configured path"
+}

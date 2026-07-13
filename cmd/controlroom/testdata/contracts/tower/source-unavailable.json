@@ -1,0 +1,8 @@
+{
+  "source": "tower",
+  "state": "unavailable",
+  "observed_at": "2026-07-13T12:00:00.000Z",
+  "duration_ms": 300,
+  "error_code": "executable_not_found",
+  "message": "tower executable not found on configured path"
+}

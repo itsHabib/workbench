@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": "req_demo_session_fail",
+  "error": {
+    "code": -32000,
+    "message": "dossier session unavailable: child process exited before handshake"
+  }
+}
