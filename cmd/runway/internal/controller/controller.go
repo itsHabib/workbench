@@ -153,11 +153,64 @@ func (c *ctrl) execute() (Outcome, error) {
 		return c.failEarly(execution.PhasePreparation, execution.ReasonDeadlineExceeded, fmt.Errorf("deadline exceeded during preparation"))
 	}
 
-	h, err := c.startBackend()
-	if err != nil {
-		return c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, err)
+	h, out, done, err := c.startUnderDeadline()
+	if done {
+		return out, err
 	}
 	return c.runWorkload(h)
+}
+
+type startResult struct {
+	h   backend.Handle
+	err error
+}
+
+// startUnderDeadline runs backend startup under the absolute deadline and
+// cancel marker, mirroring prepare(): a hung placement/boot cannot keep the
+// run open past policy.deadline_ms, and a cancel written during expansion or
+// backend start is honored before the workload phase. On interrupt it joins
+// the Start goroutine and cleans up any handle it produced.
+func (c *ctrl) startUnderDeadline() (backend.Handle, Outcome, bool, error) {
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+
+	startCh := make(chan startResult, 1)
+	go func() {
+		h, err := c.startBackend()
+		startCh <- startResult{h: h, err: err}
+	}()
+
+	deadlineCh := time.After(time.Until(c.deadline))
+	cancelCh := c.watchCancel(watchDone)
+	select {
+	case sr := <-startCh:
+		if sr.err != nil {
+			out, err := c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, sr.err)
+			return nil, out, true, err
+		}
+		return sr.h, Outcome{}, false, nil
+	case <-deadlineCh:
+		return c.interruptedStart(startCh, execution.ReasonDeadlineExceeded)
+	case <-cancelCh:
+		return c.interruptedStart(startCh, execution.ReasonCancelRequested)
+	}
+}
+
+// interruptedStart joins an interrupted Start. If Start failed, the interrupt
+// reason wins the receipt (still in the startup phase). If Start succeeded —
+// it may already have journaled workload_started — the handle flows into the
+// normal workload path, whose await loop observes the already-fired deadline
+// or cancel marker immediately; emitting a startup-phase failure here would
+// regress the journal's phase order. The join is prompt for the local
+// backend's bounded spawn; a future placement backend must keep Start
+// interruptible for this to hold.
+func (c *ctrl) interruptedStart(startCh <-chan startResult, reason string) (backend.Handle, Outcome, bool, error) {
+	sr := <-startCh
+	if sr.err != nil {
+		out, err := c.failEarly(execution.PhaseStartup, reason, fmt.Errorf("%s during startup: start also failed: %w", reason, sr.err))
+		return nil, out, true, err
+	}
+	return sr.h, Outcome{}, false, nil
 }
 
 // prepare materializes the bundle under the absolute deadline and cancel
@@ -388,6 +441,17 @@ func applyTerminalTruth(res *execution.Result, exitCode int, intent string, coll
 			Message: collectErr.Error(),
 		})
 	}
+	// The escalation branches carry WHY cleanup failed in the receipt, not
+	// only in the journal — collectErr gets the same treatment above.
+	attachCleanupDiag := func() {
+		if cleanupErr == nil {
+			return
+		}
+		res.Diagnostics = append(res.Diagnostics, execution.Diagnostic{
+			Code:    execution.ReasonCleanupFailed,
+			Message: cleanupErr.Error(),
+		})
+	}
 
 	// Isolation truth is global (TDD §8): cleanup failure always escalates,
 	// including after cancel — cancelled+cleanupErr becomes failed/cleanup.
@@ -400,6 +464,7 @@ func applyTerminalTruth(res *execution.Result, exitCode int, intent string, coll
 			ReasonCode: execution.ReasonDeadlineExceeded,
 		}}
 		attachCollectDiag()
+		attachCleanupDiag()
 		return
 	}
 	if intent == execution.ReasonCancelRequested && cleanupErr != nil {
@@ -411,6 +476,7 @@ func applyTerminalTruth(res *execution.Result, exitCode int, intent string, coll
 			ReasonCode: execution.ReasonCancelRequested,
 		}}
 		attachCollectDiag()
+		attachCleanupDiag()
 		return
 	}
 	if intent == execution.ReasonDeadlineExceeded {

@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -146,15 +145,15 @@ func checkoutWorkspace(ctx context.Context, ws execution.Workspace, dest string)
 		}
 	}()
 
-	clone := exec.CommandContext(ctx, "git", "clone", "--quiet", ws.URL, tmp)
+	clone := gitCommand(ctx, "clone", "--quiet", ws.URL, tmp)
 	if out, err := clone.CombinedOutput(); err != nil {
 		return fmt.Errorf("bundle: git clone: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	checkout := exec.CommandContext(ctx, "git", "-C", tmp, "checkout", "--quiet", ws.Revision)
+	checkout := gitCommand(ctx, "-C", tmp, "checkout", "--quiet", ws.Revision)
 	if out, err := checkout.CombinedOutput(); err != nil {
 		return fmt.Errorf("bundle: git checkout %s: %w: %s", ws.Revision, err, strings.TrimSpace(string(out)))
 	}
-	head := exec.CommandContext(ctx, "git", "-C", tmp, "rev-parse", "HEAD")
+	head := gitCommand(ctx, "-C", tmp, "rev-parse", "HEAD")
 	out, err := head.Output()
 	if err != nil {
 		return fmt.Errorf("bundle: git rev-parse: %w", err)

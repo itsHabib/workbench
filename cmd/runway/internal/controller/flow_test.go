@@ -356,6 +356,59 @@ func main() { time.Sleep(10 * time.Second) }
 	}
 }
 
+func TestFlowC_DeadlineDuringStartup(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+import "time"
+func main() { time.Sleep(10 * time.Second) }
+`)
+	work := goRunWork(h, "main.go", nil)
+	// Deadline expires while the backend is still starting: the controller
+	// must not let a hung placement keep the run open, and the eventually
+	// started workload must still be cleaned up (no orphan). On a slow host
+	// the deadline may instead land in preparation — the receipt assertions
+	// hold for either interleaving.
+	be := &slowStart{inner: local.New(), delay: 3 * time.Second}
+	start := time.Now()
+	out := h.runWith(work, execution.Policy{DeadlineMS: 1800, CancelGraceMS: 200}, controller.Options{Backend: be})
+	if out.Result.Status != execution.StatusTimedOut || out.Result.ReasonCode != execution.ReasonDeadlineExceeded {
+		t.Fatalf("want timed_out/deadline_exceeded, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.ExitCode != controller.ExitTimedOut {
+		t.Fatalf("exit=%d", out.ExitCode)
+	}
+	if time.Since(start) > 15*time.Second {
+		t.Fatalf("startup-deadline path too slow: %s", time.Since(start))
+	}
+	if out.Result.Placement.AllocationID != "none" {
+		assertNoOrphans(t, out.Result.Placement.AllocationID)
+	}
+}
+
+// slowStart delays backend startup past the fixture deadline while
+// delegating everything else — a stand-in for a hung placement/boot.
+type slowStart struct {
+	inner backend.Backend
+	delay time.Duration
+}
+
+func (s *slowStart) Start(ctx context.Context, prep backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+	time.Sleep(s.delay)
+	return s.inner.Start(ctx, prep, emit)
+}
+func (s *slowStart) Wait(ctx context.Context, h backend.Handle, emit backend.Emit) (backend.Exit, error) {
+	return s.inner.Wait(ctx, h, emit)
+}
+func (s *slowStart) Cancel(ctx context.Context, h backend.Handle) error {
+	return s.inner.Cancel(ctx, h)
+}
+func (s *slowStart) Collect(ctx context.Context, h backend.Handle, outDir string) ([]execution.Artifact, error) {
+	return s.inner.Collect(ctx, h, outDir)
+}
+func (s *slowStart) Cleanup(ctx context.Context, h backend.Handle) error {
+	return s.inner.Cleanup(ctx, h)
+}
+
 type failCleanup struct {
 	inner backend.Backend
 }
