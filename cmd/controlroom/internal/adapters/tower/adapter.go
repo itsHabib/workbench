@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os/exec"
 	"sort"
 	"time"
@@ -79,7 +80,7 @@ func (a *Adapter) Collect(ctx context.Context) Result {
 			return finish(model.SourceUnavailable, "timeout", "Tower collection timed out")
 		}
 		var execErr *exec.Error
-		if errors.As(err, &execErr) {
+		if errors.As(err, &execErr) || errors.Is(err, fs.ErrNotExist) {
 			return finish(model.SourceUnavailable, "executable_not_found", "Tower executable is unavailable")
 		}
 		return finish(model.SourceUnavailable, "command_failed", "Tower collection failed")
@@ -120,10 +121,7 @@ func (a *Adapter) Collect(ctx context.Context) Result {
 		if rows[i].Repository != rows[j].Repository {
 			return rows[i].Repository < rows[j].Repository
 		}
-		if rows[i].Branch != rows[j].Branch {
-			return rows[i].Branch < rows[j].Branch
-		}
-		return rows[i].Path < rows[j].Path
+		return rows[i].Branch < rows[j].Branch
 	})
 	receipt.State = model.SourceOK
 	receipt.DurationMS = max(0, a.now().Sub(started).Milliseconds())
