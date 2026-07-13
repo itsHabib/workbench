@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,35 +38,48 @@ func main() {
 	if err := os.WriteFile(filepath.Join(bundleDir, "main.go"), prog, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	work := []byte(`{
-  "schema_version": "0.1.0",
-  "command": {
-    "executable": {"name": "go"},
-    "args": [
-      {"literal": "run"},
-      {"path": {"root": "inputs", "value": "main.go"}}
-    ]
-  },
-  "cwd": {"root": "workspace", "value": "."},
-  "workspace": {
-    "kind": "git",
-    "url": "` + repo + `",
-    "revision": "` + rev + `"
-  },
-  "inputs": [
-    {"name": "prog", "source": "main.go", "target": "main.go", "sha256": "` + sha256Hex(prog) + `"}
-  ]
-}`)
+	name := "go"
+	litRun := "run"
+	workSpec := execution.WorkSpec{
+		SchemaVersion: execution.SchemaVersion,
+		Command: execution.Command{
+			Executable: execution.Executable{Name: &name},
+			Args: []execution.Arg{
+				{Literal: &litRun},
+				{Path: &execution.PathRef{Root: execution.RootInputs, Value: "main.go"}},
+			},
+		},
+		Cwd: execution.PathRef{Root: execution.RootWorkspace, Value: "."},
+		Workspace: execution.Workspace{
+			Kind:     "git",
+			URL:      repo,
+			Revision: rev,
+		},
+		Inputs: []execution.Input{{
+			Name:   "prog",
+			Source: "main.go",
+			Target: "main.go",
+			SHA256: sha256Hex(prog),
+		}},
+	}
+	work, err := json.Marshal(workSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	req := []byte(`{
-  "schema_version": "0.1.0",
-  "request_id": "req_golden",
-  "work": {"manifest": "work.json", "sha256": "` + sha256Hex(work) + `"},
-  "placement": {"backend": "local", "profile": "default"},
-  "policy": {"deadline_ms": 120000, "cancel_grace_ms": 1000}
-}`)
+	reqDoc := execution.Request{
+		SchemaVersion: execution.SchemaVersion,
+		RequestID:     "req_golden",
+		Work:          execution.Work{Manifest: "work.json", SHA256: sha256Hex(work)},
+		Placement:     execution.Placement{Backend: "local", Profile: "default"},
+		Policy:        execution.Policy{DeadlineMS: 120000, CancelGraceMS: 1000},
+	}
+	req, err := json.Marshal(reqDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
 	spec := filepath.Join(dir, "request.json")
 	if err := os.WriteFile(spec, req, 0o600); err != nil {
 		t.Fatal(err)

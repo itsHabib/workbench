@@ -19,6 +19,17 @@ type Roots struct {
 	Out       string
 }
 
+// NewRoots constructs Roots with each path filepath.Clean'd once so Env and
+// every expansion emit identical native strings (Gate A / FR3). Callers that
+// spell roots with non-native separators still get parity by construction.
+func NewRoots(workspace, inputs, out string) Roots {
+	return Roots{
+		Workspace: filepath.Clean(workspace),
+		Inputs:    filepath.Clean(inputs),
+		Out:       filepath.Clean(out),
+	}
+}
+
 // EnvNames are the root-discovery environment variable names every backend sets.
 const (
 	EnvWorkspace = "RUNWAY_WORKSPACE"

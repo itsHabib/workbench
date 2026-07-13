@@ -3,6 +3,7 @@ package bundle_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/bundle"
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
+	"github.com/itsHabib/workbench/contracts/execution"
 )
 
 func TestBundleRejectsDigestMismatch(t *testing.T) {
@@ -116,13 +118,27 @@ func TestBundleMaterializeCopiesExactBytes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bundleDir, "in.txt"), payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	work := []byte(`{
-  "schema_version": "0.1.0",
-  "command": {"executable": {"name": "true"}},
-  "cwd": {"root": "workspace", "value": "."},
-  "workspace": {"kind": "git", "url": "` + repo + `", "revision": "` + rev + `"},
-  "inputs": [{"name": "in", "source": "in.txt", "target": "in.txt", "sha256": "` + sha256Hex(payload) + `"}]
-}`)
+	name := "true"
+	workSpec := execution.WorkSpec{
+		SchemaVersion: execution.SchemaVersion,
+		Command:       execution.Command{Executable: execution.Executable{Name: &name}},
+		Cwd:           execution.PathRef{Root: execution.RootWorkspace, Value: "."},
+		Workspace: execution.Workspace{
+			Kind:     "git",
+			URL:      repo,
+			Revision: rev,
+		},
+		Inputs: []execution.Input{{
+			Name:   "in",
+			Source: "in.txt",
+			Target: "in.txt",
+			SHA256: sha256Hex(payload),
+		}},
+	}
+	work, err := json.Marshal(workSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -160,24 +176,32 @@ func TestBundleMaterializeCopiesExactBytes(t *testing.T) {
 
 func minimalWork(t *testing.T, url, rev string) []byte {
 	t.Helper()
-	return []byte(`{
-  "schema_version": "0.1.0",
-  "command": {"executable": {"name": "true"}},
-  "cwd": {"root": "workspace", "value": "."},
-  "workspace": {"kind": "git", "url": "` + url + `", "revision": "` + rev + `"}
-}`)
+	name := "true"
+	work, err := json.Marshal(execution.WorkSpec{
+		SchemaVersion: execution.SchemaVersion,
+		Command:       execution.Command{Executable: execution.Executable{Name: &name}},
+		Cwd:           execution.PathRef{Root: execution.RootWorkspace, Value: "."},
+		Workspace:     execution.Workspace{Kind: "git", URL: url, Revision: rev},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return work
 }
 
 func placedRequest(t *testing.T, work []byte) []byte {
 	t.Helper()
-	sum := sha256Hex(work)
-	return []byte(`{
-  "schema_version": "0.1.0",
-  "request_id": "req_ok",
-  "work": {"manifest": "work.json", "sha256": "` + sum + `"},
-  "placement": {"backend": "local", "profile": "default"},
-  "policy": {"deadline_ms": 60000, "cancel_grace_ms": 1000}
-}`)
+	req, err := json.Marshal(execution.Request{
+		SchemaVersion: execution.SchemaVersion,
+		RequestID:     "req_ok",
+		Work:          execution.Work{Manifest: "work.json", SHA256: sha256Hex(work)},
+		Placement:     execution.Placement{Backend: "local", Profile: "default"},
+		Policy:        execution.Policy{DeadlineMS: 60000, CancelGraceMS: 1000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
 }
 
 func sha256Hex(b []byte) string {

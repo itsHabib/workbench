@@ -58,11 +58,9 @@ func TestExpandWindowsAndLinuxFixtures(t *testing.T) {
 }
 
 func TestEnvRootsMatchExpansion(t *testing.T) {
-	roots := expand.Roots{
-		Workspace: "/tmp/run/workspace",
-		Inputs:    "/tmp/run/inputs",
-		Out:       "/tmp/run/artifacts",
-	}
+	// Construct via NewRoots so non-native separators are cleaned once;
+	// Env and Path expansions must then match byte-for-byte (Gate A).
+	roots := expand.NewRoots("/tmp/run/workspace", "/tmp/run/inputs", "/tmp/run/artifacts")
 	env := expand.Env(roots)
 	if env[expand.EnvWorkspace] != roots.Workspace {
 		t.Fatalf("RUNWAY_WORKSPACE %q != root %q", env[expand.EnvWorkspace], roots.Workspace)

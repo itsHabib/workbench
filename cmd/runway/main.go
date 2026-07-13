@@ -106,11 +106,7 @@ func runOnce(specPath, bundleDir, stateRoot string) (string, error) {
 		return runID, err
 	}
 
-	roots := expand.Roots{
-		Workspace: run.WorkspaceDir(),
-		Inputs:    run.InputsDir(),
-		Out:       run.ArtifactsDir(),
-	}
+	roots := expand.NewRoots(run.WorkspaceDir(), run.InputsDir(), run.ArtifactsDir())
 	prep, err := expand.Command(roots, adm.Work)
 	if err != nil {
 		return runID, err
