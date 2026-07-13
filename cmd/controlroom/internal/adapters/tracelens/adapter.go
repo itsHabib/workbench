@@ -19,7 +19,7 @@ const (
 	maxRuns        = 5
 )
 
-var sensitiveText = regexp.MustCompile(`(?i)([a-z]:\\|/(?:users|home)/|token\s*[=:]|password\s*[=:]|authorization\s*:)`)
+var sensitiveText = regexp.MustCompile(`(?i)([a-z]:\\|\\\\[^\\]+\\|/(?:users|home|etc|var|tmp)/|token\s*[=:]|password\s*[=:]|authorization\s*:|bearer\s+)`)
 
 // Result is Tracelens's source-local collection result.
 type Result struct {
@@ -99,9 +99,11 @@ func (a *Adapter) Collect(ctx context.Context, runs []model.Run, shipReceipt mod
 
 func selectEligible(runs []model.Run, now time.Time) []model.Run {
 	terminal := map[string]bool{"succeeded": true, "failed": true, "cancelled": true, "canceled": true, "timed_out": true}
-	selected := make([]model.Run, 0, min(len(runs), maxRuns))
+	selected := make([]model.Run, 0, len(runs))
 	cutoff := now.Add(-eligibilityAge)
 	for _, run := range runs {
+		// Future timestamps are not within the preceding window and commonly
+		// indicate a clock-injection mistake or producer clock skew.
 		if run.Kind != "workflow" || !terminal[run.Status] || run.ID == "" || run.Evidence == nil || run.UpdatedAt.Before(cutoff) || run.UpdatedAt.After(now) {
 			continue
 		}
@@ -120,15 +122,20 @@ func selectEligible(runs []model.Run, now time.Time) []model.Run {
 }
 
 func safeDiagnosis(d *model.Diagnosis) bool {
+	if d.Report.Validate() != nil {
+		return false
+	}
 	if d.Report.State == model.Available {
 		if d.Report.Value == nil || d.Report.Value.Validate() != nil {
 			return false
 		}
+		d.Report.Value.Label = sanitize(d.Report.Value.Label)
 	}
-	for _, link := range d.Evidence {
-		if link.Validate() != nil {
+	for i := range d.Evidence {
+		if d.Evidence[i].Validate() != nil {
 			return false
 		}
+		d.Evidence[i].Label = sanitize(d.Evidence[i].Label)
 	}
 	for i := range d.Findings {
 		finding := &d.Findings[i]

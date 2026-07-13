@@ -12,8 +12,9 @@ import (
 type fakeRunner struct{ ids []string }
 
 func (f *fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
-	f.ids = append(f.ids, args[2])
-	return []byte(fmt.Sprintf(`{"run_id":%q,"verdict":"pass","tier":"T0","dialect":"ship-trace-v1","findings":[],"report":{"state":"unknown"},"evidence":[],"input_tokens":{"state":"unknown"},"output_tokens":{"state":"unknown"},"cost_usd":{"state":"unavailable"},"latency_ms":{"state":"unavailable"}}`, args[2])), nil
+	id := args[len(args)-1]
+	f.ids = append(f.ids, id)
+	return []byte(fmt.Sprintf(`{"run_id":%q,"verdict":"pass","tier":"T0","dialect":"ship-trace-v1","findings":[],"report":{"state":"unknown"},"evidence":[],"input_tokens":{"state":"unknown"},"output_tokens":{"state":"unknown"},"cost_usd":{"state":"unavailable"},"latency_ms":{"state":"unavailable"}}`, id)), nil
 }
 
 func TestCollectAppliesEligibilityOrderingAndCap(t *testing.T) {
@@ -42,12 +43,27 @@ func TestCollectAppliesEligibilityOrderingAndCap(t *testing.T) {
 }
 
 func TestCollectDoesNotRunWhenShipIsIncomplete(t *testing.T) {
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	f := &fakeRunner{}
 	a := New("tracelens")
 	a.runner = f
-	got := a.Collect(context.Background(), []model.Run{{ID: "wf", Kind: "workflow", Status: "failed", UpdatedAt: time.Now(), Evidence: []model.SafeLink{}}}, model.SourceReceipt{Source: "ship", State: model.SourceDegraded})
+	a.now = func() time.Time { return now }
+	got := a.Collect(context.Background(), []model.Run{{ID: "wf", Kind: "workflow", Status: "failed", UpdatedAt: now, Evidence: []model.SafeLink{}}}, model.SourceReceipt{Source: "ship", State: model.SourceDegraded})
 	if got.Receipt.ErrorCode != "ship_not_current" || len(f.ids) != 0 {
 		t.Fatalf("unexpected result: %#v, calls=%#v", got, f.ids)
+	}
+}
+
+func TestCollectRedactsSensitiveLinkLabels(t *testing.T) {
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	a := New("tracelens")
+	a.now = func() time.Time { return now }
+	a.runner = runnerFunc(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return []byte(`{"run_id":"wf","verdict":"pass","tier":"T0","dialect":"ship-trace-v1","findings":[],"report":{"state":"available","value":{"label":"Bearer secret","url":"https://example.invalid/report"}},"evidence":[{"label":"token=secret","url":"https://example.invalid/evidence"}],"input_tokens":{"state":"unknown"},"output_tokens":{"state":"unknown"},"cost_usd":{"state":"unknown"},"latency_ms":{"state":"unknown"}}`), nil
+	})
+	got := a.Collect(context.Background(), []model.Run{{ID: "wf", Kind: "workflow", Status: "succeeded", UpdatedAt: now, Evidence: []model.SafeLink{}}}, model.SourceReceipt{Source: "ship", State: model.SourceOK})
+	if got.Diagnoses[0].Evidence[0].Label != "[redacted]" || got.Diagnoses[0].Report.Value.Label != "[redacted]" {
+		t.Fatalf("sensitive labels survived: %#v", got.Diagnoses[0])
 	}
 }
 
