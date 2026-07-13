@@ -92,6 +92,7 @@ func TestSafeLinkValidation(t *testing.T) {
 		{Label: "file", URL: "file:///tmp/secret"},
 		{Label: "parent", Path: "../secret"},
 		{Label: "absolute", Path: "C:\\secret"},
+		{Label: "slash-absolute", Path: "C:/secret"},
 		{Label: "ambiguous", URL: "https://example.com", Path: "docs/a.md"},
 	}
 	for _, link := range invalid {

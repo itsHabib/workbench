@@ -63,6 +63,13 @@ func elapsed(now, then time.Time) time.Duration {
 	return d
 }
 
+func elapsedKnown(now, then time.Time) (time.Duration, bool) {
+	if then.IsZero() {
+		return 0, false
+	}
+	return elapsed(now, then), true
+}
+
 func activeRun(status string) bool {
 	switch strings.ToLower(status) {
 	case "pending", "running", "dispatching", "dispatched":
@@ -89,8 +96,12 @@ func runIdentity(run model.Run) string {
 func retryGroups(runs []model.Run, now time.Time) map[string]int {
 	groups := make(map[string]int)
 	for _, run := range runs {
+		age, ok := elapsedKnown(now, run.UpdatedAt)
+		if !ok {
+			continue
+		}
 		identity := runIdentity(run)
-		if identity != "" && strings.EqualFold(run.Status, "failed") && elapsed(now, run.UpdatedAt) <= 72*time.Hour {
+		if identity != "" && strings.EqualFold(run.Status, "failed") && age <= 72*time.Hour {
 			groups[identity]++
 		}
 	}
@@ -109,16 +120,16 @@ func applyRunLiveness(runs []model.Run, prs []model.PullRequest, r receipts, now
 			run.Liveness = model.LivenessRetryLoop
 			continue
 		}
-		if activeRun(run.Status) && elapsed(now, run.UpdatedAt) >= 15*time.Minute {
+		age, ok := elapsedKnown(now, run.UpdatedAt)
+		if ok && activeRun(run.Status) && age >= 15*time.Minute {
 			run.Liveness = model.LivenessStalledActive
 			continue
 		}
-		age := elapsed(now, run.UpdatedAt)
-		if activeRun(run.Status) || age <= 72*time.Hour || runHasOpenPR(*run, prs) {
+		if activeRun(run.Status) || ok && age <= 72*time.Hour || r.current(githubSource) && runHasOpenPR(*run, prs) {
 			run.Liveness = model.LivenessLive
 			continue
 		}
-		if age <= 336*time.Hour {
+		if ok && age <= 336*time.Hour {
 			run.Liveness = model.LivenessIdle
 		}
 	}
@@ -140,35 +151,45 @@ func applyTaskLiveness(tasks []model.Task, runs []model.Run, prs []model.PullReq
 			task.Liveness = model.LivenessDone
 			continue
 		}
-		if task.Status == "blocked" && !taskHasPath(*task, knownTasks) {
+		if task.Status == "blocked" && !taskHasPath(*task, knownTasks, prs, r.current(githubSource)) {
 			task.Liveness = model.LivenessBlockedNoPath
 			continue
 		}
-		age := elapsed(now, task.UpdatedAt)
-		if (task.Status == "claimed" || task.Status == "in_progress") && age > 336*time.Hour &&
+		age, ok := elapsedKnown(now, task.UpdatedAt)
+		if ok && (task.Status == "claimed" || task.Status == "in_progress") && age > 336*time.Hour &&
 			r.current(shipSource) && r.bySource[shipSource].State == model.SourceOK &&
 			r.current(githubSource) && r.bySource[githubSource].State == model.SourceOK &&
 			r.bySource[dossierSource].State == model.SourceOK && !taskHasRecentWork(*task, runs, prs, now) {
 			task.Liveness = model.LivenessStaleClaim
 			continue
 		}
-		if age <= 72*time.Hour || taskHasOpenPR(*task, prs) || taskHasCurrentRun(*task, runs, now) {
+		if ok && age <= 72*time.Hour || r.current(githubSource) && taskHasOpenPR(*task, prs) || r.current(shipSource) && taskHasCurrentRun(*task, runs, now) {
 			task.Liveness = model.LivenessLive
 			continue
 		}
-		if age <= 336*time.Hour {
+		if ok && age <= 336*time.Hour {
 			task.Liveness = model.LivenessIdle
 		}
 	}
 }
 
-func taskHasPath(task model.Task, known map[string]bool) bool {
+func taskHasPath(task model.Task, known map[string]bool, prs []model.PullRequest, githubCurrent bool) bool {
 	for _, dependency := range task.Dependencies {
 		if known[dependency] {
 			return true
 		}
 	}
-	return len(task.Artifacts) > 0
+	hasURLArtifact := false
+	for _, artifact := range task.Artifacts {
+		if artifact.URL == "" {
+			continue
+		}
+		hasURLArtifact = true
+	}
+	if hasURLArtifact && !githubCurrent {
+		return true
+	}
+	return githubCurrent && taskHasOpenPR(task, prs)
 }
 
 func taskMatchesRun(task model.Task, run model.Run) bool {
@@ -177,7 +198,8 @@ func taskMatchesRun(task model.Task, run model.Run) bool {
 
 func taskHasCurrentRun(task model.Task, runs []model.Run, now time.Time) bool {
 	for _, run := range runs {
-		if taskMatchesRun(task, run) && elapsed(now, run.UpdatedAt) <= 336*time.Hour {
+		age, ok := elapsedKnown(now, run.UpdatedAt)
+		if taskMatchesRun(task, run) && ok && age <= 336*time.Hour {
 			return true
 		}
 	}
@@ -240,11 +262,12 @@ func runAttention(runs []model.Run, r receipts, now time.Time) []model.Attention
 	items := make([]model.AttentionItem, 0)
 	groups := retryGroups(runs, now)
 	for _, run := range runs {
+		age, ok := elapsedKnown(now, run.UpdatedAt)
 		identity := runIdentity(run)
 		switch {
 		case identity != "" && groups[identity] >= 3 && strings.EqualFold(run.Status, "failed"):
 			items = append(items, item("run.retry_loop", run.ID, "urgent", 100, "Repeated run failures", fmt.Sprintf("%d failures for %s within 72h", groups[identity], identity), run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
-		case activeRun(run.Status) && elapsed(now, run.UpdatedAt) >= 15*time.Minute:
+		case ok && activeRun(run.Status) && age >= 15*time.Minute:
 			items = append(items, item("run.stalled_active", run.ID, "urgent", 95, "Active run has stalled", "Control Room policy: no source update for 15m", run.Repository, run.Project, run.UpdatedAt, []string{shipSource}))
 		}
 	}

@@ -91,6 +91,22 @@ func TestLivenessFallbacksAnd336HourBoundary(t *testing.T) {
 	}
 }
 
+func TestMissingTimestampsDoNotTriggerTimeBasedLabels(t *testing.T) {
+	snapshot := base()
+	snapshot.Runs = []model.Run{{ID: "active", Kind: "workflow", Status: "running", UpdatedAt: time.Time{}, DocPath: model.Known("docs/active.md")}}
+	snapshot.Tasks = []model.Task{{ID: "claimed", Slug: "claimed", Status: "claimed", UpdatedAt: time.Time{}}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Runs[0].Liveness != model.LivenessLive {
+		t.Fatalf("run liveness = %s want %s", got.Runs[0].Liveness, model.LivenessLive)
+	}
+	if got.Tasks[0].Liveness != model.LivenessUnknown {
+		t.Fatalf("task liveness = %s want %s", got.Tasks[0].Liveness, model.LivenessUnknown)
+	}
+	if hasRule(got, "run.stalled_active") || hasRule(got, "task.stale_claim") {
+		t.Fatalf("missing timestamps emitted time-based rules: %v", ruleIDs(got))
+	}
+}
+
 func TestWorkflowAndDriverRetryGroupsNeverMix(t *testing.T) {
 	path := "docs/example/spec.md"
 	snapshot := base()
@@ -140,6 +156,27 @@ func TestTaskBoundariesAndFailClosedStaleClaim(t *testing.T) {
 	}
 }
 
+func TestLiveLinkageRequiresCurrentSupportingSource(t *testing.T) {
+	snapshot := base()
+	snapshot.Sources[2].State = model.SourceStale
+	snapshot.Runs = []model.Run{{
+		ID: "run", Kind: "workflow", Status: "failed", UpdatedAt: now.Add(-337 * time.Hour),
+		DocPath: model.Known("docs/run.md"), Evidence: []model.SafeLink{{URL: "https://example.invalid/pr/1"}},
+	}}
+	snapshot.Tasks = []model.Task{{
+		ID: "task", Slug: "task", Status: "todo", UpdatedAt: now.Add(-337 * time.Hour),
+		Artifacts: []model.SafeLink{{URL: "https://example.invalid/pr/1"}},
+	}}
+	snapshot.PullRequests = []model.PullRequest{{ID: "pr", URL: "https://example.invalid/pr/1", State: "open"}}
+	got := policy.ApplyPolicy(snapshot, now)
+	if got.Runs[0].Liveness != model.LivenessUnknown {
+		t.Fatalf("run liveness = %s want %s", got.Runs[0].Liveness, model.LivenessUnknown)
+	}
+	if got.Tasks[0].Liveness != model.LivenessUnknown {
+		t.Fatalf("task liveness = %s want %s", got.Tasks[0].Liveness, model.LivenessUnknown)
+	}
+}
+
 func TestStaleClaimExactLinkageAnd336HourBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -167,6 +204,32 @@ func TestStaleClaimExactLinkageAnd336HourBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBlockedTaskPathRequiresExactOpenPR(t *testing.T) {
+	t.Run("doc artifact does not suppress no-path", func(t *testing.T) {
+		snapshot := base()
+		snapshot.Tasks = []model.Task{{
+			ID: "blocked", Slug: "blocked", Status: "blocked", UpdatedAt: now,
+			Artifacts: []model.SafeLink{{Label: "spec", Path: "docs/features/example/spec.md"}},
+		}}
+		got := policy.ApplyPolicy(snapshot, now)
+		if got.Tasks[0].Liveness != model.LivenessBlockedNoPath {
+			t.Fatalf("liveness = %s want %s", got.Tasks[0].Liveness, model.LivenessBlockedNoPath)
+		}
+	})
+	t.Run("exact open pr suppresses no-path", func(t *testing.T) {
+		snapshot := base()
+		snapshot.Tasks = []model.Task{{
+			ID: "blocked", Slug: "blocked", Status: "blocked", UpdatedAt: now,
+			Artifacts: []model.SafeLink{{URL: "https://example.invalid/pr/1"}},
+		}}
+		snapshot.PullRequests = []model.PullRequest{{ID: "pr", URL: "https://example.invalid/pr/1", State: "open"}}
+		got := policy.ApplyPolicy(snapshot, now)
+		if got.Tasks[0].Liveness == model.LivenessBlockedNoPath {
+			t.Fatalf("liveness = %s", got.Tasks[0].Liveness)
+		}
+	})
 }
 
 func TestPRRulesFailClosedAndPreserveNegativeEvidence(t *testing.T) {

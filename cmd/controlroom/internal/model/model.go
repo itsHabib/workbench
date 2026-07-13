@@ -191,7 +191,8 @@ func (l SafeLink) Validate() error {
 		return nil
 	}
 	clean := path.Clean(l.Path)
-	if strings.Contains(l.Path, "\\") || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || clean != l.Path {
+	if strings.Contains(l.Path, "\\") || len(l.Path) >= 3 && l.Path[1] == ':' && l.Path[2] == '/' ||
+		clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || clean != l.Path {
 		return fmt.Errorf("link path must be a clean repository-relative path")
 	}
 	return nil
