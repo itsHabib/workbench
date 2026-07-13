@@ -35,7 +35,7 @@ The hypothesis is that a storeless, read-mostly local control room can make the 
 7. Filter by repository/project and status/severity; support manual refresh and safe 60-second automatic refresh.
 8. Provide useful loading, empty, degraded, disconnected, and partial-source-failure states.
 9. Deep-link to HTTPS PRs/reports, expose copyable local paths, and offer `vscode://file/` links only for validated workspace paths.
-10. Support `demo` mode from deterministic fixtures and `real` mode from local tools, with no producer-write endpoints in either mode; the only POST control action requests a read refresh.
+10. Support `demo` mode from deterministic fixtures and `real` mode from local tools, with no producer-write endpoints in either mode; POST control actions only request reads (refresh or on-demand diagnosis).
 
 ### Non-functional requirements
 
@@ -141,7 +141,7 @@ docs/features/portfolio-control-room/
 
 ### D6 — Tracelens remains stateless
 
-**Choice:** analyze up to the five newest eligible Ship traces in the slow enrichment lane and retain results only in the current snapshot. A trace is eligible when it belongs to a normalized workflow run (not a driver container), the Ship receipt is current, the run is terminal, Ship reports trace evidence available, and `updated_at` is within the preceding 14 days. Selection sorts `updated_at` descending, then stable run ID. Drill-down reuses that diagnosis or invokes `tracelens ship -json <run>` synchronously with a 10-second bound and a visible loading state. A timeout yields an unavailable diagnosis. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
+**Choice:** analyze up to the five newest eligible Ship traces in the slow enrichment lane and retain results only in the current snapshot. A trace is eligible when it belongs to a normalized workflow run (not a driver container), the Ship receipt is current, the run is terminal, Ship reports trace evidence available, and `updated_at` is within the preceding 14 days. Selection sorts `updated_at` descending, then stable run ID. Pure drill-down GET reuses that diagnosis; only the CSRF-protected diagnose POST may invoke `tracelens ship -json <run>` synchronously with a 10-second bound and a visible loading state. A timeout yields an unavailable diagnosis. Rich drill-down may generate a temporary Markdown report under the process temp directory, never in a new report store.
 
 **Alternative:** invent recent-analysis or provider-comparison APIs. Rejected: Tracelens exposes neither. Current Ship decoders do not record per-step cost/tokens/latency, so cost hotspots and honest provider comparison remain unavailable for those traces.
 
@@ -241,20 +241,21 @@ Real mode requires `gh >= 2.90.0` and reports an unavailable GitHub receipt when
 
 ### HTTP API
 
-Snapshot/detail routes are pure GET/HEAD. The sole POST is the CSRF-protected read-refresh control action; it never writes to a producer. Every other method returns `405`.
+Snapshot/detail routes are pure GET/HEAD. The only POSTs are CSRF-protected read-control actions for refresh and on-demand diagnosis; neither writes to a producer. Every other method returns `405`.
 
 ```text
 GET /                         embedded application shell
 GET /api/v1/snapshot?repository=&status=&severity=
 POST /api/v1/refresh          application/json: {"mode":"demo|real","trigger":"auto|manual"}
 GET /api/v1/runs/{id}/diagnosis
+POST /api/v1/runs/{id}/diagnose application/json: {}
 GET /api/v1/prs/{owner}/{repo}/{number}
 GET /healthz                  process liveness only
 ```
 
-`snapshot` only returns the latest published `Snapshot`; its parameters are presentation filters applied after collection and cannot change source queries or state. `refresh` selects the configured adapter set (`demo` fixtures or `real` tools). Its required `trigger` distinguishes timer `auto` from button `manual`; only `manual` may request the one Dossier breaker half-open probe. A refresh cancels the previous in-flight refresh. The server coalesces only requests with the same collection identity: mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
+`snapshot` only returns the latest published `Snapshot`; its parameters are presentation filters applied after collection and cannot change source queries or state. Before the first publish it returns `200` with an empty bootstrap snapshot (`mode = ""`) and one `loading` receipt per configured source. `refresh` selects the configured adapter set (`demo` fixtures or `real` tools). Its required `trigger` distinguishes timer `auto` from button `manual`; only `manual` may request the one Dossier breaker half-open probe. A request with the same collection identity joins the in-flight result; only a different-identity request cancels it and starts fresh. Collection identity is mode, trigger class, and SHA-256 of canonical JSON containing adapter names, absolute executable paths, argv, timeouts, GitHub scopes, Dossier corpus, and workspace root. Presentation filters are excluded. Demo and real, or auto and manual, can never share an in-flight result when breaker behavior differs.
 
-On the application-shell response, the server sets a process-random 256-bit `controlroom_csrf` cookie with `SameSite=Strict; Path=/`. Refresh requires `Content-Type: application/json`, an exact `Origin` match for the canonical `http://127.0.0.1:<port>`, and `X-Control-Room-CSRF` equal to the cookie using constant-time comparison. Missing `Origin`, token, or JSON content type returns `403` before collection or breaker state changes. No CORS headers are emitted; preflight and cross-origin requests are rejected.
+On the application-shell response, the server sets a process-random 256-bit `controlroom_csrf` cookie with `SameSite=Strict; Path=/` and deliberately without `HttpOnly`, because same-origin JavaScript must copy it into a header. Every POST control action requires `Content-Type: application/json`, an exact `Origin` match for the canonical `http://127.0.0.1:<port>`, and `X-Control-Room-CSRF` equal to the cookie using constant-time comparison. Missing `Origin`, token, or JSON content type returns `403` before process execution, collection, or breaker state changes. No CORS headers are emitted; preflight and cross-origin requests are rejected.
 
 ### Source contracts
 
@@ -296,8 +297,8 @@ The adapter fetches scopes in stable order and pages them round-robin, at most f
 ### Run and Tracelens drill-down
 
 1. User opens a run row.
-2. API validates the run ID against the current snapshot and resolves only the configured Ship runs directory.
-3. If the snapshot already contains a diagnosis, the API returns it. Otherwise the UI shows loading while the API invokes Tracelens with a 10-second bound; there is no second cache. Timeout or unsupported input returns a typed unavailable diagnosis.
+2. Pure diagnosis GET validates the run ID and returns only a diagnosis already present in the current snapshot; absence is `204` and never starts a process.
+3. If absent, the UI shows loading and sends the CSRF-protected diagnose POST. That handler revalidates the run ID against the snapshot, resolves only the configured Ship runs directory, and invokes Tracelens with a 10-second bound; there is no second cache. Timeout or unsupported input returns a typed unavailable diagnosis.
 4. UI shows verdict, ranked findings, evidence locus, repair text when available, and explicit telemetry gaps.
 5. The raw trace is never returned to the browser.
 
@@ -338,7 +339,7 @@ Derived labels are explicitly Control Room policy, not producer state.
 - `on_fire/stalled_active`: `pending|running|dispatching|dispatched` with no `updated_at` movement for 15 minutes. The UI labels this “Control Room policy: no source update for 15m,” not “Ship stale.”
 - `live`: source movement within 3 days, an active run, or a linked open PR.
 - `idle`: open work with no movement for 3–14 days.
-- `stale_claim`: Dossier `claimed|in_progress` whose `updated_at` is older than 14 days with no linked open PR and no linked current Ship run updated within the preceding 14 days. Linkage is explicit: a run's owner-reported task/spec identity equals the Dossier task ID or slug, or the task carries an artifact URL for that exact PR/run. Title/body substring guesses never create a link.
+- `stale_claim`: Dossier `claimed|in_progress` whose `updated_at` is older than 14 days with no linked open PR and no linked current Ship run updated within the preceding 14 days, evaluated only when Dossier, GitHub inventory, and Ship inventory receipts are all `ok` (complete, not degraded/stale). Linkage is explicit: a run's owner-reported task/spec identity equals the Dossier task ID or slug, or the task carries an artifact URL for that exact PR/run. Title/body substring guesses never create a link.
 - `blocked_no_path`: blocked task with no resolvable dependency/artifact explaining a path forward.
 
 ### Ranking rules
@@ -355,7 +356,7 @@ For each normalized run, task, or pull request, evaluate non-informational rules
 | `pr.unresolved_threads` | actionable | 75 | Current GitHub data returns one or more unresolved review threads; the observed negative fact remains valid if later thread pages are truncated. |
 | `pr.review_needed` | actionable | 70 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; at least one visible check exists and every visible check completed successfully; and `reviewDecision == REVIEW_REQUIRED` or requested reviewers are non-empty. Unknown or empty checks never qualify. |
 | `pr.merge_ready` | actionable | 65 | GitHub receipt is current; `detail_state == complete`; PR is non-draft; at least one visible check exists and every visible check completed successfully; `reviewDecision == APPROVED`; requested reviewer count is zero; `mergeable == MERGEABLE`; `mergeStateStatus == CLEAN`; unresolved thread count is zero. Empty or unknown never qualifies, so this cannot overlap `pr.review_needed`. |
-| `task.stale_claim` | actionable | 55 | Dossier reports `claimed|in_progress`, `updated_at` is older than 14 days, and no explicitly linked open PR or current Ship run was updated within 14 days. |
+| `task.stale_claim` | actionable | 55 | Dossier, GitHub inventory, and Ship inventory receipts are all `ok`; Dossier reports `claimed|in_progress`; `updated_at` is older than 14 days; and no explicitly linked open PR or current Ship run was updated within 14 days. |
 | `task.ready` | actionable | 40 | Dossier reports `status == "todo"` and every explicitly declared dependency is terminal-done. Missing/unknown dependency state never qualifies. |
 | `pr.checks_running` | waiting | 30 | GitHub receipt is current; `detail_state == complete`; at least one visible check has `QUEUED`, `PENDING`, or `IN_PROGRESS`; no completed visible check failed; `reviewDecision != CHANGES_REQUESTED`; and unresolved thread count is zero. |
 | `tool.accumulated_friction` | informational | 10–25 | Exact formula below; explicitly not a live incident. |
@@ -393,8 +394,8 @@ Neither changes the product direction or blocks Phase 3's vertical demo.
 
 - Fixture tests for every adapter contract, additive fields, malformed records, timeout, missing executable, and sanitized errors.
 - Normalization tests for unknown/unavailable fields, dependency resolution, reverse blockers, source timestamps, and no raw trace leakage.
-- Golden ranking tests for every table rule (including informational source/detail rules), per-entity precedence/exclusivity, tie-breaker, missing-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
-- `httptest` coverage for pure snapshot GET, method restrictions, CSP/Host validation, cookie/header/Origin/content-type CSRF failures before collection, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
+- Golden ranking tests for every table rule (including informational source/detail rules), per-entity precedence/exclusivity, tie-breaker, missing/truncated-source behavior, retry-loop grouping, stale thresholds, and retained informational visibility.
+- `httptest` coverage for bootstrap/pure snapshot GET, pure diagnosis GET, method restrictions, CSP/Host validation, readable CSRF cookie plus cookie/header/Origin/content-type failures on every POST before process execution, path validation, filters, required auto/manual trigger, canonical adapter fingerprinting, refresh cancellation/coalescing, breaker probing, and deep-link allowlists.
 
 ### Integration tests
 
