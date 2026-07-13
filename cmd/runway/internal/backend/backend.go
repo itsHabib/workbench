@@ -31,6 +31,7 @@ type PreparedRun struct {
 	StdoutPath string
 	StderrPath string
 	Secrets    [][]byte // resolved secret values for log redaction only
+	PrivateDir string   // run private/ for durable backend.json (0600)
 }
 
 // Backend is the placement seam. Collect/Cleanup exist for later lifecycle

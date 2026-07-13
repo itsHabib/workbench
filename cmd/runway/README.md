@@ -18,6 +18,7 @@ runway watch <run-id> [--state <dir>] [--after <seq>] [--follow] [--json]
 runway logs <run-id> [--state <dir>] [--stream stdout|stderr] [--follow]
 runway cancel <run-id> [--state <dir>] [--json]
 runway result <run-id> [--state <dir>] [--wait --timeout <duration>] [--json]
+runway reconcile <run-id> [--state <dir>] [--json]
 ```
 
 State root defaults to `$RUNWAY_STATE`, otherwise `~/.runway`. Every
@@ -29,7 +30,7 @@ run-addressing command accepts `--state`.
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | terminal success, or successful read / cancel no-op |
+| 0 | terminal success, or successful read / cancel / reconcile no-op |
 | 2 | invalid request / CLI usage; no run admitted |
 | 3 | terminal failed |
 | 4 | placement unavailable / backpressure |
@@ -40,7 +41,8 @@ The result schema is authoritative over process exit codes.
 
 ### Notes
 
-- `watch` reads durable `events.ndjson` only — never backend stdout.
+- `watch` reads durable `events.ndjson` only — never backend stdout. It makes
+  no controller-liveness claim.
 - `logs` tails buffered workload bytes; ordered per stream, may lose the
   unflushed tail on abrupt controller loss.
 - `cancel` verifies recorded controller PID + process-start identity, writes
@@ -49,6 +51,12 @@ The result schema is authoritative over process exit codes.
   latency is the controller's marker poll interval (~50ms). Repeat cancel
   after intent or terminal state is a successful no-op.
 - `result --wait` requires `--timeout`. It watches durable state and never
-  reconciles implicitly (`reconcile` is PR 3).
+  reconciles implicitly.
+- `reconcile` is the explicit recovery verb for one known run ID after
+  controller death. It takes over the writer claim, best-effort cleans the
+  backend allocation, and either appends a missing `run_terminal` or writes a
+  `controller_lost` receipt. Concurrent reconcilers: exactly one mutates.
+  v0 does not scan for orphans or promise host-restart adoption.
 
-See `docs/DESIGN.md` for policy vs mechanism and the one-writer rule.
+See `docs/DESIGN.md` for policy vs mechanism, the writer-claim primitive, and
+the one-writer rule.

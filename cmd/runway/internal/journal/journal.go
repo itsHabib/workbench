@@ -35,6 +35,28 @@ func Create(path, runID string) (*Writer, error) {
 	return &Writer{f: f, runID: runID, seq: 0}, nil
 }
 
+// OpenAppend opens an existing journal for sole-writer append, continuing
+// contiguous seq from the last durable event. Used by reconcile to repair a
+// missing run_terminal or append after controller loss — never truncates.
+func OpenAppend(path, runID string) (*Writer, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("journal: run id is empty")
+	}
+	events, err := ReadHistory(path)
+	if err != nil {
+		return nil, err
+	}
+	var seq int64
+	if n := len(events); n > 0 {
+		seq = events[n-1].Seq
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("journal: open append: %w", err)
+	}
+	return &Writer{f: f, runID: runID, seq: seq}, nil
+}
+
 // Append assigns the next contiguous seq, writes one RunEvent JSON object
 // per line, and Syncs before returning.
 func (w *Writer) Append(phase, kind string, details map[string]any) (execution.RunEvent, error) {

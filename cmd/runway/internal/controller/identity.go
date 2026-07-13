@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
 )
 
 // Identity is the recorded controller process-start identity. Cancel verifies
-// it before signaling; PR 3's writer claim / reconcile will verify the same
-// primitive against PID reuse (TDD open question 4 — Windows creation-time
-// ticks vs Linux /proc starttime). Do not treat PID alone as exclusivity.
+// it before signaling; reconcile verifies the same primitive against PID reuse.
+// Do not treat PID alone as exclusivity — that is the writer claim.
 type Identity struct {
 	PID        int    `json:"pid"`
 	StartTicks uint64 `json:"start_ticks"`
@@ -69,7 +69,7 @@ func selfIdentity() (Identity, error) {
 }
 
 func identityOf(pid int) (Identity, error) {
-	ticks, err := startTicks(pid)
+	ticks, err := claim.StartTicks(pid)
 	if err != nil {
 		return Identity{}, err
 	}

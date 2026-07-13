@@ -19,6 +19,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend/local"
 	"github.com/itsHabib/workbench/cmd/runway/internal/bundle"
+	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 	"github.com/itsHabib/workbench/cmd/runway/internal/expand"
 	"github.com/itsHabib/workbench/cmd/runway/internal/journal"
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
@@ -38,10 +39,10 @@ type Options struct {
 	Backend backend.Backend
 }
 
-// Run executes one admitted request to a single terminal receipt (Flows A–E).
+// Run executes one admitted request to a single terminal receipt (Flows A–F).
 // Admission failures before a run directory exists return ExitUsage with no
-// Outcome. Controllers that die mid-run leave an open history — reconcile is
-// PR 3.
+// Outcome. The controller acquires the per-run writer claim before any
+// durable mutation beyond the empty run directory.
 func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
 	adm, err := bundle.Admit(specPath, bundleDir)
 	if err != nil {
@@ -57,6 +58,11 @@ func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
 	run, err := state.Create(stateRoot, runID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if _, err := claim.Acquire(run.PrivateDir()); err != nil {
+		// Another writer already owns this run id — refuse without further
+		// mutation (request/identity/journal stay unwritten).
+		return Outcome{}, usageErr(fmt.Errorf("controller: acquire writer claim: %w", err))
 	}
 	if err := os.WriteFile(run.RequestPath(), adm.RequestBytes, 0o600); err != nil {
 		return Outcome{}, fmt.Errorf("controller: write request.json: %w", err)
@@ -284,6 +290,7 @@ func (c *ctrl) startBackend() (backend.Handle, error) {
 		StdoutPath: c.run.StdoutLog(),
 		StderrPath: c.run.StderrLog(),
 		Secrets:    secretBytes,
+		PrivateDir: c.run.PrivateDir(),
 	}, emit)
 }
 
