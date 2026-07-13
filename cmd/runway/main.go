@@ -74,6 +74,9 @@ func runOnce(specPath, bundleDir, stateRoot string) (string, error) {
 	if adm.Request.Placement.Backend != "local" {
 		return "", fmt.Errorf("runway: placement.backend %q is not installed in this PR (local only)", adm.Request.Placement.Backend)
 	}
+	if adm.Request.Placement.Profile != "default" {
+		return "", fmt.Errorf("runway: placement.profile %q is not installed in this PR (default only)", adm.Request.Placement.Profile)
+	}
 
 	runID, err := mintRunID()
 	if err != nil {

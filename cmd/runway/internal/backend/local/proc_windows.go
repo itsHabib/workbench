@@ -5,6 +5,7 @@ package local
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -31,9 +32,14 @@ func killGroup(pgid int) error {
 	}
 	// taskkill /T ends the process tree rooted at the group leader.
 	cmd := exec.Command("taskkill", "/PID", fmt.Sprintf("%d", pgid), "/T", "/F")
-	if err := cmd.Run(); err != nil {
-		// Already exited is fine for cleanup.
+	out, err := cmd.CombinedOutput()
+	if err == nil {
 		return nil
 	}
-	return nil
+	// Exit 128 = process not found — already exited is success for cleanup,
+	// mirroring unix ESRCH-only tolerance.
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 128 {
+		return nil
+	}
+	return fmt.Errorf("local: taskkill: %w: %s", err, strings.TrimSpace(string(out)))
 }

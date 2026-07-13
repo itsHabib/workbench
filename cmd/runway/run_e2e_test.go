@@ -128,6 +128,45 @@ func main() {
 	}
 }
 
+func TestRunRejectsNonDefaultProfile(t *testing.T) {
+	dir := t.TempDir()
+	bundleDir := filepath.Join(dir, "bundle")
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	work := []byte(`{
+  "schema_version": "0.1.0",
+  "command": {"executable": {"name": "true"}},
+  "cwd": {"root": "workspace", "value": "."},
+  "workspace": {"kind": "git", "url": "https://example.invalid/repo.git", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+}`)
+	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reqDoc := execution.Request{
+		SchemaVersion: execution.SchemaVersion,
+		RequestID:     "req_profile",
+		Work:          execution.Work{Manifest: "work.json", SHA256: sha256Hex(work)},
+		Placement:     execution.Placement{Backend: "local", Profile: "custom"},
+		Policy:        execution.Policy{DeadlineMS: 1000, CancelGraceMS: 0},
+	}
+	req, err := json.Marshal(reqDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(spec, req, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = runOnce(spec, bundleDir, filepath.Join(dir, "state"))
+	if err == nil {
+		t.Fatal("non-default profile must be rejected")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("placement.profile")) {
+		t.Fatalf("want profile error, got %v", err)
+	}
+}
+
 func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

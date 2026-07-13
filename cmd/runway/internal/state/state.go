@@ -37,8 +37,14 @@ func Create(stateRoot, runID string) (RunDir, error) {
 	if runID == "" {
 		return RunDir{}, fmt.Errorf("state: run id is empty")
 	}
-	root := filepath.Join(stateRoot, "runs", runID)
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	runsRoot := filepath.Join(stateRoot, "runs")
+	if err := os.MkdirAll(runsRoot, 0o700); err != nil {
+		return RunDir{}, fmt.Errorf("state: create runs root: %w", err)
+	}
+	root := filepath.Join(runsRoot, runID)
+	// Fail if the run dir already exists — run IDs are random, so a
+	// collision is always suspicious (pre-created / permissive dir).
+	if err := os.Mkdir(root, 0o700); err != nil {
 		return RunDir{}, fmt.Errorf("state: create run dir: %w", err)
 	}
 	if err := os.Chmod(root, 0o700); err != nil {

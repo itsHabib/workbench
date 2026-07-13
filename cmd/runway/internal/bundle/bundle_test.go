@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/bundle"
@@ -102,6 +104,108 @@ func TestBundleRejectsSourceEscape(t *testing.T) {
 	}
 	if _, err := bundle.Admit(spec, bundleDir); err == nil {
 		t.Fatal("source escape must be rejected")
+	}
+}
+
+func TestBundleRejectsSymlinkSourceEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture may require privilege on Windows")
+	}
+	dir := t.TempDir()
+	bundleDir := filepath.Join(dir, "bundle")
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(outside, []byte("host-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(bundleDir, "in.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256Hex([]byte("host-secret"))
+	work := []byte(`{
+  "schema_version": "0.1.0",
+  "command": {"executable": {"name": "true"}},
+  "cwd": {"root": "workspace", "value": "."},
+  "workspace": {"kind": "git", "url": "https://example.invalid/repo.git", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "inputs": [{"name": "x", "source": "in.txt", "target": "x.txt", "sha256": "` + sum + `"}]
+}`)
+	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := placedRequest(t, work)
+	spec := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(spec, req, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.Admit(spec, bundleDir); err == nil {
+		t.Fatal("symlink escaping the bundle must be rejected")
+	}
+}
+
+func TestBundleMaterializeRejectsDigestChangedSinceAdmission(t *testing.T) {
+	dir := t.TempDir()
+	repo := initGitRepo(t, dir)
+	rev := gitHead(t, repo)
+
+	bundleDir := filepath.Join(dir, "bundle")
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("hello-input")
+	inPath := filepath.Join(bundleDir, "in.txt")
+	if err := os.WriteFile(inPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name := "true"
+	workSpec := execution.WorkSpec{
+		SchemaVersion: execution.SchemaVersion,
+		Command:       execution.Command{Executable: execution.Executable{Name: &name}},
+		Cwd:           execution.PathRef{Root: execution.RootWorkspace, Value: "."},
+		Workspace: execution.Workspace{
+			Kind:     "git",
+			URL:      repo,
+			Revision: rev,
+		},
+		Inputs: []execution.Input{{
+			Name:   "in",
+			Source: "in.txt",
+			Target: "in.txt",
+			SHA256: sha256Hex(payload),
+		}},
+	}
+	work, err := json.Marshal(workSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "work.json"), work, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := placedRequest(t, work)
+	spec := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(spec, req, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adm, err := bundle.Admit(spec, bundleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// TOCTOU: mutate source after admission, before materialize.
+	if err := os.WriteFile(inPath, []byte("mutated-after-admit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := state.Create(filepath.Join(dir, "state"), "run_toctou")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = bundle.Materialize(adm, run)
+	if err == nil {
+		t.Fatal("digest change since admission must fail materialize")
+	}
+	if !strings.Contains(err.Error(), "digest changed since admission") {
+		t.Fatalf("want digest-changed error, got %v", err)
 	}
 }
 

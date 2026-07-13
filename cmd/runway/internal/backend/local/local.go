@@ -21,15 +21,16 @@ type Backend struct{}
 func New() *Backend { return &Backend{} }
 
 type handle struct {
-	cmd    *exec.Cmd
-	pgid   int
-	stdout *os.File
-	stderr *os.File
-	wg     sync.WaitGroup
-	mu     sync.Mutex
-	done   bool
-	exit   backend.Exit
-	err    error
+	cmd        *exec.Cmd
+	pgid       int
+	stdout     *os.File
+	stderr     *os.File
+	wg         sync.WaitGroup
+	mu         sync.Mutex
+	done       bool
+	exit       backend.Exit
+	err        error
+	captureErr error
 }
 
 // Start launches ONE process group with the fully expanded argv. Never a
@@ -49,37 +50,43 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		return nil, fmt.Errorf("local: open stderr log: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, prep.Argv[0], prep.Argv[1:]...)
-	cmd.Dir = prep.Cwd
-	cmd.Env = prep.Env
-	setProcessGroup(cmd)
-
-	stdoutPipe, err := cmd.StdoutPipe()
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		closeAll(stdout, stderr)
 		return nil, fmt.Errorf("local: stdout pipe: %w", err)
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
-		closeAll(stdout, stderr)
+		closeAll(stdoutR, stdoutW, stdout, stderr)
 		return nil, fmt.Errorf("local: stderr pipe: %w", err)
 	}
 
+	cmd := exec.CommandContext(ctx, prep.Argv[0], prep.Argv[1:]...)
+	cmd.Dir = prep.Cwd
+	cmd.Env = prep.Env
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+	setProcessGroup(cmd)
+
 	if err := cmd.Start(); err != nil {
-		closeAll(stdout, stderr)
+		closeAll(stdoutR, stdoutW, stderrR, stderrW, stdout, stderr)
 		return nil, fmt.Errorf("local: start: %w", err)
 	}
+	// Close write ends in the parent so EOF arrives when all holders exit.
+	closeAll(stdoutW, stderrW)
+
 	pgid, err := processGroupID(cmd)
 	if err != nil {
 		_ = cmd.Process.Kill()
-		closeAll(stdout, stderr)
+		_ = cmd.Wait()
+		closeAll(stdoutR, stderrR, stdout, stderr)
 		return nil, fmt.Errorf("local: process group: %w", err)
 	}
 
 	h := &handle{cmd: cmd, pgid: pgid, stdout: stdout, stderr: stderr}
 	h.wg.Add(2)
-	go capture(stdoutPipe, stdout, prep.Secrets, &h.wg)
-	go capture(stderrPipe, stderr, prep.Secrets, &h.wg)
+	go capture(stdoutR, stdout, prep.Secrets, h)
+	go capture(stderrR, stderr, prep.Secrets, h)
 
 	allocID := fmt.Sprintf("pid:%d", cmd.Process.Pid)
 	if err := emit(execution.PhaseStartup, execution.KindPlacementAllocated, map[string]any{
@@ -87,13 +94,20 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		"allocation_id": allocID,
 		"pid":           cmd.Process.Pid,
 	}); err != nil {
-		_ = b.Cleanup(ctx, h)
+		_ = b.abortStart(h)
+		return nil, err
+	}
+	// Local process has no separate guest-readiness signal; emit immediately.
+	if err := emit(execution.PhaseStartup, execution.KindWorkloadReady, map[string]any{
+		"pid": cmd.Process.Pid,
+	}); err != nil {
+		_ = b.abortStart(h)
 		return nil, err
 	}
 	if err := emit(execution.PhaseWorkload, execution.KindWorkloadStarted, map[string]any{
 		"pid": cmd.Process.Pid,
 	}); err != nil {
-		_ = b.Cleanup(ctx, h)
+		_ = b.abortStart(h)
 		return nil, err
 	}
 	return h, nil
@@ -106,6 +120,8 @@ func (b *Backend) Wait(_ context.Context, bh backend.Handle, emit backend.Emit) 
 		return backend.Exit{}, err
 	}
 	waitErr := h.cmd.Wait()
+	// Bound EOF against grandchildren that inherited the pipe write ends.
+	_ = killGroup(h.pgid)
 	h.wg.Wait()
 	closeAll(h.stdout, h.stderr)
 
@@ -120,6 +136,7 @@ func (b *Backend) Wait(_ context.Context, bh backend.Handle, emit backend.Emit) 
 	h.done = true
 	h.exit = backend.Exit{Code: code}
 	h.err = waitErr
+	capErr := h.captureErr
 	h.mu.Unlock()
 
 	if waitErr != nil {
@@ -129,6 +146,9 @@ func (b *Backend) Wait(_ context.Context, bh backend.Handle, emit backend.Emit) 
 		"exit_code": code,
 	}); err != nil {
 		return backend.Exit{Code: code}, err
+	}
+	if capErr != nil {
+		return backend.Exit{Code: code}, fmt.Errorf("local: capture: %w", capErr)
 	}
 	return backend.Exit{Code: code}, nil
 }
@@ -161,6 +181,16 @@ func (b *Backend) Cleanup(_ context.Context, bh backend.Handle) error {
 	return killGroup(h.pgid)
 }
 
+// abortStart tears down a partially-started handle after an emit failure:
+// kill group, drain capture, reap the process, close log files.
+func (b *Backend) abortStart(h *handle) error {
+	_ = killGroup(h.pgid)
+	h.wg.Wait()
+	_ = h.cmd.Wait()
+	closeAll(h.stdout, h.stderr)
+	return nil
+}
+
 func asHandle(bh backend.Handle) (*handle, error) {
 	h, ok := bh.(*handle)
 	if !ok || h == nil {
@@ -177,9 +207,21 @@ func closeAll(files ...*os.File) {
 	}
 }
 
-func capture(r io.Reader, w io.Writer, secrets [][]byte, wg *sync.WaitGroup) {
-	defer wg.Done()
+func capture(r io.Reader, w io.Writer, secrets [][]byte, h *handle) {
+	defer h.wg.Done()
 	redacted := newRedactor(w, secrets)
-	_, _ = io.Copy(redacted, r)
-	_ = redacted.Close()
+	_, copyErr := io.Copy(redacted, r)
+	closeErr := redacted.Close()
+	err := copyErr
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.captureErr == nil {
+		h.captureErr = err
+	}
+	h.mu.Unlock()
 }

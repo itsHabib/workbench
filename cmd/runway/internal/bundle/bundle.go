@@ -47,7 +47,7 @@ func Admit(specPath, bundleDir string) (Admitted, error) {
 	if err != nil {
 		return Admitted{}, fmt.Errorf("bundle: abs bundle: %w", err)
 	}
-	workPath, err := beneath(bundleAbs, req.Work.Manifest)
+	workPath, err := resolveUnder(bundleAbs, req.Work.Manifest)
 	if err != nil {
 		return Admitted{}, fmt.Errorf("bundle: work.manifest: %w", err)
 	}
@@ -66,7 +66,7 @@ func Admit(specPath, bundleDir string) (Admitted, error) {
 		return Admitted{}, err
 	}
 	for i, in := range work.Inputs {
-		src, err := beneath(bundleAbs, in.Source)
+		src, err := resolveUnder(bundleAbs, in.Source)
 		if err != nil {
 			return Admitted{}, fmt.Errorf("bundle: inputs[%d].source: %w", i, err)
 		}
@@ -102,7 +102,7 @@ func Materialize(adm Admitted, run state.RunDir) error {
 }
 
 func materializeInput(bundleDir, inputsDir string, i int, in execution.Input) error {
-	src, err := beneath(bundleDir, in.Source)
+	src, err := resolveUnder(bundleDir, in.Source)
 	if err != nil {
 		return fmt.Errorf("bundle: inputs[%d].source: %w", i, err)
 	}
@@ -116,6 +116,9 @@ func materializeInput(bundleDir, inputsDir string, i int, in execution.Input) er
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("bundle: read input for copy: %w", err)
+	}
+	if sum := sha256Hex(data); sum != in.SHA256 {
+		return fmt.Errorf("bundle: inputs[%d] digest changed since admission", i)
 	}
 	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("bundle: write input: %w", err)
@@ -162,6 +165,29 @@ func checkoutWorkspace(ws execution.Workspace, dest string) error {
 	}
 	tmp = ""
 	return nil
+}
+
+// resolveUnder resolves rel strictly under root, then EvalSymlinks and
+// re-checks the resolved path still lies under the (symlink-resolved) root.
+// Rejects a symlink that escapes the bundle before any ReadFile.
+func resolveUnder(root, rel string) (string, error) {
+	path, err := beneath(root, rel)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	sep := string(filepath.Separator)
+	if resolved != rootResolved && !strings.HasPrefix(resolved, rootResolved+sep) {
+		return "", fmt.Errorf("path %q escapes bundle root", rel)
+	}
+	return resolved, nil
 }
 
 // beneath resolves rel strictly under root. Absolute paths, drive prefixes,

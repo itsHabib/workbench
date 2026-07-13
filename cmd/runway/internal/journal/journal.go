@@ -38,6 +38,9 @@ func Create(path, runID string) (*Writer, error) {
 // Append assigns the next contiguous seq, writes one RunEvent JSON object
 // per line, and Syncs before returning.
 func (w *Writer) Append(phase, kind string, details map[string]any) (execution.RunEvent, error) {
+	if w.f == nil {
+		return execution.RunEvent{}, fmt.Errorf("journal: append on closed writer")
+	}
 	w.seq++
 	ev := execution.RunEvent{
 		SchemaVersion: execution.SchemaVersion,
@@ -90,11 +93,13 @@ func ReadHistory(path string) ([]execution.RunEvent, error) {
 		}
 		ev, err := execution.DecodeEvent(line)
 		if err != nil {
-			// A torn unflushed tail is not a durable event; stop before it.
-			if len(events) > 0 {
-				break
+			// More lines after a bad line => durable mid-journal corruption.
+			// EOF after a bad line => torn unflushed tail (or empty history
+			// when the first line itself was torn).
+			if sc.Scan() {
+				return nil, fmt.Errorf("journal: corrupt mid-journal: %w", err)
 			}
-			return nil, fmt.Errorf("journal: decode: %w", err)
+			break
 		}
 		events = append(events, ev)
 	}

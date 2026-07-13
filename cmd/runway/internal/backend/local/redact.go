@@ -3,6 +3,7 @@ package local
 import (
 	"bytes"
 	"io"
+	"sort"
 )
 
 const redactToken = "[REDACTED]"
@@ -28,6 +29,11 @@ func newRedactor(dst io.Writer, secrets [][]byte) *redactor {
 			maxTail = len(s) - 1
 		}
 	}
+	// Longest-first so a shorter secret cannot shadow a longer one that
+	// contains it (e.g. AB before ABCD must not leave [REDACTED]CD).
+	sort.Slice(kept, func(i, j int) bool {
+		return len(kept[i]) > len(kept[j])
+	})
 	return &redactor{dst: dst, secrets: kept, maxTail: maxTail}
 }
 

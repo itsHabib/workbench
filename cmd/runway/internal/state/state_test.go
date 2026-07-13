@@ -53,6 +53,16 @@ func TestCreateRunDirectoryLayout(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsExistingRunDir(t *testing.T) {
+	root := t.TempDir()
+	if _, err := state.Create(root, "run_dup"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.Create(root, "run_dup"); err == nil {
+		t.Fatal("reusing an existing run dir must fail")
+	}
+}
+
 func TestDefaultRootUsesEnv(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(state.EnvState, dir)
