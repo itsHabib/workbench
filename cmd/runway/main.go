@@ -1,6 +1,6 @@
 // runway — local execution-runtime controller. Owns one foreground run until
-// a single terminal receipt (result.json + run_terminal). Controller loss /
-// reconcile is PR 3.
+// a single terminal receipt (result.json + run_terminal). `reconcile` repairs
+// controller loss for one known run ID (Flow F).
 package main
 
 import (
@@ -17,7 +17,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: runway <run|watch|logs|cancel|result> ...")
+		fmt.Fprintln(os.Stderr, "usage: runway <run|watch|logs|cancel|result|reconcile> ...")
 		os.Exit(controller.ExitUsage)
 	}
 	os.Exit(dispatch(os.Args[1:]))
@@ -35,6 +35,8 @@ func dispatch(args []string) int {
 		return cmdCancel(args[1:])
 	case "result":
 		return cmdResult(args[1:])
+	case "reconcile":
+		return cmdReconcile(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "runway: unknown verb %q\n", args[0])
 	return controller.ExitUsage
@@ -215,6 +217,51 @@ func cmdResult(args []string) int {
 		_ = enc.Encode(res)
 	}
 	return controller.ExitFromResult(res)
+}
+
+func cmdReconcile(args []string) int {
+	fs := flag.NewFlagSet("reconcile", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stateDir := fs.String("state", state.DefaultRoot(), "runway state root")
+	jsonOut := fs.Bool("json", false, "machine output on stdout")
+	if err := fs.Parse(args); err != nil {
+		return controller.ExitUsage
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: runway reconcile <run-id> [--state <dir>] [--json]")
+		return controller.ExitUsage
+	}
+	stateAbs, err := controller.AbsStateRoot(*stateDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return controller.ExitUsage
+	}
+	out, err := controller.Reconcile(stateAbs, fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return mapObserveErr(err)
+	}
+	if *jsonOut {
+		payload := map[string]any{
+			"noop":    out.NoOp,
+			"mutated": out.Mutated,
+		}
+		if out.Result != nil {
+			payload["result"] = out.Result
+		}
+		if out.Owner != nil {
+			payload["owner"] = out.Owner
+		}
+		_ = controller.WriteJSON(os.Stdout, payload)
+	}
+	if out.NoOp {
+		fmt.Fprintln(os.Stderr, "runway: reconcile no-op")
+	}
+	if out.Result != nil {
+		fmt.Fprintf(os.Stderr, "runway: run_id=%s status=%s reason=%s\n",
+			out.Result.RunID, out.Result.Status, out.Result.ReasonCode)
+	}
+	return out.ExitCode
 }
 
 func mapObserveErr(err error) int {

@@ -88,6 +88,11 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 	go capture(stdoutR, stdout, prep.Secrets, h)
 	go capture(stderrR, stderr, prep.Secrets, h)
 
+	if err := writeAllocation(prep.PrivateDir, cmd.Process.Pid, pgid); err != nil {
+		_ = b.abortStart(h)
+		return nil, err
+	}
+
 	allocID := fmt.Sprintf("pid:%d", cmd.Process.Pid)
 	if err := emit(execution.PhaseStartup, execution.KindPlacementAllocated, map[string]any{
 		"backend":       "local",

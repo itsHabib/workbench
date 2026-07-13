@@ -113,6 +113,16 @@ func (r RunDir) CancelRequestPath() string {
 	return filepath.Join(r.PrivateDir(), "cancel.request")
 }
 
+// ClaimPath is private/writer.claim — the atomic exclusive writer claim.
+func (r RunDir) ClaimPath() string {
+	return filepath.Join(r.PrivateDir(), "writer.claim")
+}
+
+// BackendPath is private/backend.json — opaque durable backend allocation.
+func (r RunDir) BackendPath() string {
+	return filepath.Join(r.PrivateDir(), "backend.json")
+}
+
 // Open resolves an existing run directory under the state root. It does not
 // create anything — missing or non-directory paths fail.
 func Open(stateRoot, runID string) (RunDir, error) {

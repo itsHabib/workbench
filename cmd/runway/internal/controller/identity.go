@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
 )
 
 // Identity is the recorded controller process-start identity. Cancel verifies
-// it before signaling; PR 3's writer claim / reconcile will verify the same
-// primitive against PID reuse (TDD open question 4 — Windows creation-time
-// ticks vs Linux /proc starttime). Do not treat PID alone as exclusivity.
+// it before signaling; reconcile verifies the same primitive against PID reuse.
+// Do not treat PID alone as exclusivity — that is the writer claim.
 type Identity struct {
 	PID        int    `json:"pid"`
 	StartTicks uint64 `json:"start_ticks"`
@@ -50,18 +50,12 @@ func readIdentity(run state.RunDir) (Identity, error) {
 }
 
 // liveMatches reports whether pid still refers to the same process-start
-// identity recorded at controller start. StartTicks 0 means the identity was
-// recorded on a platform without a start-time source (unix && !linux) — an
-// unverifiable identity fails closed: cancel never signals on a bare PID.
+// identity recorded at controller start. StartTicks 0 (unix && !linux, or a
+// degraded record) falls back to pid existence — refuse takeover / cancel
+// signaling against a still-alive unverifiable owner rather than treating it
+// as dead.
 func liveMatches(id Identity) bool {
-	if id.StartTicks == 0 {
-		return false
-	}
-	got, err := identityOf(id.PID)
-	if err != nil {
-		return false
-	}
-	return got.PID == id.PID && got.StartTicks == id.StartTicks
+	return claim.LiveMatches(claim.Owner{PID: id.PID, StartTicks: id.StartTicks, Generation: 1})
 }
 
 func selfIdentity() (Identity, error) {
@@ -69,7 +63,7 @@ func selfIdentity() (Identity, error) {
 }
 
 func identityOf(pid int) (Identity, error) {
-	ticks, err := startTicks(pid)
+	ticks, err := claim.StartTicks(pid)
 	if err != nil {
 		return Identity{}, err
 	}
