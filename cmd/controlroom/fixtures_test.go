@@ -388,6 +388,30 @@ func TestGitHubDetailStateFixtures(t *testing.T) {
 	}
 }
 
+func TestPrivacyPatternsCoverStructuredValues(t *testing.T) {
+	quotedAssignment := `{"value":"SERVICE_TOKEN=realvalue1234567890"}`
+	matched := false
+	for _, pattern := range fixtureSecretPatterns {
+		if pattern.name == "generic_env_secret" && pattern.re.MatchString(quotedAssignment) {
+			matched = true
+		}
+	}
+	if !matched {
+		t.Error("generic secret pattern must detect assignments inside structured strings")
+	}
+	for _, path := range []string{`C:\\Users\\operator`, `C:/Users/operator/`} {
+		matched = false
+		for _, pattern := range fixtureHomePatterns {
+			if pattern.MatchString(path) {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Errorf("home path patterns must detect %q", path)
+		}
+	}
+}
+
 type secretPattern struct {
 	name string
 	re   *regexp.Regexp
@@ -401,7 +425,7 @@ func secretPatterns() []secretPattern {
 		{name: "openai_anthropic_key", re: regexp.MustCompile(`sk-(?:ant-)?[A-Za-z0-9]{20,}`)},
 		{
 			name: "generic_env_secret",
-			re:   regexp.MustCompile(`(?i)(?:^|[\s;])(?:[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*=\s*[^\s#]+`),
+			re:   regexp.MustCompile(`(?i)(?:^|[\s;"'{}\[\],:])(?:[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*=\s*[^\s#]+`),
 		},
 		{name: "private_key_pem", re: regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
 	}
@@ -426,7 +450,7 @@ func isPlaceholderSecret(match string) bool {
 
 func homePathPatterns() []*regexp.Regexp {
 	return []*regexp.Regexp{
-		regexp.MustCompile(`[A-Za-z]:\\{1,2}Users\\{1,2}[^\\]+\\{1,2}`),
+		regexp.MustCompile(`(?i)[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}[^\\/"\s]+[\\/]{0,2}`),
 		regexp.MustCompile(`/home/[^/\s]+/`),
 		regexp.MustCompile(`/Users/[^/\s]+/`),
 	}
