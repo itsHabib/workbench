@@ -381,8 +381,9 @@ func finishSnapshot(snapshot *model.Snapshot) {
 }
 
 func (c *Coordinator) publish(epoch uint64, candidate model.Snapshot, updates map[string]sourcePayload) (model.Snapshot, bool) {
-	candidate = policy.ApplyPolicy(candidate, c.now())
-	candidate.GeneratedAt = c.now()
+	now := c.now()
+	candidate = policy.ApplyPolicy(candidate, now)
+	candidate.GeneratedAt = now
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if epoch != c.activeEpoch {

@@ -61,8 +61,8 @@ func (r receipts) retained(source string) bool {
 	if states[model.SourceStale] != 1 {
 		return false
 	}
-	return r.counts[source] == 1 || r.counts[source] == 2 &&
-		(states[model.SourceLoading] == 1 || states[model.SourceUnavailable] == 1)
+	return r.counts[source] == 1 ||
+		(r.counts[source] == 2 && (states[model.SourceLoading] == 1 || states[model.SourceUnavailable] == 1))
 }
 
 func (r receipts) current(source string) bool {

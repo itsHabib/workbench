@@ -303,7 +303,7 @@ func resolveExecutable(value string) (string, error) {
 	}
 	resolved, err := exec.LookPath(value)
 	if err != nil {
-		return "", fmt.Errorf("not found on PATH")
+		return "", fmt.Errorf("not found on PATH: %w", err)
 	}
 	return filepath.Abs(resolved)
 }

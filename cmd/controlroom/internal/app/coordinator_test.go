@@ -69,7 +69,8 @@ func TestSupersededLateResultCannotPublish(t *testing.T) {
 		}
 		return Result{Receipt: okReceipt("ship", testNow), Runs: []model.Run{{ID: "current", Status: "running", UpdatedAt: testNow}}}
 	}})
-	if _, err := coordinator.Refresh("manual"); err != nil {
+	_, firstFlight, err := coordinator.start("manual")
+	if err != nil {
 		t.Fatal(err)
 	}
 	<-firstStarted
@@ -78,7 +79,7 @@ func TestSupersededLateResultCannotPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(releaseFirst)
-	time.Sleep(10 * time.Millisecond)
+	<-firstFlight.done
 	latest := coordinator.Snapshot()
 	if len(snapshot.Runs) != 1 || snapshot.Runs[0].ID != "current" || len(latest.Runs) != 1 || latest.Runs[0].ID != "current" || latest.Version != snapshot.Version {
 		t.Fatalf("superseded epoch published: collected=%+v latest=%+v", snapshot.Runs, latest.Runs)

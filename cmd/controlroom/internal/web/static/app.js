@@ -100,8 +100,8 @@ async function waitForSnapshot(baseline) {
       lastError = error;
     }
   }
-  if (lastError) throw lastError;
   if (latest) throw new Error("diagnostic sources remained loading beyond the collection deadline");
+  if (lastError) throw lastError;
   throw new Error("no newer snapshot arrived within the collection deadline");
 }
 
