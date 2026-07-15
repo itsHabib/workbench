@@ -40,6 +40,13 @@ func TestGateLogLiftsEscalationsAndNonPassVerdicts(t *testing.T) {
 	if events[1].ID != "vrd_2" || events[1].Fields["decision"] != "escalate" {
 		t.Fatalf("bad verdict event: %+v", events[1])
 	}
+	if events[0].Fields["run"] != "run_1" {
+		t.Fatalf("escalation must surface its run for the card, got %q", events[0].Fields["run"])
+	}
+	if v := events[1].Fields; v["repo"] != "itsHabib/ship" || v["number"] != "182" ||
+		v["tier"] != "T3" || v["dimension"] != "reducer" || v["run"] != "run_2" {
+		t.Fatalf("verdict must surface repo/number/tier/dimension/run, got %+v", v)
+	}
 	if cur.LastHash != "h3" {
 		t.Fatalf("cursor must pin the last processed hash, got %q", cur.LastHash)
 	}

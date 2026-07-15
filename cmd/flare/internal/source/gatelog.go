@@ -3,6 +3,7 @@ package source
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
@@ -77,6 +78,10 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	if b.Outcome != "" {
 		title = fmt.Sprintf("%s: %s (%s)", src.Name, strings.ReplaceAll(b.Outcome, "_", " "), env.Run)
 	}
+	fields := map[string]string{"code": b.Code}
+	if env.Run != "" {
+		fields["run"] = env.Run
+	}
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
@@ -85,7 +90,7 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		Severity: event.SevEscalate,
 		Title:    title,
 		Body:     b.Question,
-		Fields:   map[string]string{"code": b.Code},
+		Fields:   fields,
 	}
 }
 
@@ -109,6 +114,29 @@ func verdictEvent(src config.Source, env contracts.Envelope, v contracts.Verdict
 		Severity: sev,
 		Title:    fmt.Sprintf("%s: %s %s (%s, %s)", src.Name, subject, v.Decision, v.Source, v.Tier),
 		Body:     v.Why,
-		Fields:   map[string]string{"decision": v.Decision},
+		Fields:   verdictFields(env, v),
 	}, true
+}
+
+// verdictFields carries the verdict's structured facts so notify can render
+// clean fields and a PR link. Routes still select on "decision"; the rest are
+// presentational and absent when the verdict does not name them.
+func verdictFields(env contracts.Envelope, v contracts.Verdict) map[string]string {
+	fields := map[string]string{"decision": v.Decision}
+	if env.Run != "" {
+		fields["run"] = env.Run
+	}
+	if v.Subject.Repo != "" {
+		fields["repo"] = v.Subject.Repo
+	}
+	if v.Subject.Number > 0 {
+		fields["number"] = strconv.Itoa(v.Subject.Number)
+	}
+	if v.Tier != "" {
+		fields["tier"] = v.Tier
+	}
+	if v.Source != "" {
+		fields["dimension"] = v.Source
+	}
+	return fields
 }
