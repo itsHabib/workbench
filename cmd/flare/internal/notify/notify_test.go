@@ -12,7 +12,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 )
 
-func TestSlackPostRendersEvent(t *testing.T) {
+func TestSlackPostRendersBlockKit(t *testing.T) {
 	const token = "test-token"
 	const channel = "C123"
 	var got slackRequest
@@ -42,6 +42,7 @@ func TestSlackPostRendersEvent(t *testing.T) {
 		Severity: event.SevBlock,
 		Title:    "gate: workbench#33 blocked",
 		Body:     "review found a critical issue\nthat needs judgment",
+		Fields:   map[string]string{"decision": "block", "repo": "itsHabib/workbench", "number": "33"},
 	}
 	if err := postSlack(server.Client(), server.URL, token, channel, ev); err != nil {
 		t.Fatal(err)
@@ -49,9 +50,99 @@ func TestSlackPostRendersEvent(t *testing.T) {
 	if got.Channel != channel {
 		t.Fatalf("channel = %q, want %q", got.Channel, channel)
 	}
-	want := "[block] gate: workbench#33 blocked — review found a critical issue that needs judgment"
-	if got.Text != want {
-		t.Fatalf("text = %q, want %q", got.Text, want)
+	if len(got.Attachments) != 1 {
+		t.Fatalf("want one attachment, got %d", len(got.Attachments))
+	}
+	if c := got.Attachments[0].Color; c != severityColor(event.SevBlock) {
+		t.Fatalf("attachment color = %q, want %q", c, severityColor(event.SevBlock))
+	}
+	blocks := got.Attachments[0].Blocks
+	if len(blocks) == 0 || blocks[0].Type != "header" || blocks[0].Text == nil {
+		t.Fatalf("first block must be a header, got %+v", blocks)
+	}
+	if !strings.Contains(blocks[0].Text.Text, "Blocked") {
+		t.Fatalf("header must lead on the action, got %q", blocks[0].Text.Text)
+	}
+	if !hasSectionContaining(blocks, "critical issue") {
+		t.Fatalf("the why must appear in a section, got %+v", blocks)
+	}
+	if !strings.Contains(got.Text, "Blocked") {
+		t.Fatalf("fallback text must lead on the action, got %q", got.Text)
+	}
+}
+
+func hasSectionContaining(blocks []slackBlock, sub string) bool {
+	for _, b := range blocks {
+		if b.Text != nil && strings.Contains(b.Text.Text, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSlackVerdictHasPRButton(t *testing.T) {
+	msg := renderSlackMessage("C1", event.Event{
+		Source:   "gate",
+		Kind:     "verdict",
+		Severity: event.SevEscalate,
+		Body:     "tier over ceiling",
+		Fields: map[string]string{
+			"decision": "escalate", "repo": "itsHabib/rooms", "number": "71",
+			"tier": "T0", "dimension": "reducer", "run": "run_9",
+		},
+	})
+	blob, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	for _, want := range []string{
+		`"url":"https://github.com/itsHabib/rooms/pull/71"`,
+		"View PR #71",
+		"rooms#71", // header subject, owner stripped
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("verdict message missing %q\n%s", want, s)
+		}
+	}
+}
+
+func TestSlackEscalationHasNoButton(t *testing.T) {
+	msg := renderSlackMessage("C1", event.Event{
+		Source:   "gate",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "needs judgment",
+		Fields:   map[string]string{"run": "run_1"},
+	})
+	blob, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	if strings.Contains(s, `"type":"button"`) {
+		t.Fatalf("an escalation with no PR must carry no button:\n%s", s)
+	}
+	if !strings.Contains(s, "Needs your judgment") {
+		t.Fatalf("escalation header must lead on the action:\n%s", s)
+	}
+}
+
+func TestSlackFallbackLeadsWithActionAndTruncates(t *testing.T) {
+	lead := slackFallback(event.Event{Source: "gate", Severity: event.SevBlock})
+	if !strings.HasPrefix(lead, ":octagonal_sign:") {
+		t.Fatalf("fallback must lead with the severity action, got %q", lead)
+	}
+	long := slackFallback(event.Event{
+		Source:   "gate",
+		Severity: event.SevEscalate,
+		Body:     strings.Repeat("界", slackTextLimit),
+	})
+	if got := utf8.RuneCountInString(long); got > slackTextLimit {
+		t.Fatalf("fallback rune count = %d, want <= %d", got, slackTextLimit)
+	}
+	if !strings.HasSuffix(long, "…") {
+		t.Fatalf("a truncated fallback must end in an ellipsis, got %q", long[len(long)-6:])
 	}
 }
 
@@ -87,28 +178,6 @@ func TestSlackBuildRequestFailureIsSafe(t *testing.T) {
 
 	err := postSlack(http.DefaultClient, endpoint, token, channel, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "build request")
-}
-
-func TestSlackTextIsTruncated(t *testing.T) {
-	text := renderSlackText(event.Event{
-		Source:   "gate",
-		Severity: event.SevEscalate,
-		Title:    "gate: parked",
-		Body:     strings.Repeat("界", slackTextLimit),
-	})
-	if got := utf8.RuneCountInString(text); got != slackTextLimit {
-		t.Fatalf("rune count = %d, want %d", got, slackTextLimit)
-	}
-	if !strings.HasSuffix(text, "…") {
-		t.Fatalf("truncated text must end in ellipsis: %q", text[len(text)-10:])
-	}
-}
-
-func TestSlackTextWithoutDetailHasNoTrailingSeparator(t *testing.T) {
-	text := renderSlackText(event.Event{Source: "gate", Severity: event.SevInfo})
-	if text != "[info] gate" {
-		t.Fatalf("text = %q, want %q", text, "[info] gate")
-	}
 }
 
 func assertSafeSlackError(t *testing.T, err error, token, endpoint, channel, want string) {

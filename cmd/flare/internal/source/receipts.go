@@ -3,6 +3,7 @@ package source
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
@@ -61,8 +62,24 @@ func receiptEvent(src config.Source, r receipt) (event.Event, bool) {
 		Severity: sev,
 		Title:    fmt.Sprintf("%s: %s %s", src.Name, what, r.Outcome),
 		Body:     body,
-		Fields:   map[string]string{"outcome": r.Outcome},
+		Fields:   receiptFields(r),
 	}, true
+}
+
+// receiptFields carries the receipt's structured facts so notify can render
+// clean fields and a PR link. Routes still select on "outcome".
+func receiptFields(r receipt) map[string]string {
+	fields := map[string]string{"outcome": r.Outcome}
+	if r.Repo != "" {
+		fields["repo"] = r.Repo
+	}
+	if r.PRNumber > 0 {
+		fields["number"] = strconv.Itoa(r.PRNumber)
+	}
+	if r.TaskSlug != "" {
+		fields["task"] = r.TaskSlug
+	}
+	return fields
 }
 
 func receiptSeverity(outcome string) (event.Severity, bool) {
