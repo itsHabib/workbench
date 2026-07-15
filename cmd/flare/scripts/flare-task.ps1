@@ -84,7 +84,10 @@ function Get-FlareTask {
 function Register-FlareTask {
     $exe = Resolve-FlareExe
     Write-Host "flare binary: $exe"
-    $action = New-ScheduledTaskAction -Execute $exe -Argument 'watch'
+    # Run headless (no console window). A visible console exits 0xC000013A when
+    # closed, silently killing the daemon; conhost --headless (Windows 11) gives
+    # the console app a window-less host so nothing can Ctrl+C it.
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$exe`" watch"
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -RestartCount 3 `
         -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
