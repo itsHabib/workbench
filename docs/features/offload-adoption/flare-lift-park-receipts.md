@@ -1,7 +1,7 @@
 **Status**: draft
 **Owner**: @michael
 **Date**: 2026-07-13
-**Related**: dossier task `flare-lift-park-receipts` (id: `tsk_01KXDYH4X6KVWJ7357ZBSNGAK1`, workbench project, talk-readiness phase). Cross-repo producer: ship `emit-park-receipts` (`tsk_01KXDYHV5Y3EP1C9Z3WKJ1ADKJ`) — must land first; outcome string pinned to `parked`.
+**Related**: dossier task `flare-lift-park-receipts` (id: `tsk_01KXDYH4X6KVWJ7357ZBSNGAK1`, workbench project, offload-adoption phase). Cross-repo producer: ship `emit-park-receipts` (`tsk_01KXDYHV5Y3EP1C9Z3WKJ1ADKJ`) — must land first; outcome string pinned to `parked`.
 
 # Flare: lift ship park receipts as page-worthy events — design spec
 
@@ -20,7 +20,7 @@ Band: **amazing** — a one-case switch extension, table-test-pinned.
 `receiptSeverity` (`cmd/flare/internal/source/receipts.go`) lifts only `failed` /
 `cancelled`; every other outcome is dropped at the source (the `default` returns `(0, false)`
 so `receiptEvent` skips it). Driver parks (`awaiting_judgment`) — the single most page-worthy
-event for the talk story, "the engine stops and asks for my judgment" — never produce a
+event for the operator-attention story, "the engine stops and asks for my judgment" — never produce a
 notification, even once ship emits them (ship `emit-park-receipts`, outcome pinned to
 `parked`). This is the flare half of the push-on-block gap named in
 `cmd/flare/docs/FOLLOWUPS.md` ask #1.

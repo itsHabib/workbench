@@ -1,7 +1,7 @@
 **Status**: draft
 **Owner**: @michael
 **Date**: 2026-07-13
-**Related**: dossier task `local-usage-report` (id: `tsk_01KXDYG9NZ1T98R00FST9DSV7S`, workbench project, talk-readiness phase)
+**Related**: dossier task `local-usage-report` (id: `tsk_01KXDYG9NZ1T98R00FST9DSV7S`, workbench project, offload-adoption phase)
 
 # local usage: adoption report over the offload usage ledger — design spec
 
@@ -23,7 +23,7 @@ PR #11 gave `local` a write-side usage ledger (`cmd/local/usage.go` appends one 
 
 - Resolve the log via the same path logic as `logUsage` (`LOCAL_USAGE_LOG` → `XDG_STATE_HOME` → `~/.local/state/local/usage.jsonl`) — reuse the existing `usageLogPath` function, do not duplicate it.
 - Report: total invocations, span (first→last ts), per-repo counts (last path segment of `cwd`; full path in `-json`), per-day counts, source split (`local` vs `cloud`), flagged count + rate.
-- `-json` flag emits the same rollup as one JSON document (stable field names) for slide tooling.
+- `-json` flag emits the same rollup as one JSON document (stable field names) for reporting tooling.
 - Missing or empty log → a friendly zero report, exit 0 (absence of data is an answer, not an error). Malformed lines are skipped and counted; the count is reported, never a crash — mirror the best-effort posture of the write side.
 - House style applies: line-of-sight, no `else`, ≤2 nesting levels per scope, stdlib only.
 
@@ -39,4 +39,4 @@ PR #11 gave `local` a write-side usage ledger (`cmd/local/usage.go` appends one 
 
 ## Non-goals
 
-Changing the record shape or write side; charts/rendering (slide tooling consumes `-json`); pruning/rotation of the ledger.
+Changing the record shape or write side; charts/rendering (reporting tooling consumes `-json`); pruning/rotation of the ledger.

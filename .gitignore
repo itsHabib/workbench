@@ -11,3 +11,8 @@ cmd/controlroom/e2e/test-results/
 *.key
 credentials*
 secrets/
+
+# agent-runtime / session state — keep out of a public repo
+.claude/
+.huddle/
+.playwright-mcp/
