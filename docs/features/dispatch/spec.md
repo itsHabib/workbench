@@ -90,7 +90,13 @@ A descriptor no rule matches is an **error**, not a default placement. The polic
 
 ### 4.5 V1 integration: the manifest IS the interface — zero ship changes
 
-`/work-driver-prep` currently hand-guesses `model`/`provider`/`effort` per stream; v1 has prep call `decide` to fill them. Ship consumes the manifest exactly as today, unaware dispatch exists. This defers any ship thin-down (`assign`, `tier-map`) to a post-gate phase — proven demand first. **Reviewer call requested:** is there placement state the manifest can't carry that would force an earlier ship touch? (Known candidate: per-stream escalation policy — today it's manifest-comment prose.)
+`/work-driver-prep` currently hand-guesses per-stream placement; v1 has prep call `decide` to fill it. Ship consumes the manifest exactly as today, unaware dispatch exists. This defers any ship thin-down (`assign`, `tier-map`) to a post-gate phase — proven demand first.
+
+**What the manifest can and cannot carry (v2, per design review):** stream frontmatter already carries `provider`, `runtime`, `model`, `effort` — placement proper fits today. It does **not** carry: `engine` (implicitly ship-driver while that's the only engine prep drives — fine for v1), structured `escalation`, or decision provenance (`rule`, `policy_sha256`). Consequences, stated so no phase-4 integrator assumes otherwise:
+
+- **Escalation is advisory-only end-to-end until phase 5.** It lives in the placement output and the receipt, readable by a human seat; no automated consumer enforces it. A missed escalation surfaces in `drift`, retrospectively (§4.4). Automated enforcement requires a manifest schema extension — deferred to phase 5 deliberately.
+- Decision provenance stays in the receipts file, joined by task slug; the manifest is not the audit trail.
+- `budget?` has the same gap — reserved in the descriptor, carried nowhere in v1 (§10.4).
 
 ### 4.6 Name: `dispatch`, disambiguated by glossary
 
@@ -117,7 +123,13 @@ Collides with ship's `dispatch` verb; accepted deliberately because the airline-
 
 **Task descriptor** (stdin or `--task` flag, JSON): `{ repo, task_class, weighted_loc, risk_tier, budget? }`.
 
-**Placement** (stdout JSON): the matched rule's `place` + `escalation`, plus provenance: `{ rule, policy_version, policy_sha256 }`.
+**Placement** (stdout JSON): `schema_version` (the placement *shape's* own version — distinct from `policy_version`; the CLI is the contract, so the contract versions itself), then the matched rule's `place` + `escalation`, plus provenance: `{ rule, policy_version, policy_sha256 }`.
+
+**Task descriptor taxonomy (frozen in phase 1 — the replay gate depends on it existing first):**
+
+- `task_class` — complexity/novelty only; the schema **enumerates** `mechanical | analytical | generative` (unknown value → exit 2, so a typo in a `match` block fails loudly instead of silently never matching). Size is NOT encoded here — `weighted_loc` already carries it continuously; conflating them makes a large mechanical task and a small analytical one inexpressible.
+- `risk_tier` — imported from `/pr-risk`'s tiers as shared vocabulary (contract, not call stack). Used here as a proxy for model-selection appetite (novelty/judgment), not change-risk; documented at the boundary, and `drift` will surface divergence if the proxy breaks down.
+- Phase 1 also documents the **deterministic derivation rules** (task doc + manifest fields → descriptor). Without this the phase-2 replay is circular — hand-labeled descriptors fitted to historical choices prove nothing about future tasks.
 
 **Receipt** (one JSONL line, append-only): descriptor + placement + `decided_at` — the same evidence-record shape flare and gate already consume.
 
@@ -127,10 +139,23 @@ Versioning: `version` bumps on breaking schema change; the sha256 pins exact con
 
 ```
 dispatch decide --policy <path> [--task <json> | reads stdin] [--receipts <path>]
-    stdout: placement JSON        exit 0
-    exit 2: invalid/missing policy (schema, hash, version)
-    exit 3: no rule matched (fail-closed; add a catch-all if you want one)
+    stdout: placement JSON (schema_version'd)      exit 0
+    exit 2: invalid/missing policy (schema, hash, version, unknown task_class
+            in a match block, or rules: [] — an empty policy is an authoring
+            error, not a descriptor mismatch)
+    exit 3: no rule matched (fail-closed; add a catch-all if you want one);
+            stderr carries the actual unmatched VALUES
+            (task_class=analytical risk_tier=T2), not just field names
     exit 4: invalid task descriptor
+    exit 5: --receipts given but the append failed (fail-closed: an explicitly
+            requested receipt is evidence, not a nicety; no --receipts flag =
+            no receipt attempted, both worlds explicit)
+
+dispatch validate --policy <path>
+    pre-flight for policy authors: schema, hash, task_class enum, catch-all
+    lint (warn if absent). Same loader as decide — ~zero marginal cost, and
+    it means an operator can test a policy edit without a live descriptor.
+    exit 0 valid / exit 2 invalid / exit 1 valid-with-warnings
 
 dispatch drift --policy <path> --scorecard <json-path>
     stdout: drift report (JSON; --md for human form)
@@ -151,9 +176,9 @@ Errors are values on stderr as single-line JSON `{code, message}`; no partial pl
 
 ### 7.2 decide (failure paths — the load-bearing ones)
 
-- Policy unreadable/invalid → exit 2 **before** reading the descriptor. No placement.
-- No rule matches → exit 3, stderr names the descriptor fields that matched nothing. No placement. The caller (prep) surfaces this to the operator instead of guessing — a placement hole is a policy bug, and the fix is a policy edit, not a runtime default.
-- Receipt append fails after placement computed → placement still emitted, exit 0, warning on stderr. Receipts are best-effort evidence, not a transaction (flare precedent, not gate precedent — dispatch decisions are advisory until an engine acts on them).
+- Policy unreadable/invalid/empty (`rules: []`) → exit 2 **before** reading the descriptor. No placement.
+- No rule matches → exit 3, stderr carries the actual unmatched descriptor values. No placement. **Exit 3 forces an operator decision — the caller must never auto-guess a placement.** The fix is a policy edit (then re-run `decide`); if the operator instead hand-places, that is recorded as an explicit override, not a silent default — otherwise the hidden placement policy this tool exists to eliminate reappears one exit code away.
+- `--receipts` given and the append fails after placement computed → **exit 5, fail-closed.** An explicitly requested receipt is evidence — silently dropping the only durable record while the caller proceeds would rot the audit trail and starve the phase-2 gate of data. Without the flag, no receipt is attempted; both modes are explicit. (v2 — flipped from best-effort per design review; Copilot + claude converged on the audit-contract conflict.)
 
 ### 7.3 drift
 
@@ -164,27 +189,27 @@ Errors are values on stderr as single-line JSON `{code, message}`; no partial pl
 
 ## 8. Concurrency / consistency / failure model
 
-Single-shot CLI; no daemon, no shared state beyond the receipts file. Concurrent `decide` invocations appending to one receipts file use O_APPEND single-line writes (< 4KB, atomic on POSIX; on Windows, best-effort — receipts are evidence, not a ledger, per §7.2). No retries anywhere: every failure is deterministic, so retrying is re-running.
+Single-shot CLI; no daemon, no shared state beyond the receipts file. Receipt writes are O_APPEND single-line, but **no cross-process atomicity is claimed** — receipt lines can exceed any atomicity threshold and Windows append semantics are weaker than POSIX. Concurrent `decide` invocations against one receipts file are not a supported evidence-grade mode; prep calls are serial (human-cadence) and the replay harness runs serial. If parallel invocation ever matters, the design is per-decision receipt files + compaction (atomic create/rename), noted here so it's a known successor, not a redesign. No retries anywhere: every failure is deterministic, so retrying is re-running.
 
 ## 9. Rollout / implementation plan
 
 | Phase | Goal | High-level tasks | Depends on | Weighted est. | Gate |
 |---|---|---|---|---|---|
-| 1. `dispatch-decide-core` | `decide` end-to-end: policy load/validate/hash, first-match, placement emit, receipts | policy schema + loader (fail-closed), matcher, receipt writer, CLI + exit codes, table tests over §7.2 paths | — | ~550 (ideal band) | — |
-| 2. `dispatch-replay-validation` | **VALIDATION GATE** — prove decisions match reality | replay harness: descriptors reconstructed from the runway + model-lottery manifests; policy file authored to encode the operator's actual choices; `decide` must reproduce every historical placement (or diverge with a defensible receipt) | 1 | ~250 (tests-heavy) | ✅ go/no-go |
+| 1. `dispatch-decide-core` | `decide` + `validate` end-to-end: policy load/validate/hash, first-match, placement emit, receipts; **taxonomy + derivation frozen here** | policy schema + loader (fail-closed, task_class enum), matcher, receipt writer (exit-5 semantics), `validate` verb, CLI + exit codes, table tests over §7.2 paths **including receipt-presence assertions** (line count = invocation count — the phase-2 gate runs on this data), descriptor-derivation rules documented | — | ~600 (ideal band) | — |
+| 2. `dispatch-replay-validation` | **VALIDATION GATE** — prove decisions match reality | replay harness: descriptors derived from the runway + model-lottery manifests **via the phase-1 rules, not hand-labeled**; policy file authored to encode the operator's actual choices; `decide` must reproduce every historical placement (or diverge with a defensible receipt); negative control proves the gate can fail | 1 | ~250 (tests-heavy) | ✅ go/no-go |
 | 3. `dispatch-drift` | `drift` over the provenance scorecard | scorecard ingest, dominance report, `--md` render | 1 | ~350 | post-gate |
-| 4. `dispatch-prep-integration` | `/work-driver-prep` calls `decide` to fill manifest placement fields | skill edit (cc-skills), descriptor derivation from task docs, fallback-to-manual when exit 3 | 2 | skill-only | post-gate |
+| 4. `dispatch-prep-integration` | `/work-driver-prep` calls `decide` to fill manifest placement fields | skill edit (cc-skills), descriptor derivation from task docs; **exit 3 blocks — forces an operator decision (policy edit, or a hand-placement recorded as an explicit override); prep never auto-guesses** | 2 | skill-only | post-gate |
 | 5. `dispatch-ship-thindown` | ship's `assign`/`tier-map` consume decisions | **stub — do not spec.** Earn with ≥1 month of phase-4 usage | 4 | — | post-gate |
 
 Phases 1–2 are the commitment (~800 weighted total, two PRs). Phases 3–5 are gated: if replay shows the policy language can't express the operator's real choices, the design is wrong and we stop before building `drift`.
 
 ## 10. Open questions
 
-1. **Task-class taxonomy.** `task_class` + `risk_tier` need a real enumeration. Candidates: reuse `/pr-risk`'s tiers (already deterministic-floor'd) vs a new size×novelty grid. Reusing pr-risk couples two planes' vocabularies — probably correct (shared *contract*, not call stack) but needs a deliberate call.
+1. **Task-class taxonomy — RESOLVED in v2** (claude + codex converged: the phase-2 gate is circular unless this freezes in phase 1). `task_class` is complexity-only, enumerated `mechanical | analytical | generative` (§5); size stays in `weighted_loc`; `risk_tier` imports `/pr-risk`'s tiers as shared vocabulary with the proxy caveat documented. Derivation rules land in phase 1. Remaining sub-question: exact derivation heuristics (task-doc keywords vs operator tag) — phase-1 implementation detail, not a design fork.
 2. **Scorecard export shape.** `/provenance --by-model` renders markdown today; `drift` needs JSON. Add `--json` to the skill, or have drift parse the table? (Leaning: `--json` in the skill — parsing rendered markdown is a self-inflicted wound.)
 3. **When does `placement` enter `contracts`?** Phase 4 makes prep a second consumer — that's the earn-it trigger per the charter. Confirm nothing needs it earlier.
 4. **Budget semantics.** The descriptor carries `budget?` but v1 rules don't price anything (no cost telemetry exists — confirmed in ship's store). Keep the field reserved, or drop until telemetry exists?
 
 ## 11. Validation plan
 
-The phase-2 gate, binary and baseline-free: **a policy file exists that (a) passes fail-closed validation, (b) reproduces 100% of the placements the operator actually chose across the runway phase-1 and model-lottery phase-3 manifests (6 streams, 3 models, 2 repos), and (c) every reproduction receipt names the rule that fired.** If the policy language needs per-stream special-casing to hit 100%, the language failed — that's a no-go, not a rounding error. Secondary signal (phase 4, post-gate): one real `/work-driver-prep` run ships with dispatch-filled placement fields and zero manual overrides.
+The phase-2 gate, binary and baseline-free: **a policy file exists that (a) passes fail-closed validation, (b) reproduces 100% of the placements the operator actually chose across the runway phase-1 and model-lottery phase-3 manifests (6 streams, 3 models, 2 repos) — with descriptors derived via the phase-1 rules, never hand-labeled to fit — and (c) every reproduction receipt names the rule that fired.** If the policy language needs per-stream special-casing to hit 100%, the language failed — that's a no-go, not a rounding error. The harness includes a negative control (a descriptor the policy must exit-3 on) proving the gate *can* fail. Secondary signal (phase 4, post-gate): one real `/work-driver-prep` run ships with dispatch-filled placement fields and zero manual overrides.
