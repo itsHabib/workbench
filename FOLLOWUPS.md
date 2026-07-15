@@ -19,25 +19,39 @@ ballot reducer needing the verdict contract). Same day, the operator upgraded
 these three from lazy ("when next touched") to **actively scheduled** — get them
 over. The lazy rule still governs anything born later.
 
-**Done:** flare (2026-07-08), local (2026-07-09).
+**Done:** flare (2026-07-08), local (2026-07-09). flare has since grown as a
+tenant in-repo (Slack channel #34, ship-park-receipt lift #35) — the migrated-in
+pattern is proven to keep taking features.
+
+**Re-validated 2026-07-15** against the 07-13/07-14 merge batch (workbench
+#21–#35, ship #199–#215, gate #14–#17). The sequence still holds; the only
+change is a new tracelens CLI consumer (controlroom) — folded into the kickoff.
 
 **Sequence for the remaining three — tracelens → triage → gate:**
 
-- **tracelens** — SCOPED, ready. Kickoff at
+- **tracelens** — SCOPED, ready, **fire first**. Kickoff at
   `docs/features/tracelens-migration/KICKOFF.md` (2-PR: move, then contracts
-  swap); dossier `tracelens/migrate-into-workbench`. Unblocked since PR #6
-  merged. Fire first — independent of the others.
-- **triage** — clean + dormant (last commit 2026-07-08). Same shape as
-  tracelens, smaller. Dossier `triage/migrate-into-workbench`. Goes second so
-  two consumers are on `contracts` before gate inverts.
+  swap); dossier `tracelens/migrate-into-workbench` (todo). `pers/tracelens@main`
+  is unchanged since PR #6 (docs refresh only) and its verdict type still mirrors
+  `contracts` with the two known deltas — re-verified 2026-07-15. **New:** there
+  are now **two** CLI consumers, not one — ship *and* `cmd/controlroom`
+  (its `internal/adapters/tracelens` `os/exec`'s the `tracelens` binary; no Go
+  import, hygiene stays clean). The byte-identical exit-code + binary-name
+  invariant now protects controlroom too; the kickoff §5 names it.
+- **triage** — clean + dormant (last real commit 2026-07-08, only a docs refresh
+  since — re-verified 2026-07-15). Same shape as tracelens, smaller. Dossier
+  `triage/migrate-into-workbench`. Goes second so two consumers are on
+  `contracts` before gate inverts.
 - **gate** — LAST, and delicate. It is the verdict type's behavioral source of
   truth — `contracts` currently *mirrors* it; migrating inverts that (gate
   *imports* `contracts`, conformance guards move inside, `Reduce`/ladder stay in
   gate). Two constraints: (1) do it after tracelens+triage are on contracts;
-  (2) gate is under **active development** (committing 2026-07-13) — a module
-  move rewrites every import, so wait for its feature push to lull and
-  coordinate with that work. Dossier `gate/migrate-into-workbench` tracks the
-  constraints; not fire-now.
+  (2) gate is under **active development** — the 07-15 sweep shows it *more* busy,
+  not less (#14 talk-readiness, #15 explain-json, #16 decision-trace viewer, #17
+  self-gating via a gate status check + branch protection, all 07-13). A module
+  move rewrites every import; wait for that push to lull and coordinate with the
+  gate session. Dossier `gate/migrate-into-workbench` tracks the constraints;
+  **not fire-now** — its hold is reinforced, not lifted.
 
 **Hygiene note:** `pers/local` received a commit dated 2026-07-12 after being
 declared an archive on 07-09 (the usage-log change that also landed in workbench
