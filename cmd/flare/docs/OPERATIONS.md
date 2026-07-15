@@ -16,6 +16,26 @@ reads each source from its cursor, routes what's new, and sleeps. A Scheduled
 Task keeps that loop alive across logon/reboot; `flare status` is how you prove
 it's still polling.
 
+## Lifecycle: the `flare-task.ps1` script
+
+`cmd/flare/scripts/flare-task.ps1` is the one entry point for every lifecycle
+op. It wraps the raw PowerShell below and encodes the two things that bite you
+by hand: the **UAC elevation** creating a task needs, and the **stop-before-
+rebuild** ordering the Windows exe-lock forces.
+
+| Command | Elevates? | Does |
+|---|---|---|
+| `flare-task.ps1 install`   | yes — self, 1 UAC prompt | register + start the watcher |
+| `flare-task.ps1 update`    | no  | stop → `go install ./cmd/flare` → start (pick up new flare code) |
+| `flare-task.ps1 restart`   | no  | restart the task (reload `routes.json` after an edit) |
+| `flare-task.ps1 status`    | no  | task state + `flare status` |
+| `flare-task.ps1 uninstall` | yes — self, 1 UAC prompt | stop + unregister |
+
+`install` / `uninstall` self-elevate — a non-elevated token (even an admin's,
+under UAC) cannot write the Task Scheduler store. The rest run unprivileged.
+The numbered sections below are what the script does under the hood; reach for
+them to understand or debug, not for day-to-day use.
+
 ## Prerequisites
 
 - Go toolchain on PATH (to build).
@@ -50,7 +70,9 @@ Scheduled Task needs it absolute:
 
 ## 2. Register the always-on watcher
 
-Logon-triggered task, restart-on-failure, one instance:
+`flare-task.ps1 install` does all of this and **self-elevates**. Manual
+equivalent — a logon-triggered task, restart-on-failure, one instance (run from
+an **Admin** shell, or `Register-ScheduledTask` returns `Access is denied`):
 
 ```powershell
 $exe = (Get-Command flare).Source
@@ -72,6 +94,28 @@ Notes:
 - A console window appears at logon. To hide it, wrap the action:
   `-Execute "conhost.exe" -Argument "--headless `"$exe`" watch"` (Windows 11),
   or a `powershell -WindowStyle Hidden -Command "flare watch"` shim.
+
+## Updating flare after a code change
+
+The task runs a **compiled binary** (`~/go/bin/flare.exe`), not `go run` — a
+daemon shouldn't recompile on every restart. So a flare code change doesn't
+reach the watcher until you rebuild and relaunch. Windows **locks a running
+`.exe`**, so the order is fixed — stop, rebuild, start:
+
+```powershell
+flare-task.ps1 update      # stop -> go install ./cmd/flare -> start
+```
+
+Under the hood:
+
+```powershell
+Stop-ScheduledTask  -TaskName flare-watch          # releases the .exe lock
+go install ./cmd/flare                             # run from the repo root
+Start-ScheduledTask -TaskName flare-watch          # relaunch on the new binary
+```
+
+A **config-only** change (editing `routes.json`) needs no rebuild — just
+`flare-task.ps1 restart`, which reloads the loop.
 
 ## 3. Configure the phone rung
 
@@ -112,6 +156,8 @@ of a cycle — use it to test without waiting on the loop.
 
 ## 5. Read status / troubleshoot
 
+`flare-task.ps1 status` rolls the task state and `flare status` into one. The raw pieces:
+
 ```powershell
 flare status | ConvertFrom-Json | Format-List           # healthy, last_poll, per-source cursors, recent journal tail
 Get-ScheduledTask -TaskName flare-watch | Get-ScheduledTaskInfo   # LastRunTime, LastTaskResult, next run
@@ -125,6 +171,8 @@ Get-Content "$env:USERPROFILE\.flare\journal.jsonl" -Tail 20     # delivery jour
   broke; flare resweeps rather than silently resetting.
 
 ## 6. Uninstall
+
+`flare-task.ps1 uninstall` (self-elevates). Manual equivalent:
 
 ```powershell
 Stop-ScheduledTask       -TaskName flare-watch
