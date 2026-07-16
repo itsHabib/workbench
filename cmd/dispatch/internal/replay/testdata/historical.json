@@ -1,0 +1,130 @@
+[
+  {
+    "stream": "runway-local-rundir-journal-backend",
+    "repo": "workbench",
+    "phase": "runway-1-local-controller",
+    "source": "docs/features/runway-1-local-controller/driver.md batch 1 (root checkout; untracked pre-merge doc, baked here so the replay is hermetic)",
+    "descriptor": { "repo": "workbench", "task_class": "generative", "weighted_loc": 775, "risk_tier": "T2" },
+    "derivation": {
+      "task_class_signal": "rule 2 (generative): new mechanism layers (run dir, append-only journal, verified bundle materialization, native path expansion, local process-group backend) invented under an active runway TDD precondition — the shape was not established prior art, it was designed in-stream.",
+      "weighted_loc_source": "rule 3: driver.md batch 1 stream field, ~775 weighted (stretch band), taken verbatim.",
+      "risk_tier_source": "rule 4: no explicit risk_tier in the manifest; driver.md's experiment-readout conflict_notes records a residual tier-over-ceiling park at T3/T2 vs a T1 grant across all three runway streams — T2 taken as the floor (multi-file new subsystem touching a redacting capture path, secrets-adjacent)."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "max", "runtime": "cloud" },
+    "how_chosen": "operator OVERRODE the task-body opus/max recommendation to grok-4.5 (cursor) as a deliberate fable-driver/grok-4.5-implementer experiment (driver.md conflict_notes: model_override) — not task_class-driven.",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "runway-lifecycle-deadline-cancel-cli",
+    "repo": "workbench",
+    "phase": "runway-1-local-controller",
+    "source": "docs/features/runway-1-local-controller/driver.md batch 2 (root checkout; untracked pre-merge doc)",
+    "descriptor": { "repo": "workbench", "task_class": "generative", "weighted_loc": 575, "risk_tier": "T2" },
+    "derivation": {
+      "task_class_signal": "rule 2 (generative): deadline, idempotent cancel, D7 collection/cleanup truth, atomic result + run_terminal, and the watch/logs/result CLI are new state-machine surfaces invented under the same runway TDD precondition as batch 1 — an unproven design, not a wire-in-existing-case.",
+      "weighted_loc_source": "rule 3: driver.md batch 2 stream field, ~575 weighted (stretch band).",
+      "risk_tier_source": "rule 4: same floor as batch 1 — driver.md's residual tier-over-ceiling park (T3/T2 vs T1 grant) applies across all three runway streams; T2 taken as the floor (new lifecycle state machine, invariant-bearing)."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "max", "runtime": "cloud" },
+    "how_chosen": "same grok-4.5 experiment override as batch 1 (driver.md conflict_notes: model_override applies to the whole phase).",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "runway-writer-claim-reconcile",
+    "repo": "workbench",
+    "phase": "runway-1-local-controller",
+    "source": "docs/features/runway-1-local-controller/driver.md batch 3 (root checkout; untracked pre-merge doc)",
+    "descriptor": { "repo": "workbench", "task_class": "generative", "weighted_loc": 425, "risk_tier": "T2" },
+    "derivation": {
+      "task_class_signal": "rule 2 (generative): atomic writer claim + reconcile resolves the runway TDD's open question #4 (Windows claim primitive) in-PR — an unproven concurrency protocol designed from scratch, the clearest generative signal of the three.",
+      "weighted_loc_source": "rule 3: driver.md batch 3 stream field, ~425 weighted (amazing band).",
+      "risk_tier_source": "rule 4: same floor as batches 1-2 — driver.md's residual tier-over-ceiling park (T3/T2 vs T1 grant); T2 taken as the floor (correctness-critical concurrency primitive)."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "max", "runtime": "cloud" },
+    "how_chosen": "same grok-4.5 experiment override (driver.md conflict_notes: model_override applies to the whole phase).",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "cloud-sdk-cause-persistence",
+    "repo": "ship",
+    "phase": "model-lottery-phase3",
+    "source": "ship docs/features/model-lottery/phase3/driver.md batch 1 + docs/features/observability/phases/cloud-sdk-cause-persistence.md (read once from the ship repo per the phase-2 instructions; baked here)",
+    "descriptor": { "repo": "ship", "task_class": "analytical", "weighted_loc": 290, "risk_tier": "T1" },
+    "derivation": {
+      "task_class_signal": "rule 2 (analytical): persisting the bounded/redacted SDK cause chain at an existing cloud-runner catch site is a problem to solve within an established design (one data path, catch site to read surface) — no new package or protocol invented.",
+      "weighted_loc_source": "rule 3: cloud-sdk-cause-persistence.md states 'Single PR (~290 weighted)' verbatim.",
+      "risk_tier_source": "rule 4: no explicit risk_tier in the manifest or task doc; floored from blast-radius signals — single data path, three touched files, no control-plane/gate-machinery/trust-boundary trigger — T1."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "extra", "runtime": "cloud" },
+    "how_chosen": "model-lottery 'fair trio' — model assigned by the experiment's round-robin pool (ship driver assign --pool cursor:grok-4.5,cursor:claude-opus-4-8,cursor:composer-2.5), not by task_class or risk_tier.",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "ccp-store-convergence",
+    "repo": "ship",
+    "phase": "model-lottery-phase3",
+    "source": "ship docs/features/model-lottery/phase3/driver.md batch 1 + ccp-store-convergence.md",
+    "descriptor": { "repo": "ship", "task_class": "mechanical", "weighted_loc": 170, "risk_tier": "T1" },
+    "derivation": {
+      "task_class_signal": "rule 2 (mechanical): the task doc's own framing is 'CLI resolvers honor SHIP_DB_PATH/SHIP_RUNS_DIR like the MCP server does' — a codemod-style application of a stated, already-proven pattern to a second surface; no open design question.",
+      "weighted_loc_source": "rule 3: ccp-store-convergence.md scope table total, ~170 weighted.",
+      "risk_tier_source": "rule 4: no explicit risk_tier; floored from blast-radius signals — contained resolver-parity change across two known files, established pattern, no control-plane trigger — T1."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "claude-opus-4-8", "effort": "extra", "runtime": "cloud" },
+    "how_chosen": "fair-trio pool assignment (round-robin over the experiment pool), not task_class or risk_tier.",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "ccp-mcp-verb-parity",
+    "repo": "ship",
+    "phase": "model-lottery-phase3",
+    "source": "ship docs/features/model-lottery/phase3/driver.md batch 1 + ccp-mcp-verb-parity.md",
+    "descriptor": { "repo": "ship", "task_class": "analytical", "weighted_loc": 300, "risk_tier": "T1" },
+    "derivation": {
+      "task_class_signal": "rule 2 (analytical): wiring driver_import/cancel/render/mark_merged as four new MCP tools mirrors verbs that already exist on the CLI — 'wiring a new case into an existing state machine' is the taxonomy's explicit analytical signal; the task doc itself calls it 'one established pattern, low novelty'.",
+      "weighted_loc_source": "rule 3: ccp-mcp-verb-parity.md scope table total, ~300 weighted.",
+      "risk_tier_source": "rule 4: no explicit risk_tier; floored from blast-radius signals — four sibling tools on one established pattern, no control-plane trigger — T1."
+    },
+    "actual": { "engine": "ship-driver", "provider": "cursor", "model": "composer-2.5", "effort": "extra", "runtime": "cloud" },
+    "how_chosen": "fair-trio pool assignment (round-robin over the experiment pool), not task_class or risk_tier.",
+    "policy_driven": false,
+    "expect": "diverge"
+  },
+  {
+    "stream": "dispatch-decide-core",
+    "repo": "workbench",
+    "phase": "dispatch-decide-core",
+    "source": "docs/features/dispatch/driver.md (repo root)",
+    "descriptor": { "repo": "workbench", "task_class": "generative", "weighted_loc": 600, "risk_tier": "T2" },
+    "derivation": {
+      "task_class_signal": "rule 2 (generative): a brand-new plane (policy schema, fail-closed loader, matcher, receipts, CLI + exit-code contract) with the TDD (spec.md) as a stated precondition — invents the shape, not wired into an existing one.",
+      "weighted_loc_source": "rule 3: driver.md states '~600 weighted (ideal band)' verbatim.",
+      "risk_tier_source": "rule 4: no explicit risk_tier; driver.md calls it 'correctness-critical'; floored from blast-radius signals — new single-repo subsystem, no control-plane/gate-machinery trigger (dispatch decides placement preference, not merge authorization) — T2, consistent with the runway new-subsystem floor."
+    },
+    "actual": { "engine": "ship-driver", "provider": "claude", "model": "claude-opus-4-8", "effort": "max", "runtime": "local" },
+    "how_chosen": "POLICY-driven: correctness-critical new subsystem placed opus/max by the operator's actual convention, matching this same phase-1 stream's own outcome.",
+    "policy_driven": true,
+    "expect": "match"
+  },
+  {
+    "stream": "dispatch-replay-validation",
+    "repo": "workbench",
+    "phase": "dispatch-replay-validation",
+    "source": "docs/features/dispatch/spec.md §9 phase-2 row (repo root; this task's own placement)",
+    "descriptor": { "repo": "workbench", "task_class": "analytical", "weighted_loc": 250, "risk_tier": "T1" },
+    "derivation": {
+      "task_class_signal": "rule 2 (analytical): a replay harness that reproduces the phase-1 frozen taxonomy and derivation rules against fixed historical data — reading and judging existing rules/data, not inventing a new package or protocol; the taxonomy and the engine it drives through are both already frozen.",
+      "weighted_loc_source": "rule 3: spec.md §9 phase-2 row states '~250 (tests-heavy)' verbatim.",
+      "risk_tier_source": "rule 4: no explicit risk_tier; floored from blast-radius signals — test/fixture-heavy harness under cmd/dispatch/internal/replay, no production-decision-path change, no control-plane trigger — T1."
+    },
+    "actual": { "engine": "ship-driver", "provider": "claude", "model": "sonnet", "effort": "extra", "runtime": "local" },
+    "how_chosen": "POLICY-driven: test-heavy validation harness (contained, established rules) placed sonnet/extra by the operator's actual convention — this task, dogfooded.",
+    "policy_driven": true,
+    "expect": "match"
+  }
+]

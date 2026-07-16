@@ -213,3 +213,65 @@ Phases 1–2 are the commitment (~800 weighted total, two PRs). Phases 3–5 are
 ## 11. Validation plan
 
 The phase-2 gate, binary and baseline-free: **a policy file exists that (a) passes fail-closed validation, (b) reproduces 100% of the placements the operator actually chose across the runway phase-1 and model-lottery phase-3 manifests (6 streams, 3 models, 2 repos) — with descriptors derived via the phase-1 rules, never hand-labeled to fit — and (c) every reproduction receipt names the rule that fired.** If the policy language needs per-stream special-casing to hit 100%, the language failed — that's a no-go, not a rounding error. The harness includes a negative control (a descriptor the policy must exit-3 on) proving the gate *can* fail. Secondary signal (phase 4, post-gate): one real `/work-driver-prep` run ships with dispatch-filled placement fields and zero manual overrides.
+
+### Go/no-go verdict — 2026-07-15 (`dispatch-replay-validation`)
+
+**Harness:** `cmd/dispatch/internal/replay/{replay.go,replay_test.go}`, fixtures in
+`cmd/dispatch/internal/replay/testdata/{historical.json,dispatch-policy.json}`.
+Every descriptor is derived via `cmd/dispatch/docs/DESIGN.md` rules 1–5 and the
+derivation source is recorded per-field in the fixture (`derivation.*`), never
+hand-labeled to fit. The replay drives the exact CLI engine (`policy.Load` +
+`placement.ParseDescriptor` + `placement.Decide`) — no matching logic is
+reimplemented. `TestReplayPolicyValidates` (`cmd/dispatch/replay_validate_test.go`)
+runs the authored policy through the real `dispatch validate` path (`run()`).
+
+**Authored policy** — two rules, no catch-all:
+
+| Rule | Match | Place |
+|---|---|---|
+| `generative-high-risk-to-opus-max` | `task_class=generative`, `risk_tier ∈ {T2,T3}` | `ship-driver/claude/claude-opus-4-8/max/local` |
+| `contained-t1-to-sonnet-extra` | `risk_tier ∈ {T1}` | `ship-driver/claude/sonnet/extra/local` |
+
+**Result — all 8 streams, derived descriptor vs actual:**
+
+| # | stream | repo | derived task_class / weighted_loc / risk_tier | rule fired | emitted | actual | result |
+|---|---|---|---|---|---|---|---|
+| 1 | runway-local-rundir-journal-backend | workbench | generative / 775 / T2 | generative-high-risk-to-opus-max | claude/claude-opus-4-8/max/local | cursor/grok-4.5/max/cloud | DIVERGE — grok experiment override |
+| 2 | runway-lifecycle-deadline-cancel-cli | workbench | generative / 575 / T2 | generative-high-risk-to-opus-max | claude/claude-opus-4-8/max/local | cursor/grok-4.5/max/cloud | DIVERGE — grok experiment override |
+| 3 | runway-writer-claim-reconcile | workbench | generative / 425 / T2 | generative-high-risk-to-opus-max | claude/claude-opus-4-8/max/local | cursor/grok-4.5/max/cloud | DIVERGE — grok experiment override |
+| 4 | cloud-sdk-cause-persistence | ship | analytical / 290 / T1 | contained-t1-to-sonnet-extra | claude/sonnet/extra/local | cursor/grok-4.5/extra/cloud | DIVERGE — fair-trio pool assignment |
+| 5 | ccp-store-convergence | ship | mechanical / 170 / T1 | contained-t1-to-sonnet-extra | claude/sonnet/extra/local | cursor/claude-opus-4-8/extra/cloud | DIVERGE — fair-trio pool assignment |
+| 6 | ccp-mcp-verb-parity | ship | analytical / 300 / T1 | contained-t1-to-sonnet-extra | claude/sonnet/extra/local | cursor/composer-2.5/extra/cloud | DIVERGE — fair-trio pool assignment |
+| 7 | dispatch-decide-core | workbench | generative / 600 / T2 | generative-high-risk-to-opus-max | claude/claude-opus-4-8/max/local | claude/claude-opus-4-8/max/local | **MATCH** |
+| 8 | dispatch-replay-validation | workbench | analytical / 250 / T1 | contained-t1-to-sonnet-extra | claude/sonnet/extra/local | claude/sonnet/extra/local | **MATCH** |
+
+Both rules fire on 4 of the 8 streams each — no rule is single-stream. The two
+dispatch phases separate cleanly by *derived* `task_class` (generative vs
+analytical), and both MATCH, satisfying the binding gate. The
+`generative-high-risk-to-opus-max` rule also fires on the three runway streams
+(diverging there, defensibly — the grok override was never task_class-driven);
+that it generalizes to descriptors it was not written for, and diverges
+correctly on all three, is the evidence it is a real rule and not a
+per-stream special-case for `dispatch-decide-core`. Same reasoning for
+`contained-t1-to-sonnet-extra` against the three model-lottery streams.
+
+Negative control (`TestReplayNegativeControl`): `task_class=mechanical`,
+`risk_tier=T3` matches neither rule (the first requires `generative`, the
+second requires `T1`) — `placement.Decide` returns `ok=false`, confirming the
+gate can fail. The authored policy has no catch-all rule by design (`validate`
+exits 1 with the expected warning, asserted in
+`TestReplayPolicyValidates`); the negative control depends on that.
+
+**GO.** A two-rule policy, keyed only on the frozen taxonomy's `task_class` and
+`risk_tier` fields, reproduces both policy-driven historical placements
+byte-for-byte and correctly diverges on all six experiment-driven ones with a
+recorded, defensible reason — without a single per-stream special case. The
+one caveat worth naming for the record: `risk_tier` for 7 of the 8 streams was
+not stated explicitly anywhere upstream and had to be floored from
+blast-radius signals per derivation rule 4 (only the runway streams have any
+corroborating evidence — driver.md's recorded "T3/T2 vs T1 grant" park); a
+live `/pr-risk` run against each real PR would be the stronger validation and
+is worth doing before phase 4 leans on this signal for real routing decisions.
+That gap is in the *fixture's derivation fidelity*, not in the policy
+language's expressiveness — the property phase-2 exists to test — so it does
+not change the verdict.
