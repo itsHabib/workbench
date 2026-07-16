@@ -88,8 +88,9 @@ function Register-FlareTask {
     # Start-ScheduledTask (State stays Queued, no process spawned). This shim
     # launches reliably with no visible window and uses the resolved binary path
     # instead of relying on PATH in the task session.
+    $exeQuoted = $exe.Replace("'", "''")
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-WindowStyle Hidden -NoProfile -Command `"& '$exe' watch`""
+        -Argument "-WindowStyle Hidden -NoProfile -Command `"& '$exeQuoted' watch`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     # IgnoreNew: a second start while one is tracked is dropped. Orphans are
     # force-killed in Stop-FlareAndWait before update/restart, so a stale
@@ -108,6 +109,7 @@ function Register-FlareTask {
 }
 
 # Stop the task, force-kill any flare on $Exe (orphans miss Stop-ScheduledTask),
+# wait for the task shim to leave Running (IgnoreNew drops Start while Running),
 # then wait for exit so `go install` can overwrite the binary.
 function Stop-FlareAndWait {
     param([string]$Exe)
@@ -116,13 +118,21 @@ function Stop-FlareAndWait {
     while ((Get-Date) -lt $deadline) {
         $procs = Get-Process -Name flare -ErrorAction SilentlyContinue |
                  Where-Object { $_.Path -eq $Exe }
-        if (-not $procs) { return }
-        foreach ($proc in $procs) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        if ($procs) {
+            foreach ($proc in $procs) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Milliseconds 300
+            continue
         }
-        Start-Sleep -Milliseconds 300
+        $task = Get-FlareTask
+        if ($task -and $task.State -eq 'Running') {
+            Start-Sleep -Milliseconds 300
+            continue
+        }
+        return
     }
-    Write-Warning "flare still running after 15s; 'go install' may fail to overwrite $Exe"
+    Write-Warning "flare or '$TaskName' still active after 15s; 'go install' / restart may fail"
 }
 
 function Show-Status {
