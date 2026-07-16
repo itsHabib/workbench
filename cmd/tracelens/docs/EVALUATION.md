@@ -7,8 +7,8 @@ one impressive demo.
 ## Run the gate
 
 ```sh
-go run ./cmd/tracelens eval testdata/corpus
-go run ./cmd/tracelens eval -json testdata/corpus
+go run ./cmd/tracelens eval cmd/tracelens/testdata/corpus
+go run ./cmd/tracelens eval -json cmd/tracelens/testdata/corpus
 ```
 
 The command exits 0 when the checked-in policy passes, 1 for a label or metric

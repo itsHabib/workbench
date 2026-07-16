@@ -46,6 +46,11 @@ not the move's to fix (its contract is byte-identical output):
   the real `A,X`-run start at 2). Changing the scan changes detector
   behavior, so it is owed to tracelens's own iteration with a corpus case
   that pins the improvement — not to a relocation diff.
+- **A Claude stream truncated right after an `assistant` `tool_use` event
+  decodes as "unrecognized ship event dialect"** (exit 2) instead of an
+  analyzable aborted run — the dialect markers only key on `user`/`result`
+  events. Same rule as above: a decoder-behavior change, owed to
+  tracelens's own iteration with a truncated-at-tool_use corpus case.
 
 ## flare migration — choices made
 
