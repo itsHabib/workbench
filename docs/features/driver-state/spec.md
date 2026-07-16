@@ -29,6 +29,10 @@ executor becomes swappable (ship's engine, an LLM session, a human) without any 
 (`/wip`, `/shipped`, render, flare) caring who did the work. Prose shrinks, guarantees grow.
 
 **Non-goals:**
+- NOT a change to ship-driven /work-driver. The regular ship-engine drive keeps working
+  exactly as today — its store, its verbs, its flow, untouched. This plane is *additive*: it
+  gives a drive that chooses not to use ship somewhere to record. Per-drive component choice
+  is the point; replacing components is not.
 - NOT a rebuild of ship's engine or store in Go. Ship keeps its SQLite store and its engine;
   this plane records *events about* driver work, it does not drive dispatch, poll runners, or
   merge PRs.
@@ -90,12 +94,15 @@ shared-mechanism precedent. What's new: the event vocabulary, the reducer, the M
 
 ## 4. Key decisions & trade-offs
 
-**D1 — workbench owns the contract; ship is (at most) one writer.**
+**D1 — workbench owns the contract; engines are peers that choose their store.**
 Alternative: grow ship's store outward (add `driver record` verbs to ship, as first sketched
 in conversation). Rejected because gate/triage/tracelens are consolidating into workbench and
 ship likely never migrates — anchoring the cross-tool contract in the one repo that's leaving
-the family inverts the dependency. Ship's store remains ship's private state; the *shared*
-record is workbench's. Cost: during transition, `/wip`/`/shipped` read two stores (§9 P5).
+the family inverts the dependency. But this is NOT a demotion of ship: a ship-engine drive
+keeps recording to ship's store exactly as today; a session-engine drive records here. The
+operator picks the components per drive. Cost: `/wip`/`/shipped` read two stores for as long
+as both engines are in use — that's a permanent, cheap read-side join, not a transition to be
+retired (§9 P5 makes ship→driver-state emission optional, never required).
 
 **D2 — append-only event ledger + pure reducer, not a mutable-row store.**
 Alternative: SQLite tables mirroring ship's `driver_runs/streams`. Rejected: events are the
@@ -258,7 +265,7 @@ for the `driver list` grok-4.5 failure class.
 | P2 | `driver-state-ledger` | `driverstate/` package: Append/Reduce/Runs/Verify + lock + chain | append+validate; reducer; tolerant listing; verify; lock (reuse gate pattern) | P1 | — | ~600 (split into 2 PRs: write path / read path) |
 | P3 | `workbench-mcp-v0` | `cmd/workbench-mcp` stdio server exposing the four driver verbs + `cmd/driverstate` CLI | MCP server scaffold; verb handlers; CLI mirror; state-dir config | P2 | **VALIDATION GATE** (§11) | ~450 |
 | P4 | `session-engine-skill` | `/work-driver --engine session` skill variant recording through MCP | skill text; resume flow; N≤3 scope; grant-resolution step (pre-minted, never mint) | P3 gate | — | skill prose, ~0 code |
-| P5 | `ship-bridge` (stub) | ship emits driver-state events / readers merge two stores | decide bridge vs read-both; only if P3 gate passes AND ship stays alive | P3 gate | post-gate | TBD |
+| P5 | `two-store read join` (stub) | `/wip`/`/shipped` read ship's store AND the ledger as peers | read-side join in the skills; optional ship→driver-state emission only if it ever earns its keep | P3 gate | post-gate | TBD |
 | P6 | `ship-policy-hardening` (parallel, ship repo) | `.ship.json` enforced at `ShipService.startShip`; credential-source constraint (`claude` token source + gh account per repo) | ShipService check; policy `credentials` key; tests | — (independent) | — | ~300 |
 
 Phases P1–P3 are the committed spine (this week's target: P1+P2 moving, P3 opened). P4 is
