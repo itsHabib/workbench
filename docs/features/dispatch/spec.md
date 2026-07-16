@@ -171,14 +171,14 @@ Errors are values on stderr as single-line JSON `{code, message}`; no partial pl
 1. Load policy → validate schema → compute sha256.
 2. Parse descriptor → validate required fields.
 3. First-match scan of `rules` in file order.
-4. Emit placement to stdout; append receipt (descriptor, placement, rule name, policy hash, timestamp).
-5. Exit 0. Steps 1–3 are pure; the only write is the receipt append.
+4. If `--receipts`: append the receipt (descriptor, placement, rule name, policy hash, timestamp) **first** — a failed append exits 5 with nothing on stdout, preserving the "no placement on non-zero exit" invariant (v2.1, codex: stdout-before-receipt would hand callers a placement from a failed invocation).
+5. Emit placement to stdout; exit 0. Steps 1–3 are pure; the only write is the receipt append.
 
 ### 7.2 decide (failure paths — the load-bearing ones)
 
 - Policy unreadable/invalid/empty (`rules: []`) → exit 2 **before** reading the descriptor. No placement.
 - No rule matches → exit 3, stderr carries the actual unmatched descriptor values. No placement. **Exit 3 forces an operator decision — the caller must never auto-guess a placement.** The fix is a policy edit (then re-run `decide`); if the operator instead hand-places, that is recorded as an explicit override, not a silent default — otherwise the hidden placement policy this tool exists to eliminate reappears one exit code away.
-- `--receipts` given and the append fails after placement computed → **exit 5, fail-closed.** An explicitly requested receipt is evidence — silently dropping the only durable record while the caller proceeds would rot the audit trail and starve the phase-2 gate of data. Without the flag, no receipt is attempted; both modes are explicit. (v2 — flipped from best-effort per design review; Copilot + claude converged on the audit-contract conflict.)
+- `--receipts` given and the append fails after placement computed → **exit 5, fail-closed, nothing on stdout** — the receipt writes before the placement is emitted (§7.1 step 4), so a caller can never consume a placement from a failed invocation. An explicitly requested receipt is evidence — silently dropping the only durable record while the caller proceeds would rot the audit trail and starve the phase-2 gate of data. Without the flag, no receipt is attempted; both modes are explicit. (v2 — flipped from best-effort per design review, Copilot + claude; v2.1 — write ordering fixed per codex.)
 
 ### 7.3 drift
 
