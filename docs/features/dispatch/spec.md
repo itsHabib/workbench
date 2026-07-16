@@ -44,7 +44,7 @@ Consequences, all observed in real runs: the policy can't route *across* engines
 |---|---|
 | Determinism | FR4; no clock, no randomness, no network in `decide` |
 | Failure model | fail-closed: invalid policy or unmatched descriptor → non-zero exit, **no fallback placement** (§7.2) |
-| Dependencies | stdlib-only Go, per workbench charter |
+| Dependencies | stdlib-only Go — justified, not dogma: the whole surface is JSON, sha256, file append, flag parsing (all stdlib-native); the charter permits pinned deps when earned, and none is. JSON over YAML for the policy file keeps it that way |
 | Auditability | receipts are append-only JSONL; policy hash pins every decision |
 | Composition | artifacts only (exit codes + JSONL); no other tool imports dispatch's decision logic (boundary law) |
 
