@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "poll_seconds": 60,
+  "sources": [
+    {"name": "gate", "kind": "gate-log", "path": "/home/operator/.gate/log.jsonl"},
+    {"name": "ship", "kind": "ship-receipts", "path": "/home/operator/.ship/receipts.jsonl"}
+  ],
+  "channels": {
+    "slack": {"type": "slack", "token": "xoxb-REPLACE", "channel": "C0REPLACE"},
+    "toast": {"type": "toast"}
+  },
+  "routes": [
+    {"match": {"source": "gate", "decision": "block"}, "channel": "slack"},
+    {"match": {"source": "gate", "kind": "escalation"}, "channel": "slack"},
+    {"match": {"source": "ship", "outcome": "parked"}, "channel": "slack"},
+    {"match": {"source": "ship", "outcome": "failed|cancelled"}, "channel": "toast", "throttle_seconds": 300}
+  ],
+  "catch_all": "toast"
+}
