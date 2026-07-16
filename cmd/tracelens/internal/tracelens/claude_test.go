@@ -3,6 +3,8 @@ package tracelens
 import (
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 func TestParseClaudeEvents_PairsParallelToolResults(t *testing.T) {
@@ -95,8 +97,8 @@ func TestParseClaudeEvents_ErrorResultDeclaresRunFailure(t *testing.T) {
 		t.Fatalf("DeclaredFailure = %q, want the result error", tr.DeclaredFailure)
 	}
 	report := Analyze(tr, DefaultConfig())
-	if report.Decision != DecisionBlock {
-		t.Fatalf("decision = %q, want %q — an error result must not gate-pass on tool outcomes", report.Decision, DecisionBlock)
+	if report.Decision != contracts.DecisionBlock {
+		t.Fatalf("decision = %q, want %q — an error result must not gate-pass on tool outcomes", report.Decision, contracts.DecisionBlock)
 	}
 }
 
@@ -110,8 +112,8 @@ func TestParseClaudeEvents_ResultOnlyFailureStillBlocks(t *testing.T) {
 		t.Fatalf("a declared failure must decode, not error: %v", err)
 	}
 	report := Analyze(tr, DefaultConfig())
-	if report.Decision != DecisionBlock {
-		t.Fatalf("decision = %q, want %q for a result-only failure", report.Decision, DecisionBlock)
+	if report.Decision != contracts.DecisionBlock {
+		t.Fatalf("decision = %q, want %q for a result-only failure", report.Decision, contracts.DecisionBlock)
 	}
 }
 

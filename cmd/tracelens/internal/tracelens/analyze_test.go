@@ -3,6 +3,8 @@ package tracelens
 import (
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 func TestAnalyze_HealthyRunHasNoFindings(t *testing.T) {
@@ -13,7 +15,7 @@ func TestAnalyze_HealthyRunHasNoFindings(t *testing.T) {
 		okStep("verify", nil, "passed", 0.01),
 	)
 	r := Analyze(tr, DefaultConfig())
-	if r.Decision != DecisionPass {
+	if r.Decision != contracts.DecisionPass {
 		t.Fatalf("expected pass, got %q with findings %+v", r.Decision, r.Findings)
 	}
 	if len(r.Findings) != 0 {
@@ -34,7 +36,7 @@ func TestAnalyze_LoopMakesRunPathological(t *testing.T) {
 		steps = append(steps, okStep("search", map[string]any{"q": "same"}, "no result", 0.02))
 	}
 	r := Analyze(traj(steps...), DefaultConfig())
-	if r.Decision != DecisionBlock {
+	if r.Decision != contracts.DecisionBlock {
 		t.Fatalf("a 5x loop must block, got %q", r.Decision)
 	}
 	if !strings.HasPrefix(r.Headline, "loop:") {
@@ -60,7 +62,7 @@ func TestAnalyze_RanksCriticalFirst(t *testing.T) {
 	if r.Findings[0].Severity != Critical {
 		t.Fatalf("critical finding must sort first, got %v", r.Findings[0].Severity)
 	}
-	if r.Decision != DecisionBlock {
+	if r.Decision != contracts.DecisionBlock {
 		t.Fatalf("expected block, got %q", r.Decision)
 	}
 }
@@ -88,7 +90,7 @@ func TestAnalyze_EscalateOnWarnOnly(t *testing.T) {
 		okStep("lookup", map[string]any{"id": 7}, "row", 0.01),
 	)
 	r := Analyze(tr, DefaultConfig())
-	if r.Decision != DecisionEscalate {
+	if r.Decision != contracts.DecisionEscalate {
 		t.Fatalf("warn-only run should escalate, got %q", r.Decision)
 	}
 }
@@ -119,10 +121,10 @@ func TestBuildVerdictDecisionTierOrthogonal(t *testing.T) {
 		wantDecision string
 		wantTier     string
 	}{
-		{"critical", []Finding{{Kind: "loop", Severity: Critical, Summary: "loop", Steps: steps(3)}}, DecisionBlock, TierT3},
-		{"warn", []Finding{{Kind: "redundancy", Severity: Warn, Summary: "redundant", Steps: steps(2)}}, DecisionEscalate, TierT2},
-		{"info", []Finding{{Kind: "cost_hotspot", Severity: Info, Summary: "hotspot", Steps: steps(1)}}, DecisionPass, TierT1},
-		{"empty", nil, DecisionPass, TierT0},
+		{"critical", []Finding{{Kind: "loop", Severity: Critical, Summary: "loop", Steps: steps(3)}}, contracts.DecisionBlock, TierT3},
+		{"warn", []Finding{{Kind: "redundancy", Severity: Warn, Summary: "redundant", Steps: steps(2)}}, contracts.DecisionEscalate, TierT2},
+		{"info", []Finding{{Kind: "cost_hotspot", Severity: Info, Summary: "hotspot", Steps: steps(1)}}, contracts.DecisionPass, TierT1},
+		{"empty", nil, contracts.DecisionPass, TierT0},
 	}
 	for _, c := range cases {
 		v := buildVerdict(traj(), c.findings)
@@ -138,14 +140,14 @@ func TestBuildVerdictDecisionTierOrthogonal(t *testing.T) {
 // TestVerdictCarriesProducer checks every produced verdict is stamped with the
 // deterministic code producer — the run-level provenance the gate contract wants.
 func TestVerdictCarriesProducer(t *testing.T) {
-	verdicts := []Verdict{
+	verdicts := []contracts.Verdict{
 		buildVerdict(traj(), nil),
 		buildVerdict(traj(), []Finding{{Kind: "redundancy", Severity: Warn, Summary: "r", Steps: []int{0, 1}}}),
 		buildVerdict(traj(), []Finding{{Kind: "loop", Severity: Critical, Summary: "l", Steps: []int{0, 1, 2}}}),
 	}
 	for i, v := range verdicts {
-		if v.Producer.Class != ClassCode {
-			t.Fatalf("verdict %d: producer class want %q, got %q", i, ClassCode, v.Producer.Class)
+		if v.Producer.Class != contracts.ClassCode {
+			t.Fatalf("verdict %d: producer class want %q, got %q", i, contracts.ClassCode, v.Producer.Class)
 		}
 		if v.Producer.Impl == "" {
 			t.Fatalf("verdict %d: producer impl must record the implementation, got empty", i)
@@ -164,7 +166,7 @@ func TestEscalateCarriesQuestion(t *testing.T) {
 		okStep("geo", map[string]any{"c": "sf"}, "loc", 0.02),
 	)
 	r := Analyze(tr, DefaultConfig())
-	if r.Decision != DecisionEscalate {
+	if r.Decision != contracts.DecisionEscalate {
 		t.Fatalf("two redundant pairs should escalate, got %q", r.Decision)
 	}
 	v := r.Verdict()

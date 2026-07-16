@@ -3,6 +3,8 @@ package tracelens
 import (
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 func TestParseCodexEvents_PairsInterleavedItems(t *testing.T) {
@@ -53,8 +55,8 @@ func TestParseCodexEvents_TurnFailedMaterializesFailure(t *testing.T) {
 		t.Fatalf("DeclaredFailure = %q, want producer message", tr.DeclaredFailure)
 	}
 	report := Analyze(tr, DefaultConfig())
-	if report.Decision != DecisionBlock {
-		t.Fatalf("decision = %q, want %q — a producer-declared failure must not gate-pass", report.Decision, DecisionBlock)
+	if report.Decision != contracts.DecisionBlock {
+		t.Fatalf("decision = %q, want %q — a producer-declared failure must not gate-pass", report.Decision, contracts.DecisionBlock)
 	}
 }
 

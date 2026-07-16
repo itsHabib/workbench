@@ -1,0 +1,29 @@
+{
+  "subject": {
+    "repo": "",
+    "number": 0
+  },
+  "source": "tracelens",
+  "producer": {
+    "class": "code",
+    "impl": "tracelens"
+  },
+  "decision": "block",
+  "tier": "T3",
+  "confidence": 1,
+  "findings": [
+    {
+      "title": "loop: edit{\"path\":\"C:\\\\Users\\\\MichaelHabib\\\\p… repeated 6× (period 1) across 6 steps",
+      "severity": "CRITICAL",
+      "locus": "steps 67,68,69,70,71,72",
+      "confidence": 1
+    },
+    {
+      "title": "redundant: read{\"path\":\"C:\\\\Users\\\\MichaelHabib\\\\pers\\\\shi… ran 2× for the same result ($0.0000 wasted)",
+      "severity": "WARN",
+      "locus": "steps 132,137",
+      "confidence": 1
+    }
+  ],
+  "why": "loop: edit{\"path\":\"C:\\\\Users\\\\MichaelHabib\\\\p… repeated 6× (period 1) across 6 steps\n- loop: edit{\"path\":\"C:\\\\Users\\\\MichaelHabib\\\\p… repeated 6× (period 1) across 6 steps\n- redundant: read{\"path\":\"C:\\\\Users\\\\MichaelHabib\\\\pers\\\\shi… ran 2× for the same result ($0.0000 wasted)"
+}
