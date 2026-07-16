@@ -1,11 +1,80 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// goldenRoutes is the committed contract: the canonical shipped routes shape
+// (a gate-log + ship-receipts source, a slack channel with a placeholder token,
+// a toast channel, routes, and a non-drop catch_all). It freezes the shipped
+// schema against this binary — the class of drift that took the notification
+// plane silently dead for ~17h when the live routes file gained fields the
+// binary's structs lacked and DisallowUnknownFields rejected the whole file.
+const goldenRoutes = "testdata/routes.golden.json"
+
+func TestConfigLoadAcceptsShippedGoldenRoutes(t *testing.T) {
+	cfg, err := Load(goldenRoutes)
+	if err != nil {
+		t.Fatalf("the shipped golden routes must load against this binary: %v", err)
+	}
+	if cfg.Version != Version {
+		t.Fatalf("version = %d, want %d", cfg.Version, Version)
+	}
+	kinds := map[string]bool{}
+	for _, s := range cfg.Sources {
+		kinds[s.Kind] = true
+	}
+	for _, want := range []string{SourceGateLog, SourceShipReceipts} {
+		if !kinds[want] {
+			t.Fatalf("golden routes missing a %q source; source kinds = %v", want, kinds)
+		}
+	}
+	types := map[string]string{}
+	for name, ch := range cfg.Channels {
+		types[name] = ch.Type
+	}
+	if types["slack"] != ChannelSlack {
+		t.Fatalf("channel \"slack\" type = %q, want %q", types["slack"], ChannelSlack)
+	}
+	if types["toast"] != ChannelToast {
+		t.Fatalf("channel \"toast\" type = %q, want %q", types["toast"], ChannelToast)
+	}
+	// The slack channel must carry token+channel — the exact fields whose
+	// absence from the binary's Channel struct caused the outage.
+	slack := cfg.Channels["slack"]
+	if slack.Token == "" || slack.ChannelID == "" {
+		t.Fatalf("golden slack channel must carry token+channel, got %+v", slack)
+	}
+	if strings.Contains(slack.Token, "xoxb-") && !strings.Contains(slack.Token, "REPLACE") {
+		t.Fatalf("golden slack token must be a placeholder, never a real secret: %q", slack.Token)
+	}
+}
+
+func TestConfigLoadRejectsUnknownField(t *testing.T) {
+	// Take the real golden and inject a field the binary's structs do not know.
+	// DisallowUnknownFields must make this go red — that is the guarantee that
+	// the shipped config schema can never again silently lead the binary.
+	raw, err := os.ReadFile(goldenRoutes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["unknown_future_field"] = json.RawMessage(`true`)
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(writeConfig(t, string(mutated))); err == nil {
+		t.Fatal("Load must reject a routes file carrying a field the binary does not know")
+	}
+}
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
