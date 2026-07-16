@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "small-mechanical-to-cheap",
+      "match": { "task_class": "mechanical", "max_weighted_loc": 500, "risk_tier": ["T0", "T1"] },
+      "place": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "high", "runtime": "cloud" },
+      "escalation": { "max_rounds_per_defect_class": 2, "escalate_to": "claude-opus-4-8" }
+    },
+    {
+      "name": "catch-all",
+      "match": {},
+      "place": { "engine": "ship-driver", "provider": "claude", "model": "claude-opus-4-8", "effort": "max", "runtime": "local" },
+      "escalation": { "max_rounds_per_defect_class": 3, "escalate_to": "human" }
+    }
+  ]
+}

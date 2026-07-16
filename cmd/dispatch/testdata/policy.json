@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "small-mechanical-to-cheap",
+      "match": { "task_class": "mechanical", "max_weighted_loc": 500, "risk_tier": ["T0", "T1"] },
+      "place": { "engine": "ship-driver", "provider": "cursor", "model": "grok-4.5", "effort": "high", "runtime": "cloud" },
+      "escalation": { "max_rounds_per_defect_class": 2, "escalate_to": "claude-opus-4-8" }
+    },
+    {
+      "name": "analytical-midsize-to-sonnet",
+      "match": { "task_class": "analytical", "max_weighted_loc": 1500 },
+      "place": { "engine": "ship-driver", "provider": "claude", "model": "claude-sonnet-4-8", "effort": "high", "runtime": "cloud" },
+      "escalation": { "max_rounds_per_defect_class": 2, "escalate_to": "claude-opus-4-8" }
+    }
+  ]
+}
