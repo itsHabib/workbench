@@ -13,7 +13,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL_DIR="${LOCAL_DIR:-$HOME/pers/local}"
 cd "$REPO"
 
-[ -x bin/triage-floor.exe ] || go build -o bin/triage-floor.exe ./cmd/triage-floor
+[ -x bin/triage-floor.exe ] || go build -o bin/triage-floor.exe ./triage-floor
 ls labels/diffs/*.diff >/dev/null 2>&1 || bash labels/fetch-diffs.sh
 node labels/build-dataset.mjs
 

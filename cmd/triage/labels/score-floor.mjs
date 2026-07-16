@@ -16,7 +16,7 @@ import { resolve } from "node:path";
 
 // Prefer a built binary (either OS name), else fall back to `go run` — cross-platform.
 const cand = ["bin/triage-floor.exe", "bin/triage-floor"].map((p) => resolve(p)).find(existsSync);
-const FLOOR = cand ? `"${cand}"` : "go run ./cmd/triage-floor";
+const FLOOR = cand ? `"${cand}"` : "go run ./triage-floor";
 const RANK = { T0: 0, T1: 1, T2: 2, T3: 3 };
 const norm = (t) => t.replace("?", "").trim();
 

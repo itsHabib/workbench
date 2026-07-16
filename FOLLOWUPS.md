@@ -62,6 +62,30 @@ not the move's to fix (its contract is byte-identical output):
   events. Same rule as above: a decoder-behavior change, owed to
   tracelens's own iteration with a truncated-at-tool_use corpus case.
 
+## triage migration — deferred findings (2026-07-16, PR #51 review)
+
+All three are pre-existing behavior, byte-identical to the standalone repo —
+real observations, but classifier-behavior changes the byte-identical move
+must not smuggle in (same rule as tracelens above):
+
+- **Empty stdin classifies as T0 instead of failing.** `triage-floor` on
+  zero-byte input returns a T0 floor, so an upstream failure that yields
+  empty output (`gh pr diff` auth/network error piped through) reads as
+  "safe". A guard (empty diff → exit 1, operational failure) is owed to
+  triage's own iteration — the A/B matrix pins today's shape, empty-stdin
+  case included.
+- **The control-plane rule covers the classifier's evidence, not its
+  source.** `RUBRIC.md` / `labels/` / `mismatches.jsonl` fire T3;
+  `cmd/triage/internal/{floor,advisory}/**` do not — equally true pre-move
+  (`internal/floor/**` never matched). Extending it to the classifier
+  source is a RUBRIC §5.4 policy change plus a corpus case, owed to
+  triage's iteration.
+- **A diff line over the scanner's 16 MiB cap silently truncates the
+  parse.** `ParseUnifiedDiff` never checks `sc.Err()`, so `ErrTooLong`
+  (e.g. a minified generated asset) classifies the partial diff instead of
+  failing. Propagating scanner errors is a parser-behavior change; owed
+  with a corpus case that pins it.
+
 ## flare migration — choices made
 
 - **Plain copy, not `git subtree`.** flare's layout restructured on the way in

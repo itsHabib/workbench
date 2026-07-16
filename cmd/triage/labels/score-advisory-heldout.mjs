@@ -15,7 +15,7 @@ import { join } from "node:path";
 const PROPS = process.argv[2];
 const CORPUS = process.argv[3] ?? "labels/corpus-heldout.tsv";
 const cand = ["bin/triage-advisory.exe", "bin/triage-advisory"].map((p) => resolve(p)).find(existsSync);
-const ADV = cand ? `"${cand}"` : "go run ./cmd/triage-advisory";
+const ADV = cand ? `"${cand}"` : "go run ./triage-advisory";
 const RANK = { T0: 0, T1: 1, T2: 2, T3: 3 };
 const norm = (t) => t.replace("?", "").trim();
 
