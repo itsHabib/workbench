@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"fixture"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item-1","type":"command_execution","command":"go test ./...","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item-1","type":"command_execution","command":"go test ./...","aggregated_output":"ok","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"Tests pass."}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}

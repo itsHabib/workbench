@@ -1,0 +1,8 @@
+{
+  "branches": [],
+  "durationMs": 1800000,
+  "errorMessage": "timeout-near-cap; duration 30m (cap 30m)",
+  "status": "failed",
+  "failureCategory": "timeout-near-cap",
+  "failureDetail": "duration 30m (cap 30m)"
+}

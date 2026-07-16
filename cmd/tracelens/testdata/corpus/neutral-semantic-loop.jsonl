@@ -1,0 +1,3 @@
+{"i":0,"tool":"status","args":{"job":"build-7","request_id":"r1","timestamp":"2026-07-12T10:00:00Z"},"observation":"pending","ok":true}
+{"i":1,"tool":"status","args":{"job":"build-7","request_id":"r2","timestamp":"2026-07-12T10:00:01Z"},"observation":"pending","ok":true}
+{"i":2,"tool":"status","args":{"job":"build-7","request_id":"r3","timestamp":"2026-07-12T10:00:02Z"},"observation":"pending","ok":true}

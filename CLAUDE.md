@@ -22,8 +22,9 @@ triggers that would later split `contracts` into its own module.
   when-to-route-local rule. Its CLIs live at `cmd/local` and `cmd/eval`.
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
   `cmd/<tool>/internal/`. Each tool keeps its own `CLAUDE.md` + `docs/DESIGN.md`.
-  Today: `flare` (the escalation-routing plane), plus `local`'s CLIs (`local`,
-  `eval`).
+  Today: `flare` (the escalation-routing plane), `tracelens` (agent trace
+  diagnostics — consumed via its CLI exit-code seam, never as a Go import),
+  plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.
 

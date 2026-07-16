@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"fixture"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"read_file","input":{"path":"README.md"}}]}}

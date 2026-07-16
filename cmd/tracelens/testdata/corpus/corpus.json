@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "min_macro_precision": 0.9,
+    "required_recall_kinds": ["loop", "stuck"],
+    "no_critical_on_healthy": true
+  },
+  "cases": [
+    {
+      "id": "neutral-exact-loop",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-exact-loop.jsonl",
+      "provenance": "synthetic",
+      "expected": ["loop"],
+      "tolerated": ["redundancy", "stuck"],
+      "expected_decision": "block",
+      "rationale": "Three identical read/write cycles are the minimum critical tandem loop.",
+      "tags": ["pathological", "loop"]
+    },
+    {
+      "id": "neutral-semantic-loop",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-semantic-loop.jsonl",
+      "provenance": "synthetic",
+      "expected": ["loop"],
+      "tolerated": ["stuck"],
+      "expected_decision": "block",
+      "rationale": "The same status check repeats while only request and timestamp metadata changes.",
+      "tags": ["pathological", "loop", "semantic-loop"]
+    },
+    {
+      "id": "neutral-healthy-timestamp-cursor",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-healthy-timestamp-cursor.jsonl",
+      "provenance": "synthetic",
+      "expected": [],
+      "expected_decision": "pass",
+      "rationale": "A timestamp cursor advances through distinct confirmed observations and must not become a semantic loop.",
+      "tags": ["healthy", "hard-negative-semantic-loop", "timestamp-cursor"]
+    },
+    {
+      "id": "neutral-redundancy",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-redundancy.jsonl",
+      "provenance": "synthetic",
+      "expected": ["redundancy"],
+      "tolerated": ["cost_hotspot"],
+      "expected_decision": "escalate",
+      "rationale": "The same successful computation is repeated once with an identical result.",
+      "tags": ["pathological", "redundancy"]
+    },
+    {
+      "id": "neutral-retry-storm",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-retry-storm.jsonl",
+      "provenance": "synthetic",
+      "expected": ["retry_storm"],
+      "tolerated": ["loop", "stuck", "cost_hotspot"],
+      "expected_decision": "block",
+      "rationale": "Three consecutive failures of one dependency cross the retry-storm threshold.",
+      "tags": ["pathological", "retry-storm"]
+    },
+    {
+      "id": "neutral-cost-hotspot",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-cost-hotspot.jsonl",
+      "provenance": "synthetic",
+      "expected": ["cost_hotspot"],
+      "expected_decision": "pass",
+      "rationale": "One tool consumes ninety percent of recorded spend.",
+      "tags": ["pathological", "cost-hotspot"]
+    },
+    {
+      "id": "neutral-stuck",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-stuck.jsonl",
+      "provenance": "synthetic",
+      "expected": ["stuck"],
+      "expected_decision": "escalate",
+      "rationale": "Different queries return the same already-seen state for the trailing window.",
+      "tags": ["pathological", "stuck"]
+    },
+    {
+      "id": "neutral-healthy-iteration",
+      "dialect": "neutral-jsonl",
+      "trace": "neutral-healthy-iteration.jsonl",
+      "provenance": "synthetic",
+      "expected": [],
+      "expected_decision": "pass",
+      "rationale": "Pagination and verification revisit tools while producing new state and evenly distributed cost.",
+      "tags": ["healthy", "hard-negative-loop", "hard-negative-redundancy", "hard-negative-retry-storm", "hard-negative-cost-hotspot", "hard-negative-stuck"]
+    },
+    {
+      "id": "ship-cursor-real-timeout",
+      "dialect": "ship-cursor",
+      "trace": "../ship/wf_01KVNKHBS61WJKZ9BVEQG6B5Y6/events.ndjson",
+      "provenance": "real-sanitized",
+      "expected": ["loop"],
+      "tolerated": ["redundancy", "stuck"],
+      "expected_decision": "block",
+      "rationale": "Committed real Ship driver run exhausted its cap while repeatedly editing the same file.",
+      "tags": ["pathological", "loop", "cursor", "real"]
+    },
+    {
+      "id": "ship-claude-healthy",
+      "dialect": "ship-claude",
+      "trace": "ship-claude-healthy.ndjson",
+      "provenance": "derived",
+      "expected": [],
+      "expected_decision": "pass",
+      "rationale": "Minimal sanitized schema-derived Claude tool lifecycle completes once.",
+      "tags": ["healthy", "claude"]
+    },
+    {
+      "id": "ship-codex-healthy",
+      "dialect": "ship-codex",
+      "trace": "ship-codex-healthy.ndjson",
+      "provenance": "derived",
+      "expected": [],
+      "expected_decision": "pass",
+      "rationale": "Minimal sanitized schema-derived Codex command lifecycle completes once.",
+      "tags": ["healthy", "codex"]
+    },
+    {
+      "id": "ship-claude-truncated",
+      "dialect": "ship-claude",
+      "trace": "ship-claude-truncated.ndjson",
+      "provenance": "derived",
+      "expected": [],
+      "expected_decision": "pass",
+      "rationale": "An interrupted tool call is retained with unknown outcome and must not be called a failure.",
+      "tags": ["healthy", "claude", "truncated"],
+      "limitations": "The corpus evaluates post-hoc behavior and does not simulate byte-level truncation inside a JSON record."
+    }
+  ]
+}

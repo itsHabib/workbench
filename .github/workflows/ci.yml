@@ -54,6 +54,10 @@ jobs:
           path: coverage.out
       - name: go build
         run: go build ./...
+      # The tracelens corpus gate: a detector regression against the labeled
+      # corpus fails CI, not just the tool's own tests.
+      - name: tracelens corpus gate
+        run: go run ./cmd/tracelens eval ./cmd/tracelens/testdata/corpus
 
   controlroom-e2e:
     runs-on: ubuntu-latest
