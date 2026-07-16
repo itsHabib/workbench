@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
@@ -15,6 +16,19 @@ const (
 	vrdPass = `{"id":"vrd_1","kind":"verdict","run":"run_1","time":"2026-07-08T16:37:13Z","body":{"subject":{"repo":"itsHabib/ship","number":181},"source":"reducer","decision":"pass","tier":"T1","why":"ok"},"prev":"h1","hash":"h2"}`
 	vrdEsc  = `{"id":"vrd_2","kind":"verdict","run":"run_2","time":"2026-07-08T16:38:00Z","body":{"subject":{"repo":"itsHabib/ship","number":182},"source":"reducer","decision":"escalate","tier":"T3","why":"tier over ceiling"},"prev":"h2","hash":"h3"}`
 )
+
+func receiptLine(key, outcome string) string {
+	return fmt.Sprintf(`{"key":"%s","source":"ship-run","outcome":"%s"}`, key, outcome)
+}
+
+func shipFile(t *testing.T, content string) config.Source {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "receipts.jsonl")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return config.Source{Name: "ship", Kind: config.SourceShipReceipts, Path: p}
+}
 
 func gateFile(t *testing.T, content string) config.Source {
 	t.Helper()
@@ -168,6 +182,70 @@ func TestParseErrorStillDeliversPendingAlert(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Kind != "cursor-alert" {
 		t.Fatalf("the pending truncation alert must survive the parse error, got %+v", events)
+	}
+}
+
+func TestShipReceiptsMidlineOffsetResweepsNotErrors(t *testing.T) {
+	r1 := receiptLine("wf1", "failed")
+	r2 := receiptLine("wf2", "parked")
+	src := shipFile(t, r1+"\n"+r2+"\n")
+	// Advance through r1 only; the cursor sits at the start of r2.
+	cur := Cursor{Offset: int64(len(r1) + 1)}
+	// Upstream rewrite keeps valid receipts but leaves the stored offset mid-line.
+	if err := os.WriteFile(src.Path, []byte(r1+"\n"+r2+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cur.Offset += 12
+	events, _, err := Read(src, cur)
+	if err != nil {
+		t.Fatalf("mid-line offset must resweep, not fail the poll: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("want cursor-alert + reswept receipts, got %d: %+v", len(events), events)
+	}
+	if events[0].Kind != "cursor-alert" || events[0].Severity != event.SevEscalate {
+		t.Fatalf("mid-line offset must fire cursor-alert, got %+v", events[0])
+	}
+	if !strings.Contains(events[0].Body, "unparseable receipt at cursor") {
+		t.Fatalf("mid-line offset must use receipt guard, got body %q", events[0].Body)
+	}
+	byID := make(map[string]event.Event, len(events))
+	for _, e := range events[1:] {
+		byID[e.ID] = e
+	}
+	if _, ok := byID["wf1:failed"]; !ok {
+		t.Fatalf("resweep must re-lift failed receipt, got %+v", events[1:])
+	}
+	if _, ok := byID["wf2:parked"]; !ok {
+		t.Fatalf("resweep must re-lift parked receipt, got %+v", events[1:])
+	}
+}
+
+func TestShipReceiptsAppendOnlyNoAlert(t *testing.T) {
+	r1 := receiptLine("wf1", "failed")
+	src := shipFile(t, r1+"\n")
+	_, cur, err := Read(src, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := receiptLine("wf2", "parked")
+	if err := os.WriteFile(src.Path, []byte(r1+"\n"+r2+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, next, err := Read(src, cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.Kind == "cursor-alert" {
+			t.Fatalf("append-only growth must not fire cursor-alert, got %+v", e)
+		}
+	}
+	if len(events) != 1 || events[0].ID != "wf2:parked" {
+		t.Fatalf("want only the appended parked receipt, got %+v", events)
+	}
+	if next.Offset <= cur.Offset {
+		t.Fatalf("cursor must advance on append-only growth: %d -> %d", cur.Offset, next.Offset)
 	}
 }
 
