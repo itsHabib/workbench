@@ -145,7 +145,28 @@ Claude token / gh account a repo's dispatches may use — this is the work machi
 Max-sub token and itsHabib gh auth must not leak into work-repo runs) are ship-repo changes.
 They ride this TDD's rollout as P6 because they share the motivation, not the codebase.
 
-**Open fork for reviewers — event granularity:** one `attempt` event carrying a snapshot vs
+**D6 — the review panel is per-repo contract, not skill prose.**
+Today the reviewer set is hardcoded in /work-driver's text (@codex/@claude/@cursor +
+Copilot) — wrong the moment a drive runs outside the personal repos. Work repos have
+CodeRabbit only, auto-firing, with no mention-trigger and its own severity vocabulary.
+The tail (and any consolidation step) must read the panel from repo-level config:
+which reviewers exist, how each is triggered (`mention` | `auto` | `reviewer-request`),
+and what "panel complete" means (which subset must report before consolidation, and a
+per-reviewer latency budget after which the panel is degraded-but-settled). Proposed
+shape (final home is an open question, §10 Q5):
+
+```json
+"review": {
+  "panel": [ {"name": "coderabbit", "trigger": "auto"} ],
+  "require": ["coderabbit"],
+  "settle_minutes": 15
+}
+```
+
+Personal repos declare the current four; absent key = today's behavior (the personal
+default), so nothing changes until a repo opts in. The panel-degraded warning from the
+2026-07-15 run (3 of 4 finders silent, discovered by waiting) becomes computable:
+settled = every `require` reported or its budget expired. one `attempt` event carrying a snapshot vs
 fine-grained sub-events (`review_cycle`, `ci_result`). Proposal: start coarse (the seven kinds
 in §5); fine-grained kinds are additive under a versioned schema. Weigh in if coarse loses
 something the morning-queue reader needs.
@@ -272,7 +293,7 @@ for the `driver list` grok-4.5 failure class.
 | P1 | `driver-state-contract` | Event/RunState types + schema + conformance tests in `contracts/` | types; embedded schema; parity tests; tolerant reader | — | — | ~350 |
 | P2 | `driver-state-ledger` | `driverstate/` package: Append/Reduce/Runs/Verify + lock + chain | append+validate; reducer; tolerant listing; verify; lock (reuse gate pattern) | P1 | — | ~600 (split into 2 PRs: write path / read path) |
 | P3 | `workbench-mcp-v0` | `cmd/workbench-mcp` stdio server exposing the four driver verbs + `cmd/driverstate` CLI | MCP server scaffold; verb handlers; CLI mirror; state-dir config | P2 | **VALIDATION GATE** (§11) | ~450 |
-| P4 | `session-engine-skill` | `/work-driver --engine session` skill variant recording through MCP | skill text; resume flow; N≤3 scope; grant-resolution step (pre-minted, never mint) | P3 gate | — | skill prose, ~0 code |
+| P4 | `session-engine-skill` | `/work-driver --engine session` skill variant recording through MCP | skill text; resume flow; N≤3 scope; grant-resolution step (pre-minted, never mint); panel-from-config tail (§4 D6, CodeRabbit-only work repos); thin jira-epic ingestion (epic → dossier tasks) for the work demo | P3 gate | — | skill prose + panel config schema, ~150 |
 | P5 | `ship-emitter` (committed) | ship emits lifecycle events into the ledger, receipts-style | TS emitter in ship repo writing the JSON contract (best-effort, never fails a tick); `/wip`/`/shipped` repointed at the ledger as the one read surface | P2 + P3 gate | — | ~250 (ship repo) |
 | P6 | `ship-policy-hardening` (parallel, ship repo) | `.ship.json` enforced at `ShipService.startShip`; credential-source constraint (`claude` token source + gh account per repo) | ShipService check; policy `credentials` key; tests | — (independent) | — | ~300 |
 
@@ -295,6 +316,11 @@ emitter implements it independently. P6 can run in parallel any time via the shi
 4. **MCP server hosting for Desktop:** Claude Code terminal sessions get the real state dir;
    Claude Desktop connectors see virtualized AppData (MSIX memory). Ship `WORKBENCH_STATE_DIR`
    in v0 and document, or refuse to run under a virtualized root?
+5. **Where does the review-panel config (§4 D6) live?** Candidates: extend `.ship.json`
+   (pro: one repo-policy file, discovery already built; con: name says ship, but a session
+   drive reads it too), a new `.workbench.json`, or a `review:` block in the driver manifest
+   (con: per-run, panel is really per-repo). Leaning: extend the existing repo policy file
+   and accept the name, or rename the file once — decide in review.
 
 ## 11. Validation plan
 
