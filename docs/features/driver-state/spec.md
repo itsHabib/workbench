@@ -171,10 +171,7 @@ means following the contract that's there, not the one we remember. Consequence:
 each personal repo declares its four-bot panel explicitly in its `.ship.json` (a
 one-time ~10-line chore per repo, folded into P4's rollout). The panel-degraded
 warning from the 2026-07-15 run (3 of 4 finders silent, discovered by waiting)
-becomes computable: settled = every `require` reported or its budget expired. one `attempt` event carrying a snapshot vs
-fine-grained sub-events (`review_cycle`, `ci_result`). Proposal: start coarse (the seven kinds
-in §5); fine-grained kinds are additive under a versioned schema. Weigh in if coarse loses
-something the morning-queue reader needs.
+becomes computable: settled = every `require` reported or its budget expired.
 
 ## 5. Data model
 
@@ -196,9 +193,18 @@ type Event struct {
                             // so cross-store queries don't parse every body (review: Q2)
     Body    json.RawMessage // kind-specific payload, schema-validated
     Prev    string          // prior event's Hash; "" for the first event
-    Hash    string          // SHA-256 of the canonical JSON encoding with Hash empty
+    Hash    string          // SHA-256 over the canonical encoding (see below) with Hash ""
 }
 ```
+
+**Canonical encoding, pinned (review M3 — a P1 deliverable, not an open question):**
+UTF-8 JSON, fields in the order documented by the contract schema (= Go struct
+declaration order), no insignificant whitespace, `Body` hashed as its raw bytes
+verbatim (never re-marshalled — the writer's bytes are the canonical bytes). The
+contract ships a **reference test vector** (one full event + its expected hash) that
+every implementation — Go package and ship's TS emitter alike — must reproduce; the
+conformance suite fails if they don't. This is what keeps a cross-language chain from
+breaking silently.
 
 **Idempotency (review finding, committed):** `ID` is minted by the *writer*, and `Append`
 is idempotent by it — re-appending an ID already in the ledger returns the original
@@ -234,6 +240,7 @@ contradicted F1; this table wins over any prose):
 | `pending` | `stream_dispatched` | `dispatched` |
 | `dispatched` | `stream_attempt` (non-terminal) | `dispatched` |
 | `dispatched` | `stream_attempt` (terminal, ok) | `landed` |
+| `dispatched` | `stream_attempt` (terminal, failure_category set) | `failed` |
 | `dispatched` | `stream_failed` | `failed` |
 | `landed` | `stream_pr_opened` | `pr_open` |
 | `pr_open` | `review_cycle` | `pr_open` |
@@ -242,8 +249,11 @@ contradicted F1; this table wins over any prose):
 | `pending`, `failed` | `stream_skipped` | `skipped` |
 
 `landed` = the executor finished producing work (ship's meaning); `pr_open` sits between
-landing and merging. `run_finished` appends only when every stream is in `merged`,
-`skipped`, or `failed`-with-no-retry-intent.
+landing and merging. A terminal attempt is a single write: `failure_category` set → the
+`failed` transition; absent → `landed` (no second `stream_failed` event required).
+`run_finished` is valid when every stream is in `{merged, skipped, failed}`; emitting it
+closes the run and the reducer treats `failed` streams in a finished run as non-retriable
+— finishing IS the no-retry declaration, no separate abandon event.
 
 ## 6. API contract
 
@@ -259,6 +269,9 @@ func (l Lease) Renew() error                          // heartbeat; stale = expi
 func (l Lease) Release() error
 func Append(dir string, l Lease, e Event) (Event, error) // requires a live lease; idempotent by e.ID
 func Reduce(dir, run string) (RunState, error)        // pure fold; unknown KINDS tolerated; chain break = error
+// Reduce initializes RunState.Streams from run_imported.Body.streams and overlays
+// statuses from subsequent events — a stream with no events yet is `pending`, so a
+// resuming session always sees the full stream set, not just the ones that got events.
 func Runs(dir string) ([]RunSummary, error)           // never hard-fails on one bad run (tolerant listing)
 func Verify(dir, run string) error                    // chain integrity
 ```
@@ -283,6 +296,13 @@ MCP verbs (`cmd/workbench-mcp`, stdio):
 | `driver_state` | `{run}` | `RunState` |
 | `driver_runs` | `{repo?, live?}` | `[]RunSummary` |
 | `driver_verify` | `{run}` | ok / `ErrChainBroken` detail |
+
+Lease lifecycle over MCP (review M2): the server holds the active `Lease` and
+**auto-renews it on a background goroutine at interval = staleness-threshold / 2** for as
+long as the client session is connected — a session parked for hours on CI or panel
+settlement keeps its lease without a verb call, and there is deliberately no
+`driver_renew` verb. Server exit (stdio close) stops renewal, so an orphaned lease
+self-expires within one threshold window.
 
 CLI mirrors 1:1 (`workbench driverstate record|state|runs|verify`, `--json`). Server
 registration: `.mcp.json` (project or user scope), `WORKBENCH_STATE_DIR` flowing through
