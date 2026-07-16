@@ -182,20 +182,34 @@ Event (JSONL, one file per run: `~/.workbench/driver-state/<run_id>/events.jsonl
 
 ```go
 type Event struct {
-    ID      string          // evt_<ulid>
+    ID      string          // evt_<ulid> — CLIENT-minted (idempotency key, see below)
     Run     string          // dsr_<ulid>  (driver-state run)
     V       string          // "driver-state-v0.1.0"
     Kind    Kind            // run_imported | stream_dispatched | stream_attempt |
-                            // stream_pr_opened | stream_landed | stream_failed |
-                            // stream_skipped | stream_merged | run_finished
+                            // review_cycle | stream_pr_opened | stream_landed |
+                            // stream_failed | stream_skipped | stream_merged | run_finished
     Stream  string          // dss_<ulid>; empty for run-scoped kinds
     Time    time.Time       // writer-supplied; monotonic within a run enforced by append
     Actor   string          // "session:<id>" | "ship:<drv_id>" | "human:mh"
+    ExtRef  string          // optional top-level external correlate (e.g. ship drv_id on
+                            // run_imported, PR URL on pr_opened) — top-level, not body,
+                            // so cross-store queries don't parse every body (review: Q2)
     Body    json.RawMessage // kind-specific payload, schema-validated
-    Prev    string          // hash chain (gate pattern)
-    Hash    string
+    Prev    string          // prior event's Hash; "" for the first event
+    Hash    string          // SHA-256 of the canonical JSON encoding with Hash empty
 }
 ```
+
+**Idempotency (review finding, committed):** `ID` is minted by the *writer*, and `Append`
+is idempotent by it — re-appending an ID already in the ledger returns the original
+committed event instead of duplicating. This is what makes the at-least-once writer model
+(§8) safe for terminal events and lost MCP responses. `run_imported` additionally dedupes
+on `(repo, source, generated_at)` — ship's proven import key — so a retried import cannot
+mint a second run.
+
+**`review_cycle` is a first-class kind from v0.1.0 (review finding, committed):** cycles
+are retroactively unreconstructable from coarse attempt snapshots, and the morning-queue
+reader wants "3 cycles" vs "landed first try." Body: `{cycle, panel_settled, findings}`.
 
 Kind payloads (schema-enforced): `run_imported` carries the manifest snapshot (repo, source,
 batches/streams — the `driver.md` frontmatter, verbatim, so render round-trips);
@@ -212,9 +226,24 @@ type RunState struct {
 
 Status is always derived by `reduce`, never stored — there is no row to drift.
 
-Legal transitions (the state machine, validated at append):
-`pending → dispatched → (attempt)* → landed → merged` | `failed → dispatched (retry)` |
-`pending|failed → skipped`. `run_finished` only when every stream is terminal.
+Legal transitions — the single authoritative table (review finding: v1's prose sequence
+contradicted F1; this table wins over any prose):
+
+| From | Event | To |
+|---|---|---|
+| `pending` | `stream_dispatched` | `dispatched` |
+| `dispatched` | `stream_attempt` (non-terminal) | `dispatched` |
+| `dispatched` | `stream_attempt` (terminal, ok) | `landed` |
+| `dispatched` | `stream_failed` | `failed` |
+| `landed` | `stream_pr_opened` | `pr_open` |
+| `pr_open` | `review_cycle` | `pr_open` |
+| `pr_open` | `stream_merged` | `merged` |
+| `failed` | `stream_dispatched` (retry) | `dispatched` |
+| `pending`, `failed` | `stream_skipped` | `skipped` |
+
+`landed` = the executor finished producing work (ship's meaning); `pr_open` sits between
+landing and merging. `run_finished` appends only when every stream is in `merged`,
+`skipped`, or `failed`-with-no-retry-intent.
 
 ## 6. API contract
 
@@ -225,11 +254,23 @@ verdict-v0.3.0).
 `driverstate` package (shared mechanism):
 
 ```go
-func Append(dir string, e Event) (Event, error)      // validate kind+payload+transition, lock, chain, fsync
-func Reduce(dir, run string) (RunState, error)        // pure fold; tolerant of unknown kinds
+func Claim(dir, run, actor string) (Lease, error)     // durable run ownership; ErrLocked{Holder} if held
+func (l Lease) Renew() error                          // heartbeat; stale = expired lease, not just PID
+func (l Lease) Release() error
+func Append(dir string, l Lease, e Event) (Event, error) // requires a live lease; idempotent by e.ID
+func Reduce(dir, run string) (RunState, error)        // pure fold; unknown KINDS tolerated; chain break = error
 func Runs(dir string) ([]RunSummary, error)           // never hard-fails on one bad run (tolerant listing)
 func Verify(dir, run string) error                    // chain integrity
 ```
+
+`Append` semantics, nailed down per review: acquire the append lock → **truncate any torn
+tail to the last verified newline** (a crash's partial line must not corrupt the next
+event) → read the head **inside the lock** (chain, time-monotonicity, and `stream_attempt`
+seq validation all use this read) → write + fsync → release. The run *lease* (Claim) is
+what enforces single-writer-per-run across a whole session — the per-append lock alone
+only prevents byte races, it cannot deliver F4's `ErrLocked` promise. Lease file carries
+`{actor, pid, expires_at}`; staleness = expiry (inherit gate's threshold as the default,
+configurable), so a killed session's lease self-clears within one threshold window.
 
 Errors are values with stable codes: `ErrIllegalTransition{From, Event}`, `ErrChainBroken`,
 `ErrLocked`. No panics, no silent skips on write paths.
@@ -243,16 +284,24 @@ MCP verbs (`cmd/workbench-mcp`, stdio):
 | `driver_runs` | `{repo?, live?}` | `[]RunSummary` |
 | `driver_verify` | `{run}` | ok / `ErrChainBroken` detail |
 
-CLI mirrors 1:1 (`workbench driverstate record|state|runs|verify`, `--json`). Config surface:
-`WORKBENCH_STATE_DIR` override (the MSIX / Desktop-connector escape hatch, documented).
+CLI mirrors 1:1 (`workbench driverstate record|state|runs|verify`, `--json`). Server
+registration: `.mcp.json` (project or user scope), `WORKBENCH_STATE_DIR` flowing through
+the server env. **State-root resolution is canonical, not ambient** (review P2): the
+server resolves the state dir once at startup — explicit env var, else the real
+(non-virtualized) user profile — and *prints the resolved path at startup*; two MCP
+instances resolving different roots is the ship failure mode this exists to kill, so the
+§11 gate includes a cross-client check. Verb exposure is compile-time registration in
+`cmd/workbench-mcp` (opt-in per tenant; capability-mutating verbs excluded by
+construction); unknown verbs return MCP `MethodNotFound`.
 
 ## 7. Key flows
 
 **F1 — session-engine happy path.** Session imports a `driver.md` → `driver_record run_imported`
 (manifest snapshot in body) → creates worktree, spawns impl subagent → `stream_dispatched` →
-subagent lands commit → `stream_attempt{terminal:true}` → session pushes, opens PR →
-`stream_pr_opened` → reviews/gate/merge happen in the existing tail → `stream_merged` →
-`run_finished`. At no point is stream status held only in context.
+subagent lands commit → `stream_attempt{terminal:true}` (stream now `landed`) → session
+pushes, opens PR → `stream_pr_opened` → each panel round records a `review_cycle` →
+gate/merge in the existing tail → `stream_merged` → `run_finished`. At no point is stream
+status held only in context.
 
 **F2 — illegal write.** Session (confused after compaction) records `stream_merged` on a stream
 whose ledger says `dispatched` with no `pr_opened`. Append rejects with
@@ -263,14 +312,26 @@ works even when it isn't the driver.
 
 **F3 — crash and resume.** Session dies mid-run (context loss, reboot). A fresh session runs
 `driver_runs {live:true}` → finds the run → `driver_state` → sees stream A merged, stream B
-`pr_opened` (PR #12) → resumes the tail for B only. Nothing is re-derived from prose; the
+`pr_open` (PR #12) → resumes the tail for B only. Nothing is re-derived from prose; the
 2026-07-15 park-and-resume worked exactly this way against gate's log + dossier notes — this
 makes that recovery a first-class read instead of archaeology.
+Two review-mandated rules that make this honest:
+- **The ledger says where to look, not what's true.** A crash can land *between* an external
+  action and its record (PR opened but never recorded; merge clicked but `stream_merged`
+  lost). On resume the session RECONCILES: for each non-terminal stream, check the external
+  facts (branch exists? PR state? merge commit?) against ledger state, record the missing
+  events (idempotent IDs make this safe), and only then continue. Resume = read ledger →
+  verify world → record deltas → proceed. Never act on ledger state alone.
+- **A run with only `run_imported` resumes from the manifest snapshot** in that event's body
+  (the one place a body payload drives control flow), re-running dispatch for every stream.
+A resumed session appends under a new `session:` actor — two actors on one run is the audit
+trail working, not an anomaly (render/flare must not treat it as one).
 
-**F4 — concurrent writer (the degraded mode).** A second session appends to the same run: lock
-acquisition fails fast with `ErrLocked` + the holder's actor string. No queueing, no merge —
-single-writer is declared scope (§4 D4). The Windows delete-pending → retry-everything lesson
-from gate's lock applies verbatim.
+**F4 — concurrent writer (the degraded mode).** A second session calls `Claim` on a run whose
+lease is live: fails fast with `ErrLocked{Holder}` naming the holding actor. No queueing, no
+merge — single-writer is declared scope (§4 D4), and it's the *lease*, not the per-append
+lock, that enforces it (review P1). The Windows delete-pending → retry-everything lesson from
+gate's lock applies verbatim.
 
 **F5 — tolerant read over a bad ledger.** One run's chain is broken (disk hiccup, hand edit).
 `driver_runs` still lists every other run and flags the bad one (`status: corrupt`) —
@@ -279,15 +340,22 @@ for the `driver list` grok-4.5 failure class.
 
 ## 8. Concurrency / consistency / failure model
 
-- **Single-writer per run**, lock file per run dir, gate's tested implementation pattern
-  (create-exclusive, stale detection by PID+mtime, Windows delete-pending retry). Readers are
-  lock-free (JSONL appends are atomic at line granularity; a torn final line is discarded by
-  the tolerant reader and surfaced as a warning).
+- **Single-writer per run via a durable lease** (`Claim`/`Renew`/`Release`, lease file with
+  actor+pid+expiry, gate's Windows delete-pending retry) — scope is the run dir, so
+  concurrent sessions on *different* runs write freely. The per-append lock inside a lease
+  handles byte-level safety: truncate torn tail, read head, validate, write, fsync — all in
+  one lock window.
+- **Readers are lock-free.** A torn *final* line is discarded with a warning. A break
+  *mid-chain* is an error: `Reduce` fails loudly (never silently truncates — a swallowed
+  `stream_merged` in a truncated tail would re-drive a merged PR); recovery is `Verify` +
+  operator, not automatic.
 - **Writer-supplied time, append-enforced monotonicity** per run (reject an event older than
   the head — catches clock skew and replayed writes).
-- **At-least-once writers:** a session that isn't sure its append landed re-reads
-  `driver_state` before retrying; appends are not idempotent by ID, so the rule is
-  read-then-write, stated in the skill text.
+- **At-least-once writers, idempotent appends:** event IDs are client-minted; a retried
+  append returns the original committed event. Belt-and-braces rule in the skill text:
+  before any terminal event, re-read `driver_state` and reconcile external facts (§7 F3).
+- **Schema tolerance in both directions:** unknown event kinds are skipped-with-warning on
+  read; body types use tolerant decoding so field *additions* are never breaking.
 - **Dependency-down:** there are no dependencies — no network, no daemon. The failure surface
   is the filesystem, and the answer is fsync + chain verify.
 
@@ -311,11 +379,11 @@ emitter implements it independently. P6 can run in parallel any time via the shi
 
 ## 10. Open questions
 
-1. **Event granularity** (§4 fork): are coarse `attempt` snapshots enough for the morning-queue
-   reader, or do review cycles need their own kind from day one?
-2. **`run_id` ↔ ship `drv_id` correlation:** when both stores exist, is a body-level
-   `ship_run_ref` field on `run_imported` sufficient, or does the contract need a first-class
-   external-ref field?
+1. ~~Event granularity~~ **Resolved (review, 2026-07-16): `review_cycle` is a first-class
+   kind from v0.1.0** — cycles are retroactively unreconstructable from coarse attempts.
+2. ~~`run_id` ↔ ship `drv_id` correlation~~ **Resolved (review, 2026-07-16): top-level
+   optional `ExtRef` field** — promoting it later would be a breaking change; body-level
+   would cost O(N·parse) on cross-store queries.
 3. **flare integration depth:** does flare tail this ledger in v0 (one more source in its
    config), or wait for a real escalation kind (`stream_failed` with `needs_judgment`)?
 4. **MCP server hosting for Desktop:** Claude Code terminal sessions get the real state dir;
@@ -331,7 +399,11 @@ emitter implements it independently. P6 can run in parallel any time via the shi
 The P3 gate, binary and baseline-free: **one dogfood run — a real dossier task driven by
 `/work-driver --engine session` end-to-end (dispatch → PR → reviews → gate → merge) where (a)
 every transition was written through `workbench-mcp`, (b) mid-run the session is killed and a
-fresh session resumes correctly from `driver_state` alone, and (c) `driverstate render` of the
-finished run matches what actually happened on GitHub.** Pass → P4/P5 unlock. Fail on (b) →
-the state model is wrong, stop and redesign before any more phases. Secondary signal: zero
-shell-friction entries in the friction log for the recording path (the MCP-vs-CLI bet).
+fresh session resumes correctly via ledger-read + external reconcile (§7 F3) — including at
+least one kill placed BETWEEN an external action and its record, the hard case, and (c)
+`driverstate render` of the finished run matches what actually happened on GitHub.** Pass →
+P4/P5 unlock. Fail on (b) → the state model is wrong, stop and redesign before any more
+phases. Secondary criteria (review-promoted): a terminal Claude Code client and a Desktop
+connector both resolve the SAME state root (the MSIX assumption, tested hands-on, not
+assumed); zero shell-friction entries in the friction log for the recording path (the
+MCP-vs-CLI bet).
