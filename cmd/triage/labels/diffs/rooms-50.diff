@@ -1,0 +1,83 @@
+diff --git a/docs/features/rooms-diff/spec.md b/docs/features/rooms-diff/spec.md
+index cedd07d..9708ea7 100644
+--- a/docs/features/rooms-diff/spec.md
++++ b/docs/features/rooms-diff/spec.md
+@@ -29,14 +29,18 @@ Classification, per entry under `/oldroot/mnt/upper` (relative path `R`):
+ 
+ | upper entry | meaning |
+ | --- | --- |
+-| char device `0:0` | **deleted** (`R` removed) |
+-| regular file or symlink, `/oldroot/R` exists in lower | **modified** |
+-| regular file or symlink, `/oldroot/R` absent in lower | **added** |
++| char device `0:0` (whiteout) | **deleted** (`R` removed) |
++| any other entry (file / symlink / special file), `/oldroot/R` exists in lower | **modified** |
++| any other entry, `/oldroot/R` absent in lower | **added** |
+ | directory | structural (carried for path context; opaque dirs noted) |
+ 
+-Symlinks are walked (`find … -type l`) and classified by lower presence like
+-regular files — a symlink written outside `/workspace` (e.g. `ln -s t /etc/foo`)
+-is itself a persistent-path lane escape, so a `-type f`-only walk would miss it.
++The walk covers `-type f/l/b/p/s/c` — regular files, symlinks, and every special
++file an agent can `mknod` (block/char devices, FIFOs, sockets). A special file
++written outside `/workspace` (e.g. `mknod /etc/x c 1 3`, `ln -s t /etc/foo`) is
++itself a persistent-path lane escape, so a `-type f`-only walk would miss it. A
++`0:0` char device is a whiteout (delete); any *other* char device is a real
++`mknod` and classifies by lower presence like a file — flattening that check is
++what stops a non-`0:0` device from being silently dropped.
+ 
+ ## Design
+ 
+diff --git a/docs/follow-ups.md b/docs/follow-ups.md
+index b2c55cc..2285c3b 100644
+--- a/docs/follow-ups.md
++++ b/docs/follow-ups.md
+@@ -39,7 +39,9 @@ Surfaced 2026-06-20 by `readonly-rootfs-with-overlay` ([#45](https://github.com/
+ Surfaced 2026-06-20 by `rooms diff` review ([#47](https://github.com/itsHabib/rooms/pull/47)); the host-side gate exit-code semantics (indeterminate → exit 2) landed in #47, but these touch in-guest enumeration / a bigger re-arch and each wants its own host-e2e:
+ 
+ - 2026-06-20 — **symlink writes aren't enumerated in the upperdir scan.** `ENUMERATE_OVERLAY`'s `find` visits `-type f` (files) + `-type c` (whiteout char-devs) but not `-type l`; a `ln -s target /etc/foo` lands a symlink in the upper that `rooms diff` misses, so a persistent-path lane escape via symlink exits 0. Add `-type l` to the walk (classification falls through the existing add/modify branch). Conservative (can only catch more), but needs a host-e2e since it's in-guest bash. (codex P2 on [#47](https://github.com/itsHabib/rooms/pull/47)) — **Addressed** by [#49](https://github.com/itsHabib/rooms/pull/49): `-type l` added + a `|| [ -L ]` guard for a lower dangling symlink; host-e2e'd a sudo `/etc` escape **and** a non-sudo `/home/rooms` escape → both flagged, exit 3.
+-- 2026-06-21 — **other special file types aren't enumerated (`mknod` escape).** Even after the symlink fix, `ENUMERATE_OVERLAY`'s `find` walks `-type f`/`-type l`/`-type c` but not `-type b` (block dev) / `-type p` (FIFO) / `-type s` (socket); and a **non-whiteout** char device (a `mknod c` that isn't `0:0`) hits the `-c` branch, fails the `0:0` whiteout test, and is silently dropped. An agent with NOPASSWD sudo could `mknod` a device/FIFO/socket outside `/workspace` and it would be omitted from `changeset.json` → exit 0. Walk `-type b -o -type p -o -type s` and split the `-c` branch (`0:0` → delete, else → add/modify like a file). Same class as the symlink gap; needs a host-e2e (`mknod` a node, confirm flagged). (claude review on [#49](https://github.com/itsHabib/rooms/pull/49))
++- 2026-06-21 — **other special file types aren't enumerated (`mknod` escape).** Even after the symlink fix, `ENUMERATE_OVERLAY`'s `find` walks `-type f`/`-type l`/`-type c` but not `-type b` (block dev) / `-type p` (FIFO) / `-type s` (socket); and a **non-whiteout** char device (a `mknod c` that isn't `0:0`) hits the `-c` branch, fails the `0:0` whiteout test, and is silently dropped. An agent with NOPASSWD sudo could `mknod` a device/FIFO/socket outside `/workspace` and it would be omitted from `changeset.json` → exit 0. Walk `-type b -o -type p -o -type s` and split the `-c` branch (`0:0` → delete, else → add/modify like a file). Same class as the symlink gap; needs a host-e2e (`mknod` a node, confirm flagged). (claude review on [#49](https://github.com/itsHabib/rooms/pull/49)) — **Addressed** by [#50](https://github.com/itsHabib/rooms/pull/50): walk widened to `-type f/l/b/p/s/c`, whiteout check flattened to `[ -c ] && [ 0:0 ]` so a non-`0:0` device falls through to add/modify; host-e2e'd a block dev + non-`0:0` char + FIFO escape (all flagged → exit 3) and a deletion (still classified `D`).
++- 2026-06-21 — **directory-only mutations aren't enumerated.** The walk has no `-type d`, so an *empty* dir created outside `/workspace` (`sudo mkdir /etc/evil`) isn't reported (a dir *with* contents is caught via its files); dir mode/owner changes likewise aren't surfaced. Low realism — an empty dir is a weak escape. Walk `-type d` + classify by lower presence, or accept as a known limit. (mapping pass on [#50](https://github.com/itsHabib/rooms/pull/50))
++- 2026-06-21 — **ephemeral-prefix payloads evade the lane tripwire.** `is_lane_escape` filters the OS-churn prefixes (`/run`, `/var/log`, `/var/cache`, `/var/tmp`, `/tmp`, ...) to avoid false positives, so a persistent payload an agent drops there (`sudo cp evil /var/log/x`) is in `changeset.json` but **not flagged** as an escape (`--json` still surfaces it for forensics). A filtering-policy tension, not a walk gap: tightening the filter (flag non-OS-owned writes under those prefixes) trades against false-positive noise. (mapping pass on [#50](https://github.com/itsHabib/rooms/pull/50))
+ - 2026-06-20 — **opaque-directory whiteouts aren't surfaced.** A delete-then-recreate dir carries `trusted.overlay.opaque=y` on the upper dir; the walk skips directories, so the removed entries aren't reported (the recreated dir's new files show as added). Narrow; acknowledged in the rooms-diff spec. Reading the xattr needs `getfattr`/`attr` in the Alpine image + a representation decision (how to express "these lower entries were dropped"). (claude review on [#47](https://github.com/itsHabib/rooms/pull/47))
+ - 2026-06-20 — **`rooms diff` trusts agent-controllable output (adversarial-guest hole).** The enumeration runs in-guest over SSH as the same NOPASSWD-root `rooms` user the agent runs as, so a compromised guest can forge the `NOOVERLAY` sentinel or omit its own escape records. Exit 0 is therefore a forensic signal against a non-adversarial guest, not a containment boundary (now documented in the spec's *Trust boundary* section). Closing it means enumerating the upperdir **host-side** via the firecracker drive instead of guest SSH — a bigger re-arch, out of scope for #47. (gate-soundness review on [#47](https://github.com/itsHabib/rooms/pull/47))
+ 
+diff --git a/src/runner.rs b/src/runner.rs
+index 9892186..9f5390f 100644
+--- a/src/runner.rs
++++ b/src/runner.rs
+@@ -206,19 +206,24 @@ pub async fn collect_out_to_host(guest_ip: &str, key_path: &Path, host_dir: &Pat
+ }
+ 
+ /// One `sudo bash` over the upperdir: emit NUL-delimited `<op>\t<relpath>`
+-/// records (op `A`/`M`/`D`) for every changed file or symlink, or the
+-/// `NOOVERLAY` sentinel when there is no overlay (a writable-rootfs run). Runs as
+-/// root in-process (not per-file sudo) so it also sees root-owned escapes.
+-/// Symlinks are walked too (`-type l`): a symlink dropped outside `/workspace`
+-/// (e.g. `ln -s target /etc/foo`) is itself a persistent-path lane escape, and
+-/// `find -type f` alone would miss it. `/oldroot` is the RO lower,
+-/// `/oldroot/mnt/upper` the tmpfs upper (see `scripts/lib/overlay-init.sh`).
++/// records (op `A`/`M`/`D`) for every changed entry, or the `NOOVERLAY` sentinel
++/// when there is no overlay (a writable-rootfs run). Runs as root in-process (not
++/// per-file sudo) so it also sees root-owned escapes.
++///
++/// Walks regular files, symlinks, and every special file an agent can leave on
++/// the filesystem (block/char devices via `mknod`, FIFOs, a bound socket) — each
++/// is a persistent-path lane escape when written outside `/workspace`, and a
++/// `-type f`-only walk would miss it. A
++/// char device that is `0:0` is an overlayfs **whiteout** (a deletion marker →
++/// `D`); any other char device (a real `mknod c`) classifies as a normal escape
++/// (→ `A`/`M`), so flattening that check is what stops a non-`0:0` device from
++/// being silently dropped. `/oldroot` is the RO lower, `/oldroot/mnt/upper` the
++/// tmpfs upper (see `scripts/lib/overlay-init.sh`).
+ const ENUMERATE_OVERLAY: &str = r#"sudo bash -c 'UP=/oldroot/mnt/upper; LOW=/oldroot
+ if [ ! -d "$UP" ]; then printf NOOVERLAY; exit 0; fi
+-find "$UP" \( -type f -o -type l -o -type c \) -print0 | while IFS= read -r -d "" p; do
++find "$UP" \( -type f -o -type l -o -type b -o -type p -o -type s -o -type c \) -print0 | while IFS= read -r -d "" p; do
+   rel=${p#"$UP"/}
+-  if [ -c "$p" ]; then
+-    if [ "$(stat -c %t "$p" 2>/dev/null)" = 0 ] && [ "$(stat -c %T "$p" 2>/dev/null)" = 0 ]; then printf "D\t%s\0" "$rel"; fi
++  if [ -c "$p" ] && [ "$(stat -c %t "$p" 2>/dev/null)" = 0 ] && [ "$(stat -c %T "$p" 2>/dev/null)" = 0 ]; then printf "D\t%s\0" "$rel"
+   elif [ -e "$LOW/$rel" ] || [ -L "$LOW/$rel" ]; then printf "M\t%s\0" "$rel"
+   else printf "A\t%s\0" "$rel"; fi
+ done'"#;

@@ -1,0 +1,517 @@
+diff --git a/internal/recommend/recommend.go b/internal/recommend/recommend.go
+new file mode 100644
+index 0000000..f54ce00
+--- /dev/null
++++ b/internal/recommend/recommend.go
+@@ -0,0 +1,264 @@
++// Package recommend turns a deployed-environment sanity report into a
++// deterministic recommendation. It is pure policy: no I/O, no network, no LLM.
++//
++// Synthesize encodes the §7 decision matrix as values. cmd/sanity-decide uses it
++// two ways: as the deterministic FLOOR the optional agent is clamped to, and as
++// the FALLBACK recommendation when the agent call fails or is skipped (spec §8,
++// "agent unavailable"). Because the matrix lives here — not in a prompt or YAML —
++// a hallucinated rollback / re-apply is structurally impossible (spec §4).
++//
++// D7 guard: the disabled-404 → reapply_with_secret premise assumes the prod
++// service runs at min_instances=0, so no warm prior revision keeps serving the
++// destroyed secret. Re-check this matrix if Cloud Run min-instances changes.
++package recommend
++
++import (
++	"strings"
++
++	"github.com/roxiq/roxiq/internal/sanity"
++)
++
++// Kind is the recommended action class (spec §9.3.3).
++type Kind string
++
++const (
++	// KindNone is the happy path — every check passed.
++	KindNone Kind = "none"
++	// KindInvestigate flags a human to look; no mechanical recovery applies.
++	KindInvestigate Kind = "investigate"
++	// KindRollback redeploys the prior-good image (a code/contract regression).
++	KindRollback Kind = "rollback"
++	// KindReapplyWithSecret re-applies terraform to recreate a stripped
++	// count-gated secret (the drain incident) — NOT an image rollback (D7).
++	KindReapplyWithSecret Kind = "reapply_with_secret"
++)
++
++// SecondaryFinding is an additional signal the primary recommendation must not
++// suppress — e.g. an app 5xx co-occurring with a disabled-404.
++type SecondaryFinding struct {
++	Signal   string
++	Note     string
++	Severity string
++}
++
++// Recommendation is the deterministic policy output — the floor cmd/sanity-decide
++// clamps the agent to. The agent layer adds prose (summary/rationale) and the
++// rendered action command on top; this package authors none of those.
++type Recommendation struct {
++	Kind              Kind
++	Confidence        float64
++	PrimarySignal     string
++	SecondaryFindings []SecondaryFinding
++	RollbackTargetTag string // set only when Kind == KindRollback
++}
++
++// Inputs are everything the policy reads. Browser is nil until the Phase 2
++// Playwright JSON reporter ships; Synthesize is nil-safe.
++type Inputs struct {
++	Report   sanity.RunResult
++	Browser  *BrowserReport
++	PriorTag string
++	// Gate is the deploy context. Synthesize itself is gate-independent; the
++	// downstream layers (T2/T3) read it to derive the pre-merge go/no_go form
++	// and to pick the agent model (Sonnet pre-merge / Opus post-merge).
++	Gate string // "post_merge" | "pre_merge"
++}
++
++// Synthesize maps a sanity report to a recommendation. The hard trigger
++// (disabled-404) is evaluated first so it can never be shadowed; the happy path
++// is last; line-of-sight throughout.
++func Synthesize(in *Inputs) Recommendation {
++	switch drainBodyKind(&in.Report) {
++	case "disabled": // HARD — the incident, agent-independent
++		return reapplyWithCompound(in)
++	case "route_missing":
++		return investigate("drain.unsigned_403:route_missing", 0.8, nil)
++	case "unknown":
++		return investigate("drain.unsigned_403:unknown", 0.7, unknownDrainSecondary())
++	}
++	// Rollback only when the drain is confirmed healthy (still 403); an app
++	// fault alongside a failing drain is a broader, ambiguous failure, and spec
++	// §7 scopes the rollback row to "drain still 403".
++	if app, ok := appFault(&in.Report); ok && drainHealthy(&in.Report) {
++		return rollback(signalFor(app), in.PriorTag)
++	}
++	// Any remaining HTTP failure is inconclusive — including a browser fail that
++	// co-occurs with an HTTP fail (a mixed failure is not a UI-only regression).
++	// Checked BEFORE the browser row so that row strictly means "browser fail,
++	// HTTP green" (§7).
++	if in.Report.Summary.Fail > 0 {
++		return investigate("verify:inconclusive", 0.5, nil)
++	}
++	if in.Browser.hasHardFail() { // HTTP green here; a UI-only regression
++		return investigate(in.Browser.primarySignal(), 0.7, nil)
++	}
++	return Recommendation{Kind: KindNone, Confidence: 1.0, PrimarySignal: "all_pass"}
++}
++
++// reapplyWithCompound is the disabled-404 recovery, optionally carrying a
++// co-occurring app fault as a secondary so the 404 never suppresses a 5xx.
++func reapplyWithCompound(in *Inputs) Recommendation {
++	rec := Recommendation{
++		Kind:          KindReapplyWithSecret,
++		Confidence:    0.95,
++		PrimarySignal: "drain.unsigned_403:disabled",
++	}
++	if app, ok := appFault(&in.Report); ok {
++		rec.SecondaryFindings = append(rec.SecondaryFindings, SecondaryFinding{
++			Signal:   signalFor(app),
++			Note:     "bad code still serving — also roll the image after the re-apply",
++			Severity: "high",
++		})
++	}
++	return rec
++}
++
++func investigate(signal string, confidence float64, secondary []SecondaryFinding) Recommendation {
++	return Recommendation{
++		Kind:              KindInvestigate,
++		Confidence:        confidence,
++		PrimarySignal:     signal,
++		SecondaryFindings: secondary,
++	}
++}
++
++func rollback(signal, priorTag string) Recommendation {
++	if priorTag == "" {
++		// A code regression an image rollback would fix, but verify-prod captured
++		// no prior-good tag — emitting a rollback with an empty target is
++		// unusable, so flag for a human to pick one instead.
++		return investigate(signal, 0.7, []SecondaryFinding{{
++			Signal:   signal,
++			Note:     "image rollback indicated but no prior-good tag captured — pick a rollback target manually",
++			Severity: "high",
++		}})
++	}
++	return Recommendation{
++		Kind:              KindRollback,
++		Confidence:        0.9,
++		PrimarySignal:     signal,
++		RollbackTargetTag: priorTag,
++	}
++}
++
++// drainHealthy reports whether the drain check passed (still 403) — the §7
++// precondition for an image rollback.
++func drainHealthy(r *sanity.RunResult) bool {
++	drain, ok := find(r, "drain.unsigned_403")
++	return ok && drain.Status == sanity.StatusPass
++}
++
++func unknownDrainSecondary() []SecondaryFinding {
++	return []SecondaryFinding{{
++		Signal:   "drain.unsigned_403:unknown",
++		Note:     "drain 404 of unknown body — incident may be masked; verify the 404 body strings",
++		Severity: "high",
++	}}
++}
++
++// drainBodyKind returns the 404 body classification of the drain check, or "" if
++// the drain check is absent, passed, or failed without a 404 body_kind.
++func drainBodyKind(r *sanity.RunResult) string {
++	drain, ok := find(r, "drain.unsigned_403")
++	if !ok || drain.Status != sanity.StatusFail {
++		return ""
++	}
++	kind, _ := drain.Observed["body_kind"].(string)
++	return kind
++}
++
++// appFault reports the first failed app-endpoint (api.*) check that returned an
++// HTTP response (status_code present) — a 4xx/5xx/contract regression an image
++// rollback can address. A failure with no status_code is a transport blip,
++// handled as inconclusive rather than an app fault.
++func appFault(r *sanity.RunResult) (sanity.Result, bool) {
++	for _, c := range r.Checks {
++		if !strings.HasPrefix(c.Name, "api.") {
++			continue
++		}
++		if c.Status != sanity.StatusFail {
++			continue
++		}
++		if _, ok := statusCode(c); ok {
++			return c, true
++		}
++	}
++	return sanity.Result{}, false
++}
++
++func find(r *sanity.RunResult, name string) (sanity.Result, bool) {
++	for _, c := range r.Checks {
++		if c.Name == name {
++			return c, true
++		}
++	}
++	return sanity.Result{}, false
++}
++
++// signalFor builds a stable "<check>:<discriminator>" primary-signal key the
++// operator can grep.
++func signalFor(r sanity.Result) string {
++	code, ok := statusCode(r)
++	if !ok {
++		return r.Name + ":fail"
++	}
++	if code >= 500 {
++		return r.Name + ":5xx"
++	}
++	if code >= 400 {
++		return r.Name + ":4xx"
++	}
++	if code == 200 {
++		return r.Name + ":contract"
++	}
++	return r.Name + ":fail"
++}
++
++// statusCode coerces observed["status_code"] to an int. It is float64 after a
++// report.json round-trip (ParseReport unmarshals into map[string]any) and int
++// when a check builds it directly, so both are accepted.
++func statusCode(r sanity.Result) (int, bool) {
++	switch n := r.Observed["status_code"].(type) {
++	case int: // direct construction (checks, tests)
++		return n, true
++	case float64: // after a report.json round-trip via ParseReport
++		return int(n), true
++	}
++	return 0, false
++}
++
++// BrowserReport is the normalized Playwright result. The JSON reporter is Phase
++// 2; this is nil in v1 and the methods are nil-safe.
++type BrowserReport struct {
++	Specs []BrowserSpec
++}
++
++// BrowserSpec is one spec's outcome. "flaky" (passed on retry) is not a failure.
++type BrowserSpec struct {
++	Name   string
++	Status string // "pass" | "fail" | "flaky"
++}
++
++func (b *BrowserReport) hasHardFail() bool {
++	if b == nil {
++		return false
++	}
++	for _, s := range b.Specs {
++		if s.Status == "fail" {
++			return true
++		}
++	}
++	return false
++}
++
++func (b *BrowserReport) primarySignal() string {
++	if b == nil {
++		return "playwright:fail"
++	}
++	for _, s := range b.Specs {
++		if s.Status == "fail" {
++			return "playwright:" + s.Name + ":fail"
++		}
++	}
++	return "playwright:fail"
++}
+diff --git a/internal/recommend/recommend_test.go b/internal/recommend/recommend_test.go
+new file mode 100644
+index 0000000..fbea033
+--- /dev/null
++++ b/internal/recommend/recommend_test.go
+@@ -0,0 +1,241 @@
++package recommend
++
++import (
++	"testing"
++
++	"github.com/roxiq/roxiq/internal/sanity"
++)
++
++// chk builds a check result with an optional status_code (0 = omit, i.e. a
++// transport failure with no HTTP response).
++func chk(name string, status sanity.Status, code int) sanity.Result {
++	obs := map[string]any{}
++	if code != 0 {
++		obs["status_code"] = code
++	}
++	return sanity.Result{Name: name, Status: status, Observed: obs}
++}
++
++func drain404(kind string) sanity.Result {
++	return sanity.Result{
++		Name:     "drain.unsigned_403",
++		Status:   sanity.StatusFail,
++		Observed: map[string]any{"status_code": 404, "body_kind": kind},
++	}
++}
++
++func report(checks ...sanity.Result) sanity.RunResult {
++	r := sanity.RunResult{Target: "prod", Checks: checks}
++	for _, c := range checks {
++		switch c.Status {
++		case sanity.StatusPass:
++			r.Summary.Pass++
++		case sanity.StatusFail:
++			r.Summary.Fail++
++		case sanity.StatusSkip:
++			r.Summary.Skip++
++		}
++	}
++	return r
++}
++
++var (
++	drainPass = chk("drain.unsigned_403", sanity.StatusPass, 403)
++	healthOK  = chk("api.health", sanity.StatusPass, 200)
++	searchOK  = chk("api.athletes_search", sanity.StatusPass, 200)
++	boardsOK  = chk("api.leaderboards", sanity.StatusPass, 200)
++	tlsOK     = chk("tls.valid", sanity.StatusPass, 0)
++)
++
++func TestSynthesize_matrix(t *testing.T) {
++	cases := []struct {
++		name          string
++		in            Inputs
++		wantKind      Kind
++		wantSignal    string
++		wantSecondary int
++		wantRollback  string
++		minConfidence float64
++	}{
++		{
++			name:          "all pass -> none",
++			in:            Inputs{Report: report(healthOK, searchOK, boardsOK, drainPass, tlsOK)},
++			wantKind:      KindNone,
++			wantSignal:    "all_pass",
++			minConfidence: 1.0,
++		},
++		{
++			name:          "disabled-404 -> reapply_with_secret (hard)",
++			in:            Inputs{Report: report(healthOK, drain404("disabled"))},
++			wantKind:      KindReapplyWithSecret,
++			wantSignal:    "drain.unsigned_403:disabled",
++			minConfidence: 0.95,
++		},
++		{
++			name: "compound: disabled-404 AND app 5xx -> reapply primary + flagged 5xx",
++			in: Inputs{Report: report(
++				chk("api.leaderboards", sanity.StatusFail, 503),
++				drain404("disabled"),
++			)},
++			wantKind:      KindReapplyWithSecret,
++			wantSignal:    "drain.unsigned_403:disabled",
++			wantSecondary: 1,
++			minConfidence: 0.95,
++		},
++		{
++			name:       "disabled-404 cannot be shadowed by an earlier app fault",
++			in:         Inputs{Report: report(chk("api.health", sanity.StatusFail, 500), drain404("disabled"))},
++			wantKind:   KindReapplyWithSecret,
++			wantSignal: "drain.unsigned_403:disabled",
++			// the app fault rides along as a secondary, never the primary
++			wantSecondary: 1,
++		},
++		{
++			name:       "route_missing-404 -> investigate",
++			in:         Inputs{Report: report(healthOK, drain404("route_missing"))},
++			wantKind:   KindInvestigate,
++			wantSignal: "drain.unsigned_403:route_missing",
++		},
++		{
++			name:          "unknown-404 -> investigate + loud flagged secondary",
++			in:            Inputs{Report: report(healthOK, drain404("unknown"))},
++			wantKind:      KindInvestigate,
++			wantSignal:    "drain.unsigned_403:unknown",
++			wantSecondary: 1,
++		},
++		{
++			name:         "app 5xx, drain still 403 -> rollback to prior tag",
++			in:           Inputs{Report: report(chk("api.leaderboards", sanity.StatusFail, 502), drainPass), PriorTag: "abc1234"},
++			wantKind:     KindRollback,
++			wantSignal:   "api.leaderboards:5xx",
++			wantRollback: "abc1234",
++		},
++		{
++			name:         "app contract break (200) -> rollback",
++			in:           Inputs{Report: report(chk("api.athletes_search", sanity.StatusFail, 200), drainPass), PriorTag: "def5678"},
++			wantKind:     KindRollback,
++			wantSignal:   "api.athletes_search:contract",
++			wantRollback: "def5678",
++		},
++		{
++			name:         "app 4xx route regression -> rollback",
++			in:           Inputs{Report: report(chk("api.leaderboards", sanity.StatusFail, 404), drainPass), PriorTag: "ccc3333"},
++			wantKind:     KindRollback,
++			wantSignal:   "api.leaderboards:4xx",
++			wantRollback: "ccc3333",
++		},
++		{
++			name:          "app 5xx, drain healthy, no prior tag -> investigate (no rollback target)",
++			in:            Inputs{Report: report(chk("api.leaderboards", sanity.StatusFail, 503), drainPass)},
++			wantKind:      KindInvestigate,
++			wantSignal:    "api.leaderboards:5xx",
++			wantSecondary: 1,
++		},
++		{
++			name:       "app 5xx AND drain non-404 fail -> inconclusive, not rollback (drain not 403)",
++			in:         Inputs{Report: report(chk("api.leaderboards", sanity.StatusFail, 503), chk("drain.unsigned_403", sanity.StatusFail, 500)), PriorTag: "abc1234"},
++			wantKind:   KindInvestigate,
++			wantSignal: "verify:inconclusive",
++		},
++		{
++			name:       "browser fail AND an HTTP fail -> inconclusive, not attributed to the UI",
++			in:         Inputs{Report: report(healthOK, drainPass, chk("tls.valid", sanity.StatusFail, 0)), Browser: &BrowserReport{Specs: []BrowserSpec{{Name: "share.spec", Status: "fail"}}}},
++			wantKind:   KindInvestigate,
++			wantSignal: "verify:inconclusive",
++		},
++		{
++			name:         "multiple API failures -> rollback on the first (one recommendation)",
++			in:           Inputs{Report: report(chk("api.health", sanity.StatusFail, 500), chk("api.leaderboards", sanity.StatusFail, 503), drainPass), PriorTag: "eee5555"},
++			wantKind:     KindRollback,
++			wantSignal:   "api.health:5xx",
++			wantRollback: "eee5555",
++		},
++		{
++			name:       "browser fail, HTTP green -> investigate, never rollback",
++			in:         Inputs{Report: report(healthOK, searchOK, boardsOK, drainPass), Browser: &BrowserReport{Specs: []BrowserSpec{{Name: "share.spec", Status: "fail"}}}},
++			wantKind:   KindInvestigate,
++			wantSignal: "playwright:share.spec:fail",
++		},
++		{
++			name:       "browser flaky only, HTTP green -> none (flaky is not a failure)",
++			in:         Inputs{Report: report(healthOK, drainPass), Browser: &BrowserReport{Specs: []BrowserSpec{{Name: "share.spec", Status: "flaky"}}}},
++			wantKind:   KindNone,
++			wantSignal: "all_pass",
++		},
++		{
++			name:       "tls fail (infra) only -> inconclusive investigate",
++			in:         Inputs{Report: report(healthOK, drainPass, chk("tls.valid", sanity.StatusFail, 0))},
++			wantKind:   KindInvestigate,
++			wantSignal: "verify:inconclusive",
++		},
++		{
++			name:       "drain non-404 fail alone -> inconclusive investigate",
++			in:         Inputs{Report: report(healthOK, chk("drain.unsigned_403", sanity.StatusFail, 500))},
++			wantKind:   KindInvestigate,
++			wantSignal: "verify:inconclusive",
++		},
++		{
++			name:       "app transport failure (no status_code) -> inconclusive, not rollback",
++			in:         Inputs{Report: report(chk("api.health", sanity.StatusFail, 0), drainPass)},
++			wantKind:   KindInvestigate,
++			wantSignal: "verify:inconclusive",
++		},
++	}
++
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			got := Synthesize(&tc.in)
++			if got.Kind != tc.wantKind {
++				t.Fatalf("Kind = %q, want %q", got.Kind, tc.wantKind)
++			}
++			if got.PrimarySignal != tc.wantSignal {
++				t.Errorf("PrimarySignal = %q, want %q", got.PrimarySignal, tc.wantSignal)
++			}
++			if len(got.SecondaryFindings) != tc.wantSecondary {
++				t.Errorf("SecondaryFindings = %d, want %d", len(got.SecondaryFindings), tc.wantSecondary)
++			}
++			if got.RollbackTargetTag != tc.wantRollback {
++				t.Errorf("RollbackTargetTag = %q, want %q", got.RollbackTargetTag, tc.wantRollback)
++			}
++			if tc.minConfidence > 0 && got.Confidence < tc.minConfidence {
++				t.Errorf("Confidence = %.2f, want >= %.2f", got.Confidence, tc.minConfidence)
++			}
++			// RollbackTargetTag must be set only for a rollback.
++			if got.Kind != KindRollback && got.RollbackTargetTag != "" {
++				t.Errorf("non-rollback %q carries RollbackTargetTag %q", got.Kind, got.RollbackTargetTag)
++			}
++		})
++	}
++}
++
++// TestSynthesize_parseReportRoundTrip proves the status_code coercion survives a
++// report.json round-trip, where map[string]any numbers become float64 — the path
++// cmd/sanity-decide actually takes when reading the uploaded artifact.
++func TestSynthesize_parseReportRoundTrip(t *testing.T) {
++	run := report(chk("api.leaderboards", sanity.StatusFail, 503), drainPass)
++	data, err := sanity.MarshalReport(&run)
++	if err != nil {
++		t.Fatalf("MarshalReport: %v", err)
++	}
++	parsed, err := sanity.ParseReport(data)
++	if err != nil {
++		t.Fatalf("ParseReport: %v", err)
++	}
++	// status_code is now float64 inside parsed.Checks[*].Observed.
++	got := Synthesize(&Inputs{Report: parsed, PriorTag: "abc1234"})
++	if got.Kind != KindRollback {
++		t.Fatalf("Kind = %q, want rollback (float64 status_code must coerce)", got.Kind)
++	}
++	if got.PrimarySignal != "api.leaderboards:5xx" {
++		t.Errorf("PrimarySignal = %q, want api.leaderboards:5xx", got.PrimarySignal)
++	}
++}
++
++// TestSynthesize_nilBrowser confirms the browser row is nil-safe (Browser is nil
++// until the Phase 2 reporter ships).
++func TestSynthesize_nilBrowser(t *testing.T) {
++	got := Synthesize(&Inputs{Report: report(healthOK, drainPass), Browser: nil})
++	if got.Kind != KindNone {
++		t.Fatalf("Kind = %q, want none with a nil Browser and a green report", got.Kind)
++	}
++}

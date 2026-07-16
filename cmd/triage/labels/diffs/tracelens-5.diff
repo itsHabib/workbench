@@ -1,0 +1,622 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 637ed05..c2177d7 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -15,12 +15,12 @@ CI (`.github/workflows/ci.yml`) runs gofmt check + `go vet` + `go test -race` +
+ 
+ ## Layout
+ 
+-- Root package `tracelens` — the library: `trace.go` (model + signatures), `parse.go` (JSONL ingestion), `ship.go` (ship run event-stream decoder, cursor dialect), `detect.go` (the `Detector` pipeline: loop, redundancy, retry-storm, cost-hotspot, stuck), `analyze.go` (policy: fold findings into a health verdict), `render.go` (human output).
+-- `cmd/tracelens` — the CLI: generic trace mode plus the `ship <run-ref>` subcommand (resolves run refs, exit codes gate: 0 healthy/degraded, 1 pathological, 2 error).
++- Root package `tracelens` — the library: `trace.go` (model + signatures), `parse.go` (JSONL ingestion), `ship.go` (ship run event-stream decoder, cursor dialect), `detect.go` (the `Detector` pipeline: loop, redundancy, retry-storm, cost-hotspot, stuck), `analyze.go` (policy: fold findings into a verdict — decision + tier), `render.go` (human output).
++- `cmd/tracelens` — the CLI: generic trace mode plus the `ship <run-ref>` subcommand (resolves run refs, exit codes gate: 0 pass/escalate, 1 block, 2 error).
+ - `cmd/demo` — zero-arg demo over a built-in messy trajectory.
+ - `docs/` — pitch and parked scope (`PITCH.md`, `NEXT.md`).
+ 
+-Mechanism vs policy: detectors (`detect.go`) report findings; `buildReport` (`analyze.go`) owns thresholds, ranking, and health rules. Adding a pathology means adding one `Detector`, nothing else.
++Mechanism vs policy: detectors (`detect.go`) report findings; `buildReport` (`analyze.go`) owns thresholds, ranking, and the decision/tier rules. Adding a pathology means adding one `Detector`, nothing else.
+ 
+ The guard test `TestAnalyze_LoopMakesRunPathological` fails if the detector core is stubbed to return no findings — keep that property: a green suite must certify the detectors actually ran.
+ 
+diff --git a/analyze.go b/analyze.go
+index cf2a4b7..71e62d0 100644
+--- a/analyze.go
++++ b/analyze.go
+@@ -3,6 +3,7 @@ package tracelens
+ import (
+ 	"fmt"
+ 	"sort"
++	"strings"
+ )
+ 
+ // Severity ranks how much a finding should worry an operator.
+@@ -31,7 +32,9 @@ func (s Severity) MarshalJSON() ([]byte, error) {
+ }
+ 
+ // Finding is one diagnosed issue: what it is, how bad, which steps prove it,
+-// how much money it wasted, and a concrete, evidence-filled repair.
++// how much money it wasted, and a concrete, evidence-filled repair. This is
++// tracelens's own rich finding — the detector output. The gate-shaped
++// VerdictFinding on the emitted Verdict is the aligned wire surface.
+ type Finding struct {
+ 	Kind      string
+ 	Severity  Severity
+@@ -41,17 +44,110 @@ type Finding struct {
+ 	Repair    string
+ }
+ 
+-// Report is the verdict over a whole run: totals, an overall health label, a
+-// one-line headline, and the ranked findings.
++// Report is the internal analyzer result over a whole run: totals, the two
++// orthogonal verdict axes, a one-line headline, and the ranked rich findings.
++// It backs the human render; the emitted, gate-aligned surface is Verdict
++// (see the Verdict method).
+ type Report struct {
+ 	Steps     int
+ 	TotalUSD  float64
+ 	WastedUSD float64
+-	Health    string
++	Decision  string
++	Tier      string
+ 	Headline  string
+ 	Findings  []Finding
+ }
+ 
++// Producer identifies who stands behind a verdict. Class carries the ladder
++// semantics; Impl names the specific implementation for provenance only —
++// nothing may branch on Impl. This mirrors gate's verify.Producer so the two
++// verdicts are byte-comparable.
++type Producer struct {
++	Class string `json:"class"`
++	Impl  string `json:"impl,omitempty"`
++}
++
++// Producer classes. tracelens's analyzer is deterministic, so it always
++// produces ClassCode.
++const (
++	ClassCode     = "code"
++	ClassLocal    = "local-model"
++	ClassJudgment = "judgment"
++)
++
++// Decisions, worst to best: block > escalate > pass.
++const (
++	DecisionBlock    = "block"
++	DecisionEscalate = "escalate"
++	DecisionPass     = "pass"
++)
++
++// Tiers, best to worst: T0 < T1 < T2 < T3. An unknown tier ranks highest so a
++// garbage value fails closed, matching gate's tier.Rank default.
++const (
++	TierT0 = "T0"
++	TierT1 = "T1"
++	TierT2 = "T2"
++	TierT3 = "T3"
++)
++
++// impl is the provenance stamp on every verdict tracelens emits — the analyzer
++// identity. It stays dialect-neutral because the same analyzer runs on both the
++// neutral JSONL and the cursor ship-trace paths.
++const impl = "tracelens"
++
++// Verdict is the emitted, gate-aligned result. Decision and Tier are
++// deliberately orthogonal axes: decision says who may proceed; tier says who
++// must approve. Field names and JSON tags mirror gate's verify.Verdict exactly
++// so a tracelens verdict is byte-comparable to gate's.
++type Verdict struct {
++	Subject    Subject          `json:"subject"`
++	Source     string           `json:"source"`
++	Producer   Producer         `json:"producer"`
++	Decision   string           `json:"decision"`
++	Tier       string           `json:"tier"`
++	Confidence float64          `json:"confidence"`
++	Findings   []VerdictFinding `json:"findings,omitempty"`
++	Why        string           `json:"why"`
++}
++
++// VerdictFinding is the gate-shaped, aligned finding that rides on a Verdict.
++// It carries no producer field (producer lives on the Verdict) and no repair or
++// cost — those stay on tracelens's rich Finding. Field names and JSON tags
++// mirror gate's verify.Finding so the emitted slice is byte-comparable.
++type VerdictFinding struct {
++	Title      string  `json:"title"`
++	Severity   string  `json:"severity,omitempty"`
++	Locus      string  `json:"locus,omitempty"`
++	Confidence float64 `json:"confidence,omitempty"`
++}
++
++// Subject names the change a verdict is about. tracelens analyzes a trace, not
++// a pull request, so it is left zero today; it exists to keep the emitted
++// verdict byte-comparable to gate's.
++type Subject struct {
++	Repo    string `json:"repo"`
++	Number  int    `json:"number"`
++	HeadSHA string `json:"head_sha,omitempty"`
++}
++
++// tierRank orders tiers so the max wins in composition; an unknown or empty
++// tier ranks highest (fail closed), matching gate's tier.Rank default.
++func tierRank(tier string) int {
++	switch tier {
++	case TierT0:
++		return 0
++	case TierT1:
++		return 1
++	case TierT2:
++		return 2
++	case TierT3:
++		return 3
++	default:
++		return 4
++	}
++}
++
+ // Config holds the detector thresholds. Zero values fall back to sane defaults
+ // inside each detector, so DefaultConfig is a convenience, not a requirement.
+ type Config struct {
+@@ -85,9 +181,10 @@ func Analyze(t Trajectory, cfg Config) Report {
+ 	return buildReport(t, findings)
+ }
+ 
+-// buildReport is the policy layer: it ranks findings and decides overall health.
+-// Any Critical finding makes a run pathological; a Warn alone makes it degraded;
+-// Info-only (or none) stays healthy.
++// buildReport is the policy layer: it ranks findings and decides the two
++// orthogonal verdict axes. Decision and Tier are stored independently — they
++// correlate here because one analyzer sets both, but the contract is that the
++// axes are orthogonal (as gate's are), so nothing re-derives one from the other.
+ func buildReport(t Trajectory, findings []Finding) Report {
+ 	sort.SliceStable(findings, func(i, j int) bool {
+ 		if findings[i].Severity != findings[j].Severity {
+@@ -96,31 +193,115 @@ func buildReport(t Trajectory, findings []Finding) Report {
+ 		return findings[i].WastedUSD > findings[j].WastedUSD
+ 	})
+ 	wasted := 0.0
+-	health := "healthy"
+-	hasWarn := false
+ 	for _, f := range findings {
+ 		wasted += f.WastedUSD
+-		if f.Severity == Critical {
+-			health = "pathological"
+-		}
+-		if f.Severity == Warn {
+-			hasWarn = true
+-		}
+-	}
+-	if health == "healthy" && hasWarn {
+-		health = "degraded"
+ 	}
++	decision, tier := decisionTier(findings)
+ 	r := Report{
+ 		Steps:     len(t.Steps),
+ 		TotalUSD:  t.TotalCost(),
+ 		WastedUSD: wasted,
+-		Health:    health,
++		Decision:  decision,
++		Tier:      tier,
+ 		Findings:  findings,
+ 	}
+ 	r.Headline = headline(r)
+ 	return r
+ }
+ 
++// decisionTier is the single source of truth for the two axes. A Critical
++// finding blocks at T3; a Warn (no Critical) escalates at T2; Info-only passes
++// at T1; a clean run passes at T0.
++func decisionTier(findings []Finding) (decision, tier string) {
++	max := severityFloor(findings)
++	switch max {
++	case Critical:
++		return DecisionBlock, TierT3
++	case Warn:
++		return DecisionEscalate, TierT2
++	case Info:
++		return DecisionPass, TierT1
++	default:
++		return DecisionPass, TierT0
++	}
++}
++
++// severityFloor reports the highest severity present, or -1 when there are no
++// findings, so callers can distinguish "Info only" from "empty".
++func severityFloor(findings []Finding) Severity {
++	max := Severity(-1)
++	for _, f := range findings {
++		if f.Severity > max {
++			max = f.Severity
++		}
++	}
++	return max
++}
++
++// buildVerdict composes the detector findings into the emitted, gate-aligned
++// Verdict. It is the policy entrypoint the CLI and gate consume.
++func buildVerdict(t Trajectory, findings []Finding) Verdict {
++	return buildReport(t, findings).Verdict()
++}
++
++// Verdict maps the rich internal report onto the gate-aligned wire type. It
++// copies the two axes computed by the policy layer (never re-deriving one from
++// the other), stamps the deterministic code producer, and folds the reasoning
++// into Why so a downstream reader can act on Why alone.
++func (r Report) Verdict() Verdict {
++	return Verdict{
++		Source:     "tracelens",
++		Producer:   Producer{Class: ClassCode, Impl: impl},
++		Decision:   r.Decision,
++		Tier:       r.Tier,
++		Confidence: 1,
++		Findings:   verdictFindings(r.Findings),
++		Why:        why(r),
++	}
++}
++
++// verdictFindings maps tracelens's rich findings onto the gate-shaped slice:
++// summary→Title, severity label→Severity, evidence steps→Locus.
++func verdictFindings(findings []Finding) []VerdictFinding {
++	if len(findings) == 0 {
++		return nil
++	}
++	out := make([]VerdictFinding, 0, len(findings))
++	for _, f := range findings {
++		out = append(out, VerdictFinding{
++			Title:      f.Summary,
++			Severity:   f.Severity.String(),
++			Locus:      locus(f.Steps),
++			Confidence: 1,
++		})
++	}
++	return out
++}
++
++// locus renders a finding's evidence steps as a human-readable locator, e.g.
++// "steps 3,4,5"; empty when the finding cites no steps.
++func locus(steps []int) string {
++	if len(steps) == 0 {
++		return ""
++	}
++	return "steps " + joinInts(steps)
++}
++
++// why is the aggregated reasoning for the verdict: the headline plus every
++// contributing finding's summary. On an escalate this is the full question a
++// downstream reader must be able to act on without any other field.
++func why(r Report) string {
++	if len(r.Findings) == 0 {
++		return r.Headline
++	}
++	lines := make([]string, 0, len(r.Findings)+1)
++	lines = append(lines, r.Headline)
++	for _, f := range r.Findings {
++		lines = append(lines, "- "+f.Summary)
++	}
++	return strings.Join(lines, "\n")
++}
++
+ func headline(r Report) string {
+ 	if len(r.Findings) == 0 {
+ 		return fmt.Sprintf("clean run: no pathologies across %d steps ($%.4f)", r.Steps, r.TotalUSD)
+diff --git a/analyze_test.go b/analyze_test.go
+index dd62897..c95f1a5 100644
+--- a/analyze_test.go
++++ b/analyze_test.go
+@@ -13,8 +13,8 @@ func TestAnalyze_HealthyRunHasNoFindings(t *testing.T) {
+ 		okStep("verify", nil, "passed", 0.01),
+ 	)
+ 	r := Analyze(tr, DefaultConfig())
+-	if r.Health != "healthy" {
+-		t.Fatalf("expected healthy, got %q with findings %+v", r.Health, r.Findings)
++	if r.Decision != DecisionPass {
++		t.Fatalf("expected pass, got %q with findings %+v", r.Decision, r.Findings)
+ 	}
+ 	if len(r.Findings) != 0 {
+ 		t.Fatalf("clean run should have no findings, got %d", len(r.Findings))
+@@ -34,8 +34,8 @@ func TestAnalyze_LoopMakesRunPathological(t *testing.T) {
+ 		steps = append(steps, okStep("search", map[string]any{"q": "same"}, "no result", 0.02))
+ 	}
+ 	r := Analyze(traj(steps...), DefaultConfig())
+-	if r.Health != "pathological" {
+-		t.Fatalf("a 5x loop must be pathological, got %q", r.Health)
++	if r.Decision != DecisionBlock {
++		t.Fatalf("a 5x loop must block, got %q", r.Decision)
+ 	}
+ 	if !strings.HasPrefix(r.Headline, "loop:") {
+ 		t.Fatalf("headline should lead with the loop, got %q", r.Headline)
+@@ -60,8 +60,8 @@ func TestAnalyze_RanksCriticalFirst(t *testing.T) {
+ 	if r.Findings[0].Severity != Critical {
+ 		t.Fatalf("critical finding must sort first, got %v", r.Findings[0].Severity)
+ 	}
+-	if r.Health != "pathological" {
+-		t.Fatalf("expected pathological, got %q", r.Health)
++	if r.Decision != DecisionBlock {
++		t.Fatalf("expected block, got %q", r.Decision)
+ 	}
+ }
+ 
+@@ -81,15 +81,15 @@ func TestAnalyze_WastedCostIsDisjointSum(t *testing.T) {
+ 	}
+ }
+ 
+-func TestAnalyze_DegradedOnWarnOnly(t *testing.T) {
+-	// A redundancy (warn) with no critical -> degraded, not pathological.
++func TestAnalyze_EscalateOnWarnOnly(t *testing.T) {
++	// A redundancy (warn) with no critical -> escalate, not block.
+ 	tr := traj(
+ 		okStep("lookup", map[string]any{"id": 7}, "row", 0.01),
+ 		okStep("lookup", map[string]any{"id": 7}, "row", 0.01),
+ 	)
+ 	r := Analyze(tr, DefaultConfig())
+-	if r.Health != "degraded" {
+-		t.Fatalf("warn-only run should be degraded, got %q", r.Health)
++	if r.Decision != DecisionEscalate {
++		t.Fatalf("warn-only run should escalate, got %q", r.Decision)
+ 	}
+ }
+ 
+@@ -101,3 +101,102 @@ func TestSeverityString(t *testing.T) {
+ 		}
+ 	}
+ }
++
++// TestBuildVerdictDecisionTierOrthogonal pins the max-severity → (decision,tier)
++// mapping across all four bands. Decision and Tier are independent fields; this
++// asserts both, not one derived from the other at read time.
++func TestBuildVerdictDecisionTierOrthogonal(t *testing.T) {
++	steps := func(n int) []int {
++		xs := make([]int, n)
++		for i := range xs {
++			xs[i] = i
++		}
++		return xs
++	}
++	cases := []struct {
++		name         string
++		findings     []Finding
++		wantDecision string
++		wantTier     string
++	}{
++		{"critical", []Finding{{Kind: "loop", Severity: Critical, Summary: "loop", Steps: steps(3)}}, DecisionBlock, TierT3},
++		{"warn", []Finding{{Kind: "redundancy", Severity: Warn, Summary: "redundant", Steps: steps(2)}}, DecisionEscalate, TierT2},
++		{"info", []Finding{{Kind: "cost_hotspot", Severity: Info, Summary: "hotspot", Steps: steps(1)}}, DecisionPass, TierT1},
++		{"empty", nil, DecisionPass, TierT0},
++	}
++	for _, c := range cases {
++		v := buildVerdict(traj(), c.findings)
++		if v.Decision != c.wantDecision {
++			t.Fatalf("%s: decision want %q, got %q", c.name, c.wantDecision, v.Decision)
++		}
++		if v.Tier != c.wantTier {
++			t.Fatalf("%s: tier want %q, got %q", c.name, c.wantTier, v.Tier)
++		}
++	}
++}
++
++// TestVerdictCarriesProducer checks every produced verdict is stamped with the
++// deterministic code producer — the run-level provenance the gate contract wants.
++func TestVerdictCarriesProducer(t *testing.T) {
++	verdicts := []Verdict{
++		buildVerdict(traj(), nil),
++		buildVerdict(traj(), []Finding{{Kind: "redundancy", Severity: Warn, Summary: "r", Steps: []int{0, 1}}}),
++		buildVerdict(traj(), []Finding{{Kind: "loop", Severity: Critical, Summary: "l", Steps: []int{0, 1, 2}}}),
++	}
++	for i, v := range verdicts {
++		if v.Producer.Class != ClassCode {
++			t.Fatalf("verdict %d: producer class want %q, got %q", i, ClassCode, v.Producer.Class)
++		}
++		if v.Producer.Impl == "" {
++			t.Fatalf("verdict %d: producer impl must record the implementation, got empty", i)
++		}
++	}
++}
++
++// TestEscalateCarriesQuestion asserts an escalate verdict's Why holds the full
++// aggregated reasoning — the headline plus each finding summary — not a bare
++// flag. A downstream reader must be able to act on Why alone.
++func TestEscalateCarriesQuestion(t *testing.T) {
++	tr := traj(
++		okStep("lookup", map[string]any{"id": 7}, "row", 0.01),
++		okStep("lookup", map[string]any{"id": 7}, "row", 0.01),
++		okStep("geo", map[string]any{"c": "sf"}, "loc", 0.02),
++		okStep("geo", map[string]any{"c": "sf"}, "loc", 0.02),
++	)
++	r := Analyze(tr, DefaultConfig())
++	if r.Decision != DecisionEscalate {
++		t.Fatalf("two redundant pairs should escalate, got %q", r.Decision)
++	}
++	v := r.Verdict()
++	if len(r.Findings) < 2 {
++		t.Fatalf("expected at least two findings to aggregate, got %d", len(r.Findings))
++	}
++	if !strings.Contains(v.Why, r.Headline) {
++		t.Fatalf("Why must contain the headline %q: %q", r.Headline, v.Why)
++	}
++	for _, f := range r.Findings {
++		if !strings.Contains(v.Why, f.Summary) {
++			t.Fatalf("Why must contain each finding summary %q: %q", f.Summary, v.Why)
++		}
++	}
++	if len(v.Why) <= len(r.Headline) {
++		t.Fatalf("Why should aggregate beyond a single line, got %q", v.Why)
++	}
++}
++
++// TestTierRankFailsClosed pins the ordering and the fail-closed default: an
++// unknown/garbage tier must rank strictly above every known tier.
++func TestTierRankFailsClosed(t *testing.T) {
++	if !(tierRank(TierT0) < tierRank(TierT1) &&
++		tierRank(TierT1) < tierRank(TierT2) &&
++		tierRank(TierT2) < tierRank(TierT3)) {
++		t.Fatalf("tiers must rank T0<T1<T2<T3, got %d,%d,%d,%d",
++			tierRank(TierT0), tierRank(TierT1), tierRank(TierT2), tierRank(TierT3))
++	}
++	for _, garbage := range []string{"", "T4", "unknown", "t3", "T-1"} {
++		if tierRank(garbage) <= tierRank(TierT3) {
++			t.Fatalf("unknown tier %q must rank highest (fail closed), got %d not > %d",
++				garbage, tierRank(garbage), tierRank(TierT3))
++		}
++	}
++}
+diff --git a/cmd/demo/main.go b/cmd/demo/main.go
+index 6e291e5..4e52dd4 100644
+--- a/cmd/demo/main.go
++++ b/cmd/demo/main.go
+@@ -44,6 +44,6 @@ func main() {
+ 	fmt.Println(strings.Repeat("─", 68))
+ 	fmt.Print(tracelens.RenderReport(report))
+ 	fmt.Println(strings.Repeat("─", 68))
+-	fmt.Printf("diagnosis: this run is %s — %d findings, $%.4f of $%.4f wasted.\n",
+-		report.Health, len(report.Findings), report.WastedUSD, report.TotalUSD)
++	fmt.Printf("diagnosis: %s (%s) — %d findings, $%.4f of $%.4f wasted.\n",
++		report.Decision, report.Tier, len(report.Findings), report.WastedUSD, report.TotalUSD)
+ }
+diff --git a/cmd/tracelens/main.go b/cmd/tracelens/main.go
+index 86611d6..f114d7e 100644
+--- a/cmd/tracelens/main.go
++++ b/cmd/tracelens/main.go
+@@ -46,7 +46,7 @@ func run() error {
+ 	if *asJSON {
+ 		enc := json.NewEncoder(os.Stdout)
+ 		enc.SetIndent("", "  ")
+-		return enc.Encode(report)
++		return enc.Encode(report.Verdict())
+ 	}
+ 	if !*quiet {
+ 		fmt.Print(tracelens.RenderTrace(tr))
+diff --git a/cmd/tracelens/ship.go b/cmd/tracelens/ship.go
+index 9573b43..726f193 100644
+--- a/cmd/tracelens/ship.go
++++ b/cmd/tracelens/ship.go
+@@ -17,7 +17,7 @@ import (
+ // shipMain handles `tracelens ship [-json] [-quiet] <run-ref>`: analyze a
+ // persisted ship run and gate on the verdict. The run ref is a workflow-run id
+ // (resolved under the ship runs dir), a run directory, or an events file path.
+-// Exit codes: 0 healthy or degraded, 1 pathological, 2 error.
++// Exit codes: 0 pass or escalate, 1 block, 2 error.
+ func shipMain(argv []string) int {
+ 	fs := flag.NewFlagSet("tracelens ship", flag.ContinueOnError)
+ 	asJSON := fs.Bool("json", false, "emit the report as JSON")
+@@ -59,13 +59,14 @@ func runShip(ref string, asJSON, quiet bool) (int, error) {
+ 	if err := printShipReport(filepath.Dir(eventsPath), tr, report, asJSON, quiet); err != nil {
+ 		return 0, err
+ 	}
+-	return gateCode(report), nil
++	return gateCode(report.Verdict()), nil
+ }
+ 
+-// gateCode maps a verdict to the subcommand's exit code: a pathological run
+-// trips the gate.
+-func gateCode(r tracelens.Report) int {
+-	if r.Health == "pathological" {
++// gateCode maps a verdict to the subcommand's exit code: only a block trips the
++// gate. Escalate and pass both exit 0 — the same behavior as the old
++// pathological/degraded/healthy mapping, rekeyed onto the decision axis.
++func gateCode(v tracelens.Verdict) int {
++	if v.Decision == tracelens.DecisionBlock {
+ 		return 1
+ 	}
+ 	return 0
+@@ -75,7 +76,7 @@ func printShipReport(runDir string, tr tracelens.Trajectory, r tracelens.Report,
+ 	if asJSON {
+ 		enc := json.NewEncoder(os.Stdout)
+ 		enc.SetIndent("", "  ")
+-		return enc.Encode(r)
++		return enc.Encode(r.Verdict())
+ 	}
+ 	if line := runContextLine(runDir); line != "" {
+ 		fmt.Println(line)
+diff --git a/cmd/tracelens/ship_test.go b/cmd/tracelens/ship_test.go
+index 2bce03f..8f586f2 100644
+--- a/cmd/tracelens/ship_test.go
++++ b/cmd/tracelens/ship_test.go
+@@ -68,14 +68,41 @@ func TestConfigHome_HonorsAbsoluteXDG(t *testing.T) {
+ }
+ 
+ func TestGateCode(t *testing.T) {
+-	cases := map[string]int{"healthy": 0, "degraded": 0, "pathological": 1}
+-	for health, want := range cases {
+-		if got := gateCode(tracelens.Report{Health: health}); got != want {
+-			t.Fatalf("gateCode(%s): want %d, got %d", health, want, got)
++	cases := map[string]int{
++		tracelens.DecisionBlock:    1,
++		tracelens.DecisionEscalate: 0,
++		tracelens.DecisionPass:     0,
++	}
++	for decision, want := range cases {
++		if got := gateCode(tracelens.Verdict{Decision: decision}); got != want {
++			t.Fatalf("gateCode(%s): want %d, got %d", decision, want, got)
+ 		}
+ 	}
+ }
+ 
++// TestGateCode_LoopTraceTripsGate is the end-to-end regression: a ship trace
++// with a mechanical loop — the one detector that fires on cursor ship traces —
++// must gate to exit 1 through the full analyze → verdict → gate path.
++func TestGateCode_LoopTraceTripsGate(t *testing.T) {
++	var lines []string
++	for i := 0; i < 4; i++ {
++		lines = append(lines,
++			`{"type":"tool_call","call_id":"c`+string(rune('a'+i))+`","name":"run_tests","status":"completed","args":{"pkg":"./..."},"result":"FAIL TestX"}`,
++		)
++	}
++	tr, err := tracelens.ParseShipEvents(strings.NewReader(strings.Join(lines, "\n")))
++	if err != nil {
++		t.Fatalf("ParseShipEvents: %v", err)
++	}
++	v := tracelens.Analyze(tr, tracelens.DefaultConfig()).Verdict()
++	if v.Decision != tracelens.DecisionBlock {
++		t.Fatalf("a looping ship trace must block, got %q", v.Decision)
++	}
++	if got := gateCode(v); got != 1 {
++		t.Fatalf("a looping ship trace must gate to exit 1, got %d", got)
++	}
++}
++
+ func TestRunContextLine(t *testing.T) {
+ 	dir := t.TempDir()
+ 	if line := runContextLine(dir); line != "" {
+diff --git a/render.go b/render.go
+index 0c09fe0..48b7a1c 100644
+--- a/render.go
++++ b/render.go
+@@ -38,11 +38,11 @@ func statusTag(s Step) string {
+ 	return " ok "
+ }
+ 
+-// RenderReport formats the verdict: health banner, headline, totals, then each
+-// ranked finding with its evidence steps and its repair suggestion.
++// RenderReport formats the verdict: the decision/tier banner, headline, totals,
++// then each ranked finding with its evidence steps and its repair suggestion.
+ func RenderReport(r Report) string {
+ 	var b strings.Builder
+-	fmt.Fprintf(&b, "VERDICT  %s\n", strings.ToUpper(r.Health))
++	fmt.Fprintf(&b, "VERDICT  %s · %s\n", strings.ToUpper(r.Decision), r.Tier)
+ 	fmt.Fprintf(&b, "  %s\n", r.Headline)
+ 	fmt.Fprintf(&b, "  %d steps · $%.4f spent · $%.4f wasted · %d findings\n",
+ 		r.Steps, r.TotalUSD, r.WastedUSD, len(r.Findings))
+diff --git a/ship_test.go b/ship_test.go
+index 8f50a04..dbaa566 100644
+--- a/ship_test.go
++++ b/ship_test.go
+@@ -163,8 +163,8 @@ func TestParseShipEvents_LoopStillTripsAnalysis(t *testing.T) {
+ 	}
+ 	tr := parseShip(t, lines...)
+ 	r := Analyze(tr, DefaultConfig())
+-	if r.Health != "pathological" {
+-		t.Fatalf("a 4x identical-call ship trace must be pathological, got %q", r.Health)
++	if r.Decision != DecisionBlock {
++		t.Fatalf("a 4x identical-call ship trace must block, got %q", r.Decision)
+ 	}
+ }
+ 
+@@ -201,8 +201,8 @@ func TestParseShipEvents_RealDriverRunFixture(t *testing.T) {
+ 		t.Fatalf("real run should pair args+results on 100+ calls, got %d", paired)
+ 	}
+ 	r := Analyze(tr, DefaultConfig())
+-	if r.Health != "pathological" {
+-		t.Fatalf("the captured loop run must be pathological, got %q", r.Health)
++	if r.Decision != DecisionBlock {
++		t.Fatalf("the captured loop run must block, got %q", r.Decision)
+ 	}
+ 	if hasKind(r.Findings, "loop") == nil {
+ 		t.Fatalf("the captured run's cap burn is a 6x edit loop; findings: %+v", r.Findings)

@@ -1,0 +1,679 @@
+diff --git a/docs/features/observability/phases/trace-telemetry-gap.md b/docs/features/observability/phases/trace-telemetry-gap.md
+new file mode 100644
+index 0000000..108c2a7
+--- /dev/null
++++ b/docs/features/observability/phases/trace-telemetry-gap.md
+@@ -0,0 +1,69 @@
++**Status**: draft
++**Owner**: @michael
++**Date**: 2026-07-02
++**Related**: dossier task `trace-telemetry-gap` (id: `tsk_01KWFS30WNAW71NHCWRWK10H1D`); [docs/features/observability/spec.md](../spec.md) §10 (token/cost axis deferral — this phase lifts the *capture mechanism* only; the analysis axis / cost TDD stays deferred); [docs/features/run-receipt/spec.md](../../run-receipt/spec.md) (receipt `cost_tokens` is this phase's surface-side destination); consumer github.com/itsHabib/tracelens (`tracelens ship <run-ref>`). Item 4 of the dossier task (normalized projection sidecar) is split out as dossier task `trace-normalized-sidecar` — **not this phase**.
++
++# Trace telemetry: per-event timestamps, tool outcome, usage capture
++
++## Scope
++
++| Bucket | Files | Est. LOC | Weighted |
++|---|---|---|---|
++| Production source | `packages/core/src/service.ts` (ts stamp at the `onEvent` choke point), `packages/agent-runner/src/runner.ts` (`AgentRunResult` usage fields), `packages/claude-runner/src/terminal-map.ts` + `packages/codex-runner/src/terminal-map.ts` (usage lift), `packages/cursor-runner` (outcome passthrough verification / structured exit surface), `packages/receipt/src/runs.ts` (+ `schema.ts` if needed) | ~200 | 200 |
++| Tests | ts stamping, outcome mapping, usage lift fixtures, receipt population (existing `runs.test.ts` null assertion flips) | ~300 | 150 |
++| **Total** | | | **~350** |
++
++Band: **amazing, may stretch into ideal** with test drift. Single PR.
++
++## Goal
++
++A ship run's persisted trace is step-shaped but blind on three axes: **when** each event happened (no per-event timestamps — no cursor/codex SDK event carries one, so `events.ndjson` rows are undateable), **whether** a tool call's command actually succeeded (a shell step whose command exits nonzero persists as `completed`, indistinguishable from success), and **what the run cost** (`receipts.cost_tokens` is reserved-but-null by design; the claude and codex SDKs hand over per-run `usage` that the terminal maps discard). External trace consumers — tracelens first — can detect loops and stuck states today, but their retry-storm and cost-hotspot detectors are structurally dormant on ship traces. After this phase, new runs persist per-event timestamps and a machine-readable tool outcome, and receipts carry token usage for the providers whose SDKs expose it.
++
++## Behavior / fix
++
++Architectural constraint to preserve: raw SDK events are persisted **verbatim** to `events.ndjson` (`createNdjsonEventWriter` stringifies whatever `onEvent` receives; the per-provider `EventProjection`s are read-time normalizers, not write-time transforms). All three fixes are additive at the seams — no projection becomes a write-path transform, no existing field is renamed.
++
++1. **Per-event timestamps — stamp at the single write choke point.** `packages/core/src/service.ts` `runToTerminal`'s `onEvent` callback is the one place every provider's raw events funnel to disk. Stamp `ts` (ISO-8601 string, `new Date().toISOString()`) onto each event there **iff the event doesn't already carry `ts` or `startedAt`** — never overwrite an SDK-provided timestamp. This lights up all three dialects at once, and the cursor read path already honors it: `cursorEventProjection`'s `parseEventTimestamp` reads `raw["ts"] ?? raw["startedAt"]` today (the accessor exists; the SDK just never feeds it). Write-side clock is acceptable: events arrive streaming, so stamp-at-receipt ≈ event time.
++2. **Tool outcome distinguishable from success.** Two sub-cases, split by what the SDK exposes:
++   - The cursor SDK's `SDKToolUseMessage.status` union is `"running" | "completed" | "error"` — the `error` literal already exists and verbatim persistence means it already reaches disk when emitted. Add a test pinning that passthrough (no current test asserts an `error`-status row survives to ndjson).
++   - The dominant real gap: a shell tool call whose *command* fails (nonzero exit, red test) completes normally at the transport level → `status: "completed"`. Where the completion's `result` payload carries a **structured** exit/error marker (e.g. an exit-code field on cursor's shell result — confirm exact shape at the SDK boundary during impl; `result` is `unknown`-typed), surface it as an additive outcome field on the persisted event row (e.g. `exit_code`, or `ok: false`), stamped at the same core choke point or via a small runner-side enrichment — whichever keeps the projection read-only. **Do not synthesize failure by parsing free-text tool output**; if the payload carries no structured marker, persist nothing extra and state the residual gap in the PR body.
++3. **Usage capture — extend the neutral terminal type and lift what the SDKs already hand over.** `AgentRunResult` (`packages/agent-runner/src/runner.ts`) gains optional usage fields (e.g. `usage?: { inputTokens, outputTokens, totalTokens }` + `costUsd?`). Then:
++   - `packages/claude-runner/src/terminal-map.ts` `mapResultMessage`: the terminal `result` message carries `usage.{input_tokens,output_tokens,cache_*}` and `total_cost_usd` — lift both (today's success branch returns only `{branches, durationMs, status, summary}`).
++   - `packages/codex-runner/src/terminal-map.ts`: `turn.completed` carries `usage: { cached_input_tokens, input_tokens, output_tokens, reasoning_output_tokens }` — lift it.
++   - Cursor: the SDK's `RunResult` has no usage of any kind — receipt stays null for cursor runs; document that in the PR body.
++   - Core already serializes `AgentRunResult` into `result.json` (`tryWriteSuccessArtifacts`) — the new fields ride along. Then `packages/receipt/src/runs.ts` `runResultToReceipt` extends its `resultSchema` to read the usage fields and maps `cost_tokens` from total tokens instead of the hard-coded `null` (the schema comment "Populated by a later phase" — this is that phase). `receiptSchema` already has `cost_tokens` nullable — no receipt schema-version bump needed for populating an existing field.
++
++**Compatibility posture (state this in the PR):** every change is an additive field on new runs — `ts`/outcome keys on event rows, optional fields on `AgentRunResult`/`result.json`, a previously-null receipt field becoming populated. Consumers that ignore unknown fields (tracelens's decoder does, by design) are unaffected; no rename, no removal, no rewrite/backfill of historical runs; `events.ndjson` rows for providers/paths that expose nothing extra are byte-identical to today.
++
++## Acceptance
++
++- A fresh run's `events.ndjson` (any provider) has `ts` on every event row; an SDK-provided `ts`/`startedAt` is never overwritten.
++- A cursor `tool_call` with SDK `status: "error"` survives verbatim to disk (pinned by test). A completed shell call whose structured result marks failure yields a machine-readable outcome field on its persisted row — no free-text parsing.
++- A fresh claude-runner run's `result.json` carries usage + cost, and its receipt (`ship-receipt build`) has non-null `cost_tokens`; same for codex from `turn.completed` usage; cursor receipts stay null and the PR body says why.
++- Existing field names/meanings unchanged; `make check` green (including the flipped `runs.test.ts` null assertion).
++
++## Test plan
++
++- core/ndjson seam: onEvent stamps `ts` when absent; preserves SDK `ts`/`startedAt`; additive fields round-trip through `createNdjsonEventWriter` (`packages/core/src/artifacts/ndjson.test.ts` + `service.test.ts`).
++- cursor-runner: `error`-status passthrough pin; structured-exit outcome surfacing with + without a usable marker (`packages/cursor-runner/test/cursor-event-projection.test.ts` + `_shared.test.ts` as fits).
++- claude-runner/codex-runner terminal maps: usage + cost lifted from the existing stream fixtures (`terminal-map.test.ts` in each).
++- receipt: `runResultToReceipt` maps usage → `cost_tokens`; stays null when `result.json` has no usage (`packages/receipt/src/runs.test.ts` — update the current `toBeNull()` assertion to cover both branches).
++
++## Non-goals
++
++- The normalized projection sidecar (dossier task `trace-normalized-sidecar` — its own design pass).
++- Cost *analysis* (stats, per-step attribution, pricing tables) — the §10 cost TDD stays deferred; this is capture only. Receipt auto-append on merge (run-receipt rollout Phase 4) is untouched.
++- Backfilling or rewriting historical runs; no store migration (receipts are JSONL, outside `@ship/store`; nothing here touches SQLite).
++- Per-step usage attribution — per-run totals only; don't fabricate a per-step split from totals.
++- tracelens-side mapping of the new fields (tracked in the tracelens repo, task `map-ship-telemetry-fields`).
++- Cursor usage — its SDK exposes none; nothing to capture.
++
++## Implementation plan
++
++1. `@ship/core`: `ts` stamp at the `onEvent` choke point in `runToTerminal` (+ seam tests).
++2. `@ship/cursor-runner`: `error`-status passthrough pin; structured shell-exit outcome surfacing where the result payload carries it (+ table tests).
++3. `@ship/agent-runner`: optional usage/cost fields on `AgentRunResult`.
++4. `@ship/claude-runner` + `@ship/codex-runner`: terminal-map usage lifts (+ fixture tests).
++5. `@ship/receipt`: `resultSchema` extension; `cost_tokens` population (+ both-branch tests).
++
++Single PR (~350 weighted); steps are one telemetry surface threaded through the layers, not independent shippables.
+diff --git a/packages/agent-runner/src/index.ts b/packages/agent-runner/src/index.ts
+index 33668da..ee84776 100644
+--- a/packages/agent-runner/src/index.ts
++++ b/packages/agent-runner/src/index.ts
+@@ -43,6 +43,7 @@ export type {
+   AgentRunInput,
+   AgentRunner,
+   AgentRunResult,
++  AgentRunUsage,
+   CloudRunSpec,
+   RoomRunSpec,
+ } from "./runner.js";
+diff --git a/packages/agent-runner/src/runner.ts b/packages/agent-runner/src/runner.ts
+index 38c4381..c424e96 100644
+--- a/packages/agent-runner/src/runner.ts
++++ b/packages/agent-runner/src/runner.ts
+@@ -109,6 +109,13 @@ export interface AgentRunHandle {
+   readonly cancel: () => Promise<void>;
+ }
+ 
++/** Per-run token usage lifted from provider terminal messages. */
++export interface AgentRunUsage {
++  readonly inputTokens: number;
++  readonly outputTokens: number;
++  readonly totalTokens: number;
++}
++
+ /** Terminal-state shape `handle.result` resolves to. */
+ export interface AgentRunResult {
+   readonly status: "succeeded" | "failed" | "cancelled";
+@@ -129,6 +136,10 @@ export interface AgentRunResult {
+   readonly classificationEvents?: readonly AgentEvent[];
+   readonly failureCategory?: FailureCategory;
+   readonly failureDetail?: string;
++  /** Provider-reported token usage (claude/codex only today). */
++  readonly usage?: AgentRunUsage;
++  /** Provider-reported USD cost when exposed (claude only today). */
++  readonly costUsd?: number;
+ }
+ 
+ /** The contract `core` codes against. */
+diff --git a/packages/claude-runner/src/terminal-map.test.ts b/packages/claude-runner/src/terminal-map.test.ts
+index 2e68399..aceda24 100644
+--- a/packages/claude-runner/src/terminal-map.test.ts
++++ b/packages/claude-runner/src/terminal-map.test.ts
+@@ -20,18 +20,31 @@ const baseInput = (): AgentRunInput => ({
+ });
+ 
+ describe("mapResultMessage", () => {
+-  test("success maps to succeeded with summary and empty branches", () => {
++  test("success maps to succeeded with summary, usage, cost, and empty branches", () => {
+     const msg = {
+       duration_ms: 5000,
+       result: "done",
+       subtype: "success",
+       type: "result",
++      total_cost_usd: 0.42,
++      usage: {
++        cache_creation_input_tokens: 10,
++        cache_read_input_tokens: 5,
++        input_tokens: 100,
++        output_tokens: 50,
++      },
+     } as SDKResultMessage;
+     expect(mapResultMessage(msg, baseInput(), [])).toMatchObject({
+       branches: [],
++      costUsd: 0.42,
+       durationMs: 5000,
+       status: "succeeded",
+       summary: "done",
++      usage: {
++        inputTokens: 100,
++        outputTokens: 50,
++        totalTokens: 165,
++      },
+     });
+   });
+ 
+diff --git a/packages/claude-runner/src/terminal-map.ts b/packages/claude-runner/src/terminal-map.ts
+index 974cb74..3df0ac6 100644
+--- a/packages/claude-runner/src/terminal-map.ts
++++ b/packages/claude-runner/src/terminal-map.ts
+@@ -3,7 +3,7 @@
+  */
+ 
+ import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+-import type { AgentRunInput, AgentRunResult } from "@ship/agent-runner";
++import type { AgentRunInput, AgentRunResult, AgentRunUsage } from "@ship/agent-runner";
+ 
+ import { MAX_CLASSIFICATION_EVENTS } from "@ship/agent-runner";
+ 
+@@ -17,6 +17,21 @@ import { claudeEventProjection } from "./claude-event-projection.js";
+ 
+ export { MAX_CLASSIFICATION_EVENTS };
+ 
++function liftClaudeUsage(
++  msg: Extract<SDKResultMessage, { subtype: "success" }>,
++): AgentRunUsage | undefined {
++  const usage = msg.usage;
++  const inputTokens = usage.input_tokens;
++  const outputTokens = usage.output_tokens;
++  const cacheRead = usage.cache_read_input_tokens;
++  const cacheCreate = usage.cache_creation_input_tokens;
++  const totalTokens = inputTokens + outputTokens + cacheRead + cacheCreate;
++  if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
++    return undefined;
++  }
++  return { inputTokens, outputTokens, totalTokens };
++}
++
+ function resultErrors(msg: SDKResultMessage): string[] {
+   if (msg.subtype === "success") return [];
+   return msg.errors;
+@@ -105,11 +120,14 @@ export function mapResultMessage(
+   events: readonly SDKMessage[],
+ ): AgentRunResult {
+   if (msg.subtype === "success") {
++    const usage = liftClaudeUsage(msg);
+     return {
+       branches: [],
+       durationMs: msg.duration_ms,
+       status: "succeeded",
+       summary: msg.result,
++      ...(usage !== undefined && { usage }),
++      ...(typeof msg.total_cost_usd === "number" && { costUsd: msg.total_cost_usd }),
+     };
+   }
+ 
+diff --git a/packages/codex-runner/src/terminal-map.test.ts b/packages/codex-runner/src/terminal-map.test.ts
+index fe5a990..65dcc98 100644
+--- a/packages/codex-runner/src/terminal-map.test.ts
++++ b/packages/codex-runner/src/terminal-map.test.ts
+@@ -21,7 +21,7 @@ const baseInput = (): AgentRunInput => ({
+ });
+ 
+ describe("mapTerminalEvent", () => {
+-  test("turn.completed maps to succeeded with last agent_message summary", () => {
++  test("turn.completed maps to succeeded with last agent_message summary and usage", () => {
+     const events = [
+       {
+         item: { id: "msg-1", text: "implementation done", type: "agent_message" },
+@@ -43,6 +43,11 @@ describe("mapTerminalEvent", () => {
+       durationMs: 1500,
+       status: "succeeded",
+       summary: "implementation done",
++      usage: {
++        inputTokens: 1,
++        outputTokens: 1,
++        totalTokens: 2,
++      },
+     });
+   });
+ 
+diff --git a/packages/codex-runner/src/terminal-map.ts b/packages/codex-runner/src/terminal-map.ts
+index a653fe0..b74e618 100644
+--- a/packages/codex-runner/src/terminal-map.ts
++++ b/packages/codex-runner/src/terminal-map.ts
+@@ -3,7 +3,7 @@
+  */
+ 
+ import type { ThreadEvent } from "@openai/codex-sdk";
+-import type { AgentRunInput, AgentRunResult } from "@ship/agent-runner";
++import type { AgentRunInput, AgentRunResult, AgentRunUsage } from "@ship/agent-runner";
+ 
+ import { MAX_CLASSIFICATION_EVENTS } from "@ship/agent-runner";
+ 
+@@ -17,6 +17,21 @@ import { codexEventProjection } from "./codex-event-projection.js";
+ 
+ export { MAX_CLASSIFICATION_EVENTS };
+ 
++function liftCodexUsage(
++  terminal: Extract<ThreadEvent, { type: "turn.completed" }>,
++): AgentRunUsage | undefined {
++  const usage = terminal.usage;
++  const inputTokens = usage.input_tokens;
++  const outputTokens = usage.output_tokens;
++  const cachedInput = usage.cached_input_tokens;
++  const reasoningOutput = usage.reasoning_output_tokens;
++  const totalTokens = inputTokens + outputTokens + cachedInput + reasoningOutput;
++  if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
++    return undefined;
++  }
++  return { inputTokens, outputTokens, totalTokens };
++}
++
+ function synthesizeErrorMessage(events: readonly ThreadEvent[]): string | undefined {
+   for (let i = events.length - 1; i >= 0; i--) {
+     const ev = events[i];
+@@ -113,11 +128,13 @@ export function mapTerminalEvent(
+   const sdkTerminalStatus = codexEventProjection.terminalStatus(terminal);
+   if (sdkTerminalStatus === "turn.completed") {
+     const summary = lastAgentMessageText(events) ?? "";
++    const usage = liftCodexUsage(terminal as Extract<ThreadEvent, { type: "turn.completed" }>);
+     return {
+       branches: [],
+       durationMs,
+       status: "succeeded",
+       summary,
++      ...(usage !== undefined && { usage }),
+     };
+   }
+ 
+diff --git a/packages/core/src/artifacts/event-persist.ts b/packages/core/src/artifacts/event-persist.ts
+new file mode 100644
+index 0000000..67e57c8
+--- /dev/null
++++ b/packages/core/src/artifacts/event-persist.ts
+@@ -0,0 +1,56 @@
++/**
++ * Write-path enrichment for events persisted to `events.ndjson`.
++ *
++ * Raw SDK events are stored verbatim except for additive fields stamped
++ * at the single `onEvent` choke point: per-event `ts` and structured
++ * shell exit markers when the payload exposes them.
++ */
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value);
++}
++
++function hasOwnTimestamp(record: Record<string, unknown>): boolean {
++  return record["ts"] !== undefined || record["startedAt"] !== undefined;
++}
++
++function structuredShellExitCode(result: unknown): number | undefined {
++  if (!isRecord(result)) {
++    return undefined;
++  }
++  const exitCode = result["exitCode"] ?? result["exit_code"];
++  if (typeof exitCode !== "number" || !Number.isFinite(exitCode)) {
++    return undefined;
++  }
++  return exitCode;
++}
++
++function shellOutcomeFields(event: Record<string, unknown>): Record<string, unknown> {
++  if (event["type"] !== "tool_call" || event["name"] !== "shell") {
++    return {};
++  }
++  // Completed rows only, and never overwrite an SDK-provided exit_code —
++  // running rows have no outcome yet; error rows already carry failure.
++  if (event["status"] !== "completed" || event["exit_code"] !== undefined) {
++    return {};
++  }
++  const exitCode = structuredShellExitCode(event["result"]);
++  if (exitCode === undefined) {
++    return {};
++  }
++  return { exit_code: exitCode };
++}
++
++/** Stamp additive persist fields onto an event before NDJSON write. */
++export function prepareEventForPersist(event: unknown): unknown {
++  if (!isRecord(event)) {
++    return event;
++  }
++
++  const enriched: Record<string, unknown> = { ...event, ...shellOutcomeFields(event) };
++  if (hasOwnTimestamp(event)) {
++    return enriched;
++  }
++
++  return { ...enriched, ts: new Date().toISOString() };
++}
+diff --git a/packages/core/src/artifacts/ndjson.test.ts b/packages/core/src/artifacts/ndjson.test.ts
+index db3c714..b5bca54 100644
+--- a/packages/core/src/artifacts/ndjson.test.ts
++++ b/packages/core/src/artifacts/ndjson.test.ts
+@@ -3,8 +3,115 @@
+ import { describe, expect, test } from "vitest";
+ 
+ import { createMemoryShipFs } from "../fs/memory.js";
++import { prepareEventForPersist } from "./event-persist.js";
+ import { createNdjsonEventWriter } from "./ndjson.js";
+ 
++describe("prepareEventForPersist", () => {
++  test("stamps ts when absent", () => {
++    const prepared = prepareEventForPersist({ type: "assistant" }) as { ts?: string };
++    expect(prepared.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
++  });
++
++  test("preserves SDK ts and startedAt without overwriting", () => {
++    const withTs = prepareEventForPersist({ type: "status", ts: "2026-07-02T12:00:00.000Z" }) as {
++      ts: string;
++    };
++    expect(withTs.ts).toBe("2026-07-02T12:00:00.000Z");
++
++    const withStartedAt = prepareEventForPersist({
++      type: "status",
++      startedAt: "2026-07-02T12:01:00.000Z",
++    }) as { ts?: string; startedAt: string };
++    expect(withStartedAt.startedAt).toBe("2026-07-02T12:01:00.000Z");
++    expect(withStartedAt.ts).toBeUndefined();
++  });
++
++  test("adds exit_code from structured shell result on completed tool_call", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "completed",
++      name: "shell",
++      result: { stdout: "", stderr: "fail", exitCode: 1 },
++    }) as { exit_code?: number; status: string };
++    expect(prepared.exit_code).toBe(1);
++    expect(prepared.status).toBe("completed");
++  });
++
++  test("adds exit_code from exit_code alias on structured shell result", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "completed",
++      name: "shell",
++      result: { exit_code: 2 },
++    }) as { exit_code?: number };
++    expect(prepared.exit_code).toBe(2);
++  });
++
++  test("does not add exit_code for non-shell tool_call rows", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "completed",
++      name: "grep",
++      result: { exitCode: 1 },
++    }) as { exit_code?: number };
++    expect(prepared.exit_code).toBeUndefined();
++  });
++
++  test("does not add exit_code when result is free text", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "completed",
++      name: "shell",
++      result: "command failed",
++    }) as { exit_code?: number };
++    expect(prepared.exit_code).toBeUndefined();
++  });
++
++  test("preserves error-status tool_call rows verbatim aside from ts", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "error",
++      name: "shell",
++      result: "database is locked",
++    }) as { status: string; ts?: string };
++    expect(prepared.status).toBe("error");
++    expect(prepared.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
++  });
++
++  test("does not add exit_code to non-completed shell rows", () => {
++    const running = prepareEventForPersist({
++      type: "tool_call",
++      status: "running",
++      name: "shell",
++      result: { exitCode: 0 },
++    }) as { exit_code?: number };
++    expect(running.exit_code).toBeUndefined();
++
++    const errored = prepareEventForPersist({
++      type: "tool_call",
++      status: "error",
++      name: "shell",
++      result: { exitCode: 137 },
++    }) as { exit_code?: number };
++    expect(errored.exit_code).toBeUndefined();
++  });
++
++  test("never overwrites an SDK-provided exit_code field", () => {
++    const prepared = prepareEventForPersist({
++      type: "tool_call",
++      status: "completed",
++      name: "shell",
++      exit_code: 3,
++      result: { exitCode: 1 },
++    }) as { exit_code?: number };
++    expect(prepared.exit_code).toBe(3);
++  });
++
++  test("non-object events pass through unchanged", () => {
++    expect(prepareEventForPersist("raw")).toBe("raw");
++  });
++});
++
+ describe("createNdjsonEventWriter", () => {
+   test("one JSON line per write; trailing newline; ordering preserved", async () => {
+     const fs = createMemoryShipFs();
+@@ -23,6 +130,27 @@ describe("createNdjsonEventWriter", () => {
+     expect(content.endsWith("\n")).toBe(true);
+   });
+ 
++  test("prepareEventForPersist fields round-trip through the writer", async () => {
++    const fs = createMemoryShipFs();
++    await fs.mkdir("/runs/wf_1", { recursive: true });
++    const w = createNdjsonEventWriter(fs, "/runs/wf_1/events.ndjson");
++    w.write(
++      prepareEventForPersist({
++        type: "tool_call",
++        status: "completed",
++        name: "shell",
++        result: { exitCode: 1 },
++      }),
++    );
++    await w.close();
++
++    const line = (await fs.readFile("/runs/wf_1/events.ndjson", "utf-8")).trim();
++    const parsed = JSON.parse(line) as { exit_code?: number; ts?: string; status: string };
++    expect(parsed.status).toBe("completed");
++    expect(parsed.exit_code).toBe(1);
++    expect(parsed.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
++  });
++
+   test("close() is idempotent", async () => {
+     const fs = createMemoryShipFs();
+     await fs.mkdir("/runs/wf_1", { recursive: true });
+diff --git a/packages/core/src/service.test.ts b/packages/core/src/service.test.ts
+index 496e5f0..f1d4740 100644
+--- a/packages/core/src/service.test.ts
++++ b/packages/core/src/service.test.ts
+@@ -401,6 +401,40 @@ describe("ShipService.ship — happy path", () => {
+     expect(row?.phases[0]?.status).toBe("succeeded");
+   });
+ 
++  test("persisted events.ndjson rows carry ts stamped at the onEvent choke point", async () => {
++    const statusEv = { type: "status", status: "RUNNING" };
++    const toolErrEv = {
++      type: "tool_call",
++      status: "error",
++      name: "shell",
++      result: "database is locked",
++    };
++    h.cursor.enqueue({
++      events: [statusEv, toolErrEv],
++      result: {
++        status: "failed",
++        durationMs: 1000,
++        errorMessage: "database is locked",
++        branches: [],
++      },
++    });
++
++    const out = await h.service.ship({
++      workdir: WORKDIR,
++      repo: "ship",
++      docPath: "docs.md",
++    });
++    await waitForRunTerminal(h.service, out.workflowRunId);
++
++    const content = await h.fs.readFile(out.artifacts.eventsPath, "utf-8");
++    const lines = content.split("\n").filter((line) => line.length > 0);
++    expect(lines).toHaveLength(2);
++    const parsed = lines.map((line) => JSON.parse(line) as { ts?: string; status?: string });
++    expect(parsed[0]?.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
++    expect(parsed[1]?.status).toBe("error");
++    expect(parsed[1]?.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
++  });
++
+   test("ShipOutput.summary omitted when result.summary missing", async () => {
+     h.cursor.enqueue({
+       events: [],
+diff --git a/packages/core/src/service.ts b/packages/core/src/service.ts
+index 2f67f35..8c1ca1d 100644
+--- a/packages/core/src/service.ts
++++ b/packages/core/src/service.ts
+@@ -64,6 +64,7 @@ import type { ShipFs } from "./fs/shape.js";
+ import type { ValidatedDoc } from "./validate.js";
+ import type { CloudDocResolveOptions } from "./validate.js";
+ 
++import { prepareEventForPersist } from "./artifacts/event-persist.js";
+ import { createNdjsonEventWriter } from "./artifacts/ndjson.js";
+ import {
+   assertSafeCloudArtifactPath,
+@@ -1055,7 +1056,7 @@ async function runToTerminal(
+     const ndjsonRef = ndjson;
+ 
+     const onEvent: AgentRunInput["onEvent"] = (ev) => {
+-      ndjsonRef.write(ev);
++      ndjsonRef.write(prepareEventForPersist(ev));
+       eventPump?.heartbeat();
+     };
+ 
+@@ -2267,7 +2268,7 @@ async function runResumeAttach(
+ 
+   let eventPump: EventPumpHandle | undefined;
+   const onEvent: AgentRunAttachInput["onEvent"] = (ev) => {
+-    target.ndjson.write(ev);
++    target.ndjson.write(prepareEventForPersist(ev));
+     eventPump?.heartbeat();
+   };
+ 
+diff --git a/packages/cursor-runner/src/local-runner.test.ts b/packages/cursor-runner/src/local-runner.test.ts
+index 93c5557..8be4afe 100644
+--- a/packages/cursor-runner/src/local-runner.test.ts
++++ b/packages/cursor-runner/src/local-runner.test.ts
+@@ -305,6 +305,33 @@ describe("LocalCursorRunner — happy path + status mapping", () => {
+     expect(disposeSpy).toHaveBeenCalledTimes(1);
+   });
+ 
++  test("error-status tool_call events pass through onEvent unchanged for ndjson persistence", async () => {
++    const toolErrEv = {
++      agent_id: "agent-test-0001",
++      call_id: "call-err-1",
++      name: "shell",
++      result: "database is locked",
++      run_id: "run-test-0001",
++      status: "error",
++      type: "tool_call",
++    } as unknown as SDKMessage;
++    const { run } = makeMockRun({
++      events: [toolErrEv],
++      result: { durationMs: 1000, id: "run-test-0001", status: "error" },
++    });
++    const { agent } = makeMockAgent({ run });
++    vi.mocked(Agent.create).mockResolvedValue(agent);
++
++    const onEvent = vi.fn();
++    const runner = new LocalCursorRunner();
++    const handle = await runner.run(baseInput({ onEvent }));
++    await handle.result;
++
++    const forwarded = onEvent.mock.calls.map((c) => (c as [SDKMessage])[0]);
++    expect(forwarded).toHaveLength(1);
++    expect(forwarded[0]).toMatchObject({ type: "tool_call", status: "error", name: "shell" });
++  });
++
+   test("error → failed; result resolves (does NOT throw); errorMessage populated", async () => {
+     const { run } = makeMockRun({
+       result: {
+diff --git a/packages/receipt/src/runs.test.ts b/packages/receipt/src/runs.test.ts
+index b721551..4cd131b 100644
+--- a/packages/receipt/src/runs.test.ts
++++ b/packages/receipt/src/runs.test.ts
+@@ -27,6 +27,30 @@ describe("runResultToReceipt", () => {
+     expect(receipt?.terminal_at).toBe("2026-05-10T18:51:00.000Z");
+   });
+ 
++  it("maps usage.totalTokens to cost_tokens when present", () => {
++    const receipt = runResultToReceipt({
++      runId: "wf_usage",
++      result: {
++        status: "succeeded",
++        durationMs: 1000,
++        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
++      },
++      dispatchedAt: undefined,
++      terminalAt: undefined,
++    });
++    expect(receipt?.cost_tokens).toBe(150);
++  });
++
++  it("leaves cost_tokens null when result.json has no usage", () => {
++    const receipt = runResultToReceipt({
++      runId: "wf_no_usage",
++      result: { status: "succeeded", durationMs: 1000 },
++      dispatchedAt: undefined,
++      terminalAt: undefined,
++    });
++    expect(receipt?.cost_tokens).toBeNull();
++  });
++
+   it("maps failed and cancelled terminal statuses", () => {
+     expect(
+       runResultToReceipt({
+diff --git a/packages/receipt/src/runs.ts b/packages/receipt/src/runs.ts
+index d9202a3..34d0b81 100644
+--- a/packages/receipt/src/runs.ts
++++ b/packages/receipt/src/runs.ts
+@@ -26,6 +26,15 @@ const resultSchema = z
+     durationMs: z.number().optional(),
+     model: z.object({ id: z.string().optional() }).passthrough().optional(),
+     branches: z.array(z.object({ prUrl: z.string().optional() }).passthrough()).optional(),
++    usage: z
++      .object({
++        inputTokens: z.number().optional(),
++        outputTokens: z.number().optional(),
++        totalTokens: z.number().optional(),
++      })
++      .passthrough()
++      .optional(),
++    costUsd: z.number().optional(),
+   })
+   .passthrough();
+ 
+@@ -56,7 +65,7 @@ export function runResultToReceipt(input: RunInput): Receipt | null {
+     model: result.model?.id,
+     pr_url: prUrl,
+     pr_number: prNumberFromUrl(prUrl),
+-    cost_tokens: null,
++    cost_tokens: costTokensFromResult(result),
+     dispatched_at: input.dispatchedAt,
+     terminal_at: input.terminalAt,
+   };
+@@ -65,6 +74,14 @@ export function runResultToReceipt(input: RunInput): Receipt | null {
+   return tryBuild(raw);
+ }
+ 
++function costTokensFromResult(result: z.infer<typeof resultSchema>): number | null {
++  const total = result.usage?.totalTokens;
++  if (total === undefined || !Number.isFinite(total) || total < 0) {
++    return null;
++  }
++  return Math.round(total);
++}
++
+ function tryBuild(raw: Record<string, unknown>): Receipt | null {
+   try {
+     return buildReceipt(raw);

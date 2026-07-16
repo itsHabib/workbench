@@ -1,0 +1,28 @@
+# Corpus from Experiment 01 (2026-07-02). Two rubric-blind labelers (A,B), neutral "how much review?" prompt.
+# consensus = agreed tier; where A!=B both are shown and the higher is the safe default.
+# This is held-out oracle seed data — labelers never read RUBRIC.md.
+# pr	labelA	labelB	consensus	note
+dossier#64	T3	T3	T3	new S3 backend: credential handling + CAS + big dep tree
+dossier#67	T2	T2	T2	extracts task state-machine guards to domain.rs (invariant-bearing refactor)
+dossier#77	T1	T1	T1	CAS gate mostly tests + tiny env-gated hook
+dossier#79	T1	T2	T2?	cargo-audit workflow w/ RUSTSEC ignores (A=peer, B=owner)
+dossier#80	T0	T0	T0	doc-comments on S3Config public surface
+dossier#82	T2	T2	T2	sync→async Mutex on write handlers (concurrency)
+dossier#83	T2	T3	T3?	serde_yml→serde_norway: on-disk format + supply-chain (A=owner, B=critical)
+dossier#88	T2	T2	T2	new project.overview verb + bodies:false (public API)
+dossier#89	T2	T2	T2	list verbs live-by-default (behavioral wire change)
+rooms#27	T0	T0	T0	README badges only
+rooms#31	T0	T0	T0	proptest dev-dep + property tests (tests-only)
+rooms#42	T3	T3	T3	iptables/NAT LAN-isolation rework (fail-open network boundary)
+rooms#43	T3	T3	T3	sha256 build-input pinning (supply-chain integrity)
+rooms#44	T2	T3	T3?	jailer dedicated-user privilege separation (A=owner, B=critical)
+rooms#53	T3	T3	T3	rooms kill: SIGKILL recorded pid + reap (destructive/irreversible)
+ship#146	T1	T1	T1	gh-adapter tests + small injection seam
+ship#150	T0	T0	T0	docs/prose reframe + reviewer-convention line
+ship#151	T2	T2	T2	3048-line agent-runner extraction (behavior-preserving refactor)
+ship#158	T2	T2	T2	merge-authorization verdict assembler (gate — fail-open risk)
+ship#163	T2	T3	T3?	win32 danger-full-access sandbox drop (A=owner, B=critical)
+ship#168	T3	T3	T3	cloud duration cap + DB migration 0008
+ship#169	T2	T2	T2	additive telemetry on persisted trace/receipt (consumer contract)
+ship#173	T3	T3	T3	thread provider + DB migration 0010
+ship#174	T3	T3	T3	CI checks out PR-head (fork trust-boundary)

@@ -1,0 +1,1260 @@
+diff --git a/docs/features/02-operational-layer/plan.md b/docs/features/02-operational-layer/plan.md
+new file mode 100644
+index 0000000..fc97986
+--- /dev/null
++++ b/docs/features/02-operational-layer/plan.md
+@@ -0,0 +1,104 @@
++**Status**: draft (planning)
++**Owner**: @michael (human:mh)
++**Date**: 2026-06-28
++**Related**: [docs/vision.md](../../vision.md) (v0.2 = this), [rooms-registry/spec.md](../rooms-registry/spec.md) (the substrate, #51), [docs/follow-ups.md](../../follow-ups.md)
++
++# rooms v0.2 — the operational layer (decomposition)
++
++## Where we are
++
++The **room registry** (`rooms ls` + `rooms gc`, [#51](https://github.com/itsHabib/rooms/pull/51)) shipped: per-room `room.json` metadata, `/proc/<pid>/stat` liveness, and a fail-safe orphan reaper. That was deliberately the *first* v0.2 step — almost everything else in the operational layer needs a way to **see** what rooms exist and **clean up** what leaks.
++
++v0.2 per the vision: **snapshots + fork, replay receipts, hard parallelism for `/work-driver` fan-out.** This doc decomposes that into shippable parts, sizes and orders them, sketches each design, and frames the open ship-provider decision. It is a *map*, not a per-feature TDD — each part gets its own kickoff (small) or `/tdd` (large) when picked.
++
++## The parts
++
++### 1. `rooms kill <id>` — complete the lifecycle CLI · **S**
++
++**Problem.** You can now *see* rooms (`ls`) and reap *dead* ones (`gc`), but there's no clean off-switch for a *live* one. A `--keep` debug room or a runaway exec has to be killed by hand (`ls` → copy the pid → `sudo kill`). The lifecycle verb set is `run / ls / gc / **kill**`; kill is the missing one.
++
++**Approach.** `rooms kill <id> [--json]`: resolve the room via the registry, confirm it's **alive** (Running or Kept), `SIGTERM`→grace→`SIGKILL` the firecracker pid (reuse `kill_child_gracefully`), then reap its dirs/mounts via the existing `reap_orphan` path (it's dead now). A `Dead`/`Unknown` room → clear "nothing live to kill; use `gc`" rather than a forced action.
++
++**Key decisions.** Validate the id (reuse `is_valid_room_id`); kill only confirmed-alive (symmetry with gc's confirmed-dead); `--all` to kill every live room (stretch); does it free the network slot (ties into the pool, part 2).
++
++**Deps.** Registry (done). **Reuses** `kill_child_gracefully` + `reap_orphan` — no new teardown path.
++**Ship relevance.** A driver/operator can stop a stuck ship-on-rooms run by id.
++**Sizing.** S (~150–250 LOC). A clean standalone `/goal` — good warm-up; lands independent of the pool.
++
++### 2. Multi-room pool + scheduler — hard parallelism · **L (keystone)**
++
++**Problem.** There is **one** shared `tap-fc0` at `172.16.0.1/24` and a hardcoded guest IP `172.16.0.2` (`main.rs` `NetworkConfig`). So in practice **one networked room at a time**. `/work-driver` fan-out (N parallel ship runs) cannot run N rooms concurrently. This is the v0.2 "hard parallelism" goal, and the registry was built as its bookkeeping substrate.
++
++**Approach.** A per-room **network slot**:
++- **Slot allocator** hands out `(tap_name, guest_ip, gateway_ip)` tuples; the registry's `room.json` records the slot per room so `ls`/`gc`/`kill` know it and free it. The registry is the source of truth for what's allocated.
++- **Per-room tap** (`tap-fc0..N`) created at boot, `ip tuntap del`'d at reap — this wires the already-stubbed `RoomGuard::set_tap_owned` and closes the registry's deferred "gc doesn't free a TAP" follow-up.
++- **IP layout** — a `/30` per room, or `.2/.3/.4…` flat in `172.16.0.0/24`, or a wider subnet. (Decision below.)
++- **iptables** — rework `setup-tap.sh`'s per-tap FORWARD/NAT rules into a rooms-owned **`ROOMS_FWD` chain** matching the guest subnet, so N taps don't each append a growing rule set (the existing `setup-tap` follow-up).
++- **Concurrent boot + cap** — boot up to `max_pool` rooms at once; allocate-on-create, free-on-teardown.
++
++**Key decisions (the `/tdd` will settle these).** Subnet layout (`/30`-per-room vs flat `/24`, and the pool-size ceiling it implies); tap naming + lifecycle (created at boot vs pre-provisioned pool); allocator persistence (registry-backed scan vs a small lock file — race-safe slot claim under concurrent boots); the `ROOMS_FWD` chain shape; leak handling (a slot whose room orphaned → reclaimed by gc).
++
++**Deps.** Registry (done). Touches `gc`/`kill` (free the slot + tap on teardown).
++**Ship relevance.** **THE enabler** for parallel ship-on-rooms — `/work-driver` firing N streams on `backend: "rooms"`. Highest leverage for the dogfood.
++**Sizing.** L. Decomposes into (a) slot allocator + registry slot field, (b) per-room tap lifecycle + `ROOMS_FWD` chain, (c) concurrent boot + the cap. **Own `/tdd`.**
++
++### 3. Snapshots + fork — fast warm boot · **M/L**
++
++**Problem.** Every room cold-boots (~2 s to sshd). For fan-out (boot N) and fast iteration, forking a *warm* snapshot is far cheaper — Firecracker `/snapshot/create` + `/snapshot/load` restore in well under a second. No snapshot scaffolding exists yet (clean slate).
++
++**Approach.** Snapshot a booted **base** room (post-boot, sshd up, pre-repo) to disk; `rooms run --from-snapshot <base>` restores a fresh room from it into a new network slot with a CoW rootfs overlay. Fork = restore-then-diverge.
++
++**Key decisions.** What the base captures (booted kernel + sshd, no repo/keys-yet); snapshot storage + versioning (invalidate when kernel/rootfs changes); **network re-attach** on restore (a snapshot freezes the NIC/IP — restoring into a *different* slot needs the tap re-pointed, which is the sharp part and couples to part 2); CoW interplay with the existing read-only-rootfs + overlay; staleness.
++
++**Deps.** Best on top of the pool (per-room slots on restore); can prototype single-room first.
++**Ship relevance.** Faster ship-on-rooms spin-up, especially in parallel. An *optimization*, not a blocker.
++**Sizing.** M/L. **Own `/tdd`.**
++
++### 4. Replay receipts — record + replay a run · **M**
++
++**Problem.** No durable record of *what a room did* — command, deps, repo sha, artifacts, outcome — for audit, repro, or comparing two runs. The registry holds *live* state; a receipt is the post-mortem record (the vision's "replay" line).
++
++**Approach.** On teardown, write a **receipt** (the `room.json` meta + `result.json` + the `changeset` from `rooms diff` + the inputs: command / deps / repo+base-sha) to a receipts store. `rooms replay <receipt>` re-runs the same inputs against the same image/deps and compares outcomes.
++
++**Key decisions.** Receipt schema + store location (under the state base? a sibling `receipts/`?); exactly what's captured for reproducibility; replay determinism (pin image + deps); whether receipts link back to dossier.
++
++**Deps.** Registry + artifacts + diff (all done).
++**Ship relevance.** Audit/repro for ship-on-rooms runs ("why did this agent run pass/fail"). Later.
++**Sizing.** M. Kickoff or small `/tdd`.
++
++## Dependency graph + recommended sequence
++
++```
++registry (#51, done)
++   ├── kill ............... S   standalone, builds on the reap path
++   ├── pool ............... L   keystone — parallel ship-on-rooms        ◀ the big /tdd
++   │      └── snapshots ... M/L optimizes the pool (warm fork into a slot)
++   └── receipts ........... M   audit/replay; after the lifecycle is parallel
++```
++
++**Recommended:** **kill → pool → snapshots → receipts.**
++- `kill` is a clean immediate `/goal` (small, completes the verb set, exercises the registry further).
++- `pool` is the keystone — the `/tdd` to run next; it's what makes rooms a real *parallel* ship backend.
++- `snapshots` optimizes the pool; sequence after (or prototype single-room alongside).
++- `receipts` is the audit capstone once the parallel lifecycle is solid.
++
++## The ship-provider decision (for you to call)
++
++`ship` runs an agent via a runtime/backend. Three things we could test, and how each relates to the parts above:
++
++| Provider | What it is | Status today | Needs |
++| --- | --- | --- | --- |
++| **local cursor** | agent on the host / a worktree | works | nothing — the baseline |
++| **cloud cursor** | agent in cursor's cloud | works | nothing — the cloud-driver baseline |
++| **`backend: "rooms"`** | agent **inside a rooms microVM** on rooms-host (`RoomCursorRunner`) | single run works (cursor-sdk-runner); registry now cleans up after | **N=1: nothing.** Parallel: the **pool** (part 2). |
++
++**Framing.**
++- To **validate the rooms backend end-to-end now**, fire `backend: "rooms"` at **N=1** — one ship-on-rooms run. No new code; the registry makes post-run cleanup safe. This de-risks the dogfood path *before* investing in the pool, and exercises `ls`/`gc` against real ship-driven rooms.
++- To run **parallel** ship-on-rooms (the `/work-driver`-on-rooms vision), the **pool** is the prerequisite — that's the case the keystone part unblocks.
++- **local / cloud cursor** are the non-rooms baselines to measure the rooms backend against (speed, reliability, cost).
++
++**Recommendation.** Test `backend: "rooms"` at **N=1** first (cheap, validates the dogfood + the new registry), and land `rooms kill` as a quick parallel win, then commit to the **pool `/tdd`** to scale ship-on-rooms to fan-out. Pick the provider once we see the N=1 rooms run behave.
++
++## Out of scope (still, per the vision's non-goals)
++
++Web preview / port-forwarding, persistent dev-workspace UX, multi-host control, containers. Snapshots/fork/parallel are the v0.2 lines; the rest stays where the vision drew it.
+diff --git a/docs/features/rooms-kill/spec.md b/docs/features/rooms-kill/spec.md
+new file mode 100644
+index 0000000..195cef3
+--- /dev/null
++++ b/docs/features/rooms-kill/spec.md
+@@ -0,0 +1,116 @@
++**Status**: draft
++**Owner**: @michael (human:mh)
++**Date**: 2026-06-28
++**Related**: [rooms-registry/spec.md](../rooms-registry/spec.md) (the registry this builds on — #51), [02-operational-layer/plan.md](../02-operational-layer/plan.md) (part 1, the v0.2 map), `src/firecracker.rs` (`reap_orphan`, `kill_child_gracefully`), `src/room.rs` (`probe` — reused at signal time), `src/registry.rs` (`is_valid_room_id`, `reap_paths`), [docs/follow-ups.md](../../follow-ups.md)
++
++# `rooms kill <id>` — the off-switch for a live room
++
++## Goal
++
++The registry (#51) lets you **see** rooms (`rooms ls`) and reap the **dead** ones (`rooms gc`). The missing verb is a clean off-switch for a *live* one. Today, stopping a `--keep` debug room, a runaway exec, or a stuck ship-on-rooms run means `rooms ls` → copy the pid → `sudo kill` by hand, then a separate `gc` to clean the corpse. `rooms kill <id>` is the one verb that does both: signal the live firecracker, then reap.
++
++The lifecycle verb set is `run / ls / gc / **kill**`; this completes it. It's a small, standalone step on the registry's reap path — a warm-up before the multi-room pool epic, and it exercises the registry against real teardown one more time.
++
++## Background — kill *is* "signal the live fc, then reap"
++
++`gc` already encodes the teardown: for a confirmed-**dead** orphan it builds a `RoomGuard` with `child_pid = None` (nothing to signal — which is *why* gc is safe) and runs `firecracker::reap_orphan` (umount the kernel/rootfs binds, rm the socket, rm the jail + per-room dirs, with an honest post-check). `kill` is that same teardown, preceded by the one thing gc deliberately never does: **send a signal to a live pid.**
++
++So the only genuinely new logic is *"confirm alive → signal until dead → reap."* Everything downstream of "dead" reuses the gc path verbatim. No second teardown.
++
++## Design
++
++### CLI surface
++
++```
++rooms kill <id> [--json]
++```
++
++`<id>` is **required** (no bare `rooms kill` — killing every live room by default would be dangerous; `--all` is a deliberate future flag, below). `--json` emits the schema'd report on **stdout**, logs on stderr — the same contract as `ls --json` / `doctor --json` / `diff --json`.
++
++### State → action (policy, `src/registry.rs`)
++
++`kill` resolves the room through the registry (same classify the registry already does), then acts on its state:
++
++| Classified state | Action | Disposition | Exit |
++| --- | --- | --- | --- |
++| `Running` / `Kept` (alive) | terminate the fc (identity-guarded), then `reap_orphan` | `killed` | 0 |
++| `OrphanedDead` | **don't signal, don't reap** — "nothing live to kill; run `rooms gc`" | `already-dead` | 0 |
++| `Unknown` (no pid / unreadable `/proc`) | **refuse** — indeterminate ≠ alive; never signal a pid we can't identify | `refused` | 2 |
++| (valid id, no such room dir) | "no room with id `<id>` (already gone?)" | — (empty) | 0 |
++| (invalid id) | reject before any fs/signal work (`InvalidRoomId`) | — (error) | 2 |
++
++**Why kill doesn't reap an already-dead room.** `kill` reaps a room it *transitions* alive→dead (it owns that teardown — a `--keep` room you kill must end up gone, not a corpse). A room that was *already* dead when you asked is `gc`'s job; pointing there keeps each verb's responsibility sharp (kill = remove a live room; gc = reap dead leaks) and keeps kill's blast radius to rooms it actually killed.
++
++### The identity-guarded terminate — the cardinal invariant
++
++Unlike gc, `kill` **signals a recorded pid**, which opens the pid-reuse race: between the registry classifying the room *alive* and `kill` firing a signal, the room's firecracker can exit and the kernel can reuse its pid for an unrelated process. A signal to that reused pid would hit an innocent victim.
++
++`kill_child_gracefully` (the Drop-path teardown) is **not** sufficient on its own here: its grace poll uses `kill -0` (existence), and it escalates to `SIGKILL` on whatever holds the pid after the grace — exactly the reused-pid hazard. The Drop path can afford that (it owns the `Child`, so the pid stays at least a zombie until reaped); `kill` cannot (the room may have been launched by a since-dead process, so init can reap and recycle the pid).
++
++So `kill` uses an **identity-guarded** terminate (new `firecracker::terminate_by_identity`), built on `room::probe`'s `/proc/<pid>/stat` check — **strengthened here to match `comm` *and* the process start time** (field 22), not comm alone. `boot` records the pid's start time in `room.json` (`RoomMeta.pid_starttime`); a recycled pid has a different start time, so it reads `Dead` **even if it now runs another firecracker**. (Comm-only was safe for `ls`/`gc` — a false-`Alive` there just means "don't reap" — but `kill` *signals*, so it must pin the pid to *this* incarnation. v1 `room.json` without a start time falls back to comm-only.)
++
++```
++terminate_by_identity(pid, starttime, grace) -> KillSignalOutcome
++  probe(pid, starttime):                       # comm + starttime, BEFORE SIGTERM
++    Dead    => AlreadyExited                   # gone, or pid recycled → no signal
++    Unknown => Indeterminate                   # can't tell → no signal
++    Alive   => send SIGTERM
++  loop until grace deadline:
++    probe == Dead => Signaled                  # confirmed gone; stop (don't escalate)
++    else          => keep polling              # Alive or transient Unknown → wait
++  (terminal liveness, BEFORE SIGKILL):
++    Alive   => send SIGKILL; re-probe: Dead => Signaled, else => Survived
++    Dead    => Signaled
++    Unknown => Indeterminate                   # never SIGKILL a pid we can't identify
++```
++
++The invariant: **re-probe identity immediately before every signal; signal only while the pid is still this room's firecracker/jailer.** Liveness is identity-based (`comm ∈ {firecracker, jailer}` **and** start time matches; zombie = dead), never `kill -0` existence — so a recycled pid reads `Dead` and we stop rather than escalate. Success (`Signaled`/`AlreadyExited`) requires a **definitive `Dead`**; `Unknown` is never read as success (fail-safe, mirroring `probe`). With the start-time pin, the residual TOCTOU floor shrinks to a pid recycled to *another* firecracker/jailer whose start time *also* collides, in the gap between the final probe and signal delivery — irreducible without `pidfd`, and far narrower than comm-only (let alone existence-based) signaling.
++
++`terminate_by_identity` lives beside `kill_child_gracefully` in `firecracker` (mechanism) and composes `room::probe`; the registry (policy) decides *which* rooms reach it. The Drop path keeps using `kill_child_gracefully` unchanged — different safety needs, so a little structural duplication of the TERM→grace→KILL skeleton is the right call over coupling the two.
++
++### Outcome → exit-code mapping
++
++`kill` returns a `KillReport { schema_version, outcomes: Vec<KillOutcome> }` (a one-element vec for single-id kill; the `Vec` shape mirrors `GcReport` and makes `--all` a non-breaking add). Each `KillOutcome { id, state, disposition, reason }`; `KillDisposition ∈ {killed, already-dead, refused, failed}` maps to the exit code:
++
++- **0** — `killed` (signaled+reaped, or transitioned-dead-then-reaped) | `already-dead` (pointed to gc) | no such room.
++- **1** — `failed`: the kill couldn't complete — fc `Survived` SIGKILL, or `reap_orphan` left a dir/mount behind (surfaced honestly, the way gc already reports a stuck reap).
++- **2** — `refused`: `Unknown` liveness | invalid id (via the `Err` path).
++
++### Layering
++
++No new dependency direction. `firecracker::terminate_by_identity` composes `room::probe` (firecracker already depends on `room`); `registry::kill` composes `is_valid_room_id` + `reap_paths` (private, same module) + `firecracker::{terminate_by_identity, reap_orphan}`; `main` adds the `Kill { id, json }` verb → `registry::kill` → render. Identical shape to the `Gc` wiring.
++
++## Cardinal safety invariant (adversarial-gated)
++
++> `rooms kill` must **never** (a) signal a pid that is no longer this room's firecracker, (b) act on a non-room or a path outside the state base, (c) leave a mount or process behind after a successful kill, or (d) kill a room it classified `Unknown`.
++
++Enforcement, defense-in-depth:
++
++- **(a)** Every signal is preceded by a `room::probe` identity check — `comm ∈ {firecracker, jailer}`, non-zombie, **and** the recorded start time matches. A pid that is gone, foreign, or *recycled to a different incarnation (even another firecracker)* reads `Dead` → no signal. (The unit suite proves both a *live non-firecracker* pid and a *comm-matching-but-different-start-time* pid are never treated as alive.)
++- **(b)** The id passes `is_valid_room_id` before any work; `find_entry` requires a **non-symlink** state-base subdir (`symlink_metadata`, no-follow — matching `ls`/`gc`, so a symlinked `<id>` can't source a room's pid from outside the base); every reaped path comes from `reap_paths`, which re-checks each dir is a direct child of its expected parent (`ensure_child`) before any umount/rm. kill adds no new path construction.
++- **(c)** Teardown is `reap_orphan` unchanged — it errors (room stays listed) if the jail or room dir survives, so a stuck mount is reported, never silently leaked. kill reaps **only** after a definitive `Dead`; a `Survived` fc is reported `failed` and **not** reaped (never umount/rm a room whose fc is still up). Because kill reaps *immediately* after termination (unlike gc, which reaps long-dead orphans), the umount races the kernel's deferred `fput` on the bind-mounts; the teardown retries a transient-busy umount, falling back to the room-dir-preserved `gc`-retry net if it stays stuck.
++- **(d)** `Unknown` at classify *or* at the pre-signal re-probe → `refused`, exit 2, no signal. Indeterminate is never coerced to alive *or* dead.
++
++## Acceptance
++
++- `rooms kill <id>` terminates a live room's firecracker (SIGTERM→grace→SIGKILL) then reaps its dirs/mounts; `--json` emits the schema'd report on stdout.
++- An `OrphanedDead` id is a safe no-op that points to `gc` (exit 0, not reaped here); an `Unknown` id is refused (exit 2, not signaled); a non-existent id is "already gone" (exit 0); an invalid id is rejected before any signal (exit 2).
++- The identity guard never signals a live non-firecracker pid (pid-reuse safety).
++- `make check` green (fmt + clippy `--all-targets --all-features -D warnings` + tests, Windows + Linux).
++- **Adversarial Workflow pass** scoped to the whole invariant (skeptics told to break it) before merge.
++- **Host e2e (rooms-host, gates merge):** boot a real `--keep` room → `ls` shows it `kept` → `rooms kill <id>` → fc process gone, room dir + jail dir gone, no leftover bind-mounts in `/proc/mounts` → `ls` no longer lists it. Plus: `kill` of a dead/unknown id is a safe no-op with the right exit code, and an invalid id is rejected before any signal.
++
++## Test plan
++
++- **Unit (hermetic, `state_base` → tempdir; platform-aware like the registry suite):**
++  - `registry::kill` — invalid id rejected (`Err`); no-such-room → empty outcomes; an `Unknown` room (pid `None`) → `refused`, dirs survive, nothing signaled; an `OrphanedDead` room (a pid that cannot exist, Linux) → `already-dead`, **not** reaped (dirs survive), reason points to `gc`.
++  - `firecracker::terminate_by_identity` — a pid that cannot exist → `AlreadyExited` (Linux); a **live non-firecracker** child (`sleep`) → `AlreadyExited` *and the child is still alive afterward* (proves the identity guard never signals a non-room pid).
++  - `kill_exit_code` (or the disposition→code map) — pure, exhaustive over the four dispositions + empty.
++  - CLI parse (`main`) — `rooms kill <id>` and `--json` parse; bare `rooms kill` (no id) is rejected.
++  - The alive→signal→reap full path needs a real firecracker; it is the **host-e2e**, not a unit test (no live fc to fake in-process).
++
++## Out of scope (follow-ups)
++
++- **`rooms kill --all`** — kill every live room (batched outcomes, an `id`/`--all` conflict). A clean future add (the `Vec<KillOutcome>` report shape already anticipates it); deferred to keep this v0 sharp.
++- **Freeing a network slot / per-room tap on kill** — pool-era. v0 shares `tap-fc0` (every room attaches it; `tap_owned` is always false), so kill, like gc, doesn't touch the tap. When the pool retires `tap-fc0`, kill + gc both free the slot.
++- **Snapshots, replay receipts** — separate v0.2 lines (see the plan).
+diff --git a/docs/follow-ups.md b/docs/follow-ups.md
+index 5ec9d25..9431b94 100644
+--- a/docs/follow-ups.md
++++ b/docs/follow-ups.md
+@@ -60,6 +60,11 @@ Surfaced 2026-06-28 by `rooms-registry` (the `rooms ls` + `rooms gc` registry; s
+ - 2026-06-28 — **`make check` clippy diverges from CI** (recurrence of the #44 cross-OS gap): CI runs `cargo clippy --all-targets --all-features`, but the `Makefile`'s `lint`/`check` omit `--all-features`, so an `e2e`-gated compile error (a stale `boot()` call in `tests/control_failures.rs` after a signature change) passed local `make check` and only failed in CI. Add `--all-features` to the Makefile clippy so local == CI. (rooms-registry, [#51](https://github.com/itsHabib/rooms/pull/51))
+ - 2026-06-28 — **non-root `rooms ls`/`gc` can't read root-created room state** (codex P2 on [#51](https://github.com/itsHabib/rooms/pull/51)): `sudo -E rooms run` creates the per-room dir 0700-owned by root, so a non-root `rooms ls` gets `PermissionDenied` on `room.json` and the room shows `unknown` (no pid/age), and `gc` skips it. The `/proc` liveness *mechanism* is uid-independent, but the metadata file isn't readable. Today the working path is `sudo -E rooms ls`/`gc` (consistent with `sudo -E rooms run`); to support non-root, chown the room state tree to `$SUDO_UID:$SUDO_GID` after creation (or relax perms). Same class as the 2026-06-19 `--out` chown-under-sudo item.
+ 
++Surfaced 2026-06-29 by `rooms kill <id>` review ([#53](https://github.com/itsHabib/rooms/pull/53)); the High-severity pre-SIGKILL identity re-probe was fixed in-PR, these two lower-severity kill-path findings were deferred to keep the fix focused:
++
++- 2026-06-29 — **a `reap_paths` failure after a successful terminate exits 2, not 1.** `reap_after_kill` takes `reap_paths(...)?`, so a `PathEscape`/`HomeUnset` from path re-resolution bubbles out of `kill` as a `RegistryError` (CLI exit **2**) instead of a `KillDisposition::Failed` outcome (exit **1**) — the kill/gc contract's code for an incomplete reap. The `reap_orphan` error already maps to `Failed`; `reap_paths` should too (map its error into a `Failed` outcome rather than `?`). (cursor Medium on [#53](https://github.com/itsHabib/rooms/pull/53))
++- 2026-06-29 — **a non-`NotFound` stat error on the room dir reads as "room gone" → exit 0.** `find_entry` uses `symlink_metadata(...).is_ok_and(|m| m.is_dir())`, so a permission/traversal error (e.g. a root-owned `0700` state base under `sudo`) collapses to `false` → `kill <id>` reports an empty set and exits 0 as if already reaped, while a live room is stranded. Only `NotFound` should become `None`; other stat errors should surface/refuse. (codex P2 on [#53](https://github.com/itsHabib/rooms/pull/53))
++
+ ## Closed
+ 
+ Resolved by the `--out` transport-out work ([#40](https://github.com/itsHabib/rooms/pull/40) `973534b`):
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index aa62490..b792f0d 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -397,10 +397,14 @@ fn jailer_chroot_base(config: &RoomsConfig) -> Result<PathBuf, FirecrackerError>
+ /// depends on that. If a `--daemonize` jailer is ever adopted, capture the
+ /// firecracker pid the jailer writes instead.
+ fn write_room_meta(room_dir: &Path, id: &str, descriptor: &room::RoomDescriptor, pid: Option<u32>) {
++    // Record the pid's start time so liveness can later tell *this* incarnation
++    // from a recycled pid (the `rooms kill` identity guard).
++    let pid_starttime = pid.and_then(room::starttime_of);
+     let meta = room::RoomMeta::new(
+         id.to_owned(),
+         descriptor.command.clone(),
+         pid,
++        pid_starttime,
+         descriptor.keep,
+         Utc::now(),
+     );
+@@ -624,6 +628,38 @@ fn unmount(target: &Path) -> Result<(), String> {
+     Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+ }
+ 
++/// Times a busy unmount is retried, and the wait between tries. A bind-mount can
++/// read EBUSY for a few ms after the firecracker that held the kernel/rootfs files
++/// exits — the kernel's final `fput` is deferred to a workqueue. `rooms kill`
++/// reaps *immediately* after terminating fc (unlike gc, which reaps long-dead
++/// orphans), so it races that window; a short retry clears it. A mount still busy
++/// past the retries falls through to the room-dir-preserved fallback
++/// (`cleanup_sync`) so `rooms gc` can reap it later.
++#[cfg(unix)]
++const UNMOUNT_RETRIES: u32 = 5;
++#[cfg(unix)]
++const UNMOUNT_RETRY_DELAY: Duration = Duration::from_millis(100);
++
++/// Unmount, retrying briefly while the target reads busy (a just-exited process's
++/// deferred `fput` clearing). A non-busy failure (e.g. "not mounted") returns at
++/// once — waiting won't change it.
++#[cfg(unix)]
++fn unmount_settled(target: &Path) -> Result<(), String> {
++    use std::thread;
++
++    let mut result = unmount(target);
++    let mut tries = 0;
++    while let Err(reason) = &result {
++        if tries >= UNMOUNT_RETRIES || !reason.contains("busy") {
++            break;
++        }
++        thread::sleep(UNMOUNT_RETRY_DELAY);
++        tries += 1;
++        result = unmount(target);
++    }
++    result
++}
++
+ #[cfg(unix)]
+ fn unmount_quiet(target: &Path) {
+     let _ = unmount(target);
+@@ -652,7 +688,7 @@ fn teardown_jail_sync(instance_dir: &Path) -> bool {
+     for name in [JAIL_KERNEL, JAIL_ROOTFS] {
+         let target = jail_root.join(name);
+         if target.exists() {
+-            if let Err(e) = unmount(&target) {
++            if let Err(e) = unmount_settled(&target) {
+                 tracing::warn!(target = %target.display(), error = %e, "umount reported an error; relying on dir removal");
+             }
+         }
+@@ -976,6 +1012,129 @@ fn kill_child_gracefully(pid: Option<u32>, grace: Duration) {
+     }
+ }
+ 
++/// Outcome of an identity-guarded terminate — the `rooms kill` signal path.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum KillSignalOutcome {
++    /// The process was alive and is now confirmed gone (we signaled it).
++    Signaled,
++    /// The recorded pid was already dead (or reused by a non-room process)
++    /// before any signal — nothing to kill; the caller proceeds to reap.
++    AlreadyExited,
++    /// Still the room's firecracker after SIGTERM + SIGKILL — the kill could not
++    /// complete. The caller must NOT reap (the process is still up).
++    Survived,
++    /// Liveness was indeterminate (unreadable `/proc`) — at the initial probe (no
++    /// signal sent), or after SIGTERM (a signal may have been sent, but death
++    /// could not be confirmed). Never coerced to alive or dead; the caller does
++    /// not reap.
++    Indeterminate,
++}
++
++/// Terminate a room's *live* firecracker by pid — the `rooms kill` signal path.
++///
++/// Re-checks process identity (`/proc/<pid>/stat` via [`room::probe`], matching
++/// `comm` *and* the recorded `starttime`) immediately before every signal, so a
++/// recycled pid — even one now hosting *another* firecracker — reads `Dead` and is
++/// never signaled: SIGTERM, poll identity to the grace deadline, then SIGKILL only
++/// while the pid is *still* this room's firecracker/jailer. Success requires a
++/// definitive `Dead` (an `Unknown` is never read as gone). Distinct from
++/// [`kill_child_gracefully`], which guards the Drop path — there we own the
++/// `Child`, so the pid stays at least a zombie and `kill -0` existence suffices;
++/// here the launching process may be gone, so the pid can be recycled and identity
++/// must gate each signal. With `starttime` recorded, the residual race shrinks to
++/// the pid being recycled to another firecracker/jailer whose start time *also*
++/// collides, within the gap between the final probe and signal delivery — the
++/// irreducible TOCTOU floor without `pidfd`.
++#[must_use]
++pub fn terminate_by_identity(
++    pid: u32,
++    starttime: Option<u64>,
++    grace: Duration,
++) -> KillSignalOutcome {
++    #[cfg(unix)]
++    {
++        use std::time::Instant;
++
++        match room::probe(Some(pid), starttime) {
++            room::Liveness::Dead => return KillSignalOutcome::AlreadyExited,
++            room::Liveness::Unknown => return KillSignalOutcome::Indeterminate,
++            room::Liveness::Alive => {}
++        }
++        send_signal(pid, "TERM");
++        let grace = grace.min(Duration::from_secs(5));
++        match poll_until_dead(pid, starttime, Instant::now() + grace) {
++            room::Liveness::Dead => KillSignalOutcome::Signaled,
++            room::Liveness::Unknown => KillSignalOutcome::Indeterminate,
++            room::Liveness::Alive => sigkill_and_confirm(pid, starttime),
++        }
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = (pid, starttime, grace);
++        KillSignalOutcome::Indeterminate
++    }
++}
++
++/// SIGKILL a still-alive room process, then confirm it died (by identity).
++///
++/// Re-probes identity immediately before the signal — the SIGTERM grace wait
++/// widened the window for the recorded pid to be reaped and recycled, so a stale
++/// `Alive` from the grace poll must not authorize a SIGKILL. A pid that now reads
++/// `Dead` (our incarnation gone — including one recycled to *another*
++/// firecracker/jailer, caught by the starttime mismatch) is reaped, never sent
++/// SIGKILL; an `Unknown` is left indeterminate. Mirrors the identity gate the
++/// SIGTERM path applies before *its* signal.
++#[cfg(unix)]
++fn sigkill_and_confirm(pid: u32, starttime: Option<u64>) -> KillSignalOutcome {
++    use std::time::Instant;
++
++    match room::probe(Some(pid), starttime) {
++        room::Liveness::Dead => return KillSignalOutcome::Signaled,
++        room::Liveness::Unknown => return KillSignalOutcome::Indeterminate,
++        room::Liveness::Alive => {}
++    }
++    send_signal(pid, "KILL");
++    match poll_until_dead(pid, starttime, Instant::now() + Duration::from_secs(1)) {
++        room::Liveness::Dead => KillSignalOutcome::Signaled,
++        room::Liveness::Alive => KillSignalOutcome::Survived,
++        room::Liveness::Unknown => KillSignalOutcome::Indeterminate,
++    }
++}
++
++/// Poll a pid's room-identity until it reads `Dead` or the deadline passes.
++///
++/// Returns the last observed liveness. `Unknown` keeps polling (fail-safe: a
++/// transient unreadable `/proc` is not "gone"); only a definitive `Dead` — or the
++/// deadline — ends the wait.
++#[cfg(unix)]
++fn poll_until_dead(
++    pid: u32,
++    starttime: Option<u64>,
++    deadline: std::time::Instant,
++) -> room::Liveness {
++    use std::thread;
++    use std::time::Instant;
++
++    loop {
++        let live = room::probe(Some(pid), starttime);
++        if live == room::Liveness::Dead || Instant::now() >= deadline {
++            return live;
++        }
++        thread::sleep(Duration::from_millis(50));
++    }
++}
++
++/// Send a signal to a pid via `kill(1)` (matches `kill_child_gracefully`'s style;
++/// best-effort — the identity re-probe, not this exit code, is the source of truth).
++#[cfg(unix)]
++fn send_signal(pid: u32, signal: &str) {
++    use std::process::Command;
++
++    let _ = Command::new("kill")
++        .args([&format!("-{signal}"), &pid.to_string()])
++        .output();
++}
++
+ fn release_tap(tap_name: Option<&str>) {
+     let Some(tap) = tap_name else { return };
+ 
+@@ -1056,6 +1215,43 @@ mod tests {
+     use crate::config::RoomsConfig;
+     use std::path::{Path, PathBuf};
+ 
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn terminate_absent_pid_is_already_exited() {
++        use super::{terminate_by_identity, KillSignalOutcome};
++        use std::time::Duration;
++        // A pid that cannot exist (>= 2^22 on Linux) probes Dead before any
++        // signal → AlreadyExited, no signal sent.
++        assert_eq!(
++            terminate_by_identity(4_194_305, None, Duration::from_millis(200)),
++            KillSignalOutcome::AlreadyExited
++        );
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn terminate_never_signals_a_live_non_firecracker_pid() {
++        use super::{terminate_by_identity, KillSignalOutcome};
++        use std::time::Duration;
++        // The pid-reuse guard, end to end: a real, *live* process that isn't
++        // firecracker/jailer must read Dead by identity and return AlreadyExited
++        // WITHOUT being signaled — proving kill never hits a reused pid. The
++        // child must still be alive afterward.
++        let mut child = std::process::Command::new("sleep")
++            .arg("30")
++            .spawn()
++            .expect("spawn sleep");
++        let outcome = terminate_by_identity(child.id(), None, Duration::from_millis(200));
++        let still_alive = child.try_wait().expect("try_wait").is_none();
++        let _ = child.kill();
++        let _ = child.wait();
++        assert_eq!(outcome, KillSignalOutcome::AlreadyExited);
++        assert!(
++            still_alive,
++            "a live non-firecracker pid must never be signaled"
++        );
++    }
++
+     #[test]
+     fn build_boot_args_overlay_init_only_when_readonly() {
+         let on = build_boot_args(None, true);
+diff --git a/src/main.rs b/src/main.rs
+index e8e0bf0..cfef0f0 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -124,6 +124,15 @@ enum Command {
+         /// Reap only this room id (still only if it's orphaned-dead).
+         id: Option<String>,
+     },
++    /// Terminate a live room: signal its firecracker, then reap. A dead or
++    /// unknown-liveness id is a safe no-op (an already-dead room is `gc`'s job).
++    Kill {
++        /// The room id to kill.
++        id: String,
++        /// Emit structured JSON output (schema'd; logs stay on stderr).
++        #[arg(long)]
++        json: bool,
++    },
+ }
+ 
+ /// Which runner backend drives the guest command.
+@@ -257,6 +266,7 @@ async fn dispatch(cli: Cli) -> Result<u8, RoomsError> {
+         Command::Diff { from, json } => diff_changeset(&from, json).await,
+         Command::Ls { json } => list_rooms_cmd(json, &config),
+         Command::Gc { dry_run, id } => gc_cmd(dry_run, id, &config),
++        Command::Kill { id, json } => kill_cmd(&id, json, &config),
+     }
+ }
+ 
+@@ -864,6 +874,44 @@ fn render_gc_empty(only: Option<&str>) {
+     eprintln!("no room with id {id} (already gone?)");
+ }
+ 
++fn kill_cmd(id: &str, json: bool, config: &RoomsConfig) -> Result<u8, RoomsError> {
++    info!(%id, "rooms kill");
++    let report = registry::kill(config, id)?;
++    // Exit code is the script-composition contract (like gc/diff): 0 killed or
++    // already-dead no-op, 1 the kill couldn't complete (survived / reap leak), 2
++    // refused (indeterminate liveness).
++    let code = report.exit_code();
++    if json {
++        render_kill_json(&report)?;
++        return Ok(code);
++    }
++    render_kill_human(&report, id);
++    Ok(code)
++}
++
++// stdout is the documented data surface for `rooms kill --json` (logs stay on
++// stderr), mirroring `rooms ls --json` / `rooms diff --json`.
++#[allow(
++    clippy::print_stdout,
++    reason = "machine-readable kill output; stdout is the documented contract"
++)]
++fn render_kill_json(report: &registry::KillReport) -> Result<(), RoomsError> {
++    let out =
++        serde_json::to_string_pretty(report).map_err(|e| RoomsError::Internal(e.to_string()))?;
++    println!("{out}");
++    Ok(())
++}
++
++// `rooms kill` is an action like `gc`: the per-room outcome line goes to stderr;
++// stdout is reserved for `--json`. Single-id kill yields 0 or 1 outcome.
++fn render_kill_human(report: &registry::KillReport, id: &str) {
++    let Some(outcome) = report.outcomes.first() else {
++        eprintln!("no room with id {id} (already gone?)");
++        return;
++    };
++    eprintln!("{}  {}", outcome.id, outcome.reason);
++}
++
+ #[cfg(test)]
+ mod tests {
+     #![allow(
+@@ -1215,6 +1263,25 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn kill_verb_parses_id_and_requires_it() {
++        let id = "01abcdefghijklmnopqrstuvwx";
++        let cli =
++            Cli::try_parse_from(["rooms", "kill", id, "--json"]).expect("kill <id> --json parses");
++        match cli.command {
++            Command::Kill { id: got, json } => {
++                assert_eq!(got, id);
++                assert!(json);
++            }
++            other => panic!("expected Kill, got {other:?}"),
++        }
++        // id is required: bare `rooms kill` must fail to parse.
++        assert!(
++            Cli::try_parse_from(["rooms", "kill"]).is_err(),
++            "kill requires an id"
++        );
++    }
++
+     #[test]
+     fn humanize_secs_formats_each_magnitude() {
+         assert_eq!(humanize_secs(0), "0s");
+diff --git a/src/registry.rs b/src/registry.rs
+index d78e521..9372cc2 100644
+--- a/src/registry.rs
++++ b/src/registry.rs
+@@ -14,7 +14,7 @@ use tracing::warn;
+ 
+ use crate::config::RoomsConfig;
+ use crate::error::RegistryError;
+-use crate::firecracker;
++use crate::firecracker::{self, KillSignalOutcome};
+ use crate::room::{self, Liveness, RoomMeta};
+ 
+ /// Schema version for `ls --json` stdout (mirrors `doctor`/`diff`).
+@@ -64,6 +64,10 @@ pub struct RoomEntry {
+     pub state: RoomState,
+     pub label: Option<String>,
+     pub pid: Option<u32>,
++    /// Start time of the pid's incarnation, carried for the kill identity guard.
++    /// Internal — kept out of the `ls --json` schema.
++    #[serde(skip)]
++    pub pid_starttime: Option<u64>,
+     pub started_at: Option<DateTime<Utc>>,
+     pub keep: bool,
+ }
+@@ -147,12 +151,14 @@ pub fn list_rooms(config: &RoomsConfig) -> Result<Vec<RoomEntry>, RegistryError>
+ fn entry_for(config: &RoomsConfig, id: &str) -> RoomEntry {
+     let meta = config.room_dir(id).and_then(|dir| load_meta_soft(&dir));
+     let pid = meta.as_ref().and_then(|m| m.pid);
++    let pid_starttime = meta.as_ref().and_then(|m| m.pid_starttime);
+     let keep = meta.as_ref().is_some_and(|m| m.keep);
+     RoomEntry {
+         id: id.to_owned(),
+-        state: classify(keep, room::probe(pid)),
++        state: classify(keep, room::probe(pid, pid_starttime)),
+         label: meta.as_ref().and_then(|m| m.label.clone()),
+         pid,
++        pid_starttime,
+         started_at: meta.as_ref().map(|m| m.started_at),
+         keep,
+     }
+@@ -297,6 +303,197 @@ fn outcome(entry: &RoomEntry, reaped: bool, reason: &str) -> GcOutcome {
+     }
+ }
+ 
++/// What `rooms kill` did to a room.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "kebab-case")]
++pub enum KillDisposition {
++    /// Was alive; terminated (or had just exited) and reaped.
++    Killed,
++    /// Already dead — pointed at `rooms gc`, not reaped here.
++    AlreadyDead,
++    /// Refused to signal — indeterminate liveness (indeterminate ≠ alive), or a
++    /// pre-v2 room whose process identity can't be verified.
++    Refused,
++    /// Alive, but the kill couldn't complete: survived SIGKILL, or the reap left
++    /// a dir/mount behind.
++    Failed,
++}
++
++impl KillDisposition {
++    /// Process exit code for this disposition (the script-composition contract):
++    /// **0** killed or already-dead no-op, **1** failed, **2** refused.
++    #[must_use]
++    pub const fn exit_code(self) -> u8 {
++        match self {
++            Self::Killed | Self::AlreadyDead => 0,
++            Self::Failed => 1,
++            Self::Refused => 2,
++        }
++    }
++}
++
++/// What `rooms kill` did to one room.
++#[derive(Debug, Clone, Serialize)]
++pub struct KillOutcome {
++    pub id: String,
++    pub state: RoomState,
++    pub disposition: KillDisposition,
++    pub reason: String,
++}
++
++/// The result of a kill run. A one-element `outcomes` for single-id kill; the
++/// `Vec` shape mirrors [`GcReport`] and makes a future `--all` a non-breaking add.
++#[derive(Debug, Clone, Serialize)]
++pub struct KillReport {
++    pub schema_version: u32,
++    pub outcomes: Vec<KillOutcome>,
++}
++
++impl KillReport {
++    /// The process exit code: the highest (worst) disposition code across
++    /// outcomes — any non-ok outcome makes the run non-zero. **0** when there are
++    /// no outcomes (no such room — already gone).
++    #[must_use]
++    pub fn exit_code(&self) -> u8 {
++        self.outcomes
++            .iter()
++            .map(|o| o.disposition.exit_code())
++            .max()
++            .unwrap_or(0)
++    }
++}
++
++/// Kill a *live* room: terminate its firecracker, then reap via the gc teardown.
++///
++/// Only a `Running` or `Kept` room is signaled (symmetry with gc reaping only the
++/// confirmed-dead). An `OrphanedDead` id is pointed at `gc` (not reaped here), an
++/// `Unknown` id is refused (indeterminate ≠ alive), a non-existent id is a no-op
++/// ("already gone"), an invalid id is rejected before any fs or signal work, and
++/// an unresolvable state base (HOME unset) errors rather than reporting the room
++/// gone.
++pub fn kill(config: &RoomsConfig, id: &str) -> Result<KillReport, RegistryError> {
++    if !is_valid_room_id(id) {
++        return Err(RegistryError::InvalidRoomId { id: id.to_owned() });
++    }
++    // Resolve the state base up front (as `ls`/`gc` do): an unresolvable base
++    // (HOME unset, e.g. under `sudo`) is a loud error, not a silent exit-0
++    // "already gone" — a live room could be running orphaned under a base we
++    // can't see, and reporting it gone would strand it.
++    config
++        .resolved_state_base()
++        .ok_or(RegistryError::HomeUnset)?;
++    let outcomes = match find_entry(config, id) {
++        Some(entry) => vec![kill_entry(config, &entry)?],
++        None => Vec::new(),
++    };
++    Ok(KillReport {
++        schema_version: REGISTRY_SCHEMA_VERSION,
++        outcomes,
++    })
++}
++
++/// Build the entry for a single room id, or `None` if no such room dir exists.
++///
++/// The per-room equivalent of the existence rule [`list_rooms`] applies while
++/// scanning the state base.
++fn find_entry(config: &RoomsConfig, id: &str) -> Option<RoomEntry> {
++    let room_dir = config.room_dir(id)?;
++    // symlink_metadata (no-follow) so a symlinked <id> isn't treated as a room —
++    // matching list_rooms' non-following file_type(), and refusing to source a
++    // room's pid/identity from a target outside the state base.
++    let is_dir = std::fs::symlink_metadata(&room_dir).is_ok_and(|m| m.is_dir());
++    is_dir.then(|| entry_for(config, id))
++}
++
++/// Decide and perform the kill for one room from its classified state.
++fn kill_entry(config: &RoomsConfig, entry: &RoomEntry) -> Result<KillOutcome, RegistryError> {
++    match entry.state {
++        RoomState::OrphanedDead => Ok(kill_outcome(
++            entry,
++            KillDisposition::AlreadyDead,
++            "nothing live to kill; run `rooms gc` to reap it",
++        )),
++        RoomState::Unknown => Ok(kill_outcome(
++            entry,
++            KillDisposition::Refused,
++            "liveness unknown (no pid / unreadable /proc); refusing to kill",
++        )),
++        RoomState::Running | RoomState::Kept => kill_live(config, entry),
++    }
++}
++
++/// Terminate a confirmed-alive room (identity-guarded), then reap it.
++fn kill_live(config: &RoomsConfig, entry: &RoomEntry) -> Result<KillOutcome, RegistryError> {
++    let Some(pid) = entry.pid else {
++        // A Running/Kept room always carries a pid (liveness needs one); guard
++        // the impossible case rather than unwrap.
++        return Ok(kill_outcome(
++            entry,
++            KillDisposition::Refused,
++            "alive but no pid recorded; refusing to kill",
++        ));
++    };
++    let Some(starttime) = entry.pid_starttime else {
++        // A pre-v2 room.json carries no start time, so identity would fall back
++        // to comm-only — which can't tell this room's firecracker from a pid
++        // recycled to *another* firecracker/jailer. On the signaling path that's
++        // unsafe (a wrong-process SIGTERM/SIGKILL), so refuse rather than trust
++        // comm. The read-only `ls` display still classifies comm-only; only the
++        // destructive path demands a verified identity.
++        return Ok(kill_outcome(
++            entry,
++            KillDisposition::Refused,
++            "cannot verify process identity (room predates starttime pinning); refusing to signal",
++        ));
++    };
++    match firecracker::terminate_by_identity(pid, Some(starttime), config.cleanup_grace) {
++        KillSignalOutcome::Signaled => reap_after_kill(config, entry, "killed"),
++        KillSignalOutcome::AlreadyExited => {
++            reap_after_kill(config, entry, "already exited; reaped")
++        }
++        KillSignalOutcome::Survived => Ok(kill_outcome(
++            entry,
++            KillDisposition::Failed,
++            "firecracker survived SIGKILL; still alive, not reaped",
++        )),
++        KillSignalOutcome::Indeterminate => Ok(kill_outcome(
++            entry,
++            KillDisposition::Refused,
++            "liveness indeterminate at signal time; could not confirm death (not reaped)",
++        )),
++    }
++}
++
++/// Reap a room whose firecracker is confirmed dead (reusing the gc teardown). A
++/// surviving dir/mount is reported as a `Failed` kill, never a silent leak.
++fn reap_after_kill(
++    config: &RoomsConfig,
++    entry: &RoomEntry,
++    ok_reason: &str,
++) -> Result<KillOutcome, RegistryError> {
++    let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
++    match firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, config) {
++        Ok(()) => Ok(kill_outcome(entry, KillDisposition::Killed, ok_reason)),
++        Err(e) => {
++            warn!(id = %entry.id, error = %e, "kill: reap after terminate failed");
++            Ok(kill_outcome(
++                entry,
++                KillDisposition::Failed,
++                &format!("terminated but reap failed: {e}"),
++            ))
++        }
++    }
++}
++
++fn kill_outcome(entry: &RoomEntry, disposition: KillDisposition, reason: &str) -> KillOutcome {
++    KillOutcome {
++        id: entry.id.clone(),
++        state: entry.state,
++        disposition,
++        reason: reason.to_owned(),
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     #![allow(
+@@ -307,8 +504,12 @@ mod tests {
+         reason = "test module"
+     )]
+ 
+-    use super::{classify, gc, is_valid_room_id, list_rooms, GcOptions, RoomState};
++    use super::{
++        classify, gc, is_valid_room_id, kill, kill_live, list_rooms, GcOptions, KillDisposition,
++        RoomEntry, RoomState,
++    };
+     use crate::config::RoomsConfig;
++    use crate::error::RegistryError;
+     use crate::room::{self, Liveness, RoomMeta};
+     use chrono::Utc;
+     use std::path::{Path, PathBuf};
+@@ -333,6 +534,7 @@ mod tests {
+             id.clone(),
+             Some("sleep 600".to_owned()),
+             pid,
++            pid.map(u64::from),
+             keep,
+             Utc::now(),
+         );
+@@ -599,4 +801,143 @@ mod tests {
+             Some(PathBuf::from(format!("/s/{VALID_ID}")))
+         );
+     }
++
++    #[test]
++    fn kill_rejects_invalid_id() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        assert!(
++            kill(&config, "../etc").is_err(),
++            "an invalid id must be rejected before any signal or fs work"
++        );
++    }
++
++    #[test]
++    fn kill_no_such_room_is_empty() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // A syntactically valid id with no room dir → already gone → no outcomes.
++        let report = kill(&config, VALID_ID).unwrap();
++        assert!(report.outcomes.is_empty());
++        assert_eq!(report.exit_code(), 0);
++    }
++
++    #[test]
++    fn kill_unknown_room_is_refused_and_untouched() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // pid None → Unknown liveness → refuse: never signal, never reap.
++        let id = make_room(&config, None, false, true);
++        let report = kill(&config, &id).unwrap();
++        assert_eq!(report.outcomes.len(), 1);
++        assert_eq!(report.outcomes[0].state, RoomState::Unknown);
++        assert_eq!(report.outcomes[0].disposition, KillDisposition::Refused);
++        assert_eq!(report.exit_code(), 2);
++        // the dirs must survive — kill refused to act.
++        assert!(config.room_dir(&id).unwrap().exists());
++        assert!(config.jail_instance_dir(&id).unwrap().exists());
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn kill_orphaned_dead_points_to_gc_without_reaping() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // A pid that cannot exist → Dead → OrphanedDead. kill must NOT reap it
++        // (that's gc's job); it points there and leaves the dirs for gc.
++        let id = make_room(&config, Some(4_194_305), false, true);
++        let report = kill(&config, &id).unwrap();
++        assert_eq!(report.outcomes.len(), 1);
++        assert_eq!(report.outcomes[0].state, RoomState::OrphanedDead);
++        assert_eq!(report.outcomes[0].disposition, KillDisposition::AlreadyDead);
++        assert_eq!(report.exit_code(), 0);
++        assert!(
++            config.room_dir(&id).unwrap().exists(),
++            "kill must not reap an already-dead room (gc's job)"
++        );
++        assert!(config.jail_instance_dir(&id).unwrap().exists());
++    }
++
++    /// A v1 room (no recorded start time) classified alive must REFUSE on the
++    /// signaling path rather than fall back to comm-only identity — comm alone
++    /// can't tell this room's firecracker from a pid recycled to *another*
++    /// firecracker/jailer, and signaling the wrong one is the cardinal hazard.
++    /// We force the alive branch (probe can't be faked in-process) with the
++    /// test's own live pid; the guard must short-circuit to `refused` *before*
++    /// `terminate_by_identity` is consulted — which, were the guard gone, would
++    /// read the pid Dead-by-comm, reap, and report `killed`. So `refused` plus
++    /// the surviving dirs proves nothing was signaled or reaped.
++    #[test]
++    fn kill_live_refuses_v1_room_without_starttime() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let id = make_room(&config, None, false, true);
++        let entry = RoomEntry {
++            id: id.clone(),
++            state: RoomState::Running,
++            label: None,
++            pid: Some(std::process::id()),
++            pid_starttime: None,
++            started_at: Some(Utc::now()),
++            keep: false,
++        };
++        let outcome = kill_live(&config, &entry).unwrap();
++        assert_eq!(
++            outcome.disposition,
++            KillDisposition::Refused,
++            "a v1 room without a start time must refuse before any signal"
++        );
++        // Refusal signals and reaps nothing — the dirs survive.
++        assert!(config.room_dir(&id).unwrap().exists());
++        assert!(config.jail_instance_dir(&id).unwrap().exists());
++    }
++
++    /// An unresolvable state base (HOME unset, e.g. under `sudo`) must surface
++    /// `HomeUnset` — loud and non-zero — not collapse into an empty exit-0
++    /// "already gone" report while a live room runs orphaned under a base we
++    /// can't see. `ls`/`gc` already error here; `kill` now matches.
++    #[test]
++    fn kill_on_unresolvable_base_is_home_unset_not_already_gone() {
++        // No state_base override → the base is HOME-derived. Scope the HOME
++        // removal to the kill call alone (restored on drop) so the window other
++        // parallel HOME-readers could observe is as tight as possible.
++        let config = RoomsConfig::default();
++        let result = {
++            let _home = HomeGuard::unset();
++            kill(&config, VALID_ID)
++        };
++        assert!(
++            matches!(result, Err(RegistryError::HomeUnset)),
++            "unresolvable base must be a loud HomeUnset error, got {result:?}"
++        );
++    }
++
++    #[test]
++    fn kill_disposition_exit_codes() {
++        assert_eq!(KillDisposition::Killed.exit_code(), 0);
++        assert_eq!(KillDisposition::AlreadyDead.exit_code(), 0);
++        assert_eq!(KillDisposition::Failed.exit_code(), 1);
++        assert_eq!(KillDisposition::Refused.exit_code(), 2);
++    }
++
++    /// Unset `HOME` for a test's duration, restoring it on drop (even on panic).
++    /// With no `state_base` override, the state base can't resolve — the
++    /// `HomeUnset` condition. Restoring keeps parallel HOME-readers undisturbed.
++    struct HomeGuard(Option<std::ffi::OsString>);
++
++    impl HomeGuard {
++        fn unset() -> Self {
++            let prev = std::env::var_os("HOME");
++            std::env::remove_var("HOME");
++            Self(prev)
++        }
++    }
++
++    impl Drop for HomeGuard {
++        fn drop(&mut self) {
++            if let Some(home) = self.0.take() {
++                std::env::set_var("HOME", home);
++            }
++        }
++    }
+ }
+diff --git a/src/room.rs b/src/room.rs
+index a5a6736..bc2318a 100644
+--- a/src/room.rs
++++ b/src/room.rs
+@@ -10,8 +10,9 @@ use std::path::Path;
+ use chrono::{DateTime, Utc};
+ use serde::{Deserialize, Serialize};
+ 
+-/// Schema version for `room.json` (forward-compat, mirrors `result.json`).
+-pub const ROOM_META_SCHEMA_VERSION: u32 = 1;
++/// Schema version for `room.json` (forward-compat, mirrors `result.json`). v2
++/// adds `pid_starttime`; v1 files still read (the field defaults to `None`).
++pub const ROOM_META_SCHEMA_VERSION: u32 = 2;
+ 
+ /// Metadata file name inside a room's state dir.
+ pub const ROOM_META_FILE: &str = "room.json";
+@@ -39,6 +40,12 @@ pub struct RoomMeta {
+     pub started_at: DateTime<Utc>,
+     /// Jailer→firecracker child pid; `None` leaves liveness `Unknown`.
+     pub pid: Option<u32>,
++    /// Start time of the pid's process incarnation (`/proc/<pid>/stat` field 22,
++    /// jiffies since boot). Pins `pid` to a *specific* process so a recycled pid
++    /// reads `Dead`, not a false `Alive`. `None` for a pre-v2 `room.json` (or when
++    /// it couldn't be read at boot); liveness then falls back to comm-only.
++    #[serde(default)]
++    pub pid_starttime: Option<u64>,
+     /// Started with `--keep`.
+     pub keep: bool,
+ }
+@@ -50,6 +57,7 @@ impl RoomMeta {
+         id: String,
+         label: Option<String>,
+         pid: Option<u32>,
++        pid_starttime: Option<u64>,
+         keep: bool,
+         started_at: DateTime<Utc>,
+     ) -> Self {
+@@ -59,6 +67,7 @@ impl RoomMeta {
+             label,
+             started_at,
+             pid,
++            pid_starttime,
+             keep,
+         }
+     }
+@@ -147,6 +156,65 @@ pub fn classify_stat(stat: &str) -> Liveness {
+     classify_comm(comm)
+ }
+ 
++/// Classify liveness from a `/proc/<pid>/stat` line AND verify the process
++/// incarnation via its start time. Pure, so the recycled-pid case is
++/// unit-testable.
++///
++/// comm/zombie is checked first (a dead, zombie, or foreign-`comm` pid is `Dead`
++/// regardless of start time). Then, when a start time was recorded, a mismatch
++/// means the pid was recycled to a *different* process incarnation → `Dead`; a
++/// match → `Alive`; an unparseable stat → `Unknown` (fail-safe). With no recorded
++/// start time (a pre-v2 `room.json`), this is comm-only — the prior behavior.
++#[must_use]
++pub fn classify_stat_with_identity(stat: &str, expected_starttime: Option<u64>) -> Liveness {
++    let live = classify_stat(stat);
++    if live != Liveness::Alive {
++        return live;
++    }
++    let Some(expected) = expected_starttime else {
++        return Liveness::Alive;
++    };
++    match parse_starttime(stat) {
++        Some(actual) if actual == expected => Liveness::Alive,
++        Some(_) => Liveness::Dead,
++        None => Liveness::Unknown,
++    }
++}
++
++/// Parse the process start time — field 22 of `/proc/<pid>/stat`, the value that
++/// pins a pid to a specific incarnation. `None` if the line is malformed.
++///
++/// Fields after the (parenthesized, space-permitting) `comm` are space-separated;
++/// counting from `state` (field 3) right after the last `)`, start time is the
++/// 20th token (field 22 overall).
++#[must_use]
++pub fn parse_starttime(stat: &str) -> Option<u64> {
++    let close = stat.rfind(')')?;
++    stat.get(close + 1..)?
++        .split_whitespace()
++        .nth(19)?
++        .parse()
++        .ok()
++}
++
++/// Read the start time (field 22 of `/proc/<pid>/stat`) of a live pid, to record
++/// at boot. `None` off Linux, or if the pid's stat can't be read/parsed.
++#[cfg(target_os = "linux")]
++#[must_use]
++pub fn starttime_of(pid: u32) -> Option<u64> {
++    parse_starttime(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
++}
++
++#[cfg(not(target_os = "linux"))]
++#[allow(
++    clippy::missing_const_for_fn,
++    reason = "kept non-const to match the Linux starttime_of that reads /proc"
++)]
++#[must_use]
++pub fn starttime_of(_pid: u32) -> Option<u64> {
++    None
++}
++
+ /// Probe a room's liveness via `/proc/<pid>/stat`.
+ ///
+ /// Uid-independent and pid-reuse-aware, unlike `kill -0` (which returns EPERM
+@@ -154,19 +222,21 @@ pub fn classify_stat(stat: &str) -> Liveness {
+ /// unprivileged operator against a firecracker-uid process). A missing
+ /// `/proc/<pid>` is `Dead`; a zombie is `Dead` (see `classify_stat`); an
+ /// unreadable entry is `Unknown` (fail-safe: never claim dead when we can't tell
+-/// — gc won't reap it).
++/// — gc won't reap it). When `expected_starttime` is `Some`, a pid recycled to a
++/// *different* incarnation (even another firecracker) reads `Dead` — the identity
++/// check `rooms kill` relies on before signaling.
+ #[must_use]
+-pub fn probe(pid: Option<u32>) -> Liveness {
++pub fn probe(pid: Option<u32>, expected_starttime: Option<u64>) -> Liveness {
+     let Some(pid) = pid else {
+         return Liveness::Unknown;
+     };
+-    probe_pid(pid)
++    probe_pid(pid, expected_starttime)
+ }
+ 
+ #[cfg(target_os = "linux")]
+-fn probe_pid(pid: u32) -> Liveness {
++fn probe_pid(pid: u32, expected_starttime: Option<u64>) -> Liveness {
+     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+-        Ok(stat) => classify_stat(&stat),
++        Ok(stat) => classify_stat_with_identity(&stat, expected_starttime),
+         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Liveness::Dead,
+         Err(_) => Liveness::Unknown,
+     }
+@@ -179,7 +249,7 @@ fn probe_pid(pid: u32) -> Liveness {
+     clippy::missing_const_for_fn,
+     reason = "kept non-const to match the Linux probe_pid that reads /proc"
+ )]
+-fn probe_pid(_pid: u32) -> Liveness {
++fn probe_pid(_pid: u32, _expected_starttime: Option<u64>) -> Liveness {
+     Liveness::Unknown
+ }
+ 
+@@ -187,7 +257,10 @@ fn probe_pid(_pid: u32) -> Liveness {
+ mod tests {
+     #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test module")]
+ 
+-    use super::{classify_comm, classify_stat, probe, read, write_atomic, Liveness, RoomMeta};
++    use super::{
++        classify_comm, classify_stat, classify_stat_with_identity, parse_starttime, probe, read,
++        write_atomic, Liveness, RoomMeta,
++    };
+     use chrono::Utc;
+ 
+     fn sample(pid: Option<u32>) -> RoomMeta {
+@@ -195,6 +268,7 @@ mod tests {
+             "01abcdefghijklmnopqrstuvwx".to_owned(),
+             Some("id".to_owned()),
+             pid,
++            pid.map(u64::from),
+             false,
+             Utc::now(),
+         )
+@@ -209,6 +283,18 @@ mod tests {
+         assert_eq!(meta, back);
+     }
+ 
++    #[test]
++    fn v1_meta_without_starttime_still_reads() {
++        // A pre-v2 room.json (no pid_starttime field) must still deserialize, with
++        // the field defaulting to None (comm-only fallback) — back-compat.
++        let dir = tempfile::tempdir().expect("tempdir");
++        let v1 = r#"{"schema_version":1,"id":"01abcdefghijklmnopqrstuvwx","label":null,"started_at":"2026-06-28T00:00:00Z","pid":42,"keep":false}"#;
++        std::fs::write(dir.path().join("room.json"), v1).expect("write v1");
++        let back = read(dir.path()).expect("read").expect("present");
++        assert_eq!(back.pid, Some(42));
++        assert_eq!(back.pid_starttime, None);
++    }
++
+     #[test]
+     fn atomic_write_leaves_no_temp() {
+         let dir = tempfile::tempdir().expect("tempdir");
+@@ -279,17 +365,71 @@ mod tests {
+         assert_eq!(classify_stat("garbage-no-parens"), Liveness::Unknown);
+     }
+ 
++    // A synthetic /proc/<pid>/stat with 22 fields; start time (field 22) is the
++    // 20th token after the comm's closing `)`.
++    const FC_STAT_ST555: &str =
++        "1234 (firecracker) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 555";
++
++    #[test]
++    fn parse_starttime_reads_field_22() {
++        assert_eq!(parse_starttime(FC_STAT_ST555), Some(555));
++        // comm with spaces/parens: still split on the LAST ')'.
++        assert_eq!(
++            parse_starttime("5 (odd ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 777"),
++            Some(777)
++        );
++        assert_eq!(parse_starttime("garbage-no-parens"), None);
++    }
++
++    #[test]
++    fn identity_check_distinguishes_a_recycled_pid_from_the_same_incarnation() {
++        // The precise hole the adversarial pass found: a recycled pid that IS a
++        // firecracker (comm matches) must read Dead when its start time differs.
++        assert_eq!(
++            classify_stat_with_identity(FC_STAT_ST555, Some(555)),
++            Liveness::Alive,
++            "same incarnation (comm + starttime match) is alive"
++        );
++        assert_eq!(
++            classify_stat_with_identity(FC_STAT_ST555, Some(999)),
++            Liveness::Dead,
++            "a different starttime means the pid was recycled — not this room's fc"
++        );
++        assert_eq!(
++            classify_stat_with_identity(FC_STAT_ST555, None),
++            Liveness::Alive,
++            "no recorded starttime (pre-v2 meta) falls back to comm-only"
++        );
++        // comm/zombie short-circuits before the starttime check.
++        assert_eq!(
++            classify_stat_with_identity(
++                "1234 (firecracker) Z 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 555",
++                Some(555)
++            ),
++            Liveness::Dead,
++            "a zombie is dead regardless of starttime"
++        );
++        assert_eq!(
++            classify_stat_with_identity(
++                "1234 (bash) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 555",
++                Some(555)
++            ),
++            Liveness::Dead,
++            "a foreign comm is dead regardless of starttime"
++        );
++    }
++
+     #[test]
+     fn probe_without_pid_is_unknown() {
+         // No pid recorded ⇒ indeterminate ⇒ never reaped.
+-        assert_eq!(probe(None), Liveness::Unknown);
++        assert_eq!(probe(None, None), Liveness::Unknown);
+     }
+ 
+     #[cfg(target_os = "linux")]
+     #[test]
+     fn probe_absent_pid_is_dead() {
+         // A pid that cannot exist (>= 2^22 on Linux) has no /proc entry.
+-        assert_eq!(probe(Some(4_194_305)), Liveness::Dead);
++        assert_eq!(probe(Some(4_194_305), None), Liveness::Dead);
+     }
+ 
+     #[cfg(target_os = "linux")]
+@@ -299,6 +439,6 @@ mod tests {
+         // pid-reuse case. Liveness keys on the process *identity*, not mere
+         // existence, so this must read Dead.
+         let me = std::process::id();
+-        assert_eq!(probe(Some(me)), Liveness::Dead);
++        assert_eq!(probe(Some(me), None), Liveness::Dead);
+     }
+ }

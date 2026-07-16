@@ -1,0 +1,439 @@
+diff --git a/README.md b/README.md
+index 9ddf8f0..ca25aa1 100644
+--- a/README.md
++++ b/README.md
+@@ -1,10 +1,20 @@
+ # gate
+ 
+-A merge gate for pull requests: one small Go binary (standard library only)
+-that decides pass / park / block for a PR and records *why* as an append-only,
+-hash-chained artifact log. Autonomy is risk-scaled — clean low-risk work
+-auto-lands, clean high-risk work parks for a human, dirty work escalates with
+-the judge's question attached.
++A merge-decision procedure for pull requests: one small Go binary (standard
++library only) that decides pass / park / block for a PR and records *why* as an
++append-only, hash-chained artifact log. Autonomy is risk-scaled — clean
++low-risk work is cleared to merge, clean high-risk work parks for a human,
++dirty work escalates with the judge's question attached.
++
++**What it does and does not force.** `gate` bounds its own sanctioned merge
++verb — no live grant, no `gate`-driven merge — and gives every decision an
++audit trail. It does **not**, by itself, prevent a merge: any identity holding
++a merge-capable `gh` token can `gh pr merge` around it. The gate becomes
++*enforcing* only when the target repo's branch protection requires the `gate`
++status check (and token custody keeps the merge credential off the agents the
++gate governs). See [docs/enforcement.md](docs/enforcement.md) for the honest
++enforcement model — what forces merges through the gate, the named bypass, and
++the operator precondition for going live.
+ 
+ ## Run it
+ 
+@@ -29,8 +39,10 @@ One `gate` invocation is a single pass:
+ 
+ 1. **Capability** — no live grant, no gate. Grants are HMAC-signed artifacts,
+    scoped (repo + action), timed (TTL), and capped (a ceiling risk tier they
+-   may auto-land). Expired, out-of-scope, or tampered grants refuse with a
+-   coded error before any evidence is gathered.
++   may clear). Expired, out-of-scope, or tampered grants refuse with a coded
++   error before any evidence is gathered. This bounds the gate's *own*
++   sanctioned merge path; it does not bound a merge performed directly with a
++   `gh` token (see [docs/enforcement.md](docs/enforcement.md)).
+ 2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, both comment
+    endpoints), each recorded as an artifact.
+ 3. **Verification ladder** — three rungs, each a verdict artifact:
+@@ -42,10 +54,13 @@ One `gate` invocation is a single pass:
+      the bot panel's findings. May pass or escalate, never block.
+ 4. **Reduction** — monotone composition: worst decision wins, max tier wins,
+    min confidence carries, unknown values fail closed.
+-5. **Outcome** — pass within the grant ceiling merges (dry-run prints the
+-   exact command); escalations park with the full question embedded; a later
+-   `judge` (operator or `-auto` frontier model) resolves the escalation from
+-   the recorded artifacts alone — and still cannot exceed the grant ceiling.
++5. **Outcome** — pass within the grant ceiling clears the merge and prints the
++   exact `gh pr merge` command (`-live` execution is not wired yet; the dry run
++   records `would_merge`); escalations park with the full question embedded; a
++   later `judge` (operator or `-auto` frontier model) resolves the escalation
++   from the recorded artifacts alone — and still cannot exceed the grant
++   ceiling. Clearing a merge is a decision plus a printed command, not a
++   forced merge: see [docs/enforcement.md](docs/enforcement.md).
+ 
+ `explain` reconstructs any run's full decision chain from the log; `audit`
+ replays the hash chain and names the first tampered artifact.
+@@ -57,7 +72,7 @@ law — is specified in [docs/DESIGN.md](docs/DESIGN.md).
+ 
+ | code | meaning |
+ |---|---|
+-| 0 | pass (`would_merge` / merged) |
++| 0 | pass (`would_merge`; `-live` execution not yet wired) |
+ | 1 | blocked by a code verifier |
+ | 2 | parked for judgment (escalation or tier over grant ceiling) |
+ | 3 | capability refused (no live grant) |
+diff --git a/cmd/gate/main.go b/cmd/gate/main.go
+index 9a60004..56435d4 100644
+--- a/cmd/gate/main.go
++++ b/cmd/gate/main.go
+@@ -493,29 +493,46 @@ func cmdAudit(args []string) error {
+ 
+ func cmdBacktest(args []string) error {
+ 	fs := flag.NewFlagSet("backtest", flag.ExitOnError)
+-	stateDir, floorBin, keyDir := commonFlags(fs)
++	// backtest ignores -state/-key for writes on purpose (see runBacktest);
++	// only -floor is honoured. They are still parsed so the common flag surface
++	// is uniform across verbs and passing them is not an error.
++	_, floorBin, _ := commonFlags(fs)
+ 	repo := fs.String("repo", "", "owner/repo")
+ 	prs := fs.String("prs", "", "comma-separated PR numbers")
+ 	fs.Parse(args)
+ 	if *repo == "" || *prs == "" {
+ 		return errors.New("backtest: -repo and -prs required")
+ 	}
+-	e, err := newEnv(*stateDir, *floorBin, *keyDir)
++	return runBacktest(*repo, *prs, *floorBin)
++}
++
++// runBacktest replays the gate over historical PRs as a pure dry run. It runs
++// against a throwaway, ephemeral state dir — never the operator's durable
++// -state — so a read-only preview leaves nothing spendable behind: the grant
++// it must mint to satisfy the capability check, and every evidence/verdict/
++// action artifact the passes produce, all land in a temp dir that is deleted on
++// return. backtest is -live-free (it only ever yields would_merge/blocked/
++// parked), so an ephemeral grant is all a dry run needs.
++func runBacktest(repo, prs, floorBin string) error {
++	e, cleanup, err := newEphemeralEnv(floorBin)
+ 	if err != nil {
+ 		return err
+ 	}
+-	grantArt, err := capability.Mint(e.st, e.keyPath, *repo, "merge", "T2", "backtest", time.Hour, time.Now)
++	defer cleanup()
++	// The grant is test-only: it exists only in the ephemeral store and is
++	// erased with it, so no spendable grant is ever written to durable state.
++	grantArt, err := capability.Mint(e.st, e.keyPath, repo, "merge", "T2", "backtest-ephemeral", time.Hour, time.Now)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+ 	fmt.Printf("%-6s %-10s %-6s %-22s %s\n", "PR", "decision", "tier", "outcome", "run")
+-	for _, s := range strings.Split(*prs, ",") {
++	for _, s := range strings.Split(prs, ",") {
+ 		n, err := strconv.Atoi(strings.TrimSpace(s))
+ 		if err != nil {
+ 			return fmt.Errorf("backtest: bad pr %q", s)
+ 		}
+-		res, _, err := runGate(e, *repo, n, grantArt.ID, false)
++		res, _, err := runGate(e, repo, n, grantArt.ID, false)
+ 		if err != nil {
+ 			fmt.Printf("#%-5d error: %v\n", n, err)
+ 			continue
+@@ -525,6 +542,27 @@ func cmdBacktest(args []string) error {
+ 	return nil
+ }
+ 
++// newEphemeralEnv builds an env backed by throwaway temp dirs for state and
++// keys, plus a cleanup that removes them. It is the test-only capability path
++// for dry runs: nothing it writes — grant, evidence, verdicts, actions —
++// touches the durable state log. The key dir is a sibling of the state dir (not
++// nested under it), so newEnv's key-dir-outside-state invariant holds.
++func newEphemeralEnv(floorBin string) (env, func(), error) {
++	root, err := os.MkdirTemp("", "gate-backtest-*")
++	if err != nil {
++		return env{}, func() {}, fmt.Errorf("backtest: temp dir: %w", err)
++	}
++	cleanup := func() { os.RemoveAll(root) }
++	stateDir := filepath.Join(root, "state")
++	keyDir := filepath.Join(root, "keys")
++	e, err := newEnv(stateDir, floorBin, keyDir)
++	if err != nil {
++		cleanup()
++		return env{}, func() {}, err
++	}
++	return e, cleanup, nil
++}
++
+ // cmdStress appends n artifacts as fast as possible — the cross-process half
+ // of the multi-writer safety check. Run several of these concurrently against
+ // one -state dir, then `gate audit` must still report an intact chain.
+diff --git a/cmd/gate/main_test.go b/cmd/gate/main_test.go
+index e20d3cb..4e4089f 100644
+--- a/cmd/gate/main_test.go
++++ b/cmd/gate/main_test.go
+@@ -1,8 +1,13 @@
+ package main
+ 
+ import (
++	"os"
+ 	"path/filepath"
+ 	"testing"
++	"time"
++
++	"github.com/itsHabib/gate/internal/capability"
++	"github.com/itsHabib/gate/internal/state"
+ )
+ 
+ // TestStateDirTagDistinguishesDirs guards the anchor-collision fix: two
+@@ -30,3 +35,82 @@ func TestStateDirTagStableAcrossSpellings(t *testing.T) {
+ 		t.Fatalf("same dir via different spellings forked the anchor: %q vs %q", rel, abs)
+ 	}
+ }
++
++// TestBacktestLeavesNoSpendableGrantInDurableState is the acceptance test for
++// the capability-backstop fix: a read-only backtest must not write a spendable
++// grant into the operator's durable state log. backtest runs its dry-run passes
++// against a throwaway ephemeral store, so nothing durable is touched — in
++// particular the default relative `state` dir is never created. The gate passes
++// themselves fail fast (gh cannot reach a real PR under test), which is fine:
++// the mint happens before the passes, so if backtest wrote its grant durably it
++// would show up regardless of the passes erroring.
++func TestBacktestLeavesNoSpendableGrantInDurableState(t *testing.T) {
++	cwd, err := os.Getwd()
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = os.Chdir(cwd) })
++	work := t.TempDir()
++	if err := os.Chdir(work); err != nil {
++		t.Fatal(err)
++	}
++
++	// PATH stripped so the floor and gh binaries are absent: the passes error
++	// out quickly instead of hanging on real network reads.
++	t.Setenv("PATH", "")
++	if err := runBacktest("owner/repo", "1,2", filepath.Join(work, "no-such-floor")); err != nil {
++		t.Fatalf("runBacktest returned a hard error: %v", err)
++	}
++
++	// The default durable state dir is relative to the working dir. It must not
++	// exist: a backtest that minted into durable state (the old behaviour, or a
++	// regression back to it) would have created it.
++	if _, err := os.Stat(filepath.Join(work, "state")); !os.IsNotExist(err) {
++		t.Fatalf("backtest created a durable state dir %q (stat err: %v)", filepath.Join(work, "state"), err)
++	}
++	if entries, err := os.ReadDir(work); err != nil {
++		t.Fatal(err)
++	} else if len(entries) != 0 {
++		t.Fatalf("backtest wrote durable files into the working dir: %v", entries)
++	}
++}
++
++// TestNewEphemeralEnvIsThrowaway pins the ephemeral capability path: the store
++// backtest mints into is a real, spendable store while it lives (the grant it
++// mints validates), but it is a throwaway — separate from any durable state and
++// fully removed by cleanup, so no spendable grant survives the run.
++func TestNewEphemeralEnvIsThrowaway(t *testing.T) {
++	e, cleanup, err := newEphemeralEnv("triage-floor")
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	now := func() time.Time { return time.Unix(1000, 0) }
++	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", "backtest-ephemeral", time.Hour, now)
++	if err != nil {
++		cleanup()
++		t.Fatal(err)
++	}
++	// While the ephemeral store lives the grant is a real, spendable T2 grant —
++	// backtest needs it to pass the capability check on its dry-run passes.
++	grants, err := e.st.List(func(a state.Artifact) bool { return a.Kind == state.KindGrant })
++	if err != nil {
++		cleanup()
++		t.Fatal(err)
++	}
++	if len(grants) != 1 || grants[0].ID != grantArt.ID {
++		cleanup()
++		t.Fatalf("expected the ephemeral grant in the throwaway store, got %d artifacts", len(grants))
++	}
++
++	cleanup()
++
++	// After cleanup the entire ephemeral tree is gone: no state log, no grant,
++	// nothing spendable persisted anywhere.
++	if _, err := os.Stat(e.stateDir); !os.IsNotExist(err) {
++		t.Fatalf("cleanup left the ephemeral state dir behind: %q (stat err: %v)", e.stateDir, err)
++	}
++	if _, err := os.Stat(e.keyPath); !os.IsNotExist(err) {
++		t.Fatalf("cleanup left the ephemeral key behind: %q (stat err: %v)", e.keyPath, err)
++	}
++}
+diff --git a/docs/FOLLOWUPS.md b/docs/FOLLOWUPS.md
+index de2bc48..2afa97e 100644
+--- a/docs/FOLLOWUPS.md
++++ b/docs/FOLLOWUPS.md
+@@ -19,16 +19,25 @@ wiring `gate` into the merge tail.
+   **Done when:** tests pin `Reduce(nil)` → not-pass and empty-reviews → escalate, and the invariant
+   lives in the reducer, not the caller.
+ 
+-- [ ] **Write down and enforce the capability backstop.** *(serious)*
+-  Minting is unprivileged — anyone who can run `gate` can run `gate grant`, and `backtest`
+-  self-mints a T2 grant — while every agent the gate governs already holds a `gh` token that can
+-  `gh pr merge` around it. The capability plane is advisory until something *forces* merges through
+-  the gate.
+-  **Fix:** document the enforcement model — branch protection requiring `gate` as a required check;
+-  who/what may mint and where the mint key lives; token custody so the merge-capable identity isn't
+-  the one the gate is meant to bound. Decide whether `backtest` should mint at all.
+-  **Done when:** `docs/` states the enforcement model, and the README stops implying the gate bounds
+-  anything it can't actually force.
++- [x] **Write down and enforce the capability backstop.** *(serious)*
++  Minting was unprivileged — anyone who can run `gate` can run `gate grant`, and `backtest`
++  self-minted a spendable T2 grant into durable state — while every agent the gate governs already
++  holds a `gh` token that can `gh pr merge` around it. The capability plane is advisory until
++  something *forces* merges through the gate.
++  **Landed:** the enforcement model is written in `docs/enforcement.md`, stated without overclaim —
++  branch protection requiring the `gate` check is the forcing function (until then the plane is
++  discipline plus an audit trail, not prevention); token custody names the intended
++  merge-capable-identity-vs-bounded-agent split; mint authority (unprivileged; `MintedBy` is an
++  unauthenticated free string) and the `grant.key` custody decision (cross-referenced to the tamper
++  task) are recorded; the `gh pr merge` bypass is named rather than implied-closed; and the operator
++  branch-protection action is written down as the `-live` precondition. `backtest` no longer mints a
++  spendable grant — it runs against a throwaway ephemeral store, so no grant reaches the durable log
++  (pinned by tests). The README no longer implies the gate bounds/forces merges it can't force and
++  links to `docs/enforcement.md`.
++  **Still open (documented as future, not built here):** token custody is not yet *real* on the
++  single box (every local agent shares one `gh` credential) — closing it is a precondition for
++  `-live`; and real mint authentication (so only a designated identity can mint a spendable grant)
++  is future work.
+ 
+ - [x] **State the tamper threat model honestly, then decide what to harden.** *(serious)*
+   `Audit` caught naive body edits, broken links, and reordering — but **not** tail truncation or
+diff --git a/docs/enforcement.md b/docs/enforcement.md
+new file mode 100644
+index 0000000..842a67c
+--- /dev/null
++++ b/docs/enforcement.md
+@@ -0,0 +1,138 @@
++# gate — enforcement model
++
++Status: v0
++Date: 2026-07-06
++
++This document states, plainly, **what actually forces a merge through the
++gate** and what does not. It is deliberately kept separate from
++`docs/DESIGN.md` (whose *Tamper model* section owns the state-log integrity
++boundary): this file owns the merge-enforcement boundary.
++
++The one-line summary: **today the capability plane is discipline plus an audit
++trail, not prevention.** The gate becomes *enforcing* only once the target
++repository's branch protection requires the `gate` status check. Everything
++below expands on that sentence and names the gaps honestly, because the
++alternative — implying the gate bounds what it cannot — is the exact failure
++this tool exists to correct.
++
++## What forces merges through the gate: branch protection
++
++The gate is a decision procedure. It reads evidence, runs the ladder, and
++records an outcome. Nothing in the gate reaches out and *prevents* a merge;
++by itself it produces a verdict and an artifact, not a locked door.
++
++The forcing function is **GitHub branch protection on the target
++repository**. A merge is bound by the gate only when the protected branch:
++
++1. **requires the `gate` status check** to be green before a PR can merge, and
++2. **disallows administrator bypass** of required checks, and
++3. **disallows direct pushes** to the protected branch (so the branch can only
++   advance through a checked PR merge).
++
++Until all three are configured, the gate bounds nothing. An agent — or a
++person — with merge rights can merge a PR the gate never saw, or one the gate
++blocked, and the only trace is that no corresponding `action` artifact exists
++in the log. That is an *audit trail after the fact*, not prevention. Name it
++for what it is: **discipline plus an audit trail** until branch protection is
++turned on.
++
++This is the same "absence reads as green" hazard the reducer work fights
++inside the gate, applied to the gate's own perimeter: an unprotected repo is a
++repo where skipping the gate is silent.
++
++## Token custody: the merge-capable identity must not be the bounded one
++
++Branch protection decides *which* checks must pass. Token custody decides *who
++holds the credential that can actually land the merge*. Both must hold for the
++gate to bound anything.
++
++**The intended model:**
++
++- The **gate — or a CI identity wired to it** — holds the only token permitted
++  to land a merge on the protected branch. When the gate reaches a `would_merge`
++  outcome within the grant ceiling, that identity (and only that identity)
++  performs the merge.
++- The **agents the gate governs** hold tokens scoped so they can *push
++  branches and open PRs* but **cannot merge** into the protected branch. Their
++  path to a merge runs only through the gate's decision.
++
++The separation is the whole point: the identity a merge flows through must not
++be the identity the gate is meant to bound. If the bounded agent also holds a
++merge-capable token, the gate is advisory to that agent by construction.
++
++**On the current single-box setup this separation is not real.** Every local
++agent shares one `gh` credential, and that credential can `gh pr merge`. There
++is no distinct, merge-only CI identity yet; there is no scoping that stops a
++governed agent from merging directly. Closing this — provisioning a merge-only
++identity for the gate and demoting every governed agent's token to
++push-and-open-PR-only — is a **precondition for `-live`**. Wiring live merge
++execution before token custody is real would hand the gate a merge capability
++that the agents it governs also hold, which defeats the bound.
++
++## Mint authority and where the mint key lives
++
++A grant is what authorizes an *effectful* verb (a merge, or a judgment that
++resolves an escalation). Minting a grant is therefore the policy surface that
++says "this identity may cause merges up to tier T within this window."
++
++**Who/what may mint today: anyone who can run `gate`.** `gate grant` mints a
++signed grant; there is no authentication gate in front of it. The
++`MintedBy` field on a grant is a **free-form string with no authentication** —
++`gate grant` records `"operator"`, `gate backtest` used to record
++`"backtest"`, and nothing verifies either. It is provenance-as-claimed, not
++provenance-as-proven. Treat `MintedBy` as a label, never as an authorization
++fact. Adding real mint authentication (so that only a designated identity can
++mint a spendable grant) is future work, not built here.
++
++**Where the mint key lives.** Grants are HMAC-signed with `grant.key`. The
++custody decision — that `grant.key` (and the anchor key) live **outside the
++state directory**, so that an actor who can write `log.jsonl` cannot thereby
++forge grants — is the sibling tamper task's decision. This document does not
++re-specify the path; see `docs/DESIGN.md` *Tamper model* / *Trust boundary*
++and `docs/FOLLOWUPS.md` for the key-custody decision and its default location.
++The relevant fact for *enforcement* is the trust boundary it draws: signing
++capability is not co-located with log-write capability. It is **not**
++cryptographic non-repudiation — an actor who can read the key directory can
++still forge grants (and the anchor).
++
++## The bypass, named
++
++**An agent with `gh pr merge` rights bypasses the gate entirely.**
++
++The gate's own sanctioned merge path is a `gh pr merge ... --squash
++--delete-branch --match-head-commit <sha>` command (dry-run prints it; `-live`
++today records `merge_not_implemented`). But that same `gh pr merge` verb is
++available to anyone holding a merge-capable `gh` token, run directly against
++the PR, with no grant, no verdict, and no artifact. On the current single box,
++where every agent shares one merge-capable `gh` credential, this bypass is
++open by default.
++
++This is stated here rather than implied-closed on purpose. The bypass is
++closed only by the two mechanisms above acting together: **branch protection**
++(so a direct merge is rejected unless the `gate` check is green) and **token
++custody** (so the bounded agents do not hold a merge-capable token in the
++first place). Neither is configured yet.
++
++## Operator action — the `-live` precondition
++
++This is a repository-settings action the **operator** performs; it is not code
++in this repository and is not performed by this change.
++
++> **Enable branch protection on the target repository(ies) requiring the
++> `gate` status check — with admin bypass disallowed and direct pushes to the
++> protected branch disallowed — before any `-live` wiring.**
++
++This is the gating precondition recorded for the record: `-live` merge
++execution must not be wired until (a) branch protection above is enabled on
++the target repo(s), and (b) token custody is real (a merge-only identity for
++the gate; governed agents demoted to push-and-open-PR-only). Until both hold,
++the gate is discipline plus an audit trail, and this document is the honest
++statement of that scope.
++
++## See also
++
++- `docs/DESIGN.md` — the artifact contract, the verdict schema, the ladder
++  law, and the *Tamper model* (state-log integrity, key custody, trust
++  boundary).
++- `docs/FOLLOWUPS.md` — "Write down and enforce the capability backstop" and
++  the sibling hardening items.

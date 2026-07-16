@@ -1,0 +1,2220 @@
+diff --git a/packages/cli/src/service.ts b/packages/cli/src/service.ts
+index e63d0ef..eb6a0f7 100644
+--- a/packages/cli/src/service.ts
++++ b/packages/cli/src/service.ts
+@@ -56,7 +56,12 @@ export function createCliDriverService(
+       dbPath: opts.dbPath,
+       ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
+     });
+-    cached = createDriverService({ gh: ghPort ?? createExecGhPort(), ship, store });
++    cached = createDriverService({
++      gh: ghPort ?? createExecGhPort(),
++      ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
++      ship,
++      store,
++    });
+     return cached;
+   };
+ }
+diff --git a/packages/driver/package.json b/packages/driver/package.json
+index 972830c..43b7816 100644
+--- a/packages/driver/package.json
++++ b/packages/driver/package.json
+@@ -20,6 +20,7 @@
+   },
+   "dependencies": {
+     "@ship/core": "workspace:*",
++    "@ship/logger": "workspace:*",
+     "@ship/receipt": "workspace:*",
+     "@ship/store": "workspace:*",
+     "@ship/workflow": "workspace:*",
+diff --git a/packages/driver/src/engine.test.ts b/packages/driver/src/engine.test.ts
+index b8f18ab..af8e55c 100644
+--- a/packages/driver/src/engine.test.ts
++++ b/packages/driver/src/engine.test.ts
+@@ -150,6 +150,103 @@ batches:
+     store.close();
+   });
+ 
++  test("awaiting_judgment writes stream-parked escalation before notify", async () => {
++    const docA = localDoc(repoRoot, "feat-a", "docs/tasks/a.md");
++    const notifyCalls: string[] = [];
++    const exec = async (_cmd: string, payload: string) => {
++      notifyCalls.push(payload);
++      await Promise.resolve();
++    };
++    const { port } = createFakeShipPort([
++      {
++        docPath: docA,
++        failureCategory: "timeout-near-cap",
++        repo: "ship",
++        terminalStatus: "failed",
++        workflowRunId: "wf_fail",
++      },
++    ]);
++
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({
++      notifyExec: exec,
++      ship: port,
++      store,
++    });
++    const imported = driver.importManifest(manifestPath);
++
++    const first = await driver.run(
++      { driverRunId: imported.run.id },
++      {
++        batch: 1,
++        escalation: { tiers: { "stream-parked": "page" } },
++        maxWaitMs: 0,
++        notify: { command: "test-notify" },
++      },
++    );
++    expect(first.status).toBe("awaiting_judgment");
++
++    const rows = store.listEscalations({
++      class: "stream-parked",
++      driverRunId: imported.run.id,
++      unresolvedOnly: true,
++    });
++    expect(rows).toHaveLength(1);
++    expect(rows[0]?.notifiedAt).toBeDefined();
++    expect(notifyCalls.length).toBeGreaterThanOrEqual(1);
++    const payload = JSON.parse(notifyCalls[0]!) as { class: string; v: number };
++    expect(payload.class).toBe("stream-parked");
++    expect(payload.v).toBe(1);
++
++    const triage = first.awaiting[0];
++    if (triage?.kind !== "failure-triage") throw new Error("expected failure-triage");
++    driver.decide(imported.run.id, triage.streamId, { kind: "skip", reason: "won't fix" });
++
++    const resolved = store.listEscalations({
++      class: "stream-parked",
++      driverRunId: imported.run.id,
++      unresolvedOnly: true,
++    });
++    expect(resolved).toHaveLength(0);
++    store.close();
++  });
++
++  test("queue-tier stream-parked never spawns notify", async () => {
++    const docA = localDoc(repoRoot, "feat-a", "docs/tasks/a.md");
++    let notifyCalls = 0;
++    const exec = async () => {
++      notifyCalls += 1;
++      await Promise.resolve();
++    };
++    const { port } = createFakeShipPort([
++      {
++        docPath: docA,
++        failureCategory: "timeout-near-cap",
++        repo: "ship",
++        terminalStatus: "failed",
++        workflowRunId: "wf_fail",
++      },
++    ]);
++
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({
++      notifyExec: exec,
++      ship: port,
++      store,
++    });
++    const imported = driver.importManifest(manifestPath);
++
++    await driver.run(
++      { driverRunId: imported.run.id },
++      { batch: 1, maxWaitMs: 0, notify: { command: "test-notify" } },
++    );
++    expect(notifyCalls).toBe(0);
++    const rows = store.listEscalations({ class: "stream-parked", driverRunId: imported.run.id });
++    expect(rows).toHaveLength(1);
++    expect(rows[0]?.notifiedAt).toBeUndefined();
++    store.close();
++  });
++
+   test("two-run plan determinism", async () => {
+     const docA = localDoc(repoRoot, "feat-a", "docs/tasks/a.md");
+     const scripts = [{ docPath: docA, repo: "ship", workflowRunId: "wf_det" }];
+diff --git a/packages/driver/src/engine.ts b/packages/driver/src/engine.ts
+index 962e76f..56a852d 100644
+--- a/packages/driver/src/engine.ts
++++ b/packages/driver/src/engine.ts
+@@ -3,6 +3,7 @@
+  */
+ 
+ import type { GetWorkflowRunOutput, ShipInput, ShipStartOutput } from "@ship/core";
++import type { Logger } from "@ship/logger";
+ import type { Store } from "@ship/store";
+ import type { DriverBatch, DriverRun, DriverStream, StreamAttempt } from "@ship/store";
+ import type { AgentProvider, FailureCategory } from "@ship/workflow";
+@@ -15,9 +16,16 @@ import { dirname, join, resolve } from "node:path";
+ import type { DriverGhPort } from "./gh-port.js";
+ import type { DispatchAmbiguity } from "./judgment.js";
+ import type { DriverShipPort } from "./ship-port.js";
+-import type { DriverTickResult, RunOpts, TierDispatchResult } from "./types.js";
++import type {
++  DriverTickResult,
++  EscalationConfig,
++  NotifyConfig,
++  RunOpts,
++  TierDispatchResult,
++} from "./types.js";
+ 
+ import { DriverRunNotFoundEngineError, PreconditionError, TickLiveError } from "./errors.js";
++import { retryPendingEscalationNotifications, writeAndDeliverEscalations } from "./escalation.js";
+ import {
+   allStreams,
+   batchHasPendingDispatchable,
+@@ -34,6 +42,7 @@ import {
+   recoverDispatchingStreams,
+   rollBatchStatus,
+ } from "./judgment.js";
++import { createNotifyPort, type NotifyPort } from "./notify.js";
+ import { mapTierToDispatch } from "./tier-map.js";
+ 
+ const DEFAULT_DISPATCH_PROVIDER: AgentProvider = "cursor";
+@@ -65,6 +74,9 @@ export interface EngineDeps {
+   store: Store;
+   ship: DriverShipPort;
+   gh?: DriverGhPort;
++  notify?: NotifyPort;
++  escalation?: EscalationConfig;
++  logger?: Logger;
+   clock?: () => number;
+   monotonicClock?: () => number;
+   rng?: () => number;
+@@ -79,6 +91,8 @@ export interface ResolvedRunOpts {
+   maxParallelLocal: number;
+   maxParallelCloud: number;
+   force: boolean;
++  notify?: NotifyConfig | undefined;
++  escalation?: EscalationConfig | undefined;
+ }
+ 
+ interface TickContext {
+@@ -89,6 +103,9 @@ interface TickContext {
+   ship: DriverShipPort;
+   gh?: DriverGhPort;
+   store: Store;
++  notify?: NotifyPort | undefined;
++  escalation?: EscalationConfig | undefined;
++  logger?: Logger | undefined;
+ }
+ 
+ interface TickLiveness {
+@@ -127,6 +144,7 @@ export function resolveRunOpts(opts?: RunOpts): ResolvedRunOpts {
+   const parallel = defaultParallelLimits(opts);
+   const maxWaitMs = opts?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+   return {
++    ...optionalNotifyFields(opts),
+     batch: opts?.batch,
+     force: opts?.force === true,
+     maxParallelCloud: parallel.cloud,
+@@ -137,6 +155,13 @@ export function resolveRunOpts(opts?: RunOpts): ResolvedRunOpts {
+   };
+ }
+ 
++function optionalNotifyFields(opts?: RunOpts): Pick<ResolvedRunOpts, "notify" | "escalation"> {
++  const fields: Pick<ResolvedRunOpts, "notify" | "escalation"> = {};
++  if (opts?.notify !== undefined) fields.notify = opts.notify;
++  if (opts?.escalation !== undefined) fields.escalation = opts.escalation;
++  return fields;
++}
++
+ /** Absolute monotonic ceiling — catches trickle events that reset inactivity forever. */
+ export function resolveRunawayBackstopMs(maxWaitMs: number): number {
+   return Math.max(maxWaitMs * RUNAWAY_BACKSTOP_MULTIPLIER, DEFAULT_RUNAWAY_BACKSTOP_MS);
+@@ -193,7 +218,10 @@ export async function runTick(
+ function buildTickContext(deps: EngineDeps): TickContext {
+   const ctx: TickContext = {
+     clock: deps.clock ?? Date.now,
++    escalation: deps.escalation,
++    logger: deps.logger,
+     monotonicClock: deps.monotonicClock ?? performance.now.bind(performance),
++    notify: deps.notify,
+     rng: deps.rng ?? Math.random,
+     ship: deps.ship,
+     sleep: deps.sleep ?? defaultSleep,
+@@ -205,6 +233,33 @@ function buildTickContext(deps: EngineDeps): TickContext {
+   return ctx;
+ }
+ 
++function buildEscalationDeps(
++  ctx: TickContext,
++  opts: ResolvedRunOpts,
++): {
++  store: Store;
++  notify?: NotifyPort | undefined;
++  escalation?: EscalationConfig | undefined;
++  logger?: Logger | undefined;
++  clock: () => string;
++} {
++  const notify = ctx.notify ?? createNotifyPort(opts.notify);
++  const deps: {
++    store: Store;
++    notify?: NotifyPort | undefined;
++    escalation?: EscalationConfig | undefined;
++    logger?: Logger | undefined;
++    clock: () => string;
++  } = {
++    clock: () => new Date(ctx.clock()).toISOString(),
++    escalation: opts.escalation ?? ctx.escalation,
++    logger: ctx.logger,
++    store: ctx.store,
++  };
++  if (notify !== undefined) deps.notify = notify;
++  return deps;
++}
++
+ async function executeTick(
+   driverRunId: string,
+   initialRun: DriverRun,
+@@ -216,6 +271,8 @@ async function executeTick(
+     return buildResult(initialRun, ambiguities, normalizeStickyStatus(initialRun.status));
+   }
+ 
++  await retryPendingEscalationNotifications(buildEscalationDeps(ctx, opts));
++
+   const running = ensureRunning(ctx.store, driverRunId, initialRun);
+   const recovered = await recoverDispatchingStreams(ctx.store, ctx.ship, running, ambiguities);
+   validatePreFlight(recovered, opts);
+@@ -252,13 +309,14 @@ async function runDispatchPollLoop(state: PollLoopState): Promise<DriverTickResu
+ 
+     const exit = evaluateExit(current, state.ambiguities);
+     if (exit !== undefined) {
+-      return finalizeExit(
+-        state.driverRunId,
+-        current,
+-        state.ambiguities,
+-        exit.status,
+-        state.ctx.store,
+-      );
++      return finalizeExit({
++        ambiguities: state.ambiguities,
++        ctx: state.ctx,
++        driverRunId: state.driverRunId,
++        opts: state.opts,
++        run: current,
++        status: exit.status,
++      });
+     }
+     if (shouldGiveUpTick(state.ctx.monotonicClock(), state.liveness, state.opts)) {
+       return buildResult(current, state.ambiguities, "running");
+@@ -269,22 +327,27 @@ async function runDispatchPollLoop(state: PollLoopState): Promise<DriverTickResu
+   }
+ }
+ 
+-function finalizeExit(
+-  driverRunId: string,
+-  run: DriverRun,
+-  ambiguities: DispatchAmbiguity[],
+-  status: DriverTickResult["status"],
+-  store: Store,
+-): DriverTickResult {
++interface FinalizeExitInput {
++  ambiguities: DispatchAmbiguity[];
++  ctx: TickContext;
++  driverRunId: string;
++  opts: ResolvedRunOpts;
++  run: DriverRun;
++  status: DriverTickResult["status"];
++}
++
++async function finalizeExit(input: FinalizeExitInput): Promise<DriverTickResult> {
++  const { ambiguities, ctx, driverRunId, opts, run, status } = input;
+   if (status === "awaiting_judgment") {
+-    store.updateDriverRunStatus(driverRunId, "awaiting_judgment");
++    ctx.store.updateDriverRunStatus(driverRunId, "awaiting_judgment");
++    await writeAndDeliverEscalations(buildEscalationDeps(ctx, opts), run, ambiguities);
+   }
+   if (status === "done") {
+-    const current = store.getDriverRun(driverRunId) ?? run;
+-    rollBatchStatus(store, current);
+-    store.updateDriverRunStatus(driverRunId, "done");
++    const current = ctx.store.getDriverRun(driverRunId) ?? run;
++    rollBatchStatus(ctx.store, current);
++    ctx.store.updateDriverRunStatus(driverRunId, "done");
+   }
+-  const refreshed = store.getDriverRun(driverRunId) ?? run;
++  const refreshed = ctx.store.getDriverRun(driverRunId) ?? run;
+   return buildResult(refreshed, ambiguities, status);
+ }
+ 
+diff --git a/packages/driver/src/escalation.ts b/packages/driver/src/escalation.ts
+new file mode 100644
+index 0000000..e848c83
+--- /dev/null
++++ b/packages/driver/src/escalation.ts
+@@ -0,0 +1,324 @@
++/**
++ * Escalation row writes, tier registry, and notify delivery.
++ */
++
++import type { Logger } from "@ship/logger";
++import type { Escalation, Store } from "@ship/store";
++import type { DriverRun, DriverStream } from "@ship/store";
++
++import {
++  EscalationNotFoundError,
++  EscalationOpenRowExistsError,
++  newEscalationId,
++} from "@ship/store";
++
++import type { DispatchAmbiguity } from "./judgment.js";
++import type { NotifyPort } from "./notify.js";
++import type {
++  EscalationClass,
++  EscalationConfig,
++  EscalationPayload,
++  EscalationTier,
++  JudgmentRequest,
++} from "./types.js";
++
++import { buildDispatchAmbiguityRequests, buildFailureTriageRequests } from "./judgment.js";
++
++/** Default tier per escalation class. */
++export const DEFAULT_ESCALATION_TIERS: Record<EscalationClass, EscalationTier> = {
++  "auth-rejection": "page",
++  "ci-infra": "page",
++  "cycle-exhausted": "page",
++  "grant-mutated": "page",
++  "merge-blocked-no-verdict": "queue",
++  "merge-ready-awaiting-authority": "queue",
++  "pathological-batch": "page",
++  "product-direction": "page",
++  "sensitive-path": "page",
++  "spend-ceiling": "page",
++  "stream-parked": "queue",
++  "triage-uncertain": "page",
++};
++
++export function resolveEscalationTier(
++  escalationClass: EscalationClass,
++  config?: EscalationConfig,
++): EscalationTier {
++  const override = config?.tiers?.[escalationClass];
++  if (override !== undefined) return override;
++  return DEFAULT_ESCALATION_TIERS[escalationClass];
++}
++
++export interface EscalationDeps {
++  store: Store;
++  notify?: NotifyPort | undefined;
++  escalation?: EscalationConfig | undefined;
++  clock?: () => string;
++  logger?: Logger | undefined;
++}
++
++function logNotifyFailure(deps: EscalationDeps, escalationId: string, detail: string): void {
++  if (deps.logger === undefined) return;
++  deps.logger.warn({ detail, escalationId }, "escalation notify failed");
++}
++
++function nowIso(deps: EscalationDeps): string {
++  return deps.clock?.() ?? new Date().toISOString();
++}
++
++function parsePayloadJson(payloadJson: string): EscalationPayload {
++  return JSON.parse(payloadJson) as EscalationPayload;
++}
++
++function insertEscalationRow(
++  deps: EscalationDeps,
++  input: {
++    class: EscalationClass;
++    driverRunId?: string;
++    streamId?: string;
++    repo?: string;
++    payload: EscalationPayload;
++    preResolved?: { resolution: string };
++  },
++): string {
++  const payloadJson = JSON.stringify(input.payload);
++  try {
++    const id = newEscalationId();
++    const insertInput: Parameters<Store["insertEscalation"]>[0] = {
++      class: input.class,
++      id,
++      payloadJson,
++    };
++    if (input.driverRunId !== undefined) insertInput.driverRunId = input.driverRunId;
++    if (input.streamId !== undefined) insertInput.streamId = input.streamId;
++    if (input.repo !== undefined) insertInput.repo = input.repo;
++    if (input.preResolved !== undefined) insertInput.preResolved = input.preResolved;
++    deps.store.insertEscalation(insertInput);
++    return id;
++  } catch (err: unknown) {
++    if (err instanceof EscalationOpenRowExistsError) {
++      return err.escalationId;
++    }
++    throw err;
++  }
++}
++
++function buildStreamParkedPayload(
++  run: DriverRun,
++  streamId: string,
++  request: JudgmentRequest,
++  createdAt: string,
++): EscalationPayload {
++  const base: EscalationPayload = {
++    class: "stream-parked",
++    createdAt,
++    driverRunId: run.id,
++    question: judgmentQuestion(request),
++    repo: run.repo,
++    streamId,
++    v: 1,
++  };
++  if (request.kind === "merge-confirmation" || request.kind === "review-adjudication") {
++    base.pr = request.prNumber;
++  }
++  if (request.kind === "failure-triage" && request.errorMessage !== undefined) {
++    base.question = `${base.question}: ${request.errorMessage}`;
++    base.evidence = { links: [] };
++    if (request.hint !== undefined) base.suggestion = request.hint;
++  }
++  return base;
++}
++
++function judgmentQuestion(request: JudgmentRequest): string {
++  if (request.kind === "failure-triage") {
++    return `Stream failed (${request.failureCategory}); decide retry, skip, or abort`;
++  }
++  if (request.kind === "dispatch-ambiguity") {
++    return `Multiple workflow runs match dispatch recovery; decide adopt or retry`;
++  }
++  if (request.kind === "merge-confirmation") {
++    return `Merge confirmation required for PR #${String(request.prNumber)}`;
++  }
++  return `Review adjudication required for PR #${String(request.prNumber)}`;
++}
++
++/** Write queue-tier stream-parked rows for every parked stream on awaiting_judgment. */
++export function writeStreamParkedEscalations(
++  deps: EscalationDeps,
++  run: DriverRun,
++  ambiguities: DispatchAmbiguity[],
++): string[] {
++  const createdAt = nowIso(deps);
++  const requests = [
++    ...buildFailureTriageRequests(run),
++    ...buildDispatchAmbiguityRequests(run, ambiguities),
++  ];
++  const ids: string[] = [];
++  for (const request of requests) {
++    const payload = buildStreamParkedPayload(run, request.streamId, request, createdAt);
++    const id = insertEscalationRow(deps, {
++      class: "stream-parked",
++      driverRunId: run.id,
++      payload,
++      repo: run.repo,
++      streamId: request.streamId,
++    });
++    ids.push(id);
++  }
++  return ids;
++}
++
++/** Page-tier cycle exhaustion row (writer for review loop). */
++export function writeCycleExhaustedEscalation(
++  deps: EscalationDeps,
++  run: DriverRun,
++  stream: DriverStream,
++  question: string,
++  suggestion?: string,
++): string {
++  const createdAt = nowIso(deps);
++  const payload: EscalationPayload = {
++    class: "cycle-exhausted",
++    createdAt,
++    driverRunId: run.id,
++    question,
++    repo: run.repo,
++    streamId: stream.id,
++    v: 1,
++  };
++  if (stream.prNumber !== undefined) payload.pr = stream.prNumber;
++  if (suggestion !== undefined) payload.suggestion = suggestion;
++  return insertEscalationRow(deps, {
++    class: "cycle-exhausted",
++    driverRunId: run.id,
++    payload,
++    repo: run.repo,
++    streamId: stream.id,
++  });
++}
++
++/** Run-scoped page-tier row for terminal anomaly / pathological batch. */
++export function writePathologicalBatchEscalation(
++  deps: EscalationDeps,
++  run: DriverRun,
++  question: string,
++  suggestion?: string,
++): string {
++  const createdAt = nowIso(deps);
++  const payload: EscalationPayload = {
++    class: "pathological-batch",
++    createdAt,
++    driverRunId: run.id,
++    question,
++    repo: run.repo,
++    v: 1,
++  };
++  if (suggestion !== undefined) payload.suggestion = suggestion;
++  return insertEscalationRow(deps, {
++    class: "pathological-batch",
++    driverRunId: run.id,
++    payload,
++    repo: run.repo,
++  });
++}
++
++/** Resolve the open stream-parked row after `driver decide`. */
++export function resolveStreamParkedEscalation(
++  store: Store,
++  driverRunId: string,
++  streamId: string,
++  resolution: string,
++): void {
++  try {
++    store.resolveOpenEscalation({ class: "stream-parked", driverRunId, streamId }, resolution);
++  } catch (err: unknown) {
++    if (err instanceof EscalationNotFoundError) return;
++    throw err;
++  }
++}
++
++/** Resolve every open stream-parked row for a run (e.g. run-level abort). */
++export function resolveAllStreamParkedEscalations(
++  store: Store,
++  driverRunId: string,
++  resolution: string,
++): void {
++  const rows = store.listEscalations({
++    class: "stream-parked",
++    driverRunId,
++    unresolvedOnly: true,
++  });
++  for (const row of rows) {
++    if (row.streamId === undefined) continue;
++    resolveStreamParkedEscalation(store, driverRunId, row.streamId, resolution);
++  }
++}
++
++/** Resolve every open escalation row for a run regardless of class (e.g. cancel). */
++export function resolveAllRunEscalations(
++  store: Store,
++  driverRunId: string,
++  resolution: string,
++): void {
++  const rows = store.listEscalations({ driverRunId, unresolvedOnly: true });
++  for (const row of rows) {
++    store.resolveEscalation(row.id, resolution);
++  }
++}
++
++/**
++ * True when a row was resolved by an answer after it was opened, as opposed to
++ * a born-resolved FYI page (resolved_at stamped equal to created_at at insert).
++ * An answered question stays quiet; a born-resolved FYI page still delivers.
++ */
++function isAnsweredAfterOpen(row: Escalation): boolean {
++  if (row.resolvedAt === undefined) return false;
++  return row.resolvedAt !== row.createdAt;
++}
++
++/** Attempt notify for one escalation row; failures are logged, never thrown. */
++export async function deliverPageTierEscalation(
++  deps: EscalationDeps,
++  escalationId: string,
++): Promise<void> {
++  const row = deps.store.getEscalation(escalationId);
++  if (row === null) return;
++  if (row.notifiedAt !== undefined) return;
++  if (isAnsweredAfterOpen(row)) return;
++
++  const escalationClass = row.class as EscalationClass;
++  const tier = resolveEscalationTier(escalationClass, deps.escalation);
++  if (tier !== "page") return;
++  if (deps.notify === undefined) return;
++
++  const payload = parsePayloadJson(row.payloadJson);
++  try {
++    await deps.notify.send(payload);
++    deps.store.markEscalationNotified(escalationId);
++  } catch (err: unknown) {
++    const detail = err instanceof Error ? err.message : String(err);
++    logNotifyFailure(deps, escalationId, detail);
++  }
++}
++
++/** Retry delivery for page-tier rows with null notified_at. */
++export async function retryPendingEscalationNotifications(deps: EscalationDeps): Promise<void> {
++  const pending = deps.store.listEscalations({ pendingNotifyOnly: true });
++  for (const row of pending) {
++    const tier = resolveEscalationTier(row.class as EscalationClass, deps.escalation);
++    if (tier !== "page") continue;
++    await deliverPageTierEscalation(deps, row.id);
++  }
++}
++
++/** Write rows then deliver page-tier notifications for newly written ids. */
++export async function writeAndDeliverEscalations(
++  deps: EscalationDeps,
++  run: DriverRun,
++  ambiguities: DispatchAmbiguity[],
++): Promise<void> {
++  const ids = writeStreamParkedEscalations(deps, run, ambiguities);
++  for (const id of ids) {
++    await deliverPageTierEscalation(deps, id);
++  }
++}
+diff --git a/packages/driver/src/judgment.test.ts b/packages/driver/src/judgment.test.ts
+index 09ecb1f..345c32a 100644
+--- a/packages/driver/src/judgment.test.ts
++++ b/packages/driver/src/judgment.test.ts
+@@ -2,7 +2,13 @@
+ 
+ import type { WorkflowRun } from "@ship/workflow";
+ 
+-import { createStore, newDriverBatchId, newDriverRunId, newDriverStreamId } from "@ship/store";
++import {
++  createStore,
++  newDriverBatchId,
++  newDriverRunId,
++  newDriverStreamId,
++  newEscalationId,
++} from "@ship/store";
+ import { afterEach, beforeEach, describe, expect, test } from "vitest";
+ 
+ import { CancelError, DecideError } from "./errors.js";
+@@ -440,6 +446,59 @@ describe("judgment", () => {
+     expect(store.getDriverRun(runId)?.batches[0]?.streams[0]?.status).toBe("failed");
+   });
+ 
++  test("cancelRun resolves open escalation rows for the run", async () => {
++    const streamId = newDriverStreamId();
++    const runId = store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: newDriverBatchId(),
++          status: "running",
++          streams: [
++            {
++              attempts: [],
++              id: streamId,
++              runtime: "local",
++              specPath: "a.md",
++              status: "dispatched",
++              streamIndex: 0,
++              touches: [],
++              workflowRunId: "wf_cancel_esc",
++            },
++          ],
++        },
++      ],
++      id: newDriverRunId(),
++      manifestPath: "/tmp/driver.md",
++      repo: "ship",
++      sourceJson: minimalSource(),
++      status: "awaiting_judgment",
++    }).id;
++
++    const escId = newEscalationId();
++    store.insertEscalation({
++      class: "stream-parked",
++      driverRunId: runId,
++      id: escId,
++      payloadJson: JSON.stringify({
++        class: "stream-parked",
++        createdAt: "2026-06-12T00:00:00.000Z",
++        question: "parked",
++        v: 1,
++      }),
++      streamId,
++    });
++
++    const { port } = createFakeShipPort([
++      { docPath: "a.md", repo: "ship", terminalStatus: "running", workflowRunId: "wf_cancel_esc" },
++    ]);
++    await cancelRun(store, port, runId, "2026-06-12T00:00:05.000Z");
++
++    expect(store.getEscalation(escId)?.resolvedAt).toBeDefined();
++    expect(store.listEscalations({ driverRunId: runId, unresolvedOnly: true })).toHaveLength(0);
++  });
++
+   test("decide adopt on non-dispatching stream throws", () => {
+     const runId = seedAwaitingRun(store);
+     const streamId = store.getDriverRun(runId)!.batches[0]!.streams[0]!.id;
+diff --git a/packages/driver/src/judgment.ts b/packages/driver/src/judgment.ts
+index 994fa07..fe75872 100644
+--- a/packages/driver/src/judgment.ts
++++ b/packages/driver/src/judgment.ts
+@@ -19,6 +19,11 @@ import type {
+ } from "./types.js";
+ 
+ import { CancelError, DecideError } from "./errors.js";
++import {
++  resolveAllRunEscalations,
++  resolveAllStreamParkedEscalations,
++  resolveStreamParkedEscalation,
++} from "./escalation.js";
+ import { parseManifest } from "./manifest.js";
+ 
+ const LIST_RUNS_LIMIT = 200;
+@@ -330,12 +335,17 @@ export function decide(
+     case "skip":
+       return applySkipDecision(store, driverRunId, streamId, stream, decision.reason);
+     case "abort":
+-      return store.updateDriverRunStatus(driverRunId, "failed");
++      return applyAbortDecision(store, driverRunId, streamId);
+     case "adopt":
+       return applyAdoptDecision(store, driverRunId, streamId, stream, decision.workflowRunId);
+   }
+ }
+ 
++function applyAbortDecision(store: Store, driverRunId: string, _streamId: string): DriverRun {
++  resolveAllStreamParkedEscalations(store, driverRunId, "decide:abort");
++  return store.updateDriverRunStatus(driverRunId, "failed");
++}
++
+ function loadRunForDecision(store: Store, driverRunId: string): DriverRun {
+   const run = store.getDriverRun(driverRunId);
+   if (run === null) {
+@@ -361,6 +371,7 @@ function applyRetryDecision(
+     );
+   }
+   store.updateDriverStream(streamId, PENDING_RESET_PATCH);
++  resolveStreamParkedEscalation(store, driverRunId, streamId, "decide:retry");
+   return resumeAfterDecision(store, driverRunId);
+ }
+ 
+@@ -375,6 +386,7 @@ function applySkipDecision(
+     throw new DecideError(`stream ${streamId} is not failed (status=${stream.status})`);
+   }
+   store.updateDriverStream(streamId, { errorMessage: reason, status: "skipped" });
++  resolveStreamParkedEscalation(store, driverRunId, streamId, "decide:skip");
+   return resumeAfterDecision(store, driverRunId);
+ }
+ 
+@@ -395,6 +407,7 @@ function applyAdoptDecision(
+     status: "dispatched",
+     workflowRunId,
+   });
++  resolveStreamParkedEscalation(store, driverRunId, streamId, "decide:adopt");
+   return resumeAfterDecision(store, driverRunId);
+ }
+ 
+@@ -469,6 +482,9 @@ export async function cancelRun(
+     });
+   }
+ 
++  // A cancelled run's open escalation rows would otherwise keep showing as
++  // unresolved and stay eligible for notify retry; close them all out.
++  resolveAllRunEscalations(store, driverRunId, "driver:cancelled");
+   return store.updateDriverRunStatus(driverRunId, "cancelled");
+ }
+ 
+diff --git a/packages/driver/src/notify.test.ts b/packages/driver/src/notify.test.ts
+new file mode 100644
+index 0000000..3213b0d
+--- /dev/null
++++ b/packages/driver/src/notify.test.ts
+@@ -0,0 +1,307 @@
++/** Tests for `notify.ts` — page-tier spawn, timeout, queue-tier skip. */
++
++import { createStore, newDriverRunId, newEscalationId } from "@ship/store";
++import { describe, expect, test, vi } from "vitest";
++
++import type { EscalationPayload } from "./types.js";
++
++import {
++  deliverPageTierEscalation,
++  resolveEscalationTier,
++  retryPendingEscalationNotifications,
++} from "./escalation.js";
++import { createNotifyPort, DEFAULT_NOTIFY_TIMEOUT_MS } from "./notify.js";
++
++const FAKE_NOW = "2026-07-02T12:00:00.000Z";
++
++describe("notify hook", () => {
++  test("page-tier spawn receives payload JSON on stdin", async () => {
++    const received: string[] = [];
++    const exec = vi.fn(async (_cmd: string, payload: string) => {
++      received.push(payload);
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "echo-notify" }, exec)!;
++    const payload: EscalationPayload = {
++      class: "cycle-exhausted",
++      createdAt: FAKE_NOW,
++      driverRunId: "drv_x",
++      question: "cycles exhausted",
++      v: 1,
++    };
++    await port.send(payload);
++    expect(exec).toHaveBeenCalledOnce();
++    expect(JSON.parse(received[0]!)).toEqual(payload);
++  });
++
++  test("queue-tier class never invokes notify from deliverPageTierEscalation", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    const exec = vi.fn(async () => {
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "echo-notify" }, exec)!;
++    try {
++      const runId = newDriverRunId();
++      store.insertDriverRun({
++        batches: [],
++        id: runId,
++        manifestPath: "/tmp/x.driver.md",
++        repo: "ship",
++        sourceJson: "{}",
++        status: "running",
++      });
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({
++          class: "stream-parked",
++          createdAt: FAKE_NOW,
++          question: "parked",
++          v: 1,
++        }),
++        streamId: "ds_1",
++      });
++      await deliverPageTierEscalation({ notify: port, store }, id);
++      expect(exec).not.toHaveBeenCalled();
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("hanging command hits timeout and tick path completes without throw", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    const exec = vi.fn(
++      (_cmd: string, _payload: string, timeoutMs: number) =>
++        new Promise<void>((_resolve, reject) => {
++          setTimeout(() => {
++            reject(new Error(`notify command timed out after ${String(timeoutMs)}ms`));
++          }, 20);
++        }),
++    );
++    const port = createNotifyPort({ command: "hang", timeoutMs: 20 }, exec)!;
++    try {
++      const runId = newDriverRunId();
++      store.insertDriverRun({
++        batches: [],
++        id: runId,
++        manifestPath: "/tmp/x.driver.md",
++        repo: "ship",
++        sourceJson: "{}",
++        status: "running",
++      });
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({
++          class: "cycle-exhausted",
++          createdAt: FAKE_NOW,
++          question: "exhausted",
++          v: 1,
++        }),
++      });
++      await expect(deliverPageTierEscalation({ notify: port, store }, id)).resolves.toBeUndefined();
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("notified_at stamped on success; retried when null", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    let calls = 0;
++    const exec = vi.fn(async () => {
++      calls += 1;
++      if (calls === 1) {
++        throw new Error("transient failure");
++      }
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "flaky" }, exec)!;
++    try {
++      const runId = newDriverRunId();
++      store.insertDriverRun({
++        batches: [],
++        id: runId,
++        manifestPath: "/tmp/x.driver.md",
++        repo: "ship",
++        sourceJson: "{}",
++        status: "running",
++      });
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "triage-uncertain",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({
++          class: "triage-uncertain",
++          createdAt: FAKE_NOW,
++          question: "uncertain",
++          v: 1,
++        }),
++        streamId: "ds_1",
++      });
++      await deliverPageTierEscalation({ notify: port, store }, id);
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++
++      await deliverPageTierEscalation({ notify: port, store }, id);
++      expect(store.getEscalation(id)?.notifiedAt).toBe(FAKE_NOW);
++      expect(calls).toBe(2);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("command that exits before reading stdin fails delivery without crashing", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    // Real spawn (no injected exec) so the stdin pipe is exercised. A large
++    // payload written to a command that exits immediately breaks the pipe
++    // (EPIPE) — the driver must survive and leave the row un-notified for retry.
++    const port = createNotifyPort({ command: "exit 1", timeoutMs: 5_000 })!;
++    try {
++      const runId = newDriverRunId();
++      store.insertDriverRun({
++        batches: [],
++        id: runId,
++        manifestPath: "/tmp/x.driver.md",
++        repo: "ship",
++        sourceJson: "{}",
++        status: "running",
++      });
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({
++          class: "cycle-exhausted",
++          createdAt: FAKE_NOW,
++          question: "x".repeat(2_000_000),
++          v: 1,
++        }),
++      });
++      await expect(deliverPageTierEscalation({ notify: port, store }, id)).resolves.toBeUndefined();
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("pre-resolved page row delivers notify at write time", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    const exec = vi.fn(async () => {
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "notify" }, exec)!;
++    try {
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "grant-mutated",
++        id,
++        payloadJson: JSON.stringify({
++          class: "grant-mutated",
++          createdAt: FAKE_NOW,
++          question: "grant activated",
++          v: 1,
++        }),
++        preResolved: { resolution: "grant:activate" },
++        repo: "owner/ship",
++      });
++      await deliverPageTierEscalation({ notify: port, store }, id);
++      expect(exec).toHaveBeenCalledOnce();
++      expect(store.getEscalation(id)?.notifiedAt).toBe(FAKE_NOW);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("pre-resolved page delivery failure is retried on later ticks", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    let calls = 0;
++    const exec = vi.fn(async () => {
++      calls += 1;
++      if (calls === 1) {
++        throw new Error("transient failure");
++      }
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "notify" }, exec)!;
++    try {
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "grant-mutated",
++        id,
++        payloadJson: JSON.stringify({
++          class: "grant-mutated",
++          createdAt: FAKE_NOW,
++          question: "grant activated",
++          v: 1,
++        }),
++        preResolved: { resolution: "grant:activate" },
++        repo: "owner/ship",
++      });
++      await retryPendingEscalationNotifications({ notify: port, store });
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++
++      await retryPendingEscalationNotifications({ notify: port, store });
++      expect(store.getEscalation(id)?.notifiedAt).toBe(FAKE_NOW);
++      expect(calls).toBe(2);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("page row resolved after opening is skipped by the retry path", async () => {
++    const store = createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++    const exec = vi.fn(async () => {
++      await Promise.resolve();
++    });
++    const port = createNotifyPort({ command: "notify" }, exec)!;
++    try {
++      const runId = newDriverRunId();
++      store.insertDriverRun({
++        batches: [],
++        id: runId,
++        manifestPath: "/tmp/x.driver.md",
++        repo: "ship",
++        sourceJson: "{}",
++        status: "running",
++      });
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({
++          class: "cycle-exhausted",
++          createdAt: FAKE_NOW,
++          question: "exhausted",
++          v: 1,
++        }),
++      });
++      // Answered on a later tick (resolved_at strictly after created_at).
++      store.resolveEscalation(id, "decide:abort", "2026-07-02T13:00:00.000Z");
++
++      await retryPendingEscalationNotifications({ notify: port, store });
++      expect(exec).not.toHaveBeenCalled();
++      expect(store.getEscalation(id)?.notifiedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("resolveEscalationTier honors config override", () => {
++    expect(resolveEscalationTier("stream-parked")).toBe("queue");
++    expect(resolveEscalationTier("stream-parked", { tiers: { "stream-parked": "page" } })).toBe(
++      "page",
++    );
++  });
++
++  test("default notify timeout constant", () => {
++    expect(DEFAULT_NOTIFY_TIMEOUT_MS).toBe(30_000);
++  });
++});
+diff --git a/packages/driver/src/notify.ts b/packages/driver/src/notify.ts
+new file mode 100644
+index 0000000..e9745ac
+--- /dev/null
++++ b/packages/driver/src/notify.ts
+@@ -0,0 +1,80 @@
++/**
++ * Notify command spawn — bounded stdin delivery for page-tier escalations.
++ */
++
++import { spawn } from "node:child_process";
++
++import type { EscalationPayload, NotifyConfig } from "./types.js";
++
++const DEFAULT_NOTIFY_TIMEOUT_MS = 30_000;
++
++/**
++ * Exec seam — spawn `command` with payload JSON on stdin. Injectable for tests;
++ * production uses `node:child_process` spawn.
++ */
++export type NotifyExec = (command: string, payloadJson: string, timeoutMs: number) => Promise<void>;
++
++export interface NotifyPort {
++  send(payload: EscalationPayload): Promise<void>;
++}
++
++function defaultNotifyExec(command: string, payloadJson: string, timeoutMs: number): Promise<void> {
++  return new Promise((resolve, reject) => {
++    // Operator-configured shell command; stdin carries the payload JSON.
++    // eslint-disable-next-line sonarjs/os-command -- intentional notify-hook seam
++    const child = spawn(command, [], {
++      shell: true,
++      stdio: ["pipe", "ignore", "pipe"],
++    });
++
++    let stderr = "";
++    child.stderr.on("data", (chunk: Buffer | string) => {
++      stderr += String(chunk);
++    });
++
++    const timer = setTimeout(() => {
++      child.kill("SIGTERM");
++      reject(new Error(`notify command timed out after ${String(timeoutMs)}ms`));
++    }, timeoutMs);
++
++    child.on("error", (err) => {
++      clearTimeout(timer);
++      reject(err);
++    });
++
++    child.on("close", (code) => {
++      clearTimeout(timer);
++      if (code === 0) {
++        resolve();
++        return;
++      }
++      reject(new Error(`notify command exited ${String(code)}: ${stderr}`));
++    });
++
++    // A command that exits or closes stdin before reading the payload breaks the
++    // pipe (EPIPE); treat it as a delivery failure rather than crashing the driver.
++    child.stdin.on("error", (err) => {
++      clearTimeout(timer);
++      reject(new Error(`notify command stdin error: ${err.message}`));
++    });
++
++    child.stdin.write(payloadJson);
++    child.stdin.end();
++  });
++}
++
++/** Build a notify port from driver config; undefined config yields a no-op port. */
++export function createNotifyPort(
++  config: NotifyConfig | undefined,
++  exec: NotifyExec = defaultNotifyExec,
++): NotifyPort | undefined {
++  if (config === undefined) return undefined;
++  const timeoutMs = config.timeoutMs ?? DEFAULT_NOTIFY_TIMEOUT_MS;
++  return {
++    send: async (payload) => {
++      await exec(config.command, JSON.stringify(payload), timeoutMs);
++    },
++  };
++}
++
++export { DEFAULT_NOTIFY_TIMEOUT_MS };
+diff --git a/packages/driver/src/service.ts b/packages/driver/src/service.ts
+index 5e627e4..3e42092 100644
+--- a/packages/driver/src/service.ts
++++ b/packages/driver/src/service.ts
+@@ -2,6 +2,7 @@
+  * DriverService factory — public surface (spec §6).
+  */
+ 
++import type { Logger } from "@ship/logger";
+ import type { Store } from "@ship/store";
+ import type { DriverRun, DriverRunStatus, ListDriverRunsFilter } from "@ship/store";
+ 
+@@ -22,6 +23,7 @@ import { DecideError, DriverRunNotFoundEngineError } from "./errors.js";
+ import { importManifest as importManifestFn } from "./import.js";
+ import { cancelRun, decide as decideFn, markMerged as markMergedFn } from "./judgment.js";
+ import { land as landFn } from "./land.js";
++import { createNotifyPort, type NotifyExec } from "./notify.js";
+ import { renderDriverRun } from "./render.js";
+ 
+ export interface DriverService {
+@@ -49,10 +51,14 @@ export interface CreateDriverServiceOpts {
+   monotonicClock?: () => number;
+   rng?: () => number;
+   sleep?: (ms: number) => Promise<void>;
++  /** Injectable notify exec for tests; production omits this. */
++  notifyExec?: NotifyExec;
++  /** Structured logger for notify failures; omitted in tests that silence logs. */
++  logger?: Logger;
+ }
+ 
+ export function createDriverService(opts: CreateDriverServiceOpts): DriverService {
+-  const { store, ship, gh, clock, monotonicClock, rng, sleep } = opts;
++  const { store, ship, gh, clock, monotonicClock, rng, sleep, notifyExec, logger } = opts;
+ 
+   const now = (): string => new Date((clock ?? Date.now)()).toISOString();
+ 
+@@ -73,28 +79,56 @@ export function createDriverService(opts: CreateDriverServiceOpts): DriverServic
+     markMerged: (driverRunId, streamId, facts) => markMergedFn(store, driverRunId, streamId, facts),
+     render: (driverRunId) => renderDriverRun(store, driverRunId),
+     run: async (ref, runOpts) => {
+-      // A tick is the one driver operation that polls in-flight work, so it
+-      // owns orphan recovery: re-attach this process's cloud runs that a prior
+-      // tick left orphaned (kill+resume), then let the poll loop harvest the
+-      // result. Fire-and-forget keeps the tick within its maxWait bound — the
+-      // staleness-guarded re-attach lands in this poll window or the next
+-      // re-invocation. Read verbs (status/render/decide/...) never resume.
+       void ship.resumeOrphanedRuns?.().catch(() => undefined);
+       const resolved = resolveRunOpts(runOpts);
+       const { driverRunId, warnings } = resolveRunRef(store, ref);
+-      const deps: Parameters<typeof runTick>[2] = { ship, store };
+-      if (gh !== undefined) deps.gh = gh;
+-      if (clock !== undefined) deps.clock = clock;
+-      if (monotonicClock !== undefined) deps.monotonicClock = monotonicClock;
+-      if (rng !== undefined) deps.rng = rng;
+-      if (sleep !== undefined) deps.sleep = sleep;
+-      const tick = await runTick(driverRunId, resolved, deps);
++      const tick = await runTick(
++        driverRunId,
++        resolved,
++        buildTickDeps({
++          resolved,
++          ship,
++          store,
++          clock,
++          gh,
++          logger,
++          monotonicClock,
++          notifyExec,
++          rng,
++          sleep,
++        }),
++      );
+       if (warnings === undefined || warnings.length === 0) return tick;
+       return { ...tick, warnings };
+     },
+   };
+ }
+ 
++function buildTickDeps(input: {
++  store: Store;
++  ship: DriverShipPort;
++  resolved: ReturnType<typeof resolveRunOpts>;
++  gh?: DriverGhPort | undefined;
++  logger?: Logger | undefined;
++  notifyExec?: NotifyExec | undefined;
++  clock?: (() => number) | undefined;
++  monotonicClock?: (() => number) | undefined;
++  rng?: (() => number) | undefined;
++  sleep?: ((ms: number) => Promise<void>) | undefined;
++}): Parameters<typeof runTick>[2] {
++  const deps: Parameters<typeof runTick>[2] = { ship: input.ship, store: input.store };
++  if (input.gh !== undefined) deps.gh = input.gh;
++  if (input.logger !== undefined) deps.logger = input.logger;
++  const notifyPort = createNotifyPort(input.resolved.notify, input.notifyExec);
++  if (notifyPort !== undefined) deps.notify = notifyPort;
++  if (input.resolved.escalation !== undefined) deps.escalation = input.resolved.escalation;
++  if (input.clock !== undefined) deps.clock = input.clock;
++  if (input.monotonicClock !== undefined) deps.monotonicClock = input.monotonicClock;
++  if (input.rng !== undefined) deps.rng = input.rng;
++  if (input.sleep !== undefined) deps.sleep = input.sleep;
++  return deps;
++}
++
+ interface ResolvedRunRef {
+   driverRunId: string;
+   warnings?: string[];
+diff --git a/packages/driver/src/types.ts b/packages/driver/src/types.ts
+index 8a2a8cc..d92ca09 100644
+--- a/packages/driver/src/types.ts
++++ b/packages/driver/src/types.ts
+@@ -32,6 +32,51 @@ export interface RunOpts {
+   pollIntervalMs?: number;
+   maxParallel?: { local?: number; cloud?: number };
+   force?: boolean;
++  /** Optional notify command for page-tier escalation delivery. */
++  notify?: NotifyConfig;
++  /** Per-class tier overrides for escalation delivery. */
++  escalation?: EscalationConfig;
++}
++
++/** Notify hook configuration — engine knows a command, not a channel. */
++export interface NotifyConfig {
++  command: string;
++  timeoutMs?: number;
++}
++
++/** Escalation tier and class overrides in driver config. */
++export interface EscalationConfig {
++  tiers?: Partial<Record<EscalationClass, EscalationTier>>;
++}
++
++export type EscalationTier = "page" | "queue";
++
++export type EscalationClass =
++  | "triage-uncertain"
++  | "auth-rejection"
++  | "cycle-exhausted"
++  | "product-direction"
++  | "sensitive-path"
++  | "spend-ceiling"
++  | "pathological-batch"
++  | "ci-infra"
++  | "grant-mutated"
++  | "stream-parked"
++  | "merge-blocked-no-verdict"
++  | "merge-ready-awaiting-authority";
++
++/** Versioned escalation payload written to rows and notify stdin. */
++export interface EscalationPayload {
++  v: 1;
++  class: EscalationClass;
++  driverRunId?: string;
++  streamId?: string;
++  repo?: string;
++  pr?: number;
++  question: string;
++  suggestion?: string;
++  evidence?: { links?: string[]; verdict?: object; traceRef?: string };
++  createdAt: string;
+ }
+ 
+ export type Decision =
+diff --git a/packages/store/migrations/0013_escalations.sql b/packages/store/migrations/0013_escalations.sql
+new file mode 100644
+index 0000000..2fa83d3
+--- /dev/null
++++ b/packages/store/migrations/0013_escalations.sql
+@@ -0,0 +1,28 @@
++-- 0013_escalations.sql — durable escalation rows for push-on-block.
++--
++-- Open-row-only dedup via partial unique index with COALESCE sentinels so
++-- nullable driver_run_id / stream_id columns participate in uniqueness.
++
++CREATE TABLE escalations (
++  id             TEXT PRIMARY KEY,
++  driver_run_id  TEXT REFERENCES driver_runs (id) ON DELETE CASCADE,
++  stream_id      TEXT,
++  repo           TEXT,
++  class          TEXT NOT NULL,
++  payload_json   TEXT NOT NULL,
++  created_at     TEXT NOT NULL,
++  notified_at    TEXT,
++  resolved_at    TEXT,
++  resolution     TEXT
++);
++
++CREATE INDEX escalations_run_idx ON escalations (driver_run_id);
++CREATE INDEX escalations_repo_idx ON escalations (repo);
++CREATE INDEX escalations_class_idx ON escalations (class);
++CREATE INDEX escalations_open_idx ON escalations (resolved_at) WHERE resolved_at IS NULL;
++
++CREATE UNIQUE INDEX escalations_open_dedup_idx ON escalations (
++  COALESCE(driver_run_id, ''),
++  COALESCE(stream_id, ''),
++  class
++) WHERE resolved_at IS NULL;
+diff --git a/packages/store/src/driver-ids.ts b/packages/store/src/driver-ids.ts
+index 8083837..fad45d9 100644
+--- a/packages/store/src/driver-ids.ts
++++ b/packages/store/src/driver-ids.ts
+@@ -18,3 +18,8 @@ export function newDriverBatchId(): string {
+ export function newDriverStreamId(): string {
+   return `ds_${ulid()}`;
+ }
++
++/** Returns a new escalation ID, e.g. `esc_01ARZ3NDEKTSV4RRFFQ69G5FAV`. */
++export function newEscalationId(): string {
++  return `esc_${ulid()}`;
++}
+diff --git a/packages/store/src/errors.ts b/packages/store/src/errors.ts
+index 67b9f57..411ddad 100644
+--- a/packages/store/src/errors.ts
++++ b/packages/store/src/errors.ts
+@@ -44,6 +44,28 @@ export class DriverBatchNotFoundError extends Error {
+   }
+ }
+ 
++/** Thrown by `insertEscalation` when an open row already exists for the dedup key. */
++export class EscalationOpenRowExistsError extends Error {
++  override readonly name = "EscalationOpenRowExistsError";
++  readonly escalationId: string;
++
++  constructor(escalationId: string, options?: { cause?: unknown }) {
++    super(`open escalation already exists: ${escalationId}`, options);
++    this.escalationId = escalationId;
++  }
++}
++
++/** Thrown when an escalation referenced by id does not exist. */
++export class EscalationNotFoundError extends Error {
++  override readonly name = "EscalationNotFoundError";
++  readonly escalationId: string;
++
++  constructor(escalationId: string) {
++    super(`escalation not found: ${escalationId}`);
++    this.escalationId = escalationId;
++  }
++}
++
+ /** Thrown by `updateDriverStream` when the stream id does not resolve. */
+ export class DriverStreamNotFoundError extends Error {
+   override readonly name = "DriverStreamNotFoundError";
+diff --git a/packages/store/src/escalation-schemas.ts b/packages/store/src/escalation-schemas.ts
+new file mode 100644
+index 0000000..229608e
+--- /dev/null
++++ b/packages/store/src/escalation-schemas.ts
+@@ -0,0 +1,20 @@
++/**
++ * Zod hydration for `escalations` rows.
++ */
++
++import { z } from "zod";
++
++export const escalationSchema = z.object({
++  id: z.string(),
++  driverRunId: z.string().optional(),
++  streamId: z.string().optional(),
++  repo: z.string().optional(),
++  class: z.string(),
++  payloadJson: z.string(),
++  createdAt: z.string().datetime({ offset: true }),
++  notifiedAt: z.string().datetime({ offset: true }).optional(),
++  resolvedAt: z.string().datetime({ offset: true }).optional(),
++  resolution: z.string().optional(),
++});
++
++export type Escalation = z.infer<typeof escalationSchema>;
+diff --git a/packages/store/src/escalations.test.ts b/packages/store/src/escalations.test.ts
+new file mode 100644
+index 0000000..bbf912a
+--- /dev/null
++++ b/packages/store/src/escalations.test.ts
+@@ -0,0 +1,277 @@
++/** Tests for `escalations.ts` — insert scopes, open-row dedup, pre-resolved rows. */
++
++import { describe, expect, test } from "vitest";
++
++import {
++  createStore,
++  EscalationNotFoundError,
++  EscalationOpenRowExistsError,
++  newDriverRunId,
++  newEscalationId,
++} from "./index.js";
++
++const FAKE_NOW = "2026-07-02T12:00:00.000Z";
++
++function memoryStore() {
++  return createStore({ clock: () => FAKE_NOW, dbPath: ":memory:" });
++}
++
++function seedDriverRun(store: ReturnType<typeof createStore>): string {
++  const runId = newDriverRunId();
++  store.insertDriverRun({
++    batches: [],
++    id: runId,
++    manifestPath: "/tmp/manifest.driver.md",
++    repo: "owner/ship",
++    sourceJson: "{}",
++    status: "running",
++  });
++  return runId;
++}
++
++describe("escalations store", () => {
++  test("insert stream-scoped escalation", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const id = newEscalationId();
++      const row = store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id,
++        payloadJson: JSON.stringify({ class: "stream-parked", v: 1 }),
++        repo: "owner/ship",
++        streamId: "ds_test",
++      });
++      expect(row.id).toBe(id);
++      expect(row.driverRunId).toBe(runId);
++      expect(row.streamId).toBe("ds_test");
++      expect(row.resolvedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("insert run-scoped escalation with null stream_id", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const row = store.insertEscalation({
++        class: "spend-ceiling",
++        driverRunId: runId,
++        id: newEscalationId(),
++        payloadJson: "{}",
++        repo: "owner/ship",
++      });
++      expect(row.streamId).toBeUndefined();
++      expect(row.driverRunId).toBe(runId);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("insert system-scoped escalation with null driver_run_id", () => {
++    const store = memoryStore();
++    try {
++      const row = store.insertEscalation({
++        class: "grant-mutated",
++        id: newEscalationId(),
++        payloadJson: "{}",
++        repo: "owner/ship",
++      });
++      expect(row.driverRunId).toBeUndefined();
++      expect(row.repo).toBe("owner/ship");
++    } finally {
++      store.close();
++    }
++  });
++
++  test("open-row-only dedup rejects second insert on same key", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id: newEscalationId(),
++        payloadJson: "{}",
++        streamId: "ds_a",
++      });
++      expect(() =>
++        store.insertEscalation({
++          class: "stream-parked",
++          driverRunId: runId,
++          id: newEscalationId(),
++          payloadJson: "{}",
++          streamId: "ds_a",
++        }),
++      ).toThrow(EscalationOpenRowExistsError);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("insert after resolve succeeds and opens a fresh row", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const firstId = newEscalationId();
++      store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id: firstId,
++        payloadJson: "{}",
++        streamId: "ds_a",
++      });
++      store.resolveEscalation(firstId, "decide:retry");
++
++      const second = store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id: newEscalationId(),
++        payloadJson: "{}",
++        streamId: "ds_a",
++      });
++      expect(second.id).not.toBe(firstId);
++      expect(second.resolvedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("NULL-sentinel: different runs coexist for same class", () => {
++    const store = memoryStore();
++    try {
++      const runA = seedDriverRun(store);
++      const runB = seedDriverRun(store);
++      store.insertEscalation({
++        class: "spend-ceiling",
++        driverRunId: runA,
++        id: newEscalationId(),
++        payloadJson: "{}",
++      });
++      const rowB = store.insertEscalation({
++        class: "spend-ceiling",
++        driverRunId: runB,
++        id: newEscalationId(),
++        payloadJson: "{}",
++      });
++      expect(rowB.driverRunId).toBe(runB);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("pre-resolved grant-mutated insert does not block successor", () => {
++    const store = memoryStore();
++    try {
++      store.insertEscalation({
++        class: "grant-mutated",
++        id: newEscalationId(),
++        payloadJson: "{}",
++        preResolved: { resolution: "grant:activate" },
++        repo: "owner/ship",
++      });
++      const successor = store.insertEscalation({
++        class: "grant-mutated",
++        id: newEscalationId(),
++        payloadJson: "{}",
++        repo: "owner/ship",
++      });
++      expect(successor.resolvedAt).toBeUndefined();
++    } finally {
++      store.close();
++    }
++  });
++
++  test("markEscalationNotified stamps notified_at", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const id = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id,
++        payloadJson: "{}",
++        streamId: "ds_x",
++      });
++      const notified = store.markEscalationNotified(id);
++      expect(notified.notifiedAt).toBe(FAKE_NOW);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("resolveOpenEscalation throws when no open row", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      expect(() =>
++        store.resolveOpenEscalation(
++          { class: "stream-parked", driverRunId: runId, streamId: "ds_missing" },
++          "decide:skip",
++        ),
++      ).toThrow(EscalationNotFoundError);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("listEscalations pendingNotifyOnly filter", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const pageId = newEscalationId();
++      const queueId = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id: pageId,
++        payloadJson: "{}",
++      });
++      store.insertEscalation({
++        class: "stream-parked",
++        driverRunId: runId,
++        id: queueId,
++        payloadJson: "{}",
++        streamId: "ds_q",
++      });
++      const pending = store.listEscalations({ pendingNotifyOnly: true });
++      expect(new Set(pending.map((r) => r.id))).toEqual(new Set([pageId, queueId]));
++      store.markEscalationNotified(pageId);
++      const after = store.listEscalations({ pendingNotifyOnly: true });
++      expect(after.map((r) => r.id)).toEqual([queueId]);
++    } finally {
++      store.close();
++    }
++  });
++
++  test("pendingNotifyOnly includes born-resolved rows, excludes answered-later", () => {
++    const store = memoryStore();
++    try {
++      const runId = seedDriverRun(store);
++      const bornResolvedId = newEscalationId();
++      store.insertEscalation({
++        class: "grant-mutated",
++        id: bornResolvedId,
++        payloadJson: "{}",
++        preResolved: { resolution: "grant:activate" },
++        repo: "owner/ship",
++      });
++      const answeredId = newEscalationId();
++      store.insertEscalation({
++        class: "cycle-exhausted",
++        driverRunId: runId,
++        id: answeredId,
++        payloadJson: "{}",
++      });
++      store.resolveEscalation(answeredId, "decide:abort", "2026-07-02T13:00:00.000Z");
++
++      const pending = store.listEscalations({ pendingNotifyOnly: true });
++      expect(pending.map((r) => r.id)).toEqual([bornResolvedId]);
++    } finally {
++      store.close();
++    }
++  });
++});
+diff --git a/packages/store/src/escalations.ts b/packages/store/src/escalations.ts
+new file mode 100644
+index 0000000..cfa21bc
+--- /dev/null
++++ b/packages/store/src/escalations.ts
+@@ -0,0 +1,288 @@
++/**
++ * Per-table module for `escalations`. Owns insert/dedup, notify stamp, resolve.
++ */
++
++import type { Db } from "./db.js";
++
++import {
++  EscalationNotFoundError,
++  EscalationOpenRowExistsError,
++  StoreSchemaError,
++} from "./errors.js";
++import { type Escalation, escalationSchema } from "./escalation-schemas.js";
++
++/** Inputs for `insertEscalation`. Caller supplies id; timestamps from clock. */
++export interface InsertEscalationInput {
++  id: string;
++  driverRunId?: string;
++  streamId?: string;
++  repo?: string;
++  class: string;
++  payloadJson: string;
++  /** When set, the row is written already resolved (e.g. grant-mutated FYI). */
++  preResolved?: { resolution: string; resolvedAt?: string };
++}
++
++/** Filter for `listEscalations`. */
++export interface ListEscalationsFilter {
++  driverRunId?: string;
++  streamId?: string;
++  repo?: string;
++  class?: string;
++  unresolvedOnly?: boolean;
++  pendingNotifyOnly?: boolean;
++}
++
++/** Key for open-row dedup lookup / resolve. */
++export interface EscalationOpenKey {
++  driverRunId?: string;
++  streamId?: string;
++  class: string;
++}
++
++export interface EscalationOps {
++  insert: (input: InsertEscalationInput) => Escalation;
++  get: (id: string) => Escalation | null;
++  list: (filter: ListEscalationsFilter) => Escalation[];
++  getOpenByKey: (key: EscalationOpenKey) => Escalation | null;
++  markNotified: (id: string, notifiedAt?: string) => Escalation;
++  resolve: (id: string, resolution: string, resolvedAt?: string) => Escalation;
++  resolveOpenByKey: (key: EscalationOpenKey, resolution: string, resolvedAt?: string) => Escalation;
++}
++
++interface EscalationRow {
++  id: string;
++  driver_run_id: string | null;
++  stream_id: string | null;
++  repo: string | null;
++  class: string;
++  payload_json: string;
++  created_at: string;
++  notified_at: string | null;
++  resolved_at: string | null;
++  resolution: string | null;
++}
++
++const ESCALATION_COLUMNS =
++  "id, driver_run_id, stream_id, repo, class, payload_json, created_at, notified_at, resolved_at, resolution";
++
++function hydrate(row: EscalationRow): Escalation {
++  const parsed = escalationSchema.safeParse({
++    class: row.class,
++    createdAt: row.created_at,
++    driverRunId: row.driver_run_id ?? undefined,
++    id: row.id,
++    notifiedAt: row.notified_at ?? undefined,
++    payloadJson: row.payload_json,
++    repo: row.repo ?? undefined,
++    resolution: row.resolution ?? undefined,
++    resolvedAt: row.resolved_at ?? undefined,
++    streamId: row.stream_id ?? undefined,
++  });
++  if (!parsed.success) {
++    throw new StoreSchemaError(`escalation schema drift: ${parsed.error.message}`);
++  }
++  return parsed.data;
++}
++
++function dedupKey(input: EscalationOpenKey): {
++  driverRunId: string;
++  streamId: string;
++  class: string;
++} {
++  return {
++    class: input.class,
++    driverRunId: input.driverRunId ?? "",
++    streamId: input.streamId ?? "",
++  };
++}
++
++function openKeyFromInput(input: InsertEscalationInput): EscalationOpenKey {
++  const key: EscalationOpenKey = { class: input.class };
++  if (input.driverRunId !== undefined) key.driverRunId = input.driverRunId;
++  if (input.streamId !== undefined) key.streamId = input.streamId;
++  return key;
++}
++
++function preResolvedColumns(
++  preResolved: InsertEscalationInput["preResolved"],
++  createdAt: string,
++): { resolution: string | null; resolvedAt: string | null } {
++  if (preResolved === undefined) {
++    return { resolution: null, resolvedAt: null };
++  }
++  return {
++    resolution: preResolved.resolution,
++    resolvedAt: preResolved.resolvedAt ?? createdAt,
++  };
++}
++
++export function createEscalationOps(db: Db, clock: () => string): EscalationOps {
++  const insertStmt = db.prepare(`
++    INSERT INTO escalations (
++      id, driver_run_id, stream_id, repo, class, payload_json,
++      created_at, notified_at, resolved_at, resolution
++    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
++  `);
++
++  const getByIdStmt = db.prepare<[string], EscalationRow>(
++    `SELECT ${ESCALATION_COLUMNS} FROM escalations WHERE id = ?`,
++  );
++
++  const getOpenByKeyStmt = db.prepare<[string, string, string], EscalationRow>(`
++    SELECT ${ESCALATION_COLUMNS} FROM escalations
++    WHERE COALESCE(driver_run_id, '') = ?
++      AND COALESCE(stream_id, '') = ?
++      AND class = ?
++      AND resolved_at IS NULL
++    LIMIT 1
++  `);
++
++  const markNotifiedStmt = db.prepare(`
++    UPDATE escalations SET notified_at = ? WHERE id = ?
++  `);
++
++  const resolveStmt = db.prepare(`
++    UPDATE escalations SET resolved_at = ?, resolution = ? WHERE id = ?
++  `);
++
++  function get(id: string): Escalation | null {
++    const row = getByIdStmt.get(id);
++    if (row === undefined) return null;
++    return hydrate(row);
++  }
++
++  function getOpenByKey(key: EscalationOpenKey): Escalation | null {
++    const k = dedupKey(key);
++    const row = getOpenByKeyStmt.get(k.driverRunId, k.streamId, k.class);
++    if (row === undefined) return null;
++    return hydrate(row);
++  }
++
++  function insert(input: InsertEscalationInput): Escalation {
++    const existing = getOpenByKey(openKeyFromInput(input));
++    if (existing !== null) {
++      throw new EscalationOpenRowExistsError(existing.id);
++    }
++
++    const createdAt = clock();
++    const resolved = preResolvedColumns(input.preResolved, createdAt);
++
++    try {
++      insertStmt.run(
++        input.id,
++        input.driverRunId ?? null,
++        input.streamId ?? null,
++        input.repo ?? null,
++        input.class,
++        input.payloadJson,
++        createdAt,
++        resolved.resolvedAt,
++        resolved.resolution,
++      );
++    } catch (err: unknown) {
++      const open = getOpenByKey(openKeyFromInput(input));
++      if (open !== null) {
++        throw new EscalationOpenRowExistsError(open.id, { cause: err });
++      }
++      throw err;
++    }
++
++    return loadEscalationById(input.id);
++  }
++
++  function loadEscalationById(id: string): Escalation {
++    const row = getByIdStmt.get(id);
++    if (row === undefined) {
++      throw new Error(`escalation insert failed to persist: ${id}`);
++    }
++    return hydrate(row);
++  }
++
++  function list(filter: ListEscalationsFilter): Escalation[] {
++    const clauses: string[] = [];
++    const params: unknown[] = [];
++
++    if (filter.driverRunId !== undefined) {
++      clauses.push("driver_run_id = ?");
++      params.push(filter.driverRunId);
++    }
++    if (filter.streamId !== undefined) {
++      clauses.push("stream_id = ?");
++      params.push(filter.streamId);
++    }
++    if (filter.repo !== undefined) {
++      clauses.push("repo = ?");
++      params.push(filter.repo);
++    }
++    if (filter.class !== undefined) {
++      clauses.push("class = ?");
++      params.push(filter.class);
++    }
++    if (filter.unresolvedOnly === true) {
++      clauses.push("resolved_at IS NULL");
++    }
++    if (filter.pendingNotifyOnly === true) {
++      // Born-resolved FYI rows (resolved_at stamped equal to created_at at
++      // insert) still need delivery; rows answered after opening do not.
++      clauses.push("notified_at IS NULL");
++      clauses.push("(resolved_at IS NULL OR resolved_at = created_at)");
++    }
++
++    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
++    const rows = db
++      .prepare(`SELECT ${ESCALATION_COLUMNS} FROM escalations ${where} ORDER BY created_at ASC`)
++      .all(...params) as EscalationRow[];
++    return rows.map(hydrate);
++  }
++
++  function markNotified(id: string, notifiedAt?: string): Escalation {
++    const stampedAt = notifiedAt ?? clock();
++    const result = markNotifiedStmt.run(stampedAt, id);
++    if (result.changes === 0) {
++      throw new EscalationNotFoundError(id);
++    }
++    const row = getByIdStmt.get(id);
++    if (row === undefined) {
++      throw new EscalationNotFoundError(id);
++    }
++    return hydrate(row);
++  }
++
++  function resolve(id: string, resolution: string, resolvedAt?: string): Escalation {
++    const stampedAt = resolvedAt ?? clock();
++    const result = resolveStmt.run(stampedAt, resolution, id);
++    if (result.changes === 0) {
++      throw new EscalationNotFoundError(id);
++    }
++    const row = getByIdStmt.get(id);
++    if (row === undefined) {
++      throw new EscalationNotFoundError(id);
++    }
++    return hydrate(row);
++  }
++
++  function resolveOpenByKey(
++    key: EscalationOpenKey,
++    resolution: string,
++    resolvedAt?: string,
++  ): Escalation {
++    const open = getOpenByKey(key);
++    if (open === null) {
++      throw new EscalationNotFoundError(
++        `open escalation not found: ${key.class}/${key.driverRunId ?? ""}/${key.streamId ?? ""}`,
++      );
++    }
++    return resolve(open.id, resolution, resolvedAt);
++  }
++
++  return {
++    get,
++    getOpenByKey,
++    insert,
++    list,
++    markNotified,
++    resolve,
++    resolveOpenByKey,
++  };
++}
+diff --git a/packages/store/src/index.ts b/packages/store/src/index.ts
+index 560f6aa..2298bcb 100644
+--- a/packages/store/src/index.ts
++++ b/packages/store/src/index.ts
+@@ -42,13 +42,27 @@ export type {
+ export type { UpdateDriverBatchInput } from "./driver-batches.js";
+ export type { UpdateDriverStreamInput } from "./driver-streams.js";
+ 
+-export { newDriverBatchId, newDriverRunId, newDriverStreamId } from "./driver-ids.js";
++export type { Escalation } from "./escalation-schemas.js";
++export type {
++  EscalationOpenKey,
++  InsertEscalationInput,
++  ListEscalationsFilter,
++} from "./escalations.js";
++
++export {
++  newDriverBatchId,
++  newDriverRunId,
++  newDriverStreamId,
++  newEscalationId,
++} from "./driver-ids.js";
+ 
+ export {
+   CursorRunNotFoundError,
+   DriverBatchNotFoundError,
+   DriverRunNotFoundError,
+   DriverStreamNotFoundError,
++  EscalationNotFoundError,
++  EscalationOpenRowExistsError,
+   LOCAL_RUN_CONTENTION_HINT,
+   LOCAL_RUNTIME_PARALLELISM_LIMIT,
+   MigrationError,
+diff --git a/packages/store/src/migrations.test.ts b/packages/store/src/migrations.test.ts
+index ed561a2..c486c01 100644
+--- a/packages/store/src/migrations.test.ts
++++ b/packages/store/src/migrations.test.ts
+@@ -50,9 +50,10 @@ describe("runMigrations", () => {
+     expect(tables).toContain("driver_runs");
+     expect(tables).toContain("driver_batches");
+     expect(tables).toContain("driver_streams");
++    expect(tables).toContain("escalations");
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name, applied_at FROM _migrations").all();
+-    expect(applied).toHaveLength(11);
++    expect(applied).toHaveLength(12);
+     expect(applied.map((r) => r.name)).toEqual([
+       "0001_init.sql",
+       "0002_cursor_runs_run_id.sql",
+@@ -65,6 +66,7 @@ describe("runMigrations", () => {
+       "0009_driver_streams_tier.sql",
+       "0010_driver_streams_provider.sql",
+       "0012_driver_streams_continuation.sql",
++      "0013_escalations.sql",
+     ]);
+ 
+     const phaseColumns = db
+@@ -95,7 +97,7 @@ describe("runMigrations", () => {
+     runMigrations(db);
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name FROM _migrations").all();
+-    expect(applied).toHaveLength(11);
++    expect(applied).toHaveLength(12);
+   });
+ 
+   test("synthetic 0002 migration applies on top of 0001 via temp directory", () => {
+diff --git a/packages/store/src/store.ts b/packages/store/src/store.ts
+index 4db3ce4..6dda2e1 100644
+--- a/packages/store/src/store.ts
++++ b/packages/store/src/store.ts
+@@ -16,6 +16,12 @@ import type { UpdateDriverBatchInput } from "./driver-batches.js";
+ import type { ClaimTickInput, InsertDriverRunInput, ListDriverRunsFilter } from "./driver-runs.js";
+ import type { DriverBatch, DriverRun, DriverRunStatus, DriverStream } from "./driver-schemas.js";
+ import type { UpdateDriverStreamInput } from "./driver-streams.js";
++import type { Escalation } from "./escalation-schemas.js";
++import type {
++  EscalationOpenKey,
++  InsertEscalationInput,
++  ListEscalationsFilter,
++} from "./escalations.js";
+ import type { AppendPhaseInput, UpdatePhaseInput } from "./phases.js";
+ import type {
+   CreateWorkflowRunInput,
+@@ -26,6 +32,7 @@ import type {
+ import { createCursorRunOps } from "./cursor-runs.js";
+ import { openDatabase, withStoreContentionGuard } from "./db.js";
+ import { createDriverRunOps } from "./driver-runs.js";
++import { createEscalationOps } from "./escalations.js";
+ import { assertSchemaVersion, runMigrations } from "./migrations.js";
+ import { createPhaseOps } from "./phases.js";
+ import { createWorkflowRunOps } from "./workflow-runs.js";
+@@ -145,6 +152,24 @@ export interface Store {
+   updateDriverBatch: (id: string, patch: UpdateDriverBatchInput) => DriverBatch;
+   /** Patch driver stream progress columns; bumps parent run `updated_at`. */
+   updateDriverStream: (id: string, patch: UpdateDriverStreamInput) => DriverStream;
++  /** Insert an escalation row; rejects when an open row exists for the dedup key. */
++  insertEscalation: (input: InsertEscalationInput) => Escalation;
++  /** Hydrated escalation row, or `null` if unknown. Does not throw. */
++  getEscalation: (id: string) => Escalation | null;
++  /** Filtered list of escalation rows. */
++  listEscalations: (filter: ListEscalationsFilter) => Escalation[];
++  /** Open unresolved escalation for a dedup key, or `null`. */
++  getOpenEscalation: (key: EscalationOpenKey) => Escalation | null;
++  /** Stamp `notified_at` after a successful notify delivery attempt. */
++  markEscalationNotified: (id: string, notifiedAt?: string) => Escalation;
++  /** Resolve an escalation row by id. */
++  resolveEscalation: (id: string, resolution: string, resolvedAt?: string) => Escalation;
++  /** Resolve the open escalation for a dedup key. */
++  resolveOpenEscalation: (
++    key: EscalationOpenKey,
++    resolution: string,
++    resolvedAt?: string,
++  ) => Escalation;
+   /**
+    * Run `PRAGMA wal_checkpoint(TRUNCATE)` (cleans up `-wal` / `-shm`
+    * sidecars) and close the SQLite handle. Caller must not invoke other
+@@ -184,6 +209,7 @@ export function createStore(opts: CreateStoreOptions): Store {
+     const workflowRunOps = createWorkflowRunOps(db, clock, phaseOps);
+     const cursorRunOps = createCursorRunOps(db, clock);
+     const driverRunOps = createDriverRunOps(db, clock);
++    const escalationOps = createEscalationOps(db, clock);
+ 
+     return {
+       appendPhase: (input) => withStoreContentionGuard(() => phaseOps.append(input)),
+@@ -208,6 +234,16 @@ export function createStore(opts: CreateStoreOptions): Store {
+         withStoreContentionGuard(() => driverRunOps.claimTick(id, input)),
+       updateDriverStream: (id, patch) =>
+         withStoreContentionGuard(() => driverRunOps.updateStream(id, patch)),
++      getEscalation: (id) => withStoreContentionGuard(() => escalationOps.get(id)),
++      getOpenEscalation: (key) => withStoreContentionGuard(() => escalationOps.getOpenByKey(key)),
++      insertEscalation: (input) => withStoreContentionGuard(() => escalationOps.insert(input)),
++      listEscalations: (filter) => withStoreContentionGuard(() => escalationOps.list(filter)),
++      markEscalationNotified: (id, notifiedAt) =>
++        withStoreContentionGuard(() => escalationOps.markNotified(id, notifiedAt)),
++      resolveEscalation: (id, resolution, resolvedAt) =>
++        withStoreContentionGuard(() => escalationOps.resolve(id, resolution, resolvedAt)),
++      resolveOpenEscalation: (key, resolution, resolvedAt) =>
++        withStoreContentionGuard(() => escalationOps.resolveOpenByKey(key, resolution, resolvedAt)),
+       listWorkflowRunsForPrune: () => withStoreContentionGuard(() => workflowRunOps.listForPrune()),
+       close: () => {
+         // wal_checkpoint(TRUNCATE) can throw SQLITE_BUSY under contention;
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 5c2db9c..4e216c1 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -282,6 +282,9 @@ importers:
+       '@ship/core':
+         specifier: workspace:*
+         version: link:../core
++      '@ship/logger':
++        specifier: workspace:*
++        version: link:../logger
+       '@ship/receipt':
+         specifier: workspace:*
+         version: link:../receipt

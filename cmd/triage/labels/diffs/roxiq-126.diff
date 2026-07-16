@@ -1,0 +1,345 @@
+diff --git a/.github/workflows/deploy-secret-lint.yml b/.github/workflows/deploy-secret-lint.yml
+new file mode 100644
+index 0000000..19076d6
+--- /dev/null
++++ b/.github/workflows/deploy-secret-lint.yml
+@@ -0,0 +1,35 @@
++name: deploy-secret-lint
++
++# Required pre-merge gate (Phase 2). Asserts deploy-prod.yml passes a
++# TF_VAR_<name> for every count-gated prod secret — the set DERIVED from
++# infra/terraform/environments/prod/secrets.tf — so a deploy can never silently
++# drop one (the 2026-06-13 VERCEL_DRAIN_SECRET incident). Pure text: no GCP, no
++# secrets, ~seconds, so it auto-triggers on every PR and is cheap to require.
++# The deployed HTTP/browser suite (cmd/sanity) stays on-demand (/sanity) +
++# post-merge (verify-prod) — it can't be a cheap required pre-merge check.
++#
++# Mark the `deploy-secret-lint` check required in branch protection
++# (dossier task e2e-sanity-require-deploy-secret-lint).
++
++on:
++  pull_request:
++    branches: [main]
++  push:
++    branches: [main]
++
++permissions:
++  contents: read
++
++jobs:
++  deploy-secret-lint:
++    name: deploy-secret-lint
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++
++      - uses: actions/setup-go@v5
++        with:
++          go-version-file: go.mod
++
++      - name: Assert deploy-prod.yml wires every count-gated prod secret
++        run: go run ./cmd/deploy-secret-lint
+diff --git a/cmd/deploy-secret-lint/main.go b/cmd/deploy-secret-lint/main.go
+new file mode 100644
+index 0000000..5c657c0
+--- /dev/null
++++ b/cmd/deploy-secret-lint/main.go
+@@ -0,0 +1,136 @@
++// Command deploy-secret-lint is a pre-merge gate: it asserts deploy-prod.yml
++// passes a TF_VAR_<name> for every count-gated prod secret, so a deploy can
++// never silently drop one. The 2026-06-13 incident: an omitted
++// TF_VAR_vercel_drain_secret made `terraform apply` DESTROY the Secret Manager
++// secret + strip the VERCEL_DRAIN_SECRET env from the api service, 404-ing the
++// Vercel drain endpoint — caught only manually, days later.
++//
++// The set of count-gated secrets is DERIVED from secrets.tf (the resources
++// gated on `count = var.x == "" ? 0 : 1`), not hardcoded, so adding a new
++// count-gated secret can't silently bypass the lint.
++//
++// Pure text: no GCP, no secrets, no terraform — runs in ~seconds, so it's a
++// cheap auto-triggered required check (unlike the deployed HTTP suite, which
++// needs a deployed target and belongs post-merge).
++//
++// Usage:
++//
++//	deploy-secret-lint [--secrets-tf <path>] [--deploy-workflow <path>]
++//
++// Exit 0 when every count-gated secret has a TF_VAR_<name> wired to a
++// ${{ secrets.* }} reference; 1 otherwise, printing each violation.
++package main
++
++import (
++	"flag"
++	"fmt"
++	"os"
++	"regexp"
++	"sort"
++	"strings"
++)
++
++const (
++	defaultSecretsTF      = "infra/terraform/environments/prod/secrets.tf"
++	defaultDeployWorkflow = ".github/workflows/deploy-prod.yml"
++)
++
++// countGatedRe captures the variable name of a count-gated secret — a resource
++// whose existence is gated on a non-empty variable, so an empty value drops it.
++var countGatedRe = regexp.MustCompile(`count\s*=\s*var\.([a-z_][a-z0-9_]*)\s*==\s*""`)
++
++// tfVarRe captures a `TF_VAR_<name>: <value>` env assignment. A leading '#'
++// breaks the `^\s*TF_VAR_` anchor, so a commented-out var reads as omitted
++// (which it effectively is).
++var tfVarRe = regexp.MustCompile(`(?m)^\s*TF_VAR_([a-z_][a-z0-9_]*):\s*(.*)$`)
++
++// countGated returns the sorted, de-duplicated names of count-gated secrets in
++// a terraform secrets file. Each secret is two resources (the secret + its
++// version), both gated, so the names dedupe.
++func countGated(secretsTF string) []string {
++	seen := make(map[string]bool)
++	for _, m := range countGatedRe.FindAllStringSubmatch(secretsTF, -1) {
++		seen[m[1]] = true
++	}
++	names := make([]string, 0, len(seen))
++	for name := range seen {
++		names = append(names, name)
++	}
++	sort.Strings(names)
++	return names
++}
++
++// passedTFVars maps each TF_VAR_<name> the deploy workflow sets to its raw value.
++func passedTFVars(deployYML string) map[string]string {
++	out := make(map[string]string)
++	for _, m := range tfVarRe.FindAllStringSubmatch(deployYML, -1) {
++		out[m[1]] = strings.TrimSpace(m[2])
++	}
++	return out
++}
++
++// lint returns one message per violation: a count-gated secret whose TF_VAR_ is
++// missing from the deploy workflow, or present but not wired to a secret
++// reference (e.g. a `TF_VAR_x: ""` literal, which destroys the secret just like
++// omitting it).
++func lint(secretsTF, deployYML string) []string {
++	passed := passedTFVars(deployYML)
++	var violations []string
++	for _, name := range countGated(secretsTF) {
++		value, ok := passed[name]
++		if !ok {
++			violations = append(violations, fmt.Sprintf(
++				"deploy-prod.yml is missing TF_VAR_%s — it's count-gated, so an omitted apply DESTROYS the secret + strips its Cloud Run env", name))
++			continue
++		}
++		if !strings.Contains(value, "secrets.") {
++			violations = append(violations, fmt.Sprintf(
++				"TF_VAR_%s is set to %q, not a ${{ secrets.* }} reference — an empty value destroys the secret", name, value))
++		}
++	}
++	return violations
++}
++
++func run() error {
++	secretsTFPath := flag.String("secrets-tf", defaultSecretsTF, "path to the prod secrets.tf")
++	deployPath := flag.String("deploy-workflow", defaultDeployWorkflow, "path to deploy-prod.yml")
++	flag.Parse()
++
++	secretsTF, err := os.ReadFile(*secretsTFPath)
++	if err != nil {
++		return fmt.Errorf("read secrets.tf: %w", err)
++	}
++	deployYML, err := os.ReadFile(*deployPath)
++	if err != nil {
++		return fmt.Errorf("read deploy workflow: %w", err)
++	}
++
++	gated := countGated(string(secretsTF))
++	if len(gated) == 0 {
++		// Fail loud: a lint that finds no secrets is worse than none — it would
++		// pass everything. Almost certainly a wrong --secrets-tf path.
++		return fmt.Errorf("no count-gated secrets found in %s — check the path", *secretsTFPath)
++	}
++
++	violations := lint(string(secretsTF), string(deployYML))
++	if len(violations) > 0 {
++		fmt.Fprintf(os.Stderr,
++			"deploy-secret-lint: %d violation(s) — every count-gated prod secret must be passed to terraform apply:\n",
++			len(violations))
++		for _, v := range violations {
++			fmt.Fprintf(os.Stderr, "  - %s\n", v)
++		}
++		return fmt.Errorf("%d count-gated secret(s) not wired in %s", len(violations), *deployPath)
++	}
++
++	fmt.Printf("deploy-secret-lint: OK — all %d count-gated prod secrets are passed to terraform apply (%s)\n",
++		len(gated), strings.Join(gated, ", "))
++	return nil
++}
++
++func main() {
++	if err := run(); err != nil {
++		fmt.Fprintln(os.Stderr, "deploy-secret-lint:", err)
++		os.Exit(1)
++	}
++}
+diff --git a/cmd/deploy-secret-lint/main_test.go b/cmd/deploy-secret-lint/main_test.go
+new file mode 100644
+index 0000000..a92673e
+--- /dev/null
++++ b/cmd/deploy-secret-lint/main_test.go
+@@ -0,0 +1,119 @@
++package main
++
++import (
++	"strings"
++	"testing"
++)
++
++// A representative prod secrets.tf: four count-gated secrets (each as the
++// secret + its version, both gated) plus an UNGATED database_url.
++const secretsTF4 = `
++resource "google_secret_manager_secret" "database_url" {
++  secret_id = "roxiq-database-url-prod"
++}
++resource "google_secret_manager_secret" "sentry_dsn" {
++  count     = var.sentry_dsn == "" ? 0 : 1
++  secret_id = "roxiq-sentry-dsn-prod"
++}
++resource "google_secret_manager_secret_version" "sentry_dsn" {
++  count  = var.sentry_dsn == "" ? 0 : 1
++  secret = google_secret_manager_secret.sentry_dsn[0].id
++}
++resource "google_secret_manager_secret" "slack_webhook_url" {
++  count = var.slack_webhook_url == "" ? 0 : 1
++}
++resource "google_secret_manager_secret" "subscriber_slack_webhook_url" {
++  count = var.subscriber_slack_webhook_url == "" ? 0 : 1
++}
++resource "google_secret_manager_secret" "vercel_drain_secret" {
++  count = var.vercel_drain_secret == "" ? 0 : 1
++}
++`
++
++// A deploy-prod.yml apply-step env block passing all four (mirrors the real file).
++const deployOK = `
++        env:
++          TF_VAR_database_url: ${{ secrets.PROD_DATABASE_URL }}
++          TF_VAR_sentry_dsn: ${{ secrets.PROD_SENTRY_DSN }}
++          TF_VAR_slack_webhook_url: ${{ secrets.PROD_SLACK_WEBHOOK_URL }}
++          TF_VAR_subscriber_slack_webhook_url: ${{ secrets.PROD_SUBSCRIBER_SLACK_WEBHOOK_URL }}
++          TF_VAR_vercel_drain_secret: ${{ secrets.PROD_VERCEL_DRAIN_SECRET }}
++`
++
++func TestCountGated(t *testing.T) {
++	got := strings.Join(countGated(secretsTF4), ",")
++	want := "sentry_dsn,slack_webhook_url,subscriber_slack_webhook_url,vercel_drain_secret"
++	if got != want {
++		t.Fatalf("countGated = %q, want %q (database_url is ungated and must be excluded)", got, want)
++	}
++}
++
++func TestLint(t *testing.T) {
++	tests := []struct {
++		name      string
++		secretsTF string
++		deployYML string
++		wantViol  int
++		wantName  string // a secret name expected in the violation messages
++	}{
++		{
++			name:      "all four present passes (the current-main case)",
++			secretsTF: secretsTF4,
++			deployYML: deployOK,
++			wantViol:  0,
++		},
++		{
++			name:      "dropped vercel_drain_secret is caught (the §11 fixture)",
++			secretsTF: secretsTF4,
++			deployYML: strings.ReplaceAll(deployOK,
++				"          TF_VAR_vercel_drain_secret: ${{ secrets.PROD_VERCEL_DRAIN_SECRET }}\n", ""),
++			wantViol: 1,
++			wantName: "vercel_drain_secret",
++		},
++		{
++			name:      "commented-out secret reads as omitted",
++			secretsTF: secretsTF4,
++			deployYML: strings.ReplaceAll(deployOK,
++				"          TF_VAR_vercel_drain_secret:", "          # TF_VAR_vercel_drain_secret:"),
++			wantViol: 1,
++			wantName: "vercel_drain_secret",
++		},
++		{
++			name:      "empty-string literal is caught",
++			secretsTF: secretsTF4,
++			deployYML: strings.ReplaceAll(deployOK,
++				"${{ secrets.PROD_VERCEL_DRAIN_SECRET }}", `""`),
++			wantViol: 1,
++			wantName: "vercel_drain_secret",
++		},
++		{
++			name: "a newly-added count-gated secret without a TF_VAR is caught (self-maintaining)",
++			secretsTF: secretsTF4 + `
++resource "google_secret_manager_secret" "new_secret" {
++  count = var.new_secret == "" ? 0 : 1
++}
++`,
++			deployYML: deployOK,
++			wantViol:  1,
++			wantName:  "new_secret",
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			got := lint(tt.secretsTF, tt.deployYML)
++			if len(got) != tt.wantViol {
++				t.Fatalf("lint returned %d violation(s), want %d: %v", len(got), tt.wantViol, got)
++			}
++			if tt.wantName == "" {
++				return
++			}
++			for _, v := range got {
++				if strings.Contains(v, tt.wantName) {
++					return
++				}
++			}
++			t.Errorf("expected a violation mentioning %q, got %v", tt.wantName, got)
++		})
++	}
++}
+diff --git a/docs/features/e2e-sanity-suite/spec.md b/docs/features/e2e-sanity-suite/spec.md
+index df374fd..1565c81 100644
+--- a/docs/features/e2e-sanity-suite/spec.md
++++ b/docs/features/e2e-sanity-suite/spec.md
+@@ -5,7 +5,7 @@
+ **Date:** 2026-06-13
+ **Related:** `features/observability-launch.md`, `features/cloud-run-deployment.md`, `features/sandbox-automation-v2.md`, `.github/workflows/pr-sanity.yml` (the existing PR sandbox gate Gate 1 extends — see §7), the drain-health diagnosis memo, [PR #116](https://github.com/itsHabib/roxiq/pull/116) (the Phase 0 fix, already shipped)
+ 
+-**v2 (2026-06-15):** folded in a multi-lens design review (22 confirmed findings). Material changes: rollback is now **image-based**, not a traffic pin (D4); the 404 signal is **split by response body** (disabled-secret vs missing-route) and a compound `404 + 5xx` row added (§7); the pre-merge check **generalizes to all six count-gated prod secrets** + a workflow-file lint (§9); Gate 1 **extends the existing `pr-sanity.yml`** rather than adding a rival workflow (§7/§9); v1 is **HTTP-only** (frontend-route/prod-DB checks deferred until their host/role exist) (§2, §9); sandbox drain wiring is now **Phase 1 task #1** so the validation gate can actually run (§9/§11).
++**v2 (2026-06-15):** folded in a multi-lens design review (22 confirmed findings). Material changes: rollback is now **image-based**, not a traffic pin (D4); the 404 signal is **split by response body** (disabled-secret vs missing-route) and a compound `404 + 5xx` row added (§7); the pre-merge check **generalizes to all four count-gated prod secrets (derived from `secrets.tf`)** via a workflow-file lint (§9); Gate 1 **extends the existing `pr-sanity.yml`** rather than adding a rival workflow (§7/§9); v1 is **HTTP-only** (frontend-route/prod-DB checks deferred until their host/role exist) (§2, §9); sandbox drain wiring is now **Phase 1 task #1** so the validation gate can actually run (§9/§11).
+ 
+ **v3 (2026-06-16):** widened from a narrow HTTP-only *detector* to a **deployed-env gate system**. The "suite" is a **workflow-level composition** — the Go HTTP/contract runner (`cmd/sanity`, Phase 1, **shipped**) **plus** the existing Playwright browser e2e (`web/e2e`) re-pointed at the *deployed* URL — that (a) **blocks merges** pre-merge (sandbox) and (b) can **trigger a rollback** post-merge (prod), with the agent decision layer still **last** (D1, §9). Playwright stays *out of the Go binary* (D5 holds) and joins at the gate (D10). **Phase 1 is DONE** (PRs [#118](https://github.com/itsHabib/roxiq/pull/118)/[#119](https://github.com/itsHabib/roxiq/pull/119)/[#120](https://github.com/itsHabib/roxiq/pull/120)); the §11 drill is the gate that flips the deterministic suite to blocking. The v2 "deliberately narrow / not a Playwright replacement" framing is superseded: the HTTP detector was the *cheapest-first slice*, not the whole system — the gate now **composes** HTTP + browser.
+ 
+@@ -235,7 +235,7 @@ Re-cut around proof-of-value: cheapest thesis-proving work first, the **agent la
+ |---|---|---|---|---|
+ | **0 — Stop the bleed (DONE)** | The cause is fixed + a deploy-time 404 guard exists | ✅ `deploy-prod.yml` passes `TF_VAR_vercel_drain_secret`; ✅ drain 403-not-404 smoke ([PR #116](https://github.com/itsHabib/roxiq/pull/116)). Operator: add `PROD_VERCEL_DRAIN_SECRET` repo secret. | — | shipped |
+ | **1 — HTTP suite + post-merge verify (advisory) — ✅ DONE** | `cmd/sanity` runs against prod after every deploy, advisory | ✅ shipped (PRs [#118](https://github.com/itsHabib/roxiq/pull/118)/[#119](https://github.com/itsHabib/roxiq/pull/119)/[#120](https://github.com/itsHabib/roxiq/pull/120)): `internal/drainsig` (shared HMAC); sandbox drain wiring; `cmd/sanity` + `internal/sanity` (HTTP v1 checks — health, athletes_search, leaderboards, **drain.unsigned_403 + body_kind**, tls.valid); `verify-prod.yml` (workflow_run, revision-identity gate @100%, prior-good image-tag capture, report artifact, advisory). | Phase 0 | **VALIDATION GATE (§11) — operator drill pending** |
+-| **2 — Blocking HTTP gate (auto) + Playwright-vs-deployed (advisory) + secret-drop lint** | Make the deterministic HTTP gate a *required* check; compose a curated browser subset as a separate advisory check; lint the cause | **Trigger model (load-bearing):** `pr-sanity.yml` is comment-only (`/sanity`) so it can't be a required check — gate the required **HTTP** check on an **auto `pull_request`** job (the `cmd/sanity` step, absent today), keep the **browser** run on `/sanity` **advisory** (D10, §10 Q10). **Net-new pre-merge work** (the browser run already exists at `pr-sanity.yml`): the `cmd/sanity` HTTP step + **port verify-prod's revision-identity guard** into `pr-sanity` + the **JSON reporter** + the **D6 scrub** over the Playwright artifact + **curate the deployed-safe subset** (`@deployed` tag, read-only). A **workflow-file lint** asserting `deploy-prod.yml` passes a `TF_VAR_*` for **every** count-gated prod secret (the real catch of the CI-omission cause); a `terraform plan` assertion that no currently-bound prod secret env disappears (all six). **Flip the HTTP suite to required once §11 passes**; the browser suite graduates on its OWN bar (Q6). Follow-ups: `e2e-sanity-playwright-vs-deployed`, `e2e-sanity-local-sandbox-apply-secret-drop`. | Phase 1 + §11 gate | — |
++| **2 — Blocking pre-merge gate = the static secret-drop lint + Playwright-vs-deployed (advisory)** | The required check is a cheap static lint, NOT a deployed probe (gate design **locked v3.2, 2026-06-20**, 5-agent pass) | **Decision (load-bearing):** the deployed HTTP suite needs a deployed target and the only per-PR deploy path (`pr-sanity`) is heavy+shared+serialized, so it is **NOT** the required pre-merge check. The required check is a **NEW static `deploy-secret-lint`** (`cmd/deploy-secret-lint` + `deploy-secret-lint.yml`, auto on `pull_request`, ~30s / $0 / no-GCP): assert `deploy-prod.yml` passes a `TF_VAR_*` for **every count-gated prod secret** — the **four** today (sentry_dsn, slack_webhook_url, subscriber_slack_webhook_url, vercel_drain_secret), **derived from `secrets.tf`** not hardcoded — the real catch of the CI-omission cause; mark it required in branch protection. The deployed HTTP/browser suite stays **on-demand** (extend `pr-sanity.yml`: advisory `cmd/sanity` step + ported verify-prod revision-identity guard + JSON reporter + D6 scrub + curated `@deployed` subset + shared `sandbox-mutate` key) and **post-merge** (`verify-prod`, flips to required after §11✓ + 20-green; browser suite graduates on its OWN bar, Q6). The `terraform plan` assertion is **demoted to advisory** (per-PR prod state read conflicts with the prod-access boundary). §11 for the lint = a unit-test fixture (dropped `TF_VAR_vercel_drain_secret` → red). Tasks: `e2e-sanity-deploy-secret-lint`, `e2e-sanity-require-deploy-secret-lint`, `e2e-sanity-playwright-vs-deployed`, `e2e-sanity-local-sandbox-apply-secret-drop`. | Phase 1 + §11 gate | — |
+ | **3 — Agent recommendation + notifier + rollback** | Results → structured recommendation; human-confirmed actions | agent-decide step (secret-free job); recommendation schema + decision matrix incl. the D7 fork + 404 body-split + compound row; `Notifier` seam (GH summary + comment, minimal-perm job); **`rollback-prod.yml` (image-redeploy, scoped SA, validated input)**; the signed-pipeline check **if** a `roxiq_sanity` cleanup role is chosen (D5); provision `roxiq_readonly` on prod main if DB checks are wanted | Phase 2 | — |
+ | **4 — Richer signals** | Slack notifier + live post-deploy watch | `SlackNotifier`; watch Cloud Run 5xx + drain-404 for first N min post-deploy and fold into the recommendation; image-GC workflow for `pr-*` tags | Phase 3 | — |
+ 
+@@ -249,7 +249,7 @@ Rough scope: Phase 1 shipped at ~1.1k weighted-LOC (HTTP runner + checks + verif
+ 2. **Sandbox drain wiring** — RESOLVED into Phase 1 task #1: wire a *separate* `SANDBOX_VERCEL_DRAIN_SECRET` (never reuse prod's key) so the validation drill can run. (Was open; the review showed §11 can't execute without it.)
+ 3. **Advisory → required graduation.** What flips the deterministic suite to a required branch-protection check? Proposed in §11 (20 green + drills). The *agent* check is never required (advisory by D1). Define a documented admin break-glass (solo repo, no second approver).
+ 4. **Agent invocation + model.** Which mechanism in GH Actions (Anthropic action vs headless `claude -p`), and Sonnet pre-merge / Opus post-merge? Cost is **TBD pending this** (§2). Run the agent **once per head SHA** to avoid push-burst re-billing.
+-5. **Prod readonly role + the pre-merge check's real value.** `roxiq_readonly` exists only on sandbox today — provision it on prod main before any Gate 2 DB probe, or keep v1 HTTP-only (chosen). And note: the pre-merge `terraform plan` assertion does **not** catch the motivating CI-omission bug (that's invisible to plan); the **workflow-file lint** (§9 Phase 2) is what catches it. The plan assertion only catches a PR that *edits the TF* to drop a binding — keep it for that, generalized to all six secrets, but don't oversell it.
++5. **Prod readonly role + the pre-merge check's real value.** `roxiq_readonly` exists only on sandbox today — provision it on prod main before any Gate 2 DB probe, or keep v1 HTTP-only (chosen). And note: the pre-merge `terraform plan` assertion does **not** catch the motivating CI-omission bug (that's invisible to plan); the **workflow-file lint** (§9 Phase 2) is what catches it. The plan assertion only catches a PR that *edits the TF* to drop a binding, and per-PR prod state access conflicts with the prod-access boundary — so it's **demoted to advisory** (v3.2). The load-bearing pre-merge catch is the static `deploy-secret-lint` over the **four** count-gated secrets (derived from `secrets.tf`), not the plan.
+ 
+ *New in v3 (the composition widening):*
+ 6. **Playwright-against-deployed flakiness vs the 20-green bar (§11).** A browser suite against a real deployed env is flakier than HTTP checks (network, cold starts, animation/hydration timing). Does it count toward the 20-green stability bar, or graduate on its **own** separate bar? Proposal: the deterministic HTTP suite flips to *required* first; the browser suite joins the required gate only after its own 20-green run, staying **advisory** until then.
+@@ -274,4 +274,4 @@ Binary go/no-go: *does a reproduced drain-secret drop in sandbox turn the suite
+ 
+ ---
+ 
+-*Created 2026-06-13. Synthesized from a multi-agent design + adversarial review pass (suite-runner, decision/notifier, both gates; reviewed for races/failure, security/cost, completeness/altitude). v2 2026-06-15 (multi-lens review). v3 2026-06-16 — widened to a **deployed-env gate system**: + Playwright composition at the gate (D10), the blocking-gate flip, Phase 1 marked shipped (#118–120), Q6–Q9 for the browser-suite flake budget. v3.1 2026-06-16 — folded in an 11-agent design review (verdict: **revise-then-lock**): corrected "reuse the whole web/e2e" → **curated deployed-safe subset** (the seed-coupled specs false-red on deployed), the **comment-only-trigger** gap (can't be a required check), the **inverted net-new framing** (the browser run already ships at `pr-sanity.yml`), and extended the **D6 secret scrub to the Playwright artifact**; resolved Q6–Q10.*
++*Created 2026-06-13. Synthesized from a multi-agent design + adversarial review pass (suite-runner, decision/notifier, both gates; reviewed for races/failure, security/cost, completeness/altitude). v2 2026-06-15 (multi-lens review). v3 2026-06-16 — widened to a **deployed-env gate system**: + Playwright composition at the gate (D10), the blocking-gate flip, Phase 1 marked shipped (#118–120), Q6–Q9 for the browser-suite flake budget. v3.1 2026-06-16 — folded in an 11-agent design review (verdict: **revise-then-lock**): corrected "reuse the whole web/e2e" → **curated deployed-safe subset** (the seed-coupled specs false-red on deployed), the **comment-only-trigger** gap (can't be a required check), the **inverted net-new framing** (the browser run already ships at `pr-sanity.yml`), and extended the **D6 secret scrub to the Playwright artifact**; resolved Q6–Q10. v3.2 2026-06-20 — **gate-mechanism design pass (5 agents)**: the blocking pre-merge required check is the cheap static `deploy-secret-lint`, NOT a deployed probe (the deployed suite needs a target and the only per-PR deploy path is heavy+shared+serialized — it stays on-demand `/sanity` + post-merge `verify-prod`); the secret set is **derived from `secrets.tf`**, correcting "six" → **four** count-gated prod secrets; the pre-merge `terraform plan` assertion is **demoted to advisory** (per-PR prod state access conflicts with the prod-access boundary). §9 Phase 2, §10 Q5.*

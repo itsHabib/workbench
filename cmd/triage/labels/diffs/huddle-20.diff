@@ -1,0 +1,235 @@
+diff --git a/.gitignore b/.gitignore
+index 1c3e300..fe0329c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -12,6 +12,7 @@
+ /bin/
+ 
+ # Local state
++.huddle/
+ .huddle-state/
+ *.sqlite
+ *.sqlite-journal
+diff --git a/README.md b/README.md
+index 815eea6..78cb66a 100644
+--- a/README.md
++++ b/README.md
+@@ -32,7 +32,7 @@ Set the Slack token (plus any optional overrides), then start the stdio MCP serv
+ 
+ ```sh
+ export HUDDLE_SLACK_BOT_TOKEN=xoxb-...          # required for create/close/post/read
+-export HUDDLE_STATE_DIR=~/.huddle               # optional; default ./.huddle-state
++export HUDDLE_STATE_DIR=~/.huddle               # optional; default .huddle (in cwd)
+ export HUDDLE_ORCHESTRATOR_SLACK_USER_ID=U...   # optional; auto-invite operator to new channels
+ 
+ make run   # same as go run ./cmd/huddle
+diff --git a/cmd/huddle/main.go b/cmd/huddle/main.go
+index df9c33c..046e62f 100644
+--- a/cmd/huddle/main.go
++++ b/cmd/huddle/main.go
+@@ -73,6 +73,8 @@ func run(args []string) int {
+ 		}
+ 	}()
+ 
++	logStoreReady(log, st)
++
+ 	slackAdapter := slack.NewAdapter(cfg)
+ 	deps := server.Deps{
+ 		Slack: slackAdapter,
+@@ -96,3 +98,25 @@ func run(args []string) int {
+ 
+ 	return 0
+ }
++
++// logStoreReady records the resolved state directory and DB path at startup so a
++// misconfigured HUDDLE_STATE_DIR (e.g. a stale MCP process pointed at the wrong
++// dir) is obvious instead of silent. It also warns on the two telltales: an unset
++// env var (path resolved from cwd) and a brand-new empty database.
++func logStoreReady(log *slog.Logger, st *store.Store) {
++	active, err := st.ListHuddles(context.Background(), true)
++	if err != nil {
++		log.Warn("count active huddles at startup", slog.String("error", err.Error()))
++	}
++
++	log.Info("store ready",
++		slog.String("state_dir", st.StateDir()),
++		slog.String("db_path", st.DBPath()),
++		slog.Int("active_huddles", len(active)),
++	)
++
++	if st.CreatedFreshDB() {
++		log.Warn("opened a brand-new empty huddle database; if you expected existing huddles, HUDDLE_STATE_DIR is likely pointing at the wrong directory",
++			slog.String("state_dir", st.StateDir()))
++	}
++}
+diff --git a/docs/design.md b/docs/design.md
+index 076a9b9..d98cab1 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -359,7 +359,7 @@ CREATE INDEX IF NOT EXISTS idx_keys_huddle  ON keys(huddle_id);
+ CREATE INDEX IF NOT EXISTS idx_keys_active  ON keys(key) WHERE revoked_at IS NULL;
+ ```
+ 
+-DB location: `${HUDDLE_STATE_DIR:-pers/huddle-state}/huddle.sqlite`.
++DB location: `${HUDDLE_STATE_DIR:-.huddle}/huddle.sqlite` (the code default, in the working directory). Override `HUDDLE_STATE_DIR` to relocate it; the canonical deployment pins an absolute path in the MCP server config.
+ 
+ Migrations: schema file applied idempotently at startup via `CREATE ... IF NOT EXISTS`. No migration tool for v0; if schema evolves, write `0002_*.sql` files and an applied-migrations table.
+ 
+@@ -370,7 +370,7 @@ Env vars loaded by `internal/config/config.go`:
+ | Variable | Required | Default | Notes |
+ |---|---|---|---|
+ | `HUDDLE_SLACK_BOT_TOKEN` | per-verb | — | Slack bot token (`xoxb-...`). Required for `huddle.create` / `.close` / `.post` / `.read`. `huddle.who_else` is local-only and works without it; the server boots regardless. |
+-| `HUDDLE_STATE_DIR` | no | `./.huddle-state` | Where `huddle.sqlite` lives |
++| `HUDDLE_STATE_DIR` | no | `.huddle` | Where `huddle.sqlite` lives (in cwd unless overridden) |
+ | `HUDDLE_LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
+ | `HUDDLE_CHANNEL_PREFIX` | no | `huddle-` | Prefix for created Slack channels |
+ | `HUDDLE_ORCHESTRATOR_SLACK_USER_ID` | no | — | If set, auto-invites this Slack user (`U…`) to every channel `huddle.create` opens. Best-effort: invite failure is logged, not propagated. |
+diff --git a/docs/tasks/foundation.md b/docs/tasks/foundation.md
+index 008826b..92f6201 100644
+--- a/docs/tasks/foundation.md
++++ b/docs/tasks/foundation.md
+@@ -73,7 +73,7 @@ Interface separation so handlers can test against a fake.
+ 
+ ### 5. Config + errors + types (`internal/{config,errors,types}/`)
+ 
+-- `config/config.go` — env loading per design doc § Configuration. Required: `HUDDLE_SLACK_BOT_TOKEN`. Optional with defaults: `HUDDLE_STATE_DIR` (default `./.huddle-state`), `HUDDLE_LOG_LEVEL` (default `info`), `HUDDLE_CHANNEL_PREFIX` (default `huddle-`). Validation returns a typed error; main exits with a clear message on missing required vars.
++- `config/config.go` — env loading per design doc § Configuration. Required: `HUDDLE_SLACK_BOT_TOKEN`. Optional with defaults: `HUDDLE_STATE_DIR` (default `.huddle`), `HUDDLE_LOG_LEVEL` (default `info`), `HUDDLE_CHANNEL_PREFIX` (default `huddle-`). Validation returns a typed error; main exits with a clear message on missing required vars.
+ - `errors/errors.go` — typed errors:
+   - `ErrKeyInvalid`, `ErrHuddleNotFound`, `ErrHuddleClosed`, `ErrSlackRateLimited`, `ErrSlackMissingScope`, `ErrStorageFailure`.
+   - Helper `MCPError(code, err) *mcp.CallToolResult` mapping to `-32602` / `-32603` per design doc § Error handling.
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 328a0b0..6c06640 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -15,7 +15,7 @@ const (
+ 	envLogLevel                = "HUDDLE_LOG_LEVEL"
+ 	envChannelPrefix           = "HUDDLE_CHANNEL_PREFIX"
+ 	envOrchestratorSlackUserID = "HUDDLE_ORCHESTRATOR_SLACK_USER_ID"
+-	defaultStateDir            = "./.huddle-state"
++	defaultStateDir            = ".huddle"
+ 	defaultLogLevel            = "info"
+ 	defaultChanPrefix          = "huddle-"
+ )
+@@ -39,6 +39,10 @@ type Config struct {
+ func Load() (Config, error) {
+ 	token := strings.TrimSpace(os.Getenv(envSlackBotToken))
+ 
++	// State dir defaults to .huddle in the working directory; set HUDDLE_STATE_DIR
++	// to override (the MCP server config pins an absolute path). The default is
++	// resolved against cwd at store.New time, and cmd/huddle logs the resolved
++	// absolute path at startup so the location is never a mystery.
+ 	stateDir := strings.TrimSpace(os.Getenv(envStateDir))
+ 	if stateDir == "" {
+ 		stateDir = defaultStateDir
+diff --git a/internal/store/db.go b/internal/store/db.go
+index 5e76f51..e2b3e92 100644
+--- a/internal/store/db.go
++++ b/internal/store/db.go
+@@ -23,7 +23,10 @@ var schemaSQL string
+ 
+ // Store wraps SQLite access with small domain helpers.
+ type Store struct {
+-	db *sql.DB
++	db       *sql.DB
++	stateDir string // resolved absolute state directory
++	dbPath   string // resolved absolute path to huddle.sqlite
++	freshDB  bool   // New created a brand-new empty database file
+ }
+ 
+ // sqliteDSN converts a filesystem path into a SQLite DSN understood by modernc.org/sqlite.
+@@ -46,12 +49,23 @@ func New(stateDir string) (*Store, error) {
+ 		return nil, absErr
+ 	}
+ 
++	absStateDir, absDirErr := filepath.Abs(stateDir)
++	if absDirErr != nil {
++		return nil, absDirErr
++	}
++
++	// MkdirAll above created only the directory, not the DB file, so an absent
++	// file here means we're about to create a brand-new database. A fresh DB
++	// alongside zero huddles is the classic sign HUDDLE_STATE_DIR is wrong.
++	_, statErr := os.Stat(absPath)
++	freshDB := os.IsNotExist(statErr)
++
+ 	db, err := sql.Open("sqlite", sqliteDSN(absPath))
+ 	if err != nil {
+ 		return nil, fmt.Errorf("open sqlite: %w", err)
+ 	}
+ 
+-	s := &Store{db: db}
++	s := &Store{db: db, stateDir: absStateDir, dbPath: absPath, freshDB: freshDB}
+ 	if err = s.ApplySchema(context.Background()); err != nil {
+ 		closeErr := s.Close()
+ 
+@@ -145,3 +159,20 @@ func (s *Store) Close() error {
+ 
+ 	return err
+ }
++
++// StateDir returns the resolved absolute state directory backing this store.
++func (s *Store) StateDir() string {
++	return s.stateDir
++}
++
++// DBPath returns the resolved absolute path to the SQLite database file.
++func (s *Store) DBPath() string {
++	return s.dbPath
++}
++
++// CreatedFreshDB reports whether New created a brand-new empty database (no
++// huddle.sqlite existed at the resolved path). A true value together with zero
++// existing huddles is the classic sign HUDDLE_STATE_DIR points at the wrong dir.
++func (s *Store) CreatedFreshDB() bool {
++	return s.freshDB
++}
+diff --git a/internal/store/db_test.go b/internal/store/db_test.go
+new file mode 100644
+index 0000000..f7842b6
+--- /dev/null
++++ b/internal/store/db_test.go
+@@ -0,0 +1,44 @@
++package store
++
++import (
++	"path/filepath"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++// TestNewExposesResolvedAbsolutePaths verifies the store reports the resolved
++// absolute state dir and DB path it actually opened — the values cmd/huddle
++// logs at startup so a wrong HUDDLE_STATE_DIR is never silent.
++func TestNewExposesResolvedAbsolutePaths(t *testing.T) {
++	t.Parallel()
++
++	dir := t.TempDir()
++	st, err := New(dir)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, st.Close()) })
++
++	require.True(t, filepath.IsAbs(st.StateDir()), "state dir should be absolute")
++	require.True(t, filepath.IsAbs(st.DBPath()), "db path should be absolute")
++	require.Equal(t, "huddle.sqlite", filepath.Base(st.DBPath()))
++	require.Equal(t, st.StateDir(), filepath.Dir(st.DBPath()))
++}
++
++// TestNewReportsFreshThenExistingDB verifies CreatedFreshDB is true only when
++// New had to create a brand-new database file, and false once the file exists.
++// A fresh DB alongside zero huddles is the classic "wrong state dir" symptom.
++func TestNewReportsFreshThenExistingDB(t *testing.T) {
++	t.Parallel()
++
++	dir := t.TempDir()
++
++	first, err := New(dir)
++	require.NoError(t, err)
++	require.True(t, first.CreatedFreshDB(), "first open of an empty dir should create a fresh DB")
++	require.NoError(t, first.Close())
++
++	second, err := New(dir)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, second.Close()) })
++	require.False(t, second.CreatedFreshDB(), "second open should find the existing DB")
++}

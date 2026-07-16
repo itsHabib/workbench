@@ -1,0 +1,1039 @@
+diff --git a/packages/cli/src/format.ts b/packages/cli/src/format.ts
+index 8d32002..91e3ae9 100644
+--- a/packages/cli/src/format.ts
++++ b/packages/cli/src/format.ts
+@@ -249,6 +249,7 @@ type StreamTierDiagnosticInput = Parameters<typeof formatStreamTierDiagnostic>[0
+ 
+ function requestedTierFields(stream: DriverStream): StreamTierDiagnosticInput {
+   return {
++    ...(stream.provider !== undefined && { provider: stream.provider }),
+     ...(stream.modelTier !== undefined && { modelTier: stream.modelTier }),
+     ...(stream.effortTier !== undefined && { effortTier: stream.effortTier }),
+   };
+diff --git a/packages/driver/src/engine.test.ts b/packages/driver/src/engine.test.ts
+index 065cbb9..cdc6629 100644
+--- a/packages/driver/src/engine.test.ts
++++ b/packages/driver/src/engine.test.ts
+@@ -9,10 +9,12 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
+ import type { DriverStreamView } from "./types.js";
+ 
+ import {
++  buildShipInputForTest,
+   isTickLive,
+   resolveDocPath,
+   resolveRepoRoot,
+   resolveRunawayBackstopMs,
++  resolveRunOpts,
+   shouldGiveUpTick,
+ } from "./engine.js";
+ import { TickLiveError } from "./errors.js";
+@@ -20,6 +22,8 @@ import { type DispatchAmbiguity, recoverDispatchingStreams } from "./judgment.js
+ import { createDriverService } from "./service.js";
+ import { createFakeShipPort } from "./test/fake-ship-port.js";
+ 
++const noopProgress = (): void => undefined;
++
+ describe("driver engine", () => {
+   let tmpDir: string;
+   let repoRoot: string;
+@@ -666,6 +670,191 @@ batches:
+     expect(start?.input).not.toHaveProperty("modelParams");
+     store.close();
+   });
++
++  test("claude cloud stream dispatches provider and prBranch on ShipInput", async () => {
++    writeFileSync(
++      manifestPath,
++      `---
++driver_version: 1
++generated_at: 2026-07-02T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: claude-cloud-dispatch
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/tasks/a.md
++        branch_name: feat-claude
++        runtime: cloud
++        provider: claude
++        model: opus
++        status: pending
++---
++`,
++    );
++    const docA = resolveDocPath(repoRoot, "docs/tasks/a.md");
++    const fake = createFakeShipPort([
++      { docPath: docA, repo: "ship", workflowRunId: "wf_claude_cloud" },
++    ]);
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({ ship: fake.port, store });
++    const imported = driver.importManifest(manifestPath);
++
++    await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
++
++    const start = fake.calls.find((c) => c.kind === "startShip");
++    expect(start?.input).toMatchObject({
++      provider: "claude",
++      runtime: "cloud",
++      cloud: {
++        repos: [{ url: "https://github.com/example/ship", prBranch: "feat-claude" }],
++      },
++    });
++
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.provider).toBe("claude");
++    expect(stream?.dispatchProvider).toBe("claude");
++    store.close();
++  });
++});
++
++describe("buildShipInputForTest", () => {
++  let tmpDir: string;
++  let repoRoot: string;
++  let store: ReturnType<typeof createStore>;
++
++  beforeEach(() => {
++    tmpDir = mkdtempSync(join(tmpdir(), "driver-ship-input-"));
++    repoRoot = join(tmpDir, "repo");
++    mkdirSync(join(repoRoot, ".git"), { recursive: true });
++    store = createStore({ dbPath: ":memory:" });
++  });
++
++  afterEach(() => {
++    store.close();
++    rmSync(tmpDir, { force: true, recursive: true });
++  });
++
++  test("forwards provider and prBranch when set on claude cloud stream", () => {
++    const runId = newDriverRunId();
++    const batchId = newDriverBatchId();
++    const streamId = newDriverStreamId();
++    store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: batchId,
++          status: "pending",
++          streams: [
++            {
++              attempts: [],
++              branch: "feat-claude",
++              id: streamId,
++              provider: "claude",
++              runtime: "cloud",
++              specPath: "docs/a.md",
++              status: "pending",
++              streamIndex: 0,
++              touches: [],
++            },
++          ],
++        },
++      ],
++      id: runId,
++      manifestPath: join(repoRoot, "driver.md"),
++      repo: "ship",
++      sourceJson: "---\ndriver_version: 1\nrepo_url: https://github.com/example/ship\n---\n",
++      status: "pending",
++    });
++
++    const stream = store.getDriverRun(runId)?.batches[0]?.streams[0];
++    expect(stream).toBeDefined();
++    const input = buildShipInputForTest(
++      {
++        clock: () => 0,
++        cloudInFlight: 0,
++        localInFlight: 0,
++        onProgress: noopProgress,
++        opts: resolveRunOpts(),
++        repoRoot,
++        repoUrl: "https://github.com/example/ship",
++        runId,
++        ship: createFakeShipPort([]).port,
++        store,
++      },
++      stream!,
++      "docs/a.md",
++    );
++    expect(input).toMatchObject({
++      provider: "claude",
++      runtime: "cloud",
++      cloud: { repos: [{ url: "https://github.com/example/ship", prBranch: "feat-claude" }] },
++    });
++  });
++
++  test("omits provider when unset so ShipInput matches legacy cursor shape", () => {
++    const runId = newDriverRunId();
++    const batchId = newDriverBatchId();
++    const streamId = newDriverStreamId();
++    mkdirSync(join(repoRoot, ".claude", "worktrees", "feat-a"), { recursive: true });
++    store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: batchId,
++          status: "pending",
++          streams: [
++            {
++              attempts: [],
++              branch: "feat-a",
++              id: streamId,
++              runtime: "local",
++              specPath: "docs/a.md",
++              status: "pending",
++              streamIndex: 0,
++              touches: [],
++            },
++          ],
++        },
++      ],
++      id: runId,
++      manifestPath: join(repoRoot, "driver.md"),
++      repo: "ship",
++      sourceJson: "---\ndriver_version: 1\n---\n",
++      status: "pending",
++    });
++
++    const stream = store.getDriverRun(runId)?.batches[0]?.streams[0];
++    expect(stream).toBeDefined();
++    const input = buildShipInputForTest(
++      {
++        clock: () => 0,
++        cloudInFlight: 0,
++        localInFlight: 0,
++        onProgress: noopProgress,
++        opts: resolveRunOpts(),
++        repoRoot,
++        repoUrl: undefined,
++        runId,
++        ship: createFakeShipPort([]).port,
++        store,
++      },
++      stream!,
++      "docs/a.md",
++    );
++    expect(input).not.toHaveProperty("provider");
++    expect(input).toMatchObject({
++      branch: "feat-a",
++      runtime: "local",
++      workdir: join(repoRoot, ".claude", "worktrees", "feat-a"),
++    });
++  });
+ });
+ 
+ describe("liveness-aware tick give-up", () => {
+diff --git a/packages/driver/src/engine.ts b/packages/driver/src/engine.ts
+index 6b94a3e..2c29716 100644
+--- a/packages/driver/src/engine.ts
++++ b/packages/driver/src/engine.ts
+@@ -463,18 +463,15 @@ async function dispatchStream(ctx: DispatchContext, stream: DriverStream): Promi
+     terminal: false,
+   };
+   const attempts = [...stream.attempts, attempt];
+-  const tierMapping = mapTierToDispatch(
+-    DEFAULT_DISPATCH_PROVIDER,
+-    stream.modelTier,
+-    stream.effortTier,
+-  );
++  const provider = stream.provider ?? DEFAULT_DISPATCH_PROVIDER;
++  const tierMapping = mapTierToDispatch(provider, stream.modelTier, stream.effortTier);
+ 
+   ctx.store.updateDriverStream(stream.id, {
+     attempts,
+     status: "dispatching",
+-    ...tierDispatchPatch(DEFAULT_DISPATCH_PROVIDER, tierMapping),
++    ...tierDispatchPatch(provider, tierMapping),
+   });
+-  const input = buildShipInput(ctx, stream, docPath, tierMapping);
++  const input = buildShipInput(ctx, stream, docPath, provider, tierMapping);
+   return dispatchStartShip({
+     baseAttempts: attempts,
+     input,
+@@ -522,6 +519,7 @@ function buildShipInput(
+   ctx: DispatchContext,
+   stream: DriverStream,
+   docPath: string,
++  provider: AgentProvider,
+   tierMapping?: TierDispatchResult,
+ ): ShipInput {
+   let input: ShipInput;
+@@ -533,6 +531,10 @@ function buildShipInput(
+     if (repoUrl === undefined) {
+       throw new PreconditionError(`cloud stream ${stream.id} requires repo_url in manifest`);
+     }
++    const repoEntry: NonNullable<ShipInput["cloud"]>["repos"][number] = { url: repoUrl };
++    if (stream.provider === "claude" && stream.branch !== undefined) {
++      repoEntry.prBranch = stream.branch;
++    }
+     input = {
+       docPath,
+       repo: loadRun(ctx.store, ctx.runId).repo,
+@@ -540,7 +542,7 @@ function buildShipInput(
+       cloud: {
+         autoCreatePR: true,
+         env: { type: "cloud" },
+-        repos: [{ url: repoUrl }],
++        repos: [repoEntry],
+         workOnCurrentBranch: false,
+       },
+     };
+@@ -557,6 +559,9 @@ function buildShipInput(
+       workdir: join(ctx.repoRoot, ".claude", "worktrees", branch),
+     };
+   }
++  if (stream.provider !== undefined) {
++    input = { ...input, provider: stream.provider };
++  }
+   return applyTierMapping(input, tierMapping);
+ }
+ 
+@@ -598,12 +603,9 @@ export function buildShipInputForTest(
+   stream: DriverStream,
+   docPath: string,
+ ): ShipInput {
+-  const tierMapping = mapTierToDispatch(
+-    DEFAULT_DISPATCH_PROVIDER,
+-    stream.modelTier,
+-    stream.effortTier,
+-  );
+-  return buildShipInput(ctx, stream, docPath, tierMapping);
++  const provider = stream.provider ?? DEFAULT_DISPATCH_PROVIDER;
++  const tierMapping = mapTierToDispatch(provider, stream.modelTier, stream.effortTier);
++  return buildShipInput(ctx, stream, docPath, provider, tierMapping);
+ }
+ 
+ function markLatestAttemptWorkflowRunId(
+diff --git a/packages/driver/src/import.test.ts b/packages/driver/src/import.test.ts
+index 8783714..782e287 100644
+--- a/packages/driver/src/import.test.ts
++++ b/packages/driver/src/import.test.ts
+@@ -237,3 +237,121 @@ describe("importManifest tier threading", () => {
+     rmSync(dir, { force: true, recursive: true });
+   });
+ });
++
++describe("importManifest provider threading", () => {
++  let store: Store;
++
++  beforeEach(() => {
++    store = createStore({ dbPath: ":memory:" });
++  });
++
++  afterEach(() => {
++    store.close();
++  });
++
++  it("persists resolved provider on stream rows", () => {
++    const dir = mkdtempSync(join(tmpdir(), "ship-import-provider-"));
++    const path = join(dir, "driver.md");
++    writeFileSync(
++      path,
++      [
++        "---",
++        "driver_version: 1",
++        "generated_at: 2026-07-02T00:00:00Z",
++        "generated_by: test",
++        "source:",
++        "  project: ship",
++        "  phase: provider-test",
++        "repo: ship",
++        "default_provider: claude",
++        "batches:",
++        "  - id: 1",
++        "    depends_on: []",
++        "    streams:",
++        "      - spec_path: docs/a.md",
++        "        branch_name: feat-a",
++        "        provider: codex",
++        "      - spec_path: docs/b.md",
++        "        branch_name: feat-b",
++        "---",
++      ].join("\n"),
++      "utf8",
++    );
++
++    const { run } = importManifest(store, path);
++    const streams = run.batches[0]?.streams ?? [];
++    expect(streams[0]?.provider).toBe("codex");
++    expect(streams[1]?.provider).toBe("claude");
++    rmSync(dir, { force: true, recursive: true });
++  });
++
++  it("rejects codex provider with cloud runtime at import", () => {
++    const dir = mkdtempSync(join(tmpdir(), "ship-import-codex-cloud-"));
++    const path = join(dir, "driver.md");
++    writeFileSync(
++      path,
++      [
++        "---",
++        "driver_version: 1",
++        "generated_at: 2026-07-02T00:00:00Z",
++        "generated_by: test",
++        "source:",
++        "  project: ship",
++        "  phase: codex-cloud",
++        "repo: ship",
++        "repo_url: https://github.com/example/ship",
++        "batches:",
++        "  - id: 1",
++        "    depends_on: []",
++        "    streams:",
++        "      - spec_path: docs/a.md",
++        "        task_slug: codex-cloud-task",
++        "        provider: codex",
++        "        runtime: cloud",
++        "---",
++      ].join("\n"),
++      "utf8",
++    );
++
++    expect(() => importManifest(store, path)).toThrow(ImportManifestError);
++    expect(() => importManifest(store, path)).toThrow(/codex-cloud-task/);
++    expect(() => importManifest(store, path)).toThrow(
++      /codex provider supports only runtime 'local'/,
++    );
++    rmSync(dir, { force: true, recursive: true });
++  });
++
++  it("rejects claude cloud stream without branch_name at import", () => {
++    const dir = mkdtempSync(join(tmpdir(), "ship-import-claude-cloud-"));
++    const path = join(dir, "driver.md");
++    writeFileSync(
++      path,
++      [
++        "---",
++        "driver_version: 1",
++        "generated_at: 2026-07-02T00:00:00Z",
++        "generated_by: test",
++        "source:",
++        "  project: ship",
++        "  phase: claude-cloud",
++        "repo: ship",
++        "repo_url: https://github.com/example/ship",
++        "batches:",
++        "  - id: 1",
++        "    depends_on: []",
++        "    streams:",
++        "      - spec_path: docs/a.md",
++        "        task_slug: claude-cloud-task",
++        "        provider: claude",
++        "        runtime: cloud",
++        "---",
++      ].join("\n"),
++      "utf8",
++    );
++
++    expect(() => importManifest(store, path)).toThrow(ImportManifestError);
++    expect(() => importManifest(store, path)).toThrow(/claude-cloud-task/);
++    expect(() => importManifest(store, path)).toThrow(/requires branch_name/);
++    rmSync(dir, { force: true, recursive: true });
++  });
++});
+diff --git a/packages/driver/src/import.ts b/packages/driver/src/import.ts
+index 7361628..c455a2c 100644
+--- a/packages/driver/src/import.ts
++++ b/packages/driver/src/import.ts
+@@ -5,6 +5,7 @@
+ import type { Store } from "@ship/store";
+ import type { DriverRun } from "@ship/store";
+ import type { DriverBatchStatus } from "@ship/store";
++import type { AgentProvider } from "@ship/workflow";
+ 
+ import { newDriverBatchId, newDriverRunId, newDriverStreamId } from "@ship/store";
+ import { readFileSync } from "node:fs";
+@@ -15,6 +16,7 @@ import { parseManifest } from "./manifest.js";
+ import {
+   manifestBatchStatusToStore,
+   manifestStatusToStore,
++  resolveStreamProvider,
+   resolveStreamTier,
+ } from "./status-mapping.js";
+ 
+@@ -62,13 +64,22 @@ export function importManifest(store: Store, manifestPath: string): ImportManife
+     return { alreadyImported: true, run: existing, ...warningExtras };
+   }
+ 
++  const providerErrors = collectProviderValidationErrors(
++    manifest.batches,
++    manifest.default_runtime,
++    manifest.default_provider,
++  );
++  if (providerErrors.length > 0) {
++    throw new ImportManifestError(providerErrors);
++  }
++
+   const batches = manifest.batches.map((batch) =>
+-    buildBatchInput(
+-      batch,
+-      manifest.default_runtime,
+-      manifest.default_model,
+-      manifest.default_effort,
+-    ),
++    buildBatchInput(batch, {
++      defaultEffort: manifest.default_effort,
++      defaultModel: manifest.default_model,
++      defaultProvider: manifest.default_provider,
++      defaultRuntime: manifest.default_runtime,
++    }),
+   );
+   const runStatus = deriveRunStatus(batches.map((b) => b.status));
+ 
+@@ -86,6 +97,48 @@ export function importManifest(store: Store, manifestPath: string): ImportManife
+   return { run, ...warningExtras };
+ }
+ 
++function collectProviderValidationErrors(
++  batches: ManifestBatch[],
++  defaultRuntime: ManifestStream["runtime"] | undefined,
++  defaultProvider: AgentProvider | undefined,
++): ManifestParseError[] {
++  const errors: ManifestParseError[] = [];
++  for (const batch of batches) {
++    for (const stream of batch.streams) {
++      const runtime = stream.runtime ?? defaultRuntime ?? "local";
++      const provider = resolveStreamProvider(stream, defaultProvider).provider;
++      const streamError = validateStreamProviderRules(stream, runtime, provider);
++      if (streamError !== undefined) errors.push(streamError);
++    }
++  }
++  return errors;
++}
++
++function validateStreamProviderRules(
++  stream: ManifestStream,
++  runtime: NonNullable<ManifestStream["runtime"]> | "local",
++  provider: AgentProvider | undefined,
++): ManifestParseError | undefined {
++  if (provider === undefined) return undefined;
++  const label = streamLabel(stream);
++  if (provider === "codex" && runtime !== "local") {
++    return {
++      message: `stream ${label}: codex provider supports only runtime 'local' (runtime is '${runtime}')`,
++    };
++  }
++  if (provider === "claude" && runtime === "cloud" && !stream.branch_name) {
++    return {
++      message: `stream ${label}: claude provider with runtime 'cloud' requires branch_name`,
++    };
++  }
++  return undefined;
++}
++
++function streamLabel(stream: ManifestStream): string {
++  if (stream.task_slug !== undefined) return stream.task_slug;
++  return stream.spec_path;
++}
++
+ function findExistingRun(
+   store: Store,
+   repo: string,
+@@ -121,11 +174,16 @@ function deriveRunStatus(batchStatuses: DriverBatchStatus[]): DriverRun["status"
+   return "pending";
+ }
+ 
++interface ManifestStreamDefaults {
++  defaultRuntime: ManifestStream["runtime"] | undefined;
++  defaultModel: ManifestStream["model"] | undefined;
++  defaultEffort: ManifestStream["effort"] | undefined;
++  defaultProvider: AgentProvider | undefined;
++}
++
+ function buildBatchInput(
+   batch: ManifestBatch,
+-  defaultRuntime: ManifestStream["runtime"] | undefined,
+-  defaultModel: ManifestStream["model"] | undefined,
+-  defaultEffort: ManifestStream["effort"] | undefined,
++  defaults: ManifestStreamDefaults,
+ ): {
+   id: string;
+   batchIndex: number;
+@@ -151,9 +209,7 @@ function buildBatchInput(
+   }[];
+ } {
+   const batchStatus = manifestBatchStatusToStore(batch.status, batch.completed_at);
+-  const streams = batch.streams.map((stream, index) =>
+-    buildStreamInput(stream, index, defaultRuntime, defaultModel, defaultEffort),
+-  );
++  const streams = batch.streams.map((stream, index) => buildStreamInput(stream, index, defaults));
+ 
+   const result: {
+     id: string;
+@@ -178,9 +234,7 @@ function buildBatchInput(
+ function buildStreamInput(
+   stream: ManifestStream,
+   streamIndex: number,
+-  defaultRuntime: ManifestStream["runtime"] | undefined,
+-  defaultModel: ManifestStream["model"] | undefined,
+-  defaultEffort: ManifestStream["effort"] | undefined,
++  defaults: ManifestStreamDefaults,
+ ): {
+   id: string;
+   streamIndex: number;
+@@ -198,6 +252,7 @@ function buildStreamInput(
+   cycles?: number;
+   modelTier?: ReturnType<typeof resolveStreamTier>["modelTier"];
+   effortTier?: ReturnType<typeof resolveStreamTier>["effortTier"];
++  provider?: ReturnType<typeof resolveStreamProvider>["provider"];
+ } {
+   const candidate: {
+     id: string;
+@@ -216,15 +271,17 @@ function buildStreamInput(
+     cycles?: number;
+     modelTier?: ReturnType<typeof resolveStreamTier>["modelTier"];
+     effortTier?: ReturnType<typeof resolveStreamTier>["effortTier"];
++    provider?: ReturnType<typeof resolveStreamProvider>["provider"];
+   } = {
+     attempts: [],
+     id: newDriverStreamId(),
+-    runtime: stream.runtime ?? defaultRuntime ?? "local",
++    runtime: stream.runtime ?? defaults.defaultRuntime ?? "local",
+     specPath: stream.spec_path,
+     status: manifestStatusToStore(stream.status),
+     streamIndex,
+     touches: stream.touches,
+-    ...resolveStreamTier(stream, defaultModel, defaultEffort),
++    ...resolveStreamTier(stream, defaults.defaultModel, defaults.defaultEffort),
++    ...resolveStreamProvider(stream, defaults.defaultProvider),
+   };
+   if (stream.task_id !== undefined) candidate.taskId = stream.task_id;
+   if (stream.task_slug !== undefined) candidate.taskSlug = stream.task_slug;
+diff --git a/packages/driver/src/index.ts b/packages/driver/src/index.ts
+index d8036b8..c9f25a1 100644
+--- a/packages/driver/src/index.ts
++++ b/packages/driver/src/index.ts
+@@ -36,6 +36,7 @@ export {
+   manifestBatchStatusToStore,
+   manifestStatusToStore,
+   resolveStreamTier,
++  resolveStreamProvider,
+   storeBatchStatusToManifest,
+   storeStatusToManifest,
+ } from "./status-mapping.js";
+diff --git a/packages/driver/src/judgment.ts b/packages/driver/src/judgment.ts
+index 8a68916..994fa07 100644
+--- a/packages/driver/src/judgment.ts
++++ b/packages/driver/src/judgment.ts
+@@ -68,6 +68,7 @@ function optionalStreamTierFields(stream: DriverStream): Partial<DriverStreamVie
+   const fields: Partial<DriverStreamView> = {};
+   if (stream.modelTier !== undefined) fields.modelTier = stream.modelTier;
+   if (stream.effortTier !== undefined) fields.effortTier = stream.effortTier;
++  if (stream.provider !== undefined) fields.provider = stream.provider;
+   if (stream.dispatchProvider !== undefined) fields.dispatchProvider = stream.dispatchProvider;
+   if (stream.dispatchModel !== undefined) fields.dispatchModel = stream.dispatchModel;
+   if (stream.dispatchModelParams !== undefined)
+diff --git a/packages/driver/src/manifest.ts b/packages/driver/src/manifest.ts
+index d0b2e1a..06e25d2 100644
+--- a/packages/driver/src/manifest.ts
++++ b/packages/driver/src/manifest.ts
+@@ -7,6 +7,7 @@
+  * engine's input, not prep-time human notes.
+  */
+ 
++import { agentProviderSchema } from "@ship/workflow";
+ import { type Document, LineCounter, type ParsedNode, parseDocument } from "yaml";
+ import { z } from "zod";
+ 
+@@ -18,6 +19,7 @@ const streamStatusSchema = z.enum(["pending", "todo", "in_progress", "done", "fa
+ 
+ export const modelTierSchema = z.enum(["opus", "sonnet", "fable"]);
+ export const effortTierSchema = z.enum(["extra", "max", "ultracode"]);
++export const manifestProviderSchema = agentProviderSchema;
+ 
+ export const manifestStreamSchema = z
+   .object({
+@@ -28,6 +30,7 @@ export const manifestStreamSchema = z
+     runtime: runtimeSchema.optional(),
+     model: modelTierSchema.optional(),
+     effort: effortTierSchema.optional(),
++    provider: manifestProviderSchema.optional(),
+     touches: z.array(z.string()).optional().default([]),
+     status: streamStatusSchema.optional(),
+     pr_number: z.number().int().optional(),
+@@ -72,6 +75,7 @@ export const driverManifestSchema = z
+     default_runtime: runtimeSchema.optional(),
+     default_model: modelTierSchema.optional(),
+     default_effort: effortTierSchema.optional(),
++    default_provider: manifestProviderSchema.optional(),
+     batches: z.array(manifestBatchSchema),
+     conflict_notes: advisoryBlockSchema,
+     skipped_during_resolution: advisoryBlockSchema,
+diff --git a/packages/driver/src/status-mapping.test.ts b/packages/driver/src/status-mapping.test.ts
+index a0c8b67..ff6e240 100644
+--- a/packages/driver/src/status-mapping.test.ts
++++ b/packages/driver/src/status-mapping.test.ts
+@@ -2,7 +2,11 @@
+ 
+ import { describe, expect, it } from "vitest";
+ 
+-import { formatStreamTierDiagnostic, resolveStreamTier } from "./status-mapping.js";
++import {
++  formatStreamTierDiagnostic,
++  resolveStreamProvider,
++  resolveStreamTier,
++} from "./status-mapping.js";
+ 
+ describe("resolveStreamTier", () => {
+   it("prefers stream fields over manifest defaults", () => {
+@@ -27,6 +31,24 @@ describe("resolveStreamTier", () => {
+   });
+ });
+ 
++describe("resolveStreamProvider", () => {
++  it("prefers stream field over manifest default", () => {
++    expect(
++      resolveStreamProvider({ spec_path: "a.md", provider: "claude", touches: [] }, "cursor"),
++    ).toEqual({ provider: "claude" });
++  });
++
++  it("falls back to manifest default when stream omits provider", () => {
++    expect(resolveStreamProvider({ spec_path: "a.md", touches: [] }, "codex")).toEqual({
++      provider: "codex",
++    });
++  });
++
++  it("returns empty when no provider is configured", () => {
++    expect(resolveStreamProvider({ spec_path: "a.md", touches: [] })).toEqual({});
++  });
++});
++
+ describe("formatStreamTierDiagnostic", () => {
+   it("renders requested tier, dispatch mapping, and degrade flags", () => {
+     const line = formatStreamTierDiagnostic({
+@@ -42,4 +64,14 @@ describe("formatStreamTierDiagnostic", () => {
+     expect(line).toMatch(/effortDegraded=true/);
+     expect(line).toContain("degrade=");
+   });
++
++  it("renders requested provider alongside tier fields", () => {
++    const line = formatStreamTierDiagnostic({
++      modelTier: "opus",
++      effortTier: "max",
++      provider: "claude",
++    });
++    expect(line).toMatch(/requested=opus\/max/);
++    expect(line).toMatch(/provider=claude/);
++  });
+ });
+diff --git a/packages/driver/src/status-mapping.ts b/packages/driver/src/status-mapping.ts
+index aea1005..5f7f589 100644
+--- a/packages/driver/src/status-mapping.ts
++++ b/packages/driver/src/status-mapping.ts
+@@ -17,6 +17,7 @@
+  */
+ 
+ import type { DriverStreamStatus } from "@ship/store";
++import type { AgentProvider } from "@ship/workflow";
+ 
+ import type { EffortTier, ManifestStream, ModelTier } from "./manifest.js";
+ 
+@@ -78,6 +79,10 @@ export interface ResolvedStreamTier {
+   effortTier?: EffortTier;
+ }
+ 
++export interface ResolvedStreamProvider {
++  provider?: AgentProvider;
++}
++
+ /** Resolve per-stream tier: stream field > manifest default > none. */
+ export function resolveStreamTier(
+   stream: ManifestStream,
+@@ -92,10 +97,22 @@ export function resolveStreamTier(
+   return resolved;
+ }
+ 
++/** Resolve per-stream provider: stream field > manifest default > none. */
++export function resolveStreamProvider(
++  stream: ManifestStream,
++  defaultProvider?: AgentProvider,
++): ResolvedStreamProvider {
++  const resolved: ResolvedStreamProvider = {};
++  const provider = stream.provider ?? defaultProvider;
++  if (provider !== undefined) resolved.provider = provider;
++  return resolved;
++}
++
+ /** Format tier + dispatch mapping for status diagnostics. */
+ export function formatStreamTierDiagnostic(stream: {
+   modelTier?: ModelTier;
+   effortTier?: EffortTier;
++  provider?: AgentProvider;
+   dispatchProvider?: string;
+   dispatchModel?: string;
+   dispatchModelParams?: { id: string; value: string | boolean }[];
+@@ -103,17 +120,27 @@ export function formatStreamTierDiagnostic(stream: {
+   tierDegradeReason?: string;
+ }): string | undefined {
+   const requested = formatRequestedTier(stream.modelTier, stream.effortTier);
+-  if (requested === undefined && stream.dispatchModel === undefined) {
++  if (
++    requested === undefined &&
++    stream.provider === undefined &&
++    stream.dispatchModel === undefined
++  ) {
+     return undefined;
+   }
+ 
+   const parts: string[] = [];
+   appendRequestedTierPart(parts, requested);
++  appendRequestedProviderPart(parts, stream.provider);
+   appendDispatchPart(parts, stream);
+   appendDegradeParts(parts, stream);
+   return parts.join(" ");
+ }
+ 
++function appendRequestedProviderPart(parts: string[], provider?: AgentProvider): void {
++  if (provider === undefined) return;
++  parts.push(`provider=${provider}`);
++}
++
+ function appendRequestedTierPart(parts: string[], requested: string | undefined): void {
+   if (requested === undefined) return;
+   parts.push(`requested=${requested}`);
+diff --git a/packages/driver/src/types.ts b/packages/driver/src/types.ts
+index ab6b8eb..8a2a8cc 100644
+--- a/packages/driver/src/types.ts
++++ b/packages/driver/src/types.ts
+@@ -67,6 +67,7 @@ export interface DriverStreamView {
+   prUrl?: string;
+   modelTier?: ModelTier;
+   effortTier?: EffortTier;
++  provider?: AgentProvider;
+   dispatchProvider?: AgentProvider;
+   dispatchModel?: string;
+   dispatchModelParams?: NonNullable<ShipInput["modelParams"]>;
+diff --git a/packages/mcp/src/mcp.test.ts b/packages/mcp/src/mcp.test.ts
+index cac02cf..abe5041 100644
+--- a/packages/mcp/src/mcp.test.ts
++++ b/packages/mcp/src/mcp.test.ts
+@@ -768,6 +768,30 @@ describe("driver MCP schemas", () => {
+     expect(driverTickResultSchema.safeParse(result).success).toBe(true);
+   });
+ 
++  test("driverTickResultSchema accepts a stream view carrying a requested provider", () => {
++    const result = {
++      driverRunId: DRV_ID,
++      status: "blocked_on_merges",
++      awaiting: [],
++      unmerged: [],
++      progress: { batchIndex: 1, dispatched: 0, landed: 1, failed: 0, remaining: 0 },
++      streams: [
++        {
++          streamId: DS_ID,
++          batchIndex: 1,
++          specPath: "docs/features/x/spec.md",
++          runtime: "cloud",
++          status: "landed",
++          provider: "claude",
++          dispatchProvider: "claude",
++          modelTier: "sonnet",
++          effortTier: "extra",
++        },
++      ],
++    };
++    expect(driverTickResultSchema.safeParse(result).success).toBe(true);
++  });
++
+   test("driverDecideInputSchema accepts retry/skip/abort/adopt decisions", () => {
+     expect(
+       driverDecideInputSchema.safeParse({
+diff --git a/packages/mcp/src/mcp.ts b/packages/mcp/src/mcp.ts
+index c649ab9..4703dda 100644
+--- a/packages/mcp/src/mcp.ts
++++ b/packages/mcp/src/mcp.ts
+@@ -491,6 +491,7 @@ const driverStreamViewSchema = z
+     prUrl: z.string().optional(),
+     modelTier: driverModelTierSchema.optional(),
+     effortTier: driverEffortTierSchema.optional(),
++    provider: agentProviderSchema.optional(),
+     dispatchProvider: agentProviderSchema.optional(),
+     dispatchModel: z.string().optional(),
+     dispatchModelParams: z.array(shipInputModelParamEntrySchema).optional(),
+diff --git a/packages/store/migrations/0010_driver_streams_provider.sql b/packages/store/migrations/0010_driver_streams_provider.sql
+new file mode 100644
+index 0000000..7ef583d
+--- /dev/null
++++ b/packages/store/migrations/0010_driver_streams_provider.sql
+@@ -0,0 +1,6 @@
++-- 0010_driver_streams_provider.sql — per-stream requested provider persistence.
++--
++-- Requested provider is resolved at import (stream > manifest default > none).
++-- Dispatch provider is written separately when the engine starts a ship run.
++
++ALTER TABLE driver_streams ADD COLUMN provider TEXT;
+diff --git a/packages/store/src/driver-runs.test.ts b/packages/store/src/driver-runs.test.ts
+index 693d7ba..3219ec0 100644
+--- a/packages/store/src/driver-runs.test.ts
++++ b/packages/store/src/driver-runs.test.ts
+@@ -121,6 +121,41 @@ describe("driver runs (via createStore)", () => {
+     expect(run?.batches[0]?.streams[0]?.prNumber).toBe(42);
+   });
+ 
++  test("provider column round-trips through insert and read", () => {
++    const runId = newDriverRunId();
++    const batchId = newDriverBatchId();
++    const streamId = newDriverStreamId();
++    store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: batchId,
++          status: "pending",
++          streams: [
++            {
++              attempts: [],
++              id: streamId,
++              provider: "claude",
++              runtime: "cloud",
++              specPath: "docs/a.md",
++              status: "pending",
++              streamIndex: 0,
++              touches: [],
++            },
++          ],
++        },
++      ],
++      id: runId,
++      manifestPath: "/tmp/provider.md",
++      repo: "ship",
++      sourceJson: "---\ndriver_version: 1\n---\n",
++      status: "pending",
++    });
++
++    expect(store.getDriverRun(runId)?.batches[0]?.streams[0]?.provider).toBe("claude");
++  });
++
+   test("updateDriverStream throws DriverStreamNotFoundError for unknown id", () => {
+     expect(() => store.updateDriverStream(newDriverStreamId(), { status: "failed" })).toThrow(
+       DriverStreamNotFoundError,
+diff --git a/packages/store/src/driver-runs.ts b/packages/store/src/driver-runs.ts
+index 39ca3c3..3bf4db3 100644
+--- a/packages/store/src/driver-runs.ts
++++ b/packages/store/src/driver-runs.ts
+@@ -37,6 +37,7 @@ export interface InsertDriverStreamInput {
+   errorMessage?: string;
+   modelTier?: DriverStream["modelTier"];
+   effortTier?: DriverStream["effortTier"];
++  provider?: DriverStream["provider"];
+ }
+ 
+ /** Nested batch input for aggregate insert. */
+diff --git a/packages/store/src/driver-schemas.ts b/packages/store/src/driver-schemas.ts
+index 98a2f50..ca4895a 100644
+--- a/packages/store/src/driver-schemas.ts
++++ b/packages/store/src/driver-schemas.ts
+@@ -71,6 +71,7 @@ export const driverStreamSchema = z
+     touches: z.array(z.string()),
+     modelTier: driverModelTierSchema.optional(),
+     effortTier: driverEffortTierSchema.optional(),
++    provider: agentProviderSchema.optional(),
+     dispatchProvider: agentProviderSchema.optional(),
+     dispatchModel: z.string().optional(),
+     dispatchModelParams: z.array(shipInputModelParamEntrySchema).optional(),
+diff --git a/packages/store/src/driver-streams.ts b/packages/store/src/driver-streams.ts
+index 450fc87..7b09a09 100644
+--- a/packages/store/src/driver-streams.ts
++++ b/packages/store/src/driver-streams.ts
+@@ -50,6 +50,7 @@ export interface DriverStreamRow {
+   error_message: string | null;
+   model_tier: string | null;
+   effort_tier: string | null;
++  provider: string | null;
+   dispatch_provider: string | null;
+   dispatch_model: string | null;
+   dispatch_model_params: string | null;
+@@ -79,6 +80,7 @@ interface InsertStreamRowInput {
+   errorMessage?: string;
+   modelTier?: DriverStream["modelTier"];
+   effortTier?: DriverStream["effortTier"];
++  provider?: DriverStream["provider"];
+   createdAt: string;
+ }
+ 
+@@ -95,7 +97,7 @@ export interface DriverStreamOps {
+ }
+ 
+ const STREAM_COLUMNS =
+-  "id, driver_run_id, driver_batch_id, stream_index, task_id, task_slug, spec_path, branch, runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url, merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded, tier_degrade_reason, created_at, updated_at";
++  "id, driver_run_id, driver_batch_id, stream_index, task_id, task_slug, spec_path, branch, runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url, merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, provider, dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded, tier_degrade_reason, created_at, updated_at";
+ 
+ function sqlNull<T>(value: T | undefined): T | null {
+   return value ?? null;
+@@ -114,10 +116,10 @@ export function createDriverStreamOps(
+     `INSERT INTO driver_streams (
+        id, driver_run_id, driver_batch_id, stream_index, task_id, task_slug, spec_path, branch,
+        runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url,
+-       merge_commit, merged_at, cycles, error_message, model_tier, effort_tier,
++       merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, provider,
+        dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded,
+        tier_degrade_reason, created_at, updated_at
+-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+   );
+   const selectByIdStmt = db.prepare<[string], DriverStreamRow>(
+     `SELECT ${STREAM_COLUMNS} FROM driver_streams WHERE id = ?`,
+@@ -151,6 +153,7 @@ export function createDriverStreamOps(
+       sqlNull(input.errorMessage),
+       sqlNull(input.modelTier),
+       sqlNull(input.effortTier),
++      sqlNull(input.provider),
+       null,
+       null,
+       null,
+@@ -284,6 +287,7 @@ function optionalStreamFields(row: DriverStreamRow): Record<string, string | num
+     ["modelTier", row.model_tier],
+     ["prNumber", row.pr_number],
+     ["prUrl", row.pr_url],
++    ["provider", row.provider],
+     ["taskId", row.task_id],
+     ["taskSlug", row.task_slug],
+     ["tierDegradeReason", row.tier_degrade_reason],
+diff --git a/packages/store/src/migrations.test.ts b/packages/store/src/migrations.test.ts
+index 3efe5d4..0368674 100644
+--- a/packages/store/src/migrations.test.ts
++++ b/packages/store/src/migrations.test.ts
+@@ -52,7 +52,7 @@ describe("runMigrations", () => {
+     expect(tables).toContain("driver_streams");
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name, applied_at FROM _migrations").all();
+-    expect(applied).toHaveLength(9);
++    expect(applied).toHaveLength(10);
+     expect(applied.map((r) => r.name)).toEqual([
+       "0001_init.sql",
+       "0002_cursor_runs_run_id.sql",
+@@ -63,6 +63,7 @@ describe("runMigrations", () => {
+       "0007_cursor_runs_provider.sql",
+       "0008_cursor_runs_created_at_ms.sql",
+       "0009_driver_streams_tier.sql",
++      "0010_driver_streams_provider.sql",
+     ]);
+ 
+     const phaseColumns = db
+@@ -79,6 +80,12 @@ describe("runMigrations", () => {
+     expect(columns).toContain("artifacts_json");
+     expect(columns).toContain("provider");
+     expect(columns).toContain("created_at_ms");
++
++    const driverStreamColumns = db
++      .prepare("PRAGMA table_info(driver_streams)")
++      .all()
++      .map((r) => (r as { name: string }).name);
++    expect(driverStreamColumns).toContain("provider");
+   });
+ 
+   test("re-run on already-migrated DB is a no-op (two _migrations rows)", () => {
+@@ -87,7 +94,7 @@ describe("runMigrations", () => {
+     runMigrations(db);
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name FROM _migrations").all();
+-    expect(applied).toHaveLength(9);
++    expect(applied).toHaveLength(10);
+   });
+ 
+   test("synthetic 0002 migration applies on top of 0001 via temp directory", () => {

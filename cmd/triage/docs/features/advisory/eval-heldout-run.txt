@@ -1,0 +1,42 @@
+PR            flr con esc  trigger                 rej?  fin result
+ship#170      T1  T1  none none                    -     T1  ok
+ship#172      T0  T2  T2   plan-of-record          -     T2  caught
+ship#176      T1  T2  none none                    -     T1  MISS
+ship#177      T1  T2  T2   gate-machinery          -     T2  caught
+ship#178      T2  T2  none none                    -     T2  ok
+ship#180      T2  T2  none none                    -     T2  ok
+ship#181      T0  T0  none none                    -     T0  ok
+ship#182      T0  T1  T2   plan-of-record          -     T2  INFLATED
+dossier#81    T1  T1  none none                    -     T1  ok
+dossier#84    T1  T2  T2   invariant-relocation    -     T2  caught
+dossier#86    T0  T0  none none                    -     T0  ok
+dossier#90    T2  T2  none none                    -     T2  ok
+rooms#50      T1  T3  T3   gate-machinery          -     T3  caught
+rooms#51      T2  T2  T2   gate-machinery          -     T2  ok
+rooms#56      T2  T2  none none                    -     T2  ok
+rooms#59      T2  T3  T3   trust-boundary-widening -     T3  caught
+rooms#62      T1  T2  T2   gate-machinery          -     T2  caught
+rooms#64      T1  T2  T2   invariant-relocation    -     T2  caught
+rooms#65      T1  T1  T2   gate-machinery          REJ   T1  ok
+gate#3        T1  T3  T2   gate-machinery          -     T2  MISS
+gate#5        T1  T3  T2   plan-of-record          -     T2  MISS
+gate#9        T1  T3  T3   gate-machinery          -     T3  caught
+roxiq#123     T2  T2  none none                    -     T2  ok
+roxiq#126     T2  T2  T2   gate-machinery          -     T2  ok
+roxiq#127     T1  T2  T2   trust-boundary-widening -     T2  caught
+roxiq#132     T1  T2  T2   gate-machinery          REJ   T1  MISS
+huddle#19     T1  T1  none none                    -     T1  ok
+huddle#20     T1  T1  none none                    -     T1  ok
+tracelens#5   T1  T2  T2   gate-machinery          -     T2  caught
+wellness#ai-1 T1  ?   none none                    -     T1  ok
+
+ADDRESSABLE RESIDUAL (consensus>=T2, floor<consensus): 14
+  recall: caught 10/14 = 71%  missed: ship#176, gate#3, gate#5, roxiq#132
+  per-trigger recall:
+    plan-of-record           1/2
+    (none-proposed)          0/1
+    gate-machinery           5/7
+    invariant-relocation     2/2
+    trust-boundary-widening  2/2
+
+INFLATION (final > consensus, all rows): 1/30 = 3% (hard gate: <=30%) — ship#182

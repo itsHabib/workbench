@@ -1,0 +1,375 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 82eb5e4..86001b7 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -97,6 +97,21 @@ version = "1.5.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+ 
++[[package]]
++name = "bit-set"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
++dependencies = [
++ "bit-vec",
++]
++
++[[package]]
++name = "bit-vec"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
++
+ [[package]]
+ name = "bitflags"
+ version = "2.11.1"
+@@ -251,6 +266,12 @@ dependencies = [
+  "num-traits",
+ ]
+ 
++[[package]]
++name = "fnv"
++version = "1.0.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
++
+ [[package]]
+ name = "foldhash"
+ version = "0.1.5"
+@@ -549,6 +570,31 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "proptest"
++version = "1.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
++dependencies = [
++ "bit-set",
++ "bit-vec",
++ "bitflags",
++ "num-traits",
++ "rand",
++ "rand_chacha",
++ "rand_xorshift",
++ "regex-syntax",
++ "rusty-fork",
++ "tempfile",
++ "unarray",
++]
++
++[[package]]
++name = "quick-error"
++version = "1.2.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
++
+ [[package]]
+ name = "quote"
+ version = "1.0.45"
+@@ -599,6 +645,15 @@ dependencies = [
+  "getrandom 0.3.4",
+ ]
+ 
++[[package]]
++name = "rand_xorshift"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
++dependencies = [
++ "rand_core",
++]
++
+ [[package]]
+ name = "regex"
+ version = "1.12.3"
+@@ -637,6 +692,7 @@ dependencies = [
+  "chrono",
+  "clap",
+  "predicates",
++ "proptest",
+  "serde",
+  "serde_json",
+  "tempfile",
+@@ -666,6 +722,18 @@ version = "1.0.22"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+ 
++[[package]]
++name = "rusty-fork"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
++dependencies = [
++ "fnv",
++ "quick-error",
++ "tempfile",
++ "wait-timeout",
++]
++
+ [[package]]
+ name = "semver"
+ version = "1.0.28"
+@@ -925,6 +993,12 @@ dependencies = [
+  "web-time",
+ ]
+ 
++[[package]]
++name = "unarray"
++version = "0.1.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
++
+ [[package]]
+ name = "unicode-ident"
+ version = "1.0.24"
+diff --git a/Cargo.toml b/Cargo.toml
+index 0a4dee6..e03d52a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -25,6 +25,7 @@ anyhow = "1.0.102"
+ [dev-dependencies]
+ assert_cmd = "2"
+ predicates = "3"
++proptest = "1"
+ tempfile = "3"
+ 
+ [features]
+diff --git a/src/artifacts.rs b/src/artifacts.rs
+index 2244722..f907483 100644
+--- a/src/artifacts.rs
++++ b/src/artifacts.rs
+@@ -482,4 +482,81 @@ mod tests {
+             .expect_err("absolute path should be rejected");
+         assert_eq!(err, ArtifactsError::UnsafeReference(abs));
+     }
++
++    mod path_validation_properties {
++        use std::path::PathBuf;
++
++        use proptest::prelude::*;
++
++        use super::super::{safe_join, ArtifactsError};
++
++        fn sample_out_dir() -> PathBuf {
++            PathBuf::from("/tmp/rooms-artifact-out")
++        }
++
++        proptest! {
++            #[test]
++            fn relative_segments_stay_inside(
++                segments in proptest::collection::vec("[a-z0-9_-]+", 1..5),
++            ) {
++                let rel = segments.join("/");
++                let out_dir = sample_out_dir();
++                let joined = safe_join(&out_dir, &rel).expect("safe relative path");
++                prop_assert!(joined.starts_with(&out_dir));
++            }
++
++            #[test]
++            fn parent_dir_components_are_rejected(
++                prefix in proptest::collection::vec("[a-z0-9]+", 0..3),
++                suffix in proptest::collection::vec("[a-z0-9]+", 0..3),
++            ) {
++                let mut parts = prefix;
++                parts.push("..".to_owned());
++                parts.extend(suffix);
++                let rel = parts.join("/");
++                let err = safe_join(&sample_out_dir(), &rel).expect_err(".. must be rejected");
++                prop_assert_eq!(err, ArtifactsError::UnsafeReference(rel));
++            }
++
++            #[test]
++            fn absolute_paths_are_rejected(segments in proptest::collection::vec("[a-z0-9]+", 1..4)) {
++                let rel = if cfg!(windows) {
++                    format!("C:\\{}", segments.join("\\"))
++                } else {
++                    format!("/{}", segments.join("/"))
++                };
++                let err = safe_join(&sample_out_dir(), &rel).expect_err("absolute path");
++                prop_assert_eq!(err, ArtifactsError::UnsafeReference(rel));
++            }
++
++            #[test]
++            fn multi_segment_escapes_are_rejected(
++                depth in 1usize..5,
++                tail in proptest::collection::vec("[a-z0-9]+", 1..3),
++            ) {
++                let mut parts = vec!["inside".to_owned(); depth];
++                for _ in 0..=depth {
++                    parts.push("..".to_owned());
++                }
++                parts.extend(tail);
++                let rel = parts.join("/");
++                let err = safe_join(&sample_out_dir(), &rel).expect_err("multi-segment escape");
++                prop_assert_eq!(err, ArtifactsError::UnsafeReference(rel));
++            }
++
++            #[test]
++            fn embedded_nul_with_traversal_is_rejected(
++                prefix in proptest::collection::vec("[a-z0-9]+", 1..3),
++                tail in proptest::collection::vec("[a-z0-9]+", 0..2),
++            ) {
++                let mut parts = prefix;
++                parts.push("seg\0ment".to_owned());
++                parts.push("..".to_owned());
++                parts.extend(tail);
++                let rel = parts.join("/");
++                let err = safe_join(&sample_out_dir(), &rel).expect_err("NUL + .. must reject");
++                prop_assert_eq!(err, ArtifactsError::UnsafeReference(rel));
++            }
++        }
++    }
+ }
+diff --git a/src/doctor.rs b/src/doctor.rs
+index d607602..ec359e3 100644
+--- a/src/doctor.rs
++++ b/src/doctor.rs
+@@ -354,4 +354,63 @@ mod tests {
+         assert!(version_meets_min(2, 0, (1, 7)));
+         assert!(!version_meets_min(1, 6, (1, 7)));
+     }
++
++    mod version_parser_properties {
++        use proptest::prelude::*;
++
++        use super::parse_firecracker_version;
++
++        proptest! {
++            #[test]
++            fn firecracker_banner_round_trips(
++                major in 0u32..=99,
++                minor in 0u32..=99,
++                patch in 0u32..=999,
++            ) {
++                let output = format!("Firecracker v{major}.{minor}.{patch}");
++                prop_assert_eq!(parse_firecracker_version(&output), Some((major, minor)));
++            }
++
++            #[test]
++            fn v_prefix_round_trips(
++                major in 0u32..=99,
++                minor in 0u32..=99,
++                patch in 0u32..=99,
++            ) {
++                let output = format!("v{major}.{minor}.{patch}");
++                prop_assert_eq!(parse_firecracker_version(&output), Some((major, minor)));
++            }
++
++            #[test]
++            fn trailing_junk_still_parses_version(
++                major in 1u32..=20,
++                minor in 0u32..=20,
++                patch in 0u32..=20,
++                junk in "\\s+[A-Za-z0-9._-]+",
++            ) {
++                let output = format!("Firecracker v{major}.{minor}.{patch}{junk}");
++                prop_assert_eq!(parse_firecracker_version(&output), Some((major, minor)));
++            }
++
++            #[test]
++            fn tokens_without_dots_return_none(words in proptest::collection::vec("[^\\.\\s]+", 1..6)) {
++                let output = words.join(" ");
++                prop_assert_eq!(parse_firecracker_version(&output), None);
++            }
++        }
++
++        #[test]
++        fn adversarial_inputs_return_none() {
++            for input in [
++                "",
++                "Firecracker",
++                "no version token here",
++                "v.",
++                "v1.",
++                "v.not_a_number.2",
++            ] {
++                assert_eq!(parse_firecracker_version(input), None, "input: {input:?}");
++            }
++        }
++    }
+ }
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index 9b866cd..d6f9a09 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -592,6 +592,77 @@ mod tests {
+ 
+         assert!(path.exists(), "dismissed guard should leave the directory");
+     }
++
++    mod room_guard_properties {
++        use proptest::prelude::*;
++
++        use super::RoomGuard;
++        use crate::config::RoomsConfig;
++
++        #[derive(Debug, Clone)]
++        enum GuardAction {
++            Dismiss,
++            SetSuppressCleanup(bool),
++            SetTapOwned(bool),
++        }
++
++        prop_compose! {
++            fn arb_guard_action()(tag in 0u8..3, flag in any::<bool>()) -> GuardAction {
++                match tag {
++                    0 => GuardAction::Dismiss,
++                    1 => GuardAction::SetSuppressCleanup(flag),
++                    _ => GuardAction::SetTapOwned(flag),
++                }
++            }
++        }
++
++        fn apply_action(guard: &mut RoomGuard, action: &GuardAction) {
++            match action {
++                GuardAction::Dismiss => guard.dismiss(),
++                GuardAction::SetSuppressCleanup(suppress) => {
++                    guard.set_suppress_cleanup(*suppress);
++                }
++                GuardAction::SetTapOwned(owned) => guard.set_tap_owned(*owned),
++            }
++        }
++
++        fn should_preserve_on_drop(actions: &[GuardAction]) -> bool {
++            let mut dismissed = false;
++            let mut suppress_cleanup = false;
++            for action in actions {
++                match action {
++                    GuardAction::Dismiss => dismissed = true,
++                    GuardAction::SetSuppressCleanup(suppress) => suppress_cleanup = *suppress,
++                    GuardAction::SetTapOwned(_) => {}
++                }
++            }
++            dismissed || suppress_cleanup
++        }
++
++        proptest! {
++            #[test]
++            fn drop_respects_dismiss_and_suppress_flags(
++                actions in proptest::collection::vec(arb_guard_action(), 0..24),
++            ) {
++                let dir = tempfile::tempdir().expect("tempdir");
++                let path = dir.path().to_path_buf();
++                std::fs::write(path.join("marker"), b"x").expect("write marker");
++
++                let config = RoomsConfig::default();
++                let mut guard = RoomGuard::new(path.clone(), path.join("api.sock"), &config);
++                for action in &actions {
++                    apply_action(&mut guard, action);
++                }
++                drop(guard);
++
++                if should_preserve_on_drop(&actions) {
++                    prop_assert!(path.exists(), "dismiss/suppress should skip cleanup");
++                } else {
++                    prop_assert!(!path.exists(), "guard should remove the directory");
++                }
++            }
++        }
++    }
+ }
+ 
+ #[cfg(all(test, feature = "e2e"))]

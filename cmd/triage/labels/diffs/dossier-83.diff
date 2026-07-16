@@ -1,0 +1,229 @@
+diff --git a/.github/workflows/audit.yml b/.github/workflows/audit.yml
+index 5a04a40..3ccc284 100644
+--- a/.github/workflows/audit.yml
++++ b/.github/workflows/audit.yml
+@@ -17,9 +17,7 @@ jobs:
+       # Advisory ignores — each entry needs a one-line justification (mirrors
+       # the repo's #[allow]-needs-a-reason posture). All three are transitive
+       # via aws-sdk-s3 -> rustls-webpki 0.101.7 with no non-breaking bump yet;
+-      # remediation (bump the rustls stack) is tracked separately. The 2 unsound
+-      # warnings (libyml / serde_yml) are intentionally NOT ignored so they stay
+-      # visible until the serde_yml migration lands.
++      # remediation (bump the rustls stack) is tracked separately.
+       #   RUSTSEC-2026-0104  rustls-webpki CRL-parse panic (DoS); dossier's S3 TLS hits a trusted endpoint and parses no CRLs
+       #   RUSTSEC-2026-0099  rustls-webpki wildcard name-constraint; misissuance-gated, reachable only after signature verification
+       #   RUSTSEC-2026-0098  rustls-webpki URI name-constraint; misissuance-gated, and dossier asserts no URI names
+diff --git a/Cargo.lock b/Cargo.lock
+index deef0ba..105b433 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -975,7 +975,7 @@ dependencies = [
+  "schemars",
+  "serde",
+  "serde_json",
+- "serde_yml",
++ "serde_norway",
+  "sha2 0.10.9",
+  "tempfile",
+  "tokio",
+@@ -1681,16 +1681,6 @@ version = "0.2.186"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+ 
+-[[package]]
+-name = "libyml"
+-version = "0.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3302702afa434ffa30847a83305f0a69d6abd74293b6554c18ec85c7ef30c980"
+-dependencies = [
+- "anyhow",
+- "version_check",
+-]
+-
+ [[package]]
+ name = "linux-raw-sys"
+ version = "0.12.1"
+@@ -2354,18 +2344,16 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "serde_yml"
+-version = "0.0.12"
++name = "serde_norway"
++version = "0.9.42"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd"
++checksum = "e408f29489b5fd500fab51ff1484fc859bb655f32c671f307dcd733b72e8168c"
+ dependencies = [
+  "indexmap",
+  "itoa",
+- "libyml",
+- "memchr",
+  "ryu",
+  "serde",
+- "version_check",
++ "unsafe-libyaml-norway",
+ ]
+ 
+ [[package]]
+@@ -2757,6 +2745,12 @@ version = "1.0.24"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+ 
++[[package]]
++name = "unsafe-libyaml-norway"
++version = "0.2.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
++
+ [[package]]
+ name = "untrusted"
+ version = "0.9.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index 484297c..8cffa69 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -19,7 +19,7 @@ rmcp = { version = "1", features = ["server", "transport-io", "macros"] }
+ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "sync"] }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+-serde_yml = "0.0"
++serde_norway = "0.9"
+ schemars = { version = "1", features = ["chrono04"] }
+ chrono = { version = "0.4", features = ["serde"] }
+ anyhow = "1"
+diff --git a/LAYOUT.md b/LAYOUT.md
+index 2fa5719..86b4b63 100644
+--- a/LAYOUT.md
++++ b/LAYOUT.md
+@@ -46,6 +46,10 @@ in corpus, phase slug unique in project, task slug unique in project).
+ 
+ YAML frontmatter, markdown body. The body **is** the project's design doc.
+ 
++Frontmatter is YAML 1.2 core. The 1.1 boolean words (`yes`, `no`, `on`,
++`off`) are plain strings and may appear unquoted — parse the corpus with a
++1.2-core resolver, not a YAML 1.1 one.
++
+ ```markdown
+ ---
+ id: prj_01HFG3J7K8N9P0Q1R2S3T4V5W6
+diff --git a/src/store.rs b/src/store.rs
+index ec4d7f6..7dc6de4 100644
+--- a/src/store.rs
++++ b/src/store.rs
+@@ -799,7 +799,7 @@ fn split_frontmatter(raw: &str) -> Result<(String, String)> {
+ /// Parse a project markdown blob (YAML frontmatter + optional description body).
+ pub(crate) fn parse_project(raw: &str, with_body: bool) -> Result<Project> {
+     let (front, body) = split_frontmatter(raw)?;
+-    let mut p: Project = serde_yml::from_str(&front).context("parse project frontmatter")?;
++    let mut p: Project = serde_norway::from_str(&front).context("parse project frontmatter")?;
+     if with_body {
+         body.trim().clone_into(&mut p.description);
+     }
+@@ -809,7 +809,7 @@ pub(crate) fn parse_project(raw: &str, with_body: bool) -> Result<Project> {
+ /// Parse a phase markdown blob (YAML frontmatter + optional body).
+ pub(crate) fn parse_phase(raw: &str) -> Result<Phase> {
+     let (front, body) = split_frontmatter(raw)?;
+-    let mut p: Phase = serde_yml::from_str(&front).context("parse phase frontmatter")?;
++    let mut p: Phase = serde_norway::from_str(&front).context("parse phase frontmatter")?;
+     body.trim().clone_into(&mut p.body);
+     Ok(p)
+ }
+@@ -817,7 +817,7 @@ pub(crate) fn parse_phase(raw: &str) -> Result<Phase> {
+ /// Parse a task markdown blob into a domain task and raw note lines.
+ pub(crate) fn parse_task(raw: &str, project_slug: &str) -> Result<(Task, Vec<String>)> {
+     let (front, body) = split_frontmatter(raw)?;
+-    let mut t: Task = serde_yml::from_str(&front).context("parse task frontmatter")?;
++    let mut t: Task = serde_norway::from_str(&front).context("parse task frontmatter")?;
+     let (spec, notes_lines) = split_task_body(&body);
+     t.body = spec;
+     project_slug.clone_into(&mut t.project_slug);
+@@ -1032,7 +1032,7 @@ impl<'a> From<&'a Project> for ProjectFrontmatter<'a> {
+ /// blank line, description body, trailing newline. Body absent when
+ /// description is empty so the file stays tidy.
+ pub(crate) fn serialize_project_file(project: &Project) -> Result<String> {
+-    let frontmatter = serde_yml::to_string(&ProjectFrontmatter::from(project))
++    let frontmatter = serde_norway::to_string(&ProjectFrontmatter::from(project))
+         .context("serialize frontmatter")?;
+     let body = project.description.trim();
+     Ok(if body.is_empty() {
+@@ -1076,7 +1076,7 @@ impl<'a> From<&'a Phase> for PhaseFrontmatter<'a> {
+ }
+ 
+ pub(crate) fn serialize_phase_file(phase: &Phase) -> Result<String> {
+-    let frontmatter = serde_yml::to_string(&PhaseFrontmatter::from(phase))
++    let frontmatter = serde_norway::to_string(&PhaseFrontmatter::from(phase))
+         .context("serialize phase frontmatter")?;
+     let body = phase.body.trim();
+     Ok(if body.is_empty() {
+@@ -1131,8 +1131,8 @@ impl<'a> From<&'a Task> for TaskFrontmatter<'a> {
+ /// `notes_lines`. Each note line is emitted verbatim with one trailing
+ /// newline.
+ pub(crate) fn serialize_task_file(task: &Task, notes_lines: &[String]) -> Result<String> {
+-    let frontmatter =
+-        serde_yml::to_string(&TaskFrontmatter::from(task)).context("serialize task frontmatter")?;
++    let frontmatter = serde_norway::to_string(&TaskFrontmatter::from(task))
++        .context("serialize task frontmatter")?;
+     let spec = task.body.trim();
+     let mut out = format!("---\n{frontmatter}---\n");
+     if !spec.is_empty() {
+@@ -1519,6 +1519,59 @@ mod tests {
+         assert!(!tmp.exists(), "tmp sibling lingered");
+     }
+ 
++    #[test]
++    fn frontmatter_golden_byte_shape() {
++        // Pins the exact emitted frontmatter bytes so a serializer swap or
++        // version bump can't silently shift the on-disk shape. The corpus is
++        // the source of truth; byte drift here is a breaking change.
++        use chrono::TimeZone as _;
++        let t = Utc.with_ymd_and_hms(2026, 6, 8, 4, 58, 37).unwrap();
++        let project = Project {
++            id: "prj_01KRSZ90005B5290ZC9QH79QS4".into(),
++            slug: "demo".into(),
++            title: "Demo: a title with punctuation!".into(),
++            description: String::new(),
++            status: ProjectStatus::Planning,
++            created_at: t,
++            updated_at: t,
++            created_by: "human:michael".into(),
++        };
++        let got = serde_norway::to_string(&ProjectFrontmatter::from(&project)).unwrap();
++        let want = "\
++id: prj_01KRSZ90005B5290ZC9QH79QS4
++slug: demo
++title: 'Demo: a title with punctuation!'
++status: planning
++created_at: 2026-06-08T04:58:37Z
++updated_at: 2026-06-08T04:58:37Z
++created_by: human:michael
++";
++        assert_eq!(got, want, "frontmatter byte shape drifted");
++    }
++
++    #[test]
++    fn frontmatter_dialect_is_yaml_12_core() {
++        // The emitter resolves scalars per YAML 1.2 core: the 1.1 boolean
++        // words (yes/no/on/off) are plain strings and stay unquoted, while
++        // true/false are quoted when they appear as string values. Both
++        // directions must agree so a bare `yes` reads back as the string it
++        // was. Consumers parsing the corpus must use a 1.2-core resolver.
++        #[derive(serde::Serialize, serde::Deserialize)]
++        struct Probe {
++            a: String,
++            b: String,
++        }
++        let out = serde_norway::to_string(&Probe {
++            a: "yes".into(),
++            b: "true".into(),
++        })
++        .unwrap();
++        assert_eq!(out, "a: yes\nb: 'true'\n", "scalar quoting drifted");
++        let back: Probe = serde_norway::from_str(&out).unwrap();
++        assert_eq!(back.a, "yes", "bare yes must parse as a string");
++        assert_eq!(back.b, "true");
++    }
++
+     #[test]
+     fn append_jsonl_creates_and_appends() {
+         let dir = tempfile::tempdir().unwrap();

@@ -1,0 +1,2002 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 32ca00c..cfdab1b 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -170,14 +170,16 @@ Each layer swappable, seams deliberate. dossier could be Linear; ship could be a
+ Strict layered dependency direction (mirrored from dossier / tower):
+ 
+ ```
+-domain → firecracker / rootfs / transport → runner → main
++config / room → firecracker / rootfs / transport → runner / registry → main
+ ```
+ 
+-- **`domain`** — plain types (`RoomId`, outcomes); no I/O.
+-- **`firecracker`** — process spawn, API socket, VM config, boot/shutdown.
++- **`config`** — runtime config + the room path layout (state base, room dir, jail dirs); no I/O.
++- **`room`** — per-room metadata (`RoomMeta`) + liveness probe; plain data plus its own persistence.
++- **`firecracker`** — process spawn, API socket, VM config, boot/shutdown, orphan reap.
+ - **`rootfs`** — overlay/CoW, image paths (flake input lands here in v0.1).
+ - **`transport`** — repo bundle, scp into guest.
+ - **`runner`** — SSH exec, artifact capture, guest readiness.
++- **`registry`** — `rooms ls` / `rooms gc` policy: scan the state base, classify liveness, reap orphans (composes the `firecracker` teardown).
+ - **`main`** — clap CLI, wires layers.
+ 
+ Don't introduce a downward import. If a feature needs a new dependency direction, lift the shared concern into `domain`.
+diff --git a/docs/features/rooms-registry/spec.md b/docs/features/rooms-registry/spec.md
+new file mode 100644
+index 0000000..e579668
+--- /dev/null
++++ b/docs/features/rooms-registry/spec.md
+@@ -0,0 +1,155 @@
++**Status**: draft
++**Owner**: @michael (human:mh)
++**Date**: 2026-06-28
++**Related**: `src/firecracker.rs` (the `RoomGuard` teardown this reuses), `src/config.rs` (state paths), `src/main.rs` (the verb wiring), [docs/vision.md](../../vision.md) (v0.2 operational layer), [docs/follow-ups.md](../../follow-ups.md)
++
++# `rooms ls` + `rooms gc` — the room registry + orphan reaper
++
++## Goal
++
++rooms can run one agent room unattended without hurting you (jailer + read-only rootfs + `--max-wall` cap + the `rooms diff` lane gate). What it **can't** do is tell you what rooms exist or clean up the ones that leak. A crash, a `--keep`, or a `kill` of the launching process strands a firecracker process and a jailer chroot under `~/.local/state/rooms/` with no way to see it and no way to reap it (stale-room cruft hit twice during the safety arc).
++
++This is the "`docker ps` + `docker system prune`" of rooms, and it's the substrate the rest of v0.2 (pool, scheduler, snapshots) hangs off: everything in that layer needs a room registry first.
++
++Two verbs + the metadata that makes them possible:
++
++1. **`rooms ls [--json]`** — what rooms exist, and is each one alive, kept, or a leaked corpse.
++2. **`rooms gc [--dry-run] [<id>]`** — reap the corpses; never touch anything alive.
++
++## Background (the on-disk layout, verified against `firecracker.rs`)
++
++A room owns **two** directories under the state base (default `$HOME/.local/state/rooms`, overridable via `RoomsConfig::state_base`):
++
++```
++$STATE_BASE/
++├── <id>/                              # per-room dir, mode 0700  (room_state_dir)
++│   ├── firecracker.log
++│   └── room.json                      # NEW — the metadata this feature adds
++└── jailer/                            # the jailer chroot base (NOT a room)
++    └── firecracker/<id>/              # jail instance dir
++        └── root/
++            ├── kernel                 # bind-mount  ← must be unmounted before rm
++            ├── rootfs                 # bind-mount  ← must be unmounted before rm
++            └── api.sock               # firecracker API socket
++```
++
++`<id>` is a lowercase ULID. The filesystem is the **source of truth** for "a room exists" — `room.json` only *enriches* it (pid, label, age). The scan tolerates a room with no `room.json` (a crash between dir-create and the meta write).
++
++Normal teardown is `RoomGuard::cleanup_sync` (`firecracker.rs`): kill the fc child → (release tap — *skipped in v0*, shared `tap-fc0`) → rm the API socket → `teardown_jail_sync` (umount `kernel`+`rootfs`, rm the jail instance dir) → rm the per-room dir. **gc is exactly this teardown for a room whose live `RoomGuard` is gone**, so it reuses that path rather than forking a parallel one.
++
++## Design
++
++### 1. Per-room metadata — `room.json` (new module `src/room.rs`, leaf/domain layer)
++
++Written **atomically** (temp + `rename` in the same dir; honors the repo's atomic-write convention) by `boot()` right after the jailer child pid is known — earliest possible, so a crash strands as little as possible.
++
++```rust
++pub struct RoomMeta {
++    pub schema_version: u32,        // own file schema; forward-compat like result.json
++    pub id: String,                // lowercase ULID (matches the dir name)
++    pub label: Option<String>,     // command/task: "id", "cursor:<repo>", "(keep)", "(idle)"
++    pub started_at: DateTime<Utc>,
++    pub pid: Option<u32>,          // jailer→firecracker child pid; None ⇒ liveness Unknown
++    pub keep: bool,                // started with --keep (a deliberately held room)
++}
++```
++
++`room.rs` is plain data + its own I/O (atomic write, read) + the liveness probe. No upward import; depends only on std/serde/chrono. The `label` is the only field `main` (policy) supplies — `boot` takes it as `Option<&str>` and stays ignorant of CLI semantics.
++
++### 2. Liveness — `/proc/<pid>/comm`, not `kill -0`
++
++The reliable, **uid-independent, pid-reuse-resistant** liveness signal is `/proc/<pid>/comm`:
++
++- `kill -0 <pid>` is wrong here: cross-uid it returns **EPERM** (process exists but you can't signal it) — which a naive `status.success()` reads as *dead*. `ls` runs as the unprivileged operator against a firecracker-uid process, so `kill -0` would misreport every live room.
++- `/proc/<pid>/comm` is **world-readable** (mode 0644), needs no ptrace, and fits the 15-char `comm` cap (`firecracker` = 11). It distinguishes "process gone" from "pid reused by something else."
++
++```
++probe(pid) -> Liveness
++  None                              => Unknown      // no pid recorded
++  Some(p):
++    /proc/p/comm missing            => Dead         // process gone
++    comm ∈ {firecracker, jailer}    => Alive
++    comm = anything else            => Dead         // pid reused by another process
++    read error (not NotFound)       => Unknown      // fail-safe: can't tell ⇒ don't claim dead
++  (non-unix)                        => Unknown
++```
++
++The recorded pid is the jailer child; the jailer `exec`s into firecracker (no `--daemonize`), so `comm` is `firecracker` in steady state (`jailer` accepted to cover the pre-exec window).
++
++### 3. State classification (policy — `src/registry.rs`)
++
++```
++classify(meta, liveness):
++  Alive + keep      => Kept            // a deliberately-held --keep room, still up
++  Alive + !keep     => Running         // an in-flight `rooms run` exec
++  Dead              => OrphanedDead    // fc gone, dirs/mounts leaked  ← the only reapable state
++  Unknown           => Unknown         // no pid / unreadable /proc — never reaped
++```
++
++### 4. `rooms ls [--json]`
++
++Scan `$STATE_BASE` for `<id>` subdirs (skip `jailer/` and any name that isn't a 26-char ULID), load `room.json` (tolerate absent), probe liveness, classify. Sort by `started_at` (newest last).
++
++- **human**: one row per room — `ID  STATE  COMMAND  AGE  PID` (label truncated, age as `2h3m`/`45s`).
++- **`--json`**: a `Serialize` struct `{ schema_version, rooms: [...] }` to **stdout**, logs on stderr, behind a justified `#[allow(clippy::print_stdout)]` — identical contract to `doctor --json` / `diff --json`.
++
++### 5. `rooms gc [--dry-run] [<id>]`
++
++Reap **only** `OrphanedDead` rooms. The reap reuses `RoomGuard` via a new `firecracker::reap_orphan(config, id)`: it builds a guard for the orphan (`child_pid = None` — the process is *confirmed dead*, so there is nothing to kill, which also sidesteps the pid-reuse-kill hazard; `tap` untouched) and calls `.cleanup()` → the exact `teardown_jail_sync` + socket-rm + dir-rm path the live drop uses.
++
++- bare `rooms gc` → reap every `OrphanedDead` room; print a per-room summary (`reaped <id>` / `skipped <id> (running)`).
++- `rooms gc <id>` → reap just that one (still only if `OrphanedDead`; otherwise a clear skip line, not a forced delete).
++- `rooms gc --dry-run` → print what *would* be reaped; **touch nothing** (never constructs a guard, never unmounts, never rms).
++- gc **accumulates** per-room errors instead of aborting the batch — one orphan with a stuck mount never blocks reaping the healthy rest in a single run.
++- **Exit code** (composes in scripts like `doctor`/`diff`): **0** when clean (everything reapable was reaped, or nothing to reap, or a dry-run); **non-zero** when a real reap failed (a reapable room left un-reaped, e.g. a stuck mount).
++
++Destructive-by-default is safe **by construction**: the reap predicate is `state == OrphanedDead`, so gc can never reap a live, kept, or unknown-liveness room. Safety comes from the predicate, not from a `--force` flag (matches the e2e contract: bare `gc` reaps, `--dry-run` previews).
++
++### Cardinal safety invariant (adversarial-gated)
++
++> gc must **never** (a) reap a live or `--keep` room, (b) delete anything outside `$STATE_BASE`, or (c) leave a mount or process behind.
++
++Enforcement, defense-in-depth:
++
++- **(a)** Reap predicate is `OrphanedDead` only. Liveness is **fail-safe — indeterminate ≠ dead** (mirrors `rooms diff`'s "couldn't verify ≠ clean" → exit 2): a missing pid or an unreadable `/proc` is `Unknown`, never reaped. A `--keep` room shows `Kept` while alive and is never reaped; once its fc is confirmed dead the keep flag no longer protects a corpse (nothing left to inspect) and it becomes reapable — that *is* the leak gc exists to clean.
++- **(b)** Every reap target is derived from a **validated** id (`^[0-9a-z]{26}$`; the `<id>` arg and every scanned dir name pass through the same validator, so `..`, `jailer`, absolute paths, and separators are rejected) and re-checked: `room_dir.parent() == $STATE_BASE` and `jail_instance_dir.parent() == $STATE_BASE/jailer/firecracker` before any umount/rm.
++- **(c)** Reap reuses `teardown_jail_sync` — unmount the binds, then `remove_dir_all`; it reports success only when the jail instance dir is actually gone (an active mount fails the removal and leaves it). When a bind is stuck (EBUSY at shutdown), the **live** teardown (`cleanup_sync`) now *preserves the per-room dir* instead of deleting gc's only handle — so the room re-classifies `orphaned-dead` and a later `gc` retries the unmount. `reap_orphan` errors (the room stays listed) if a dir survives. No silent, un-reapable mount leak. *(Hardening from the adversarial pass — the one real finding.)*
++
++### Errors (`src/error.rs`)
++
++A small `RegistryError` (thiserror) — `InvalidRoomId { id }`, `PathEscape { path }`, `Io(#[from])` — wired into `RoomsError::Registry`. Matches the structured-error direction (`FirecrackerError`); errors-not-capitalized.
++
++### Layering
++
++- `room` — new **leaf** (domain): `RoomMeta` + atomic I/O + `Liveness::probe`. Depends on nothing in-crate.
++- `config` — gains `state_base` + path resolvers (`room_dir(id)`, `jail_instance_dir(id)`, `jail_root_dir(id)`, `jail_socket(id)`); centralizes path policy that was scattered as private fns in `firecracker.rs`. Leaf — everyone depends on it.
++- `firecracker` — `boot` writes meta via `room`; `reap_orphan` reuses `RoomGuard`. Depends on `config`, `room`.
++- `registry` — scan + classify + ls/gc policy (beside `runner`, composes `firecracker`). Depends on `config`, `room`, `firecracker`.
++- `main` — `Ls`/`Gc` verbs → `registry`; renders human + json.
++
++No cycle (`room`/`config` are leaves; `firecracker → {config, room}`; `registry → {config, room, firecracker}`). Dependencies flow down only.
++
++## Acceptance
++
++- `room.json` is written atomically at boot (temp + rename); round-trips through serde; `ls` degrades gracefully when it's absent.
++- Liveness: `firecracker`/`jailer` comm ⇒ Alive; missing `/proc/<pid>` ⇒ Dead; foreign comm ⇒ Dead; no pid / unreadable ⇒ Unknown.
++- `rooms ls` lists every room with correct state/age/pid; `--json` emits the schema'd struct on stdout (logs on stderr).
++- `rooms gc` reaps only `OrphanedDead`; **never** selects Running/Kept/Unknown. `--dry-run` deletes nothing. An invalid/`..`/non-ULID id is rejected before any path is touched.
++- `make check` green (fmt + clippy `-D warnings` + tests, Windows + Linux).
++- **Adversarial Workflow pass** scoped to the whole invariant (skeptics told to break it, not just review a function) before merge.
++- **Host e2e (rooms-host, gates merge):** leak a live `--keep` room → `ls` shows it alive → `kill` its fc pid → `ls` shows `orphaned-dead` → `gc` reaps it (dir gone, no leftover mounts in `/proc/mounts`, no fc process) → `ls` empty. Plus: `--dry-run` previews without deleting, and a negative test that a **live** room is never reaped.
++
++## Test plan
++
++- **Unit (hermetic, `state_base` → tempdir):** meta round-trip + atomic-write leaves no temp; `probe` over a fabricated `/proc`-style input (alive/dead/unknown — pure on the pid→Liveness mapping); `classify` truth table; gc reap-selection over a fixture of mixed-state rooms (asserts Running/Kept/Unknown are never selected); the id validator (rejects `..`, `jailer`, `<26`, separators); `--dry-run` leaves the fixture intact; the age/label formatters.
++- **E2e (host-only, the gate):** the leak→kill→ls→gc→empty cycle above on a real jailer chroot.
++
++## Out of scope (follow-ups)
++
++- **Multi-room pool** (per-room tap + IP allocation + scheduler) — the L-sized epic, its own `/tdd`. v0 has one shared `tap-fc0`, so gc never frees a tap (noted, not built).
++- **`rooms kill <id>`** (terminate a *live* room) — an orphaned-but-*alive* fc (launcher gone, fc still up) shows as `running` and is not gc's job. Stretch / follow-on.
++- **Snapshots, replay receipts** — separate v0.2 lines.
++- **`gc --json`** — trivial parity add; ship `ls --json` first, add if a consumer needs it.
++- **Reaping meta-less / pre-feature leaks.** A room with no `room.json` (created before this lands, or a crash before the write) classifies `Unknown` and isn't auto-reaped (fail-safe). A **socket-probe liveness fallback** (the kickoff sanctions "the API socket": a refused/absent `api.sock` ⇒ definitively dead) would let `gc` clean those too — the natural fast-follow. Its own liveness path → its own adversarial pass.
++- **Jail-subtree sweep** — defense-in-depth: have the registry also enumerate `<chroot_base>/firecracker/<id>` for jail dirs whose per-room dir is gone, as a second orphan source (the hardening above prevents *new* such leaks; this would recover historical ones).
++- **Lazy-unmount self-heal** — `umount -l` as a last resort in the reap path so a transient EBUSY clears without waiting for a retry.
+diff --git a/docs/follow-ups.md b/docs/follow-ups.md
+index 2285c3b..5ec9d25 100644
+--- a/docs/follow-ups.md
++++ b/docs/follow-ups.md
+@@ -49,6 +49,17 @@ Surfaced 2026-06-21 by `rooms run --max-wall` review ([#48](https://github.com/i
+ 
+ - 2026-06-21 — **a timed-out / cancelled run truncates partial guest logs.** `record_aborted_run` → `ensure_guest_artifact_skeleton` does `: > logs/stdout.log` / `logs/stderr.log`, so a run that produced partial stdout/stderr before the cap fired loses it just before `--out` collection. Pre-exists on the cancel path; `--max-wall` makes timeouts (hence partial output) routine. Make the skeleton non-truncating (create-if-missing) or skip it when the logs already exist, in `src/runner.rs`. Forensic-quality, not a correctness/teardown issue. (codex P2 on [#48](https://github.com/itsHabib/rooms/pull/48))
+ 
++Surfaced 2026-06-28 by `rooms-registry` (the `rooms ls` + `rooms gc` registry; spec [`docs/features/rooms-registry/spec.md`](features/rooms-registry/spec.md)); deferred to keep the PR a sharp v0:
++
++- 2026-06-28 — **`rooms kill <id>`** (terminate a *live* room) isn't built. An orphaned-but-*alive* firecracker — the launching `rooms run` died but firecracker is still up — shows in `rooms ls` as `running` and is never reaped by gc (gc reaps only confirmed-dead orphans). Reclaiming it needs an explicit `kill` verb (signal the fc pid, then reap). Its own follow-on.
++- 2026-06-28 — **gc doesn't free a TAP.** v0 uses one shared `tap-fc0` (every room attaches it; `tap_owned` is always false), so there's nothing per-room to release. When the multi-room pool retires `tap-fc0` for per-room TAPs, `rooms gc` must `ip tuntap del` the orphan's TAP as part of the reap. Pool-era concern; noted, not built.
++- 2026-06-28 — **`gc --json`** not implemented. `rooms ls --json` ships (the `doctor`/`diff` stdout contract); `gc` prints a human summary to stderr. A `GcReport` JSON surface is a trivial parity add when a consumer (cloud driver) needs machine-readable reap results.
++- 2026-06-28 — **liveness can't see an orphaned-but-alive fc whose launcher renamed it.** `room::probe` keys on `/proc/<pid>/comm ∈ {firecracker, jailer}`; if a future launch path changed the process name, a live room would read `Dead`. The pid is the jailer child that `exec`s firecracker, so this holds today — but a host-side cross-check (the room's `/proc/<pid>/cwd` resolving into its jail root) would make liveness identity-proof if it ever matters.
++- 2026-06-28 — **gc can't reap meta-less / pre-feature leaks.** A room with no `room.json` (created before the registry landed, or a crash before the write) classifies `Unknown` and isn't auto-reaped (fail-safe). The rooms-host already carries ~5 such leaked dirs under `~/.local/state/rooms/`. A **socket-probe liveness fallback** (a refused/absent `api.sock` ⇒ definitively dead) would let `gc` clean them; pairs with a **jail-subtree sweep** (`<chroot_base>/firecracker/<id>` with no per-room dir) as a second orphan source. Each is a new liveness/discovery path → wants its own adversarial pass. (rooms-registry spec out-of-scope)
++- 2026-06-28 — **adversarial-pass finding (fixed in-PR):** the live teardown (`cleanup_sync`) deleted the per-room dir unconditionally even when a bind-mount couldn't be unmounted (EBUSY at shutdown), stranding the mount where `gc` could never find it. Fixed: `teardown_jail_sync` now reports real success (instance dir gone) and `cleanup_sync` preserves the room dir on failure so the room re-classifies orphaned-dead and `gc` retries. A `umount -l` self-heal in the reap path is a possible further hardening. (rooms-registry adversarial Workflow)
++- 2026-06-28 — **`make check` clippy diverges from CI** (recurrence of the #44 cross-OS gap): CI runs `cargo clippy --all-targets --all-features`, but the `Makefile`'s `lint`/`check` omit `--all-features`, so an `e2e`-gated compile error (a stale `boot()` call in `tests/control_failures.rs` after a signature change) passed local `make check` and only failed in CI. Add `--all-features` to the Makefile clippy so local == CI. (rooms-registry, [#51](https://github.com/itsHabib/rooms/pull/51))
++- 2026-06-28 — **non-root `rooms ls`/`gc` can't read root-created room state** (codex P2 on [#51](https://github.com/itsHabib/rooms/pull/51)): `sudo -E rooms run` creates the per-room dir 0700-owned by root, so a non-root `rooms ls` gets `PermissionDenied` on `room.json` and the room shows `unknown` (no pid/age), and `gc` skips it. The `/proc` liveness *mechanism* is uid-independent, but the metadata file isn't readable. Today the working path is `sudo -E rooms ls`/`gc` (consistent with `sudo -E rooms run`); to support non-root, chown the room state tree to `$SUDO_UID:$SUDO_GID` after creation (or relax perms). Same class as the 2026-06-19 `--out` chown-under-sudo item.
++
+ ## Closed
+ 
+ Resolved by the `--out` transport-out work ([#40](https://github.com/itsHabib/rooms/pull/40) `973534b`):
+diff --git a/src/config.rs b/src/config.rs
+index 00ac9b5..1e3025b 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -22,8 +22,12 @@ pub struct RoomsConfig {
+     pub firecracker_binary: PathBuf,
+     /// Path to the jailer binary (default: `"jailer"` on PATH).
+     pub jailer_binary: PathBuf,
+-    /// Base directory for jailer chroot jails (default: `$HOME/.local/state/rooms/jailer`).
++    /// Base directory for jailer chroot jails (default: `<state_base>/jailer`).
+     pub jailer_chroot_base: Option<PathBuf>,
++    /// Base directory for all room state (default: `$HOME/.local/state/rooms`).
++    /// Overriding it (e.g. to a tempdir) redirects every room path — the seam
++    /// that makes the registry hermetically testable.
++    pub state_base: Option<PathBuf>,
+     /// Minimum supported Firecracker semver major.minor.
+     pub min_firecracker_version: (u32, u32),
+     /// Minimum rootfs image size in bytes.
+@@ -50,6 +54,7 @@ impl Default for RoomsConfig {
+             firecracker_binary: PathBuf::from("firecracker"),
+             jailer_binary: PathBuf::from("jailer"),
+             jailer_chroot_base: None,
++            state_base: None,
+             min_firecracker_version: (1, 7),
+             min_rootfs_bytes: 64 * 1024 * 1024,
+         }
+@@ -57,6 +62,50 @@ impl Default for RoomsConfig {
+ }
+ 
+ impl RoomsConfig {
++    /// The base directory holding every room's state. Honors `state_base`,
++    /// else `$HOME/.local/state/rooms`. `None` only when neither is set (HOME
++    /// unset); callers map that to their own layer's error.
++    pub fn resolved_state_base(&self) -> Option<PathBuf> {
++        if let Some(base) = &self.state_base {
++            return Some(base.clone());
++        }
++        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state/rooms"))
++    }
++
++    /// Per-room state dir: `<state_base>/<id>` — holds `firecracker.log` and
++    /// `room.json`.
++    pub fn room_dir(&self, id: &str) -> Option<PathBuf> {
++        Some(self.resolved_state_base()?.join(id))
++    }
++
++    /// Jailer chroot base: the `jailer_chroot_base` override, else
++    /// `<state_base>/jailer`.
++    pub fn chroot_base(&self) -> Option<PathBuf> {
++        if let Some(base) = &self.jailer_chroot_base {
++            return Some(base.clone());
++        }
++        Some(self.resolved_state_base()?.join("jailer"))
++    }
++
++    // The three below mirror the jail layout staged in `firecracker` — kept in
++    // lockstep by `config_paths_match_jail_layout` so the registry and the
++    // booter resolve identical paths.
++
++    /// Jail instance dir: `<chroot_base>/firecracker/<id>`.
++    pub fn jail_instance_dir(&self, id: &str) -> Option<PathBuf> {
++        Some(self.chroot_base()?.join("firecracker").join(id))
++    }
++
++    /// Jail root (the chroot): `<jail_instance_dir>/root`.
++    pub fn jail_root_dir(&self, id: &str) -> Option<PathBuf> {
++        Some(self.jail_instance_dir(id)?.join("root"))
++    }
++
++    /// Firecracker API socket: `<jail_root>/api.sock`.
++    pub fn jail_socket(&self, id: &str) -> Option<PathBuf> {
++        Some(self.jail_root_dir(id)?.join("api.sock"))
++    }
++
+     /// API call timeout for a specific endpoint.
+     #[must_use]
+     pub fn timeout_for_endpoint(&self, endpoint: &str) -> Duration {
+@@ -70,3 +119,59 @@ impl RoomsConfig {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::RoomsConfig;
++    use std::path::PathBuf;
++
++    fn with_base(base: &str) -> RoomsConfig {
++        RoomsConfig {
++            state_base: Some(PathBuf::from(base)),
++            ..RoomsConfig::default()
++        }
++    }
++
++    #[test]
++    fn paths_derive_from_state_base() {
++        let c = with_base("/s");
++        let id = "01abcdefghijklmnopqrstuvwx";
++        assert_eq!(c.resolved_state_base(), Some(PathBuf::from("/s")));
++        assert_eq!(c.room_dir(id), Some(PathBuf::from(format!("/s/{id}"))));
++        assert_eq!(c.chroot_base(), Some(PathBuf::from("/s/jailer")));
++    }
++
++    #[test]
++    fn config_paths_match_jail_layout() {
++        // Pins the registry's view of a room's dirs to the layout `firecracker`
++        // stages; a drift here would point gc at the wrong tree.
++        let c = with_base("/s");
++        let id = "01abcdefghijklmnopqrstuvwx";
++        assert_eq!(
++            c.jail_instance_dir(id),
++            Some(PathBuf::from(format!("/s/jailer/firecracker/{id}")))
++        );
++        assert_eq!(
++            c.jail_root_dir(id),
++            Some(PathBuf::from(format!("/s/jailer/firecracker/{id}/root")))
++        );
++        assert_eq!(
++            c.jail_socket(id),
++            Some(PathBuf::from(format!(
++                "/s/jailer/firecracker/{id}/root/api.sock"
++            )))
++        );
++    }
++
++    #[test]
++    fn jailer_chroot_base_override_wins() {
++        let c = RoomsConfig {
++            state_base: Some(PathBuf::from("/s")),
++            jailer_chroot_base: Some(PathBuf::from("/custom/jail")),
++            ..RoomsConfig::default()
++        };
++        assert_eq!(c.chroot_base(), Some(PathBuf::from("/custom/jail")));
++        // room_dir still tracks state_base, independent of the chroot override.
++        assert_eq!(c.room_dir("x"), Some(PathBuf::from("/s/x")));
++    }
++}
+diff --git a/src/error.rs b/src/error.rs
+index 060e3e4..65a01f4 100644
+--- a/src/error.rs
++++ b/src/error.rs
+@@ -5,7 +5,8 @@
+ //! ├── Firecracker(FirecrackerError)
+ //! ├── Rootfs(RootfsError)
+ //! ├── Transport(TransportError)
+-//! └── Runner(RunnerError)
++//! ├── Runner(RunnerError)
++//! └── Registry(RegistryError)
+ //! ```
+ 
+ use std::path::PathBuf;
+@@ -23,10 +24,27 @@ pub enum RoomsError {
+     Transport(#[from] TransportError),
+     #[error(transparent)]
+     Runner(#[from] RunnerError),
++    #[error(transparent)]
++    Registry(#[from] RegistryError),
+     #[error("internal: {0}")]
+     Internal(String),
+ }
+ 
++/// Errors from the room registry (`rooms ls` / `rooms gc`).
++#[derive(Debug, Error)]
++pub enum RegistryError {
++    #[error("invalid room id: {id}")]
++    InvalidRoomId { id: String },
++    #[error("refusing to remove a path outside the state base: {path}")]
++    PathEscape { path: PathBuf },
++    #[error("home env var unset; cannot locate the rooms state base")]
++    HomeUnset,
++    #[error(transparent)]
++    Firecracker(#[from] FirecrackerError),
++    #[error("io error: {0}")]
++    Io(#[from] std::io::Error),
++}
++
+ /// Errors from Firecracker process control and guest lifecycle.
+ #[derive(Debug, Error)]
+ pub enum FirecrackerError {
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index 246df57..aa62490 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -9,13 +9,14 @@ use std::env;
+ use std::path::{Path, PathBuf};
+ use std::time::Duration;
+ 
++use chrono::Utc;
+ use tokio::process::{Child, Command};
+ use tracing::{debug, info, warn};
+ use ulid::Ulid;
+ 
+ use crate::config::RoomsConfig;
+ use crate::error::FirecrackerError;
+-use crate::transport;
++use crate::{room, transport};
+ 
+ /// Dedicated unprivileged user Firecracker runs as inside the jailer.
+ pub const FIRECRACKER_USER: &str = "firecracker";
+@@ -82,6 +83,23 @@ impl RoomGuard {
+         self.jail_instance_dir = Some(path);
+     }
+ 
++    /// Construct a guard over an already-dead room's paths, for orphan reaping
++    /// (`rooms gc`). No child pid — the process is *confirmed dead* before gc
++    /// reaps it, so there's nothing to kill (which also sidesteps signalling a
++    /// reused pid) — and no tap ownership (v0's `tap-fc0` is shared). `cleanup`
++    /// then only unmounts the jail binds, removes the socket, and removes both
++    /// dirs: the exact teardown the live drop runs.
++    pub fn for_orphan(
++        room_dir: PathBuf,
++        socket: PathBuf,
++        jail_instance_dir: PathBuf,
++        config: &RoomsConfig,
++    ) -> Self {
++        let mut guard = Self::new(room_dir, socket, config);
++        guard.set_jail_instance_dir(jail_instance_dir);
++        guard
++    }
++
+     fn set_child(&mut self, child: &Child) {
+         self.child_pid = child.id();
+     }
+@@ -133,10 +151,29 @@ impl RoomGuard {
+         if self.socket.exists() {
+             let _ = std::fs::remove_file(&self.socket);
+         }
+-        if let Some(jail_dir) = self.jail_instance_dir.take() {
+-            teardown_jail_sync(&jail_dir);
++        let jail_torn_down = self
++            .jail_instance_dir
++            .take()
++            .is_none_or(|jail_dir| teardown_jail_sync(&jail_dir));
++        // Keep the room dir (gc's only handle on this room) if the jail tree
++        // didn't fully tear down: a stuck bind-mount leaves the jail dir behind,
++        // and deleting the room dir here would orphan that mount invisibly (the
++        // registry scans the per-room state dir, not the chroot subtree). With
++        // the room dir preserved and the process dead, the room re-classifies as
++        // orphaned-dead, so a later `rooms gc` retries the unmount and reaps it.
++        if jail_torn_down {
++            // Surface a failed room-dir removal: the jail is clean but the room
++            // dir lingers, so the room re-lists as `unknown` (fc gone, meta
++            // intact) and never becomes reapable — at least make it diagnosable.
++            if let Err(e) = std::fs::remove_dir_all(&self.room_dir) {
++                warn!(room_dir = %self.room_dir.display(), error = %e, "failed to remove room dir after cleanup; it may re-list as unknown");
++            }
++            return;
+         }
+-        let _ = std::fs::remove_dir_all(&self.room_dir);
++        warn!(
++            room_dir = %self.room_dir.display(),
++            "jail teardown incomplete (stranded mount?); keeping room dir so `rooms gc` can reap it"
++        );
+     }
+ }
+ 
+@@ -203,6 +240,7 @@ pub async fn boot(
+     network: Option<&NetworkConfig>,
+     config: &RoomsConfig,
+     readonly_rootfs: bool,
++    descriptor: &room::RoomDescriptor,
+ ) -> Result<BootedVm, FirecrackerError> {
+     ensure_root()?;
+     check_kvm()?;
+@@ -214,7 +252,9 @@ pub async fn boot(
+ 
+     let room_id = RoomId::new();
+     let room_id_str = room_id.as_str();
+-    let per_room_dir = room_state_dir(&room_id)?;
++    let per_room_dir = config
++        .room_dir(&room_id_str)
++        .ok_or(FirecrackerError::HomeUnset)?;
+     prepare_room_dir(&per_room_dir).await?;
+ 
+     let chroot_base = jailer_chroot_base(config)?;
+@@ -243,6 +283,7 @@ pub async fn boot(
+     let log_handles = open_log_file(&log_path).await?;
+     let mut child = spawn_jailer(&launch, log_handles)?;
+     guard.set_child(&child);
++    write_room_meta(&per_room_dir, &room_id_str, descriptor, child.id());
+ 
+     wait_for_socket(
+         &socket,
+@@ -344,13 +385,28 @@ where
+ }
+ 
+ fn jailer_chroot_base(config: &RoomsConfig) -> Result<PathBuf, FirecrackerError> {
+-    if let Some(base) = &config.jailer_chroot_base {
+-        return Ok(base.clone());
++    config.chroot_base().ok_or(FirecrackerError::HomeUnset)
++}
++
++/// Persist the room's metadata (`room.json`) as early as the pid is known.
++///
++/// Best-effort: a write failure only hides the room from `rooms ls`, never
++/// aborts an otherwise-successful boot. The recorded pid is the jailer child,
++/// which `exec`s firecracker in place (no `--daemonize` in the launch plan), so
++/// it stays the firecracker pid for the room's life — `room::probe` liveness
++/// depends on that. If a `--daemonize` jailer is ever adopted, capture the
++/// firecracker pid the jailer writes instead.
++fn write_room_meta(room_dir: &Path, id: &str, descriptor: &room::RoomDescriptor, pid: Option<u32>) {
++    let meta = room::RoomMeta::new(
++        id.to_owned(),
++        descriptor.command.clone(),
++        pid,
++        descriptor.keep,
++        Utc::now(),
++    );
++    if let Err(e) = room::write_atomic(room_dir, &meta) {
++        warn!(error = %e, "failed to write room.json; room will be invisible to `rooms ls`");
+     }
+-    let home = env::var("HOME").map_err(|_| FirecrackerError::HomeUnset)?;
+-    Ok(PathBuf::from(home)
+-        .join(".local/state/rooms")
+-        .join("jailer"))
+ }
+ 
+ #[derive(Debug, Clone)]
+@@ -585,24 +641,71 @@ fn stage_jail_sync(
+     Err(FirecrackerError::KvmUnavailable)
+ }
+ 
++/// Unmount a room's jail binds and remove its instance dir. Returns `true` only
++/// when the jail fully tore down — i.e. the instance dir is gone. A still-active
++/// bind mount fails the `remove_dir_all` (EBUSY) and leaves the dir behind, so
++/// the dir-gone check is the authoritative signal; the `unmount` exit codes are
++/// advisory (a "not mounted" error on a plain file is harmless).
+ #[cfg(unix)]
+-fn teardown_jail_sync(instance_dir: &Path) {
++fn teardown_jail_sync(instance_dir: &Path) -> bool {
+     let jail_root = instance_dir.join("root");
+     for name in [JAIL_KERNEL, JAIL_ROOTFS] {
+         let target = jail_root.join(name);
+         if target.exists() {
+             if let Err(e) = unmount(&target) {
+-                tracing::warn!(target = %target.display(), error = %e, "failed to unmount jail bind; may leak");
++                tracing::warn!(target = %target.display(), error = %e, "umount reported an error; relying on dir removal");
+             }
+         }
+     }
+     if let Err(e) = std::fs::remove_dir_all(instance_dir) {
+-        tracing::warn!(dir = %instance_dir.display(), error = %e, "failed to remove jail instance dir");
++        tracing::warn!(dir = %instance_dir.display(), error = %e, "failed to remove jail instance dir (active mount?)");
+     }
++    !instance_dir.exists()
+ }
+ 
+ #[cfg(not(unix))]
+-fn teardown_jail_sync(_instance_dir: &Path) {}
++const fn teardown_jail_sync(_instance_dir: &Path) -> bool {
++    true
++}
++
++/// Tear down an orphaned room — one whose live `RoomGuard` is gone.
++///
++/// A crash, a killed launcher, or a `--keep` room whose firecracker later died.
++/// Reconstructs a guard over the room's paths and runs the same cleanup the live
++/// drop uses; the caller (gc) guarantees the firecracker process is already
++/// dead. Returns an error if either dir survives, so `rooms gc` reports an
++/// honest outcome rather than a silent leak.
++pub fn reap_orphan(
++    room_dir: &Path,
++    jail_instance_dir: &Path,
++    socket: &Path,
++    config: &RoomsConfig,
++) -> Result<(), FirecrackerError> {
++    let mut guard = RoomGuard::for_orphan(
++        room_dir.to_path_buf(),
++        socket.to_path_buf(),
++        jail_instance_dir.to_path_buf(),
++        config,
++    );
++    guard.cleanup();
++    guard.dismiss(); // cleanup already ran; don't let Drop run it again.
++                     // cleanup keeps the room dir when the jail tree didn't fully tear down, so a
++                     // surviving jail dir is the primary signal of an incomplete reap (a stranded
++                     // bind-mount). Report it honestly; the room stays listed for a retry.
++    if jail_instance_dir.exists() {
++        return Err(FirecrackerError::Internal(format!(
++            "jail instance dir survived reap (stranded mount?): {}",
++            jail_instance_dir.display()
++        )));
++    }
++    if room_dir.exists() {
++        return Err(FirecrackerError::Internal(format!(
++            "room dir survived reap: {}",
++            room_dir.display()
++        )));
++    }
++    Ok(())
++}
+ 
+ fn spawn_jailer(
+     plan: &JailerLaunchPlan,
+@@ -625,13 +728,6 @@ fn spawn_jailer(
+         })
+ }
+ 
+-fn room_state_dir(room_id: &RoomId) -> Result<PathBuf, FirecrackerError> {
+-    let home = env::var("HOME").map_err(|_| FirecrackerError::HomeUnset)?;
+-    Ok(PathBuf::from(home)
+-        .join(".local/state/rooms")
+-        .join(room_id.0.to_string().to_lowercase()))
+-}
+-
+ async fn prepare_room_dir(per_room_dir: &Path) -> Result<(), FirecrackerError> {
+     if let Some(parent) = per_room_dir.parent() {
+         tokio::fs::create_dir_all(parent)
+@@ -1101,6 +1197,90 @@ mod tests {
+         assert!(path.exists(), "dismissed guard should leave the directory");
+     }
+ 
++    /// Regression for the adversarial finding: when the jail tree can't fully
++    /// tear down (a stuck bind-mount blocking `remove_dir_all`), `cleanup` must
++    /// PRESERVE the room dir — gc's only handle — so the stranded mount stays
++    /// reapable instead of being orphaned invisibly. We inject the failure by
++    /// making the jail dir's parent read-only so the final rmdir can't unlink it
++    /// (no root or real mount required).
++    #[cfg(unix)]
++    #[test]
++    fn cleanup_keeps_room_dir_when_jail_teardown_fails() {
++        use std::os::unix::fs::PermissionsExt;
++
++        let tmp = tempfile::tempdir().expect("tempdir");
++        let room_dir = tmp.path().join("room");
++        std::fs::create_dir_all(&room_dir).expect("room dir");
++        std::fs::write(room_dir.join("room.json"), b"{}").expect("marker");
++
++        let fc_parent = tmp.path().join("chroot").join("firecracker");
++        let instance = fc_parent.join("01abcdefghijklmnopqrstuvwx");
++        std::fs::create_dir_all(instance.join("root")).expect("jail tree");
++        std::fs::write(instance.join("root").join("kernel"), b"k").expect("kernel");
++        std::fs::write(instance.join("root").join("rootfs"), b"r").expect("rootfs");
++        std::fs::set_permissions(&fc_parent, std::fs::Permissions::from_mode(0o500))
++            .expect("lock parent");
++
++        let config = RoomsConfig::default();
++        let mut guard = RoomGuard::for_orphan(
++            room_dir.clone(),
++            room_dir.join("api.sock"),
++            instance.clone(),
++            &config,
++        );
++        guard.cleanup();
++        guard.dismiss(); // don't let drop re-run cleanup
++
++        let injected = instance.exists();
++        // Restore perms so the tempdir can be cleaned up regardless of outcome.
++        std::fs::set_permissions(&fc_parent, std::fs::Permissions::from_mode(0o700))
++            .expect("restore perms");
++
++        if !injected {
++            // Running as root: the read-only parent didn't block removal, so the
++            // failure couldn't be injected. The preserve-on-failure path is
++            // covered on non-root runners (CI + the rooms-host).
++            return;
++        }
++        assert!(
++            room_dir.exists(),
++            "room dir (gc's handle) must be preserved when the jail tree leaks"
++        );
++    }
++
++    /// A failed room-dir removal on the jail-succeeded path must not panic and
++    /// must leave the dir (so it's at least diagnosable, per the cleanup warn).
++    /// We inject the removal failure with a read-only parent; no jail dir is set,
++    /// so the jail teardown "succeeds" and cleanup proceeds to the room-dir rm.
++    #[cfg(unix)]
++    #[test]
++    fn cleanup_survives_room_dir_removal_failure() {
++        use std::os::unix::fs::PermissionsExt;
++
++        let tmp = tempfile::tempdir().expect("tempdir");
++        let parent = tmp.path().join("locked");
++        let room_dir = parent.join("room");
++        std::fs::create_dir_all(&room_dir).expect("room dir");
++        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500))
++            .expect("lock parent");
++
++        let config = RoomsConfig::default();
++        let mut guard = RoomGuard::new(room_dir.clone(), room_dir.join("api.sock"), &config);
++        guard.cleanup(); // no jail dir → jail "torn down" → attempts room-dir rm
++        guard.dismiss();
++
++        let injected = room_dir.exists();
++        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700))
++            .expect("restore perms");
++
++        if injected {
++            assert!(
++                room_dir.exists(),
++                "a failed room-dir removal must leave the dir, not panic"
++            );
++        }
++    }
++
+     mod room_guard_properties {
+         use proptest::prelude::*;
+ 
+@@ -1202,9 +1382,16 @@ mod e2e_tests {
+         assert!(kernel.exists(), "kernel missing at {kernel:?}");
+         assert!(rootfs.exists(), "rootfs missing at {rootfs:?}");
+ 
+-        let mut vm = boot(&kernel, &rootfs, None, &config, false)
+-            .await
+-            .expect("boot should succeed");
++        let mut vm = boot(
++            &kernel,
++            &rootfs,
++            None,
++            &config,
++            false,
++            &crate::room::RoomDescriptor::default(),
++        )
++        .await
++        .expect("boot should succeed");
+ 
+         tokio::time::sleep(Duration::from_secs(3)).await;
+         assert!(vm.is_alive().expect("is_alive probe"));
+diff --git a/src/lib.rs b/src/lib.rs
+index d4166d5..e5d2edc 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -5,6 +5,8 @@ pub mod config;
+ pub mod doctor;
+ pub mod error;
+ pub mod firecracker;
++pub mod registry;
++pub mod room;
+ pub mod rootfs;
+ pub mod runner;
+ pub mod transport;
+diff --git a/src/main.rs b/src/main.rs
+index 0ee2a21..e8e0bf0 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
+ use clap::{Parser, Subcommand, ValueEnum};
+ use rooms::artifacts::{ResultJson, RunStatus};
+ use rooms::{
+-    artifacts, config::RoomsConfig, doctor, error::RoomsError, firecracker, rootfs, runner,
++    artifacts, config::RoomsConfig, doctor, error::RoomsError, firecracker, registry, room, rootfs,
++    runner,
+ };
+ use tracing::{info, warn};
+ 
+@@ -109,6 +110,20 @@ enum Command {
+         #[arg(long)]
+         json: bool,
+     },
++    /// List rooms and their liveness (running | kept | orphaned-dead | unknown).
++    Ls {
++        /// Emit structured JSON output (schema'd; logs stay on stderr).
++        #[arg(long)]
++        json: bool,
++    },
++    /// Reap orphaned (dead-but-leaked) rooms. Never touches a live or kept room.
++    Gc {
++        /// Preview what would be reaped; remove nothing.
++        #[arg(long = "dry-run")]
++        dry_run: bool,
++        /// Reap only this room id (still only if it's orphaned-dead).
++        id: Option<String>,
++    },
+ }
+ 
+ /// Which runner backend drives the guest command.
+@@ -240,6 +255,8 @@ async fn dispatch(cli: Cli) -> Result<u8, RoomsError> {
+         Command::Collect { from } => collect_artifacts(from).await,
+         Command::Doctor { image, json } => run_doctor_cmd(image.as_deref(), json, &config),
+         Command::Diff { from, json } => diff_changeset(&from, json).await,
++        Command::Ls { json } => list_rooms_cmd(json, &config),
++        Command::Gc { dry_run, id } => gc_cmd(dry_run, id, &config),
+     }
+ }
+ 
+@@ -312,12 +329,17 @@ async fn run_room(args: RunArgs, config: &RoomsConfig) -> Result<u8, RoomsError>
+     // plain `rooms run --command` otherwise keeps a writable rootfs so any
+     // image — including ones without /sbin/overlay-init — still boots.
+     let readonly_rootfs = args.readonly_rootfs || matches!(args.runner, RunnerKind::Cursor);
++    let descriptor = room::RoomDescriptor {
++        command: Some(room_label(&action)),
++        keep: args.keep,
++    };
+     let mut vm = firecracker::boot(
+         &kernel,
+         &args.image,
+         Some(&network),
+         config,
+         readonly_rootfs,
++        &descriptor,
+     )
+     .await?;
+ 
+@@ -700,6 +722,148 @@ fn print_escapes_by_op(changeset: &artifacts::Changeset) {
+     }
+ }
+ 
++/// A short human label for `room.json`, derived from the resolved post-boot
++/// action — what `rooms ls` shows under COMMAND.
++fn room_label(action: &Action) -> String {
++    match action {
++        Action::Keep => "(keep)".to_owned(),
++        Action::Idle => "(idle)".to_owned(),
++        Action::Exec(runner::Runner::Command(cmd)) => cmd.clone(),
++        Action::Exec(runner::Runner::Cursor(req)) => format!("cursor:{}", req.repo_url),
++    }
++}
++
++fn list_rooms_cmd(json: bool, config: &RoomsConfig) -> Result<u8, RoomsError> {
++    info!("rooms ls");
++    let rooms = registry::list_rooms(config)?;
++    if json {
++        return render_rooms_json(&rooms);
++    }
++    render_rooms_human(&rooms);
++    Ok(0)
++}
++
++// stdout is the documented data surface for `rooms ls --json` (logs stay on
++// stderr), mirroring `rooms doctor --json` / `rooms diff --json`.
++#[allow(
++    clippy::print_stdout,
++    reason = "machine-readable ls output; stdout is the documented contract"
++)]
++fn render_rooms_json(rooms: &[registry::RoomEntry]) -> Result<u8, RoomsError> {
++    let report = registry::ListReport::new(rooms.to_vec());
++    let out =
++        serde_json::to_string_pretty(&report).map_err(|e| RoomsError::Internal(e.to_string()))?;
++    println!("{out}");
++    Ok(0)
++}
++
++// `rooms ls` is a data surface like `docker ps`; the table is its stdout
++// contract (the empty-state note goes to stderr so a piped `ls` stays clean).
++#[allow(
++    clippy::print_stdout,
++    reason = "ls table is the documented stdout contract"
++)]
++fn render_rooms_human(rooms: &[registry::RoomEntry]) {
++    if rooms.is_empty() {
++        eprintln!("no rooms");
++        return;
++    }
++    println!(
++        "{:<26}  {:<13}  {:<7}  {:<8}  COMMAND",
++        "ID", "STATE", "PID", "AGE"
++    );
++    for r in rooms {
++        let pid = r.pid.map_or_else(|| "-".to_owned(), |p| p.to_string());
++        println!(
++            "{:<26}  {:<13}  {:<7}  {:<8}  {}",
++            r.id,
++            r.state.label(),
++            pid,
++            format_age(r.started_at),
++            truncate_label(r.label.as_deref(), 48),
++        );
++    }
++}
++
++/// Humanized age from a room's start time; `?` when unknown (no metadata).
++fn format_age(started_at: Option<DateTime<Utc>>) -> String {
++    let Some(start) = started_at else {
++        return "?".to_owned();
++    };
++    humanize_secs((Utc::now() - start).num_seconds().max(0))
++}
++
++/// Render a non-negative second count compactly (`45s`, `2m3s`, `1h4m`, `3d2h`).
++fn humanize_secs(secs: i64) -> String {
++    if secs < 60 {
++        return format!("{secs}s");
++    }
++    if secs < 3600 {
++        return format!("{}m{}s", secs / 60, secs % 60);
++    }
++    if secs < 86_400 {
++        return format!("{}h{}m", secs / 3600, (secs % 3600) / 60);
++    }
++    format!("{}d{}h", secs / 86_400, (secs % 86_400) / 3600)
++}
++
++/// Truncate a label to `max` display chars, marking elision with a single `…`.
++fn truncate_label(label: Option<&str>, max: usize) -> String {
++    let Some(s) = label else {
++        return "-".to_owned();
++    };
++    if s.chars().count() <= max {
++        return s.to_owned();
++    }
++    let head: String = s.chars().take(max.saturating_sub(1)).collect();
++    format!("{head}…")
++}
++
++fn gc_cmd(dry_run: bool, id: Option<String>, config: &RoomsConfig) -> Result<u8, RoomsError> {
++    info!(dry_run, ?id, "rooms gc");
++    let only = id.clone();
++    let report = registry::gc(config, &registry::GcOptions { dry_run, only: id })?;
++    render_gc(&report, only.as_deref());
++    // Exit non-zero when a real reap failed (a reapable room left un-reaped), so
++    // a scripted caller sees the partial failure — mirroring `doctor`/`diff`'s
++    // exit-code-as-contract. A dry-run never reaps, so it's always exit 0.
++    let reap_failed = !report.dry_run
++        && report
++            .outcomes
++            .iter()
++            .any(|o| o.state.is_reapable() && !o.reaped);
++    Ok(u8::from(reap_failed))
++}
++
++fn render_gc(report: &registry::GcReport, only: Option<&str>) {
++    if report.outcomes.is_empty() {
++        render_gc_empty(only);
++        return;
++    }
++    for o in &report.outcomes {
++        eprintln!("{}  {}", o.id, o.reason);
++    }
++    if report.dry_run {
++        let n = report
++            .outcomes
++            .iter()
++            .filter(|o| o.state.is_reapable())
++            .count();
++        eprintln!("dry-run: {n} room(s) would be reaped");
++        return;
++    }
++    let n = report.outcomes.iter().filter(|o| o.reaped).count();
++    eprintln!("reaped {n} room(s)");
++}
++
++fn render_gc_empty(only: Option<&str>) {
++    let Some(id) = only else {
++        eprintln!("no rooms to reap");
++        return;
++    };
++    eprintln!("no room with id {id} (already gone?)");
++}
++
+ #[cfg(test)]
+ mod tests {
+     #![allow(
+@@ -714,8 +878,8 @@ mod tests {
+     use std::time::Duration;
+ 
+     use super::{
+-        changeset_exit_code, diff_changeset, parse_max_wall, resolve_action, Cli, Command,
+-        RoomsError, RunArgs, RunnerKind,
++        changeset_exit_code, diff_changeset, humanize_secs, parse_max_wall, resolve_action,
++        truncate_label, Cli, Command, RoomsError, RunArgs, RunnerKind,
+     };
+     use crate::artifacts::Changeset;
+     use clap::{CommandFactory, Parser};
+@@ -1014,4 +1178,58 @@ mod tests {
+             "expected error to name --out and --keep; got: {err}"
+         );
+     }
++
++    #[test]
++    fn ls_verb_parses_json_and_default() {
++        let json = Cli::try_parse_from(["rooms", "ls", "--json"]).expect("ls --json parses");
++        match json.command {
++            Command::Ls { json } => assert!(json),
++            other => panic!("expected Ls, got {other:?}"),
++        }
++        let human = Cli::try_parse_from(["rooms", "ls"]).expect("ls parses");
++        match human.command {
++            Command::Ls { json } => assert!(!json),
++            other => panic!("expected Ls, got {other:?}"),
++        }
++    }
++
++    #[test]
++    fn gc_verb_parses_dry_run_and_id() {
++        let id = "01abcdefghijklmnopqrstuvwx";
++        let cli = Cli::try_parse_from(["rooms", "gc", "--dry-run", id])
++            .expect("gc --dry-run <id> parses");
++        match cli.command {
++            Command::Gc { dry_run, id: got } => {
++                assert!(dry_run);
++                assert_eq!(got.as_deref(), Some(id));
++            }
++            other => panic!("expected Gc, got {other:?}"),
++        }
++        let bare = Cli::try_parse_from(["rooms", "gc"]).expect("bare gc parses");
++        match bare.command {
++            Command::Gc { dry_run, id } => {
++                assert!(!dry_run);
++                assert!(id.is_none());
++            }
++            other => panic!("expected Gc, got {other:?}"),
++        }
++    }
++
++    #[test]
++    fn humanize_secs_formats_each_magnitude() {
++        assert_eq!(humanize_secs(0), "0s");
++        assert_eq!(humanize_secs(45), "45s");
++        assert_eq!(humanize_secs(125), "2m5s");
++        assert_eq!(humanize_secs(3_661), "1h1m");
++        assert_eq!(humanize_secs(90_061), "1d1h");
++    }
++
++    #[test]
++    fn truncate_label_elides_long_and_passes_short() {
++        assert_eq!(truncate_label(None, 10), "-");
++        assert_eq!(truncate_label(Some("short"), 10), "short");
++        let long = truncate_label(Some("abcdefghijklmnop"), 5);
++        assert_eq!(long.chars().count(), 5, "truncated to max display width");
++        assert!(long.ends_with('…'), "elision marker present: {long}");
++    }
+ }
+diff --git a/src/registry.rs b/src/registry.rs
+new file mode 100644
+index 0000000..d78e521
+--- /dev/null
++++ b/src/registry.rs
+@@ -0,0 +1,602 @@
++//! The room registry — `rooms ls` + `rooms gc` over the on-disk state base.
++//!
++//! Policy plane: scan the state base, classify each room's liveness, and reap
++//! only the corpses. The mechanism it composes — the metadata/liveness in
++//! [`crate::room`], the path layout in [`crate::config`], and the teardown in
++//! [`crate::firecracker`] — stays dumb; the *decisions* (what state a room is
++//! in, what is safe to reap) live here.
++
++use std::path::{Path, PathBuf};
++
++use chrono::{DateTime, Utc};
++use serde::Serialize;
++use tracing::warn;
++
++use crate::config::RoomsConfig;
++use crate::error::RegistryError;
++use crate::firecracker;
++use crate::room::{self, Liveness, RoomMeta};
++
++/// Schema version for `ls --json` stdout (mirrors `doctor`/`diff`).
++pub const REGISTRY_SCHEMA_VERSION: u32 = 1;
++
++/// A room's lifecycle state as the registry sees it.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "kebab-case")]
++pub enum RoomState {
++    /// firecracker alive, an in-flight `rooms run`.
++    Running,
++    /// firecracker alive, a deliberately-held `--keep` room.
++    Kept,
++    /// firecracker dead; the state dir + bind-mounts leaked. The *only* reapable
++    /// state.
++    OrphanedDead,
++    /// Liveness indeterminate (no pid recorded / unreadable `/proc`). Never
++    /// reaped — indeterminate ≠ dead.
++    Unknown,
++}
++
++impl RoomState {
++    /// Stable lowercase label for human output (matches the JSON rename).
++    #[must_use]
++    pub const fn label(self) -> &'static str {
++        match self {
++            Self::Running => "running",
++            Self::Kept => "kept",
++            Self::OrphanedDead => "orphaned-dead",
++            Self::Unknown => "unknown",
++        }
++    }
++
++    /// Whether `rooms gc` may reap a room in this state. The whole safety
++    /// invariant funnels through this one predicate: only a confirmed-dead
++    /// orphan is reapable.
++    #[must_use]
++    pub const fn is_reapable(self) -> bool {
++        matches!(self, Self::OrphanedDead)
++    }
++}
++
++/// One room as listed by `rooms ls`.
++#[derive(Debug, Clone, Serialize)]
++pub struct RoomEntry {
++    pub id: String,
++    pub state: RoomState,
++    pub label: Option<String>,
++    pub pid: Option<u32>,
++    pub started_at: Option<DateTime<Utc>>,
++    pub keep: bool,
++}
++
++/// The `ls --json` payload (schema'd, like the doctor/diff reports).
++#[derive(Debug, Clone, Serialize)]
++pub struct ListReport {
++    pub schema_version: u32,
++    pub rooms: Vec<RoomEntry>,
++}
++
++impl ListReport {
++    #[must_use]
++    pub const fn new(rooms: Vec<RoomEntry>) -> Self {
++        Self {
++            schema_version: REGISTRY_SCHEMA_VERSION,
++            rooms,
++        }
++    }
++}
++
++/// Pure state classification from a room's keep flag + liveness (policy).
++#[must_use]
++pub const fn classify(keep: bool, liveness: Liveness) -> RoomState {
++    match liveness {
++        Liveness::Alive if keep => RoomState::Kept,
++        Liveness::Alive => RoomState::Running,
++        Liveness::Dead => RoomState::OrphanedDead,
++        Liveness::Unknown => RoomState::Unknown,
++    }
++}
++
++/// Whether `id` is a syntactically valid room id (26 lowercase-alphanumerics).
++///
++/// The lowercased ULID alphabet is a subset, so every real id passes. This is
++/// the gate that keeps `..`, `jailer`, absolute paths, and separators out of
++/// every path gc builds — the `<id>` arg and every scanned dir name pass
++/// through it.
++#[must_use]
++pub fn is_valid_room_id(id: &str) -> bool {
++    id.len() == 26
++        && id
++            .bytes()
++            .all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
++}
++
++/// List every room under the state base, classified.
++///
++/// Tolerant: a room with no (or unreadable) `room.json` still lists, with
++/// `Unknown` liveness. Sorted by start time (oldest first), then id for the
++/// meta-less rows.
++pub fn list_rooms(config: &RoomsConfig) -> Result<Vec<RoomEntry>, RegistryError> {
++    let base = config
++        .resolved_state_base()
++        .ok_or(RegistryError::HomeUnset)?;
++    let read_dir = match std::fs::read_dir(&base) {
++        Ok(rd) => rd,
++        // No state base yet ⇒ no rooms, not an error.
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
++        Err(e) => return Err(RegistryError::Io(e)),
++    };
++    let mut entries = Vec::new();
++    for dirent in read_dir {
++        let dirent = dirent.map_err(RegistryError::Io)?;
++        let name = dirent.file_name().to_string_lossy().into_owned();
++        // Skips `jailer/`, stray files, and anything that isn't a room dir.
++        if !is_valid_room_id(&name) || !dirent.file_type().is_ok_and(|t| t.is_dir()) {
++            continue;
++        }
++        entries.push(entry_for(config, &name));
++    }
++    entries.sort_by(|a, b| {
++        a.started_at
++            .cmp(&b.started_at)
++            .then_with(|| a.id.cmp(&b.id))
++    });
++    Ok(entries)
++}
++
++/// Build one room's entry: load its (soft) metadata, probe liveness, classify.
++fn entry_for(config: &RoomsConfig, id: &str) -> RoomEntry {
++    let meta = config.room_dir(id).and_then(|dir| load_meta_soft(&dir));
++    let pid = meta.as_ref().and_then(|m| m.pid);
++    let keep = meta.as_ref().is_some_and(|m| m.keep);
++    RoomEntry {
++        id: id.to_owned(),
++        state: classify(keep, room::probe(pid)),
++        label: meta.as_ref().and_then(|m| m.label.clone()),
++        pid,
++        started_at: meta.as_ref().map(|m| m.started_at),
++        keep,
++    }
++}
++
++/// Read a room's metadata, downgrading any read/parse error to `None` (one bad
++/// file must not break `ls` for healthy rooms) with a warning.
++fn load_meta_soft(room_dir: &Path) -> Option<RoomMeta> {
++    match room::read(room_dir) {
++        Ok(meta) => meta,
++        Err(e) => {
++            warn!(dir = %room_dir.display(), error = %e, "unreadable room.json; treating as no metadata");
++            None
++        }
++    }
++}
++
++/// Inputs to a gc run.
++#[derive(Debug, Clone, Default)]
++pub struct GcOptions {
++    /// Preview only — touch nothing.
++    pub dry_run: bool,
++    /// Reap only this room id (still only if it's orphaned-dead).
++    pub only: Option<String>,
++}
++
++/// What gc did (or would do) to one room.
++#[derive(Debug, Clone, Serialize)]
++pub struct GcOutcome {
++    pub id: String,
++    pub state: RoomState,
++    /// True only when the room was actually removed (never in a dry-run).
++    pub reaped: bool,
++    pub reason: String,
++}
++
++/// The result of a gc run.
++#[derive(Debug, Clone, Serialize)]
++pub struct GcReport {
++    pub schema_version: u32,
++    pub dry_run: bool,
++    pub outcomes: Vec<GcOutcome>,
++}
++
++/// Reap orphaned-dead rooms. Reaps **only** `OrphanedDead` rooms — Running,
++/// Kept, and Unknown are reported as skipped, never touched. `--dry-run`
++/// previews without removing anything.
++pub fn gc(config: &RoomsConfig, opts: &GcOptions) -> Result<GcReport, RegistryError> {
++    if let Some(id) = &opts.only {
++        if !is_valid_room_id(id) {
++            return Err(RegistryError::InvalidRoomId { id: id.clone() });
++        }
++    }
++    let mut rooms = list_rooms(config)?;
++    if let Some(only) = &opts.only {
++        rooms.retain(|e| &e.id == only);
++    }
++    let mut outcomes = Vec::with_capacity(rooms.len());
++    for entry in &rooms {
++        // Accumulate per-room errors instead of aborting the batch: one orphan
++        // with a stuck mount must not stop gc from reaping the healthy rest.
++        match reap_entry(config, entry, opts.dry_run) {
++            Ok(out) => outcomes.push(out),
++            Err(e) => {
++                warn!(id = %entry.id, error = %e, "reap failed; continuing with the remaining rooms");
++                outcomes.push(error_outcome(entry, &e));
++            }
++        }
++    }
++    Ok(GcReport {
++        schema_version: REGISTRY_SCHEMA_VERSION,
++        dry_run: opts.dry_run,
++        outcomes,
++    })
++}
++
++/// Decide and (unless dry-run) perform the reap for one room. The cardinal
++/// predicate lives in the first guard: a non-reapable room returns a skip
++/// outcome before any path is resolved or touched.
++fn reap_entry(
++    config: &RoomsConfig,
++    entry: &RoomEntry,
++    dry_run: bool,
++) -> Result<GcOutcome, RegistryError> {
++    if !entry.state.is_reapable() {
++        return Ok(skip_outcome(entry));
++    }
++    // Resolve + safety-check the dirs even for a dry-run, so a preview surfaces
++    // a path-escape rather than hiding it until the real run.
++    let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
++    if dry_run {
++        return Ok(outcome(entry, false, "would reap (dry-run)"));
++    }
++    firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, config)?;
++    Ok(outcome(entry, true, "reaped"))
++}
++
++/// Resolve the two dirs gc removes for `id`, re-checking each sits under its
++/// expected parent — the defense-in-depth backstop behind `is_valid_room_id`.
++fn reap_paths(
++    config: &RoomsConfig,
++    id: &str,
++) -> Result<(PathBuf, PathBuf, PathBuf), RegistryError> {
++    let base = config
++        .resolved_state_base()
++        .ok_or(RegistryError::HomeUnset)?;
++    let chroot_base = config.chroot_base().ok_or(RegistryError::HomeUnset)?;
++    let room_dir = config.room_dir(id).ok_or(RegistryError::HomeUnset)?;
++    let jail_instance_dir = config
++        .jail_instance_dir(id)
++        .ok_or(RegistryError::HomeUnset)?;
++    let socket = config.jail_socket(id).ok_or(RegistryError::HomeUnset)?;
++    ensure_child(&room_dir, &base)?;
++    ensure_child(&jail_instance_dir, &chroot_base.join("firecracker"))?;
++    Ok((room_dir, jail_instance_dir, socket))
++}
++
++/// Reject any reap target that isn't a direct child of its expected parent.
++fn ensure_child(path: &Path, expected_parent: &Path) -> Result<(), RegistryError> {
++    if path.parent() == Some(expected_parent) {
++        return Ok(());
++    }
++    Err(RegistryError::PathEscape {
++        path: path.to_path_buf(),
++    })
++}
++
++fn skip_outcome(entry: &RoomEntry) -> GcOutcome {
++    outcome(entry, false, &format!("skipped: {}", entry.state.label()))
++}
++
++fn error_outcome(entry: &RoomEntry, err: &RegistryError) -> GcOutcome {
++    outcome(entry, false, &format!("error: {err}"))
++}
++
++fn outcome(entry: &RoomEntry, reaped: bool, reason: &str) -> GcOutcome {
++    GcOutcome {
++        id: entry.id.clone(),
++        state: entry.state,
++        reaped,
++        reason: reason.to_owned(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    #![allow(
++        clippy::unwrap_used,
++        clippy::expect_used,
++        clippy::panic,
++        clippy::indexing_slicing,
++        reason = "test module"
++    )]
++
++    use super::{classify, gc, is_valid_room_id, list_rooms, GcOptions, RoomState};
++    use crate::config::RoomsConfig;
++    use crate::room::{self, Liveness, RoomMeta};
++    use chrono::Utc;
++    use std::path::{Path, PathBuf};
++
++    const VALID_ID: &str = "01abcdefghijklmnopqrstuvwx";
++
++    fn config_with_base(base: &Path) -> RoomsConfig {
++        RoomsConfig {
++            state_base: Some(base.to_path_buf()),
++            ..RoomsConfig::default()
++        }
++    }
++
++    /// Materialize a room on disk: its per-room dir + room.json, and (optionally)
++    /// its jail instance tree with the two bind-mount *targets* (plain files in
++    /// the test — no real mounts). Returns the room id.
++    fn make_room(config: &RoomsConfig, pid: Option<u32>, keep: bool, with_jail: bool) -> String {
++        let id = unique_id();
++        let room_dir = config.room_dir(&id).unwrap();
++        std::fs::create_dir_all(&room_dir).unwrap();
++        let meta = RoomMeta::new(
++            id.clone(),
++            Some("sleep 600".to_owned()),
++            pid,
++            keep,
++            Utc::now(),
++        );
++        room::write_atomic(&room_dir, &meta).unwrap();
++        if with_jail {
++            let jail_root = config.jail_root_dir(&id).unwrap();
++            std::fs::create_dir_all(&jail_root).unwrap();
++            std::fs::write(jail_root.join("kernel"), b"k").unwrap();
++            std::fs::write(jail_root.join("rootfs"), b"r").unwrap();
++            std::fs::write(jail_root.join("api.sock"), b"").unwrap();
++        }
++        id
++    }
++
++    // A distinct 26-char id per call without Math.random / time — derive from a
++    // process-local counter so parallel tests don't collide on a fixed id.
++    fn unique_id() -> String {
++        use std::sync::atomic::{AtomicU32, Ordering};
++        static N: AtomicU32 = AtomicU32::new(0);
++        let n = N.fetch_add(1, Ordering::Relaxed);
++        let suffix = format!("{n:06}");
++        format!("01abcdefghijklmnopqr{suffix}")
++    }
++
++    #[test]
++    fn classify_truth_table() {
++        assert_eq!(classify(false, Liveness::Alive), RoomState::Running);
++        assert_eq!(classify(true, Liveness::Alive), RoomState::Kept);
++        assert_eq!(classify(false, Liveness::Dead), RoomState::OrphanedDead);
++        assert_eq!(classify(true, Liveness::Dead), RoomState::OrphanedDead);
++        assert_eq!(classify(false, Liveness::Unknown), RoomState::Unknown);
++        assert_eq!(classify(true, Liveness::Unknown), RoomState::Unknown);
++    }
++
++    #[test]
++    fn only_orphaned_dead_is_reapable() {
++        assert!(RoomState::OrphanedDead.is_reapable());
++        assert!(!RoomState::Running.is_reapable());
++        assert!(!RoomState::Kept.is_reapable());
++        assert!(!RoomState::Unknown.is_reapable());
++    }
++
++    #[test]
++    fn id_validator_rejects_traversal_and_junk() {
++        assert!(is_valid_room_id(VALID_ID));
++        for bad in [
++            "..",
++            "jailer",
++            "../../etc",
++            "01abc",                       // too short
++            "01ABCDEFGHIJKLMNOPQRSTUVWX",  // uppercase
++            "01abcdefghijklmnopqrstuv/x",  // separator
++            "01abcdefghijklmnopqrstuv.x",  // dot
++            "01abcdefghijklmnopqrstuvwxy", // 27 chars
++        ] {
++            assert!(!is_valid_room_id(bad), "{bad} must be rejected");
++        }
++    }
++
++    #[test]
++    fn list_skips_jailer_dir_and_non_rooms() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // a real room + the jailer dir + a stray file with a room-shaped name.
++        let id = make_room(&config, Some(std::process::id()), false, true);
++        std::fs::create_dir_all(dir.path().join("jailer/firecracker")).unwrap();
++        std::fs::write(dir.path().join(VALID_ID), b"not a dir").unwrap();
++        let rooms = list_rooms(&config).unwrap();
++        assert_eq!(rooms.len(), 1, "only the real room should list");
++        assert_eq!(rooms[0].id, id);
++    }
++
++    #[test]
++    fn list_on_missing_base_is_empty_not_error() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(&dir.path().join("does-not-exist"));
++        assert!(list_rooms(&config).unwrap().is_empty());
++    }
++
++    #[test]
++    fn gc_never_reaps_live_kept_or_unknown() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // running (this process's pid is alive but isn't firecracker → wait:
++        // probe keys on comm, so a real pid reads Dead). To simulate "alive" we
++        // can't fake /proc, so cover the never-reap invariant via the states
++        // that DON'T require a live process: Unknown (no pid) + a meta-less room.
++        let unknown = make_room(&config, None, false, true); // pid None → Unknown
++        let report = gc(&config, &GcOptions::default()).unwrap();
++        assert!(
++            report.outcomes.iter().all(|o| !o.reaped),
++            "no non-orphaned room may be reaped"
++        );
++        // the dirs must survive.
++        assert!(config.room_dir(&unknown).unwrap().exists());
++        assert!(config.jail_instance_dir(&unknown).unwrap().exists());
++    }
++
++    #[test]
++    fn gc_reaps_orphaned_dead_room() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        // A pid that cannot exist → Dead → OrphanedDead → reapable.
++        let dead_pid = Some(4_194_305u32);
++        let id = make_room(&config, dead_pid, false, true);
++        // sanity: the dirs exist before.
++        assert!(config.room_dir(&id).unwrap().exists());
++        assert!(config.jail_instance_dir(&id).unwrap().exists());
++
++        let report = gc(&config, &GcOptions::default()).unwrap();
++        // On Linux the dead pid classifies OrphanedDead and is reaped; elsewhere
++        // probe is Unknown and it's skipped. Assert the platform-correct branch.
++        if cfg!(target_os = "linux") {
++            assert!(report.outcomes.iter().any(|o| o.id == id && o.reaped));
++            assert!(!config.room_dir(&id).unwrap().exists(), "room dir reaped");
++            assert!(
++                !config.jail_instance_dir(&id).unwrap().exists(),
++                "jail dir reaped"
++            );
++        } else {
++            assert!(report.outcomes.iter().all(|o| !o.reaped));
++        }
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn dry_run_deletes_nothing() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let id = make_room(&config, Some(4_194_305), false, true);
++        let report = gc(
++            &config,
++            &GcOptions {
++                dry_run: true,
++                only: None,
++            },
++        )
++        .unwrap();
++        assert!(report.dry_run);
++        assert!(report.outcomes.iter().any(|o| o.id == id && !o.reaped));
++        assert!(
++            config.room_dir(&id).unwrap().exists(),
++            "dry-run must not delete"
++        );
++        assert!(config.jail_instance_dir(&id).unwrap().exists());
++    }
++
++    #[test]
++    fn gc_rejects_invalid_only_id() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let err = gc(
++            &config,
++            &GcOptions {
++                dry_run: false,
++                only: Some("../etc".to_owned()),
++            },
++        );
++        assert!(
++            err.is_err(),
++            "an invalid --id must be rejected before any fs work"
++        );
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn gc_only_targets_one_room() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let bystander = make_room(&config, Some(4_194_305), false, true);
++        let target = make_room(&config, Some(4_194_305), false, true);
++        let report = gc(
++            &config,
++            &GcOptions {
++                dry_run: false,
++                only: Some(target.clone()),
++            },
++        )
++        .unwrap();
++        assert_eq!(report.outcomes.len(), 1);
++        assert_eq!(report.outcomes[0].id, target);
++        // the non-targeted orphan is untouched.
++        assert!(config.room_dir(&bystander).unwrap().exists());
++        assert!(!config.room_dir(&target).unwrap().exists());
++    }
++
++    /// gc must not abort the whole batch when one orphan's reap fails (a stuck
++    /// mount): the healthy orphans still get reaped and the failure surfaces as a
++    /// per-room outcome, not an error that aborts the run.
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn gc_continues_past_a_failed_reap() {
++        use std::os::unix::fs::PermissionsExt;
++
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++
++        // Orphan whose jail removal fails: lock its jail root read-only so the
++        // entries under it can't be unlinked -> remove_dir_all fails -> reap errors.
++        let stuck = make_room(&config, Some(4_194_305), false, true);
++        let stuck_root = config.jail_root_dir(&stuck).unwrap();
++        std::fs::create_dir_all(stuck_root.join("sub")).unwrap();
++        std::fs::set_permissions(&stuck_root, std::fs::Permissions::from_mode(0o500)).unwrap();
++
++        // A normal orphan that reaps cleanly.
++        let healthy = make_room(&config, Some(4_194_305), false, true);
++
++        let report = gc(&config, &GcOptions::default()).unwrap(); // must NOT be Err
++
++        // Best-effort restore: under a root runner the lock didn't hold, so the
++        // jail dir was already reaped and this path no longer exists — don't panic.
++        let _ = std::fs::set_permissions(&stuck_root, std::fs::Permissions::from_mode(0o700));
++
++        // The healthy orphan is reaped regardless of the stuck one -> no abort.
++        let healthy_out = report
++            .outcomes
++            .iter()
++            .find(|o| o.id == healthy)
++            .expect("healthy listed");
++        assert!(
++            healthy_out.reaped,
++            "healthy orphan reaped despite the stuck one"
++        );
++        assert!(!config.room_dir(&healthy).unwrap().exists());
++
++        // Stuck-specific assertions only when the failure was actually injected
++        // (a root test runner bypasses the read-only lock).
++        if config.room_dir(&stuck).unwrap().exists() {
++            let stuck_out = report
++                .outcomes
++                .iter()
++                .find(|o| o.id == stuck)
++                .expect("stuck listed");
++            assert!(!stuck_out.reaped);
++            assert!(
++                stuck_out.reason.contains("error"),
++                "stuck reap reported as error: {}",
++                stuck_out.reason
++            );
++        }
++    }
++
++    #[test]
++    fn meta_less_room_is_unknown_not_reaped() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let id = unique_id();
++        // a room dir with NO room.json (crash before the write).
++        std::fs::create_dir_all(config.room_dir(&id).unwrap()).unwrap();
++        let rooms = list_rooms(&config).unwrap();
++        let entry = rooms.iter().find(|e| e.id == id).expect("listed");
++        assert_eq!(entry.state, RoomState::Unknown);
++        let report = gc(&config, &GcOptions::default()).unwrap();
++        assert!(report.outcomes.iter().all(|o| !o.reaped));
++        assert!(config.room_dir(&id).unwrap().exists());
++    }
++
++    // Keep PathBuf import used on all platforms.
++    #[test]
++    fn valid_id_round_trips_to_room_dir() {
++        let config = config_with_base(&PathBuf::from("/s"));
++        assert_eq!(
++            config.room_dir(VALID_ID),
++            Some(PathBuf::from(format!("/s/{VALID_ID}")))
++        );
++    }
++}
+diff --git a/src/room.rs b/src/room.rs
+new file mode 100644
+index 0000000..a5a6736
+--- /dev/null
++++ b/src/room.rs
+@@ -0,0 +1,304 @@
++//! Per-room metadata + liveness — the data the registry reads.
++//!
++//! Plain data plus its own persistence; no upward import. The filesystem (the
++//! per-room dir + the jailer chroot) is the source of truth for "a room
++//! exists"; `room.json` only *enriches* it with the pid, label, and age that
++//! `rooms ls` shows. A room with no (or unreadable) `room.json` still lists.
++
++use std::path::Path;
++
++use chrono::{DateTime, Utc};
++use serde::{Deserialize, Serialize};
++
++/// Schema version for `room.json` (forward-compat, mirrors `result.json`).
++pub const ROOM_META_SCHEMA_VERSION: u32 = 1;
++
++/// Metadata file name inside a room's state dir.
++pub const ROOM_META_FILE: &str = "room.json";
++
++/// The policy-supplied facts about a room that `boot` records into `room.json`.
++///
++/// Carries only what the CLI knows and the substrate doesn't — the human label
++/// and whether the room was deliberately held (`--keep`).
++#[derive(Debug, Clone, Default)]
++pub struct RoomDescriptor {
++    /// What the room is running, for display: a command, `cursor:<repo>`, etc.
++    pub command: Option<String>,
++    /// Started with `--keep` (a deliberately-held room, not an in-flight run).
++    pub keep: bool,
++}
++
++/// Persisted metadata for one room, written atomically at boot.
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++pub struct RoomMeta {
++    pub schema_version: u32,
++    /// Lowercase ULID — matches the room's state-dir name.
++    pub id: String,
++    /// Human label (command / task); `None` for an idle or unlabelled room.
++    pub label: Option<String>,
++    pub started_at: DateTime<Utc>,
++    /// Jailer→firecracker child pid; `None` leaves liveness `Unknown`.
++    pub pid: Option<u32>,
++    /// Started with `--keep`.
++    pub keep: bool,
++}
++
++impl RoomMeta {
++    /// Build a v-current metadata record.
++    #[must_use]
++    pub const fn new(
++        id: String,
++        label: Option<String>,
++        pid: Option<u32>,
++        keep: bool,
++        started_at: DateTime<Utc>,
++    ) -> Self {
++        Self {
++            schema_version: ROOM_META_SCHEMA_VERSION,
++            id,
++            label,
++            started_at,
++            pid,
++            keep,
++        }
++    }
++}
++
++/// Write `meta` to `<room_dir>/room.json` atomically.
++///
++/// Serialize to a temp file in the same dir, then `rename` over the final name.
++/// `rename` is atomic on unix (the production host), so a crash mid-write never
++/// leaves a half-written `room.json` for the registry to read.
++pub fn write_atomic(room_dir: &Path, meta: &RoomMeta) -> std::io::Result<()> {
++    let json = serde_json::to_vec_pretty(meta)
++        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
++    let tmp = room_dir.join(".room.json.tmp");
++    let final_path = room_dir.join(ROOM_META_FILE);
++    std::fs::write(&tmp, &json)?;
++    std::fs::rename(&tmp, &final_path)
++}
++
++/// Read `<room_dir>/room.json`.
++///
++/// `Ok(None)` when absent (a room with no metadata — e.g. a crash before the
++/// write); `Err` only when a present file can't be read or parsed. Callers
++/// decide how soft to be about the error.
++pub fn read(room_dir: &Path) -> std::io::Result<Option<RoomMeta>> {
++    let path = room_dir.join(ROOM_META_FILE);
++    let bytes = match std::fs::read(&path) {
++        Ok(bytes) => bytes,
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
++        Err(e) => return Err(e),
++    };
++    let meta = serde_json::from_slice(&bytes)
++        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
++    Ok(Some(meta))
++}
++
++/// Liveness of a room's firecracker process, derived from its recorded pid.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Liveness {
++    /// The firecracker (or pre-exec jailer) process is running.
++    Alive,
++    /// The recorded pid is gone, or reused by an unrelated process.
++    Dead,
++    /// Can't tell — no pid recorded, or `/proc` unreadable. Never reaped.
++    Unknown,
++}
++
++/// Process names the recorded pid may legitimately carry: the jailer `exec`s
++/// into firecracker, so steady state is `firecracker`; `jailer` covers the brief
++/// pre-exec window.
++const ROOM_PROC_NAMES: [&str; 2] = ["firecracker", "jailer"];
++
++/// Map a process name (`comm`) to liveness. Pure (the I/O lives in `probe`), so
++/// it's unit-testable everywhere — a pid running *something else* (reuse) reads
++/// as `Dead`, not a false `Alive`.
++#[must_use]
++pub fn classify_comm(comm: &str) -> Liveness {
++    if ROOM_PROC_NAMES.contains(&comm.trim()) {
++        return Liveness::Alive;
++    }
++    Liveness::Dead
++}
++
++/// Map a `/proc/<pid>/stat` line to liveness. Pure, so it's unit-testable
++/// everywhere.
++///
++/// The format is `pid (comm) state ...`; `comm` can contain spaces and parens,
++/// so the fields are split on the **last** `)`. A **zombie** (`Z`) or dead
++/// (`X`/`x`) process is `Dead` even though `/proc/<pid>` still lists it — a
++/// killed firecracker whose parent hasn't reaped it lingers as a zombie with
++/// `comm` still `firecracker`, which a comm-only check misreads as alive (caught
++/// by host-e2e: a `--keep` room's fc killed under its still-alive launcher).
++#[must_use]
++pub fn classify_stat(stat: &str) -> Liveness {
++    let Some(close) = stat.rfind(')') else {
++        return Liveness::Unknown;
++    };
++    let Some(open) = stat[..close].find('(') else {
++        return Liveness::Unknown;
++    };
++    let comm = &stat[open + 1..close];
++    let state = stat[close + 1..].trim_start().chars().next();
++    if matches!(state, Some('Z' | 'X' | 'x')) {
++        return Liveness::Dead;
++    }
++    classify_comm(comm)
++}
++
++/// Probe a room's liveness via `/proc/<pid>/stat`.
++///
++/// Uid-independent and pid-reuse-aware, unlike `kill -0` (which returns EPERM
++/// cross-uid and reads as a false "dead", breaking `rooms ls` run as the
++/// unprivileged operator against a firecracker-uid process). A missing
++/// `/proc/<pid>` is `Dead`; a zombie is `Dead` (see `classify_stat`); an
++/// unreadable entry is `Unknown` (fail-safe: never claim dead when we can't tell
++/// — gc won't reap it).
++#[must_use]
++pub fn probe(pid: Option<u32>) -> Liveness {
++    let Some(pid) = pid else {
++        return Liveness::Unknown;
++    };
++    probe_pid(pid)
++}
++
++#[cfg(target_os = "linux")]
++fn probe_pid(pid: u32) -> Liveness {
++    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
++        Ok(stat) => classify_stat(&stat),
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Liveness::Dead,
++        Err(_) => Liveness::Unknown,
++    }
++}
++
++#[cfg(not(target_os = "linux"))]
++// A const stub would make clippy suggest the public `probe` be const too, but on
++// Linux `probe` reads /proc and can't be — keep both plain across platforms.
++#[allow(
++    clippy::missing_const_for_fn,
++    reason = "kept non-const to match the Linux probe_pid that reads /proc"
++)]
++fn probe_pid(_pid: u32) -> Liveness {
++    Liveness::Unknown
++}
++
++#[cfg(test)]
++mod tests {
++    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test module")]
++
++    use super::{classify_comm, classify_stat, probe, read, write_atomic, Liveness, RoomMeta};
++    use chrono::Utc;
++
++    fn sample(pid: Option<u32>) -> RoomMeta {
++        RoomMeta::new(
++            "01abcdefghijklmnopqrstuvwx".to_owned(),
++            Some("id".to_owned()),
++            pid,
++            false,
++            Utc::now(),
++        )
++    }
++
++    #[test]
++    fn meta_round_trips_through_disk() {
++        let dir = tempfile::tempdir().expect("tempdir");
++        let meta = sample(Some(42));
++        write_atomic(dir.path(), &meta).expect("write");
++        let back = read(dir.path()).expect("read").expect("present");
++        assert_eq!(meta, back);
++    }
++
++    #[test]
++    fn atomic_write_leaves_no_temp() {
++        let dir = tempfile::tempdir().expect("tempdir");
++        write_atomic(dir.path(), &sample(Some(1))).expect("write");
++        assert!(
++            !dir.path().join(".room.json.tmp").exists(),
++            "temp file must not survive"
++        );
++        assert!(
++            dir.path().join("room.json").exists(),
++            "final file must exist"
++        );
++    }
++
++    #[test]
++    fn read_absent_is_none_not_error() {
++        let dir = tempfile::tempdir().expect("tempdir");
++        assert_eq!(read(dir.path()).expect("read"), None);
++    }
++
++    #[test]
++    fn read_corrupt_is_error() {
++        let dir = tempfile::tempdir().expect("tempdir");
++        std::fs::write(dir.path().join("room.json"), b"{not json").expect("write garbage");
++        assert!(
++            read(dir.path()).is_err(),
++            "a present-but-corrupt file must error, not read as absent"
++        );
++    }
++
++    #[test]
++    fn classify_comm_distinguishes_firecracker_from_reuse() {
++        assert_eq!(classify_comm("firecracker"), Liveness::Alive);
++        assert_eq!(classify_comm("firecracker\n"), Liveness::Alive);
++        assert_eq!(classify_comm("jailer"), Liveness::Alive);
++        // A pid reused by an unrelated process must NOT read as alive.
++        assert_eq!(classify_comm("bash"), Liveness::Dead);
++        assert_eq!(classify_comm(""), Liveness::Dead);
++    }
++
++    #[test]
++    fn classify_stat_detects_zombie_reuse_and_identity() {
++        // A running firecracker.
++        assert_eq!(
++            classify_stat("48757 (firecracker) S 1 48757 0"),
++            Liveness::Alive
++        );
++        assert_eq!(
++            classify_stat("48757 (firecracker) R 1 48757 0"),
++            Liveness::Alive
++        );
++        assert_eq!(classify_stat("5 (jailer) S 1 5 0"), Liveness::Alive);
++        // A zombie firecracker (killed; parent hasn't reaped it) is DEAD even
++        // though comm is still "firecracker" — the bug host-e2e caught.
++        assert_eq!(
++            classify_stat("48757 (firecracker) Z 1 48757 0"),
++            Liveness::Dead
++        );
++        assert_eq!(
++            classify_stat("48757 (firecracker) X 1 48757 0"),
++            Liveness::Dead
++        );
++        // pid reused by an unrelated process.
++        assert_eq!(classify_stat("48757 (bash) S 1 48757 0"), Liveness::Dead);
++        // comm containing spaces/parens — fields split on the LAST ')'.
++        assert_eq!(classify_stat("5 (odd ) name) S 1 5 0"), Liveness::Dead);
++        // malformed.
++        assert_eq!(classify_stat("garbage-no-parens"), Liveness::Unknown);
++    }
++
++    #[test]
++    fn probe_without_pid_is_unknown() {
++        // No pid recorded ⇒ indeterminate ⇒ never reaped.
++        assert_eq!(probe(None), Liveness::Unknown);
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn probe_absent_pid_is_dead() {
++        // A pid that cannot exist (>= 2^22 on Linux) has no /proc entry.
++        assert_eq!(probe(Some(4_194_305)), Liveness::Dead);
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn probe_self_is_dead_by_name() {
++        // The test process is alive but isn't firecracker/jailer — exactly the
++        // pid-reuse case. Liveness keys on the process *identity*, not mere
++        // existence, so this must read Dead.
++        let me = std::process::id();
++        assert_eq!(probe(Some(me)), Liveness::Dead);
++    }
++}
+diff --git a/tests/control_failures.rs b/tests/control_failures.rs
+index 0108011..e82da50 100644
+--- a/tests/control_failures.rs
++++ b/tests/control_failures.rs
+@@ -83,9 +83,16 @@ async fn firecracker_exits_early_is_caught() {
+     };
+ 
+     let before = room_dirs_glob();
+-    let err = firecracker::boot(&kernel, &rootfs, None, &config, false)
+-        .await
+-        .expect_err("stub should exit early");
++    let err = firecracker::boot(
++        &kernel,
++        &rootfs,
++        None,
++        &config,
++        false,
++        &rooms::room::RoomDescriptor::default(),
++    )
++    .await
++    .expect_err("stub should exit early");
+ 
+     match &err {
+         FirecrackerError::ProcessExitedEarly { exit_code, .. } => {
+@@ -122,9 +129,16 @@ async fn api_socket_never_appears() {
+         ..RoomsConfig::default()
+     };
+ 
+-    let err = firecracker::boot(&kernel, &rootfs, None, &config, false)
+-        .await
+-        .expect_err("stub should never open socket");
++    let err = firecracker::boot(
++        &kernel,
++        &rootfs,
++        None,
++        &config,
++        false,
++        &rooms::room::RoomDescriptor::default(),
++    )
++    .await
++    .expect_err("stub should never open socket");
+ 
+     match &err {
+         FirecrackerError::ApiSocketNeverAppeared { timeout_ms } => {
+@@ -151,9 +165,16 @@ async fn guest_unreachable() {
+     };
+ 
+     // Boot without network so SSH can never succeed.
+-    let vm = firecracker::boot(&kernel, &rootfs, None, &config, false)
+-        .await
+-        .expect("boot without network should succeed");
++    let vm = firecracker::boot(
++        &kernel,
++        &rootfs,
++        None,
++        &config,
++        false,
++        &rooms::room::RoomDescriptor::default(),
++    )
++    .await
++    .expect("boot without network should succeed");
+ 
+     let key = PathBuf::from(std::env::var("HOME").expect("HOME") + "/.ssh/id_rooms");
+ 

@@ -1,0 +1,318 @@
+diff --git a/packages/agent-runner/src/classify-failure.ts b/packages/agent-runner/src/classify-failure.ts
+index f3c3b40..fc856cd 100644
+--- a/packages/agent-runner/src/classify-failure.ts
++++ b/packages/agent-runner/src/classify-failure.ts
+@@ -174,6 +174,15 @@ function detailForGatewayUnreachable<E>(input: BuildFailureDetailInput<E>): stri
+   return "gateway unreachable";
+ }
+ 
++function detailForGatewayAuth<E>(input: BuildFailureDetailInput<E>): string {
++  const fromErr = thrownErrorMessage(input.thrownErr);
++  if (fromErr !== undefined) return fromErr;
++  if (input.rawErrorMessage !== undefined && input.rawErrorMessage.length > 0) {
++    return input.rawErrorMessage;
++  }
++  return "gateway rejected credentials or authorization";
++}
++
+ function detailForBudgetExceeded<E>(input: BuildFailureDetailInput<E>): string {
+   if (input.sdkTerminalStatus !== undefined && input.sdkTerminalStatus.length > 0) {
+     return `SDK status ${input.sdkTerminalStatus}`;
+@@ -204,6 +213,7 @@ const DETAIL_BUILDERS: Record<FailureCategory, <E>(input: BuildFailureDetailInpu
+   "agent-collapse-on-running-tool": detailForAgentCollapse,
+   "sdk-throw": detailForSdkThrow,
+   "gateway-unreachable": detailForGatewayUnreachable,
++  "gateway-auth": detailForGatewayAuth,
+   "budget-exceeded": detailForBudgetExceeded,
+   "sandbox-denial": detailForSandboxDenial,
+   "patch-apply-fail": detailForPatchApplyFail,
+diff --git a/packages/claude-runner/src/classify-failure.test.ts b/packages/claude-runner/src/classify-failure.test.ts
+index 79ab9bd..c286f82 100644
+--- a/packages/claude-runner/src/classify-failure.test.ts
++++ b/packages/claude-runner/src/classify-failure.test.ts
+@@ -75,6 +75,86 @@ describe("classifyFailure (Claude)", () => {
+     ).toBe("gateway-unreachable");
+   });
+ 
++  test("401 Unauthorized → gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("401 Unauthorized"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-auth");
++  });
++
++  test("403 Forbidden → gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("403 Forbidden"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-auth");
++  });
++
++  test("401 without gateway keyword → gateway-auth, not sdk-throw", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("HTTP 401: invalid API key"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-auth");
++  });
++
++  test("gateway returned 401 → gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("gateway returned 401"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-auth");
++  });
++
++  test("gateway returned 403 → gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("gateway returned 403"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-auth");
++  });
++
++  test("gateway returned 502 → gateway-unreachable, not gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("gateway returned 502 Bad Gateway"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-unreachable");
++  });
++
++  test("5xx gateway error → gateway-unreachable, not gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("gateway returned 503 Service Unavailable"),
++        thrownError: true,
++      }),
++    ).toBe("gateway-unreachable");
++  });
++
++  test("output merely mentioning 401 → NOT gateway-auth", () => {
++    expect(
++      classifyFailure({
++        events: [],
++        thrownErr: new Error("lint found 401 style violations"),
++        thrownError: true,
++      }),
++    ).toBe("sdk-throw");
++  });
++
+   test("non-error subtype delegates to base classifier", () => {
+     const events = [
+       {
+diff --git a/packages/claude-runner/src/classify-failure.ts b/packages/claude-runner/src/classify-failure.ts
+index fdb390d..d26fb1b 100644
+--- a/packages/claude-runner/src/classify-failure.ts
++++ b/packages/claude-runner/src/classify-failure.ts
+@@ -28,13 +28,32 @@ function errorText(err: unknown): string {
+   return "";
+ }
+ 
+-function isGatewayUnreachableError(err: unknown): boolean {
+-  const text = errorText(err);
++function isGatewayUnreachableText(text: string): boolean {
+   if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|fetch failed/i.test(text)) return true;
+-  if (/gateway/i.test(text) && /\b[45]\d{2}\b/.test(text)) return true;
++  // Only 5xx signal an unreachable gateway. 401/403 are auth rejections, not transport.
++  if (/gateway/i.test(text) && /\b5\d{2}\b/.test(text)) return true;
++  return false;
++}
++
++function isGatewayUnreachableError(err: unknown): boolean {
++  return isGatewayUnreachableText(errorText(err));
++}
++
++function isGatewayAuthText(text: string): boolean {
++  if (/\b401\s+Unauthorized\b/i.test(text)) return true;
++  if (/\b403\s+Forbidden\b/i.test(text)) return true;
++  if (/\bHTTP\s+401\b/i.test(text)) return true;
++  if (/\bHTTP\s+403\b/i.test(text)) return true;
++  if (/\bstatus(?:\s+code)?\s*[=:]\s*(401|403)\b/i.test(text)) return true;
++  // A gateway phrasing its rejection as "gateway returned 401/403" is auth, not transport.
++  if (/gateway/i.test(text) && /\b40[13]\b/.test(text)) return true;
+   return false;
+ }
+ 
++function isGatewayAuthError(err: unknown): boolean {
++  return isGatewayAuthText(errorText(err));
++}
++
+ function subtypeCategory(subtype: string | undefined): FailureCategory | undefined {
+   if (subtype === "error_max_budget_usd" || subtype === "error_max_turns") {
+     return "budget-exceeded";
+@@ -48,6 +67,9 @@ export function classifyFailure(input: ClaudeClassifyFailureInput): FailureCateg
+     if (input.thrownErr !== undefined && isGatewayUnreachableError(input.thrownErr)) {
+       return "gateway-unreachable";
+     }
++    if (input.thrownErr !== undefined && isGatewayAuthError(input.thrownErr)) {
++      return "gateway-auth";
++    }
+     return "sdk-throw";
+   }
+ 
+diff --git a/packages/claude-runner/src/local-runner.test.ts b/packages/claude-runner/src/local-runner.test.ts
+index 44a926b..cabcd75 100644
+--- a/packages/claude-runner/src/local-runner.test.ts
++++ b/packages/claude-runner/src/local-runner.test.ts
+@@ -139,14 +139,39 @@ describe("LocalClaudeRunner — runtime selection", () => {
+ });
+ 
+ describe("LocalClaudeRunner — env / pre-run errors", () => {
+-  test("throws MissingApiKeyError when ANTHROPIC_API_KEY is unset", async () => {
++  test("throws MissingApiKeyError when both credentials are unset", async () => {
+     vi.unstubAllEnvs();
+     vi.stubEnv("ANTHROPIC_API_KEY", "");
++    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "");
+     const runner = new LocalClaudeRunner();
+     await expect(runner.run(baseInput())).rejects.toBeInstanceOf(MissingApiKeyError);
+     expect(query).not.toHaveBeenCalled();
+   });
+ 
++  test("passes validateRunInput with only ANTHROPIC_AUTH_TOKEN", async () => {
++    vi.unstubAllEnvs();
++    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "bearer-token-xyz");
++    const { queryInstance } = makeMockQuery({ events: [successResult] });
++    vi.mocked(query).mockReturnValue(queryInstance);
++
++    const runner = new LocalClaudeRunner();
++    const handle = await runner.run(baseInput());
++    await expect(handle.result).resolves.toMatchObject({ status: "succeeded" });
++    expect(query).toHaveBeenCalled();
++  });
++
++  test("passes validateRunInput with only ANTHROPIC_API_KEY", async () => {
++    vi.unstubAllEnvs();
++    vi.stubEnv("ANTHROPIC_API_KEY", "test-key-abc123");
++    const { queryInstance } = makeMockQuery({ events: [successResult] });
++    vi.mocked(query).mockReturnValue(queryInstance);
++
++    const runner = new LocalClaudeRunner();
++    const handle = await runner.run(baseInput());
++    await expect(handle.result).resolves.toMatchObject({ status: "succeeded" });
++    expect(query).toHaveBeenCalled();
++  });
++
+   test("query() construction throw → AgentRunFailedError", async () => {
+     const sdkErr = new Error("option validation failed");
+     vi.mocked(query).mockImplementation(() => {
+@@ -335,6 +360,36 @@ describe("LocalClaudeRunner — query options", () => {
+     expect(call?.options?.env?.["ANTHROPIC_BASE_URL"]).toBeUndefined();
+   });
+ 
++  test("forwards ANTHROPIC_AUTH_TOKEN when set", async () => {
++    vi.unstubAllEnvs();
++    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "bearer-token-xyz");
++    const { queryInstance } = makeMockQuery({ events: [successResult] });
++    vi.mocked(query).mockReturnValue(queryInstance);
++
++    const runner = new LocalClaudeRunner();
++    await runner.run(baseInput());
++
++    const call = vi.mocked(query).mock.calls[0]?.[0] as
++      | { options?: { env?: Record<string, string | undefined> } }
++      | undefined;
++    expect(call?.options?.env?.["ANTHROPIC_AUTH_TOKEN"]).toBe("bearer-token-xyz");
++  });
++
++  test("omits ANTHROPIC_AUTH_TOKEN from env when unset", async () => {
++    vi.unstubAllEnvs();
++    vi.stubEnv("ANTHROPIC_API_KEY", "test-key-abc123");
++    const { queryInstance } = makeMockQuery({ events: [successResult] });
++    vi.mocked(query).mockReturnValue(queryInstance);
++
++    const runner = new LocalClaudeRunner();
++    await runner.run(baseInput());
++
++    const call = vi.mocked(query).mock.calls[0]?.[0] as
++      | { options?: { env?: Record<string, string | undefined> } }
++      | undefined;
++    expect(call?.options?.env?.["ANTHROPIC_AUTH_TOKEN"]).toBeUndefined();
++  });
++
+   test("interrupt rejection during cancel is swallowed", async () => {
+     const { interruptSpy, queryInstance } = makeMockQuery({ events: [successResult] });
+     interruptSpy.mockRejectedValueOnce(new Error("interrupt failed"));
+diff --git a/packages/claude-runner/src/local-runner.ts b/packages/claude-runner/src/local-runner.ts
+index 859d685..b44a588 100644
+--- a/packages/claude-runner/src/local-runner.ts
++++ b/packages/claude-runner/src/local-runner.ts
+@@ -41,6 +41,7 @@ import { MAX_CLASSIFICATION_EVENTS } from "./terminal-map.js";
+ import { mapMidStreamFailure, mapResultMessage } from "./terminal-map.js";
+ 
+ const API_KEY_ENV = "ANTHROPIC_API_KEY";
++const AUTH_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN";
+ const BASE_URL_ENV = "ANTHROPIC_BASE_URL";
+ 
+ const SUPPORTED_PLATFORM_KEYS = new Set([
+@@ -133,6 +134,8 @@ function buildGatewayEnv(): Record<string, string> {
+   const gatewayEnv: Record<string, string> = {};
+   const apiKey = process.env[API_KEY_ENV];
+   if (apiKey !== undefined && apiKey !== "") gatewayEnv[API_KEY_ENV] = apiKey;
++  const authToken = process.env[AUTH_TOKEN_ENV];
++  if (authToken !== undefined && authToken !== "") gatewayEnv[AUTH_TOKEN_ENV] = authToken;
+   const baseUrl = process.env[BASE_URL_ENV];
+   if (baseUrl !== undefined && baseUrl !== "") gatewayEnv[BASE_URL_ENV] = baseUrl;
+   return gatewayEnv;
+@@ -190,8 +193,13 @@ function validateRunInput(input: AgentRunInput): void {
+     );
+   }
+   const apiKey = process.env[API_KEY_ENV];
+-  if (apiKey === undefined || apiKey === "") {
+-    throw new MissingApiKeyError(`${API_KEY_ENV} environment variable is not set`);
++  const authToken = process.env[AUTH_TOKEN_ENV];
++  const hasApiKey = apiKey !== undefined && apiKey !== "";
++  const hasAuthToken = authToken !== undefined && authToken !== "";
++  if (!hasApiKey && !hasAuthToken) {
++    throw new MissingApiKeyError(
++      "no API credential set (ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN required)",
++    );
+   }
+ }
+ 
+diff --git a/packages/claude-runner/src/terminal-map.test.ts b/packages/claude-runner/src/terminal-map.test.ts
+index aceda24..7b89d19 100644
+--- a/packages/claude-runner/src/terminal-map.test.ts
++++ b/packages/claude-runner/src/terminal-map.test.ts
+@@ -154,6 +154,13 @@ describe("mapMidStreamFailure", () => {
+     expect(result.errorMessage).toBe("fetch failed");
+   });
+ 
++  test("401 auth rejection resolves failed with gateway-auth", () => {
++    const result = mapMidStreamFailure(new Error("401 Unauthorized"), baseInput(), []);
++    expect(result.status).toBe("failed");
++    expect(result.failureCategory).toBe("gateway-auth");
++    expect(result.errorMessage).toBe("401 Unauthorized");
++  });
++
+   test("non-gateway throw resolves sdk-throw category", () => {
+     const result = mapMidStreamFailure(new Error("unexpected"), baseInput(), []);
+     expect(result.failureCategory).toBe("sdk-throw");
+diff --git a/packages/workflow/src/workflow.ts b/packages/workflow/src/workflow.ts
+index dd7c730..df72c20 100644
+--- a/packages/workflow/src/workflow.ts
++++ b/packages/workflow/src/workflow.ts
+@@ -67,6 +67,7 @@ export const failureCategorySchema = z.enum([
+   "agent-collapse-on-running-tool",
+   "sdk-throw",
+   "gateway-unreachable",
++  "gateway-auth",
+   "budget-exceeded",
+   "sandbox-denial",
+   "patch-apply-fail",

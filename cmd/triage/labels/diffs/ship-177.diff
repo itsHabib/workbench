@@ -1,0 +1,537 @@
+diff --git a/packages/driver/src/engine.test.ts b/packages/driver/src/engine.test.ts
+index cdc6629..cfe9966 100644
+--- a/packages/driver/src/engine.test.ts
++++ b/packages/driver/src/engine.test.ts
+@@ -20,6 +20,7 @@ import {
+ import { TickLiveError } from "./errors.js";
+ import { type DispatchAmbiguity, recoverDispatchingStreams } from "./judgment.js";
+ import { createDriverService } from "./service.js";
++import { createFakeGhPort } from "./test/fake-gh-port.js";
+ import { createFakeShipPort } from "./test/fake-ship-port.js";
+ 
+ const noopProgress = (): void => undefined;
+@@ -600,7 +601,8 @@ batches:
+       },
+     ]);
+     const store = createStore({ dbPath: ":memory:" });
+-    const driver = createDriverService({ ship: fake.port, store });
++    const gh = createFakeGhPort({ 9: { isDraft: true, state: "OPEN" } });
++    const driver = createDriverService({ gh, ship: fake.port, store });
+     const imported = driver.importManifest(manifest);
+ 
+     const result = await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
+@@ -609,6 +611,169 @@ batches:
+     expect(stream?.status).toBe("landed");
+     expect(stream?.branch).toBe("cursor/auto-1a2b");
+     expect(stream?.prUrl).toBe("https://github.com/example/ship/pull/9");
++    expect(gh.markReadyCalls).toEqual([{ prNumber: 9, repo: "https://github.com/example/ship" }]);
++    store.close();
++  });
++
++  test("cloud succeeded stream with draft PR calls markReady once", async () => {
++    const manifest = join(repoRoot, "cloud-draft-flip.driver.md");
++    writeFileSync(
++      manifest,
++      `---
++driver_version: 1
++generated_at: 2026-07-02T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: cloud-draft-flip
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/tasks/a.md
++        runtime: cloud
++        status: pending
++---
++`,
++    );
++    const docA = resolveDocPath(repoRoot, "docs/tasks/a.md");
++    const fake = createFakeShipPort([
++      {
++        docPath: docA,
++        prUrl: "https://github.com/example/ship/pull/42",
++        repo: "ship",
++        workflowRunId: "wf_draft",
++      },
++    ]);
++    const gh = createFakeGhPort({ 42: { isDraft: true, state: "OPEN" } });
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({ gh, ship: fake.port, store });
++    const imported = driver.importManifest(manifest);
++
++    await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
++
++    expect(gh.markReadyCalls).toEqual([{ prNumber: 42, repo: "https://github.com/example/ship" }]);
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.status).toBe("landed");
++    store.close();
++  });
++
++  test("cloud markReady is idempotent when PR is already ready", async () => {
++    const manifest = join(repoRoot, "cloud-ready-noop.driver.md");
++    writeFileSync(
++      manifest,
++      `---
++driver_version: 1
++generated_at: 2026-07-02T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: cloud-ready-noop
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/tasks/a.md
++        runtime: cloud
++        status: pending
++---
++`,
++    );
++    const docA = resolveDocPath(repoRoot, "docs/tasks/a.md");
++    const fake = createFakeShipPort([
++      {
++        docPath: docA,
++        prUrl: "https://github.com/example/ship/pull/55",
++        repo: "ship",
++        workflowRunId: "wf_ready",
++      },
++    ]);
++    const gh = createFakeGhPort({ 55: { isDraft: false, state: "OPEN" } });
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({ gh, ship: fake.port, store });
++    const imported = driver.importManifest(manifest);
++
++    await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
++
++    expect(gh.markReadyCalls).toEqual([{ prNumber: 55, repo: "https://github.com/example/ship" }]);
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.status).toBe("landed");
++    store.close();
++  });
++
++  test("cloud markReady failure parks the stream with a legible error", async () => {
++    const manifest = join(repoRoot, "cloud-flip-fail.driver.md");
++    writeFileSync(
++      manifest,
++      `---
++driver_version: 1
++generated_at: 2026-07-02T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: cloud-flip-fail
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/tasks/a.md
++        runtime: cloud
++        status: pending
++---
++`,
++    );
++    const docA = resolveDocPath(repoRoot, "docs/tasks/a.md");
++    const fake = createFakeShipPort([
++      {
++        branchName: "cursor/flip-77",
++        docPath: docA,
++        prUrl: "https://github.com/example/ship/pull/77",
++        repo: "ship",
++        workflowRunId: "wf_flip_fail",
++      },
++    ]);
++    const gh = createFakeGhPort({
++      77: { isDraft: true, markReadyError: "gh pr ready denied", state: "OPEN" },
++    });
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({ gh, ship: fake.port, store });
++    const imported = driver.importManifest(manifest);
++
++    const result = await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
++
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.status).toBe("failed");
++    expect(stream?.errorMessage).toBe("draft→ready flip failed: gh pr ready denied");
++    expect(stream?.prUrl).toBe("https://github.com/example/ship/pull/77");
++    expect(stream?.branch).toBe("cursor/flip-77");
++    expect(result.status).toBe("awaiting_judgment");
++    store.close();
++  });
++
++  test("local succeeded stream does not call markReady", async () => {
++    const docA = localDoc(repoRoot, "feat-a", "docs/tasks/a.md");
++    const fake = createFakeShipPort([
++      {
++        docPath: docA,
++        prUrl: "https://github.com/example/ship/pull/99",
++        repo: "ship",
++        workflowRunId: "wf_local_pr",
++      },
++    ]);
++    const gh = createFakeGhPort({ 99: { isDraft: true, state: "OPEN" } });
++    const store = createStore({ dbPath: ":memory:" });
++    const driver = createDriverService({ gh, ship: fake.port, store });
++    const imported = driver.importManifest(manifestPath);
++
++    await driver.run({ driverRunId: imported.run.id }, { maxWaitMs: 0 });
++
++    expect(gh.markReadyCalls).toEqual([]);
+     store.close();
+   });
+ 
+diff --git a/packages/driver/src/engine.ts b/packages/driver/src/engine.ts
+index 2c29716..b554784 100644
+--- a/packages/driver/src/engine.ts
++++ b/packages/driver/src/engine.ts
+@@ -7,10 +7,12 @@ import type { Store } from "@ship/store";
+ import type { DriverBatch, DriverRun, DriverStream, StreamAttempt } from "@ship/store";
+ import type { AgentProvider, FailureCategory } from "@ship/workflow";
+ 
++import { prNumberFromUrl } from "@ship/receipt";
+ import { isTerminal } from "@ship/workflow";
+ import { existsSync } from "node:fs";
+ import { dirname, join, resolve } from "node:path";
+ 
++import type { DriverGhPort } from "./gh-port.js";
+ import type { DispatchAmbiguity } from "./judgment.js";
+ import type { DriverShipPort } from "./ship-port.js";
+ import type { DriverTickResult, RunOpts, TierDispatchResult } from "./types.js";
+@@ -45,6 +47,7 @@ const RUNAWAY_BACKSTOP_MULTIPLIER = 6;
+ export interface EngineDeps {
+   store: Store;
+   ship: DriverShipPort;
++  gh?: DriverGhPort;
+   clock?: () => number;
+   monotonicClock?: () => number;
+   rng?: () => number;
+@@ -67,6 +70,7 @@ interface TickContext {
+   rng: () => number;
+   sleep: (ms: number) => Promise<void>;
+   ship: DriverShipPort;
++  gh?: DriverGhPort;
+   store: Store;
+ }
+ 
+@@ -170,7 +174,7 @@ export async function runTick(
+ }
+ 
+ function buildTickContext(deps: EngineDeps): TickContext {
+-  return {
++  const ctx: TickContext = {
+     clock: deps.clock ?? Date.now,
+     monotonicClock: deps.monotonicClock ?? performance.now.bind(performance),
+     rng: deps.rng ?? Math.random,
+@@ -178,6 +182,10 @@ function buildTickContext(deps: EngineDeps): TickContext {
+     sleep: deps.sleep ?? defaultSleep,
+     store: deps.store,
+   };
++  if (deps.gh !== undefined) {
++    ctx.gh = deps.gh;
++  }
++  return ctx;
+ }
+ 
+ async function executeTick(
+@@ -639,18 +647,22 @@ async function pollDispatched(
+   run: DriverRun,
+ ): Promise<DriverRun> {
+   for (const stream of allStreams(run)) {
+-    await pollOneStream(ctx, liveness, store, ship, stream);
++    await pollOneStream({ ctx, liveness, run, ship, store, stream });
+   }
+   return loadRun(store, run.id);
+ }
+ 
+-async function pollOneStream(
+-  ctx: TickContext,
+-  liveness: TickLiveness,
+-  store: Store,
+-  ship: DriverShipPort,
+-  stream: DriverStream,
+-): Promise<void> {
++interface PollOneStreamParams {
++  ctx: TickContext;
++  liveness: TickLiveness;
++  run: DriverRun;
++  ship: DriverShipPort;
++  store: Store;
++  stream: DriverStream;
++}
++
++async function pollOneStream(params: PollOneStreamParams): Promise<void> {
++  const { ctx, liveness, run, ship, store, stream } = params;
+   if (stream.status !== "dispatched") return;
+   const wfId = stream.workflowRunId;
+   if (wfId === undefined) return;
+@@ -661,7 +673,7 @@ async function pollOneStream(
+   if (!isTerminal(wfRun.status)) return;
+ 
+   if (wfRun.status === "succeeded") {
+-    store.updateDriverStream(stream.id, buildLandedPatch(stream, wfRun));
++    await handleSucceededPoll(ctx, run, store, stream, wfRun);
+     return;
+   }
+ 
+@@ -672,11 +684,58 @@ async function pollOneStream(
+   });
+ }
+ 
+-function buildLandedPatch(
++async function handleSucceededPoll(
++  ctx: TickContext,
++  run: DriverRun,
++  store: Store,
++  stream: DriverStream,
++  wfRun: GetWorkflowRunOutput,
++): Promise<void> {
++  const prUrl = wfRun.branches?.[0]?.prUrl;
++  if (stream.runtime === "cloud" && prUrl !== undefined) {
++    const flipError = await flipCloudDraftReady(ctx.gh, run, prUrl);
++    if (flipError !== undefined) {
++      store.updateDriverStream(stream.id, {
++        ...buildPrMetaPatch(stream, wfRun),
++        errorMessage: flipError,
++        status: "failed",
++      });
++      return;
++    }
++  }
++  store.updateDriverStream(stream.id, buildLandedPatch(stream, wfRun));
++}
++
++async function flipCloudDraftReady(
++  gh: DriverGhPort | undefined,
++  run: DriverRun,
++  prUrl: string,
++): Promise<string | undefined> {
++  if (gh === undefined) {
++    return "draft→ready flip failed: GitHub port not configured";
++  }
++  const repo = extractRepoUrl(run);
++  if (repo === undefined) {
++    return "draft→ready flip failed: manifest missing repo_url";
++  }
++  const prNumber = prNumberFromUrl(prUrl);
++  if (prNumber === undefined) {
++    return `draft→ready flip failed: cannot parse PR number from prUrl ${prUrl}`;
++  }
++  try {
++    await gh.markReady(repo, prNumber);
++  } catch (err: unknown) {
++    const message = err instanceof Error ? err.message : String(err);
++    return `draft→ready flip failed: ${message}`;
++  }
++  return undefined;
++}
++
++function buildPrMetaPatch(
+   stream: DriverStream,
+   wfRun: GetWorkflowRunOutput,
+ ): Parameters<Store["updateDriverStream"]>[1] {
+-  const patch: Parameters<Store["updateDriverStream"]>[1] = { status: "landed" };
++  const patch: Parameters<Store["updateDriverStream"]>[1] = {};
+   const branchRef = wfRun.branches?.[0];
+   if (branchRef?.prUrl !== undefined) patch.prUrl = branchRef.prUrl;
+   if (stream.branch === undefined && branchRef?.branch !== undefined) {
+@@ -685,6 +744,13 @@ function buildLandedPatch(
+   return patch;
+ }
+ 
++function buildLandedPatch(
++  stream: DriverStream,
++  wfRun: GetWorkflowRunOutput,
++): Parameters<Store["updateDriverStream"]>[1] {
++  return { ...buildPrMetaPatch(stream, wfRun), status: "landed" };
++}
++
+ function evaluateExit(
+   run: DriverRun,
+   ambiguities: DispatchAmbiguity[],
+diff --git a/packages/driver/src/gh-port.test.ts b/packages/driver/src/gh-port.test.ts
+index c9c8662..0c76578 100644
+--- a/packages/driver/src/gh-port.test.ts
++++ b/packages/driver/src/gh-port.test.ts
+@@ -239,3 +239,71 @@ describe("createExecGhPort — fetchPrReadiness", () => {
+     expect(readiness.mergeable).toBe("CONFLICTING");
+   });
+ });
++
++describe("createExecGhPort — markReady", () => {
++  test("flips a draft PR via gh pr ready and verifies the write", async () => {
++    let viewCalls = 0;
++    const readyCalls: string[][] = [];
++    const exec: GhExec = (file, args) => {
++      if (args[1] === "view") {
++        viewCalls += 1;
++        const isDraft = viewCalls === 1;
++        return Promise.resolve({
++          stdout: JSON.stringify({
++            isDraft,
++            mergeable: "MERGEABLE",
++            state: "OPEN",
++            statusCheckRollup: [],
++          }),
++        });
++      }
++      readyCalls.push([...args]);
++      return Promise.resolve({ stdout: "" });
++    };
++    const gh = createExecGhPort(exec);
++
++    await gh.markReady("org/repo", 42);
++
++    expect(viewCalls).toBe(2);
++    expect(readyCalls).toEqual([["pr", "ready", "42", "-R", "org/repo"]]);
++  });
++
++  test("is a no-op when the PR is already ready", async () => {
++    const { calls, exec } = fakeExec(
++      JSON.stringify({
++        isDraft: false,
++        mergeable: "MERGEABLE",
++        state: "OPEN",
++        statusCheckRollup: [],
++      }),
++    );
++    const gh = createExecGhPort(exec);
++
++    await gh.markReady("org/repo", 7);
++
++    expect(calls).toHaveLength(1);
++    expect(calls[0]?.args[1]).toBe("view");
++  });
++
++  test("throws when the flip is not confirmed by a follow-up read", async () => {
++    let viewCalls = 0;
++    const exec: GhExec = (_file, args) => {
++      if (args[1] !== "view") {
++        return Promise.resolve({ stdout: "" });
++      }
++      viewCalls += 1;
++      return Promise.resolve({
++        stdout: JSON.stringify({
++          isDraft: true,
++          mergeable: "MERGEABLE",
++          state: "OPEN",
++          statusCheckRollup: [],
++        }),
++      });
++    };
++    const gh = createExecGhPort(exec);
++
++    await expect(gh.markReady("org/repo", 3)).rejects.toThrow("still draft after gh pr ready");
++    expect(viewCalls).toBe(2);
++  });
++});
+diff --git a/packages/driver/src/gh-port.ts b/packages/driver/src/gh-port.ts
+index 0d110f3..419aa33 100644
+--- a/packages/driver/src/gh-port.ts
++++ b/packages/driver/src/gh-port.ts
+@@ -54,6 +54,8 @@ export interface DriverGhPort {
+   mergePullRequest(repo: string, prNumber: number, opts?: GhMergeOpts): Promise<void>;
+   viewPullRequest(repo: string, prNumber: number): Promise<GhPullRequestView>;
+   fetchPrReadiness(repo: string, prNumber: number): Promise<GhPrReadiness>;
++  /** Flip a draft PR to ready; idempotent when already ready. Verified write. */
++  markReady(repo: string, prNumber: number): Promise<void>;
+ }
+ 
+ interface GhPrViewJson {
+@@ -144,6 +146,19 @@ export function createExecGhPort(exec: GhExec = defaultGhExec): DriverGhPort {
+         state: parsed.state,
+       };
+     },
++    async markReady(repo: string, prNumber: number): Promise<void> {
++      const before = await this.fetchPrReadiness(repo, prNumber);
++      if (!before.isDraft) {
++        return;
++      }
++      await exec("gh", ["pr", "ready", String(prNumber), "-R", toGhRepo(repo)]);
++      const after = await this.fetchPrReadiness(repo, prNumber);
++      if (after.isDraft) {
++        throw new Error(
++          `PR #${String(prNumber)} is still draft after gh pr ready — flip unconfirmed`,
++        );
++      }
++    },
+   };
+ }
+ 
+diff --git a/packages/driver/src/service.ts b/packages/driver/src/service.ts
+index b3dd5df..cf2deaf 100644
+--- a/packages/driver/src/service.ts
++++ b/packages/driver/src/service.ts
+@@ -80,6 +80,7 @@ export function createDriverService(opts: CreateDriverServiceOpts): DriverServic
+       const resolved = resolveRunOpts(runOpts);
+       const { driverRunId, warnings } = resolveRunRef(store, ref);
+       const deps: Parameters<typeof runTick>[2] = { ship, store };
++      if (gh !== undefined) deps.gh = gh;
+       if (clock !== undefined) deps.clock = clock;
+       if (monotonicClock !== undefined) deps.monotonicClock = monotonicClock;
+       if (rng !== undefined) deps.rng = rng;
+diff --git a/packages/driver/src/test/fake-gh-port.ts b/packages/driver/src/test/fake-gh-port.ts
+index fcc5bf2..3b116a6 100644
+--- a/packages/driver/src/test/fake-gh-port.ts
++++ b/packages/driver/src/test/fake-gh-port.ts
+@@ -20,11 +20,16 @@ export interface FakeGhPrState {
+   checks?: GhPrCheck[];
+   /** After merge, return a stale OPEN view this many times before the merged state. */
+   postMergeViewLagReads?: number;
++  /** When set, `markReady` throws with this message. */
++  markReadyError?: string;
++  /** When true, `markReady` leaves the PR draft (simulates unconfirmed flip). */
++  markReadyUnconfirmed?: boolean;
+ }
+ 
+ export interface FakeGhPort extends DriverGhPort {
+   mergeCalls: { repo: string; prNumber: number; admin: boolean }[];
+   viewCalls: { repo: string; prNumber: number }[];
++  markReadyCalls: { repo: string; prNumber: number }[];
+ }
+ 
+ export function createFakeGhPort(initial: Record<number, FakeGhPrState> = {}): FakeGhPort {
+@@ -33,9 +38,11 @@ export function createFakeGhPort(initial: Record<number, FakeGhPrState> = {}): F
+   );
+   const mergeCalls: { repo: string; prNumber: number; admin: boolean }[] = [];
+   const viewCalls: { repo: string; prNumber: number }[] = [];
++  const markReadyCalls: { repo: string; prNumber: number }[] = [];
+   const postMergeLagRemaining = new Map<number, number>();
+ 
+   return {
++    markReadyCalls,
+     mergeCalls,
+     viewCalls,
+     mergePullRequest(_repo: string, prNumber: number, opts?: GhMergeOpts): Promise<void> {
+@@ -89,5 +96,22 @@ export function createFakeGhPort(initial: Record<number, FakeGhPrState> = {}): F
+         state,
+       });
+     },
++    markReady(_repo: string, prNumber: number): Promise<void> {
++      markReadyCalls.push({ prNumber, repo: _repo });
++      const current = prs.get(prNumber);
++      if (current?.markReadyError !== undefined) {
++        return Promise.reject(new Error(current.markReadyError));
++      }
++      if (current?.isDraft !== true) {
++        return Promise.resolve();
++      }
++      if (current.markReadyUnconfirmed === true) {
++        return Promise.reject(
++          new Error(`PR #${String(prNumber)} is still draft after gh pr ready — flip unconfirmed`),
++        );
++      }
++      prs.set(prNumber, { ...current, isDraft: false });
++      return Promise.resolve();
++    },
+   };
+ }

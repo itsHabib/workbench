@@ -21,7 +21,14 @@ owner — not this repo's work to force.
   graduate it in and have it *import* `contracts` for the shared type, so the
   conformance test guards drift from the inside. Until then `contracts` mirrors
   gate's `internal/verify` and is conformance-tested against the schema.
-- **triage** — adopt `contracts`; drop its hand-parsed verdict copy.
+- **triage** — migrated in 2026-07-16 as `cmd/triage` (the fourth tenant; two
+  binaries, `triage-floor`/`triage-advisory`, sharing `cmd/triage/internal/`).
+  `contracts` adoption deliberately NOT done with the move: inspection showed
+  triage's verdict (floor/escalate/final/route) is its own domain shape, not a
+  mirror of the merge verdict — there is no hand-parsed copy to drop. Adoption
+  is owed together with the parked schema-alignment work (gate project,
+  `align-triage-verdict-schema`), a behavior change the byte-identical
+  migration must not smuggle in.
 - ~~**tracelens** — adopt `contracts`; drop its hand-parsed verdict copy.~~
   Migrated in 2026-07-16 as `cmd/tracelens` (the third tenant); imports
   `contracts` for the verdict type, local mirror deleted, emitted JSON pinned
