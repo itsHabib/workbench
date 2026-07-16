@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itsHabib/workbench/contracts"
-
 	"github.com/itsHabib/workbench/cmd/tracelens/internal/tracelens"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 func TestResolveRunRef_Directory(t *testing.T) {
