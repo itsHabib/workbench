@@ -43,16 +43,19 @@ func Send(ch config.Channel, ev event.Event) error {
 
 // A Slack message is one severity-colored attachment whose blocks lead on the
 // action the operator must take — the whole point of a page is that what-to-do
-// is unmistakable. Text is the notification/preview fallback (lock screen).
+// is unmistakable. The blocks live inside the attachment (not at the top level)
+// so the message renders exactly once, as a single colored card; the
+// attachment's Fallback is the notification/lock-screen line and is never shown
+// in the channel body.
 type slackRequest struct {
 	Channel     string            `json:"channel"`
-	Text        string            `json:"text"`
 	Attachments []slackAttachment `json:"attachments,omitempty"`
 }
 
 type slackAttachment struct {
-	Color  string       `json:"color"`
-	Blocks []slackBlock `json:"blocks"`
+	Color    string       `json:"color"`
+	Fallback string       `json:"fallback,omitempty"`
+	Blocks   []slackBlock `json:"blocks"`
 }
 
 // slackBlock is one Block Kit block. Text carries header/section content;
@@ -124,24 +127,26 @@ func requestCause(err error) error {
 	return err
 }
 
-// renderSlackMessage turns an event into a Block Kit message: a colored
-// attachment whose blocks lead on the required action.
+// renderSlackMessage turns an event into a Block Kit message: one colored
+// attachment whose blocks lead on the required action, plus a notification
+// fallback so the lock-screen line still leads on the action.
 func renderSlackMessage(channel string, ev event.Event) slackRequest {
 	return slackRequest{
-		Channel:     channel,
-		Text:        slackFallback(ev),
-		Attachments: []slackAttachment{{Color: severityColor(ev.Severity), Blocks: slackBlocks(ev)}},
+		Channel: channel,
+		Attachments: []slackAttachment{{
+			Color:    severityColor(ev.Severity),
+			Fallback: slackFallback(ev),
+			Blocks:   slackBlocks(ev),
+		}},
 	}
 }
 
 func slackBlocks(ev event.Event) []slackBlock {
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: headline(ev), Emoji: true}},
-		{Type: "section", Text: &slackText{Type: "mrkdwn", Text: detailLine(ev)}},
 	}
-	if why := compact(ev.Body); why != "" {
-		quote := "> " + truncateRunes(why, slackSectionLimit)
-		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: quote}})
+	if why := whyBlock(ev.Body); why != "" {
+		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: why}})
 	}
 	if btn, ok := prButton(ev); ok {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: []any{btn}})
@@ -150,28 +155,46 @@ func slackBlocks(ev event.Event) []slackBlock {
 	return append(blocks, slackBlock{Type: "context", Elements: []any{footer}})
 }
 
-// headline is the one line that must make the required action obvious: a
-// severity verb, plus the subject ("rooms#71") when the event carries one.
+// headline is the one line that must make the required action obvious: a plain
+// imperative, with the subject woven in when the event names one.
 func headline(ev event.Event) string {
-	h := severityHeadline(ev.Severity)
-	if s := subject(ev); s != "" {
-		h += " · " + s
+	switch ev.Severity {
+	case event.SevBlock:
+		return blockHeadline(ev)
+	case event.SevEscalate:
+		return escalateHeadline(ev)
+	case event.SevFailed:
+		return runHeadline(ev, "failed", "❌")
+	case event.SevCancelled:
+		return runHeadline(ev, "cancelled", "⚪")
 	}
-	return h
+	return "ℹ️ Notice"
 }
 
-func severityHeadline(s event.Severity) string {
-	switch s {
-	case event.SevBlock:
-		return ":octagonal_sign: Blocked — needs you"
-	case event.SevEscalate:
-		return ":warning: Needs your judgment"
-	case event.SevFailed:
-		return ":x: Run failed"
-	case event.SevCancelled:
-		return ":white_circle: Run cancelled"
+func blockHeadline(ev event.Event) string {
+	if s := subject(ev); s != "" {
+		return "🛑 Don't merge " + s + " — review it yourself"
 	}
-	return ":information_source: Notice"
+	return "🛑 Blocked — this needs manual review"
+}
+
+func escalateHeadline(ev event.Event) string {
+	if s := subject(ev); s != "" {
+		return "⚠️ Your call on " + s
+	}
+	return "⚠️ Your call — a run paused for your decision"
+}
+
+// runHeadline covers failed and cancelled: prefer the task name, then the
+// subject, then just the verb.
+func runHeadline(ev event.Event, verb, icon string) string {
+	if t := ev.Fields["task"]; t != "" {
+		return icon + " Task " + verb + " — " + t
+	}
+	if s := subject(ev); s != "" {
+		return icon + " Run " + verb + " — " + s
+	}
+	return icon + " Run " + verb
 }
 
 func severityColor(s event.Severity) string {
@@ -188,28 +211,23 @@ func severityColor(s event.Severity) string {
 	return "#2F80ED"
 }
 
-// detailLine is the "what / where" context: the source, then the meaningful
-// fields the producer surfaced, in a stable order.
-func detailLine(ev event.Event) string {
-	parts := []string{"*" + ev.Source + "*"}
-	for _, k := range []string{"decision", "outcome", "dimension", "tier", "task", "run"} {
-		v := ev.Fields[k]
-		if v == "" {
-			continue
-		}
-		parts = append(parts, slackFieldValue(k, v))
+// whyBlock renders the reason as a blockquote: a bulleted list when the producer
+// packed several reasons into one "; "-joined line, otherwise a single quote.
+// The words stay the producer's; flare only structures them.
+func whyBlock(body string) string {
+	why := compact(body)
+	if why == "" {
+		return ""
 	}
-	return strings.Join(parts, "  ·  ")
-}
-
-func slackFieldValue(key, val string) string {
-	switch key {
-	case "tier":
-		return "tier `" + val + "`"
-	case "run", "task":
-		return "`" + val + "`"
+	parts := strings.Split(why, "; ")
+	if len(parts) == 1 {
+		return truncateRunes("> "+why, slackSectionLimit)
 	}
-	return val
+	lines := make([]string, len(parts))
+	for i, p := range parts {
+		lines[i] = "> • " + p
+	}
+	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
 }
 
 // subject is the short "repo#n" the header carries when the event names one.
@@ -243,8 +261,18 @@ func prButton(ev event.Event) (slackButton, bool) {
 	}, true
 }
 
+// slackFooter is the small print: the source and the correlation ids the
+// operator only needs when digging in, kept out of the way of the action above.
 func slackFooter(ev event.Event) string {
-	return ":stopwatch: " + ev.Time.Format("Jan 2, 3:04 PM MST") + "  ·  " + ev.Severity.String()
+	parts := []string{ev.Source}
+	if tier := ev.Fields["tier"]; tier != "" {
+		parts = append(parts, "tier "+tier)
+	}
+	if run := ev.Fields["run"]; run != "" {
+		parts = append(parts, run)
+	}
+	parts = append(parts, ev.Time.Format("Jan 2, 3:04 PM MST"))
+	return strings.Join(parts, " · ")
 }
 
 // slackFallback is the notification/preview text (the lock-screen line): the

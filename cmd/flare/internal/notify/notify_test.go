@@ -60,14 +60,14 @@ func TestSlackPostRendersBlockKit(t *testing.T) {
 	if len(blocks) == 0 || blocks[0].Type != "header" || blocks[0].Text == nil {
 		t.Fatalf("first block must be a header, got %+v", blocks)
 	}
-	if !strings.Contains(blocks[0].Text.Text, "Blocked") {
-		t.Fatalf("header must lead on the action, got %q", blocks[0].Text.Text)
+	if h := blocks[0].Text.Text; !strings.Contains(h, "Don't merge") || !strings.Contains(h, "workbench#33") {
+		t.Fatalf("header must lead on the action and name the subject, got %q", h)
 	}
 	if !hasSectionContaining(blocks, "critical issue") {
 		t.Fatalf("the why must appear in a section, got %+v", blocks)
 	}
-	if !strings.Contains(got.Text, "Blocked") {
-		t.Fatalf("fallback text must lead on the action, got %q", got.Text)
+	if fb := got.Attachments[0].Fallback; !strings.Contains(fb, "Don't merge") {
+		t.Fatalf("notification fallback must lead on the action, got %q", fb)
 	}
 }
 
@@ -78,6 +78,32 @@ func hasSectionContaining(blocks []slackBlock, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestSlackMessageRendersOnce(t *testing.T) {
+	// The blocks live inside the attachment and there is no top-level text, so
+	// Slack renders the card exactly once — not a summary line stacked above a
+	// card that repeats it. The notification line lives on the fallback.
+	msg := renderSlackMessage("C1", event.Event{
+		Source:   "gate",
+		Severity: event.SevBlock,
+		Body:     "tier over ceiling",
+		Fields:   map[string]string{"repo": "itsHabib/rooms", "number": "71"},
+	})
+	blob, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(blob, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top["text"]; ok {
+		t.Fatalf("a top-level text stacks a duplicate above the card; want none:\n%s", blob)
+	}
+	if len(msg.Attachments) != 1 || msg.Attachments[0].Fallback == "" {
+		t.Fatalf("the notification line must live on the attachment fallback, got %+v", msg.Attachments)
+	}
 }
 
 func TestSlackVerdictHasPRButton(t *testing.T) {
@@ -123,14 +149,14 @@ func TestSlackEscalationHasNoButton(t *testing.T) {
 	if strings.Contains(s, `"type":"button"`) {
 		t.Fatalf("an escalation with no PR must carry no button:\n%s", s)
 	}
-	if !strings.Contains(s, "Needs your judgment") {
+	if !strings.Contains(s, "Your call") {
 		t.Fatalf("escalation header must lead on the action:\n%s", s)
 	}
 }
 
 func TestSlackFallbackLeadsWithActionAndTruncates(t *testing.T) {
 	lead := slackFallback(event.Event{Source: "gate", Severity: event.SevBlock})
-	if !strings.HasPrefix(lead, ":octagonal_sign:") {
+	if !strings.HasPrefix(lead, "🛑") {
 		t.Fatalf("fallback must lead with the severity action, got %q", lead)
 	}
 	long := slackFallback(event.Event{
