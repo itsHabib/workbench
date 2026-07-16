@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itsHabib/workbench/contracts"
-
 	"github.com/itsHabib/workbench/cmd/tracelens/internal/tracelens"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // shipMain handles `tracelens ship [-json] [-quiet] <run-ref>`: analyze a

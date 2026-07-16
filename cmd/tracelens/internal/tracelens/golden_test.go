@@ -3,10 +3,13 @@ package tracelens
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+var update = flag.Bool("update", false, "update golden files")
 
 // TestVerdictJSON_Golden pins the emitted verdict JSON byte-for-byte against
 // goldens captured before the contracts type swap. The wire surface is the
@@ -45,6 +48,12 @@ func TestVerdictJSON_Golden(t *testing.T) {
 				t.Fatalf("marshal verdict: %v", err)
 			}
 			got = append(got, '\n') // the CLI emits via json.Encoder, which appends one
+			if *update {
+				if err := os.WriteFile(tc.golden, got, 0o644); err != nil {
+					t.Fatalf("update golden: %v", err)
+				}
+				return
+			}
 			want, err := os.ReadFile(tc.golden)
 			if err != nil {
 				t.Fatalf("read golden: %v", err)
@@ -53,7 +62,7 @@ func TestVerdictJSON_Golden(t *testing.T) {
 			// bytes are the LF form the encoder emits.
 			want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 			if !bytes.Equal(got, want) {
-				t.Fatalf("verdict JSON drifted from golden %s\ngot:\n%s\nwant:\n%s", tc.golden, got, want)
+				t.Fatalf("verdict JSON drifted from golden %s; if intended, run go test ./cmd/tracelens/internal/tracelens -update\ngot:\n%s\nwant:\n%s", tc.golden, got, want)
 			}
 		})
 	}
