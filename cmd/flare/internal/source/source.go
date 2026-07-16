@@ -83,17 +83,26 @@ func completeLines(raw []byte) ([]string, int64) {
 }
 
 // chainBreak reports why the first new line does not follow the cursor, or
-// "" when it does. Only gate logs carry a hash chain.
+// "" when it does. Gate logs verify the hash chain; ship receipts have no
+// chain, so integrity is best-effort via a valid-record check at the offset.
 func chainBreak(src config.Source, cur Cursor, first string) string {
-	if src.Kind != config.SourceGateLog || cur.LastHash == "" {
+	if src.Kind == config.SourceGateLog && cur.LastHash != "" {
+		var env contracts.Envelope
+		if err := json.Unmarshal([]byte(first), &env); err != nil {
+			return fmt.Sprintf("unparseable line at cursor: %v; resweeping", err)
+		}
+		if env.Prev != cur.LastHash {
+			return fmt.Sprintf("hash chain broke at cursor (prev %.12s != last %.12s): rewritten upstream; resweeping", env.Prev, cur.LastHash)
+		}
 		return ""
 	}
-	var env contracts.Envelope
-	if err := json.Unmarshal([]byte(first), &env); err != nil {
-		return fmt.Sprintf("unparseable line at cursor: %v; resweeping", err)
-	}
-	if env.Prev != cur.LastHash {
-		return fmt.Sprintf("hash chain broke at cursor (prev %.12s != last %.12s): rewritten upstream; resweeping", env.Prev, cur.LastHash)
+	if src.Kind == config.SourceShipReceipts && cur.Offset > 0 {
+		var r receipt
+		if err := json.Unmarshal([]byte(first), &r); err != nil {
+			// No hash chain to verify continuity; a decodable receipt at the
+			// offset is the guard against a mid-line / rewritten cursor.
+			return fmt.Sprintf("unparseable receipt at cursor: %v; resweeping", err)
+		}
 	}
 	return ""
 }
