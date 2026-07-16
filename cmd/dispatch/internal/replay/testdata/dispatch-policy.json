@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "generative-high-risk-to-opus-max",
+      "match": { "task_class": "generative", "risk_tier": ["T2", "T3"] },
+      "place": { "engine": "ship-driver", "provider": "claude", "model": "claude-opus-4-8", "effort": "max", "runtime": "local" },
+      "escalation": { "max_rounds_per_defect_class": 2, "escalate_to": "claude-opus-4-8" }
+    },
+    {
+      "name": "contained-t1-to-sonnet-extra",
+      "match": { "risk_tier": ["T1"] },
+      "place": { "engine": "ship-driver", "provider": "claude", "model": "sonnet", "effort": "extra", "runtime": "local" },
+      "escalation": { "max_rounds_per_defect_class": 2, "escalate_to": "claude-opus-4-8" }
+    }
+  ]
+}
