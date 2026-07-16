@@ -5,7 +5,7 @@
 **Date:** 2026-07-16
 **Related:** `docs/DESIGN.md` (workbench charter), `contracts/` (verdict-v0.3.0 precedent), gate `docs/DESIGN.md` (artifact-ledger prior art), `pers/workbench-friction.md` 2026-07-15 entries (motivating evidence), dossier project `workbench`
 
-> **Reviewers — focus areas:** §4 D1 (who owns the driver-state contract — workbench, with ship demoted to one writer), §4 D2 (JSONL event ledger + reduce, NOT a SQLite mirror of ship's store), §7 flow 3 (session crash → resume from ledger alone), §8 (multi-writer locking on Windows). The riskiest wrong turn is rebuilding ship's store in Go — §1 non-goals draws that line.
+> **Reviewers — focus areas:** §4 D1 (DECIDED by operator: the workbench ledger is the one canonical record; ship emits into it receipts-style — scrutinize the best-effort emission failure modes), §4 D2 (JSONL event ledger + reduce, NOT a SQLite mirror of ship's store), §7 flow 3 (session crash → resume from ledger alone), §8 (multi-writer locking on Windows + the TS-writable chain rule). The riskiest wrong turn is rebuilding ship's store in Go — §1 non-goals draws that line.
 
 ## 1. Problem & hypothesis
 
@@ -29,10 +29,11 @@ executor becomes swappable (ship's engine, an LLM session, a human) without any 
 (`/wip`, `/shipped`, render, flare) caring who did the work. Prose shrinks, guarantees grow.
 
 **Non-goals:**
-- NOT a change to ship-driven /work-driver. The regular ship-engine drive keeps working
-  exactly as today — its store, its verbs, its flow, untouched. This plane is *additive*: it
-  gives a drive that chooses not to use ship somewhere to record. Per-drive component choice
-  is the point; replacing components is not.
+- NOT a change to ship-driven /work-driver behavior. The regular ship-engine drive keeps
+  working exactly as today — its engine, its verbs, its flow. Ship gains one additive,
+  best-effort event emitter (§4 D1, §9 P5), the same grade as its existing receipts write;
+  a ledger failure never fails a drive. Per-drive component choice is the point; replacing
+  components is not.
 - NOT a rebuild of ship's engine or store in Go. Ship keeps its SQLite store and its engine;
   this plane records *events about* driver work, it does not drive dispatch, poll runners, or
   merge PRs.
@@ -94,15 +95,22 @@ shared-mechanism precedent. What's new: the event vocabulary, the reducer, the M
 
 ## 4. Key decisions & trade-offs
 
-**D1 — workbench owns the contract; engines are peers that choose their store.**
-Alternative: grow ship's store outward (add `driver record` verbs to ship, as first sketched
-in conversation). Rejected because gate/triage/tracelens are consolidating into workbench and
-ship likely never migrates — anchoring the cross-tool contract in the one repo that's leaving
-the family inverts the dependency. But this is NOT a demotion of ship: a ship-engine drive
-keeps recording to ship's store exactly as today; a session-engine drive records here. The
-operator picks the components per drive. Cost: `/wip`/`/shipped` read two stores for as long
-as both engines are in use — that's a permanent, cheap read-side join, not a transition to be
-retired (§9 P5 makes ship→driver-state emission optional, never required).
+**D1 — the workbench ledger is THE driver-state record; every engine writes it (decided).**
+Session-engine drives write it natively (their only store). Ship-engine drives keep their
+flow and SQLite store untouched as *engine-internal working state*, and additionally emit
+lifecycle events into the ledger **receipts-style: best-effort, never failing a tick on a
+write error** — the exact pattern ship already uses for park receipts that flare tails, so
+this is an extension of an existing seam, not a new kind of coupling. The ledger is the one
+canonical read surface; ship's SQLite is consulted only when debugging the engine itself,
+like any tool's internals.
+Alternatives rejected: (a) beef up ship's MCP and make its SQLite the shared store — points
+the dependency arrow at the TS repo staying outside the family, and makes ship load-bearing
+even for shipless drives; (b) two authoritative stores + read-time join in `/wip`/`/shipped`
+— no drift risk (disjoint ownership) but two formats, two mental models, two things to debug;
+operator verdict: the unified record is the point of the unifying repo. Residual cost of the
+chosen design: best-effort emission means a ship drive's ledger view can lag or hole on a
+write failure — acceptable because ship's own store remains authoritative for its engine
+loop, and `driver_verify` makes holes visible rather than silent.
 
 **D2 — append-only event ledger + pure reducer, not a mutable-row store.**
 Alternative: SQLite tables mirroring ship's `driver_runs/streams`. Rejected: events are the
@@ -265,12 +273,15 @@ for the `driver list` grok-4.5 failure class.
 | P2 | `driver-state-ledger` | `driverstate/` package: Append/Reduce/Runs/Verify + lock + chain | append+validate; reducer; tolerant listing; verify; lock (reuse gate pattern) | P1 | — | ~600 (split into 2 PRs: write path / read path) |
 | P3 | `workbench-mcp-v0` | `cmd/workbench-mcp` stdio server exposing the four driver verbs + `cmd/driverstate` CLI | MCP server scaffold; verb handlers; CLI mirror; state-dir config | P2 | **VALIDATION GATE** (§11) | ~450 |
 | P4 | `session-engine-skill` | `/work-driver --engine session` skill variant recording through MCP | skill text; resume flow; N≤3 scope; grant-resolution step (pre-minted, never mint) | P3 gate | — | skill prose, ~0 code |
-| P5 | `two-store read join` (stub) | `/wip`/`/shipped` read ship's store AND the ledger as peers | read-side join in the skills; optional ship→driver-state emission only if it ever earns its keep | P3 gate | post-gate | TBD |
+| P5 | `ship-emitter` (committed) | ship emits lifecycle events into the ledger, receipts-style | TS emitter in ship repo writing the JSON contract (best-effort, never fails a tick); `/wip`/`/shipped` repointed at the ledger as the one read surface | P2 + P3 gate | — | ~250 (ship repo) |
 | P6 | `ship-policy-hardening` (parallel, ship repo) | `.ship.json` enforced at `ShipService.startShip`; credential-source constraint (`claude` token source + gh account per repo) | ShipService check; policy `credentials` key; tests | — (independent) | — | ~300 |
 
 Phases P1–P3 are the committed spine (this week's target: P1+P2 moving, P3 opened). P4 is
-cheap once P3 exists. P5 is explicitly speculative — task-less stub until the gate passes.
-P6 can run in parallel any time via the ship repo.
+cheap once P3 exists. P5 is committed (operator decision 2026-07-16: one canonical record in
+the unifying repo) but sequenced after the P3 gate — don't wire ship into an unproven contract.
+Note for P1/P2: the ledger's on-disk format (canonical JSON, hash rule) must be writable from
+TS as well as Go — keep the chain rule dead simple and document it in the contract, since ship's
+emitter implements it independently. P6 can run in parallel any time via the ship repo.
 
 ## 10. Open questions
 
