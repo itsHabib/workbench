@@ -163,10 +163,15 @@ shape (final home is an open question, §10 Q5):
 }
 ```
 
-Personal repos declare the current four; absent key = today's behavior (the personal
-default), so nothing changes until a repo opts in. The panel-degraded warning from the
-2026-07-15 run (3 of 4 finders silent, discovered by waiting) becomes computable:
-settled = every `require` reported or its budget expired. one `attempt` event carrying a snapshot vs
+**No implicit default (operator decision 2026-07-16):** absent or empty `review` key
+= the tail runs NO automated review step — no pings, no consolidation, review is
+whatever humans do — and the drive records `review: unconfigured` in its state so the
+omission is visible, never silently papered over with a built-in panel. Discipline
+means following the contract that's there, not the one we remember. Consequence:
+each personal repo declares its four-bot panel explicitly in its `.ship.json` (a
+one-time ~10-line chore per repo, folded into P4's rollout). The panel-degraded
+warning from the 2026-07-15 run (3 of 4 finders silent, discovered by waiting)
+becomes computable: settled = every `require` reported or its budget expired. one `attempt` event carrying a snapshot vs
 fine-grained sub-events (`review_cycle`, `ci_result`). Proposal: start coarse (the seven kinds
 in §5); fine-grained kinds are additive under a versioned schema. Weigh in if coarse loses
 something the morning-queue reader needs.
@@ -316,11 +321,10 @@ emitter implements it independently. P6 can run in parallel any time via the shi
 4. **MCP server hosting for Desktop:** Claude Code terminal sessions get the real state dir;
    Claude Desktop connectors see virtualized AppData (MSIX memory). Ship `WORKBENCH_STATE_DIR`
    in v0 and document, or refuse to run under a virtualized root?
-5. **Where does the review-panel config (§4 D6) live?** Candidates: extend `.ship.json`
-   (pro: one repo-policy file, discovery already built; con: name says ship, but a session
-   drive reads it too), a new `.workbench.json`, or a `review:` block in the driver manifest
-   (con: per-run, panel is really per-repo). Leaning: extend the existing repo policy file
-   and accept the name, or rename the file once — decide in review.
+5. ~~Where does the review-panel config (§4 D6) live?~~ **Resolved (operator,
+   2026-07-16): extend `.ship.json`** — one repo-policy file, discovery/validation
+   already built; the ship-flavored name is accepted cost (rename is a one-commit
+   mechanical sweep later if it ever grates).
 
 ## 11. Validation plan
 
