@@ -85,6 +85,13 @@ must not smuggle in (same rule as tracelens above):
   (e.g. a minified generated asset) classifies the partial diff instead of
   failing. Propagating scanner errors is a parser-behavior change; owed
   with a corpus case that pins it.
+- **Hygiene nits in the moved floor code** (claude review, all pre-move):
+  `sawCode` and `reLoosenGuard` are set/compiled then blanked out
+  (vestigial or unimplemented heuristic — decide which), `hasCodeChange`
+  merges `Added`+`Removed` into a throwaway slice, and `triage-advisory`'s
+  main drops the `MarshalIndent` error where `triage-floor` propagates.
+  Behavior-neutral cleanups, but the move ships the files byte-identical;
+  fold into the same triage iteration as the items above.
 
 ## flare migration — choices made
 
