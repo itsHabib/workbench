@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // Severity ranks how much a finding should worry an operator.
@@ -34,8 +36,9 @@ func (s Severity) MarshalJSON() ([]byte, error) {
 
 // Finding is one diagnosed issue: what it is, how bad, which steps prove it,
 // how much money it wasted, and a concrete, evidence-filled repair. This is
-// tracelens's own rich finding — the detector output. The gate-shaped
-// VerdictFinding on the emitted Verdict is the aligned wire surface.
+// tracelens's own rich finding — the detector output. The shared
+// contracts.Finding on the emitted contracts.Verdict is the aligned wire
+// surface.
 type Finding struct {
 	Kind      string
 	Severity  Severity
@@ -47,8 +50,8 @@ type Finding struct {
 
 // Report is the internal analyzer result over a whole run: totals, the two
 // orthogonal verdict axes, a one-line headline, and the ranked rich findings.
-// It backs the human render; the emitted, gate-aligned surface is Verdict
-// (see the Verdict method).
+// It backs the human render; the emitted, gate-aligned surface is
+// contracts.Verdict (see the Verdict method).
 type Report struct {
 	Steps     int
 	TotalUSD  float64
@@ -58,30 +61,6 @@ type Report struct {
 	Headline  string
 	Findings  []Finding
 }
-
-// Producer identifies who stands behind a verdict. Class carries the ladder
-// semantics; Impl names the specific implementation for provenance only —
-// nothing may branch on Impl. This mirrors gate's verify.Producer so the two
-// verdicts are byte-comparable.
-type Producer struct {
-	Class string `json:"class"`
-	Impl  string `json:"impl,omitempty"`
-}
-
-// Producer classes. tracelens's analyzer is deterministic, so it always
-// produces ClassCode.
-const (
-	ClassCode     = "code"
-	ClassLocal    = "local-model"
-	ClassJudgment = "judgment"
-)
-
-// Decisions, worst to best: block > escalate > pass.
-const (
-	DecisionBlock    = "block"
-	DecisionEscalate = "escalate"
-	DecisionPass     = "pass"
-)
 
 // Tiers, best to worst: T0 < T1 < T2 < T3. An unknown tier ranks highest so a
 // garbage value fails closed, matching gate's tier.Rank default.
@@ -96,41 +75,6 @@ const (
 // identity. It stays dialect-neutral because the same analyzer runs on every
 // normalized trace path.
 const impl = "tracelens"
-
-// Verdict is the emitted, gate-aligned result. Decision and Tier are
-// deliberately orthogonal axes: decision says who may proceed; tier says who
-// must approve. Field names and JSON tags mirror gate's verify.Verdict exactly
-// so a tracelens verdict is byte-comparable to gate's.
-type Verdict struct {
-	Subject    Subject          `json:"subject"`
-	Source     string           `json:"source"`
-	Producer   Producer         `json:"producer"`
-	Decision   string           `json:"decision"`
-	Tier       string           `json:"tier"`
-	Confidence float64          `json:"confidence"`
-	Findings   []VerdictFinding `json:"findings,omitempty"`
-	Why        string           `json:"why"`
-}
-
-// VerdictFinding is the gate-shaped, aligned finding that rides on a Verdict.
-// It carries no producer field (producer lives on the Verdict) and no repair or
-// cost — those stay on tracelens's rich Finding. Field names and JSON tags
-// mirror gate's verify.Finding so the emitted slice is byte-comparable.
-type VerdictFinding struct {
-	Title      string  `json:"title"`
-	Severity   string  `json:"severity,omitempty"`
-	Locus      string  `json:"locus,omitempty"`
-	Confidence float64 `json:"confidence,omitempty"`
-}
-
-// Subject names the change a verdict is about. tracelens analyzes a trace, not
-// a pull request, so it is left zero today; it exists to keep the emitted
-// verdict byte-comparable to gate's.
-type Subject struct {
-	Repo    string `json:"repo"`
-	Number  int    `json:"number"`
-	HeadSHA string `json:"head_sha,omitempty"`
-}
 
 // tierRank orders tiers so the max wins in composition; an unknown or empty
 // tier ranks highest (fail closed), matching gate's tier.Rank default.
@@ -222,13 +166,13 @@ func decisionTier(findings []Finding) (decision, tier string) {
 	worst := severityFloor(findings)
 	switch worst {
 	case Critical:
-		return DecisionBlock, TierT3
+		return contracts.DecisionBlock, TierT3
 	case Warn:
-		return DecisionEscalate, TierT2
+		return contracts.DecisionEscalate, TierT2
 	case Info:
-		return DecisionPass, TierT1
+		return contracts.DecisionPass, TierT1
 	default:
-		return DecisionPass, TierT0
+		return contracts.DecisionPass, TierT0
 	}
 }
 
@@ -245,19 +189,19 @@ func severityFloor(findings []Finding) Severity {
 }
 
 // buildVerdict composes the detector findings into the emitted, gate-aligned
-// Verdict. It is the policy entrypoint the CLI and gate consume.
-func buildVerdict(t Trajectory, findings []Finding) Verdict {
+// contracts.Verdict. It is the policy entrypoint the CLI and gate consume.
+func buildVerdict(t Trajectory, findings []Finding) contracts.Verdict {
 	return buildReport(t, findings).Verdict()
 }
 
-// Verdict maps the rich internal report onto the gate-aligned wire type. It
-// copies the two axes computed by the policy layer (never re-deriving one from
-// the other), stamps the deterministic code producer, and folds the reasoning
+// Verdict maps the rich internal report onto the shared wire type. It copies
+// the two axes computed by the policy layer (never re-deriving one from the
+// other), stamps the deterministic code producer, and folds the reasoning
 // into Why so a downstream reader can act on Why alone.
-func (r Report) Verdict() Verdict {
-	return Verdict{
+func (r Report) Verdict() contracts.Verdict {
+	return contracts.Verdict{
 		Source:     "tracelens",
-		Producer:   Producer{Class: ClassCode, Impl: impl},
+		Producer:   contracts.Producer{Class: contracts.ClassCode, Impl: impl},
 		Decision:   r.Decision,
 		Tier:       r.Tier,
 		Confidence: 1,
@@ -266,15 +210,17 @@ func (r Report) Verdict() Verdict {
 	}
 }
 
-// verdictFindings maps tracelens's rich findings onto the gate-shaped slice:
-// summary→Title, severity label→Severity, evidence steps→Locus.
-func verdictFindings(findings []Finding) []VerdictFinding {
+// verdictFindings maps tracelens's rich findings onto the shared slice:
+// summary→Title, severity label→Severity, evidence steps→Locus. Evidence is
+// deliberately left empty — tracelens's evidence lives in Locus step refs, and
+// omitempty keeps the emitted JSON unchanged.
+func verdictFindings(findings []Finding) []contracts.Finding {
 	if len(findings) == 0 {
 		return nil
 	}
-	out := make([]VerdictFinding, 0, len(findings))
+	out := make([]contracts.Finding, 0, len(findings))
 	for _, f := range findings {
-		out = append(out, VerdictFinding{
+		out = append(out, contracts.Finding{
 			Title:      f.Summary,
 			Severity:   f.Severity.String(),
 			Locus:      locus(f.Steps),

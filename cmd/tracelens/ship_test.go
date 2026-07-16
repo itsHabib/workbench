@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itsHabib/workbench/contracts"
+
 	"github.com/itsHabib/workbench/cmd/tracelens/internal/tracelens"
 )
 
@@ -69,12 +71,12 @@ func TestConfigHome_HonorsAbsoluteXDG(t *testing.T) {
 
 func TestGateCode(t *testing.T) {
 	cases := map[string]int{
-		tracelens.DecisionBlock:    1,
-		tracelens.DecisionEscalate: 0,
-		tracelens.DecisionPass:     0,
+		contracts.DecisionBlock:    1,
+		contracts.DecisionEscalate: 0,
+		contracts.DecisionPass:     0,
 	}
 	for decision, want := range cases {
-		if got := gateCode(tracelens.Verdict{Decision: decision}); got != want {
+		if got := gateCode(contracts.Verdict{Decision: decision}); got != want {
 			t.Fatalf("gateCode(%s): want %d, got %d", decision, want, got)
 		}
 	}
@@ -95,7 +97,7 @@ func TestGateCode_LoopTraceTripsGate(t *testing.T) {
 		t.Fatalf("ParseShipEvents: %v", err)
 	}
 	v := tracelens.Analyze(tr, tracelens.DefaultConfig()).Verdict()
-	if v.Decision != tracelens.DecisionBlock {
+	if v.Decision != contracts.DecisionBlock {
 		t.Fatalf("a looping ship trace must block, got %q", v.Decision)
 	}
 	if got := gateCode(v); got != 1 {

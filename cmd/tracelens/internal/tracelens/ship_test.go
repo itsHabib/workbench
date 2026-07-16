@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 func parseShip(t *testing.T, lines ...string) Trajectory {
@@ -163,7 +165,7 @@ func TestParseShipEvents_LoopStillTripsAnalysis(t *testing.T) {
 	}
 	tr := parseShip(t, lines...)
 	r := Analyze(tr, DefaultConfig())
-	if r.Decision != DecisionBlock {
+	if r.Decision != contracts.DecisionBlock {
 		t.Fatalf("a 4x identical-call ship trace must block, got %q", r.Decision)
 	}
 }
@@ -201,7 +203,7 @@ func TestParseShipEvents_RealDriverRunFixture(t *testing.T) {
 		t.Fatalf("real run should pair args+results on 100+ calls, got %d", paired)
 	}
 	r := Analyze(tr, DefaultConfig())
-	if r.Decision != DecisionBlock {
+	if r.Decision != contracts.DecisionBlock {
 		t.Fatalf("the captured loop run must block, got %q", r.Decision)
 	}
 	if hasKind(r.Findings, "loop") == nil {

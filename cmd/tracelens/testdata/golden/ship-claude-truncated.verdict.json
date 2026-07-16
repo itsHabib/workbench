@@ -1,0 +1,15 @@
+{
+  "subject": {
+    "repo": "",
+    "number": 0
+  },
+  "source": "tracelens",
+  "producer": {
+    "class": "code",
+    "impl": "tracelens"
+  },
+  "decision": "pass",
+  "tier": "T0",
+  "confidence": 1,
+  "why": "clean run: no pathologies across 1 steps ($0.0000)"
+}

@@ -22,7 +22,10 @@ owner — not this repo's work to force.
   conformance test guards drift from the inside. Until then `contracts` mirrors
   gate's `internal/verify` and is conformance-tested against the schema.
 - **triage** — adopt `contracts`; drop its hand-parsed verdict copy.
-- **tracelens** — adopt `contracts`; drop its hand-parsed verdict copy.
+- ~~**tracelens** — adopt `contracts`; drop its hand-parsed verdict copy.~~
+  Migrated in 2026-07-16 as `cmd/tracelens` (the third tenant); imports
+  `contracts` for the verdict type, local mirror deleted, emitted JSON pinned
+  byte-identical by a golden test.
 - **local** — migrated in 2026-07-09 (the second tenant; going public touched
   it). `contracts` adoption is owed only if/when it reads verdicts — nothing in
   it does today.
