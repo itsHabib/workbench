@@ -84,11 +84,17 @@ function Get-FlareTask {
 function Register-FlareTask {
     $exe = Resolve-FlareExe
     Write-Host "flare binary: $exe"
-    # Run headless (no console window). A visible console exits 0xC000013A when
-    # closed, silently killing the daemon; conhost --headless (Windows 11) gives
-    # the console app a window-less host so nothing can Ctrl+C it.
-    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$exe`" watch"
+    # Hidden PowerShell shim: conhost --headless queues forever under
+    # Start-ScheduledTask (State stays Queued, no process spawned). This shim
+    # launches reliably with no visible window and uses the resolved binary path
+    # instead of relying on PATH in the task session.
+    $exeQuoted = $exe.Replace("'", "''")
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        -Argument "-WindowStyle Hidden -NoProfile -Command `"& '$exeQuoted' watch`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn
+    # IgnoreNew: a second start while one is tracked is dropped. Orphans are
+    # force-killed in Stop-FlareAndWait before update/restart, so a stale
+    # instance cannot block the next launch.
     $settings = New-ScheduledTaskSettingsSet -RestartCount 3 `
         -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
         -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
@@ -102,19 +108,31 @@ function Register-FlareTask {
     Write-Host "Registered '$TaskName'." -ForegroundColor Green
 }
 
-# Stop the task, then wait for the flare process to actually exit so it releases
-# the .exe lock before `go install` tries to overwrite it.
+# Stop the task, force-kill any flare on $Exe (orphans miss Stop-ScheduledTask),
+# wait for the task shim to leave Running (IgnoreNew drops Start while Running),
+# then wait for exit so `go install` can overwrite the binary.
 function Stop-FlareAndWait {
     param([string]$Exe)
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     $deadline = (Get-Date).AddSeconds(15)
     while ((Get-Date) -lt $deadline) {
-        $proc = Get-Process -Name flare -ErrorAction SilentlyContinue |
-                Where-Object { $_.Path -eq $Exe }
-        if (-not $proc) { return }
-        Start-Sleep -Milliseconds 300
+        $procs = Get-Process -Name flare -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Path -eq $Exe }
+        if ($procs) {
+            foreach ($proc in $procs) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Milliseconds 300
+            continue
+        }
+        $task = Get-FlareTask
+        if ($task -and $task.State -eq 'Running') {
+            Start-Sleep -Milliseconds 300
+            continue
+        }
+        return
     }
-    Write-Warning "flare still running after 15s; 'go install' may fail to overwrite $Exe"
+    Write-Warning "flare or '$TaskName' still active after 15s; 'go install' / restart may fail"
 }
 
 function Show-Status {
@@ -170,7 +188,10 @@ switch ($Command) {
     }
     'restart' {
         if (-not (Get-FlareTask)) { throw "'$TaskName' not installed. Run: .\flare-task.ps1 install" }
-        Restart-ScheduledTask -TaskName $TaskName
+        $exe = Resolve-FlareExe
+        Write-Host "Stopping '$TaskName' to restart $exe ..."
+        Stop-FlareAndWait -Exe $exe
+        Start-ScheduledTask -TaskName $TaskName
         Write-Host "Restarted '$TaskName' (config reloaded)." -ForegroundColor Green
         Start-Sleep -Seconds 2
         Show-Status
