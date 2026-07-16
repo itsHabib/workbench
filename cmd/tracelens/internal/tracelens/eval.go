@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // Corpus is a versioned collection of labeled trace cases and its validation
@@ -117,7 +119,7 @@ func validateCorpus(c Corpus) error {
 	}
 	known := knownPathologies
 	dialects := map[Dialect]bool{DialectNeutral: true, DialectShipCursor: true, DialectShipClaude: true, DialectShipCodex: true}
-	decisions := map[string]bool{"": true, DecisionPass: true, DecisionEscalate: true, DecisionBlock: true}
+	decisions := map[string]bool{"": true, contracts.DecisionPass: true, contracts.DecisionEscalate: true, contracts.DecisionBlock: true}
 	ids := map[string]bool{}
 	for _, tc := range c.Cases {
 		if tc.ID == "" || tc.Trace == "" || tc.Dialect == "" || tc.Provenance == "" || tc.Rationale == "" {

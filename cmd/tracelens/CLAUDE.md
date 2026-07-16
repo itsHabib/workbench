@@ -34,4 +34,4 @@ The guard test `TestAnalyze_LoopMakesRunPathological` fails if the detector core
 gofmt -l . && go vet ./... && golangci-lint run ./... && go test ./...
 ```
 
-Standard library only; today tracelens imports nothing else in the module (the `contracts` verdict-type adoption is the tracked follow-up).
+Standard library only; the sole in-module import is `contracts` — the shared verdict vocabulary tracelens emits (`contracts.Verdict` / `contracts.Finding`). Decision logic (the tier ladder, `decisionTier`, the detectors) stays here; `contracts` carries none. The golden test `TestVerdictJSON_Golden` pins the emitted verdict JSON byte-for-byte — output drift on the wire surface fails the suite.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/tracelens/internal/tracelens"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // shipMain handles `tracelens ship [-json] [-quiet] <run-ref>`: analyze a
@@ -65,8 +66,8 @@ func runShip(ref string, asJSON, quiet bool) (int, error) {
 // gateCode maps a verdict to the subcommand's exit code: only a block trips the
 // gate. Escalate and pass both exit 0 — the same behavior as the old
 // pathological/degraded/healthy mapping, rekeyed onto the decision axis.
-func gateCode(v tracelens.Verdict) int {
-	if v.Decision == tracelens.DecisionBlock {
+func gateCode(v contracts.Verdict) int {
+	if v.Decision == contracts.DecisionBlock {
 		return 1
 	}
 	return 0
