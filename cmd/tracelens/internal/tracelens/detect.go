@@ -361,10 +361,7 @@ func bestTandem(seq []string, minRepeats int) (span, bool) {
 	for p := 1; p <= len(seq)/minRepeats; p++ {
 		i := 0
 		for i < len(seq) {
-			j := i + p
-			for j < len(seq) && seq[j] == seq[j-p] {
-				j++
-			}
+			j := runEnd(seq, i, p)
 			r := (j - i) / p
 			if r >= minRepeats && better(span{i, p, r}, best, found) {
 				best, found = span{i, p, r}, true
@@ -377,6 +374,16 @@ func bestTandem(seq []string, minRepeats int) (span, bool) {
 		}
 	}
 	return best, found
+}
+
+// runEnd reports how far a period-p tandem match starting at i extends: the
+// first index where seq stops repeating its value from one period back.
+func runEnd(seq []string, i, p int) int {
+	j := i + p
+	for j < len(seq) && seq[j] == seq[j-p] {
+		j++
+	}
+	return j
 }
 
 func better(a, b span, haveB bool) bool {

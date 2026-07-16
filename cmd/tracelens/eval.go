@@ -30,18 +30,23 @@ func evalMain(argv []string) int {
 		fmt.Fprintln(os.Stderr, "tracelens:", err)
 		return 2
 	}
-	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(evaluation); err != nil {
-			fmt.Fprintln(os.Stderr, "tracelens:", err)
-			return 2
-		}
-	} else {
-		fmt.Print(tracelens.RenderEvaluation(evaluation))
+	if err := printEvaluation(evaluation, *asJSON); err != nil {
+		fmt.Fprintln(os.Stderr, "tracelens:", err)
+		return 2
 	}
 	if !evaluation.Pass {
 		return 1
 	}
 	return 0
+}
+
+// printEvaluation renders the evaluation to stdout, machine- or human-shaped.
+func printEvaluation(evaluation tracelens.Evaluation, asJSON bool) error {
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(evaluation)
+	}
+	fmt.Print(tracelens.RenderEvaluation(evaluation))
+	return nil
 }

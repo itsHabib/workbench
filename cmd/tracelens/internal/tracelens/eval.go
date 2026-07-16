@@ -225,11 +225,12 @@ func accumulateMetrics(metrics map[string]KindMetrics, ce CaseEvaluation) {
 	observed := stringSet(ce.Observed)
 	for kind := range expected {
 		m := metrics[kind]
-		if observed[kind] {
-			m.TruePositive++
-		} else {
+		if !observed[kind] {
 			m.FalseNegative++
+			metrics[kind] = m
+			continue
 		}
+		m.TruePositive++
 		metrics[kind] = m
 	}
 	for _, kind := range ce.FalsePositive {
@@ -261,6 +262,19 @@ func finalizeMetrics(result *Evaluation) {
 	}
 }
 
+// macroPrecisionFailure reports why the macro-precision gate failed, or ""
+// when it holds. An undefined metric is a failure — the gate never passes on
+// missing evidence.
+func macroPrecisionFailure(result *Evaluation) string {
+	if result.MacroPrecision == nil {
+		return "macro precision unavailable"
+	}
+	if *result.MacroPrecision < result.Policy.MinMacroPrecision {
+		return fmt.Sprintf("macro precision %.3f below %.3f", *result.MacroPrecision, result.Policy.MinMacroPrecision)
+	}
+	return ""
+}
+
 func applyEvalPolicy(result *Evaluation) {
 	for _, ce := range result.Cases {
 		if !ce.Pass {
@@ -270,10 +284,8 @@ func applyEvalPolicy(result *Evaluation) {
 			result.Failures = append(result.Failures, fmt.Sprintf("case %s: critical finding on healthy case", ce.ID))
 		}
 	}
-	if result.MacroPrecision == nil {
-		result.Failures = append(result.Failures, "macro precision unavailable")
-	} else if *result.MacroPrecision < result.Policy.MinMacroPrecision {
-		result.Failures = append(result.Failures, fmt.Sprintf("macro precision %.3f below %.3f", *result.MacroPrecision, result.Policy.MinMacroPrecision))
+	if f := macroPrecisionFailure(result); f != "" {
+		result.Failures = append(result.Failures, f)
 	}
 	for _, kind := range result.Policy.RequiredRecallKinds {
 		m, ok := result.Metrics[kind]

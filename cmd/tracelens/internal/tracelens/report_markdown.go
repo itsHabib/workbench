@@ -67,21 +67,19 @@ func writeTelemetry(b *strings.Builder, tr Trajectory, report Report) {
 		hasLatency = hasLatency || step.LatencyMS != 0
 		hasCost = hasCost || step.CostUSD != 0
 	}
-	if hasTokens {
-		fmt.Fprintf(b, "| Tokens in / out | %d / %d |\n", tokensIn, tokensOut)
-	} else {
-		b.WriteString("| Tokens in / out | unavailable |\n")
+	telemetryRow(b, "Tokens in / out", hasTokens, fmt.Sprintf("%d / %d", tokensIn, tokensOut))
+	telemetryRow(b, "Total / wasted cost", hasCost, fmt.Sprintf("$%.4f / $%.4f", report.TotalUSD, report.WastedUSD))
+	telemetryRow(b, "Recorded latency", hasLatency, fmt.Sprintf("%d ms", latency))
+}
+
+// telemetryRow writes one table row, rendering a metric the trace never
+// carried as "unavailable" rather than a misleading zero.
+func telemetryRow(b *strings.Builder, label string, available bool, value string) {
+	if !available {
+		fmt.Fprintf(b, "| %s | unavailable |\n", label)
+		return
 	}
-	if hasCost {
-		fmt.Fprintf(b, "| Total / wasted cost | $%.4f / $%.4f |\n", report.TotalUSD, report.WastedUSD)
-	} else {
-		b.WriteString("| Total / wasted cost | unavailable |\n")
-	}
-	if hasLatency {
-		fmt.Fprintf(b, "| Recorded latency | %d ms |\n", latency)
-	} else {
-		b.WriteString("| Recorded latency | unavailable |\n")
-	}
+	fmt.Fprintf(b, "| %s | %s |\n", label, value)
 }
 
 func stepLabel(step Step) string {

@@ -14,12 +14,7 @@ func RenderEvaluation(e Evaluation) string {
 	if !e.Pass {
 		status = "FAIL"
 	}
-	fmt.Fprintf(&b, "EVALUATION %s · %d cases", status, len(e.Cases))
-	if e.MacroPrecision == nil {
-		b.WriteString(" · macro precision n/a\n")
-	} else {
-		fmt.Fprintf(&b, " · macro precision %.1f%%\n", *e.MacroPrecision*100)
-	}
+	fmt.Fprintf(&b, "EVALUATION %s · %d cases · macro precision %s\n", status, len(e.Cases), metricText(e.MacroPrecision))
 	kinds := make([]string, 0, len(e.Metrics))
 	for kind := range e.Metrics {
 		kinds = append(kinds, kind)
