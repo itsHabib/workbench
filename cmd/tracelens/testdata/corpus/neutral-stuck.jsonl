@@ -1,0 +1,5 @@
+{"i":0,"tool":"search","args":{"query":"first"},"observation":"no matches","ok":true}
+{"i":1,"tool":"search","args":{"query":"second"},"observation":"no matches","ok":true}
+{"i":2,"tool":"search","args":{"query":"third"},"observation":"no matches","ok":true}
+{"i":3,"tool":"search","args":{"query":"fourth"},"observation":"no matches","ok":true}
+{"i":4,"tool":"search","args":{"query":"fifth"},"observation":"no matches","ok":true}

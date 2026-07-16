@@ -1,0 +1,10 @@
+{"i":0,"tool":"list","args":{"page":1},"observation":"items a,b; next=2","ok":true,"cost_usd":0.10}
+{"i":1,"tool":"list","args":{"page":2},"observation":"items c,d; next=3","ok":true,"cost_usd":0.10}
+{"i":2,"tool":"list","args":{"page":3},"observation":"items e,f; done","ok":true,"cost_usd":0.10}
+{"i":3,"tool":"read","args":{"path":"a"},"observation":"content a","ok":true,"cost_usd":0.10}
+{"i":4,"tool":"write","args":{"path":"b"},"observation":"wrote b","ok":true,"cost_usd":0.10}
+{"i":5,"tool":"test","args":{"package":"all"},"observation":"pass","ok":true,"cost_usd":0.10}
+{"i":6,"tool":"inspect","args":{"target":"report"},"observation":"complete","ok":true,"cost_usd":0.10}
+{"i":7,"tool":"verify","args":{"target":"report"},"observation":"valid","ok":true,"cost_usd":0.10}
+{"i":8,"tool":"finish","args":{},"observation":"done","ok":true,"cost_usd":0.10}
+{"i":9,"thought":"All pages and validations completed."}

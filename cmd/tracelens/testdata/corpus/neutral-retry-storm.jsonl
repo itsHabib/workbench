@@ -1,0 +1,3 @@
+{"i":0,"tool":"fetch","args":{"url":"https://invalid.example"},"error":"connection refused","ok":false,"cost_usd":0.01}
+{"i":1,"tool":"fetch","args":{"url":"https://invalid.example"},"error":"connection refused","ok":false,"cost_usd":0.01}
+{"i":2,"tool":"fetch","args":{"url":"https://invalid.example"},"error":"connection refused","ok":false,"cost_usd":0.01}

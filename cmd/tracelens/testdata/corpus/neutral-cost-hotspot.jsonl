@@ -1,0 +1,3 @@
+{"i":0,"tool":"expensive_model","args":{"task":"summarize"},"observation":"summary","ok":true,"cost_usd":0.90}
+{"i":1,"tool":"read","args":{"path":"a"},"observation":"a","ok":true,"cost_usd":0.05}
+{"i":2,"tool":"write","args":{"path":"b"},"observation":"ok","ok":true,"cost_usd":0.05}

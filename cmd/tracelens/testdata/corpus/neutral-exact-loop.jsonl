@@ -1,0 +1,6 @@
+{"i":0,"tool":"read","args":{"path":"a.go"},"observation":"old","ok":true}
+{"i":1,"tool":"write","args":{"path":"a.go","content":"new"},"observation":"ok","ok":true}
+{"i":2,"tool":"read","args":{"path":"a.go"},"observation":"old","ok":true}
+{"i":3,"tool":"write","args":{"path":"a.go","content":"new"},"observation":"ok","ok":true}
+{"i":4,"tool":"read","args":{"path":"a.go"},"observation":"old","ok":true}
+{"i":5,"tool":"write","args":{"path":"a.go","content":"new"},"observation":"ok","ok":true}

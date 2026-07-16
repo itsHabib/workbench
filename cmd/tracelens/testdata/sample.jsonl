@@ -1,0 +1,6 @@
+# a research agent that spins on the same search
+{"role":"assistant","thought":"find the capital of atlantis"}
+{"tool":"web_search","args":{"q":"capital of atlantis"},"ok":true,"observation":"no authoritative result","cost_usd":0.04}
+{"tool":"web_search","args":{"q":"capital of atlantis"},"ok":true,"observation":"no authoritative result","cost_usd":0.04}
+{"tool":"web_search","args":{"q":"capital of atlantis"},"ok":true,"observation":"no authoritative result","cost_usd":0.04}
+{"tool":"web_search","args":{"q":"capital of atlantis"},"ok":true,"observation":"no authoritative result","cost_usd":0.04}

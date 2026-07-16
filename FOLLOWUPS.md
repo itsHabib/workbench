@@ -28,6 +28,30 @@ owner — not this repo's work to force.
   it does today.
 - **huddle, sense** — graduate in when next touched.
 
+## tracelens migration — deferred findings (2026-07-16, PR #48 review)
+
+Both surfaced by the move review; both are real, and both are deliberately
+not the move's to fix (its contract is byte-identical output):
+
+- **controlroom's tracelens adapter cannot accept a real verdict.**
+  `cmd/controlroom/internal/adapters/tracelens/adapter.go` unmarshals a
+  `model.Diagnosis` (requiring `run_id`) that the `tracelens ship -json`
+  binary has never emitted, and its `runner.Run` treats a block's exit 1 as
+  unavailable, discarding stdout. The fix is controlroom-side: parse the
+  emitted `contracts`-shaped verdict and accept exit-1-with-stdout as a
+  successful (blocking) analysis. tracelens's binary name + exit codes are
+  the seam and stay fixed.
+- **`bestTandem` may skip a loop start after a partial periodic match**
+  (e.g. `A,B,A,X,A,X,A,X` at period 2: the failed scan from 0 jumps past
+  the real `A,X`-run start at 2). Changing the scan changes detector
+  behavior, so it is owed to tracelens's own iteration with a corpus case
+  that pins the improvement — not to a relocation diff.
+- **A Claude stream truncated right after an `assistant` `tool_use` event
+  decodes as "unrecognized ship event dialect"** (exit 2) instead of an
+  analyzable aborted run — the dialect markers only key on `user`/`result`
+  events. Same rule as above: a decoder-behavior change, owed to
+  tracelens's own iteration with a truncated-at-tool_use corpus case.
+
 ## flare migration — choices made
 
 - **Plain copy, not `git subtree`.** flare's layout restructured on the way in
