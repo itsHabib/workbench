@@ -35,13 +35,24 @@ import (
 // order IS the canonical-encoding order (see canonical.go). Body stays raw
 // until a reader knows the Kind.
 type Event struct {
-	ID     string          `json:"id"`
-	Run    string          `json:"run"`
-	V      string          `json:"v"`
-	Kind   Kind            `json:"kind"`
-	Stream string          `json:"stream,omitempty"`
-	Time   time.Time       `json:"time"`
-	Actor  string          `json:"actor"`
+	ID   string `json:"id"`
+	Run  string `json:"run"`
+	V    string `json:"v"`
+	Kind Kind   `json:"kind"`
+	// Stream is dss_<ulid>; empty for run-scoped kinds.
+	Stream string `json:"stream,omitempty"`
+	// Time is writer-supplied; append enforces per-run monotonicity (P2).
+	// Writers must truncate to whole seconds: the canonical encoding uses
+	// RFC 3339 as marshalled, so sub-second precision would have to be
+	// reproduced bit-for-bit by every other-language emitter to keep the
+	// chain stable. P2's Append enforces the truncation.
+	Time time.Time `json:"time"`
+	// Actor is "session:<id>" | "ship:<drv_id>" | "human:<who>".
+	Actor string `json:"actor"`
+	// ExtRef is the optional top-level external correlate (ship drv_id on
+	// run_imported, PR URL on stream_pr_opened) — top-level, not body, so
+	// cross-store queries don't parse every body (spec §10 Q2).
+	ExtRef string          `json:"ext_ref,omitempty"`
 	Body   json.RawMessage `json:"body"`
 	Prev   string          `json:"prev"`
 	Hash   string          `json:"hash"`
@@ -208,8 +219,10 @@ func DecodeEvent(data []byte) (Event, error) {
 
 // ReadLedger decodes a run's JSONL event stream tolerantly: known-kind events
 // return in file order, unknown-kind events are SKIPPED with a warning (never
-// an error), and a malformed line fails loudly. It reduces nothing — it only
-// partitions the vocabulary, so it stays decision-free and leaf-safe.
+// an error), and a malformed line fails loudly. A wrong contract version also
+// fails loudly — same law as DecodeEvent; kind tolerance is for additive growth
+// within a version, never across one. It reduces nothing — it only partitions
+// the vocabulary, so it stays decision-free and leaf-safe.
 func ReadLedger(data []byte) ([]Event, []string, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var events []Event
@@ -222,6 +235,9 @@ func ReadLedger(data []byte) ([]Event, []string, error) {
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("driverstate: read ledger: %w", err)
+		}
+		if e.V != Version {
+			return nil, nil, fmt.Errorf("driverstate: read ledger: %w: got %q at event %q, this reader accepts %q", ErrUnknownVersion, e.V, e.ID, Version)
 		}
 		if !e.Kind.Known() {
 			warnings = append(warnings, fmt.Sprintf("skipped unknown kind %q at event %q", e.Kind, e.ID))

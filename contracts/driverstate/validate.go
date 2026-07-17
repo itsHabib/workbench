@@ -86,10 +86,34 @@ func unmarshalBody(kind Kind, body json.RawMessage, into any) error {
 	return nil
 }
 
+// Presence probes: decoding a required boolean/array/int into a value struct
+// loses whether the member was present at all, so the pinned-grammar validators
+// decode into pointer-field shadows and reject nil — the schema's `required`
+// list, enforced at runtime.
+type runImportedProbe struct {
+	Streams *[]StreamSpec `json:"streams"`
+}
+
+type streamAttemptProbe struct {
+	Terminal *bool `json:"terminal"`
+}
+
+type reviewCycleProbe struct {
+	PanelSettled *bool `json:"panel_settled"`
+	Findings     *int  `json:"findings"`
+}
+
 func validateRunImported(body json.RawMessage) error {
 	var b RunImportedBody
 	if err := unmarshalBody(KindRunImported, body, &b); err != nil {
 		return err
+	}
+	var probe runImportedProbe
+	if err := unmarshalBody(KindRunImported, body, &probe); err != nil {
+		return err
+	}
+	if probe.Streams == nil {
+		return fmt.Errorf("driverstate: run_imported body: streams is missing")
 	}
 	if b.Repo == "" {
 		return fmt.Errorf("driverstate: run_imported body: repo is empty")
@@ -112,6 +136,13 @@ func validateStreamAttempt(body json.RawMessage) error {
 	var b StreamAttemptBody
 	if err := unmarshalBody(KindStreamAttempt, body, &b); err != nil {
 		return err
+	}
+	var probe streamAttemptProbe
+	if err := unmarshalBody(KindStreamAttempt, body, &probe); err != nil {
+		return err
+	}
+	if probe.Terminal == nil {
+		return fmt.Errorf("driverstate: stream_attempt body: terminal is missing")
 	}
 	if b.Seq < 1 {
 		return fmt.Errorf("driverstate: stream_attempt body: seq %d must be at least 1", b.Seq)
@@ -153,6 +184,9 @@ func validateStreamMerged(body json.RawMessage) error {
 	if b.MergeCommit == "" {
 		return fmt.Errorf("driverstate: stream_merged body: merge_commit is empty")
 	}
+	if b.MergedAt == "" {
+		return fmt.Errorf("driverstate: stream_merged body: merged_at is empty")
+	}
 	return nil
 }
 
@@ -160,6 +194,16 @@ func validateReviewCycle(body json.RawMessage) error {
 	var b ReviewCycleBody
 	if err := unmarshalBody(KindReviewCycle, body, &b); err != nil {
 		return err
+	}
+	var probe reviewCycleProbe
+	if err := unmarshalBody(KindReviewCycle, body, &probe); err != nil {
+		return err
+	}
+	if probe.PanelSettled == nil {
+		return fmt.Errorf("driverstate: review_cycle body: panel_settled is missing")
+	}
+	if probe.Findings == nil {
+		return fmt.Errorf("driverstate: review_cycle body: findings is missing")
 	}
 	if b.Cycle < 1 {
 		return fmt.Errorf("driverstate: review_cycle body: cycle %d must be at least 1", b.Cycle)

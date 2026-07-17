@@ -31,6 +31,7 @@
     "stream": { "type": "string", "description": "dss_<ulid> — the stream this event scopes to; empty for run-scoped kinds (run_imported, run_finished)." },
     "time": { "type": "string", "format": "date-time", "description": "Writer-supplied; append enforces per-run monotonicity (P2)." },
     "actor": { "type": "string", "description": "session:<id> | ship:<drv_id> | human:<who> — who wrote the event." },
+    "ext_ref": { "type": "string", "description": "Optional top-level external correlate (ship drv_id on run_imported, PR URL on stream_pr_opened) — top-level, not body, so cross-store queries do not parse every body (spec §10 Q2)." },
     "body": { "description": "Kind-specific payload; shapes are defined in $defs and validated in Go per kind. Hashed as its raw bytes verbatim — the writer's bytes are the canonical bytes, never re-marshalled." },
     "prev": { "type": "string", "description": "The prior event's hash; empty for the first event in a run." },
     "hash": { "type": "string", "description": "SHA-256 (hex) over the canonical encoding of this event with hash set to the empty string." }

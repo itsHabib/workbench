@@ -114,20 +114,6 @@ func assertObjectConforms(t *testing.T, name string, typ reflect.Type, obj objSc
 	}
 }
 
-func assertSetEqual(t *testing.T, name string, got, want []string) {
-	t.Helper()
-	set := func(ss []string) map[string]bool {
-		m := map[string]bool{}
-		for _, s := range ss {
-			m[s] = true
-		}
-		return m
-	}
-	if !reflect.DeepEqual(set(got), set(want)) {
-		t.Errorf("%s = %v, want %v", name, got, want)
-	}
-}
-
 // TestSchemaMatchesGoTypes is the acceptance-1 gate: the Event envelope and
 // every pinned body payload conform to the schema both ways. Drift in either
 // the Go types or the schema fails here.
@@ -160,7 +146,11 @@ func TestEnumsMatchConstants(t *testing.T) {
 	for _, k := range AllKinds() {
 		want = append(want, string(k))
 	}
-	assertSetEqual(t, "kind.enum", root.child(t, "kind").Enum, want)
+	// Order-sensitive on purpose: AllKinds documents schema-enum order, so a
+	// silent reorder in either place is drift.
+	if got := root.child(t, "kind").Enum; !reflect.DeepEqual(got, want) {
+		t.Errorf("kind.enum = %v, want %v (order is part of the contract)", got, want)
+	}
 
 	if c := root.child(t, "v").Const; c != Version {
 		t.Errorf("schema v const = %q, want %q", c, Version)
@@ -209,6 +199,16 @@ func TestTolerantReaderSkipsUnknownKind(t *testing.T) {
 	}
 }
 
+// TestReadLedgerVersionGate: kind tolerance never crosses a version boundary —
+// a future-version event fails the whole read loudly, same law as DecodeEvent,
+// even when its kind happens to be known in this version.
+func TestReadLedgerVersionGate(t *testing.T) {
+	data := []byte(`{"id":"evt_future","run":"dsr_1","v":"driver-state-v9.9.9","kind":"run_imported","time":"2026-07-16T12:00:00Z","actor":"session:demo","body":{"repo":"r","source":"s","streams":[]},"prev":"","hash":"h"}` + "\n")
+	if _, _, err := ReadLedger(data); !errors.Is(err, ErrUnknownVersion) {
+		t.Fatalf("want ErrUnknownVersion, got %v", err)
+	}
+}
+
 // TestPayloadValidationPerKind exercises the per-kind body grammar: a good body
 // admits, a malformed one rejects at unmarshal-validate — including the bad
 // stream_attempt seq the task plan calls out.
@@ -222,16 +222,22 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"run_imported ok", KindRunImported, `{"repo":"r","source":"s","streams":[{"stream":"dss_1","doc_path":"d"}]}`, false},
 		{"run_imported empty repo", KindRunImported, `{"repo":"","source":"s","streams":[]}`, true},
 		{"run_imported stream missing doc_path", KindRunImported, `{"repo":"r","source":"s","streams":[{"stream":"dss_1"}]}`, true},
+		{"run_imported missing streams", KindRunImported, `{"repo":"r","source":"s"}`, true},
 		{"stream_attempt ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":false}`, false},
 		{"stream_attempt bad seq", KindStreamAttempt, `{"seq":0,"doc_path":"d","terminal":false}`, true},
 		{"stream_attempt failure on non-terminal", KindStreamAttempt, `{"seq":2,"doc_path":"d","terminal":false,"failure_category":"flake"}`, true},
 		{"stream_attempt terminal failure ok", KindStreamAttempt, `{"seq":2,"doc_path":"d","terminal":true,"failure_category":"flake"}`, false},
+		{"stream_attempt missing terminal", KindStreamAttempt, `{"seq":1,"doc_path":"d"}`, true},
 		{"stream_pr_opened ok", KindStreamPROpened, `{"pr":12,"url":"u","head_sha":"abc"}`, false},
 		{"stream_pr_opened bad pr", KindStreamPROpened, `{"pr":0,"url":"u","head_sha":"abc"}`, true},
 		{"stream_merged ok", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":"2026-07-16T12:00:00Z"}`, false},
 		{"stream_merged empty merge_commit", KindStreamMerged, `{"pr":12,"merge_commit":"","merged_at":"t"}`, true},
+		{"stream_merged empty merged_at", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":""}`, true},
+		{"stream_merged missing merged_at", KindStreamMerged, `{"pr":12,"merge_commit":"abc"}`, true},
 		{"review_cycle ok", KindReviewCycle, `{"cycle":1,"panel_settled":true,"findings":0}`, false},
 		{"review_cycle bad cycle", KindReviewCycle, `{"cycle":0,"panel_settled":true,"findings":0}`, true},
+		{"review_cycle missing panel_settled", KindReviewCycle, `{"cycle":1,"findings":0}`, true},
+		{"review_cycle missing findings", KindReviewCycle, `{"cycle":1,"panel_settled":false}`, true},
 		{"malformed json", KindStreamAttempt, `{"seq":`, true},
 		{"open kind tolerated", KindStreamDispatched, `{"anything":true}`, false},
 	}
@@ -299,6 +305,7 @@ func vectorEvent() Event {
 		Stream: "",
 		Time:   time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC),
 		Actor:  "session:demo-01",
+		ExtRef: "drv_01JQSHIP000000000000000001",
 		Body:   json.RawMessage(body),
 		Prev:   "",
 		Hash:   "",

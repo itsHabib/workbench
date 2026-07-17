@@ -39,6 +39,8 @@ func Canonical(e Event) []byte {
 	b.Write(jsonScalar(e.Time))
 	b.WriteString(`,"actor":`)
 	b.Write(jsonScalar(e.Actor))
+	b.WriteString(`,"ext_ref":`)
+	b.Write(jsonScalar(e.ExtRef))
 	b.WriteString(`,"body":`)
 	b.Write(rawBody(e.Body))
 	b.WriteString(`,"prev":`)
