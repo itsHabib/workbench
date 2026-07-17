@@ -1,6 +1,6 @@
 # dispatch
 
-The workbench's placement-decision plane: a small Go binary that turns a
+The workbench's placement-decision plane: a stdlib-only Go binary that turns a
 versioned, content-hashed policy file + a task descriptor into a deterministic
 placement (engine, provider, model, effort, runtime, escalation) plus an
 append-only decision receipt. It **decides** placement; ship's `dispatch` verb
@@ -59,4 +59,4 @@ trigger (a second consumer, `/work-driver-prep`).
 gofmt -l . && go vet ./... && golangci-lint run ./... && go test ./...
 ```
 
-No in-repo dependency (not even `contracts`) in phase 1.
+Standard library only; no in-repo dependency (not even `contracts`) in phase 1.
