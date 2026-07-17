@@ -47,8 +47,11 @@ func releaseLock(path string) { _ = os.Remove(path) }
 
 // breakStaleLock removes a lock whose mtime is older than the lease TTL — an
 // orphan from a writer that crashed mid-critical-section must not wedge the run
-// forever. A fresh lock (a live holder) is left untouched. Best-effort: a lost
-// race to remove it just means another attempt retries.
+// forever. Staleness is measured against the lock's mtime, so a live holder of a
+// long critical section (e.g. a large import dedupe scan) MUST heartbeat via
+// touchLock to stay young; an un-touched lock older than one TTL is treated as
+// an orphan. A fresh (or heartbeated) lock is left untouched. Best-effort: a
+// lost race to remove it just means another attempt retries.
 func breakStaleLock(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -58,4 +61,13 @@ func breakStaleLock(path string) {
 		return
 	}
 	_ = os.Remove(path)
+}
+
+// touchLock refreshes a held lock's mtime so the age-based stale-break does not
+// mistake a long but live critical section for an orphan. Short sections
+// (append, lease mutate) finish well within one TTL and need not touch; a
+// caller in a potentially long section touches periodically. Best-effort.
+func touchLock(path string) {
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
 }

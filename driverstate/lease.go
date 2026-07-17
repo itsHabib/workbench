@@ -30,13 +30,18 @@ const maxRetries = 50
 
 const retryDelay = 2 * time.Millisecond
 
-// leaseRecord is the on-disk lease. Generation increases on every steal so a
-// stale holder that wakes up can detect it lost the lease.
+// leaseRecord is the on-disk lease. Generation increases on every takeover — a
+// steal, or a re-Claim after Release — so it is a monotonic fencing token that
+// never repeats for a run; a stale holder that wakes up detects it lost the
+// lease by the generation drift. Released marks a lease the holder voluntarily
+// dropped: the record stays on disk (preserving the generation) so the next
+// Claim continues at generation+1 rather than resetting to 1.
 type leaseRecord struct {
 	Actor      string    `json:"actor"`
 	PID        int       `json:"pid"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Generation uint64    `json:"generation"`
+	Released   bool      `json:"released,omitempty"`
 }
 
 // Lease is a held run lease. Its zero value is not usable — obtain one from
@@ -103,7 +108,10 @@ func claimLocked(dir, run, actor string, ttl time.Duration) (Lease, error) {
 	if err != nil {
 		return installLease(dir, run, actor, ttl, 1)
 	}
-	if !expired(rec) {
+	// A live lease (not released, not expired) locks the run out. A released or
+	// expired one is claimable and continues at the next generation, so the
+	// fencing token stays monotonic across the takeover.
+	if !rec.Released && !expired(rec) {
 		return Lease{}, ErrLocked{Holder: rec.Actor}
 	}
 	return installLease(dir, run, actor, ttl, rec.Generation+1)
@@ -135,13 +143,20 @@ func validateRunID(run string) error {
 
 // Renew heartbeats the lease, pushing expiry out one TTL. It fails with
 // ErrLocked if the lease was stolen out from under this holder (generation or
-// actor drift). The whole check-then-write runs under the lease lock, so a steal
-// cannot interleave between verifying ownership and rewriting the record.
+// actor drift), and with errLeaseExpired if this holder's own lease has already
+// lapsed — staleness is expiry, so an expired holder re-Claims rather than
+// resurrecting a lease another writer may already be about to steal. The whole
+// check-then-write runs under the lease lock, so a steal cannot interleave
+// between verifying ownership and rewriting the record.
 func (l Lease) Renew() error {
 	rd := runDir(l.dir, l.run)
 	return withLock(leaseLockPath(rd), func() error {
-		if _, err := l.ownsCurrent(rd); err != nil {
+		cur, err := l.ownsCurrent(rd)
+		if err != nil {
 			return err
+		}
+		if expired(cur) {
+			return errLeaseExpired
 		}
 		return writeLeaseFile(rd, selfLeaseFor(l.actor, l.pid, l.gen, l.ttl))
 	})
@@ -149,30 +164,29 @@ func (l Lease) Renew() error {
 
 // Release drops the lease if this holder still owns it. A lease already stolen
 // (generation drift) or already gone is left untouched — Release never removes
-// another writer's lease. The check-then-remove runs under the lease lock, so a
-// steal cannot slip a successor's lease in between the ownership check and the
-// remove.
+// another writer's lease. It does not delete lease.json: it marks the record
+// released, KEEPING the generation, so the next Claim continues at generation+1
+// and the fencing token never repeats. The check-then-write runs under the lease
+// lock, so a steal cannot interleave.
 func (l Lease) Release() error {
 	rd := runDir(l.dir, l.run)
 	return withLock(leaseLockPath(rd), func() error {
-		if _, err := l.ownsCurrent(rd); err != nil {
+		cur, err := l.ownsCurrent(rd)
+		if err != nil {
 			if errors.Is(err, errNoLease) || errors.As(err, new(ErrLocked)) {
-				return nil // already gone, or a successor's — not ours to remove
+				return nil // already released/stolen — not ours to touch
 			}
 			return err
 		}
-		e := os.Remove(leasePath(rd))
-		if os.IsNotExist(e) {
-			return nil
-		}
-		return e
+		cur.Released = true
+		return writeLeaseFile(rd, cur)
 	})
 }
 
 // ownsCurrent reads the live lease record and confirms this holder still owns
-// it. It returns errNoLease when the file is gone and ErrLocked{Holder} on a
-// generation/actor drift (a steal). The returned record lets callers layer an
-// expiry check on top (requireLease).
+// it. It returns errNoLease when the record is gone OR this holder has already
+// released it, and ErrLocked{Holder} on a generation/actor drift (a steal). The
+// returned record lets callers layer an expiry check on top (requireLease).
 func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 	cur, err := readLease(rd)
 	if err != nil {
@@ -183,6 +197,9 @@ func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 	}
 	if cur.Generation != l.gen || cur.Actor != l.actor {
 		return leaseRecord{}, ErrLocked{Holder: cur.Actor}
+	}
+	if cur.Released {
+		return leaseRecord{}, errNoLease
 	}
 	return cur, nil
 }

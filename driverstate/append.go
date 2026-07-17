@@ -168,7 +168,10 @@ func importKey(e Event) (importIdent, bool) {
 
 // dedupeImport scans every run under dir for a committed run_imported carrying
 // e's import key. The current run is included: a re-import into the same run
-// returns the original rather than an illegal-transition rejection.
+// returns the original rather than an illegal-transition rejection. Callers hold
+// the state-root import lock across this scan; over many runs the scan can run
+// long, so each iteration heartbeats that lock (touchLock) to keep another
+// waiter from age-breaking a live lock.
 func dedupeImport(dir string, e Event) (Event, bool, error) {
 	key, ok := importKey(e)
 	if !ok {
@@ -181,7 +184,9 @@ func dedupeImport(dir string, e Event) (Event, bool, error) {
 		}
 		return Event{}, false, fmt.Errorf("driverstate: dedupe import: %w", err)
 	}
+	lock := importLockPath(dir)
 	for _, entry := range entries {
+		touchLock(lock)
 		if !entry.IsDir() {
 			continue
 		}

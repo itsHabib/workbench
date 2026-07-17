@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 )
 
 // withTTL sets DefaultLeaseTTL for the duration of a test so expiry paths do not
@@ -36,12 +38,22 @@ func TestClaimRenewRelease(t *testing.T) {
 	if err := l.Release(); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "dsr_run1", "lease.json")); !os.IsNotExist(err) {
-		t.Fatalf("lease file should be gone after release, got %v", err)
+	// The record persists (marked released), preserving the generation so the
+	// fencing token never resets — it is not deleted.
+	rec, err := readLease(runDir(dir, "dsr_run1"))
+	if err != nil {
+		t.Fatalf("released lease record should remain on disk, got %v", err)
 	}
-	// Releasable run can be re-claimed.
-	if _, err := Claim(dir, "dsr_run1", "session:b"); err != nil {
+	if !rec.Released {
+		t.Fatalf("released lease should be marked released, got %+v", rec)
+	}
+	// A released run can be re-claimed, continuing at the next generation.
+	l2, err := Claim(dir, "dsr_run1", "session:b")
+	if err != nil {
 		t.Fatalf("re-claim after release: %v", err)
+	}
+	if l2.gen <= l.gen {
+		t.Fatalf("re-claim should advance the generation past %d, got %d", l.gen, l2.gen)
 	}
 }
 
@@ -86,10 +98,12 @@ func TestStaleLeaseSelfClears(t *testing.T) {
 // fail AND leave the successor's lease untouched (renewal is atomic with
 // takeover, never a blind rewrite).
 func TestRenewAfterStealRejected(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	// A TTL comfortably larger than the test's own steps keeps the successor's
+	// lease live for its renew, while a sleep past it expires the first holder.
+	withTTL(t, 150*time.Millisecond)
 	dir := t.TempDir()
 	first, _ := Claim(dir, "dsr_run1", "session:one")
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(180 * time.Millisecond)
 	second, err := Claim(dir, "dsr_run1", "session:two") // installs generation 2
 	if err != nil {
 		t.Fatalf("steal: %v", err)
@@ -116,16 +130,94 @@ func TestReleaseAfterStealIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	first, _ := Claim(dir, "dsr_run1", "session:one")
 	time.Sleep(40 * time.Millisecond)
-	second, err := Claim(dir, "dsr_run1", "session:two")
-	if err != nil {
+	if _, err := Claim(dir, "dsr_run1", "session:two"); err != nil { // installs gen 2
 		t.Fatalf("steal: %v", err)
 	}
-	// The stale holder releasing must not remove the new holder's lease.
+	// The stale holder releasing must not touch the new holder's lease.
 	if err := first.Release(); err != nil {
 		t.Fatalf("stale release: %v", err)
 	}
-	if err := second.Renew(); err != nil {
-		t.Fatalf("new holder should still hold lease, got %v", err)
+	rec, err := readLease(runDir(dir, "dsr_run1"))
+	if err != nil {
+		t.Fatalf("read lease: %v", err)
+	}
+	if rec.Actor != "session:two" || rec.Generation != 2 || rec.Released {
+		t.Fatalf("stale release corrupted the successor's lease: on-disk %+v", rec)
+	}
+}
+
+// Cycle 3, item 2 — Renew of a lease whose own TTL has lapsed must fail: the
+// staleness law is expiry, so an expired holder re-Claims, never resurrects.
+func TestRenewAfterExpiryRejected(t *testing.T) {
+	withTTL(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	l, err := Claim(dir, "dsr_run1", "session:a")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond) // own lease lapses; nobody steals it
+	if err := l.Renew(); !errors.Is(err, errLeaseExpired) {
+		t.Fatalf("renew of an expired lease should be errLeaseExpired, got %v", err)
+	}
+}
+
+// Cycle 3, item 4 — generations are monotonic across Release: a re-Claim of a
+// released run continues at the next generation, and the stale prior holder is
+// fenced out (can neither renew nor write).
+func TestGenMonotonicAcrossRelease(t *testing.T) {
+	dir := t.TempDir()
+	first, err := Claim(dir, "dsr_run1", "session:a")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if first.gen != 1 {
+		t.Fatalf("first claim should be generation 1, got %d", first.gen)
+	}
+	if err := first.Release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	second, err := Claim(dir, "dsr_run1", "session:b")
+	if err != nil {
+		t.Fatalf("re-claim after release: %v", err)
+	}
+	if second.gen != 2 {
+		t.Fatalf("re-claim after release should be generation 2, got %d", second.gen)
+	}
+	// The stale generation-1 holder is fenced out by the drift.
+	if err := first.Renew(); !errors.As(err, new(ErrLocked)) {
+		t.Fatalf("stale gen-1 renew should be ErrLocked, got %v", err)
+	}
+	if _, err := Append(dir, first, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a"))); !errors.As(err, new(ErrLocked)) {
+		t.Fatalf("stale gen-1 append should be ErrLocked, got %v", err)
+	}
+}
+
+// Cycle 3, item 3 — a long critical section that heartbeats its lock (touchLock)
+// survives the age-based stale-break, while an un-touched aged lock is broken.
+func TestLongSectionLockSurvivesViaTouch(t *testing.T) {
+	withTTL(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "import.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aged := time.Now().Add(-time.Second) // far older than the TTL
+	if err := os.Chtimes(lock, aged, aged); err != nil {
+		t.Fatal(err)
+	}
+	// Heartbeating the lock keeps it young: a stale-break must NOT remove it.
+	touchLock(lock)
+	breakStaleLock(lock)
+	if _, err := os.Stat(lock); err != nil {
+		t.Fatalf("a heartbeated lock must survive stale-break, got %v", err)
+	}
+	// The same lock left un-touched and aged is an orphan: it IS broken.
+	if err := os.Chtimes(lock, aged, aged); err != nil {
+		t.Fatal(err)
+	}
+	breakStaleLock(lock)
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Fatalf("an un-touched aged lock must be broken, got %v", err)
 	}
 }
 
