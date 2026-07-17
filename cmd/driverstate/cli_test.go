@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -156,17 +157,77 @@ func TestCLIRecordJSONSealsEvent(t *testing.T) {
 
 func TestCLIRecordMintsRunWhenOmitted(t *testing.T) {
 	dir := t.TempDir()
-	imp := eventLine("evt_imp2", dsc.KindRunImported, "", "2026-07-16T00:00:00Z", dsc.RunImportedBody{
+	got := runCLI(t, dir, keyedImportLine("evt_imp2", "2026-07-16T00:00:00Z"), "record", "--json")
+	var sealed driverstate.Event
+	_ = json.Unmarshal([]byte(got), &sealed)
+	if !strings.HasPrefix(sealed.Run, "dsr_") {
+		t.Fatalf("run not minted: %q", sealed.Run)
+	}
+}
+
+// keyedImportLine is an omitted-run run_imported carrying a (repo, source,
+// generated_at) key, so minting is retry-safe.
+func keyedImportLine(id, generatedAt string) string {
+	return eventLine(id, dsc.KindRunImported, "", "2026-07-16T00:00:00Z", dsc.RunImportedBody{
+		Repo:        "itsHabib/workbench",
+		Source:      "driver.md",
+		GeneratedAt: generatedAt,
+		Manifest:    json.RawMessage(`{}`),
+		Streams:     []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/x.md"}},
+	})
+}
+
+// A CLI run_imported with no --run and no generated_at is refused — a cron retry
+// after a lost response must not mint a duplicate run (parity with the server).
+func TestCLIRecordRejectsKeylessMintedImport(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(driverstate.StateDirEnv, dir)
+	keyless := eventLine("evt_nokey", dsc.KindRunImported, "", "2026-07-16T00:00:00Z", dsc.RunImportedBody{
 		Repo:     "itsHabib/workbench",
 		Source:   "driver.md",
 		Manifest: json.RawMessage(`{}`),
 		Streams:  []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/x.md"}},
 	})
-	got := runCLI(t, dir, imp, "record", "--json")
-	var sealed driverstate.Event
-	_ = json.Unmarshal([]byte(got), &sealed)
-	if !strings.HasPrefix(sealed.Run, "dsr_") {
-		t.Fatalf("run not minted: %q", sealed.Run)
+	var out, errb bytes.Buffer
+	err := run([]string{"record"}, strings.NewReader(keyless), &out, &errb)
+	if err == nil {
+		t.Fatal("record should refuse a keyless omitted-run import")
+	}
+	if !strings.Contains(err.Error(), "generated_at") {
+		t.Fatalf("error = %v, want it to name the missing key", err)
+	}
+}
+
+// A keyed import retried with no --run resolves to the original run via Append's
+// dedupe; the speculatively minted run dir must be cleaned up, leaving exactly
+// one run dir on disk.
+func TestCLIImportRetryDedupesNoOrphan(t *testing.T) {
+	dir := t.TempDir()
+	imp := keyedImportLine("evt_dup", "2026-07-16T00:00:00Z")
+
+	first := runCLI(t, dir, imp, "record", "--json")
+	var e1 driverstate.Event
+	_ = json.Unmarshal([]byte(first), &e1)
+
+	second := runCLI(t, dir, imp, "record", "--json") // the lost-response retry
+	var e2 driverstate.Event
+	_ = json.Unmarshal([]byte(second), &e2)
+
+	if e2.Run != e1.Run || e2.Hash != e1.Hash {
+		t.Fatalf("retry should resolve to the original run/event: e1=%s/%s e2=%s/%s", e1.Run, e1.Hash, e2.Run, e2.Hash)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDirs := 0
+	for _, en := range entries {
+		if en.IsDir() {
+			runDirs++
+		}
+	}
+	if runDirs != 1 {
+		t.Fatalf("want exactly one run dir (orphan cleaned), got %d", runDirs)
 	}
 }
 

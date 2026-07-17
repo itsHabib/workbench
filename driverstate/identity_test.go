@@ -21,20 +21,17 @@ func TestStateRootPrefersExplicitEnv(t *testing.T) {
 	}
 }
 
-// A relative WORKBENCH_STATE_DIR must resolve to an ABSOLUTE path so a CLI in a
-// subdir and an MCP server at the repo root can't split roots (spec §6 P2).
-func TestStateRootResolvesRelativeEnvToAbsolute(t *testing.T) {
-	rel := filepath.Join("some", "rel", "root")
-	t.Setenv(StateDirEnv, rel)
-	dir, _, err := StateRoot()
-	if err != nil {
-		t.Fatalf("StateRoot: %v", err)
+// A relative WORKBENCH_STATE_DIR is REJECTED: filepath.Abs would only re-anchor
+// it to each process's cwd, so a CLI in a subdir and an MCP server at the repo
+// root would still split roots. Absolute-or-error is the only safe rule (spec §6 P2).
+func TestStateRootRejectsRelativeEnv(t *testing.T) {
+	t.Setenv(StateDirEnv, filepath.Join("some", "rel", "root"))
+	_, _, err := StateRoot()
+	if err == nil {
+		t.Fatal("StateRoot should reject a relative WORKBENCH_STATE_DIR")
 	}
-	if !filepath.IsAbs(dir) {
-		t.Fatalf("dir = %q, want an absolute path", dir)
-	}
-	if !strings.HasSuffix(dir, filepath.Clean(rel)) {
-		t.Fatalf("dir = %q, want it to end with the resolved relative path %q", dir, filepath.Clean(rel))
+	if !strings.Contains(err.Error(), "must be absolute") {
+		t.Fatalf("error = %v, want it to say the override must be absolute", err)
 	}
 }
 

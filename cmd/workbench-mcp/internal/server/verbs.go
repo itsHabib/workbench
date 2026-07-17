@@ -101,6 +101,13 @@ func (s *Server) recordVerb(args json.RawMessage) (any, error) {
 	}
 	out, err := driverstate.Append(s.dir, lease, e)
 	if err != nil {
+		// A cached lease that lost ownership mid-session (expired after a
+		// suspend, or stolen) must be dropped now, so the NEXT record re-Claims
+		// immediately instead of reusing the dead lease until the renew tick
+		// evicts it (up to TTL/2 later).
+		if driverstate.OwnershipLost(err) {
+			s.evictLease(e.Run)
+		}
 		return nil, err
 	}
 	// A run we speculatively minted for a run_imported that Append then deduped
@@ -113,14 +120,20 @@ func (s *Server) recordVerb(args json.RawMessage) (any, error) {
 	return out, nil
 }
 
-// discardMintedRun releases and removes a run this session minted but that
-// Append deduped away. It clears the lease-map entry (so the renewer stops
-// touching it) and removes the empty run dir. Best-effort: any leftover
-// self-expires, but cleaning up keeps import retries from littering run dirs.
-func (s *Server) discardMintedRun(run string) {
+// evictLease drops a run's cached lease so the next record re-Claims. It does
+// NOT touch the on-disk run — the ledger and any live successor lease stay put.
+func (s *Server) evictLease(run string) {
 	s.mu.Lock()
 	delete(s.leases, run)
 	s.mu.Unlock()
+}
+
+// discardMintedRun evicts the cached lease AND removes the empty run dir of a
+// run this session minted but that Append deduped away. Best-effort: any
+// leftover self-expires, but cleaning up keeps import retries from littering run
+// dirs.
+func (s *Server) discardMintedRun(run string) {
+	s.evictLease(run)
 	_ = os.RemoveAll(filepath.Join(s.dir, run))
 }
 
@@ -166,8 +179,12 @@ func ensureRun(e *driverstate.Event) (bool, error) {
 	if e.Kind != dsc.KindRunImported {
 		return false, fmt.Errorf("driver_record: event kind %q requires a run", e.Kind)
 	}
-	if err := requireImportKey(e.Body); err != nil {
-		return false, err
+	// Minting a run for an omitted-run import is only retry-safe if the import
+	// carries its (repo, source, generated_at) dedupe key — otherwise a
+	// lost-response retry mints a second genuine run. Refuse rather than
+	// duplicate (the shared predicate is the same one the CLI uses).
+	if !driverstate.ImportHasDedupeKey(*e) {
+		return false, fmt.Errorf("driver_record: a run_imported without an explicit run must carry (repo, source, generated_at) so a retried import cannot mint a duplicate run")
 	}
 	id, err := driverstate.NewRunID()
 	if err != nil {
@@ -179,17 +196,6 @@ func ensureRun(e *driverstate.Event) (bool, error) {
 
 // requireImportKey rejects a minted (run-omitted) import whose body lacks the
 // generated_at member of the dedupe key.
-func requireImportKey(body json.RawMessage) error {
-	var b dsc.RunImportedBody
-	if err := json.Unmarshal(body, &b); err != nil {
-		return fmt.Errorf("driver_record: invalid run_imported body: %w", err)
-	}
-	if b.GeneratedAt == "" {
-		return fmt.Errorf("driver_record: a run_imported without an explicit run must carry generated_at — the (repo, source, generated_at) key is what makes a retried import idempotent")
-	}
-	return nil
-}
-
 type runParam struct {
 	Run string `json:"run"`
 }

@@ -199,6 +199,37 @@ func TestImportRetryDedupesNoOrphan(t *testing.T) {
 	}
 }
 
+// A cached lease that loses ownership mid-session (here: expires after a
+// suspend) must be evicted the moment a driver_record's Append reports the loss,
+// so the next record re-Claims immediately instead of failing on the dead lease
+// until the renew tick.
+func TestRecordEvictsCachedLeaseOnAppendOwnershipLoss(t *testing.T) {
+	// A TTL comfortably larger than an Append keeps the post-eviction re-claim's
+	// own lease live through its record, while a sleep past it expires the first.
+	withTTL(t, 100*time.Millisecond)
+	dir := t.TempDir()
+	s := New(dir)
+	run := mustRun(t, callRecord(t, s, "", importEvent("dss_a", "session:x")))
+	if _, ok := s.leases[run]; !ok {
+		t.Fatal("import should have cached the run lease")
+	}
+
+	time.Sleep(150 * time.Millisecond) // the cached lease expires (suspend)
+
+	bad := callRecord(t, s, run, event(dsc.KindStreamDispatched, "dss_a", "session:x", struct{}{}))
+	if !bad.IsError {
+		t.Fatalf("expected an ownership-loss error, got %s", resultText(t, bad))
+	}
+	if _, ok := s.leases[run]; ok {
+		t.Fatal("the dead lease should be evicted after append-time ownership loss")
+	}
+	// The next record re-Claims the (now expired) run and succeeds.
+	ok := callRecord(t, s, run, event(dsc.KindStreamDispatched, "dss_a", "session:x", struct{}{}))
+	if ok.IsError {
+		t.Fatalf("retry after eviction should re-claim and succeed, got %s", resultText(t, ok))
+	}
+}
+
 func countRunDirs(t *testing.T, dir string) int {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

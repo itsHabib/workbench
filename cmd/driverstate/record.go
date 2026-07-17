@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
@@ -28,12 +30,12 @@ func cmdRecord(dir string, args []string, stdin io.Reader, stdout io.Writer) err
 	if err != nil {
 		return fmt.Errorf("read event: %w", err)
 	}
-	e, err := buildEvent(raw, *run)
+	e, minted, err := buildEvent(raw, *run)
 	if err != nil {
 		return err
 	}
 
-	sealed, err := appendOneShot(dir, e)
+	sealed, err := appendOneShot(dir, e, minted)
 	if err != nil {
 		return err
 	}
@@ -46,56 +48,73 @@ func cmdRecord(dir string, args []string, stdin io.Reader, stdout io.Writer) err
 
 // buildEvent decodes the record event and fills the client-minted defaults —
 // run (explicit flag, else minted for run_imported), event id, and time. It
-// mirrors the server's prepareEvent so both surfaces produce the same event.
-func buildEvent(raw []byte, run string) (driverstate.Event, error) {
+// mirrors the server's prepareEvent so both surfaces produce the same event, and
+// reports whether the run was minted so a speculative run Append dedupes away can
+// be unwound.
+func buildEvent(raw []byte, run string) (driverstate.Event, bool, error) {
 	var e driverstate.Event
 	if err := json.Unmarshal(raw, &e); err != nil {
-		return e, fmt.Errorf("decode event: %w", err)
+		return e, false, fmt.Errorf("decode event: %w", err)
 	}
 	if run != "" {
 		e.Run = run
 	}
-	if err := fillRun(&e); err != nil {
-		return e, err
+	minted, err := fillRun(&e)
+	if err != nil {
+		return e, false, err
 	}
 	if e.ID == "" {
 		id, err := driverstate.NewEventID()
 		if err != nil {
-			return e, err
+			return e, false, err
 		}
 		e.ID = id
 	}
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
 	}
-	return e, nil
+	return e, minted, nil
 }
 
-// fillRun mints a run id for a run_imported that named none, and rejects any
-// other kind with no run.
-func fillRun(e *driverstate.Event) error {
+// fillRun mints a run id for a run_imported that named none (reporting true),
+// and rejects any other kind with no run. Minting is only retry-safe when the
+// import carries its (repo, source, generated_at) dedupe key — the same refusal
+// the MCP server applies — so a lost-response cron retry cannot mint a duplicate.
+func fillRun(e *driverstate.Event) (bool, error) {
 	if e.Run != "" {
-		return nil
+		return false, nil
 	}
 	if e.Kind != dsc.KindRunImported {
-		return fmt.Errorf("event kind %q requires --run", e.Kind)
+		return false, fmt.Errorf("event kind %q requires --run", e.Kind)
+	}
+	if !driverstate.ImportHasDedupeKey(*e) {
+		return false, fmt.Errorf("a run_imported without --run must carry (repo, source, generated_at) so a retried import cannot mint a duplicate run")
 	}
 	id, err := driverstate.NewRunID()
 	if err != nil {
-		return err
+		return false, err
 	}
 	e.Run = id
-	return nil
+	return true, nil
 }
 
 // appendOneShot claims the run lease, appends, and releases — the CLI's
 // no-session lifecycle. The lease is released even on append failure so a cron
-// invocation never leaves a run locked behind it.
-func appendOneShot(dir string, e driverstate.Event) (driverstate.Event, error) {
+// invocation never leaves a run locked behind it. A speculatively minted run
+// that Append deduped to an existing run is unwound: the empty run dir is removed
+// (the returned event names the original run), mirroring the server's cleanup.
+func appendOneShot(dir string, e driverstate.Event, minted bool) (driverstate.Event, error) {
 	lease, err := driverstate.Claim(dir, e.Run, e.Actor)
 	if err != nil {
 		return driverstate.Event{}, err
 	}
-	defer lease.Release()
-	return driverstate.Append(dir, lease, e)
+	out, err := driverstate.Append(dir, lease, e)
+	_ = lease.Release()
+	if err != nil {
+		return driverstate.Event{}, err
+	}
+	if minted && out.Run != e.Run {
+		_ = os.RemoveAll(filepath.Join(dir, e.Run))
+	}
+	return out, nil
 }
