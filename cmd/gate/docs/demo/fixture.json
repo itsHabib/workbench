@@ -1,0 +1,100 @@
+{
+  "run": "run_ceiling_park_demo",
+  "artifacts": [
+    {
+      "id": "grt_a1b2c3d4e5f67890",
+      "kind": "grant",
+      "time": "14:30:00",
+      "flat": {
+        "action": "merge",
+        "expires_at": "2026-07-13T15:30:00Z",
+        "max_cycles": 3,
+        "max_tier": "T1",
+        "minted_by": "operator",
+        "repo": "acme/widget",
+        "sig": "demo"
+      }
+    },
+    {
+      "id": "evd_b2c3d4e5f6789012",
+      "kind": "evidence",
+      "time": "14:30:01",
+      "evidence": {
+        "type": "diff",
+        "byte_count": 4821
+      }
+    },
+    {
+      "id": "vrd_c3d4e5f678901234",
+      "kind": "verdict",
+      "time": "14:30:02",
+      "parents": [
+        "evd_b2c3d4e5f6789012"
+      ],
+      "verdict": {
+        "source": "floor",
+        "producer": "code/triage-floor",
+        "decision": "block",
+        "tier": "T1",
+        "confidence": 0.92,
+        "why": "CI failure on main test suite",
+        "findings": [
+          {
+            "title": "TestWidgetIntegration",
+            "severity": "high",
+            "locus": "ci",
+            "evidence": "FAIL pkg/widget TestWidgetIntegration (0.04s)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vrd_d4e5f67890123456",
+      "kind": "verdict",
+      "time": "14:30:03",
+      "parents": [
+        "vrd_c3d4e5f678901234"
+      ],
+      "verdict": {
+        "source": "reducer",
+        "producer": "reducer",
+        "decision": "pass",
+        "tier": "T2",
+        "confidence": 0.92,
+        "why": "failure is a known flake; risk-scoped to T2 for operator review"
+      }
+    },
+    {
+      "id": "jdg_e5f6789012345678",
+      "kind": "judgment",
+      "time": "14:30:04",
+      "parents": [
+        "vrd_d4e5f67890123456"
+      ],
+      "verdict": {
+        "source": "operator",
+        "producer": "judgment",
+        "decision": "pass",
+        "tier": "T0",
+        "confidence": 1,
+        "why": "flake is known; acceptable risk for hotfix"
+      }
+    },
+    {
+      "id": "esc_f678901234567890",
+      "kind": "escalation",
+      "time": "14:30:05",
+      "parents": [
+        "jdg_e5f6789012345678",
+        "grt_a1b2c3d4e5f67890"
+      ],
+      "flat": {
+        "code": "grant_tier_exceeded",
+        "grant": "grt_a1b2c3d4e5f67890",
+        "outcome": "parked_for_judgment",
+        "question": "verdict tier T2 exceeds grant ceiling T1; flake is known; acceptable risk for hotfix",
+        "verdict": "vrd_d4e5f67890123456"
+      }
+    }
+  ]
+}

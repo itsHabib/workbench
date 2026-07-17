@@ -1,0 +1,47 @@
+# basename<TAB>bucket<TAB>note   (only labeled chunks are emitted; drops omitted)
+# --- real-break: Rust (dossier) ---
+dossier-26001022393	real-break	cargo fmt --check diff
+dossier-26001158306	real-break	cargo fmt --check diff (different file)
+dossier-26001505045	real-break	cargo fmt --check diff
+dossier-26001690858	real-break	clippy redundant_closure -D warnings
+dossier-26011017976	real-break	compile E0277 Default not implemented
+dossier-26378673223	real-break	clippy too_long_first_doc_paragraph
+dossier-26799913495	real-break	compile E0063 missing field test_list_call_counter
+dossier-27232064142	real-break	cargo-audit serde_yml unsound (security-gate edge)
+# --- real-break: Go (roxiq/gate) ---
+roxiq-26729840206	real-break	go test FAIL internal/scraper
+roxiq-27112905851	real-break	go test overall FAIL (scraper ok, fail elsewhere)
+roxiq-27113387416	real-break	revive unused-parameter lint
+gate-28767609335	real-break	golangci-lint config schema invalid (version-drift edge)
+# --- real-break: TS (ship) ---
+ship-27113727014	real-break	coverage branches 84.68%<85% cursor-runner
+ship-28566698485	real-break	coverage branches 84.91%<85% core
+ship-27811062325	real-break	coverage lines 89.98%<90% driver
+ship-27831159382	real-break	coverage 89.65%<90% driver
+ship-27832268156	real-break	coverage 89.65%<90% driver
+ship-27856703101	real-break	coverage 89.65%<90% driver
+ship-28561988262	real-break	coverage core (sdk-throw fixture noise present)
+ship-28494955622	real-break	coverage test-harness
+ship-28466478958	real-break	eslint 6 problems max-params/type-imports
+ship-27396066529	real-break	prettier format-check e2e
+ship-27809984223	real-break	prettier format-check 3 files
+ship-27810529820	real-break	prettier format-check
+ship-28566379823	real-break	AssertionError expected 'failed' to be 'succeeded' service.test.ts
+# --- infra: token-exchange / setup / registry ---
+gate-28762855981	infra	setup-go go.mod does not exist
+gate-28762900323	infra	claude-code installation token exchange (0 bytes)
+huddle-26007231213	infra	claude-code missing ANTHROPIC_API_KEY / internal error
+huddle-26011328903	infra	claude-code token exchange
+huddle-26320041557	infra	claude-code token exchange
+ship-28595211551	infra	claude post-buffered-inline-comments empty key
+ship-27285635802	infra	claude token exchange
+ship-27323698168	infra	claude token exchange
+triage-28807014654	infra	claude token exchange
+wellness-ai-27561505809	infra	claude token exchange
+roxiq-27561620172	infra	terraform registry 429 provider install
+# --- flake: db-readiness races / windows vitest ---
+roxiq-28219476298	flake	postgres "database system is starting up" race
+roxiq-28336714025	flake	postgres socket not ready race
+roxiq-28550369287	flake	postgres socket not ready (after image pull)
+wellness-ai-27560353270	flake	postgres db-test shutting down / not ready
+ship-27407769875	flake	windows vitest run failed, tests passed

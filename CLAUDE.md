@@ -26,6 +26,9 @@ triggers that would later split `contracts` into its own module.
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),
   `triage` (PR risk floor + escalate-only advisory; two binaries,
   `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),
+  `gate` (the merge-authorization boundary — grants, the verifier ladder, the
+  hash-chained decision log; exit codes 0 pass / 1 blocked / 2 parked /
+  3 refused / 4 error are a load-bearing seam),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.

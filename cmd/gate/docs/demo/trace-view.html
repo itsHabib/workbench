@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate decision trace</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --surface: #1a2332;
+    --border: #2d3a4d;
+    --text: #e7ecf3;
+    --muted: #8b9cb3;
+    --grant: #a78bfa;
+    --evidence: #60a5fa;
+    --verdict: #fbbf24;
+    --judgment: #34d399;
+    --escalation: #fb923c;
+    --action: #f87171;
+    --terminal: #fde047;
+    --edge: #4b5c73;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  header h1 { margin: 0 0 0.25rem; font-size: 1.1rem; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+  .dropzone {
+    margin-top: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .dropzone.dragover { border-color: var(--evidence); color: var(--text); background: #152033; }
+  main { padding: 1.25rem; max-width: 920px; margin: 0 auto; }
+  .run-label { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+  .graph-wrap { position: relative; }
+  svg.edges {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .kind-section { margin-bottom: 1.5rem; }
+  .kind-section h2 {
+    margin: 0 0 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .nodes { display: flex; flex-direction: column; gap: 0.75rem; }
+  .node {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    border-left: 4px solid var(--border);
+  }
+  .node[data-kind="grant"] { border-left-color: var(--grant); }
+  .node[data-kind="evidence"] { border-left-color: var(--evidence); }
+  .node[data-kind="verdict"] { border-left-color: var(--verdict); }
+  .node[data-kind="judgment"] { border-left-color: var(--judgment); }
+  .node[data-kind="escalation"] { border-left-color: var(--escalation); }
+  .node[data-kind="action"] { border-left-color: var(--action); }
+  .node.terminal {
+    border-color: var(--terminal);
+    box-shadow: 0 0 0 1px var(--terminal), 0 0 24px rgba(253, 224, 71, 0.15);
+  }
+  .node-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 0.35rem;
+  }
+  .node-time { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+  .node-kind { font-weight: 600; text-transform: capitalize; }
+  .node-id { color: var(--muted); font-size: 0.78rem; font-family: ui-monospace, monospace; }
+  .badge {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge-pass { background: #064e3b; color: #6ee7b7; }
+  .badge-block { background: #7f1d1d; color: #fca5a5; }
+  .badge-escalate { background: #78350f; color: #fdba74; }
+  .badge-parked { background: #713f12; color: #fde68a; }
+  .badge-blocked { background: #7f1d1d; color: #fca5a5; }
+  .badge-merge { background: #14532d; color: #86efac; }
+  .badge-refused { background: #581c87; color: #d8b4fe; }
+  .detail { margin: 0.2rem 0; color: var(--text); }
+  .detail.muted { color: var(--muted); }
+  .why { margin-top: 0.35rem; font-style: italic; color: var(--muted); }
+  .ceiling-callout {
+    margin-top: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 4px;
+    background: rgba(251, 146, 60, 0.12);
+    border: 1px solid rgba(251, 146, 60, 0.35);
+    font-size: 0.85rem;
+  }
+  .findings { margin-top: 0.45rem; }
+  .findings summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.85rem;
+    user-select: none;
+  }
+  .findings ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+  .findings li { margin: 0.25rem 0; font-size: 0.85rem; }
+  .finding-sev { font-weight: 600; text-transform: uppercase; font-size: 0.72rem; }
+  .error {
+    padding: 0.75rem;
+    border-radius: 6px;
+    background: #3f1212;
+    border: 1px solid #991b1b;
+    color: #fecaca;
+  }
+  .flat-kv { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+  .badge-unknown { background: #1e293b; color: #94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gate decision trace</h1>
+  <p>Evidence → verdicts → judgment → action. Offline static view of <code>explain -json</code>.</p>
+  <div class="dropzone" id="dropzone">Drop or paste an explain JSON document here</div>
+</header>
+<main id="main">
+  <p class="run-label" id="run-label"></p>
+  <div class="graph-wrap" id="graph-wrap">
+    <svg class="edges" id="edges"></svg>
+    <div id="graph"></div>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+
+  const EMBEDDED_FIXTURE = {"run":"run_ceiling_park_demo","artifacts":[{"id":"grt_a1b2c3d4e5f67890","kind":"grant","time":"14:30:00","flat":{"action":"merge","expires_at":"2026-07-13T15:30:00Z","max_cycles":3,"max_tier":"T1","minted_by":"operator","repo":"acme/widget","sig":"demo"}},{"id":"evd_b2c3d4e5f6789012","kind":"evidence","time":"14:30:01","evidence":{"type":"diff","byte_count":4821}},{"id":"vrd_c3d4e5f678901234","kind":"verdict","time":"14:30:02","parents":["evd_b2c3d4e5f6789012"],"verdict":{"source":"floor","producer":"code/triage-floor","decision":"block","tier":"T1","confidence":0.92,"why":"CI failure on main test suite","findings":[{"title":"TestWidgetIntegration","severity":"high","locus":"ci","evidence":"FAIL pkg/widget TestWidgetIntegration (0.04s)"}]}},{"id":"vrd_d4e5f67890123456","kind":"verdict","time":"14:30:03","parents":["vrd_c3d4e5f678901234"],"verdict":{"source":"reducer","producer":"reducer","decision":"pass","tier":"T2","confidence":0.92,"why":"failure is a known flake; risk-scoped to T2 for operator review"}},{"id":"jdg_e5f6789012345678","kind":"judgment","time":"14:30:04","parents":["vrd_d4e5f67890123456"],"verdict":{"source":"operator","producer":"judgment","decision":"pass","tier":"T0","confidence":1,"why":"flake is known; acceptable risk for hotfix"}},{"id":"esc_f678901234567890","kind":"escalation","time":"14:30:05","parents":["jdg_e5f6789012345678","grt_a1b2c3d4e5f67890"],"flat":{"code":"grant_tier_exceeded","grant":"grt_a1b2c3d4e5f67890","outcome":"parked_for_judgment","question":"verdict tier T2 exceeds grant ceiling T1; flake is known; acceptable risk for hotfix","verdict":"vrd_d4e5f67890123456"}}]};
+
+  const KIND_ORDER = ["grant", "evidence", "verdict", "judgment", "escalation", "action"];
+  const graphEl = document.getElementById("graph");
+  const edgesEl = document.getElementById("edges");
+  const runLabelEl = document.getElementById("run-label");
+  const dropzone = document.getElementById("dropzone");
+  const graphWrap = document.getElementById("graph-wrap");
+  let currentDoc = null;
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function badgeClass(decision, outcome) {
+    const key = (outcome || decision || "").toLowerCase();
+    if (key === "pass" || key === "would_merge") return "badge-pass";
+    if (key === "block" || key === "blocked") return "badge-block";
+    if (key === "escalate") return "badge-escalate";
+    if (key === "parked_for_judgment") return "badge-parked";
+    if (key === "capability_refused") return "badge-refused";
+    if (key === "merge_not_implemented") return "badge-merge";
+    return "badge-unknown";
+  }
+
+  function labelForOutcome(outcome) {
+    if (!outcome) return "";
+    return outcome.replace(/_/g, " ");
+  }
+
+  function indexById(artifacts) {
+    const map = Object.create(null);
+    for (const a of artifacts) map[a.id] = a;
+    return map;
+  }
+
+  function findTerminalId(artifacts) {
+    const terminals = artifacts.filter(function (a) {
+      return a.kind === "escalation" || a.kind === "action";
+    });
+    if (terminals.length === 0) return null;
+    return terminals[terminals.length - 1].id;
+  }
+
+  function grantSummary(byId, grantId) {
+    if (!grantId) return null;
+    const g = byId[grantId];
+    if (!g || !g.flat) return null;
+    return g.flat;
+  }
+
+  function renderEvidence(node) {
+    if (node.unparseable) {
+      return '<p class="detail muted">(unparseable body)</p>';
+    }
+    const e = node.evidence;
+    if (!e) return "";
+    let detail = e.type;
+    if (e.byte_count != null) detail += " — " + e.byte_count + " bytes";
+    if (e.item_count != null) detail += " — " + e.item_count + " items";
+    return '<p class="detail">' + esc(detail) + " evidence</p>";
+  }
+
+  function renderFindings(findings) {
+    if (!findings || findings.length === 0) return "";
+    let items = "";
+    for (const f of findings) {
+      const parts = [];
+      if (f.severity) parts.push('<span class="finding-sev">' + esc(f.severity) + "</span>");
+      if (f.locus) parts.push(esc(f.locus));
+      parts.push(esc(f.title));
+      let line = parts.join(" · ");
+      if (f.evidence) line += " — " + esc(f.evidence);
+      items += "<li>" + line + "</li>";
+    }
+    return (
+      '<details class="findings"><summary>' +
+      findings.length +
+      " finding" +
+      (findings.length === 1 ? "" : "s") +
+      "</summary><ul>" +
+      items +
+      "</ul></details>"
+    );
+  }
+
+  function renderVerdict(node) {
+    if (node.unparseable) {
+      return '<p class="detail muted">(unparseable body)</p>';
+    }
+    const v = node.verdict;
+    if (!v) return '<p class="detail muted">(unparseable body)</p>';
+    const badge = '<span class="badge ' + badgeClass(v.decision) + '">' + esc(v.decision) + "</span>";
+    const conf =
+      typeof v.confidence === "number" && !isNaN(v.confidence)
+        ? v.confidence.toFixed(2)
+        : "?";
+    const head =
+      esc(v.producer) +
+      " · tier " +
+      esc(v.tier) +
+      " · conf " +
+      conf +
+      " · " +
+      esc(v.source);
+    let html =
+      '<p class="detail">' +
+      badge +
+      " " +
+      head +
+      '</p><p class="why">' +
+      esc(v.why) +
+      "</p>";
+    html += renderFindings(v.findings);
+    return html;
+  }
+
+  function renderFlat(node, byId, isTerminal) {
+    const f = node.flat;
+    if (!f) {
+      if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
+      return "";
+    }
+    let html = "";
+    if (f.outcome) {
+      html +=
+        '<p class="detail"><span class="badge ' +
+        badgeClass(null, f.outcome) +
+        '">' +
+        esc(labelForOutcome(f.outcome)) +
+        "</span></p>";
+    }
+    if (f.question) {
+      html += '<p class="detail">' + esc(f.question) + "</p>";
+    }
+    if (f.code) {
+      html += '<p class="detail muted">code: <span class="flat-kv">' + esc(f.code) + "</span></p>";
+    }
+    if (node.kind === "grant") {
+      html += '<p class="detail">repo: ' + esc(f.repo) + " · action: " + esc(f.action) + "</p>";
+      html +=
+        '<p class="detail"><strong>max_tier: ' +
+        esc(f.max_tier) +
+        "</strong> · max_cycles: " +
+        esc(String(f.max_cycles)) +
+        "</p>";
+      html += '<p class="detail muted">expires: ' + esc(f.expires_at) + "</p>";
+    }
+    if (isTerminal && f.code === "grant_tier_exceeded") {
+      const g = f.grant ? grantSummary(byId, f.grant) : null;
+      const ceiling = g && g.max_tier
+        ? "Grant ceiling <strong>" + esc(g.max_tier) + "</strong>"
+        : "The grant ceiling";
+      html +=
+        '<div class="ceiling-callout">' +
+        ceiling +
+        " refused this verdict — re-mint a wider grant to proceed.</div>";
+    }
+    if (node.kind === "action" && f.command) {
+      html += '<p class="detail flat-kv">' + esc(f.command) + "</p>";
+    }
+    if (f.error) {
+      html += '<p class="detail muted">' + esc(f.error) + "</p>";
+    }
+    return html;
+  }
+
+  function renderNode(node, byId, terminalId) {
+    const isTerminal = node.id === terminalId;
+    let body = "";
+    if (node.kind === "evidence") body = renderEvidence(node);
+    if (node.kind === "verdict" || node.kind === "judgment") body = renderVerdict(node);
+    if (node.kind === "grant" || node.kind === "escalation" || node.kind === "action") {
+      body = renderFlat(node, byId, isTerminal);
+    }
+    const cls = "node" + (isTerminal ? " terminal" : "");
+    return (
+      '<article class="' +
+      cls +
+      '" data-kind="' +
+      esc(node.kind) +
+      '" data-id="' +
+      esc(node.id) +
+      '" id="node-' +
+      esc(node.id) +
+      '">' +
+      '<div class="node-head">' +
+      '<span class="node-time">' +
+      esc(node.time) +
+      "</span>" +
+      '<span class="node-kind">' +
+      esc(node.kind) +
+      "</span>" +
+      '<span class="node-id">' +
+      esc(node.id) +
+      "</span>" +
+      "</div>" +
+      body +
+      "</article>"
+    );
+  }
+
+  function groupByKind(artifacts) {
+    const groups = Object.create(null);
+    for (const k of KIND_ORDER) groups[k] = [];
+    for (const a of artifacts) {
+      if (!groups[a.kind]) groups[a.kind] = [];
+      groups[a.kind].push(a);
+    }
+    return groups;
+  }
+
+  function renderGraph(doc) {
+    if (!doc || !Array.isArray(doc.artifacts)) {
+      graphEl.innerHTML = '<p class="error">Invalid explain JSON: expected { run, artifacts[] }</p>';
+      runLabelEl.textContent = "";
+      edgesEl.innerHTML = "";
+      currentDoc = null;
+      return;
+    }
+    const byId = indexById(doc.artifacts);
+    const terminalId = findTerminalId(doc.artifacts);
+    runLabelEl.textContent = "run " + doc.run + " — " + doc.artifacts.length + " artifacts";
+
+    const groups = groupByKind(doc.artifacts);
+    let html = "";
+    for (const kind of KIND_ORDER) {
+      const nodes = groups[kind];
+      if (!nodes || nodes.length === 0) continue;
+      html += '<section class="kind-section" data-kind-group="' + esc(kind) + '">';
+      html += "<h2>" + esc(kind) + "</h2>";
+      html += '<div class="nodes">';
+      for (const n of nodes) html += renderNode(n, byId, terminalId);
+      html += "</div></section>";
+    }
+    graphEl.innerHTML = html;
+    currentDoc = doc;
+    requestAnimationFrame(function () {
+      drawEdges(doc.artifacts);
+    });
+  }
+
+  function drawEdges(artifacts) {
+    edgesEl.innerHTML = "";
+    const wrapRect = graphWrap.getBoundingClientRect();
+    edgesEl.setAttribute("width", wrapRect.width);
+    edgesEl.setAttribute("height", wrapRect.height);
+    edgesEl.setAttribute("viewBox", "0 0 " + wrapRect.width + " " + wrapRect.height);
+
+    for (const child of artifacts) {
+      if (!child.parents || child.parents.length === 0) continue;
+      const childEl = document.getElementById("node-" + child.id);
+      if (!childEl) continue;
+      const cRect = childEl.getBoundingClientRect();
+      const cx = cRect.left + 20 - wrapRect.left;
+      const cy = cRect.top - wrapRect.top;
+
+      for (const pid of child.parents) {
+        const parentEl = document.getElementById("node-" + pid);
+        if (!parentEl) continue;
+        const pRect = parentEl.getBoundingClientRect();
+        const px = pRect.left + 20 - wrapRect.left;
+        const py = pRect.bottom - wrapRect.top;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const midY = (py + cy) / 2;
+        const d =
+          "M" +
+          px +
+          " " +
+          py +
+          " C" +
+          px +
+          " " +
+          midY +
+          ", " +
+          cx +
+          " " +
+          midY +
+          ", " +
+          cx +
+          " " +
+          cy;
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#4b5c73");
+        path.setAttribute("stroke-width", "1.5");
+        path.setAttribute("opacity", "0.7");
+        edgesEl.appendChild(path);
+      }
+    }
+  }
+
+  function loadDoc(raw) {
+    let doc;
+    try {
+      doc = typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch (e) {
+      graphEl.innerHTML = '<p class="error">JSON parse error: ' + esc(e.message) + "</p>";
+      runLabelEl.textContent = "";
+      edgesEl.innerHTML = "";
+      currentDoc = null;
+      return;
+    }
+    renderGraph(doc);
+  }
+
+  document.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    dropzone.classList.add("dragover");
+  });
+  document.addEventListener("dragleave", function (e) {
+    if (!e.relatedTarget) dropzone.classList.remove("dragover");
+  });
+  document.addEventListener("drop", function (e) {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      loadDoc(reader.result);
+    };
+    reader.onerror = function () {
+      graphEl.innerHTML = '<p class="error">Failed to read dropped file.</p>';
+      runLabelEl.textContent = "";
+      edgesEl.innerHTML = "";
+      currentDoc = null;
+    };
+    reader.readAsText(file);
+  });
+  document.addEventListener("paste", function (e) {
+    const text = (e.clipboardData.getData("text") || "").trimStart();
+    if (!text || text.charAt(0) !== "{") return;
+    e.preventDefault();
+    loadDoc(text);
+  });
+
+  window.addEventListener("resize", function () {
+    if (currentDoc) drawEdges(currentDoc.artifacts);
+  });
+
+  graphEl.addEventListener("toggle", function () {
+    if (currentDoc) drawEdges(currentDoc.artifacts);
+  }, true);
+
+  renderGraph(EMBEDDED_FIXTURE);
+})();
+</script>
+</body>
+</html>
