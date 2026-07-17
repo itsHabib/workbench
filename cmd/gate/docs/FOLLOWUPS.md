@@ -93,3 +93,15 @@ wiring `gate` into the merge tail.
   `parseFloorOutput` refuses an absent or unknown tier (`tier.Valid`) as an operational error
   before any verdict is recorded — no valid floor, no verdict (pinned by the
   `TestParseFloorOutput*` cases).
+
+- [ ] **Authenticate appended entries (per-entry MAC) — the crash-window residual.**
+  Surfaced by codex's second pass on workbench#59 (2026-07-17). The reseal path now proves the
+  anchored prefix and bounds recovery to the one-append crash window
+  (`ErrRebindRewrite` / `ErrRebindUnprovenSuffix`), which closes rewrite laundering and
+  batch-suffix forgery — but ONE forged chain-consistent entry timed inside the crash window is
+  still byte-indistinguishable from a genuinely interrupted append, and gets sealed by the next
+  legitimate write. The chain is unkeyed by design; closing this fully means authenticating each
+  entry at append time (per-entry MAC under the anchor key, or signing the writer), a tamper-model
+  design change owed to the red-team-hardening thread — not a bolt-on. Until then the residual is
+  one unauthenticated entry per genuine crash-recovery event, named here rather than implied
+  closed.

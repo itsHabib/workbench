@@ -69,8 +69,21 @@ jobs:
           set -euo pipefail
           num="${EVENT_PR}"
           if [ -z "$num" ]; then
-            num=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-              --jq '.[0].number // empty')
+            # One commit can back several open PRs (different bases). The gate
+            # status is commit-scoped, so evaluating whichever PR the API lists
+            # first could stamp an easier PR's green onto the head another PR
+            # shares. Only an UNAMBIGUOUS mapping is gateable — anything else
+            # posts nothing, and branch protection blocks on the absent
+            # context (fail closed).
+            nums=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
+              --jq '[.[].number] | unique')
+            n=$(printf '%s' "$nums" | jq 'length')
+            if [ "$n" -gt 1 ]; then
+              echo "ambiguous: ${HEAD_SHA} backs ${n} PRs (${nums}); refusing to gate any of them"
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            num=$(printf '%s' "$nums" | jq -r '.[0] // empty')
           fi
           if [ -z "$num" ]; then
             echo "no PR resolves for ${HEAD_SHA}; nothing to gate"

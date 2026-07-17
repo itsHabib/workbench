@@ -198,6 +198,16 @@ func (s *Store) rebind(prevHead, newHead string) error {
 			return fmt.Errorf("%w: anchor pinned head %s at entry %d, log has %s", ErrRebindRewrite, short(rec.Head), rec.Count, short(head))
 		}
 	}
+	// Bound recovery to the crash window's shape: one entry whose anchor
+	// update crashed, plus the entry this append just wrote. The chain is
+	// unkeyed, so entries past the pinned head are unauthenticated — sealing
+	// an arbitrarily long unanchored suffix would let a state-dir writer
+	// batch-forge history into the anchor. (One forged entry timed inside the
+	// crash window is still indistinguishable from a real interrupted append;
+	// closing that needs per-entry authentication — tracked in FOLLOWUPS.)
+	if ok && count > rec.Count+2 {
+		return fmt.Errorf("%w: anchor pinned %d entries, log has %d — beyond the one-append crash window", ErrRebindUnprovenSuffix, rec.Count, count)
+	}
 	return s.anchor.bind(newHead, count)
 }
 

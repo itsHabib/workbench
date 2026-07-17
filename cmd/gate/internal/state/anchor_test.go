@@ -420,3 +420,60 @@ func TestAppendAfterRewriteRefusesReseal(t *testing.T) {
 		t.Fatal("audit reported intact after a rewrite + refused reseal")
 	}
 }
+
+// forgeAppend writes one chain-consistent entry onto the current log head
+// WITHOUT touching the anchor — what a state-dir writer (no anchor key) can
+// do: the chain is unkeyed, so the forgery replays clean.
+func forgeAppend(t *testing.T, st *Store) {
+	t.Helper()
+	all, err := st.List(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := Artifact{
+		ID:   "evd_forged00",
+		Kind: KindEvidence,
+		Run:  NewRunID(),
+		Time: time.Unix(2000, 0).UTC(),
+		Body: json.RawMessage(`{"forged":true}`),
+		Prev: all[len(all)-1].Hash,
+	}
+	forged.Hash = hashArtifact(forged)
+	raw, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, st)
+	writeLines(t, st, append(lines, raw))
+}
+
+// Recovery must seal at most the one-append crash window (one interrupted
+// entry + the entry being appended). A longer unanchored suffix is
+// unauthenticated chain extension — batch-forged history must not be
+// HMAC-bound as "crash recovery".
+func TestAppendBeyondCrashWindowRefusesReseal(t *testing.T) {
+	st := openAnchored(t)
+	appendN(t, st, 3) // anchor pins 3
+	forgeAppend(t, st)
+	forgeAppend(t, st) // log now 5, anchor still 3 — two unanchored entries
+
+	_, err := st.Append(KindEvidence, NewRunID(), nil, map[string]int{"seq": 9})
+	if !errors.Is(err, ErrRebindUnprovenSuffix) {
+		t.Fatalf("append over a 2-entry unanchored suffix did not refuse reseal: %v", err)
+	}
+
+	rec, ok, err := st.anchor.read()
+	if err != nil || !ok {
+		t.Fatalf("anchor unreadable after refusal: ok=%v err=%v", ok, err)
+	}
+	if rec.Count != 3 {
+		t.Fatalf("anchor moved despite refusal: pins %d, want 3", rec.Count)
+	}
+	res, err := st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatal("audit reported intact over an unsealed forged suffix")
+	}
+}

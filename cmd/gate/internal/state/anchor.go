@@ -67,6 +67,14 @@ var ErrRebindTruncation = errors.New("rebind_truncation")
 // append refuses instead and Audit keeps reporting the mismatch.
 var ErrRebindRewrite = errors.New("rebind_rewrite")
 
+// ErrRebindUnprovenSuffix fires when an append would advance the anchor over
+// more unanchored entries than the one-append crash window can leave. The
+// chain is unkeyed, so entries beyond the pinned head are unauthenticated;
+// recovery may seal at most the single entry whose anchor update crashed plus
+// the entry being appended now. Anything further was not left by a crash —
+// refuse, and let Audit keep reporting the gap.
+var ErrRebindUnprovenSuffix = errors.New("rebind_unproven_suffix")
+
 // bind records the current head and count under the anchor's key. It runs on
 // the append path inside the store lock, so it may create the key on first use
 // — that is the one place a fresh anchor key is legitimate.
