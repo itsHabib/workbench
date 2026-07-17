@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 const (
@@ -121,34 +122,60 @@ func takeoverOnce(privateDir string) (Owner, error) {
 	claimPath := Path(privateDir)
 	if err := os.Rename(takeoverPath, claimPath); err != nil {
 		_ = os.Remove(takeoverPath)
+		if os.IsNotExist(err) {
+			// The takeover file vanished under us: a racing reconciler
+			// cleared it as debris. The lock is gone, so the race is lost.
+			return Owner{}, ErrBusy
+		}
 		return Owner{}, fmt.Errorf("claim: rename takeover: %w", err)
 	}
 	return owner, nil
 }
 
+// staleTakeoverAge is how old an unreadable takeover file must be before it
+// counts as crash debris. A concurrent writer's file is unreadable only for
+// the instant between O_EXCL create and write; debris never gets newer.
+const staleTakeoverAge = 10 * time.Second
+
 // clearStaleTakeover removes a takeover file whose recorded owner is dead so
 // a crashed reconciler cannot leave a stuck lock. Live owners yield ErrBusy.
-// Corrupt or unreadable content is removed and retried — a crash mid-write
-// must not permanently block reconcile (exclusivity is O_EXCL, not content).
+// Unreadable content is ambiguous: a concurrent writer between O_EXCL create
+// and write (deleting its lock would let two takeovers win the same
+// generation), or debris from a writer that crashed mid-write (leaving it
+// would block the generation forever). File age decides: fresh yields ErrBusy,
+// old is removed and retried.
 func clearStaleTakeover(takeoverPath string) error {
 	data, err := os.ReadFile(takeoverPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		_ = os.Remove(takeoverPath)
-		return errStaleTakeover
+		return clearIfAged(takeoverPath)
 	}
 	var o Owner
 	if err := json.Unmarshal(data, &o); err != nil {
-		_ = os.Remove(takeoverPath)
-		return errStaleTakeover
+		return clearIfAged(takeoverPath)
 	}
 	if LiveMatches(o) {
 		return ErrBusy
 	}
 	_ = os.Remove(takeoverPath)
 	return nil
+}
+
+func clearIfAged(takeoverPath string) error {
+	fi, err := os.Stat(takeoverPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return ErrBusy
+	}
+	if time.Since(fi.ModTime()) < staleTakeoverAge {
+		return ErrBusy
+	}
+	_ = os.Remove(takeoverPath)
+	return errStaleTakeover
 }
 
 // Read loads the current claim owner. Missing claim yields os.ErrNotExist.
