@@ -24,7 +24,9 @@ owner — not this repo's work to force.
   follow-up PR — `verify`'s Verdict/Producer/Subject/Finding are now aliases of
   `contracts`, `observe` decodes `contracts.Verdict` instead of a hand-parsed
   copy, and `ProducerString` presentation moved into gate). The reducer and the
-  ladder law never moved; the queue is now empty of planned tenants.
+  ladder law never moved. The only queue entries left are huddle and sense,
+  both "graduate in when next touched" — no active migration is planned
+  (2026-07-13 freeze: huddle out, sense lean-no).
 - **triage** — migrated in 2026-07-16 as `cmd/triage` (the fourth tenant; two
   binaries, `triage-floor`/`triage-advisory`, sharing `cmd/triage/internal/`).
   `contracts` adoption deliberately NOT done with the move: inspection showed
