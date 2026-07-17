@@ -86,7 +86,7 @@
       "required": ["pr", "url", "head_sha"],
       "additionalProperties": false,
       "properties": {
-        "pr": { "type": "integer" },
+        "pr": { "type": "integer", "minimum": 1 },
         "url": { "type": "string" },
         "head_sha": { "type": "string" }
       }
@@ -96,7 +96,7 @@
       "required": ["pr", "merge_commit", "merged_at"],
       "additionalProperties": false,
       "properties": {
-        "pr": { "type": "integer" },
+        "pr": { "type": "integer", "minimum": 1 },
         "merge_commit": { "type": "string" },
         "merged_at": { "type": "string" }
       }

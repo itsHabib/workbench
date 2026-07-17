@@ -377,6 +377,27 @@ func TestRequiredFieldsAlwaysMarshal(t *testing.T) {
 	}
 }
 
+// TestEncodeEventPreservesBodyBytes pins the persistence-encoding law: a body
+// with insignificant whitespace survives EncodeEvent → DecodeEvent with its
+// exact bytes, so ComputeHash verifies after read-back. json.Marshal would
+// compact the RawMessage and break the chain — the trap EncodeEvent exists for.
+func TestEncodeEventPreservesBodyBytes(t *testing.T) {
+	e := vectorEvent()
+	e.Body = json.RawMessage(`{ "repo" : "r", "source" : "s", "manifest" : {}, "streams" : [] }`)
+	e.Hash = ComputeHash(e)
+
+	decoded, err := DecodeEvent(EncodeEvent(e))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded.Body) != string(e.Body) {
+		t.Fatalf("body bytes altered by encode/decode:\n got=%s\nwant=%s", decoded.Body, e.Body)
+	}
+	if got := ComputeHash(decoded); got != e.Hash {
+		t.Fatalf("hash no longer verifies after round-trip: got %s want %s", got, e.Hash)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	e := vectorEvent()
 	e.Hash = ComputeHash(e)

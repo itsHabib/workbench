@@ -23,6 +23,19 @@ import (
 // and hash; the conformance suite fails if either drifts.
 func Canonical(e Event) []byte {
 	e.Hash = ""
+	return encode(e)
+}
+
+// EncodeEvent is the persistence encoding: the canonical layout with the real
+// Hash, ready to write as a ledger line. Writers MUST persist these exact
+// bytes — json.Marshal compacts a json.RawMessage body, silently altering the
+// very bytes the hash covers, so a marshal-persisted event with insignificant
+// body whitespace would fail chain verification on read-back.
+func EncodeEvent(e Event) []byte {
+	return encode(e)
+}
+
+func encode(e Event) []byte {
 	var b bytes.Buffer
 	b.WriteByte('{')
 	b.WriteString(`"id":`)
