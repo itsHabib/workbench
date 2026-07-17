@@ -20,10 +20,11 @@ gate is **enforceable via its canary status check**: the `gate` workflow
 (`.github/workflows/gate.yml`, at the workbench module root) plus branch
 protection makes a merge to `main` require the green check, closing the
 direct-merge bypass on the repo that arms it — see the runbook in
-[docs/enforcement.md](docs/enforcement.md). First armed on the standalone
-itsHabib/gate repo (now an archived pointer); since the tenant move the
-armable canary is itsHabib/workbench. The merge itself stays dry-run advisory
-(`-live` is unbuilt) and token custody stays open.
+[docs/enforcement.md](docs/enforcement.md). The workflow first shipped —
+dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
+move it ships here, so the armable canary is itsHabib/workbench. The merge
+itself stays dry-run advisory (`-live` is unbuilt) and token custody stays
+open.
 
 ## Run it
 

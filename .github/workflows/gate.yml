@@ -61,9 +61,13 @@ jobs:
       # commits->pulls API for the head SHA. No PR resolved => nothing to gate.
       - name: Resolve PR number
         id: pr
+        env:
+          # Passed via env, never interpolated into the script body — the same
+          # expression-injection hygiene every other step here follows.
+          EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
-          num='${{ github.event.workflow_run.pull_requests[0].number }}'
+          num="${EVENT_PR}"
           if [ -z "$num" ]; then
             num=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
               --jq '.[0].number // empty')

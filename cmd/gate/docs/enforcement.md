@@ -171,8 +171,9 @@ and why each choice is the safe one:
 
 These are **repository-settings actions the operator performs** on the canary
 repo; they are not code in this repository, and this change does not perform
-them. (First armed on the standalone itsHabib/gate; since the `cmd/gate` tenant
-move the workflow ships here, so the armable canary is itsHabib/workbench.)
+them. (The workflow first shipped — dormant, never armed — on the standalone
+itsHabib/gate; since the `cmd/gate` tenant move it ships here, so the armable
+canary is itsHabib/workbench.)
 
 0. **Resolve the runtime, then arm the workflow (it ships dormant).** The `gate`
    workflow is guarded by repo variable `GATE_ENFORCE` — it posts and enforces
