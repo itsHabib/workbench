@@ -155,7 +155,10 @@ func prepareEvent(p recordParams) (driverstate.Event, bool, error) {
 }
 
 // ensureRun mints a run id for a run_imported that omitted one (reporting true),
-// and rejects any other kind that names no run.
+// and rejects any other kind that names no run. A minted import must carry
+// generated_at: without the full (repo, source, generated_at) dedupe key a
+// retry can never be recognized and every attempt would mint a genuine second
+// run — the server refuses rather than silently duplicating (spec §5).
 func ensureRun(e *driverstate.Event) (bool, error) {
 	if e.Run != "" {
 		return false, nil
@@ -163,12 +166,28 @@ func ensureRun(e *driverstate.Event) (bool, error) {
 	if e.Kind != dsc.KindRunImported {
 		return false, fmt.Errorf("driver_record: event kind %q requires a run", e.Kind)
 	}
+	if err := requireImportKey(e.Body); err != nil {
+		return false, err
+	}
 	id, err := driverstate.NewRunID()
 	if err != nil {
 		return false, err
 	}
 	e.Run = id
 	return true, nil
+}
+
+// requireImportKey rejects a minted (run-omitted) import whose body lacks the
+// generated_at member of the dedupe key.
+func requireImportKey(body json.RawMessage) error {
+	var b dsc.RunImportedBody
+	if err := json.Unmarshal(body, &b); err != nil {
+		return fmt.Errorf("driver_record: invalid run_imported body: %w", err)
+	}
+	if b.GeneratedAt == "" {
+		return fmt.Errorf("driver_record: a run_imported without an explicit run must carry generated_at — the (repo, source, generated_at) key is what makes a retried import idempotent")
+	}
+	return nil
 }
 
 type runParam struct {

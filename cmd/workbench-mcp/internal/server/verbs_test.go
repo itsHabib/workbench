@@ -9,15 +9,11 @@ import (
 	"github.com/itsHabib/workbench/driverstate"
 )
 
-// importEvent is a minimal valid run_imported event body for one stream.
+// importEvent is a minimal valid run_imported event body for one stream. A
+// minted (run-omitted) import must carry generated_at, so the minimal fixture
+// does too.
 func importEvent(stream, actor string) json.RawMessage {
-	body := dsc.RunImportedBody{
-		Repo:     "itsHabib/workbench",
-		Source:   "driver.md",
-		Manifest: json.RawMessage(`{}`),
-		Streams:  []dsc.StreamSpec{{Stream: stream, DocPath: "docs/x.md"}},
-	}
-	return event(dsc.KindRunImported, "", actor, body)
+	return importEventKeyed(stream, actor, "2026-07-16T12:00:00Z/"+stream+"/"+actor)
 }
 
 // importEventKeyed is importEvent carrying a generated_at, so Append's
@@ -241,5 +237,21 @@ func callOK(t *testing.T, s *Server, run string, ev json.RawMessage) {
 	tr := callRecord(t, s, run, ev)
 	if tr.IsError {
 		t.Fatalf("record failed: %s", resultText(t, tr))
+	}
+}
+
+// A minted import with no generated_at is refused: without the full dedupe key
+// a retry could never be recognized and every attempt would mint a second run.
+func TestRecordMintedImportRequiresGeneratedAt(t *testing.T) {
+	s := New(t.TempDir())
+	body := dsc.RunImportedBody{
+		Repo:     "itsHabib/workbench",
+		Source:   "driver.md",
+		Manifest: json.RawMessage(`{}`),
+		Streams:  []dsc.StreamSpec{{Stream: "dss_1", DocPath: "docs/x.md"}},
+	}
+	res := callRecord(t, s, "", event(dsc.KindRunImported, "", "session:t", body))
+	if !res.IsError {
+		t.Fatal("want generated_at rejection, got success")
 	}
 }
