@@ -194,8 +194,6 @@ func ensureRun(e *driverstate.Event) (bool, error) {
 	return true, nil
 }
 
-// requireImportKey rejects a minted (run-omitted) import whose body lacks the
-// generated_at member of the dedupe key.
 type runParam struct {
 	Run string `json:"run"`
 }
