@@ -8,6 +8,16 @@ Open `trace-view.html` in a browser (double-click or `file://` URL). No server o
 
 The embedded fixture shows the ceiling-park story: judgment passes, but the grant ceiling (`max_tier: T1`) refuses the reduced verdict tier (`T2`) and parks the run.
 
+## Render a real run — one command
+
+The gate binary embeds this page; `-html` swaps the demo fixture for the run's
+own projection and writes a self-contained file (no server, no paste):
+
+```bash
+gate explain -state /path/to/state -run run_XXXXX -html          # writes gate-explain-<run>.html, prints the path
+gate explain -state /path/to/state -run run_XXXXX -html -out t.html
+```
+
 ## Freeze a run
 
 From a gate state directory with a completed run:

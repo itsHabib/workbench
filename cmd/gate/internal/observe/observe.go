@@ -293,3 +293,39 @@ func renderFlat(w io.Writer, n Node) {
 		fmt.Fprintf(w, "         %s: %v\n", kv.key, kv.val)
 	}
 }
+
+// fixtureMarker anchors the swap point in the trace-view page: the demo
+// fixture's declaration, replaced wholesale by the requested run's projection.
+// Contract with the template: the declaration is ONE line ending in ";", and
+// this marker's first occurrence is that line — TestExplainHTMLFlag pins the
+// swap, so a template edit that breaks either shows up as a failing test, not
+// a corrupt page.
+const fixtureMarker = "const EMBEDDED_FIXTURE = "
+
+// ExplainHTML renders the run's projection into the self-contained trace-view
+// page. page is the shipped template (docs/demo/trace-view.html, embedded by
+// the caller); its demo fixture line is swapped for this run's projection
+// JSON, so the output opens offline — no server, no paste. Read-only and
+// storeless like every observe view. json.Marshal escapes <, >, and & inside
+// strings, so artifact content cannot break out of the script tag.
+func ExplainHTML(w io.Writer, st *state.Store, run, page string) error {
+	proj, err := Project(st, run)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(proj)
+	if err != nil {
+		return fmt.Errorf("observe: marshal projection: %w", err)
+	}
+	i := strings.Index(page, fixtureMarker)
+	if i < 0 {
+		return fmt.Errorf("observe: trace-view template lacks the %q marker", fixtureMarker)
+	}
+	rest := page[i+len(fixtureMarker):]
+	nl := strings.Index(rest, "\n")
+	if nl < 0 {
+		return fmt.Errorf("observe: trace-view template fixture line is unterminated")
+	}
+	_, err = io.WriteString(w, page[:i+len(fixtureMarker)]+string(raw)+";"+rest[nl:])
+	return err
+}
