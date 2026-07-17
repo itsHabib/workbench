@@ -438,21 +438,23 @@ to merged PR #65, every transition recorded through `workbench-mcp`.
   `driver_record`; zero CLI writes; `driver_verify` ok throughout.
 - **(b) PASS — the hard case.** Kill placed between opening PR #65 and recording
   `stream_pr_opened`. A fresh-context session (given no run id, PR number, or branch) ran
-  F3 verbatim: found the run via `driver_runs{live:true}`, reconciled external facts
+  F3 verbatim: found the run via `driver_runs {live:true}`, reconciled external facts
   (branch, head SHA, open PR), recorded the missing event under a new actor
   (`session:p4a-resume`) with the chain intact, and continued the drive. The prior lease
   had expired and self-cleared, so the resume exercised a genuine re-claim.
-- **(c) PASS — method: `driverstate state --json` diffed against GitHub facts** (P3
-  shipped no `render`; a minimal render is tracked as a P4-phase task). Reduced state
-  matched GitHub exactly: stream `merged`, PR 65, merge commit `d556a82b`, one terminal
-  attempt, run `finished`.
+- **(c) PASS — criterion amended at execution time.** §11 names `driverstate render`,
+  which P3 did not ship; the substitute method — `driverstate state --json` diffed against
+  GitHub facts — is recorded here as the amendment (minimal render is a P4-phase task).
+  Reduced state matched GitHub exactly: stream `merged`, PR 65, merge commit `d556a82b`,
+  one terminal attempt, run `finished`.
 - **Secondary: same-root PASS, tested hands-on** — `workbench-mcp.exe` executed inside the
   Claude Desktop MSIX app container (`Invoke-CommandInDesktopPackage`) resolved the
   identical root (`~\.workbench\driver-state`, source: user profile) and a container write
   landed in the real directory: the profile root sits outside MSIX's AppData VFS, so §10
   Q4's virtualization risk does not apply to this path.
-- **Secondary: zero shell-friction on the recording path PASS** (friction log 2026-07-17;
-  one read-path nit: `state` wants `--run`, not a positional).
+- **Secondary: zero shell-friction on the recording path PASS** (`pers/workbench-friction.md`,
+  2026-07-17 entry; one read-path nit: `state` wants `--run`, not a positional — tracked in
+  the render task).
 
 Findings folded into P4 (dossier phase `session-engine-skill`): promote
 `stream_attempt.commit` into the §5 payload (off-contract today, load-bearing for F3

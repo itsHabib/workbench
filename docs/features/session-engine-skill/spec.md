@@ -44,23 +44,36 @@ external act it describes — the ledger is written from facts, never ahead of t
 |---|---|---|
 | manifest resolved | `run_imported` | repo, source, generated_at, manifest snapshot, stream list |
 | worktree + impl started | `stream_dispatched` | engine:"session", worktree, branch |
-| commit landed | `stream_attempt` | seq, doc_path, terminal, **commit** (the head SHA — load-bearing for F3 reconcile) |
+| commit landed | `stream_attempt` | seq, doc_path, terminal, **commit** (the head SHA — off-contract today, see follow-ups; load-bearing for F3 reconcile) |
 | PR opened | `stream_pr_opened` | pr, url, head_sha |
-| each panel round settled | `review_cycle` | cycle, panel_settled, findings, panel, verdict |
+| each panel round settled | `review_cycle` | cycle, panel_settled, findings, panel, verdict — or `review: unconfigured` when the repo declares no panel |
 | PR merged | `stream_merged` | pr, merge_commit, merged_at |
 | all streams terminal | `run_finished` | — |
 
 Actor convention (validation-gate finding): `session:<label>-<n>` where `<label>` names the
-drive and `<n>` increments per session generation — a resumed session MUST append under a
-new actor (`…-2`, `…-resume`); two actors on one run is the audit trail working. Event ids
-are server-minted when omitted — omit them.
+drive and `<n>` increments per session generation — the canonical form; a resumed session
+MUST append under a new actor (first resume = `-2`; any distinct string signals correctly,
+the validation run used `-resume`). Two actors on one run is the audit trail working.
+
+**Event ids are the idempotency key — mint them client-side and REUSE on retry.** `Append`
+dedupes on `id` alone (§8 at-least-once): a lost-response retry that omits the id gets a
+fresh server-minted one and appends a duplicate (or draws `ErrIllegalTransition` on a
+transition kind) instead of returning the original committed event. So: mint
+`evt_<32 hex>` per event before the first attempt, resend the SAME event verbatim on
+retry. (`run_imported` is the exception — its dedupe key is `(repo, source, generated_at)`
+and the server refuses to mint a run without it.)
 
 ### Resume (F3)
 
 A fresh session resumes with: `driver_runs {live:true}` → `driver_state <run>` →
 `driver_verify <run>` → **reconcile external facts before any write** (branch exists? PR
 state? merge commit? — `stream_dispatched`'s branch/worktree + `stream_attempt`'s commit
-say where to look) → record missing events (idempotent) → continue the drive. Never act on
+say where to look) → record missing events (idempotent) → continue the drive.
+Honest gap (validation-gate finding): `Reduce` does not yet surface those locators —
+`RunState` carries statuses and PR facts but drops the `stream_dispatched` body and the
+attempt `commit`, so the resumer reads the run's `events.jsonl` alongside `driver_state`
+for them (exactly what the validation resume did). Exposing them in `RunState` is a
+tracked follow-up; until then the raw-ledger read is part of the documented F3 flow. Never act on
 ledger state alone; never record an event whose external fact you did not verify. An
 `ErrIllegalTransition` rejection means re-read `driver_state` and reconcile again — the
 contract correcting the agent (F2) is the plane working, not an error to force past.
@@ -71,20 +84,24 @@ The reviewer set is read from the target repo's `.ship.json` at drive time — n
 skill prose:
 
 ```json
-"review": {
-  "panel": [
-    {"name": "codex",   "trigger": "mention"},
-    {"name": "claude",  "trigger": "mention"},
-    {"name": "cursor",  "trigger": "mention"},
-    {"name": "copilot", "trigger": "reviewer-request"}
-  ],
-  "require": ["codex", "claude", "cursor"],
-  "settle_minutes": 15
+{
+  "review": {
+    "panel": [
+      {"name": "codex",   "trigger": "mention"},
+      {"name": "claude",  "trigger": "mention"},
+      {"name": "cursor",  "trigger": "mention"},
+      {"name": "copilot", "trigger": "reviewer-request"}
+    ],
+    "require": ["codex", "claude", "cursor"],
+    "settle_minutes": 15
+  }
 }
 ```
 
 - `trigger`: `mention` → standalone `@<name> review` comment; `auto` → the bot fires on PR
-  open, post nothing; `reviewer-request` → `gh pr edit --add-reviewer`.
+  open, post nothing; `reviewer-request` → `gh pr edit --add-reviewer` (copilot resolves
+  only via the API form: `gh api repos/<r>/pulls/<n>/requested_reviewers -f
+  'reviewers[]=copilot-pull-request-reviewer[bot]'`).
 - **Settled** = every `require` member reported, or its `settle_minutes` budget expired
   (record the cycle as degraded, naming the silent bots).
 - **No implicit default (operator decision 2026-07-16):** absent or empty `review` key = NO
@@ -123,12 +140,16 @@ dossier tasks so a driver manifest can be prepped from them.
   no `review` key gets no pings and a `review: unconfigured` record.
 - A work epic's tickets can become dossier tasks with no code written.
 
-## Follow-ups (tracked, not this PR)
+## Follow-ups (tracked in the dossier `session-engine-skill` phase, not this PR)
 
-- Promote `stream_attempt.commit` into the §5 contract payload (validation-gate finding —
-  off-contract today, tolerated by decoding, load-bearing for reconcile).
+- Promote `stream_attempt.commit` into the §5 contract payload AND expose the F3 resume
+  locators (`stream_dispatched` branch/worktree, attempt `commit`) in `RunState`, so
+  resume stops needing the raw-ledger read (dossier `promote-stream-attempt-commit`).
 - Document (or enforce) the event-id shape: spec says `evt_<ulid>`, server mints
-  `evt_<32hex>`, append validates neither.
+  `evt_<32hex>`, append validates neither (same task).
 - Minimal `driverstate render` (read-only pretty-print of `Reduce`) — §11(c) shipped on
-  `state --json` + GitHub diff instead.
-- Four-bot stanza rollout to the remaining personal repos' `.ship.json`.
+  `state --json` + GitHub diff instead; also fix the `state` read-path nit (`--run` flag,
+  no positional) (dossier `driverstate-render-minimal`).
+- Four-bot stanza rollout to the remaining personal repos' `.ship.json`, plus adding
+  `review` to ship's policy `TOP_LEVEL_KEYS` so the loader stops warning on it (dossier
+  `ship-json-panel-rollout`).
