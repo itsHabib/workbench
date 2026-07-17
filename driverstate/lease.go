@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
@@ -57,13 +58,19 @@ func (l Lease) Run() string { return l.run }
 
 // Claim takes durable ownership of run under dir for actor. It fails fast with
 // ErrLocked{Holder} if a live (non-expired) lease is already held, and steals an
-// expired one atomically. dir/run need not exist yet.
+// expired one. dir/run need not exist yet. run must be a single directory
+// component (no separators or traversal) so it cannot escape the state root.
+//
+// All lease mutation — Claim, Renew, Release — runs under a per-run lease lock
+// (lease.lock), so the read-check-mutate window is atomic against every other
+// mutator; the lease file itself is published by atomic rename so a lock-free
+// reader (requireLease) never observes a half-write.
 func Claim(dir, run, actor string) (Lease, error) {
 	if actor == "" {
 		return Lease{}, fmt.Errorf("driverstate: claim: actor is empty")
 	}
-	if run == "" {
-		return Lease{}, fmt.Errorf("driverstate: claim: run is empty")
+	if err := validateRunID(run); err != nil {
+		return Lease{}, fmt.Errorf("driverstate: claim: %w", err)
 	}
 	rd := runDir(dir, run)
 	if err := os.MkdirAll(rd, 0o700); err != nil {
@@ -71,8 +78,8 @@ func Claim(dir, run, actor string) (Lease, error) {
 	}
 	ttl := DefaultLeaseTTL
 	var lease Lease
-	err := withRetry(func() error {
-		l, e := claimOnce(dir, run, actor, ttl)
+	err := withLock(leaseLockPath(rd), func() error {
+		l, e := claimLocked(dir, run, actor, ttl)
 		if e != nil {
 			return e
 		}
@@ -82,134 +89,72 @@ func Claim(dir, run, actor string) (Lease, error) {
 	return lease, err
 }
 
-func claimOnce(dir, run, actor string, ttl time.Duration) (Lease, error) {
+// claimLocked decides the claim under the held lease lock: a live lease locks
+// the run out, an expired or corrupt one is taken over at the next generation,
+// and an absent one is created at generation 1. Because mutations are serialized
+// by the lock and every write is an atomic rename, a decode failure here is real
+// corruption — never a concurrent half-write — so it is safely stealable.
+func claimLocked(dir, run, actor string, ttl time.Duration) (Lease, error) {
 	rd := runDir(dir, run)
 	rec, err := readLease(rd)
-	if err != nil && !os.IsNotExist(err) {
-		// A corrupt lease record blocks nobody: treat it as stealable at gen 1.
-		return steal(dir, run, actor, ttl, 1, 0, false)
+	if os.IsNotExist(err) {
+		return installLease(dir, run, actor, ttl, 1)
 	}
-	if err == nil {
-		if !expired(rec) {
-			return Lease{}, ErrLocked{Holder: rec.Actor}
-		}
-		return steal(dir, run, actor, ttl, rec.Generation+1, rec.Generation, true)
+	if err != nil {
+		return installLease(dir, run, actor, ttl, 1)
 	}
-	// No lease file: create it exclusively at generation 1.
-	newRec := selfLease(actor, 1, ttl)
-	if err := createExclusiveJSON(leasePath(rd), newRec); err != nil {
-		if os.IsExist(err) {
-			return Lease{}, errRetry
-		}
-		return Lease{}, fmt.Errorf("driverstate: claim: %w", err)
+	if !expired(rec) {
+		return Lease{}, ErrLocked{Holder: rec.Actor}
 	}
-	return leaseFrom(dir, run, ttl, newRec), nil
+	return installLease(dir, run, actor, ttl, rec.Generation+1)
 }
 
-// steal race-safely replaces an expired (or corrupt) lease. Exactly one caller
-// wins the O_EXCL on a generation-suffixed temp, re-checks the current lease has
-// not advanced or gone live, then renames over lease.json. Mirrors gate's
-// takeover discipline — never "verify stale, then write in place" (TOCTOU).
-func steal(dir, run, actor string, ttl time.Duration, gen, prevGen uint64, havePrev bool) (Lease, error) {
-	rd := runDir(dir, run)
-	tmp := filepath.Join(rd, fmt.Sprintf("lease.steal.%d", gen))
+// installLease atomically publishes actor's lease at gen and returns the held
+// Lease. Called only under the lease lock.
+func installLease(dir, run, actor string, ttl time.Duration, gen uint64) (Lease, error) {
 	rec := selfLease(actor, gen, ttl)
-	if err := createExclusiveJSON(tmp, rec); err != nil {
-		if os.IsExist(err) {
-			return Lease{}, clearStaleSteal(tmp)
-		}
-		return Lease{}, fmt.Errorf("driverstate: claim: steal: %w", err)
-	}
-	cur, err := readLease(rd)
-	if err == nil {
-		// A readable lease is present now. Never overwrite a LIVE one — this
-		// guards the race where our original read caught a half-written lease
-		// (havePrev == false) that has since become another claimer's valid,
-		// live lease: backing off here keeps single-writer intact.
-		if !expired(cur) {
-			_ = os.Remove(tmp)
-			return Lease{}, ErrLocked{Holder: cur.Actor}
-		}
-		// Expired, but if we based this steal on a specific prior generation and
-		// it has since advanced, another steal already landed — retry fresh.
-		if havePrev && cur.Generation != prevGen {
-			_ = os.Remove(tmp)
-			return Lease{}, errRetry
-		}
-	}
-	// err != nil (absent or genuinely corrupt): the file is safe to take over.
-	if err := os.Rename(tmp, leasePath(rd)); err != nil {
-		_ = os.Remove(tmp)
-		return Lease{}, fmt.Errorf("driverstate: claim: rename lease: %w", err)
+	if err := writeLeaseFile(runDir(dir, run), rec); err != nil {
+		return Lease{}, err
 	}
 	return leaseFrom(dir, run, ttl, rec), nil
 }
 
-// clearStaleSteal removes a steal temp whose owner is dead (expired) so a
-// crashed stealer cannot leave a stuck lock, then signals a retry. A live steal
-// temp yields a retry too (the winner is about to rename it away).
-func clearStaleSteal(tmp string) error {
-	rec, err := readLeaseFile(tmp)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return errRetry
-		}
-		_ = os.Remove(tmp)
-		return errRetry
+// validateRunID rejects a run identifier that is not a single, safe directory
+// component — empty, a traversal ("." / ".."), or carrying a path separator or
+// volume — so filepath.Join(dir, run) can never escape the state root. The same
+// check guards every path built from a run (Claim here, Append via bindDir).
+func validateRunID(run string) error {
+	if run == "" {
+		return fmt.Errorf("run id is empty")
 	}
-	if !expired(rec) {
-		return errRetry
-	}
-	_ = os.Remove(tmp)
-	return errRetry
-}
-
-// Renew heartbeats the lease, pushing expiry out one TTL. It fails with
-// ErrLocked if the lease was stolen out from under this holder (generation or
-// actor drift). Renewal is atomic with takeover: it writes a generation-suffixed
-// temp, RE-verifies ownership under that temp, and only then renames — so a steal
-// that landed between the first check and the rename cannot be clobbered by a
-// stale holder's renewal (mirrors the steal discipline).
-func (l Lease) Renew() error {
-	rd := runDir(l.dir, l.run)
-	return withRetry(func() error {
-		return l.renewOnce(rd)
-	})
-}
-
-func (l Lease) renewOnce(rd string) error {
-	if _, err := l.ownsCurrent(rd); err != nil {
-		return err
-	}
-	rec := selfLeaseFor(l.actor, l.pid, l.gen, l.ttl)
-	tmp := filepath.Join(rd, fmt.Sprintf("lease.renew.%d", l.gen))
-	if err := createExclusiveJSON(tmp, rec); err != nil {
-		if os.IsExist(err) {
-			return errRetry
-		}
-		return fmt.Errorf("driverstate: renew: %w", err)
-	}
-	// Re-verify ownership now that the temp exists: a steal that installed a
-	// newer generation between the first check and here must not be overwritten.
-	if _, err := l.ownsCurrent(rd); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, leasePath(rd)); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("driverstate: renew: rename lease: %w", err)
+	if run == "." || run == ".." || strings.ContainsAny(run, `/\`) || run != filepath.Base(run) || filepath.VolumeName(run) != "" {
+		return fmt.Errorf("run id %q must be a bare directory name (no separators or traversal)", run)
 	}
 	return nil
 }
 
+// Renew heartbeats the lease, pushing expiry out one TTL. It fails with
+// ErrLocked if the lease was stolen out from under this holder (generation or
+// actor drift). The whole check-then-write runs under the lease lock, so a steal
+// cannot interleave between verifying ownership and rewriting the record.
+func (l Lease) Renew() error {
+	rd := runDir(l.dir, l.run)
+	return withLock(leaseLockPath(rd), func() error {
+		if _, err := l.ownsCurrent(rd); err != nil {
+			return err
+		}
+		return writeLeaseFile(rd, selfLeaseFor(l.actor, l.pid, l.gen, l.ttl))
+	})
+}
+
 // Release drops the lease if this holder still owns it. A lease already stolen
 // (generation drift) or already gone is left untouched — Release never removes
-// another writer's lease. Ownership is re-checked inside EVERY retry attempt,
-// not once before the loop: a steal that completes mid-retry must leave the
-// successor's lease intact.
+// another writer's lease. The check-then-remove runs under the lease lock, so a
+// steal cannot slip a successor's lease in between the ownership check and the
+// remove.
 func (l Lease) Release() error {
 	rd := runDir(l.dir, l.run)
-	return withRetry(func() error {
+	return withLock(leaseLockPath(rd), func() error {
 		if _, err := l.ownsCurrent(rd); err != nil {
 			if errors.Is(err, errNoLease) || errors.As(err, new(ErrLocked)) {
 				return nil // already gone, or a successor's — not ours to remove
@@ -244,9 +189,21 @@ func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 
 // requireLease verifies this holder still owns a live lease — Append's write
 // guard, called INSIDE the append lock so a lease lost while waiting for the
-// lock is caught before any write.
+// lock is caught before any write. The read is lock-free (it does not take the
+// lease lock), so on Windows it can transiently collide with a concurrent
+// Renew/steal rename; withRetry absorbs that (ErrLocked / errNoLease are
+// non-transient and return at once).
 func requireLease(l Lease) error {
-	cur, err := l.ownsCurrent(runDir(l.dir, l.run))
+	rd := runDir(l.dir, l.run)
+	var cur leaseRecord
+	err := withRetry(func() error {
+		c, e := l.ownsCurrent(rd)
+		if e != nil {
+			return e
+		}
+		cur = c
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -281,6 +238,10 @@ func runDir(dir, run string) string { return filepath.Join(dir, run) }
 
 func leasePath(rd string) string { return filepath.Join(rd, "lease.json") }
 
+// leaseLockPath is the per-run lease-mutation lock — held across Claim/Renew/
+// Release so their read-check-mutate windows are atomic against one another.
+func leaseLockPath(rd string) string { return filepath.Join(rd, "lease.lock") }
+
 func readLease(rd string) (leaseRecord, error) {
 	return readLeaseFile(leasePath(rd))
 }
@@ -297,16 +258,29 @@ func readLeaseFile(path string) (leaseRecord, error) {
 	return rec, nil
 }
 
-func createExclusiveJSON(path string, rec leaseRecord) error {
+// writeLeaseFile publishes rec as the run's lease by atomic rename: write a
+// temp, fsync, rename over lease.json. The rename is what lets a lock-free
+// reader (requireLease) always observe a complete lease, never a partial write —
+// the root fix for the half-written-lease misread. Callers hold the lease lock,
+// so the fixed temp name is race-free.
+func writeLeaseFile(rd string, rec leaseRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("driverstate: encode lease: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	tmp := filepath.Join(rd, "lease.tmp")
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
+		return fmt.Errorf("driverstate: open lease temp: %w", err)
+	}
+	if err := finishWrite(f, tmp, data); err != nil {
 		return err
 	}
-	return finishWrite(f, path, data)
+	if err := os.Rename(tmp, leasePath(rd)); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("driverstate: install lease: %w", err)
+	}
+	return nil
 }
 
 func finishWrite(f *os.File, path string, data []byte) error {
@@ -357,6 +331,9 @@ func isTransient(err error) bool {
 		return true
 	}
 	// Windows leaves a just-removed file in a delete-pending state; opening it
-	// returns ERROR_ACCESS_DENIED, which maps to a permission error. Retry.
-	return errors.Is(err, os.ErrPermission)
+	// returns ERROR_ACCESS_DENIED, which maps to a permission error. A lock-free
+	// read that collides with a concurrent atomic rename returns
+	// ERROR_SHARING_VIOLATION, which Go does not map to a permission error.
+	// Both clear within microseconds — retry.
+	return errors.Is(err, os.ErrPermission) || isSharingViolation(err)
 }

@@ -16,9 +16,12 @@ import (
 // original committed event). The returned Event carries the sealed Prev/Hash and
 // the truncated time actually persisted.
 //
-// The write window (all under the per-append lock): heal a torn tail → read the
-// head → validate (contract grammar, state machine, monotonicity, seq) → seal →
-// write + fsync. See the package doc for the chain rule.
+// The write window (all under the per-append lock): revalidate the lease → heal
+// a torn tail → read the head → validate (contract grammar, state machine,
+// monotonicity, seq) → seal → write + fsync. A run_imported additionally holds a
+// state-root import lock across the dedupe scan and its first append, so two
+// concurrent imports of the same key into different runs cannot both mint a run.
+// See the package doc for the chain rule.
 func Append(dir string, l Lease, e Event) (Event, error) {
 	// Bind the write to the lease's OWN dir: a caller passing a dir that
 	// disagrees would validate ownership in one run root and write into another
@@ -37,12 +40,32 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 	// is byte-stable across the Go and TS emitters (spec §5).
 	e.Time = e.Time.UTC().Truncate(time.Second)
 
+	// A run_imported serializes its dedupe-scan-then-append under a state-root
+	// import lock so concurrent imports of one key into DIFFERENT runs cannot
+	// both observe "not found" and each commit. Only imports pay this cost; the
+	// import lock is always taken before the per-run append lock, so no cycle.
+	if e.Kind == dsc.KindRunImported {
+		var out Event
+		err := withLock(importLockPath(l.dir), func() error {
+			var e2 error
+			out, e2 = appendLocked(l, e)
+			return e2
+		})
+		return out, err
+	}
+	return appendLocked(l, e)
+}
+
+// appendLocked performs the validated, hash-chained write under the per-run
+// append lock. Callers appending a run_imported hold the state-root import lock
+// around this call; every other kind takes only the append lock here.
+func appendLocked(l Lease, e Event) (Event, error) {
 	rd := runDir(l.dir, l.run)
-	lockPath := filepath.Join(rd, "append.lock")
-	if err := acquireAppendLock(lockPath); err != nil {
+	lockPath := appendLockPath(rd)
+	if err := acquireLock(lockPath); err != nil {
 		return Event{}, err
 	}
-	defer releaseAppendLock(lockPath)
+	defer releaseLock(lockPath)
 
 	// Revalidate the lease INSIDE the lock: a holder that passed a pre-lock
 	// check could have waited behind another append until its lease expired and
@@ -69,6 +92,8 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 	// Import dedupe (spec §5): a run_imported whose (repo, source, generated_at)
 	// already minted a run — in this dir or any sibling — returns that original
 	// event, so a retried import with a fresh ID/run cannot mint a second run.
+	// The state-root import lock (held by Append) makes this scan-then-write
+	// atomic across runs.
 	if e.Kind == dsc.KindRunImported {
 		orig, found, err := dedupeImport(l.dir, e)
 		if err != nil {
@@ -99,11 +124,18 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 	return e, nil
 }
 
-// bindDir rejects an Append whose dir does not name the lease's own state root.
-// A zero-value lease (no run) can never write.
+func appendLockPath(rd string) string  { return filepath.Join(rd, "append.lock") }
+func importLockPath(dir string) string { return filepath.Join(dir, "import.lock") }
+
+// bindDir rejects an Append whose dir does not name the lease's own state root,
+// and whose run is not a safe single path component. A zero-value lease (no run)
+// can never write.
 func bindDir(dir string, l Lease) error {
 	if l.run == "" {
 		return errNoLease
+	}
+	if err := validateRunID(l.run); err != nil {
+		return fmt.Errorf("driverstate: append: %w", err)
 	}
 	if filepath.Clean(dir) != filepath.Clean(l.dir) {
 		return fmt.Errorf("driverstate: append: dir %q does not match lease dir %q", dir, l.dir)
@@ -164,12 +196,15 @@ func dedupeImport(dir string, e Event) (Event, bool, error) {
 // importInRun returns the run_imported event in one run dir matching key, if any.
 // A missing or corrupt sibling ledger is not a hard error here — it simply holds
 // no matching import, so a fresh import is never blocked by an unrelated bad run.
+// The read is torn-tail tolerant: only bytes through the last complete newline
+// are decoded (we do NOT heal — we don't hold that run's lock), so a sibling
+// caught mid-append cannot hide its already-committed import from the scan.
 func importInRun(rd string, key importIdent) (Event, bool) {
 	data, err := os.ReadFile(filepath.Join(rd, "events.jsonl"))
 	if err != nil {
 		return Event{}, false
 	}
-	events, err := decodeLedger(data)
+	events, err := decodeLedger(trimTornTail(data))
 	if err != nil {
 		return Event{}, false
 	}
@@ -423,6 +458,14 @@ func lastNewline(data []byte) int64 {
 	return int64(i + 1)
 }
 
+// trimTornTail returns data through its last complete line, dropping any partial
+// bytes a crash left after the final newline. Unlike readAndHealLedger it does
+// NOT truncate the file — the read-only dedupe scan uses it on sibling ledgers
+// whose lock it does not hold.
+func trimTornTail(data []byte) []byte {
+	return data[:lastNewline(data)]
+}
+
 // decodeLedger parses complete lines into events AND verifies the persisted hash
 // chain: every line must decode, each event's Hash must seal its own canonical
 // bytes, and each Prev must link to the prior event's Hash. Any failure is a loud
@@ -483,42 +526,4 @@ func appendSynced(path string, line []byte, offset int64) error {
 		return fmt.Errorf("driverstate: close ledger: %w", err)
 	}
 	return nil
-}
-
-// acquireAppendLock takes the per-append byte-race lock: an O_EXCL create under
-// the same retry discipline as the lease. A lock left behind by a crashed writer
-// self-clears: an existing lock older than DefaultLeaseTTL is broken (a live
-// append completes in milliseconds, so only an orphan survives that window),
-// then the create is retried.
-func acquireAppendLock(path string) error {
-	return withRetry(func() error {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			return f.Close()
-		}
-		if os.IsExist(err) {
-			breakStaleAppendLock(path)
-			return errRetry
-		}
-		return fmt.Errorf("driverstate: acquire append lock: %w", err)
-	})
-}
-
-// breakStaleAppendLock removes an append lock whose mtime is older than the
-// lease TTL — a writer that crashed holding it must not wedge the run forever. A
-// fresh lock (a live writer mid-append) is left untouched. Best-effort: a lost
-// race to remove it just means another attempt retries.
-func breakStaleAppendLock(path string) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	if time.Since(info.ModTime()) < DefaultLeaseTTL {
-		return
-	}
-	_ = os.Remove(path)
-}
-
-func releaseAppendLock(path string) {
-	_ = os.Remove(path)
 }

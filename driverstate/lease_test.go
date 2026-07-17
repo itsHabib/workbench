@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -140,6 +141,96 @@ func TestClaimCorruptLeaseIsStealable(t *testing.T) {
 	if _, err := Claim(dir, "dsr_run1", "session:fresh"); err != nil {
 		t.Fatalf("corrupt lease should be stealable, got %v", err)
 	}
+}
+
+// Cycle 2, cluster 4 — a run id that is empty, a traversal, or carries a path
+// separator/volume must be rejected before any path is built, so a claim cannot
+// escape the state root.
+func TestTraversalRunIDRejected(t *testing.T) {
+	dir := t.TempDir()
+	bad := []string{"", ".", "..", "../evil", "a/b", `a\b`, "sub/dsr_run1"}
+	for _, run := range bad {
+		if _, err := Claim(dir, run, "session:a"); err == nil {
+			t.Fatalf("Claim should reject run id %q", run)
+		}
+	}
+	// A bare, safe id still works, and nothing was created outside dir.
+	if _, err := Claim(dir, "dsr_ok", "session:a"); err != nil {
+		t.Fatalf("valid run id should claim, got %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(dir)); len(entries) != 1 {
+		t.Fatalf("a rejected traversal must not create siblings of the state root, got %d entries", len(entries))
+	}
+}
+
+// Cycle 2, cluster 1 — a partial/garbage lease.json (as a half-write or crash
+// could leave) must resolve to a single, well-formed, EXCLUSIVE owner: the first
+// claimer heals it into a valid lease, and a second claimer is then locked out —
+// never a second winner.
+func TestPartialLeaseFileClaimIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	rd := filepath.Join(dir, "dsr_run1")
+	if err := os.MkdirAll(rd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A zero-byte lease.json — the exact artifact the old non-atomic create left
+	// visible between O_EXCL create and the write.
+	if err := os.WriteFile(filepath.Join(rd, "lease.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Claim(dir, "dsr_run1", "session:a"); err != nil {
+		t.Fatalf("claim over a partial lease should heal and succeed, got %v", err)
+	}
+	if _, err := Claim(dir, "dsr_run1", "session:b"); !errors.As(err, new(ErrLocked)) {
+		t.Fatalf("second claim must be locked out by the healed lease, got %v", err)
+	}
+}
+
+// Cycle 2, cluster 1 — the lease is published by atomic rename, so a lock-free
+// reader never observes a half-write. Churn Claim/Release on one goroutine while
+// another reads the raw record: it must always see a complete lease or nothing,
+// never a decode error.
+func TestLeasePublishedAtomically(t *testing.T) {
+	withTTL(t, time.Second)
+	dir := t.TempDir()
+	rd := filepath.Join(dir, "dsr_run1")
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			l, err := Claim(dir, "dsr_run1", "session:a")
+			if err != nil {
+				continue
+			}
+			_ = l.Release()
+		}
+		close(done)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			// A complete read, ENOENT (between remove and next create), or a
+			// transient Windows sharing-violation are all fine. A decode error
+			// would mean partial CONTENT was read — the non-atomic symptom.
+			_, err := readLease(rd)
+			if err == nil || os.IsNotExist(err) || isTransient(err) {
+				continue
+			}
+			t.Errorf("reader saw a non-atomic lease (partial content): %v", err)
+			return
+		}
+	}()
+	wg.Wait()
 }
 
 func TestConcurrentClaimSingleWinner(t *testing.T) {

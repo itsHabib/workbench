@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -339,6 +340,88 @@ func TestImportDifferentGeneratedAtMintsRun(t *testing.T) {
 	}
 	if events := readLedger(t, dir, "dsr_run2"); len(events) != 1 {
 		t.Fatalf("run2 should hold its own import, got %d events", len(events))
+	}
+}
+
+// Cycle 2, cluster 2 — two concurrent imports of the SAME (repo,source,
+// generated_at) into DIFFERENT run dirs must serialize under the state-root
+// import lock: exactly one run's ledger is written, and both Append calls return
+// that one committed event.
+func TestConcurrentImportDedupe(t *testing.T) {
+	dir := t.TempDir()
+	body := importBody("itsHabib/wb", "docs/driver.md", "2026-07-16T00:00:00Z", "dss_a")
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make([]Event, 2)
+	errs := make([]error, 2)
+	runs := []string{"dsr_run1", "dsr_run2"}
+	for i := range runs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			l, err := Claim(dir, runs[i], "session:a")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			<-start
+			results[i], errs[i] = Append(dir, l, ev("evt_"+runs[i], dsc.KindRunImported, "", "session:a", baseTime, body))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("import %d: %v", i, err)
+		}
+	}
+	if results[0].Hash != results[1].Hash {
+		t.Fatalf("both imports should resolve to one committed event: %q vs %q", results[0].Hash, results[1].Hash)
+	}
+	ledgers := 0
+	for _, run := range runs {
+		if _, err := os.Stat(filepath.Join(dir, run, "events.jsonl")); err == nil {
+			ledgers++
+		}
+	}
+	if ledgers != 1 {
+		t.Fatalf("exactly one run should have minted a ledger, got %d", ledgers)
+	}
+}
+
+// Cycle 2, cluster 3 — a sibling run mid-append (a committed import followed by a
+// crash-torn partial line with no newline) must NOT hide its committed import
+// from the dedupe scan: the retried import still resolves to the original.
+func TestTornTailSiblingStillDedupes(t *testing.T) {
+	dir := t.TempDir()
+	l1, _ := Claim(dir, "dsr_run1", "session:a")
+	orig := mustAppend(t, dir, l1, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "2026-07-16T00:00:00Z", "dss_a")))
+	if err := l1.Release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	// Simulate run1 crash-torn mid-append: a partial next line, no newline.
+	ledger := filepath.Join(dir, "dsr_run1", "events.jsonl")
+	f, err := os.OpenFile(ledger, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"id":"evt_torn","v":"driver-state-v0.1.0","kind":"stream_dispa`); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	l2, _ := Claim(dir, "dsr_run2", "session:b")
+	dup, err := Append(dir, l2, ev("evt_2", dsc.KindRunImported, "", "session:b", baseTime.Add(time.Hour), importBody("r", "s", "2026-07-16T00:00:00Z", "dss_a")))
+	if err != nil {
+		t.Fatalf("dedupe over torn sibling: %v", err)
+	}
+	if dup.Hash != orig.Hash {
+		t.Fatalf("retried import should resolve to run1's original despite its torn tail, got %q want %q", dup.Hash, orig.Hash)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dsr_run2", "events.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("run2 should not have minted a ledger, stat = %v", err)
 	}
 }
 
