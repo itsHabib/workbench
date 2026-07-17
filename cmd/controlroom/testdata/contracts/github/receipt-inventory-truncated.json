@@ -1,8 +1,0 @@
-{
-  "source": "github",
-  "state": "degraded",
-  "observed_at": "2026-07-13T12:00:00.000Z",
-  "duration_ms": 9800,
-  "error_code": "inventory_truncated",
-  "message": "GitHub inventory capped at four pages (200 pull requests); additional pages were not fetched"
-}

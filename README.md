@@ -58,6 +58,4 @@ golangci-lint run ./...
 go test ./...
 ```
 
-Production Go is standard-library-only. The sole test-tooling exception is an
-exact, lockfile-pinned Playwright Node dependency under `cmd/controlroom/e2e`;
-it is never linked into a production binary.
+Production Go is standard-library-only, with no third-party dependencies.

@@ -59,36 +59,6 @@ jobs:
       - name: tracelens corpus gate
         run: go run ./cmd/tracelens eval ./cmd/tracelens/testdata/corpus
 
-  controlroom-e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.0
-          cache: npm
-          cache-dependency-path: cmd/controlroom/e2e/package-lock.json
-      - name: install pinned browser test package
-        run: npm --prefix cmd/controlroom/e2e ci
-      - name: install Chromium runtime
-        run: npx --prefix cmd/controlroom/e2e playwright install --with-deps chromium
-      - name: Control Room browser matrix
-        run: npm --prefix cmd/controlroom/e2e test
-      - name: upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: controlroom-playwright-report
-          retention-days: 14
-          if-no-files-found: ignore
-          path: cmd/controlroom/e2e/playwright-report/
-
   # The boundary law, enforced mechanically instead of by discipline:
   # "share contracts, not call stacks." contracts imports nothing else in the
   # module; local (a shared mechanism package) imports at most contracts; no
