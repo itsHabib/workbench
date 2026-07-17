@@ -8,7 +8,24 @@ import (
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
 )
+
+// parseFloorOutput decodes the floor binary's JSON and refuses an absent or
+// unknown tier. tier.Rank maps unknown values to the highest rank and the
+// capability check only bounds the grant ceiling — so recording an invalid
+// floor as a passing verdict would read as "assessed" when nothing was.
+// No valid tier, no verdict: an operational error, fail closed.
+func parseFloorOutput(out []byte) (floorResult, error) {
+	var res floorResult
+	if err := json.Unmarshal(out, &res); err != nil {
+		return floorResult{}, fmt.Errorf("verify: parse floor output: %w", err)
+	}
+	if !tier.Valid(res.Floor) {
+		return floorResult{}, fmt.Errorf("verify: triage-floor returned invalid tier %q", res.Floor)
+	}
+	return res, nil
+}
 
 // floorResult mirrors the triage floor binary's JSON output.
 type floorResult struct {
@@ -45,9 +62,9 @@ func Floor(st *state.Store, run, diffEvidenceID, floorBin string, subject Subjec
 	if err := cmd.Run(); err != nil {
 		return state.Artifact{}, fmt.Errorf("verify: triage-floor: %w", err)
 	}
-	var res floorResult
-	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
-		return state.Artifact{}, fmt.Errorf("verify: parse floor output: %w", err)
+	res, err := parseFloorOutput(out.Bytes())
+	if err != nil {
+		return state.Artifact{}, err
 	}
 
 	v := Verdict{

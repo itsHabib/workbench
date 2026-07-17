@@ -183,7 +183,54 @@ func (s *Store) rebind(prevHead, newHead string) error {
 	if ok && rec.Count >= count {
 		return fmt.Errorf("%w: anchor pinned %d entries, log has %d", ErrRebindTruncation, rec.Count, count)
 	}
+	// And it must never reseal a rewritten prefix: a state-dir writer who
+	// rewrites the log in place (rehashing the chain into self-consistency)
+	// and then lets one legitimate append land would otherwise have the
+	// forgery HMAC-bound here as "crash recovery". Crash recovery is only
+	// recovery when the entry at the pinned count still carries the pinned
+	// head — prove it before resealing.
+	if ok {
+		head, err := s.headAt(rec.Count)
+		if err != nil {
+			return err
+		}
+		if head != rec.Head {
+			return fmt.Errorf("%w: anchor pinned head %s at entry %d, log has %s", ErrRebindRewrite, short(rec.Head), rec.Count, short(head))
+		}
+	}
 	return s.anchor.bind(newHead, count)
+}
+
+// headAt returns the chain hash of the nth log entry (1-based). Used only on
+// rebind's reconcile path, to prove the anchored prefix survived intact before
+// the anchor advances over it.
+func (s *Store) headAt(n int) (string, error) {
+	f, err := os.Open(s.logPath())
+	if err != nil {
+		return "", fmt.Errorf("state: open log: %w", err)
+	}
+	defer f.Close()
+	i := 0
+	var head string
+	err = eachLine(f, func(line []byte) error {
+		i++
+		if i != n {
+			return nil
+		}
+		var a Artifact
+		if err := json.Unmarshal(line, &a); err != nil {
+			return fmt.Errorf("state: parse log entry %d: %w", n, err)
+		}
+		head = a.Hash
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if head == "" {
+		return "", fmt.Errorf("state: log has fewer than %d entries", n)
+	}
+	return head, nil
 }
 
 // count returns the number of log lines. Used off the steady-state path —

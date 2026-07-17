@@ -79,19 +79,17 @@ wiring `gate` into the merge tail.
   window to a sub-call race); airtight variant fetches the under-cap diff SHA-pinned via the
   `compare` endpoint. The fallback path already has this property.
 
-- [ ] **Refuse to reseal a mismatched anchor as crash recovery.**
-  Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17), in byte-identically moved
-  code — deferred, not the relocation's to fix. A state-dir writer that rewrites a same-length log
-  and recomputes the unkeyed hash chain leaves the anchor count pinned; the next legitimate
-  `Append` makes `count > rec.Count`, and the reseal branch then HMAC-binds the rewritten head, so
-  `audit` reports the forged history intact. Crash recovery must not launder a rewrite: prove the
-  intervening entries are the anchored ones (e.g. verify the anchored head hash still appears in
-  the chain at the pinned count) before resealing, refuse otherwise.
+- [x] **Refuse to reseal a mismatched anchor as crash recovery.**
+  Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17); the gate judge blocked
+  the move until fixed, so it landed in the same PR as a separate reviewed commit (the move commit
+  itself stays byte-identical and A/B-verified). **Landed:** rebind's reconcile path proves the
+  entry at the pinned count still carries the pinned head before resealing; a rewritten prefix
+  refuses with `ErrRebindRewrite` and Audit keeps failing (pinned by
+  `TestAppendAfterRewriteRefusesReseal`).
 
-- [ ] **Validate the floor's tier before recording its verdict.**
-  Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17), in byte-identically moved
-  code — deferred, not the relocation's to fix. `triage-floor` exiting 0 with valid JSON but an
-  absent/unknown `floor` records a passing code verdict carrying an invalid tier; `tier.Rank` maps
-  unknown to rank 3 and `TierWithin` checks only the grant ceiling, so a T3 grant (the CI canary's
-  ephemeral mint is exactly that) can clear a run that never got a valid risk-floor assessment.
-  Fail closed: `tier.Valid(res.Floor)` before the verdict is recorded, refuse otherwise.
+- [x] **Validate the floor's tier before recording its verdict.**
+  Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17); the gate judge blocked
+  the move until fixed, so it landed in the same PR as a separate reviewed commit. **Landed:**
+  `parseFloorOutput` refuses an absent or unknown tier (`tier.Valid`) as an operational error
+  before any verdict is recorded — no valid floor, no verdict (pinned by the
+  `TestParseFloorOutput*` cases).

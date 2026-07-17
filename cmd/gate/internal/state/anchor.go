@@ -60,6 +60,13 @@ var ErrAnchorMissing = errors.New("anchor_missing")
 // refuses instead and Audit keeps reporting the loss.
 var ErrRebindTruncation = errors.New("rebind_truncation")
 
+// ErrRebindRewrite fires when an append would advance the anchor over a log
+// whose entry at the pinned count no longer carries the pinned head — the
+// anchored prefix was rewritten (and rehashed into a self-consistent chain).
+// Resealing would HMAC-bind the forged history as crash recovery, so the
+// append refuses instead and Audit keeps reporting the mismatch.
+var ErrRebindRewrite = errors.New("rebind_rewrite")
+
 // bind records the current head and count under the anchor's key. It runs on
 // the append path inside the store lock, so it may create the key on first use
 // — that is the one place a fresh anchor key is legitimate.

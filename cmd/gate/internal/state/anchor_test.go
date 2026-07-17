@@ -366,3 +366,57 @@ func TestAnchorSelfHealsAfterCrash(t *testing.T) {
 		t.Fatalf("audit still failing after a recovery append: %+v", res)
 	}
 }
+
+// The reseal-laundering attack: rewrite the log in place (rehashed into a
+// self-consistent chain, same length — the anchor is the only witness), then
+// let one legitimate append land. rebind's reconcile path must refuse to
+// HMAC-bind the forged prefix as "crash recovery"; the anchor keeps pinning
+// the real history and Audit keeps failing.
+func TestAppendAfterRewriteRefusesReseal(t *testing.T) {
+	st := openAnchored(t)
+	appendN(t, st, 5)
+
+	recBefore, ok, err := st.anchor.read()
+	if err != nil || !ok {
+		t.Fatalf("anchor not readable after appends: ok=%v err=%v", ok, err)
+	}
+
+	all, err := st.List(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all[2].Body = json.RawMessage(`{"seq":999,"forged":true}`)
+	rechain(t, all)
+	lines := make([][]byte, len(all))
+	for i, a := range all {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines[i] = raw
+	}
+	writeLines(t, st, lines)
+
+	// The legitimate append lands in the log (fsync'd before the anchor
+	// moves) but the anchor must refuse to advance over the forged prefix.
+	_, err = st.Append(KindEvidence, NewRunID(), nil, map[string]int{"seq": 5})
+	if !errors.Is(err, ErrRebindRewrite) {
+		t.Fatalf("append over a rewritten prefix did not refuse reseal: %v", err)
+	}
+
+	recAfter, ok, err := st.anchor.read()
+	if err != nil || !ok {
+		t.Fatalf("anchor not readable after refused reseal: ok=%v err=%v", ok, err)
+	}
+	if recAfter != recBefore {
+		t.Fatalf("anchor moved despite refusal: before=%+v after=%+v", recBefore, recAfter)
+	}
+
+	res, err := st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatal("audit reported intact after a rewrite + refused reseal")
+	}
+}
