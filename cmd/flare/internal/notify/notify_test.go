@@ -106,6 +106,35 @@ func TestSlackMessageRendersOnce(t *testing.T) {
 	}
 }
 
+// TestSlackEscalationHasPRButton pins the acceptance for the escalation
+// click-target: an escalation naming a PR renders the same View PR button and
+// header subject verdicts get.
+func TestSlackEscalationHasPRButton(t *testing.T) {
+	msg := renderSlackMessage("C1", event.Event{
+		Source:   "gate",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "repo": "itsHabib/workbench", "number": "64",
+		},
+	})
+	blob, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	for _, want := range []string{
+		`"url":"https://github.com/itsHabib/workbench/pull/64"`,
+		"View PR #64",
+		"workbench#64",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("escalation message missing %q\n%s", want, s)
+		}
+	}
+}
+
 func TestSlackVerdictHasPRButton(t *testing.T) {
 	msg := renderSlackMessage("C1", event.Event{
 		Source:   "gate",

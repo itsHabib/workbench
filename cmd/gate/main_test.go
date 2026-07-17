@@ -111,6 +111,67 @@ func TestExitCodesAreStable(t *testing.T) {
 	}
 }
 
+// TestEscalationCarriesPRSubject pins the escalation click-target contract: a
+// parked_for_judgment escalation names the PR it parked (repo + number) so a
+// notification sink can link straight to it, while action outcomes stay
+// subject-free (their join runs outcome → parent verdict).
+func TestEscalationCarriesPRSubject(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := state.NewRunID()
+	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 41, HeadSHA: "abc"}, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false); err != nil || code != codeParked {
+		t.Fatalf("escalate: code %d err %v", code, err)
+	}
+	var subject struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}
+	unmarshalKindBody(t, e, run, state.KindEscalation, &subject)
+	if subject.Repo != "o/r" || subject.Number != 41 {
+		t.Fatalf("escalation must carry its PR subject, got %+v", subject)
+	}
+
+	run2 := state.NewRunID()
+	v2 := reducedVerdict(verify.Subject{Repo: "o/r", Number: 42, HeadSHA: "abc"}, verify.DecisionBlock, "T0")
+	id2 := recordReduced(t, e, run2, v2)
+	if _, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false); err != nil || code != codeBlocked {
+		t.Fatalf("block: code %d err %v", code, err)
+	}
+	var actionSubject struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}
+	unmarshalKindBody(t, e, run2, state.KindAction, &actionSubject)
+	if actionSubject.Repo != "" || actionSubject.Number != 0 {
+		t.Fatalf("action body must stay subject-free, got %+v", actionSubject)
+	}
+}
+
+// unmarshalKindBody decodes the body of run's sole artifact of the given kind.
+func unmarshalKindBody(t *testing.T, e env, run, kind string, into any) {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.Kind != kind {
+			continue
+		}
+		if err := json.Unmarshal(a.Body, into); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Fatalf("run %s has no %s artifact", run, kind)
+}
+
 // TestResultEmitsJudgedHeadSHA pins the SHA-binding fix: an evidence-backed
 // result carries head_sha under that exact JSON key, set to the head gate
 // judged, so a caller (the enforcement workflow) can bind an out-of-band commit

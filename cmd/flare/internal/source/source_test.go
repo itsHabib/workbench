@@ -66,6 +66,27 @@ func TestGateLogLiftsEscalationsAndNonPassVerdicts(t *testing.T) {
 	}
 }
 
+// TestGateLogEscalationCarriesPRSubject pins the escalation click-target: an
+// escalation body naming a PR surfaces repo+number for notify's button, and
+// one naming none stays subjectless so no button is invented.
+func TestGateLogEscalationCarriesPRSubject(t *testing.T) {
+	withPR := `{"id":"esc_pr","kind":"escalation","run":"run_7","time":"2026-07-08T16:39:00Z","body":{"outcome":"parked_for_judgment","question":"your call","repo":"itsHabib/workbench","number":64},"prev":"h1","hash":"h2"}`
+	src := gateFile(t, escLine+"\n"+withPR+"\n")
+	events, _, err := Read(src, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("want both escalations, got %d: %+v", len(events), events)
+	}
+	if f := events[0].Fields; f["repo"] != "" || f["number"] != "" {
+		t.Fatalf("subjectless escalation must not invent a PR, got %+v", f)
+	}
+	if f := events[1].Fields; f["repo"] != "itsHabib/workbench" || f["number"] != "64" {
+		t.Fatalf("escalation must surface its PR subject, got %+v", f)
+	}
+}
+
 func TestTornFinalLineIsLeftForNextPoll(t *testing.T) {
 	src := gateFile(t, escLine+"\n"+`{"id":"esc_2","kind":"esc`)
 	events, cur, err := Read(src, Cursor{})

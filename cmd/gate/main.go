@@ -431,6 +431,13 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		for k, v := range extra {
 			body[k] = v
 		}
+		// An escalation pages the operator; carry the PR subject so a
+		// notification sink can render a direct click-target instead of a
+		// bare run id.
+		if kind == state.KindEscalation && reduced.Subject.Repo != "" && reduced.Subject.Number > 0 {
+			body["repo"] = reduced.Subject.Repo
+			body["number"] = reduced.Subject.Number
+		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		_, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
