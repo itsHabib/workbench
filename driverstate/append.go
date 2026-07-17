@@ -132,7 +132,7 @@ func importLockPath(dir string) string { return filepath.Join(dir, "import.lock"
 // can never write.
 func bindDir(dir string, l Lease) error {
 	if l.run == "" {
-		return errNoLease
+		return ErrNotHolder
 	}
 	if err := validateRunID(l.run); err != nil {
 		return fmt.Errorf("driverstate: append: %w", err)
@@ -149,6 +149,20 @@ type importIdent struct {
 	repo        string
 	source      string
 	generatedAt string
+}
+
+// ImportHasDedupeKey reports whether a run_imported event carries the full
+// (repo, source, generated_at) import key — the anchor that makes a retried
+// import with a freshly minted run idempotent (Append dedupes on it). A client
+// that mints a run for an omitted-run import uses this to refuse a key-less
+// import a lost-response retry could duplicate. Non-import events, and imports
+// missing any key component, report false.
+func ImportHasDedupeKey(e Event) bool {
+	if e.Kind != dsc.KindRunImported {
+		return false
+	}
+	_, ok := importKey(e)
+	return ok
 }
 
 // importKey extracts the dedupe key from a run_imported body. It reports false

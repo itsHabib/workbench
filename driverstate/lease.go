@@ -127,6 +127,25 @@ func installLease(dir, run, actor string, ttl time.Duration, gen uint64) (Lease,
 	return leaseFrom(dir, run, ttl, rec), nil
 }
 
+// ExpireLeaseForTest forces the on-disk lease for run under dir to be already
+// expired, atomically — it holds the lease lock and rewrites the record through
+// the same write path Renew/Claim use (writeLeaseFile), so a lock-free reader
+// never sees a torn file. It exists ONLY so tests (in this package and its MCP
+// consumer) can drive expiry deterministically: sleeping a real TTL to expire a
+// lease always risks losing the wall-clock race on a loaded or -race runner.
+// Not a production operation — leases expire by their own clock.
+func ExpireLeaseForTest(dir, run string) error {
+	rd := runDir(dir, run)
+	return withLock(leaseLockPath(rd), func() error {
+		rec, err := readLease(rd)
+		if err != nil {
+			return err
+		}
+		rec.ExpiresAt = time.Now().Add(-time.Hour)
+		return writeLeaseFile(rd, rec)
+	})
+}
+
 // validateRunID rejects a run identifier that is not a single, safe directory
 // component — empty, a traversal ("." / ".."), or carrying a path separator or
 // volume — so filepath.Join(dir, run) can never escape the state root. The same
@@ -143,7 +162,7 @@ func validateRunID(run string) error {
 
 // Renew heartbeats the lease, pushing expiry out one TTL. It fails with
 // ErrLocked if the lease was stolen out from under this holder (generation or
-// actor drift), and with errLeaseExpired if this holder's own lease has already
+// actor drift), and with ErrLeaseExpired if this holder's own lease has already
 // lapsed — staleness is expiry, so an expired holder re-Claims rather than
 // resurrecting a lease another writer may already be about to steal. The whole
 // check-then-write runs under the lease lock, so a steal cannot interleave
@@ -156,7 +175,7 @@ func (l Lease) Renew() error {
 			return err
 		}
 		if expired(cur) {
-			return errLeaseExpired
+			return ErrLeaseExpired
 		}
 		return writeLeaseFile(rd, selfLeaseFor(l.actor, l.pid, l.gen, l.ttl))
 	})
@@ -173,7 +192,7 @@ func (l Lease) Release() error {
 	return withLock(leaseLockPath(rd), func() error {
 		cur, err := l.ownsCurrent(rd)
 		if err != nil {
-			if errors.Is(err, errNoLease) || errors.As(err, new(ErrLocked)) {
+			if errors.Is(err, ErrNotHolder) || errors.As(err, new(ErrLocked)) {
 				return nil // already released/stolen — not ours to touch
 			}
 			return err
@@ -184,14 +203,14 @@ func (l Lease) Release() error {
 }
 
 // ownsCurrent reads the live lease record and confirms this holder still owns
-// it. It returns errNoLease when the record is gone OR this holder has already
+// it. It returns ErrNotHolder when the record is gone OR this holder has already
 // released it, and ErrLocked{Holder} on a generation/actor drift (a steal). The
 // returned record lets callers layer an expiry check on top (requireLease).
 func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 	cur, err := readLease(rd)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return leaseRecord{}, errNoLease
+			return leaseRecord{}, ErrNotHolder
 		}
 		return leaseRecord{}, err
 	}
@@ -199,7 +218,7 @@ func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 		return leaseRecord{}, ErrLocked{Holder: cur.Actor}
 	}
 	if cur.Released {
-		return leaseRecord{}, errNoLease
+		return leaseRecord{}, ErrNotHolder
 	}
 	return cur, nil
 }
@@ -208,7 +227,7 @@ func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
 // guard, called INSIDE the append lock so a lease lost while waiting for the
 // lock is caught before any write. The read is lock-free (it does not take the
 // lease lock), so on Windows it can transiently collide with a concurrent
-// Renew/steal rename; withRetry absorbs that (ErrLocked / errNoLease are
+// Renew/steal rename; withRetry absorbs that (ErrLocked / ErrNotHolder are
 // non-transient and return at once).
 func requireLease(l Lease) error {
 	rd := runDir(l.dir, l.run)
@@ -225,7 +244,7 @@ func requireLease(l Lease) error {
 		return err
 	}
 	if expired(cur) {
-		return errLeaseExpired
+		return ErrLeaseExpired
 	}
 	return nil
 }
