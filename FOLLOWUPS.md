@@ -131,3 +131,12 @@ retest wasteful.
 `claude.yml` is committed but @claude is **not** requested until the operator
 sets the `CLAUDE_CODE_OAUTH_TOKEN` repo secret. Once set, @claude joins the
 reviewer set (@codex, @cursor) on the next PR.
+
+## cmd/triage: gocognit debt in internal/floor (2026-07-17)
+
+`golangci-lint run ./...` flags `manifestIsDev`, `migrationStatements`, and
+`ParseUnifiedDiff` in `cmd/triage/internal/floor` for cognitive complexity.
+Pre-existing — the code arrived byte-identical with the tenant move (#51) and
+was outside every subsequent PR's diff. Fix is the house-style extraction
+(≤2 nesting per scope) the next time triage is touched; not worth a
+standalone churn PR.
