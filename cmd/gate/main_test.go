@@ -622,3 +622,57 @@ func TestNewEphemeralEnvIsThrowaway(t *testing.T) {
 		t.Fatalf("cleanup left the ephemeral key behind: %q (stat err: %v)", e.keyPath, err)
 	}
 }
+
+func TestExplainHTMLFlag(t *testing.T) {
+	root := t.TempDir()
+	fixtureSrc := observeFixtureDir(t)
+	fixtureDst := filepath.Join(root, "state")
+	if err := copyDir(fixtureSrc, fixtureDst); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "trace.html")
+
+	var buf bytes.Buffer
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	err = cmdExplain([]string{"-state", fixtureDst, "-run", "run_explain_fixture", "-html", "-out", out})
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+
+	printed := strings.TrimSpace(buf.String())
+	if printed == "" || !strings.Contains(printed, "trace.html") {
+		t.Fatalf("did not print the output path, got %q", printed)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(page)
+	if !strings.Contains(html, `const EMBEDDED_FIXTURE = {"run":"run_explain_fixture"`) {
+		t.Fatal("run projection not embedded as the fixture")
+	}
+	if strings.Contains(html, "run_ceiling_park_demo") {
+		t.Fatal("demo fixture survived the swap")
+	}
+	if !strings.Contains(html, "renderGraph(EMBEDDED_FIXTURE)") {
+		t.Fatal("render logic missing from the emitted page")
+	}
+}
+
+func TestExplainRejectsJSONWithHTML(t *testing.T) {
+	err := cmdExplain([]string{"-run", "run_x", "-json", "-html"})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("want mutual-exclusion error, got %v", err)
+	}
+}

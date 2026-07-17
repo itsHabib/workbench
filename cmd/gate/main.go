@@ -13,6 +13,7 @@ package main
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -128,7 +129,7 @@ func usage() {
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
-  explain  -run run_x [-json]
+  explain  -run run_x [-json | -html [-out path]]
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -734,11 +735,20 @@ func runVerdicts(arts []state.Artifact) ([]verify.Verdict, string, verify.Subjec
 	return out, escalationID, subject, nil
 }
 
+// traceViewPage is the self-contained decision-trail viewer shipped at
+// docs/demo/trace-view.html, embedded so `explain -html` renders a page with
+// no copy-paste and no dependency on the checkout's docs tree.
+//
+//go:embed docs/demo/trace-view.html
+var traceViewPage string
+
 func cmdExplain(args []string) error {
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	run := fs.String("run", "", "run id")
 	asJSON := fs.Bool("json", false, "emit JSON projection")
+	asHTML := fs.Bool("html", false, "render the projection into a self-contained trace-view HTML file")
+	outPath := fs.String("out", "", "output path for -html (default gate-explain-<run>.html)")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -749,14 +759,45 @@ func cmdExplain(args []string) error {
 	if *run == "" {
 		return errors.New("explain: -run required")
 	}
+	if *asJSON && *asHTML {
+		return errors.New("explain: -json and -html are mutually exclusive")
+	}
+	if *outPath != "" && !*asHTML {
+		return errors.New("explain: -out requires -html")
+	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
 		return err
+	}
+	if *asHTML {
+		return explainHTMLFile(e, *run, *outPath)
 	}
 	if *asJSON {
 		return observe.ExplainJSON(os.Stdout, e.st, *run)
 	}
 	return observe.Explain(os.Stdout, e.st, *run)
+}
+
+// explainHTMLFile writes the run's rendered trace-view page and prints the
+// path. It renders to memory first so a projection error leaves no partial
+// file behind.
+func explainHTMLFile(e env, run, path string) error {
+	if path == "" {
+		path = "gate-explain-" + run + ".html"
+	}
+	var buf strings.Builder
+	if err := observe.ExplainHTML(&buf, e.st, run, traceViewPage); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o644); err != nil {
+		return fmt.Errorf("explain: write %s: %w", path, err)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	fmt.Println(abs)
+	return nil
 }
 
 func cmdAudit(args []string) error {
