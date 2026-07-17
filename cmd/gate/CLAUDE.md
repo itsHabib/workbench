@@ -38,6 +38,10 @@ Constraints that are design decisions, not omissions:
 - **The ladder law lives in code.** Local producers can never block, judgment
   cannot override a code block, tiers compose monotone-max, unknown values
   fail closed. These are reducer errors and pinned tests, not conventions.
+- **The verdict vocabulary is `contracts`.** `verify`'s
+  Verdict/Producer/Subject/Finding are aliases of the shared contract types;
+  the reducer, the ladder law, and all tier logic stay here — decisions never
+  live in the contract.
 - **State and keys live outside the repo.** The migration was code-only: a
   running gate's `-state` and `-key` dirs are operational data on the
   operator's machine, never files in this tree.
