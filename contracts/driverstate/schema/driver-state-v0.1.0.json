@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/driver-state/v0.1.0",
+  "title": "Event",
+  "x-version": "0.1.0",
+  "x-source-of-truth": "docs/features/driver-state/spec.md §5 (event schema + canonical encoding) and §6 (state machine / reducer output shapes). This is the leaf contract: types + schema + canonical encoding, no reducer, no ledger mechanism (that is P2). Ship's TS emitter (P5) reproduces the same on-disk shape and canonical hash independently, so the chain rule stays dead simple and the reference vector under testdata/ is the cross-language conformance anchor.",
+  "description": "One driver-state lifecycle event. Append-only, one file per run, hash-chained (prev links the chain, hash seals the line). Body is a kind-specific payload, schema-shaped by the $defs below and hashed as its raw bytes verbatim. Readers are tolerant: an unknown kind is skipped with a warning, never a hard error (the driver list grok-4.5 lesson).",
+  "type": "object",
+  "required": ["id", "run", "v", "kind", "time", "actor", "body", "prev", "hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "description": "evt_<ulid> — client-minted idempotency key." },
+    "run": { "type": "string", "description": "dsr_<ulid> — the driver-state run this event belongs to." },
+    "v": { "type": "string", "const": "driver-state-v0.1.0", "description": "The contract version this event was written against." },
+    "kind": {
+      "type": "string",
+      "description": "The lifecycle transition this event records. Enumerated here as the known-v0 set for validation; readers stay tolerant of kinds beyond it (additive within a major version).",
+      "enum": [
+        "run_imported",
+        "stream_dispatched",
+        "stream_attempt",
+        "review_cycle",
+        "stream_pr_opened",
+        "stream_landed",
+        "stream_failed",
+        "stream_skipped",
+        "stream_merged",
+        "run_finished"
+      ]
+    },
+    "stream": { "type": "string", "description": "dss_<ulid> — the stream this event scopes to; empty for run-scoped kinds (run_imported, run_finished)." },
+    "time": { "type": "string", "format": "date-time", "description": "Writer-supplied; append enforces per-run monotonicity (P2)." },
+    "actor": { "type": "string", "description": "session:<id> | ship:<drv_id> | human:<who> — who wrote the event." },
+    "ext_ref": { "type": "string", "description": "Optional top-level external correlate (ship drv_id on run_imported, PR URL on stream_pr_opened) — top-level, not body, so cross-store queries do not parse every body (spec §10 Q2)." },
+    "body": { "description": "Kind-specific payload; shapes are defined in $defs and validated in Go per kind. Hashed as its raw bytes verbatim — the writer's bytes are the canonical bytes, never re-marshalled." },
+    "prev": { "type": "string", "description": "The prior event's hash; empty for the first event in a run." },
+    "hash": { "type": "string", "description": "SHA-256 (hex) over the canonical encoding of this event with hash set to the empty string." }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "run_imported" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/run_imported_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_attempt" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_attempt_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_pr_opened" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_pr_opened_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_merged" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_merged_body" } } } },
+    { "if": { "properties": { "kind": { "const": "review_cycle" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/review_cycle_body" } } } }
+  ],
+  "$defs": {
+    "run_imported_body": {
+      "type": "object",
+      "description": "The manifest snapshot at import. manifest carries the driver.md frontmatter VERBATIM (render round-trips, and a run with only run_imported resumes from it — spec §7 F3); repo/source/streams are the typed essentials readers index without parsing the snapshot. ship_run_ref carries the optional ship drv_id correlate — field included per spec §10 Q2, semantics deferred.",
+      "required": ["repo", "source", "manifest", "streams"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string" },
+        "source": { "type": "string" },
+        "generated_at": { "type": "string" },
+        "manifest": { "type": "object", "description": "The driver.md frontmatter, verbatim." },
+        "streams": { "type": "array", "items": { "$ref": "#/$defs/stream_spec" } },
+        "ship_run_ref": { "type": "string" }
+      }
+    },
+    "stream_spec": {
+      "type": "object",
+      "description": "One stream in the imported manifest snapshot.",
+      "required": ["stream", "doc_path"],
+      "additionalProperties": false,
+      "properties": {
+        "stream": { "type": "string" },
+        "doc_path": { "type": "string" },
+        "batch": { "type": "integer" }
+      }
+    },
+    "stream_attempt_body": {
+      "type": "object",
+      "description": "One dispatch attempt on a stream. seq is append-only monotone (P2 enforces increase); a terminal attempt with failure_category set lands the stream in failed, absent it lands the stream in landed — no separate stream_failed event required.",
+      "required": ["seq", "doc_path", "terminal"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "doc_path": { "type": "string" },
+        "terminal": { "type": "boolean" },
+        "failure_category": { "type": "string" }
+      }
+    },
+    "stream_pr_opened_body": {
+      "type": "object",
+      "required": ["pr", "url", "head_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "pr": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string" },
+        "head_sha": { "type": "string" }
+      }
+    },
+    "stream_merged_body": {
+      "type": "object",
+      "required": ["pr", "merge_commit", "merged_at"],
+      "additionalProperties": false,
+      "properties": {
+        "pr": { "type": "integer", "minimum": 1 },
+        "merge_commit": { "type": "string" },
+        "merged_at": { "type": "string" }
+      }
+    },
+    "review_cycle_body": {
+      "type": "object",
+      "description": "One review cycle on an open PR — a first-class kind from v0.1.0 because cycles are retroactively unreconstructable from coarse attempt snapshots.",
+      "required": ["cycle", "panel_settled", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle": { "type": "integer", "minimum": 1 },
+        "panel_settled": { "type": "boolean" },
+        "findings": { "type": "integer" }
+      }
+    }
+  }
+}
