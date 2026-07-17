@@ -1,0 +1,356 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 5299ba2..a32f0a4 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -190,7 +190,7 @@ Layered top-down: **entry → server → handlers → adapter/store**. Each laye
+ - **`internal/handlers/`** — one file per verb (`create.go`, `close.go`, `list.go`, `post.go`, `read.go`, `who_else.go`), plus `resolve.go` (key-vs-huddleId speaker resolution shared by post + read) and `deps.go` (typed Deps struct). Each handler exports a `Register<Verb>(s, deps)` that calls `mcp.AddTool(...)`.
+ - **`internal/slack/`** — Slack façade. `Adapter` interface (`iface.go`) is the seam — handlers depend on it, never on `slack-go` directly. Real impl is `slackGoAdapter` (`impl.go` / `channels.go` / `messages.go`); `FakeAdapter` (`fake_adapter.go`) records calls + returns canned data for handler tests. Message-prefix encoding (`[displayName] body` for seats, `*[displayName] body` for orchestrator) lives in `encoding.go` and is the source of truth for identity-on-the-wire.
+ - **`internal/store/`** — SQLite via `modernc.org/sqlite`. Schema is `//go:embed`-ed from `schema.sql`. Two tables: `huddles` (one row per huddle) and `keys` (per-seat keys; FK to huddles with `ON DELETE CASCADE`). Constructor `store.New(stateDir)` opens / applies schema; `OpenMemory(ctx)` is the test fixture.
+-- **`internal/config/`** — env-only `Load()`. Required: `HUDDLE_SLACK_BOT_TOKEN`. Optional: `HUDDLE_STATE_DIR`, `HUDDLE_LOG_LEVEL`, `HUDDLE_CHANNEL_PREFIX`, `HUDDLE_ORCHESTRATOR_SLACK_USER_ID` (auto-invites a human to every channel `huddle.create` opens; best-effort).
++- **`internal/config/`** — env-only `Load()`. No required env vars at startup. `HUDDLE_SLACK_BOT_TOKEN` gates Slack-touching verbs (`create` / `close` / `post` / `read`) — the slack adapter's `noTokenAdapter` returns `slack.ErrNoToken` at call time when it's unset, so `huddle.who_else` (local-only) still serves. Optional: `HUDDLE_STATE_DIR`, `HUDDLE_LOG_LEVEL`, `HUDDLE_CHANNEL_PREFIX`, `HUDDLE_ORCHESTRATOR_SLACK_USER_ID` (auto-invites a human to every channel `huddle.create` opens; best-effort).
+ - **`internal/errors/`** — `huddleerr.MCPError(jsonrpc.Code*, err)` wraps business errors into JSON-RPC errors. Validation → `CodeInvalidParams` (-32602); runtime → `CodeInternalError` (-32603).
+ - **`internal/types/`** — shared structs (`Huddle`, `Seat`, `Identity`, `Message`, plus `CreateArgs` / `ReadArgs` / etc. per-verb arg + result types). `IdentityKind` is `seat | orchestrator | human`.
+ 
+diff --git a/README.md b/README.md
+index 6771cd2..815eea6 100644
+--- a/README.md
++++ b/README.md
+@@ -28,16 +28,18 @@ make install   # builds cmd/huddle → $GOBIN/huddle
+ 
+ ## Quickstart
+ 
+-Set the required Slack token (plus any optional overrides), then start the stdio MCP server:
++Set the Slack token (plus any optional overrides), then start the stdio MCP server:
+ 
+ ```sh
+-export HUDDLE_SLACK_BOT_TOKEN=xoxb-...          # required
++export HUDDLE_SLACK_BOT_TOKEN=xoxb-...          # required for create/close/post/read
+ export HUDDLE_STATE_DIR=~/.huddle               # optional; default ./.huddle-state
+ export HUDDLE_ORCHESTRATOR_SLACK_USER_ID=U...   # optional; auto-invite operator to new channels
+ 
+ make run   # same as go run ./cmd/huddle
+ ```
+ 
++The server boots without `HUDDLE_SLACK_BOT_TOKEN` — `huddle.who_else` is local-only and works either way. Slack-touching verbs (`create` / `close` / `post` / `read`) error at call time with a clear message until the token is set.
++
+ Register the server with Claude Code or Claude Desktop so sessions can call the verbs. In Claude Code:
+ 
+ ```sh
+@@ -59,7 +61,7 @@ Claude Desktop uses an `mcpServers` block in its config file — same binary and
+ }
+ ```
+ 
+-Without `HUDDLE_SLACK_BOT_TOKEN`, the process exits immediately with `missing required configuration: HUDDLE_SLACK_BOT_TOKEN`.
++Without `HUDDLE_SLACK_BOT_TOKEN`, the server still boots; Slack-touching verbs return `HUDDLE_SLACK_BOT_TOKEN is not set; Slack-touching verbs (create, close, post, read) are unavailable — set the env to enable them` at call time.
+ 
+ ## v0 verb surface (6 verbs)
+ 
+@@ -87,7 +89,7 @@ Each lives under `cmd/<name>/`. `make install` ships `huddle` only; run the othe
+ 
+ ## Configuration
+ 
+-The MCP server reads these environment variables: `HUDDLE_SLACK_BOT_TOKEN` (required), `HUDDLE_STATE_DIR`, `HUDDLE_LOG_LEVEL`, `HUDDLE_CHANNEL_PREFIX`, and `HUDDLE_ORCHESTRATOR_SLACK_USER_ID`. Defaults, validation, and semantics live in [`docs/design.md#configuration`](docs/design.md#configuration).
++The MCP server reads these environment variables: `HUDDLE_SLACK_BOT_TOKEN` (required for Slack-touching verbs), `HUDDLE_STATE_DIR`, `HUDDLE_LOG_LEVEL`, `HUDDLE_CHANNEL_PREFIX`, and `HUDDLE_ORCHESTRATOR_SLACK_USER_ID`. Defaults, validation, and semantics live in [`docs/design.md#configuration`](docs/design.md#configuration).
+ 
+ ## Stack
+ 
+diff --git a/cmd/seat/main.go b/cmd/seat/main.go
+index a83cc9f..c5d4f34 100644
+--- a/cmd/seat/main.go
++++ b/cmd/seat/main.go
+@@ -11,12 +11,11 @@
+ //	seat post     --key K_… --body "..."
+ //	seat who-else --key K_…
+ //
+-// Environment: HUDDLE_SLACK_BOT_TOKEN must be set in the env for every
+-// subcommand. Only `read` and `post` need it operationally, but the
+-// spawned huddle MCP subprocess fails to start without it (config.Load
+-// requires it), so `who-else` would error out at connect time anyway. A
+-// follow-up could relax config.Load to make `who-else` token-less; until
+-// then, the gate stays uniform.
++// Environment: HUDDLE_SLACK_BOT_TOKEN is required for `read` and `post`
++// (both hit Slack). `who-else` only touches local state and works
++// tokenless; the spawned MCP subprocess boots either way and the slack
++// adapter errors out at call time for Slack-touching verbs when the
++// token is unset.
+ package main
+ 
+ import (
+@@ -57,8 +56,14 @@ func main() {
+ }
+ 
+ func run(verb, key, body string, limit int) error {
+-	if os.Getenv("HUDDLE_SLACK_BOT_TOKEN") == "" {
+-		return errors.New("HUDDLE_SLACK_BOT_TOKEN must be set in the env")
++	// Slack-touching verbs (read / post) need HUDDLE_SLACK_BOT_TOKEN; gate
++	// only those. who-else only touches local state — the spawned MCP
++	// boots regardless and serves it without a token.
++	// TrimSpace to match config.Load's normalization so a token of pure
++	// whitespace fails fast here with a clear message instead of passing
++	// the gate and then having the spawned server return ErrNoToken.
++	if (verb == "read" || verb == "post") && strings.TrimSpace(os.Getenv("HUDDLE_SLACK_BOT_TOKEN")) == "" {
++		return errors.New("HUDDLE_SLACK_BOT_TOKEN must be set in the env for " + verb)
+ 	}
+ 
+ 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+diff --git a/docs/design.md b/docs/design.md
+index 2509e70..076a9b9 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -369,13 +369,13 @@ Env vars loaded by `internal/config/config.go`:
+ 
+ | Variable | Required | Default | Notes |
+ |---|---|---|---|
+-| `HUDDLE_SLACK_BOT_TOKEN` | yes | — | Slack bot token (`xoxb-...`) |
++| `HUDDLE_SLACK_BOT_TOKEN` | per-verb | — | Slack bot token (`xoxb-...`). Required for `huddle.create` / `.close` / `.post` / `.read`. `huddle.who_else` is local-only and works without it; the server boots regardless. |
+ | `HUDDLE_STATE_DIR` | no | `./.huddle-state` | Where `huddle.sqlite` lives |
+ | `HUDDLE_LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
+ | `HUDDLE_CHANNEL_PREFIX` | no | `huddle-` | Prefix for created Slack channels |
+ | `HUDDLE_ORCHESTRATOR_SLACK_USER_ID` | no | — | If set, auto-invites this Slack user (`U…`) to every channel `huddle.create` opens. Best-effort: invite failure is logged, not propagated. |
+ 
+-`internal/config/config.go` validates at startup; missing required → process exits with a clear error message.
++`internal/config/config.go` reads env vars at startup but no value is strictly required for the process to boot. Slack-touching verbs surface `slack.ErrNoToken` at call time when `HUDDLE_SLACK_BOT_TOKEN` is unset; local-only verbs (`huddle.who_else`) work either way.
+ 
+ ## Error handling
+ 
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 78545e5..328a0b0 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -29,28 +29,15 @@ type Config struct {
+ 	OrchestratorSlackUserID string
+ }
+ 
+-// ValidationError aggregates missing env contract violations.
+-type ValidationError struct {
+-	Missing []string
+-}
+-
+-func (e *ValidationError) Error() string {
+-	if e == nil || len(e.Missing) == 0 {
+-		return "configuration invalid"
+-	}
+-	return "missing required configuration: " + strings.Join(e.Missing, ", ")
+-}
+-
+ // Load reads environment variables once and applies defaults documented in docs/design.md.
++//
++// HUDDLE_SLACK_BOT_TOKEN is read but no longer required. Verbs that don't
++// hit Slack (huddle.who_else, plus any future local-only verb) work
++// tokenless. Verbs that do hit Slack — huddle.create, huddle.close,
++// huddle.post, huddle.read — error at call time with a clear message via
++// the slack package's no-token adapter when the token is unset.
+ func Load() (Config, error) {
+ 	token := strings.TrimSpace(os.Getenv(envSlackBotToken))
+-	var missing []string
+-	if token == "" {
+-		missing = append(missing, envSlackBotToken)
+-	}
+-	if len(missing) > 0 {
+-		return Config{}, &ValidationError{Missing: missing}
+-	}
+ 
+ 	stateDir := strings.TrimSpace(os.Getenv(envStateDir))
+ 	if stateDir == "" {
+diff --git a/internal/config/config_test.go b/internal/config/config_test.go
+new file mode 100644
+index 0000000..4018bf4
+--- /dev/null
++++ b/internal/config/config_test.go
+@@ -0,0 +1,52 @@
++package config
++
++import (
++	"log/slog"
++	"path/filepath"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++func TestLoadTokenlessSucceeds(t *testing.T) {
++	// HUDDLE_SLACK_BOT_TOKEN is no longer required at startup so the server
++	// can serve local-only verbs (huddle.who_else) without it. Slack-touching
++	// verbs error at call time via the slack package's no-token adapter.
++	t.Setenv(envSlackBotToken, "")
++	t.Setenv(envStateDir, "")
++	t.Setenv(envLogLevel, "")
++	t.Setenv(envChannelPrefix, "")
++	t.Setenv(envOrchestratorSlackUserID, "")
++
++	cfg, err := Load()
++	require.NoError(t, err)
++	require.Empty(t, cfg.SlackBotToken)
++	require.Equal(t, filepath.Clean(defaultStateDir), cfg.StateDir)
++	require.Equal(t, slog.LevelInfo, cfg.LogLevel)
++	require.Equal(t, defaultChanPrefix, cfg.ChannelPrefix)
++	require.Empty(t, cfg.OrchestratorSlackUserID)
++}
++
++func TestLoadHonorsAllEnvVars(t *testing.T) {
++	t.Setenv(envSlackBotToken, "xoxb-test-token")
++	t.Setenv(envStateDir, "/tmp/huddle-test")
++	t.Setenv(envLogLevel, "debug")
++	t.Setenv(envChannelPrefix, "test-")
++	t.Setenv(envOrchestratorSlackUserID, "U0ABC123")
++
++	cfg, err := Load()
++	require.NoError(t, err)
++	require.Equal(t, "xoxb-test-token", cfg.SlackBotToken)
++	require.Equal(t, filepath.Clean("/tmp/huddle-test"), cfg.StateDir)
++	require.Equal(t, slog.LevelDebug, cfg.LogLevel)
++	require.Equal(t, "test-", cfg.ChannelPrefix)
++	require.Equal(t, "U0ABC123", cfg.OrchestratorSlackUserID)
++}
++
++func TestLoadRejectsInvalidLogLevel(t *testing.T) {
++	t.Setenv(envSlackBotToken, "xoxb-test-token")
++	t.Setenv(envLogLevel, "shouty")
++	_, err := Load()
++	require.Error(t, err)
++	require.Contains(t, err.Error(), "invalid HUDDLE_LOG_LEVEL")
++}
+diff --git a/internal/slack/impl.go b/internal/slack/impl.go
+index a595c6c..fc0836b 100644
+--- a/internal/slack/impl.go
++++ b/internal/slack/impl.go
+@@ -1,9 +1,13 @@
+ package slack
+ 
+ import (
++	"context"
++	"errors"
+ 	"sync/atomic"
++	"time"
+ 
+ 	"github.com/itsHabib/huddle/internal/config"
++	"github.com/itsHabib/huddle/internal/types"
+ 
+ 	slackapi "github.com/slack-go/slack"
+ )
+@@ -13,9 +17,54 @@ type slackGoAdapter struct {
+ 	seq    atomic.Uint64
+ }
+ 
+-// NewAdapter wires a Slack Web API Client from configuration.
++// ErrNoToken is returned by every Slack-touching adapter method when the
++// server was started without HUDDLE_SLACK_BOT_TOKEN. Slack-touching verbs
++// (huddle.create / .close / .post / .read) surface this to the caller;
++// huddle.who_else and huddle.list don't go through the adapter and are
++// unaffected.
++//
++// Note on wrapping: handlers pass this through huddleerr.MCPError to
++// serialize it across the MCP/JSON-RPC boundary. That wrapping drops
++// the Go error chain by design — only the .Error() string survives. If
++// a caller needs to detect ErrNoToken post-wrap, they have to match on
++// the message text rather than use errors.Is. The wording is guarded
++// by TestErrNoTokenMessageDocumentsRemedy so it stays stable.
++var ErrNoToken = errors.New("HUDDLE_SLACK_BOT_TOKEN is not set; Slack-touching verbs (create, close, post, read) are unavailable — set the env to enable them")
++
++// NewAdapter wires a Slack Web API Client from configuration. When
++// cfg.SlackBotToken is empty, returns a no-token adapter that errors on
++// every method with ErrNoToken — keeps the server bootable for
++// local-only verbs (e.g. huddle.who_else).
+ func NewAdapter(cfg config.Config) Adapter {
++	if cfg.SlackBotToken == "" {
++		return noTokenAdapter{}
++	}
+ 	return &slackGoAdapter{
+ 		client: newUnderlyingClient(cfg),
+ 	}
+ }
++
++// noTokenAdapter satisfies Adapter without a Slack client; every method
++// returns ErrNoToken. Used when HUDDLE_SLACK_BOT_TOKEN is unset so the
++// MCP server still boots and local-only verbs can be served.
++type noTokenAdapter struct{}
++
++func (noTokenAdapter) CreateChannel(context.Context, string) (Channel, error) {
++	return Channel{}, ErrNoToken
++}
++
++func (noTokenAdapter) ArchiveChannel(context.Context, string) error {
++	return ErrNoToken
++}
++
++func (noTokenAdapter) InviteUserToChannel(context.Context, string, string) error {
++	return ErrNoToken
++}
++
++func (noTokenAdapter) PostMessage(context.Context, string, string, string) (string, error) {
++	return "", ErrNoToken
++}
++
++func (noTokenAdapter) History(context.Context, string, *time.Time, int) ([]types.Message, error) {
++	return nil, ErrNoToken
++}
+diff --git a/internal/slack/impl_test.go b/internal/slack/impl_test.go
+new file mode 100644
+index 0000000..6133059
+--- /dev/null
++++ b/internal/slack/impl_test.go
+@@ -0,0 +1,64 @@
++package slack
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/itsHabib/huddle/internal/config"
++
++	"github.com/stretchr/testify/require"
++)
++
++// TestNewAdapterTokenlessReturnsNoTokenAdapter verifies that constructing
++// a Slack adapter without a token returns the sentinel no-token adapter
++// rather than a real Slack client. This is the seam that lets the MCP
++// server boot tokenless and still serve local-only verbs like
++// huddle.who_else.
++func TestNewAdapterTokenlessReturnsNoTokenAdapter(t *testing.T) {
++	t.Parallel()
++
++	a := NewAdapter(config.Config{SlackBotToken: ""})
++	_, ok := a.(noTokenAdapter)
++	require.True(t, ok, "expected noTokenAdapter, got %T", a)
++}
++
++// TestNoTokenAdapterEveryMethodErrors verifies every Adapter method
++// surfaces ErrNoToken so the Slack-touching verbs (create/close/post/read)
++// fail at call time with a stable, recognizable error.
++func TestNoTokenAdapterEveryMethodErrors(t *testing.T) {
++	t.Parallel()
++
++	a := noTokenAdapter{}
++	ctx := context.Background()
++
++	_, err := a.CreateChannel(ctx, "any")
++	require.ErrorIs(t, err, ErrNoToken)
++
++	require.ErrorIs(t, a.ArchiveChannel(ctx, "C123"), ErrNoToken)
++	require.ErrorIs(t, a.InviteUserToChannel(ctx, "C123", "U123"), ErrNoToken)
++
++	_, err = a.PostMessage(ctx, "C123", "hi", "")
++	require.ErrorIs(t, err, ErrNoToken)
++
++	_, err = a.History(ctx, "C123", nil, 10)
++	require.ErrorIs(t, err, ErrNoToken)
++}
++
++// TestErrNoTokenMessageDocumentsRemedy guards the error message's wording
++// because it's surfaced verbatim to operators via MCP tool errors and the
++// README quotes it. A docs-drift signal if anyone "improves" the wording.
++func TestErrNoTokenMessageDocumentsRemedy(t *testing.T) {
++	t.Parallel()
++
++	require.Contains(t, ErrNoToken.Error(), "HUDDLE_SLACK_BOT_TOKEN")
++	require.Contains(t, ErrNoToken.Error(), "set the env")
++}
++
++// Sanity: ErrNoToken is reachable via errors.Is from a wrapped form too.
++func TestErrNoTokenWraps(t *testing.T) {
++	t.Parallel()
++
++	wrapped := errors.Join(errors.New("upstream"), ErrNoToken)
++	require.ErrorIs(t, wrapped, ErrNoToken)
++}

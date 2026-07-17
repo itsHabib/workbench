@@ -1,0 +1,459 @@
+diff --git a/docs/README.md b/docs/README.md
+index f1049fe..f29be6c 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -7,5 +7,6 @@ Start with the elevator pitch in [the top-level README](../README.md). For more
+ 3. **Architecture** — see [`CLAUDE.md`](../CLAUDE.md)'s "Architecture" section.
+ 4. **Productionization manifest** — [`features/01-productionization/driver.md`](features/01-productionization/driver.md).
+ 5. **Runner contract** — [`runner-contract.md`](runner-contract.md). Artifact layout consumers need.
++6. **Doctor preflight gate** — [`preflight.md`](preflight.md). Every host/e2e run preflights on `rooms doctor`; FAIL aborts.
+ 
+ Per-feature spec docs live under [`features/<slug>/spec.md`](features/).
+diff --git a/docs/preflight.md b/docs/preflight.md
+new file mode 100644
+index 0000000..df98e5d
+--- /dev/null
++++ b/docs/preflight.md
+@@ -0,0 +1,47 @@
++# Doctor preflight gate
++
++**Every host / e2e run preflights on `rooms doctor` before it boots anything. A FAIL aborts the run at the door with the failing check's remediation; a WARN is allowed through but logged.**
++
++Without this, a misprovisioned host (stale gateway IP, missing TAP, `ROOMS_FWD` not installed, nested-virt off, ...) fails deep in boot with a confusing error instead of loud at the door with the exact fix. The gate turns doctor's advisory report into a precondition.
++
++## What counts as FAIL vs WARN
++
++`rooms doctor` emits one `CheckResult { name, ok, message }` per check.
++
++- **FAIL** — `ok: false`. Hard-aborts the run. The `message` *is* the remediation.
++- **WARN** — `ok: true` and `message` starts with `warn:`. Allowed through, but recorded.
++- **ok** — `ok: true`, no `warn:` prefix. Clean.
++
++The `warn:` prefix has one source — the `WARN_PREFIX` constant — checked by [`CheckResult::is_warning`](../src/doctor.rs) and emitted by the producing checks; the human `rooms doctor` renderer keys on `is_warning` too.
++
++## Gating a run
++
++**Shell harness** — `rooms doctor` already exits non-zero on any FAIL, so gate on the exit code:
++
++```sh
++rooms doctor || { echo "preflight failed — fix the FAILs above before running"; exit 1; }
++```
++
++**Rust e2e harness** — use the [`preflight`](../src/preflight.rs) module for a structured decision:
++
++```rust
++use rooms::preflight;
++
++let pf = preflight::run(rooms_bin, image)?;   // runs `rooms doctor --json` and parses it
++if !pf.passed() {
++    for line in pf.remediations() {
++        eprintln!("preflight FAIL — {line}");
++    }
++    // abort before booting anything
++}
++```
++
++`preflight::from_json(&json)` gates already-captured `--json` output (what the unit tests exercise against fixtures).
++
++## Fail-safe
++
++A report the gate **can't read** — unparseable output, or a `schema_version` this build doesn't understand — is a **failed** gate, never a silent pass (the same "couldn't verify ≠ clean" discipline [`rooms diff`](../src/main.rs) follows). A doctor that errored before emitting its JSON therefore aborts the run rather than waving it through.
++
++## Scope
++
++The gate wires the *existing* doctor checks; it adds none. New checks land with the surface that needs them (e.g. the pool adds its `ROOMS_FWD` / slots checks in its own work). Preflight reports, never fixes — no auto-remediation.
+diff --git a/src/doctor.rs b/src/doctor.rs
+index c5bf891..790af52 100644
+--- a/src/doctor.rs
++++ b/src/doctor.rs
+@@ -4,7 +4,7 @@ use std::collections::HashMap;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ 
+-use serde::Serialize;
++use serde::{Deserialize, Serialize};
+ 
+ use crate::config::RoomsConfig;
+ #[cfg(unix)]
+@@ -25,6 +25,13 @@ const DRIFT_ARTIFACTS: &[&str] = &[
+ /// Schema version for `--json` output (ED-4: forward-compatible).
+ pub const DOCTOR_SCHEMA_VERSION: u32 = 1;
+ 
++/// Prefix doctor stamps on a passing-but-non-fatal check's message.
++///
++/// A gate lets these through (logged); the human `rooms doctor` output renders
++/// them `WARN`. The single source both surfaces key on — see
++/// [`CheckResult::is_warning`].
++pub const WARN_PREFIX: &str = "warn:";
++
+ /// The rooms-owned FORWARD sub-chain.
+ pub const ROOMS_FWD_CHAIN: &str = "ROOMS_FWD";
+ 
+@@ -123,15 +130,25 @@ pub fn classify_rooms_fwd_dump(dump: &str) -> RoomsFwdStatus {
+ }
+ 
+ /// Outcome of a single doctor check.
+-#[derive(Debug, Clone, Serialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct CheckResult {
+     pub name: String,
+     pub ok: bool,
+     pub message: String,
+ }
+ 
++impl CheckResult {
++    /// A *warning* — surfaced but non-fatal — is a check that passed yet whose
++    /// message carries the [`WARN_PREFIX`]. A preflight gate lets warnings
++    /// through (logged); only a not-`ok` check is a hard failure.
++    #[must_use]
++    pub fn is_warning(&self) -> bool {
++        self.ok && self.message.starts_with(WARN_PREFIX)
++    }
++}
++
+ /// Full doctor report.
+-#[derive(Debug, Clone, Serialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct DoctorReport {
+     pub schema_version: u32,
+     pub checks: Vec<CheckResult>,
+@@ -596,7 +613,7 @@ fn check_rooms_fwd() -> CheckResult {
+             name,
+             ok: true,
+             message: format!(
+-                "warn: could not read {ROOMS_FWD_CHAIN} (need root?); re-run `sudo rooms doctor` to verify the chain"
++                "{WARN_PREFIX} could not read {ROOMS_FWD_CHAIN} (need root?); re-run `sudo rooms doctor` to verify the chain"
+             ),
+         },
+     }
+@@ -662,7 +679,9 @@ fn check_orphaned_taps(config: &RoomsConfig) -> CheckResult {
+     CheckResult {
+         name,
+         ok: true,
+-        message: format!("warn: orphaned tap(s) with no live slot: {list}; `rooms gc` sweeps them"),
++        message: format!(
++            "{WARN_PREFIX} orphaned tap(s) with no live slot: {list}; `rooms gc` sweeps them"
++        ),
+     }
+ }
+ 
+@@ -967,7 +986,7 @@ fn check_sha_drift(config: &RoomsConfig, image: Option<&Path>) -> CheckResult {
+     CheckResult {
+         name,
+         ok: true,
+-        message: format!("warn: {}", warnings.join("; ")),
++        message: format!("{WARN_PREFIX} {}", warnings.join("; ")),
+     }
+ }
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index c642351..c9f670e 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -5,6 +5,7 @@ pub mod config;
+ pub mod doctor;
+ pub mod error;
+ pub mod firecracker;
++pub mod preflight;
+ pub mod registry;
+ pub mod room;
+ pub mod rootfs;
+diff --git a/src/main.rs b/src/main.rs
+index ee9e1f8..fad4721 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -414,14 +414,12 @@ fn run_doctor_cmd(
+         }
+     } else {
+         for check in &report.checks {
+-            let status = if check.ok {
+-                if check.message.starts_with("warn:") {
+-                    "WARN"
+-                } else {
+-                    "ok"
+-                }
+-            } else {
++            let status = if !check.ok {
+                 "FAIL"
++            } else if check.is_warning() {
++                "WARN"
++            } else {
++                "ok"
+             };
+             eprintln!("[{status}] {}: {}", check.name, check.message);
+         }
+diff --git a/src/preflight.rs b/src/preflight.rs
+new file mode 100644
+index 0000000..0f462c8
+--- /dev/null
++++ b/src/preflight.rs
+@@ -0,0 +1,237 @@
++//! Doctor-as-a-gate: turn `rooms doctor` from an advisory report into a hard
++//! precheck a host run passes before it boots anything.
++//!
++//! `rooms doctor` already exits non-zero on any FAIL, so a shell harness can gate
++//! on its exit code alone. This module is the *programmatic* form for the Rust
++//! e2e harness: parse the `--json` report, split it into hard failures (abort)
++//! and warnings (allowed, logged), and surface each failure's remediation — so a
++//! misprovisioned host fails loud at the door with the exact fix instead of deep
++//! in boot with a confusing error.
++//!
++//! Fail-safe: a report that can't be read — unparseable, or a schema version this
++//! build doesn't understand — is a *failed* gate, never a silent pass (the same
++//! "couldn't verify ≠ clean" discipline `rooms diff` follows).
++
++use std::path::Path;
++use std::process::Command;
++
++use thiserror::Error;
++
++use crate::doctor::{CheckResult, DoctorReport, DOCTOR_SCHEMA_VERSION};
++
++/// The result of gating a doctor report: the hard failures that must abort a run
++/// and the warnings that are allowed through but worth logging.
++#[derive(Debug, Clone)]
++pub struct Preflight {
++    pub failures: Vec<CheckResult>,
++    pub warnings: Vec<CheckResult>,
++}
++
++impl Preflight {
++    /// True when no check hard-failed — the run may proceed (warnings and all).
++    #[must_use]
++    pub const fn passed(&self) -> bool {
++        self.failures.is_empty()
++    }
++
++    /// One `name: message` line per failing check. Doctor's message *is* the
++    /// remediation, so this is what a caller prints before aborting.
++    #[must_use]
++    pub fn remediations(&self) -> Vec<String> {
++        self.failures
++            .iter()
++            .map(|c| format!("{}: {}", c.name, c.message))
++            .collect()
++    }
++}
++
++/// Why a gate could not be decided cleanly. Every variant is a *failed* gate: a
++/// caller must never read one as "clean".
++#[derive(Debug, Error)]
++pub enum PreflightError {
++    #[error("could not parse doctor --json report: {0}")]
++    Parse(String),
++    #[error("doctor report schema_version {found} != supported {supported}; regenerate with this rooms build")]
++    SchemaVersion { found: u32, supported: u32 },
++    #[error("could not run doctor: {0}")]
++    Doctor(String),
++}
++
++/// Gate an already-parsed report: partition its checks into hard failures
++/// (not `ok`) and warnings ([`CheckResult::is_warning`]); a clean `ok` check
++/// contributes to neither.
++#[must_use]
++pub fn gate(report: &DoctorReport) -> Preflight {
++    let mut failures = Vec::new();
++    let mut warnings = Vec::new();
++    for check in &report.checks {
++        if !check.ok {
++            failures.push(check.clone());
++        } else if check.is_warning() {
++            warnings.push(check.clone());
++        }
++    }
++    Preflight { failures, warnings }
++}
++
++/// Parse `rooms doctor --json` output and gate it. A parse error or a schema
++/// version this build doesn't understand is a failed gate, never a silent pass.
++pub fn from_json(json: &str) -> Result<Preflight, PreflightError> {
++    let report: DoctorReport =
++        serde_json::from_str(json).map_err(|e| PreflightError::Parse(e.to_string()))?;
++    if report.schema_version != DOCTOR_SCHEMA_VERSION {
++        return Err(PreflightError::SchemaVersion {
++            found: report.schema_version,
++            supported: DOCTOR_SCHEMA_VERSION,
++        });
++    }
++    Ok(gate(&report))
++}
++
++/// Run `<rooms_bin> doctor --json [--image <image>]` and gate its stdout — the
++/// shell-out the e2e harness calls at the door.
++///
++/// The doctor binary always writes the JSON report to stdout (logs stay on
++/// stderr) regardless of its own exit code, so the parsed report — not the exit
++/// status — drives the gate.
++pub fn run(rooms_bin: &Path, image: Option<&Path>) -> Result<Preflight, PreflightError> {
++    let mut cmd = Command::new(rooms_bin);
++    cmd.arg("doctor").arg("--json");
++    if let Some(image) = image {
++        cmd.arg("--image").arg(image);
++    }
++    let output = cmd
++        .output()
++        .map_err(|e| PreflightError::Doctor(format!("spawn {}: {e}", rooms_bin.display())))?;
++    match from_json(&String::from_utf8_lossy(&output.stdout)) {
++        // A parse failure usually means doctor errored before emitting JSON — its
++        // stderr carries the real reason, which the bare parse error would drop.
++        Err(PreflightError::Parse(msg)) => {
++            let stderr = String::from_utf8_lossy(&output.stderr);
++            let stderr = stderr.trim();
++            if stderr.is_empty() {
++                Err(PreflightError::Parse(msg))
++            } else {
++                Err(PreflightError::Doctor(format!(
++                    "doctor produced no readable report ({msg}); stderr: {stderr}"
++                )))
++            }
++        }
++        other => other,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test module")]
++
++    use super::{from_json, gate, PreflightError};
++    use crate::doctor::{CheckResult, DoctorReport, DOCTOR_SCHEMA_VERSION};
++
++    fn check(name: &str, ok: bool, message: &str) -> CheckResult {
++        CheckResult {
++            name: name.to_owned(),
++            ok,
++            message: message.to_owned(),
++        }
++    }
++
++    /// Serialize a real `DoctorReport` so the fixtures round-trip through the
++    /// exact production schema — a field rename can't silently drift the gate.
++    fn report_json(checks: Vec<CheckResult>) -> String {
++        let report = DoctorReport {
++            schema_version: DOCTOR_SCHEMA_VERSION,
++            checks,
++        };
++        serde_json::to_string(&report).unwrap()
++    }
++
++    #[test]
++    fn all_checks_ok_passes_clean() {
++        let json = report_json(vec![
++            check("kvm", true, "/dev/kvm present"),
++            check("firecracker", true, "1.10.1"),
++        ]);
++        let pf = from_json(&json).expect("gate a clean report");
++        assert!(pf.passed());
++        assert!(pf.failures.is_empty() && pf.warnings.is_empty());
++    }
++
++    #[test]
++    fn a_failing_check_aborts_the_gate_and_surfaces_its_remediation() {
++        let json = report_json(vec![
++            check("kvm", true, "/dev/kvm present"),
++            check(
++                "rooms_fwd",
++                false,
++                "ROOMS_FWD not installed; run `sudo bash scripts/setup-tap.sh --host`",
++            ),
++        ]);
++        let pf = from_json(&json).expect("gate returns a decision, not an error");
++        assert!(!pf.passed(), "a FAIL check must fail the gate");
++        assert_eq!(pf.failures.len(), 1);
++        assert!(
++            pf.remediations()
++                .iter()
++                .any(|line| line.contains("setup-tap.sh")),
++            "the failing check's remediation must be surfaced: {:?}",
++            pf.remediations()
++        );
++    }
++
++    #[test]
++    fn a_warn_check_is_allowed_through_but_recorded() {
++        let json = report_json(vec![
++            check("api_key", true, "warn: ANTHROPIC_API_KEY unset"),
++            check("kvm", true, "/dev/kvm present"),
++        ]);
++        let pf = from_json(&json).expect("gate a report with a warning");
++        assert!(pf.passed(), "a warning must not fail the gate");
++        assert_eq!(pf.warnings.len(), 1, "the warning is recorded");
++        assert!(pf.failures.is_empty());
++    }
++
++    #[test]
++    fn a_foreign_schema_version_is_a_failed_gate_not_a_pass() {
++        // An escape-shaped report under a schema this build can't read must not
++        // slip through as clean.
++        let json = format!(
++            r#"{{"schema_version":{},"checks":[]}}"#,
++            DOCTOR_SCHEMA_VERSION + 1
++        );
++        assert!(matches!(
++            from_json(&json),
++            Err(PreflightError::SchemaVersion { .. })
++        ));
++    }
++
++    #[test]
++    fn unparseable_output_is_a_failed_gate() {
++        // A doctor that errored before emitting JSON (empty/garbage stdout) must
++        // read as a failed gate, never a silent pass.
++        assert!(matches!(from_json(""), Err(PreflightError::Parse(_))));
++        assert!(matches!(
++            from_json("not json"),
++            Err(PreflightError::Parse(_))
++        ));
++    }
++
++    #[test]
++    fn gate_partitions_failures_and_warnings_by_convention() {
++        let report = DoctorReport {
++            schema_version: DOCTOR_SCHEMA_VERSION,
++            checks: vec![
++                check("ok_check", true, "fine"),
++                check("warn_check", true, "warn: soft"),
++                check("fail_check", false, "hard: fix me"),
++                // ok:false wins even if the message is warn-shaped — not-ok is
++                // always a hard failure.
++                check("fail_warnish", false, "warn: still a failure"),
++            ],
++        };
++        let pf = gate(&report);
++        assert_eq!(pf.failures.len(), 2);
++        assert_eq!(pf.warnings.len(), 1);
++        assert!(!pf.passed());
++    }
++}
+diff --git a/tests/preflight_binary.rs b/tests/preflight_binary.rs
+new file mode 100644
+index 0000000..0626a44
+--- /dev/null
++++ b/tests/preflight_binary.rs
+@@ -0,0 +1,26 @@
++//! Integration guard: the real `rooms doctor --json` output round-trips through
++//! the preflight gate.
++//!
++//! Runs anywhere — doctor emits its report regardless of how the host is
++//! provisioned — so it needs no rooms-host, and it catches any Serialize /
++//! Deserialize drift on the doctor report that would silently break the gate
++//! (the report is `Serialize` in the binary, `Deserialize` in the gate; nothing
++//! but this test pins the two together against the actual CLI output).
++
++#![allow(clippy::expect_used, reason = "integration test module")]
++
++use std::path::Path;
++
++use rooms::preflight;
++
++#[test]
++fn real_doctor_json_round_trips_through_the_gate() {
++    let bin = Path::new(env!("CARGO_BIN_EXE_rooms"));
++    // On an unprovisioned CI host the gate will report failures; the point is
++    // that the binary's real `--json` deserialized cleanly (no schema drift), so
++    // the Preflight decision is well-formed either way.
++    let preflight = preflight::run(bin, None)
++        .expect("rooms doctor --json must round-trip through the preflight gate");
++    // Exercise the decision path so the round-tripped report is actually used.
++    let _ = preflight.passed();
++}

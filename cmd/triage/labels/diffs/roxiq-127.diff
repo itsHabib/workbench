@@ -1,0 +1,82 @@
+diff --git a/scripts/sandbox-up.ps1 b/scripts/sandbox-up.ps1
+index 361957a..856b193 100644
+--- a/scripts/sandbox-up.ps1
++++ b/scripts/sandbox-up.ps1
+@@ -11,6 +11,10 @@
+ # Optional:
+ #   $env:GCP_REGION                default us-east4
+ #   $env:NEON_PROJECT_ID           default delicate-surf-47809445
++#   $env:SANDBOX_VERCEL_DRAIN_SECRET          count-gated. UNSET => this apply DROPS the
++#   $env:SANDBOX_FEEDBACK_SLACK_WEBHOOK_URL    sandbox drain/slack secret if a prior apply
++#   $env:SANDBOX_SUBSCRIBER_SLACK_WEBHOOK_URL  (or the sandbox.yml workflow) created it.
++#                                             Mirror the workflow's repo secrets to keep them.
+ #
+ # Flags:
+ #   -ResetDb                       re-snapshot the Neon sandbox branch from prod main
+@@ -29,7 +33,15 @@ param(
+     [string] $GcpProjectId  = $env:GCP_PROJECT_ID,
+     [string] $GcpRegion     = $(if ($env:GCP_REGION)     { $env:GCP_REGION }     else { "us-east4" }),
+     [string] $NeonProjectId = $(if ($env:NEON_PROJECT_ID) { $env:NEON_PROJECT_ID } else { "delicate-surf-47809445" }),
+-    [string] $BasicAuth     = $env:ROXIQ_SANDBOX_BASIC_AUTH
++    [string] $BasicAuth     = $env:ROXIQ_SANDBOX_BASIC_AUTH,
++
++    # Count-gated optional secrets -- mirror the canonical GH Action (sandbox.yml).
++    # Passed to terraform only when non-empty; an EMPTY value makes `terraform
++    # apply` DESTROY the Secret Manager secret + strip its Cloud Run env binding
++    # (count 1->0). Set these to preserve secrets the workflow provisioned.
++    [string] $VercelDrainSecret         = $env:SANDBOX_VERCEL_DRAIN_SECRET,
++    [string] $SlackWebhookUrl           = $env:SANDBOX_FEEDBACK_SLACK_WEBHOOK_URL,
++    [string] $SubscriberSlackWebhookUrl = $env:SANDBOX_SUBSCRIBER_SLACK_WEBHOOK_URL
+ )
+ 
+ $ErrorActionPreference = 'Stop'
+@@ -156,6 +168,39 @@ $env:TF_VAR_basic_auth   = $BasicAuth
+ $env:TF_IN_AUTOMATION    = "true"
+ $env:TF_INPUT            = "0"
+ 
++# Count-gated optional secrets. terraform's `count = var.x == "" ? 0 : 1` DESTROYS
++# the Secret Manager secret + strips its Cloud Run env binding when the value is
++# empty -- so an unset secret here silently drops one the sandbox.yml workflow
++# provisioned (the drain-404 incident, reproduced locally). Pass each only when
++# non-empty; warn loudly about any left empty so a drop is never silent.
++$optionalSecrets = @(
++    @{ Var = 'vercel_drain_secret';          Value = $VercelDrainSecret;         Env = 'SANDBOX_VERCEL_DRAIN_SECRET' }
++    @{ Var = 'slack_webhook_url';            Value = $SlackWebhookUrl;           Env = 'SANDBOX_FEEDBACK_SLACK_WEBHOOK_URL' }
++    @{ Var = 'subscriber_slack_webhook_url'; Value = $SubscriberSlackWebhookUrl; Env = 'SANDBOX_SUBSCRIBER_SLACK_WEBHOOK_URL' }
++)
++# If a value isn't provided here but TF_VAR_<name> is ALREADY exported in the
++# shell, terraform inherits it -- so it's not a drop. Only genuinely-empty ones
++# are droppable, and `finally` cleans up only what THIS run set (never a
++# pre-existing export the caller owns).
++$weSet = @()
++$droppable = @()
++foreach ($s in $optionalSecrets) {
++    if ($s.Value) {
++        Set-Item -Path "Env:TF_VAR_$($s.Var)" -Value $s.Value
++        $weSet += $s
++    } elseif (-not [Environment]::GetEnvironmentVariable("TF_VAR_$($s.Var)")) {
++        $droppable += $s
++    }
++}
++if ($droppable.Count) {
++    Write-Host ""
++    Write-Host "  WARNING: not passing these count-gated secrets -- this apply DESTROYS each one" -ForegroundColor Yellow
++    Write-Host "  if a prior apply or the sandbox.yml workflow created it (e.g. drain -> 404):" -ForegroundColor Yellow
++    foreach ($s in $droppable) {
++        Write-Host "    - $($s.Var)  (set `$env:$($s.Env) to preserve it)" -ForegroundColor Yellow
++    }
++}
++
+ $apiUrl = $null
+ Push-Location $sandboxDir
+ try {
+@@ -168,6 +213,9 @@ try {
+     Pop-Location
+     Remove-Item Env:TF_VAR_database_url -ErrorAction SilentlyContinue
+     Remove-Item Env:TF_VAR_basic_auth   -ErrorAction SilentlyContinue
++    foreach ($s in $weSet) {
++        Remove-Item -Path "Env:TF_VAR_$($s.Var)" -ErrorAction SilentlyContinue
++    }
+ }
+ 
+ Write-Host "  api_url: $apiUrl"

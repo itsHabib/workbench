@@ -1,0 +1,1841 @@
+diff --git a/packages/agent-runner/src/fake.ts b/packages/agent-runner/src/fake.ts
+index 6788132..ab878cf 100644
+--- a/packages/agent-runner/src/fake.ts
++++ b/packages/agent-runner/src/fake.ts
+@@ -11,7 +11,10 @@ import type {
+   AgentRunAttachInput,
+   AgentRunHandle,
+   AgentRunInput,
++  AgentRunLiveness,
+   AgentRunner,
++  AgentRunProbeArgs,
++  AgentRunProbeResult,
+   AgentRunResult,
+ } from "./runner.js";
+ 
+@@ -28,6 +31,10 @@ export interface FakeAgentScript {
+   readonly cancelBehavior?: "complete" | "ignore" | "throw";
+   readonly delayMsBetweenEvents?: number;
+   readonly artifactBytes?: Readonly<Record<string, Buffer>>;
++  /** Server-stamped liveness returned by `probeRun` and seeded on the handle. */
++  readonly liveness?: AgentRunLiveness;
++  /** Scripted probe answers keyed by `${agentId}:${runId}`. */
++  readonly probeResults?: Readonly<Record<string, AgentRunProbeResult | undefined>>;
+ }
+ 
+ export type FakeAgentAttachScript =
+@@ -57,6 +64,8 @@ const CANCEL_THROWN_MESSAGE = "FakeAgentRunner: scripted cancel error";
+ export interface FakeAgentRunnerOptions {
+   readonly defaultScript?: FakeAgentScript;
+   readonly defaultAttachScript?: FakeAgentAttachScript;
++  /** Global probe script when a per-script entry is absent. */
++  readonly defaultProbeResult?: AgentRunProbeResult | undefined;
+ }
+ 
+ export class FakeAgentRunner implements AgentRunner {
+@@ -66,12 +75,16 @@ export class FakeAgentRunner implements AgentRunner {
+   readonly #attachCalls: FakeAgentAttachCall[] = [];
+   readonly #defaultScript: FakeAgentScript | undefined;
+   readonly #defaultAttachScript: FakeAgentAttachScript | undefined;
++  readonly #defaultProbeResult: AgentRunProbeResult | undefined;
+   readonly #artifactBytesByAgent = new Map<string, Map<string, Buffer>>();
++  readonly #activeLiveness = new Map<string, AgentRunLiveness>();
++  readonly #probeScripts = new Map<string, AgentRunProbeResult | undefined>();
+   #runCounter = 0;
+ 
+   constructor(opts: FakeAgentRunnerOptions = {}) {
+     this.#defaultScript = opts.defaultScript;
+     this.#defaultAttachScript = opts.defaultAttachScript;
++    this.#defaultProbeResult = opts.defaultProbeResult;
+   }
+ 
+   enqueue(script: FakeAgentScript): void {
+@@ -94,6 +107,25 @@ export class FakeAgentRunner implements AgentRunner {
+     return this.#scripts.length;
+   }
+ 
++  /** Test hook: set a probe answer for a specific agent/run pair. */
++  setProbeResult(args: AgentRunProbeArgs, result: AgentRunProbeResult | undefined): void {
++    this.#probeScripts.set(probeKey(args), result);
++  }
++
++  probeRun(args: AgentRunProbeArgs): Promise<AgentRunProbeResult | undefined> {
++    const key = probeKey(args);
++    if (this.#probeScripts.has(key)) return Promise.resolve(this.#probeScripts.get(key));
++    const active = this.#activeLiveness.get(key);
++    if (active?.createdAtMs !== undefined && active.lastEventAtMs !== undefined) {
++      return Promise.resolve({
++        createdAtMs: active.createdAtMs,
++        status: "RUNNING",
++        updatedAtMs: active.lastEventAtMs,
++      });
++    }
++    return Promise.resolve(this.#defaultProbeResult);
++  }
++
+   run(input: AgentRunInput): Promise<AgentRunHandle> {
+     const script = this.#scripts.shift() ?? this.#defaultScript;
+     if (script === undefined) {
+@@ -162,6 +194,15 @@ export class FakeAgentRunner implements AgentRunner {
+     script: FakeAgentScript;
+   }): AgentRunHandle {
+     const { agentId, input, runId, script } = args;
++    const livenessState: { createdAtMs?: number; lastEventAtMs?: number } = {
++      ...(script.liveness ?? {}),
++    };
++    this.#activeLiveness.set(probeKey({ agentId, runId }), livenessState);
++    if (script.probeResults !== undefined) {
++      for (const [key, value] of Object.entries(script.probeResults)) {
++        this.#probeScripts.set(key, value);
++      }
++    }
+     let terminated = false;
+     let cancelAttempted = false;
+     let resolveResult!: (value: AgentRunResult) => void;
+@@ -214,18 +255,38 @@ export class FakeAgentRunner implements AgentRunner {
+     const setActiveSleep = (s: { cancel: () => void } | null): void => {
+       activeSleep = s;
+     };
+-    void this.#emit(script, input, () => terminated, finalize, setActiveSleep);
++    void this.#emit({
++      finalize,
++      input,
++      isTerminated: () => terminated,
++      onProviderEvent: (ev) => {
++        const ts = eventTimestampMs(ev);
++        if (ts === undefined) return;
++        livenessState.lastEventAtMs = ts;
++        livenessState.createdAtMs ??= ts;
++      },
++      script,
++      setActiveSleep,
++    });
+ 
+-    return { agentId, cancel: cancelInternal, result, runId };
++    return {
++      agentId,
++      cancel: cancelInternal,
++      liveness: () => ({ ...livenessState }),
++      result,
++      runId,
++    };
+   }
+ 
+-  async #emit(
+-    script: FakeAgentScript,
+-    input: AgentRunInput,
+-    isTerminated: () => boolean,
+-    finalize: (terminal: AgentRunResult) => void,
+-    setActiveSleep: (s: { cancel: () => void } | null) => void,
+-  ): Promise<void> {
++  async #emit(args: {
++    script: FakeAgentScript;
++    input: AgentRunInput;
++    isTerminated: () => boolean;
++    finalize: (terminal: AgentRunResult) => void;
++    setActiveSleep: (s: { cancel: () => void } | null) => void;
++    onProviderEvent?: (ev: AgentEvent) => void;
++  }): Promise<void> {
++    const { script, input, isTerminated, finalize, setActiveSleep, onProviderEvent } = args;
+     const delay = script.delayMsBetweenEvents ?? 0;
+     for (const ev of script.events) {
+       if (delay > 0) {
+@@ -235,29 +296,58 @@ export class FakeAgentRunner implements AgentRunner {
+         setActiveSleep(null);
+       }
+       if (isTerminated()) return;
+-      try {
+-        const maybePromise: unknown = input.onEvent(ev);
+-        if (isPromiseLike(maybePromise)) {
+-          maybePromise.then(undefined, () => {
+-            /* swallow */
+-          });
+-        }
+-      } catch {
+-        /* swallow */
+-      }
++      deliverProviderEvent(input, ev, onProviderEvent);
+     }
+     if (!isTerminated()) {
+-      if (script.listArtifacts !== undefined) {
+-        const artifacts = await captureListedArtifacts(script.listArtifacts, input.log);
+-        const terminal = artifacts.length > 0 ? { ...script.result, artifacts } : script.result;
+-        finalize(finalizeFakeResult(script, terminal));
+-        return;
+-      }
+-      finalize(finalizeFakeResult(script, script.result));
++      await finalizeScriptedRun(script, input, finalize);
+     }
+   }
+ }
+ 
++function deliverProviderEvent(
++  input: AgentRunInput,
++  ev: AgentEvent,
++  onProviderEvent?: (ev: AgentEvent) => void,
++): void {
++  onProviderEvent?.(ev);
++  try {
++    const maybePromise: unknown = input.onEvent(ev);
++    if (isPromiseLike(maybePromise)) {
++      maybePromise.then(undefined, () => {
++        /* swallow */
++      });
++    }
++  } catch {
++    /* swallow */
++  }
++}
++
++async function finalizeScriptedRun(
++  script: FakeAgentScript,
++  input: AgentRunInput,
++  finalize: (terminal: AgentRunResult) => void,
++): Promise<void> {
++  if (script.listArtifacts !== undefined) {
++    const artifacts = await captureListedArtifacts(script.listArtifacts, input.log);
++    const terminal = artifacts.length > 0 ? { ...script.result, artifacts } : script.result;
++    finalize(finalizeFakeResult(script, terminal));
++    return;
++  }
++  finalize(finalizeFakeResult(script, script.result));
++}
++
++function probeKey(args: AgentRunProbeArgs): string {
++  return `${args.agentId}:${args.runId}`;
++}
++
++function eventTimestampMs(ev: AgentEvent): number | undefined {
++  const raw = ev as { ts?: unknown; startedAt?: unknown };
++  const ts = raw.ts ?? raw.startedAt;
++  if (typeof ts !== "string" || ts.length === 0) return undefined;
++  const ms = Date.parse(ts);
++  return Number.isFinite(ms) ? ms : undefined;
++}
++
+ function finalizeFakeResult(script: FakeAgentScript, terminal: AgentRunResult): AgentRunResult {
+   if (script.events.length === 0) return terminal;
+   return { ...terminal, classificationEvents: script.events.slice(-MAX_CLASSIFICATION_EVENTS) };
+diff --git a/packages/agent-runner/src/handle-state.ts b/packages/agent-runner/src/handle-state.ts
+index bfbf03e..c4f1e66 100644
+--- a/packages/agent-runner/src/handle-state.ts
++++ b/packages/agent-runner/src/handle-state.ts
+@@ -4,7 +4,7 @@
+  * and funnels cancel through a single `cancelInternal` with retry-on-transient.
+  */
+ 
+-import type { AgentRunHandle, AgentRunResult } from "./runner.js";
++import type { AgentRunHandle, AgentRunLiveness, AgentRunResult } from "./runner.js";
+ 
+ export interface SdkRunHandleCallbacks {
+   readonly finalizeOk: (terminal: AgentRunResult) => void;
+@@ -84,10 +84,12 @@ export function buildSdkRunHandle(args: {
+   readonly agentId: string;
+   readonly runId: string;
+   readonly state: SdkRunHandleState;
++  readonly liveness?: () => AgentRunLiveness;
+ }): AgentRunHandle {
+   return {
+     agentId: args.agentId,
+     cancel: args.state.cancelInternal,
++    ...(args.liveness !== undefined && { liveness: args.liveness }),
+     result: args.state.result,
+     runId: args.runId,
+   };
+diff --git a/packages/agent-runner/src/index.ts b/packages/agent-runner/src/index.ts
+index 33668da..de05a78 100644
+--- a/packages/agent-runner/src/index.ts
++++ b/packages/agent-runner/src/index.ts
+@@ -41,6 +41,9 @@ export type {
+   AgentRunAttachInput,
+   AgentRunHandle,
+   AgentRunInput,
++  AgentRunLiveness,
++  AgentRunProbeArgs,
++  AgentRunProbeResult,
+   AgentRunner,
+   AgentRunResult,
+   CloudRunSpec,
+diff --git a/packages/agent-runner/src/runner.ts b/packages/agent-runner/src/runner.ts
+index 38c4381..910dbf3 100644
+--- a/packages/agent-runner/src/runner.ts
++++ b/packages/agent-runner/src/runner.ts
+@@ -96,6 +96,24 @@ export interface RoomRunSpec {
+   readonly pushBranch?: string;
+ }
+ 
++/** Server-stamped liveness snapshot fed by the runner's provider-origin event stream. */
++export interface AgentRunLiveness {
++  readonly createdAtMs?: number;
++  readonly lastEventAtMs?: number;
++}
++
++/** Server-stamped fields returned by an id-addressed run probe. */
++export interface AgentRunProbeResult {
++  readonly status?: string;
++  readonly createdAtMs?: number;
++  readonly updatedAtMs?: number;
++}
++
++export interface AgentRunProbeArgs {
++  readonly agentId: string;
++  readonly runId: string;
++}
++
+ /** Handle returned once a run starts. `result` resolves on terminal status; `cancel` is idempotent. */
+ export interface AgentRunHandle {
+   readonly agentId: string;
+@@ -107,6 +125,11 @@ export interface AgentRunHandle {
+    */
+   readonly result: Promise<AgentRunResult>;
+   readonly cancel: () => Promise<void>;
++  /**
++   * Sync, I/O-free liveness snapshot from provider-origin stream events.
++   * Omitted on local and rooms runners.
++   */
++  readonly liveness?: () => AgentRunLiveness;
+ }
+ 
+ /** Terminal-state shape `handle.result` resolves to. */
+@@ -136,4 +159,9 @@ export interface AgentRunner {
+   run(input: AgentRunInput): Promise<AgentRunHandle>;
+   attach(input: AgentRunAttachInput): Promise<AgentRunHandle>;
+   downloadArtifact?(agentId: string, path: string): Promise<Buffer>;
++  /**
++   * Bounded async probe of a run by id before a handle exists (attach path).
++   * Omitted on local and rooms runners.
++   */
++  probeRun?(args: AgentRunProbeArgs): Promise<AgentRunProbeResult | undefined>;
+ }
+diff --git a/packages/core/src/cursor-runs/duration-cap-wire.ts b/packages/core/src/cursor-runs/duration-cap-wire.ts
+new file mode 100644
+index 0000000..430c5d1
+--- /dev/null
++++ b/packages/core/src/cursor-runs/duration-cap-wire.ts
+@@ -0,0 +1,95 @@
++/**
++ * Service-layer wiring for remote duration-cap signals (provider-origin
++ * event filter, probe/liveness delegation, discontinuity sampling).
++ */
++
++import type { AgentEvent, AgentRunLiveness, AgentRunner } from "@ship/agent-runner";
++import type { EventProjection } from "@ship/agent-runner";
++import type { AgentProvider } from "@ship/workflow";
++
++import { claudeEventProjection } from "@ship/claude-runner";
++import { codexEventProjection } from "@ship/codex-runner";
++import { cursorEventProjection } from "@ship/cursor-runner";
++
++import type { DurationCapHandle, DurationCapRunArgs, DurationCapSignals } from "./duration-cap.js";
++
++import { DEFAULT_EVENT_PUMP_INTERVAL_MS } from "./event-pump.js";
++
++const SHIP_SYNTHESIZED_KINDS = new Set(["ship.resumed"]);
++
++function projectionForProvider(provider: AgentProvider): EventProjection {
++  if (provider === "claude") return claudeEventProjection;
++  if (provider === "codex") return codexEventProjection;
++  return cursorEventProjection;
++}
++
++export function providerStreamEventTimestamp(
++  provider: AgentProvider,
++  event: AgentEvent,
++): number | undefined {
++  const projection = projectionForProvider(provider);
++  const kind = projection.eventKind(event);
++  if (kind !== undefined && SHIP_SYNTHESIZED_KINDS.has(kind)) return undefined;
++  return projection.timestamp(event);
++}
++
++export interface RemoteCapWireInput {
++  readonly provider: AgentProvider;
++  readonly runner: AgentRunner;
++  readonly runtime: "cloud" | "rooms";
++  readonly getHandle: () => { liveness?: () => AgentRunLiveness } | undefined;
++}
++
++export function buildRemoteCapSignals(input: RemoteCapWireInput): DurationCapSignals {
++  const probeRun = input.runner.probeRun?.bind(input.runner);
++  return {
++    ...(probeRun !== undefined && { probeRun }),
++    getLiveness: () => input.getHandle()?.liveness?.(),
++  };
++}
++
++export function wireCapStreamFold(
++  provider: AgentProvider,
++  capHandle: DurationCapHandle | undefined,
++  event: AgentEvent,
++): void {
++  if (capHandle === undefined) return;
++  const ts = providerStreamEventTimestamp(provider, event);
++  if (ts === undefined) return;
++  capHandle.onProviderStreamEvent(ts);
++}
++
++export function startCapDiscontinuitySampler(args: {
++  readonly capHandle: DurationCapHandle | undefined;
++  readonly intervalMs?: number;
++  readonly wallClock?: () => number;
++  readonly monotonicClock?: () => number;
++}): () => void {
++  const wall = args.wallClock ?? (() => Date.now());
++  const mono = args.monotonicClock ?? (() => performance.now());
++  const intervalMs = args.intervalMs ?? DEFAULT_EVENT_PUMP_INTERVAL_MS;
++  const timer = setInterval(() => {
++    if (args.capHandle === undefined) return;
++    args.capHandle.onDiscontinuitySample(wall(), mono());
++  }, intervalMs);
++  if (typeof timer.unref === "function") timer.unref();
++  return () => {
++    clearInterval(timer);
++  };
++}
++
++export function isRemoteCapRuntime(runtime: string): boolean {
++  return runtime === "cloud" || runtime === "rooms";
++}
++
++export type PartialDurationCapArgs = Pick<
++  DurationCapRunArgs,
++  | "signals"
++  | "kind"
++  | "wallClock"
++  | "rowCreatedAtWallMs"
++  | "serverCreatedAtMs"
++  | "probeAgentId"
++  | "probeRunId"
++  | "onCapReady"
++>;
+diff --git a/packages/core/src/cursor-runs/duration-cap.test.ts b/packages/core/src/cursor-runs/duration-cap.test.ts
+index 9af5f0a..4d09718 100644
+--- a/packages/core/src/cursor-runs/duration-cap.test.ts
++++ b/packages/core/src/cursor-runs/duration-cap.test.ts
+@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+ 
+ import { CursorRunStartTimedOutError } from "../errors.js";
+ import {
++  type DurationCapHandle,
+   type DurationCapRunArgs,
+   MAX_CAP_REARMS,
+   MAX_TIMER_DELAY_MS,
+@@ -401,3 +402,269 @@ describe("runWithDurationCap", () => {
+     expect(cancel).toHaveBeenCalledTimes(1);
+   });
+ });
++
++describe("runWithDurationCap remote signals", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  test("paused-clock suspend: discontinuity detector folds over-cap probe age and expires", async () => {
++    const capHooks: { current?: DurationCapHandle } = {};
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => 0,
++      wallClock: () => 0,
++      onCapReady: (h) => {
++        capHooks.current = h;
++      },
++      onHandle: () => undefined,
++      signals: {
++        getLiveness: () => ({ createdAtMs: 0, lastEventAtMs: CAP_MS + 1 }),
++        probeRun: () =>
++          Promise.resolve({
++            createdAtMs: 0,
++            status: "RUNNING",
++            updatedAtMs: CAP_MS + 1,
++          }),
++      },
++      start: () => Promise.resolve(handle),
++    });
++    await Promise.resolve();
++    capHooks.current?.onDiscontinuitySample(100_000, 1_000);
++    await Promise.resolve();
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(out.durationMs).toBeGreaterThanOrEqual(CAP_MS);
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("divergent-clock early fire with over-cap stream liveness expires on probe", async () => {
++    let mono = 0;
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => mono,
++      onHandle: () => undefined,
++      signals: {
++        getLiveness: () => ({ createdAtMs: 0, lastEventAtMs: CAP_MS + 1 }),
++        probeRun: () =>
++          Promise.resolve({
++            createdAtMs: 0,
++            updatedAtMs: CAP_MS + 1,
++          }),
++      },
++      start: () => Promise.resolve(handle),
++    });
++    await vi.advanceTimersByTimeAsync(CAP_MS);
++    await vi.advanceTimersByTimeAsync(0);
++    mono = 1;
++    await vi.advanceTimersByTimeAsync(0);
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("attach with broken seed uses grace window not a full cap", async () => {
++    const onHandle = vi.fn();
++    let resolveStart!: (h: AgentRunHandle) => void;
++    const start = new Promise<AgentRunHandle>((resolve) => {
++      resolveStart = resolve;
++    });
++    const pending = runWithDurationCap({
++      kind: "attach",
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => Date.now(),
++      onHandle,
++      probeAgentId: "agent-x",
++      probeRunId: "run-x",
++      signals: { probeRun: () => Promise.resolve(undefined) },
++      start: () => start,
++    });
++    const rejection = expect(pending).rejects.toBeInstanceOf(CursorRunStartTimedOutError);
++    await vi.advanceTimersByTimeAsync(MIN_RESUMED_CAP_WINDOW_MS);
++    await rejection;
++    expect(onHandle).not.toHaveBeenCalled();
++    const { handle } = fakeHandle(pendingForever());
++    resolveStart(handle);
++    await vi.advanceTimersByTimeAsync(0);
++  });
++
++  test("attach: over-cap probe evidence shrinks to the grace, and a real result inside it wins", async () => {
++    const { handle } = fakeHandle(Promise.resolve(succeededResult));
++    const pending = runWithDurationCap({
++      elapsedMs: CAP_MS + 990,
++      kind: "attach",
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => Date.now(),
++      onHandle: () => undefined,
++      probeAgentId: "agent-x",
++      probeRunId: "run-x",
++      signals: {
++        probeRun: () =>
++          Promise.resolve({
++            createdAtMs: 0,
++            status: "RUNNING",
++            updatedAtMs: CAP_MS + 990,
++          }),
++      },
++      start: () => Promise.resolve(handle),
++    });
++    // The probe folds an over-cap age immediately; the already-terminal
++    // run's real result must still win inside the grace window.
++    await vi.advanceTimersByTimeAsync(0);
++    const out = await pending;
++    expect(out.status).toBe("succeeded");
++  });
++
++  test("attach: over-cap probe evidence with no result expires at the grace boundary", async () => {
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      elapsedMs: CAP_MS + 990,
++      kind: "attach",
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => Date.now(),
++      onHandle: () => undefined,
++      probeAgentId: "agent-x",
++      probeRunId: "run-x",
++      signals: {
++        probeRun: () =>
++          Promise.resolve({
++            createdAtMs: 0,
++            status: "RUNNING",
++            updatedAtMs: CAP_MS + 990,
++          }),
++      },
++      start: () => Promise.resolve(handle),
++    });
++    await vi.advanceTimersByTimeAsync(0);
++    await vi.advanceTimersByTimeAsync(MIN_RESUMED_CAP_WINDOW_MS);
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(out.durationMs).toBeGreaterThanOrEqual(CAP_MS);
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("rule 5 fail-closed: three unreachable probes with wall age over cap expires", async () => {
++    const capHooks: { current?: DurationCapHandle } = {};
++    const { cancel, handle } = fakeHandle(pendingForever());
++    let mono = 0;
++    let wall = 0;
++    const pending = runWithDurationCap({
++      elapsedMs: CAP_MS + 1000,
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => mono,
++      onCapReady: (h) => {
++        capHooks.current = h;
++      },
++      onHandle: () => undefined,
++      signals: { probeRun: () => Promise.reject(new Error("api down")) },
++      start: () => Promise.resolve(handle),
++      wallClock: () => wall,
++    });
++    await vi.advanceTimersByTimeAsync(0);
++    // Each discontinuity hit fires one probe; each rejection increments the
++    // shared unreachable counter. The third failure with wallAge >= cap
++    // fails closed.
++    for (const [wallMs, monoMs] of [
++      [100_000, 1],
++      [200_000, 2],
++      [300_000, 3],
++    ] as const) {
++      wall = wallMs;
++      mono = monoMs;
++      capHooks.current?.onDiscontinuitySample(wallMs, monoMs);
++      await vi.advanceTimersByTimeAsync(0);
++    }
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(out.durationMs).toBeGreaterThanOrEqual(CAP_MS);
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("late fire without a probe charges the suspect segment as served and expires", async () => {
++    let mono = 0;
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => mono,
++      onHandle: () => undefined,
++      signals: { getLiveness: () => undefined },
++      start: () => Promise.resolve(handle),
++    });
++    await vi.advanceTimersByTimeAsync(0);
++    // Forward monotonic step: the timer fire is late by more than the
++    // classifier slack, and with no probe to adjudicate, the armed delay is
++    // charged as served — reaching the cap immediately.
++    mono = CAP_MS + 61_000;
++    await vi.advanceTimersByTimeAsync(CAP_MS);
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("early fires without a probe still spend the rearm backstop", async () => {
++    // Monotonic clock frozen at zero: every fire is early, nothing folds,
++    // and only the rearm budget bounds the loop.
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => 0,
++      onHandle: () => undefined,
++      signals: { getLiveness: () => undefined },
++      start: () => Promise.resolve(handle),
++    });
++    await vi.advanceTimersByTimeAsync(0);
++    for (let i = 0; i <= MAX_CAP_REARMS; i += 1) {
++      await vi.advanceTimersByTimeAsync(CAP_MS);
++    }
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++
++  test("a discontinuity sample below the threshold is ignored", async () => {
++    const capHooks: { current?: DurationCapHandle } = {};
++    const { handle } = fakeHandle(Promise.resolve(succeededResult));
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => Date.now(),
++      onCapReady: (h) => {
++        capHooks.current = h;
++      },
++      onHandle: () => undefined,
++      signals: { probeRun: () => Promise.reject(new Error("must not be called")) },
++      start: () => Promise.resolve(handle),
++    });
++    capHooks.current?.onDiscontinuitySample(1_000, 900);
++    await vi.advanceTimersByTimeAsync(0);
++    const out = await pending;
++    expect(out.status).toBe("succeeded");
++  });
++
++  test("stream event fold alone can expire an over-cap remote run", async () => {
++    let capHooks: DurationCapHandle | undefined;
++    const { cancel, handle } = fakeHandle(pendingForever());
++    const pending = runWithDurationCap({
++      maxRunDurationMs: CAP_MS,
++      monotonicClock: () => Date.now(),
++      onCapReady: (h) => {
++        capHooks = h;
++      },
++      onHandle: () => undefined,
++      serverCreatedAtMs: 0,
++      signals: { getLiveness: () => ({ createdAtMs: 0, lastEventAtMs: CAP_MS }) },
++      start: () => Promise.resolve(handle),
++    });
++    await vi.advanceTimersByTimeAsync(0);
++    capHooks?.onProviderStreamEvent(CAP_MS + 1);
++    await vi.advanceTimersByTimeAsync(0);
++    const out = await pending;
++    expect(out.status).toBe("failed");
++    expect(cancel).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/packages/core/src/cursor-runs/duration-cap.ts b/packages/core/src/cursor-runs/duration-cap.ts
+index adabd61..3a7f367 100644
+--- a/packages/core/src/cursor-runs/duration-cap.ts
++++ b/packages/core/src/cursor-runs/duration-cap.ts
+@@ -13,14 +13,18 @@
+  * instead — the SDK start call is what hung, not the agent run — which the
+  * finalize path classifies `sdk-throw`.
+  *
+- * The cap is measured with a monotonic clock, and the timer re-validates real
+- * elapsed on fire: a host suspend / wall-clock jump can fire the event-loop
+- * timer before `windowMs` of real time actually passed, so a misfire re-arms
+- * for the remaining window instead of synthesizing a false `timeout-near-cap`.
+- * A re-arm-count backstop bounds this against a pathological clock.
++ * Local runs measure elapsed with a monotonic clock and re-validate on fire
++ * (#165). Cloud / rooms runs additionally track a live server-anchored age
++ * floor and consult bounded probes on suspend evidence.
+  */
+ 
+-import type { AgentRunHandle, AgentRunResult } from "@ship/cursor-runner";
++import type {
++  AgentRunHandle,
++  AgentRunLiveness,
++  AgentRunProbeArgs,
++  AgentRunProbeResult,
++  AgentRunResult,
++} from "@ship/agent-runner";
+ import type { Logger } from "@ship/logger";
+ 
+ import { CursorRunStartTimedOutError } from "../errors.js";
+@@ -57,8 +61,33 @@ export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+  */
+ export const MAX_CAP_REARMS = 64;
+ 
+-/** Monotonic wall time (immune to system-clock jumps) for the cap measurement. */
+-const defaultMonotonicClock = (): number => performance.now();
++/** Bounded network round-trip for a run-age probe. */
++export const PROBE_TIMEOUT_MS = 10_000;
++
++/** Consecutive unreachable probes before rule-5 fail-closed can fire. */
++export const CAP_PROBE_FAIL_CLOSED_AFTER = 3;
++
++/** Slack when classifying a timer fire as late (step-suspect). */
++export const FIRE_CLASSIFIER_SLACK_MS = 60_000;
++
++/** Wall-minus-mono delta across one pump interval that signals paused-clock suspend. */
++export const DISCONTINUITY_THRESHOLD_MS = 60_000;
++
++/** Attach retry cadence for broken-seed probe schedule (midpoint of 30–60s). */
++export const ATTACH_PROBE_RETRY_MS = 45_000;
++
++export type DurationCapKind = "fresh" | "attach";
++
++export interface DurationCapSignals {
++  readonly probeRun?: (args: AgentRunProbeArgs) => Promise<AgentRunProbeResult | undefined>;
++  readonly getLiveness?: () => AgentRunLiveness | undefined;
++}
++
++/** Hooks the service wires into event taps and the event-pump cadence. */
++export interface DurationCapHandle {
++  readonly onProviderStreamEvent: (eventAtMs: number) => void;
++  readonly onDiscontinuitySample: (wallMs: number, monoMs: number) => void;
++}
+ 
+ export interface DurationCapRunArgs {
+   /** Starts the run (fresh dispatch) or attach (resume); invoked once, immediately. */
+@@ -78,28 +107,54 @@ export interface DurationCapRunArgs {
+    * full cap to a run that already spent most of it.
+    */
+   readonly elapsedMs?: number;
++  readonly kind?: DurationCapKind;
+   /**
+    * Monotonic clock for the cap measurement; defaults to `performance.now`.
+    * Injectable so tests can drive elapsed independently of `setTimeout` firing.
+-   * Must be monotonic (immune to wall-clock jumps) — that is what lets a timer
+-   * misfire after a suspend / clock jump re-arm instead of falsely expiring.
+    */
+   readonly monotonicClock?: () => number;
++  /** Wall clock for rule-5 and the discontinuity detector; defaults to `Date.now`. */
++  readonly wallClock?: () => number;
++  /** Row creation wall time (epoch ms) for broken-seed anchor fallback. */
++  readonly rowCreatedAtWallMs?: number;
++  /** Persisted provider server-stamped run creation (epoch ms). */
++  readonly serverCreatedAtMs?: number;
++  readonly signals?: DurationCapSignals;
++  /** Id-addressed probe targets on attach before a handle exists. */
++  readonly probeAgentId?: string;
++  readonly probeRunId?: string;
++  /** Called synchronously once remote-cap hooks are ready. */
++  readonly onCapReady?: (handle: DurationCapHandle) => void;
+   readonly log?: Logger;
+ }
+ 
++const defaultMonotonicClock = (): number => performance.now();
++const defaultWallClock = (): number => Date.now();
++
++interface FloorSample {
++  readonly ageMs: number;
++  readonly foldedAtMono: number;
++}
++
++type TimerFireKind = "served" | "early" | "late";
++
+ /**
+  * Resolves with the runner's terminal result, or — once the remaining cap
+  * window of real (monotonic) time expires — cancels the run (best-effort, not
+- * awaited) and resolves with a synthetic `failed` terminal instead. Rejects
+- * when `start` rejects, when the registration hook throws, or when the window
+- * expires before `start` produced a handle (`CursorRunStartTimedOutError`).
+- *
+- * The timer re-validates against the monotonic clock on fire: a suspend /
+- * wall-clock jump that fires it before `windowMs` of real time elapsed re-arms
+- * for the remaining window rather than giving up (bounded by `MAX_CAP_REARMS`).
++ * awaited) and resolves with a synthetic `failed` terminal instead.
+  */
+ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<AgentRunResult> {
++  if (!hasRemoteSignals(args)) {
++    return runLocalDurationCap(args);
++  }
++  return runRemoteDurationCap(args);
++}
++
++function hasRemoteSignals(args: DurationCapRunArgs): boolean {
++  return args.signals?.probeRun !== undefined || args.signals?.getLiveness !== undefined;
++}
++
++async function runLocalDurationCap(args: DurationCapRunArgs): Promise<AgentRunResult> {
+   const elapsedMs = args.elapsedMs ?? 0;
+   const windowMs = capWindowMs(args.maxRunDurationMs, elapsedMs);
+   const monotonicNow = args.monotonicClock ?? defaultMonotonicClock;
+@@ -108,16 +163,9 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+   let expired = false;
+   let timer: ReturnType<typeof setTimeout> | undefined;
+   let rearms = 0;
+-  // Monotonic time the current timer was armed, and the delay it was armed for.
+-  // Comparing real elapsed-since-arm against the armed delay separates a healthy
+-  // clamped-segment continuation (full delay elapsed) from a suspend misfire
+-  // (fired early because the monotonic clock barely advanced).
+   let armedAtMono = 0;
+   let armedDelayMs = 0;
+ 
+-  // Everything that arms the timer or calls `start()` lives inside the try,
+-  // so a synchronous throw from an injected runner still hits the finally
+-  // and clears the cap timer rather than leaking it.
+   try {
+     const capExpiry = new Promise<AgentRunResult>((resolve, reject) => {
+       const onCapTimer = (): void => {
+@@ -125,10 +173,6 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+         const realElapsed = nowMono - startedMono;
+         const windowRemainingMs = windowMs - realElapsed;
+ 
+-        // The full armed delay elapsed in real (monotonic) time but the window
+-        // hasn't: a clamped segment of a cap beyond MAX_TIMER_DELAY_MS finishing
+-        // on a healthy clock. Continue with the next segment — not a misfire, so
+-        // it neither warns nor spends the misfire backstop.
+         if (windowRemainingMs > 0 && nowMono - armedAtMono >= armedDelayMs) {
+           armedAtMono = nowMono;
+           armedDelayMs = Math.min(windowRemainingMs, MAX_TIMER_DELAY_MS);
+@@ -136,9 +180,6 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+           return;
+         }
+ 
+-        // Fired before its armed delay elapsed in real time — a host suspend /
+-        // wall-clock jump. Re-arm for the remaining window, bounded by the
+-        // backstop against a frozen clock that never advances to the window.
+         if (windowRemainingMs > 0 && rearms < MAX_CAP_REARMS) {
+           rearms += 1;
+           armedAtMono = nowMono;
+@@ -167,9 +208,6 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+           reject(new CursorRunStartTimedOutError(windowMs));
+           return;
+         }
+-        // Resolve the synthetic terminal BEFORE firing cancel: a runner whose
+-        // cancel settles `result` synchronously (as "cancelled") must not win
+-        // the race — the cap verdict is `failed`, not `cancelled`.
+         resolve(capExceededResult(elapsedMs + windowMs));
+         cancelBestEffort(handle);
+       };
+@@ -177,21 +215,11 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+       armedDelayMs = Math.min(windowMs, MAX_TIMER_DELAY_MS);
+       timer = setTimeout(onCapTimer, armedDelayMs);
+     });
+-    // The loser of the race can still settle later — e.g. the cap rejects
+-    // pre-handle and `start()` (a hung `Agent.create`/`Agent.resume`) rejects
+-    // minutes afterward, or the cap resolves synthetic and the live
+-    // `handle.result` rejects post-cancel. `Promise.race` retains a reaction
+-    // on each input, so a late rejection is already observed, but these
+-    // sibling swallowers make that guarantee explicit and independent of the
+-    // host's race implementation. They never suppress the winner: the race
+-    // keeps its own reaction and still propagates the winning settlement.
+     void capExpiry.catch(() => {
+       /* swallow late loser rejection */
+     });
+ 
+     const terminal = args.start().then((h) => {
+-      // Past expiry the race has already settled; the late handle is only
+-      // cancelled, never registered. The returned value is discarded.
+       if (expired) {
+         cancelBestEffort(h);
+         return capExceededResult(elapsedMs + windowMs);
+@@ -210,24 +238,482 @@ export async function runWithDurationCap(args: DurationCapRunArgs): Promise<Agen
+   }
+ }
+ 
++async function runRemoteDurationCap(args: DurationCapRunArgs): Promise<AgentRunResult> {
++  const cap = args.maxRunDurationMs;
++  const seedMs = resolveSeedMs(args);
++  const windowMs = resolveWindowMs(args, seedMs);
++  const monotonicNow = args.monotonicClock ?? defaultMonotonicClock;
++  const wallNow = args.wallClock ?? defaultWallClock;
++  const startedMono = monotonicNow();
++  const windowDeadlineMono = startedMono + windowMs;
++  // Attach evidence shrinks the window to the grace floor, never below it: an
++  // already-terminal run must get the grace to deliver its real result, even
++  // when the very first probe/stream fold proves the run is over cap.
++  const graceDeadlineMono =
++    args.kind === "attach" ? startedMono + Math.min(MIN_RESUMED_CAP_WINDOW_MS, cap) : startedMono;
++  const streamAnchorMs = args.serverCreatedAtMs;
++
++  let handle: AgentRunHandle | undefined;
++  let settled = false;
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  let armedAtMono = startedMono;
++  let armedDelayMs = Math.min(windowMs, MAX_TIMER_DELAY_MS);
++  let rearms = 0;
++  let unreachableCount = 0;
++  let attachProbeRetries = 0;
++  let pendingStepSuspectMs = 0;
++  let probeInFlight = false;
++  let attachRetryTimer: ReturnType<typeof setTimeout> | undefined;
++  const floorSamples: FloorSample[] = [];
++  // Trusted-mono floor term — accumulated corroborated segments; never ages
++  // (the in-flight segment stays uncounted until its fire classifies it).
++  let trustedMonoAgeMs = 0;
++  let lastWallSample = wallNow();
++  let lastMonoSample = startedMono;
++  let latestEventAtMs: number | undefined;
++
++  const capHooks: DurationCapHandle = {
++    onDiscontinuitySample: (wallMs, monoMs) => {
++      if (settled) return;
++      const wallDelta = wallMs - lastWallSample;
++      const monoDelta = monoMs - lastMonoSample;
++      lastWallSample = wallMs;
++      lastMonoSample = monoMs;
++      if (wallDelta - monoDelta <= DISCONTINUITY_THRESHOLD_MS) return;
++      handleEarlyEvidence("discontinuity");
++    },
++    onProviderStreamEvent: (eventAtMs) => {
++      if (settled) return;
++      latestEventAtMs = eventAtMs;
++      foldStreamSignals();
++      evaluateDecisionPoint();
++    },
++  };
++  args.onCapReady?.(capHooks);
++
++  let resolveCap!: (result: AgentRunResult) => void;
++  let rejectCap!: (err: unknown) => void;
++  const capExpiry = new Promise<AgentRunResult>((resolve, reject) => {
++    resolveCap = resolve;
++    rejectCap = reject;
++  });
++
++  const settleExpired = (preHandle: boolean): void => {
++    if (settled) return;
++    settled = true;
++    if (timer !== undefined) {
++      clearTimeout(timer);
++      timer = undefined;
++    }
++    const floor = floorNow(monotonicNow());
++    const reportedMs = Math.max(cap, Math.max(seedMs + windowMs, floor));
++    args.log?.warn(
++      {
++        floor,
++        maxRunDurationMs: cap,
++        preHandle,
++        seedMs,
++        windowMs,
++      },
++      "policy.maxRunDurationMs exceeded; cancelling run",
++    );
++    if (preHandle) {
++      rejectCap(new CursorRunStartTimedOutError(windowMs));
++      return;
++    }
++    resolveCap(capExceededResult(reportedMs, cap));
++    if (handle !== undefined) cancelBestEffort(handle);
++  };
++
++  const evaluateDecisionPoint = (): boolean => {
++    if (settled) return true;
++    const nowMono = monotonicNow();
++    if (floorNow(nowMono) >= cap && nowMono >= graceDeadlineMono) {
++      settleExpired(handle === undefined);
++      return true;
++    }
++    // Budget exhaustion expires only via a served timer fire (rule 2's
++    // second condition) — never at a fold. A fold-time deadline check runs
++    // on microtask boundaries and could beat a result that is already
++    // resolving, turning a settled race into a synthetic failure.
++    if (unreachableCount >= CAP_PROBE_FAIL_CLOSED_AFTER && wallAgeMs(args, wallNow()) >= cap) {
++      settleExpired(handle === undefined);
++      return true;
++    }
++    if (rearms >= MAX_CAP_REARMS) {
++      settleExpired(handle === undefined);
++      return true;
++    }
++    return settled;
++  };
++
++  const rederiveAndRearm = (): void => {
++    if (settled) return;
++    const nowMono = monotonicNow();
++    const floor = floorNow(nowMono);
++    const windowRemainingMs = windowDeadlineMono - nowMono;
++    const capRemainderMs = Math.max(0, cap - floor);
++    let nextDelay = Math.min(windowRemainingMs, capRemainderMs);
++    // Over-cap evidence inside the attach grace shrinks to the grace
++    // boundary rather than expiring — the result still gets its race.
++    if (nextDelay <= 0 && nowMono < graceDeadlineMono) {
++      nextDelay = graceDeadlineMono - nowMono;
++    }
++    if (nextDelay <= 0) {
++      settleExpired(handle === undefined);
++      return;
++    }
++    armedAtMono = nowMono;
++    armedDelayMs = Math.min(nextDelay, MAX_TIMER_DELAY_MS);
++    if (timer !== undefined) clearTimeout(timer);
++    timer = setTimeout(onCapTimer, armedDelayMs);
++  };
++
++  const foldStreamSignals = (): void => {
++    foldRemoteStreamAge({
++      floorSamples,
++      getLiveness: () => args.signals?.getLiveness?.() ?? readHandleLiveness(handle),
++      monotonicNow,
++      ...(streamAnchorMs !== undefined && { anchorMs: streamAnchorMs }),
++      ...(latestEventAtMs !== undefined && { latestEventAtMs }),
++    });
++  };
++
++  const foldProbeResult = (probe: AgentRunProbeResult): void => {
++    const created = probe.createdAtMs;
++    const updated = probe.updatedAtMs;
++    if (created === undefined || updated === undefined || updated < created) return;
++    const ageMs = updated - created;
++    foldSample(ageMs, monotonicNow());
++    if (ageMs < cap) {
++      rearms = 0;
++      unreachableCount = 0;
++    }
++  };
++
++  const maybeRearm = (): void => {
++    if (settled) return;
++    rederiveAndRearm();
++  };
++
++  const noteProbeMiss = (
++    shouldAdjudicate: boolean,
++    suspectMs: number,
++    attachProbe: boolean,
++  ): void => {
++    if (!attachProbe) unreachableCount += 1;
++    if (shouldAdjudicate && suspectMs > 0) chargeStepSuspectAsServed();
++    evaluateDecisionPoint();
++  };
++
++  const resolveProbeAnswer = (
++    probe: AgentRunProbeResult | undefined,
++    shouldAdjudicate: boolean,
++    suspectMs: number,
++    attachProbe: boolean,
++  ): void => {
++    if (settled) return;
++    probeInFlight = false;
++    if (probe === undefined) {
++      noteProbeMiss(shouldAdjudicate, suspectMs, attachProbe);
++      return;
++    }
++    const created = probe.createdAtMs;
++    const updated = probe.updatedAtMs;
++    // An inverted server pair is as unusable as a missing one — it must not
++    // discard a pending step-suspect segment the fold then never charges.
++    if (created === undefined || updated === undefined || updated < created) {
++      noteProbeMiss(shouldAdjudicate, suspectMs, attachProbe);
++      return;
++    }
++    pendingStepSuspectMs = 0;
++    foldProbeResult(probe);
++    if (evaluateDecisionPoint()) return;
++    maybeRearm();
++  };
++
++  const probeTargets = ():
++    | { agentId: string; runId: string; probeFn: NonNullable<DurationCapSignals["probeRun"]> }
++    | undefined => {
++    const probeFn = args.signals?.probeRun;
++    const agentId = handle?.agentId ?? args.probeAgentId;
++    const runId = handle?.runId ?? args.probeRunId;
++    if (probeFn === undefined || agentId === undefined || runId === undefined) return undefined;
++    return { agentId, probeFn, runId };
++  };
++
++  const dispatchProbe = (
++    shouldAdjudicate: boolean,
++    suspectMs: number,
++    attachProbe: boolean,
++  ): void => {
++    const targets = probeTargets();
++    if (targets === undefined) return;
++    probeInFlight = true;
++    void probeWithTimeout(targets.probeFn, {
++      agentId: targets.agentId,
++      runId: targets.runId,
++    }).then(
++      (probe) => {
++        resolveProbeAnswer(probe, shouldAdjudicate, suspectMs, attachProbe);
++      },
++      () => {
++        resolveProbeAnswer(undefined, shouldAdjudicate, suspectMs, attachProbe);
++      },
++    );
++  };
++
++  const fireProbe = (reason: string, adjudicateStepSuspect: boolean): void => {
++    if (settled || probeInFlight) return;
++    const suspectMs = pendingStepSuspectMs;
++    const attachProbe = reason === "attach" || reason === "attach-retry";
++    if (probeTargets() === undefined) {
++      if (adjudicateStepSuspect && suspectMs > 0) chargeStepSuspectAsServed();
++      return;
++    }
++    dispatchProbe(adjudicateStepSuspect, suspectMs, attachProbe);
++  };
++
++  const chargeStepSuspectAsServed = (): void => {
++    if (pendingStepSuspectMs <= 0) return;
++    foldMonoDelta(pendingStepSuspectMs);
++    pendingStepSuspectMs = 0;
++    evaluateDecisionPoint();
++    maybeRearm();
++  };
++
++  const handleEarlyEvidence = (reason: string): void => {
++    if (settled) return;
++    foldMonoDelta(Math.max(0, monotonicNow() - armedAtMono));
++    foldStreamSignals();
++    if (evaluateDecisionPoint()) return;
++    // Every early re-arm spends the backstop budget, probe or no probe —
++    // otherwise a frozen monotonic clock during a hung start re-arms forever
++    // and the workflow never reaches CursorRunStartTimedOutError.
++    rearms += 1;
++    if (probeTargets() !== undefined) fireProbe(reason, false);
++    rederiveAndRearm();
++  };
++
++  const onServedFire = (nowMono: number, monoDelta: number, windowRemainingMs: number): void => {
++    foldMonoDelta(monoDelta);
++    foldStreamSignals();
++    if (evaluateDecisionPoint()) return;
++    if (windowRemainingMs <= 0) {
++      settleExpired(handle === undefined);
++      return;
++    }
++    const floor = floorNow(nowMono);
++    if (floor >= cap && nowMono >= graceDeadlineMono) {
++      settleExpired(handle === undefined);
++      return;
++    }
++    armedAtMono = nowMono;
++    const floorRemainder = floor >= cap ? graceDeadlineMono - nowMono : cap - floor;
++    armedDelayMs = Math.min(windowRemainingMs, Math.max(1, floorRemainder), MAX_TIMER_DELAY_MS);
++    timer = setTimeout(onCapTimer, armedDelayMs);
++  };
++
++  const onCapTimer = (): void => {
++    if (settled) return;
++    const nowMono = monotonicNow();
++    const monoDelta = nowMono - armedAtMono;
++    const windowRemainingMs = windowDeadlineMono - nowMono;
++    const fireKind = classifyTimerFire(monoDelta, armedDelayMs);
++
++    if (fireKind === "served") {
++      onServedFire(nowMono, monoDelta, windowRemainingMs);
++      return;
++    }
++
++    if (fireKind === "early") {
++      handleEarlyEvidence("early-fire");
++      return;
++    }
++
++    // Late / step-suspect
++    pendingStepSuspectMs = armedDelayMs;
++    foldStreamSignals();
++    if (evaluateDecisionPoint()) return;
++    rearms += 1;
++    if (probeTargets() === undefined) {
++      // No adjudicator at all: charge the suspect segment as served so
++      // repeated stalls cannot defer the cap indefinitely. The charge
++      // re-evaluates and re-arms internally.
++      chargeStepSuspectAsServed();
++      return;
++    }
++    fireProbe("late-fire", true);
++    rederiveAndRearm();
++  };
++
++  function foldSample(ageMs: number, atMono: number): void {
++    if (ageMs < 0) return;
++    floorSamples.push({ ageMs, foldedAtMono: atMono });
++  }
++
++  // Trusted-mono time is its own non-aging floor term. Server-anchored
++  // samples already age by mono-since-fold in `floorNow`; compounding the
++  // mono delta into a new sample on top of `floorNow()` would double-count
++  // the same interval and over-cancel young runs.
++  function foldMonoDelta(deltaMs: number): void {
++    if (deltaMs <= 0) return;
++    trustedMonoAgeMs += deltaMs;
++  }
++
++  function floorNow(nowMono: number): number {
++    let maxAge = trustedMonoAgeMs;
++    for (const sample of floorSamples) {
++      const aged = sample.ageMs + Math.max(0, nowMono - sample.foldedAtMono);
++      if (aged > maxAge) maxAge = aged;
++    }
++    return maxAge;
++  }
++
++  const scheduleAttachProbeRetry = (): void => {
++    if (settled || args.kind !== "attach") return;
++    if (seedMs > 0 || args.rowCreatedAtWallMs !== undefined) return;
++    if (attachProbeRetries >= CAP_PROBE_FAIL_CLOSED_AFTER) return;
++    attachProbeRetries += 1;
++    attachRetryTimer = setTimeout(() => {
++      fireProbe("attach-retry", false);
++      if (!settled) scheduleAttachProbeRetry();
++    }, ATTACH_PROBE_RETRY_MS);
++  };
++
++  try {
++    void capExpiry.catch(() => {
++      /* swallow late loser rejection */
++    });
++    timer = setTimeout(onCapTimer, armedDelayMs);
++
++    if (args.kind === "attach") {
++      fireProbe("attach", false);
++      scheduleAttachProbeRetry();
++    }
++
++    const terminal = args.start().then((h) => {
++      if (settled) {
++        cancelBestEffort(h);
++        return capExceededResult(Math.max(cap, seedMs + windowMs), cap);
++      }
++      handle = h;
++      args.onHandle(h);
++      return h.result;
++    });
++    void terminal.catch(() => {
++      /* swallow late loser rejection */
++    });
++
++    return await Promise.race([terminal, capExpiry]);
++  } finally {
++    // A settled race retires the cap entirely: late-arriving hooks
++    // (discontinuity samples, stream folds, in-flight probe resolutions,
++    // attach retries) must not re-arm timers or cancel a completed run.
++    settled = true;
++    if (timer !== undefined) clearTimeout(timer);
++    if (attachRetryTimer !== undefined) clearTimeout(attachRetryTimer);
++  }
++}
++
++function foldRemoteStreamAge(args: {
++  readonly anchorMs?: number;
++  readonly latestEventAtMs?: number;
++  readonly getLiveness: () => AgentRunLiveness | undefined;
++  readonly monotonicNow: () => number;
++  readonly floorSamples: FloorSample[];
++}): void {
++  const liveness = args.getLiveness();
++  const anchor = args.anchorMs ?? liveness?.createdAtMs ?? args.latestEventAtMs;
++  const lastEvent = liveness?.lastEventAtMs ?? args.latestEventAtMs;
++  if (anchor === undefined || lastEvent === undefined) return;
++  if (lastEvent < anchor) return;
++  args.floorSamples.push({ ageMs: lastEvent - anchor, foldedAtMono: args.monotonicNow() });
++}
++
++function classifyTimerFire(monoDelta: number, armedDelayMs: number): TimerFireKind {
++  if (monoDelta + FIRE_CLASSIFIER_SLACK_MS < armedDelayMs) return "early";
++  if (monoDelta > armedDelayMs + FIRE_CLASSIFIER_SLACK_MS) return "late";
++  return "served";
++}
++
++function resolveSeedMs(args: DurationCapRunArgs): number {
++  const elapsed = args.elapsedMs ?? 0;
++  if (elapsed > 0) return elapsed;
++  if (args.rowCreatedAtWallMs !== undefined) {
++    const wall = args.wallClock ?? defaultWallClock;
++    const derived = wall() - args.rowCreatedAtWallMs;
++    if (Number.isFinite(derived) && derived > 0) return derived;
++  }
++  return 0;
++}
++
++function resolveWindowMs(args: DurationCapRunArgs, seedMs: number): number {
++  const cap = args.maxRunDurationMs;
++  const graceMs = Math.min(MIN_RESUMED_CAP_WINDOW_MS, cap);
++  if (args.kind !== "attach") return cap;
++  if (seedMs > 0) return Math.max(cap - seedMs, graceMs);
++  if (args.rowCreatedAtWallMs !== undefined) {
++    const wall = args.wallClock ?? defaultWallClock;
++    const derived = wall() - args.rowCreatedAtWallMs;
++    if (Number.isFinite(derived) && derived > 0) {
++      return Math.max(cap - derived, graceMs);
++    }
++  }
++  return graceMs;
++}
++
+ function capWindowMs(maxRunDurationMs: number, elapsedMs: number): number {
+   if (elapsedMs <= 0) return maxRunDurationMs;
+   const graceMs = Math.min(MIN_RESUMED_CAP_WINDOW_MS, maxRunDurationMs);
+   return Math.max(maxRunDurationMs - elapsedMs, graceMs);
+ }
+ 
+-// Best-effort: the cap verdict stands whether or not the SDK-side cancel
+-// lands (a hung agent may not acknowledge it).
++function wallAgeMs(args: DurationCapRunArgs, wallMs: number): number {
++  const startedWall = parseStartedWallMs(args);
++  if (startedWall === undefined) return 0;
++  return Math.max(0, wallMs - startedWall);
++}
++
++function parseStartedWallMs(args: DurationCapRunArgs): number | undefined {
++  const elapsed = args.elapsedMs ?? 0;
++  if (elapsed > 0) {
++    const wall = args.wallClock ?? defaultWallClock;
++    return wall() - elapsed;
++  }
++  return args.rowCreatedAtWallMs;
++}
++
++function readHandleLiveness(handle: AgentRunHandle | undefined): AgentRunLiveness | undefined {
++  if (handle?.liveness === undefined) return undefined;
++  return handle.liveness();
++}
++
++async function probeWithTimeout(
++  probeRun: (args: AgentRunProbeArgs) => Promise<AgentRunProbeResult | undefined>,
++  args: AgentRunProbeArgs,
++): Promise<AgentRunProbeResult | undefined> {
++  return await Promise.race([
++    probeRun(args),
++    new Promise<undefined>((resolve) => {
++      setTimeout(() => {
++        resolve(undefined);
++      }, PROBE_TIMEOUT_MS);
++    }),
++  ]);
++}
++
+ function cancelBestEffort(handle: AgentRunHandle): void {
+   handle.cancel().catch(() => {
+     /* swallow */
+   });
+ }
+ 
+-function capExceededResult(durationMs: number): AgentRunResult {
++function capExceededResult(durationMs: number, floorCapMs?: number): AgentRunResult {
++  const reported = floorCapMs !== undefined ? Math.max(durationMs, floorCapMs) : durationMs;
+   return {
+     branches: [],
+-    durationMs,
++    durationMs: reported,
+     errorMessage:
+       "run exceeded policy.maxRunDurationMs; ship requested an SDK-run cancel (best-effort)",
+     status: "failed",
+diff --git a/packages/core/src/service.ts b/packages/core/src/service.ts
+index 2f67f35..afcc097 100644
+--- a/packages/core/src/service.ts
++++ b/packages/core/src/service.ts
+@@ -59,6 +59,7 @@ import {
+ import { basename, resolve as resolvePathAbs } from "node:path";
+ 
+ import type { EventWriter } from "./artifacts/ndjson.js";
++import type { DurationCapHandle } from "./cursor-runs/duration-cap.js";
+ import type { DocSource } from "./doc-source/doc-source.js";
+ import type { ShipFs } from "./fs/shape.js";
+ import type { ValidatedDoc } from "./validate.js";
+@@ -75,6 +76,12 @@ import {
+   type RunArtifactPaths,
+ } from "./artifacts/paths.js";
+ import { renderImplementationPrompt } from "./artifacts/prompt-template.js";
++import {
++  buildRemoteCapSignals,
++  isRemoteCapRuntime,
++  startCapDiscontinuitySampler,
++  wireCapStreamFold,
++} from "./cursor-runs/duration-cap-wire.js";
+ import { runWithDurationCap } from "./cursor-runs/duration-cap.js";
+ import { type EventPumpHandle, startEventPump } from "./cursor-runs/event-pump.js";
+ import { selectStaleOrphanResumeCandidates } from "./cursor-runs/orphan-resume.js";
+@@ -1034,6 +1041,8 @@ async function runToTerminal(
+   let cursorRunId: string | undefined;
+   let ndjson: EventWriter | undefined;
+   let eventPump: EventPumpHandle | undefined;
++  let stopDiscontinuitySampler: (() => void) | undefined;
++  let capHandle: DurationCapHandle | undefined;
+   let scratchOwned = false;
+ 
+   try {
+@@ -1057,6 +1066,7 @@ async function runToTerminal(
+     const onEvent: AgentRunInput["onEvent"] = (ev) => {
+       ndjsonRef.write(ev);
+       eventPump?.heartbeat();
++      wireCapStreamFold(ctx.provider, capHandle, ev);
+     };
+ 
+     const runInput = buildShipAgentRunInput({
+@@ -1072,16 +1082,36 @@ async function runToTerminal(
+     // The cap window opens before the runner is invoked: a stalled SDK start
+     // call must not hold the workflow open past the policy cap any more than
+     // a hung agent run.
++    const remoteCap = isRemoteCapRuntime(ctx.resolvedCursorRuntime);
++    let capHandleRef: AgentRunHandle | undefined;
+     const result = await runWithDurationCap({
+       log: runLog,
+       maxRunDurationMs: resolveMaxRunDurationMs(ctx.store, prep.workflowRunId),
++      ...(remoteCap && {
++        kind: "fresh" as const,
++        onCapReady: (handle) => {
++          capHandle = handle;
++          if (ctx.resolvedCursorRuntime === "cloud" || ctx.resolvedCursorRuntime === "rooms") {
++            stopDiscontinuitySampler = startCapDiscontinuitySampler({ capHandle: handle });
++          }
++        },
++        signals: buildRemoteCapSignals({
++          getHandle: () => capHandleRef,
++          provider: ctx.provider,
++          runner: ctx.runner,
++          runtime: ctx.resolvedCursorRuntime as "cloud" | "rooms",
++        }),
++        wallClock: () => Date.parse(ctx.clock()),
++      }),
+       onHandle: (handle) => {
++        capHandleRef = handle;
+         // Cloud + rooms both run unattended off the async path; the timer-based
+         // pump keeps `workflow_runs.updated_at` fresh while a long run is live.
+         if (ctx.resolvedCursorRuntime === "cloud" || ctx.resolvedCursorRuntime === "rooms") {
+           eventPump = startEventPump({ store: ctx.store, workflowRunId: prep.workflowRunId });
+         }
+         cursorRunId = ctx.ids.cursorRun();
++        const serverCreatedAtMs = handle.liveness?.().createdAtMs;
+         ctx.store.recordCursorRun({
+           id: cursorRunId,
+           workflowRunId: prep.workflowRunId,
+@@ -1091,6 +1121,7 @@ async function runToTerminal(
+           provider: ctx.provider,
+           model,
+           artifactsDir: prep.paths.dir,
++          ...(serverCreatedAtMs !== undefined && { createdAtMs: serverCreatedAtMs }),
+         });
+         // Link the phase to the cursor-run so `getRun()` consumers can
+         // join phase rows back to their `cursor_runs` metadata after
+@@ -1121,6 +1152,7 @@ async function runToTerminal(
+     });
+   } finally {
+     ctx.activeRuns.delete(prep.workflowRunId);
++    stopDiscontinuitySampler?.();
+     eventPump?.stop();
+     if (ndjson !== undefined) {
+       try {
+@@ -2266,9 +2298,12 @@ async function runResumeAttach(
+   const runner = target.runner;
+ 
+   let eventPump: EventPumpHandle | undefined;
++  let stopDiscontinuitySampler: (() => void) | undefined;
++  let capHandle: DurationCapHandle | undefined;
+   const onEvent: AgentRunAttachInput["onEvent"] = (ev) => {
+     target.ndjson.write(ev);
+     eventPump?.heartbeat();
++    wireCapStreamFold(target.shipCtx.provider, capHandle, ev);
+   };
+ 
+   try {
+@@ -2280,11 +2315,33 @@ async function runResumeAttach(
+     // Same single-window cap as the dispatch path: the attach call itself
+     // (`Agent.resume` + `Agent.getRun`) can stall, so it runs inside the
+     // remaining-budget window rather than ahead of it.
++    const cursorRow = ctx.store.getCursorRun(target.row.id);
++    const rowCreatedAtWallMs =
++      cursorRow?.startedAt !== undefined ? Date.parse(cursorRow.startedAt) : undefined;
++    let capHandleRef: AgentRunHandle | undefined;
+     const result = await runWithDurationCap({
+       elapsedMs: resumeElapsedMs(ctx, target.row.id),
++      kind: "attach",
+       log: resumeLog,
+       maxRunDurationMs: resolveMaxRunDurationMs(ctx.store, target.row.workflowRunId),
++      onCapReady: (handle) => {
++        capHandle = handle;
++        stopDiscontinuitySampler = startCapDiscontinuitySampler({ capHandle: handle });
++      },
++      probeAgentId: target.row.agentId,
++      probeRunId: target.row.runId,
++      ...(cursorRow?.createdAtMs !== undefined && { serverCreatedAtMs: cursorRow.createdAtMs }),
++      ...(rowCreatedAtWallMs !== undefined &&
++        Number.isFinite(rowCreatedAtWallMs) && { rowCreatedAtWallMs }),
++      signals: buildRemoteCapSignals({
++        getHandle: () => capHandleRef,
++        provider: target.shipCtx.provider,
++        runner,
++        runtime: "cloud",
++      }),
++      wallClock: () => Date.parse(ctx.clock()),
+       onHandle: (handle) => {
++        capHandleRef = handle;
+         eventPump = startEventPump({ store: ctx.store, workflowRunId: target.row.workflowRunId });
+         onPumpStarted(eventPump);
+         ctx.activeRuns.set(target.row.workflowRunId, { controller: target.controller, handle });
+@@ -2313,6 +2370,8 @@ async function runResumeAttach(
+     });
+   } catch (err) {
+     await handleResumeAttachError(ctx, target, err);
++  } finally {
++    stopDiscontinuitySampler?.();
+   }
+ }
+ 
+diff --git a/packages/cursor-runner/src/cloud-run-probe.ts b/packages/cursor-runner/src/cloud-run-probe.ts
+new file mode 100644
+index 0000000..ebf9353
+--- /dev/null
++++ b/packages/cursor-runner/src/cloud-run-probe.ts
+@@ -0,0 +1,66 @@
++/**
++ * Bounded REST probe of a Cursor cloud run for server-stamped age fields.
++ */
++
++import type { AgentRunProbeResult } from "@ship/agent-runner";
++
++const API_KEY_ENV = "CURSOR_API_KEY";
++const DEFAULT_API_BASE = "https://api.cursor.com";
++
++interface V1RunResponse {
++  readonly status?: string;
++  readonly createdAt?: string;
++  readonly updatedAt?: string;
++}
++
++function parseIsoMs(value: string | undefined): number | undefined {
++  if (value === undefined || value.length === 0) return undefined;
++  const ms = Date.parse(value);
++  return Number.isFinite(ms) ? ms : undefined;
++}
++
++function buildProbeResult(body: V1RunResponse): AgentRunProbeResult | undefined {
++  const createdAtMs = parseIsoMs(body.createdAt);
++  const updatedAtMs = parseIsoMs(body.updatedAt);
++  if (createdAtMs === undefined && updatedAtMs === undefined && body.status === undefined) {
++    return undefined;
++  }
++  return {
++    ...(body.status !== undefined && { status: body.status }),
++    ...(createdAtMs !== undefined && { createdAtMs }),
++    ...(updatedAtMs !== undefined && { updatedAtMs }),
++  };
++}
++
++/** Probe a cloud run via the agents REST surface; undefined on failure/timeout. */
++export async function probeCursorCloudRun(args: {
++  readonly agentId: string;
++  readonly runId: string;
++  readonly timeoutMs: number;
++}): Promise<AgentRunProbeResult | undefined> {
++  const apiKey = process.env[API_KEY_ENV];
++  if (apiKey === undefined || apiKey === "") return undefined;
++
++  const baseUrl = process.env["CURSOR_API_BASE_URL"] ?? DEFAULT_API_BASE;
++  const controller = new AbortController();
++  const timeout = setTimeout(() => {
++    controller.abort();
++  }, args.timeoutMs);
++  try {
++    const url = `${baseUrl}/v0/agents/${encodeURIComponent(args.agentId)}/runs/${encodeURIComponent(args.runId)}`;
++    const resp = await fetch(url, {
++      headers: {
++        Accept: "application/json",
++        Authorization: `Bearer ${apiKey}`,
++      },
++      signal: controller.signal,
++    });
++    if (!resp.ok) return undefined;
++    const body = (await resp.json()) as V1RunResponse;
++    return buildProbeResult(body);
++  } catch {
++    return undefined;
++  } finally {
++    clearTimeout(timeout);
++  }
++}
+diff --git a/packages/cursor-runner/src/cloud-runner.ts b/packages/cursor-runner/src/cloud-runner.ts
+index 60855c0..d11acff 100644
+--- a/packages/cursor-runner/src/cloud-runner.ts
++++ b/packages/cursor-runner/src/cloud-runner.ts
+@@ -12,6 +12,7 @@ import type {
+   SDKAgent,
+   SDKMessage,
+ } from "@cursor/sdk";
++import type { AgentRunProbeArgs, AgentRunProbeResult } from "@ship/agent-runner";
+ import type { Logger } from "@ship/logger";
+ import type { ArtifactRef } from "@ship/workflow";
+ 
+@@ -48,6 +49,8 @@ import {
+   modelArgFromInput,
+ } from "./_shared.js";
+ import { captureListedArtifacts } from "./artifacts-capture.js";
++import { probeCursorCloudRun } from "./cloud-run-probe.js";
++import { cursorEventProjection } from "./cursor-event-projection.js";
+ import { cloudDebugLog } from "./debug.js";
+ import {
+   CursorAgentNotFoundError,
+@@ -58,6 +61,12 @@ import {
+ } from "./errors.js";
+ 
+ const API_KEY_ENV = "CURSOR_API_KEY";
++const PROBE_TIMEOUT_MS = 10_000;
++
++function isShipSynthesizedEvent(ev: SDKMessage): boolean {
++  const kind = (ev as { type?: unknown }).type;
++  return kind === "ship.resumed";
++}
+ 
+ function isUnsafeCloudArtifactPath(sdkPath: string): boolean {
+   return isAbsolute(sdkPath) || sdkPath.replace(/\\/g, "/").split("/").includes("..");
+@@ -143,6 +152,14 @@ function mapCloudRunResult(
+ 
+ /** Construct once, reuse across runs. The runner holds no per-run state. */
+ export class CloudCursorRunner implements AgentRunner {
++  async probeRun(args: AgentRunProbeArgs): Promise<AgentRunProbeResult | undefined> {
++    return probeCursorCloudRun({
++      agentId: args.agentId,
++      runId: args.runId,
++      timeoutMs: PROBE_TIMEOUT_MS,
++    });
++  }
++
+   async downloadArtifact(agentId: string, path: string): Promise<Buffer> {
+     const apiKey = process.env[API_KEY_ENV];
+     if (apiKey === undefined || apiKey === "") {
+@@ -302,6 +319,12 @@ export class CloudCursorRunner implements AgentRunner {
+       readonly shipResumed?: { readonly agentId: string; readonly runId: string };
+     },
+   ): AgentRunHandle {
++    const livenessState: { createdAtMs?: number; lastEventAtMs?: number } = {};
++    const createdAtMs = sdkRun.createdAt;
++    if (createdAtMs !== undefined && Number.isFinite(createdAtMs)) {
++      livenessState.createdAtMs = createdAtMs;
++    }
++
+     const state = createSdkRunHandleState({
+       cancelRun: () => sdkRun.cancel(),
+       ...(input.signal !== undefined && { signal: input.signal }),
+@@ -310,10 +333,18 @@ export class CloudCursorRunner implements AgentRunner {
+     void this.#runPipeline(agent, sdkRun, input, {
+       ...state.callbacks,
+       ...(opts?.shipResumed !== undefined && { shipResumed: opts.shipResumed }),
++      recordProviderEvent: (ev) => {
++        if (isShipSynthesizedEvent(ev)) return;
++        const ts = cursorEventProjection.timestamp(ev);
++        if (ts === undefined) return;
++        livenessState.lastEventAtMs = ts;
++        livenessState.createdAtMs ??= ts;
++      },
+     });
+ 
+     return buildSdkRunHandle({
+       agentId: agent.agentId,
++      liveness: () => ({ ...livenessState }),
+       runId: sdkRun.id,
+       state,
+     });
+@@ -328,6 +359,7 @@ export class CloudCursorRunner implements AgentRunner {
+       finalizeError: (err: unknown) => void;
+       detachSignalListener: () => void;
+       shipResumed?: { readonly agentId: string; readonly runId: string };
++      recordProviderEvent?: (ev: SDKMessage) => void;
+     },
+   ): Promise<void> {
+     const safelyEmit = (ev: SDKMessage): void => {
+@@ -364,6 +396,7 @@ export class CloudCursorRunner implements AgentRunner {
+       try {
+         for await (const ev of sdkRun.stream()) {
+           recordEvent(ev);
++          callbacks.recordProviderEvent?.(ev);
+           safelyEmit(ev);
+         }
+       } catch (streamErr) {
+diff --git a/packages/cursor-runner/src/runner.ts b/packages/cursor-runner/src/runner.ts
+index 2cbee31..331edf1 100644
+--- a/packages/cursor-runner/src/runner.ts
++++ b/packages/cursor-runner/src/runner.ts
+@@ -11,6 +11,9 @@ export type {
+   AgentRunResult,
+   CloudRunSpec,
+   RoomRunSpec,
++  AgentRunLiveness,
++  AgentRunProbeArgs,
++  AgentRunProbeResult,
+ } from "@ship/agent-runner";
+ 
+ export type { AgentDefinition, McpServerConfig } from "@ship/agent-runner";
+diff --git a/packages/store/migrations/0008_cursor_runs_created_at_ms.sql b/packages/store/migrations/0008_cursor_runs_created_at_ms.sql
+new file mode 100644
+index 0000000..a5f4b1e
+--- /dev/null
++++ b/packages/store/migrations/0008_cursor_runs_created_at_ms.sql
+@@ -0,0 +1,4 @@
++-- 0008_cursor_runs_created_at_ms.sql — provider server-stamped run creation time.
++-- Nullable: local rows and pre-migration cloud rows have no server anchor.
++
++ALTER TABLE cursor_runs ADD COLUMN created_at_ms INTEGER;
+diff --git a/packages/store/src/cursor-runs.ts b/packages/store/src/cursor-runs.ts
+index 55b9b59..da78673 100644
+--- a/packages/store/src/cursor-runs.ts
++++ b/packages/store/src/cursor-runs.ts
+@@ -33,6 +33,8 @@ export interface RecordCursorRunInput {
+   runtime: CursorRunRuntime;
+   model?: ModelSelection;
+   artifactsDir: string;
++  /** Provider server-stamped run creation time (epoch ms), when exposed at dispatch. */
++  createdAtMs?: number;
+ }
+ 
+ /** Patch shape for `updateCursorRunStatus`; every field optional. */
+@@ -85,10 +87,11 @@ interface CursorRunRow {
+   duration_ms: number | null;
+   artifacts_dir: string;
+   artifacts_json: string | null;
++  created_at_ms: number | null;
+ }
+ 
+ const CURSOR_RUN_COLUMNS =
+-  "id, workflow_run_id, agent_id, provider, run_id, runtime, model_json, status, started_at, ended_at, duration_ms, artifacts_dir, artifacts_json";
++  "id, workflow_run_id, agent_id, provider, run_id, runtime, model_json, status, started_at, ended_at, duration_ms, artifacts_dir, artifacts_json, created_at_ms";
+ 
+ /**
+  * Constructs the `cursor_runs` ops. Caches static prepared statements
+@@ -96,8 +99,8 @@ const CURSOR_RUN_COLUMNS =
+  */
+ export function createCursorRunOps(db: Db, clock: () => string): CursorRunOps {
+   const insertStmt = db.prepare(
+-    `INSERT INTO cursor_runs (id, workflow_run_id, agent_id, provider, run_id, runtime, model_json, status, started_at, artifacts_dir)
+-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++    `INSERT INTO cursor_runs (id, workflow_run_id, agent_id, provider, run_id, runtime, model_json, status, started_at, artifacts_dir, created_at_ms)
++     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+   );
+   const selectByIdStmt = db.prepare<[string], CursorRunRow>(
+     `SELECT ${CURSOR_RUN_COLUMNS} FROM cursor_runs WHERE id = ?`,
+@@ -124,6 +127,7 @@ export function createCursorRunOps(db: Db, clock: () => string): CursorRunOps {
+           "running",
+           clock(),
+           input.artifactsDir,
++          input.createdAtMs ?? null,
+         );
+       } catch (err: unknown) {
+         if (isForeignKeyViolation(err)) {
+@@ -297,6 +301,9 @@ function parseCursorRun(row: CursorRunRow): CursorRunRef {
+   if (artifacts !== undefined) {
+     (candidate as { artifacts?: ArtifactRef[] }).artifacts = artifacts;
+   }
++  if (row.created_at_ms !== null) {
++    (candidate as { createdAtMs?: number }).createdAtMs = row.created_at_ms;
++  }
+ 
+   const result = cursorRunRefSchema.safeParse(candidate);
+   if (!result.success) {
+diff --git a/packages/store/src/migrations.test.ts b/packages/store/src/migrations.test.ts
+index 650cc10..0ab2b57 100644
+--- a/packages/store/src/migrations.test.ts
++++ b/packages/store/src/migrations.test.ts
+@@ -52,7 +52,7 @@ describe("runMigrations", () => {
+     expect(tables).toContain("driver_streams");
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name, applied_at FROM _migrations").all();
+-    expect(applied).toHaveLength(7);
++    expect(applied).toHaveLength(8);
+     expect(applied.map((r) => r.name)).toEqual([
+       "0001_init.sql",
+       "0002_cursor_runs_run_id.sql",
+@@ -61,6 +61,7 @@ describe("runMigrations", () => {
+       "0005_driver_runs.sql",
+       "0006_driver_tick_lease.sql",
+       "0007_cursor_runs_provider.sql",
++      "0008_cursor_runs_created_at_ms.sql",
+     ]);
+ 
+     const phaseColumns = db
+@@ -76,6 +77,7 @@ describe("runMigrations", () => {
+     expect(columns).toContain("run_id");
+     expect(columns).toContain("artifacts_json");
+     expect(columns).toContain("provider");
++    expect(columns).toContain("created_at_ms");
+   });
+ 
+   test("re-run on already-migrated DB is a no-op (two _migrations rows)", () => {
+@@ -84,7 +86,7 @@ describe("runMigrations", () => {
+     runMigrations(db);
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name FROM _migrations").all();
+-    expect(applied).toHaveLength(7);
++    expect(applied).toHaveLength(8);
+   });
+ 
+   test("synthetic 0002 migration applies on top of 0001 via temp directory", () => {
+diff --git a/packages/test-harness/scenarios/core-cloud-resume.scenario.test.ts b/packages/test-harness/scenarios/core-cloud-resume.scenario.test.ts
+index 188781f..eff1f45 100644
+--- a/packages/test-harness/scenarios/core-cloud-resume.scenario.test.ts
++++ b/packages/test-harness/scenarios/core-cloud-resume.scenario.test.ts
+@@ -57,7 +57,7 @@ test("kill-mid-run restart: resumeOrphanedRuns attaches and completes the same w
+     baseRef: "main",
+     docPath: "docs/task.md",
+     id: WORKFLOW_RUN_ID,
+-    policy: { agentTimeoutMs: 1, baseRef: "main", maxRunDurationMs: 1 },
++    policy: { agentTimeoutMs: 1, baseRef: "main", maxRunDurationMs: 60_000 },
+     repo: "ship",
+     worktree: {
+       baseRef: "main",
+diff --git a/packages/workflow/src/workflow.ts b/packages/workflow/src/workflow.ts
+index c2db091..dd7c730 100644
+--- a/packages/workflow/src/workflow.ts
++++ b/packages/workflow/src/workflow.ts
+@@ -179,6 +179,8 @@ export const cursorRunRefSchema = z
+     artifactsDir: z.string().min(1),
+     /** Cloud SDK artifact manifest (refs only). Omitted for local runs. */
+     artifacts: z.array(artifactRefSchema).optional(),
++    /** Provider server-stamped run creation time (epoch ms). Cloud dispatch only. */
++    createdAtMs: z.number().int().nonnegative().optional(),
+   })
+   .strict();
+ export type CursorRunRef = z.infer<typeof cursorRunRefSchema>;

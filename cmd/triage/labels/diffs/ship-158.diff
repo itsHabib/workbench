@@ -1,0 +1,468 @@
+diff --git a/packages/driver/src/index.ts b/packages/driver/src/index.ts
+index a8c9e59..0b0c269 100644
+--- a/packages/driver/src/index.ts
++++ b/packages/driver/src/index.ts
+@@ -38,6 +38,8 @@ export { createExecGhPort } from "./gh-port.js";
+ export type { DriverShipPort } from "./ship-port.js";
+ 
+ export type {
++  CanonicalReviewer,
++  CiCheckState,
+   Decision,
+   DriverRunRef,
+   DriverStreamView,
+@@ -45,9 +47,21 @@ export type {
+   JudgmentRequest,
+   LandOpts,
+   MergeFacts,
++  MergeVerdict,
++  MergeVerdictEvidence,
++  MergeVerdictInputs,
++  MergeVerdictOutcome,
++  ReviewerBallot,
++  ReviewerBallotVerdict,
+   RunOpts,
+ } from "./types.js";
+ 
++export {
++  assembleMergeVerdict,
++  CANONICAL_REVIEWERS,
++  REQUIRED_REVIEW_COORDINATOR_CYCLES,
++} from "./merge-verdict.js";
++
+ export {
+   CancelError,
+   DecideError,
+diff --git a/packages/driver/src/merge-verdict.test.ts b/packages/driver/src/merge-verdict.test.ts
+new file mode 100644
+index 0000000..fbba16c
+--- /dev/null
++++ b/packages/driver/src/merge-verdict.test.ts
+@@ -0,0 +1,121 @@
++/** Unit tests for the merge-gate verdict assembler. */
++
++import { describe, expect, test } from "vitest";
++
++import type { MergeVerdictInputs, ReviewerBallot } from "./types.js";
++
++import {
++  assembleMergeVerdict,
++  CANONICAL_REVIEWERS,
++  REQUIRED_REVIEW_COORDINATOR_CYCLES,
++} from "./merge-verdict.js";
++
++function allApprovedBallots(): ReviewerBallot[] {
++  return CANONICAL_REVIEWERS.map((reviewer) => ({
++    reviewer,
++    verdict: "approved" as const,
++  }));
++}
++
++function authorizedInputs(overrides: Partial<MergeVerdictInputs> = {}): MergeVerdictInputs {
++  return {
++    adversarialGatePassed: true,
++    ciCheckState: "success",
++    ciSha: "abc123def456",
++    reviewCoordinatorCycles: REQUIRED_REVIEW_COORDINATOR_CYCLES,
++    reviewerBallots: allApprovedBallots(),
++    ...overrides,
++  };
++}
++
++describe("assembleMergeVerdict", () => {
++  test("all-approve + green CI + adversarial-pass + required cycles → authorized", () => {
++    const verdict = assembleMergeVerdict(authorizedInputs());
++
++    expect(verdict.outcome).toBe("merge_authorized");
++    expect(verdict.authorized).toBe(true);
++    expect(verdict.blockingReasons).toEqual([]);
++    expect(verdict.evidence.reviewerBallots).toEqual(allApprovedBallots());
++    expect(verdict.evidence.requiredReviewCoordinatorCycles).toBe(
++      REQUIRED_REVIEW_COORDINATOR_CYCLES,
++    );
++  });
++
++  test("missing reviewer ballot → not authorized with blocking reason", () => {
++    const verdict = assembleMergeVerdict(
++      authorizedInputs({
++        reviewerBallots: [
++          { reviewer: "codex", verdict: "approved" },
++          { reviewer: "claude", verdict: "approved" },
++        ],
++      }),
++    );
++
++    expect(verdict.outcome).toBe("merge_blocked");
++    expect(verdict.authorized).toBe(false);
++    expect(verdict.blockingReasons).toContain("reviewer @cursor: missing ballot");
++  });
++
++  test("red CI → not authorized with CI blocking reason", () => {
++    const verdict = assembleMergeVerdict(
++      authorizedInputs({
++        ciCheckState: "failure",
++        ciSha: "deadbeef",
++      }),
++    );
++
++    expect(verdict.authorized).toBe(false);
++    expect(verdict.blockingReasons).toContain("CI checks not green (state=failure, sha=deadbeef)");
++  });
++
++  test("failed adversarial gate → not authorized", () => {
++    const verdict = assembleMergeVerdict(
++      authorizedInputs({
++        adversarialGatePassed: false,
++      }),
++    );
++
++    expect(verdict.authorized).toBe(false);
++    expect(verdict.blockingReasons).toContain("adversarial gate not passed");
++  });
++
++  test("insufficient review-coordinator cycles → not authorized", () => {
++    const verdict = assembleMergeVerdict(
++      authorizedInputs({
++        reviewCoordinatorCycles: REQUIRED_REVIEW_COORDINATOR_CYCLES - 1,
++      }),
++    );
++
++    expect(verdict.authorized).toBe(false);
++    expect(verdict.blockingReasons).toContain(
++      `review coordinator cycles ${String(REQUIRED_REVIEW_COORDINATOR_CYCLES - 1)}/${String(REQUIRED_REVIEW_COORDINATOR_CYCLES)} required`,
++    );
++  });
++
++  test("changes_requested reviewer → not authorized with verdict surfaced", () => {
++    const verdict = assembleMergeVerdict(
++      authorizedInputs({
++        reviewerBallots: [
++          { reviewer: "codex", verdict: "approved" },
++          { reviewer: "claude", verdict: "changes_requested" },
++          { reviewer: "cursor", verdict: "approved" },
++        ],
++      }),
++    );
++
++    expect(verdict.authorized).toBe(false);
++    expect(verdict.blockingReasons).toContain("reviewer @claude: changes_requested");
++  });
++
++  test("same inputs → identical verdict (determinism)", () => {
++    const inputs = authorizedInputs({
++      reviewCoordinatorCycles: 2,
++      reviewerBallots: [{ reviewer: "codex", verdict: "pending" }],
++    });
++    const first = assembleMergeVerdict(inputs);
++    const second = assembleMergeVerdict(inputs);
++
++    expect(first).toEqual(second);
++    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
++  });
++});
+diff --git a/packages/driver/src/merge-verdict.ts b/packages/driver/src/merge-verdict.ts
+new file mode 100644
+index 0000000..b8e3ec1
+--- /dev/null
++++ b/packages/driver/src/merge-verdict.ts
+@@ -0,0 +1,79 @@
++/**
++ * Deterministic merge-gate verdict assembler — policy over recorded ballots.
++ * Pure over its inputs; no gh/store/agent calls.
++ */
++
++import {
++  CANONICAL_REVIEWERS,
++  type CanonicalReviewer,
++  type MergeVerdict,
++  type MergeVerdictEvidence,
++  type MergeVerdictInputs,
++  REQUIRED_REVIEW_COORDINATOR_CYCLES,
++  type ReviewerBallot,
++  type ReviewerBallotVerdict,
++} from "./types.js";
++
++export { CANONICAL_REVIEWERS, REQUIRED_REVIEW_COORDINATOR_CYCLES } from "./types.js";
++
++/** Assemble one structured merge verdict from gate inputs. */
++export function assembleMergeVerdict(inputs: MergeVerdictInputs): MergeVerdict {
++  const evidence = buildEvidence(inputs);
++  const blockingReasons = collectBlockingReasons(evidence);
++  const authorized = blockingReasons.length === 0;
++  return {
++    authorized,
++    blockingReasons,
++    evidence,
++    outcome: authorized ? "merge_authorized" : "merge_blocked",
++  };
++}
++
++function buildEvidence(inputs: MergeVerdictInputs): MergeVerdictEvidence {
++  return {
++    adversarialGatePassed: inputs.adversarialGatePassed,
++    ciCheckState: inputs.ciCheckState,
++    ciSha: inputs.ciSha,
++    requiredReviewCoordinatorCycles: REQUIRED_REVIEW_COORDINATOR_CYCLES,
++    reviewCoordinatorCycles: inputs.reviewCoordinatorCycles,
++    reviewerBallots: normalizeReviewerBallots(inputs.reviewerBallots),
++  };
++}
++
++function normalizeReviewerBallots(ballots: ReviewerBallot[]): ReviewerBallot[] {
++  const byReviewer = new Map<CanonicalReviewer, ReviewerBallotVerdict>();
++  for (const ballot of ballots) {
++    byReviewer.set(ballot.reviewer, ballot.verdict);
++  }
++  return CANONICAL_REVIEWERS.map((reviewer) => ({
++    reviewer,
++    verdict: byReviewer.get(reviewer) ?? "absent",
++  }));
++}
++
++function collectBlockingReasons(evidence: MergeVerdictEvidence): string[] {
++  const reasons: string[] = [];
++  for (const ballot of evidence.reviewerBallots) {
++    if (ballot.verdict === "approved") continue;
++    reasons.push(formatReviewerBlock(ballot.reviewer, ballot.verdict));
++  }
++  if (evidence.reviewCoordinatorCycles < evidence.requiredReviewCoordinatorCycles) {
++    reasons.push(
++      `review coordinator cycles ${String(evidence.reviewCoordinatorCycles)}/${String(evidence.requiredReviewCoordinatorCycles)} required`,
++    );
++  }
++  if (evidence.ciCheckState !== "success") {
++    reasons.push(`CI checks not green (state=${evidence.ciCheckState}, sha=${evidence.ciSha})`);
++  }
++  if (!evidence.adversarialGatePassed) {
++    reasons.push("adversarial gate not passed");
++  }
++  return reasons;
++}
++
++function formatReviewerBlock(reviewer: CanonicalReviewer, verdict: ReviewerBallotVerdict): string {
++  if (verdict === "absent") {
++    return `reviewer @${reviewer}: missing ballot`;
++  }
++  return `reviewer @${reviewer}: ${verdict}`;
++}
+diff --git a/packages/driver/src/types.ts b/packages/driver/src/types.ts
+index b09614f..8658dec 100644
+--- a/packages/driver/src/types.ts
++++ b/packages/driver/src/types.ts
+@@ -51,6 +51,50 @@ export interface DriverStreamView {
+   prUrl?: string;
+ }
+ 
++/** Canonical external reviewers polled before merge authorization. */
++export const CANONICAL_REVIEWERS = ["codex", "claude", "cursor"] as const;
++export type CanonicalReviewer = (typeof CANONICAL_REVIEWERS)[number];
++
++export type ReviewerBallotVerdict = "approved" | "changes_requested" | "pending" | "absent";
++
++export interface ReviewerBallot {
++  reviewer: CanonicalReviewer;
++  verdict: ReviewerBallotVerdict;
++}
++
++/** Terminal CI rollup state for the merge-gate sha under review. */
++export type CiCheckState = "success" | "failure" | "pending" | "neutral";
++
++/** Minimum `/review-coordinator` ballot count before merge authorization. */
++export const REQUIRED_REVIEW_COORDINATOR_CYCLES = 3;
++
++export interface MergeVerdictEvidence {
++  reviewerBallots: ReviewerBallot[];
++  reviewCoordinatorCycles: number;
++  requiredReviewCoordinatorCycles: number;
++  ciSha: string;
++  ciCheckState: CiCheckState;
++  adversarialGatePassed: boolean;
++}
++
++export type MergeVerdictOutcome = "merge_authorized" | "merge_blocked";
++
++/** Structured merge-gate authorization with attached evidence. */
++export interface MergeVerdict {
++  outcome: MergeVerdictOutcome;
++  authorized: boolean;
++  blockingReasons: string[];
++  evidence: MergeVerdictEvidence;
++}
++
++export interface MergeVerdictInputs {
++  reviewerBallots: ReviewerBallot[];
++  reviewCoordinatorCycles: number;
++  ciSha: string;
++  ciCheckState: CiCheckState;
++  adversarialGatePassed: boolean;
++}
++
+ export type JudgmentRequest =
+   | {
+       kind: "failure-triage";
+@@ -69,8 +113,20 @@ export type JudgmentRequest =
+       streamId: string;
+       candidates: { workflowRunId: string; createdAt: string; status: string }[];
+     }
+-  | { kind: "merge-confirmation" }
+-  | { kind: "review-adjudication" };
++  | {
++      kind: "merge-confirmation";
++      driverRunId: string;
++      streamId: string;
++      prNumber: number;
++      verdict: MergeVerdict;
++    }
++  | {
++      kind: "review-adjudication";
++      driverRunId: string;
++      streamId: string;
++      prNumber: number;
++      verdict: MergeVerdict;
++    };
+ 
+ export interface DriverTickResult {
+   driverRunId: string;
+diff --git a/packages/mcp/src/index.ts b/packages/mcp/src/index.ts
+index f2c6bb0..4a3fc69 100644
+--- a/packages/mcp/src/index.ts
++++ b/packages/mcp/src/index.ts
+@@ -23,6 +23,8 @@ export {
+   listArtifactsOutputSchema,
+   listWorkflowRunsInputSchema,
+   listWorkflowRunsOutputSchema,
++  mergeVerdictEvidenceSchema,
++  mergeVerdictSchema,
+   roomRunSpecSchema,
+   runBranchRefSchema,
+   shipArtifactsSchema,
+@@ -50,6 +52,7 @@ export type {
+   ListArtifactsOutput,
+   ListWorkflowRunsInput,
+   ListWorkflowRunsOutput,
++  MergeVerdictOutput,
+   RunBranchRef,
+   ShipArtifacts,
+   ShipInput,
+diff --git a/packages/mcp/src/mcp.test.ts b/packages/mcp/src/mcp.test.ts
+index 9a4f537..97af2a3 100644
+--- a/packages/mcp/src/mcp.test.ts
++++ b/packages/mcp/src/mcp.test.ts
+@@ -17,6 +17,7 @@ import {
+   getWorkflowRunOutputSchema,
+   listWorkflowRunsInputSchema,
+   listWorkflowRunsOutputSchema,
++  mergeVerdictSchema,
+   shipArtifactsSchema,
+   shipInputSchema,
+   shipOutputSchema,
+@@ -772,4 +773,43 @@ describe("driver MCP schemas", () => {
+       }).success,
+     ).toBe(true);
+   });
++
++  test("driverTickResultSchema accepts merge-confirmation with structured verdict", () => {
++    const verdict = {
++      outcome: "merge_authorized",
++      authorized: true,
++      blockingReasons: [],
++      evidence: {
++        reviewerBallots: [
++          { reviewer: "codex", verdict: "approved" },
++          { reviewer: "claude", verdict: "approved" },
++          { reviewer: "cursor", verdict: "approved" },
++        ],
++        reviewCoordinatorCycles: 3,
++        requiredReviewCoordinatorCycles: 3,
++        ciSha: "abc123",
++        ciCheckState: "success",
++        adversarialGatePassed: true,
++      },
++    };
++    expect(mergeVerdictSchema.safeParse(verdict).success).toBe(true);
++    expect(
++      driverTickResultSchema.safeParse({
++        driverRunId: DRV_ID,
++        status: "awaiting_judgment",
++        awaiting: [
++          {
++            kind: "merge-confirmation",
++            driverRunId: DRV_ID,
++            streamId: DS_ID,
++            prNumber: 42,
++            verdict,
++          },
++        ],
++        unmerged: [],
++        progress: { batchIndex: 1, dispatched: 0, landed: 1, failed: 0, remaining: 0 },
++        streams: [],
++      }).success,
++    ).toBe(true);
++  });
+ });
+diff --git a/packages/mcp/src/mcp.ts b/packages/mcp/src/mcp.ts
+index 5dd1df4..f6a3428 100644
+--- a/packages/mcp/src/mcp.ts
++++ b/packages/mcp/src/mcp.ts
+@@ -504,9 +504,59 @@ const dispatchAmbiguityRequestSchema = z
+   })
+   .strict();
+ 
+-const mergeConfirmationRequestSchema = z.object({ kind: z.literal("merge-confirmation") }).strict();
++const mergeVerdictOutcomeSchema = z.enum(["merge_authorized", "merge_blocked"]);
++
++const canonicalReviewerSchema = z.enum(["codex", "claude", "cursor"]);
++
++const reviewerBallotVerdictSchema = z.enum(["approved", "changes_requested", "pending", "absent"]);
++
++const reviewerBallotSchema = z
++  .object({
++    reviewer: canonicalReviewerSchema,
++    verdict: reviewerBallotVerdictSchema,
++  })
++  .strict();
++
++const ciCheckStateSchema = z.enum(["success", "failure", "pending", "neutral"]);
++
++export const mergeVerdictEvidenceSchema = z
++  .object({
++    reviewerBallots: z.array(reviewerBallotSchema),
++    reviewCoordinatorCycles: z.number().int().nonnegative(),
++    requiredReviewCoordinatorCycles: z.number().int().nonnegative(),
++    ciSha: z.string().min(1),
++    ciCheckState: ciCheckStateSchema,
++    adversarialGatePassed: z.boolean(),
++  })
++  .strict();
++
++export const mergeVerdictSchema = z
++  .object({
++    outcome: mergeVerdictOutcomeSchema,
++    authorized: z.boolean(),
++    blockingReasons: z.array(z.string()),
++    evidence: mergeVerdictEvidenceSchema,
++  })
++  .strict();
++export type MergeVerdictOutput = z.infer<typeof mergeVerdictSchema>;
++
++const mergeConfirmationRequestSchema = z
++  .object({
++    kind: z.literal("merge-confirmation"),
++    driverRunId: driverRunIdSchema,
++    streamId: driverStreamIdSchema,
++    prNumber: z.number().int().positive(),
++    verdict: mergeVerdictSchema,
++  })
++  .strict();
+ const reviewAdjudicationRequestSchema = z
+-  .object({ kind: z.literal("review-adjudication") })
++  .object({
++    kind: z.literal("review-adjudication"),
++    driverRunId: driverRunIdSchema,
++    streamId: driverStreamIdSchema,
++    prNumber: z.number().int().positive(),
++    verdict: mergeVerdictSchema,
++  })
+   .strict();
+ 
+ const judgmentRequestSchema = z.discriminatedUnion("kind", [

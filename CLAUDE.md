@@ -24,6 +24,8 @@ triggers that would later split `contracts` into its own module.
   `cmd/<tool>/internal/`. Each tool keeps its own `CLAUDE.md` + `docs/DESIGN.md`.
   Today: `flare` (the escalation-routing plane), `tracelens` (agent trace
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),
+  `triage` (PR risk floor + escalate-only advisory; two binaries,
+  `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.

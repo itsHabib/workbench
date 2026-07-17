@@ -1,0 +1,353 @@
+diff --git a/internal/store/leaderboard_query_test.go b/internal/store/leaderboard_query_test.go
+new file mode 100644
+index 0000000..8c9abcd
+--- /dev/null
++++ b/internal/store/leaderboard_query_test.go
+@@ -0,0 +1,134 @@
++package store
++
++import (
++	"regexp"
++	"strconv"
++	"strings"
++	"testing"
++
++	"github.com/roxiq/roxiq/internal/model"
++)
++
++// Pure-unit coverage for the leaderboard SQL builders (no DB). Guards the
++// 027 refactor: the stats query drops the events JOIN (which forced a full
++// seq scan) for an `event_id IN (events subquery)`, and the result/event
++// clause split must keep $N placeholders aligned with the shared args slice.
++
++var paramRe = regexp.MustCompile(`\$(\d+)`)
++
++// maxParam returns the highest $N referenced in q.
++func maxParam(q string) int {
++	highest := 0
++	for _, m := range paramRe.FindAllStringSubmatch(q, -1) {
++		if n, _ := strconv.Atoi(m[1]); n > highest {
++			highest = n
++		}
++	}
++	return highest
++}
++
++func TestBuildLeaderboardStatsQuery_NoEventsJoin(t *testing.T) {
++	w, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open"})
++	if err != nil {
++		t.Fatalf("buildLeaderboardWhere: %v", err)
++	}
++	q, args := buildLeaderboardStatsQuery(&w)
++
++	if strings.Contains(q, "JOIN events") {
++		t.Fatalf("stats query must NOT join events (the join forces a seq scan):\n%s", q)
++	}
++	if !strings.Contains(q, "event_id IN (SELECT") {
++		t.Fatalf("stats query must exclude events via an event_id IN subquery:\n%s", q)
++	}
++	if !strings.Contains(q, "NOT ILIKE") {
++		t.Fatalf("stats subquery must carry the event-name exclusions:\n%s", q)
++	}
++	if got := maxParam(q); got != len(args) {
++		t.Fatalf("stats: max param $%d != len(args) %d (placeholder/arg mismatch)\n%s", got, len(args), q)
++	}
++}
++
++func TestBuildLeaderboardPageQuery_JoinsEvents(t *testing.T) {
++	w, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open"})
++	if err != nil {
++		t.Fatalf("buildLeaderboardWhere: %v", err)
++	}
++	q, args := buildLeaderboardPageQuery(&w, 20, 0)
++
++	if !strings.Contains(q, "JOIN events e") {
++		t.Fatalf("page query must JOIN events for e.name/e.season output:\n%s", q)
++	}
++	if got := maxParam(q); got != len(args) {
++		t.Fatalf("page: max param $%d != len(args) %d\n%s", got, len(args), q)
++	}
++}
++
++func TestBuildLeaderboard_SeasonFilterLivesInStatsSubquery(t *testing.T) {
++	w, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open", Season: 8})
++	if err != nil {
++		t.Fatalf("buildLeaderboardWhere: %v", err)
++	}
++	q, args := buildLeaderboardStatsQuery(&w)
++
++	sub := strings.Index(q, "(SELECT")
++	if sub < 0 {
++		t.Fatalf("expected an events subquery:\n%s", q)
++	}
++	// results has no season column; the season predicate must sit inside the
++	// events subquery, never in the outer results scan.
++	if !strings.Contains(q[sub:], "e.season =") {
++		t.Fatalf("season filter must be inside the events subquery:\n%s", q)
++	}
++	if strings.Contains(q[:sub], "season") {
++		t.Fatalf("season must not appear in the outer results predicate:\n%s", q)
++	}
++	if got := maxParam(q); got != len(args) {
++		t.Fatalf("stats(season): max param $%d != len(args) %d\n%s", got, len(args), q)
++	}
++}
++
++func TestBuildLeaderboard_ExclusionPatternsLiveInStatsSubquery(t *testing.T) {
++	w, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open"})
++	if err != nil {
++		t.Fatalf("buildLeaderboardWhere: %v", err)
++	}
++	q, _ := buildLeaderboardStatsQuery(&w)
++
++	sub := strings.Index(q, "(SELECT")
++	if sub < 0 {
++		t.Fatalf("expected an events subquery:\n%s", q)
++	}
++	// the name exclusions reference e.name and MUST sit inside the events
++	// subquery -- results has no name column, so an outer-scan NOT ILIKE would
++	// be a SQL error (and re-introducing the join is the perf regression).
++	if strings.Contains(q[:sub], "NOT ILIKE") {
++		t.Fatalf("event-name exclusions must be inside the subquery, not the outer results scan:\n%s", q)
++	}
++	if !strings.Contains(q[sub:], "NOT ILIKE") {
++		t.Fatalf("event-name exclusions missing from the events subquery:\n%s", q)
++	}
++}
++
++func TestBuildLeaderboard_StationSortStillAvoidsJoin(t *testing.T) {
++	w, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open", Station: "ski_erg"})
++	if err != nil {
++		t.Fatalf("buildLeaderboardWhere: %v", err)
++	}
++	q, args := buildLeaderboardStatsQuery(&w)
++
++	if strings.Contains(q, "JOIN events") {
++		t.Fatalf("station-sorted stats must still avoid the events join:\n%s", q)
++	}
++	if !strings.Contains(q, "MIN(r.ski_erg)") {
++		t.Fatalf("station sort should MIN the station column:\n%s", q)
++	}
++	if got := maxParam(q); got != len(args) {
++		t.Fatalf("stats(station): max param $%d != len(args) %d\n%s", got, len(args), q)
++	}
++}
++
++func TestBuildLeaderboard_InvalidStationRejected(t *testing.T) {
++	if _, err := buildLeaderboardWhere(model.LeaderboardFilters{Division: "men_open", Station: "not_a_station"}); err == nil {
++		t.Fatal("expected an error for an invalid station column (SQL-injection guard)")
++	}
++}
+diff --git a/internal/store/store.go b/internal/store/store.go
+index f67ef95..084b8cc 100644
+--- a/internal/store/store.go
++++ b/internal/store/store.go
+@@ -1832,8 +1832,13 @@ func resultBib(r *model.Result) *string {
+ // leaderboardWhere holds the shared filter clause for the leaderboard page and
+ // stats queries, so both score the same population from one place.
+ type leaderboardWhere struct {
+-	where          string // " AND ..." clauses following "WHERE r.division = $1"
+-	args           []any  // $1.. parameters (division first, then clause values)
++	resultWhere string // " AND ..." clauses on results (r.*), after "WHERE r.division = $1"
++	// eventWhere holds the events clauses (e.season, e.name exclusions). The page
++	// query applies them through its events JOIN; the stats query applies them via
++	// an `event_id IN (events subquery)` instead of joining, so the COUNT/MIN stay
++	// index-only rather than seq-scanning all results to hash-join events.
++	eventWhere     string
++	args           []any  // $1.. parameters (division first, then clause values, in $N order)
+ 	sortCol        string // ranking column: r.total_time or r.<station>
+ 	stationSelect  string // station column, or NULL::interval when ranking by total
+ 	stationNotNull string // " AND r.<station> IS NOT NULL", or empty
+@@ -1861,37 +1866,42 @@ func buildLeaderboardWhere(filters model.LeaderboardFilters) (leaderboardWhere,
+ 
+ 	args := []any{filters.Division}
+ 	paramIdx := 2
+-	var clauses []string
++	// Clauses are split by the table they filter: result clauses (r.*) apply to
++	// both queries directly; event clauses (e.*) ride the page query's events
++	// JOIN but become a subquery in the stats query (see leaderboardWhere). The
++	// shared args slice keeps $N positions identical across both shapes.
++	var resultClauses, eventClauses []string
+ 
+ 	if filters.AgeGroup != "" {
+-		clauses = append(clauses, fmt.Sprintf(" AND r.age_group = $%d", paramIdx))
++		resultClauses = append(resultClauses, fmt.Sprintf(" AND r.age_group = $%d", paramIdx))
+ 		args = append(args, filters.AgeGroup)
+ 		paramIdx++
+ 	}
+ 	if filters.Season > 0 {
+-		clauses = append(clauses, fmt.Sprintf(" AND e.season = $%d", paramIdx))
++		eventClauses = append(eventClauses, fmt.Sprintf(" AND e.season = $%d", paramIdx))
+ 		args = append(args, filters.Season)
+ 		paramIdx++
+ 	}
+ 	for _, pattern := range leaderboardExcludedEventPatterns {
+-		clauses = append(clauses, fmt.Sprintf(" AND e.name NOT ILIKE $%d", paramIdx))
++		eventClauses = append(eventClauses, fmt.Sprintf(" AND e.name NOT ILIKE $%d", paramIdx))
+ 		args = append(args, pattern)
+ 		paramIdx++
+ 	}
+-	clauses = append(clauses, fmt.Sprintf(" AND r.total_time >= $%d", paramIdx))
++	resultClauses = append(resultClauses, fmt.Sprintf(" AND r.total_time >= $%d", paramIdx))
+ 	args = append(args, leaderboardMinTotalTime)
+ 	paramIdx++
+ 	for _, splitName := range model.SplitNames {
+-		clauses = append(clauses, fmt.Sprintf(" AND r.%s IS NOT NULL", splitName))
++		resultClauses = append(resultClauses, fmt.Sprintf(" AND r.%s IS NOT NULL", splitName))
+ 	}
+ 	if stationMinTime != nil {
+-		clauses = append(clauses, fmt.Sprintf(" AND r.%s >= $%d", filters.Station, paramIdx))
++		resultClauses = append(resultClauses, fmt.Sprintf(" AND r.%s >= $%d", filters.Station, paramIdx))
+ 		args = append(args, *stationMinTime)
+ 		paramIdx++
+ 	}
+ 
+ 	return leaderboardWhere{
+-		where:          strings.Join(clauses, ""),
++		resultWhere:    strings.Join(resultClauses, ""),
++		eventWhere:     strings.Join(eventClauses, ""),
+ 		args:           args,
+ 		sortCol:        sortCol,
+ 		stationSelect:  stationSelect,
+@@ -1913,10 +1923,10 @@ func buildLeaderboardPageQuery(w *leaderboardWhere, limit, offset int) (string,
+ 		FROM results r
+ 		JOIN athletes a ON a.id = r.athlete_id
+ 		JOIN events e ON e.id = r.event_id
+-		WHERE r.division = $1%s%s
++		WHERE r.division = $1%s%s%s
+ 		ORDER BY %s ASC
+ 		LIMIT $%d OFFSET $%d`,
+-		w.stationSelect, w.where, w.stationNotNull, w.sortCol,
++		w.stationSelect, w.resultWhere, w.eventWhere, w.stationNotNull, w.sortCol,
+ 		w.nextParam, w.nextParam+1,
+ 	)
+ 	args := make([]any, 0, len(w.args)+2)
+@@ -1926,16 +1936,32 @@ func buildLeaderboardPageQuery(w *leaderboardWhere, limit, offset int) (string,
+ }
+ 
+ // buildLeaderboardStatsQuery builds the pagination total and the leader's time
+-// (the gap-to-leader anchor). It does NOT join athletes -- the count/min need
+-// no athlete data, so it skips the per-row athlete lookups the windowed query
+-// paid for every matching result.
++// (the gap-to-leader anchor). It joins NEITHER athletes nor events: the count/min
++// need no athlete data, and the events exclusions (non-standard events / season)
++// are applied as an `event_id IN (events subquery)` instead of a JOIN. The JOIN
++// forced the planner off the (division, total_time) partial index onto a full
++// parallel Seq Scan of ~1.76M results (~4.8s on prod) just to exclude ~5 events.
++// For the default total_time ranking the subquery keeps the aggregate index-only
++// against idx_results_lb_* (which carry event_id as an INCLUDE column for exactly
++// this filter). Station-sorted ranking (MIN over a station column) has no
++// covering index, so it still seq-scans -- dropping the join merely avoids the
++// hash join; a station covering index would be a separate change.
+ func buildLeaderboardStatsQuery(w *leaderboardWhere) (string, []any) {
++	// eventWhere is always non-empty in practice (leaderboardExcludedEventPatterns
++	// always contributes its 3 exclusions); the guard is kept so a future empty
++	// case can't emit a degenerate "IN (SELECT ... WHERE TRUE)".
++	eventFilter := ""
++	if w.eventWhere != "" {
++		eventFilter = fmt.Sprintf(
++			" AND r.event_id IN (SELECT e.id FROM events e WHERE TRUE%s)",
++			w.eventWhere,
++		)
++	}
+ 	query := fmt.Sprintf(`
+ 		SELECT COUNT(*) AS total, MIN(%s) AS leader
+ 		FROM results r
+-		JOIN events e ON e.id = r.event_id
+-		WHERE r.division = $1%s%s`,
+-		w.sortCol, w.where, w.stationNotNull,
++		WHERE r.division = $1%s%s%s`,
++		w.sortCol, w.resultWhere, w.stationNotNull, eventFilter,
+ 	)
+ 	args := make([]any, len(w.args))
+ 	copy(args, w.args)
+diff --git a/migrations/027_leaderboard_stats_covering_index.down.sql b/migrations/027_leaderboard_stats_covering_index.down.sql
+new file mode 100644
+index 0000000..d18c577
+--- /dev/null
++++ b/migrations/027_leaderboard_stats_covering_index.down.sql
+@@ -0,0 +1,25 @@
++-- Revert 027: restore the 025 partial indexes (without INCLUDE event_id) and
++-- drop the covering replacements. Mirror image of the up migration.
++
++CREATE INDEX IF NOT EXISTS idx_results_leaderboard_division_time
++    ON results (division, total_time)
++    WHERE run_1 IS NOT NULL AND run_2 IS NOT NULL AND run_3 IS NOT NULL
++      AND run_4 IS NOT NULL AND run_5 IS NOT NULL AND run_6 IS NOT NULL
++      AND run_7 IS NOT NULL AND run_8 IS NOT NULL
++      AND ski_erg IS NOT NULL AND sled_push IS NOT NULL AND sled_pull IS NOT NULL
++      AND burpee_broad_jump IS NOT NULL AND rowing IS NOT NULL
++      AND farmer_carry IS NOT NULL AND sandbag_lunge IS NOT NULL
++      AND wall_balls IS NOT NULL AND roxzone IS NOT NULL;
++
++CREATE INDEX IF NOT EXISTS idx_results_leaderboard_division_age_time
++    ON results (division, age_group, total_time)
++    WHERE run_1 IS NOT NULL AND run_2 IS NOT NULL AND run_3 IS NOT NULL
++      AND run_4 IS NOT NULL AND run_5 IS NOT NULL AND run_6 IS NOT NULL
++      AND run_7 IS NOT NULL AND run_8 IS NOT NULL
++      AND ski_erg IS NOT NULL AND sled_push IS NOT NULL AND sled_pull IS NOT NULL
++      AND burpee_broad_jump IS NOT NULL AND rowing IS NOT NULL
++      AND farmer_carry IS NOT NULL AND sandbag_lunge IS NOT NULL
++      AND wall_balls IS NOT NULL AND roxzone IS NOT NULL;
++
++DROP INDEX IF EXISTS idx_results_lb_division_time;
++DROP INDEX IF EXISTS idx_results_lb_division_age_time;
+diff --git a/migrations/027_leaderboard_stats_covering_index.up.sql b/migrations/027_leaderboard_stats_covering_index.up.sql
+new file mode 100644
+index 0000000..312ce91
+--- /dev/null
++++ b/migrations/027_leaderboard_stats_covering_index.up.sql
+@@ -0,0 +1,53 @@
++-- 027_leaderboard_stats_covering_index.up.sql
++-- Make the leaderboard STATS query (COUNT(*) + MIN(ranking column) -- the
++-- pagination total and the gap-to-leader anchor) index-only for the default
++-- total_time ranking. (Station-sorted leaderboards rank by a station column,
++-- which these indexes do not cover -- that path still seq-scans; out of scope.)
++--
++-- 025 added partial indexes on (division, total_time) [+ age_group], which made
++-- the PAGE query an index range scan. But the STATS query excludes ~5
++-- non-standard events (youngstars / browney / red-bull-monday-night-shift) by
++-- JOINing events and applying `e.name NOT ILIKE`. That join forced the planner
++-- off the index onto a parallel Seq Scan of all ~1.76M results rows -- ~4.8s on
++-- prod, the real cost behind the slow GET /api/leaderboards. (Proven via
++-- EXPLAIN: COUNT without the events join = 375ms index-only; WITH it = 4808ms.)
++--
++-- The stats query now drops the join and filters `event_id IN (events subquery)`
++-- instead (internal/store/store.go buildLeaderboardStatsQuery). For that to stay
++-- index-only the event_id must be readable FROM the index, so these indexes
++-- carry it as an INCLUDE column. The INCLUDE versions serve everything the 025
++-- originals did (same key prefix + predicate), so they supersede and replace
++-- them.
++--
++-- New index NAMES (not the 025 names) so this migration is idempotent under the
++-- no-tracking, re-apply-all migrate-up runner: CREATE IF NOT EXISTS the new
++-- ones, then DROP IF EXISTS the old ones -- both no-ops on every re-run. CREATE
++-- runs before DROP so there is never a window with no usable index.
++--
++-- On prod, prefer CREATE/DROP INDEX CONCURRENTLY (run each as a standalone
++-- statement, outside a transaction) to avoid the brief write lock on results;
++-- plain CREATE/DROP is used here so the file applies cleanly via `make
++-- migrate-up` and the Neon SQL Editor. results is append-mostly, lock is short.
++
++CREATE INDEX IF NOT EXISTS idx_results_lb_division_time
++    ON results (division, total_time) INCLUDE (event_id)
++    WHERE run_1 IS NOT NULL AND run_2 IS NOT NULL AND run_3 IS NOT NULL
++      AND run_4 IS NOT NULL AND run_5 IS NOT NULL AND run_6 IS NOT NULL
++      AND run_7 IS NOT NULL AND run_8 IS NOT NULL
++      AND ski_erg IS NOT NULL AND sled_push IS NOT NULL AND sled_pull IS NOT NULL
++      AND burpee_broad_jump IS NOT NULL AND rowing IS NOT NULL
++      AND farmer_carry IS NOT NULL AND sandbag_lunge IS NOT NULL
++      AND wall_balls IS NOT NULL AND roxzone IS NOT NULL;
++
++CREATE INDEX IF NOT EXISTS idx_results_lb_division_age_time
++    ON results (division, age_group, total_time) INCLUDE (event_id)
++    WHERE run_1 IS NOT NULL AND run_2 IS NOT NULL AND run_3 IS NOT NULL
++      AND run_4 IS NOT NULL AND run_5 IS NOT NULL AND run_6 IS NOT NULL
++      AND run_7 IS NOT NULL AND run_8 IS NOT NULL
++      AND ski_erg IS NOT NULL AND sled_push IS NOT NULL AND sled_pull IS NOT NULL
++      AND burpee_broad_jump IS NOT NULL AND rowing IS NOT NULL
++      AND farmer_carry IS NOT NULL AND sandbag_lunge IS NOT NULL
++      AND wall_balls IS NOT NULL AND roxzone IS NOT NULL;
++
++DROP INDEX IF EXISTS idx_results_leaderboard_division_time;
++DROP INDEX IF EXISTS idx_results_leaderboard_division_age_time;

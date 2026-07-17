@@ -1,0 +1,1261 @@
+diff --git a/cmd/gate/main.go b/cmd/gate/main.go
+index 56435d4..846c047 100644
+--- a/cmd/gate/main.go
++++ b/cmd/gate/main.go
+@@ -7,7 +7,8 @@
+ // and the reducer's law, not prose.
+ //
+ // Exit codes: 0 pass, 1 blocked, 2 escalated (parked for judgment),
+-// 3 capability refused, 4 error.
++// 3 capability refused, 4 error. See the code* constants for the full
++// driver contract.
+ package main
+ 
+ import (
+@@ -30,10 +31,69 @@ import (
+ 	"github.com/itsHabib/gate/internal/verify"
+ )
+ 
++// The exit-code contract — the one surface the driver branches on. gate owns
++// this code space: nothing else may emit one of these codes, or the driver
++// misreads a malformed run as a decision. Flag parse errors and panics route
++// to codeError — flagsets use ContinueOnError because ExitOnError's os.Exit(2)
++// would collide with codeParked, making a typo read as a park — and each code
++// must agree with the JSON outcome on stdout: a bare code with no matching
++// outcome is an aborted run, not a decision.
++//
++//	code | outcome                                | driver action
++//	  0  | would_merge / merged / already_merged  | land the PR
++//	  1  | blocked                                | stop; do not merge
++//	  2  | parked_for_judgment                    | re-mint a wider grant (ceiling) or judge (escalation)
++//	  3  | capability_refused                     | mint/repair the grant, retry once
++//	  4  | (hard error, no outcome)               | surface the error; no merge
++const (
++	codeMerge   = 0
++	codeBlocked = 1
++	codeParked  = 2
++	codeRefused = 3
++	codeError   = 4
++)
++
++// parkCodeCountUnreadable marks an escalation parked because the cycle count
++// could not be derived. Authorization parks carry a machine-readable code so
++// the cycle count can exclude them structurally, never by prose matching;
++// the ceiling parks reuse the capability package's coded error strings.
++const parkCodeCountUnreadable = "cycle_count_unreadable"
++
++// errLogTampered fires when the state log fails its integrity check at the
++// point the cycle count is derived. It is a hard fault (codeError), not a
++// park: a rewritten log is corruption, not a judgment call, and the count
++// derived from it cannot be trusted to bound the cap.
++var errLogTampered = errors.New("log_integrity_failed")
++
++// parseFlags parses a subcommand's flags under ContinueOnError. A help request
++// (-h/-help) is a clean success, not an error — the flag package has already
++// printed usage, so the caller returns nil and main exits 0. Any other parse
++// error routes to codeError via main.
++func parseFlags(fs *flag.FlagSet, args []string) (help bool, err error) {
++	err = fs.Parse(args)
++	if errors.Is(err, flag.ErrHelp) {
++		return true, nil
++	}
++	if err != nil {
++		return false, fmt.Errorf("parse flags: %w", err)
++	}
++	return false, nil
++}
++
+ func main() {
++	// Panics must not escape as bare runtime exit codes (which gate does not
++	// own): route every one to codeError.
++	defer func() {
++		r := recover()
++		if r == nil {
++			return
++		}
++		fmt.Fprintln(os.Stderr, "gate: panic:", r)
++		os.Exit(codeError)
++	}()
+ 	if len(os.Args) < 2 {
+ 		usage()
+-		os.Exit(4)
++		os.Exit(codeError)
+ 	}
+ 	var err error
+ 	switch os.Args[1] {
+@@ -53,19 +113,19 @@ func main() {
+ 		err = cmdStress(os.Args[2:])
+ 	default:
+ 		usage()
+-		os.Exit(4)
++		os.Exit(codeError)
+ 	}
+ 	if err == nil {
+ 		return
+ 	}
+ 	fmt.Fprintln(os.Stderr, "gate:", err)
+-	os.Exit(4)
++	os.Exit(codeError)
+ }
+ 
+ func usage() {
+ 	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|explain|audit|backtest|stress> [flags]
+   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
+-  grant    -repo R [-action merge] [-max-tier T1] [-ttl 24h]
++  grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h]
+   gate     -repo R -pr N -grant grt_x [-live]
+   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
+   explain  -run run_x
+@@ -186,13 +246,23 @@ func commonFlags(fs *flag.FlagSet) (stateDir, floorBin, keyDir *string) {
+ }
+ 
+ func cmdGrant(args []string) error {
+-	fs := flag.NewFlagSet("grant", flag.ExitOnError)
++	fs := flag.NewFlagSet("grant", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+ 	repo := fs.String("repo", "", "owner/repo the grant is scoped to")
+ 	action := fs.String("action", "merge", "action the grant authorizes")
+ 	maxTier := fs.String("max-tier", "T1", "highest risk tier the grant may auto-land")
++	// 3 is the canonical review-cycle policy — an opinion, not a knob. The
++	// field's zero value stays unbounded for grants that never set it; only the
++	// CLI default is opinionated. 0 mints an explicitly unbounded grant.
++	maxCycles := fs.Int("max-cycles", 3, "review-cycle ceiling the grant may consume (0 = unbounded)")
+ 	ttl := fs.Duration("ttl", 24*time.Hour, "grant lifetime")
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	if *repo == "" {
+ 		return errors.New("grant: -repo required")
+ 	}
+@@ -200,7 +270,7 @@ func cmdGrant(args []string) error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	a, err := capability.Mint(e.st, e.keyPath, *repo, *action, *maxTier, "operator", *ttl, time.Now)
++	a, err := capability.Mint(e.st, e.keyPath, *repo, *action, *maxTier, *maxCycles, "operator", *ttl, time.Now)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -219,13 +289,19 @@ type gateResult struct {
+ }
+ 
+ func cmdGate(args []string) error {
+-	fs := flag.NewFlagSet("gate", flag.ExitOnError)
++	fs := flag.NewFlagSet("gate", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+ 	repo := fs.String("repo", "", "owner/repo")
+ 	pr := fs.Int("pr", 0, "PR number")
+ 	grantID := fs.String("grant", "", "grant artifact id")
+ 	live := fs.Bool("live", false, "actually merge instead of dry-run")
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	if *repo == "" || *pr == 0 || *grantID == "" {
+ 		return errors.New("gate: -repo, -pr, -grant required")
+ 	}
+@@ -252,7 +328,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool) (gateResult,
+ 	if _, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now); err != nil {
+ 		res.Outcome = "capability_refused"
+ 		res.Why = err.Error()
+-		return res, 3, nil
++		return res, codeRefused, nil
+ 	}
+ 
+ 	run := state.NewRunID()
+@@ -260,33 +336,33 @@ func runGate(e env, repo string, pr int, grantID string, live bool) (gateResult,
+ 
+ 	bundle, err := evidence.Gather(e.st, run, evidence.PRRef{Repo: repo, Number: pr})
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 
+ 	// The verifier ladder: three rungs, each a verdict artifact.
+ 	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, subject)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 	floorArt, err := verify.Floor(e.st, run, bundle.Diff, e.floorBin, subject)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 	reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 	verdicts, err := loadVerdicts(e.st, readinessArt.ID, floorArt.ID, reviewsArt.ID)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 	reduced, err := verify.Reduce(subject, verdicts)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 	reducedArt, err := verify.Record(e.st, run, []string{readinessArt.ID, floorArt.ID, reviewsArt.ID}, reduced)
+ 	if err != nil {
+-		return res, 4, err
++		return res, codeError, err
+ 	}
+ 
+ 	return act(e, run, grantID, reduced, reducedArt.ID, res, live)
+@@ -303,6 +379,8 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
+ 		for k, v := range extra {
+ 			body[k] = v
+ 		}
++		// Parents[0] = the reduced verdict is a contract: cycleCount joins
++		// outcome → Parents[0] → Subject, and fails closed on anything else.
+ 		_, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+ 		return err
+ 	}
+@@ -314,23 +392,54 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
+ 	if err != nil {
+ 		res.Outcome = "capability_refused"
+ 		res.Why = err.Error()
+-		return res, 3, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
++		return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
+ 	}
+ 
+ 	if reduced.Decision == verify.DecisionBlock {
+ 		res.Outcome = "blocked"
+-		return res, 1, record(state.KindAction, "blocked", nil)
++		return res, codeBlocked, record(state.KindAction, "blocked", nil)
+ 	}
+ 	if reduced.Decision == verify.DecisionEscalate {
+ 		res.Outcome = "parked_for_judgment"
+-		return res, 2, record(state.KindEscalation, "parked_for_judgment",
++		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
+ 			map[string]any{"question": reduced.Why})
+ 	}
+ 	if !grant.TierWithin(reduced.Tier) {
+ 		res.Outcome = "parked_for_judgment"
+ 		res.Why = fmt.Sprintf("verdict tier %s exceeds grant ceiling %s; %s", reduced.Tier, grant.MaxTier, reduced.Why)
+-		return res, 2, record(state.KindEscalation, "parked_for_judgment",
+-			map[string]any{"question": res.Why})
++		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
++			map[string]any{"question": res.Why, "code": capability.ErrTierCeiling.Error()})
++	}
++	// The cycle number is state-derived, never caller-passed — the driver is
++	// the identity the cap bounds. An unreadable count parks: absence never
++	// reads as "0 cycles consumed, proceed". An unbounded grant skips the
++	// scan — it has no ceiling to enforce, so there is nothing to park on.
++	n := 0
++	if grant.MaxCycles != 0 {
++		n, err = cycleCount(e.st, reduced.Subject, run)
++	}
++	// A tampered log is corruption, not a judgment call: fail hard (codeError,
++	// no merge), never a park a re-mint could clear.
++	if errors.Is(err, errLogTampered) {
++		res.Outcome = "error"
++		res.Why = err.Error()
++		return res, codeError, err
++	}
++	if err != nil {
++		res.Outcome = "parked_for_judgment"
++		res.Why = fmt.Sprintf("cycle count unreadable: %v; %s", err, reduced.Why)
++		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
++			map[string]any{"question": res.Why, "code": parkCodeCountUnreadable})
++	}
++	if !grant.CyclesWithin(n + 1) {
++		// A ceiling park resolves by re-minting a wider -max-cycles grant —
++		// an authorization decision. A judgment pass decides content and
++		// cannot launder a ceiling; this same check re-applies after judgment.
++		res.Outcome = "parked_for_judgment"
++		res.Why = fmt.Sprintf("%s: cycle %d exceeds grant ceiling %d; re-mint a wider -max-cycles grant to proceed; %s",
++			capability.ErrCycleExceeded, n+1, grant.MaxCycles, reduced.Why)
++		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
++			map[string]any{"question": res.Why, "code": capability.ErrCycleExceeded.Error()})
+ 	}
+ 
+ 	// --match-head-commit pins the merge to the exact SHA the evidence was
+@@ -341,31 +450,154 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
+ 	res.Action = mergeCmd
+ 	if !live {
+ 		res.Outcome = "would_merge"
+-		return res, 0, record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
++		return res, codeMerge, record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+ 	}
+ 	res.Outcome = "merge_not_implemented"
+-	return res, 0, record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
++	return res, codeMerge, record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+ }
+ 
+ func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
+ 
++// cycleCount derives how many review cycles this repo+PR has consumed, from
++// state alone — a caller-passed count is never trusted, because the caller is
++// the very identity the cap bounds and could under-report to sneak past its
++// ceiling. Outcome bodies carry no repo/PR, so the join is outcome → parent
++// reduced verdict (Parents[0]) → Subject; each distinct prior run with a
++// matching subject and a counting outcome is one consumed cycle. curRun is
++// excluded so a judgment resolving this run's park does not count the run
++// against itself.
++func cycleCount(st *state.Store, subject verify.Subject, curRun string) (int, error) {
++	// The count is only a tamper-resistant backstop if the log it reads is
++	// itself intact. Audit replays the chain and checks the anchor (whose key
++	// lives outside the state dir, so a log writer cannot forge it); a failure
++	// here fails closed rather than counting a doctored log. The count then
++	// reads the audit's own verified snapshot — never a second scan, so there
++	// is no window for a state-dir writer to swap the log between the
++	// verification and the count.
++	audit, err := st.Audit()
++	if err != nil {
++		return 0, fmt.Errorf("cycle count: audit: %w", err)
++	}
++	if !audit.OK {
++		return 0, fmt.Errorf("%w: %s", errLogTampered, audit.Reason)
++	}
++	all := audit.All
++	byID := make(map[string]state.Artifact, len(all))
++	for _, a := range all {
++		byID[a.ID] = a
++	}
++	runs := make(map[string]struct{})
++	for _, a := range all {
++		if !isOutcome(a) || a.Run == curRun {
++			continue
++		}
++		counts, err := countsAsCycle(a)
++		if err != nil {
++			return 0, err
++		}
++		if !counts {
++			continue
++		}
++		match, err := outcomeSubjectMatches(byID, a, subject)
++		if err != nil {
++			return 0, err
++		}
++		if match {
++			runs[a.Run] = struct{}{}
++		}
++	}
++	return len(runs), nil
++}
++
++func isOutcome(a state.Artifact) bool {
++	return a.Kind == state.KindAction || a.Kind == state.KindEscalation
++}
++
++// outcomeBody is the slice of an action/escalation body the cycle count
++// reads: the outcome string and the machine-readable park code.
++type outcomeBody struct {
++	Outcome string `json:"outcome"`
++	Code    string `json:"code"`
++}
++
++// countsAsCycle reports whether an outcome artifact represents a consumed
++// review cycle. A consumed cycle is a run that produced a ladder decision —
++// blocked, parked for content judgment, or a merge outcome. Authorization
++// parks (a tier or cycle ceiling, an unreadable count — the escalations that
++// carry a code) and capability refusals are policy exhaustion, not
++// consumption: counting them would make the re-mint resolution self-defeating,
++// because every failed retry would burn the cycle the wider grant was minted
++// to free. Excluding them can only lower the count by gate-authored
++// authorization artifacts, never hide a run that did review work.
++func countsAsCycle(a state.Artifact) (bool, error) {
++	var b outcomeBody
++	if err := json.Unmarshal(a.Body, &b); err != nil {
++		return false, fmt.Errorf("cycle count: parse outcome %s: %w", a.ID, err)
++	}
++	if a.Kind == state.KindEscalation {
++		return b.Code == "", nil
++	}
++	return b.Outcome != "capability_refused", nil
++}
++
++// outcomeSubjectMatches follows an outcome artifact to its parent reduced
++// verdict and reports whether that verdict names the given repo+PR. A dangling
++// or malformed parent is an error, not a non-match: an unreadable count must
++// park upstream, never read as fewer cycles consumed.
++func outcomeSubjectMatches(byID map[string]state.Artifact, a state.Artifact, subject verify.Subject) (bool, error) {
++	if len(a.Parents) == 0 {
++		return false, fmt.Errorf("cycle count: outcome %s has no parent verdict", a.ID)
++	}
++	parent, ok := byID[a.Parents[0]]
++	if !ok {
++		return false, fmt.Errorf("cycle count: outcome %s parent %s not in log", a.ID, a.Parents[0])
++	}
++	if parent.Kind != state.KindVerdict {
++		return false, fmt.Errorf("cycle count: outcome %s parent %s is kind %s, want verdict", a.ID, parent.ID, parent.Kind)
++	}
++	v, err := verify.Load(parent)
++	if err != nil {
++		return false, fmt.Errorf("cycle count: %w", err)
++	}
++	return v.Subject.Repo == subject.Repo && v.Subject.Number == subject.Number, nil
++}
++
++// validateJudgeFlags enforces the judge subcommand's flag contract: a run and
++// grant are always required; a manual decision needs both a -why and a
++// pass/block -decision, while -auto supplies both from the artifacts.
++func validateJudgeFlags(run, grantID, decision, why string, auto bool) error {
++	if run == "" || grantID == "" {
++		return errors.New("judge: -run and -grant required")
++	}
++	if auto {
++		return nil
++	}
++	if why == "" {
++		return errors.New("judge: -why required (or -auto)")
++	}
++	if decision != verify.DecisionPass && decision != verify.DecisionBlock {
++		return errors.New("judge: -decision must be pass or block (or use -auto)")
++	}
++	return nil
++}
++
+ func cmdJudge(args []string) error {
+-	fs := flag.NewFlagSet("judge", flag.ExitOnError)
++	fs := flag.NewFlagSet("judge", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+ 	run := fs.String("run", "", "gate run to judge")
+ 	grantID := fs.String("grant", "", "grant artifact id")
+ 	decision := fs.String("decision", "", "pass or block")
+ 	why := fs.String("why", "", "the judgment's reasoning")
+ 	auto := fs.Bool("auto", false, "let a frontier model judge from the artifacts alone")
+-	fs.Parse(args)
+-	if *run == "" || *grantID == "" {
+-		return errors.New("judge: -run and -grant required")
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
+ 	}
+-	if !*auto && *why == "" {
+-		return errors.New("judge: -why required (or -auto)")
++	if help {
++		return nil
+ 	}
+-	if !*auto && *decision != verify.DecisionPass && *decision != verify.DecisionBlock {
+-		return errors.New("judge: -decision must be pass or block (or use -auto)")
++	if err := validateJudgeFlags(*run, *grantID, *decision, *why, *auto); err != nil {
++		return err
+ 	}
+ 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+ 	if err != nil {
+@@ -452,10 +684,16 @@ func runVerdicts(arts []state.Artifact) ([]verify.Verdict, string, verify.Subjec
+ }
+ 
+ func cmdExplain(args []string) error {
+-	fs := flag.NewFlagSet("explain", flag.ExitOnError)
++	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+ 	run := fs.String("run", "", "run id")
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	if *run == "" {
+ 		return errors.New("explain: -run required")
+ 	}
+@@ -467,9 +705,15 @@ func cmdExplain(args []string) error {
+ }
+ 
+ func cmdAudit(args []string) error {
+-	fs := flag.NewFlagSet("audit", flag.ExitOnError)
++	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+ 	if err != nil {
+ 		return err
+@@ -487,19 +731,27 @@ func cmdAudit(args []string) error {
+ 		at = " (at " + res.Artifact + ")"
+ 	}
+ 	fmt.Printf("TAMPERED: %s%s\n", res.Reason, at)
+-	os.Exit(1)
++	// codeError, not a bare 1: exit 1 belongs to codeBlocked in the decision
++	// contract, and a tamper finding is a hard fault, not a PR decision.
++	os.Exit(codeError)
+ 	return nil
+ }
+ 
+ func cmdBacktest(args []string) error {
+-	fs := flag.NewFlagSet("backtest", flag.ExitOnError)
++	fs := flag.NewFlagSet("backtest", flag.ContinueOnError)
+ 	// backtest ignores -state/-key for writes on purpose (see runBacktest);
+ 	// only -floor is honoured. They are still parsed so the common flag surface
+ 	// is uniform across verbs and passing them is not an error.
+ 	_, floorBin, _ := commonFlags(fs)
+ 	repo := fs.String("repo", "", "owner/repo")
+ 	prs := fs.String("prs", "", "comma-separated PR numbers")
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	if *repo == "" || *prs == "" {
+ 		return errors.New("backtest: -repo and -prs required")
+ 	}
+@@ -521,7 +773,7 @@ func runBacktest(repo, prs, floorBin string) error {
+ 	defer cleanup()
+ 	// The grant is test-only: it exists only in the ephemeral store and is
+ 	// erased with it, so no spendable grant is ever written to durable state.
+-	grantArt, err := capability.Mint(e.st, e.keyPath, repo, "merge", "T2", "backtest-ephemeral", time.Hour, time.Now)
++	grantArt, err := capability.Mint(e.st, e.keyPath, repo, "merge", "T2", 0, "backtest-ephemeral", time.Hour, time.Now)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -567,11 +819,17 @@ func newEphemeralEnv(floorBin string) (env, func(), error) {
+ // of the multi-writer safety check. Run several of these concurrently against
+ // one -state dir, then `gate audit` must still report an intact chain.
+ func cmdStress(args []string) error {
+-	fs := flag.NewFlagSet("stress", flag.ExitOnError)
++	fs := flag.NewFlagSet("stress", flag.ContinueOnError)
+ 	stateDir, floorBin, keyDir := commonFlags(fs)
+ 	n := fs.Int("n", 50, "artifacts to append")
+ 	tag := fs.String("tag", "w", "writer tag")
+-	fs.Parse(args)
++	help, err := parseFlags(fs, args)
++	if err != nil {
++		return err
++	}
++	if help {
++		return nil
++	}
+ 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+ 	if err != nil {
+ 		return err
+diff --git a/cmd/gate/main_test.go b/cmd/gate/main_test.go
+index 60b0c43..6773252 100644
+--- a/cmd/gate/main_test.go
++++ b/cmd/gate/main_test.go
+@@ -1,15 +1,375 @@
+ package main
+ 
+ import (
++	"encoding/json"
++	"errors"
+ 	"os"
++	"os/exec"
+ 	"path/filepath"
++	"strings"
+ 	"testing"
+ 	"time"
+ 
+ 	"github.com/itsHabib/gate/internal/capability"
+ 	"github.com/itsHabib/gate/internal/state"
++	"github.com/itsHabib/gate/internal/verify"
+ )
+ 
++// testEnv builds an env over throwaway state and key dirs (the key dir a
++// sibling, honouring the key-outside-state invariant).
++func testEnv(t *testing.T) env {
++	t.Helper()
++	root := t.TempDir()
++	e, err := newEnv(filepath.Join(root, "state"), "triage-floor", filepath.Join(root, "keys"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	return e
++}
++
++// recordReduced appends a reduced verdict artifact so act has the parent its
++// outcome will name — the same shape runGate produces.
++func recordReduced(t *testing.T, e env, run string, v verify.Verdict) string {
++	t.Helper()
++	a, err := verify.Record(e.st, run, nil, v)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return a.ID
++}
++
++func reducedVerdict(subject verify.Subject, decision, tier string) verify.Verdict {
++	return verify.Verdict{Subject: subject, Source: "reducer",
++		Producer: verify.Producer{Class: verify.ClassCode},
++		Decision: decision, Tier: tier, Confidence: 1.0, Why: "test"}
++}
++
++// TestExitCodesAreStable pins the driver contract (spec §6): the five code
++// values, each decision→code mapping, and code↔JSON-outcome agreement.
++// Renumbering or re-pairing any of these is a breaking change the driver
++// cannot see.
++func TestExitCodesAreStable(t *testing.T) {
++	if codeMerge != 0 || codeBlocked != 1 || codeParked != 2 || codeRefused != 3 || codeError != 4 {
++		t.Fatal("exit-code contract renumbered")
++	}
++
++	e := testEnv(t)
++	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	cases := []struct {
++		name        string
++		decision    string
++		tier        string
++		live        bool
++		wantCode    int
++		wantOutcome string
++	}{
++		{"pass within ceilings", verify.DecisionPass, "T0", false, codeMerge, "would_merge"},
++		{"block", verify.DecisionBlock, "T0", false, codeBlocked, "blocked"},
++		{"escalate", verify.DecisionEscalate, "T0", false, codeParked, "parked_for_judgment"},
++		{"tier over ceiling", verify.DecisionPass, "T2", false, codeParked, "parked_for_judgment"},
++		{"live merge unbuilt", verify.DecisionPass, "T0", true, codeMerge, "merge_not_implemented"},
++	}
++	for i, c := range cases {
++		run := state.NewRunID()
++		v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 100 + i, HeadSHA: "abc"}, c.decision, c.tier)
++		id := recordReduced(t, e, run, v)
++		res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, c.live)
++		if err != nil {
++			t.Fatalf("%s: %v", c.name, err)
++		}
++		if code != c.wantCode || res.Outcome != c.wantOutcome {
++			t.Errorf("%s: got code %d outcome %q, want %d %q", c.name, code, res.Outcome, c.wantCode, c.wantOutcome)
++		}
++	}
++
++	// No valid grant: coded refusal, and the code↔outcome pairing holds there too.
++	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", -time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	run := state.NewRunID()
++	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 200, HeadSHA: "abc"}, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	res, code, err := act(e, run, expired.ID, v, id, gateResult{}, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if code != codeRefused || res.Outcome != "capability_refused" {
++		t.Errorf("expired grant: got code %d outcome %q, want %d %q", code, res.Outcome, codeRefused, "capability_refused")
++	}
++}
++
++// TestGateTypoExitsError pins the code-space fix (spec §6 mf2): a malformed
++// invocation must exit codeError. Under flag.ExitOnError it exited 2 —
++// which the driver reads as parked_for_judgment, a fail-open. The test
++// re-execs itself so the os.Exit path is observed for real.
++func TestGateTypoExitsError(t *testing.T) {
++	if os.Getenv("GATE_ARGV_HELPER") == "1" {
++		os.Args = []string{"gate", "gate", "-typo"}
++		main()
++		return
++	}
++	cmd := exec.Command(os.Args[0], "-test.run=TestGateTypoExitsError")
++	cmd.Env = append(os.Environ(), "GATE_ARGV_HELPER=1")
++	err := cmd.Run()
++	var ee *exec.ExitError
++	if !errors.As(err, &ee) {
++		t.Fatalf("want an exit error from the helper, got %v", err)
++	}
++	if ee.ExitCode() != codeError {
++		t.Fatalf("gate gate -typo exited %d, want %d", ee.ExitCode(), codeError)
++	}
++}
++
++// TestHelpRequestExitsZero pins that -h is a clean success, not codeError:
++// ContinueOnError makes flag return ErrHelp rather than exiting, and the
++// wrapper must treat that as a normal exit-0 help path, not a hard error.
++func TestHelpRequestExitsZero(t *testing.T) {
++	if os.Getenv("GATE_ARGV_HELPER") == "1" {
++		os.Args = []string{"gate", "grant", "-h"}
++		main()
++		return
++	}
++	cmd := exec.Command(os.Args[0], "-test.run=TestHelpRequestExitsZero")
++	cmd.Env = append(os.Environ(), "GATE_ARGV_HELPER=1")
++	if err := cmd.Run(); err != nil {
++		t.Fatalf("gate grant -h must exit 0, got %v", err)
++	}
++}
++
++// TestCycleCountRefusesTamperedLog pins the mf1 tamper-resistance claim at the
++// enforcement point: if the log is rewritten to under-count cycles, deriving
++// the count must fail closed (codeError), never emit a would_merge from a
++// doctored log. Corrupting a recorded outcome body breaks the hash chain,
++// which Audit catches before the count is trusted.
++func TestCycleCountRefusesTamperedLog(t *testing.T) {
++	e := testEnv(t)
++	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 3, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}
++
++	// One clean pass records a would_merge outcome to later tamper with.
++	run := state.NewRunID()
++	v := reducedVerdict(subject, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false); err != nil || code != codeMerge {
++		t.Fatalf("clean first pass: code %d err %v", code, err)
++	}
++
++	logPath := filepath.Join(e.stateDir, "log.jsonl")
++	raw, err := os.ReadFile(logPath)
++	if err != nil {
++		t.Fatal(err)
++	}
++	// Same-length rewrite of a recorded outcome: keeps every line parseable,
++	// but the body no longer matches its recorded hash.
++	tampered := strings.Replace(string(raw), "would_merge", "would_XXXXX", 1)
++	if tampered == string(raw) {
++		t.Fatal("expected a would_merge outcome in the log to tamper")
++	}
++	if err := os.WriteFile(logPath, []byte(tampered), 0o644); err != nil {
++		t.Fatal(err)
++	}
++
++	run2 := state.NewRunID()
++	v2 := reducedVerdict(subject, verify.DecisionPass, "T0")
++	id2 := recordReduced(t, e, run2, v2)
++	_, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false)
++	if code != codeError || !errors.Is(err, errLogTampered) {
++		t.Fatalf("a tampered log must fail closed to codeError: got code %d err %v", code, err)
++	}
++}
++
++// TestCycleCapParksOverCap is the scripted replay from spec §12/P2: a
++// -max-cycles 2 grant lets two passes through and parks the third with the
++// coded reason; another PR's cycles never count against it; and the operator
++// resolution — re-minting a wider grant — unparks it without a judge.
++func TestCycleCapParksOverCap(t *testing.T) {
++	e := testEnv(t)
++	capped, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 2, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}
++
++	for i := 1; i <= 2; i++ {
++		run := state.NewRunID()
++		v := reducedVerdict(subject, verify.DecisionPass, "T0")
++		id := recordReduced(t, e, run, v)
++		res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if code != codeMerge {
++			t.Fatalf("cycle %d under the cap: got code %d outcome %q", i, code, res.Outcome)
++		}
++	}
++
++	run := state.NewRunID()
++	v := reducedVerdict(subject, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if code != codeParked || res.Outcome != "parked_for_judgment" {
++		t.Fatalf("cycle 3 over cap 2: got code %d outcome %q, want park", code, res.Outcome)
++	}
++	if !strings.Contains(res.Why, "grant_cycle_exceeded") {
++		t.Fatalf("over-cap park must carry the coded reason, got %q", res.Why)
++	}
++
++	// A different PR on the same repo starts at zero — the count joins on subject.
++	otherRun := state.NewRunID()
++	other := reducedVerdict(verify.Subject{Repo: "o/r", Number: 8, HeadSHA: "def"}, verify.DecisionPass, "T0")
++	otherID := recordReduced(t, e, otherRun, other)
++	if _, code, err := act(e, otherRun, capped.ID, other, otherID, gateResult{}, false); err != nil || code != codeMerge {
++		t.Fatalf("fresh PR under the same grant: got code %d err %v", code, err)
++	}
++
++	// The park resolves by re-minting a grant exactly one cycle wider (D2),
++	// not a judge. This only works because the ceiling park itself did not
++	// consume a cycle — authorization parks are exhaustion, not consumption;
++	// if they counted, every failed retry would burn the cycle the wider
++	// grant was minted to free and a +1 re-mint would never unpark.
++	wider, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 3, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	retryRun := state.NewRunID()
++	retryID := recordReduced(t, e, retryRun, v)
++	if _, code, err := act(e, retryRun, wider.ID, v, retryID, gateResult{}, false); err != nil || code != codeMerge {
++		t.Fatalf("re-minted one-wider grant must unpark: got code %d err %v", code, err)
++	}
++}
++
++// TestCycleCapJudgeCannotLaunderCeiling pins D2's ladder law for cycles: a
++// judgment pass on an over-cap run, checked against the same capped grant,
++// must still park. A judge decides content; widening a ceiling is an
++// authorization decision that only a re-mint makes.
++func TestCycleCapJudgeCannotLaunderCeiling(t *testing.T) {
++	e := testEnv(t)
++	capped, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 2, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}
++	for i := 1; i <= 2; i++ {
++		run := state.NewRunID()
++		v := reducedVerdict(subject, verify.DecisionPass, "T0")
++		id := recordReduced(t, e, run, v)
++		if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false); err != nil || code != codeMerge {
++			t.Fatalf("cycle %d under the cap: code %d err %v", i, code, err)
++		}
++	}
++	run := state.NewRunID()
++	v := reducedVerdict(subject, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false); err != nil || code != codeParked {
++		t.Fatalf("cycle 3 over cap 2: code %d err %v", code, err)
++	}
++
++	// The judgment path re-enters act on the same run with the same grant —
++	// exactly what cmdJudge does after appending a judgment verdict.
++	judged := reducedVerdict(subject, verify.DecisionPass, "T0")
++	jid := recordReduced(t, e, run, judged)
++	res, code, err := act(e, run, capped.ID, judged, jid, gateResult{}, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if code != codeParked || !strings.Contains(res.Why, "grant_cycle_exceeded") {
++		t.Fatalf("a judgment must not launder the cycle ceiling: got code %d why %q", code, res.Why)
++	}
++}
++
++// TestCycleCountSkipsCapabilityRefusals pins the consumption rule for the
++// refusal path: a run refused by an expired grant produced no ladder decision
++// and must not burn a cycle against the re-minted retry.
++func TestCycleCountSkipsCapabilityRefusals(t *testing.T) {
++	e := testEnv(t)
++	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}
++
++	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 1, "test", -time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	run := state.NewRunID()
++	v := reducedVerdict(subject, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	if _, code, err := act(e, run, expired.ID, v, id, gateResult{}, false); err != nil || code != codeRefused {
++		t.Fatalf("expired grant: code %d err %v", code, err)
++	}
++
++	fresh, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 1, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	retryRun := state.NewRunID()
++	retryID := recordReduced(t, e, retryRun, v)
++	if _, code, err := act(e, retryRun, fresh.ID, v, retryID, gateResult{}, false); err != nil || code != codeMerge {
++		t.Fatalf("retry after refusal must have a full cycle budget: code %d err %v", code, err)
++	}
++}
++
++// TestCycleCountUnreadableParks pins fail-closed counting: an outcome artifact
++// whose parent verdict cannot be resolved parks the run — it must never read
++// as fewer cycles consumed.
++func TestCycleCountUnreadableParks(t *testing.T) {
++	e := testEnv(t)
++	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 3, "test", time.Hour, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := e.st.Append(state.KindAction, "run_stray", nil, map[string]any{"outcome": "would_merge"}); err != nil {
++		t.Fatal(err)
++	}
++	run := state.NewRunID()
++	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}, verify.DecisionPass, "T0")
++	id := recordReduced(t, e, run, v)
++	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if code != codeParked || !strings.Contains(res.Why, "cycle count unreadable") {
++		t.Fatalf("unreadable count must park: got code %d why %q", code, res.Why)
++	}
++}
++
++// TestGrantFlagDefaultsThreeCycles pins mf5: a plain `gate grant` mints the
++// canonical 3-cycle cap. The field's zero value stays unbounded; only the CLI
++// default carries the opinion.
++func TestGrantFlagDefaultsThreeCycles(t *testing.T) {
++	root := t.TempDir()
++	stateDir := filepath.Join(root, "state")
++	if err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r"}); err != nil {
++		t.Fatal(err)
++	}
++	st, err := state.Open(stateDir, time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	grants, err := st.List(func(a state.Artifact) bool { return a.Kind == state.KindGrant })
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(grants) != 1 {
++		t.Fatalf("want one grant, got %d", len(grants))
++	}
++	var g capability.Grant
++	if err := json.Unmarshal(grants[0].Body, &g); err != nil {
++		t.Fatal(err)
++	}
++	if g.MaxCycles != 3 {
++		t.Fatalf("default -max-cycles minted %d, want 3", g.MaxCycles)
++	}
++}
++
+ // TestStateDirTagDistinguishesDirs guards the anchor-collision fix: two
+ // different state dirs sharing one key dir must map to different anchor records,
+ // or appending to one would falsely fail the other's audit.
+@@ -92,7 +452,7 @@ func TestNewEphemeralEnvIsThrowaway(t *testing.T) {
+ 	}
+ 
+ 	now := func() time.Time { return time.Unix(1000, 0) }
+-	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", "backtest-ephemeral", time.Hour, now)
++	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "backtest-ephemeral", time.Hour, now)
+ 	if err != nil {
+ 		cleanup()
+ 		t.Fatal(err)
+diff --git a/docs/features/driver-merge-wiring/spec.md b/docs/features/driver-merge-wiring/spec.md
+index 8f461e7..7323040 100644
+--- a/docs/features/driver-merge-wiring/spec.md
++++ b/docs/features/driver-merge-wiring/spec.md
+@@ -186,6 +186,17 @@ integer, but it's skill-supplied for the audit record and equally un-trusted;
+ gate's count is derived from **gate's own** log, which the driver can't forge.
+ Cost: deriving the count needs a repo+PR scan of the log — see §11 Q1.
+ 
++**What counts as a consumed cycle (refinement, post-review):** a run that
++produced a ladder *decision* — blocked, parked for content judgment, or a
++merge outcome. Authorization parks (tier- or cycle-over-ceiling, an unreadable
++count) and capability refusals are policy *exhaustion*, not consumption, and
++are excluded structurally (a machine-readable `code` on the escalation body,
++never prose matching). Counting them would make the D2 re-mint resolution
++self-defeating: the over-cap park itself would burn the cycle the wider grant
++was minted to free, so a `-max-cycles`+1 re-mint would never unpark. The
++exclusion is gate-authored and monotone — it can never hide a run that did
++review work.
++
+ **D2 — Cap-exceeded parks, and the park is resolved by re-minting a wider grant.**
+ Over-cycle folds into the *existing* exit-2 park path — same code, same
+ escalation artifact the tier-over-ceiling case already uses in `act`. **How it
+diff --git a/internal/capability/capability.go b/internal/capability/capability.go
+index be00bdc..acd0d70 100644
+--- a/internal/capability/capability.go
++++ b/internal/capability/capability.go
+@@ -25,6 +25,7 @@ type Grant struct {
+ 	Repo      string    `json:"repo"`
+ 	Action    string    `json:"action"`
+ 	MaxTier   string    `json:"max_tier"`
++	MaxCycles int       `json:"max_cycles"` // review-cycle ceiling; 0 == unbounded (back-compat)
+ 	ExpiresAt time.Time `json:"expires_at"`
+ 	MintedBy  string    `json:"minted_by"`
+ 	Sig       string    `json:"sig"`
+@@ -32,20 +33,25 @@ type Grant struct {
+ 
+ // Coded errors so callers branch on the code, never on prose.
+ var (
+-	ErrExpired     = errors.New("grant_expired")
+-	ErrScope       = errors.New("grant_scope_mismatch")
+-	ErrSignature   = errors.New("grant_bad_signature")
+-	ErrTierCeiling = errors.New("grant_tier_exceeded")
+-	ErrBadTier     = errors.New("grant_bad_tier")
++	ErrExpired       = errors.New("grant_expired")
++	ErrScope         = errors.New("grant_scope_mismatch")
++	ErrSignature     = errors.New("grant_bad_signature")
++	ErrTierCeiling   = errors.New("grant_tier_exceeded")
++	ErrBadTier       = errors.New("grant_bad_tier")
++	ErrCycleExceeded = errors.New("grant_cycle_exceeded")
++	ErrBadCycles     = errors.New("grant_bad_cycles")
+ )
+ 
+ // Mint signs and records a grant, returning its artifact. A malformed
+-// ceiling is refused at mint time — an unrecognized tier must never become
+-// a grant at all, let alone the broadest one.
+-func Mint(st *state.Store, keyPath, repo, action, maxTier, mintedBy string, ttl time.Duration, now func() time.Time) (state.Artifact, error) {
++// ceiling is refused at mint time — an unrecognized tier or a negative cycle
++// cap must never become a grant at all, let alone the broadest one.
++func Mint(st *state.Store, keyPath, repo, action, maxTier string, maxCycles int, mintedBy string, ttl time.Duration, now func() time.Time) (state.Artifact, error) {
+ 	if !tier.Valid(maxTier) {
+ 		return state.Artifact{}, fmt.Errorf("%w: %q", ErrBadTier, maxTier)
+ 	}
++	if maxCycles < 0 {
++		return state.Artifact{}, fmt.Errorf("%w: %d", ErrBadCycles, maxCycles)
++	}
+ 	key, err := loadOrCreateKey(keyPath)
+ 	if err != nil {
+ 		return state.Artifact{}, err
+@@ -54,6 +60,7 @@ func Mint(st *state.Store, keyPath, repo, action, maxTier, mintedBy string, ttl
+ 		Repo:      repo,
+ 		Action:    action,
+ 		MaxTier:   maxTier,
++		MaxCycles: maxCycles,
+ 		ExpiresAt: now().UTC().Add(ttl),
+ 		MintedBy:  mintedBy,
+ 	}
+@@ -100,11 +107,23 @@ func (g Grant) TierWithin(t string) bool {
+ 	return tierRank(t) <= tierRank(g.MaxTier)
+ }
+ 
++// CyclesWithin reports whether review cycle n is at or under the grant's
++// ceiling. A zero ceiling means unbounded — the honest back-compat reading of
++// a grant minted before the field existed.
++func (g Grant) CyclesWithin(n int) bool {
++	return g.MaxCycles == 0 || n <= g.MaxCycles
++}
++
+ func tierRank(t string) int { return tier.Rank(t) }
+ 
++// sign covers every field a ceiling lives in, each at a fixed position — a
++// field outside the pre-image would be silently forgeable. Extending the
++// pre-image breaks signatures on grants minted before the extension; grants
++// are per-run and short-TTL, so the migration is "mint fresh", not versioned
++// signatures.
+ func sign(key []byte, g Grant) string {
+ 	mac := hmac.New(sha256.New, key)
+-	fmt.Fprint(mac, g.Repo, "|", g.Action, "|", g.MaxTier, "|", g.ExpiresAt.Format(time.RFC3339Nano), "|", g.MintedBy)
++	fmt.Fprint(mac, g.Repo, "|", g.Action, "|", g.MaxTier, "|", g.MaxCycles, "|", g.ExpiresAt.Format(time.RFC3339Nano), "|", g.MintedBy)
+ 	return hex.EncodeToString(mac.Sum(nil))
+ }
+ 
+diff --git a/internal/capability/capability_test.go b/internal/capability/capability_test.go
+index 5fc9ad1..b2b190f 100644
+--- a/internal/capability/capability_test.go
++++ b/internal/capability/capability_test.go
+@@ -1,6 +1,7 @@
+ package capability
+ 
+ import (
++	"encoding/json"
+ 	"errors"
+ 	"os"
+ 	"path/filepath"
+@@ -25,7 +26,7 @@ func setup(t *testing.T) (*state.Store, string) {
+ func TestGrantExpiry(t *testing.T) {
+ 	st, key := setup(t)
+ 	mintedAt := time.Unix(1000, 0)
+-	a, err := Mint(st, key, "o/r", "merge", "T1", "test", time.Hour, fixedClock(mintedAt))
++	a, err := Mint(st, key, "o/r", "merge", "T1", 0, "test", time.Hour, fixedClock(mintedAt))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -41,7 +42,7 @@ func TestGrantExpiry(t *testing.T) {
+ func TestGrantScope(t *testing.T) {
+ 	st, key := setup(t)
+ 	now := fixedClock(time.Unix(1000, 0))
+-	a, err := Mint(st, key, "o/r", "merge", "T1", "test", time.Hour, now)
++	a, err := Mint(st, key, "o/r", "merge", "T1", 0, "test", time.Hour, now)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -54,7 +55,7 @@ func TestGrantScope(t *testing.T) {
+ func TestCheckRefusesToMintKey(t *testing.T) {
+ 	st, key := setup(t)
+ 	now := fixedClock(time.Unix(1000, 0))
+-	a, err := Mint(st, key, "o/r", "merge", "T1", "test", time.Hour, now)
++	a, err := Mint(st, key, "o/r", "merge", "T1", 0, "test", time.Hour, now)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -87,12 +88,80 @@ func TestTierCeilingFailsClosed(t *testing.T) {
+ func TestMintRejectsUnknownCeiling(t *testing.T) {
+ 	st, key := setup(t)
+ 	now := fixedClock(time.Unix(1000, 0))
+-	_, err := Mint(st, key, "o/r", "merge", "T9", "test", time.Hour, now)
++	_, err := Mint(st, key, "o/r", "merge", "T9", 0, "test", time.Hour, now)
+ 	if !errors.Is(err, ErrBadTier) {
+ 		t.Fatalf("want ErrBadTier, got %v", err)
+ 	}
+ }
+ 
++// TestSignatureCoversMaxCycles pins that the cycle ceiling sits inside the
++// HMAC pre-image: flipping it after signing must change the signature, or the
++// cap would be silently widenable by anyone who can write state.
++func TestSignatureCoversMaxCycles(t *testing.T) {
++	key := []byte("test-key")
++	g := Grant{Repo: "o/r", Action: "merge", MaxTier: "T1", MaxCycles: 3,
++		ExpiresAt: time.Unix(2000, 0), MintedBy: "test"}
++	sig := sign(key, g)
++	g.MaxCycles = 99
++	if sign(key, g) == sig {
++		t.Fatal("widening MaxCycles did not change the signature — the ceiling is forgeable")
++	}
++}
++
++// TestCheckRefusesForgedCycleCeiling is the end-to-end form: a grant body with
++// a widened ceiling but the original signature must fail Check.
++func TestCheckRefusesForgedCycleCeiling(t *testing.T) {
++	st, key := setup(t)
++	now := fixedClock(time.Unix(1000, 0))
++	a, err := Mint(st, key, "o/r", "merge", "T1", 3, "test", time.Hour, now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	art, err := st.Get(a.ID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var g Grant
++	if err := json.Unmarshal(art.Body, &g); err != nil {
++		t.Fatal(err)
++	}
++	g.MaxCycles = 99
++	forged, err := st.Append(state.KindGrant, "run_mint", nil, g)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := Check(st, key, forged.ID, "o/r", "merge", now); !errors.Is(err, ErrSignature) {
++		t.Fatalf("want ErrSignature for forged ceiling, got %v", err)
++	}
++}
++
++// TestCyclesWithinBoundary pins the ceiling arithmetic: cycles at or under the
++// cap pass, the first cycle past it fails, and a zero cap means unbounded —
++// the back-compat reading of a grant minted before the field existed.
++func TestCyclesWithinBoundary(t *testing.T) {
++	g := Grant{MaxCycles: 3}
++	for n := 1; n <= 3; n++ {
++		if !g.CyclesWithin(n) {
++			t.Fatalf("cycle %d at or under ceiling 3 must pass", n)
++		}
++	}
++	if g.CyclesWithin(4) {
++		t.Fatal("cycle 4 over ceiling 3 must fail")
++	}
++	unbounded := Grant{}
++	if !unbounded.CyclesWithin(1) || !unbounded.CyclesWithin(1000) {
++		t.Fatal("a zero ceiling means unbounded")
++	}
++}
++
++func TestMintRejectsNegativeCycles(t *testing.T) {
++	st, key := setup(t)
++	now := fixedClock(time.Unix(1000, 0))
++	if _, err := Mint(st, key, "o/r", "merge", "T1", -1, "test", time.Hour, now); !errors.Is(err, ErrBadCycles) {
++		t.Fatalf("want ErrBadCycles, got %v", err)
++	}
++}
++
+ // TestGrantSurvivesKeyRelocation pins the key-custody move: the signing key
+ // content relocates (out of the state dir, in production), and previously
+ // minted grants still validate. The key is moved, never re-minted — a re-mint
+@@ -100,7 +169,7 @@ func TestMintRejectsUnknownCeiling(t *testing.T) {
+ func TestGrantSurvivesKeyRelocation(t *testing.T) {
+ 	st, key := setup(t)
+ 	now := fixedClock(time.Unix(1000, 0))
+-	a, err := Mint(st, key, "o/r", "merge", "T1", "test", time.Hour, now)
++	a, err := Mint(st, key, "o/r", "merge", "T1", 0, "test", time.Hour, now)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/internal/state/state.go b/internal/state/state.go
+index 67a75ff..1aed800 100644
+--- a/internal/state/state.go
++++ b/internal/state/state.go
+@@ -269,11 +269,16 @@ func (s *Store) scan(keep func(Artifact) bool) ([]Artifact, error) {
+ // the class of tampering. Artifact carries the id of the first tampered entry
+ // when one survives to be named (naive body edit, broken link, reorder);
+ // truncation and whole-log deletion have no surviving artifact id, so Artifact
+-// is empty and Reason alone carries the finding.
++// is empty and Reason alone carries the finding. All carries the artifacts the
++// audit verified, populated only when OK: a caller deriving anything from the
++// log reads the audited snapshot itself rather than re-scanning, so what it
++// reads is exactly what was verified — no window for the log to change between
++// the two.
+ type AuditResult struct {
+ 	OK       bool
+ 	Artifact string
+ 	Reason   string
++	All      []Artifact
+ }
+ 
+ // auditFault is the internal shape a check returns: a reason plus an optional
+@@ -317,7 +322,7 @@ func (s *Store) Audit() (AuditResult, error) {
+ 		return tampered(fault), nil
+ 	}
+ 	if s.anchor == nil {
+-		return AuditResult{OK: true}, nil
++		return AuditResult{OK: true, All: all}, nil
+ 	}
+ 	head := ""
+ 	if n := len(all); n > 0 {
+@@ -330,7 +335,7 @@ func (s *Store) Audit() (AuditResult, error) {
+ 	if !fault.ok() {
+ 		return tampered(fault), nil
+ 	}
+-	return AuditResult{OK: true}, nil
++	return AuditResult{OK: true, All: all}, nil
+ }
+ 
+ // replayChain walks the recomputed hash chain, returning the first fault.
+diff --git a/internal/state/state_test.go b/internal/state/state_test.go
+index b14e792..a029e53 100644
+--- a/internal/state/state_test.go
++++ b/internal/state/state_test.go
+@@ -57,6 +57,50 @@ func TestAuditCatchesTamper(t *testing.T) {
+ 	}
+ }
+ 
++func TestAuditReturnsVerifiedSnapshot(t *testing.T) {
++	st := open(t)
++	run := NewRunID()
++	first, err := st.Append(KindEvidence, run, nil, map[string]string{"k": "v1"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	second, err := st.Append(KindVerdict, run, nil, map[string]string{"decision": "pass"})
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	res, err := st.Audit()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !res.OK {
++		t.Fatalf("clean chain reported tampered: %s", res.Reason)
++	}
++	if len(res.All) != 2 || res.All[0].ID != first.ID || res.All[1].ID != second.ID {
++		t.Fatalf("audit snapshot does not match the appended log: %+v", res.All)
++	}
++
++	// A tampered log must not hand back a snapshot a caller could count from.
++	raw, err := os.ReadFile(st.logPath())
++	if err != nil {
++		t.Fatal(err)
++	}
++	tamper := strings.Replace(string(raw), `"decision":"pass"`, `"decision":"XXXX"`, 1)
++	if tamper == string(raw) {
++		t.Fatal("test setup: tamper had no effect")
++	}
++	if err := os.WriteFile(st.logPath(), []byte(tamper), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	res, err = st.Audit()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if res.OK || res.All != nil {
++		t.Fatalf("tampered log returned a snapshot: OK=%v len(All)=%d", res.OK, len(res.All))
++	}
++}
++
+ func TestProvenanceRoundTrip(t *testing.T) {
+ 	st := open(t)
+ 	run := NewRunID()

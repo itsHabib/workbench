@@ -1,0 +1,821 @@
+diff --git a/packages/cli/src/commands/driver.ts b/packages/cli/src/commands/driver.ts
+index 3971fd1..37b7aa2 100644
+--- a/packages/cli/src/commands/driver.ts
++++ b/packages/cli/src/commands/driver.ts
+@@ -149,6 +149,17 @@ export function registerDriverCommand(program: Command, factory: DriverServiceFa
+       });
+     });
+ 
++  driver
++    .command("flip-cloud <driverRunId>")
++    .description("flip an imported local stream to cloud, continuing its branch")
++    .requiredOption("--stream <ds_id>", "driver stream id")
++    .action(async (driverRunId: string, rawOpts: { stream: string }) => {
++      await runDriverActionAsync(async () => {
++        const run = await factory().flipStreamToCloud(driverRunId, rawOpts.stream);
++        process.stdout.write(`${formatDriverDecideOutput(run)}\n`);
++      });
++    });
++
+   driver
+     .command("cancel <driverRunId>")
+     .description("cancel an in-flight driver run")
+diff --git a/packages/cli/test/driver-command.test.ts b/packages/cli/test/driver-command.test.ts
+index 505d88c..f38b2d9 100644
+--- a/packages/cli/test/driver-command.test.ts
++++ b/packages/cli/test/driver-command.test.ts
+@@ -443,4 +443,38 @@ batches:
+     await runDriver(["driver", "status", imported.driverRunId]);
+     expect(stdout.join("")).toContain("manifest modified since import");
+   });
++
++  test("flip-cloud re-dispatches an imported local stream with continuation ref", async () => {
++    const layout = writeOneStreamManifest(h.repoRoot);
++    expect(await runDriver(["driver", "import", layout.manifestPath])).toBe(0);
++    const imported = JSON.parse(stdout.join("").trim()) as {
++      driverRunId: string;
++    };
++    const statusBefore = JSON.parse(
++      (
++        await (async () => {
++          stdout.length = 0;
++          await runDriver(["driver", "status", imported.driverRunId, "--json"]);
++          return stdout.join("");
++        })()
++      ).trim(),
++    ) as { batches: { streams: { id: string }[] }[] };
++    const streamId = statusBefore.batches[0]?.streams[0]?.id;
++    expect(streamId).toBeDefined();
++
++    h.cursor.enqueue({
++      events: [],
++      result: { status: "succeeded", durationMs: 0, branches: [] },
++    });
++    stdout.length = 0;
++    expect(
++      await runDriver(["driver", "flip-cloud", imported.driverRunId, "--stream", streamId!]),
++    ).toBe(0);
++    await h.drainShip();
++
++    const startCall = h.cursor.calls.at(-1);
++    expect(startCall?.input.runtime).toBe("cloud");
++    expect(startCall?.input.cloud?.repos[0]?.startingRef).toBe("feat-a");
++    expect(startCall?.input.cloud?.workOnCurrentBranch).toBe(true);
++  });
+ });
+diff --git a/packages/cli/test/driver-disk-harness.ts b/packages/cli/test/driver-disk-harness.ts
+index 61da805..bc8c54a 100644
+--- a/packages/cli/test/driver-disk-harness.ts
++++ b/packages/cli/test/driver-disk-harness.ts
+@@ -20,6 +20,8 @@ export interface DriverDiskHarness {
+   readonly cursor: FakeCursorRunner;
+   readonly tmp: string;
+   readonly repoRoot: string;
++  /** Await in-flight `startShip` continuations before closing the store. */
++  readonly drainShip: () => Promise<void>;
+   /** Closes the shared store, then removes the temp dir — Windows cannot unlink an open SQLite file. */
+   readonly dispose: () => void;
+ }
+@@ -30,12 +32,19 @@ export function createDriverDiskHarness(ghPort?: DriverGhPort): DriverDiskHarnes
+   const runsDir = join(tmp, "runs");
+   const repoRoot = join(tmp, "repo");
+   const cursor = new FakeCursorRunner();
+-  const opts = { dbPath, runsDir, cursor };
++  const opts = { cloudCursor: cursor, cursor, dbPath, runsDir };
+   const shipFactory = createCliService(opts);
+   const program = buildProgram(shipFactory, createCliDriverService(opts, shipFactory, ghPort));
+   const dispose = (): void => {
+     closeDefaultSharedStore(dbPath);
+     rmSync(tmp, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+   };
+-  return { program, cursor, tmp, repoRoot, dispose };
++  return {
++    program,
++    cursor,
++    tmp,
++    repoRoot,
++    drainShip: () => shipFactory().drainBackground(),
++    dispose,
++  };
+ }
+diff --git a/packages/driver/src/engine.test.ts b/packages/driver/src/engine.test.ts
+index cfe9966..b8f18ab 100644
+--- a/packages/driver/src/engine.test.ts
++++ b/packages/driver/src/engine.test.ts
+@@ -10,6 +10,7 @@ import type { DriverStreamView } from "./types.js";
+ 
+ import {
+   buildShipInputForTest,
++  flipStreamToCloud,
+   isTickLive,
+   resolveDocPath,
+   resolveRepoRoot,
+@@ -1020,6 +1021,266 @@ describe("buildShipInputForTest", () => {
+       workdir: join(repoRoot, ".claude", "worktrees", "feat-a"),
+     });
+   });
++
++  test("propagates startingRef and workOnCurrentBranch when set on cloud stream", () => {
++    const runId = newDriverRunId();
++    const batchId = newDriverBatchId();
++    const streamId = newDriverStreamId();
++    store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: batchId,
++          status: "pending",
++          streams: [
++            {
++              attempts: [],
++              branch: "feat-continue",
++              id: streamId,
++              runtime: "cloud",
++              specPath: "docs/a.md",
++              status: "pending",
++              streamIndex: 0,
++              touches: [],
++            },
++          ],
++        },
++      ],
++      id: runId,
++      manifestPath: join(repoRoot, "driver.md"),
++      repo: "ship",
++      sourceJson: "---\ndriver_version: 1\nrepo_url: https://github.com/example/ship\n---\n",
++      status: "pending",
++    });
++
++    const stream = store.getDriverRun(runId)?.batches[0]?.streams[0];
++    expect(stream).toBeDefined();
++    store.updateDriverStream(streamId, { workOnCurrentBranch: true });
++    const persisted = store.getDriverRun(runId)?.batches[0]?.streams[0];
++    expect(persisted?.workOnCurrentBranch).toBe(true);
++    const input = buildShipInputForTest(
++      {
++        clock: () => 0,
++        cloudInFlight: 0,
++        localInFlight: 0,
++        onProgress: noopProgress,
++        opts: resolveRunOpts(),
++        repoRoot,
++        repoUrl: "https://github.com/example/ship",
++        runId,
++        ship: createFakeShipPort([]).port,
++        store,
++      },
++      persisted!,
++      "docs/a.md",
++    );
++    expect(input).toMatchObject({
++      runtime: "cloud",
++      startingRef: "feat-continue",
++      cloud: {
++        repos: [{ url: "https://github.com/example/ship", startingRef: "feat-continue" }],
++        workOnCurrentBranch: true,
++      },
++    });
++  });
++
++  test("default cloud path is unchanged when continuation fields are absent", () => {
++    const runId = newDriverRunId();
++    const batchId = newDriverBatchId();
++    const streamId = newDriverStreamId();
++    store.insertDriverRun({
++      batches: [
++        {
++          batchIndex: 1,
++          dependsOn: [],
++          id: batchId,
++          status: "pending",
++          streams: [
++            {
++              attempts: [],
++              id: streamId,
++              runtime: "cloud",
++              specPath: "docs/a.md",
++              status: "pending",
++              streamIndex: 0,
++              touches: [],
++            },
++          ],
++        },
++      ],
++      id: runId,
++      manifestPath: join(repoRoot, "driver.md"),
++      repo: "ship",
++      sourceJson: "---\ndriver_version: 1\nrepo_url: https://github.com/example/ship\n---\n",
++      status: "pending",
++    });
++
++    const stream = store.getDriverRun(runId)?.batches[0]?.streams[0];
++    expect(stream).toBeDefined();
++    const input = buildShipInputForTest(
++      {
++        clock: () => 0,
++        cloudInFlight: 0,
++        localInFlight: 0,
++        onProgress: noopProgress,
++        opts: resolveRunOpts(),
++        repoRoot,
++        repoUrl: "https://github.com/example/ship",
++        runId,
++        ship: createFakeShipPort([]).port,
++        store,
++      },
++      stream!,
++      "docs/a.md",
++    );
++    expect(input).toMatchObject({
++      runtime: "cloud",
++      cloud: {
++        autoCreatePR: true,
++        env: { type: "cloud" },
++        repos: [{ url: "https://github.com/example/ship" }],
++        workOnCurrentBranch: false,
++      },
++    });
++    expect(input).not.toHaveProperty("startingRef");
++  });
++});
++
++describe("flipStreamToCloud", () => {
++  let tmpDir: string;
++  let repoRoot: string;
++  let store: ReturnType<typeof createStore>;
++
++  beforeEach(() => {
++    tmpDir = mkdtempSync(join(tmpdir(), "driver-flip-cloud-"));
++    repoRoot = join(tmpDir, "repo");
++    mkdirSync(join(repoRoot, ".git"), { recursive: true });
++    mkdirSync(join(repoRoot, "docs"), { recursive: true });
++    writeFileSync(join(repoRoot, "docs", "a.md"), "# task\n");
++    mkdirSync(join(repoRoot, ".claude", "worktrees", "feat-a"), { recursive: true });
++    store = createStore({ dbPath: ":memory:" });
++  });
++
++  afterEach(() => {
++    store.close();
++    rmSync(tmpDir, { force: true, recursive: true });
++  });
++
++  test("re-dispatches to cloud with continuation ref from the local branch", async () => {
++    const manifestPath = join(repoRoot, "driver.md");
++    writeFileSync(
++      manifestPath,
++      `---
++driver_version: 1
++generated_at: 2026-06-26T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: flip
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/a.md
++        branch_name: feat-a
++        runtime: local
++        status: pending
++---
++`,
++    );
++    const fake = createFakeShipPort([
++      { docPath: join(repoRoot, "docs", "a.md"), repo: "ship", workflowRunId: "wf_flip_cloud" },
++    ]);
++    const driver = createDriverService({ ship: fake.port, store });
++    const imported = driver.importManifest(manifestPath);
++    const streamId = imported.run.batches[0]?.streams[0]?.id;
++    expect(streamId).toBeDefined();
++
++    await flipStreamToCloud(store, fake.port, imported.run.id, streamId!, () => 0);
++
++    const start = fake.calls.find((c) => c.kind === "startShip");
++    expect(start?.input).toMatchObject({
++      runtime: "cloud",
++      startingRef: "feat-a",
++      cloud: {
++        repos: [{ url: "https://github.com/example/ship", startingRef: "feat-a" }],
++        workOnCurrentBranch: true,
++      },
++    });
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.runtime).toBe("cloud");
++    expect(stream?.status).toBe("dispatched");
++    expect(stream?.workOnCurrentBranch).toBe(true);
++  });
++
++  test("retry re-dispatch after flip keeps branch continuation on the stream row", async () => {
++    const manifestPath = join(repoRoot, "driver.md");
++    writeFileSync(
++      manifestPath,
++      `---
++driver_version: 1
++generated_at: 2026-06-26T00:00:00Z
++generated_by: test
++source:
++  project: ship
++  phase: flip-retry
++repo: ship
++repo_url: https://github.com/example/ship
++batches:
++  - id: 1
++    depends_on: []
++    streams:
++      - spec_path: docs/a.md
++        branch_name: feat-a
++        runtime: local
++        status: pending
++---
++`,
++    );
++    const docPath = join(repoRoot, "docs", "a.md");
++    const fake = createFakeShipPort([
++      {
++        docPath,
++        repo: "ship",
++        terminalStatus: "failed",
++        workflowRunId: "wf_flip_fail",
++      },
++    ]);
++    const driver = createDriverService({ ship: fake.port, store });
++    const imported = driver.importManifest(manifestPath);
++    const streamId = imported.run.batches[0]?.streams[0]?.id;
++    expect(streamId).toBeDefined();
++
++    await flipStreamToCloud(store, fake.port, imported.run.id, streamId!, () => 0);
++    store.updateDriverStream(streamId!, { status: "failed" });
++    store.updateDriverRunStatus(imported.run.id, "awaiting_judgment");
++    driver.decide(imported.run.id, streamId!, { kind: "retry" });
++
++    const stream = store.getDriverRun(imported.run.id)?.batches[0]?.streams[0];
++    expect(stream?.runtime).toBe("cloud");
++    expect(stream?.workOnCurrentBranch).toBe(true);
++    const input = buildShipInputForTest(
++      {
++        clock: () => 0,
++        cloudInFlight: 0,
++        localInFlight: 0,
++        onProgress: noopProgress,
++        opts: resolveRunOpts(),
++        repoRoot,
++        repoUrl: "https://github.com/example/ship",
++        runId: imported.run.id,
++        ship: fake.port,
++        store,
++      },
++      stream!,
++      docPath,
++    );
++    expect(input.cloud?.repos[0]?.startingRef).toBe("feat-a");
++    expect(input.cloud?.workOnCurrentBranch).toBe(true);
++  });
+ });
+ 
+ describe("liveness-aware tick give-up", () => {
+diff --git a/packages/driver/src/engine.ts b/packages/driver/src/engine.ts
+index b554784..962e76f 100644
+--- a/packages/driver/src/engine.ts
++++ b/packages/driver/src/engine.ts
+@@ -44,6 +44,23 @@ const DEFAULT_MAX_PARALLEL_LOCAL = 1;
+ const DEFAULT_MAX_PARALLEL_CLOUD = 4;
+ const RUNAWAY_BACKSTOP_MULTIPLIER = 6;
+ 
++/** Cloud branch-continuation override — used by `flipStreamToCloud` and unit tests. */
++export interface CloudContinuation {
++  readonly startingRef: string;
++  readonly workOnCurrentBranch: true;
++}
++
++const FLIP_CLOUD_RESET_PATCH = {
++  dispatchModel: null,
++  dispatchModelParams: null,
++  dispatchProvider: null,
++  effortDegraded: false,
++  status: "pending" as const,
++  tierDegradeReason: null,
++  runtime: "cloud" as const,
++  workOnCurrentBranch: true,
++};
++
+ export interface EngineDeps {
+   store: Store;
+   ship: DriverShipPort;
+@@ -463,7 +480,11 @@ function countInFlight(run: DriverRun, runtime: "local" | "cloud"): number {
+   }).length;
+ }
+ 
+-async function dispatchStream(ctx: DispatchContext, stream: DriverStream): Promise<boolean> {
++async function dispatchStream(
++  ctx: DispatchContext,
++  stream: DriverStream,
++  continuation?: CloudContinuation,
++): Promise<boolean> {
+   const docPath = resolveStreamDocPath(ctx.repoRoot, stream);
+   const attempt: StreamAttempt = {
+     dispatchedAt: new Date(ctx.clock()).toISOString(),
+@@ -479,7 +500,13 @@ async function dispatchStream(ctx: DispatchContext, stream: DriverStream): Promi
+     status: "dispatching",
+     ...tierDispatchPatch(provider, tierMapping),
+   });
+-  const input = buildShipInput(ctx, stream, docPath, provider, tierMapping);
++  const input = buildShipInput({
++    ctx,
++    docPath,
++    stream,
++    tierMapping,
++    ...(continuation !== undefined ? { continuation } : {}),
++  });
+   return dispatchStartShip({
+     baseAttempts: attempts,
+     input,
+@@ -523,13 +550,14 @@ async function dispatchStartShip(params: StartShipParams): Promise<boolean> {
+   return true;
+ }
+ 
+-function buildShipInput(
+-  ctx: DispatchContext,
+-  stream: DriverStream,
+-  docPath: string,
+-  provider: AgentProvider,
+-  tierMapping?: TierDispatchResult,
+-): ShipInput {
++function buildShipInput(params: {
++  ctx: DispatchContext;
++  stream: DriverStream;
++  docPath: string;
++  tierMapping?: TierDispatchResult;
++  continuation?: CloudContinuation;
++}): ShipInput {
++  const { ctx, stream, docPath, tierMapping, continuation } = params;
+   let input: ShipInput;
+   if (stream.runtime === "rooms") {
+     throw new PreconditionError(`rooms stream ${stream.id} is not supported by the engine yet`);
+@@ -539,7 +567,11 @@ function buildShipInput(
+     if (repoUrl === undefined) {
+       throw new PreconditionError(`cloud stream ${stream.id} requires repo_url in manifest`);
+     }
++    const cloudContinuation = resolveCloudContinuation(stream, continuation);
+     const repoEntry: NonNullable<ShipInput["cloud"]>["repos"][number] = { url: repoUrl };
++    if (cloudContinuation.startingRef !== undefined) {
++      repoEntry.startingRef = cloudContinuation.startingRef;
++    }
+     if (stream.provider === "claude" && stream.branch !== undefined) {
+       repoEntry.prBranch = stream.branch;
+     }
+@@ -547,11 +579,14 @@ function buildShipInput(
+       docPath,
+       repo: loadRun(ctx.store, ctx.runId).repo,
+       runtime: "cloud",
++      ...(cloudContinuation.startingRef !== undefined
++        ? { startingRef: cloudContinuation.startingRef }
++        : {}),
+       cloud: {
+         autoCreatePR: true,
+         env: { type: "cloud" },
+         repos: [repoEntry],
+-        workOnCurrentBranch: false,
++        workOnCurrentBranch: cloudContinuation.workOnCurrentBranch,
+       },
+     };
+   } else {
+@@ -573,6 +608,103 @@ function buildShipInput(
+   return applyTierMapping(input, tierMapping);
+ }
+ 
++function resolveCloudContinuation(
++  stream: DriverStream,
++  override?: CloudContinuation,
++): { startingRef?: string; workOnCurrentBranch: boolean } {
++  if (override !== undefined) {
++    return { startingRef: override.startingRef, workOnCurrentBranch: true };
++  }
++  if (stream.workOnCurrentBranch === true) {
++    const ref = stream.branch;
++    if (ref !== undefined) {
++      return { startingRef: ref, workOnCurrentBranch: true };
++    }
++  }
++  return { workOnCurrentBranch: false };
++}
++
++/**
++ * Flip an imported local stream to cloud dispatch, continuing from its branch
++ * without re-importing the manifest.
++ */
++export async function flipStreamToCloud(
++  store: Store,
++  ship: DriverShipPort,
++  driverRunId: string,
++  streamId: string,
++  clock: () => number = Date.now,
++): Promise<DriverRun> {
++  const run = loadRun(store, driverRunId);
++  const stream = allStreams(run).find((s) => s.id === streamId);
++  if (stream === undefined) {
++    throw new PreconditionError(`stream not found: ${streamId}`);
++  }
++  const branch = assertFlipEligibleStream(stream, run);
++
++  store.updateDriverStream(streamId, FLIP_CLOUD_RESET_PATCH);
++  const refreshed = store.getDriverRun(driverRunId);
++  if (refreshed === null) {
++    throw new DriverRunNotFoundEngineError(driverRunId);
++  }
++  const flipped = allStreams(refreshed).find((s) => s.id === streamId);
++  if (flipped === undefined) {
++    throw new PreconditionError(`stream not found after flip: ${streamId}`);
++  }
++
++  if (refreshed.status !== "running" && refreshed.status !== "awaiting_judgment") {
++    store.updateDriverRunStatus(driverRunId, "running");
++  }
++
++  const ctx: DispatchContext = {
++    clock,
++    cloudInFlight: 0,
++    localInFlight: 0,
++    onProgress: () => undefined,
++    opts: resolveRunOpts(),
++    repoRoot: resolveRepoRoot(refreshed.manifestPath),
++    repoUrl: extractRepoUrl(refreshed),
++    runId: driverRunId,
++    ship,
++    store,
++  };
++  const continuation: CloudContinuation = {
++    startingRef: branch,
++    workOnCurrentBranch: true,
++  };
++  const dispatched = await dispatchStream(ctx, flipped, continuation);
++  if (!dispatched) {
++    throw new PreconditionError(`cloud dispatch failed for stream ${streamId} after flip`);
++  }
++  const finalRun = store.getDriverRun(driverRunId);
++  if (finalRun === null) {
++    throw new DriverRunNotFoundEngineError(driverRunId);
++  }
++  return finalRun;
++}
++
++function assertFlipEligibleStream(stream: DriverStream, run: DriverRun): string {
++  if (stream.runtime !== "local") {
++    throw new PreconditionError(
++      `stream ${stream.id} is not local (runtime=${stream.runtime}); flip-cloud applies to local streams only`,
++    );
++  }
++  const branch = stream.branch;
++  if (branch === undefined || branch === "") {
++    throw new PreconditionError(`stream ${stream.id} missing branch — cannot continue on cloud`);
++  }
++  if (stream.status !== "pending" && stream.status !== "failed") {
++    throw new PreconditionError(
++      `stream ${stream.id} is not flip-eligible (status=${stream.status}); expected pending or failed`,
++    );
++  }
++  const repoUrl = extractRepoUrl(run);
++  if (repoUrl === undefined) {
++    throw new PreconditionError(`cloud flip for stream ${stream.id} requires repo_url in manifest`);
++  }
++  return branch;
++}
++
+ function applyTierMapping(input: ShipInput, tierMapping?: TierDispatchResult): ShipInput {
+   if (tierMapping === undefined) {
+     return input;
+@@ -610,10 +742,17 @@ export function buildShipInputForTest(
+   ctx: DispatchContext,
+   stream: DriverStream,
+   docPath: string,
++  continuation?: CloudContinuation,
+ ): ShipInput {
+   const provider = stream.provider ?? DEFAULT_DISPATCH_PROVIDER;
+   const tierMapping = mapTierToDispatch(provider, stream.modelTier, stream.effortTier);
+-  return buildShipInput(ctx, stream, docPath, provider, tierMapping);
++  return buildShipInput({
++    ctx,
++    docPath,
++    stream,
++    tierMapping,
++    ...(continuation !== undefined ? { continuation } : {}),
++  });
+ }
+ 
+ function markLatestAttemptWorkflowRunId(
+diff --git a/packages/driver/src/index.ts b/packages/driver/src/index.ts
+index c9f25a1..757850f 100644
+--- a/packages/driver/src/index.ts
++++ b/packages/driver/src/index.ts
+@@ -84,7 +84,14 @@ export {
+ export { createDriverService } from "./service.js";
+ export type { CreateDriverServiceOpts, DriverService } from "./service.js";
+ 
+-export { isTickLive, resolveDocPath, resolveRepoRoot, resolveRunOpts } from "./engine.js";
++export {
++  isTickLive,
++  resolveDocPath,
++  resolveRepoRoot,
++  resolveRunOpts,
++  flipStreamToCloud,
++} from "./engine.js";
++export type { CloudContinuation } from "./engine.js";
+ 
+ export {
+   allStreams,
+diff --git a/packages/driver/src/service.ts b/packages/driver/src/service.ts
+index cf2deaf..5e627e4 100644
+--- a/packages/driver/src/service.ts
++++ b/packages/driver/src/service.ts
+@@ -17,7 +17,7 @@ import type {
+   RunOpts,
+ } from "./types.js";
+ 
+-import { resolveRunOpts, runTick } from "./engine.js";
++import { flipStreamToCloud, resolveRunOpts, runTick } from "./engine.js";
+ import { DecideError, DriverRunNotFoundEngineError } from "./errors.js";
+ import { importManifest as importManifestFn } from "./import.js";
+ import { cancelRun, decide as decideFn, markMerged as markMergedFn } from "./judgment.js";
+@@ -31,6 +31,7 @@ export interface DriverService {
+   markMerged(driverRunId: string, streamId: string, facts: MergeFacts): DriverRun;
+   land(driverRunId: string, opts: LandOpts): Promise<DriverRun>;
+   cancel(driverRunId: string): Promise<DriverRun>;
++  flipStreamToCloud(driverRunId: string, streamId: string): Promise<DriverRun>;
+   render(driverRunId: string): string;
+   getDriverRun(id: string): DriverRun | null;
+   listDriverRuns(filter?: {
+@@ -57,6 +58,8 @@ export function createDriverService(opts: CreateDriverServiceOpts): DriverServic
+ 
+   return {
+     cancel: (driverRunId) => cancelRun(store, ship, driverRunId, now()),
++    flipStreamToCloud: (driverRunId, streamId) =>
++      flipStreamToCloud(store, ship, driverRunId, streamId, clock ?? Date.now),
+     decide: (driverRunId, streamId, decision) => decideFn(store, driverRunId, streamId, decision),
+     getDriverRun: (id) => store.getDriverRun(id),
+     importManifest: (manifestPath) => importManifestFn(store, manifestPath),
+diff --git a/packages/mcp/src/mcp.properties.test.ts b/packages/mcp/src/mcp.properties.test.ts
+index 508d7fb..49aa391 100644
+--- a/packages/mcp/src/mcp.properties.test.ts
++++ b/packages/mcp/src/mcp.properties.test.ts
+@@ -51,6 +51,7 @@ const localShipInputArbitrary: fc.Arbitrary<ShipInput> = fc.record({
+   worktreeName: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
+   branch: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
+   baseRef: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
++  startingRef: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
+   model: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
+   modelParams: fc.option(
+     fc.array(
+diff --git a/packages/mcp/src/mcp.ts b/packages/mcp/src/mcp.ts
+index 4703dda..72d76d4 100644
+--- a/packages/mcp/src/mcp.ts
++++ b/packages/mcp/src/mcp.ts
+@@ -109,6 +109,8 @@ export const shipInputSchema = z
+     repo: z.string().min(1).optional(),
+     worktreeName: z.string().min(1).optional(),
+     baseRef: z.string().min(1).optional(),
++    /** Git ref a cloud run checks out before implementing (maps to `cloud.repos[0].startingRef`). */
++    startingRef: z.string().min(1).optional(),
+     branch: z.string().min(1).optional(),
+     model: z.string().min(1).optional(),
+     modelParams: z.array(shipInputModelParamEntrySchema).optional(),
+diff --git a/packages/store/migrations/0012_driver_streams_continuation.sql b/packages/store/migrations/0012_driver_streams_continuation.sql
+new file mode 100644
+index 0000000..75e21cb
+--- /dev/null
++++ b/packages/store/migrations/0012_driver_streams_continuation.sql
+@@ -0,0 +1,7 @@
++-- 0012_driver_streams_continuation.sql — persist cloud branch-continuation intent.
++--
++-- When true, cloud dispatch checks out `branch` via startingRef/workOnCurrentBranch
++-- instead of starting fresh from the repo default branch. Set by flip-cloud and
++-- optional manifest import; survives retry re-dispatch.
++
++ALTER TABLE driver_streams ADD COLUMN work_on_current_branch INTEGER;
+diff --git a/packages/store/src/driver-schemas.ts b/packages/store/src/driver-schemas.ts
+index ca4895a..6a9e460 100644
+--- a/packages/store/src/driver-schemas.ts
++++ b/packages/store/src/driver-schemas.ts
+@@ -52,6 +52,8 @@ export const driverStreamSchema = z
+   .object({
+     attempts: z.array(streamAttemptSchema),
+     branch: z.string().optional(),
++    /** When true, cloud dispatch continues on `branch` instead of the default ref. */
++    workOnCurrentBranch: z.boolean().optional(),
+     createdAt: z.string().datetime({ offset: true }),
+     cycles: z.number().int().optional(),
+     driverBatchId: z.string(),
+diff --git a/packages/store/src/driver-streams.ts b/packages/store/src/driver-streams.ts
+index 7b09a09..a371e1e 100644
+--- a/packages/store/src/driver-streams.ts
++++ b/packages/store/src/driver-streams.ts
+@@ -15,6 +15,8 @@ export interface UpdateDriverStreamInput {
+   workflowRunId?: string;
+   attempts?: StreamAttempt[];
+   branch?: string;
++  runtime?: DriverStream["runtime"];
++  workOnCurrentBranch?: boolean | null;
+   prNumber?: number;
+   prUrl?: string;
+   mergeCommit?: string;
+@@ -56,6 +58,7 @@ export interface DriverStreamRow {
+   dispatch_model_params: string | null;
+   effort_degraded: number | null;
+   tier_degrade_reason: string | null;
++  work_on_current_branch: number | null;
+   created_at: string;
+   updated_at: string;
+ }
+@@ -97,7 +100,7 @@ export interface DriverStreamOps {
+ }
+ 
+ const STREAM_COLUMNS =
+-  "id, driver_run_id, driver_batch_id, stream_index, task_id, task_slug, spec_path, branch, runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url, merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, provider, dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded, tier_degrade_reason, created_at, updated_at";
++  "id, driver_run_id, driver_batch_id, stream_index, task_id, task_slug, spec_path, branch, runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url, merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, provider, dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded, tier_degrade_reason, work_on_current_branch, created_at, updated_at";
+ 
+ function sqlNull<T>(value: T | undefined): T | null {
+   return value ?? null;
+@@ -118,8 +121,8 @@ export function createDriverStreamOps(
+        runtime, touches, status, workflow_run_id, attempts, pr_number, pr_url,
+        merge_commit, merged_at, cycles, error_message, model_tier, effort_tier, provider,
+        dispatch_provider, dispatch_model, dispatch_model_params, effort_degraded,
+-       tier_degrade_reason, created_at, updated_at
+-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++       tier_degrade_reason, work_on_current_branch, created_at, updated_at
++     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+   );
+   const selectByIdStmt = db.prepare<[string], DriverStreamRow>(
+     `SELECT ${STREAM_COLUMNS} FROM driver_streams WHERE id = ?`,
+@@ -159,6 +162,7 @@ export function createDriverStreamOps(
+       null,
+       null,
+       null,
++      null,
+       input.createdAt,
+       now,
+     );
+@@ -195,6 +199,7 @@ function applyStreamPatch(db: Db, id: string, patch: UpdateDriverStreamInput, no
+   appendStreamPatchColumn(sets, params, "workflow_run_id = ?", patch.workflowRunId);
+   appendStreamPatchColumn(sets, params, "attempts = ?", patch.attempts, JSON.stringify);
+   appendStreamPatchColumn(sets, params, "branch = ?", patch.branch);
++  appendStreamPatchColumn(sets, params, "runtime = ?", patch.runtime);
+   appendStreamPatchColumn(sets, params, "pr_number = ?", patch.prNumber);
+   appendStreamPatchColumn(sets, params, "pr_url = ?", patch.prUrl);
+   appendStreamPatchColumn(sets, params, "merge_commit = ?", patch.mergeCommit);
+@@ -212,6 +217,13 @@ function applyStreamPatch(db: Db, id: string, patch: UpdateDriverStreamInput, no
+   );
+   appendStreamPatchColumn(sets, params, "effort_degraded = ?", patch.effortDegraded, boolToInt);
+   appendStreamPatchColumn(sets, params, "tier_degrade_reason = ?", patch.tierDegradeReason);
++  appendStreamPatchColumn(
++    sets,
++    params,
++    "work_on_current_branch = ?",
++    patch.workOnCurrentBranch,
++    (value) => (value === null ? null : boolToInt(value)),
++  );
+   if (sets.length === 1) return;
+   params.push(id);
+   db.prepare(`UPDATE driver_streams SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+@@ -291,6 +303,10 @@ function optionalStreamFields(row: DriverStreamRow): Record<string, string | num
+     ["taskId", row.task_id],
+     ["taskSlug", row.task_slug],
+     ["tierDegradeReason", row.tier_degrade_reason],
++    [
++      "workOnCurrentBranch",
++      row.work_on_current_branch === null ? null : row.work_on_current_branch === 1,
++    ],
+     ["workflowRunId", row.workflow_run_id],
+   ];
+   return Object.fromEntries(
+diff --git a/packages/store/src/migrations.test.ts b/packages/store/src/migrations.test.ts
+index 0368674..ed561a2 100644
+--- a/packages/store/src/migrations.test.ts
++++ b/packages/store/src/migrations.test.ts
+@@ -52,7 +52,7 @@ describe("runMigrations", () => {
+     expect(tables).toContain("driver_streams");
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name, applied_at FROM _migrations").all();
+-    expect(applied).toHaveLength(10);
++    expect(applied).toHaveLength(11);
+     expect(applied.map((r) => r.name)).toEqual([
+       "0001_init.sql",
+       "0002_cursor_runs_run_id.sql",
+@@ -64,6 +64,7 @@ describe("runMigrations", () => {
+       "0008_cursor_runs_created_at_ms.sql",
+       "0009_driver_streams_tier.sql",
+       "0010_driver_streams_provider.sql",
++      "0012_driver_streams_continuation.sql",
+     ]);
+ 
+     const phaseColumns = db
+@@ -94,7 +95,7 @@ describe("runMigrations", () => {
+     runMigrations(db);
+ 
+     const applied = db.prepare<[], MigrationRow>("SELECT name FROM _migrations").all();
+-    expect(applied).toHaveLength(10);
++    expect(applied).toHaveLength(11);
+   });
+ 
+   test("synthetic 0002 migration applies on top of 0001 via temp directory", () => {

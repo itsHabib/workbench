@@ -1,0 +1,4011 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 1e9a6d1..12fb82f 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2,6 +2,12 @@
+ # It is not intended for manual editing.
+ version = 4
+ 
++[[package]]
++name = "allocator-api2"
++version = "0.2.21"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
++
+ [[package]]
+ name = "android_system_properties"
+ version = "0.1.5"
+@@ -47,7 +53,7 @@ version = "1.1.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
+ dependencies = [
+- "windows-sys",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -58,7 +64,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
+ dependencies = [
+  "anstyle",
+  "once_cell_polyfill",
+- "windows-sys",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -67,6 +73,15 @@ version = "1.0.102"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+ 
++[[package]]
++name = "arc-swap"
++version = "1.9.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
++dependencies = [
++ "rustversion",
++]
++
+ [[package]]
+ name = "async-trait"
+ version = "0.1.89"
+@@ -78,18 +93,516 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "atomic-waker"
++version = "1.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
++
+ [[package]]
+ name = "autocfg"
+ version = "1.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+ 
++[[package]]
++name = "aws-config"
++version = "1.8.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "517aa062d8bd9015ee23d6daa5e1c1372328412fdae4e6c4c1be9b69c6ad37a2"
++dependencies = [
++ "aws-credential-types",
++ "aws-runtime",
++ "aws-sdk-sso",
++ "aws-sdk-ssooidc",
++ "aws-sdk-sts",
++ "aws-smithy-async",
++ "aws-smithy-http",
++ "aws-smithy-json",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-schema",
++ "aws-smithy-types",
++ "aws-types",
++ "bytes",
++ "fastrand",
++ "hex",
++ "http 1.4.1",
++ "sha1 0.10.6",
++ "time",
++ "tokio",
++ "tracing",
++ "url",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-credential-types"
++version = "1.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8f20799b373a1be121fe3005fba0c2090af9411573878f224df44b42727fcaf7"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-lc-rs"
++version = "1.17.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
++dependencies = [
++ "aws-lc-sys",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-lc-sys"
++version = "0.41.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1a2f9779ce85b93ab6170dd940ad0169b5766ff848247aff13bb788b832fe3f4"
++dependencies = [
++ "cc",
++ "cmake",
++ "dunce",
++ "fs_extra",
++]
++
++[[package]]
++name = "aws-runtime"
++version = "1.7.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77ed8e8c52d2dc2390ad9f15647fe663f71e9780b4262c190fbb823a32721566"
++dependencies = [
++ "aws-credential-types",
++ "aws-sigv4",
++ "aws-smithy-async",
++ "aws-smithy-eventstream",
++ "aws-smithy-http",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "aws-types",
++ "bytes",
++ "bytes-utils",
++ "fastrand",
++ "http 0.2.12",
++ "http 1.4.1",
++ "http-body 0.4.6",
++ "http-body 1.0.1",
++ "percent-encoding",
++ "pin-project-lite",
++ "tracing",
++ "uuid",
++]
++
++[[package]]
++name = "aws-sdk-s3"
++version = "1.134.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "be06bdfdf00371318253d74776567512d1229d1f3cd5546d27d333c89e013b84"
++dependencies = [
++ "aws-credential-types",
++ "aws-runtime",
++ "aws-sigv4",
++ "aws-smithy-async",
++ "aws-smithy-checksums",
++ "aws-smithy-eventstream",
++ "aws-smithy-http",
++ "aws-smithy-json",
++ "aws-smithy-observability",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "aws-smithy-xml",
++ "aws-types",
++ "bytes",
++ "fastrand",
++ "hex",
++ "hmac 0.13.0",
++ "http 0.2.12",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "lru",
++ "percent-encoding",
++ "regex-lite",
++ "sha2 0.11.0",
++ "tracing",
++ "url",
++]
++
++[[package]]
++name = "aws-sdk-sso"
++version = "1.100.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bee2719d4a5e5e147bb9e9b77490df6ece750df1094968aa857b09b618a1881a"
++dependencies = [
++ "aws-credential-types",
++ "aws-runtime",
++ "aws-smithy-async",
++ "aws-smithy-http",
++ "aws-smithy-json",
++ "aws-smithy-observability",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "aws-types",
++ "bytes",
++ "fastrand",
++ "http 0.2.12",
++ "http 1.4.1",
++ "regex-lite",
++ "tracing",
++]
++
++[[package]]
++name = "aws-sdk-ssooidc"
++version = "1.102.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b30d254992d56ef19f430396e5765b11e0f5bd21a7a557cb12fca1c8c18b9636"
++dependencies = [
++ "arc-swap",
++ "aws-credential-types",
++ "aws-runtime",
++ "aws-smithy-async",
++ "aws-smithy-http",
++ "aws-smithy-json",
++ "aws-smithy-observability",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "aws-types",
++ "bytes",
++ "fastrand",
++ "http 0.2.12",
++ "http 1.4.1",
++ "regex-lite",
++ "tracing",
++]
++
++[[package]]
++name = "aws-sdk-sts"
++version = "1.105.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "59f4f8065fe615dbed9096458ba98dda6d641553ffd5aedd27e37e65211aca9f"
++dependencies = [
++ "aws-credential-types",
++ "aws-runtime",
++ "aws-smithy-async",
++ "aws-smithy-http",
++ "aws-smithy-json",
++ "aws-smithy-observability",
++ "aws-smithy-query",
++ "aws-smithy-runtime",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "aws-smithy-xml",
++ "aws-types",
++ "fastrand",
++ "http 0.2.12",
++ "http 1.4.1",
++ "regex-lite",
++ "tracing",
++]
++
++[[package]]
++name = "aws-sigv4"
++version = "1.4.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b7083fb918b38474ac65ffbf8a69fc8792d36879f4ac5f1667b43aec61efe9a5"
++dependencies = [
++ "aws-credential-types",
++ "aws-smithy-eventstream",
++ "aws-smithy-http",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "bytes",
++ "crypto-bigint",
++ "form_urlencoded",
++ "hex",
++ "hmac 0.13.0",
++ "http 0.2.12",
++ "http 1.4.1",
++ "p256",
++ "percent-encoding",
++ "sha2 0.11.0",
++ "subtle",
++ "time",
++ "tracing",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-smithy-async"
++version = "1.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2ffcaf626bdda484571968400c326a244598634dc75fd451325a54ad1a59acfc"
++dependencies = [
++ "futures-util",
++ "pin-project-lite",
++ "tokio",
++]
++
++[[package]]
++name = "aws-smithy-checksums"
++version = "0.64.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e9e8e65f4f81fcccdeb6c3eca2af17ac21d421a1786a26a394aecf421d616d3a"
++dependencies = [
++ "aws-smithy-http",
++ "aws-smithy-types",
++ "bytes",
++ "crc-fast",
++ "hex",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "http-body-util",
++ "md-5",
++ "pin-project-lite",
++ "sha1 0.11.0",
++ "sha2 0.11.0",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-eventstream"
++version = "0.60.20"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "faf09d74e5e32f76b8762da505a3cd59303e367a664ca67295387baa8c1d7548"
++dependencies = [
++ "aws-smithy-types",
++ "bytes",
++ "crc32fast",
++]
++
++[[package]]
++name = "aws-smithy-http"
++version = "0.63.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ba1ab2dc1c2c3749ead27180d333c42f11be8b0e934058fb4b2258ee8dbe5231"
++dependencies = [
++ "aws-smithy-eventstream",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "bytes",
++ "bytes-utils",
++ "futures-core",
++ "futures-util",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "http-body-util",
++ "percent-encoding",
++ "pin-project-lite",
++ "pin-utils",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-http-client"
++version = "1.1.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6a2f165a7feee6f263028b899d0a181987f4fa7179a6411a32a439fba7c5f769"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "h2 0.3.27",
++ "h2 0.4.14",
++ "http 0.2.12",
++ "http 1.4.1",
++ "http-body 0.4.6",
++ "hyper 0.14.32",
++ "hyper 1.10.1",
++ "hyper-rustls 0.24.2",
++ "hyper-rustls 0.27.9",
++ "hyper-util",
++ "pin-project-lite",
++ "rustls 0.21.12",
++ "rustls 0.23.40",
++ "rustls-native-certs",
++ "rustls-pki-types",
++ "tokio",
++ "tokio-rustls 0.26.4",
++ "tower",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-json"
++version = "0.62.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "517089205f18ab4adc5a3e02888cb139bbbbb2e168eac9f396216925d1fbeaf5"
++dependencies = [
++ "aws-smithy-runtime-api",
++ "aws-smithy-schema",
++ "aws-smithy-types",
++]
++
++[[package]]
++name = "aws-smithy-observability"
++version = "0.2.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a06c2315d173edbf1920da8ba3a7189695827002e4c0fc961973ab1c54abca9c"
++dependencies = [
++ "aws-smithy-runtime-api",
++]
++
++[[package]]
++name = "aws-smithy-query"
++version = "0.60.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1a56d79744fb3edb5d722ef79d86081e121d3b9422cb209eb03aea6aa4f21ebd"
++dependencies = [
++ "aws-smithy-types",
++ "urlencoding",
++]
++
++[[package]]
++name = "aws-smithy-runtime"
++version = "1.11.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b8e6f5caf6fea86f8c2206541ab5857cfcda9013426cdbe8fa0098b9e2d32182"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-http",
++ "aws-smithy-http-client",
++ "aws-smithy-observability",
++ "aws-smithy-runtime-api",
++ "aws-smithy-schema",
++ "aws-smithy-types",
++ "bytes",
++ "fastrand",
++ "http 0.2.12",
++ "http 1.4.1",
++ "http-body 0.4.6",
++ "http-body 1.0.1",
++ "http-body-util",
++ "pin-project-lite",
++ "pin-utils",
++ "tokio",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-runtime-api"
++version = "1.12.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dc117c179ecf39a62a0a3f49f600e9ac26a7ad7dd172177999f83933af776c32"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-runtime-api-macros",
++ "aws-smithy-types",
++ "bytes",
++ "http 0.2.12",
++ "http 1.4.1",
++ "pin-project-lite",
++ "tokio",
++ "tracing",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-smithy-runtime-api-macros"
++version = "1.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8d7396fd9500589e62e460e987ecb671bad374934e55ec3b5f498cc7a8a8a7b7"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
++]
++
++[[package]]
++name = "aws-smithy-schema"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7442cb268338f0eb8278140a107c046756aa01093d8ef5e99628d34ae09c94f5"
++dependencies = [
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "http 1.4.1",
++]
++
++[[package]]
++name = "aws-smithy-types"
++version = "1.4.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "056b66dbce2f81cc0c1e2b05bb402eb58f8a3530479d650efadd5bbae9a4050b"
++dependencies = [
++ "base64-simd",
++ "bytes",
++ "bytes-utils",
++ "futures-core",
++ "http 0.2.12",
++ "http 1.4.1",
++ "http-body 0.4.6",
++ "http-body 1.0.1",
++ "http-body-util",
++ "itoa",
++ "num-integer",
++ "pin-project-lite",
++ "pin-utils",
++ "ryu",
++ "serde",
++ "time",
++ "tokio",
++ "tokio-util",
++]
++
++[[package]]
++name = "aws-smithy-xml"
++version = "0.60.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0ce02add1aa3677d022f8adf81dcbe3046a95f17a1b1e8979c145cd21d3d22b3"
++dependencies = [
++ "xmlparser",
++]
++
++[[package]]
++name = "aws-types"
++version = "1.3.16"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d16bf10b03a3c01e6b3b7d47cd964e873ffe9e7d4e80fad16bd4c077cb068531"
++dependencies = [
++ "aws-credential-types",
++ "aws-smithy-async",
++ "aws-smithy-runtime-api",
++ "aws-smithy-schema",
++ "aws-smithy-types",
++ "rustc_version",
++ "tracing",
++]
++
++[[package]]
++name = "base16ct"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
++
+ [[package]]
+ name = "base64"
+ version = "0.22.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+ 
++[[package]]
++name = "base64-simd"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195"
++dependencies = [
++ "outref",
++ "vsimd",
++]
++
++[[package]]
++name = "base64ct"
++version = "1.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
++
+ [[package]]
+ name = "bit-set"
+ version = "0.8.0"
+@@ -120,6 +633,15 @@ dependencies = [
+  "generic-array",
+ ]
+ 
++[[package]]
++name = "block-buffer"
++version = "0.12.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"
++dependencies = [
++ "hybrid-array",
++]
++
+ [[package]]
+ name = "bumpalo"
+ version = "3.20.2"
+@@ -132,6 +654,16 @@ version = "1.11.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+ 
++[[package]]
++name = "bytes-utils"
++version = "0.1.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35"
++dependencies = [
++ "bytes",
++ "either",
++]
++
+ [[package]]
+ name = "cc"
+ version = "1.2.62"
+@@ -139,6 +671,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
+ dependencies = [
+  "find-msvc-tools",
++ "jobserver",
++ "libc",
+  "shlex",
+ ]
+ 
+@@ -202,12 +736,49 @@ version = "1.1.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+ 
++[[package]]
++name = "cmake"
++version = "0.1.58"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
++dependencies = [
++ "cc",
++]
++
++[[package]]
++name = "cmov"
++version = "0.5.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
++
+ [[package]]
+ name = "colorchoice"
+ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+ 
++[[package]]
++name = "const-oid"
++version = "0.9.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
++
++[[package]]
++name = "const-oid"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
++
++[[package]]
++name = "core-foundation"
++version = "0.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
+ [[package]]
+ name = "core-foundation-sys"
+ version = "0.8.7"
+@@ -223,6 +794,46 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "cpufeatures"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
++dependencies = [
++ "libc",
++]
++
++[[package]]
++name = "crc-fast"
++version = "1.10.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
++dependencies = [
++ "digest 0.10.7",
++ "spin",
++]
++
++[[package]]
++name = "crc32fast"
++version = "1.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
++dependencies = [
++ "cfg-if",
++]
++
++[[package]]
++name = "crypto-bigint"
++version = "0.5.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
++dependencies = [
++ "generic-array",
++ "rand_core 0.6.4",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "crypto-common"
+ version = "0.1.7"
+@@ -233,6 +844,24 @@ dependencies = [
+  "typenum",
+ ]
+ 
++[[package]]
++name = "crypto-common"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
++dependencies = [
++ "hybrid-array",
++]
++
++[[package]]
++name = "ctutils"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
++dependencies = [
++ "cmov",
++]
++
+ [[package]]
+ name = "darling"
+ version = "0.23.0"
+@@ -267,14 +896,59 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "der"
++version = "0.7.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
++dependencies = [
++ "const-oid 0.9.6",
++ "pem-rfc7468",
++ "zeroize",
++]
++
++[[package]]
++name = "deranged"
++version = "0.5.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
++dependencies = [
++ "powerfmt",
++]
++
+ [[package]]
+ name = "digest"
+ version = "0.10.7"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+ dependencies = [
+- "block-buffer",
+- "crypto-common",
++ "block-buffer 0.10.4",
++ "const-oid 0.9.6",
++ "crypto-common 0.1.7",
++ "subtle",
++]
++
++[[package]]
++name = "digest"
++version = "0.11.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
++dependencies = [
++ "block-buffer 0.12.0",
++ "const-oid 0.10.2",
++ "crypto-common 0.2.2",
++ "ctutils",
++]
++
++[[package]]
++name = "displaydoc"
++version = "0.2.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -283,26 +957,77 @@ version = "0.1.0"
+ dependencies = [
+  "anyhow",
+  "async-trait",
++ "aws-config",
++ "aws-credential-types",
++ "aws-sdk-s3",
++ "aws-smithy-runtime-api",
+  "chrono",
+  "clap",
++ "futures",
+  "proptest",
+  "rmcp",
+  "schemars",
+  "serde",
+  "serde_json",
+  "serde_yml",
+- "sha2",
++ "sha2 0.10.9",
+  "tempfile",
+  "tokio",
+  "ulid",
+ ]
+ 
++[[package]]
++name = "dunce"
++version = "1.0.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
++
+ [[package]]
+ name = "dyn-clone"
+ version = "1.0.20"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+ 
++[[package]]
++name = "ecdsa"
++version = "0.16.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
++dependencies = [
++ "der",
++ "digest 0.10.7",
++ "elliptic-curve",
++ "rfc6979",
++ "signature",
++ "spki",
++]
++
++[[package]]
++name = "either"
++version = "1.16.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
++
++[[package]]
++name = "elliptic-curve"
++version = "0.13.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
++dependencies = [
++ "base16ct",
++ "crypto-bigint",
++ "digest 0.10.7",
++ "ff",
++ "generic-array",
++ "group",
++ "pem-rfc7468",
++ "pkcs8",
++ "rand_core 0.6.4",
++ "sec1",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "equivalent"
+ version = "1.0.2"
+@@ -316,7 +1041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+- "windows-sys",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -325,6 +1050,16 @@ version = "2.4.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
+ 
++[[package]]
++name = "ff"
++version = "0.13.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
++dependencies = [
++ "rand_core 0.6.4",
++ "subtle",
++]
++
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.9"
+@@ -337,6 +1072,27 @@ version = "1.0.7"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+ 
++[[package]]
++name = "foldhash"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
++
++[[package]]
++name = "form_urlencoded"
++version = "1.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
++dependencies = [
++ "percent-encoding",
++]
++
++[[package]]
++name = "fs_extra"
++version = "1.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
++
+ [[package]]
+ name = "futures"
+ version = "0.3.32"
+@@ -426,38 +1182,309 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "generic-array"
+-version = "0.14.7"
++name = "generic-array"
++version = "0.14.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
++dependencies = [
++ "typenum",
++ "version_check",
++ "zeroize",
++]
++
++[[package]]
++name = "getrandom"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
++dependencies = [
++ "cfg-if",
++ "libc",
++ "wasi",
++]
++
++[[package]]
++name = "getrandom"
++version = "0.3.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
++dependencies = [
++ "cfg-if",
++ "libc",
++ "r-efi",
++ "wasip2",
++]
++
++[[package]]
++name = "group"
++version = "0.13.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
++dependencies = [
++ "ff",
++ "rand_core 0.6.4",
++ "subtle",
++]
++
++[[package]]
++name = "h2"
++version = "0.3.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
++dependencies = [
++ "bytes",
++ "fnv",
++ "futures-core",
++ "futures-sink",
++ "futures-util",
++ "http 0.2.12",
++ "indexmap",
++ "slab",
++ "tokio",
++ "tokio-util",
++ "tracing",
++]
++
++[[package]]
++name = "h2"
++version = "0.4.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
++dependencies = [
++ "atomic-waker",
++ "bytes",
++ "fnv",
++ "futures-core",
++ "futures-sink",
++ "http 1.4.1",
++ "indexmap",
++ "slab",
++ "tokio",
++ "tokio-util",
++ "tracing",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.16.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
++dependencies = [
++ "allocator-api2",
++ "equivalent",
++ "foldhash",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.17.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++
++[[package]]
++name = "heck"
++version = "0.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
++
++[[package]]
++name = "hex"
++version = "0.4.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
++
++[[package]]
++name = "hmac"
++version = "0.12.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
++dependencies = [
++ "digest 0.10.7",
++]
++
++[[package]]
++name = "hmac"
++version = "0.13.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
++dependencies = [
++ "digest 0.11.3",
++]
++
++[[package]]
++name = "http"
++version = "0.2.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
++dependencies = [
++ "bytes",
++ "fnv",
++ "itoa",
++]
++
++[[package]]
++name = "http"
++version = "1.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
++dependencies = [
++ "bytes",
++ "itoa",
++]
++
++[[package]]
++name = "http-body"
++version = "0.4.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
++dependencies = [
++ "bytes",
++ "http 0.2.12",
++ "pin-project-lite",
++]
++
++[[package]]
++name = "http-body"
++version = "1.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
++dependencies = [
++ "bytes",
++ "http 1.4.1",
++]
++
++[[package]]
++name = "http-body-util"
++version = "0.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
++dependencies = [
++ "bytes",
++ "futures-core",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "pin-project-lite",
++]
++
++[[package]]
++name = "httparse"
++version = "1.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
++
++[[package]]
++name = "httpdate"
++version = "1.0.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
++
++[[package]]
++name = "hybrid-array"
++version = "0.4.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
++dependencies = [
++ "typenum",
++]
++
++[[package]]
++name = "hyper"
++version = "0.14.32"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7"
++dependencies = [
++ "bytes",
++ "futures-channel",
++ "futures-core",
++ "futures-util",
++ "h2 0.3.27",
++ "http 0.2.12",
++ "http-body 0.4.6",
++ "httparse",
++ "httpdate",
++ "itoa",
++ "pin-project-lite",
++ "socket2 0.5.10",
++ "tokio",
++ "tower-service",
++ "tracing",
++ "want",
++]
++
++[[package]]
++name = "hyper"
++version = "1.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
++dependencies = [
++ "atomic-waker",
++ "bytes",
++ "futures-channel",
++ "futures-core",
++ "h2 0.4.14",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "httparse",
++ "itoa",
++ "pin-project-lite",
++ "smallvec",
++ "tokio",
++ "want",
++]
++
++[[package]]
++name = "hyper-rustls"
++version = "0.24.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
++checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
+ dependencies = [
+- "typenum",
+- "version_check",
++ "futures-util",
++ "http 0.2.12",
++ "hyper 0.14.32",
++ "log",
++ "rustls 0.21.12",
++ "tokio",
++ "tokio-rustls 0.24.1",
+ ]
+ 
+ [[package]]
+-name = "getrandom"
+-version = "0.3.4"
++name = "hyper-rustls"
++version = "0.27.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
++checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
+ dependencies = [
+- "cfg-if",
+- "libc",
+- "r-efi",
+- "wasip2",
++ "http 1.4.1",
++ "hyper 1.10.1",
++ "hyper-util",
++ "rustls 0.23.40",
++ "rustls-native-certs",
++ "tokio",
++ "tokio-rustls 0.26.4",
++ "tower-service",
+ ]
+ 
+ [[package]]
+-name = "hashbrown"
+-version = "0.17.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+-
+-[[package]]
+-name = "heck"
+-version = "0.5.0"
++name = "hyper-util"
++version = "0.1.20"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
++checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
++dependencies = [
++ "base64",
++ "bytes",
++ "futures-channel",
++ "futures-util",
++ "http 1.4.1",
++ "http-body 1.0.1",
++ "hyper 1.10.1",
++ "ipnet",
++ "libc",
++ "percent-encoding",
++ "pin-project-lite",
++ "socket2 0.6.4",
++ "tokio",
++ "tower-service",
++ "tracing",
++]
+ 
+ [[package]]
+ name = "iana-time-zone"
+@@ -483,12 +1510,115 @@ dependencies = [
+  "cc",
+ ]
+ 
++[[package]]
++name = "icu_collections"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2984d1cd16c883d7935b9e07e44071dca8d917fd52ecc02c04d5fa0b5a3f191c"
++dependencies = [
++ "displaydoc",
++ "potential_utf",
++ "utf8_iter",
++ "yoke",
++ "zerofrom",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_locale_core"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29"
++dependencies = [
++ "displaydoc",
++ "litemap",
++ "tinystr",
++ "writeable",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_normalizer"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c56e5ee99d6e3d33bd91c5d85458b6005a22140021cc324cea84dd0e72cff3b4"
++dependencies = [
++ "icu_collections",
++ "icu_normalizer_data",
++ "icu_properties",
++ "icu_provider",
++ "smallvec",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_normalizer_data"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38"
++
++[[package]]
++name = "icu_properties"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bee3b67d0ea5c2cca5003417989af8996f8604e34fb9ddf96208a033901e70de"
++dependencies = [
++ "icu_collections",
++ "icu_locale_core",
++ "icu_properties_data",
++ "icu_provider",
++ "zerotrie",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_properties_data"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14"
++
++[[package]]
++name = "icu_provider"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
++dependencies = [
++ "displaydoc",
++ "icu_locale_core",
++ "writeable",
++ "yoke",
++ "zerofrom",
++ "zerotrie",
++ "zerovec",
++]
++
+ [[package]]
+ name = "ident_case"
+ version = "1.0.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+ 
++[[package]]
++name = "idna"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
++dependencies = [
++ "idna_adapter",
++ "smallvec",
++ "utf8_iter",
++]
++
++[[package]]
++name = "idna_adapter"
++version = "1.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
++dependencies = [
++ "icu_normalizer",
++ "icu_properties",
++]
++
+ [[package]]
+ name = "indexmap"
+ version = "2.14.0"
+@@ -496,9 +1626,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+ dependencies = [
+  "equivalent",
+- "hashbrown",
++ "hashbrown 0.17.1",
+ ]
+ 
++[[package]]
++name = "ipnet"
++version = "2.12.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
++
+ [[package]]
+ name = "is_terminal_polyfill"
+ version = "1.70.2"
+@@ -511,6 +1647,16 @@ version = "1.0.18"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+ 
++[[package]]
++name = "jobserver"
++version = "0.1.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
++dependencies = [
++ "getrandom 0.3.4",
++ "libc",
++]
++
+ [[package]]
+ name = "js-sys"
+ version = "0.3.98"
+@@ -545,18 +1691,69 @@ version = "0.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+ 
++[[package]]
++name = "litemap"
++version = "0.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
++
+ [[package]]
+ name = "log"
+ version = "0.4.29"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+ 
++[[package]]
++name = "lru"
++version = "0.16.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
++dependencies = [
++ "hashbrown 0.16.1",
++]
++
++[[package]]
++name = "md-5"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
++dependencies = [
++ "cfg-if",
++ "digest 0.11.3",
++]
++
+ [[package]]
+ name = "memchr"
+ version = "2.8.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+ 
++[[package]]
++name = "mio"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
++dependencies = [
++ "libc",
++ "wasi",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "num-conv"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
++
++[[package]]
++name = "num-integer"
++version = "0.1.46"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
++dependencies = [
++ "num-traits",
++]
++
+ [[package]]
+ name = "num-traits"
+ version = "0.2.19"
+@@ -578,18 +1775,88 @@ version = "1.70.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+ 
++[[package]]
++name = "openssl-probe"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
++
++[[package]]
++name = "outref"
++version = "0.5.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
++
++[[package]]
++name = "p256"
++version = "0.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
++dependencies = [
++ "ecdsa",
++ "elliptic-curve",
++ "primeorder",
++ "sha2 0.10.9",
++]
++
+ [[package]]
+ name = "pastey"
+ version = "0.2.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c5a797f0e07bdf071d15742978fc3128ec6c22891c31a3a931513263904c982a"
+ 
++[[package]]
++name = "pem-rfc7468"
++version = "0.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
++dependencies = [
++ "base64ct",
++]
++
++[[package]]
++name = "percent-encoding"
++version = "2.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
++
+ [[package]]
+ name = "pin-project-lite"
+ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+ 
++[[package]]
++name = "pin-utils"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
++
++[[package]]
++name = "pkcs8"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
++dependencies = [
++ "der",
++ "spki",
++]
++
++[[package]]
++name = "potential_utf"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
++dependencies = [
++ "zerovec",
++]
++
++[[package]]
++name = "powerfmt"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
++
+ [[package]]
+ name = "ppv-lite86"
+ version = "0.2.21"
+@@ -599,6 +1866,15 @@ dependencies = [
+  "zerocopy",
+ ]
+ 
++[[package]]
++name = "primeorder"
++version = "0.13.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
++dependencies = [
++ "elliptic-curve",
++]
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.106"
+@@ -655,7 +1931,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
+ dependencies = [
+  "rand_chacha",
+- "rand_core",
++ "rand_core 0.9.5",
+ ]
+ 
+ [[package]]
+@@ -665,7 +1941,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+ dependencies = [
+  "ppv-lite86",
+- "rand_core",
++ "rand_core 0.9.5",
++]
++
++[[package]]
++name = "rand_core"
++version = "0.6.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
++dependencies = [
++ "getrandom 0.2.17",
+ ]
+ 
+ [[package]]
+@@ -674,7 +1959,7 @@ version = "0.9.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+ dependencies = [
+- "getrandom",
++ "getrandom 0.3.4",
+ ]
+ 
+ [[package]]
+@@ -683,7 +1968,7 @@ version = "0.4.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+ dependencies = [
+- "rand_core",
++ "rand_core 0.9.5",
+ ]
+ 
+ [[package]]
+@@ -706,12 +1991,42 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "regex-lite"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
++
+ [[package]]
+ name = "regex-syntax"
+ version = "0.8.10"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+ 
++[[package]]
++name = "rfc6979"
++version = "0.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
++dependencies = [
++ "hmac 0.12.1",
++ "subtle",
++]
++
++[[package]]
++name = "ring"
++version = "0.17.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
++dependencies = [
++ "cc",
++ "cfg-if",
++ "getrandom 0.2.17",
++ "libc",
++ "untrusted",
++ "windows-sys 0.52.0",
++]
++
+ [[package]]
+ name = "rmcp"
+ version = "1.6.0"
+@@ -747,6 +2062,15 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "rustc_version"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
++dependencies = [
++ "semver",
++]
++
+ [[package]]
+ name = "rustix"
+ version = "1.1.4"
+@@ -757,7 +2081,76 @@ dependencies = [
+  "errno",
+  "libc",
+  "linux-raw-sys",
+- "windows-sys",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "rustls"
++version = "0.21.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
++dependencies = [
++ "log",
++ "ring",
++ "rustls-webpki 0.101.7",
++ "sct",
++]
++
++[[package]]
++name = "rustls"
++version = "0.23.40"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
++dependencies = [
++ "aws-lc-rs",
++ "once_cell",
++ "rustls-pki-types",
++ "rustls-webpki 0.103.13",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-native-certs"
++version = "0.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
++dependencies = [
++ "openssl-probe",
++ "rustls-pki-types",
++ "schannel",
++ "security-framework",
++]
++
++[[package]]
++name = "rustls-pki-types"
++version = "1.14.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "30a7197ae7eb376e574fe940d068c30fe0462554a3ddbe4eca7838e049c937a9"
++dependencies = [
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-webpki"
++version = "0.101.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
++dependencies = [
++ "ring",
++ "untrusted",
++]
++
++[[package]]
++name = "rustls-webpki"
++version = "0.103.13"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
++dependencies = [
++ "aws-lc-rs",
++ "ring",
++ "rustls-pki-types",
++ "untrusted",
+ ]
+ 
+ [[package]]
+@@ -784,6 +2177,15 @@ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+ 
++[[package]]
++name = "schannel"
++version = "0.1.29"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
++dependencies = [
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "schemars"
+ version = "1.2.1"
+@@ -799,17 +2201,70 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "schemars_derive"
+-version = "1.2.1"
++name = "schemars_derive"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "serde_derive_internals",
++ "syn",
++]
++
++[[package]]
++name = "sct"
++version = "0.7.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
++dependencies = [
++ "ring",
++ "untrusted",
++]
++
++[[package]]
++name = "sec1"
++version = "0.7.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
++dependencies = [
++ "base16ct",
++ "der",
++ "generic-array",
++ "pkcs8",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "security-framework"
++version = "3.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
++dependencies = [
++ "bitflags",
++ "core-foundation",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
++[[package]]
++name = "security-framework-sys"
++version = "2.17.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
++checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+ dependencies = [
+- "proc-macro2",
+- "quote",
+- "serde_derive_internals",
+- "syn",
++ "core-foundation-sys",
++ "libc",
+ ]
+ 
++[[package]]
++name = "semver"
++version = "1.0.28"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
++
+ [[package]]
+ name = "serde"
+ version = "1.0.228"
+@@ -879,6 +2334,28 @@ dependencies = [
+  "version_check",
+ ]
+ 
++[[package]]
++name = "sha1"
++version = "0.10.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.2.17",
++ "digest 0.10.7",
++]
++
++[[package]]
++name = "sha1"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.3.0",
++ "digest 0.11.3",
++]
++
+ [[package]]
+ name = "sha2"
+ version = "0.10.9"
+@@ -886,8 +2363,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+ dependencies = [
+  "cfg-if",
+- "cpufeatures",
+- "digest",
++ "cpufeatures 0.2.17",
++ "digest 0.10.7",
++]
++
++[[package]]
++name = "sha2"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.3.0",
++ "digest 0.11.3",
+ ]
+ 
+ [[package]]
+@@ -896,18 +2384,92 @@ version = "1.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+ 
++[[package]]
++name = "signal-hook-registry"
++version = "1.4.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
++dependencies = [
++ "errno",
++ "libc",
++]
++
++[[package]]
++name = "signature"
++version = "2.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
++dependencies = [
++ "digest 0.10.7",
++ "rand_core 0.6.4",
++]
++
+ [[package]]
+ name = "slab"
+ version = "0.4.12"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+ 
++[[package]]
++name = "smallvec"
++version = "1.15.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
++
++[[package]]
++name = "socket2"
++version = "0.5.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
++dependencies = [
++ "libc",
++ "windows-sys 0.52.0",
++]
++
++[[package]]
++name = "socket2"
++version = "0.6.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
++dependencies = [
++ "libc",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "spin"
++version = "0.10.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
++
++[[package]]
++name = "spki"
++version = "0.7.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
++dependencies = [
++ "base64ct",
++ "der",
++]
++
++[[package]]
++name = "stable_deref_trait"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
++
+ [[package]]
+ name = "strsim"
+ version = "0.11.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+ 
++[[package]]
++name = "subtle"
++version = "2.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
++
+ [[package]]
+ name = "syn"
+ version = "2.0.117"
+@@ -919,6 +2481,17 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "synstructure"
++version = "0.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
++]
++
+ [[package]]
+ name = "tempfile"
+ version = "3.27.0"
+@@ -926,10 +2499,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+ dependencies = [
+  "fastrand",
+- "getrandom",
++ "getrandom 0.3.4",
+  "once_cell",
+  "rustix",
+- "windows-sys",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -952,6 +2525,46 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "time"
++version = "0.3.47"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
++dependencies = [
++ "deranged",
++ "num-conv",
++ "powerfmt",
++ "serde_core",
++ "time-core",
++ "time-macros",
++]
++
++[[package]]
++name = "time-core"
++version = "0.1.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
++
++[[package]]
++name = "time-macros"
++version = "0.2.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
++dependencies = [
++ "num-conv",
++ "time-core",
++]
++
++[[package]]
++name = "tinystr"
++version = "0.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
++dependencies = [
++ "displaydoc",
++ "zerovec",
++]
++
+ [[package]]
+ name = "tokio"
+ version = "1.52.3"
+@@ -959,8 +2572,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+ dependencies = [
+  "bytes",
++ "libc",
++ "mio",
+  "pin-project-lite",
++ "signal-hook-registry",
++ "socket2 0.6.4",
+  "tokio-macros",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -974,6 +2592,26 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "tokio-rustls"
++version = "0.24.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
++dependencies = [
++ "rustls 0.21.12",
++ "tokio",
++]
++
++[[package]]
++name = "tokio-rustls"
++version = "0.26.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
++dependencies = [
++ "rustls 0.23.40",
++ "tokio",
++]
++
+ [[package]]
+ name = "tokio-util"
+ version = "0.7.18"
+@@ -987,6 +2625,28 @@ dependencies = [
+  "tokio",
+ ]
+ 
++[[package]]
++name = "tower"
++version = "0.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
++dependencies = [
++ "tower-layer",
++ "tower-service",
++]
++
++[[package]]
++name = "tower-layer"
++version = "0.3.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
++
++[[package]]
++name = "tower-service"
++version = "0.3.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
++
+ [[package]]
+ name = "tracing"
+ version = "0.1.44"
+@@ -1018,6 +2678,12 @@ dependencies = [
+  "once_cell",
+ ]
+ 
++[[package]]
++name = "try-lock"
++version = "0.2.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
++
+ [[package]]
+ name = "typenum"
+ version = "1.20.1"
+@@ -1046,18 +2712,64 @@ version = "1.0.24"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+ 
++[[package]]
++name = "untrusted"
++version = "0.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
++
++[[package]]
++name = "url"
++version = "2.5.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
++dependencies = [
++ "form_urlencoded",
++ "idna",
++ "percent-encoding",
++ "serde",
++]
++
++[[package]]
++name = "urlencoding"
++version = "2.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
++
++[[package]]
++name = "utf8_iter"
++version = "1.0.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
++
+ [[package]]
+ name = "utf8parse"
+ version = "0.2.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+ 
++[[package]]
++name = "uuid"
++version = "1.23.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d258b83ceec21034727ecee8c382cfa6c3e133699b0742c64571814fb420c9f7"
++dependencies = [
++ "js-sys",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "version_check"
+ version = "0.9.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+ 
++[[package]]
++name = "vsimd"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
++
+ [[package]]
+ name = "wait-timeout"
+ version = "0.2.1"
+@@ -1067,6 +2779,21 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "want"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
++dependencies = [
++ "try-lock",
++]
++
++[[package]]
++name = "wasi"
++version = "0.11.1+wasi-snapshot-preview1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
++
+ [[package]]
+ name = "wasip2"
+ version = "1.0.3+wasi-0.2.9"
+@@ -1190,6 +2917,15 @@ dependencies = [
+  "windows-link",
+ ]
+ 
++[[package]]
++name = "windows-sys"
++version = "0.52.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
++dependencies = [
++ "windows-targets",
++]
++
+ [[package]]
+ name = "windows-sys"
+ version = "0.61.2"
+@@ -1199,12 +2935,111 @@ dependencies = [
+  "windows-link",
+ ]
+ 
++[[package]]
++name = "windows-targets"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
++dependencies = [
++ "windows_aarch64_gnullvm",
++ "windows_aarch64_msvc",
++ "windows_i686_gnu",
++ "windows_i686_gnullvm",
++ "windows_i686_msvc",
++ "windows_x86_64_gnu",
++ "windows_x86_64_gnullvm",
++ "windows_x86_64_msvc",
++]
++
++[[package]]
++name = "windows_aarch64_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
++
++[[package]]
++name = "windows_aarch64_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
++
++[[package]]
++name = "windows_i686_gnu"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
++
++[[package]]
++name = "windows_i686_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
++
++[[package]]
++name = "windows_i686_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
++
++[[package]]
++name = "windows_x86_64_gnu"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
++
++[[package]]
++name = "windows_x86_64_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
++
++[[package]]
++name = "windows_x86_64_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
++
+ [[package]]
+ name = "wit-bindgen"
+ version = "0.57.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+ 
++[[package]]
++name = "writeable"
++version = "0.6.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
++
++[[package]]
++name = "xmlparser"
++version = "0.13.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
++
++[[package]]
++name = "yoke"
++version = "0.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "abe8c5fda708d9ca3df187cae8bfb9ceda00dd96231bed36e445a1a48e66f9ca"
++dependencies = [
++ "stable_deref_trait",
++ "yoke-derive",
++ "zerofrom",
++]
++
++[[package]]
++name = "yoke-derive"
++version = "0.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
++ "synstructure",
++]
++
+ [[package]]
+ name = "zerocopy"
+ version = "0.8.48"
+@@ -1225,6 +3060,66 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "zerofrom"
++version = "0.1.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0ec05a11813ea801ff6d75110ad09cd0824ddba17dfe17128ea0d5f68e6c5272"
++dependencies = [
++ "zerofrom-derive",
++]
++
++[[package]]
++name = "zerofrom-derive"
++version = "0.1.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "11532158c46691caf0f2593ea8358fed6bbf68a0315e80aae9bd41fbade684a1"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
++ "synstructure",
++]
++
++[[package]]
++name = "zeroize"
++version = "1.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
++
++[[package]]
++name = "zerotrie"
++version = "0.2.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0f9152d31db0792fa83f70fb2f83148effb5c1f5b8c7686c3459e361d9bc20bf"
++dependencies = [
++ "displaydoc",
++ "yoke",
++ "zerofrom",
++]
++
++[[package]]
++name = "zerovec"
++version = "0.11.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239"
++dependencies = [
++ "yoke",
++ "zerofrom",
++ "zerovec-derive",
++]
++
++[[package]]
++name = "zerovec-derive"
++version = "0.11.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn",
++]
++
+ [[package]]
+ name = "zmij"
+ version = "1.0.21"
+diff --git a/Cargo.toml b/Cargo.toml
+index b81db39..26279ab 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -10,6 +10,11 @@ categories = ["development-tools", "command-line-utilities"]
+ readme = "README.md"
+ 
+ [dependencies]
++aws-config = "1"
++aws-credential-types = "1"
++aws-sdk-s3 = "1"
++aws-smithy-runtime-api = "1"
++futures = "0.3"
+ rmcp = { version = "1", features = ["server", "transport-io", "macros"] }
+ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "sync"] }
+ serde = { version = "1", features = ["derive"] }
+diff --git a/docs/features/cloud-backend/phase-1/s3store.md b/docs/features/cloud-backend/phase-1/s3store.md
+new file mode 100644
+index 0000000..3e25a7b
+--- /dev/null
++++ b/docs/features/cloud-backend/phase-1/s3store.md
+@@ -0,0 +1,107 @@
++**Status**: draft
++**Owner**: @itsHabib
++**Date**: 2026-05-30
++**Related**: dossier task `s3store-cas-proof` (`tsk_01KSVMJHQ6DKB4Y1KG6Y8FB34C`); builds on PR #62 (`Store` trait + CAS); cloud-backend TDD [spec.md](../spec.md).
++
++# `S3Store` — prove multi-writer CAS holds on S3 (against MinIO)
++
++## Goal
++
++Answer the one question that gates the whole cloud direction: **when two writers race on the same object, does compare-and-swap reliably let exactly one win, with no lost update?** Implement `S3Store` against the **existing** async `Store` trait, mirror the on-disk layout as closely as possible, and prove the race with an integration test against **MinIO** (local S3-compatible server). Keep it simple — mirror disk, no cleverness; optimizations are deferred until something shows they're needed.
++
++**Not in scope (deliberately — do not touch):** wiring S3 into the running server (`MeshService`/`bin`), changing `FsStore`'s behavior, artifact sharding, warm cache, transport, auth. `S3Store` stands alone, proven by its test. The server keeps running on `FsStore`.
++
++## Scope
++
++| Bucket | Files | Est. LOC | Weighted |
++|---|---|---|---|
++| Production | `src/s3store.rs` (NEW — the whole backend), `src/store.rs` (small: `pub(crate)` on reused helpers + factor string-based parse cores), `src/lib.rs` (exports), `Cargo.toml` (deps) | ~350 | ~350 |
++| Tests | `tests/s3_store_minio.rs` (NEW — env-gated MinIO integration test), property-test additions for round-trip parity | ~200 | ~100 |
++| **Total** | | | **~450** |
++
++Band: **amazing/ideal**.
++
++## Two non-negotiables (operator priorities)
++
++1. **Minimal public API.** The crate lints `unreachable_pub`. Export **only** `S3Store` and `S3Config` from `lib.rs`. Everything else in `s3store.rs` is private. The reused `store.rs` helpers become **`pub(crate)`**, never `pub`. We're doing right by downstream users — the public surface stays tiny and intentional.
++2. **Property-tested byte-parity.** The load-bearing correctness is that an S3 object is the **exact same bytes** FsStore writes to disk, so the two backends are interchangeable and `dossier export` stays a literal copy. Prove it with a property test: for arbitrary valid `Project`/`Phase`/`Task`, `parse(serialize(x)) == x`. This guarantees the shared format is lossless regardless of backend. (The repo already has `tests/proptest_frontmatter_roundtrip.rs` and `tests/proptest_slug_roundtrip.rs` — follow that style.)
++
++## Design — mirror disk
++
++### Reuse FsStore's serialization (byte-parity seam)
++S3Store must call the **same** serialize/parse code FsStore uses. In `src/store.rs`:
++- Make `pub(crate)`: the three `serialize_*_file` fns + `notes_lines_for_task` (already take a domain value → `String`; reuse directly).
++- The parse side is currently `&Path`-based (it does `fs::read_to_string` then parses). S3 hands you **bytes in memory**, not a path. So **factor out string-based cores** and have the disk path delegate (FsStore behavior must stay bit-identical — the existing proptests are the safety net):
++  - `pub(crate) fn parse_project(raw: &str, with_body: bool) -> Result<Project>`
++  - `pub(crate) fn parse_phase(raw: &str) -> Result<Phase>`
++  - `pub(crate) fn parse_task(raw: &str, project_slug: &str) -> Result<(Task, Vec<String>)>`
++  - refactor `read_frontmatter`/`load_phase`/`load_task_with_notes`/`load_project` to read the file then call these.
++- Make `pub(crate)`: `task_filename`, `phase_filename`, `is_valid_slug`, and the `*_matches`/`sort_*` filter/sort fns (so `list_*` semantics match disk exactly).
++
++### Keys mirror the on-disk tree (under an optional prefix)
++- `{P}projects/<slug>/project.md`
++- `{P}projects/<slug>/phases/<order:02>-<slug>.md`   (use `phase_filename`)
++- `{P}projects/<slug>/tasks/<tsk_id>-<slug>.md`        (use `task_filename`)
++- `{P}projects/<slug>/artifacts.jsonl`
++Build keys by **joining with `/`** — S3 keys are not OS paths; never `Path::join` (it emits `\` on Windows). Validate `slug` via `is_valid_slug`.
++
++### `Version` = the S3 ETag
++Opaque per-backend token (the trait never compares versions across backends — fine that it's an ETag here vs SHA-256 for disk). After a PUT, the new version is `put_resp.e_tag()`. For reads, bind the returned `Versioned<T>.version` to the **GET response ETag** (not a listing ETag) so value and version stay consistent.
++
++### CAS → S3 conditional PUTs
++Map the trait's existing semantics:
++- `expected = None` → `put_object().if_none_match("*")` (create-only; object-exists → 412).
++- `expected = Some(v)` → `put_object().if_match(v.as_str())` (update-only-if-matches; mismatch → 412).
++- **HTTP 412 → `StoreError::Conflict`.** `If-Match` on a **missing** key returns 404 → map to `StoreError::NotFound` (distinct from Conflict — matches `cas_write`'s absent branch).
++
++### Error mapping (one small helper)
++`map_sdk_err`: 412 → `Conflict`; 404/`NoSuchKey` → `NotFound`; dispatch failure / timeout / 5xx → `Unavailable`; UTF-8 / parse / anything else → `Invalid(msg)`. Detect 412/404 via the SDK error's `raw_response().status()`.
++
++### Reads / lists
++- `get_*` = `GetObject` → body → `parse_*` → pair with the GET ETag.
++- `list_*` = `ListObjectsV2` (prefix; `delimiter("/")` only for corpus-wide `list_projects` → project slugs from `CommonPrefixes`) → `GetObject` per key with **bounded concurrency** (`futures::stream::...buffer_unordered(16)` or a `JoinSet`) → parse → reuse the `*_matches`/`sort_*` helpers for identical filter semantics. Resolve `filter.phase` (slug→id) the same way `FsStore::list_tasks` does.
++
++### Artifacts — mirror disk, NO sharding
++`artifacts.jsonl` stays a single object (same as disk). `put_artifact` = `GetObject` the current jsonl (+ its ETag; absent ⇒ empty), append the new JSON line, `PutObject` conditionally (`if_match` the ETag read, or `if_none_match("*")` if it was absent); on 412 retry the read-append-put a bounded number of times. `list_artifacts` = `GetObject` + parse JSONL (absent ⇒ empty). (Yes, a shared hot file is contention-prone under heavy concurrency — that's a deliberate "optimize when it's actually a problem" call, not now.)
++
++### Construction
++```rust
++pub struct S3Config {
++    pub bucket: String,
++    pub prefix: String,                 // tenant segment; "" == bucket root; no leading/trailing '/'
++    pub endpoint_url: Option<String>,   // Some("http://localhost:9000") for MinIO; None = real AWS
++    pub region: String,                 // MinIO ignores it; SDK requires one; default "us-east-1"
++    pub access_key_id: String,
++    pub secret_access_key: String,
++    pub force_path_style: bool,         // true for MinIO
++}
++pub struct S3Store { /* client + bucket + prefix, all private */ }
++impl S3Store { pub async fn new(cfg: S3Config) -> Result<Self, StoreError>; }
++```
++Client build: `aws_config::defaults(BehaviorVersion::latest())` + `.region(...)` + `.credentials_provider(Credentials::from_keys(...))` + (if `endpoint_url` set) `.endpoint_url(...)`; then `aws_sdk_s3::config::Builder::from(&shared).force_path_style(cfg.force_path_style).build()`. `new` does **not** create the bucket. No `from_env`/`bin` wiring in this PR.
++
++### Dependencies (`Cargo.toml`)
++`aws-config = "1"`, `aws-sdk-s3 = "1"`, `aws-smithy-runtime-api = "1"` (for `raw_response()` / the 412 status check), `futures = "0.3"` (bounded list fan-out). Default features on to start (avoid the TLS/connector feature rabbit hole). Confirm the build on the MSVC toolchain. Keep clippy-strict clean (small `?`-propagating helpers — `map_sdk_err`, `body_to_string`, `apply_cas`, a per-key GET fn; **no `unwrap`/`expect`/indexing in non-test code**; cognitive complexity ≤ 20 per fn).
++
++## Tests
++
++### Property tests (byte-parity — the cheap guarantee)
++Add round-trip property tests proving `parse_*(serialize_*(x)) == x` for arbitrary valid `Project`, `Phase`, `Task` (with notes). Put them where the existing roundtrip proptests live / a sibling file. These don't need S3 at all — they lock the shared format.
++
++### MinIO integration test — `tests/s3_store_minio.rs`
++Gate the **whole** file behind env var `DOSSIER_S3_TEST_ENDPOINT` (absent ⇒ every test early-returns, so `cargo test`/CI stays green without MinIO). Helper builds `S3Config` from `DOSSIER_S3_TEST_ENDPOINT` + `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (default `minioadmin`/`minioadmin`), bucket `dossier-it`, **unique `prefix` per run** (`format!("it/{}", Ulid::new())`) for isolation. `ensure_bucket` at the top (create, ignore already-exists). Lint header like `tests/cli_subcommands.rs`. Scenarios, each a `#[tokio::test]`:
++1. create-only success; duplicate create → `Conflict`.
++2. CAS update with correct version → `Ok(new etag)`; **stale version → `Conflict`**.
++3. get → ETag → put round-trip: `put(None)`→v0; `get`→`Versioned{value,version}`; assert `version == v0` (ETag stable) and `value` equals the original; then `put(mutated, Some(version))`→`Ok`.
++4. update-if-absent (`if_match` on a never-created key) → `NotFound` (not Conflict).
++5. **CENTERPIECE — concurrent-writer race:** seed at v0; two `tokio` tasks both `put(variant, Some(v0))` concurrently; assert **exactly one `Ok`, the other `Conflict`** — never two Ok, never two Err. **Loop N≈30** (fresh key each iteration). This is the proof.
++6. artifact round-trip: `put_artifact(a)` then `list_artifacts({project})` contains `a`.
++
++## Acceptance
++- `make check` green with MinIO **down** (S3 integration tests skip cleanly; property tests + existing suite pass).
++- With MinIO up + `DOSSIER_S3_TEST_ENDPOINT=http://localhost:9000`: `cargo test --test s3_store_minio` passes — **the concurrent-writer race in particular** (exactly one winner, looped).
++- Public API is exactly `S3Store` + `S3Config`; reused helpers are `pub(crate)`.
++- FsStore behavior unchanged (existing proptests green) after the parse-core refactor.
++
++## Non-goals
++Server wiring / `MeshService` / `bin` selection; lifting the state machine above the trait; artifact sharding; warm cache; HTTP transport; auth; real-AWS validation (MinIO is the local proof). All deferred — decided after we see this result.
+diff --git a/src/lib.rs b/src/lib.rs
+index 557915d..cc08e2a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -3,7 +3,9 @@
+ //! format lives in LAYOUT.md.
+ 
+ pub mod domain;
++pub mod s3store;
+ pub mod server;
+ pub mod store;
+ 
++pub use s3store::{S3Config, S3Store};
+ pub use store::{ArtifactListFilter, FsStore, Store, StoreError, Version, Versioned};
+diff --git a/src/s3store.rs b/src/s3store.rs
+new file mode 100644
+index 0000000..810886d
+--- /dev/null
++++ b/src/s3store.rs
+@@ -0,0 +1,676 @@
++//! S3-backed [`Store`] using conditional PUTs for compare-and-swap writes.
++
++use async_trait::async_trait;
++use aws_config::BehaviorVersion;
++use aws_credential_types::Credentials;
++use aws_sdk_s3::primitives::ByteStream;
++use aws_sdk_s3::Client;
++use aws_smithy_runtime_api::client::result::SdkError;
++use aws_smithy_runtime_api::http::Response;
++use futures::stream::{self, StreamExt};
++use futures::TryStreamExt;
++
++use crate::domain::{
++    Artifact, Phase, PhaseListFilter, Project, ProjectListFilter, Task, TaskListFilter,
++};
++use crate::store::{
++    is_valid_slug, notes_lines_for_task, parse_phase, parse_project, parse_task, phase_filename,
++    phase_matches, project_matches, serialize_phase_file, serialize_project_file,
++    serialize_task_file, sort_phases, sort_projects, sort_tasks, task_filename, task_matches,
++    ArtifactListFilter, Store, StoreError, Version, Versioned,
++};
++
++const LIST_CONCURRENCY: usize = 16;
++const ARTIFACT_PUT_RETRIES: usize = 5;
++
++fn key_is_markdown(key: &str) -> bool {
++    std::path::Path::new(key)
++        .extension()
++        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
++}
++
++/// Connection settings for [`S3Store`]. Does not create the bucket.
++#[derive(Debug, Clone)]
++pub struct S3Config {
++    pub bucket: String,
++    /// Tenant segment; empty means bucket root. No leading or trailing `/`.
++    pub prefix: String,
++    /// `Some("http://localhost:9000")` for `MinIO`; `None` for real AWS.
++    pub endpoint_url: Option<String>,
++    /// `MinIO` ignores this; the SDK requires a region. Default `us-east-1`.
++    pub region: String,
++    pub access_key_id: String,
++    pub secret_access_key: String,
++    /// Set `true` for `MinIO` path-style URLs.
++    pub force_path_style: bool,
++}
++
++/// Object store backend mirroring the on-disk corpus layout under an optional prefix.
++#[derive(Debug)]
++pub struct S3Store {
++    client: Client,
++    bucket: String,
++    prefix: String,
++}
++
++struct ObjectBody {
++    raw: String,
++    version: Version,
++}
++
++impl S3Store {
++    /// Build an S3 client from `cfg`. Does not create the bucket.
++    pub async fn new(cfg: S3Config) -> Result<Self, StoreError> {
++        let creds = Credentials::new(
++            cfg.access_key_id,
++            cfg.secret_access_key,
++            None,
++            None,
++            "dossier-s3store",
++        );
++        let shared = aws_config::defaults(BehaviorVersion::latest())
++            .region(aws_config::Region::new(cfg.region))
++            .credentials_provider(creds)
++            .load()
++            .await;
++        let mut s3_builder = aws_sdk_s3::config::Builder::from(&shared);
++        if let Some(url) = &cfg.endpoint_url {
++            s3_builder = s3_builder.endpoint_url(url);
++        }
++        s3_builder = s3_builder.force_path_style(cfg.force_path_style);
++        let client = Client::from_conf(s3_builder.build());
++        Ok(Self {
++            client,
++            bucket: cfg.bucket,
++            prefix: Self::normalize_prefix(&cfg.prefix)?,
++        })
++    }
++
++    fn normalize_prefix(prefix: &str) -> Result<String, StoreError> {
++        if prefix.starts_with('/') || prefix.ends_with('/') {
++            return Err(StoreError::Invalid(
++                "prefix must not have leading or trailing '/'".into(),
++            ));
++        }
++        Ok(prefix.to_owned())
++    }
++
++    fn join_key(&self, segments: &[&str]) -> String {
++        let mut out = String::new();
++        if !self.prefix.is_empty() {
++            out.push_str(&self.prefix);
++            out.push('/');
++        }
++        out.push_str(&segments.join("/"));
++        out
++    }
++
++    fn validate_slug(slug: &str) -> Result<(), StoreError> {
++        if is_valid_slug(slug) {
++            Ok(())
++        } else {
++            Err(StoreError::Invalid(format!("invalid slug: {slug}")))
++        }
++    }
++
++    async fn list_object_keys(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
++        let mut keys = Vec::new();
++        let mut token: Option<String> = None;
++        loop {
++            let mut req = self
++                .client
++                .list_objects_v2()
++                .bucket(&self.bucket)
++                .prefix(prefix);
++            if let Some(t) = &token {
++                req = req.continuation_token(t);
++            }
++            let resp = req.send().await.map_err(map_sdk_err)?;
++            for obj in resp.contents() {
++                if let Some(key) = obj.key() {
++                    keys.push(key.to_owned());
++                }
++            }
++            if resp.is_truncated() == Some(true) {
++                token = resp.next_continuation_token().map(str::to_owned);
++            } else {
++                break;
++            }
++        }
++        Ok(keys)
++    }
++
++    async fn list_project_slugs(&self) -> Result<Vec<String>, StoreError> {
++        let list_prefix = format!("{}/", self.join_key(&["projects"]));
++        let mut slugs = Vec::new();
++        let mut token: Option<String> = None;
++        loop {
++            let mut req = self
++                .client
++                .list_objects_v2()
++                .bucket(&self.bucket)
++                .prefix(&list_prefix)
++                .delimiter("/");
++            if let Some(t) = &token {
++                req = req.continuation_token(t);
++            }
++            let resp = req.send().await.map_err(map_sdk_err)?;
++            for cp in resp.common_prefixes() {
++                if let Some(p) = cp.prefix() {
++                    if let Some(slug) = project_slug_from_prefix(p, &list_prefix) {
++                        slugs.push(slug);
++                    }
++                }
++            }
++            if resp.is_truncated() == Some(true) {
++                token = resp.next_continuation_token().map(str::to_owned);
++            } else {
++                break;
++            }
++        }
++        slugs.sort();
++        Ok(slugs)
++    }
++
++    async fn get_object_body(&self, key: &str) -> Result<ObjectBody, StoreError> {
++        self.get_object_body_optional(key)
++            .await?
++            .ok_or(StoreError::NotFound)
++    }
++
++    async fn get_object_body_optional(&self, key: &str) -> Result<Option<ObjectBody>, StoreError> {
++        let resp = match self
++            .client
++            .get_object()
++            .bucket(&self.bucket)
++            .key(key)
++            .send()
++            .await
++        {
++            Ok(resp) => resp,
++            Err(err) if is_not_found(&err) => return Ok(None),
++            Err(err) => return Err(map_sdk_err(err)),
++        };
++        let version = etag_from_output(resp.e_tag())?;
++        let raw = body_to_string(resp.body).await?;
++        Ok(Some(ObjectBody { raw, version }))
++    }
++
++    async fn cas_put(
++        &self,
++        key: &str,
++        content: &[u8],
++        expected: Option<&Version>,
++    ) -> Result<Version, StoreError> {
++        if let Some(expected_v) = expected {
++            match self.get_object_body_optional(key).await? {
++                None => return Err(StoreError::NotFound),
++                Some(obj) if obj.version.as_str() != expected_v.as_str() => {
++                    return Err(StoreError::Conflict);
++                }
++                Some(_) => {}
++            }
++        }
++        let mut req = self
++            .client
++            .put_object()
++            .bucket(&self.bucket)
++            .key(key)
++            .body(ByteStream::from(content.to_vec()));
++        req = match expected {
++            None => req.if_none_match("*"),
++            Some(v) => req.if_match(v.as_str()),
++        };
++        let resp = req.send().await.map_err(map_sdk_err)?;
++        etag_from_output(resp.e_tag())
++    }
++
++    async fn load_phases_for(&self, project_slug: &str) -> Result<Vec<Phase>, StoreError> {
++        Self::validate_slug(project_slug)?;
++        let prefix = format!("{}/", self.join_key(&["projects", project_slug, "phases"]));
++        let keys = self.list_object_keys(&prefix).await?;
++        let mut out = Vec::new();
++        for key in keys {
++            if !key_is_markdown(&key) {
++                continue;
++            }
++            let obj = self.get_object_body(&key).await?;
++            let phase = parse_phase(&obj.raw).map_err(invalid_err)?;
++            out.push(phase);
++        }
++        Ok(out)
++    }
++
++    async fn load_tasks_for(&self, project_slug: &str) -> Result<Vec<Task>, StoreError> {
++        Self::validate_slug(project_slug)?;
++        let prefix = format!("{}/", self.join_key(&["projects", project_slug, "tasks"]));
++        let keys = self.list_object_keys(&prefix).await?;
++        let mut out = Vec::new();
++        for key in keys {
++            if !key_is_markdown(&key) {
++                continue;
++            }
++            let obj = self.get_object_body(&key).await?;
++            let (task, _notes) = parse_task(&obj.raw, project_slug).map_err(invalid_err)?;
++            out.push(task);
++        }
++        Ok(out)
++    }
++
++    async fn find_phase_key(
++        &self,
++        project_slug: &str,
++        phase_slug: &str,
++    ) -> Result<String, StoreError> {
++        Self::validate_slug(project_slug)?;
++        let prefix = format!("{}/", self.join_key(&["projects", project_slug, "phases"]));
++        let keys = self.list_object_keys(&prefix).await?;
++        for key in keys {
++            let Some(name) = key.rsplit('/').next() else {
++                continue;
++            };
++            if !key_is_markdown(name) {
++                continue;
++            }
++            let Some(stem) = name.strip_suffix(".md") else {
++                continue;
++            };
++            if let Some((_, slug)) = stem.split_once('-') {
++                if slug == phase_slug {
++                    return Ok(key);
++                }
++            }
++        }
++        Err(StoreError::NotFound)
++    }
++
++    async fn find_task_key(&self, task_id: &str) -> Result<(String, String), StoreError> {
++        let mut found: Option<(String, String)> = None;
++        for project_slug in self.list_project_slugs().await? {
++            let prefix = format!("{}/", self.join_key(&["projects", &project_slug, "tasks"]));
++            let keys = self.list_object_keys(&prefix).await?;
++            for key in keys {
++                let Some(name) = key.rsplit('/').next() else {
++                    continue;
++                };
++                if !key_is_markdown(name) {
++                    continue;
++                }
++                let Some(stem) = name.strip_suffix(".md") else {
++                    continue;
++                };
++                if let Some((id, _slug)) = stem.split_once('-') {
++                    if id == task_id {
++                        if found.is_some() {
++                            return Err(StoreError::Invalid(format!(
++                                "duplicate task id: {task_id}"
++                            )));
++                        }
++                        found = Some((project_slug.clone(), key));
++                    }
++                }
++            }
++        }
++        found.ok_or(StoreError::NotFound)
++    }
++
++    async fn project_slug_for_id(&self, project_id: &str) -> Result<String, StoreError> {
++        for slug in self.list_project_slugs().await? {
++            let key = self.join_key(&["projects", &slug, "project.md"]);
++            let Some(obj) = self.get_object_body_optional(&key).await? else {
++                continue;
++            };
++            let project = parse_project(&obj.raw, false).map_err(invalid_err)?;
++            if project.id == project_id {
++                return Ok(slug);
++            }
++        }
++        Err(StoreError::NotFound)
++    }
++
++    async fn project_slug_for_phase_id(&self, phase_id: &str) -> Result<String, StoreError> {
++        for slug in self.list_project_slugs().await? {
++            let phases = self.load_phases_for(&slug).await?;
++            if phases.iter().any(|p| p.id == phase_id) {
++                return Ok(slug);
++            }
++        }
++        Err(StoreError::NotFound)
++    }
++
++    async fn read_artifacts(&self, project_slug: &str) -> Result<Vec<Artifact>, StoreError> {
++        Self::validate_slug(project_slug)?;
++        let key = self.join_key(&["projects", project_slug, "artifacts.jsonl"]);
++        match self.get_object_body_optional(&key).await? {
++            None => Ok(Vec::new()),
++            Some(obj) => parse_artifacts_jsonl(&obj.raw),
++        }
++    }
++
++    async fn get_versioned_projects(
++        &self,
++        slugs: &[String],
++        with_body: bool,
++    ) -> Result<Vec<Versioned<Project>>, StoreError> {
++        stream::iter(slugs.iter().cloned())
++            .map(|slug| async move {
++                let key = self.join_key(&["projects", &slug, "project.md"]);
++                let obj = self.get_object_body(&key).await?;
++                let project = parse_project(&obj.raw, with_body).map_err(invalid_err)?;
++                Ok::<_, StoreError>(Versioned {
++                    value: project,
++                    version: obj.version,
++                })
++            })
++            .buffer_unordered(LIST_CONCURRENCY)
++            .try_collect()
++            .await
++    }
++}
++
++#[async_trait]
++impl Store for S3Store {
++    async fn get_project(&self, slug: &str) -> Result<Versioned<Project>, StoreError> {
++        Self::validate_slug(slug)?;
++        let key = self.join_key(&["projects", slug, "project.md"]);
++        let obj = self.get_object_body(&key).await?;
++        let project = parse_project(&obj.raw, true).map_err(invalid_err)?;
++        Ok(Versioned {
++            value: project,
++            version: obj.version,
++        })
++    }
++
++    async fn list_projects(
++        &self,
++        filter: ProjectListFilter,
++    ) -> Result<Vec<Versioned<Project>>, StoreError> {
++        let slugs = self.list_project_slugs().await?;
++        let needs_body = filter.body_contains.is_some();
++        let versioned = self.get_versioned_projects(&slugs, needs_body).await?;
++        let mut projects: Vec<Project> = versioned.iter().map(|v| v.value.clone()).collect();
++        projects.retain(|p| project_matches(p, &filter));
++        sort_projects(&mut projects, &filter);
++        if let Some(limit) = filter.limit {
++            projects.truncate(limit);
++        }
++        for p in &mut projects {
++            p.description.clear();
++        }
++        let mut out = Vec::with_capacity(projects.len());
++        for p in projects {
++            let version = versioned
++                .iter()
++                .find(|v| v.value.id == p.id)
++                .map(|v| v.version.clone())
++                .ok_or(StoreError::NotFound)?;
++            out.push(Versioned { value: p, version });
++        }
++        Ok(out)
++    }
++
++    async fn get_phase(&self, project: &str, slug: &str) -> Result<Versioned<Phase>, StoreError> {
++        let key = self.find_phase_key(project, slug).await?;
++        let obj = self.get_object_body(&key).await?;
++        let phase = parse_phase(&obj.raw).map_err(invalid_err)?;
++        Ok(Versioned {
++            value: phase,
++            version: obj.version,
++        })
++    }
++
++    async fn list_phases(
++        &self,
++        filter: PhaseListFilter,
++    ) -> Result<Vec<Versioned<Phase>>, StoreError> {
++        let slugs = if let Some(project) = &filter.project {
++            Self::validate_slug(project)?;
++            vec![project.clone()]
++        } else {
++            self.list_project_slugs().await?
++        };
++        let mut phases = Vec::new();
++        for project_slug in slugs {
++            phases.extend(self.load_phases_for(&project_slug).await?);
++        }
++        phases.retain(|p| phase_matches(p, &filter));
++        sort_phases(&mut phases, &filter);
++        if let Some(limit) = filter.limit {
++            phases.truncate(limit);
++        }
++        let project_filter = filter.project.clone();
++        stream::iter(phases)
++            .map(move |phase| {
++                let project_filter = project_filter.clone();
++                async move {
++                    let project_slug = if let Some(p) = &project_filter {
++                        p.clone()
++                    } else {
++                        self.project_slug_for_phase_id(&phase.id).await?
++                    };
++                    let key = self.find_phase_key(&project_slug, &phase.slug).await?;
++                    let obj = self.get_object_body(&key).await?;
++                    Ok(Versioned {
++                        value: phase,
++                        version: obj.version,
++                    })
++                }
++            })
++            // buffered (not buffer_unordered) so results stay in the sorted order
++            // established above — buffer_unordered would yield in completion order.
++            .buffered(LIST_CONCURRENCY)
++            .try_collect()
++            .await
++    }
++
++    async fn get_task(&self, id: &str) -> Result<Versioned<Task>, StoreError> {
++        let (project_slug, key) = self.find_task_key(id).await?;
++        let obj = self.get_object_body(&key).await?;
++        let (task, _notes) = parse_task(&obj.raw, &project_slug).map_err(invalid_err)?;
++        Ok(Versioned {
++            value: task,
++            version: obj.version,
++        })
++    }
++
++    async fn list_tasks(&self, filter: TaskListFilter) -> Result<Vec<Versioned<Task>>, StoreError> {
++        let resolved_phase_id: Option<String> = match (&filter.project, &filter.phase) {
++            (Some(project_slug), Some(phase_slug)) => {
++                let phases = self.load_phases_for(project_slug).await?;
++                let phase = phases
++                    .iter()
++                    .find(|p| &p.slug == phase_slug)
++                    .ok_or_else(|| {
++                        StoreError::Invalid(format!(
++                            "phase not found: {phase_slug} in project {project_slug}"
++                        ))
++                    })?;
++                Some(phase.id.clone())
++            }
++            _ => None,
++        };
++
++        let mut tasks = if let Some(slug) = &filter.project {
++            self.load_tasks_for(slug).await?
++        } else {
++            let mut all = Vec::new();
++            for slug in self.list_project_slugs().await? {
++                all.extend(self.load_tasks_for(&slug).await?);
++            }
++            all
++        };
++        tasks.retain(|t| task_matches(t, &filter, resolved_phase_id.as_deref()));
++        sort_tasks(&mut tasks, &filter);
++        if let Some(limit) = filter.limit {
++            tasks.truncate(limit);
++        }
++        stream::iter(tasks)
++            .map(|task| async move {
++                let key = self.join_key(&[
++                    "projects",
++                    &task.project_slug,
++                    "tasks",
++                    &task_filename(&task.id, &task.slug),
++                ]);
++                let obj = self.get_object_body(&key).await?;
++                Ok(Versioned {
++                    value: task,
++                    version: obj.version,
++                })
++            })
++            // buffered (not buffer_unordered) so results stay in the sorted order
++            // established above — buffer_unordered would yield in completion order.
++            .buffered(LIST_CONCURRENCY)
++            .try_collect()
++            .await
++    }
++
++    async fn list_artifacts(
++        &self,
++        filter: ArtifactListFilter,
++    ) -> Result<Vec<Artifact>, StoreError> {
++        self.read_artifacts(&filter.project).await
++    }
++
++    async fn put_project(
++        &self,
++        project: &Project,
++        expected: Option<Version>,
++    ) -> Result<Version, StoreError> {
++        Self::validate_slug(&project.slug)?;
++        let key = self.join_key(&["projects", &project.slug, "project.md"]);
++        let content = serialize_project_file(project).map_err(invalid_err)?;
++        self.cas_put(&key, content.as_bytes(), expected.as_ref())
++            .await
++    }
++
++    async fn put_phase(
++        &self,
++        phase: &Phase,
++        expected: Option<Version>,
++    ) -> Result<Version, StoreError> {
++        let project_slug = self.project_slug_for_id(&phase.project).await?;
++        let content = serialize_phase_file(phase).map_err(invalid_err)?;
++        let key = if expected.is_none() {
++            self.join_key(&[
++                "projects",
++                &project_slug,
++                "phases",
++                &phase_filename(phase.order, &phase.slug),
++            ])
++        } else {
++            self.find_phase_key(&project_slug, &phase.slug).await?
++        };
++        self.cas_put(&key, content.as_bytes(), expected.as_ref())
++            .await
++    }
++
++    async fn put_task(
++        &self,
++        task: &Task,
++        expected: Option<Version>,
++    ) -> Result<Version, StoreError> {
++        Self::validate_slug(&task.project_slug)?;
++        Self::validate_slug(&task.slug)?;
++        let key = self.join_key(&[
++            "projects",
++            &task.project_slug,
++            "tasks",
++            &task_filename(&task.id, &task.slug),
++        ]);
++        let notes_lines = notes_lines_for_task(task);
++        let content = serialize_task_file(task, &notes_lines).map_err(invalid_err)?;
++        self.cas_put(&key, content.as_bytes(), expected.as_ref())
++            .await
++    }
++
++    async fn put_artifact(&self, artifact: &Artifact) -> Result<(), StoreError> {
++        let project_slug = self.project_slug_for_id(&artifact.project).await?;
++        let key = self.join_key(&["projects", &project_slug, "artifacts.jsonl"]);
++        let line =
++            serde_json::to_string(artifact).map_err(|e| StoreError::Invalid(e.to_string()))?;
++        for _ in 0..ARTIFACT_PUT_RETRIES {
++            let existing = self.read_artifacts(&project_slug).await?;
++            if existing.iter().any(|a| a.id == artifact.id) {
++                return Err(StoreError::Conflict);
++            }
++            let current = self.get_object_body_optional(&key).await?;
++            let mut body = current
++                .as_ref()
++                .map_or_else(String::new, |obj| obj.raw.clone());
++            if !body.is_empty() && !body.ends_with('\n') {
++                body.push('\n');
++            }
++            body.push_str(&line);
++            body.push('\n');
++            let expected = current.as_ref().map(|obj| &obj.version);
++            match self.cas_put(&key, body.as_bytes(), expected).await {
++                Ok(_) => return Ok(()),
++                Err(StoreError::Conflict) => {}
++                Err(err) => return Err(err),
++            }
++        }
++        Err(StoreError::Conflict)
++    }
++}
++
++fn project_slug_from_prefix(common_prefix: &str, list_prefix: &str) -> Option<String> {
++    let rest = common_prefix.strip_prefix(list_prefix)?;
++    let slug = rest.strip_suffix('/')?;
++    is_valid_slug(slug).then(|| slug.to_owned())
++}
++
++fn etag_from_output(etag: Option<&str>) -> Result<Version, StoreError> {
++    etag.map(|t| Version::new(t.to_owned()))
++        .ok_or_else(|| StoreError::Invalid("missing ETag".into()))
++}
++
++async fn body_to_string(body: ByteStream) -> Result<String, StoreError> {
++    let bytes = body
++        .collect()
++        .await
++        .map_err(|_| StoreError::Unavailable)?
++        .into_bytes();
++    String::from_utf8(bytes.to_vec()).map_err(|e| StoreError::Invalid(e.to_string()))
++}
++
++fn parse_artifacts_jsonl(raw: &str) -> Result<Vec<Artifact>, StoreError> {
++    let mut out = Vec::new();
++    for (idx, line) in raw.lines().enumerate() {
++        let line = line.trim();
++        if line.is_empty() {
++            continue;
++        }
++        let artifact: Artifact = serde_json::from_str(line).map_err(|e| {
++            StoreError::Invalid(format!("parse artifacts.jsonl line {}: {e}", idx + 1))
++        })?;
++        out.push(artifact);
++    }
++    Ok(out)
++}
++
++#[allow(clippy::needless_pass_by_value)] // map_err hands errors by value
++fn invalid_err(err: anyhow::Error) -> StoreError {
++    StoreError::Invalid(err.to_string())
++}
++
++fn is_not_found<E>(err: &SdkError<E, Response>) -> bool {
++    status_code(err) == Some(404)
++}
++
++fn status_code<E>(err: &SdkError<E, Response>) -> Option<u16> {
++    err.raw_response().map(|r| r.status().as_u16())
++}
++
++#[allow(clippy::needless_pass_by_value)] // map_err hands errors by value
++fn map_sdk_err<E: std::fmt::Debug>(err: SdkError<E, Response>) -> StoreError {
++    if let Some(code) = status_code(&err) {
++        return match code {
++            412 => StoreError::Conflict,
++            404 => StoreError::NotFound,
++            500..=599 => StoreError::Unavailable,
++            _ => StoreError::Invalid(format!("{err:?}")),
++        };
++    }
++    StoreError::Unavailable
++}
+diff --git a/src/store.rs b/src/store.rs
+index 75fcd94..e046b72 100644
+--- a/src/store.rs
++++ b/src/store.rs
+@@ -32,6 +32,11 @@ impl Version {
+     pub fn as_str(&self) -> &str {
+         &self.0
+     }
++
++    /// Wrap a backend-specific content token (SHA-256 hex, S3 `ETag`, etc.).
++    pub fn new(token: impl Into<String>) -> Self {
++        Self(token.into())
++    }
+ }
+ 
+ impl std::fmt::Display for Version {
+@@ -177,7 +182,7 @@ fn versioned_task(path: &Path, project_slug: &str) -> Result<Versioned<Task>, St
+     })
+ }
+ 
+-fn notes_lines_for_task(task: &Task) -> Vec<String> {
++pub(crate) fn notes_lines_for_task(task: &Task) -> Vec<String> {
+     task.notes
+         .iter()
+         .map(|n| format_note_line(n.posted_at, &n.actor, &n.body))
+@@ -646,22 +651,14 @@ impl FsStore {
+ 
+     fn load_project(&self, slug: &str, with_body: bool) -> Result<Project> {
+         let path = self.project_dir(slug)?.join("project.md");
+-        let (front, body) = read_frontmatter(&path)?;
+-        let mut p: Project = serde_yml::from_str(&front)
+-            .with_context(|| format!("parse project frontmatter {}", path.display()))?;
+-        if with_body {
+-            body.trim().clone_into(&mut p.description);
+-        }
+-        Ok(p)
++        let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
++        parse_project(&raw, with_body).with_context(|| format!("parse project {}", path.display()))
+     }
+ }
+ 
+ fn load_phase(path: &Path) -> Result<Phase> {
+-    let (front, body) = read_frontmatter(path)?;
+-    let mut p: Phase = serde_yml::from_str(&front)
+-        .with_context(|| format!("parse phase frontmatter {}", path.display()))?;
+-    body.trim().clone_into(&mut p.body);
+-    Ok(p)
++    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
++    parse_phase(&raw).with_context(|| format!("parse phase {}", path.display()))
+ }
+ 
+ fn load_task(path: &Path, project_slug: &str) -> Result<Task> {
+@@ -682,17 +679,8 @@ fn load_task(path: &Path, project_slug: &str) -> Result<Task> {
+ /// JSON output) get the owning-project slug without having to thread it
+ /// alongside every Task value. It is not read from frontmatter.
+ fn load_task_with_notes(path: &Path, project_slug: &str) -> Result<(Task, Vec<String>)> {
+-    let (front, body) = read_frontmatter(path)?;
+-    let mut t: Task = serde_yml::from_str(&front)
+-        .with_context(|| format!("parse task frontmatter {}", path.display()))?;
+-    let (spec, notes_lines) = split_task_body(&body);
+-    t.body = spec;
+-    project_slug.clone_into(&mut t.project_slug);
+-    t.notes = notes_lines
+-        .iter()
+-        .filter_map(|l| parse_note_line(l))
+-        .collect();
+-    Ok((t, notes_lines))
++    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
++    parse_task(&raw, project_slug).with_context(|| format!("parse task {}", path.display()))
+ }
+ 
+ /// Parse a single `## Notes` line into a structured `Note`. Accepts the
+@@ -755,21 +743,52 @@ fn split_task_body(raw: &str) -> (String, Vec<String>) {
+     (spec, notes_lines)
+ }
+ 
+-fn read_frontmatter(path: &Path) -> Result<(String, String)> {
+-    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
++fn split_frontmatter(raw: &str) -> Result<(String, String)> {
+     let after_open = raw
+         .strip_prefix("---\n")
+         .or_else(|| raw.strip_prefix("---\r\n"))
+-        .ok_or_else(|| anyhow!("{}: missing frontmatter delimiter", path.display()))?;
++        .ok_or_else(|| anyhow!("missing frontmatter delimiter"))?;
+     let close_idx = after_open
+         .find("\n---")
+-        .ok_or_else(|| anyhow!("{}: unterminated frontmatter", path.display()))?;
++        .ok_or_else(|| anyhow!("unterminated frontmatter"))?;
+     let front = after_open[..close_idx].to_owned();
+     let after = &after_open[close_idx + 4..];
+     let body = after.trim_start_matches(['\r', '\n']).to_owned();
+     Ok((front, body))
+ }
+ 
++/// Parse a project markdown blob (YAML frontmatter + optional description body).
++pub(crate) fn parse_project(raw: &str, with_body: bool) -> Result<Project> {
++    let (front, body) = split_frontmatter(raw)?;
++    let mut p: Project = serde_yml::from_str(&front).context("parse project frontmatter")?;
++    if with_body {
++        body.trim().clone_into(&mut p.description);
++    }
++    Ok(p)
++}
++
++/// Parse a phase markdown blob (YAML frontmatter + optional body).
++pub(crate) fn parse_phase(raw: &str) -> Result<Phase> {
++    let (front, body) = split_frontmatter(raw)?;
++    let mut p: Phase = serde_yml::from_str(&front).context("parse phase frontmatter")?;
++    body.trim().clone_into(&mut p.body);
++    Ok(p)
++}
++
++/// Parse a task markdown blob into a domain task and raw note lines.
++pub(crate) fn parse_task(raw: &str, project_slug: &str) -> Result<(Task, Vec<String>)> {
++    let (front, body) = split_frontmatter(raw)?;
++    let mut t: Task = serde_yml::from_str(&front).context("parse task frontmatter")?;
++    let (spec, notes_lines) = split_task_body(&body);
++    t.body = spec;
++    project_slug.clone_into(&mut t.project_slug);
++    t.notes = notes_lines
++        .iter()
++        .filter_map(|l| parse_note_line(l))
++        .collect();
++    Ok((t, notes_lines))
++}
++
+ // =============================================================================
+ // Write side
+ // =============================================================================
+@@ -1536,13 +1555,13 @@ impl FsStore {
+ 
+ /// Filename for a task: ULID + slug. ULID never contains a `-` so the
+ /// split on the first `-` is unambiguous.
+-fn task_filename(id: &str, slug: &str) -> String {
++pub(crate) fn task_filename(id: &str, slug: &str) -> String {
+     format!("{id}-{slug}.md")
+ }
+ 
+ /// Filename for a phase: zero-padded order + slug. The order prefix
+ /// gives stable sort in directory listings AND a human-readable hint.
+-fn phase_filename(order: i32, slug: &str) -> String {
++pub(crate) fn phase_filename(order: i32, slug: &str) -> String {
+     format!("{order:02}-{slug}.md")
+ }
+ 
+@@ -1712,7 +1731,7 @@ pub fn now_utc() -> DateTime<Utc> {
+ /// Slugs are lowercase ASCII with `-` and `_` allowed. Keeps
+ /// cross-platform filesystem behavior predictable (case-sensitivity
+ /// differs between NTFS, APFS, ext4).
+-fn is_valid_slug(slug: &str) -> bool {
++pub(crate) fn is_valid_slug(slug: &str) -> bool {
+     !slug.is_empty()
+         && slug
+             .chars()
+@@ -1748,7 +1767,7 @@ impl<'a> From<&'a Project> for ProjectFrontmatter<'a> {
+ /// Serialize a project to its on-disk markdown form: YAML frontmatter,
+ /// blank line, description body, trailing newline. Body absent when
+ /// description is empty so the file stays tidy.
+-fn serialize_project_file(project: &Project) -> Result<String> {
++pub(crate) fn serialize_project_file(project: &Project) -> Result<String> {
+     let frontmatter = serde_yml::to_string(&ProjectFrontmatter::from(project))
+         .context("serialize frontmatter")?;
+     let body = project.description.trim();
+@@ -1792,7 +1811,7 @@ impl<'a> From<&'a Phase> for PhaseFrontmatter<'a> {
+     }
+ }
+ 
+-fn serialize_phase_file(phase: &Phase) -> Result<String> {
++pub(crate) fn serialize_phase_file(phase: &Phase) -> Result<String> {
+     let frontmatter = serde_yml::to_string(&PhaseFrontmatter::from(phase))
+         .context("serialize phase frontmatter")?;
+     let body = phase.body.trim();
+@@ -1847,7 +1866,7 @@ impl<'a> From<&'a Task> for TaskFrontmatter<'a> {
+ /// spec body (if any), then a `## Notes` section reconstructed from
+ /// `notes_lines`. Each note line is emitted verbatim with one trailing
+ /// newline.
+-fn serialize_task_file(task: &Task, notes_lines: &[String]) -> Result<String> {
++pub(crate) fn serialize_task_file(task: &Task, notes_lines: &[String]) -> Result<String> {
+     let frontmatter =
+         serde_yml::to_string(&TaskFrontmatter::from(task)).context("serialize task frontmatter")?;
+     let spec = task.body.trim();
+@@ -1902,7 +1921,7 @@ fn in_range(
+     true
+ }
+ 
+-fn project_matches(p: &Project, f: &ProjectListFilter) -> bool {
++pub(crate) fn project_matches(p: &Project, f: &ProjectListFilter) -> bool {
+     if let Some(statuses) = &f.status {
+         if !statuses.is_empty() && !statuses.contains(&p.status) {
+             return false;
+@@ -1917,7 +1936,7 @@ fn project_matches(p: &Project, f: &ProjectListFilter) -> bool {
+         && in_range(p.updated_at, f.updated_after, f.updated_before)
+ }
+ 
+-fn sort_projects(out: &mut [Project], f: &ProjectListFilter) {
++pub(crate) fn sort_projects(out: &mut [Project], f: &ProjectListFilter) {
+     let order = f.order_by.unwrap_or(ProjectOrderField::CreatedAt);
+     out.sort_by(|a, b| match order {
+         ProjectOrderField::CreatedAt => a
+@@ -1934,7 +1953,7 @@ fn sort_projects(out: &mut [Project], f: &ProjectListFilter) {
+     }
+ }
+ 
+-fn phase_matches(p: &Phase, f: &PhaseListFilter) -> bool {
++pub(crate) fn phase_matches(p: &Phase, f: &PhaseListFilter) -> bool {
+     if let Some(statuses) = &f.status {
+         if !statuses.is_empty() && !statuses.contains(&p.status) {
+             return false;
+@@ -1949,7 +1968,7 @@ fn phase_matches(p: &Phase, f: &PhaseListFilter) -> bool {
+         && in_range(p.updated_at, f.updated_after, f.updated_before)
+ }
+ 
+-fn sort_phases(out: &mut [Phase], f: &PhaseListFilter) {
++pub(crate) fn sort_phases(out: &mut [Phase], f: &PhaseListFilter) {
+     let order = f.order_by.unwrap_or(PhaseOrderField::Order);
+     out.sort_by(|a, b| match order {
+         PhaseOrderField::CreatedAt => a
+@@ -1973,7 +1992,7 @@ fn sort_phases(out: &mut [Phase], f: &PhaseListFilter) {
+     }
+ }
+ 
+-fn task_matches(t: &Task, f: &TaskListFilter, resolved_phase_id: Option<&str>) -> bool {
++pub(crate) fn task_matches(t: &Task, f: &TaskListFilter, resolved_phase_id: Option<&str>) -> bool {
+     if let Some(pid) = resolved_phase_id {
+         if t.phase != pid {
+             return false;
+@@ -2019,7 +2038,7 @@ fn task_matches(t: &Task, f: &TaskListFilter, resolved_phase_id: Option<&str>) -
+     true
+ }
+ 
+-fn sort_tasks(out: &mut Vec<Task>, f: &TaskListFilter) {
++pub(crate) fn sort_tasks(out: &mut Vec<Task>, f: &TaskListFilter) {
+     let order = f.order_by.unwrap_or(TaskOrderField::CreatedAt);
+     // Sort keys on nullable fields (`completed_at`, `claimed_at`)
+     // implicitly drop nulls — sorting by a field you don't have is
+@@ -5936,3 +5955,7 @@ updated_at: 2026-05-10T14:30:00Z
+         assert_task_all_fields_persisted(&want, got);
+     }
+ }
++
++#[cfg(test)]
++#[path = "../tests/common/proptest_serialize_roundtrip.rs"]
++mod proptest_serialize_roundtrip;
+diff --git a/tests/common/proptest_serialize_roundtrip.rs b/tests/common/proptest_serialize_roundtrip.rs
+new file mode 100644
+index 0000000..cdbb9a5
+--- /dev/null
++++ b/tests/common/proptest_serialize_roundtrip.rs
+@@ -0,0 +1,259 @@
++//! Property tests for serialize/parse byte parity on the shared corpus format.
++//! Included from `store::proptest_serialize_roundtrip` for `pub(crate)` access.
++
++#![allow(
++    clippy::expect_used,
++    clippy::missing_panics_doc,
++    clippy::missing_errors_doc,
++    reason = "test module"
++)]
++
++use chrono::{DateTime, Utc};
++use proptest::prelude::*;
++
++use crate::domain::{Note, Phase, PhaseStatus, Project, ProjectStatus, Task, TaskStatus};
++use crate::store::{
++    notes_lines_for_task, parse_phase, parse_project, parse_task, serialize_phase_file,
++    serialize_project_file, serialize_task_file,
++};
++
++fn slug() -> impl Strategy<Value = String> {
++    proptest::string::string_regex("[a-z0-9_-]{1,16}").expect("slug regex")
++}
++
++fn title() -> impl Strategy<Value = String> {
++    proptest::string::string_regex(r"[A-Za-z0-9][A-Za-z0-9 :#\-_,.!?]{0,32}[A-Za-z0-9]|[A-Za-z0-9]")
++        .expect("title regex")
++}
++
++fn body() -> impl Strategy<Value = String> {
++    prop_oneof![
++        Just(String::new()),
++        proptest::string::string_regex(r"[A-Za-z0-9][A-Za-z0-9 \-_,.!?\n]{0,80}[A-Za-z0-9]")
++            .expect("body regex"),
++    ]
++}
++
++fn utc_time() -> impl Strategy<Value = DateTime<Utc>> {
++    (0i64..4_000_000_000)
++        .prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap_or_else(Utc::now))
++}
++
++fn project_status() -> impl Strategy<Value = ProjectStatus> {
++    prop_oneof![
++        Just(ProjectStatus::Planning),
++        Just(ProjectStatus::Active),
++        Just(ProjectStatus::Paused),
++        Just(ProjectStatus::Done),
++        Just(ProjectStatus::Abandoned),
++    ]
++}
++
++fn phase_status() -> impl Strategy<Value = PhaseStatus> {
++    prop_oneof![
++        Just(PhaseStatus::Pending),
++        Just(PhaseStatus::Active),
++        Just(PhaseStatus::Done),
++        Just(PhaseStatus::Skipped),
++    ]
++}
++
++fn task_status() -> impl Strategy<Value = TaskStatus> {
++    prop_oneof![
++        Just(TaskStatus::Todo),
++        Just(TaskStatus::Claimed),
++        Just(TaskStatus::InProgress),
++        Just(TaskStatus::Blocked),
++        Just(TaskStatus::Done),
++        Just(TaskStatus::Cancelled),
++    ]
++}
++
++fn project_strategy() -> impl Strategy<Value = Project> {
++    (
++        proptest::string::string_regex("prj_[A-Z0-9]{26}").expect("id"),
++        slug(),
++        title(),
++        body(),
++        project_status(),
++        utc_time(),
++        utc_time(),
++        proptest::string::string_regex("human:[a-z0-9_-]{1,16}").expect("actor"),
++    )
++        .prop_map(
++            |(id, slug, title, description, status, created_at, updated_at, created_by)| Project {
++                id,
++                slug,
++                title,
++                description,
++                status,
++                created_at,
++                updated_at,
++                created_by,
++            },
++        )
++}
++
++fn phase_strategy() -> impl Strategy<Value = Phase> {
++    (
++        proptest::string::string_regex("prj_[A-Z0-9]{26}").expect("project id"),
++        proptest::string::string_regex("phs_[A-Z0-9]{26}").expect("id"),
++        slug(),
++        title(),
++        body(),
++        0i32..100,
++        phase_status(),
++        utc_time(),
++        utc_time(),
++        proptest::string::string_regex("human:[a-z0-9_-]{1,16}").expect("actor"),
++        proptest::string::string_regex("human:[a-z0-9_-]{1,16}").expect("owner"),
++    )
++        .prop_map(
++            |(
++                project,
++                id,
++                slug,
++                title,
++                body,
++                order,
++                status,
++                created_at,
++                updated_at,
++                created_by,
++                owner,
++            )| Phase {
++                id,
++                project,
++                slug,
++                title,
++                body,
++                order,
++                status,
++                created_at,
++                updated_at,
++                created_by,
++                owner,
++            },
++        )
++}
++
++fn note_strategy() -> impl Strategy<Value = Note> {
++    (
++        proptest::string::string_regex("human:[a-z0-9_-]{1,16}").expect("actor"),
++        proptest::string::string_regex(r"[A-Za-z0-9][A-Za-z0-9 \-_,.!?]{0,32}").expect("body"),
++        utc_time(),
++    )
++        .prop_map(|(actor, body, posted_at)| Note {
++            actor,
++            body: body.trim().to_owned(),
++            posted_at,
++        })
++        .prop_filter("note body non-empty after trim", |n| !n.body.is_empty())
++}
++
++fn task_strategy() -> impl Strategy<Value = Task> {
++    (
++        proptest::string::string_regex("prj_[A-Z0-9]{26}").expect("project id"),
++        slug(),
++        proptest::string::string_regex("tsk_[A-Z0-9]{26}").expect("id"),
++        proptest::string::string_regex("phs_[A-Z0-9]{26}").expect("phase id"),
++        slug(),
++        title(),
++        body(),
++        task_status(),
++        utc_time(),
++        utc_time(),
++        proptest::option::of(proptest::collection::vec(note_strategy(), 0..3)),
++    )
++        .prop_map(
++            |(
++                project,
++                project_slug,
++                id,
++                phase,
++                slug,
++                title,
++                body,
++                status,
++                created_at,
++                updated_at,
++                notes,
++            )| Task {
++                id,
++                project,
++                project_slug,
++                phase,
++                slug,
++                title,
++                body,
++                status,
++                assignee: String::new(),
++                claimed_at: None,
++                completed_at: None,
++                created_at,
++                updated_at,
++                notes: notes.unwrap_or_default(),
++                depends_on: Vec::new(),
++            },
++        )
++}
++
++proptest! {
++    #[test]
++    fn project_serialize_parse_roundtrip(project in project_strategy()) {
++        let raw = serialize_project_file(&project).expect("serialize project");
++        let parsed = parse_project(&raw, true).expect("parse project");
++        prop_assert_eq!(&parsed.id, &project.id);
++        prop_assert_eq!(&parsed.slug, &project.slug);
++        prop_assert_eq!(&parsed.title, &project.title);
++        prop_assert_eq!(&parsed.description, &project.description);
++        prop_assert_eq!(parsed.status, project.status);
++        prop_assert_eq!(parsed.created_at, project.created_at);
++        prop_assert_eq!(parsed.updated_at, project.updated_at);
++        prop_assert_eq!(&parsed.created_by, &project.created_by);
++    }
++
++    #[test]
++    fn phase_serialize_parse_roundtrip(phase in phase_strategy()) {
++        let raw = serialize_phase_file(&phase).expect("serialize phase");
++        let parsed = parse_phase(&raw).expect("parse phase");
++        prop_assert_eq!(&parsed.id, &phase.id);
++        prop_assert_eq!(&parsed.project, &phase.project);
++        prop_assert_eq!(&parsed.slug, &phase.slug);
++        prop_assert_eq!(&parsed.title, &phase.title);
++        prop_assert_eq!(&parsed.body, &phase.body);
++        prop_assert_eq!(parsed.order, phase.order);
++        prop_assert_eq!(parsed.status, phase.status);
++        prop_assert_eq!(parsed.created_at, phase.created_at);
++        prop_assert_eq!(parsed.updated_at, phase.updated_at);
++        prop_assert_eq!(&parsed.created_by, &phase.created_by);
++        prop_assert_eq!(&parsed.owner, &phase.owner);
++    }
++
++    #[test]
++    fn task_serialize_parse_roundtrip(task in task_strategy()) {
++        let notes_lines = notes_lines_for_task(&task);
++        let raw = serialize_task_file(&task, &notes_lines).expect("serialize task");
++        let (parsed, _) = parse_task(&raw, &task.project_slug).expect("parse task");
++        prop_assert_eq!(&parsed.id, &task.id);
++        prop_assert_eq!(&parsed.project, &task.project);
++        prop_assert_eq!(&parsed.project_slug, &task.project_slug);
++        prop_assert_eq!(&parsed.phase, &task.phase);
++        prop_assert_eq!(&parsed.slug, &task.slug);
++        prop_assert_eq!(&parsed.title, &task.title);
++        prop_assert_eq!(&parsed.body, &task.body);
++        prop_assert_eq!(parsed.status, task.status);
++        prop_assert_eq!(&parsed.assignee, &task.assignee);
++        prop_assert_eq!(parsed.claimed_at, task.claimed_at);
++        prop_assert_eq!(parsed.completed_at, task.completed_at);
++        prop_assert_eq!(parsed.created_at, task.created_at);
++        prop_assert_eq!(parsed.updated_at, task.updated_at);
++        prop_assert_eq!(&parsed.depends_on, &task.depends_on);
++        prop_assert_eq!(parsed.notes.len(), task.notes.len());
++        for (got, want) in parsed.notes.iter().zip(task.notes.iter()) {
++            prop_assert_eq!(&got.actor, &want.actor);
++            prop_assert_eq!(&got.body, &want.body);
++            prop_assert_eq!(got.posted_at, want.posted_at);
++        }
++    }
++}
+diff --git a/tests/common/proptest_serialize_roundtrip.txt b/tests/common/proptest_serialize_roundtrip.txt
+new file mode 100644
+index 0000000..314774b
+--- /dev/null
++++ b/tests/common/proptest_serialize_roundtrip.txt
+@@ -0,0 +1,7 @@
++# Seeds for failure cases proptest has generated in the past. It is
++# automatically read and these particular cases re-run before any
++# novel cases are generated.
++#
++# It is recommended to check this file in to source control so that
++# everyone who runs the test benefits from these saved cases.
++cc 31a67d5192518dcdecee830fac51397f9c8b7d69442daf90435ea9323c41bd94 # shrinks to task = Task { id: "tsk_AA0A00A0AAAA0AAAAA00000A0A", project: "prj_00A0A0A00AAAAA000000000000", project_slug: "a", phase: "phs_AAAAA0000AAA000000A0A0A00A", slug: "_", title: "00", body: "", status: Todo, assignee: "", claimed_at: None, completed_at: None, created_at: 1970-01-01T00:00:00Z, updated_at: 1970-01-01T00:00:00Z, notes: [Note { actor: "human:a", body: "a ", posted_at: 1970-01-01T00:00:00Z }], depends_on: [] }
+diff --git a/tests/s3_store_minio.rs b/tests/s3_store_minio.rs
+new file mode 100644
+index 0000000..20921ab
+--- /dev/null
++++ b/tests/s3_store_minio.rs
+@@ -0,0 +1,213 @@
++//! `MinIO` integration tests for `S3Store` CAS semantics.
++
++#![allow(
++    clippy::expect_used,
++    clippy::unwrap_used,
++    clippy::indexing_slicing,
++    clippy::missing_const_for_fn,
++    clippy::missing_panics_doc,
++    clippy::missing_errors_doc,
++    reason = "integration tests"
++)]
++
++use std::sync::Arc;
++
++use aws_config::BehaviorVersion;
++use aws_credential_types::Credentials;
++use aws_sdk_s3::Client;
++use chrono::Utc;
++use dossier::domain::{Artifact, Project, ProjectStatus};
++use dossier::store::{Store, StoreError, Version};
++use dossier::{S3Config, S3Store};
++use ulid::Ulid;
++
++fn endpoint_configured() -> Option<String> {
++    std::env::var("DOSSIER_S3_TEST_ENDPOINT").ok()
++}
++
++async fn test_store() -> Option<(S3Store, S3Config)> {
++    let endpoint = endpoint_configured()?;
++    let access_key = std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_owned());
++    let secret_key =
++        std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_owned());
++    let cfg = S3Config {
++        bucket: "dossier-it".to_owned(),
++        prefix: format!("it/{}", Ulid::new()),
++        endpoint_url: Some(endpoint),
++        region: "us-east-1".to_owned(),
++        access_key_id: access_key,
++        secret_access_key: secret_key,
++        force_path_style: true,
++    };
++    ensure_bucket(&cfg).await.ok()?;
++    let store = S3Store::new(cfg.clone()).await.ok()?;
++    Some((store, cfg))
++}
++
++async fn ensure_bucket(cfg: &S3Config) -> Result<(), StoreError> {
++    let creds = Credentials::new(
++        cfg.access_key_id.clone(),
++        cfg.secret_access_key.clone(),
++        None,
++        None,
++        "dossier-s3-it",
++    );
++    let shared = aws_config::defaults(BehaviorVersion::latest())
++        .region(aws_config::Region::new(cfg.region.clone()))
++        .credentials_provider(creds)
++        .load()
++        .await;
++    let mut s3_builder = aws_sdk_s3::config::Builder::from(&shared);
++    if let Some(url) = &cfg.endpoint_url {
++        s3_builder = s3_builder.endpoint_url(url);
++    }
++    s3_builder = s3_builder.force_path_style(cfg.force_path_style);
++    let client = Client::from_conf(s3_builder.build());
++    match client.create_bucket().bucket(&cfg.bucket).send().await {
++        Ok(_) => Ok(()),
++        Err(err) => {
++            let msg = format!("{err:?}");
++            if msg.contains("BucketAlreadyOwnedByYou") || msg.contains("BucketAlreadyExists") {
++                Ok(())
++            } else {
++                Err(StoreError::Unavailable)
++            }
++        }
++    }
++}
++
++fn sample_project(slug: &str) -> Project {
++    let now = Utc::now();
++    Project {
++        id: format!("prj_{}", Ulid::new()),
++        slug: slug.to_owned(),
++        title: "Integration project".to_owned(),
++        description: "CAS proof".to_owned(),
++        status: ProjectStatus::Active,
++        created_at: now,
++        updated_at: now,
++        created_by: "human:test".to_owned(),
++    }
++}
++
++#[tokio::test]
++async fn create_only_success_and_duplicate_conflict() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let project = sample_project("create-only");
++    let v0 = store.put_project(&project, None).await.expect("create");
++    assert!(!v0.as_str().is_empty());
++    let err = store.put_project(&project, None).await.unwrap_err();
++    assert!(matches!(err, StoreError::Conflict));
++}
++
++#[tokio::test]
++async fn cas_update_success_and_stale_conflict() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let mut project = sample_project("cas-update");
++    let v0 = store.put_project(&project, None).await.expect("create");
++    project.title = "Updated".to_owned();
++    let v1 = store
++        .put_project(&project, Some(v0.clone()))
++        .await
++        .expect("cas update");
++    assert_ne!(v0.as_str(), v1.as_str());
++    project.title = "Stale".to_owned();
++    let err = store.put_project(&project, Some(v0)).await.unwrap_err();
++    assert!(matches!(err, StoreError::Conflict));
++}
++
++#[tokio::test]
++async fn get_put_roundtrip_etag_stable() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let mut project = sample_project("etag-roundtrip");
++    let v0 = store.put_project(&project, None).await.expect("create");
++    let got = store.get_project(&project.slug).await.expect("get");
++    assert_eq!(got.version.as_str(), v0.as_str());
++    assert_eq!(got.value.title, project.title);
++    project.description = "mutated".to_owned();
++    store
++        .put_project(&project, Some(got.version))
++        .await
++        .expect("update with etag");
++}
++
++#[tokio::test]
++async fn update_if_absent_on_missing_key_is_not_found() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let project = sample_project("never-created");
++    let err = store
++        .put_project(&project, Some(Version::new("stale")))
++        .await
++        .unwrap_err();
++    assert!(matches!(err, StoreError::NotFound));
++}
++
++#[tokio::test]
++async fn concurrent_writer_race_exactly_one_wins() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let store = Arc::new(store);
++    for i in 0..30 {
++        let slug = format!("race-{i}");
++        let mut project = sample_project(&slug);
++        let v0 = store.put_project(&project, None).await.expect("seed");
++        project.title = format!("winner-a-{i}");
++        let mut project_b = project.clone();
++        project_b.title = format!("winner-b-{i}");
++        let store_a = Arc::clone(&store);
++        let store_b = Arc::clone(&store);
++        let v0_a = v0.clone();
++        let v0_b = v0;
++        let slug_a = slug.clone();
++        let slug_b = slug;
++        let handle_a = tokio::spawn(async move { store_a.put_project(&project, Some(v0_a)).await });
++        let handle_b =
++            tokio::spawn(async move { store_b.put_project(&project_b, Some(v0_b)).await });
++        let res_a = handle_a.await.expect("join a");
++        let res_b = handle_b.await.expect("join b");
++        let ok_count = usize::from(res_a.is_ok()) + usize::from(res_b.is_ok());
++        let conflict_count = usize::from(matches!(res_a, Err(StoreError::Conflict)))
++            + usize::from(matches!(res_b, Err(StoreError::Conflict)));
++        assert_eq!(ok_count, 1, "iteration {i}: slug {slug_a}/{slug_b}");
++        assert_eq!(conflict_count, 1, "iteration {i}");
++    }
++}
++
++#[tokio::test]
++async fn artifact_roundtrip() {
++    let Some((store, _cfg)) = test_store().await else {
++        return;
++    };
++    let project = sample_project("artifacts");
++    store
++        .put_project(&project, None)
++        .await
++        .expect("create project");
++    let artifact = Artifact {
++        id: format!("art_{}", Ulid::new()),
++        project: project.id.clone(),
++        task: String::new(),
++        kind: "commit".to_owned(),
++        reference: "abc123".to_owned(),
++        label: "test".to_owned(),
++        linked_at: Utc::now(),
++        actor: "human:test".to_owned(),
++    };
++    store.put_artifact(&artifact).await.expect("put artifact");
++    let listed = store
++        .list_artifacts(dossier::store::ArtifactListFilter {
++            project: project.slug.clone(),
++        })
++        .await
++        .expect("list artifacts");
++    assert!(listed.iter().any(|a| a.id == artifact.id));
++}

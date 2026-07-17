@@ -1,0 +1,479 @@
+diff --git a/cmd/bloxgen/main.go b/cmd/bloxgen/main.go
+index 56ef544..08d3d4f 100644
+--- a/cmd/bloxgen/main.go
++++ b/cmd/bloxgen/main.go
+@@ -73,7 +73,7 @@ func emitArtifact(emit string, in genplan.Input) error {
+ 	case "target":
+ 		return printJSON(in.Target)
+ 	case "mock":
+-		block, err := genplan.NewMock().Generate(context.Background(), in)
++		block, _, err := genplan.NewMock().Generate(context.Background(), in)
+ 		if err != nil {
+ 			return fmt.Errorf("mock generate: %w", err)
+ 		}
+diff --git a/internal/blox/api/handlers.go b/internal/blox/api/handlers.go
+index f938dc0..9355b85 100644
+--- a/internal/blox/api/handlers.go
++++ b/internal/blox/api/handlers.go
+@@ -222,7 +222,7 @@ func (h *handler) generateBlock(planID string, in genplan.Input) {
+ 	ctx, cancel := context.WithTimeout(context.Background(), GenerateTimeout)
+ 	defer cancel()
+ 	start := time.Now()
+-	block, err := h.gen.Generate(ctx, in)
++	block, usage, err := h.gen.Generate(ctx, in)
+ 	elapsed := int(time.Since(start).Milliseconds())
+ 
+ 	storeCtx, storeCancel := context.WithTimeout(context.Background(), storeWriteTimeout)
+@@ -234,6 +234,17 @@ func (h *handler) generateBlock(planID string, in genplan.Input) {
+ 		}
+ 		return
+ 	}
++	model := h.gen.Model()
++	costMicros := genplan.CostMicros(model, usage)
++	slog.Info("blox: generation usage",
++		"plan_id", planID,
++		"model", model,
++		"input_tokens", usage.InputTokens,
++		"output_tokens", usage.OutputTokens,
++		"attempts", usage.Attempts,
++		"retried", usage.Retried,
++		"cost_micros", costMicros,
++	)
+ 	if err := h.store.SetPlanReady(storeCtx, planID, block, elapsed); err != nil {
+ 		slog.Error("blox: set plan ready", "plan_id", planID, "error", err)
+ 	}
+diff --git a/internal/blox/blox.go b/internal/blox/blox.go
+index 1af15a8..eb56744 100644
+--- a/internal/blox/blox.go
++++ b/internal/blox/blox.go
+@@ -163,6 +163,17 @@ type Block struct {
+ 	RacePlan    RacePlan   `json:"race_plan"`
+ }
+ 
++// Usage is token consumption for one plan generation. OutputTokens includes
++// thinking tokens on the Anthropic SDK path.
++type Usage struct {
++	InputTokens      int
++	OutputTokens     int
++	CacheReadTokens  int
++	CacheWriteTokens int
++	Attempts         int
++	Retried          bool
++}
++
+ // Plan statuses.
+ const (
+ 	StatusGenerating = "generating"
+diff --git a/internal/blox/genplan/cost.go b/internal/blox/genplan/cost.go
+new file mode 100644
+index 0000000..3187c4d
+--- /dev/null
++++ b/internal/blox/genplan/cost.go
+@@ -0,0 +1,35 @@
++package genplan
++
++import (
++	"log/slog"
++
++	"github.com/wellness-ai/wellness-ai/internal/blox"
++)
++
++// modelRates holds USD-per-million-token pricing for one model.
++type modelRates struct {
++	inputPerM  int64 // micro-dollars per 1M input tokens
++	outputPerM int64 // micro-dollars per 1M output tokens
++}
++
++// modelRateTable is the per-model pricing used to estimate generation cost.
++// Unknown models return 0 — never guess.
++var modelRateTable = map[string]modelRates{
++	DefaultModel:        {inputPerM: 5_000_000, outputPerM: 25_000_000},  // opus-4-8: $5/$25
++	"claude-sonnet-4-6": {inputPerM: 3_000_000, outputPerM: 15_000_000}, // $3/$15
++	"claude-haiku-4-5":  {inputPerM: 1_000_000, outputPerM: 5_000_000},  // $1/$5
++}
++
++// CostMicros estimates USD cost in micro-dollars (1 USD = 1_000_000 micros)
++// from model rates and token usage. Cache tokens are captured on Usage but
++// not priced here — only billed input and output tokens count.
++func CostMicros(model string, u blox.Usage) int64 {
++	rates, ok := modelRateTable[model]
++	if !ok {
++		slog.Warn("genplan: unknown model for cost estimate", "model", model)
++		return 0
++	}
++	in := int64(u.InputTokens) * rates.inputPerM
++	out := int64(u.OutputTokens) * rates.outputPerM
++	return (in + out) / 1_000_000
++}
+diff --git a/internal/blox/genplan/cost_test.go b/internal/blox/genplan/cost_test.go
+new file mode 100644
+index 0000000..58412d2
+--- /dev/null
++++ b/internal/blox/genplan/cost_test.go
+@@ -0,0 +1,36 @@
++package genplan
++
++import (
++	"testing"
++
++	"github.com/wellness-ai/wellness-ai/internal/blox"
++)
++
++func TestCostMicros(t *testing.T) {
++	tests := []struct {
++		name  string
++		model string
++		usage blox.Usage
++		want  int64
++	}{
++		{
++			name:  "opus-4-8 input and output",
++			model: DefaultModel,
++			usage: blox.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
++			want:  30_000_000, // $5 input + $25 output
++		},
++		{
++			name:  "unknown model returns zero",
++			model: "claude-unknown-99",
++			usage: blox.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
++			want:  0,
++		},
++	}
++	for _, tc := range tests {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := CostMicros(tc.model, tc.usage); got != tc.want {
++				t.Errorf("CostMicros() = %d, want %d", got, tc.want)
++			}
++		})
++	}
++}
+diff --git a/internal/blox/genplan/genplan.go b/internal/blox/genplan/genplan.go
+index 8d2d2d3..307aa6d 100644
+--- a/internal/blox/genplan/genplan.go
++++ b/internal/blox/genplan/genplan.go
+@@ -50,7 +50,7 @@ type Input struct {
+ 
+ // Generator produces a validated training block for one athlete.
+ type Generator interface {
+-	Generate(ctx context.Context, in Input) (blox.Block, error)
++	Generate(ctx context.Context, in Input) (blox.Block, blox.Usage, error)
+ 	Model() string
+ }
+ 
+@@ -89,42 +89,57 @@ func (g *realGenerator) Model() string { return g.model }
+ // Generate renders the dossier, calls the model and validates the block.
+ // On violations it retries once with the violation list appended to the
+ // user content; a second invalid block is an error.
+-func (g *realGenerator) Generate(ctx context.Context, in Input) (blox.Block, error) {
++func (g *realGenerator) Generate(ctx context.Context, in Input) (blox.Block, blox.Usage, error) {
+ 	dossier := RenderDossier(in)
+-	block, violations, err := g.attempt(ctx, in, dossier)
++	block, usage, violations, err := g.attempt(ctx, in, dossier)
++	total := usage
++	total.Attempts = 1
+ 	if err != nil {
+-		return blox.Block{}, fmt.Errorf("generate block: %w", err)
++		return blox.Block{}, blox.Usage{}, fmt.Errorf("generate block: %w", err)
+ 	}
+ 	if len(violations) == 0 {
+-		return block, nil
++		return block, total, nil
+ 	}
+ 	retry := dossier + "\n\nYour previous output violated: " +
+ 		strings.Join(violations, "; ") +
+ 		". Regenerate the full corrected JSON."
+ 	firstViolations := strings.Join(violations, "; ")
+-	block, violations, err = g.attempt(ctx, in, retry)
++	block, usage, violations, err = g.attempt(ctx, in, retry)
++	total = addUsage(total, usage)
++	total.Attempts = 2
++	total.Retried = true
+ 	if err != nil {
+-		return blox.Block{}, fmt.Errorf("generate block retry (first attempt violated: %s): %w", firstViolations, err)
++		return blox.Block{}, blox.Usage{}, fmt.Errorf("generate block retry (first attempt violated: %s): %w", firstViolations, err)
+ 	}
+ 	if len(violations) > 0 {
+-		return blox.Block{}, fmt.Errorf("block invalid after retry: %s", strings.Join(violations, "; "))
++		return blox.Block{}, blox.Usage{}, fmt.Errorf("block invalid after retry: %s", strings.Join(violations, "; "))
++	}
++	return block, total, nil
++}
++
++// addUsage sums token fields across model calls.
++func addUsage(a, b blox.Usage) blox.Usage {
++	return blox.Usage{
++		InputTokens:      a.InputTokens + b.InputTokens,
++		OutputTokens:     a.OutputTokens + b.OutputTokens,
++		CacheReadTokens:  a.CacheReadTokens + b.CacheReadTokens,
++		CacheWriteTokens: a.CacheWriteTokens + b.CacheWriteTokens,
+ 	}
+-	return block, nil
+ }
+ 
+ // attempt makes one model call and returns the parsed block plus any
+ // validation violations. A response that is not parseable JSON is reported
+ // as a violation (so the caller's retry path can feed it back), not an error.
+-func (g *realGenerator) attempt(ctx context.Context, in Input, user string) (blox.Block, []string, error) {
+-	raw, err := callModel(ctx, g.apiKey, g.model, systemPrompt, user)
++func (g *realGenerator) attempt(ctx context.Context, in Input, user string) (blox.Block, blox.Usage, []string, error) {
++	raw, usage, err := callModel(ctx, g.apiKey, g.model, systemPrompt, user)
+ 	if err != nil {
+-		return blox.Block{}, nil, fmt.Errorf("call %s: %w", g.model, err)
++		return blox.Block{}, blox.Usage{}, nil, fmt.Errorf("call %s: %w", g.model, err)
+ 	}
+ 	var b blox.Block
+ 	if err := json.Unmarshal([]byte(extractJSON(raw)), &b); err != nil {
+-		return blox.Block{}, []string{"output was not one valid JSON object: " + err.Error()}, nil
++		return blox.Block{}, usage, []string{"output was not one valid JSON object: " + err.Error()}, nil
+ 	}
+-	return b, Validate(b, in.Target, in.Intake), nil
++	return b, usage, Validate(b, in.Target, in.Intake), nil
+ }
+ 
+ // callModel is the seam between Generate and the Anthropic API; unit tests
+@@ -133,7 +148,7 @@ var callModel = callAnthropic
+ 
+ // callAnthropic makes the streaming planning call. Adaptive thinking,
+ // streaming accumulate; never temperature/top_p (400 on opus-4-8).
+-func callAnthropic(ctx context.Context, apiKey, model, system, user string) (string, error) {
++func callAnthropic(ctx context.Context, apiKey, model, system, user string) (string, blox.Usage, error) {
+ 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
+ 	stream := client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+ 		Model:     model,
+@@ -149,11 +164,11 @@ func callAnthropic(ctx context.Context, apiKey, model, system, user string) (str
+ 	var msg anthropic.Message
+ 	for stream.Next() {
+ 		if err := msg.Accumulate(stream.Current()); err != nil {
+-			return "", fmt.Errorf("accumulate stream event: %w", err)
++			return "", blox.Usage{}, fmt.Errorf("accumulate stream event: %w", err)
+ 		}
+ 	}
+ 	if err := stream.Err(); err != nil {
+-		return "", fmt.Errorf("stream from %s: %w", model, err)
++		return "", blox.Usage{}, fmt.Errorf("stream from %s: %w", model, err)
+ 	}
+ 	var sb strings.Builder
+ 	for _, b := range msg.Content {
+@@ -161,7 +176,13 @@ func callAnthropic(ctx context.Context, apiKey, model, system, user string) (str
+ 			sb.WriteString(t.Text)
+ 		}
+ 	}
+-	return sb.String(), nil
++	usage := blox.Usage{
++		InputTokens:      int(msg.Usage.InputTokens),
++		OutputTokens:     int(msg.Usage.OutputTokens),
++		CacheReadTokens:  int(msg.Usage.CacheReadInputTokens),
++		CacheWriteTokens: int(msg.Usage.CacheCreationInputTokens),
++	}
++	return sb.String(), usage, nil
+ }
+ 
+ // extractJSON pulls the JSON object body out of a model response — the
+diff --git a/internal/blox/genplan/genplan_test.go b/internal/blox/genplan/genplan_test.go
+index 42976b2..3fabf18 100644
+--- a/internal/blox/genplan/genplan_test.go
++++ b/internal/blox/genplan/genplan_test.go
+@@ -100,8 +100,9 @@ func variantInput(days, weeks, fixCount int, withSplits bool) Input {
+ 
+ // stubResp is one canned model response for the callModel seam.
+ type stubResp struct {
+-	text string
+-	err  error
++	text  string
++	usage blox.Usage
++	err   error
+ }
+ 
+ // stubModel replaces the callModel seam for one test, recording the user
+@@ -111,11 +112,11 @@ func stubModel(t *testing.T, responses ...stubResp) *[]string {
+ 	users := &[]string{}
+ 	orig := callModel
+ 	i := 0
+-	callModel = func(_ context.Context, _, _, _, user string) (string, error) {
++	callModel = func(_ context.Context, _, _, _, user string) (string, blox.Usage, error) {
+ 		*users = append(*users, user)
+ 		r := responses[min(i, len(responses)-1)]
+ 		i++
+-		return r.text, r.err
++		return r.text, r.usage, r.err
+ 	}
+ 	t.Cleanup(func() { callModel = orig })
+ 	return users
+@@ -124,7 +125,7 @@ func stubModel(t *testing.T, responses ...stubResp) *[]string {
+ // validBlockJSON marshals the deterministic mock block for the fixture.
+ func validBlockJSON(t *testing.T, in Input) string {
+ 	t.Helper()
+-	block, err := NewMock().Generate(context.Background(), in)
++	block, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}
+@@ -138,7 +139,7 @@ func validBlockJSON(t *testing.T, in Input) string {
+ // invalidBlockJSON is a parseable block that fails validation (voice lint).
+ func invalidBlockJSON(t *testing.T, in Input) string {
+ 	t.Helper()
+-	block, err := NewMock().Generate(context.Background(), in)
++	block, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}
+@@ -175,7 +176,7 @@ func TestGenerateValidFirstTry(t *testing.T) {
+ 	in := caseyInput()
+ 	users := stubModel(t, stubResp{text: validBlockJSON(t, in)})
+ 	g := New(Config{APIKey: "k"})
+-	block, err := g.Generate(context.Background(), in)
++	block, _, err := g.Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("Generate: %v", err)
+ 	}
+@@ -194,18 +195,54 @@ func TestGenerateFencedResponse(t *testing.T) {
+ 	in := caseyInput()
+ 	fenced := "```json\n" + validBlockJSON(t, in) + "\n```"
+ 	stubModel(t, stubResp{text: fenced})
+-	if _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
++	if _, _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
+ 		t.Fatalf("Generate with fenced JSON: %v", err)
+ 	}
+ }
+ 
++func TestGenerateAccumulatesUsageOnRetry(t *testing.T) {
++	in := caseyInput()
++	stubModel(t,
++		stubResp{
++			text:  invalidBlockJSON(t, in),
++			usage: blox.Usage{InputTokens: 1000, OutputTokens: 2000, CacheReadTokens: 100},
++		},
++		stubResp{
++			text:  validBlockJSON(t, in),
++			usage: blox.Usage{InputTokens: 1500, OutputTokens: 3000, CacheWriteTokens: 50},
++		},
++	)
++	_, usage, err := New(Config{APIKey: "k"}).Generate(context.Background(), in)
++	if err != nil {
++		t.Fatalf("Generate: %v", err)
++	}
++	if usage.InputTokens != 2500 {
++		t.Errorf("InputTokens = %d, want 2500", usage.InputTokens)
++	}
++	if usage.OutputTokens != 5000 {
++		t.Errorf("OutputTokens = %d, want 5000", usage.OutputTokens)
++	}
++	if usage.CacheReadTokens != 100 {
++		t.Errorf("CacheReadTokens = %d, want 100", usage.CacheReadTokens)
++	}
++	if usage.CacheWriteTokens != 50 {
++		t.Errorf("CacheWriteTokens = %d, want 50", usage.CacheWriteTokens)
++	}
++	if usage.Attempts != 2 {
++		t.Errorf("Attempts = %d, want 2", usage.Attempts)
++	}
++	if !usage.Retried {
++		t.Error("Retried = false, want true")
++	}
++}
++
+ func TestGenerateRetriesOnViolation(t *testing.T) {
+ 	in := caseyInput()
+ 	users := stubModel(t,
+ 		stubResp{text: invalidBlockJSON(t, in)},
+ 		stubResp{text: validBlockJSON(t, in)},
+ 	)
+-	if _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
++	if _, _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
+ 		t.Fatalf("Generate: %v", err)
+ 	}
+ 	if len(*users) != 2 {
+@@ -226,7 +263,7 @@ func TestGenerateRetriesOnMalformedJSON(t *testing.T) {
+ 		stubResp{text: "sorry, here is some prose with no json"},
+ 		stubResp{text: validBlockJSON(t, in)},
+ 	)
+-	if _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
++	if _, _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in); err != nil {
+ 		t.Fatalf("Generate: %v", err)
+ 	}
+ 	if len(*users) != 2 {
+@@ -237,7 +274,7 @@ func TestGenerateRetriesOnMalformedJSON(t *testing.T) {
+ func TestGenerateFailsAfterRetry(t *testing.T) {
+ 	in := caseyInput()
+ 	users := stubModel(t, stubResp{text: invalidBlockJSON(t, in)})
+-	_, err := New(Config{APIKey: "k"}).Generate(context.Background(), in)
++	_, _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in)
+ 	if err == nil {
+ 		t.Fatal("Generate: want error after two invalid outputs")
+ 	}
+@@ -252,7 +289,7 @@ func TestGenerateFailsAfterRetry(t *testing.T) {
+ func TestGenerateWrapsModelError(t *testing.T) {
+ 	in := caseyInput()
+ 	stubModel(t, stubResp{err: errors.New("boom")})
+-	_, err := New(Config{APIKey: "k"}).Generate(context.Background(), in)
++	_, _, err := New(Config{APIKey: "k"}).Generate(context.Background(), in)
+ 	if err == nil || !strings.Contains(err.Error(), "boom") {
+ 		t.Fatalf("Generate error = %v, want wrapped boom", err)
+ 	}
+@@ -329,7 +366,7 @@ func TestMockPassesValidateAcrossInputs(t *testing.T) {
+ 		name := fmt.Sprintf("d%d_w%d_f%d_splits_%v", tc.days, tc.weeks, tc.fixes, tc.splits)
+ 		t.Run(name, func(t *testing.T) {
+ 			in := variantInput(tc.days, tc.weeks, tc.fixes, tc.splits)
+-			block, err := NewMock().Generate(context.Background(), in)
++			block, _, err := NewMock().Generate(context.Background(), in)
+ 			if err != nil {
+ 				t.Fatalf("mock generate: %v", err)
+ 			}
+@@ -342,11 +379,11 @@ func TestMockPassesValidateAcrossInputs(t *testing.T) {
+ 
+ func TestMockDeterministic(t *testing.T) {
+ 	in := caseyInput()
+-	a, err := NewMock().Generate(context.Background(), in)
++	a, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}
+-	b, err := NewMock().Generate(context.Background(), in)
++	b, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}
+@@ -357,7 +394,7 @@ func TestMockDeterministic(t *testing.T) {
+ 
+ func TestMockUsesRealNumbers(t *testing.T) {
+ 	in := caseyInput()
+-	block, err := NewMock().Generate(context.Background(), in)
++	block, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}
+diff --git a/internal/blox/genplan/mock.go b/internal/blox/genplan/mock.go
+index 6540e6d..7785bba 100644
+--- a/internal/blox/genplan/mock.go
++++ b/internal/blox/genplan/mock.go
+@@ -24,12 +24,16 @@ type mockGenerator struct{}
+ func (mockGenerator) Model() string { return "mock" }
+ 
+ // Generate builds the deterministic block.
+-func (mockGenerator) Generate(_ context.Context, in Input) (blox.Block, error) {
++func (mockGenerator) Generate(_ context.Context, in Input) (blox.Block, blox.Usage, error) {
+ 	return blox.Block{
+ 		CoachLetter: coachLetter(in),
+ 		Fixes:       blockFixes(in.Target),
+ 		Weeks:       buildWeeks(in),
+ 		RacePlan:    buildRacePlan(in.Target),
++	}, blox.Usage{
++		InputTokens:  1200,
++		OutputTokens: 8500,
++		Attempts:     1,
+ 	}, nil
+ }
+ 
+diff --git a/internal/blox/genplan/validate_test.go b/internal/blox/genplan/validate_test.go
+index 53d3279..056a34b 100644
+--- a/internal/blox/genplan/validate_test.go
++++ b/internal/blox/genplan/validate_test.go
+@@ -11,7 +11,7 @@ import (
+ // freshBlock builds a known-valid block from the fixture for mutation.
+ func freshBlock(t *testing.T, in Input) blox.Block {
+ 	t.Helper()
+-	block, err := NewMock().Generate(context.Background(), in)
++	block, _, err := NewMock().Generate(context.Background(), in)
+ 	if err != nil {
+ 		t.Fatalf("mock generate: %v", err)
+ 	}

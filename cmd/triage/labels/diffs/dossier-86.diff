@@ -1,0 +1,103 @@
+diff --git a/.cursor/agents/code-reviewer.md b/.cursor/agents/code-reviewer.md
+index 4f1746c..40a5a17 100644
+--- a/.cursor/agents/code-reviewer.md
++++ b/.cursor/agents/code-reviewer.md
+@@ -7,7 +7,7 @@ model: inherit
+ Review the diff for bugs, security issues, edge cases, and adherence to
+ `CLAUDE.md` + the following operator conventions:
+ 
+-- **Samurai-sword:** prefer narrow single-purpose tools; resist scope creep; defer framework-y abstractions until a second concrete use case forces them.
++- **Right-sized tools:** prefer narrow single-purpose tools; add a framework-y abstraction when a second concrete use case calls for it — sequence capability to evidence, don't pre-build it or forbid it for good.
+ - **Naming:** no `And` / `Or` in function or method names (split into intent verbs); no `Impl` suffix on symbols; no generic package or module names like `shared` / `common` / `utils` / `helpers` (use specific names).
+ - **Doc-first:** non-trivial work has a phase doc in `docs/features/<feature>/phases/<NN>-<slug>.md` with the standard sections (Status / Owner / Scope / Functional / Tradeoffs / EDs / Validation / Risks / Out-of-scope / Implementation plan) BEFORE code is written.
+ - **PR sizing:** target weighted-LOC budgets — <500 amazing / <700 ideal / <1000 stretch. Production source 1.0×; tests and fixtures 0.5×; lockfiles, generated, configs, docs 0×.
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 4e9d195..602a1dd 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -23,8 +23,9 @@ validation is enforced on every create path.
+ 
+ `artifact.link` is the next chunk (~80 LOC). After that: a
+ `dossier init` / `sync` CLI that scaffolds a fresh corpus from
+-an existing repo. Conflict detection and other "enterprise" verbs are
+-explicitly deferred — see [docs/vision.md](docs/vision.md).
++an existing repo. Conflict detection and other multi-writer verbs aren't here yet — they
++land when a real workflow needs them, in the right order (see
++[docs/vision.md](docs/vision.md)).
+ 
+ <!-- BEGIN dev-workbench (managed by /dev-workbench skill — re-run to refresh; hand-edits inside this block will be overwritten) -->
+ ## Dev workbench
+@@ -207,7 +208,7 @@ direction, lift the shared concern into `domain`.
+ 
+ ## Docs
+ 
+-- [docs/vision.md](docs/vision.md) — what dossier is, why, what we're explicitly NOT building. Read first.
++- [docs/vision.md](docs/vision.md) — what dossier is, why, and how it sequences what to build next. Read first.
+ - [PROTOCOL.md](PROTOCOL.md) — data model: primitives, verbs, task state machine.
+ - [LAYOUT.md](LAYOUT.md) — on-disk corpus convention: directory tree, frontmatter shape, append-only `artifacts.jsonl`, concurrency assumptions.
+ - [docs/features/&lt;feature&gt;/spec.md](docs/features/) — design spec per feature (problem, scope, decisions, acceptance).
+@@ -398,8 +399,12 @@ machine, single schema you can't ship half of, etc.).
+   state machine" → stop. The state machine is the protocol. Add an
+   enforcement test if you can't see why.
+ - "I want to add a feature that pulls dossier toward generic doc
+-  storage / Notion / RAG" → stop. dossier is opinionated PM. Generic doc
+-  store is explicitly out of scope; see PROTOCOL.md "Out of scope (v0)".
++  storage / Notion / RAG" → pause and check the fit. dossier is
++  opinionated project memory; a generic doc store is a different shape,
++  and semantic retrieval composes better in the LLM that queries the
++  corpus (see PROTOCOL.md "Not in v0"). If a real workflow keeps needing
++  it here, that's the signal to design it in — deliberately, not by
++  default.
+ - "Tests pass on Linux, fail on Windows" → most likely a path
+   separator (`/` vs `\`) or line-ending (CRLF) assumption. Use
+   `Path::join` and `lines()` rather than splitting on `\n`.
+diff --git a/PROTOCOL.md b/PROTOCOL.md
+index ea3fb1f..c7feda8 100644
+--- a/PROTOCOL.md
++++ b/PROTOCOL.md
+@@ -173,21 +173,31 @@ This document is `v0` — pre-1.0. Tool names and field names may change
+ between revisions. When dossier picks up an external consumer that
+ needs version stability, this section grows; today it doesn't.
+ 
+-## Out of scope (v0)
++## Not in v0
+ 
+-Deliberately not built. See [docs/vision.md](docs/vision.md) for the
+-"samurai sword, not swiss army" framing.
++What the v0 surface leaves out, and why. These are where the work sits
++today — not a list of things dossier refuses to build. The core earns
++the next capability when a real workflow keeps hitting the wall it
++solves; see [docs/vision.md](docs/vision.md) for the "samurai = mastery
+++ sequencing" framing.
++
++Some jobs compose better *outside* dossier than inside it:
++
++- **Semantic query / vector / RAG** — literal substring `search` ships;
++  the embedding index and semantic retrieval belong to whatever LLM
++  queries the corpus, not the store.
++- **Decisions** as a first-class primitive — today a task or an
++  `artifact` of kind `doc` carries them.
++
++The rest are sequencing calls — not yet needed at solo scale, added when
++the evidence shows up:
+ 
+-- **Semantic query / vector / RAG inside dossier** — literal substring
+-  `search` ships; embedding indexes and semantic retrieval stay in the
+-  LLM consumer, not the store.
+ - **Conflict detection** (multi-claim, slug similarity, stale claims) —
+-  enterprise problem; solo dev doesn't have it.
+-- **Decisions** as a first-class primitive — use a task or an
+-  artifact-of-kind=doc.
+-- **Cross-project links / dependencies** — keep projects independent.
++  a multi-writer concern; a solo corpus doesn't hit it yet.
++- **Cross-project links / dependencies** — projects stay independent
++  until a workflow genuinely spans them.
+ - **Permissions / multi-tenant auth** — solo today.
+-- **Notifications / subscriptions / streaming** — poll.
+-- **Rich attachments** — use artifacts pointing at external storage.
+-- **Time tracking, estimates, sprints** — workflow conventions on top,
+-  not primitives.
++- **Notifications / subscriptions / streaming** — poll for now.
++- **Rich attachments** — artifacts point at external storage instead.
++- **Time tracking, estimates, sprints** — workflow conventions on top of
++  the primitives, not primitives themselves.

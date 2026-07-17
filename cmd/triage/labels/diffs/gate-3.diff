@@ -1,0 +1,346 @@
+diff --git a/internal/verify/readiness.go b/internal/verify/readiness.go
+index e1e2faa..2cfa9b4 100644
+--- a/internal/verify/readiness.go
++++ b/internal/verify/readiness.go
+@@ -3,6 +3,7 @@ package verify
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"strings"
+ 
+ 	"github.com/itsHabib/gate/internal/state"
+ )
+@@ -56,8 +57,8 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
+ 	}
+ 	// The review decision is GitHub's own merge-policy readback. An explicit
+ 	// CHANGES_REQUESTED, a missing required approval, or any state this code
+-	// doesn't know blocks — resolve it on GitHub, not past it. Empty means
+-	// the repo requires no reviews; merged subjects are historical.
++	// doesn't know blocks — resolve it on GitHub, not past it. Empty is not a
++	// block but is not green either: it escalates below, alongside empty CI.
+ 	if pv.State != "MERGED" && pv.ReviewDecision != "" && pv.ReviewDecision != "APPROVED" {
+ 		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
+ 	}
+@@ -76,12 +77,24 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
+ 		art, err := Record(st, run, []string{viewEvidenceID}, v)
+ 		return art, subject, err
+ 	}
+-	// An empty rollup means CI never ran — never-triggered checks must not
+-	// read as green. Escalate rather than block: a judge may know the repo
+-	// genuinely has no CI.
++	// Absence of signal must not read as green. An empty rollup means CI
++	// never ran; an empty reviewDecision means GitHub reported no live merge
++	// policy — on an unprotected repo that would otherwise pass silently.
++	// Escalate rather than block: a judge may know the repo genuinely has no
++	// CI or requires no reviews. If both hold, one escalate naming the
++	// reasons is enough. The reviewDecision branch is MERGED-exempt (a
++	// backtested PR has no live review signal), mirroring the block checks
++	// above; the empty-CI branch is not, matching its long-standing behavior.
++	var escalations []string
+ 	if len(pv.StatusCheckRollup) == 0 {
++		escalations = append(escalations, "no CI checks recorded for this head")
++	}
++	if pv.State != "MERGED" && pv.ReviewDecision == "" {
++		escalations = append(escalations, "no review decision reported by GitHub")
++	}
++	if len(escalations) > 0 {
+ 		v.Decision = DecisionEscalate
+-		v.Why = "no CI checks recorded for this head — cannot verify readiness"
++		v.Why = strings.Join(escalations, "; ") + " — cannot verify readiness"
+ 		art, err := Record(st, run, []string{viewEvidenceID}, v)
+ 		return art, subject, err
+ 	}
+diff --git a/internal/verify/reviews.go b/internal/verify/reviews.go
+index 44b12b9..f52dc6e 100644
+--- a/internal/verify/reviews.go
++++ b/internal/verify/reviews.go
+@@ -109,7 +109,12 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject) (
+ 
+ 	switch {
+ 	case processed == 0:
+-		v.Why = "no bot findings to consolidate"
++		// An empty panel is not a reviewed panel: a PR opened minutes ago,
++		// before any bot has run, must not read as consolidated. Escalate
++		// (the local rung's fail-closed) rather than pass — a judge can
++		// confirm the panel is genuinely empty.
++		v.Decision = DecisionEscalate
++		v.Why = "no bot review comments yet — cannot consolidate a panel"
+ 	case actionable > 0 || lowConf > 0:
+ 		v.Decision = DecisionEscalate
+ 		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment", processed, actionable, lowConf)
+diff --git a/internal/verify/verify.go b/internal/verify/verify.go
+index dc858ff..12061ad 100644
+--- a/internal/verify/verify.go
++++ b/internal/verify/verify.go
+@@ -55,6 +55,14 @@ const (
+ 	DecisionPass     = "pass"
+ )
+ 
++// knownDecision reports whether d is a decision the ladder defines. Reduce
++// refuses any other value — including the empty zero value a drifted or foreign
++// artifact leaves — rather than letting it fall through to pass. Unknown
++// decisions fail closed, like unknown producer classes and tiers.
++func knownDecision(d string) bool {
++	return d == DecisionBlock || d == DecisionEscalate || d == DecisionPass
++}
++
+ // ErrLocalBlock fires when a local-model verifier tries to block — a ladder-law
+ // violation the reducer refuses structurally, not by convention.
+ var ErrLocalBlock = errors.New("ladder_violation_local_block")
+@@ -64,6 +72,18 @@ var ErrLocalBlock = errors.New("ladder_violation_local_block")
+ // a fail-open — so the reducer refuses instead.
+ var ErrUnknownProducer = errors.New("unknown_producer_class")
+ 
++// ErrUnknownDecision fires when a verdict carries a decision the ladder does
++// not define. The reducer already fails closed on an unknown producer class and
++// an unknown tier; a decision it cannot reason about — including the zero value
++// an empty or drifted artifact leaves — is no different. Absence of a real
++// decision is absence of signal, and must never fall through to a pass.
++var ErrUnknownDecision = errors.New("unknown_decision")
++
++// noFloorWhy is the reason Reduce escalates when the set carries no code-class
++// verdict. Absence of the deterministic floor must never read as green — the
++// same fail-open shape as a never-triggered CI check passing.
++const noFloorWhy = "no code-floor verdict present — cannot verify readiness"
++
+ // Subject names what a verdict is about.
+ type Subject struct {
+ 	Repo    string `json:"repo"`
+@@ -95,6 +115,11 @@ type Verdict struct {
+ 
+ // Reduce composes verdicts monotonically into one. Verdict order does not
+ // matter; only producer class and decision do.
++//
++// A code-class verdict must be present for the result to pass: absence of the
++// deterministic floor escalates (never passes), and no judgment verdict can
++// substitute for it. This invariant lives here, not in the caller's rung
++// ordering, so a pass can never be composed from nothing observed.
+ func Reduce(subject Subject, verdicts []Verdict) (Verdict, error) {
+ 	out := Verdict{
+ 		Subject:    subject,
+@@ -106,13 +131,22 @@ func Reduce(subject Subject, verdicts []Verdict) (Verdict, error) {
+ 	}
+ 	var judged *Verdict
+ 	var escalations []string
++	var hasCode bool
+ 	for i, v := range verdicts {
+ 		if !isCode(v) && !isLocal(v) && !isJudgment(v) {
+ 			return Verdict{}, fmt.Errorf("%w: %q from %s", ErrUnknownProducer, v.Producer.Class, v.Source)
+ 		}
++		// A verdict whose decision the ladder cannot name is nothing observed,
++		// not a pass — fail closed before any of it counts toward the outcome.
++		if !knownDecision(v.Decision) {
++			return Verdict{}, fmt.Errorf("%w: %q from %s", ErrUnknownDecision, v.Decision, v.Source)
++		}
+ 		if isLocal(v) && v.Decision == DecisionBlock {
+ 			return Verdict{}, fmt.Errorf("%w: %s", ErrLocalBlock, v.Source)
+ 		}
++		if isCode(v) {
++			hasCode = true
++		}
+ 		if tierRank(v.Tier) > tierRank(out.Tier) {
+ 			out.Tier = v.Tier
+ 		}
+@@ -133,6 +167,15 @@ func Reduce(subject Subject, verdicts []Verdict) (Verdict, error) {
+ 	if out.Decision == DecisionBlock {
+ 		return out, nil
+ 	}
++	// Floor-presence dominates the pass path — and the judgment carve-out
++	// below. Absence of a code-class verdict must never read as green, and a
++	// judgment pass must not be able to launder a missing floor. Resolved
++	// before the judgment step so it cannot turn this green.
++	if !hasCode {
++		out.Decision = DecisionEscalate
++		out.Why = join(out.Why, noFloorWhy)
++		return out, nil
++	}
+ 	if judged != nil {
+ 		out.Decision = judged.Decision
+ 		out.Why = join(out.Why, "judgment: "+judged.Why)
+diff --git a/internal/verify/verify_test.go b/internal/verify/verify_test.go
+index e4c549a..16cc8cd 100644
+--- a/internal/verify/verify_test.go
++++ b/internal/verify/verify_test.go
+@@ -42,6 +42,7 @@ func TestReduceLocalCannotBlock(t *testing.T) {
+ 
+ func TestReduceJudgmentResolvesEscalation(t *testing.T) {
+ 	got, err := Reduce(subj, []Verdict{
++		{Source: "readiness", Producer: code, Decision: DecisionPass, Tier: "T0", Confidence: 1},
+ 		{Source: "review-consolidation", Producer: local, Decision: DecisionEscalate, Tier: "T1", Confidence: 0.5},
+ 		{Source: "operator", Producer: judgment, Decision: DecisionPass, Tier: "T0", Confidence: 1, Why: "findings addressed"},
+ 	})
+@@ -77,6 +78,7 @@ func TestReduceEscalationParksWithoutJudgment(t *testing.T) {
+ 
+ func TestReduceClassIgnoresImpl(t *testing.T) {
+ 	got, err := Reduce(subj, []Verdict{
++		{Source: "readiness", Producer: Producer{Class: ClassCode, Impl: "gh-readback"}, Decision: DecisionPass, Tier: "T0", Confidence: 1},
+ 		{Source: "review-consolidation", Producer: Producer{Class: ClassLocal, Impl: "some-other-model"}, Decision: DecisionEscalate, Tier: "T0", Confidence: 0.8},
+ 		{Source: "auto-judge", Producer: Producer{Class: ClassJudgment, Impl: "claude-cli"}, Decision: DecisionPass, Tier: "T0", Confidence: 0.9, Why: "nits only"},
+ 	})
+@@ -103,6 +105,78 @@ func TestReduceUnknownProducerClassFailsClosed(t *testing.T) {
+ 	}
+ }
+ 
++// A verdict whose decision the ladder cannot name must fail closed, not fall
++// through to pass — the same posture as an unknown producer class or tier. A
++// code verdict carrying the empty zero value (a drifted or foreign artifact
++// read back from the log) is the load-bearing case: presence of the class must
++// not license a pass its decision never granted.
++func TestReduceUnknownDecisionFailsClosed(t *testing.T) {
++	for _, dec := range []string{"", "approved", "ok", "merge", "totally-unknown"} {
++		_, err := Reduce(subj, []Verdict{
++			{Source: "readiness", Producer: code, Decision: dec, Tier: "T0", Confidence: 1},
++		})
++		if !errors.Is(err, ErrUnknownDecision) {
++			t.Fatalf("code verdict with decision %q must fail closed with ErrUnknownDecision, got %v", dec, err)
++		}
++	}
++}
++
++// The floor-presence invariant lives in Reduce, not in the caller's rung
++// order: an empty set, or any set without a code-class verdict, must escalate
++// rather than compose a pass from nothing observed. These pin that directly,
++// with no reference to cmd/gate's call sequence.
++func TestReduceNilEscalatesNotPass(t *testing.T) {
++	got, err := Reduce(subj, nil)
++	if err != nil {
++		t.Fatalf("Reduce(nil) must not error: %v", err)
++	}
++	if got.Decision == DecisionPass {
++		t.Fatalf("Reduce(nil) auto-passed on an empty set (fail-open): %s", got.Why)
++	}
++	if got.Decision != DecisionEscalate {
++		t.Fatalf("Reduce(nil) must escalate, got %s", got.Decision)
++	}
++}
++
++func TestReduceNoCodeFloorEscalatesEvenWithJudgmentPass(t *testing.T) {
++	got, err := Reduce(subj, []Verdict{
++		{Source: "review-consolidation", Producer: local, Decision: DecisionPass, Tier: "T0", Confidence: 1},
++		{Source: "operator", Producer: judgment, Decision: DecisionPass, Tier: "T0", Confidence: 1, Why: "lgtm"},
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Decision != DecisionEscalate {
++		t.Fatalf("a judgment pass laundered a missing code floor: %s (%s)", got.Decision, got.Why)
++	}
++}
++
++func TestReduceHealthyFloorStillPasses(t *testing.T) {
++	got, err := Reduce(subj, []Verdict{
++		{Source: "readiness", Producer: code, Decision: DecisionPass, Tier: "T0", Confidence: 1},
++		{Source: "review-consolidation", Producer: local, Decision: DecisionPass, Tier: "T0", Confidence: 1},
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Decision != DecisionPass {
++		t.Fatalf("healthy set with a code floor must still pass, got %s (%s)", got.Decision, got.Why)
++	}
++}
++
++func TestReduceCodeBlockDominatesMissingFloorCarveout(t *testing.T) {
++	got, err := Reduce(subj, []Verdict{
++		{Source: "readiness", Producer: code, Decision: DecisionBlock, Tier: "T0", Confidence: 1, Why: "red check"},
++		{Source: "operator", Producer: judgment, Decision: DecisionPass, Tier: "T0", Confidence: 1, Why: "override"},
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Decision != DecisionBlock {
++		t.Fatalf("a code block must still dominate, got %s (%s)", got.Decision, got.Why)
++	}
++}
++
+ func TestRollupCheckFailsClosed(t *testing.T) {
+ 	green := []rollupCheck{
+ 		{Conclusion: "SUCCESS"},
+@@ -171,6 +245,42 @@ func readinessFor(t *testing.T, view map[string]any) Verdict {
+ 	return v
+ }
+ 
++func reviewsFor(t *testing.T, comments []map[string]any) Verdict {
++	t.Helper()
++	st, err := state.Open(t.TempDir(), time.Now)
++	if err != nil {
++		t.Fatal(err)
++	}
++	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"comments": comments})
++	if err != nil {
++		t.Fatal(err)
++	}
++	art, err := Reviews(st, "run_t", evd.ID, subj)
++	if err != nil {
++		t.Fatal(err)
++	}
++	v, err := Load(art)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return v
++}
++
++func TestReviewsEmptyPanelEscalates(t *testing.T) {
++	// A genuinely empty panel and a panel with only a human comment both
++	// consolidate zero bot comments — neither may read as reviewed.
++	v := reviewsFor(t, nil)
++	if v.Decision != DecisionEscalate {
++		t.Fatalf("empty review panel must escalate, got %s (%s)", v.Decision, v.Why)
++	}
++	v = reviewsFor(t, []map[string]any{
++		{"author": "alice", "is_bot": false, "body": "human note, not a bot"},
++	})
++	if v.Decision != DecisionEscalate {
++		t.Fatalf("panel with no bot comments must escalate, got %s (%s)", v.Decision, v.Why)
++	}
++}
++
+ func TestReadinessReviewDecisionBlocks(t *testing.T) {
+ 	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
+ 	v := readinessFor(t, map[string]any{
+@@ -217,11 +327,43 @@ func TestReadinessUnknownMergeabilityBlocksOpenPRs(t *testing.T) {
+ 
+ func TestReadinessEmptyRollupEscalates(t *testing.T) {
+ 	v := readinessFor(t, map[string]any{
+-		"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": []map[string]any{},
++		"state": "OPEN", "mergeable": "MERGEABLE",
++		"reviewDecision": "APPROVED", "statusCheckRollup": []map[string]any{},
+ 	})
+ 	if v.Decision != DecisionEscalate {
+ 		t.Fatalf("empty rollup must escalate, got %s (%s)", v.Decision, v.Why)
+ 	}
++
++	// The empty-CI branch is not MERGED-exempt: a backtested PR with no
++	// recorded checks still cannot verify readiness. Pins the long-standing
++	// behavior against drift now that a MERGED-exempt reviewDecision branch
++	// sits beside it.
++	v = readinessFor(t, map[string]any{
++		"state": "MERGED", "mergeable": "MERGEABLE",
++		"reviewDecision": "APPROVED", "statusCheckRollup": []map[string]any{},
++	})
++	if v.Decision != DecisionEscalate {
++		t.Fatalf("merged subject with empty rollup must still escalate, got %s (%s)", v.Decision, v.Why)
++	}
++}
++
++func TestReadinessEmptyReviewDecisionEscalates(t *testing.T) {
++	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
++	v := readinessFor(t, map[string]any{
++		"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": greenCheck,
++	})
++	if v.Decision != DecisionEscalate {
++		t.Fatalf("empty reviewDecision on an open PR must escalate, got %s (%s)", v.Decision, v.Why)
++	}
++
++	// A merged (backtested) subject has no live review decision and must not
++	// newly escalate on that basis — same exemption as the block checks.
++	v = readinessFor(t, map[string]any{
++		"state": "MERGED", "mergeable": "MERGEABLE", "statusCheckRollup": greenCheck,
++	})
++	if v.Decision != DecisionPass {
++		t.Fatalf("merged subject with empty reviewDecision must not newly escalate, got %s (%s)", v.Decision, v.Why)
++	}
+ }
+ 
+ func TestJudgeContextNeutralizesMarkers(t *testing.T) {

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "escalate":   {"type": "string", "enum": ["none", "T2", "T3"]},
+    "trigger":    {"type": "string", "enum": ["none", "trust-boundary-widening", "production-default", "invariant-relocation"]},
+    "evidence":   {"type": "string"},
+    "confidence": {"type": "number"}
+  },
+  "required": ["escalate", "trigger", "evidence", "confidence"]
+}

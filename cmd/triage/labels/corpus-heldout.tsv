@@ -1,0 +1,36 @@
+# Held-out corpus (2026-07-08). 30 portfolio PRs NOT in corpus-e01 — the floor's precision gate.
+# Two rubric-blind labelers (A,B), same neutral "how much review?" prompt as Experiment 01.
+# consensus = agreed tier; where A!=B both are shown and the higher is the safe default.
+# Labels produced blind (labelers read only the vendored diffs + titles), before any floor comparison.
+# Agreement 25/30, every disagreement ±1 (E01: 20/24) — same oracle noise floor.
+# pr	labelA	labelB	consensus	note
+ship#170	T1	T1	T1	--runtime rooms CLI flag; guarded, well-tested, contained
+ship#172	T2	T2	T2	cloud-control-plane TDD: merge authority + trust ladder (plan-of-record doc)
+ship#176	T2	T2	T2	gateway auth carrier into runner env + 401/403 taxonomy
+ship#177	T2	T2	T2	driver auto-flips draft PRs to ready (verified write automation)
+ship#178	T2	T2	T2	escalation rows + operator notify exec hook + migration 0013
+ship#180	T1	T2	T2?	branch-continuation dispatch + schema column (A=peer, B=owner)
+ship#181	T0	T0	T0	tests + phase doc only
+ship#182	T1	T1	T1	doc amendment redirecting merge-authority plan (plan-of-record)
+dossier#81	T1	T1	T1	E2E tests + new dev-only deps (rmcp, tokio features)
+dossier#84	T2	T2	T2	task state-machine compound transition semantics
+dossier#86	T0	T0	T0	pure docs reframing
+dossier#90	T2	T2	T2	ETag/version re-pairing feeding CAS
+rooms#50	T3	T3	T3	sandbox escape-detection gate; miss fails open
+rooms#51	T2	T2	T2	gc reaper deletes room state; misjudgment kills live rooms
+rooms#56	T2	T2	T2	concurrent slot allocator feeding network slots
+rooms#59	T3	T3	T3	host iptables isolation chain + sudo network scripts
+rooms#62	T1	T2	T2?	doctor-as-gate boot-or-abort; fail-open load-bearing (A=peer, B=owner)
+rooms#64	T2	T2	T2	isolation predicates certify firewall; weak predicate passes broken isolation
+rooms#65	T1	T1	T1	one doctor check fail→warn
+gate#3	T3	T3	T3	merge-gate verifier fail-open closures (merge machinery)
+gate#5	T3	T3	T3	merge-capability enforcement + grant minting
+gate#9	T3	T3	T3	HMAC grant pre-image + exit-code contract (signed merge authority)
+roxiq#123	T2	T2	T2	prod index-only migration + stats query rewrite
+roxiq#126	T2	T2	T2	required CI gate guarding prod secrets
+roxiq#127	T2	T1	T2?	sandbox terraform secret passing (A=owner, B=peer)
+roxiq#132	T2	T1	T2?	deterministic decision-matrix driving prod recovery (A=owner, B=peer)
+huddle#19	T1	T1	T1	tokenless startup for local-only verbs
+huddle#20	T1	T1	T1	state-dir logging + default dir rename
+tracelens#5	T1	T2	T2?	verdict wire contract feeding the merge gate (A=peer, B=owner)
+wellness-ai#1	T1	T1	T1	token usage/cost telemetry plumbing

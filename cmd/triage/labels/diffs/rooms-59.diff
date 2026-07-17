@@ -1,0 +1,2603 @@
+diff --git a/docs/features/multi-room-pool/pool-tap-lifecycle-fwd-chain.md b/docs/features/multi-room-pool/pool-tap-lifecycle-fwd-chain.md
+new file mode 100644
+index 0000000..391b5e6
+--- /dev/null
++++ b/docs/features/multi-room-pool/pool-tap-lifecycle-fwd-chain.md
+@@ -0,0 +1,68 @@
++**Status**: draft
++**Owner**: @claude-code:michael
++**Date**: 2026-07-02
++**Related**: dossier task `pool-tap-lifecycle-fwd-chain` (id: `tsk_01KWFVK8A552FGJCDYP193S5QE`), [multi-room pool TDD](spec.md) §4 D2/D4, §7.1–7.3, §8
++
++# P2: per-room tap lifecycle + ROOMS_FWD chain + setup-tap.sh --host split — design spec
++
++## Scope
++
++| Bucket | Files | Est. LOC | Weighted |
++|---|---|---|---|
++| Production source | `src/main.rs`, `src/firecracker.rs`, `src/registry.rs`, `src/slot.rs`, `src/doctor.rs`, `src/config.rs`, `scripts/setup-tap.sh` | ~400 | 400 |
++| Tests | guard-unwind + reap-order units (fake command layer), e2e (feature-gated) | ~400 | 200 |
++| **Total** | | | **~600** |
++
++Band: **ideal** (< 700). TDD §9 estimates P2 at ~450–650 weighted.
++
++## Goal
++
++Networking is host-once-per-tap today: `setup-tap.sh` creates the single shared `tap-fc0` and appends 5 FORWARD rules per tap into the global chain. This unit moves tap creation into the boot path (per-slot values), grows every teardown path to delete the tap and free the slot, and replaces per-tap firewall appends with the O(1) `ROOMS_FWD` chain. After this unit a single room boots on a pool slot end-to-end.
++
++## Behavior
++
++### Boot path (TDD §7.1)
++
++0. `main.rs` mints the room id **before** the claim (`RoomId::new`/`as_str` become `pub(crate)`, minting moves up out of `boot`) — the same id value is the slot-file contents, the room dir name, and `room.json.id`.
++1. `slot::claim(state, id, me, cap)` — `me` is this process's `(pid, starttime)` identity.
++2. Create the slot's tap: `ip tuntap add tap-fc<k> mode tap user firecracker`, `ip addr add <gw>/30`, link up, per-tap forwarding sysctl (the four operations `setup-tap.sh` does today, moved into the binary with slot values).
++3. Build `NetworkConfig` from the slot. `NetworkConfig` gains `prefix: u8`; `build_boot_args` stops hardcoding `255.255.255.0` and interpolates a dotted-quad netmask via a named `prefix → dotted-quad` conversion at the `NetworkConfig`→boot-args boundary (`30 → 255.255.255.252`).
++4. `RoomGuard::set_tap_owned(true)`; write `slot` into `room.json` **before** the firecracker spawn.
++5. Failure at any step ≥ 2 unwinds in reverse via the existing guard (tap delete if created, then `slot::free(k, id)`) — the guard grows two steps.
++
++### Teardown / kill / gc (TDD §7.2–7.3)
++
++All three converge on `reap_orphan`. It grows: **gate the slot release on `reap_orphan` returning `Ok(())`** — if reap preserved the room dir (stranded-mount case), the slot stays claimed for a later retry. On clean reap: delete the tap (`ip link del`, tolerate already-gone), then `slot::free(k, this_room_id)` — compare-and-delete, so a reclaimed-and-reassigned index is left untouched (`AlreadyReassigned`). Order is tap-then-slot-file so a crash mid-reap leaves the slot file as the breadcrumb.
++
++gc wires `slot::reconcile`: liveness comes from the slot file's own claimer token, probed with the same `(pid, starttime)` identity check `room::probe`/`terminate_by_identity` use. Confirmed-dead → reclaim (tap delete tolerate-gone, slot file removed, **room dir removed/tombstoned if present** so one corpse can't drive two frees). Alive or unknown → never reclaim. Claim-in-progress files (empty/short) → skip. Live rooms are never touched; the pid-identity probe is the authority.
++
++Legacy no-slot rooms reap exactly as today (`tap_owned=false` → shared tap untouched).
++
++### setup-tap.sh split (TDD §4 D2/D4)
++
++- `--host` installs the once-per-host substrate, idempotently: `-I FORWARD 1 -j ROOMS_FWD` (**inserted at position 1**, not appended — a pre-existing broad FORWARD ACCEPT must not preempt isolation); inside `ROOMS_FWD`, source/dest-qualified by the `172.16.0.0/24` supernet: RFC1918 DROPs (guest→LAN), the **guest→guest isolation DROP** (`-s 172.16.0.0/24 -d 172.16.0.0/24`), guest→out ACCEPT, established-return ACCEPT **keeping its `-i <out_iface>` ingress scope**, and a self-terminating `-s 172.16.0.0/24 -j DROP` tail. NAT: one `POSTROUTING -s 172.16.0.0/24 -o <out> -j MASQUERADE`. Recorded sysctls. Include the version/supernet **marker rule** doctor keys on.
++- `--host --teardown` flushes + removes the chain and restores recorded sysctls.
++- The per-tap single-tap mode (env-tunable) is **deleted**, not kept as a parallel path.
++
++### Doctor (TDD §6)
++
++Read-only checks: `ROOMS_FWD` installed **and matches the allocator supernet** (marker rule, not existence-only); `slots/` present + local-filesystem + writable (the O_EXCL atomicity assumption, §4 D3); orphaned-tap flag (`tap-fc<k>` with no live room). Doctor flags; gc acts. Degraded mode: chain missing → boot fails at the doctor-precheck with the exact `setup-tap.sh --host` remediation, before a slot is claimed.
++
++## Acceptance
++
++- Host-e2e: single room boots on slot 1, task runs with egress, reap leaves `ip link` / `slots/` / `iptables -L ROOMS_FWD` byte-identical to pre-run.
++- Kill and gc paths both free tap + slot; a fabricated orphan (slot file + dead claimer) is reclaimed by gc and flagged by doctor.
++- Legacy no-slot rooms reap exactly as today.
++- Guard unwind order verified: boot failure after tap create deletes the tap then frees the slot.
++
++## Test plan
++
++Unit tests for the guard unwind ordering + reap steps against a fake command layer (CI-runnable, `make check` green — cloud agent VMs have no KVM, per repo gotchas). Host-e2e (`cargo test --features e2e`) written by this unit but **executed on rooms-host as the batch gate**, not in the agent's sandbox.
++
++## Review posture
++
++Root-touching firewall + teardown-safety surface; crash windows (TDD §8) must be reconcilable without a human. Per the gate-change convention this PR gets an **adversarial Workflow pass before merge** (skeptics briefed to escape the /30, reach a sibling guest, leak a slot) in addition to the bot panel.
++
++## Out of scope
++
++Concurrency cap + `PoolFull` exit-code/`--json` surfacing at the CLI (P3); snapshots re-attach (own TDD). Design: [spec.md](spec.md) §4 D2/D4, §7.1–7.3, §8.
+diff --git a/scripts/setup-tap.sh b/scripts/setup-tap.sh
+index ba48380..b3d8d6d 100644
+--- a/scripts/setup-tap.sh
++++ b/scripts/setup-tap.sh
+@@ -1,27 +1,48 @@
+ #!/usr/bin/env bash
+-# Create the TAP device that Firecracker microVMs use as their NIC.
++# Install the once-per-host networking substrate for the rooms pool.
+ # Idempotent — safe to re-run. Requires sudo.
+ #
+-# Layout:
+-#   - tap-fc0   (host's end of the wire, 172.16.0.1)
+-#   - guest's eth0 will be 172.16.0.2 (configured via kernel cmdline)
+-#   - outbound packets get NAT'd through the host's real interface
++# The per-room taps (tap-fc<k>, one /30 per slot) are created in the boot path
++# by the `rooms` binary, not here. This script installs only the host-once
++# substrate every slot shares:
+ #
+-# POC: one TAP, one room at a time. Per-room dynamic TAPs land in task #2.
++#   - the ROOMS_FWD filter chain: all rules source/dest-qualified by the
++#     172.16.0.0/24 pool supernet, jumped from FORWARD position 1 so a
++#     pre-existing broad ACCEPT can't preempt guest isolation.
++#   - one supernet-scoped NAT MASQUERADE for egress.
++#   - IPv4 forwarding on the outbound interface (the guest→internet return
++#     path; per-tap forwarding is set per-slot by the binary).
++#
++# Usage:
++#   sudo bash scripts/setup-tap.sh --host              install the substrate
++#   sudo bash scripts/setup-tap.sh --host --teardown   remove it, restore sysctls
+ 
+ set -euo pipefail
+ 
+-TAP="${TAP:-tap-fc0}"
+-HOST_IP_CIDR="${HOST_IP_CIDR:-172.16.0.1/24}"
+-GUEST_NET="${GUEST_NET:-172.16.0.0/24}"
+-FIRECRACKER_USER="${FIRECRACKER_USER:-firecracker}"
++FWD_CHAIN="${ROOMS_FWD_CHAIN:-ROOMS_FWD}"
++SUPERNET="${ROOMS_SUPERNET:-172.16.0.0/24}"
++# Marker doctor keys on: version + supernet. Bump the version when the chain's
++# rule shape changes so `rooms doctor` flags hosts still on the old layout.
++MARKER="${ROOMS_FWD_MARKER:-rooms:fwd:v1:172.16.0.0/24}"
+ STATE_DIR="${ROOMS_TAP_STATE_DIR:-/run/rooms}"
+-OUT_FORWARD_STATE="$STATE_DIR/tap-out-forward.prev"
+-OUT_IFACE_STATE="$STATE_DIR/tap-out-iface"
++OUT_FORWARD_STATE="$STATE_DIR/host-out-forward.prev"
++OUT_IFACE_STATE="$STATE_DIR/host-out-iface"
+ 
+-log() { printf '\033[1;34m[setup-tap]\033[0m %s\n' "$*"; }
++log()   { printf '\033[1;34m[setup-tap]\033[0m %s\n' "$*"; }
+ fatal() { printf '\033[1;31m[setup-tap]\033[0m %s\n' "$*" >&2; exit 1; }
+ 
++usage() {
++    cat >&2 <<'EOF'
++usage: setup-tap.sh --host [--teardown]
++
++  --host              install the once-per-host rooms networking substrate
++  --host --teardown   remove the substrate and restore recorded sysctls
++
++Per-room taps are created by the rooms binary on boot, not by this script.
++EOF
++    exit 2
++}
++
+ iptables_delete_while_present() {
+     local table="$1"
+     shift
+@@ -30,71 +51,117 @@ iptables_delete_while_present() {
+     done
+ }
+ 
+-if ! command -v iptables >/dev/null 2>&1; then
+-    fatal "iptables not found; install with: sudo apt install iptables"
+-fi
++detect_out_iface() {
++    ip route get 8.8.8.8 2>/dev/null \
++        | awk '/dev/ { for (i=1; i<NF; i++) if ($i == "dev") print $(i+1); exit }'
++}
+ 
+-# Find the outbound interface dynamically (might be eth0, ens33, enp0s3, ...).
+-OUT_IFACE="$(ip route get 8.8.8.8 | awk '/dev/ { for (i=1; i<NF; i++) if ($i == "dev") print $(i+1); exit }')"
+-if [[ -z "${OUT_IFACE:-}" ]]; then
+-    fatal "could not detect outbound interface; check 'ip route get 8.8.8.8'"
+-fi
+-log "outbound interface: $OUT_IFACE"
++install_host() {
++    local out_iface="$1"
+ 
+-# Tear down existing TAP if present (idempotent restart).
+-if ip link show "$TAP" >/dev/null 2>&1; then
+-    log "removing existing $TAP"
+-    sudo ip link del "$TAP"
+-fi
++    # Fresh chain every run: create-if-missing, then flush so re-runs converge
++    # on exactly the rule set below regardless of prior version.
++    sudo iptables -N "$FWD_CHAIN" 2>/dev/null || true
++    sudo iptables -F "$FWD_CHAIN"
++
++    # All rules are qualified by the pool supernet, not an interface name — the
++    # taps that carry this traffic don't exist yet at install time. A packet
++    # that matches no rule falls through the chain back to FORWARD.
++    #
++    # guest → guest isolation: one slot can't reach another's /30.
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" -d "$SUPERNET" -j DROP
++    # guest → host LAN (RFC1918): block before the egress accept.
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" -d 10.0.0.0/8 -j DROP
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" -d 192.168.0.0/16 -j DROP
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" -d 172.16.0.0/12 -j DROP
++    # guest → internet: accept egress out the real interface.
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" -o "$out_iface" -j ACCEPT
++    # internet → guest: return path for established flows, scoped to arrivals on
++    # the outbound interface (keeps the ingress scope the per-tap rule had).
++    sudo iptables -A "$FWD_CHAIN" -i "$out_iface" -d "$SUPERNET" \
++        -m state --state RELATED,ESTABLISHED -j ACCEPT
++    # Self-terminating default-deny tail. Doubles as the marker rule doctor
++    # matches on: its comment carries the version + supernet.
++    sudo iptables -A "$FWD_CHAIN" -s "$SUPERNET" \
++        -m comment --comment "$MARKER" -j DROP
++
++    # Jump into the chain from FORWARD position 1 — ahead of any pre-existing
++    # broad ACCEPT that would otherwise let guest→guest slip past isolation.
++    iptables_delete_while_present filter FORWARD -j "$FWD_CHAIN"
++    sudo iptables -I FORWARD 1 -j "$FWD_CHAIN"
++
++    # One supernet-scoped NAT rule for egress. Drop any legacy unrestricted or
++    # prior rooms rule first so re-runs land in a known-good state.
++    iptables_delete_while_present nat POSTROUTING -s "$SUPERNET" -o "$out_iface" -j MASQUERADE
++    iptables_delete_while_present nat POSTROUTING -o "$out_iface" -j MASQUERADE
++    sudo iptables -t nat -A POSTROUTING -s "$SUPERNET" -o "$out_iface" -j MASQUERADE
+ 
+-# Create TAP, owned by the dedicated firecracker user — not the operator.
+-if ! id "$FIRECRACKER_USER" >/dev/null 2>&1; then
+-    fatal "system user $FIRECRACKER_USER missing; run scripts/setup-rooms-host.sh first"
++    # The guest→internet return path is forwarded per the outbound interface's
++    # setting. Record the prior value (and the interface name) so teardown
++    # restores exactly what we changed; never touch the global ip_forward flag.
++    sudo mkdir -p "$STATE_DIR"
++    if [[ ! -f "$OUT_FORWARD_STATE" ]]; then
++        log "recording prior net.ipv4.conf.${out_iface}.forwarding"
++        sysctl -n "net.ipv4.conf.${out_iface}.forwarding" | sudo tee "$OUT_FORWARD_STATE" >/dev/null
++        printf '%s\n' "$out_iface" | sudo tee "$OUT_IFACE_STATE" >/dev/null
++    fi
++    log "enabling IPv4 forwarding on $out_iface"
++    sudo sysctl -w "net.ipv4.conf.${out_iface}.forwarding=1" >/dev/null
++
++    log "done. $FWD_CHAIN installed and scoped to $SUPERNET; egress via $out_iface."
++}
++
++teardown_host() {
++    # Prefer the interface install actually used — the default route may have
++    # moved since, and the sysctl was applied to the original interface.
++    local out_iface
++    out_iface="$(detect_out_iface)"
++    out_iface="${out_iface:-eth0}"
++    [[ -f "$OUT_IFACE_STATE" ]] && out_iface="$(<"$OUT_IFACE_STATE")"
++
++    log "removing $FWD_CHAIN and NAT rule"
++    iptables_delete_while_present filter FORWARD -j "$FWD_CHAIN"
++    if sudo iptables -L "$FWD_CHAIN" >/dev/null 2>&1; then
++        sudo iptables -F "$FWD_CHAIN"
++        sudo iptables -X "$FWD_CHAIN"
++    fi
++    iptables_delete_while_present nat POSTROUTING -s "$SUPERNET" -o "$out_iface" -j MASQUERADE
++    iptables_delete_while_present nat POSTROUTING -o "$out_iface" -j MASQUERADE
++
++    if [[ -f "$OUT_FORWARD_STATE" ]]; then
++        local prior_out
++        prior_out="$(<"$OUT_FORWARD_STATE")"
++        log "restoring net.ipv4.conf.${out_iface}.forwarding=$prior_out"
++        sudo sysctl -w "net.ipv4.conf.${out_iface}.forwarding=$prior_out" >/dev/null 2>&1 || true
++        sudo rm -f "$OUT_FORWARD_STATE" "$OUT_IFACE_STATE"
++    fi
++
++    log "done"
++}
++
++MODE=""
++TEARDOWN=0
++for arg in "$@"; do
++    case "$arg" in
++        --host) MODE="host" ;;
++        --teardown) TEARDOWN=1 ;;
++        -h|--help) usage ;;
++        *) fatal "unknown argument: $arg (see --help)" ;;
++    esac
++done
++
++[[ "$MODE" == "host" ]] || usage
++
++if ! command -v iptables >/dev/null 2>&1; then
++    fatal "iptables not found; install with: sudo apt install iptables"
+ fi
+-log "creating $TAP owned by $FIRECRACKER_USER"
+-sudo ip tuntap add "$TAP" mode tap user "$FIRECRACKER_USER"
+-sudo ip addr add "$HOST_IP_CIDR" dev "$TAP"
+-sudo ip link set "$TAP" up
+-
+-# Record the outbound interface's prior per-interface forwarding value, plus the
+-# interface name, so teardown restores exactly what we changed. We never touch
+-# the global net.ipv4.ip_forward flag, so we never record or restore it.
+-sudo mkdir -p "$STATE_DIR"
+-if [[ ! -f "$OUT_FORWARD_STATE" ]]; then
+-    log "recording prior net.ipv4.conf.${OUT_IFACE}.forwarding"
+-    sysctl -n "net.ipv4.conf.${OUT_IFACE}.forwarding" | sudo tee "$OUT_FORWARD_STATE" >/dev/null
+-    printf '%s\n' "$OUT_IFACE" | sudo tee "$OUT_IFACE_STATE" >/dev/null
++
++if [[ "$TEARDOWN" -eq 1 ]]; then
++    teardown_host
++    exit 0
+ fi
+ 
+-# Scope forwarding to the TAP and outbound interface only — never flip the
+-# global ip_forward flag. Both directions need it: guest→internet is forwarded
+-# per the TAP's setting; the return path arrives on the outbound interface and
+-# is forwarded per its setting (without this the guest's egress replies are
+-# dropped even though the NAT and FORWARD rules look correct).
+-log "enabling IPv4 forwarding on $TAP and $OUT_IFACE"
+-sudo sysctl -w "net.ipv4.conf.${TAP}.forwarding=1" >/dev/null
+-sudo sysctl -w "net.ipv4.conf.${OUT_IFACE}.forwarding=1" >/dev/null
+-
+-# Remove legacy unrestricted MASQUERADE and any prior rooms rule, then add
+-# the source-restricted NAT rule in a known-good state.
+-log "ensuring source-restricted NAT rule for $OUT_IFACE"
+-iptables_delete_while_present nat POSTROUTING -s "$GUEST_NET" -o "$OUT_IFACE" -j MASQUERADE
+-iptables_delete_while_present nat POSTROUTING -o "$OUT_IFACE" -j MASQUERADE
+-sudo iptables -t nat -A POSTROUTING -s "$GUEST_NET" -o "$OUT_IFACE" -j MASQUERADE
+-
+-# Drop guest → RFC1918 before the egress accept. Re-add in order every run so
+-# upgrades from the permissive POC rules cannot leave DROP after ACCEPT.
+-log "ensuring guest→LAN blocks and egress forward rules"
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 192.168.0.0/16 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 10.0.0.0/8 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 172.16.0.0/12 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -o "$OUT_IFACE" -j ACCEPT
+-iptables_delete_while_present filter FORWARD -i "$OUT_IFACE" -o "$TAP" -m state --state RELATED,ESTABLISHED -j ACCEPT
+-
+-sudo iptables -A FORWARD -i "$TAP" -d 192.168.0.0/16 -j DROP
+-sudo iptables -A FORWARD -i "$TAP" -d 10.0.0.0/8 -j DROP
+-sudo iptables -A FORWARD -i "$TAP" -d 172.16.0.0/12 -j DROP
+-sudo iptables -A FORWARD -i "$TAP" -o "$OUT_IFACE" -j ACCEPT
+-sudo iptables -A FORWARD -i "$OUT_IFACE" -o "$TAP" -m state --state RELATED,ESTABLISHED -j ACCEPT
+-
+-log "done. $TAP is up at ${HOST_IP_CIDR%/*}; guest will reach internet via $OUT_IFACE."
++OUT_IFACE="$(detect_out_iface)"
++[[ -n "${OUT_IFACE:-}" ]] || fatal "could not detect outbound interface; check 'ip route get 8.8.8.8'"
++log "outbound interface: $OUT_IFACE"
++install_host "$OUT_IFACE"
+diff --git a/scripts/teardown-tap.sh b/scripts/teardown-tap.sh
+index 8d6c29c..adc3832 100644
+--- a/scripts/teardown-tap.sh
++++ b/scripts/teardown-tap.sh
+@@ -1,55 +1,11 @@
+ #!/usr/bin/env bash
+-# Remove the rooms TAP device + NAT/forward rules. Idempotent.
++# Remove the once-per-host rooms networking substrate. Idempotent.
++#
++# Thin wrapper kept for muscle memory: the substrate (ROOMS_FWD chain, NAT,
++# recorded sysctls) is owned by setup-tap.sh, so teardown lives there too.
++# Per-room taps are reaped by the rooms binary on room teardown/gc, not here.
+ 
+ set -euo pipefail
+ 
+-TAP="${TAP:-tap-fc0}"
+-GUEST_NET="${GUEST_NET:-172.16.0.0/24}"
+-STATE_DIR="${ROOMS_TAP_STATE_DIR:-/run/rooms}"
+-OUT_FORWARD_STATE="$STATE_DIR/tap-out-forward.prev"
+-OUT_IFACE_STATE="$STATE_DIR/tap-out-iface"
+-
+-log() { printf '\033[1;34m[teardown-tap]\033[0m %s\n' "$*"; }
+-
+-iptables_delete_while_present() {
+-    local table="$1"
+-    shift
+-    while sudo iptables -t "$table" -C "$@" 2>/dev/null; do
+-        sudo iptables -t "$table" -D "$@"
+-    done
+-}
+-
+-OUT_IFACE="$(ip route get 8.8.8.8 2>/dev/null | awk '/dev/ { for (i=1; i<NF; i++) if ($i == "dev") print $(i+1); exit }')"
+-OUT_IFACE="${OUT_IFACE:-eth0}"
+-# Prefer the interface setup actually used — the default route may have changed
+-# since setup, and rules/forwarding were applied to the original interface.
+-[[ -f "$OUT_IFACE_STATE" ]] && OUT_IFACE="$(<"$OUT_IFACE_STATE")"
+-
+-if ip link show "$TAP" >/dev/null 2>&1; then
+-    log "disabling IPv4 forwarding on $TAP"
+-    sudo sysctl -w "net.ipv4.conf.${TAP}.forwarding=0" >/dev/null 2>&1 || true
+-
+-    log "removing $TAP"
+-    sudo ip link del "$TAP"
+-else
+-    log "$TAP not present; skipping interface removal"
+-fi
+-
+-log "removing NAT and forward rules"
+-iptables_delete_while_present nat POSTROUTING -s "$GUEST_NET" -o "$OUT_IFACE" -j MASQUERADE
+-iptables_delete_while_present nat POSTROUTING -o "$OUT_IFACE" -j MASQUERADE
+-
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 192.168.0.0/16 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 10.0.0.0/8 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -d 172.16.0.0/12 -j DROP
+-iptables_delete_while_present filter FORWARD -i "$TAP" -o "$OUT_IFACE" -j ACCEPT
+-iptables_delete_while_present filter FORWARD -i "$OUT_IFACE" -o "$TAP" -m state --state RELATED,ESTABLISHED -j ACCEPT
+-
+-if [[ -f "$OUT_FORWARD_STATE" ]]; then
+-    prior_out="$(<"$OUT_FORWARD_STATE")"
+-    log "restoring net.ipv4.conf.${OUT_IFACE}.forwarding=$prior_out"
+-    sudo sysctl -w "net.ipv4.conf.${OUT_IFACE}.forwarding=$prior_out" >/dev/null 2>&1 || true
+-    sudo rm -f "$OUT_FORWARD_STATE" "$OUT_IFACE_STATE"
+-fi
+-
+-log "done"
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++exec bash "$SCRIPT_DIR/setup-tap.sh" --host --teardown "$@"
+diff --git a/scripts/test-tap-rules.sh b/scripts/test-tap-rules.sh
+index f6a51ab..06ddaa1 100755
+--- a/scripts/test-tap-rules.sh
++++ b/scripts/test-tap-rules.sh
+@@ -1,16 +1,19 @@
+ #!/usr/bin/env bash
+-# Assert setup-tap.sh iptables rules are present, ordered, and removed by teardown.
++# Assert setup-tap.sh --host installs the ROOMS_FWD chain correctly, ordered,
++# with the version/supernet marker, jumped from FORWARD position 1 — and that
++# --host --teardown removes it cleanly and idempotently.
+ #
+ # Host-only: needs root/sudo, a routable outbound interface, and mutates live
+-# iptables + tap-fc0. Run on rooms-host before merge — not in cloud CI.
++# iptables. Run on rooms-host before merge — not in cloud CI.
+ #
+ # Usage:
+ #   sudo ./scripts/test-tap-rules.sh
+ 
+ set -euo pipefail
+ 
+-TAP="${TAP:-tap-fc0}"
+-GUEST_NET="${GUEST_NET:-172.16.0.0/24}"
++FWD_CHAIN="${ROOMS_FWD_CHAIN:-ROOMS_FWD}"
++SUPERNET="${ROOMS_SUPERNET:-172.16.0.0/24}"
++MARKER="${ROOMS_FWD_MARKER:-rooms:fwd:v1:172.16.0.0/24}"
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ 
+ log()   { printf '\033[1;34m[test-tap-rules]\033[0m %s\n' "$*"; }
+@@ -26,37 +29,30 @@ if [[ -z "${OUT_IFACE:-}" ]]; then
+ fi
+ 
+ assert_grep() {
+-    local haystack="$1"
+-    local needle="$2"
+-    local label="$3"
++    local haystack="$1" needle="$2" label="$3"
+     if ! grep -Fq -- "$needle" <<<"$haystack"; then
+         fatal "missing $label: expected '$needle'"
+     fi
+ }
+ 
+ assert_not_grep() {
+-    local haystack="$1"
+-    local needle="$2"
+-    local label="$3"
++    local haystack="$1" needle="$2" label="$3"
+     if grep -Fq -- "$needle" <<<"$haystack"; then
+         fatal "unexpected $label: still present '$needle'"
+     fi
+ }
+ 
+-forward_line() {
++chain_line() {
+     local pattern="$1"
+-    iptables -S FORWARD | grep -F -- "$pattern" | head -n1
++    iptables -S "$FWD_CHAIN" | grep -F -- "$pattern" | head -n1
+ }
+ 
+ assert_rule_before() {
+-    local earlier="$1"
+-    local later="$2"
+-    local label="$3"
+-    local forward_dump
+-    forward_dump="$(iptables -S FORWARD)"
+-    local earlier_line later_line
+-    earlier_line="$(grep -Fn -- "$earlier" <<<"$forward_dump" | head -n1 | cut -d: -f1)"
+-    later_line="$(grep -Fn -- "$later" <<<"$forward_dump" | head -n1 | cut -d: -f1)"
++    local earlier="$1" later="$2" label="$3"
++    local dump earlier_line later_line
++    dump="$(iptables -S "$FWD_CHAIN")"
++    earlier_line="$(grep -Fn -- "$earlier" <<<"$dump" | head -n1 | cut -d: -f1)"
++    later_line="$(grep -Fn -- "$later" <<<"$dump" | head -n1 | cut -d: -f1)"
+     if [[ -z "$earlier_line" || -z "$later_line" ]]; then
+         fatal "could not locate rules for ordering check: $label"
+     fi
+@@ -66,33 +62,41 @@ assert_rule_before() {
+ }
+ 
+ assert_rules_present() {
+-    local nat forward
++    local nat forward chain
+     nat="$(iptables -t nat -S)"
+     forward="$(iptables -S FORWARD)"
++    chain="$(iptables -S "$FWD_CHAIN")"
++
++    # FORWARD jumps into the chain at position 1 (ahead of any broad ACCEPT).
++    local first_jump
++    first_jump="$(iptables -S FORWARD | grep -F -- "-j $FWD_CHAIN" | head -n1)"
++    if [[ "$first_jump" != "-A FORWARD -j $FWD_CHAIN" ]]; then
++        fatal "expected '-A FORWARD -j $FWD_CHAIN' as the FORWARD jump, got '$first_jump'"
++    fi
++    local forward_first
++    forward_first="$(grep -E '^-A FORWARD ' <<<"$forward" | head -n1)"
++    if [[ "$forward_first" != "-A FORWARD -j $FWD_CHAIN" ]]; then
++        fatal "$FWD_CHAIN jump must be the first FORWARD rule, got '$forward_first'"
++    fi
+ 
+-    assert_grep "$nat" "-A POSTROUTING -s $GUEST_NET -o $OUT_IFACE -j MASQUERADE" "source-restricted MASQUERADE"
++    # Supernet-scoped NAT, no legacy unrestricted MASQUERADE.
++    assert_grep "$nat" "-A POSTROUTING -s $SUPERNET -o $OUT_IFACE -j MASQUERADE" "source-restricted MASQUERADE"
+     assert_not_grep "$nat" "-A POSTROUTING -o $OUT_IFACE -j MASQUERADE" "legacy unrestricted MASQUERADE"
+ 
+-    assert_grep "$forward" "-A FORWARD -d 192.168.0.0/16 -i $TAP -j DROP" "192.168.0.0/16 drop"
+-    assert_grep "$forward" "-A FORWARD -d 10.0.0.0/8 -i $TAP -j DROP" "10.0.0.0/8 drop"
+-    assert_grep "$forward" "-A FORWARD -d 172.16.0.0/12 -i $TAP -j DROP" "172.16.0.0/12 drop"
+-    assert_grep "$forward" "-A FORWARD -i $TAP -o $OUT_IFACE -j ACCEPT" "egress accept"
+-
+-    local drop192 drop10 drop172 accept
+-    drop192="$(forward_line "-d 192.168.0.0/16 -i $TAP -j DROP")"
+-    drop10="$(forward_line "-d 10.0.0.0/8 -i $TAP -j DROP")"
+-    drop172="$(forward_line "-d 172.16.0.0/12 -i $TAP -j DROP")"
+-    accept="$(forward_line "-i $TAP -o $OUT_IFACE -j ACCEPT")"
+-
+-    assert_rule_before "$drop192" "$accept" "192.168 drop before egress accept"
+-    assert_rule_before "$drop10" "$accept" "10/8 drop before egress accept"
+-    assert_rule_before "$drop172" "$accept" "172.16/12 drop before egress accept"
+-
+-    local tap_forward
+-    tap_forward="$(sysctl -n "net.ipv4.conf.${TAP}.forwarding")"
+-    if [[ "$tap_forward" != "1" ]]; then
+-        fatal "expected net.ipv4.conf.${TAP}.forwarding=1, got $tap_forward"
+-    fi
++    # Chain rules, all supernet-qualified.
++    assert_grep "$chain" "-A $FWD_CHAIN -s $SUPERNET -d $SUPERNET -j DROP" "guest→guest isolation drop"
++    assert_grep "$chain" "-A $FWD_CHAIN -s $SUPERNET -d 10.0.0.0/8 -j DROP" "10.0.0.0/8 drop"
++    assert_grep "$chain" "-A $FWD_CHAIN -s $SUPERNET -d 192.168.0.0/16 -j DROP" "192.168.0.0/16 drop"
++    assert_grep "$chain" "-A $FWD_CHAIN -s $SUPERNET -d 172.16.0.0/12 -j DROP" "172.16.0.0/12 drop"
++    assert_grep "$chain" "-A $FWD_CHAIN -s $SUPERNET -o $OUT_IFACE -j ACCEPT" "egress accept"
++    # `iptables -S` prints the comment value quoted (`--comment "rooms:fwd:..."`),
++    # so match the marker value itself — the same substring `doctor` keys on.
++    assert_grep "$chain" "$MARKER" "version/supernet marker"
++
++    # Isolation + LAN drops precede the egress accept; the marker tail is last.
++    assert_rule_before "-s $SUPERNET -d $SUPERNET -j DROP" "-s $SUPERNET -o $OUT_IFACE -j ACCEPT" "isolation before egress"
++    assert_rule_before "-d 10.0.0.0/8 -j DROP" "-s $SUPERNET -o $OUT_IFACE -j ACCEPT" "10/8 drop before egress"
++    assert_rule_before "-s $SUPERNET -o $OUT_IFACE -j ACCEPT" "$MARKER" "egress before marker tail"
+ 
+     local out_forward
+     out_forward="$(sysctl -n "net.ipv4.conf.${OUT_IFACE}.forwarding")"
+@@ -106,25 +110,29 @@ assert_rules_absent() {
+     nat="$(iptables -t nat -S)"
+     forward="$(iptables -S FORWARD)"
+ 
+-    assert_not_grep "$nat" "-A POSTROUTING -s $GUEST_NET -o $OUT_IFACE -j MASQUERADE" "source-restricted MASQUERADE"
++    assert_not_grep "$forward" "-A FORWARD -j $FWD_CHAIN" "FORWARD jump"
++    assert_not_grep "$nat" "-A POSTROUTING -s $SUPERNET -o $OUT_IFACE -j MASQUERADE" "source-restricted MASQUERADE"
+     assert_not_grep "$nat" "-A POSTROUTING -o $OUT_IFACE -j MASQUERADE" "legacy unrestricted MASQUERADE"
+-    assert_not_grep "$forward" "-A FORWARD -d 192.168.0.0/16 -i $TAP -j DROP" "192.168.0.0/16 drop"
+-    assert_not_grep "$forward" "-A FORWARD -d 10.0.0.0/8 -i $TAP -j DROP" "10.0.0.0/8 drop"
+-    assert_not_grep "$forward" "-A FORWARD -d 172.16.0.0/12 -i $TAP -j DROP" "172.16.0.0/12 drop"
+-    assert_not_grep "$forward" "-A FORWARD -i $TAP -o $OUT_IFACE -j ACCEPT" "egress accept"
+-    assert_not_grep "$forward" "-A FORWARD -i $OUT_IFACE -o $TAP -m state --state RELATED,ESTABLISHED -j ACCEPT" "return accept"
++    # The chain itself is gone (-S on a missing chain errors → empty capture).
++    if iptables -S "$FWD_CHAIN" >/dev/null 2>&1; then
++        fatal "$FWD_CHAIN chain still present after teardown"
++    fi
+ }
+ 
+-log "running setup-tap.sh"
+-bash "$SCRIPT_DIR/setup-tap.sh"
++log "running setup-tap.sh --host"
++bash "$SCRIPT_DIR/setup-tap.sh" --host
++assert_rules_present
++
++log "re-running setup-tap.sh --host (idempotent)"
++bash "$SCRIPT_DIR/setup-tap.sh" --host
+ assert_rules_present
+ 
+-log "running teardown-tap.sh"
+-bash "$SCRIPT_DIR/teardown-tap.sh"
++log "running setup-tap.sh --host --teardown"
++bash "$SCRIPT_DIR/setup-tap.sh" --host --teardown
+ assert_rules_absent
+ 
+-log "re-running teardown-tap.sh (idempotent no-op)"
+-bash "$SCRIPT_DIR/teardown-tap.sh"
++log "re-running teardown (idempotent no-op)"
++bash "$SCRIPT_DIR/setup-tap.sh" --host --teardown
+ assert_rules_absent
+ 
+ log "all assertions passed"
+diff --git a/src/config.rs b/src/config.rs
+index 1e3025b..fb9d8f5 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -78,6 +78,12 @@ impl RoomsConfig {
+         Some(self.resolved_state_base()?.join(id))
+     }
+ 
++    /// Pool slot directory: `<state_base>/slots` — one `O_EXCL` file per claimed
++    /// slot. `None` only when the base can't resolve (HOME unset).
++    pub fn slots_dir(&self) -> Option<PathBuf> {
++        Some(self.resolved_state_base()?.join(crate::slot::SLOTS_DIR))
++    }
++
+     /// Jailer chroot base: the `jailer_chroot_base` override, else
+     /// `<state_base>/jailer`.
+     pub fn chroot_base(&self) -> Option<PathBuf> {
+diff --git a/src/doctor.rs b/src/doctor.rs
+index 318274d..c5bf891 100644
+--- a/src/doctor.rs
++++ b/src/doctor.rs
+@@ -25,6 +25,103 @@ const DRIFT_ARTIFACTS: &[&str] = &[
+ /// Schema version for `--json` output (ED-4: forward-compatible).
+ pub const DOCTOR_SCHEMA_VERSION: u32 = 1;
+ 
++/// The rooms-owned FORWARD sub-chain.
++pub const ROOMS_FWD_CHAIN: &str = "ROOMS_FWD";
++
++/// The allocator supernet every slot's /30 is carved from — the value doctor
++/// checks the chain is scoped to, not mere chain existence.
++pub const ROOMS_SUPERNET: &str = "172.16.0.0/24";
++
++/// Marker comment `setup-tap.sh --host` stamps into `ROOMS_FWD`, embedding the
++/// chain version + supernet so doctor keys on a version/supernet match rather
++/// than existence alone.
++pub const ROOMS_FWD_MARKER: &str = "rooms:fwd:v1:172.16.0.0/24";
++
++/// Whether the host's `ROOMS_FWD` chain could be read, and if so whether it
++/// matches the allocator supernet marker.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum RoomsFwdStatus {
++    /// Chain present and the version/supernet marker matches.
++    Installed,
++    /// Chain absent, or present without the current marker (version/supernet
++    /// drift). Boot must not proceed.
++    Missing,
++    /// Could not read the chain (no `iptables`, or insufficient privilege) — a
++    /// fail-open state: the caller defers to its own root/privilege checks.
++    Unprobeable,
++}
++
++/// Boot-time degraded-mode precheck: the host firewall chain must be installed
++/// before a slot is claimed.
++///
++/// `Err(remediation)` only when the chain is *confirmed* missing; an unprobeable
++/// host (non-root, no `iptables`) returns `Ok(())` so the boot's own root/KVM
++/// checks surface those errors.
++pub fn ensure_rooms_fwd_installed() -> Result<(), String> {
++    match rooms_fwd_status() {
++        RoomsFwdStatus::Installed | RoomsFwdStatus::Unprobeable => Ok(()),
++        RoomsFwdStatus::Missing => Err(format!(
++            "{ROOMS_FWD_CHAIN} chain not installed (or supernet drift); run `sudo bash scripts/setup-tap.sh --host` before booting a room"
++        )),
++    }
++}
++
++/// Probe the `ROOMS_FWD` chain, distinguishing a confirmed-missing chain from an
++/// unreadable one (permission / no iptables) so callers never conflate "not set
++/// up" with "run me as root".
++#[must_use]
++#[cfg_attr(
++    not(unix),
++    allow(
++        clippy::missing_const_for_fn,
++        reason = "non-unix body is const-trivial; the unix body shells out to iptables"
++    )
++)]
++pub fn rooms_fwd_status() -> RoomsFwdStatus {
++    #[cfg(unix)]
++    {
++        let output = Command::new("iptables")
++            .args(["-S", ROOMS_FWD_CHAIN])
++            .output();
++        match output {
++            Ok(out) if out.status.success() => {
++                classify_rooms_fwd_dump(&String::from_utf8_lossy(&out.stdout))
++            }
++            Ok(out) => {
++                // A missing chain exits non-zero with "No chain/target/match by
++                // that name"; a privilege failure ("Permission denied ...") is
++                // unprobeable, not a confirmed-missing chain.
++                let stderr = String::from_utf8_lossy(&out.stderr);
++                if stderr.contains("No chain") {
++                    RoomsFwdStatus::Missing
++                } else {
++                    RoomsFwdStatus::Unprobeable
++                }
++            }
++            // iptables not installed / not on PATH.
++            Err(_) => RoomsFwdStatus::Unprobeable,
++        }
++    }
++    #[cfg(not(unix))]
++    {
++        RoomsFwdStatus::Unprobeable
++    }
++}
++
++/// Classify an `iptables -S ROOMS_FWD` dump.
++///
++/// `Installed` iff it carries the current version/supernet marker (chain exists
++/// but without it → drift → `Missing`). Pure, so it's unit-testable without
++/// iptables.
++#[must_use]
++pub fn classify_rooms_fwd_dump(dump: &str) -> RoomsFwdStatus {
++    if dump.contains(ROOMS_FWD_MARKER) {
++        RoomsFwdStatus::Installed
++    } else {
++        RoomsFwdStatus::Missing
++    }
++}
++
+ /// Outcome of a single doctor check.
+ #[derive(Debug, Clone, Serialize)]
+ pub struct CheckResult {
+@@ -55,8 +152,10 @@ pub fn run_doctor(config: &RoomsConfig, image: Option<&Path>) -> DoctorReport {
+         check_jailer(config),
+         check_firecracker_user(),
+         check_jailer_file_access(image),
+-        check_tap(),
+-        check_tap_openable(),
++        check_tun_device(),
++        check_rooms_fwd(),
++        check_slots_dir(config),
++        check_orphaned_taps(config),
+         check_kernel(image, config),
+         check_rootfs(image, config),
+         check_anthropic_api_key(),
+@@ -347,8 +446,12 @@ fn current_primary_gid(uid: u32) -> u32 {
+     parse_getent_passwd(&String::from_utf8_lossy(&out.stdout)).map_or(u32::MAX, |(_uid, gid)| gid)
+ }
+ 
+-fn check_tap_openable() -> CheckResult {
+-    let name = "tap_openable".to_owned();
++/// The `/dev/net/tun` device firecracker opens at boot to create each slot's
++/// tap. The per-slot model has no persistent `tap-fc0` to probe — tap creation
++/// happens in the boot path — so the standing precondition is just that the
++/// firecracker user can open `/dev/net/tun`.
++fn check_tun_device() -> CheckResult {
++    let name = "tun_device".to_owned();
+     #[cfg(unix)]
+     {
+         let Some(uid) = firecracker_uid() else {
+@@ -358,7 +461,6 @@ fn check_tap_openable() -> CheckResult {
+                 message: format!("cannot verify TAP access: {FIRECRACKER_USER} user missing"),
+             };
+         };
+-
+         let tun = Path::new("/dev/net/tun");
+         if !tun.exists() {
+             return CheckResult {
+@@ -368,53 +470,21 @@ fn check_tap_openable() -> CheckResult {
+                     .to_owned(),
+             };
+         }
+-
+         if !path_readable_by_uid(tun, uid) {
+             return CheckResult {
+                 name,
+                 ok: false,
+                 message: format!(
+-                    "{FIRECRACKER_USER} cannot open /dev/net/tun; recreate TAP with scripts/setup-tap.sh"
++                    "{FIRECRACKER_USER} cannot open /dev/net/tun; check its permissions"
+                 ),
+             };
+         }
+-
+-        let show = Command::new("ip")
+-            .args(["tuntap", "show", "tap-fc0"])
+-            .output();
+-        match show {
+-            Ok(out) if out.status.success() => {
+-                let line = String::from_utf8_lossy(&out.stdout);
+-                if tap_owned_by_user(&line, FIRECRACKER_USER) {
+-                    CheckResult {
+-                        name,
+-                        ok: true,
+-                        message: format!("tap-fc0 exists and is owned by {FIRECRACKER_USER}"),
+-                    }
+-                } else {
+-                    CheckResult {
+-                        name,
+-                        ok: false,
+-                        message: format!(
+-                            "tap-fc0 is not owned by {FIRECRACKER_USER}; run sudo bash scripts/setup-tap.sh"
+-                        ),
+-                    }
+-                }
+-            }
+-            Ok(out) => CheckResult {
+-                name,
+-                ok: false,
+-                message: format!(
+-                    "tap-fc0 not found (ip link exit {}: {}); run `sudo bash scripts/setup-tap.sh`",
+-                    out.status,
+-                    String::from_utf8_lossy(&out.stderr).trim()
+-                ),
+-            },
+-            Err(e) => CheckResult {
+-                name,
+-                ok: false,
+-                message: format!("could not run `ip link show tap-fc0`: {e}"),
+-            },
++        CheckResult {
++            name,
++            ok: true,
++            message: format!(
++                "/dev/net/tun present and openable by {FIRECRACKER_USER} (per-slot taps created at boot)"
++            ),
+         }
+     }
+     #[cfg(not(unix))]
+@@ -422,20 +492,11 @@ fn check_tap_openable() -> CheckResult {
+         CheckResult {
+             name,
+             ok: false,
+-            message: "TAP openability checks require a Unix host".to_owned(),
++            message: "TAP checks require a Unix host".to_owned(),
+         }
+     }
+ }
+ 
+-/// Returns true when `ip tuntap show` output assigns the TAP to `user`.
+-pub fn tap_owned_by_user(tuntap_output: &str, user: &str) -> bool {
+-    tuntap_output
+-        .split_whitespace()
+-        .collect::<Vec<_>>()
+-        .windows(2)
+-        .any(|pair| pair.first() == Some(&"user") && pair.get(1) == Some(&user))
+-}
+-
+ fn parse_firecracker_version(output: &str) -> Option<(u32, u32)> {
+     for token in output.split_whitespace() {
+         let trimmed = token.trim_start_matches(['v', 'V']);
+@@ -514,55 +575,217 @@ fn check_anthropic_api_key() -> CheckResult {
+     }
+ }
+ 
+-fn check_tap() -> CheckResult {
+-    let name = "tap".to_owned();
++fn check_rooms_fwd() -> CheckResult {
++    let name = "rooms_fwd".to_owned();
++    match rooms_fwd_status() {
++        RoomsFwdStatus::Installed => CheckResult {
++            name,
++            ok: true,
++            message: format!("{ROOMS_FWD_CHAIN} installed and scoped to {ROOMS_SUPERNET}"),
++        },
++        RoomsFwdStatus::Missing => CheckResult {
++            name,
++            ok: false,
++            message: format!(
++                "{ROOMS_FWD_CHAIN} not installed or supernet drift; run `sudo bash scripts/setup-tap.sh --host`"
++            ),
++        },
++        // Non-root / no iptables: warn (ok) rather than fail — a non-privileged
++        // `rooms doctor` can't read the FORWARD table.
++        RoomsFwdStatus::Unprobeable => CheckResult {
++            name,
++            ok: true,
++            message: format!(
++                "warn: could not read {ROOMS_FWD_CHAIN} (need root?); re-run `sudo rooms doctor` to verify the chain"
++            ),
++        },
++    }
++}
++
++fn check_slots_dir(config: &RoomsConfig) -> CheckResult {
++    let name = "slots_dir".to_owned();
++    let Some(slots) = config.slots_dir() else {
++        return CheckResult {
++            name,
++            ok: false,
++            message: "HOME unset; cannot locate the slots dir".to_owned(),
++        };
++    };
++    // `O_EXCL` slot claims need a local, writable filesystem. Probe writability
++    // at the nearest existing ancestor — the slots dir is created lazily on
++    // first claim, so its absence is fine as long as the parent accepts a file.
++    let probe = nearest_existing_dir(&slots);
++    match probe {
++        Some(dir) if dir_is_writable(&dir) => CheckResult {
++            name,
++            ok: true,
++            message: format!(
++                "slots dir {} is writable (ensure the state base is a local fs, not NFS)",
++                slots.display()
++            ),
++        },
++        Some(dir) => CheckResult {
++            name,
++            ok: false,
++            message: format!(
++                "slots dir {} not writable ({} rejected a probe file); O_EXCL slot claims will fail",
++                slots.display(),
++                dir.display()
++            ),
++        },
++        None => CheckResult {
++            name,
++            ok: false,
++            message: format!(
++                "no existing ancestor of {} to write slot claims into",
++                slots.display()
++            ),
++        },
++    }
++}
++
++fn check_orphaned_taps(config: &RoomsConfig) -> CheckResult {
++    let name = "orphaned_taps".to_owned();
++    let orphans = orphaned_pool_taps(config);
++    if orphans.is_empty() {
++        return CheckResult {
++            name,
++            ok: true,
++            message: "no orphaned pool taps".to_owned(),
++        };
++    }
++    let list = orphans
++        .iter()
++        .map(|k| format!("tap-fc{k}"))
++        .collect::<Vec<_>>()
++        .join(", ");
++    CheckResult {
++        name,
++        ok: true,
++        message: format!("warn: orphaned tap(s) with no live slot: {list}; `rooms gc` sweeps them"),
++    }
++}
++
++/// Pool taps (`tap-fc<k>`, k≥1) present on the host with no claimed slot file.
++///
++/// The true orphans a boot-path or reconcile crash can strand (a slot file
++/// removed, then its tap-delete failed). Empty on a non-unix host or when `ip
++/// link show` can't be read. Shared by `doctor` (which flags them) and
++/// `registry::gc` (which sweeps them), so the two never disagree.
++#[must_use]
++#[cfg_attr(
++    not(unix),
++    allow(
++        clippy::missing_const_for_fn,
++        reason = "non-unix body is const-trivial; the unix body shells out to ip"
++    )
++)]
++pub fn orphaned_pool_taps(config: &RoomsConfig) -> Vec<u8> {
+     #[cfg(unix)]
+     {
+-        // Verifies the runtime prerequisites without needing CAP_NET_ADMIN:
+-        // firecracker opens the existing `tap-fc0` via `/dev/net/tun` at boot;
+-        // tap creation is `scripts/setup-tap.sh`'s job, not the probe's.
+-        let tun = Path::new("/dev/net/tun");
+-        if !tun.exists() {
+-            return CheckResult {
+-                name,
+-                ok: false,
+-                message: "/dev/net/tun missing; load the tun kernel module (sudo modprobe tun)"
+-                    .to_owned(),
+-            };
+-        }
+-        let show = Command::new("ip")
+-            .args(["link", "show", "tap-fc0"])
+-            .output();
+-        match show {
+-            Ok(out) if out.status.success() => CheckResult {
+-                name,
+-                ok: true,
+-                message: "/dev/net/tun present and tap-fc0 exists".to_owned(),
+-            },
+-            Ok(out) => CheckResult {
+-                name,
+-                ok: false,
+-                message: format!(
+-                    "tap-fc0 not found (ip link exit {}: {}); run `sudo bash scripts/setup-tap.sh`",
+-                    out.status,
+-                    String::from_utf8_lossy(&out.stderr).trim()
+-                ),
+-            },
+-            Err(e) => CheckResult {
+-                name,
+-                ok: false,
+-                message: format!("could not run `ip link show tap-fc0`: {e}"),
+-            },
++        let claimed = claimed_slot_indices(config);
++        let Ok(out) = Command::new("ip").args(["-o", "link", "show"]).output() else {
++            return Vec::new();
++        };
++        if !out.status.success() {
++            return Vec::new();
+         }
++        orphaned_tap_indices(&String::from_utf8_lossy(&out.stdout), &claimed)
+     }
+     #[cfg(not(unix))]
+     {
+-        CheckResult {
+-            name,
+-            ok: false,
+-            message: "TAP checks require a Unix host".to_owned(),
++        let _ = config;
++        Vec::new()
++    }
++}
++
++/// The set of currently-claimed pool slot indices, read from the slots dir. An
++/// unresolvable / unreadable dir yields an empty set (best-effort).
++#[cfg(unix)]
++fn claimed_slot_indices(config: &RoomsConfig) -> std::collections::HashSet<u8> {
++    let mut set = std::collections::HashSet::new();
++    let Some(slots) = config.slots_dir() else {
++        return set;
++    };
++    let Ok(read_dir) = std::fs::read_dir(&slots) else {
++        return set;
++    };
++    for dirent in read_dir.flatten() {
++        if let Some(name) = dirent.file_name().to_str() {
++            if let Ok(index) = name.parse::<u8>() {
++                if name == index.to_string() {
++                    set.insert(index);
++                }
++            }
+         }
+     }
++    set
++}
++
++/// The nearest existing directory at or above `path`.
++fn nearest_existing_dir(path: &Path) -> Option<PathBuf> {
++    let mut cur = Some(path);
++    while let Some(p) = cur {
++        if p.is_dir() {
++            return Some(p.to_path_buf());
++        }
++        cur = p.parent();
++    }
++    None
++}
++
++/// Whether `dir` accepts a probe file — the writability signal for slot claims.
++///
++/// The probe file is created then removed; a rename-free `O_EXCL` create is the
++/// operation slot claims actually use.
++fn dir_is_writable(dir: &Path) -> bool {
++    let probe = dir.join(".rooms-doctor-write-probe");
++    match std::fs::OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .open(&probe)
++    {
++        Ok(_) => {
++            let _ = std::fs::remove_file(&probe);
++            true
++        }
++        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
++            // A stray probe from a prior run — still proves writability.
++            let _ = std::fs::remove_file(&probe);
++            true
++        }
++        Err(_) => false,
++    }
++}
++
++/// Parse `ip -o link show` output for `tap-fc<k>` devices (k ≥ 1) whose slot
++/// index is not in `claimed`, sorted ascending. Pure, so it's unit-testable
++/// without touching the host's links.
++#[must_use]
++pub fn orphaned_tap_indices<S: std::hash::BuildHasher>(
++    ip_link_output: &str,
++    claimed: &std::collections::HashSet<u8, S>,
++) -> Vec<u8> {
++    let mut orphans: Vec<u8> = ip_link_output
++        .lines()
++        .filter_map(parse_tap_index)
++        .filter(|k| !claimed.contains(k))
++        .collect();
++    orphans.sort_unstable();
++    orphans.dedup();
++    orphans
++}
++
++/// Extract a `tap-fc<k>` (k ≥ 1) slot index from one `ip -o link show` line.
++/// The device name is the second whitespace-colon token: `N: tap-fc3: <...>`.
++fn parse_tap_index(line: &str) -> Option<u8> {
++    let dev = line.split_whitespace().nth(1)?.trim_end_matches(':');
++    // `ip -o` sometimes suffixes `@if<n>` for linked devices; strip it.
++    let dev = dev.split('@').next()?;
++    let suffix = dev.strip_prefix("tap-fc")?;
++    let index: u8 = suffix.parse().ok()?;
++    // Slot 0 is the reserved legacy shared tap — never an orphan candidate.
++    (index >= 1).then_some(index)
+ }
+ 
+ fn check_nested_virt() -> CheckResult {
+@@ -754,20 +977,52 @@ mod tests {
+ 
+     use super::{
+         check_sha_drift, default_rootfs_path, drift_target_path, parse_checksums,
+-        parse_firecracker_version, tap_owned_by_user, version_meets_min, RoomsConfig,
++        parse_firecracker_version, version_meets_min, RoomsConfig,
+     };
+     use std::path::PathBuf;
+ 
+     #[test]
+-    fn tap_owned_by_user_detects_tuntap_owner() {
+-        assert!(tap_owned_by_user(
+-            "tap-fc0: tap persist user firecracker\n",
+-            "firecracker"
+-        ));
+-        assert!(!tap_owned_by_user(
+-            "tap-fc0: tap persist user mh\n",
+-            "firecracker"
+-        ));
++    fn classify_rooms_fwd_dump_keys_on_the_supernet_marker() {
++        use super::{classify_rooms_fwd_dump, RoomsFwdStatus, ROOMS_FWD_MARKER};
++        let installed = format!(
++            "-N ROOMS_FWD\n-A ROOMS_FWD -s 172.16.0.0/24 -m comment --comment \"{ROOMS_FWD_MARKER}\" -j DROP\n"
++        );
++        assert_eq!(
++            classify_rooms_fwd_dump(&installed),
++            RoomsFwdStatus::Installed
++        );
++        // A chain that exists but lacks the current marker is drift → Missing,
++        // never a false Installed.
++        assert_eq!(
++            classify_rooms_fwd_dump("-N ROOMS_FWD\n-A ROOMS_FWD -j DROP\n"),
++            RoomsFwdStatus::Missing
++        );
++        // An older-version marker must not satisfy the current supernet check.
++        assert_eq!(
++            classify_rooms_fwd_dump(
++                "-A ROOMS_FWD -m comment --comment \"rooms:fwd:v0:10.0.0.0/8\" -j DROP\n"
++            ),
++            RoomsFwdStatus::Missing
++        );
++    }
++
++    #[test]
++    fn orphaned_tap_indices_flags_only_unclaimed_pool_taps() {
++        use super::orphaned_tap_indices;
++        use std::collections::HashSet;
++        let dump = "\
++1: lo: <LOOPBACK,UP> mtu 65536 qdisc noqueue state UNKNOWN\n\
++2: eth0: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq state UP\n\
++3: tap-fc0: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc pfifo_fast state DOWN\n\
++4: tap-fc1: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc pfifo_fast state DOWN\n\
++5: tap-fc2: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc pfifo_fast state DOWN\n\
++6: tap-fc7@if9: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc pfifo_fast state DOWN\n";
++        // Slot 1 is claimed; taps 0 (legacy, never an orphan), 2, and 7 are not.
++        let claimed: HashSet<u8> = std::iter::once(1u8).collect();
++        assert_eq!(orphaned_tap_indices(dump, &claimed), vec![2, 7]);
++        // With every pool tap claimed, none are orphaned.
++        let all: HashSet<u8> = [1u8, 2, 7].into_iter().collect();
++        assert!(orphaned_tap_indices(dump, &all).is_empty());
+     }
+ 
+     #[test]
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index b792f0d..75d17cc 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -6,6 +6,7 @@
+ )]
+ 
+ use std::env;
++use std::net::Ipv4Addr;
+ use std::path::{Path, PathBuf};
+ use std::time::Duration;
+ 
+@@ -33,23 +34,109 @@ pub struct NetworkConfig {
+     pub tap_name: String,
+     pub guest_ip: String,
+     pub gateway_ip: String,
+-    pub netmask: String,
++    /// Network prefix length (e.g. 30 for a slot's /30). Converted to a
++    /// dotted-quad netmask at the boot-args boundary via [`prefix_to_netmask`].
++    pub prefix: u8,
++}
++
++/// Convert a network prefix length to a dotted-quad netmask
++/// (`30 → 255.255.255.252`).
++///
++/// The named boundary conversion `build_boot_args` needs: a [`crate::room::Slot`]
++/// records the prefix length, but the kernel `ip=` cmdline wants a dotted-quad.
++/// Kept in one place so P1/P2 don't rediscover it.
++#[must_use]
++pub fn prefix_to_netmask(prefix: u8) -> String {
++    let p = u32::from(prefix.min(32));
++    // p == 0 → 0.0.0.0; p == 32 → 255.255.255.255. The shift is always in range
++    // for 1..=32 (32 - p is 0..=31).
++    let mask: u32 = if p == 0 { 0 } else { u32::MAX << (32 - p) };
++    Ipv4Addr::from(mask).to_string()
+ }
+ 
+ /// Unique identifier for a room's on-disk state directory.
+ #[derive(Debug, Clone, Copy)]
+-pub struct RoomId(Ulid);
++pub(crate) struct RoomId(Ulid);
+ 
+ impl RoomId {
+-    fn new() -> Self {
++    pub(crate) fn new() -> Self {
+         Self(Ulid::new())
+     }
+ 
+-    fn as_str(&self) -> String {
++    pub(crate) fn as_str(&self) -> String {
+         self.0.to_string().to_lowercase()
+     }
+ }
+ 
++/// Mint a fresh lowercase-ULID room id.
++///
++/// The identity is threaded through the slot file, the room dir name, and
++/// `room.json.id`. `main` calls this **before** the slot claim so all three
++/// share one value.
++#[must_use]
++pub fn mint_room_id() -> String {
++    RoomId::new().as_str()
++}
++
++/// A guard's binding to a claimed pool slot.
++///
++/// Holds the slot's tap (deleted on a clean reap) and the slot file to free
++/// (compare-and-delete) once the room dir is gone. Constructed by the boot path
++/// and by `reap_orphan` for orphan cleanup.
++#[derive(Debug, Clone)]
++pub struct SlotRelease {
++    state_base: PathBuf,
++    index: u8,
++    tap: String,
++    room_id: String,
++}
++
++impl SlotRelease {
++    #[must_use]
++    pub fn new(state_base: PathBuf, index: u8, tap: String, room_id: String) -> Self {
++        Self {
++            state_base,
++            index,
++            tap,
++            room_id,
++        }
++    }
++}
++
++/// One ordered network-teardown step for a reaped slot room. Pure policy so the
++/// tap-then-slot ordering is unit-testable without root or a real `ip`.
++#[derive(Debug, Clone, PartialEq, Eq)]
++enum ReleaseStep {
++    /// `ip tuntap del` the owned tap (tolerate already-gone).
++    DeleteTap(String),
++    /// `slot::free` the slot file (compare-and-delete on `room_id`).
++    FreeSlot { index: u8, room_id: String },
++}
++
++/// The ordered network release for a reaped room: delete the owned tap **first**,
++/// then free the slot file, so a crash mid-reap leaves the slot file as the
++/// breadcrumb. A legacy no-slot room (no ownership, no slot) yields an empty
++/// plan.
++fn plan_release(
++    tap: Option<&str>,
++    tap_owned: bool,
++    slot: Option<&SlotRelease>,
++) -> Vec<ReleaseStep> {
++    let mut steps = Vec::new();
++    if tap_owned {
++        if let Some(tap) = tap {
++            steps.push(ReleaseStep::DeleteTap(tap.to_owned()));
++        }
++    }
++    if let Some(slot) = slot {
++        steps.push(ReleaseStep::FreeSlot {
++            index: slot.index,
++            room_id: slot.room_id.clone(),
++        });
++    }
++    steps
++}
++
+ /// RAII guard that cleans up room resources on drop or explicit shutdown.
+ #[derive(Debug)]
+ pub struct RoomGuard {
+@@ -58,6 +145,7 @@ pub struct RoomGuard {
+     child_pid: Option<u32>,
+     tap_name: Option<String>,
+     tap_owned: bool,
++    slot_release: Option<SlotRelease>,
+     suppress_cleanup: bool,
+     dismiss: bool,
+     cleanup_grace: Duration,
+@@ -72,6 +160,7 @@ impl RoomGuard {
+             child_pid: None,
+             tap_name: None,
+             tap_owned: false,
++            slot_release: None,
+             suppress_cleanup: false,
+             dismiss: false,
+             cleanup_grace: config.cleanup_grace,
+@@ -86,9 +175,11 @@ impl RoomGuard {
+     /// Construct a guard over an already-dead room's paths, for orphan reaping
+     /// (`rooms gc`). No child pid — the process is *confirmed dead* before gc
+     /// reaps it, so there's nothing to kill (which also sidesteps signalling a
+-    /// reused pid) — and no tap ownership (v0's `tap-fc0` is shared). `cleanup`
+-    /// then only unmounts the jail binds, removes the socket, and removes both
+-    /// dirs: the exact teardown the live drop runs.
++    /// reused pid). Tap/slot ownership is added afterward via [`set_slot`] when
++    /// the reaped room held a pool slot; a legacy no-slot orphan leaves the
++    /// shared tap untouched. `cleanup` then unmounts the jail binds, removes the
++    /// socket, removes both dirs, and (for a slot room) deletes the tap + frees
++    /// the slot — the exact teardown the live drop runs.
+     pub fn for_orphan(
+         room_dir: PathBuf,
+         socket: PathBuf,
+@@ -112,14 +203,43 @@ impl RoomGuard {
+         self.tap_name = Some(tap_name);
+     }
+ 
+-    /// Mark the recorded TAP as per-room (owned by this guard). Cleanup
+-    /// will `ip tuntap del` the interface on drop. Not yet wired — per-room
+-    /// TAPs land with the network rewrite that retires `tap-fc0`.
+-    #[allow(dead_code, reason = "wired by future per-room-TAP work")]
++    /// Mark the recorded TAP as per-room (owned by this guard). A clean reap
++    /// `ip link del`s the interface. Usually set via [`set_slot`], which binds
++    /// the tap and the slot file together; exposed on its own for the guard
++    /// property tests.
+     pub fn set_tap_owned(&mut self, owned: bool) {
+         self.tap_owned = owned;
+     }
+ 
++    /// Bind this guard to a claimed pool slot: it owns the slot's tap (deleted
++    /// on a clean reap) and frees the slot file (compare-and-delete) once the
++    /// room dir is gone. Sets tap ownership as a side effect — the tap and the
++    /// slot file are one resource pair.
++    pub fn set_slot(&mut self, release: SlotRelease) {
++        self.tap_name = Some(release.tap.clone());
++        self.tap_owned = true;
++        self.slot_release = Some(release);
++    }
++
++    /// Execute the ordered network release (tap delete, then slot free). Only
++    /// called once the room dir is confirmed removed — the reap-clean gate.
++    fn release_network(&self) {
++        for step in plan_release(
++            self.tap_name.as_deref(),
++            self.tap_owned,
++            self.slot_release.as_ref(),
++        ) {
++            match step {
++                ReleaseStep::DeleteTap(tap) => release_tap(Some(&tap)),
++                ReleaseStep::FreeSlot { index, room_id } => {
++                    if let Some(release) = &self.slot_release {
++                        free_slot_quiet(&release.state_base, index, &room_id);
++                    }
++                }
++            }
++        }
++    }
++
+     /// Prevent cleanup on drop (successful handoff to caller-managed shutdown).
+     pub fn dismiss(&mut self) {
+         self.dismiss = true;
+@@ -145,9 +265,6 @@ impl RoomGuard {
+         debug!(room_dir = %self.room_dir.display(), "RoomGuard cleanup");
+         kill_child_gracefully(self.child_pid, self.cleanup_grace);
+         self.child_pid = None;
+-        if self.tap_owned {
+-            release_tap(self.tap_name.as_deref());
+-        }
+         if self.socket.exists() {
+             let _ = std::fs::remove_file(&self.socket);
+         }
+@@ -155,25 +272,31 @@ impl RoomGuard {
+             .jail_instance_dir
+             .take()
+             .is_none_or(|jail_dir| teardown_jail_sync(&jail_dir));
+-        // Keep the room dir (gc's only handle on this room) if the jail tree
+-        // didn't fully tear down: a stuck bind-mount leaves the jail dir behind,
+-        // and deleting the room dir here would orphan that mount invisibly (the
+-        // registry scans the per-room state dir, not the chroot subtree). With
+-        // the room dir preserved and the process dead, the room re-classifies as
+-        // orphaned-dead, so a later `rooms gc` retries the unmount and reaps it.
+-        if jail_torn_down {
+-            // Surface a failed room-dir removal: the jail is clean but the room
+-            // dir lingers, so the room re-lists as `unknown` (fc gone, meta
+-            // intact) and never becomes reapable — at least make it diagnosable.
+-            if let Err(e) = std::fs::remove_dir_all(&self.room_dir) {
+-                warn!(room_dir = %self.room_dir.display(), error = %e, "failed to remove room dir after cleanup; it may re-list as unknown");
+-            }
++        // Keep the room dir (gc's only handle on this room) AND the slot claimed
++        // if the jail tree didn't fully tear down: a stuck bind-mount leaves the
++        // jail dir behind, and deleting the room dir here would orphan that mount
++        // invisibly (the registry scans the per-room state dir, not the chroot
++        // subtree). With the room dir preserved and the process dead, the room
++        // re-classifies as orphaned-dead, so a later `rooms gc` retries the
++        // unmount and reaps it — freeing the slot then, not prematurely now.
++        if !jail_torn_down {
++            warn!(
++                room_dir = %self.room_dir.display(),
++                "jail teardown incomplete (stranded mount?); keeping room dir + slot so `rooms gc` can reap it"
++            );
+             return;
+         }
+-        warn!(
+-            room_dir = %self.room_dir.display(),
+-            "jail teardown incomplete (stranded mount?); keeping room dir so `rooms gc` can reap it"
+-        );
++        // Room-dir removal is the reap-clean gate: only a removed room dir
++        // authorizes the tap-then-slot release. A failed removal keeps the slot
++        // claimed so the slot file stays the breadcrumb for a later retry.
++        match std::fs::remove_dir_all(&self.room_dir) {
++            Ok(()) => self.release_network(),
++            // Already gone (an idempotent retry) still authorizes the release.
++            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.release_network(),
++            Err(e) => {
++                warn!(room_dir = %self.room_dir.display(), error = %e, "failed to remove room dir after cleanup; keeping slot claimed so `rooms gc` can retry");
++            }
++        }
+     }
+ }
+ 
+@@ -233,14 +356,28 @@ pub struct JailerLaunchPlan {
+     pub rootfs_path_in_jail: PathBuf,
+ }
+ 
++/// Inputs to [`boot`]. Bundled because the room id + slot join the kernel /
++/// rootfs / network / descriptor already threaded through — past the argument
++/// cap as positionals.
++pub struct BootRequest<'a> {
++    pub kernel: &'a Path,
++    pub rootfs: &'a Path,
++    /// Guest network wiring; `None` boots with no NIC (the e2e reachability path).
++    pub network: Option<&'a NetworkConfig>,
++    /// The claimed pool slot whose tap this boot creates and owns; `None` for a
++    /// legacy no-slot boot (shared tap, untouched by teardown).
++    pub slot: Option<&'a room::Slot>,
++    /// The pre-minted room id — the slot-file contents, the room dir name, and
++    /// `room.json.id` are all this value.
++    pub room_id: &'a str,
++    pub readonly_rootfs: bool,
++    pub descriptor: &'a room::RoomDescriptor,
++}
++
+ /// Boot a Firecracker microVM with the given kernel + rootfs.
+ pub async fn boot(
+-    kernel: &Path,
+-    rootfs: &Path,
+-    network: Option<&NetworkConfig>,
++    req: &BootRequest<'_>,
+     config: &RoomsConfig,
+-    readonly_rootfs: bool,
+-    descriptor: &room::RoomDescriptor,
+ ) -> Result<BootedVm, FirecrackerError> {
+     ensure_root()?;
+     check_kvm()?;
+@@ -250,23 +387,44 @@ pub async fn boot(
+         .await
+         .map_err(|e| FirecrackerError::Internal(format!("spawn_blocking panicked: {e}")))??;
+ 
+-    let room_id = RoomId::new();
+-    let room_id_str = room_id.as_str();
++    let room_id_str = req.room_id.to_owned();
+     let per_room_dir = config
+         .room_dir(&room_id_str)
+         .ok_or(FirecrackerError::HomeUnset)?;
+     prepare_room_dir(&per_room_dir).await?;
+ 
+     let chroot_base = jailer_chroot_base(config)?;
+-    let jail_layout =
+-        prepare_jail_layout(&chroot_base, &room_id_str, kernel, rootfs, fc_uid, fc_gid).await?;
++    let jail_layout = prepare_jail_layout(
++        &chroot_base,
++        &room_id_str,
++        req.kernel,
++        req.rootfs,
++        fc_uid,
++        fc_gid,
++    )
++    .await?;
+ 
+     let socket = jail_layout.host_socket.clone();
+     let log_path = per_room_dir.join("firecracker.log");
+     let mut guard = RoomGuard::new(per_room_dir.clone(), socket.clone(), config);
+     guard.set_jail_instance_dir(jail_layout.instance_dir.clone());
+ 
+-    if let Some(net) = network {
++    // Bind the guard to the slot (tap ownership + slot-file release) BEFORE
++    // creating the tap, so a tap-create failure unwinds through the guard —
++    // delete the tap if created, then free the slot. A legacy no-slot boot only
++    // records the shared tap (no ownership).
++    if let Some(slot) = req.slot {
++        let state_base = config
++            .resolved_state_base()
++            .ok_or(FirecrackerError::HomeUnset)?;
++        guard.set_slot(SlotRelease::new(
++            state_base,
++            slot.index,
++            slot.tap.clone(),
++            room_id_str.clone(),
++        ));
++        create_slot_tap(slot)?;
++    } else if let Some(net) = req.network {
+         guard.set_tap(net.tap_name.clone());
+     }
+ 
+@@ -283,7 +441,13 @@ pub async fn boot(
+     let log_handles = open_log_file(&log_path).await?;
+     let mut child = spawn_jailer(&launch, log_handles)?;
+     guard.set_child(&child);
+-    write_room_meta(&per_room_dir, &room_id_str, descriptor, child.id());
++    write_room_meta(
++        &per_room_dir,
++        &room_id_str,
++        req.descriptor,
++        child.id(),
++        req.slot.cloned(),
++    );
+ 
+     wait_for_socket(
+         &socket,
+@@ -293,13 +457,13 @@ pub async fn boot(
+     )
+     .await?;
+ 
+-    let boot_args = build_boot_args(network, readonly_rootfs);
+-    let rootfs_drive = rootfs_drive_payload(&launch.rootfs_path_in_jail, readonly_rootfs);
++    let boot_args = build_boot_args(req.network, req.readonly_rootfs);
++    let rootfs_drive = rootfs_drive_payload(&launch.rootfs_path_in_jail, req.readonly_rootfs);
+     configure_vm(
+         &socket,
+         &launch.kernel_path_in_jail,
+         &rootfs_drive,
+-        network,
++        req.network,
+         &boot_args,
+         config,
+     )
+@@ -309,6 +473,77 @@ pub async fn boot(
+     Ok(BootedVm { guard, child })
+ }
+ 
++/// Create a pool slot's tap: `ip tuntap add`, `ip addr add <gw>/<prefix>`, link
++/// up, and the per-tap forwarding sysctl — the four operations `setup-tap.sh`
++/// did per-tap, now in the boot path with the slot's values.
++#[cfg(unix)]
++fn create_slot_tap(slot: &room::Slot) -> Result<(), FirecrackerError> {
++    run_ip(&[
++        "tuntap",
++        "add",
++        &slot.tap,
++        "mode",
++        "tap",
++        "user",
++        FIRECRACKER_USER,
++    ])?;
++    let cidr = format!("{}/{}", slot.gateway, slot.prefix);
++    run_ip(&["addr", "add", &cidr, "dev", &slot.tap])?;
++    run_ip(&["link", "set", &slot.tap, "up"])?;
++    set_tap_forwarding(&slot.tap)?;
++    Ok(())
++}
++
++#[cfg(not(unix))]
++fn create_slot_tap(_slot: &room::Slot) -> Result<(), FirecrackerError> {
++    Err(FirecrackerError::KvmUnavailable)
++}
++
++/// Run `ip <args>`, mapping a non-zero exit to a descriptive error.
++#[cfg(unix)]
++fn run_ip(args: &[&str]) -> Result<(), FirecrackerError> {
++    let out = std::process::Command::new("ip")
++        .args(args)
++        .output()
++        .map_err(FirecrackerError::Io)?;
++    if out.status.success() {
++        return Ok(());
++    }
++    Err(FirecrackerError::Internal(format!(
++        "ip {} failed: {}",
++        args.join(" "),
++        String::from_utf8_lossy(&out.stderr).trim()
++    )))
++}
++
++/// Enable per-tap IPv4 forwarding (the `sysctl` `setup-tap.sh` set per-tap).
++#[cfg(unix)]
++fn set_tap_forwarding(tap: &str) -> Result<(), FirecrackerError> {
++    let key = format!("net.ipv4.conf.{tap}.forwarding=1");
++    let out = std::process::Command::new("sysctl")
++        .args(["-w", &key])
++        .output()
++        .map_err(FirecrackerError::Io)?;
++    if out.status.success() {
++        return Ok(());
++    }
++    Err(FirecrackerError::Internal(format!(
++        "sysctl -w {key} failed: {}",
++        String::from_utf8_lossy(&out.stderr).trim()
++    )))
++}
++
++/// Free a pool slot file (compare-and-delete), logging the outcome. Best-effort:
++/// a failure leaves the slot file as the breadcrumb for gc/reconcile to retry.
++fn free_slot_quiet(state_base: &Path, index: u8, room_id: &str) {
++    match crate::slot::free(state_base, index, room_id) {
++        Ok(freed) => debug!(index, ?freed, "freed pool slot"),
++        Err(e) => {
++            warn!(index, error = %e, "failed to free pool slot; gc/reconcile will retry");
++        }
++    }
++}
++
+ /// Jailer must run as root: it chroots, bind-mounts the kernel/rootfs into the
+ /// jail, and drops to the firecracker uid. Fail early and clearly when not
+ /// root rather than cryptically at the first `mount --bind`.
+@@ -396,11 +631,17 @@ fn jailer_chroot_base(config: &RoomsConfig) -> Result<PathBuf, FirecrackerError>
+ /// it stays the firecracker pid for the room's life — `room::probe` liveness
+ /// depends on that. If a `--daemonize` jailer is ever adopted, capture the
+ /// firecracker pid the jailer writes instead.
+-fn write_room_meta(room_dir: &Path, id: &str, descriptor: &room::RoomDescriptor, pid: Option<u32>) {
++fn write_room_meta(
++    room_dir: &Path,
++    id: &str,
++    descriptor: &room::RoomDescriptor,
++    pid: Option<u32>,
++    slot: Option<room::Slot>,
++) {
+     // Record the pid's start time so liveness can later tell *this* incarnation
+     // from a recycled pid (the `rooms kill` identity guard).
+     let pid_starttime = pid.and_then(room::starttime_of);
+-    let meta = room::RoomMeta::new(
++    let mut meta = room::RoomMeta::new(
+         id.to_owned(),
+         descriptor.command.clone(),
+         pid,
+@@ -408,6 +649,10 @@ fn write_room_meta(room_dir: &Path, id: &str, descriptor: &room::RoomDescriptor,
+         descriptor.keep,
+         Utc::now(),
+     );
++    // The slot is written into room.json before the firecracker spawn completes,
++    // so `rooms ls`/`gc`/`kill` can free the tap + slot even for a room that
++    // never finished booting.
++    meta.slot = slot;
+     if let Err(e) = room::write_atomic(room_dir, &meta) {
+         warn!(error = %e, "failed to write room.json; room will be invisible to `rooms ls`");
+     }
+@@ -709,12 +954,17 @@ const fn teardown_jail_sync(_instance_dir: &Path) -> bool {
+ /// A crash, a killed launcher, or a `--keep` room whose firecracker later died.
+ /// Reconstructs a guard over the room's paths and runs the same cleanup the live
+ /// drop uses; the caller (gc) guarantees the firecracker process is already
+-/// dead. Returns an error if either dir survives, so `rooms gc` reports an
+-/// honest outcome rather than a silent leak.
++/// dead. `slot` binds the tap + slot-file release for a pool room (`None` for a
++/// legacy shared-tap room). The slot is freed **only** on a clean reap (room dir
++/// removed) — the same reap-clean gate the live cleanup applies — so a preserved
++/// room dir (stranded mount) leaves the slot claimed for a later retry. Returns
++/// an error if either dir survives, so `rooms gc` reports an honest outcome
++/// rather than a silent leak.
+ pub fn reap_orphan(
+     room_dir: &Path,
+     jail_instance_dir: &Path,
+     socket: &Path,
++    slot: Option<SlotRelease>,
+     config: &RoomsConfig,
+ ) -> Result<(), FirecrackerError> {
+     let mut guard = RoomGuard::for_orphan(
+@@ -723,6 +973,9 @@ pub fn reap_orphan(
+         jail_instance_dir.to_path_buf(),
+         config,
+     );
++    if let Some(release) = slot {
++        guard.set_slot(release);
++    }
+     guard.cleanup();
+     guard.dismiss(); // cleanup already ran; don't let Drop run it again.
+                      // cleanup keeps the room dir when the jail tree didn't fully tear down, so a
+@@ -820,7 +1073,9 @@ fn build_boot_args(network: Option<&NetworkConfig>, readonly_rootfs: bool) -> St
+     };
+     format!(
+         "{base} ip={}::{}:{}::eth0:off",
+-        net.guest_ip, net.gateway_ip, net.netmask
++        net.guest_ip,
++        net.gateway_ip,
++        prefix_to_netmask(net.prefix)
+     )
+ }
+ 
+@@ -1151,6 +1406,13 @@ fn release_tap(tap_name: Option<&str>) {
+     }
+ }
+ 
++/// Delete a pool slot's tap by name, tolerating already-gone. The public seam
++/// `gc` uses to sweep an orphaned `tap-fc<k>` whose slot file `reconcile`
++/// already removed.
++pub fn delete_tap(tap: &str) {
++    release_tap(Some(tap));
++}
++
+ #[cfg(test)]
+ mod tests {
+     #![allow(
+@@ -1277,7 +1539,7 @@ mod tests {
+             tap_name: "tap-fc0".to_owned(),
+             guest_ip: "172.16.0.2".to_owned(),
+             gateway_ip: "172.16.0.1".to_owned(),
+-            netmask: "255.255.255.0".to_owned(),
++            prefix: 24,
+         };
+         let args = build_boot_args(Some(&net), true);
+         assert!(
+@@ -1290,6 +1552,69 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn build_boot_args_interpolates_slot_prefix_as_dotted_quad() {
++        // A pool slot's /30 must render 255.255.255.252 in the kernel ip= arg —
++        // the prefix→dotted-quad conversion at the boot-args boundary.
++        let net = NetworkConfig {
++            tap_name: "tap-fc1".to_owned(),
++            guest_ip: "172.16.0.6".to_owned(),
++            gateway_ip: "172.16.0.5".to_owned(),
++            prefix: 30,
++        };
++        let args = build_boot_args(Some(&net), false);
++        assert!(
++            args.contains("ip=172.16.0.6::172.16.0.5:255.255.255.252::eth0:off"),
++            "a /30 slot must interpolate 255.255.255.252: {args}"
++        );
++    }
++
++    #[test]
++    fn prefix_to_netmask_covers_the_boundaries() {
++        use super::prefix_to_netmask;
++        assert_eq!(prefix_to_netmask(30), "255.255.255.252");
++        assert_eq!(prefix_to_netmask(24), "255.255.255.0");
++        assert_eq!(prefix_to_netmask(32), "255.255.255.255");
++        assert_eq!(prefix_to_netmask(0), "0.0.0.0");
++        assert_eq!(prefix_to_netmask(16), "255.255.0.0");
++        // Out-of-range clamps to /32 rather than panicking on the shift.
++        assert_eq!(prefix_to_netmask(33), "255.255.255.255");
++    }
++
++    #[test]
++    fn plan_release_orders_tap_delete_before_slot_free() {
++        use super::{plan_release, ReleaseStep, SlotRelease};
++        use std::path::PathBuf;
++
++        let release = SlotRelease::new(
++            PathBuf::from("/state"),
++            1,
++            "tap-fc1".to_owned(),
++            "01abcdefghijklmnopqrstuvwx".to_owned(),
++        );
++        let steps = plan_release(Some("tap-fc1"), true, Some(&release));
++        assert_eq!(
++            steps,
++            vec![
++                ReleaseStep::DeleteTap("tap-fc1".to_owned()),
++                ReleaseStep::FreeSlot {
++                    index: 1,
++                    room_id: "01abcdefghijklmnopqrstuvwx".to_owned(),
++                },
++            ],
++            "tap delete must precede slot free (breadcrumb ordering)"
++        );
++
++        // A legacy no-slot room (no ownership, no slot) yields an empty plan —
++        // the shared tap is never touched.
++        assert!(plan_release(Some("tap-fc0"), false, None).is_empty());
++        // Ownership without a recorded slot still deletes the tap only.
++        assert_eq!(
++            plan_release(Some("tap-fc9"), true, None),
++            vec![ReleaseStep::DeleteTap("tap-fc9".to_owned())]
++        );
++    }
++
+     #[test]
+     fn rootfs_drive_payload_read_only_tracks_flag() {
+         let ro = rootfs_drive_payload(Path::new("/tmp/rootfs.ext4"), true);
+@@ -1477,6 +1802,110 @@ mod tests {
+         }
+     }
+ 
++    /// A clean reap (room dir removed) frees the claimed slot file — the guard's
++    /// tap-then-slot release wired end to end. The tap here is a fake name, so
++    /// the `ip link del` is a harmless no-op; the observable effect is the slot
++    /// file disappearing.
++    #[cfg(unix)]
++    #[test]
++    fn cleanup_frees_slot_after_clean_reap() {
++        use crate::slot::{self, Claimer};
++
++        let tmp = tempfile::tempdir().expect("tempdir");
++        let state = tmp.path();
++        let id = "01abcdefghijklmnopqrstuvwx";
++        let me = Claimer {
++            pid: 1,
++            starttime: 1,
++        };
++        let claimed = slot::claim(state, id, me, 8, None).expect("claim slot");
++        let slot_file = state.join("slots").join(claimed.index.to_string());
++        assert!(slot_file.exists(), "slot file present after claim");
++
++        let room_dir = state.join(id);
++        std::fs::create_dir_all(&room_dir).expect("room dir");
++
++        let config = RoomsConfig::default();
++        let mut guard = RoomGuard::new(room_dir.clone(), room_dir.join("api.sock"), &config);
++        guard.set_slot(super::SlotRelease::new(
++            state.to_path_buf(),
++            claimed.index,
++            claimed.tap,
++            id.to_owned(),
++        ));
++        guard.cleanup();
++        guard.dismiss();
++
++        assert!(!room_dir.exists(), "room dir reaped");
++        assert!(
++            !slot_file.exists(),
++            "a clean reap must free the slot file after removing the room dir"
++        );
++    }
++
++    /// When the jail teardown fails (stranded mount), the slot stays claimed —
++    /// the slot file is the breadcrumb for a later `rooms gc` retry, never freed
++    /// prematurely. Injected via a read-only jail-parent so the final rmdir fails.
++    #[cfg(unix)]
++    #[test]
++    fn cleanup_keeps_slot_when_jail_teardown_fails() {
++        use std::os::unix::fs::PermissionsExt;
++
++        use crate::slot::{self, Claimer};
++
++        let tmp = tempfile::tempdir().expect("tempdir");
++        let state = tmp.path();
++        let id = "01abcdefghijklmnopqrstuvwx";
++        let me = Claimer {
++            pid: 1,
++            starttime: 1,
++        };
++        let claimed = slot::claim(state, id, me, 8, None).expect("claim slot");
++        let slot_file = state.join("slots").join(claimed.index.to_string());
++
++        let room_dir = state.join(id);
++        std::fs::create_dir_all(&room_dir).expect("room dir");
++        std::fs::write(room_dir.join("room.json"), b"{}").expect("marker");
++
++        let fc_parent = state.join("chroot").join("firecracker");
++        let instance = fc_parent.join(id);
++        std::fs::create_dir_all(instance.join("root")).expect("jail tree");
++        std::fs::write(instance.join("root").join("kernel"), b"k").expect("kernel");
++        std::fs::write(instance.join("root").join("rootfs"), b"r").expect("rootfs");
++        std::fs::set_permissions(&fc_parent, std::fs::Permissions::from_mode(0o500))
++            .expect("lock parent");
++
++        let config = RoomsConfig::default();
++        let mut guard = RoomGuard::for_orphan(
++            room_dir.clone(),
++            room_dir.join("api.sock"),
++            instance.clone(),
++            &config,
++        );
++        guard.set_slot(super::SlotRelease::new(
++            state.to_path_buf(),
++            claimed.index,
++            claimed.tap,
++            id.to_owned(),
++        ));
++        guard.cleanup();
++        guard.dismiss();
++
++        let injected = instance.exists();
++        std::fs::set_permissions(&fc_parent, std::fs::Permissions::from_mode(0o700))
++            .expect("restore perms");
++
++        if !injected {
++            // Root runner: the read-only parent didn't block removal, so the
++            // failure couldn't be injected. Covered on non-root CI + rooms-host.
++            return;
++        }
++        assert!(
++            slot_file.exists(),
++            "a stranded-mount reap must keep the slot file as the gc breadcrumb"
++        );
++    }
++
+     mod room_guard_properties {
+         use proptest::prelude::*;
+ 
+@@ -1561,7 +1990,7 @@ mod e2e_tests {
+     use std::path::PathBuf;
+     use std::time::Duration;
+ 
+-    use super::boot;
++    use super::{boot, mint_room_id, BootRequest};
+     use crate::config::RoomsConfig;
+ 
+     fn image_path(name: &str) -> PathBuf {
+@@ -1578,16 +2007,18 @@ mod e2e_tests {
+         assert!(kernel.exists(), "kernel missing at {kernel:?}");
+         assert!(rootfs.exists(), "rootfs missing at {rootfs:?}");
+ 
+-        let mut vm = boot(
+-            &kernel,
+-            &rootfs,
+-            None,
+-            &config,
+-            false,
+-            &crate::room::RoomDescriptor::default(),
+-        )
+-        .await
+-        .expect("boot should succeed");
++        let id = mint_room_id();
++        let descriptor = crate::room::RoomDescriptor::default();
++        let req = BootRequest {
++            kernel: &kernel,
++            rootfs: &rootfs,
++            network: None,
++            slot: None,
++            room_id: &id,
++            readonly_rootfs: false,
++            descriptor: &descriptor,
++        };
++        let mut vm = boot(&req, &config).await.expect("boot should succeed");
+ 
+         tokio::time::sleep(Duration::from_secs(3)).await;
+         assert!(vm.is_alive().expect("is_alive probe"));
+diff --git a/src/main.rs b/src/main.rs
+index f386964..fb3faa2 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
+ use rooms::artifacts::{ResultJson, RunStatus};
+ use rooms::{
+     artifacts, config::RoomsConfig, doctor, error::RoomsError, firecracker, registry, room, rootfs,
+-    runner,
++    runner, slot,
+ };
+ use tracing::{info, warn};
+ 
+@@ -324,34 +324,69 @@ async fn run_room(args: RunArgs, config: &RoomsConfig) -> Result<u8, RoomsError>
+         })?;
+     rootfs::validate_kernel(&kernel).map_err(RoomsError::Rootfs)?;
+ 
+-    let network = firecracker::NetworkConfig {
+-        tap_name: "tap-fc0".to_owned(),
+-        guest_ip: "172.16.0.2".to_owned(),
+-        gateway_ip: "172.16.0.1".to_owned(),
+-        netmask: "255.255.255.0".to_owned(),
+-    };
++    // Degraded-mode precheck: the host firewall chain must be installed before
++    // we claim a slot, so a mis-provisioned host fails fast with the exact
++    // remediation rather than booting a room that can't be isolated. Fail-open
++    // on an unprobeable host (no iptables / not root) — the boot's own root/KVM
++    // checks own those errors.
++    if let Err(remediation) = doctor::ensure_rooms_fwd_installed() {
++        return Err(RoomsError::Internal(remediation));
++    }
++
++    // Every room path derives from the state base; resolve it once up front.
++    let state_base = config.resolved_state_base().ok_or_else(|| {
++        RoomsError::Internal("HOME unset; cannot locate the rooms state base".to_owned())
++    })?;
++    // Resolve every host-side input that can fail BEFORE claiming a slot: a
++    // missing --task file, a bad key path, or other input error must fail fast
++    // without leaking a claim — repeated, that would exhaust the pool until a
++    // `rooms gc`. After the claim, only boot can fail, and its guard frees the
++    // slot.
+     let key = key_path()?;
+-    // Resolve the post-boot action before booting so a missing --task file (or
+-    // other host-side input error) fails fast without spending a microVM boot.
+     let action = resolve_action(&args).await?;
+     // Read-only rootfs + tmpfs overlay on the cursor agent path (it runs
+     // untrusted code) or when the operator opts in with --readonly-rootfs; a
+     // plain `rooms run --command` otherwise keeps a writable rootfs so any
+     // image — including ones without /sbin/overlay-init — still boots.
+     let readonly_rootfs = args.readonly_rootfs || matches!(args.runner, RunnerKind::Cursor);
++
++    // Mint the room id BEFORE the claim, so the one value is the slot-file
++    // contents, the room dir name, and room.json.id. Then claim a pool slot and
++    // derive the guest network from it.
++    let room_id = firecracker::mint_room_id();
++    let me = slot::Claimer::current().ok_or_else(|| {
++        RoomsError::Internal("cannot read this process's identity for the slot claim".to_owned())
++    })?;
++    let claimed = slot::claim(&state_base, &room_id, me, slot::DEFAULT_MAX_POOL, None)?;
++    let network = firecracker::NetworkConfig {
++        tap_name: claimed.tap.clone(),
++        guest_ip: claimed.guest.to_string(),
++        gateway_ip: claimed.gateway.to_string(),
++        prefix: claimed.prefix,
++    };
+     let descriptor = room::RoomDescriptor {
+         command: Some(room_label(&action)),
+         keep: args.keep,
+     };
+-    let mut vm = firecracker::boot(
+-        &kernel,
+-        &args.image,
+-        Some(&network),
+-        config,
++    let boot_req = firecracker::BootRequest {
++        kernel: &kernel,
++        rootfs: &args.image,
++        network: Some(&network),
++        slot: Some(&claimed),
++        room_id: &room_id,
+         readonly_rootfs,
+-        &descriptor,
+-    )
+-    .await?;
++        descriptor: &descriptor,
++    };
++    let mut vm = match firecracker::boot(&boot_req, config).await {
++        Ok(vm) => vm,
++        Err(e) => {
++            // boot's guard frees the slot when it got far enough to take
++            // ownership; this covers an early failure before that. Compare-and-
++            // delete makes the double-free safe (AlreadyFree / AlreadyReassigned).
++            let _ = slot::free(&state_base, claimed.index, &room_id);
++            return Err(e.into());
++        }
++    };
+ 
+     if args.keep {
+         vm.guard_mut().set_suppress_cleanup(true);
+diff --git a/src/registry.rs b/src/registry.rs
+index 965a27e..113fd47 100644
+--- a/src/registry.rs
++++ b/src/registry.rs
+@@ -13,9 +13,11 @@ use serde::Serialize;
+ use tracing::warn;
+ 
+ use crate::config::RoomsConfig;
++use crate::doctor;
+ use crate::error::RegistryError;
+ use crate::firecracker::{self, KillSignalOutcome};
+ use crate::room::{self, Liveness, RoomMeta};
++use crate::slot;
+ 
+ /// Schema version for `ls --json` stdout (mirrors `doctor`/`diff`).
+ pub const REGISTRY_SCHEMA_VERSION: u32 = 1;
+@@ -215,6 +217,15 @@ pub fn gc(config: &RoomsConfig, opts: &GcOptions) -> Result<GcReport, RegistryEr
+             return Err(RegistryError::InvalidRoomId { id: id.clone() });
+         }
+     }
++    // Reclaim leaked slots first (a claimer that died before its room.json, or a
++    // reap that crashed mid-way): reconcile judges each slot file by its own
++    // liveness token and removes a confirmed-dead one with no room dir. A slot
++    // still backed by a room dir is left for the reap loop below to free through
++    // the room's own teardown. Skip the sweep on a dry-run and on a targeted
++    // (`--only`) gc — both are scoped to a single room, not a pool-wide sweep.
++    if !opts.dry_run && opts.only.is_none() {
++        reconcile_leaked_slots(config);
++    }
+     let mut rooms = list_rooms(config)?;
+     if let Some(only) = &opts.only {
+         rooms.retain(|e| &e.id == only);
+@@ -255,10 +266,58 @@ fn reap_entry(
+     if dry_run {
+         return Ok(outcome(entry, false, "would reap (dry-run)"));
+     }
+-    firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, config)?;
++    let slot = slot_release_for(config, entry)?;
++    firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, slot, config)?;
+     Ok(outcome(entry, true, "reaped"))
+ }
+ 
++/// Build the tap + slot-file release for a room's teardown, `None` when the room
++/// holds no pool slot (a legacy shared-tap room). The slot's own recorded tap +
++/// index are threaded straight from `room.json`.
++fn slot_release_for(
++    config: &RoomsConfig,
++    entry: &RoomEntry,
++) -> Result<Option<firecracker::SlotRelease>, RegistryError> {
++    let Some(slot) = &entry.slot else {
++        return Ok(None);
++    };
++    let base = config
++        .resolved_state_base()
++        .ok_or(RegistryError::HomeUnset)?;
++    Ok(Some(firecracker::SlotRelease::new(
++        base,
++        slot.index,
++        slot.tap.clone(),
++        entry.id.clone(),
++    )))
++}
++
++/// Reclaim leaked slots and sweep orphaned taps. Two passes, in order:
++///
++/// 1. `slot::reconcile` frees slot files whose claimer is dead, deleting each
++///    reclaimed slot's tap.
++/// 2. Any `tap-fc<k>` still present with no slot file is a true orphan — either
++///    a boot-path crash before the room registered, or a pass-1 tap-delete that
++///    failed after the slot file was already gone. Delete it so the next room
++///    claiming that index doesn't fail on `ip tuntap add`. This is the sweep
++///    `rooms doctor` promises for its orphaned-tap warning.
++///
++/// Best-effort throughout: an unresolvable base skips it, every tap delete
++/// tolerates already-gone.
++fn reconcile_leaked_slots(config: &RoomsConfig) {
++    let Some(base) = config.resolved_state_base() else {
++        return;
++    };
++    for reclaimed in slot::reconcile(&base) {
++        if reclaimed.removed {
++            firecracker::delete_tap(&format!("tap-fc{}", reclaimed.index));
++        }
++    }
++    for index in doctor::orphaned_pool_taps(config) {
++        firecracker::delete_tap(&format!("tap-fc{index}"));
++    }
++}
++
+ /// Resolve the two dirs gc removes for `id`, re-checking each sits under its
+ /// expected parent — the defense-in-depth backstop behind `is_valid_room_id`.
+ fn reap_paths(
+@@ -475,7 +534,8 @@ fn reap_after_kill(
+     ok_reason: &str,
+ ) -> Result<KillOutcome, RegistryError> {
+     let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
+-    match firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, config) {
++    let slot = slot_release_for(config, entry)?;
++    match firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, slot, config) {
+         Ok(()) => Ok(kill_outcome(entry, KillDisposition::Killed, ok_reason)),
+         Err(e) => {
+             warn!(id = %entry.id, error = %e, "kill: reap after terminate failed");
+@@ -662,6 +722,44 @@ mod tests {
+         }
+     }
+ 
++    /// Reaping a slotted orphaned-dead room frees its slot file — the reap path
++    /// threads the room.json slot into `reap_orphan`'s compare-and-delete free.
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn gc_frees_slot_of_reaped_slotted_room() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config_with_base(dir.path());
++        let id = make_room(&config, Some(4_194_305), false, true);
++
++        // Record a slot in room.json and claim the matching slot file (dead
++        // claimer, so the belt-and-suspenders reconcile sweep defers to the reap
++        // because the room dir is still present).
++        let room_dir = config.room_dir(&id).unwrap();
++        let mut meta = room::read(&room_dir).unwrap().unwrap();
++        meta.slot = Some(room::Slot {
++            index: 1,
++            tap: "tap-fc1".to_owned(),
++            gateway: std::net::Ipv4Addr::new(172, 16, 0, 5),
++            guest: std::net::Ipv4Addr::new(172, 16, 0, 6),
++            prefix: 30,
++        });
++        room::write_atomic(&room_dir, &meta).unwrap();
++        let me = crate::slot::Claimer {
++            pid: 4_194_305,
++            starttime: 1,
++        };
++        crate::slot::claim(dir.path(), &id, me, 8, Some(1)).unwrap();
++        let slot_file = dir.path().join("slots").join("1");
++        assert!(slot_file.exists(), "slot file present before reap");
++
++        let report = gc(&config, &GcOptions::default()).unwrap();
++        assert!(report.outcomes.iter().any(|o| o.id == id && o.reaped));
++        assert!(
++            !slot_file.exists(),
++            "reaping a slotted room must free its slot file"
++        );
++    }
++
+     #[cfg(target_os = "linux")]
+     #[test]
+     fn dry_run_deletes_nothing() {
+diff --git a/src/slot.rs b/src/slot.rs
+index b768d15..12818c5 100644
+--- a/src/slot.rs
++++ b/src/slot.rs
+@@ -38,6 +38,10 @@ const FREE_LOCK: &str = "slots.lock";
+ /// reserved slot 0.
+ pub const MAX_SLOT: u8 = 63;
+ 
++/// Default per-invocation pool ceiling. Boot walks slots `1..=this`; an operator
++/// override to lower it can land later.
++pub const DEFAULT_MAX_POOL: u8 = 8;
++
+ /// Identity of the process performing a claim.
+ ///
+ /// A pid pinned to its incarnation via `/proc/<pid>/stat` start time — the
+@@ -49,6 +53,19 @@ pub struct Claimer {
+     pub starttime: u64,
+ }
+ 
++impl Claimer {
++    /// This process's own `(pid, starttime)` identity — what boot records into
++    /// the slot file so reconcile can probe the claimer directly. `None` when
++    /// the start time can't be read (off Linux, or an unreadable `/proc`); a
++    /// caller that can't identify itself must not claim.
++    #[must_use]
++    pub fn current() -> Option<Self> {
++        let pid = std::process::id();
++        let starttime = crate::room::starttime_of(pid)?;
++        Some(Self { pid, starttime })
++    }
++}
++
+ /// Claim a slot for `room_id`, whose identity the caller pre-minted.
+ ///
+ /// With `target: None`, walks k = 1..=cap (clamped to [`MAX_SLOT`]) and
+diff --git a/tests/control_failures.rs b/tests/control_failures.rs
+index e82da50..28cad0d 100644
+--- a/tests/control_failures.rs
++++ b/tests/control_failures.rs
+@@ -83,16 +83,20 @@ async fn firecracker_exits_early_is_caught() {
+     };
+ 
+     let before = room_dirs_glob();
+-    let err = firecracker::boot(
+-        &kernel,
+-        &rootfs,
+-        None,
+-        &config,
+-        false,
+-        &rooms::room::RoomDescriptor::default(),
+-    )
+-    .await
+-    .expect_err("stub should exit early");
++    let id = firecracker::mint_room_id();
++    let descriptor = rooms::room::RoomDescriptor::default();
++    let req = firecracker::BootRequest {
++        kernel: &kernel,
++        rootfs: &rootfs,
++        network: None,
++        slot: None,
++        room_id: &id,
++        readonly_rootfs: false,
++        descriptor: &descriptor,
++    };
++    let err = firecracker::boot(&req, &config)
++        .await
++        .expect_err("stub should exit early");
+ 
+     match &err {
+         FirecrackerError::ProcessExitedEarly { exit_code, .. } => {
+@@ -129,16 +133,20 @@ async fn api_socket_never_appears() {
+         ..RoomsConfig::default()
+     };
+ 
+-    let err = firecracker::boot(
+-        &kernel,
+-        &rootfs,
+-        None,
+-        &config,
+-        false,
+-        &rooms::room::RoomDescriptor::default(),
+-    )
+-    .await
+-    .expect_err("stub should never open socket");
++    let id = firecracker::mint_room_id();
++    let descriptor = rooms::room::RoomDescriptor::default();
++    let req = firecracker::BootRequest {
++        kernel: &kernel,
++        rootfs: &rootfs,
++        network: None,
++        slot: None,
++        room_id: &id,
++        readonly_rootfs: false,
++        descriptor: &descriptor,
++    };
++    let err = firecracker::boot(&req, &config)
++        .await
++        .expect_err("stub should never open socket");
+ 
+     match &err {
+         FirecrackerError::ApiSocketNeverAppeared { timeout_ms } => {
+@@ -165,16 +173,20 @@ async fn guest_unreachable() {
+     };
+ 
+     // Boot without network so SSH can never succeed.
+-    let vm = firecracker::boot(
+-        &kernel,
+-        &rootfs,
+-        None,
+-        &config,
+-        false,
+-        &rooms::room::RoomDescriptor::default(),
+-    )
+-    .await
+-    .expect("boot without network should succeed");
++    let id = firecracker::mint_room_id();
++    let descriptor = rooms::room::RoomDescriptor::default();
++    let req = firecracker::BootRequest {
++        kernel: &kernel,
++        rootfs: &rootfs,
++        network: None,
++        slot: None,
++        room_id: &id,
++        readonly_rootfs: false,
++        descriptor: &descriptor,
++    };
++    let vm = firecracker::boot(&req, &config)
++        .await
++        .expect("boot without network should succeed");
+ 
+     let key = PathBuf::from(std::env::var("HOME").expect("HOME") + "/.ssh/id_rooms");
+ 
+diff --git a/tests/pool_e2e.rs b/tests/pool_e2e.rs
+new file mode 100644
+index 0000000..fb50150
+--- /dev/null
++++ b/tests/pool_e2e.rs
+@@ -0,0 +1,313 @@
++//! Host-e2e: a single room boots on pool slot 1, runs an egress task, and reaps
++//! byte-identically — the pool tap set, the `slots/` directory, and the
++//! `ROOMS_FWD` chain all return to their exact pre-boot state.
++//!
++//! Gated behind `e2e` + unix. Requires the rooms-host, not the CI sandbox:
++//! root (tap creation needs `CAP_NET_ADMIN`), `/dev/kvm`, Firecracker + jailer
++//! on PATH, the guest images under `~/rooms/images`, and the `ROOMS_FWD` chain
++//! already installed (`sudo bash scripts/setup-tap.sh --host`). Every
++//! precondition it can't meet is a skip, not a failure, so it's a no-op on an
++//! unprovisioned host.
++//!
++//! Run on rooms-host:
++//! `sudo -E cargo test --features e2e --test pool_e2e -- --nocapture`
++
++#![cfg(all(unix, feature = "e2e"))]
++#![allow(
++    clippy::unwrap_used,
++    clippy::expect_used,
++    clippy::panic,
++    reason = "e2e test module: panicky lints are noise in tests"
++)]
++
++use std::path::{Path, PathBuf};
++use std::process::Command;
++
++use rooms::config::RoomsConfig;
++use rooms::firecracker::{self, BootRequest, NetworkConfig};
++use rooms::slot::{self, Claimer};
++
++/// The slot this test drives. 1 is the first real pool slot (0 is the reserved
++/// legacy shared tap).
++const SLOT_INDEX: u8 = 1;
++
++/// The guest user the baked rootfs exposes (matches `runner`'s `GUEST_USER`).
++const GUEST_USER: &str = "rooms";
++
++fn image_path(name: &str) -> PathBuf {
++    let home = std::env::var("HOME").expect("HOME");
++    PathBuf::from(home).join("rooms/images").join(name)
++}
++
++fn guest_key() -> PathBuf {
++    let home = std::env::var("HOME").expect("HOME");
++    PathBuf::from(home).join(".ssh/id_rooms")
++}
++
++fn is_root() -> bool {
++    Command::new("id")
++        .arg("-u")
++        .output()
++        .ok()
++        .and_then(|o| String::from_utf8(o.stdout).ok())
++        .is_some_and(|s| s.trim() == "0")
++}
++
++/// The pool tap set (`tap-fc*` links only). Filtering to the rooms taps keeps
++/// the byte-identical assert immune to unrelated host interfaces and counters —
++/// the invariant under test is "no pool tap leaked", not "the whole link table
++/// froze".
++fn rooms_taps() -> String {
++    let out = Command::new("ip")
++        .args(["-o", "link", "show"])
++        .output()
++        .expect("ip link show");
++    let text = String::from_utf8_lossy(&out.stdout);
++    let mut taps: Vec<String> = text
++        .lines()
++        .filter(|line| line.contains("tap-fc"))
++        .map(str::to_owned)
++        .collect();
++    taps.sort_unstable();
++    taps.join("\n")
++}
++
++/// Sorted listing of `<state_base>/slots/` — the claimed-slot files.
++fn slots_listing(state_base: &Path) -> String {
++    let dir = state_base.join(slot::SLOTS_DIR);
++    let mut names: Vec<String> = std::fs::read_dir(&dir)
++        .map(|rd| {
++            rd.filter_map(Result::ok)
++                .map(|e| e.file_name().to_string_lossy().into_owned())
++                .collect()
++        })
++        .unwrap_or_default();
++    names.sort();
++    names.join("\n")
++}
++
++fn rooms_fwd_output() -> std::process::Output {
++    Command::new("iptables")
++        .args(["-S", "ROOMS_FWD"])
++        .output()
++        .expect("iptables -S ROOMS_FWD")
++}
++
++/// The `ROOMS_FWD` chain dump — boot/reap must never touch this host-once chain.
++fn rooms_fwd_dump() -> String {
++    String::from_utf8_lossy(&rooms_fwd_output().stdout).into_owned()
++}
++
++fn rooms_fwd_installed() -> bool {
++    rooms_fwd_output().status.success()
++}
++
++/// Run one command in the guest over SSH, returning stdout. Matches `runner`'s
++/// SSH options (host keys rotate every guest boot, so no known-hosts pinning).
++fn ssh_guest(guest_ip: &str, key: &Path, cmd: &str) -> std::process::Output {
++    Command::new("ssh")
++        .args([
++            "-i",
++            key.to_str().expect("key path utf-8"),
++            "-o",
++            "StrictHostKeyChecking=no",
++            "-o",
++            "UserKnownHostsFile=/dev/null",
++            "-o",
++            "IdentitiesOnly=yes",
++            "-o",
++            "ConnectTimeout=10",
++            &format!("{GUEST_USER}@{guest_ip}"),
++            cmd,
++        ])
++        .output()
++        .expect("ssh to guest")
++}
++
++/// Kernel + rootfs paths if the host can run the e2e, else `None` (with the skip
++/// reason logged). Keeps the preconditions — root, `/dev/kvm`, images, the
++/// installed `ROOMS_FWD` chain — out of the test body's line budget.
++fn preflight() -> Option<(PathBuf, PathBuf)> {
++    if !is_root() {
++        eprintln!("skipping: e2e needs root (tap creation via `ip tuntap ... user firecracker`)");
++        return None;
++    }
++    if !Path::new("/dev/kvm").exists() {
++        eprintln!("skipping: no /dev/kvm (nested virt off?)");
++        return None;
++    }
++    let kernel = image_path("vmlinux.bin");
++    let rootfs = image_path("rootfs.ext4");
++    if !kernel.exists() || !rootfs.exists() {
++        eprintln!("skipping: guest images not present under ~/rooms/images");
++        return None;
++    }
++    if !rooms_fwd_installed() {
++        eprintln!(
++            "skipping: ROOMS_FWD not installed; run `sudo bash scripts/setup-tap.sh --host` first"
++        );
++        return None;
++    }
++    Some((kernel, rootfs))
++}
++
++/// Outcome of probing the guest over its slot tap.
++enum Egress {
++    /// Reached the internet through the NAT MASQUERADE + `ROOMS_FWD` ACCEPT.
++    Verified,
++    /// sshd answered over the slot tap (tap + routing work), but the login key
++    /// didn't match this host's baked image, so the egress task couldn't run.
++    ReachableNoAuth,
++    /// sshd never answered within the deadline — the slot tap / routing failed.
++    Unreachable,
++}
++
++/// Poll the guest for up to ~90s, stopping as soon as sshd answers. Separates a
++/// real networking failure (never answers → `Unreachable`) from a guest-image
++/// key mismatch (a publickey rejection → `ReachableNoAuth`), so a host whose
++/// rootfs isn't paired with `~/.ssh/id_rooms` still exercises the reap invariant
++/// rather than masking it behind an auth error.
++async fn probe_egress(guest_ip: &str) -> Egress {
++    let key = guest_key();
++    if !key.exists() {
++        eprintln!("note: ~/.ssh/id_rooms missing; egress task not probed");
++        return Egress::ReachableNoAuth;
++    }
++    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
++    loop {
++        let out = ssh_guest(
++            guest_ip,
++            &key,
++            "getent hosts github.com >/dev/null && echo OK",
++        );
++        if out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "OK" {
++            return Egress::Verified;
++        }
++        // A publickey rejection means sshd answered over the tap (networking is
++        // fine) but the image isn't paired with this key — retrying won't fix
++        // it. A connection-level error just means the guest is still booting;
++        // keep polling until the deadline.
++        if String::from_utf8_lossy(&out.stderr).contains("Permission denied") {
++            return Egress::ReachableNoAuth;
++        }
++        if std::time::Instant::now() >= deadline {
++            return Egress::Unreachable;
++        }
++        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
++    }
++}
++
++#[tokio::test]
++async fn room_boots_on_slot_1_and_reaps_byte_identically() {
++    let Some((kernel, rootfs)) = preflight() else {
++        return;
++    };
++
++    // Isolated state base so the claim + room dir never collide with real rooms.
++    // The tap (`tap-fc1`) is still a host-global device, so the pre-check below
++    // also asserts slot 1 is actually free on this host.
++    let tmp = tempfile::tempdir().expect("tempdir");
++    let state_base = tmp.path().to_path_buf();
++    let config = RoomsConfig {
++        state_base: Some(state_base.clone()),
++        ..RoomsConfig::default()
++    };
++
++    // Capture the pre-boot state the reap must restore exactly.
++    let taps_before = rooms_taps();
++    let slots_before = slots_listing(&state_base);
++    let fwd_before = rooms_fwd_dump();
++    assert!(
++        !taps_before.contains("tap-fc1 "),
++        "slot 1 already in use on this host (tap-fc1 present); free it before running: {taps_before}"
++    );
++
++    // Claim slot 1 explicitly, then boot a room on it.
++    let room_id = firecracker::mint_room_id();
++    let me = Claimer::current().expect("read this process's claimer identity");
++    let claimed = slot::claim(
++        &state_base,
++        &room_id,
++        me,
++        slot::DEFAULT_MAX_POOL,
++        Some(SLOT_INDEX),
++    )
++    .expect("claim slot 1");
++    assert_eq!(claimed.index, SLOT_INDEX, "claimed the wrong slot");
++
++    let network = NetworkConfig {
++        tap_name: claimed.tap.clone(),
++        guest_ip: claimed.guest.to_string(),
++        gateway_ip: claimed.gateway.to_string(),
++        prefix: claimed.prefix,
++    };
++    let descriptor = rooms::room::RoomDescriptor::default();
++    let req = BootRequest {
++        kernel: &kernel,
++        rootfs: &rootfs,
++        network: Some(&network),
++        slot: Some(&claimed),
++        room_id: &room_id,
++        readonly_rootfs: false,
++        descriptor: &descriptor,
++    };
++    let vm = match firecracker::boot(&req, &config).await {
++        Ok(vm) => vm,
++        Err(e) => {
++            // Don't strand slot 1 if boot fails mid-way — mirror main's guard.
++            let _ = slot::free(&state_base, claimed.index, &room_id);
++            panic!("boot on slot 1 failed: {e}");
++        }
++    };
++
++    // Mid-boot: the slot tap and slot file exist.
++    let taps_live = rooms_taps();
++    assert!(
++        taps_live.contains(&claimed.tap),
++        "slot tap {} should exist mid-boot, saw: {taps_live}",
++        claimed.tap
++    );
++    assert!(
++        state_base
++            .join(slot::SLOTS_DIR)
++            .join(SLOT_INDEX.to_string())
++            .exists(),
++        "slot file should exist mid-boot"
++    );
++
++    match probe_egress(&network.guest_ip).await {
++        Egress::Verified => {
++            eprintln!("egress OK: guest resolved github.com through NAT / ROOMS_FWD");
++        }
++        Egress::ReachableNoAuth => eprintln!(
++            "note: guest reachable over the slot tap, but its baked key didn't match \
++             ~/.ssh/id_rooms — egress task unverified (bake a key-paired rootfs to cover it)"
++        ),
++        Egress::Unreachable => panic!(
++            "guest never answered over the slot tap {} — tap/slot networking failed",
++            network.guest_ip
++        ),
++    }
++
++    // Reap: shutdown deletes the tap, then frees the slot file (once the room
++    // dir is gone) — the tap-then-slot release under the reap-clean gate.
++    vm.shutdown().await.expect("shutdown/reap");
++
++    // The crux: every observable the boot touched is back to byte-identical.
++    let taps_after = rooms_taps();
++    let slots_after = slots_listing(&state_base);
++    let fwd_after = rooms_fwd_dump();
++
++    assert_eq!(
++        taps_after, taps_before,
++        "pool tap set not restored after reap — a slot tap leaked"
++    );
++    assert_eq!(
++        slots_after, slots_before,
++        "slots/ not restored after reap — a slot file leaked"
++    );
++    assert_eq!(
++        fwd_after, fwd_before,
++        "ROOMS_FWD chain was mutated by boot/reap — it must stay host-once"
++    );
++}
