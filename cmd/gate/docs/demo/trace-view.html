@@ -6,152 +6,444 @@
 <title>Gate decision trace</title>
 <style>
   :root {
-    --bg: #0f1419;
-    --surface: #1a2332;
-    --border: #2d3a4d;
-    --text: #e7ecf3;
-    --muted: #8b9cb3;
-    --grant: #a78bfa;
-    --evidence: #60a5fa;
-    --verdict: #fbbf24;
-    --judgment: #34d399;
-    --escalation: #fb923c;
-    --action: #f87171;
-    --terminal: #fde047;
-    --edge: #4b5c73;
+    --serif: "Charter", "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, Menlo, monospace;
+
+    --bg: #faf9f6;
+    --page: #ffffff;
+    --ink: #1c2024;
+    --muted: #6b7280;
+    --faint: #9aa3af;
+    --hairline: #e4e1da;
+    --card-border: #d9d5cc;
+    --card-shadow: 0 1px 2px rgba(28, 32, 36, 0.05);
+    --rail: #c9c4b8;
+    --edge: #b3ada0;
+    --edge-hot: #1c2024;
+    --chip-bg: #f1efe9;
+
+    --pass: #1a7f4b;
+    --pass-bg: #e6f4ec;
+    --block: #b3352d;
+    --block-bg: #fbeae8;
+    --escalate: #a16207;
+    --escalate-bg: #fdf3e0;
+    --refused: #6d4fa3;
+    --refused-bg: #f0ebfa;
+    --neutral: #52606d;
+    --neutral-bg: #eef0f2;
+
+    --terminal-ring: #1c2024;
+    --judgment-accent: #1c2024;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10131a;
+      --page: #161a23;
+      --ink: #e8e6e1;
+      --muted: #949dab;
+      --faint: #6b7280;
+      --hairline: #262b36;
+      --card-border: #2c3340;
+      --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      --rail: #3a4150;
+      --edge: #4a5262;
+      --edge-hot: #e8e6e1;
+      --chip-bg: #1f242f;
+
+      --pass: #4ade80;
+      --pass-bg: #12271b;
+      --block: #f87171;
+      --block-bg: #2c1615;
+      --escalate: #fbbf24;
+      --escalate-bg: #2a2110;
+      --refused: #c4b5fd;
+      --refused-bg: #211a33;
+      --neutral: #9aa7b4;
+      --neutral-bg: #1e242d;
+
+      --terminal-ring: #e8e6e1;
+      --judgment-accent: #e8e6e1;
+    }
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+    font: 15px/1.5 var(--sans);
     background: var(--bg);
-    color: var(--text);
+    color: var(--ink);
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
+
+  /* ---------- header ---------- */
   header {
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.25rem 1.5rem 1.25rem;
   }
-  header h1 { margin: 0 0 0.25rem; font-size: 1.1rem; font-weight: 600; }
-  header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
-  .dropzone {
-    margin-top: 0.75rem;
-    padding: 0.6rem 0.75rem;
-    border: 1px dashed var(--border);
-    border-radius: 6px;
+  .masthead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.6rem 1rem;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 0.75rem;
+  }
+  header h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 1.45rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .masthead .wordmark { font-weight: 700; }
+  .masthead .subtitle {
     color: var(--muted);
-    font-size: 0.85rem;
+    font-family: var(--serif);
+    font-size: 1rem;
+    font-style: italic;
   }
-  .dropzone.dragover { border-color: var(--evidence); color: var(--text); background: #152033; }
-  main { padding: 1.25rem; max-width: 920px; margin: 0 auto; }
-  .run-label { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+  .runline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    padding: 0.7rem 0 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .runline .run-id { font-family: var(--mono); color: var(--ink); }
+  .runline .sep { color: var(--faint); }
+  .runline a.outcome-link { text-decoration: none; }
+  .dropzone {
+    margin-top: 0.9rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px dashed var(--card-border);
+    border-radius: 6px;
+    color: var(--faint);
+    font-size: 0.78rem;
+    transition: border-color 120ms, color 120ms, background 120ms;
+  }
+  .dropzone.dragover {
+    border-color: var(--ink);
+    color: var(--ink);
+    background: var(--chip-bg);
+  }
+
+  /* ---------- ledger ---------- */
+  main { max-width: 860px; margin: 0 auto; padding: 0.5rem 1.5rem 4rem; }
   .graph-wrap { position: relative; }
   svg.edges {
     position: absolute;
     top: 0; left: 0;
-    width: 100%; height: 100%;
     pointer-events: none;
     overflow: visible;
+    z-index: 0;
   }
-  .kind-section { margin-bottom: 1.5rem; }
-  .kind-section h2 {
-    margin: 0 0 0.6rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+  svg.edges path {
+    fill: none;
+    stroke: var(--edge);
+    stroke-width: 1.25;
+    opacity: 0.85;
+    transition: opacity 120ms, stroke 120ms;
+  }
+  .graph-wrap.focused svg.edges path { opacity: 0.18; }
+  .graph-wrap.focused svg.edges path.hot {
+    opacity: 1;
+    stroke: var(--edge-hot);
+    stroke-width: 1.6;
+  }
+
+  .row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 4.2rem 4.5rem 1fr;
+    align-items: start;
+    z-index: 1;
+  }
+  .row + .row { margin-top: 0.85rem; }
+  .row-time {
+    padding-top: 0.85rem;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 0.76rem;
     color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
-  .nodes { display: flex; flex-direction: column; gap: 0.75rem; }
+  .row-rail { position: relative; align-self: stretch; }
+  .marker {
+    position: absolute;
+    left: 50%;
+    top: 0.95rem;
+    width: 11px;
+    height: 11px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--muted);
+    z-index: 2;
+  }
+  .marker[data-kind="evidence"] { border-radius: 50%; background: var(--bg); }
+  .marker[data-kind="verdict"] { border-radius: 50%; background: var(--muted); }
+  .marker[data-kind="grant"] { border-radius: 2px; }
+  .marker[data-kind="judgment"] {
+    border-radius: 2px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+  .marker[data-kind="escalation"] { border-radius: 50% 50% 50% 0; transform: translateX(-50%) rotate(-45deg); }
+  .marker[data-kind="action"] { border-radius: 50%; box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--muted); }
+
   .node {
     position: relative;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--page);
+    border: 1px solid var(--card-border);
     border-radius: 8px;
-    padding: 0.75rem 0.9rem;
-    border-left: 4px solid var(--border);
+    padding: 0.7rem 1rem 0.75rem;
+    box-shadow: var(--card-shadow);
+    transition: border-color 120ms;
   }
-  .node[data-kind="grant"] { border-left-color: var(--grant); }
-  .node[data-kind="evidence"] { border-left-color: var(--evidence); }
-  .node[data-kind="verdict"] { border-left-color: var(--verdict); }
-  .node[data-kind="judgment"] { border-left-color: var(--judgment); }
-  .node[data-kind="escalation"] { border-left-color: var(--escalation); }
-  .node[data-kind="action"] { border-left-color: var(--action); }
+  .graph-wrap.focused .node { opacity: 0.45; transition: opacity 120ms; }
+  .graph-wrap.focused .node.hot { opacity: 1; }
+  .node.flash { border-color: var(--ink); }
+
   .node.terminal {
-    border-color: var(--terminal);
-    box-shadow: 0 0 0 1px var(--terminal), 0 0 24px rgba(253, 224, 71, 0.15);
+    border-color: var(--terminal-ring);
+    box-shadow: 0 0 0 1px var(--terminal-ring), var(--card-shadow);
   }
+  .terminal-tag {
+    font-family: var(--serif);
+    font-size: 0.7rem;
+    font-style: italic;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .node[data-kind="judgment"] { border-left: 3px solid var(--judgment-accent); }
+
   .node-head {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.5rem 0.75rem;
-    margin-bottom: 0.35rem;
+    gap: 0.35rem 0.7rem;
   }
-  .node-time { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
-  .node-kind { font-weight: 600; text-transform: capitalize; }
-  .node-id { color: var(--muted); font-size: 0.78rem; font-family: ui-monospace, monospace; }
+  .node-kind {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-transform: capitalize;
+    letter-spacing: 0.01em;
+  }
+  .node-id {
+    color: var(--faint);
+    font-size: 0.72rem;
+    font-family: var(--mono);
+  }
+  .head-spacer { flex: 1; }
+
   .badge {
     display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 4px;
+    padding: 0.08rem 0.5rem;
+    border-radius: 999px;
     font-size: 0.72rem;
-    font-weight: 600;
+    font-weight: 650;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    border: 1px solid transparent;
+    white-space: nowrap;
   }
-  .badge-pass { background: #064e3b; color: #6ee7b7; }
-  .badge-block { background: #7f1d1d; color: #fca5a5; }
-  .badge-escalate { background: #78350f; color: #fdba74; }
-  .badge-parked { background: #713f12; color: #fde68a; }
-  .badge-blocked { background: #7f1d1d; color: #fca5a5; }
-  .badge-merge { background: #14532d; color: #86efac; }
-  .badge-refused { background: #581c87; color: #d8b4fe; }
-  .detail { margin: 0.2rem 0; color: var(--text); }
+  .badge-pass { color: var(--pass); background: var(--pass-bg); border-color: color-mix(in srgb, var(--pass) 30%, transparent); }
+  .badge-block { color: var(--block); background: var(--block-bg); border-color: color-mix(in srgb, var(--block) 30%, transparent); }
+  .badge-escalate { color: var(--escalate); background: var(--escalate-bg); border-color: color-mix(in srgb, var(--escalate) 35%, transparent); }
+  .badge-refused { color: var(--refused); background: var(--refused-bg); border-color: color-mix(in srgb, var(--refused) 30%, transparent); }
+  .badge-unknown { color: var(--neutral); background: var(--neutral-bg); border-color: color-mix(in srgb, var(--neutral) 30%, transparent); }
+
+  .meta-line {
+    margin: 0.3rem 0 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .meta-line .mv { color: var(--ink); }
+  .meta-line .mono { font-family: var(--mono); font-size: 0.76rem; }
+  .detail { margin: 0.3rem 0 0; font-size: 0.86rem; }
   .detail.muted { color: var(--muted); }
-  .why { margin-top: 0.35rem; font-style: italic; color: var(--muted); }
-  .ceiling-callout {
-    margin-top: 0.5rem;
-    padding: 0.45rem 0.6rem;
-    border-radius: 4px;
-    background: rgba(251, 146, 60, 0.12);
-    border: 1px solid rgba(251, 146, 60, 0.35);
-    font-size: 0.85rem;
+
+  .why {
+    margin: 0.45rem 0 0;
+    font-family: var(--serif);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: var(--ink);
   }
-  .findings { margin-top: 0.45rem; }
+  .why.clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .why.clamp::after { content: ""; }
+  .why-more {
+    display: block;
+    margin-top: 0.15rem;
+    font: 0.75rem var(--sans);
+    color: var(--muted);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .why-more:hover { color: var(--ink); }
+
+  .parents {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.55rem;
+  }
+  .parents-label { font-size: 0.7rem; color: var(--faint); letter-spacing: 0.05em; text-transform: uppercase; }
+  .parent-chip {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: var(--chip-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 0.05rem 0.4rem;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .parent-chip:hover { color: var(--ink); border-color: var(--muted); }
+  .parent-chip.missing { cursor: default; opacity: 0.6; border-style: dashed; }
+  .parent-chip.missing:hover { color: var(--muted); border-color: var(--hairline); }
+
+  .findings { margin-top: 0.55rem; border-top: 1px solid var(--hairline); padding-top: 0.45rem; }
   .findings summary {
     cursor: pointer;
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
   }
-  .findings ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
-  .findings li { margin: 0.25rem 0; font-size: 0.85rem; }
-  .finding-sev { font-weight: 600; text-transform: uppercase; font-size: 0.72rem; }
-  .error {
-    padding: 0.75rem;
+  .findings summary::-webkit-details-marker { display: none; }
+  .findings summary::before {
+    content: "▸";
+    font-size: 0.7rem;
+    color: var(--faint);
+    transition: transform 120ms;
+    display: inline-block;
+  }
+  .findings[open] summary::before { transform: rotate(90deg); }
+  .findings summary:hover { color: var(--ink); }
+  .findings-count { font-weight: 600; color: var(--ink); }
+  .findings ul {
+    margin: 0.4rem 0 0;
+    padding: 0;
+    list-style: none;
+    max-height: 22rem;
+    overflow-y: auto;
+  }
+  .findings li {
+    margin: 0;
+    padding: 0.3rem 0.2rem;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--muted);
+  }
+  .findings li:last-child { border-bottom: none; }
+  .findings li .f-title { color: var(--ink); }
+  .finding-sev {
+    display: inline-block;
+    min-width: 3.4em;
+    font-weight: 650;
+    text-transform: uppercase;
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .finding-sev.sev-high, .finding-sev.sev-critical { color: var(--block); }
+  .finding-sev.sev-medium { color: var(--escalate); }
+  .f-evidence { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
+
+  .kv { margin-top: 0.45rem; display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.8rem; font-size: 0.8rem; }
+  .kv dt { color: var(--faint); font-family: var(--mono); font-size: 0.74rem; padding-top: 0.05rem; }
+  .kv dd { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+
+  .command {
+    margin-top: 0.55rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--chip-bg);
+    border: 1px solid var(--hairline);
     border-radius: 6px;
-    background: #3f1212;
-    border: 1px solid #991b1b;
-    color: #fecaca;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    overflow-wrap: anywhere;
+    color: var(--ink);
   }
-  .flat-kv { font-family: ui-monospace, monospace; font-size: 0.82rem; }
-  .badge-unknown { background: #1e293b; color: #94a3b8; }
+  .question {
+    margin-top: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    border-left: 3px solid var(--escalate);
+    background: var(--escalate-bg);
+    border-radius: 0 6px 6px 0;
+    font-family: var(--serif);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  .ceiling-callout {
+    margin-top: 0.55rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    background: var(--escalate-bg);
+    border: 1px solid color-mix(in srgb, var(--escalate) 35%, transparent);
+    font-size: 0.84rem;
+  }
+  .error {
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+    background: var(--block-bg);
+    border: 1px solid color-mix(in srgb, var(--block) 35%, transparent);
+    color: var(--block);
+    font-size: 0.88rem;
+  }
+  .colophon {
+    margin-top: 2.5rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--hairline);
+    color: var(--faint);
+    font-size: 0.74rem;
+    font-family: var(--serif);
+    font-style: italic;
+  }
+  @media (max-width: 560px) {
+    .row { grid-template-columns: 3.1rem 2.2rem 1fr; }
+    .row-time { font-size: 0.68rem; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Gate decision trace</h1>
-  <p>Evidence → verdicts → judgment → action. Offline static view of <code>explain -json</code>.</p>
-  <div class="dropzone" id="dropzone">Drop or paste an explain JSON document here</div>
+  <div class="masthead">
+    <h1><span class="wordmark">gate</span> — decision trace</h1>
+    <span class="subtitle">evidence → verdicts → judgment → action</span>
+  </div>
+  <div class="runline" id="run-label"></div>
+  <div class="dropzone" id="dropzone">Drop or paste any <code>explain -json</code> document to re-render this page</div>
 </header>
 <main id="main">
-  <p class="run-label" id="run-label"></p>
   <div class="graph-wrap" id="graph-wrap">
-    <svg class="edges" id="edges"></svg>
+    <svg class="edges" id="edges" aria-hidden="true"></svg>
     <div id="graph"></div>
   </div>
+  <p class="colophon">Every artifact above is read verbatim from gate's append-only, hash-chained log. This page renders; it never decides.</p>
 </main>
 <script>
 (function () {
@@ -159,7 +451,6 @@
 
   const EMBEDDED_FIXTURE = {"run":"run_ceiling_park_demo","artifacts":[{"id":"grt_a1b2c3d4e5f67890","kind":"grant","time":"14:30:00","flat":{"action":"merge","expires_at":"2026-07-13T15:30:00Z","max_cycles":3,"max_tier":"T1","minted_by":"operator","repo":"acme/widget","sig":"demo"}},{"id":"evd_b2c3d4e5f6789012","kind":"evidence","time":"14:30:01","evidence":{"type":"diff","byte_count":4821}},{"id":"vrd_c3d4e5f678901234","kind":"verdict","time":"14:30:02","parents":["evd_b2c3d4e5f6789012"],"verdict":{"source":"floor","producer":"code/triage-floor","decision":"block","tier":"T1","confidence":0.92,"why":"CI failure on main test suite","findings":[{"title":"TestWidgetIntegration","severity":"high","locus":"ci","evidence":"FAIL pkg/widget TestWidgetIntegration (0.04s)"}]}},{"id":"vrd_d4e5f67890123456","kind":"verdict","time":"14:30:03","parents":["vrd_c3d4e5f678901234"],"verdict":{"source":"reducer","producer":"reducer","decision":"pass","tier":"T2","confidence":0.92,"why":"failure is a known flake; risk-scoped to T2 for operator review"}},{"id":"jdg_e5f6789012345678","kind":"judgment","time":"14:30:04","parents":["vrd_d4e5f67890123456"],"verdict":{"source":"operator","producer":"judgment","decision":"pass","tier":"T0","confidence":1,"why":"flake is known; acceptable risk for hotfix"}},{"id":"esc_f678901234567890","kind":"escalation","time":"14:30:05","parents":["jdg_e5f6789012345678","grt_a1b2c3d4e5f67890"],"flat":{"code":"grant_tier_exceeded","grant":"grt_a1b2c3d4e5f67890","outcome":"parked_for_judgment","question":"verdict tier T2 exceeds grant ceiling T1; flake is known; acceptable risk for hotfix","verdict":"vrd_d4e5f67890123456"}}]};
 
-  const KIND_ORDER = ["grant", "evidence", "verdict", "judgment", "escalation", "action"];
   const graphEl = document.getElementById("graph");
   const edgesEl = document.getElementById("edges");
   const runLabelEl = document.getElementById("run-label");
@@ -177,18 +468,30 @@
 
   function badgeClass(decision, outcome) {
     const key = (outcome || decision || "").toLowerCase();
-    if (key === "pass" || key === "would_merge") return "badge-pass";
+    if (key === "pass" || key === "would_merge" || key === "merged") return "badge-pass";
     if (key === "block" || key === "blocked") return "badge-block";
-    if (key === "escalate") return "badge-escalate";
-    if (key === "parked_for_judgment") return "badge-parked";
+    if (key === "escalate" || key === "parked_for_judgment") return "badge-escalate";
     if (key === "capability_refused") return "badge-refused";
-    if (key === "merge_not_implemented") return "badge-merge";
+    if (key === "merge_not_implemented") return "badge-unknown";
     return "badge-unknown";
   }
 
   function labelForOutcome(outcome) {
     if (!outcome) return "";
     return outcome.replace(/_/g, " ");
+  }
+
+  function badge(decision, outcome) {
+    const text = outcome ? labelForOutcome(outcome) : decision;
+    if (!text) return "";
+    return '<span class="badge ' + badgeClass(decision, outcome) + '">' + esc(text) + "</span>";
+  }
+
+  function fmtBytes(n) {
+    if (typeof n !== "number" || isNaN(n)) return String(n);
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
   }
 
   function indexById(artifacts) {
@@ -212,165 +515,222 @@
     return g.flat;
   }
 
+  // ---------- per-kind bodies ----------
+
   function renderEvidence(node) {
-    if (node.unparseable) {
-      return '<p class="detail muted">(unparseable body)</p>';
-    }
+    if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
     const e = node.evidence;
     if (!e) return "";
-    let detail = e.type;
-    if (e.byte_count != null) detail += " — " + e.byte_count + " bytes";
-    if (e.item_count != null) detail += " — " + e.item_count + " items";
-    return '<p class="detail">' + esc(detail) + " evidence</p>";
+    let size = "";
+    if (e.byte_count != null) size = fmtBytes(e.byte_count);
+    if (e.item_count != null) size = e.item_count + " item" + (e.item_count === 1 ? "" : "s");
+    let html = '<p class="meta-line"><span class="mv">' + esc(e.type) + "</span>";
+    if (size) html += ' <span class="sep">·</span> ' + esc(size);
+    html += "</p>";
+    html += renderExtraKV(e, ["type", "byte_count", "item_count"]);
+    return html;
+  }
+
+  function sevClass(sev) {
+    return "sev-" + String(sev || "").toLowerCase().replace(/[^a-z]/g, "");
+  }
+
+  function findingsSummaryText(findings) {
+    const bySev = Object.create(null);
+    for (const f of findings) {
+      const s = (f.severity || "unrated").toLowerCase();
+      bySev[s] = (bySev[s] || 0) + 1;
+    }
+    const parts = [];
+    for (const s of ["critical", "high", "medium", "low", "info", "unrated"]) {
+      if (bySev[s]) { parts.push(bySev[s] + " " + s); delete bySev[s]; }
+    }
+    for (const s in bySev) parts.push(bySev[s] + " " + s);
+    return parts.join(" · ");
   }
 
   function renderFindings(findings) {
     if (!findings || findings.length === 0) return "";
     let items = "";
     for (const f of findings) {
-      const parts = [];
-      if (f.severity) parts.push('<span class="finding-sev">' + esc(f.severity) + "</span>");
-      if (f.locus) parts.push(esc(f.locus));
-      parts.push(esc(f.title));
-      let line = parts.join(" · ");
-      if (f.evidence) line += " — " + esc(f.evidence);
+      let line = "";
+      if (f.severity != null) line += '<span class="finding-sev ' + sevClass(f.severity) + '">' + esc(f.severity) + "</span> ";
+      line += '<span class="f-title">' + esc(f.title) + "</span>";
+      if (f.locus) line += ' <span class="f-evidence">' + esc(f.locus) + "</span>";
+      if (f.evidence) line += ' — <span class="f-evidence">' + esc(f.evidence) + "</span>";
       items += "<li>" + line + "</li>";
     }
     return (
-      '<details class="findings"><summary>' +
+      '<details class="findings"><summary><span class="findings-count">' +
       findings.length +
       " finding" +
       (findings.length === 1 ? "" : "s") +
-      "</summary><ul>" +
+      "</span><span>" +
+      esc(findingsSummaryText(findings)) +
+      "</span></summary><ul>" +
       items +
       "</ul></details>"
     );
   }
 
+  function renderWhy(why) {
+    if (why == null || why === "") return "";
+    const long = String(why).length > 160;
+    return (
+      '<p class="why' + (long ? " clamp" : "") + '">' + esc(why) + "</p>" +
+      (long ? '<button class="why-more" type="button">show more</button>' : "")
+    );
+  }
+
   function renderVerdict(node) {
-    if (node.unparseable) {
-      return '<p class="detail muted">(unparseable body)</p>';
-    }
+    if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
     const v = node.verdict;
     if (!v) return '<p class="detail muted">(unparseable body)</p>';
-    const badge = '<span class="badge ' + badgeClass(v.decision) + '">' + esc(v.decision) + "</span>";
     const conf =
       typeof v.confidence === "number" && !isNaN(v.confidence)
         ? v.confidence.toFixed(2)
         : "?";
-    const head =
-      esc(v.producer) +
-      " · tier " +
-      esc(v.tier) +
-      " · conf " +
-      conf +
-      " · " +
-      esc(v.source);
     let html =
-      '<p class="detail">' +
-      badge +
-      " " +
-      head +
-      '</p><p class="why">' +
-      esc(v.why) +
-      "</p>";
+      '<p class="meta-line"><span class="mv">' + esc(v.producer) + "</span>" +
+      ' <span class="sep">·</span> <span class="mono">' + esc(v.source) + "</span>" +
+      ' <span class="sep">·</span> tier <span class="mv mono">' + esc(v.tier) + "</span>" +
+      ' <span class="sep">·</span> conf <span class="mono">' + conf + "</span></p>";
+    html += renderWhy(v.why);
     html += renderFindings(v.findings);
+    html += renderExtraKV(v, ["source", "producer", "decision", "tier", "confidence", "why", "findings", "subject"]);
     return html;
   }
 
-  function renderFlat(node, byId, isTerminal) {
+  // Any keys the renderer doesn't know by name still show up — degrade honestly.
+  function renderExtraKV(obj, knownKeys) {
+    if (!obj) return "";
+    let rows = "";
+    for (const k in obj) {
+      if (knownKeys.indexOf(k) !== -1) continue;
+      const v = obj[k];
+      const shown = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+      rows += "<dt>" + esc(k) + "</dt><dd>" + esc(shown) + "</dd>";
+    }
+    if (!rows) return "";
+    return '<dl class="kv">' + rows + "</dl>";
+  }
+
+  function renderGrant(node) {
     const f = node.flat;
-    if (!f) {
-      if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
-      return "";
-    }
+    if (!f) return node.unparseable ? '<p class="detail muted">(unparseable body)</p>' : "";
+    let html =
+      '<p class="meta-line"><span class="mv">' + esc(f.repo) + "</span>" +
+      ' <span class="sep">·</span> ' + esc(f.action) +
+      ' <span class="sep">·</span> ceiling <span class="mv mono">' + esc(f.max_tier) + "</span>" +
+      ' <span class="sep">·</span> max ' + esc(String(f.max_cycles)) + " cycles</p>";
+    html += '<p class="meta-line">minted by <span class="mv">' + esc(f.minted_by) + "</span>" +
+      ' <span class="sep">·</span> expires <span class="mono">' + esc(f.expires_at) + "</span></p>";
+    html += renderExtraKV(f, ["repo", "action", "max_tier", "max_cycles", "minted_by", "expires_at", "sig"]);
+    return html;
+  }
+
+  function renderEscalation(node, byId, isTerminal) {
+    const f = node.flat;
+    if (!f) return node.unparseable ? '<p class="detail muted">(unparseable body)</p>' : "";
     let html = "";
-    if (f.outcome) {
-      html +=
-        '<p class="detail"><span class="badge ' +
-        badgeClass(null, f.outcome) +
-        '">' +
-        esc(labelForOutcome(f.outcome)) +
-        "</span></p>";
-    }
-    if (f.question) {
-      html += '<p class="detail">' + esc(f.question) + "</p>";
-    }
+    if (f.question) html += '<div class="question">' + esc(f.question) + "</div>";
     if (f.code) {
-      html += '<p class="detail muted">code: <span class="flat-kv">' + esc(f.code) + "</span></p>";
-    }
-    if (node.kind === "grant") {
-      html += '<p class="detail">repo: ' + esc(f.repo) + " · action: " + esc(f.action) + "</p>";
-      html +=
-        '<p class="detail"><strong>max_tier: ' +
-        esc(f.max_tier) +
-        "</strong> · max_cycles: " +
-        esc(String(f.max_cycles)) +
-        "</p>";
-      html += '<p class="detail muted">expires: ' + esc(f.expires_at) + "</p>";
+      html += '<p class="meta-line">code <span class="mono mv">' + esc(f.code) + "</span></p>";
     }
     if (isTerminal && f.code === "grant_tier_exceeded") {
       const g = f.grant ? grantSummary(byId, f.grant) : null;
       const ceiling = g && g.max_tier
         ? "Grant ceiling <strong>" + esc(g.max_tier) + "</strong>"
         : "The grant ceiling";
-      html +=
-        '<div class="ceiling-callout">' +
-        ceiling +
-        " refused this verdict — re-mint a wider grant to proceed.</div>";
+      html += '<div class="ceiling-callout">' + ceiling + " refused this verdict — re-mint a wider grant to proceed.</div>";
     }
-    if (node.kind === "action" && f.command) {
-      html += '<p class="detail flat-kv">' + esc(f.command) + "</p>";
-    }
-    if (f.error) {
-      html += '<p class="detail muted">' + esc(f.error) + "</p>";
-    }
+    html += renderExtraKV(f, ["outcome", "question", "code", "grant", "verdict"]);
     return html;
+  }
+
+  function renderAction(node) {
+    const f = node.flat;
+    if (!f) return node.unparseable ? '<p class="detail muted">(unparseable body)</p>' : "";
+    let html = "";
+    if (f.dry_run) html += '<p class="meta-line">dry run — no side effects</p>';
+    if (f.command) html += '<div class="command">' + esc(f.command) + "</div>";
+    if (f.error) html += '<p class="detail muted">' + esc(f.error) + "</p>";
+    html += renderExtraKV(f, ["outcome", "command", "dry_run", "error", "grant", "verdict"]);
+    return html;
+  }
+
+  function renderUnknownKind(node) {
+    if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
+    if (node.flat) return renderExtraKV(node.flat, []);
+    return "";
+  }
+
+  function headBadge(node) {
+    if (node.verdict && node.verdict.decision) return badge(node.verdict.decision, null);
+    if (node.flat && node.flat.outcome) return badge(null, node.flat.outcome);
+    return "";
+  }
+
+  function renderParents(node, byId) {
+    if (!node.parents || node.parents.length === 0) return "";
+    let chips = "";
+    for (const pid of node.parents) {
+      const present = !!byId[pid];
+      chips += present
+        ? '<a class="parent-chip" href="#node-' + esc(pid) + '" data-goto="' + esc(pid) + '">' + esc(pid) + "</a>"
+        : '<span class="parent-chip missing" title="referenced but not in this trace">' + esc(pid) + " (not in trace)</span>";
+    }
+    return '<div class="parents"><span class="parents-label">from</span>' + chips + "</div>";
   }
 
   function renderNode(node, byId, terminalId) {
     const isTerminal = node.id === terminalId;
-    let body = "";
-    if (node.kind === "evidence") body = renderEvidence(node);
-    if (node.kind === "verdict" || node.kind === "judgment") body = renderVerdict(node);
-    if (node.kind === "grant" || node.kind === "escalation" || node.kind === "action") {
-      body = renderFlat(node, byId, isTerminal);
+    let body;
+    switch (node.kind) {
+      case "evidence": body = renderEvidence(node); break;
+      case "verdict":
+      case "judgment": body = renderVerdict(node); break;
+      case "grant": body = renderGrant(node); break;
+      case "escalation": body = renderEscalation(node, byId, isTerminal); break;
+      case "action": body = renderAction(node); break;
+      default: body = renderUnknownKind(node);
     }
+    body += renderParents(node, byId);
     const cls = "node" + (isTerminal ? " terminal" : "");
     return (
-      '<article class="' +
-      cls +
-      '" data-kind="' +
-      esc(node.kind) +
-      '" data-id="' +
-      esc(node.id) +
-      '" id="node-' +
-      esc(node.id) +
-      '">' +
+      '<div class="row" data-id="' + esc(node.id) + '">' +
+      '<div class="row-time">' + esc(node.time) + "</div>" +
+      '<div class="row-rail"><span class="marker" data-kind="' + esc(node.kind) + '" id="marker-' + esc(node.id) + '"></span></div>' +
+      '<article class="' + cls + '" data-kind="' + esc(node.kind) + '" data-id="' + esc(node.id) + '" id="node-' + esc(node.id) + '">' +
       '<div class="node-head">' +
-      '<span class="node-time">' +
-      esc(node.time) +
-      "</span>" +
-      '<span class="node-kind">' +
-      esc(node.kind) +
-      "</span>" +
-      '<span class="node-id">' +
-      esc(node.id) +
-      "</span>" +
+      '<span class="node-kind">' + esc(node.kind) + "</span>" +
+      '<span class="node-id">' + esc(node.id) + "</span>" +
+      '<span class="head-spacer"></span>' +
+      (isTerminal ? '<span class="terminal-tag">terminal</span>' : "") +
+      headBadge(node) +
       "</div>" +
       body +
-      "</article>"
+      "</article></div>"
     );
   }
 
-  function groupByKind(artifacts) {
-    const groups = Object.create(null);
-    for (const k of KIND_ORDER) groups[k] = [];
-    for (const a of artifacts) {
-      if (!groups[a.kind]) groups[a.kind] = [];
-      groups[a.kind].push(a);
+  function renderRunLine(doc, terminalId, byId) {
+    const n = doc.artifacts.length;
+    let html =
+      'run <span class="run-id">' + esc(doc.run) + "</span>" +
+      '<span class="sep">·</span>' + n + " artifact" + (n === 1 ? "" : "s");
+    const times = doc.artifacts.map(function (a) { return a.time; }).filter(Boolean);
+    if (times.length > 1) {
+      html += '<span class="sep">·</span><span class="run-id">' + esc(times[0]) + " – " + esc(times[times.length - 1]) + "</span>";
     }
-    return groups;
+    const t = terminalId ? byId[terminalId] : null;
+    const outcome = t && t.flat && t.flat.outcome;
+    if (outcome) {
+      html +=
+        '<span class="sep">·</span><a class="outcome-link" href="#node-' + esc(terminalId) + '" data-goto="' + esc(terminalId) + '">' +
+        badge(null, outcome) + "</a>";
+    }
+    runLabelEl.innerHTML = html;
   }
 
   function renderGraph(doc) {
@@ -383,24 +743,53 @@
     }
     const byId = indexById(doc.artifacts);
     const terminalId = findTerminalId(doc.artifacts);
-    runLabelEl.textContent = "run " + doc.run + " — " + doc.artifacts.length + " artifacts";
+    renderRunLine(doc, terminalId, byId);
 
-    const groups = groupByKind(doc.artifacts);
     let html = "";
-    for (const kind of KIND_ORDER) {
-      const nodes = groups[kind];
-      if (!nodes || nodes.length === 0) continue;
-      html += '<section class="kind-section" data-kind-group="' + esc(kind) + '">';
-      html += "<h2>" + esc(kind) + "</h2>";
-      html += '<div class="nodes">';
-      for (const n of nodes) html += renderNode(n, byId, terminalId);
-      html += "</div></section>";
-    }
+    for (const n of doc.artifacts) html += renderNode(n, byId, terminalId);
     graphEl.innerHTML = html;
     currentDoc = doc;
     requestAnimationFrame(function () {
       drawEdges(doc.artifacts);
     });
+  }
+
+  // ---------- provenance arcs ----------
+  // Drawn in the rail gutter like a commit graph: each parent edge is a cubic
+  // arc bulging left of the rail; overlapping spans get deeper lanes.
+
+  function markerCenter(id, wrapRect) {
+    const el = document.getElementById("marker-" + id);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.left + r.width / 2 - wrapRect.left,
+      y: r.top + r.height / 2 - wrapRect.top
+    };
+  }
+
+  function collectEdges(artifacts) {
+    const order = Object.create(null);
+    artifacts.forEach(function (a, i) { order[a.id] = i; });
+    const edges = [];
+    for (const child of artifacts) {
+      if (!child.parents) continue;
+      for (const pid of child.parents) {
+        if (!(pid in order)) continue;
+        edges.push({ from: pid, to: child.id, lo: Math.min(order[pid], order[child.id]), hi: Math.max(order[pid], order[child.id]) });
+      }
+    }
+    // Longer spans get outer lanes so short arcs nest inside them.
+    edges.sort(function (a, b) { return (a.hi - a.lo) - (b.hi - b.lo); });
+    for (const e of edges) {
+      let lane = 0;
+      for (const other of edges) {
+        if (other === e || other.lane == null) continue;
+        if (other.lo < e.hi && e.lo < other.hi) lane = Math.max(lane, other.lane + 1);
+      }
+      e.lane = lane;
+    }
+    return edges;
   }
 
   function drawEdges(artifacts) {
@@ -410,55 +799,87 @@
     edgesEl.setAttribute("height", wrapRect.height);
     edgesEl.setAttribute("viewBox", "0 0 " + wrapRect.width + " " + wrapRect.height);
 
-    for (const child of artifacts) {
-      if (!child.parents || child.parents.length === 0) continue;
-      const childEl = document.getElementById("node-" + child.id);
-      if (!childEl) continue;
-      const cRect = childEl.getBoundingClientRect();
-      const cx = cRect.left + 20 - wrapRect.left;
-      const cy = cRect.top - wrapRect.top;
-
-      for (const pid of child.parents) {
-        const parentEl = document.getElementById("node-" + pid);
-        if (!parentEl) continue;
-        const pRect = parentEl.getBoundingClientRect();
-        const px = pRect.left + 20 - wrapRect.left;
-        const py = pRect.bottom - wrapRect.top;
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        const midY = (py + cy) / 2;
-        const d =
-          "M" +
-          px +
-          " " +
-          py +
-          " C" +
-          px +
-          " " +
-          midY +
-          ", " +
-          cx +
-          " " +
-          midY +
-          ", " +
-          cx +
-          " " +
-          cy;
-        path.setAttribute("d", d);
-        path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "#4b5c73");
-        path.setAttribute("stroke-width", "1.5");
-        path.setAttribute("opacity", "0.7");
-        edgesEl.appendChild(path);
-      }
+    for (const e of collectEdges(artifacts)) {
+      const p = markerCenter(e.from, wrapRect);
+      const c = markerCenter(e.to, wrapRect);
+      if (!p || !c) continue;
+      const bulge = 14 + e.lane * 9;
+      const x = p.x - bulge;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute(
+        "d",
+        "M" + p.x + " " + p.y +
+        " C" + x + " " + (p.y + (c.y - p.y) * 0.2) +
+        ", " + x + " " + (c.y - (c.y - p.y) * 0.2) +
+        ", " + c.x + " " + c.y
+      );
+      path.setAttribute("data-from", e.from);
+      path.setAttribute("data-to", e.to);
+      edgesEl.appendChild(path);
     }
   }
+
+  // Hovering a node spotlights its provenance: direct parent/child edges and
+  // the nodes on their far ends.
+  function focusNode(id) {
+    const hot = Object.create(null);
+    hot[id] = true;
+    const paths = edgesEl.querySelectorAll("path");
+    for (const p of paths) {
+      const from = p.getAttribute("data-from");
+      const to = p.getAttribute("data-to");
+      if (from !== id && to !== id) continue;
+      p.classList.add("hot");
+      hot[from] = true;
+      hot[to] = true;
+    }
+    for (const nid in hot) {
+      const el = document.getElementById("node-" + nid);
+      if (el) el.classList.add("hot");
+    }
+    graphWrap.classList.add("focused");
+  }
+
+  function unfocus() {
+    graphWrap.classList.remove("focused");
+    for (const el of graphWrap.querySelectorAll(".hot")) el.classList.remove("hot");
+  }
+
+  graphEl.addEventListener("mouseover", function (e) {
+    const node = e.target.closest(".node");
+    if (!node) return;
+    unfocus();
+    focusNode(node.getAttribute("data-id"));
+  });
+  graphEl.addEventListener("mouseleave", unfocus);
+
+  function flash(id) {
+    const el = document.getElementById("node-" + id);
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(function () { el.classList.remove("flash"); }, 1200);
+  }
+
+  document.addEventListener("click", function (e) {
+    const goto = e.target.closest("[data-goto]");
+    if (goto) flash(goto.getAttribute("data-goto"));
+    const more = e.target.closest(".why-more");
+    if (more) {
+      const why = more.previousElementSibling;
+      const clamped = why.classList.toggle("clamp");
+      more.textContent = clamped ? "show more" : "show less";
+      if (currentDoc) requestAnimationFrame(function () { drawEdges(currentDoc.artifacts); });
+    }
+  });
+
+  // ---------- load + input ----------
 
   function loadDoc(raw) {
     let doc;
     try {
       doc = typeof raw === "string" ? JSON.parse(raw) : raw;
-    } catch (e) {
-      graphEl.innerHTML = '<p class="error">JSON parse error: ' + esc(e.message) + "</p>";
+    } catch (err) {
+      graphEl.innerHTML = '<p class="error">JSON parse error: ' + esc(err.message) + "</p>";
       runLabelEl.textContent = "";
       edgesEl.innerHTML = "";
       currentDoc = null;
