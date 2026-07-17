@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 )
@@ -117,6 +118,12 @@ func TestClaimClearsCorruptTakeover(t *testing.T) {
 	if err := os.WriteFile(garbage, []byte("not-json{{{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Crash debris is old by definition; backdate past the staleness window
+	// so it is distinguishable from a concurrent writer mid-write.
+	debris := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(garbage, debris, debris); err != nil {
+		t.Fatal(err)
+	}
 	owner, err := claim.Takeover(dir)
 	if err != nil {
 		t.Fatalf("corrupt takeover must be cleared and retried: %v", err)
@@ -126,6 +133,23 @@ func TestClaimClearsCorruptTakeover(t *testing.T) {
 	}
 	if _, err := os.Stat(garbage); !os.IsNotExist(err) {
 		t.Fatalf("corrupt takeover file must be removed, stat err=%v", err)
+	}
+}
+
+func TestClaimFreshUnreadableTakeoverIsNotStolen(t *testing.T) {
+	dir := t.TempDir()
+	writeOwner(t, dir, claim.Owner{PID: 999999, StartTicks: 1, Generation: 1})
+	inflight := filepath.Join(dir, "writer.claim.takeover.2")
+	// A concurrent writer between O_EXCL create and write: exists, no content.
+	if err := os.WriteFile(inflight, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := claim.Takeover(dir)
+	if !errors.Is(err, claim.ErrBusy) {
+		t.Fatalf("fresh unreadable takeover must yield ErrBusy, got %v", err)
+	}
+	if _, err := os.Stat(inflight); err != nil {
+		t.Fatalf("fresh takeover file must not be removed, stat err=%v", err)
 	}
 }
 
