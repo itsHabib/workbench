@@ -39,7 +39,7 @@ result as authoritative and appends only the missing terminal event.
 ## Writer claim primitive (TDD open question #4)
 
 **Exclusivity** comes only from the filesystem: `os.OpenFile(...,
-O_CREATE|O_EXCL, 0600)` — atomic on both Linux and Windows, stdlib-only, and
+O_CREATE|O_EXCL, 0600)` — atomic on both Linux and Windows, and
 leaves no stuck lock when the holder crashes (death is detectable; takeover
 recovers).
 
@@ -47,8 +47,7 @@ recovers).
 lock itself:
 
 - Linux: `/proc/<pid>/stat` starttime (field 22)
-- Windows: process creation FILETIME via `syscall.GetProcessTimes` (no
-  `golang.org/x/sys`)
+- Windows: process creation FILETIME via `syscall.GetProcessTimes`
 
 **Takeover** (reconcile path) stays race-safe when the recorded owner is dead:
 create `writer.claim.takeover.<nextGen>` with `O_EXCL`, then `rename` over

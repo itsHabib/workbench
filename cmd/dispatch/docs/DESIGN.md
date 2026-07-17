@@ -2,7 +2,7 @@
 
 **Status:** phase 1 (`dispatch-decide-core`), 2026-07-15
 **Owner:** @itsHabib
-**Shape:** one small stdlib-Go binary. Reads a policy + a task descriptor, emits a placement decision. Never dispatches, polls, lands, or talks to a provider.
+**Shape:** one small Go binary. Reads a policy + a task descriptor, emits a placement decision. Never dispatches, polls, lands, or talks to a provider.
 **Contract:** [`docs/features/dispatch/spec.md`](../../../../docs/features/dispatch/spec.md) is the merged TDD and the binding design. This doc is the per-tool charter — read the TDD's §5 (data model), §6 (API), §7 (flows), §8 (concurrency) first.
 
 ## Glossary — one line, so it is never re-debated
