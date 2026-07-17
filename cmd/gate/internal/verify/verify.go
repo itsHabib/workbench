@@ -65,9 +65,9 @@ func isJudgment(v Verdict) bool { return v.Producer.Class == ClassJudgment }
 
 // Decisions, worst to best: block > escalate > pass.
 const (
-	DecisionBlock    = "block"
-	DecisionEscalate = "escalate"
-	DecisionPass     = "pass"
+	DecisionBlock    = contracts.DecisionBlock
+	DecisionEscalate = contracts.DecisionEscalate
+	DecisionPass     = contracts.DecisionPass
 )
 
 // knownDecision reports whether d is a decision the ladder defines. Reduce
