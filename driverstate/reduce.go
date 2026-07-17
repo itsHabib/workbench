@@ -24,7 +24,7 @@ const (
 // torn-tail tolerance — a partial line left by a crash is discarded without
 // error — and the hash chain is verified across every complete line. A
 // mid-chain break returns ErrChainBroken; a torn final line is discarded
-// silently (lock-free readers may see a mid-append file; spec §8).
+// with a stderr warning (lock-free readers may see a mid-append file; spec §8).
 //
 // Manifest-seeded streams: the run_imported body carries the full stream list.
 // Reduce initialises every stream to pending before folding later events, so a
@@ -34,6 +34,9 @@ const (
 // Unknown event kinds are tolerated: the chain is verified across them, but
 // they are skipped in the fold and a warning is printed to stderr (spec §8).
 func Reduce(dir, run string) (dsc.RunState, error) {
+	if err := validateRunID(run); err != nil {
+		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
+	}
 	data, err := os.ReadFile(filepath.Join(runDir(dir, run), "events.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -41,11 +44,22 @@ func Reduce(dir, run string) (dsc.RunState, error) {
 		}
 		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
 	}
-	events, err := decodeLedger(trimTornTail(data))
+	events, err := decodeLedger(trimWithWarning(data, "reduce", run))
 	if err != nil {
 		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
 	}
 	return foldEvents(events), nil
+}
+
+// trimWithWarning discards a torn final line and, when it actually trimmed,
+// says so on stderr — so a lock-free reader can distinguish a benign
+// mid-append read from a real chain break (spec §8).
+func trimWithWarning(data []byte, verb, run string) []byte {
+	trimmed := trimTornTail(data)
+	if len(trimmed) != len(data) {
+		fmt.Fprintf(os.Stderr, "driverstate: %s: discarded torn final line in run %q\n", verb, run)
+	}
+	return trimmed
 }
 
 // foldEvents builds a RunState from a decoded, chain-verified event slice.

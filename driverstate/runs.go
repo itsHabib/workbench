@@ -24,7 +24,8 @@ type RunSummary struct {
 // with Status RunStatusCorrupt while all other runs list normally (spec §7 F5
 // — the direct fix for ship's driver list grok-4.5 failure class).
 //
-// An absent directory is not an error — it returns an empty list. Directories
+// An absent directory is not an error — it returns a nil slice (callers treat
+// nil as an empty listing). Directories
 // without an events.jsonl (runs that were claimed but never appended to) are
 // skipped.
 func Runs(dir string) ([]RunSummary, error) {

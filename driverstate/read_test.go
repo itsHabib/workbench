@@ -392,3 +392,15 @@ func TestVerifyAbsentRun(t *testing.T) {
 		t.Errorf("absent run should not return ErrChainBroken, got: %v", err)
 	}
 }
+
+func TestReduceRejectsTraversalRunID(t *testing.T) {
+	if _, err := Reduce(t.TempDir(), "../escape"); err == nil {
+		t.Fatal("want run-id validation error, got nil")
+	}
+}
+
+func TestVerifyRejectsTraversalRunID(t *testing.T) {
+	if err := Verify(t.TempDir(), "../escape"); err == nil {
+		t.Fatal("want run-id validation error, got nil")
+	}
+}

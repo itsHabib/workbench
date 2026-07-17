@@ -12,11 +12,14 @@ import (
 // chain is intact, or ErrChainBroken (with detail naming the offending event)
 // when any link fails (spec §8).
 //
-// A torn final line (no trailing newline) is discarded without error — a
-// lock-free reader may observe a file that the writer is mid-appending. A
+// A torn final line (no trailing newline) is discarded with a stderr warning —
+// a lock-free reader may observe a file that the writer is mid-appending. A
 // break anywhere in the completed portion is always loud, never silently
 // truncated (a swallowed stream_merged would re-drive a merged PR).
 func Verify(dir, run string) error {
+	if err := validateRunID(run); err != nil {
+		return fmt.Errorf("driverstate: verify: %w", err)
+	}
 	data, err := os.ReadFile(filepath.Join(runDir(dir, run), "events.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -24,6 +27,6 @@ func Verify(dir, run string) error {
 		}
 		return fmt.Errorf("driverstate: verify: %w", err)
 	}
-	_, err = decodeLedger(trimTornTail(data))
+	_, err = decodeLedger(trimWithWarning(data, "verify", run))
 	return err
 }
