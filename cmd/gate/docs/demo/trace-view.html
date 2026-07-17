@@ -661,8 +661,9 @@
 
   function renderUnknownKind(node) {
     if (node.unparseable) return '<p class="detail muted">(unparseable body)</p>';
-    if (node.flat) return renderExtraKV(node.flat, []);
-    return "";
+    let html = renderExtraKV(node.flat, []);
+    html += renderExtraKV(node, ["id", "kind", "time", "parents", "flat"]);
+    return html;
   }
 
   function headBadge(node) {
@@ -846,10 +847,10 @@
   }
 
   graphEl.addEventListener("mouseover", function (e) {
-    const node = e.target.closest(".node");
-    if (!node) return;
+    const row = e.target.closest(".row");
     unfocus();
-    focusNode(node.getAttribute("data-id"));
+    if (!row) return;
+    focusNode(row.getAttribute("data-id"));
   });
   graphEl.addEventListener("mouseleave", unfocus);
 
