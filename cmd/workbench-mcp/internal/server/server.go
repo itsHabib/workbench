@@ -112,19 +112,42 @@ func (s *Server) renewLoop(done <-chan struct{}, ticks <-chan time.Time) {
 // make the next Claim return ErrLocked against this very session until the lease
 // expires — instead we keep it and retry on the next tick.
 func (s *Server) renewAll() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for run, l := range s.leases {
+	for run, l := range s.snapshotLeases() {
 		err := l.Renew()
 		if err == nil {
 			continue
 		}
 		if driverstate.OwnershipLost(err) {
 			fmt.Fprintf(os.Stderr, "workbench-mcp: lease lost for run %s: %v\n", run, err)
-			delete(s.leases, run)
+			s.evictLeaseIf(run, l)
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "workbench-mcp: transient lease renew error for run %s (keeping, will retry): %v\n", run, err)
+	}
+}
+
+// snapshotLeases copies the lease map under the mutex so renewAll's file I/O
+// (each Renew takes the on-disk lease lock, with bounded retries) never runs
+// with the server mutex held — a record verb must not stall behind a renew
+// sweep.
+func (s *Server) snapshotLeases() map[string]driverstate.Lease {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]driverstate.Lease, len(s.leases))
+	for run, l := range s.leases {
+		out[run] = l
+	}
+	return out
+}
+
+// evictLeaseIf drops run's cached lease only when the map still holds the very
+// lease the sweep renewed — a record verb may have re-claimed the run between
+// the snapshot and this eviction, and that fresh lease must survive.
+func (s *Server) evictLeaseIf(run string, l driverstate.Lease) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.leases[run] == l {
+		delete(s.leases, run)
 	}
 }
 
