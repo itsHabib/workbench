@@ -296,6 +296,10 @@ func renderFlat(w io.Writer, n Node) {
 
 // fixtureMarker anchors the swap point in the trace-view page: the demo
 // fixture's declaration, replaced wholesale by the requested run's projection.
+// Contract with the template: the declaration is ONE line ending in ";", and
+// this marker's first occurrence is that line — TestExplainHTMLFlag pins the
+// swap, so a template edit that breaks either shows up as a failing test, not
+// a corrupt page.
 const fixtureMarker = "const EMBEDDED_FIXTURE = "
 
 // ExplainHTML renders the run's projection into the self-contained trace-view

@@ -783,7 +783,9 @@ func cmdExplain(args []string) error {
 // file behind.
 func explainHTMLFile(e env, run, path string) error {
 	if path == "" {
-		path = "gate-explain-" + run + ".html"
+		// filepath.Base pins the default file next to the caller even if a
+		// future run-id format ever grew a path separator.
+		path = "gate-explain-" + filepath.Base(run) + ".html"
 	}
 	var buf strings.Builder
 	if err := observe.ExplainHTML(&buf, e.st, run, traceViewPage); err != nil {

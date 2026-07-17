@@ -676,3 +676,10 @@ func TestExplainRejectsJSONWithHTML(t *testing.T) {
 		t.Fatalf("want mutual-exclusion error, got %v", err)
 	}
 }
+
+func TestExplainRejectsOutWithoutHTML(t *testing.T) {
+	err := cmdExplain([]string{"-run", "run_x", "-out", "t.html"})
+	if err == nil || !strings.Contains(err.Error(), "requires -html") {
+		t.Fatalf("want -out-requires-html error, got %v", err)
+	}
+}
