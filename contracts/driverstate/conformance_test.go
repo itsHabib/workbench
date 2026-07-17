@@ -371,6 +371,9 @@ func TestRequiredFieldsAlwaysMarshal(t *testing.T) {
 	if strings.Contains(s, `"stream"`) {
 		t.Errorf("optional stream must be omitted when empty: %s", s)
 	}
+	if strings.Contains(s, `"ext_ref"`) {
+		t.Errorf("optional ext_ref must be omitted when empty: %s", s)
+	}
 }
 
 func TestRoundTrip(t *testing.T) {
