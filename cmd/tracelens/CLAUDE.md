@@ -2,7 +2,7 @@
 
 Agent trace diagnostics. Feed it an agent run's JSONL trace and it diagnoses the run — loops, redundant tool calls, retry storms, cost hotspots, stuck states — each finding with the exact evidence steps and a concrete fix. Pure computation over the parsed trace: stdlib only, no network, no credentials, fully reproducible.
 
-A workbench tenant: the binary is `cmd/tracelens`, the library is private under `cmd/tracelens/internal/tracelens`. Nothing imports the library as Go code — consumers (ship's driver, controlroom's adapter) shell out to the `tracelens` binary and read exit codes + JSON. That CLI seam is the contract; keep the binary name and exit codes stable.
+A workbench tenant: the binary is `cmd/tracelens`, the library is private under `cmd/tracelens/internal/tracelens`. Nothing imports the library as Go code — consumers (e.g. ship's driver) shell out to the `tracelens` binary and read exit codes + JSON. That CLI seam is the contract; keep the binary name and exit codes stable.
 
 ## Develop (from the module root)
 

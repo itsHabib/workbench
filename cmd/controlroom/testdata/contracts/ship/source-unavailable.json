@@ -1,8 +1,0 @@
-{
-  "source": "ship",
-  "state": "unavailable",
-  "observed_at": "2026-07-13T12:00:00.000Z",
-  "duration_ms": 1200,
-  "error_code": "executable_not_found",
-  "message": "ship executable not found on configured path"
-}
