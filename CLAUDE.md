@@ -64,8 +64,7 @@ go test ./...
 ```
 
 CI (`.github/workflows/ci.yml`) additionally runs `go test -race` and the
-`hygiene` boundary-law assertions. Standard library only; no third-party
-dependencies, in production or test.
+`hygiene` boundary-law assertions. Third-party Go dependencies are allowed.
 
 <!-- local-offload:start -->
 ## Local-first offload

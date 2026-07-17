@@ -9,9 +9,8 @@ boundary law, how tools migrate in, and the triggers that would later split
 
 ## One repo, one Go module
 
-One `go.mod` at the root (one `go.sum` once production Go has third-party deps
-to pin; today it has none). Not multi-module. No `go.work`. No third-party
-dependencies, in production or test.
+One `go.mod` at the root (a `go.sum` once there are third-party deps to pin).
+Not multi-module. No `go.work`. Third-party Go dependencies are allowed.
 
 `go install github.com/itsHabib/workbench/cmd/<tool>@latest` works cleanly from a
 single module.
