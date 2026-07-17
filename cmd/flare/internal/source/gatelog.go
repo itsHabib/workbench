@@ -19,6 +19,8 @@ type escalationBody struct {
 	Outcome  string `json:"outcome"`
 	Question string `json:"question"`
 	Code     string `json:"code"`
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
 }
 
 // parseGateLog lifts events from gate artifact lines: every escalation, and
@@ -81,6 +83,12 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	fields := map[string]string{"code": b.Code}
 	if env.Run != "" {
 		fields["run"] = env.Run
+	}
+	// The PR subject, when the escalation names one, feeds notify's headline
+	// and View PR button — the click-target verdicts already get.
+	if b.Repo != "" && b.Number > 0 {
+		fields["repo"] = b.Repo
+		fields["number"] = strconv.Itoa(b.Number)
 	}
 	return event.Event{
 		Source:   src.Name,
