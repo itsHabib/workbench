@@ -1,6 +1,6 @@
 # flare
 
-One stdlib-only Go binary that pushes a notification when something in the
+One Go binary that pushes a notification when something in the
 workbench blocks or escalates. It tails the artifact logs other tools already
 emit — gate's state log, ship's run receipts — matches events against a small
 routes table, and raises a Windows toast, posts a webhook, or sends a Slack
@@ -43,8 +43,6 @@ go test ./...
 
 Constraints that are design decisions, not omissions:
 
-- **Standard library only.** The toast shells to `powershell.exe`; the
-  webhook and Slack channels are `net/http` POSTs. Nothing else.
 - **Reads are raw and read-only.** No producer lock is taken, torn final
   lines wait for the next poll, watched paths are explicit config.
 - **Nothing is silently dropped.** Unrouted events hit a required catch-all

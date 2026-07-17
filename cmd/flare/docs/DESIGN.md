@@ -2,7 +2,7 @@
 
 **Status:** v0 design, 2026-07-08
 **Owner:** operator
-**Shape:** one small stdlib-Go binary, outside ship and gate. Pure sink.
+**Shape:** one small Go binary, outside ship and gate. Pure sink.
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # flare
 
-The workbench's escalation-routing plane: a stdlib-only Go binary that tails
+The workbench's escalation-routing plane: a small Go binary that tails
 producers' artifact logs (gate `log.jsonl`, ship `receipts.jsonl`) and pushes
 a notification (Windows toast, webhook) on block/escalate. Pure sink — it
 never gates, never blocks, never writes into a producer's state or takes a
@@ -47,4 +47,4 @@ there first.
 gofmt -l . && go vet ./... && golangci-lint run ./... && go test ./...
 ```
 
-Standard library only; the sole in-repo dependency is the `contracts` package.
+The sole in-repo dependency is the `contracts` package.
