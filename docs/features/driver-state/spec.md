@@ -427,3 +427,41 @@ phases. Secondary criteria (review-promoted): a terminal Claude Code client and 
 connector both resolve the SAME state root (the MSIX assumption, tested hands-on, not
 assumed); zero shell-friction entries in the friction log for the recording path (the
 MCP-vs-CLI bet).
+
+### Verdict — PASSED (2026-07-17, run `dsr_0f12f9fb28229dc95b81e3ba8c2c988e`)
+
+One real dossier task (`flare-slack-escalation-click-target`) driven session-engine style
+to merged PR #65, every transition recorded through `workbench-mcp`.
+
+- **(a) PASS.** `run_imported` → `stream_dispatched` → `stream_attempt{terminal}` →
+  `stream_pr_opened` → `review_cycle` → `stream_merged` → `run_finished`, all via
+  `driver_record`; zero CLI writes; `driver_verify` ok throughout.
+- **(b) PASS — the hard case.** Kill placed between opening PR #65 and recording
+  `stream_pr_opened`. A fresh-context session (given no run id, PR number, or branch) ran
+  F3 verbatim: found the run via `driver_runs{live:true}`, reconciled external facts
+  (branch, head SHA, open PR), recorded the missing event under a new actor
+  (`session:p4a-resume`) with the chain intact, and continued the drive. The prior lease
+  had expired and self-cleared, so the resume exercised a genuine re-claim.
+- **(c) PASS — method: `driverstate state --json` diffed against GitHub facts** (P3
+  shipped no `render`; a minimal render is tracked as a P4-phase task). Reduced state
+  matched GitHub exactly: stream `merged`, PR 65, merge commit `d556a82b`, one terminal
+  attempt, run `finished`.
+- **Secondary: same-root PASS, tested hands-on** — `workbench-mcp.exe` executed inside the
+  Claude Desktop MSIX app container (`Invoke-CommandInDesktopPackage`) resolved the
+  identical root (`~\.workbench\driver-state`, source: user profile) and a container write
+  landed in the real directory: the profile root sits outside MSIX's AppData VFS, so §10
+  Q4's virtualization risk does not apply to this path.
+- **Secondary: zero shell-friction on the recording path PASS** (friction log 2026-07-17;
+  one read-path nit: `state` wants `--run`, not a positional).
+
+Findings folded into P4 (dossier phase `session-engine-skill`): promote
+`stream_attempt.commit` into the §5 payload (off-contract today, load-bearing for F3
+reconcile); document/enforce the event-id shape (`evt_<ulid>` documented, `evt_<32hex>`
+minted, neither validated); an actor-minting convention for resumed sessions belongs in
+the skill text; the review panel must come from `.ship.json`, never instruction memory
+(D6 — the P4 change). One environment finding: the harness's self-approval classifier
+parks an agent merging its own session-authored PR even after an independent
+`gate judge -auto` pass — the operator executed the merge; session-engine runs treat
+merge-by-operator as a legitimate final step until a standing allowlist rule exists.
+
+**P4/P5: UNLOCKED.**
