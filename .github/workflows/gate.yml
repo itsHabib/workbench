@@ -1,0 +1,237 @@
+name: gate
+
+# Fork-safe enforcement check. Triggering on workflow_run (not pull_request /
+# pull_request_target) runs this in the TRUSTED base-repo context with a token
+# that can post commit statuses, even for fork PRs, WITHOUT executing any fork
+# code. It also fires only after CI has finished, so the PR's other checks have
+# a settled state to read.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# Least privilege: post the gate status, read the code/PR/checks/logs gate
+# needs as evidence. No write access to contents or pull-requests.
+permissions:
+  statuses: write
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  gate:
+    # DORMANT until armed. gate's full ladder needs triage-floor + a model
+    # backend (Ollama today) that a stock GitHub-hosted runner does not have, so
+    # this stays OFF until the runtime is sorted (point gate's model rungs at a
+    # cloud model, or run on a box-side runner) AND the operator arms it by
+    # setting repo variable GATE_ENFORCE=true. Until then it posts nothing and
+    # enforces nothing. See docs/enforcement.md. (Also skips non-PR CI runs — a
+    # push to main has no PR to gate.)
+    if: github.event.workflow_run.event == 'pull_request' && vars.GATE_ENFORCE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      # workflow_run exposes the run's web URL; used as the status target link.
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      # No `ref:` on purpose. workflow_run checks out the DEFAULT BRANCH (the
+      # trusted base), never the PR/fork head. This is load-bearing: gate is
+      # built from base so a PR cannot edit gate's own code to neuter the check
+      # that governs it. persist-credentials: false — the base build needs no
+      # git credentials, so none are left in the runner's git config.
+      - name: Checkout base (trusted)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Built from the base checkout above — never from PR head.
+      - name: Build gate
+        run: go build -o gate ./cmd/gate
+
+      # Resolve the PR from the event. Same-repo PRs populate pull_requests[0];
+      # fork PRs arrive with an empty pull_requests[], so fall back to the
+      # commits->pulls API for the head SHA. No PR resolved => nothing to gate.
+      - name: Resolve PR number
+        id: pr
+        run: |
+          set -euo pipefail
+          num='${{ github.event.workflow_run.pull_requests[0].number }}'
+          if [ -z "$num" ]; then
+            num=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
+              --jq '.[0].number // empty')
+          fi
+          if [ -z "$num" ]; then
+            echo "no PR resolves for ${HEAD_SHA}; nothing to gate"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "resolved PR #${num}"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "number=${num}" >> "$GITHUB_OUTPUT"
+
+      # gate treats ANY non-green check (pending/queued/in-progress) as a block
+      # (fail closed). Reading mid-flight CI would therefore block spuriously,
+      # so wait until every check that is NOT `gate` has settled before running.
+      # Bounded: on timeout we proceed anyway — a still-pending check just makes
+      # gate block, which is the safe direction.
+      #
+      # `gh pr checks` exits non-zero when checks are pending (8) or failing (1),
+      # so its exit code is captured and ignored; only the JSON drives the loop.
+      # The settled/not-settled decision keys off the `bucket` field (pass / fail
+      # / pending / skipping / cancel) — `pending` is the only unsettled bucket.
+      - name: Wait for other checks to settle
+        if: steps.pr.outputs.found == 'true'
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          deadline=$(( SECONDS + 300 ))
+          while :; do
+            checks=$(gh pr checks "$PR" --json name,bucket 2>/dev/null || true)
+            if [ -z "$checks" ]; then
+              echo "no checks reported yet; proceeding"
+              break
+            fi
+            pending=$(printf '%s' "$checks" \
+              | jq '[.[] | select(.name != "gate") | select(.bucket == "pending")] | length')
+            if [ "$pending" -eq 0 ]; then
+              echo "all non-gate checks settled"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "timeout with ${pending} check(s) still pending; proceeding (gate will block on them)"
+              break
+            fi
+            echo "waiting on ${pending} pending check(s)..."
+            sleep 15
+          done
+
+      # Mint an ephemeral grant and run gate as a DRY RUN (never -live). The
+      # grant, state, and keys live in a throwaway temp dir per run, so no
+      # signing secret ever touches CI. -key must sit outside -state (gate
+      # refuses a nested key dir).
+      #
+      # -max-tier T3 / -max-cycles 0: this check reflects gate's LADDER verdict
+      # (block / escalate / pass), not a tier or cycle ceiling. A CI runner has
+      # no operator to re-mint a wider grant or judge an escalation, and the
+      # per-run ephemeral state makes cross-run cycle counting meaningless — so
+      # the ceilings are opened to their widest and the check stands or falls on
+      # the ladder alone.
+      - name: Run gate
+        id: gate
+        if: steps.pr.outputs.found == 'true'
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          # Erase the ephemeral state/key dir on exit — no minted grant or key
+          # survives the step, matching the "erased with it" guarantee.
+          trap 'rm -rf "$TMP"' EXIT
+          GRT=$(./gate grant -repo "$REPO" -action merge -max-tier T3 -max-cycles 0 -ttl 1h \
+            -state "$TMP/state" -key "$TMP/keys")
+          echo "minted ephemeral grant"
+          set +e
+          JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys")
+          CODE=$?
+          set -e
+          # Persist the raw outcome for the status-posting step and the summary.
+          printf '%s\n' "$JSON" > gate-outcome.json
+          {
+            echo "## gate outcome (exit ${CODE})"
+            echo '```json'
+            cat gate-outcome.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The code= write MUST stay the effective last action of this step: if
+          # any line above fails under set -e, code= is never written, the next
+          # step sees an empty CODE, and it posts error (fail closed) rather than
+          # acting on a half-finished run.
+          echo "code=${CODE}" >> "$GITHUB_OUTPUT"
+
+      # Map gate's exit code to the `gate` commit status. FAIL CLOSED: state=success
+      # is posted ONLY when gate exited 0 AND its verdict is bound to the exact
+      # head it judged. Block/park/refuse are failures; anything else is an error.
+      # The context is exactly `gate` — branch protection requires that context.
+      #
+      # Two distinct failure surfaces, both fail-closed:
+      #   * A PRIOR step failed (checkout, build, PR resolve, or the gate step
+      #     itself erroring out). This step's `if:` has no status function, so it
+      #     is implicitly `success() && <cond>` — a failed prior step SKIPS this
+      #     step, so NO status is posted. An absent `gate` context makes branch
+      #     protection block the merge. (There is no continue-on-error on the gate
+      #     step, so a gate crash cannot be laundered into a pass.)
+      #   * This step RUNS but the run was incomplete — CODE empty (the gate step
+      #     succeeded as a step but never wrote code=) or gate-outcome.json
+      #     missing / empty / not valid JSON (gate errored before printing its
+      #     result). Handled in-step below by posting state=error, so a broken run
+      #     lands a visible error rather than silently doing nothing.
+      #
+      # SHA BINDING (the TOCTOU fix): gate computes its verdict from the LIVE PR
+      # head it reads at run time (emitted as .head_sha), while this status is
+      # posted to HEAD_SHA, the head fixed in the workflow_run event when CI
+      # completed. Those can differ — a force-push can move the live head under
+      # the run — so a green verdict for one commit must never be stamped onto a
+      # different one. success is therefore gated on JUDGED == HEAD_SHA (and the
+      # outcome being would_merge, so code and outcome agree). If they diverge we
+      # post error("stale: head moved"), never success.
+      - name: Post gate status
+        if: steps.pr.outputs.found == 'true'
+        env:
+          CODE: ${{ steps.gate.outputs.code }}
+        run: |
+          set -uo pipefail
+          # Descriptions are capped well under GitHub's 140-char status limit.
+          trunc() { printf '%s' "$1" | head -c 110; }
+
+          # Parse the outcome defensively: a missing / empty / invalid
+          # gate-outcome.json, or an empty CODE, means the run did not finish
+          # cleanly. Never let a jq failure abort this step (that would skip the
+          # post and leave the status absent) — force the error path instead.
+          why=""; tier=""; outcome=""; JUDGED=""; broken=""
+          if [ -z "${CODE}" ]; then
+            broken="gate did not report an exit code"
+          elif [ ! -s gate-outcome.json ] || ! jq -e . gate-outcome.json >/dev/null 2>&1; then
+            broken="gate produced no valid outcome JSON"
+          else
+            why=$(jq -r '.why // ""' gate-outcome.json)
+            tier=$(jq -r '.tier // ""' gate-outcome.json)
+            outcome=$(jq -r '.outcome // ""' gate-outcome.json)
+            JUDGED=$(jq -r '.head_sha // ""' gate-outcome.json)
+          fi
+
+          if [ -n "$broken" ]; then
+            STATE=error; DESC="gate error: $(trunc "$broken")"
+          else
+            case "$CODE" in
+              0)
+                # A pass is honoured only if it is bound to the head this status
+                # targets and the outcome agrees with the code. Any mismatch means
+                # the live head moved (or the run is inconsistent): fail closed.
+                if [ "$JUDGED" = "$HEAD_SHA" ] && [ "$outcome" = "would_merge" ]; then
+                  STATE=success; DESC="would_merge (${tier})"
+                else
+                  STATE=error; DESC="stale: head moved during gate run"
+                fi
+                ;;
+              1) STATE=failure; DESC="blocked: $(trunc "$why")" ;;
+              2) STATE=failure; DESC="parked_for_judgment: $(trunc "$why")" ;;
+              3) STATE=failure; DESC="capability_refused" ;;
+              *) STATE=error;   DESC="gate error: $(trunc "$why")" ;;
+            esac
+          fi
+
+          echo "posting gate=${STATE}: ${DESC} (code=${CODE:-<none>} judged=${JUDGED:-<none>} target=${HEAD_SHA})"
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state="$STATE" \
+            -f context=gate \
+            -f description="$DESC" \
+            -f target_url="$RUN_URL"

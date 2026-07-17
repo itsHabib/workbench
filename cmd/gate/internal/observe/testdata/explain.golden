@@ -1,0 +1,37 @@
+run run_explain_fixture — 7 artifacts
+
+14:30:00  grant  grt_8fc483df98c50ac6
+         repo: o/r
+         action: merge
+         max_tier: T1
+         max_cycles: 3
+         expires_at: 2026-07-13T15:30:00Z
+         minted_by: test
+         sig: fixture
+
+14:30:00  evidence  evd_e44dbad96c32dc06
+         diff evidence: 18 bytes
+
+14:30:00  verdict  vrd_344689409e39c85c
+         from: [evd_e44dbad96c32dc06]
+         floor [code/triage-floor] → block tier=T1 conf=0.95
+         why: test failure in CI
+           - high ci missing test
+             evidence: FAIL pkg/foo
+
+14:30:00  judgment  jdg_f683783edd459e87
+         from: [vrd_344689409e39c85c]
+         operator [judgment] → pass tier=T0 conf=1.00
+         why: acceptable risk
+
+14:30:00  escalation  esc_85b46c7fa371d58f
+         from: [vrd_344689409e39c85c]
+         question: tier exceeds ceiling
+
+14:30:00  action  act_114d45e3148c623d
+         from: [vrd_344689409e39c85c]
+         outcome: blocked
+
+14:30:00  evidence  evd_522a03704c43075c
+         (unparseable body)
+
