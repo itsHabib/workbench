@@ -1,0 +1,5 @@
+{
+  "_note": "Pinned canonical-encoding reference vector for driver-state-v0.1.0 (spec §5, review M3). The vector event is constructed in conformance_test.go (vectorEvent); this file pins the exact canonical bytes and SHA-256 hash it must reproduce. Ship's independent TS emitter must reproduce these byte-for-byte. Regenerate ONLY on a deliberate contract change.",
+  "canonical": "{\"id\":\"evt_01JQEVENT00000000000000IMP0\",\"run\":\"dsr_01JQRUN0000000000000000RUN0\",\"v\":\"driver-state-v0.1.0\",\"kind\":\"run_imported\",\"stream\":\"\",\"time\":\"2026-07-16T12:00:00Z\",\"actor\":\"session:demo-01\",\"body\":{\"repo\":\"itsHabib/workbench\",\"source\":\"docs/driver/driver.md\",\"streams\":[{\"stream\":\"dss_01JQSTREAM0000000000000001\",\"doc_path\":\"docs/features/driver-state/spec.md\"}],\"ship_run_ref\":\"drv_01JQSHIP000000000000000001\"},\"prev\":\"\",\"hash\":\"\"}",
+  "hash": "f69d3a32c31fd4e76c155ada4326cd2fd6faebb2f93caf07ca0036719d274fc5"
+}
