@@ -46,7 +46,7 @@ external act it describes — the ledger is written from facts, never ahead of t
 | worktree + impl started | `stream_dispatched` | engine:"session", worktree, branch |
 | commit landed | `stream_attempt` | seq, doc_path, terminal, **commit** (the head SHA — off-contract today, see follow-ups; load-bearing for F3 reconcile) |
 | PR opened | `stream_pr_opened` | pr, url, head_sha |
-| each panel round settled | `review_cycle` | cycle, panel_settled, findings, panel, verdict — or `review: unconfigured` when the repo declares no panel |
+| each panel round settled | `review_cycle` | cycle, panel_settled, findings, panel, verdict. Unconfigured repo (no `review` key): exactly one `{cycle: 1, review: "unconfigured", panel_settled: true, findings: 0}` — no panel/verdict fields |
 | PR merged | `stream_merged` | pr, merge_commit, merged_at |
 | all streams terminal | `run_finished` | — |
 
@@ -60,8 +60,14 @@ dedupes on `id` alone (§8 at-least-once): a lost-response retry that omits the 
 fresh server-minted one and appends a duplicate (or draws `ErrIllegalTransition` on a
 transition kind) instead of returning the original committed event. So: mint
 `evt_<32 hex>` per event before the first attempt, resend the SAME event verbatim on
-retry. (`run_imported` is the exception — its dedupe key is `(repo, source, generated_at)`
-and the server refuses to mint a run without it.)
+retry. Mint an id for `run_imported` too — the id stays the append idempotency key; what
+differs is the RUN mint, which dedupes on `(repo, source, generated_at)` in the body, and
+the server refuses to mint a run when those are absent.
+
+Fields beyond the contract's body payloads (`stream_attempt.commit`, `review_cycle.panel`
+/ `verdict`) are legal by design — §8 mandates tolerant body decoding so additions are
+never breaking; a field gets *promoted* into the contract only when reads depend on it
+(commit is queued precisely because F3 resume does).
 
 ### Resume (F3)
 
@@ -69,6 +75,11 @@ A fresh session resumes with: `driver_runs {live:true}` → `driver_state <run>`
 `driver_verify <run>` → **reconcile external facts before any write** (branch exists? PR
 state? merge commit? — `stream_dispatched`'s branch/worktree + `stream_attempt`'s commit
 say where to look) → record missing events (idempotent) → continue the drive.
+The reconcile-first rule covers the pre-record dispatch window too: a run showing only
+`run_imported` resumes from its manifest snapshot, but a branch or worktree the manifest
+names that ALREADY exists is adopted, never recreated — the prior session died between
+creating it and recording `stream_dispatched`, and `git worktree add` on an existing
+branch would otherwise fail the resume.
 Honest gap (validation-gate finding): `Reduce` does not yet surface those locators —
 `RunState` carries statuses and PR facts but drops the `stream_dispatched` body and the
 attempt `commit`, so the resumer reads the run's `events.jsonl` alongside `driver_state`
@@ -113,7 +124,9 @@ skill prose:
 
 ### Merge tail
 
-Unchanged from the base skill: consolidate on real findings (`/review-coordinator`), gate
+Unchanged from the base skill *when a panel is configured*: consolidate on real findings
+(`/review-coordinator`) — a repo with no `review` key has no automated review step, so
+there is nothing to consolidate and the tail proceeds straight to gate. Then: gate
 authorize per PR (`gate gate -repo <r> -pr <n> -grant <grt_…> -state ~/pers/gate/state`),
 branch on exit code with code↔JSON agreement, judge only content escalations, re-mint only
 via the operator. Record `review_cycle` per settled round and `stream_merged` only after
