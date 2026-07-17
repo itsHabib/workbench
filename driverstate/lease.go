@@ -127,6 +127,25 @@ func installLease(dir, run, actor string, ttl time.Duration, gen uint64) (Lease,
 	return leaseFrom(dir, run, ttl, rec), nil
 }
 
+// ExpireLeaseForTest forces the on-disk lease for run under dir to be already
+// expired, atomically — it holds the lease lock and rewrites the record through
+// the same write path Renew/Claim use (writeLeaseFile), so a lock-free reader
+// never sees a torn file. It exists ONLY so tests (in this package and its MCP
+// consumer) can drive expiry deterministically: sleeping a real TTL to expire a
+// lease always risks losing the wall-clock race on a loaded or -race runner.
+// Not a production operation — leases expire by their own clock.
+func ExpireLeaseForTest(dir, run string) error {
+	rd := runDir(dir, run)
+	return withLock(leaseLockPath(rd), func() error {
+		rec, err := readLease(rd)
+		if err != nil {
+			return err
+		}
+		rec.ExpiresAt = time.Now().Add(-time.Hour)
+		return writeLeaseFile(rd, rec)
+	})
+}
+
 // validateRunID rejects a run identifier that is not a single, safe directory
 // component — empty, a traversal ("." / ".."), or carrying a path separator or
 // volume — so filepath.Join(dir, run) can never escape the state root. The same

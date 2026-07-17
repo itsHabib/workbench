@@ -118,13 +118,17 @@ func TestRenewLoopRenewsEachTickThenStopsOnExit(t *testing.T) {
 // A definitive ownership loss (the run stolen out from under the session) drops
 // the lease from the held set so it will be re-Claimed on the next record.
 func TestRenewAllEvictsOnOwnershipLoss(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second)
 	dir := t.TempDir()
 	s := New(dir)
 	if _, err := s.leaseFor("dsr_r", "session:x"); err != nil {
 		t.Fatalf("leaseFor: %v", err)
 	}
-	time.Sleep(40 * time.Millisecond) // the session's lease expires
+	// Force the session's lease expired on disk, then let another writer steal it
+	// — deterministic, no wall-clock race against the TTL.
+	if err := driverstate.ExpireLeaseForTest(dir, "dsr_r"); err != nil {
+		t.Fatalf("force expire: %v", err)
+	}
 	other, err := driverstate.Claim(dir, "dsr_r", "session:other")
 	if err != nil {
 		t.Fatalf("steal: %v", err)
@@ -204,9 +208,7 @@ func TestImportRetryDedupesNoOrphan(t *testing.T) {
 // so the next record re-Claims immediately instead of failing on the dead lease
 // until the renew tick.
 func TestRecordEvictsCachedLeaseOnAppendOwnershipLoss(t *testing.T) {
-	// A TTL comfortably larger than an Append keeps the post-eviction re-claim's
-	// own lease live through its record, while a sleep past it expires the first.
-	withTTL(t, 100*time.Millisecond)
+	withTTL(t, 5*time.Second) // comfortable — expiry is forced on disk, not slept
 	dir := t.TempDir()
 	s := New(dir)
 	run := mustRun(t, callRecord(t, s, "", importEvent("dss_a", "session:x")))
@@ -214,7 +216,11 @@ func TestRecordEvictsCachedLeaseOnAppendOwnershipLoss(t *testing.T) {
 		t.Fatal("import should have cached the run lease")
 	}
 
-	time.Sleep(150 * time.Millisecond) // the cached lease expires (suspend)
+	// The cached lease loses ownership mid-session (a suspend): force it expired
+	// on disk rather than sleeping past a short TTL under a loaded/-race runner.
+	if err := driverstate.ExpireLeaseForTest(dir, run); err != nil {
+		t.Fatalf("force expire: %v", err)
+	}
 
 	bad := callRecord(t, s, run, event(dsc.KindStreamDispatched, "dss_a", "session:x", struct{}{}))
 	if !bad.IsError {

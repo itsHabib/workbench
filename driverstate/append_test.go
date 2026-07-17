@@ -241,10 +241,12 @@ func TestTornTailHealed(t *testing.T) {
 }
 
 func TestAppendWithoutLiveLease(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second)
 	dir := t.TempDir()
 	l, _ := Claim(dir, "dsr_run1", "session:a")
-	time.Sleep(40 * time.Millisecond) // lease expires
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil { // lease expires
+		t.Fatalf("force expire: %v", err)
+	}
 	_, err := Append(dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, dsc.RunImportedBody{
 		Repo: "r", Source: "s", Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "d"}},
 	}))
@@ -283,13 +285,15 @@ func TestAppendRejectsMismatchedDir(t *testing.T) {
 // lease was stolen (generation bumped) must not be able to write, even though it
 // passed a Claim earlier.
 func TestAppendRevalidatesStolenLease(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second)
 	dir := t.TempDir()
 	first, err := Claim(dir, "dsr_run1", "session:a")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	time.Sleep(40 * time.Millisecond) // first's lease expires
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil { // first's lease expires
+		t.Fatalf("force expire: %v", err)
+	}
 	if _, err := Claim(dir, "dsr_run1", "session:b"); err != nil {
 		t.Fatalf("steal claim: %v", err)
 	}

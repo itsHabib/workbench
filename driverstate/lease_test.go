@@ -73,14 +73,16 @@ func TestSecondClaimerLocked(t *testing.T) {
 }
 
 func TestStaleLeaseSelfClears(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second) // comfortable — expiry is forced deterministically
 	dir := t.TempDir()
 	first, err := Claim(dir, "dsr_run1", "session:dead")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
 	_ = first
-	time.Sleep(40 * time.Millisecond) // lease now expired
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil {
+		t.Fatalf("force expire: %v", err)
+	}
 	second, err := Claim(dir, "dsr_run1", "session:fresh")
 	if err != nil {
 		t.Fatalf("claim over stale lease should succeed, got %v", err)
@@ -98,12 +100,12 @@ func TestStaleLeaseSelfClears(t *testing.T) {
 // fail AND leave the successor's lease untouched (renewal is atomic with
 // takeover, never a blind rewrite).
 func TestRenewAfterStealRejected(t *testing.T) {
-	// A TTL comfortably larger than the test's own steps keeps the successor's
-	// lease live for its renew, while a sleep past it expires the first holder.
-	withTTL(t, 150*time.Millisecond)
+	withTTL(t, 5*time.Second) // comfortable — the first lease is expired on disk, not by sleep
 	dir := t.TempDir()
 	first, _ := Claim(dir, "dsr_run1", "session:one")
-	time.Sleep(180 * time.Millisecond)
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil {
+		t.Fatalf("force expire: %v", err)
+	}
 	second, err := Claim(dir, "dsr_run1", "session:two") // installs generation 2
 	if err != nil {
 		t.Fatalf("steal: %v", err)
@@ -119,17 +121,19 @@ func TestRenewAfterStealRejected(t *testing.T) {
 	if rec.Actor != "session:two" || rec.Generation != 2 {
 		t.Fatalf("stale renew clobbered the successor: on-disk %+v", rec)
 	}
-	// The successor still holds a renewable lease.
+	// The successor still holds a live, renewable lease (its TTL is comfortable).
 	if err := second.Renew(); err != nil {
 		t.Fatalf("successor renew should succeed, got %v", err)
 	}
 }
 
 func TestReleaseAfterStealIsNoop(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second)
 	dir := t.TempDir()
 	first, _ := Claim(dir, "dsr_run1", "session:one")
-	time.Sleep(40 * time.Millisecond)
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil {
+		t.Fatalf("force expire: %v", err)
+	}
 	if _, err := Claim(dir, "dsr_run1", "session:two"); err != nil { // installs gen 2
 		t.Fatalf("steal: %v", err)
 	}
@@ -149,13 +153,15 @@ func TestReleaseAfterStealIsNoop(t *testing.T) {
 // Cycle 3, item 2 — Renew of a lease whose own TTL has lapsed must fail: the
 // staleness law is expiry, so an expired holder re-Claims, never resurrects.
 func TestRenewAfterExpiryRejected(t *testing.T) {
-	withTTL(t, 20*time.Millisecond)
+	withTTL(t, 5*time.Second)
 	dir := t.TempDir()
 	l, err := Claim(dir, "dsr_run1", "session:a")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	time.Sleep(40 * time.Millisecond) // own lease lapses; nobody steals it
+	if err := ExpireLeaseForTest(dir, "dsr_run1"); err != nil { // lapses; nobody steals it
+		t.Fatalf("force expire: %v", err)
+	}
 	if err := l.Renew(); !errors.Is(err, ErrLeaseExpired) {
 		t.Fatalf("renew of an expired lease should be ErrLeaseExpired, got %v", err)
 	}
