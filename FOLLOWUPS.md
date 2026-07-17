@@ -17,10 +17,14 @@ New planes are born here; existing tools migrate in when next in hand, not as a
 sweep. Order is by convenience, not priority. Each is handed to that tool's
 owner — not this repo's work to force.
 
-- **gate** — the verdict type's behavioral source of truth. When next touched,
+- ~~**gate** — the verdict type's behavioral source of truth. When next touched,
   graduate it in and have it *import* `contracts` for the shared type, so the
-  conformance test guards drift from the inside. Until then `contracts` mirrors
-  gate's `internal/verify` and is conformance-tested against the schema.
+  conformance test guards drift from the inside.~~ Done 2026-07-17: migrated in
+  as `cmd/gate` (byte-identical move, then `contracts` adoption in the
+  follow-up PR — `verify`'s Verdict/Producer/Subject/Finding are now aliases of
+  `contracts`, `observe` decodes `contracts.Verdict` instead of a hand-parsed
+  copy, and `ProducerString` presentation moved into gate). The reducer and the
+  ladder law never moved; the queue is now empty of planned tenants.
 - **triage** — migrated in 2026-07-16 as `cmd/triage` (the fourth tenant; two
   binaries, `triage-floor`/`triage-advisory`, sharing `cmd/triage/internal/`).
   `contracts` adoption deliberately NOT done with the move: inspection showed
@@ -140,3 +144,16 @@ Pre-existing — the code arrived byte-identical with the tenant move (#51) and
 was outside every subsequent PR's diff. Fix is the house-style extraction
 (≤2 nesting per scope) the next time triage is touched; not worth a
 standalone churn PR.
+
+## Idea (parked 2026-07-17): an MCP surface for the merge-loop verbs
+
+Operator flagged mid-migration ("something to take on next maybe"): wrapping the
+loop verbs an agent drives by shell today — `gate gate`/`judge`/`explain`, the
+review-cycle bookkeeping — in an MCP the way `workbench-mcp` wraps the driver
+state verbs. The standing position stays: planes compose via exit codes + JSONL
+(lightest channel wins; the exit code IS the API; CI runners have no MCP), and
+`judge -decision` should remain a deliberately *inconvenient* human act, never
+one tool-call away from an agent. What would change the calculus: session-state
+verbs emerging on the gate side (e.g. a park-inbox an agent polls, cross-run
+grant/cycle queries) where discovery + typed schemas beat re-shelling — the
+same bar workbench-mcp cleared. Evaluate then; not before.

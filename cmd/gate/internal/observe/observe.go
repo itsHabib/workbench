@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // Run is a structured, read-only projection of one gate run's artifact chain.
@@ -159,23 +160,7 @@ func projectEvidence(n *Node, body json.RawMessage) {
 }
 
 func projectVerdict(n *Node, body json.RawMessage) {
-	var v struct {
-		Source   string `json:"source"`
-		Producer struct {
-			Class string `json:"class"`
-			Impl  string `json:"impl"`
-		} `json:"producer"`
-		Decision   string  `json:"decision"`
-		Tier       string  `json:"tier"`
-		Confidence float64 `json:"confidence"`
-		Why        string  `json:"why"`
-		Findings   []struct {
-			Title    string `json:"title"`
-			Severity string `json:"severity"`
-			Locus    string `json:"locus"`
-			Evidence string `json:"evidence"`
-		} `json:"findings"`
-	}
+	var v contracts.Verdict
 	if err := json.Unmarshal(body, &v); err != nil {
 		n.Unparseable = true
 		return

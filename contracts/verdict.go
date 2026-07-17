@@ -7,11 +7,12 @@
 // enforces, and every routing rule stay in the tools that own them. Share
 // contracts, not call stacks.
 //
-// The behavioral source of truth for the verdict type is gate's internal/verify
-// (type Verdict + Reduce). These types mirror that shape and are
-// conformance-tested against the embedded schema; the reducer is deliberately
-// absent, because composing verdicts is a decision and decisions do not live in
-// a shared contract.
+// These are the canonical verdict types: gate's internal/verify — the
+// behavioral source of truth for how verdicts compose — aliases them directly,
+// so the emitter and the vocabulary cannot drift. They are conformance-tested
+// against the embedded schema; the reducer is deliberately absent, because
+// composing verdicts is a decision and decisions do not live in a shared
+// contract.
 package contracts
 
 // Verdict is the one artifact body every verifier emits — code, local-model, or

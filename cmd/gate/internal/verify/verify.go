@@ -9,7 +9,7 @@
 //     override a code block — red evidence stays red.
 //
 // Composition is monotone: worst decision wins, max tier wins, min confidence
-// carries. Imports point down: state only.
+// carries. Imports point down: state and the shared contracts vocabulary only.
 package verify
 
 import (
@@ -20,24 +20,39 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
+	"github.com/itsHabib/workbench/contracts"
 )
 
-// Producer identifies who stands behind a verdict. Class carries the ladder
-// semantics; Impl names the specific implementation (a model, a binary, a
-// person) for provenance only — nothing may branch on it.
-type Producer struct {
-	Class string `json:"class"`
-	Impl  string `json:"impl,omitempty"`
-}
+// The verdict vocabulary is the shared contract: gate emits the canonical
+// shape every workbench verifier speaks, so these are aliases, not copies.
+// Everything that DECIDES — Reduce, the ladder law, the tier logic — stays
+// here: a contract carries no decisions, and a reducer is a decision.
+type (
+	// Verdict is the one artifact body every verifier emits — code, local,
+	// or judgment. Decision and Tier are deliberately orthogonal axes:
+	// decision says who may proceed, tier says who must approve.
+	Verdict = contracts.Verdict
+	// Producer identifies who stands behind a verdict. Class carries the
+	// ladder semantics; Impl is provenance only — nothing may branch on it.
+	Producer = contracts.Producer
+	// Subject names what a verdict is about.
+	Subject = contracts.Subject
+	// Finding is one piece of a verdict's supporting evidence.
+	Finding = contracts.Finding
+)
 
 // Producer classes, the only values the reducer accepts.
 const (
-	ClassCode     = "code"
-	ClassLocal    = "local-model"
-	ClassJudgment = "judgment"
+	ClassCode     = contracts.ClassCode
+	ClassLocal    = contracts.ClassLocal
+	ClassJudgment = contracts.ClassJudgment
 )
 
-func (p Producer) String() string {
+// ProducerString renders a producer as class or class/impl for humans.
+// Presentation lives with gate, not on the contract type: how a producer
+// reads in output is this tool's concern, and the shared vocabulary stays
+// logic-free.
+func ProducerString(p Producer) string {
 	if p.Impl == "" {
 		return p.Class
 	}
@@ -83,39 +98,6 @@ var ErrUnknownDecision = errors.New("unknown_decision")
 // verdict. Absence of the deterministic floor must never read as green — the
 // same fail-open shape as a never-triggered CI check passing.
 const noFloorWhy = "no code-floor verdict present — cannot verify readiness"
-
-// Subject names what a verdict is about.
-type Subject struct {
-	Repo    string `json:"repo"`
-	Number  int    `json:"number"`
-	HeadSHA string `json:"head_sha,omitempty"`
-}
-
-// Finding is one piece of a verdict's supporting evidence. Evidence carries
-// the verbatim source line that justifies the finding — the substrate a
-// verbatim-evidence verifier checks and what explain shows — never a
-// paraphrase.
-type Finding struct {
-	Title      string  `json:"title"`
-	Severity   string  `json:"severity,omitempty"`
-	Locus      string  `json:"locus,omitempty"`
-	Confidence float64 `json:"confidence,omitempty"`
-	Evidence   string  `json:"evidence,omitempty"`
-}
-
-// Verdict is the one artifact body every verifier emits — code, local, or
-// judgment. Decision and Tier are deliberately orthogonal axes: decision says
-// who may proceed, tier says who must approve.
-type Verdict struct {
-	Subject    Subject   `json:"subject"`
-	Source     string    `json:"source"`
-	Producer   Producer  `json:"producer"`
-	Decision   string    `json:"decision"`
-	Tier       string    `json:"tier"`
-	Confidence float64   `json:"confidence"`
-	Findings   []Finding `json:"findings,omitempty"`
-	Why        string    `json:"why"`
-}
 
 // Reduce composes verdicts monotonically into one. Verdict order does not
 // matter; only producer class and decision do.
