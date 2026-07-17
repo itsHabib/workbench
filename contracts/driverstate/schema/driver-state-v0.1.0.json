@@ -36,16 +36,24 @@
     "prev": { "type": "string", "description": "The prior event's hash; empty for the first event in a run." },
     "hash": { "type": "string", "description": "SHA-256 (hex) over the canonical encoding of this event with hash set to the empty string." }
   },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "run_imported" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/run_imported_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_attempt" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_attempt_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_pr_opened" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_pr_opened_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_merged" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_merged_body" } } } },
+    { "if": { "properties": { "kind": { "const": "review_cycle" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/review_cycle_body" } } } }
+  ],
   "$defs": {
     "run_imported_body": {
       "type": "object",
-      "description": "The manifest snapshot at import: repo, source, and the stream set (the driver.md frontmatter, verbatim, so render round-trips). ship_run_ref carries the optional ship drv_id correlate — field included per spec §10 Q2, semantics deferred.",
-      "required": ["repo", "source", "streams"],
+      "description": "The manifest snapshot at import. manifest carries the driver.md frontmatter VERBATIM (render round-trips, and a run with only run_imported resumes from it — spec §7 F3); repo/source/streams are the typed essentials readers index without parsing the snapshot. ship_run_ref carries the optional ship drv_id correlate — field included per spec §10 Q2, semantics deferred.",
+      "required": ["repo", "source", "manifest", "streams"],
       "additionalProperties": false,
       "properties": {
         "repo": { "type": "string" },
         "source": { "type": "string" },
         "generated_at": { "type": "string" },
+        "manifest": { "type": "object", "description": "The driver.md frontmatter, verbatim." },
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream_spec" } },
         "ship_run_ref": { "type": "string" }
       }

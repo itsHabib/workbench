@@ -119,15 +119,19 @@ const (
 	StatusSkipped    = "skipped"
 )
 
-// RunImportedBody is the manifest snapshot at import: the driver.md frontmatter
-// verbatim, so render round-trips. ShipRunRef is the optional ship drv_id
-// correlate (spec §10 Q2 — field included, semantics deferred).
+// RunImportedBody is the manifest snapshot at import. Manifest carries the
+// driver.md frontmatter VERBATIM (render round-trips, and a run with only
+// run_imported resumes from it — spec §7 F3); Repo/Source/Streams are the
+// typed essentials readers index without parsing the snapshot. ShipRunRef is
+// the optional ship drv_id correlate (spec §10 Q2 — field included, semantics
+// deferred).
 type RunImportedBody struct {
-	Repo        string       `json:"repo"`
-	Source      string       `json:"source"`
-	GeneratedAt string       `json:"generated_at,omitempty"`
-	Streams     []StreamSpec `json:"streams"`
-	ShipRunRef  string       `json:"ship_run_ref,omitempty"`
+	Repo        string          `json:"repo"`
+	Source      string          `json:"source"`
+	GeneratedAt string          `json:"generated_at,omitempty"`
+	Manifest    json.RawMessage `json:"manifest"`
+	Streams     []StreamSpec    `json:"streams"`
+	ShipRunRef  string          `json:"ship_run_ref,omitempty"`
 }
 
 // StreamSpec is one stream in the imported manifest snapshot.

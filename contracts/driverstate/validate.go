@@ -91,7 +91,8 @@ func unmarshalBody(kind Kind, body json.RawMessage, into any) error {
 // decode into pointer-field shadows and reject nil — the schema's `required`
 // list, enforced at runtime.
 type runImportedProbe struct {
-	Streams *[]StreamSpec `json:"streams"`
+	Manifest *json.RawMessage `json:"manifest"`
+	Streams  *[]StreamSpec    `json:"streams"`
 }
 
 type streamAttemptProbe struct {
@@ -114,6 +115,9 @@ func validateRunImported(body json.RawMessage) error {
 	}
 	if probe.Streams == nil {
 		return fmt.Errorf("driverstate: run_imported body: streams is missing")
+	}
+	if probe.Manifest == nil {
+		return fmt.Errorf("driverstate: run_imported body: manifest is missing; the verbatim driver.md frontmatter snapshot is what a bare run resumes from")
 	}
 	if b.Repo == "" {
 		return fmt.Errorf("driverstate: run_imported body: repo is empty")

@@ -219,9 +219,10 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		body    string
 		wantErr bool
 	}{
-		{"run_imported ok", KindRunImported, `{"repo":"r","source":"s","streams":[{"stream":"dss_1","doc_path":"d"}]}`, false},
-		{"run_imported empty repo", KindRunImported, `{"repo":"","source":"s","streams":[]}`, true},
-		{"run_imported stream missing doc_path", KindRunImported, `{"repo":"r","source":"s","streams":[{"stream":"dss_1"}]}`, true},
+		{"run_imported ok", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1","doc_path":"d"}]}`, false},
+		{"run_imported empty repo", KindRunImported, `{"repo":"","source":"s","manifest":{},"streams":[]}`, true},
+		{"run_imported missing manifest", KindRunImported, `{"repo":"r","source":"s","streams":[]}`, true},
+		{"run_imported stream missing doc_path", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1"}]}`, true},
 		{"run_imported missing streams", KindRunImported, `{"repo":"r","source":"s"}`, true},
 		{"stream_attempt ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":false}`, false},
 		{"stream_attempt bad seq", KindStreamAttempt, `{"seq":0,"doc_path":"d","terminal":false}`, true},
@@ -296,7 +297,7 @@ func TestValidateEventScope(t *testing.T) {
 // compact literal so the canonical bytes are deterministic and a TS emitter can
 // reproduce them.
 func vectorEvent() Event {
-	body := `{"repo":"itsHabib/workbench","source":"docs/driver/driver.md","streams":[{"stream":"dss_01JQSTREAM0000000000000001","doc_path":"docs/features/driver-state/spec.md"}],"ship_run_ref":"drv_01JQSHIP000000000000000001"}`
+	body := `{"repo":"itsHabib/workbench","source":"docs/driver/driver.md","manifest":{"driver_version":1,"repo":"workbench"},"streams":[{"stream":"dss_01JQSTREAM0000000000000001","doc_path":"docs/features/driver-state/spec.md"}],"ship_run_ref":"drv_01JQSHIP000000000000000001"}`
 	return Event{
 		ID:     "evt_01JQEVENT00000000000000IMP0",
 		Run:    "dsr_01JQRUN0000000000000000RUN0",
