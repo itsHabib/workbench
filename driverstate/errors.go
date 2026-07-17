@@ -41,12 +41,16 @@ func (e ErrIllegalTransition) Error() string {
 // this loud error, never a silent truncation (spec §8).
 var ErrChainBroken = errors.New("driverstate: hash chain broken")
 
-// errNoLease and errLeaseExpired are internal write-guard failures surfaced
-// when Append is called without a live lease. They are not part of the public
-// stable-code set; callers re-Claim rather than branch on them.
+// ErrNotHolder and ErrLeaseExpired are the DEFINITIVE lease-loss values: a lease
+// call fails with one of these exactly when this holder no longer owns the run.
+// ErrNotHolder — the record is gone, was self-released, or was stolen (a
+// different generation/actor now holds it, also reported structurally as
+// ErrLocked). ErrLeaseExpired — this holder's own lease lapsed. A caching caller
+// (the MCP session lease map) evicts on these; a transient I/O error is NOT one
+// of them and keeps the lease for a retry — use OwnershipLost to tell them apart.
 var (
-	errNoLease      = errors.New("driverstate: no lease held for run; Claim first")
-	errLeaseExpired = errors.New("driverstate: lease has expired; Renew or re-Claim")
+	ErrNotHolder    = errors.New("driverstate: caller does not hold the run lease; Claim first")
+	ErrLeaseExpired = errors.New("driverstate: lease has expired; Renew or re-Claim")
 	// errRetry is an internal transient marker: a lost O_EXCL race the retry
 	// loop should re-attempt (never surfaced to callers).
 	errRetry = errors.New("driverstate: transient contention")
@@ -55,3 +59,14 @@ var (
 	// internal errRetry marker (a live writer holds the lock; try again later).
 	errLockContended = errors.New("driverstate: lock still held after bounded retries")
 )
+
+// OwnershipLost reports whether err from Renew (or Append's write guard) means
+// this holder has DEFINITIVELY lost the run lease — expired, stolen, or gone —
+// and must re-Claim, as opposed to a transient failure (contention, a disk
+// hiccup) that should simply be retried. It is the stable predicate a caching
+// caller uses to decide eviction without branching on individual sentinels.
+func OwnershipLost(err error) bool {
+	return errors.Is(err, ErrLeaseExpired) ||
+		errors.Is(err, ErrNotHolder) ||
+		errors.As(err, new(ErrLocked))
+}

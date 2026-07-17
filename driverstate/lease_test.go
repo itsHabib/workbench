@@ -156,8 +156,8 @@ func TestRenewAfterExpiryRejected(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	time.Sleep(40 * time.Millisecond) // own lease lapses; nobody steals it
-	if err := l.Renew(); !errors.Is(err, errLeaseExpired) {
-		t.Fatalf("renew of an expired lease should be errLeaseExpired, got %v", err)
+	if err := l.Renew(); !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("renew of an expired lease should be ErrLeaseExpired, got %v", err)
 	}
 }
 

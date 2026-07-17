@@ -54,10 +54,13 @@ func New(dir string) *Server {
 func (s *Server) renewInterval() time.Duration { return driverstate.DefaultLeaseTTL / 2 }
 
 // Serve runs the read-dispatch-write loop over in/out until in reaches EOF (the
-// client closed stdio) or ctx is cancelled. A background renewer keeps every
-// held lease alive for the session; on exit the renewer stops and the leases are
-// released, so an orphaned lease self-expires within one threshold window even
-// if release is lost. Returns the scanner error, if any.
+// client closed stdio). It also honors ctx, but only BETWEEN messages: the read
+// blocks in scanner.Scan (an underlying stdin Read), so a ctx cancellation is
+// observed after the current line completes — or at the next EOF — never mid-read.
+// Callers needing a hard mid-read shutdown must close in. A background renewer
+// keeps every held lease alive for the session; on exit the renewer stops and the
+// leases are released, so an orphaned lease self-expires within one threshold
+// window even if release is lost. Returns the scanner error, if any.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -102,17 +105,26 @@ func (s *Server) renewLoop(done <-chan struct{}, ticks <-chan time.Time) {
 	}
 }
 
-// renewAll renews each held lease. A lease lost from under this session
-// (stolen, or expired past renewal) is dropped from the held set and reported to
-// stderr — it will be re-Claimed on the next driver_record for that run.
+// renewAll renews each held lease. Only a DEFINITIVE ownership loss (expired,
+// stolen, or gone — driverstate.OwnershipLost) drops the run from the held set;
+// it will be re-Claimed on the next driver_record. A transient failure (a disk
+// hiccup, lock contention) leaves the lease live on disk, so evicting it would
+// make the next Claim return ErrLocked against this very session until the lease
+// expires — instead we keep it and retry on the next tick.
 func (s *Server) renewAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for run, l := range s.leases {
-		if err := l.Renew(); err != nil {
-			fmt.Fprintf(os.Stderr, "workbench-mcp: lease renew lost for run %s: %v\n", run, err)
-			delete(s.leases, run)
+		err := l.Renew()
+		if err == nil {
+			continue
 		}
+		if driverstate.OwnershipLost(err) {
+			fmt.Fprintf(os.Stderr, "workbench-mcp: lease lost for run %s: %v\n", run, err)
+			delete(s.leases, run)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "workbench-mcp: transient lease renew error for run %s (keeping, will retry): %v\n", run, err)
 	}
 }
 

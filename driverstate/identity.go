@@ -30,9 +30,19 @@ var stateDirLeaf = filepath.Join(".workbench", "driver-state")
 // a short description of which source won, so a server can PRINT the root at
 // startup (spec §6 P2 — canonical, not ambient). It resolves the path but does
 // not create it; Claim mkdirs on first write.
+//
+// The env value is resolved to an ABSOLUTE path (filepath.Abs, which also
+// cleans): a relative WORKBENCH_STATE_DIR would otherwise resolve against each
+// process's working directory, so a CLI in a subdir and an MCP server at the
+// repo root would split roots — the exact cross-client divergence this resolver
+// exists to prevent. The user-profile fallback is already absolute.
 func StateRoot() (dir, source string, err error) {
 	if v := os.Getenv(StateDirEnv); v != "" {
-		return filepath.Clean(v), "env " + StateDirEnv, nil
+		abs, err := filepath.Abs(v)
+		if err != nil {
+			return "", "", fmt.Errorf("driverstate: resolve state root %q: %w", v, err)
+		}
+		return abs, "env " + StateDirEnv, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

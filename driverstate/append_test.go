@@ -248,8 +248,8 @@ func TestAppendWithoutLiveLease(t *testing.T) {
 	_, err := Append(dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, dsc.RunImportedBody{
 		Repo: "r", Source: "s", Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "d"}},
 	}))
-	if !errors.Is(err, errLeaseExpired) {
-		t.Fatalf("want errLeaseExpired, got %v", err)
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("want ErrLeaseExpired, got %v", err)
 	}
 }
 

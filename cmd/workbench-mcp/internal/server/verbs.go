@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
@@ -89,7 +91,7 @@ func (s *Server) recordVerb(args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid driver_record params: %w", err)
 	}
-	e, err := prepareEvent(p)
+	e, minted, err := prepareEvent(p)
 	if err != nil {
 		return nil, err
 	}
@@ -97,51 +99,76 @@ func (s *Server) recordVerb(args json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return driverstate.Append(s.dir, lease, e)
+	out, err := driverstate.Append(s.dir, lease, e)
+	if err != nil {
+		return nil, err
+	}
+	// A run we speculatively minted for a run_imported that Append then deduped
+	// to an existing run is an orphan (its empty run dir + lease): drop it so a
+	// lost-response retry leaves nothing behind. The response carries the
+	// original run (out.Run), per Append's idempotent-import contract.
+	if minted && out.Run != e.Run {
+		s.discardMintedRun(e.Run)
+	}
+	return out, nil
+}
+
+// discardMintedRun releases and removes a run this session minted but that
+// Append deduped away. It clears the lease-map entry (so the renewer stops
+// touching it) and removes the empty run dir. Best-effort: any leftover
+// self-expires, but cleaning up keeps import retries from littering run dirs.
+func (s *Server) discardMintedRun(run string) {
+	s.mu.Lock()
+	delete(s.leases, run)
+	s.mu.Unlock()
+	_ = os.RemoveAll(filepath.Join(s.dir, run))
 }
 
 // prepareEvent decodes the record event and fills the client-minted defaults:
 // the run (explicit param, else minted for run_imported), the event id, and the
-// time. A stream event with no run is rejected — there is nothing to append to.
-func prepareEvent(p recordParams) (driverstate.Event, error) {
+// time. It reports whether the run was minted (vs supplied), so the caller can
+// unwind a speculative run that Append deduped away. A stream event with no run
+// is rejected — there is nothing to append to.
+func prepareEvent(p recordParams) (driverstate.Event, bool, error) {
 	var e driverstate.Event
 	if err := json.Unmarshal(p.Event, &e); err != nil {
-		return e, fmt.Errorf("invalid driver_record event: %w", err)
+		return e, false, fmt.Errorf("invalid driver_record event: %w", err)
 	}
 	if p.Run != "" {
 		e.Run = p.Run
 	}
-	if err := ensureRun(&e); err != nil {
-		return e, err
+	minted, err := ensureRun(&e)
+	if err != nil {
+		return e, false, err
 	}
 	if e.ID == "" {
 		id, err := driverstate.NewEventID()
 		if err != nil {
-			return e, err
+			return e, false, err
 		}
 		e.ID = id
 	}
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
 	}
-	return e, nil
+	return e, minted, nil
 }
 
-// ensureRun mints a run id for a run_imported that omitted one, and rejects any
-// other kind that names no run.
-func ensureRun(e *driverstate.Event) error {
+// ensureRun mints a run id for a run_imported that omitted one (reporting true),
+// and rejects any other kind that names no run.
+func ensureRun(e *driverstate.Event) (bool, error) {
 	if e.Run != "" {
-		return nil
+		return false, nil
 	}
 	if e.Kind != dsc.KindRunImported {
-		return fmt.Errorf("driver_record: event kind %q requires a run", e.Kind)
+		return false, fmt.Errorf("driver_record: event kind %q requires a run", e.Kind)
 	}
 	id, err := driverstate.NewRunID()
 	if err != nil {
-		return err
+		return false, err
 	}
 	e.Run = id
-	return nil
+	return true, nil
 }
 
 type runParam struct {

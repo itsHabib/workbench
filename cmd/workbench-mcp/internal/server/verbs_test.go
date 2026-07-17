@@ -20,6 +20,19 @@ func importEvent(stream, actor string) json.RawMessage {
 	return event(dsc.KindRunImported, "", actor, body)
 }
 
+// importEventKeyed is importEvent carrying a generated_at, so Append's
+// (repo, source, generated_at) dedupe key is present — the retried-import case.
+func importEventKeyed(stream, actor, generatedAt string) json.RawMessage {
+	body := dsc.RunImportedBody{
+		Repo:        "itsHabib/workbench",
+		Source:      "driver.md",
+		GeneratedAt: generatedAt,
+		Manifest:    json.RawMessage(`{}`),
+		Streams:     []dsc.StreamSpec{{Stream: stream, DocPath: "docs/x.md"}},
+	}
+	return event(dsc.KindRunImported, "", actor, body)
+}
+
 // event builds a record event JSON with a fixed id/time so tests are
 // deterministic (the client mints these; supplying them pins the hash).
 func event(kind dsc.Kind, stream, actor string, body any) json.RawMessage {

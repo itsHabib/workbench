@@ -22,7 +22,8 @@ driverstate verify --run <id> [--json]
   human/cron model (the server, by contrast, holds the lease for a session).
 - `state` / `runs` / `verify` are pure reads.
 - `--json` emits the reduced contract types verbatim, so CLI and MCP outputs
-  match byte-for-byte.
+  carry the same shape and fields — the CLI indents for humans, the MCP server
+  emits compact JSON, so they are not byte-for-byte identical.
 
 ## State root
 

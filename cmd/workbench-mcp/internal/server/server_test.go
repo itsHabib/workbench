@@ -115,6 +115,105 @@ func TestRenewLoopRenewsEachTickThenStopsOnExit(t *testing.T) {
 	}
 }
 
+// A definitive ownership loss (the run stolen out from under the session) drops
+// the lease from the held set so it will be re-Claimed on the next record.
+func TestRenewAllEvictsOnOwnershipLoss(t *testing.T) {
+	withTTL(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	s := New(dir)
+	if _, err := s.leaseFor("dsr_r", "session:x"); err != nil {
+		t.Fatalf("leaseFor: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond) // the session's lease expires
+	other, err := driverstate.Claim(dir, "dsr_r", "session:other")
+	if err != nil {
+		t.Fatalf("steal: %v", err)
+	}
+	defer other.Release()
+
+	s.renewAll()
+	if _, ok := s.leases["dsr_r"]; ok {
+		t.Fatal("a definitively lost lease should be evicted from the held set")
+	}
+}
+
+// A TRANSIENT renew failure (here: the lease lock is held, so Renew can't
+// acquire it) must NOT evict — the lease is still live on disk, so dropping it
+// would make the next Claim return ErrLocked against this very session. It is
+// kept and retried next tick.
+func TestRenewAllKeepsLeaseOnTransientError(t *testing.T) {
+	withTTL(t, 2*time.Second) // long TTL so the fresh lock never stale-breaks
+	dir := t.TempDir()
+	s := New(dir)
+	if _, err := s.leaseFor("dsr_r", "session:x"); err != nil {
+		t.Fatalf("leaseFor: %v", err)
+	}
+	// Hold the run's lease lock with a fresh mtime: Renew's acquire contends and
+	// exhausts its budget (a transient error), not an ownership loss.
+	lock := filepath.Join(dir, "dsr_r", "lease.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(lock)
+
+	s.renewAll()
+	if _, ok := s.leases["dsr_r"]; !ok {
+		t.Fatal("a transient renew failure must keep the lease for a retry")
+	}
+}
+
+// A run_imported retry (omitted run, same import key) resolves to the original
+// run via Append's dedupe; the speculatively minted run must be cleaned up, so
+// exactly one run dir and one held lease remain — no orphan.
+func TestImportRetryDedupesNoOrphan(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	imp := importEventKeyed("dss_a", "session:x", "2026-07-16T00:00:00Z")
+
+	first := callRecord(t, s, "", imp)
+	if first.IsError {
+		t.Fatalf("first import errored: %s", resultText(t, first))
+	}
+	var e1 driverstate.Event
+	if err := json.Unmarshal([]byte(resultText(t, first)), &e1); err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+
+	second := callRecord(t, s, "", imp) // the lost-response retry
+	if second.IsError {
+		t.Fatalf("retry import errored: %s", resultText(t, second))
+	}
+	var e2 driverstate.Event
+	if err := json.Unmarshal([]byte(resultText(t, second)), &e2); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+
+	if e2.Run != e1.Run || e2.Hash != e1.Hash {
+		t.Fatalf("retry should return the original run/event: e1=%s/%s e2=%s/%s", e1.Run, e1.Hash, e2.Run, e2.Hash)
+	}
+	if n := countRunDirs(t, dir); n != 1 {
+		t.Fatalf("want exactly one run dir (orphan cleaned), got %d", n)
+	}
+	if len(s.leases) != 1 {
+		t.Fatalf("want exactly one held lease (minted orphan discarded), got %d", len(s.leases))
+	}
+}
+
+func countRunDirs(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
+}
+
 // --- test helpers ---
 
 // withTTL tunes the lease TTL for a test so renew cadence and expiry paths do

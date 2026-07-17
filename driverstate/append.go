@@ -132,7 +132,7 @@ func importLockPath(dir string) string { return filepath.Join(dir, "import.lock"
 // can never write.
 func bindDir(dir string, l Lease) error {
 	if l.run == "" {
-		return errNoLease
+		return ErrNotHolder
 	}
 	if err := validateRunID(l.run); err != nil {
 		return fmt.Errorf("driverstate: append: %w", err)
