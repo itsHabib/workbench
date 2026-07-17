@@ -121,20 +121,23 @@ func steal(dir, run, actor string, ttl time.Duration, gen, prevGen uint64, haveP
 		return Lease{}, fmt.Errorf("driverstate: claim: steal: %w", err)
 	}
 	cur, err := readLease(rd)
-	if err != nil && !os.IsNotExist(err) {
-		// Current lease unreadable/corrupt: keep the temp and take over.
-		cur, havePrev, err = leaseRecord{}, false, nil
-	}
-	if havePrev && err == nil {
-		if cur.Generation != prevGen {
-			_ = os.Remove(tmp)
-			return Lease{}, errRetry
-		}
+	if err == nil {
+		// A readable lease is present now. Never overwrite a LIVE one — this
+		// guards the race where our original read caught a half-written lease
+		// (havePrev == false) that has since become another claimer's valid,
+		// live lease: backing off here keeps single-writer intact.
 		if !expired(cur) {
 			_ = os.Remove(tmp)
 			return Lease{}, ErrLocked{Holder: cur.Actor}
 		}
+		// Expired, but if we based this steal on a specific prior generation and
+		// it has since advanced, another steal already landed — retry fresh.
+		if havePrev && cur.Generation != prevGen {
+			_ = os.Remove(tmp)
+			return Lease{}, errRetry
+		}
 	}
+	// err != nil (absent or genuinely corrupt): the file is safe to take over.
 	if err := os.Rename(tmp, leasePath(rd)); err != nil {
 		_ = os.Remove(tmp)
 		return Lease{}, fmt.Errorf("driverstate: claim: rename lease: %w", err)
@@ -163,41 +166,56 @@ func clearStaleSteal(tmp string) error {
 
 // Renew heartbeats the lease, pushing expiry out one TTL. It fails with
 // ErrLocked if the lease was stolen out from under this holder (generation or
-// actor drift).
+// actor drift). Renewal is atomic with takeover: it writes a generation-suffixed
+// temp, RE-verifies ownership under that temp, and only then renames — so a steal
+// that landed between the first check and the rename cannot be clobbered by a
+// stale holder's renewal (mirrors the steal discipline).
 func (l Lease) Renew() error {
 	rd := runDir(l.dir, l.run)
 	return withRetry(func() error {
-		cur, err := readLease(rd)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return errNoLease
-			}
-			return err
-		}
-		if cur.Generation != l.gen || cur.Actor != l.actor {
-			return ErrLocked{Holder: cur.Actor}
-		}
-		rec := selfLeaseFor(l.actor, l.pid, l.gen, l.ttl)
-		return writeLeaseAtomic(rd, rec)
+		return l.renewOnce(rd)
 	})
+}
+
+func (l Lease) renewOnce(rd string) error {
+	if _, err := l.ownsCurrent(rd); err != nil {
+		return err
+	}
+	rec := selfLeaseFor(l.actor, l.pid, l.gen, l.ttl)
+	tmp := filepath.Join(rd, fmt.Sprintf("lease.renew.%d", l.gen))
+	if err := createExclusiveJSON(tmp, rec); err != nil {
+		if os.IsExist(err) {
+			return errRetry
+		}
+		return fmt.Errorf("driverstate: renew: %w", err)
+	}
+	// Re-verify ownership now that the temp exists: a steal that installed a
+	// newer generation between the first check and here must not be overwritten.
+	if _, err := l.ownsCurrent(rd); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, leasePath(rd)); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("driverstate: renew: rename lease: %w", err)
+	}
+	return nil
 }
 
 // Release drops the lease if this holder still owns it. A lease already stolen
 // (generation drift) or already gone is left untouched — Release never removes
-// another writer's lease.
+// another writer's lease. Ownership is re-checked inside EVERY retry attempt,
+// not once before the loop: a steal that completes mid-retry must leave the
+// successor's lease intact.
 func (l Lease) Release() error {
 	rd := runDir(l.dir, l.run)
-	cur, err := readLease(rd)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if cur.Generation != l.gen || cur.Actor != l.actor {
-		return nil
-	}
 	return withRetry(func() error {
+		if _, err := l.ownsCurrent(rd); err != nil {
+			if errors.Is(err, errNoLease) || errors.As(err, new(ErrLocked)) {
+				return nil // already gone, or a successor's — not ours to remove
+			}
+			return err
+		}
 		e := os.Remove(leasePath(rd))
 		if os.IsNotExist(e) {
 			return nil
@@ -206,18 +224,31 @@ func (l Lease) Release() error {
 	})
 }
 
-// requireLease verifies this holder still owns a live lease — Append's write
-// guard.
-func requireLease(l Lease) error {
-	cur, err := readLease(runDir(l.dir, l.run))
+// ownsCurrent reads the live lease record and confirms this holder still owns
+// it. It returns errNoLease when the file is gone and ErrLocked{Holder} on a
+// generation/actor drift (a steal). The returned record lets callers layer an
+// expiry check on top (requireLease).
+func (l Lease) ownsCurrent(rd string) (leaseRecord, error) {
+	cur, err := readLease(rd)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errNoLease
+			return leaseRecord{}, errNoLease
 		}
-		return err
+		return leaseRecord{}, err
 	}
 	if cur.Generation != l.gen || cur.Actor != l.actor {
-		return ErrLocked{Holder: cur.Actor}
+		return leaseRecord{}, ErrLocked{Holder: cur.Actor}
+	}
+	return cur, nil
+}
+
+// requireLease verifies this holder still owns a live lease — Append's write
+// guard, called INSIDE the append lock so a lease lost while waiting for the
+// lock is caught before any write.
+func requireLease(l Lease) error {
+	cur, err := l.ownsCurrent(runDir(l.dir, l.run))
+	if err != nil {
+		return err
 	}
 	if expired(cur) {
 		return errLeaseExpired
@@ -266,36 +297,12 @@ func readLeaseFile(path string) (leaseRecord, error) {
 	return rec, nil
 }
 
-func writeLeaseAtomic(rd string, rec leaseRecord) error {
-	tmp := filepath.Join(rd, fmt.Sprintf("lease.tmp.%d", rec.Generation))
-	if err := writeJSONSynced(tmp, rec); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, leasePath(rd)); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("driverstate: renew: rename lease: %w", err)
-	}
-	return nil
-}
-
 func createExclusiveJSON(path string, rec leaseRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("driverstate: encode lease: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	return finishWrite(f, path, data)
-}
-
-func writeJSONSynced(path string, rec leaseRecord) error {
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("driverstate: encode lease: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -334,6 +341,13 @@ func withRetry(fn func() error) error {
 			return err
 		}
 		time.Sleep(retryDelay)
+	}
+	// The budget is exhausted. errRetry is an internal marker that must never
+	// surface (errors.go); replace it with the real contention error. A genuine
+	// transient error (e.g. a delete-pending permission failure) is returned
+	// as-is.
+	if errors.Is(err, errRetry) {
+		return fmt.Errorf("driverstate: gave up after %d attempts: %w", maxRetries, errLockContended)
 	}
 	return err
 }

@@ -1,6 +1,7 @@
 package driverstate
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -248,6 +249,199 @@ func TestAppendWithoutLiveLease(t *testing.T) {
 	}))
 	if !errors.Is(err, errLeaseExpired) {
 		t.Fatalf("want errLeaseExpired, got %v", err)
+	}
+}
+
+func importBody(repo, source, generatedAt, stream string) dsc.RunImportedBody {
+	return dsc.RunImportedBody{
+		Repo:        repo,
+		Source:      source,
+		GeneratedAt: generatedAt,
+		Manifest:    json.RawMessage(`{}`),
+		Streams:     []dsc.StreamSpec{{Stream: stream, DocPath: "d"}},
+	}
+}
+
+// Cluster 1 — the append is bound to the lease's own state dir: a mismatched dir
+// must be rejected before any write, never validated in one root and written to
+// another.
+func TestAppendRejectsMismatchedDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	l, err := Claim(dirA, "dsr_run1", "session:a")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	_, err = Append(dirB, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a")))
+	if err == nil || !strings.Contains(err.Error(), "does not match lease dir") {
+		t.Fatalf("want dir-mismatch rejection, got %v", err)
+	}
+}
+
+// Cluster 1 — the lease is revalidated INSIDE the append lock: a holder whose
+// lease was stolen (generation bumped) must not be able to write, even though it
+// passed a Claim earlier.
+func TestAppendRevalidatesStolenLease(t *testing.T) {
+	withTTL(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	first, err := Claim(dir, "dsr_run1", "session:a")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond) // first's lease expires
+	if _, err := Claim(dir, "dsr_run1", "session:b"); err != nil {
+		t.Fatalf("steal claim: %v", err)
+	}
+	// first lost the lease to session:b — its append must fail with ErrLocked,
+	// not slip through on the stale generation.
+	_, err = Append(dir, first, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a")))
+	if !errors.As(err, new(ErrLocked)) {
+		t.Fatalf("want ErrLocked from stolen-lease append, got %v", err)
+	}
+}
+
+// Cluster 2 — a retried import reusing (repo, source, generated_at) with a fresh
+// run/event id returns the original committed event and mints no second run.
+func TestImportDedupeAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	l1, _ := Claim(dir, "dsr_run1", "session:a")
+	orig := mustAppend(t, dir, l1, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("itsHabib/wb", "docs/driver.md", "2026-07-16T00:00:00Z", "dss_a")))
+	if err := l1.Release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	l2, _ := Claim(dir, "dsr_run2", "session:b")
+	dup, err := Append(dir, l2, ev("evt_99", dsc.KindRunImported, "", "session:b", baseTime.Add(time.Hour), importBody("itsHabib/wb", "docs/driver.md", "2026-07-16T00:00:00Z", "dss_a")))
+	if err != nil {
+		t.Fatalf("dedupe append: %v", err)
+	}
+	if dup.ID != orig.ID || dup.Hash != orig.Hash {
+		t.Fatalf("retried import should return the original event, got id=%q hash=%q", dup.ID, dup.Hash)
+	}
+	// run2's ledger must be empty — no second run was minted.
+	if _, err := os.Stat(filepath.Join(dir, "dsr_run2", "events.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("dedupe should not have written a second run's ledger, stat = %v", err)
+	}
+}
+
+// Cluster 2 — a different generated_at is a genuinely new import and DOES mint a
+// second run (the key discriminates, it does not blanket-suppress).
+func TestImportDifferentGeneratedAtMintsRun(t *testing.T) {
+	dir := t.TempDir()
+	l1, _ := Claim(dir, "dsr_run1", "session:a")
+	mustAppend(t, dir, l1, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "2026-07-16T00:00:00Z", "dss_a")))
+	_ = l1.Release()
+
+	l2, _ := Claim(dir, "dsr_run2", "session:b")
+	out := mustAppend(t, dir, l2, ev("evt_2", dsc.KindRunImported, "", "session:b", baseTime.Add(time.Hour), importBody("r", "s", "2026-07-17T00:00:00Z", "dss_a")))
+	if out.ID != "evt_2" {
+		t.Fatalf("distinct generated_at should mint a new run, got id=%q", out.ID)
+	}
+	if events := readLedger(t, dir, "dsr_run2"); len(events) != 1 {
+		t.Fatalf("run2 should hold its own import, got %d events", len(events))
+	}
+}
+
+// Cluster 3 — a mid-chain corruption is caught on read: Append refuses to seal a
+// new event onto an unverified head, returning ErrChainBroken.
+func TestCorruptChainRejectedOnAppend(t *testing.T) {
+	dir := t.TempDir()
+	run := "dsr_run1"
+	l, _ := Claim(dir, run, "session:a")
+	mustAppend(t, dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a")))
+	mustAppend(t, dir, l, ev("evt_2", dsc.KindStreamDispatched, "dss_a", "session:a", baseTime.Add(time.Second), nil))
+
+	corruptFirstHash(t, filepath.Join(dir, run, "events.jsonl"))
+
+	_, err := Append(dir, l, ev("evt_3", dsc.KindStreamAttempt, "dss_a", "session:a", baseTime.Add(2*time.Second), dsc.StreamAttemptBody{Seq: 1, DocPath: "d", Terminal: false}))
+	if !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("want ErrChainBroken appending onto a corrupt chain, got %v", err)
+	}
+}
+
+// corruptFirstHash flips one hex digit in the first ledger line's sealed hash,
+// keeping the line valid JSON so it decodes but fails chain verification.
+func corruptFirstHash(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.SplitN(data, []byte("\n"), 2)
+	marker := []byte(`"hash":"`)
+	idx := bytes.LastIndex(lines[0], marker)
+	if idx < 0 {
+		t.Fatal("no hash field in first line")
+	}
+	pos := idx + len(marker)
+	if lines[0][pos] == '0' {
+		lines[0][pos] = '1'
+	} else {
+		lines[0][pos] = '0'
+	}
+	if err := os.WriteFile(path, bytes.Join(lines, []byte("\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Cluster 6 — when the retry budget is exhausted on a held lock, the caller sees
+// a real contention error, never the internal errRetry marker.
+func TestAppendLockContentionError(t *testing.T) {
+	dir := t.TempDir()
+	run := "dsr_run1"
+	l, _ := Claim(dir, run, "session:a")
+	// A FRESH append.lock (mtime now) is a live writer's lock: it is not stale,
+	// so the retry budget is exhausted rather than broken.
+	lock := filepath.Join(dir, run, "append.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(lock)
+	_, err := Append(dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a")))
+	if errors.Is(err, errRetry) {
+		t.Fatalf("internal errRetry marker leaked to caller: %v", err)
+	}
+	if !errors.Is(err, errLockContended) {
+		t.Fatalf("want errLockContended, got %v", err)
+	}
+}
+
+// Cluster 7 — once run_finished is on the ledger, no further event is legal: not
+// a reopening stream transition, not a second run_finished.
+func TestNoTransitionsAfterRunFinished(t *testing.T) {
+	dir, l := happyLifecycle(t)
+	stream := "dss_a"
+
+	_, err := Append(dir, l, ev("evt_reopen", dsc.KindStreamDispatched, stream, "session:a", baseTime.Add(10*time.Second), nil))
+	var illegal ErrIllegalTransition
+	if !errors.As(err, &illegal) || illegal.From != "run_finished" {
+		t.Fatalf("want ErrIllegalTransition from run_finished, got %v", err)
+	}
+
+	_, err = Append(dir, l, ev("evt_finish2", dsc.KindRunFinished, "", "session:a", baseTime.Add(11*time.Second), nil))
+	if !errors.As(err, new(ErrIllegalTransition)) {
+		t.Fatalf("want a second run_finished rejected, got %v", err)
+	}
+}
+
+// Cluster 9 — an append.lock orphaned by a crashed writer (mtime older than the
+// lease TTL) self-clears: the next append breaks it and commits.
+func TestStaleAppendLockRecovered(t *testing.T) {
+	dir := t.TempDir()
+	run := "dsr_run1"
+	l, _ := Claim(dir, run, "session:a")
+	lock := filepath.Join(dir, run, "append.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Age the lock well past the lease TTL — a crashed writer's orphan.
+	old := time.Now().Add(-2 * DefaultLeaseTTL)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	out := mustAppend(t, dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, importBody("r", "s", "", "dss_a")))
+	if out.ID != "evt_1" {
+		t.Fatalf("append over stale lock should succeed, got id=%q", out.ID)
 	}
 }
 

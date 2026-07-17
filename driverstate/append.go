@@ -20,7 +20,10 @@ import (
 // head → validate (contract grammar, state machine, monotonicity, seq) → seal →
 // write + fsync. See the package doc for the chain rule.
 func Append(dir string, l Lease, e Event) (Event, error) {
-	if err := requireLease(l); err != nil {
+	// Bind the write to the lease's OWN dir: a caller passing a dir that
+	// disagrees would validate ownership in one run root and write into another
+	// (spec §6). The lease's dir is the single source of truth for where to write.
+	if err := bindDir(dir, l); err != nil {
 		return Event{}, err
 	}
 	if e.Run != "" && e.Run != l.run {
@@ -34,12 +37,20 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 	// is byte-stable across the Go and TS emitters (spec §5).
 	e.Time = e.Time.UTC().Truncate(time.Second)
 
-	rd := runDir(dir, l.run)
+	rd := runDir(l.dir, l.run)
 	lockPath := filepath.Join(rd, "append.lock")
 	if err := acquireAppendLock(lockPath); err != nil {
 		return Event{}, err
 	}
 	defer releaseAppendLock(lockPath)
+
+	// Revalidate the lease INSIDE the lock: a holder that passed a pre-lock
+	// check could have waited behind another append until its lease expired and
+	// was stolen. The lock serializes bytes; only a live-lease recheck here
+	// preserves single-writer ownership (spec §8, review P1).
+	if err := requireLease(l); err != nil {
+		return Event{}, err
+	}
 
 	ledgerPath := filepath.Join(rd, "events.jsonl")
 	events, validOffset, err := readAndHealLedger(ledgerPath)
@@ -52,6 +63,19 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 	for _, prev := range events {
 		if prev.ID == e.ID {
 			return prev, nil
+		}
+	}
+
+	// Import dedupe (spec §5): a run_imported whose (repo, source, generated_at)
+	// already minted a run — in this dir or any sibling — returns that original
+	// event, so a retried import with a fresh ID/run cannot mint a second run.
+	if e.Kind == dsc.KindRunImported {
+		orig, found, err := dedupeImport(l.dir, e)
+		if err != nil {
+			return Event{}, err
+		}
+		if found {
+			return orig, nil
 		}
 	}
 
@@ -73,6 +97,91 @@ func Append(dir string, l Lease, e Event) (Event, error) {
 		return Event{}, err
 	}
 	return e, nil
+}
+
+// bindDir rejects an Append whose dir does not name the lease's own state root.
+// A zero-value lease (no run) can never write.
+func bindDir(dir string, l Lease) error {
+	if l.run == "" {
+		return errNoLease
+	}
+	if filepath.Clean(dir) != filepath.Clean(l.dir) {
+		return fmt.Errorf("driverstate: append: dir %q does not match lease dir %q", dir, l.dir)
+	}
+	return nil
+}
+
+// importIdent is ship's proven import key: a retried import reusing the same
+// (repo, source, generated_at) must not mint a second run.
+type importIdent struct {
+	repo        string
+	source      string
+	generatedAt string
+}
+
+// importKey extracts the dedupe key from a run_imported body. It reports false
+// when any component is absent — an import missing generated_at carries no
+// reliable key, so it is never deduped (two distinct imports of one repo/source
+// must not collide).
+func importKey(e Event) (importIdent, bool) {
+	var b dsc.RunImportedBody
+	if err := json.Unmarshal(e.Body, &b); err != nil {
+		return importIdent{}, false
+	}
+	if b.Repo == "" || b.Source == "" || b.GeneratedAt == "" {
+		return importIdent{}, false
+	}
+	return importIdent{repo: b.Repo, source: b.Source, generatedAt: b.GeneratedAt}, true
+}
+
+// dedupeImport scans every run under dir for a committed run_imported carrying
+// e's import key. The current run is included: a re-import into the same run
+// returns the original rather than an illegal-transition rejection.
+func dedupeImport(dir string, e Event) (Event, bool, error) {
+	key, ok := importKey(e)
+	if !ok {
+		return Event{}, false, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Event{}, false, nil
+		}
+		return Event{}, false, fmt.Errorf("driverstate: dedupe import: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		orig, found := importInRun(filepath.Join(dir, entry.Name()), key)
+		if found {
+			return orig, true, nil
+		}
+	}
+	return Event{}, false, nil
+}
+
+// importInRun returns the run_imported event in one run dir matching key, if any.
+// A missing or corrupt sibling ledger is not a hard error here — it simply holds
+// no matching import, so a fresh import is never blocked by an unrelated bad run.
+func importInRun(rd string, key importIdent) (Event, bool) {
+	data, err := os.ReadFile(filepath.Join(rd, "events.jsonl"))
+	if err != nil {
+		return Event{}, false
+	}
+	events, err := decodeLedger(data)
+	if err != nil {
+		return Event{}, false
+	}
+	for _, e := range events {
+		if e.Kind != dsc.KindRunImported {
+			continue
+		}
+		if k, ok := importKey(e); ok && k == key {
+			return e, true
+		}
+	}
+	return Event{}, false
 }
 
 func headHash(events []Event) string {
@@ -99,6 +208,12 @@ func checkMonotonic(events []Event, e Event) error {
 // run-scoped kinds by their run-level rules, every other kind by folding its
 // stream's prior events to a current status and applying the transition.
 func checkTransition(events []Event, e Event) error {
+	// run_finished is the no-retry declaration: once it is on the ledger, no
+	// further event — a reopening stream transition or a second run_finished —
+	// is legal (spec §5). Idempotent same-ID re-appends short-circuit earlier.
+	if runFinished(events) {
+		return ErrIllegalTransition{From: "run_finished", Event: string(e.Kind)}
+	}
 	switch e.Kind {
 	case dsc.KindRunImported:
 		if len(events) > 0 {
@@ -135,6 +250,17 @@ func checkRunFinished(events []Event) error {
 		}
 	}
 	return nil
+}
+
+// runFinished reports whether the run has already been closed by a run_finished
+// event.
+func runFinished(events []Event) bool {
+	for _, e := range events {
+		if e.Kind == dsc.KindRunFinished {
+			return true
+		}
+	}
+	return false
 }
 
 func terminalStatus(status string) bool {
@@ -297,14 +423,17 @@ func lastNewline(data []byte) int64 {
 	return int64(i + 1)
 }
 
-// decodeLedger parses complete lines into events. A line that fails to decode is
-// a mid-chain break (the torn FINAL line was already healed away): a loud
-// ErrChainBroken, never a silent skip (spec §8).
+// decodeLedger parses complete lines into events AND verifies the persisted hash
+// chain: every line must decode, each event's Hash must seal its own canonical
+// bytes, and each Prev must link to the prior event's Hash. Any failure is a loud
+// ErrChainBroken — Append never seals a new event onto an unverified head, and
+// the torn FINAL line was already healed away before this runs (spec §8).
 func decodeLedger(data []byte) ([]Event, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
 	var events []Event
+	prev := ""
 	for _, line := range bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -313,9 +442,25 @@ func decodeLedger(data []byte) ([]Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrChainBroken, err)
 		}
+		if err := verifyLink(e, prev); err != nil {
+			return nil, err
+		}
 		events = append(events, e)
+		prev = e.Hash
 	}
 	return events, nil
+}
+
+// verifyLink checks one event seals its own bytes and links to prev — the two
+// halves of the hash-chain guarantee.
+func verifyLink(e Event, prev string) error {
+	if e.Prev != prev {
+		return fmt.Errorf("%w: event %q prev %q does not link to prior hash %q", ErrChainBroken, e.ID, e.Prev, prev)
+	}
+	if got := dsc.ComputeHash(e); got != e.Hash {
+		return fmt.Errorf("%w: event %q hash %q does not seal its bytes (computed %q)", ErrChainBroken, e.ID, e.Hash, got)
+	}
+	return nil
 }
 
 // appendSynced appends line at offset (the healed length) and fsyncs. Opening
@@ -341,18 +486,37 @@ func appendSynced(path string, line []byte, offset int64) error {
 }
 
 // acquireAppendLock takes the per-append byte-race lock: an O_EXCL create under
-// the same retry discipline as the lease.
+// the same retry discipline as the lease. A lock left behind by a crashed writer
+// self-clears: an existing lock older than DefaultLeaseTTL is broken (a live
+// append completes in milliseconds, so only an orphan survives that window),
+// then the create is retried.
 func acquireAppendLock(path string) error {
 	return withRetry(func() error {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err != nil {
-			if os.IsExist(err) {
-				return errRetry
-			}
-			return fmt.Errorf("driverstate: acquire append lock: %w", err)
+		if err == nil {
+			return f.Close()
 		}
-		return f.Close()
+		if os.IsExist(err) {
+			breakStaleAppendLock(path)
+			return errRetry
+		}
+		return fmt.Errorf("driverstate: acquire append lock: %w", err)
 	})
+}
+
+// breakStaleAppendLock removes an append lock whose mtime is older than the
+// lease TTL — a writer that crashed holding it must not wedge the run forever. A
+// fresh lock (a live writer mid-append) is left untouched. Best-effort: a lost
+// race to remove it just means another attempt retries.
+func breakStaleAppendLock(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if time.Since(info.ModTime()) < DefaultLeaseTTL {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 func releaseAppendLock(path string) {

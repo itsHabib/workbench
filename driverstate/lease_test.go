@@ -81,6 +81,35 @@ func TestStaleLeaseSelfClears(t *testing.T) {
 	}
 }
 
+// Cluster 4 — a renewal by a holder that has been stolen out from under must
+// fail AND leave the successor's lease untouched (renewal is atomic with
+// takeover, never a blind rewrite).
+func TestRenewAfterStealRejected(t *testing.T) {
+	withTTL(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	first, _ := Claim(dir, "dsr_run1", "session:one")
+	time.Sleep(40 * time.Millisecond)
+	second, err := Claim(dir, "dsr_run1", "session:two") // installs generation 2
+	if err != nil {
+		t.Fatalf("steal: %v", err)
+	}
+	// The stale holder's renew must report the loss and NOT clobber gen 2.
+	if err := first.Renew(); !errors.As(err, new(ErrLocked)) {
+		t.Fatalf("stale renew should be ErrLocked, got %v", err)
+	}
+	rec, err := readLease(runDir(dir, "dsr_run1"))
+	if err != nil {
+		t.Fatalf("read lease: %v", err)
+	}
+	if rec.Actor != "session:two" || rec.Generation != 2 {
+		t.Fatalf("stale renew clobbered the successor: on-disk %+v", rec)
+	}
+	// The successor still holds a renewable lease.
+	if err := second.Renew(); err != nil {
+		t.Fatalf("successor renew should succeed, got %v", err)
+	}
+}
+
 func TestReleaseAfterStealIsNoop(t *testing.T) {
 	withTTL(t, 20*time.Millisecond)
 	dir := t.TempDir()

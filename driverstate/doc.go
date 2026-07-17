@@ -11,9 +11,10 @@
 //
 // A run has one durable lease file, lease.json, under its run directory. Claim
 // takes it, Renew heartbeats it, Release drops it. Staleness is EXPIRY, not PID
-// liveness: the lease records {actor, pid, expires_at}, and a killed session's
-// lease self-clears within one DefaultLeaseTTL window because a later Claim sees
-// an expired record and steals it. Exclusivity comes from O_EXCL create + an
+// liveness: the lease records {actor, pid, expires_at, generation}, and a killed
+// session's lease self-clears within one DefaultLeaseTTL window because a later
+// Claim sees an expired record and steals it. The generation counter increases
+// on every steal so a stale holder that wakes up detects it lost the lease. Exclusivity comes from O_EXCL create + an
 // atomic generation-suffixed rename for the steal — the same lock discipline
 // gate uses, including the Windows delete-pending → retry-everything lesson
 // (every filesystem step runs under a bounded retry loop).

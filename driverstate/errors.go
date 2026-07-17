@@ -50,4 +50,8 @@ var (
 	// errRetry is an internal transient marker: a lost O_EXCL race the retry
 	// loop should re-attempt (never surfaced to callers).
 	errRetry = errors.New("driverstate: transient contention")
+	// errLockContended is what withRetry returns when the bounded retry budget
+	// is exhausted on a lock still held — the caller-visible replacement for the
+	// internal errRetry marker (a live writer holds the lock; try again later).
+	errLockContended = errors.New("driverstate: lock still held after bounded retries")
 )
