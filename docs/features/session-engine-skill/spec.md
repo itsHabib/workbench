@@ -1,0 +1,168 @@
+**Status**: draft
+**Owner**: @mh
+**Date**: 2026-07-17
+**Related**: locked design [docs/features/driver-state/spec.md](../driver-state/spec.md) §4 D4/D6, §6, §7 (PR #47); §11 P3 validation-gate verdict (this PR); dossier project `workbench`
+
+# /work-driver `--engine session` — the P4 skill variant + panel-from-config — design spec
+
+## Scope
+
+| Bucket | Files | Est. LOC | Weighted |
+|---|---|---|---|
+| Skill prose | `~/.claude/skills/work-driver/SKILL.md` (canonical, outside this repo) + registry sync | ~150 | — |
+| Panel config | `.ship.json` `review` key — schema documented here; explicit stanza per personal repo (~10 lines each) | ~10/repo | — |
+| Repo files | this spec doc + workbench's own `.ship.json` | ~15 | ~15 |
+
+No Go changes. The plane (P1–P3) is the mechanism; this phase is pure policy prose + per-repo config.
+
+## Goal
+
+Let a Claude Code session BE the driver engine for small runs: execute everything itself
+(worktree, impl, PR, reviews, gate tail) while recording every transition through
+`workbench-mcp`, so run state lives in the ledger — never in conversation context — and any
+fresh session can resume via `driver_state` + F3 reconcile. Move the review panel out of
+skill prose into per-repo contract (`.ship.json`), per D6.
+
+## Declared scope (D4 — restated, not relitigated)
+
+- **N≤3 streams, single writer per run.** The lease enforces it: `ErrLocked{Holder}` = fail
+  fast and report the holder — no queueing, no lease-stealing.
+- Needing tick leases or orphan re-attach is the signal the run belongs on **ship's engine**
+  (`--engine ship`, the default) — not a feature request against this variant.
+- Grant resolution comes FIRST: resolve a live, operator-minted gate grant before dispatching
+  anything; absent/expired → park and emit the exact `gate grant …` mint command for the
+  operator. Agents never mint.
+
+## Behavior
+
+### The recording loop (F1)
+
+Every transition is recorded via `mcp__workbench__driver_record` immediately after the
+external act it describes — the ledger is written from facts, never ahead of them:
+
+| Step | Event | Body carries |
+|---|---|---|
+| manifest resolved | `run_imported` | repo, source, generated_at, manifest snapshot, stream list |
+| worktree + impl started | `stream_dispatched` | engine:"session", worktree, branch |
+| commit landed | `stream_attempt` | seq, doc_path, terminal, **commit** (the head SHA — off-contract today, see follow-ups; load-bearing for F3 reconcile) |
+| PR opened | `stream_pr_opened` | pr, url, head_sha |
+| each panel round settled | `review_cycle` | cycle, panel_settled, findings, panel, verdict. Unconfigured repo (no `review` key): exactly one `{cycle: 1, review: "unconfigured", panel_settled: true, findings: 0}` — no panel/verdict fields |
+| PR merged | `stream_merged` | pr, merge_commit, merged_at |
+| all streams terminal | `run_finished` | — |
+
+Actor convention (validation-gate finding): `session:<label>-<n>` where `<label>` names the
+drive and `<n>` increments per session generation — the canonical form; a resumed session
+MUST append under a new actor (first resume = `-2`; any distinct string signals correctly,
+the validation run used `-resume`). Two actors on one run is the audit trail working.
+
+**Event ids are the idempotency key — mint them client-side and REUSE on retry.** `Append`
+dedupes on `id` alone (§8 at-least-once): a lost-response retry that omits the id gets a
+fresh server-minted one and appends a duplicate (or draws `ErrIllegalTransition` on a
+transition kind) instead of returning the original committed event. So: mint
+`evt_<32 hex>` per event before the first attempt, resend the SAME event verbatim on
+retry. Mint an id for `run_imported` too — the id stays the append idempotency key; what
+differs is the RUN mint, which dedupes on `(repo, source, generated_at)` in the body, and
+the server refuses to mint a run when those are absent.
+
+Fields beyond the contract's body payloads (`stream_attempt.commit`, `review_cycle.panel`
+/ `verdict`) are legal by design — §8 mandates tolerant body decoding so additions are
+never breaking; a field gets *promoted* into the contract only when reads depend on it
+(commit is queued precisely because F3 resume does).
+
+### Resume (F3)
+
+A fresh session resumes with: `driver_runs {live:true}` → `driver_state <run>` →
+`driver_verify <run>` → **reconcile external facts before any write** (branch exists? PR
+state? merge commit? — `stream_dispatched`'s branch/worktree + `stream_attempt`'s commit
+say where to look) → record missing events (idempotent) → continue the drive.
+The reconcile-first rule covers the pre-record dispatch window too: a run showing only
+`run_imported` resumes from its manifest snapshot, but a branch or worktree the manifest
+names that ALREADY exists is adopted, never recreated — the prior session died between
+creating it and recording `stream_dispatched`, and `git worktree add` on an existing
+branch would otherwise fail the resume.
+Honest gap (validation-gate finding): `Reduce` does not yet surface those locators —
+`RunState` carries statuses and PR facts but drops the `stream_dispatched` body and the
+attempt `commit`, so the resumer reads the run's `events.jsonl` alongside `driver_state`
+for them (exactly what the validation resume did). Exposing them in `RunState` is a
+tracked follow-up; until then the raw-ledger read is part of the documented F3 flow. Never act on
+ledger state alone; never record an event whose external fact you did not verify. An
+`ErrIllegalTransition` rejection means re-read `driver_state` and reconcile again — the
+contract correcting the agent (F2) is the plane working, not an error to force past.
+
+### Panel from config (D6)
+
+The reviewer set is read from the target repo's `.ship.json` at drive time — never from
+skill prose:
+
+```json
+{
+  "review": {
+    "panel": [
+      {"name": "codex",   "trigger": "mention"},
+      {"name": "claude",  "trigger": "mention"},
+      {"name": "cursor",  "trigger": "mention"},
+      {"name": "copilot", "trigger": "reviewer-request"}
+    ],
+    "require": ["codex", "claude", "cursor"],
+    "settle_minutes": 15
+  }
+}
+```
+
+- `trigger`: `mention` → standalone `@<name> review` comment; `auto` → the bot fires on PR
+  open, post nothing; `reviewer-request` → `gh pr edit --add-reviewer` (copilot resolves
+  only via the API form: `gh api repos/<r>/pulls/<n>/requested_reviewers -f
+  'reviewers[]=copilot-pull-request-reviewer[bot]'`).
+- **Settled** = every `require` member reported, or its `settle_minutes` budget expired
+  (record the cycle as degraded, naming the silent bots).
+- **No implicit default (operator decision 2026-07-16):** absent or empty `review` key = NO
+  automated review step — no pings, no consolidation — and the drive records
+  `review: unconfigured` in the `review_cycle` body so the omission is visible. Never paper
+  over with a remembered panel; discipline means following the contract that's there.
+- Rollout: each personal repo carries the explicit four-bot stanza (workbench's lands with
+  this PR); work repos declare what they truly have (e.g. `coderabbit`/`auto` only).
+
+### Merge tail
+
+Unchanged from the base skill *when a panel is configured*: consolidate on real findings
+(`/review-coordinator`) — a repo with no `review` key has no automated review step, so
+there is nothing to consolidate and the tail proceeds straight to gate. Then: gate
+authorize per PR (`gate gate -repo <r> -pr <n> -grant <grt_…> -state ~/pers/gate/state`),
+branch on exit code with code↔JSON agreement, judge only content escalations, re-mint only
+via the operator. Record `review_cycle` per settled round and `stream_merged` only after
+the merge fact is readable from GitHub.
+
+### Thin jira-epic ingestion (the work demo's mapping step)
+
+A mapping step, not a platform: given a work epic, materialize its selected tickets as
+dossier tasks so a driver manifest can be prepped from them.
+
+1. Fetch the epic's child tickets (whatever surface the work Jira offers — CLI, export, or
+   paste); take the N≤3 smallest real ones.
+2. One dossier task per ticket: title = ticket key + summary, body = description +
+   acceptance criteria verbatim, note = ticket URL. Project/phase on the WORK side's
+   dossier — ticket content never crosses into pers/ files or memory.
+3. Hand to `/work-driver-prep` as usual. That's the whole feature.
+
+## Acceptance
+
+- `/work-driver --engine session <task>` drives a real task with every transition recorded
+  (the §11 validation run IS the reference execution; the skill text must reproduce it).
+- A kill at any point resumes in a fresh session from ledger + external facts alone.
+- The panel used on a drive is provably the target repo's `.ship.json` stanza; a repo with
+  no `review` key gets no pings and a `review: unconfigured` record.
+- A work epic's tickets can become dossier tasks with no code written.
+
+## Follow-ups (tracked in the dossier `session-engine-skill` phase, not this PR)
+
+- Promote `stream_attempt.commit` into the §5 contract payload AND expose the F3 resume
+  locators (`stream_dispatched` branch/worktree, attempt `commit`) in `RunState`, so
+  resume stops needing the raw-ledger read (dossier `promote-stream-attempt-commit`).
+- Document (or enforce) the event-id shape: spec says `evt_<ulid>`, server mints
+  `evt_<32hex>`, append validates neither (same task).
+- Minimal `driverstate render` (read-only pretty-print of `Reduce`) — §11(c) shipped on
+  `state --json` + GitHub diff instead; also fix the `state` read-path nit (`--run` flag,
+  no positional) (dossier `driverstate-render-minimal`).
+- Four-bot stanza rollout to the remaining personal repos' `.ship.json`, plus adding
+  `review` to ship's policy `TOP_LEVEL_KEYS` so the loader stops warning on it (dossier
+  `ship-json-panel-rollout`).
