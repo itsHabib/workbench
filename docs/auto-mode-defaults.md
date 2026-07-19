@@ -10,8 +10,8 @@ right, not law. Each one names the failure mode it guards; if the trade-off behi
 changes, revisit the rule — deliberately, in a PR — rather than treating it as forbidden
 territory. The bar is "works well", not "conforms".
 
-The thesis, in the redesign doc's terms (`docs/DESIGN.md`): *prose shrinks, guarantees
-grow*. Autonomy is safe
+The thesis, in the words of the [driver-state spec](features/driver-state/spec.md): *prose
+shrinks, guarantees grow*. Autonomy is safe
 in proportion to how much of the decision surface is deterministic code the model cannot
 skip. The untapped potential of "auto mode" is not a smarter judge — it is a rulebook that
 compounds.
@@ -28,7 +28,10 @@ The auto-deciders we've built so far share one shape, and new ones should start 
 - **observables** — facts computable without judgment: paths touched, diff size, CI state,
   command text, grant presence.
 - **rulebook** — versioned deterministic rules mapping observables to a tier.
-- **grant** — a human-minted, scoped, expiring ceiling on what may proceed unattended.
+- **grant** — a scoped, expiring ceiling on what may proceed unattended. "Human-minted" is
+  a key-custody precondition, not a property of the record: `MintedBy` is unauthenticated,
+  so grant presence signals human authority only while the signing keys and `gate grant`
+  stay outside governed sessions' reach.
 - **refuse** — distinct from block: the *request* is unauthorized or malformed (no grant,
   bad envelope) rather than a judged-and-denied action. Gate's exit codes carry all four
   (0 pass / 1 blocked / 2 parked / 3 refused, plus 4 for engine error).
@@ -96,9 +99,11 @@ the one that turns the log into tuning evidence (principle 6).
 ### 5. Authority is minted, not inferred
 
 The classifier decides *tier*; a grant decides *ceiling*; keep the two axes separate. An
-accumulation of correct verdicts doesn't widen what the classifier may do — a fresh
-human-minted grant does. This bounds the failure modes of the classifier itself (bugs,
-updates, prompt injection of the advisory layer) at the ceiling. Harness twin: the
+accumulation of correct verdicts doesn't widen what the classifier may do — a fresh grant
+does, minted as a human act. That act is enforced by key custody, not by the grant record
+(see the contract note): agents don't run `gate grant`, and the mint keys stay out of
+governed sessions. This bounds the failure modes of the classifier itself (bugs, updates,
+prompt injection of the advisory layer) at the ceiling. Harness twin: the
 permission mode is the grant; a guard hook holds regardless of mode.
 
 ### 6. Tune by moving the boundary, not softening it
@@ -112,7 +117,8 @@ promoted rule is a category of decisions now handled exactly, and regressions re
 reviewed diff.
 
 Cadence: weekly is the working default — mine park/prompt logs for the most frequent cause
-and promote the top one. The harness-side twin is prompt-mining the transcripts for allowlist candidates.
+and promote the top one. Harness-side twin, same cadence: mine session transcripts for
+allowlist candidates.
 
 ## The rulebooks today
 
