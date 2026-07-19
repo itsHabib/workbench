@@ -10,7 +10,8 @@ right, not law. Each one names the failure mode it guards; if the trade-off behi
 changes, revisit the rule — deliberately, in a PR — rather than treating it as forbidden
 territory. The bar is "works well", not "conforms".
 
-The thesis, in the redesign doc's terms: *prose shrinks, guarantees grow*. Autonomy is safe
+The thesis, in the redesign doc's terms (`docs/DESIGN.md`): *prose shrinks, guarantees
+grow*. Autonomy is safe
 in proportion to how much of the decision surface is deterministic code the model cannot
 skip. The untapped potential of "auto mode" is not a smarter judge — it is a rulebook that
 compounds.
@@ -20,7 +21,7 @@ compounds.
 The auto-deciders we've built so far share one shape, and new ones should start from it:
 
 ```
-(action, observables, rulebook, grant) -> {pass | park | block} + rule-fired + artifact
+(action, observables, rulebook, grant) -> {pass | park | block | refuse} + rule-fired + artifact
 ```
 
 - **action** — the thing about to happen (merge a PR, run a tool call, dispatch a stream).
@@ -28,7 +29,12 @@ The auto-deciders we've built so far share one shape, and new ones should start 
   command text, grant presence.
 - **rulebook** — versioned deterministic rules mapping observables to a tier.
 - **grant** — a human-minted, scoped, expiring ceiling on what may proceed unattended.
-- **rule-fired + artifact** — which rule decided, recorded durably.
+- **refuse** — distinct from block: the *request* is unauthorized or malformed (no grant,
+  bad envelope) rather than a judged-and-denied action. Gate's exit codes carry all four
+  (0 pass / 1 blocked / 2 parked / 3 refused, plus 4 for engine error).
+- **rule-fired** — which rule decided; the field that turns the log into tuning evidence.
+- **artifact** — the durable record of the decision, hash-chained where it carries
+  authority.
 
 Gate implements this for merges. Triage implements the classifier half for PR risk. The
 harness config (settings.json + hooks) implements it for tool calls. They should converge
@@ -105,13 +111,16 @@ deterministic layer compounds while a probabilistic judge stays at its error rat
 promoted rule is a category of decisions now handled exactly, and regressions require a
 reviewed diff.
 
-Cadence: periodically mine park/prompt logs for the most frequent cause and promote the top
-one. The harness-side twin is prompt-mining the transcripts for allowlist candidates.
+Cadence: weekly is the working default — mine park/prompt logs for the most frequent cause
+and promote the top one. The harness-side twin is prompt-mining the transcripts for allowlist candidates.
 
-## The two rulebooks today
+## The rulebooks today
 
-**Portfolio actions** (merges, dispatches): gate + triage, state in `~/pers/gate`, grants
-minted by the operator, decisions in the hash-chained audit log.
+**Portfolio actions** (merges): gate + triage, state in `~/pers/gate` (the operator's
+machine — gate state deliberately lives outside any repo), grants minted by the operator,
+decisions in the hash-chained audit log. Ship *dispatch* policy is in scope but has no
+rulebook yet — dispatch decisions today are skill-level convention (/work-driver); it
+adopts this contract when it grows one.
 
 **Harness tool calls** (what a session may do): three settings layers with distinct jobs —
 
@@ -124,11 +133,21 @@ minted by the operator, decisions in the hash-chained audit log.
    holes fail open (a `PowerShell(gh *)` entry silently undoes per-verb curation done in
    Bash rules; dual-shell platforms need every rule in both shells plus a deny backstop).
 
-The pretool guard (`pers/hooks/scripts/pretool-guard.sh`) is the harness's tier-3 floor: a
-PreToolUse hook that regex-matches command shapes with no sanctioned use today (force push, repo
-delete, visibility flips, credential and gate-state touches) and refuses them with a remedy,
-in every permission mode. It deliberately does not gate `gh pr merge` — merge authority
-belongs to gate, and duplicating it would create a second policy source.
+The pretool guard (`pers/hooks/scripts/pretool-guard.sh`, on the operator's machine — not
+in this repo) is the harness's tier-3 floor: a PreToolUse hook that regex-matches command
+shapes with no sanctioned use today (force push, repo delete, visibility flips, credential
+and gate-state touches) and refuses them with a remedy, in every permission mode.
+
+**Merge, specifically:** merge *policy* belongs to gate, and the guard does not duplicate
+it. But while gate is advisory (no `-live` wiring, no branch protection requiring its
+check), a bare `gh pr merge` from any governed session is a direct-merge bypass with no
+grant, verdict, or artifact. The guard therefore enforces *shape*, not policy: it passes
+merge commands that carry `--match-head-commit` (the form gate emits) and refuses bare
+merges with the remedy pointing at gate. This raises the bar rather than closing the hole —
+an agent could add the flag by hand — so the honest boundary is: discipline + the harness
+self-merge classifier carry merge authority today; the hole closes structurally when gate's
+check is required by branch protection or merge credentials move behind a broker. Revisit
+this paragraph when either lands.
 
 ## Not now, and why
 
