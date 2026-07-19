@@ -448,6 +448,45 @@ func main() {}
 	}
 }
 
+func TestPlacementUnavailableProducesStartupReceiptAndExitFour(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 100}, controller.Options{Backend: &placementUnavailableBackend{}})
+	if out.Result.Status != execution.StatusFailed || out.Result.ReasonCode != execution.ReasonPlacementUnavailable {
+		t.Fatalf("want failed/placement_unavailable, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.Result.TerminalPhase != execution.PhaseStartup {
+		t.Fatalf("phase=%s", out.Result.TerminalPhase)
+	}
+	if out.ExitCode != controller.ExitPlacementUnavailable {
+		t.Fatalf("exit=%d", out.ExitCode)
+	}
+}
+
+type placementUnavailableBackend struct{}
+
+func (b *placementUnavailableBackend) Start(_ context.Context, _ backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+	if err := emit(execution.PhaseStartup, "placement_profile_resolved", nil); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
+}
+
+func (b *placementUnavailableBackend) Wait(_ context.Context, _ backend.Handle, _ backend.Emit) (backend.Exit, error) {
+	return backend.Exit{}, &backend.PlacementUnavailable{Backend: "capacity-test", Cap: 8}
+}
+
+func (b *placementUnavailableBackend) Cancel(_ context.Context, _ backend.Handle) error { return nil }
+
+func (b *placementUnavailableBackend) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return nil, nil
+}
+
+func (b *placementUnavailableBackend) Cleanup(_ context.Context, _ backend.Handle) error { return nil }
+
 type immediateWaitErr struct{}
 
 func (b *immediateWaitErr) Start(_ context.Context, _ backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {

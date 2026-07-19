@@ -60,3 +60,33 @@ The result schema is authoritative over process exit codes.
 
 See `docs/DESIGN.md` for policy vs mechanism, the writer-claim primitive, and
 the one-writer rule.
+
+## Rooms placement
+
+`{"backend":"rooms","profile":"agent-cursor"}` installs the Rooms CLI
+adapter. The profile resolves on the host; placed requests never contain host
+paths or secret values:
+
+- `RUNWAY_ROOMS_IMAGE` selects the cursor guest image (default
+  `~/rooms/images/agent-alpine-cursor.ext4`).
+- `RUNWAY_ROOMS_MODEL` selects the pinned Cursor model (default
+  `composer-2.5`).
+- `RUNWAY_ROOMS_BIN` selects the CLI name/path (default `rooms`). Production
+  invokes `sudo -E <rooms-bin> run ...`; no shell is involved.
+- The work bundle must declare an input named `task`. Its materialized target,
+  the immutable workspace URL/revision, image, model, output directory, and
+  lifecycle path become the `rooms run --runner cursor` argv.
+- Only `CURSOR_API_KEY` and `ANTHROPIC_API_KEY` are accepted as work secret
+  names. Values travel in the child environment for Rooms' SSH `SendEnv`
+  allowlist; they never enter argv, lifecycle, receipts, or `backend.json`.
+
+The adapter consumes Rooms lifecycle NDJSON in four boundaries: `Start`
+through `workload_started`, `Wait` through `workload_exited`, `Collect` through
+collection completion, and `Cleanup` through verified teardown. Structured
+`pool_full {cap}` becomes `placement_unavailable` (exit 4) without a hidden
+retry. The result receipt records the image digest, fixed resource/network
+constraints, slot details, and `terminal_replay` stream delivery.
+
+Unit tests use a hermetic CLI double and need no Rooms installation. The live
+smoke is opt-in behind `-tags rooms_host` and `RUNWAY_ROOMS_HOST_TEST=1`; Gate C
+placement equivalence remains a separate downstream task.
