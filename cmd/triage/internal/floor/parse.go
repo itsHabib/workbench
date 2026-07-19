@@ -14,9 +14,11 @@ import (
 // signals like the dev-dependency discriminator need to know which section
 // a changed line sits in, and only the ordered stream carries that.
 //
-// An empty input (no files / no hunks) and a scanner error (including a line
-// over the 16 MiB buffer cap) both return an error — callers must fail closed
-// rather than classify a missing or truncated diff as T0.
+// An input with no parseable file headers (empty or unrecognized bytes) and a
+// scanner error (including a line over the 16 MiB buffer cap) both return an
+// error — callers must fail closed rather than classify a missing or truncated
+// diff as T0. A valid diff whose files carry no hunks (mode-only, rename-only,
+// binary) is real input, not an operational failure — it parses and classifies.
 //
 //nolint:gocognit,cyclop // see floor.Classify — same deferral.
 func ParseUnifiedDiff(r io.Reader) (Diff, error) {
@@ -101,7 +103,7 @@ func ParseUnifiedDiff(r io.Reader) (Diff, error) {
 		return Diff{}, fmt.Errorf("scanning unified diff: %w", err)
 	}
 	if len(d.Files) == 0 {
-		return Diff{}, fmt.Errorf("empty diff")
+		return Diff{}, fmt.Errorf("no file headers parsed: empty or unrecognized diff input")
 	}
 	return d, nil
 }
