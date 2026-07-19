@@ -137,6 +137,14 @@ type ctrl struct {
 func (c *ctrl) emit(phase, kind string, details map[string]any) error {
 	c.emitMu.Lock()
 	defer c.emitMu.Unlock()
+	if receipt, ok := details["receipt"].(execution.PlacementReceipt); ok {
+		c.receipt = receipt
+	}
+	if kind == execution.KindPlacementAllocated {
+		if id, ok := details["allocation_id"].(string); ok {
+			c.allocID = id
+		}
+	}
 	c.phase = phase
 	_, err := c.j.Append(phase, kind, details)
 	return err
@@ -289,17 +297,6 @@ func (c *ctrl) startBackend(ctx context.Context) (backend.Handle, error) {
 		return nil, err
 	}
 	childEnv := mergeEnv(os.Environ(), prep.Env, secrets)
-	emit := func(phase, kind string, details map[string]any) error {
-		if receipt, ok := details["receipt"].(execution.PlacementReceipt); ok {
-			c.receipt = receipt
-		}
-		if kind == execution.KindPlacementAllocated {
-			if id, ok := details["allocation_id"].(string); ok {
-				c.allocID = id
-			}
-		}
-		return c.emit(phase, kind, details)
-	}
 	return c.be.Start(ctx, backend.PreparedRun{
 		RunID:      c.runID,
 		Work:       c.adm.Work,
@@ -313,7 +310,7 @@ func (c *ctrl) startBackend(ctx context.Context) (backend.Handle, error) {
 		StderrPath: c.run.StderrLog(),
 		Secrets:    secretBytes,
 		PrivateDir: c.run.PrivateDir(),
-	}, emit)
+	}, c.emit)
 }
 
 type waitOutcome struct {
@@ -413,8 +410,9 @@ func (c *ctrl) watchCancel(done <-chan struct{}) <-chan struct{} {
 
 func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
 	exitCode := wo.exit.Code
-	_, backendCollectErr := c.be.Collect(context.Background(), h, c.run.ArtifactsDir())
-	arts, outputErr := collectOutputs(c.run.ArtifactsDir(), c.adm.Work.Outputs)
+	backendArts, backendCollectErr := c.be.Collect(context.Background(), h, c.run.ArtifactsDir())
+	outputArts, outputErr := collectOutputs(c.run.ArtifactsDir(), c.adm.Work.Outputs)
+	arts := append(backendArts, outputArts...)
 	collectErr := errors.Join(backendCollectErr, outputErr)
 	if collectErr == nil {
 		for _, a := range arts {
@@ -563,6 +561,8 @@ func phaseOr(phase, fallback string) string {
 }
 
 func (c *ctrl) placementReceipt() execution.PlacementReceipt {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
 	if c.receipt.Backend != "" {
 		receipt := c.receipt
 		receipt.Backend = c.adm.Request.Placement.Backend

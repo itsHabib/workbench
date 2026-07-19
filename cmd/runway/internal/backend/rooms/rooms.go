@@ -101,7 +101,7 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 	if err != nil {
 		return nil, err
 	}
-	imageSHA, err := fileSHA256(b.config.Image)
+	imageSHA, err := fileSHA256(ctx, b.config.Image)
 	if err != nil {
 		return nil, fmt.Errorf("rooms: hash profile image: %w", err)
 	}
@@ -111,28 +111,28 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 	lifecyclePath := filepath.Join(prep.PrivateDir, lifecycleFile)
 	args := b.runArgs(prep, task, lifecyclePath)
 
-	stdout, stderr, stdoutR, stdoutW, stderrR, stderrW, err := openCapture(prep)
+	captures, err := openCapture(prep)
 	if err != nil {
 		return nil, err
 	}
 	cmd := exec.Command(b.config.Launcher, args...)
 	cmd.Env = roomsEnv(prep)
-	cmd.Stdout = stdoutW
-	cmd.Stderr = stderrW
+	cmd.Stdout = captures.stdoutWrite
+	cmd.Stderr = captures.stderrWrite
 	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
-		closeAll(stdoutR, stdoutW, stderrR, stderrW, stdout, stderr)
+		captures.close()
 		return nil, fmt.Errorf("rooms: start: %w", err)
 	}
-	closeAll(stdoutW, stderrW)
+	closeAll(captures.stdoutWrite, captures.stderrWrite)
 
 	h := &handle{
 		config:      b.config,
 		cmd:         cmd,
 		prep:        prep,
 		processDone: make(chan struct{}),
-		stdout:      stdout,
-		stderr:      stderr,
+		stdout:      captures.stdoutLog,
+		stderr:      captures.stderrLog,
 		receipt: execution.PlacementReceipt{
 			Backend:        "rooms",
 			Profile:        profileAgentCursor,
@@ -151,13 +151,13 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		},
 	}
 	h.captureWG.Add(2)
-	go capture(stdoutR, stdout, prep.Secrets, h)
-	go capture(stderrR, stderr, prep.Secrets, h)
+	go capture(captures.stdoutRead, captures.stdoutLog, prep.Secrets, h)
+	go capture(captures.stderrRead, captures.stderrLog, prep.Secrets, h)
 	if err := h.writeDurable(); err != nil {
 		_ = killProcessGroup(cmd)
 		_ = cmd.Wait()
 		h.captureWG.Wait()
-		closeAll(stdout, stderr)
+		closeAll(captures.stdoutLog, captures.stderrLog)
 		return nil, err
 	}
 	go h.waitProcess()
@@ -188,26 +188,24 @@ func (b *Backend) Wait(ctx context.Context, bh backend.Handle, emit backend.Emit
 	if err != nil {
 		return backend.Exit{}, err
 	}
-	for {
-		record, err := h.next(ctx)
-		if err != nil {
-			return backend.Exit{}, err
+	record, err := h.next(ctx)
+	if err != nil {
+		return backend.Exit{}, err
+	}
+	switch record.Event {
+	case "workload_exited":
+		if err := emit(execution.PhaseWorkload, execution.KindWorkloadExited, map[string]any{
+			"exit_code": record.ExitCode,
+			"status":    record.Status,
+		}); err != nil {
+			return backend.Exit{Code: record.ExitCode}, err
 		}
-		switch record.Event {
-		case "workload_exited":
-			if err := emit(execution.PhaseWorkload, execution.KindWorkloadExited, map[string]any{
-				"exit_code": record.ExitCode,
-				"status":    record.Status,
-			}); err != nil {
-				return backend.Exit{Code: record.ExitCode}, err
-			}
-			return backend.Exit{Code: record.ExitCode}, nil
-		case "boot_failed", "guest_unreachable", "workload_failed":
-			return backend.Exit{}, fmt.Errorf("rooms: %s: %s", record.Event, record.Error)
-		default:
-			h.pushBack(record)
-			return backend.Exit{}, fmt.Errorf("rooms: workload exited event missing before %s", record.Event)
-		}
+		return backend.Exit{Code: record.ExitCode}, nil
+	case "boot_failed", "guest_unreachable", "workload_failed":
+		return backend.Exit{}, fmt.Errorf("rooms: %s: %s", record.Event, record.Error)
+	default:
+		h.pushBack(record)
+		return backend.Exit{}, fmt.Errorf("rooms: workload exited event missing before %s", record.Event)
 	}
 }
 
@@ -267,6 +265,8 @@ func (b *Backend) Collect(ctx context.Context, bh backend.Handle, _ string) ([]e
 			return nil, fmt.Errorf("rooms: collection completion event missing")
 		case "workload_failed":
 			return nil, fmt.Errorf("rooms: workload failed after exit: %s", record.Error)
+		default:
+			return nil, fmt.Errorf("rooms: unexpected lifecycle event %s during collection", record.Event)
 		}
 	}
 }
@@ -303,6 +303,8 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 		case "cleanup_failed":
 			_ = h.join(ctx)
 			return fmt.Errorf("rooms: cleanup failed: %s", record.Error)
+		default:
+			return fmt.Errorf("rooms: unexpected lifecycle event %s during cleanup", record.Event)
 		}
 	}
 }
@@ -482,40 +484,74 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 	return details
 }
 
-func fileSHA256(path string) (string, error) {
+func fileSHA256(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	buffer := make([]byte, 128*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, readErr := f.Read(buffer)
+		if n > 0 {
+			if _, err := h.Write(buffer[:n]); err != nil {
+				return "", err
+			}
+		}
+		if readErr == io.EOF {
+			return hex.EncodeToString(h.Sum(nil)), nil
+		}
+		if readErr != nil {
+			return "", readErr
+		}
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func openCapture(prep backend.PreparedRun) (*os.File, *os.File, *os.File, *os.File, *os.File, *os.File, error) {
+type captureFiles struct {
+	stdoutLog   *os.File
+	stderrLog   *os.File
+	stdoutRead  *os.File
+	stdoutWrite *os.File
+	stderrRead  *os.File
+	stderrWrite *os.File
+}
+
+func (c captureFiles) close() {
+	closeAll(c.stdoutRead, c.stdoutWrite, c.stderrRead, c.stderrWrite, c.stdoutLog, c.stderrLog)
+}
+
+func openCapture(prep backend.PreparedRun) (captureFiles, error) {
 	stdout, err := os.OpenFile(prep.StdoutPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("rooms: open stdout log: %w", err)
+		return captureFiles{}, fmt.Errorf("rooms: open stdout log: %w", err)
 	}
 	stderr, err := os.OpenFile(prep.StderrPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		closeAll(stdout)
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("rooms: open stderr log: %w", err)
+		return captureFiles{}, fmt.Errorf("rooms: open stderr log: %w", err)
 	}
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		closeAll(stdout, stderr)
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("rooms: stdout pipe: %w", err)
+		return captureFiles{}, fmt.Errorf("rooms: stdout pipe: %w", err)
 	}
 	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
 		closeAll(stdoutR, stdoutW, stdout, stderr)
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("rooms: stderr pipe: %w", err)
+		return captureFiles{}, fmt.Errorf("rooms: stderr pipe: %w", err)
 	}
-	return stdout, stderr, stdoutR, stdoutW, stderrR, stderrW, nil
+	return captureFiles{
+		stdoutLog:   stdout,
+		stderrLog:   stderr,
+		stdoutRead:  stdoutR,
+		stdoutWrite: stdoutW,
+		stderrRead:  stderrR,
+		stderrWrite: stderrW,
+	}, nil
 }
 
 func capture(r *os.File, w io.Writer, secrets [][]byte, h *handle) {

@@ -190,6 +190,28 @@ func main() {
 	}
 }
 
+func TestFlowA_PreservesBackendCollectedArtifacts(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	be := &artifactCollectBackend{Backend: local.New()}
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 1000}, controller.Options{Backend: be})
+	if out.Result.Status != execution.StatusSucceeded {
+		t.Fatalf("status=%s reason=%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if len(out.Result.Artifacts) != 1 || out.Result.Artifacts[0].Name != "backend-report" {
+		t.Fatalf("artifacts=%+v", out.Result.Artifacts)
+	}
+}
+
+type artifactCollectBackend struct{ backend.Backend }
+
+func (b *artifactCollectBackend) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return []execution.Artifact{{Name: "backend-report", Path: "artifacts/backend.json", SHA256: strings.Repeat("a", 64), Size: 2}}, nil
+}
+
 func TestFlowE_MissingRequiredOutput(t *testing.T) {
 	h := newHarness(t)
 	h.writeProg("main.go", `package main

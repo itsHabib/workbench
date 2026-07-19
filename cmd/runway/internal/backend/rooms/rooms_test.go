@@ -149,6 +149,41 @@ func TestCollectionAndCleanupFailuresRemainDistinct(t *testing.T) {
 	}
 }
 
+func TestUnexpectedLifecycleEventsFailTheirBoundary(t *testing.T) {
+	for _, scenario := range []string{"unexpected_collection", "unexpected_cleanup"} {
+		t.Run(scenario, func(t *testing.T) {
+			be, prep := helperBackend(t, scenario)
+			emit := func(_, _ string, _ map[string]any) error { return nil }
+			h, err := be.Start(context.Background(), prep, emit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := be.Wait(context.Background(), h, emit); err != nil {
+				t.Fatal(err)
+			}
+			_, collectErr := be.Collect(context.Background(), h, prep.Out)
+			if scenario == "unexpected_collection" && collectErr == nil {
+				t.Fatal("unexpected collection event was silently dropped")
+			}
+			if scenario == "unexpected_cleanup" && collectErr != nil {
+				t.Fatalf("collection failed before cleanup: %v", collectErr)
+			}
+			if scenario == "unexpected_cleanup" && be.Cleanup(context.Background(), h) == nil {
+				t.Fatal("unexpected cleanup event was silently dropped")
+			}
+		})
+	}
+}
+
+func TestLifecycleRecordRequiresRoomID(t *testing.T) {
+	out := make(chan lifecycleItem, 1)
+	line := []byte(`{"seq":1,"ts":"2026-07-19T00:00:00Z","room_id":"","event":"pool_full","cap":8}` + "\n")
+	_, _, _, err := emitCompleteLines(line, 1, "", out)
+	if err == nil || !strings.Contains(err.Error(), "missing room_id") {
+		t.Fatalf("want missing room_id error, got %v", err)
+	}
+}
+
 func TestRejectsSecretOutsideSendEnvAllowlistBeforeSpawn(t *testing.T) {
 	be, prep := helperBackend(t, "success")
 	prep.Work.Secrets = []execution.Secret{{Name: "GH_TOKEN", Ref: "env:GH_TOKEN"}}
@@ -187,6 +222,19 @@ func TestStartHonorsContextDuringGuestStartup(t *testing.T) {
 	}
 	if time.Since(started) > time.Second {
 		t.Fatalf("startup cancellation took %s", time.Since(started))
+	}
+}
+
+func TestImageHashHonorsStartupContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "image.ext4")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 256*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := fileSHA256(ctx, path)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context cancellation, got %v", err)
 	}
 }
 
@@ -336,8 +384,14 @@ func TestRoomsHelperProcess(_ *testing.T) {
 	if scenario == "collection_failed" {
 		emit("collection_failed", map[string]any{"error": "copy failed"})
 	}
+	if scenario == "unexpected_collection" {
+		emit("collection_progress", nil)
+	}
 	if scenario != "collection_failed" {
 		emit("collection_done", nil)
+	}
+	if scenario == "unexpected_cleanup" {
+		emit("cleanup_progress", nil)
 	}
 	if scenario == "cleanup_failed" {
 		emit("cleanup_failed", map[string]any{"error": "tap remained"})

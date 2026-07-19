@@ -128,4 +128,20 @@ false alarm.
 
 ## Delivery record
 
-Pending PR publication, reviewer feedback, CI, and no-grant Gate consultation.
+- Opened [workbench PR #68](https://github.com/itsHabib/workbench/pull/68)
+  from `runway-rooms-adapter` to `main`, then marked it ready after the initial
+  CI run passed. Both `check` (including the Linux race lane) and `hygiene`
+  were green before the review patch.
+- Requested Copilot and posted `@codex review` plus `@claude review`. Copilot's
+  four inline findings and Claude's six actionable suggestions were all
+  implemented. Codex raised two findings: context-cancellable image hashing
+  was implemented; the claim that `pool_full` lacks `room_id` was rejected
+  against current Rooms source, which mints the ID and binds the lifecycle
+  writer before attempting the slot claim.
+- Consulted Gate without creating or supplying a grant:
+  `gate gate -repo itsHabib/workbench -pr 68 -state
+  C:\Users\MichaelHabib\pers\gate\state`. It refused with exit code 4 and
+  `gate: gate: -repo, -pr, -grant required`, as required by the kickoff's
+  no-grant boundary.
+- No grant was minted, no merge was attempted, and nothing was pushed to
+  `main`.

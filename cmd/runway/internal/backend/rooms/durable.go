@@ -78,6 +78,8 @@ func killRoom(roomID string) (backend.CleanupResult, error) {
 	if err != nil {
 		return backend.CleanupResult{Uncertain: true, AllocationID: roomID}, nil
 	}
+	// Kill and gc are best-effort mechanisms; only the following identity-safe
+	// inventory check can prove that the allocation is absent.
 	_ = runDurableCommand(config, "kill", roomID, "--json")
 	_ = runDurableCommand(config, "gc", roomID)
 	out, err := outputDurableCommand(config, "ls", "--json")
