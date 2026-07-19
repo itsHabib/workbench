@@ -81,6 +81,21 @@ Agent: Codex. Started: 2026-07-18 (America/Los_Angeles).
   the expected sharing violation (bounded retry plus identity recheck), then
   run this race test repeatedly on a Windows CI lane.
 
+### The GitHub review-thread helper assumes a UTF-8 locale
+
+- **What I tried:** ran the `gh-address-comments` skill's bundled
+  `scripts/fetch_comments.py` with the workspace's bundled Python after the
+  three bot reviews arrived.
+- **What happened:** on Windows it decoded `gh api graphql` output as cp1252
+  and crashed on the bots' Unicode review text with
+  `UnicodeDecodeError: 'charmap' codec can't decode byte 0x8f`, followed by
+  `TypeError: the JSON object must be str, bytes or bytearray, not NoneType`.
+  Re-running with `PYTHONUTF8=1` succeeded and returned full thread state.
+- **Class:** `tool-bug`.
+- **Smallest fix:** make the helper's subprocess text reads explicitly
+  `encoding="utf-8"` (and fail on the decode error before calling
+  `json.loads`) so its behavior does not depend on the host locale.
+
 ## Implementation and validation
 
 - The adapter stayed behind Runway's private backend registry; provider names
@@ -131,13 +146,14 @@ false alarm.
 - Opened [workbench PR #68](https://github.com/itsHabib/workbench/pull/68)
   from `runway-rooms-adapter` to `main`, then marked it ready after the initial
   CI run passed. Both `check` (including the Linux race lane) and `hygiene`
-  were green before the review patch.
+  were green before and after the review patch.
 - Requested Copilot and posted `@codex review` plus `@claude review`. Copilot's
   four inline findings and Claude's six actionable suggestions were all
   implemented. Codex raised two findings: context-cancellable image hashing
   was implemented; the claim that `pool_full` lacks `room_id` was rejected
   against current Rooms source, which mints the ID and binds the lifecycle
-  writer before attempting the slot claim.
+  writer before attempting the slot claim. Every inline thread was answered
+  and resolved.
 - Consulted Gate without creating or supplying a grant:
   `gate gate -repo itsHabib/workbench -pr 68 -state
   C:\Users\MichaelHabib\pers\gate\state`. It refused with exit code 4 and
