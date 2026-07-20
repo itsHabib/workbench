@@ -30,14 +30,29 @@ open.
 
 ```
 go build -o gate.exe ./cmd/gate
+export GATE_STATE=~/pers/gate/state                          # -state/-key default to $GATE_STATE/$GATE_KEY
 ./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
+./gate.exe next                                              # what needs you: parked runs + grant ledger
+./gate.exe next -json                                        # the same projection as a machine feed
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -auto           # frontier model judges from artifacts alone
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176
 ```
+
+`-state` and `-key` default to `$GATE_STATE` and `$GATE_KEY`, so once those are
+exported the whole verb surface drops its flag tail — and a stray `gate grant`
+from the wrong directory can no longer mint into a fresh relative `state` tree.
+An explicit flag still overrides the env.
+
+`gate next` is the operator's inbox: it projects the log into what currently
+needs a human — runs parked for judgment (each with a paste-ready `gate judge`
+carrying the run's own grant id, so resolving a park is never an id hunt) and
+the grant ledger (live grants soonest-to-expire first, plus grants expired in
+the last day). It is read-only and sits outside the 0–3 decision codes: like
+`explain` and `audit` it exits 0 or 4.
 
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on
