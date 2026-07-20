@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
@@ -106,6 +107,12 @@ func appendLocked(l Lease, e Event) (Event, error) {
 
 	if err := dsc.ValidateEvent(e); err != nil {
 		return Event{}, err
+	}
+	// Event ids must carry the evt_ prefix (NewEventID mints evt_<32hex>). Full
+	// shape is not enforced: server-minted ids are 32-hex while test fixtures
+	// use short ids (evt_1); both must keep passing.
+	if !strings.HasPrefix(e.ID, "evt_") {
+		return Event{}, fmt.Errorf("driverstate: append: event id %q must start with evt_", e.ID)
 	}
 	if err := checkTransition(events, e); err != nil {
 		return Event{}, err

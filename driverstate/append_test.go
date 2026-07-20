@@ -209,6 +209,44 @@ func TestSeqMustIncrease(t *testing.T) {
 	}
 }
 
+// TestAppendEventIDPrefix rejects ids that lack the evt_ prefix while keeping
+// short fixture ids (evt_1) and NewEventID-shaped hex ids accepted.
+func TestAppendEventIDPrefix(t *testing.T) {
+	importBody := dsc.RunImportedBody{
+		Repo: "r", Source: "s", Manifest: json.RawMessage(`{}`),
+		Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "d"}},
+	}
+	cases := []struct {
+		name    string
+		id      string
+		wantErr string
+	}{
+		{name: "short fixture id ok", id: "evt_1"},
+		{name: "hex-shaped id ok", id: "evt_0123456789abcdef0123456789abcdef"},
+		{name: "missing prefix rejected", id: "bad_1", wantErr: "must start with evt_"},
+		{name: "bare ulid rejected", id: "01JQEVENT00000000000000IMP0", wantErr: "must start with evt_"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			l, err := Claim(dir, "dsr_run1", "session:a")
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			_, err = Append(dir, l, ev(c.id, dsc.KindRunImported, "", "session:a", baseTime, importBody))
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("want ok, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("want error containing %q, got %v", c.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestTornTailHealed(t *testing.T) {
 	dir := t.TempDir()
 	run := "dsr_run1"

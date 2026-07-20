@@ -17,13 +17,32 @@ import (
 // mirrors the contracts and contracts/execution walkers structurally.
 type objSchema struct {
 	XVersion   string               `json:"x-version"`
-	Type       string               `json:"type"`
+	Type       schemaType           `json:"type"`
 	Required   []string             `json:"required"`
 	Properties map[string]objSchema `json:"properties"`
 	Items      *objSchema           `json:"items"`
 	Enum       []string             `json:"enum"`
 	Const      string               `json:"const"`
 	Defs       map[string]objSchema `json:"$defs"`
+}
+
+// schemaType accepts JSON Schema's string-or-array `type` form — "object" and
+// ["object", "null"] both parse (stream_dispatched_body allows null for legacy
+// ledgers).
+type schemaType []string
+
+func (st *schemaType) UnmarshalJSON(data []byte) error {
+	var one string
+	if err := json.Unmarshal(data, &one); err == nil {
+		*st = schemaType{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return err
+	}
+	*st = schemaType(many)
+	return nil
 }
 
 func loadSchema(t *testing.T) objSchema {
@@ -127,6 +146,7 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 		{"Event", reflect.TypeOf(Event{}), root},
 		{"RunImportedBody", reflect.TypeOf(RunImportedBody{}), root.def(t, "run_imported_body")},
 		{"StreamSpec", reflect.TypeOf(StreamSpec{}), root.def(t, "stream_spec")},
+		{"StreamDispatchedBody", reflect.TypeOf(StreamDispatchedBody{}), root.def(t, "stream_dispatched_body")},
 		{"StreamAttemptBody", reflect.TypeOf(StreamAttemptBody{}), root.def(t, "stream_attempt_body")},
 		{"StreamPROpenedBody", reflect.TypeOf(StreamPROpenedBody{}), root.def(t, "stream_pr_opened_body")},
 		{"StreamMergedBody", reflect.TypeOf(StreamMergedBody{}), root.def(t, "stream_merged_body")},
@@ -225,6 +245,7 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"run_imported stream missing doc_path", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1"}]}`, true},
 		{"run_imported missing streams", KindRunImported, `{"repo":"r","source":"s"}`, true},
 		{"stream_attempt ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":false}`, false},
+		{"stream_attempt with commit ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":true,"commit":"abc123"}`, false},
 		{"stream_attempt bad seq", KindStreamAttempt, `{"seq":0,"doc_path":"d","terminal":false}`, true},
 		{"stream_attempt failure on non-terminal", KindStreamAttempt, `{"seq":2,"doc_path":"d","terminal":false,"failure_category":"flake"}`, true},
 		{"stream_attempt terminal failure ok", KindStreamAttempt, `{"seq":2,"doc_path":"d","terminal":true,"failure_category":"flake"}`, false},
@@ -240,7 +261,14 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"review_cycle missing panel_settled", KindReviewCycle, `{"cycle":1,"findings":0}`, true},
 		{"review_cycle missing findings", KindReviewCycle, `{"cycle":1,"panel_settled":false}`, true},
 		{"malformed json", KindStreamAttempt, `{"seq":`, true},
-		{"open kind tolerated", KindStreamDispatched, `{"anything":true}`, false},
+		{"stream_dispatched locators ok", KindStreamDispatched, `{"branch":"feat/x","worktree":"/tmp/wt"}`, false},
+		{"stream_dispatched empty body ok", KindStreamDispatched, `{}`, false},
+		{"stream_dispatched null body ok (legacy ledgers)", KindStreamDispatched, `null`, false},
+		// Go-level tolerance: json.Unmarshal ignores unknown members. The
+		// schema's additionalProperties:false is stricter — a schema validator
+		// would reject this body; the runtime deliberately does not.
+		{"stream_dispatched unknown field tolerated", KindStreamDispatched, `{"anything":true}`, false},
+		{"stream_dispatched malformed body rejected", KindStreamDispatched, `{"branch":5}`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -411,6 +439,71 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(e, got) {
 		t.Fatalf("round-trip mismatch:\n in=%+v\nout=%+v", e, got)
+	}
+}
+
+// TestNewBodyFieldsRoundTrip pins the additive locators: stream_dispatched
+// {branch,worktree} and stream_attempt {commit} encode and decode through the
+// body types the schema and §5 payload text name.
+func TestNewBodyFieldsRoundTrip(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		out  any
+	}{
+		{
+			name: "stream_dispatched locators",
+			in:   StreamDispatchedBody{Branch: "feat/x", Worktree: "/tmp/wt"},
+			out:  &StreamDispatchedBody{},
+		},
+		{
+			name: "stream_attempt commit",
+			in: StreamAttemptBody{
+				Seq: 1, DocPath: "d.md", Terminal: true, Commit: "abc123def",
+			},
+			out: &StreamAttemptBody{},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			raw, err := json.Marshal(c.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, c.out); err != nil {
+				t.Fatal(err)
+			}
+			got, err := json.Marshal(c.out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(raw) {
+				t.Fatalf("round-trip drifted:\n got=%s\nwant=%s", got, raw)
+			}
+		})
+	}
+}
+
+// TestAbsentNewFieldsTolerated is the old-ledger guarantee: bodies written
+// before commit/branch/worktree existed still decode, with the new fields empty.
+func TestAbsentNewFieldsTolerated(t *testing.T) {
+	var dispatched StreamDispatchedBody
+	if err := json.Unmarshal([]byte(`{}`), &dispatched); err != nil {
+		t.Fatalf("empty stream_dispatched body: %v", err)
+	}
+	if dispatched.Branch != "" || dispatched.Worktree != "" {
+		t.Fatalf("absent locators must stay empty, got %+v", dispatched)
+	}
+
+	var attempt StreamAttemptBody
+	if err := json.Unmarshal([]byte(`{"seq":1,"doc_path":"d","terminal":true}`), &attempt); err != nil {
+		t.Fatalf("legacy stream_attempt body: %v", err)
+	}
+	if attempt.Commit != "" {
+		t.Fatalf("absent commit must stay empty, got %q", attempt.Commit)
+	}
+	if attempt.Seq != 1 || attempt.DocPath != "d" || !attempt.Terminal {
+		t.Fatalf("known fields must survive: %+v", attempt)
 	}
 }
 

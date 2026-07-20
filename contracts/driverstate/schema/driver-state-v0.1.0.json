@@ -9,7 +9,7 @@
   "required": ["id", "run", "v", "kind", "time", "actor", "body", "prev", "hash"],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "description": "evt_<ulid> — client-minted idempotency key." },
+    "id": { "type": "string", "description": "evt_<hex> — client-minted idempotency key. NewEventID mints evt_ + 32 hex digits; Append requires only the evt_ prefix so short test-fixture ids keep working." },
     "run": { "type": "string", "description": "dsr_<ulid> — the driver-state run this event belongs to." },
     "v": { "type": "string", "const": "driver-state-v0.1.0", "description": "The contract version this event was written against." },
     "kind": {
@@ -38,6 +38,7 @@
   },
   "allOf": [
     { "if": { "properties": { "kind": { "const": "run_imported" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/run_imported_body" } } } },
+    { "if": { "properties": { "kind": { "const": "stream_dispatched" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_dispatched_body" } } } },
     { "if": { "properties": { "kind": { "const": "stream_attempt" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_attempt_body" } } } },
     { "if": { "properties": { "kind": { "const": "stream_pr_opened" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_pr_opened_body" } } } },
     { "if": { "properties": { "kind": { "const": "stream_merged" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_merged_body" } } } },
@@ -69,16 +70,27 @@
         "batch": { "type": "integer" }
       }
     },
+    "stream_dispatched_body": {
+      "type": ["object", "null"],
+      "description": "Locator payload written when a stream is dispatched into a worktree. Every field is optional and legacy ledgers may carry a null body (EncodeEvent emits null for an empty RawMessage) — a resumer folds the locators into StreamRecord when present.",
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "type": "string", "description": "The git branch the dispatch opened, when known." },
+        "worktree": { "type": "string", "description": "The absolute path of the dispatch worktree, when known." },
+        "engine": { "type": "string", "description": "The dispatching engine (e.g. session) — live ledgers already carry it." }
+      }
+    },
     "stream_attempt_body": {
       "type": "object",
-      "description": "One dispatch attempt on a stream. seq is append-only monotone (P2 enforces increase); a terminal attempt with failure_category set lands the stream in failed, absent it lands the stream in landed — no separate stream_failed event required.",
+      "description": "One dispatch attempt on a stream. seq is append-only monotone (P2 enforces increase); a terminal attempt with failure_category set lands the stream in failed, absent it lands the stream in landed — no separate stream_failed event required. commit is the head commit the attempt produced, when known.",
       "required": ["seq", "doc_path", "terminal"],
       "additionalProperties": false,
       "properties": {
         "seq": { "type": "integer", "minimum": 1 },
         "doc_path": { "type": "string" },
         "terminal": { "type": "boolean" },
-        "failure_category": { "type": "string" }
+        "failure_category": { "type": "string" },
+        "commit": { "type": "string", "description": "The head commit the attempt produced, when known — used by resume to match ledger state to a PR head SHA." }
       }
     },
     "stream_pr_opened_body": {

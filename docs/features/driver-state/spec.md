@@ -179,7 +179,9 @@ Event (JSONL, one file per run: `~/.workbench/driver-state/<run_id>/events.jsonl
 
 ```go
 type Event struct {
-    ID      string          // evt_<ulid> — CLIENT-minted (idempotency key, see below)
+    ID      string          // evt_<hex> — CLIENT-minted (idempotency key, see below).
+                            // NewEventID mints evt_ + 32 hex digits; Append requires
+                            // only the evt_ prefix so short test-fixture ids keep working.
     Run     string          // dsr_<ulid>  (driver-state run)
     V       string          // "driver-state-v0.1.0"
     Kind    Kind            // run_imported | stream_dispatched | stream_attempt |
@@ -219,14 +221,20 @@ reader wants "3 cycles" vs "landed first try." Body: `{cycle, panel_settled, fin
 
 Kind payloads (schema-enforced): `run_imported` carries the manifest snapshot (repo, source,
 batches/streams — the `driver.md` frontmatter, verbatim, so render round-trips);
-`stream_attempt` carries `{seq, doc_path, terminal, failure_category?}` (append-only ledger
-semantics — seq must increase); `stream_pr_opened` `{pr, url, head_sha}`; `stream_merged`
-`{pr, merge_commit, merged_at}`. Reducer output:
+`stream_dispatched` carries `{branch?, worktree?}` (dispatch locators a resumer folds into
+`StreamRecord`); `stream_attempt` carries
+`{seq, doc_path, terminal, failure_category?, commit?}` (append-only ledger semantics —
+seq must increase; `commit` is the head commit the attempt produced, when known);
+`stream_pr_opened` `{pr, url, head_sha}`; `stream_merged` `{pr, merge_commit, merged_at}`.
+Reducer output:
 
 ```go
 type RunState struct {
     Run      RunRecord            // repo, source, status (derived), imported_at
-    Streams  map[string]StreamRecord // status, attempts[], pr, merge_commit — derived only
+    Streams  map[string]StreamRecord // status, attempts[], pr, merge_commit,
+                                     // branch?, worktree? — derived only; attempt
+                                     // records carry commit? when folded from
+                                     // stream_attempt
 }
 ```
 
