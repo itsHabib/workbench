@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
 	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
@@ -25,6 +26,7 @@ const (
 	profileAgentCursor = "agent-cursor"
 	backendFile        = "backend.json"
 	lifecycleFile      = "rooms-lifecycle.ndjson"
+	startupCleanupWait = 5 * time.Second
 )
 
 var allowedSecrets = map[string]struct{}{
@@ -166,18 +168,24 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 	if err := emit(execution.PhaseStartup, "placement_profile_resolved", map[string]any{
 		"receipt": h.receipt,
 	}); err != nil {
-		_ = b.Cancel(context.Background(), h)
-		_ = b.Cleanup(context.Background(), h)
+		_ = b.Cancel(ctx, h)
+		b.cleanupStartFailure(ctx, h)
 		return nil, err
 	}
 	if err := h.awaitStartup(ctx, emit); err != nil {
 		if !backend.IsPlacementUnavailable(err) {
 			_ = signalProcessGroup(h.cmd)
 		}
-		_ = b.Cleanup(context.Background(), h)
+		b.cleanupStartFailure(ctx, h)
 		return nil, err
 	}
 	return h, nil
+}
+
+func (b *Backend) cleanupStartFailure(ctx context.Context, h *handle) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, startupCleanupWait)
+	defer cancel()
+	_ = b.Cleanup(cleanupCtx, h)
 }
 
 // Wait maps Rooms allocation/readiness/workload events and returns at the
@@ -290,22 +298,20 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 	if h.poolFull {
 		return h.join(ctx)
 	}
-	for {
-		record, nextErr := h.next(ctx)
-		if nextErr != nil {
-			_ = killProcessGroup(h.cmd)
-			_ = h.join(context.Background())
-			return nextErr
-		}
-		switch record.Event {
-		case "cleanup_done":
-			return h.join(ctx)
-		case "cleanup_failed":
-			_ = h.join(ctx)
-			return fmt.Errorf("rooms: cleanup failed: %s", record.Error)
-		default:
-			return fmt.Errorf("rooms: unexpected lifecycle event %s during cleanup", record.Event)
-		}
+	record, nextErr := h.next(ctx)
+	if nextErr != nil {
+		_ = killProcessGroup(h.cmd)
+		_ = h.join(ctx)
+		return nextErr
+	}
+	switch record.Event {
+	case "cleanup_done":
+		return h.join(ctx)
+	case "cleanup_failed":
+		_ = h.join(ctx)
+		return fmt.Errorf("rooms: cleanup failed: %s", record.Error)
+	default:
+		return fmt.Errorf("rooms: unexpected lifecycle event %s during cleanup", record.Event)
 	}
 }
 

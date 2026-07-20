@@ -256,6 +256,31 @@ func TestDurableCleanupFailsClosedWithoutRoomIdentity(t *testing.T) {
 	}
 }
 
+func TestRoomIDFromLifecycleAcceptsLargeRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), lifecycleFile)
+	record := lifecycleRecord{
+		Seq:     1,
+		Time:    time.Now().UTC().Format(time.RFC3339Nano),
+		RoomID:  "room-large-record",
+		Event:   "workload_started",
+		Command: []string{strings.Repeat("x", 70*1024)},
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roomID, err := roomIDFromLifecycle(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roomID != "room-large-record" {
+		t.Fatalf("room id=%q", roomID)
+	}
+}
+
 func TestRoomPresentRejectsUnreadableAndFindsID(t *testing.T) {
 	if !roomPresent([]byte("not-json"), "room-a") {
 		t.Fatal("unreadable residue report must fail closed")

@@ -230,7 +230,7 @@ func reconcilePlacement(run state.RunDir, req execution.Request) execution.Place
 func readReconcileRequest(run state.RunDir) (execution.Request, error) {
 	data, err := os.ReadFile(run.RequestPath())
 	if err != nil {
-		return execution.Request{}, fmt.Errorf("controller: read request for reconcile cleanup: %w", err)
+		return execution.Request{}, fmt.Errorf("controller: read request for reconcile: %w", err)
 	}
 	request, err := execution.DecodeRequest(data)
 	if err != nil {

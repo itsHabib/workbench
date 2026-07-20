@@ -12,6 +12,8 @@ import (
 	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 )
 
+const maxDurableLifecycleLine = 1 << 20
+
 // CleanupDurable best-effort reaps a Rooms allocation after controller loss.
 // A known room id goes through the Rooms CLI's identity-safe kill/reap path;
 // an allocation observed only as a supervisor process is killed but remains
@@ -25,7 +27,10 @@ func CleanupDurable(privateDir string) (backend.CleanupResult, error) {
 		return backend.CleanupResult{}, err
 	}
 	if allocation.RoomID == "" {
-		allocation.RoomID = roomIDFromLifecycle(filepath.Join(privateDir, lifecycleFile))
+		allocation.RoomID, err = roomIDFromLifecycle(filepath.Join(privateDir, lifecycleFile))
+		if err != nil {
+			return backend.CleanupResult{}, err
+		}
 	}
 	if allocation.RoomID != "" {
 		return killRoom(allocation.RoomID)
@@ -57,20 +62,27 @@ func readAllocation(privateDir string) (Allocation, error) {
 	return allocation, nil
 }
 
-func roomIDFromLifecycle(path string) string {
+func roomIDFromLifecycle(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("rooms: open durable lifecycle: %w", err)
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 32*1024), maxDurableLifecycleLine)
 	for scanner.Scan() {
 		var record lifecycleRecord
 		if json.Unmarshal(scanner.Bytes(), &record) == nil && record.RoomID != "" {
-			return record.RoomID
+			return record.RoomID, nil
 		}
 	}
-	return ""
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("rooms: scan durable lifecycle: %w", err)
+	}
+	return "", nil
 }
 
 func killRoom(roomID string) (backend.CleanupResult, error) {
