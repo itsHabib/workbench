@@ -23,15 +23,14 @@ func cmdRender(dir string, args []string, stdout io.Writer) error {
 	if *run == "" {
 		return fmt.Errorf("render: --run is required")
 	}
-	state, err := driverstate.Reduce(dir, *run)
-	if err != nil {
-		return err
-	}
+	// One ledger snapshot: read the events once and fold the state from that
+	// same slice, so on a live run the header/stream blocks can never
+	// contradict the timeline they sit beside.
 	events, err := driverstate.Events(dir, *run)
 	if err != nil {
 		return err
 	}
-	writeRender(stdout, *run, state, events)
+	writeRender(stdout, *run, driverstate.FoldEvents(events), events)
 	return nil
 }
 
@@ -62,25 +61,36 @@ func sortedStreamKeys(streams map[string]dsc.StreamRecord) []string {
 func writeStreamBlock(w io.Writer, stream string, rec dsc.StreamRecord) {
 	fmt.Fprintf(w, "  stream %s: %s\n", stream, rec.Status)
 	for _, att := range rec.Attempts {
-		fmt.Fprintf(w, "    attempt %d", att.Seq)
-		if att.Terminal {
-			fmt.Fprint(w, ": terminal")
-		}
-		if att.FailureCategory != "" {
-			fmt.Fprintf(w, ", failure=%s", att.FailureCategory)
-		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(w, formatAttemptLine(att))
 	}
 	if rec.PR != 0 {
+		line := fmt.Sprintf("    pr %d", rec.PR)
 		if rec.URL != "" {
-			fmt.Fprintf(w, "    pr %d: %s\n", rec.PR, rec.URL)
-		} else {
-			fmt.Fprintf(w, "    pr %d\n", rec.PR)
+			line += ": " + rec.URL
 		}
+		fmt.Fprintln(w, line)
 	}
 	if rec.MergeCommit != "" {
 		fmt.Fprintf(w, "    merge %s\n", shortCommit(rec.MergeCommit))
 	}
+}
+
+// formatAttemptLine renders one attempt's facts after a single "attempt N:"
+// prefix, so an unusual combination (a failure category on a non-terminal
+// attempt) never yields a dangling comma.
+func formatAttemptLine(att dsc.AttemptRecord) string {
+	var facts []string
+	if att.Terminal {
+		facts = append(facts, "terminal")
+	}
+	if att.FailureCategory != "" {
+		facts = append(facts, "failure="+att.FailureCategory)
+	}
+	line := fmt.Sprintf("    attempt %d", att.Seq)
+	if len(facts) == 0 {
+		return line
+	}
+	return line + ": " + strings.Join(facts, ", ")
 }
 
 func formatTimelineLine(e driverstate.Event) string {

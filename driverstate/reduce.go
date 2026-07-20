@@ -37,7 +37,7 @@ func Reduce(dir, run string) (dsc.RunState, error) {
 	if err != nil {
 		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
 	}
-	return foldEvents(events), nil
+	return FoldEvents(events), nil
 }
 
 // trimWithWarning discards a torn final line and, when it actually trimmed,
@@ -51,10 +51,13 @@ func trimWithWarning(data []byte, verb, run string) []byte {
 	return trimmed
 }
 
-// foldEvents builds a RunState from a decoded, chain-verified event slice.
+// FoldEvents builds a RunState from a decoded, chain-verified event slice.
 // Unknown kinds are skipped with a stderr warning; known kinds each apply
 // their own fold rule. The function is pure: no I/O beyond the warning.
-func foldEvents(events []Event) dsc.RunState {
+// Reduce is Events + FoldEvents; a caller that already holds an event slice
+// folds that same snapshot, so derived views cannot diverge from the events
+// they were derived from.
+func FoldEvents(events []Event) dsc.RunState {
 	state := dsc.RunState{
 		Streams: make(map[string]dsc.StreamRecord),
 	}
