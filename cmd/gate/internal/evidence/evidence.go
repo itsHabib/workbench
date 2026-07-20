@@ -50,10 +50,10 @@ type Comment struct {
 	Path   string `json:"path,omitempty"`
 	Line   int    `json:"line,omitempty"`
 	Body   string `json:"body"`
-	// CommitID is the head commit the comment was originally posted against
-	// (original_commit_id). Empty for issue-level comments, which have no
-	// commit anchor. Verifiers use it to tell a finding about the judged head
-	// from one layered onto an earlier cycle.
+	// CommitID is the commit the comment currently targets (GitHub re-anchors
+	// live comments as the head moves). Empty for issue-level comments, which
+	// have no commit anchor. Verifiers use it to tell a finding about the
+	// judged head from one layered onto an earlier cycle.
 	CommitID string `json:"commit_id,omitempty"`
 	// Resolved reports whether the comment's review thread has been resolved
 	// on GitHub. Always false for issue-level comments (no threads there).
@@ -120,11 +120,15 @@ type rawComment struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
-	Path             string `json:"path"`
-	Line             *int   `json:"line"`
-	OriginalLine     *int   `json:"original_line"`
-	Body             string `json:"body"`
-	OriginalCommitID string `json:"original_commit_id"`
+	Path         string `json:"path"`
+	Line         *int   `json:"line"`
+	OriginalLine *int   `json:"original_line"`
+	Body         string `json:"body"`
+	// CommitID is the commit the comment currently targets — GitHub re-anchors
+	// it as the PR head moves while the comment still applies. original_commit_id
+	// is deliberately not used: it stays pinned to the head the comment was first
+	// posted against, so a live comment on the judged head could read as stale.
+	CommitID string `json:"commit_id"`
 }
 
 const commentsPerPage = 100
@@ -154,7 +158,7 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 			Path:     rc.Path,
 			Line:     lineOf(rc),
 			Body:     rc.Body,
-			CommitID: rc.OriginalCommitID,
+			CommitID: rc.CommitID,
 			Resolved: resolved[rc.ID],
 		})
 	}
@@ -188,7 +192,10 @@ func pagedComments(ep string) ([]rawComment, error) {
 
 // resolvedThreadsQuery pages a PR's review threads with each thread's
 // resolution state and its comments' REST database ids, so resolution can be
-// joined onto the REST comment fetch.
+// joined onto the REST comment fetch. The inner comments list is capped at its
+// first 100 — un-paged on purpose: a longer thread's overflow comments simply
+// aren't marked resolved, which fails safe (they stay in the panel and can
+// only add a judgment call, never hide a finding).
 const resolvedThreadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviewThreads(first:100,after:$cursor){

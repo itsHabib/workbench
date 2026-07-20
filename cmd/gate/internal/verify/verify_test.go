@@ -445,6 +445,12 @@ func TestReviewsAllStalePanelEscalates(t *testing.T) {
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("all-stale panel must escalate, got %s (%s)", v.Decision, v.Why)
 	}
+	// Pin the filter path: a broken filter would still escalate (the stale
+	// comment reaches the scriptedModel, fails extraction, lowConf > 0), but
+	// through the wrong branch with different prose.
+	if !strings.Contains(v.Why, "no bot review comments for this head") {
+		t.Fatalf("all-stale escalation must cite no live comments, got %q", v.Why)
+	}
 }
 
 func TestReviewsUnanchoredCommentsAlwaysConsolidate(t *testing.T) {
