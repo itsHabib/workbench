@@ -29,6 +29,8 @@ triggers that would later split `contracts` into its own module.
   `gate` (the merge-authorization boundary — grants, the verifier ladder, the
   hash-chained decision log; exit codes 0 pass / 1 blocked / 2 parked /
   3 refused / 4 error are a load-bearing seam),
+  `console` (a local, read-only web view of gate's inbox — parked runs + the
+  grant ledger — that shells the gate binary for its data and never imports it),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.
