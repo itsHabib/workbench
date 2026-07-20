@@ -151,11 +151,20 @@ func bindDir(dir string, l Lease) error {
 }
 
 // importIdent is ship's proven import key: a retried import reusing the same
-// (repo, source, generated_at) must not mint a second run.
+// (repo, source, generated_at) must not mint a second run. For a CHILD sub-run
+// the parent linkage is part of identity: sibling children derived from one
+// driver manifest legitimately share (repo, source, generated_at), so parent +
+// parent_stream must discriminate them — otherwise a second child's import
+// dedupes to the first child's run and the sub-run isolation the orchestrator
+// depends on is destroyed (session-orchestrator spec §4 D1). Both are empty on a
+// parent or standalone run, so its key is unchanged and legacy ledgers still
+// dedupe identically.
 type importIdent struct {
-	repo        string
-	source      string
-	generatedAt string
+	repo         string
+	source       string
+	generatedAt  string
+	parent       string
+	parentStream string
 }
 
 // ImportHasDedupeKey reports whether a run_imported event carries the full
@@ -184,7 +193,13 @@ func importKey(e Event) (importIdent, bool) {
 	if b.Repo == "" || b.Source == "" || b.GeneratedAt == "" {
 		return importIdent{}, false
 	}
-	return importIdent{repo: b.Repo, source: b.Source, generatedAt: b.GeneratedAt}, true
+	return importIdent{
+		repo:         b.Repo,
+		source:       b.Source,
+		generatedAt:  b.GeneratedAt,
+		parent:       b.Parent,
+		parentStream: b.ParentStream,
+	}, true
 }
 
 // dedupeImport scans every run under dir for a committed run_imported carrying

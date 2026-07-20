@@ -56,7 +56,10 @@
         "generated_at": { "type": "string" },
         "manifest": { "type": "object", "description": "The driver.md frontmatter, verbatim." },
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream_spec" } },
-        "ship_run_ref": { "type": "string" }
+        "ship_run_ref": { "type": "string" },
+        "parent": { "type": "string", "description": "The parent run id (dsr_…) for a child sub-run; empty on a parent or standalone run (session-orchestrator spec §4 D1)." },
+        "parent_stream": { "type": "string", "description": "The parent stream (dss_…) this child sub-run implements; empty on a parent or standalone run." },
+        "done_boundary": { "type": "string", "description": "The per-run done policy: green | pr-open | merged. Empty reads as merged. Governs the drive only — no new event or state-machine transition (spec §4 D7)." }
       }
     },
     "stream_spec": {
@@ -77,7 +80,9 @@
       "properties": {
         "branch": { "type": "string", "description": "The git branch the dispatch opened, when known." },
         "worktree": { "type": "string", "description": "The absolute path of the dispatch worktree, when known." },
-        "engine": { "type": "string", "description": "The dispatching engine (e.g. session) — live ledgers already carry it." }
+        "engine": { "type": "string", "description": "The dispatching engine (e.g. session) — live ledgers already carry it." },
+        "child_run": { "type": "string", "description": "The child sub-run (dsr_…) this parent stream delegated its impl to — the rollup join link (session-orchestrator spec §4 D1)." },
+        "worktree_conflict": { "type": "boolean", "description": "The dispatch hit (and resolved) a worktree/branch collision — a per-child friction flag (spec §4 D4)." }
       }
     },
     "stream_attempt_body": {

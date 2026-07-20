@@ -1,10 +1,14 @@
 # workbench-mcp
 
 The unified workbench MCP surface (v0): a JSON-RPC 2.0 server over **stdio**
-exposing the four driver-state verbs — `driver_record`, `driver_state`,
-`driver_runs`, `driver_verify`. It is the **client boundary** of the
-driver-state plane (spec `docs/features/driver-state/spec.md` §6, §11); the P3
-validation gate runs against it.
+exposing the driver-state verbs — `driver_record`, `driver_transition`,
+`driver_state`, `driver_runs`, `driver_verify`, `driver_rollup`. It is the
+**client boundary** of the driver-state plane (spec
+`docs/features/driver-state/spec.md` §6, §11; thin-orchestrator additions in
+`docs/features/session-orchestrator/spec.md` §6). `driver_transition` is the
+ergonomic recorder — flat facts in, a deterministic (retry-idempotent) id and
+the body minted server-side; `driver_rollup` joins a parent run to its child
+sub-runs. The P3 validation gate runs against this surface.
 
 A workbench tenant: the binary is `cmd/workbench-mcp`, the guts are private under
 `cmd/workbench-mcp/internal/server`. It imports at most `driverstate` (the ledger

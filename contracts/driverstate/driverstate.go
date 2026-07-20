@@ -119,19 +119,47 @@ const (
 	StatusSkipped    = "skipped"
 )
 
+// Done boundaries (session-orchestrator spec §4 D7): the per-run policy for how
+// a stream reaches DONE. Merged is the pers/ default (drive through the gate to
+// a merge); PROpen stops at an open PR (local-only / human-merge repos — no
+// cloud dispatch, no bot reviewers, no gate merge); Green additionally waits for
+// the local gate/CI to report green before stopping. An empty done_boundary
+// reads as Merged (DoneBoundaryOrDefault). No boundary needs a new event or a
+// state-machine change — it only governs the drive.
+const (
+	DoneBoundaryGreen  = "green"
+	DoneBoundaryPROpen = "pr-open"
+	DoneBoundaryMerged = "merged"
+)
+
+// DoneBoundaryOrDefault maps an empty boundary to the Merged default and passes
+// any set value through unchanged — one place so readers never re-derive the
+// default.
+func DoneBoundaryOrDefault(b string) string {
+	if b == "" {
+		return DoneBoundaryMerged
+	}
+	return b
+}
+
 // RunImportedBody is the manifest snapshot at import. Manifest carries the
 // driver.md frontmatter VERBATIM (render round-trips, and a run with only
 // run_imported resumes from it — spec §7 F3); Repo/Source/Streams are the
 // typed essentials readers index without parsing the snapshot. ShipRunRef is
 // the optional ship drv_id correlate (spec §10 Q2 — field included, semantics
-// deferred).
+// deferred). Parent/ParentStream link a child sub-run up to the parent run and
+// stream it implements (session-orchestrator spec §4 D1); both are empty on a
+// parent or standalone run. DoneBoundary is the per-run done policy (§4 D7).
 type RunImportedBody struct {
-	Repo        string          `json:"repo"`
-	Source      string          `json:"source"`
-	GeneratedAt string          `json:"generated_at,omitempty"`
-	Manifest    json.RawMessage `json:"manifest"`
-	Streams     []StreamSpec    `json:"streams"`
-	ShipRunRef  string          `json:"ship_run_ref,omitempty"`
+	Repo         string          `json:"repo"`
+	Source       string          `json:"source"`
+	GeneratedAt  string          `json:"generated_at,omitempty"`
+	Manifest     json.RawMessage `json:"manifest"`
+	Streams      []StreamSpec    `json:"streams"`
+	ShipRunRef   string          `json:"ship_run_ref,omitempty"`
+	Parent       string          `json:"parent,omitempty"`
+	ParentStream string          `json:"parent_stream,omitempty"`
+	DoneBoundary string          `json:"done_boundary,omitempty"`
 }
 
 // StreamSpec is one stream in the imported manifest snapshot.
@@ -152,6 +180,13 @@ type StreamDispatchedBody struct {
 	// Engine names the dispatching engine (e.g. "session") — live ledgers
 	// already carry it, so the typed body must too.
 	Engine string `json:"engine,omitempty"`
+	// ChildRun is the child sub-run (dsr_…) this parent stream delegated its
+	// impl to (session-orchestrator spec §4 D1) — the join link the rollup
+	// reads. Empty on a non-delegating dispatch.
+	ChildRun string `json:"child_run,omitempty"`
+	// WorktreeConflict records that this dispatch hit (and resolved) a
+	// worktree/branch collision — a per-child friction flag (spec §4 D4).
+	WorktreeConflict bool `json:"worktree_conflict,omitempty"`
 }
 
 // StreamAttemptBody is one dispatch attempt on a stream. Seq is append-only
@@ -197,12 +232,17 @@ type RunState struct {
 	Streams map[string]StreamRecord `json:"streams"`
 }
 
-// RunRecord is a run's derived summary.
+// RunRecord is a run's derived summary. Parent/ParentStream/DoneBoundary are
+// folded from run_imported (empty parent = a parent or standalone run;
+// DoneBoundary reads through DoneBoundaryOrDefault at the call site).
 type RunRecord struct {
-	Repo       string    `json:"repo"`
-	Source     string    `json:"source"`
-	Status     string    `json:"status"`
-	ImportedAt time.Time `json:"imported_at"`
+	Repo         string    `json:"repo"`
+	Source       string    `json:"source"`
+	Status       string    `json:"status"`
+	ImportedAt   time.Time `json:"imported_at"`
+	Parent       string    `json:"parent,omitempty"`
+	ParentStream string    `json:"parent_stream,omitempty"`
+	DoneBoundary string    `json:"done_boundary,omitempty"`
 }
 
 // StreamRecord is a stream's derived summary: current status plus the facts
@@ -217,6 +257,15 @@ type StreamRecord struct {
 	Branch string `json:"branch,omitempty"`
 	// Worktree is folded from stream_dispatched — the dispatch worktree locator.
 	Worktree string `json:"worktree,omitempty"`
+	// ChildRun is folded from stream_dispatched.child_run — the sub-run this
+	// stream delegated its impl to (session-orchestrator spec §4 D1).
+	ChildRun string `json:"child_run,omitempty"`
+	// ReviewCycles is the count of review_cycle events folded onto this stream —
+	// the gate-loop count surfaced for friction (spec §4 D4). It is a derived
+	// counter, not a stored field.
+	ReviewCycles int `json:"review_cycles,omitempty"`
+	// WorktreeConflict is folded from stream_dispatched.worktree_conflict.
+	WorktreeConflict bool `json:"worktree_conflict,omitempty"`
 }
 
 // AttemptRecord is one folded attempt in a StreamRecord.

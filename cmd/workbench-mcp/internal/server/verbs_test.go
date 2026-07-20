@@ -255,3 +255,168 @@ func TestRecordMintedImportRequiresGeneratedAt(t *testing.T) {
 		t.Fatal("want generated_at rejection, got success")
 	}
 }
+
+// callTransition drives a driver_transition through the full tools/call path.
+func callTransition(t *testing.T, s *Server, p transitionParams) toolResult {
+	t.Helper()
+	args, _ := json.Marshal(p)
+	return callVerb(t, s, "driver_transition", args)
+}
+
+func factsOf(v any) json.RawMessage {
+	raw, _ := json.Marshal(v)
+	return raw
+}
+
+// TestTransitionMintsRunAndDerivesID drives a run through driver_transition (not
+// driver_record): the caller passes flat facts and no event id, and the server
+// mints the run and a deterministic evt_ id for every transition.
+func TestTransitionMintsRunAndDerivesID(t *testing.T) {
+	s := New(t.TempDir())
+	imp := callTransition(t, s, transitionParams{
+		Kind:  string(dsc.KindRunImported),
+		Actor: "session:o",
+		Facts: factsOf(dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-20T00:00:00Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/x.md"}},
+		}),
+	})
+	if imp.IsError {
+		t.Fatalf("transition import errored: %s", resultText(t, imp))
+	}
+	var sealed driverstate.Event
+	if err := json.Unmarshal([]byte(resultText(t, imp)), &sealed); err != nil {
+		t.Fatalf("decode sealed: %v", err)
+	}
+	run := sealed.Run
+	if !strings.HasPrefix(sealed.ID, "evt_") || len(sealed.ID) != len("evt_")+32 {
+		t.Fatalf("server did not mint a canonical evt_ id: %q", sealed.ID)
+	}
+
+	disp := callTransition(t, s, transitionParams{
+		Run: run, Kind: string(dsc.KindStreamDispatched), Stream: "dss_a", Actor: "session:o",
+		Facts: factsOf(dsc.StreamDispatchedBody{Engine: "session-orchestrator", ChildRun: "dsr_child"}),
+	})
+	if disp.IsError {
+		t.Fatalf("transition dispatch errored: %s", resultText(t, disp))
+	}
+}
+
+// TestTransitionIsIdempotentByFacts is the core ergonomics guarantee: the same
+// transition recorded twice (no client-minted id, no reuse discipline) maps to
+// the same deterministic id, so the second call returns the original event and
+// appends nothing.
+func TestTransitionIsIdempotentByFacts(t *testing.T) {
+	s := New(t.TempDir())
+	imp := callTransition(t, s, transitionParams{
+		Kind: string(dsc.KindRunImported), Actor: "session:o",
+		Facts: factsOf(dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-20T00:00:00Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/x.md"}},
+		}),
+	})
+	run := mustRun(t, imp)
+
+	pr := dsc.StreamPROpenedBody{PR: 5, URL: "http://pr/5", HeadSHA: "abc"}
+	// Dispatch → terminal attempt → the PR transition, twice.
+	callTransition(t, s, transitionParams{Run: run, Kind: string(dsc.KindStreamDispatched), Stream: "dss_a", Actor: "session:o", Facts: factsOf(dsc.StreamDispatchedBody{})})
+	callTransition(t, s, transitionParams{Run: run, Kind: string(dsc.KindStreamAttempt), Stream: "dss_a", Actor: "session:o", Facts: factsOf(dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/x.md", Terminal: true})})
+	first := callTransition(t, s, transitionParams{Run: run, Kind: string(dsc.KindStreamPROpened), Stream: "dss_a", Actor: "session:o", Facts: factsOf(pr)})
+	second := callTransition(t, s, transitionParams{Run: run, Kind: string(dsc.KindStreamPROpened), Stream: "dss_a", Actor: "session:o", Facts: factsOf(pr)})
+	if first.IsError || second.IsError {
+		t.Fatalf("pr transition errored: %s / %s", resultText(t, first), resultText(t, second))
+	}
+	var a, b driverstate.Event
+	json.Unmarshal([]byte(resultText(t, first)), &a)
+	json.Unmarshal([]byte(resultText(t, second)), &b)
+	if a.ID != b.ID || a.Hash != b.Hash {
+		t.Fatalf("retry was not idempotent: first %s/%s, second %s/%s", a.ID, a.Hash, b.ID, b.Hash)
+	}
+}
+
+// TestTransitionReDispatchToNewChildGetsDistinctID guards the re-dispatch
+// collision: the state machine allows failed → dispatched, so a parent
+// re-dispatching a stream to a NEW child must not reuse the first dispatch's
+// deterministic id (which would silently dedupe the second delegation away). The
+// child_run discriminator keeps them distinct while a same-child retry stays
+// idempotent.
+func TestTransitionReDispatchToNewChildGetsDistinctID(t *testing.T) {
+	e1 := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c1"})}
+	e2 := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c2"})}
+	e1retry := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c1"})}
+	id1, err1 := deterministicEventID(e1)
+	id2, err2 := deterministicEventID(e2)
+	id1r, err3 := deterministicEventID(e1retry)
+	if err1 != nil || err2 != nil || err3 != nil {
+		t.Fatalf("id errors: %v %v %v", err1, err2, err3)
+	}
+	if id1 == id2 {
+		t.Errorf("re-dispatch to a new child collided: both %s", id1)
+	}
+	if id1 != id1r {
+		t.Errorf("same-child retry was not idempotent: %s vs %s", id1, id1r)
+	}
+}
+
+// TestRollupAndParentFilterThroughVerbs builds a parent + one delegated child
+// through driver_transition and asserts driver_rollup joins them and
+// driver_runs{parent} lists the child.
+func TestRollupAndParentFilterThroughVerbs(t *testing.T) {
+	// Parent imports first, then the child names it as its parent.
+	s2 := New(t.TempDir())
+	parentImp := callTransition(t, s2, transitionParams{
+		Kind: string(dsc.KindRunImported), Actor: "session:parent",
+		Facts: factsOf(dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-20T00:00:00Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+			DoneBoundary: dsc.DoneBoundaryMerged,
+		}),
+	})
+	parent := mustRun(t, parentImp)
+
+	child := callTransition(t, s2, transitionParams{
+		Kind: string(dsc.KindRunImported), Actor: "session:child",
+		Facts: factsOf(dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-20T00:00:01Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+			Parent: parent, ParentStream: "dss_a",
+		}),
+	})
+	childRun := mustRun(t, child)
+	callTransition(t, s2, transitionParams{Run: childRun, Kind: string(dsc.KindStreamDispatched), Stream: "dss_a", Actor: "session:child", Facts: factsOf(dsc.StreamDispatchedBody{WorktreeConflict: true})})
+	callTransition(t, s2, transitionParams{Run: childRun, Kind: string(dsc.KindStreamAttempt), Stream: "dss_a", Actor: "session:child", Facts: factsOf(dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/a.md", Terminal: true})})
+	callTransition(t, s2, transitionParams{Run: childRun, Kind: string(dsc.KindStreamPROpened), Stream: "dss_a", Actor: "session:child", Facts: factsOf(dsc.StreamPROpenedBody{PR: 9, URL: "http://pr/9", HeadSHA: "h"})})
+
+	// Parent mirrors the stream, linking the child.
+	callTransition(t, s2, transitionParams{Run: parent, Kind: string(dsc.KindStreamDispatched), Stream: "dss_a", Actor: "session:parent", Facts: factsOf(dsc.StreamDispatchedBody{ChildRun: childRun})})
+
+	// driver_runs{parent} lists exactly the child.
+	runsArgs, _ := json.Marshal(runsParams{Parent: parent})
+	runs := callVerb(t, s2, "driver_runs", runsArgs)
+	var summaries []driverstate.RunSummary
+	json.Unmarshal([]byte(resultText(t, runs)), &summaries)
+	if len(summaries) != 1 || summaries[0].Run != childRun {
+		t.Fatalf("parent filter wrong: %+v", summaries)
+	}
+
+	// driver_rollup joins parent → child.
+	rollupArgs, _ := json.Marshal(runParam{Run: parent})
+	rollup := callVerb(t, s2, "driver_rollup", rollupArgs)
+	var pr driverstate.ParentRollup
+	if err := json.Unmarshal([]byte(resultText(t, rollup)), &pr); err != nil {
+		t.Fatalf("decode rollup: %v", err)
+	}
+	if len(pr.Streams) != 1 {
+		t.Fatalf("want 1 stream in rollup, got %+v", pr)
+	}
+	row := pr.Streams[0]
+	if row.ChildRun != childRun || row.ChildStatus != dsc.StatusPROpen || row.PR != 9 {
+		t.Fatalf("rollup join wrong: %+v", row)
+	}
+	if !row.Friction.WorktreeConflict {
+		t.Fatalf("friction did not carry the child's worktree conflict: %+v", row.Friction)
+	}
+}

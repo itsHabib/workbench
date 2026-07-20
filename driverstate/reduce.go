@@ -90,7 +90,7 @@ func applyEventToState(state *dsc.RunState, finished *bool, e Event) {
 	case dsc.KindStreamPROpened:
 		applyStreamPROpened(state, e)
 	case dsc.KindReviewCycle:
-		// Status stays pr_open; no fold needed.
+		applyReviewCycle(state, e)
 	case dsc.KindStreamLanded:
 		setStreamStatus(state, e.Stream, dsc.StatusLanded)
 	case dsc.KindStreamFailed:
@@ -115,6 +115,9 @@ func applyRunImported(state *dsc.RunState, e Event) {
 	state.Run.Repo = b.Repo
 	state.Run.Source = b.Source
 	state.Run.ImportedAt = e.Time
+	state.Run.Parent = b.Parent
+	state.Run.ParentStream = b.ParentStream
+	state.Run.DoneBoundary = b.DoneBoundary
 	for _, s := range b.Streams {
 		if _, exists := state.Streams[s.Stream]; !exists {
 			state.Streams[s.Stream] = dsc.StreamRecord{Status: dsc.StatusPending}
@@ -132,7 +135,19 @@ func applyStreamDispatched(state *dsc.RunState, e Event) {
 	if err := json.Unmarshal(e.Body, &b); err == nil {
 		rec.Branch = b.Branch
 		rec.Worktree = b.Worktree
+		rec.ChildRun = b.ChildRun
+		rec.WorktreeConflict = b.WorktreeConflict
 	}
+	state.Streams[e.Stream] = rec
+}
+
+// applyReviewCycle counts one review cycle on the stream (spec §4 D4 — the
+// gate-loop count). Status stays pr_open; only the counter advances. A
+// re-dispatched stream is a new attempt, not a reset of prior cycles, so the
+// count accumulates across the stream's whole life.
+func applyReviewCycle(state *dsc.RunState, e Event) {
+	rec := state.Streams[e.Stream]
+	rec.ReviewCycles++
 	state.Streams[e.Stream] = rec
 }
 

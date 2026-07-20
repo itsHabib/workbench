@@ -17,6 +17,10 @@ type RunSummary struct {
 	Repo       string    `json:"repo,omitempty"`
 	Source     string    `json:"source,omitempty"`
 	ImportedAt time.Time `json:"imported_at,omitempty"`
+	// Parent is the parent run id when this run is a child sub-run — empty for a
+	// parent or standalone run. It lets a listing filter a run's children
+	// (session-orchestrator spec §4 D1).
+	Parent string `json:"parent,omitempty"`
 }
 
 // Runs lists every started run under dir. It never hard-fails on a single bad
@@ -64,5 +68,6 @@ func summariseRun(dir, run string) RunSummary {
 		Repo:       state.Run.Repo,
 		Source:     state.Run.Source,
 		ImportedAt: state.Run.ImportedAt,
+		Parent:     state.Run.Parent,
 	}
 }

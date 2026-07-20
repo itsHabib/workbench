@@ -463,3 +463,73 @@ func TestCLIRenderUnknownRunPropagatesError(t *testing.T) {
 		t.Fatalf("error = %v, want read-path not-found error", err)
 	}
 }
+
+// seedParentChild records a child sub-run and a parent run whose stream mirror
+// links it, both stopping at pr_open (a pr-open boundary), so the rollup joins
+// cleanly with agreement.
+func seedParentChild(t *testing.T, dir string) {
+	t.Helper()
+	child := "dsr_child"
+	childImp := eventLine("evt_ci", dsc.KindRunImported, "", "2026-07-16T00:00:00Z", dsc.RunImportedBody{
+		Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-16T00:00:00Z",
+		Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+		Parent: "dsr_parent", ParentStream: "dss_a",
+	})
+	runCLI(t, dir, childImp, "record", "--run", child)
+	runCLI(t, dir, eventLine("evt_cd", dsc.KindStreamDispatched, "dss_a", "2026-07-16T00:01:00Z", dsc.StreamDispatchedBody{WorktreeConflict: true}), "record", "--run", child)
+	runCLI(t, dir, eventLine("evt_ca", dsc.KindStreamAttempt, "dss_a", "2026-07-16T00:02:00Z", dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/a.md", Terminal: true}), "record", "--run", child)
+	runCLI(t, dir, eventLine("evt_cp", dsc.KindStreamPROpened, "dss_a", "2026-07-16T00:03:00Z", dsc.StreamPROpenedBody{PR: 9, URL: "http://pr/9", HeadSHA: "h"}), "record", "--run", child)
+
+	parent := "dsr_parent"
+	parentImp := eventLine("evt_pi", dsc.KindRunImported, "", "2026-07-16T00:00:00Z", dsc.RunImportedBody{
+		Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-16T00:00:10Z",
+		Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+		DoneBoundary: dsc.DoneBoundaryPROpen,
+	})
+	runCLI(t, dir, parentImp, "record", "--run", parent)
+	runCLI(t, dir, eventLine("evt_pd", dsc.KindStreamDispatched, "dss_a", "2026-07-16T00:04:00Z", dsc.StreamDispatchedBody{ChildRun: child}), "record", "--run", parent)
+	runCLI(t, dir, eventLine("evt_pa", dsc.KindStreamAttempt, "dss_a", "2026-07-16T00:05:00Z", dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/a.md", Terminal: true}), "record", "--run", parent)
+	runCLI(t, dir, eventLine("evt_pp", dsc.KindStreamPROpened, "dss_a", "2026-07-16T00:06:00Z", dsc.StreamPROpenedBody{PR: 9, URL: "http://pr/9", HeadSHA: "h"}), "record", "--run", parent)
+}
+
+func TestCLIRollupJSONJoinsChild(t *testing.T) {
+	dir := t.TempDir()
+	seedParentChild(t, dir)
+	got := runCLI(t, dir, "", "rollup", "--run", "dsr_parent", "--json")
+	var r driverstate.ParentRollup
+	if err := json.Unmarshal([]byte(got), &r); err != nil {
+		t.Fatalf("decode rollup json: %v\n%s", err, got)
+	}
+	if r.DoneBoundary != dsc.DoneBoundaryPROpen || !r.BoundaryReached {
+		t.Errorf("boundary wrong: %+v", r)
+	}
+	if len(r.Streams) != 1 {
+		t.Fatalf("want 1 stream, got %+v", r.Streams)
+	}
+	s := r.Streams[0]
+	if s.ChildRun != "dsr_child" || s.ChildStatus != dsc.StatusPROpen || s.PR != 9 || !s.Agrees || !s.Friction.WorktreeConflict {
+		t.Errorf("rollup row wrong: %+v", s)
+	}
+}
+
+func TestCLIRunsParentFilter(t *testing.T) {
+	dir := t.TempDir()
+	seedParentChild(t, dir)
+	got := runCLI(t, dir, "", "runs", "--parent", "dsr_parent", "--json")
+	var summaries []driverstate.RunSummary
+	if err := json.Unmarshal([]byte(got), &summaries); err != nil {
+		t.Fatalf("decode runs json: %v\n%s", err, got)
+	}
+	if len(summaries) != 1 || summaries[0].Run != "dsr_child" {
+		t.Fatalf("parent filter wrong: %+v", summaries)
+	}
+}
+
+func TestCLIRollupRequiresRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(driverstate.StateDirEnv, dir)
+	var out, errb bytes.Buffer
+	if err := run([]string{"rollup"}, strings.NewReader(""), &out, &errb); err == nil {
+		t.Fatalf("rollup with no --run must error")
+	}
+}
