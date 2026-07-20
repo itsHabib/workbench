@@ -62,11 +62,13 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 	}
 	var body struct {
 		Comments []struct {
-			Author string `json:"author"`
-			IsBot  bool   `json:"is_bot"`
-			Path   string `json:"path"`
-			Line   int    `json:"line"`
-			Body   string `json:"body"`
+			Author   string `json:"author"`
+			IsBot    bool   `json:"is_bot"`
+			Path     string `json:"path"`
+			Line     int    `json:"line"`
+			Body     string `json:"body"`
+			CommitID string `json:"commit_id"`
+			Resolved bool   `json:"resolved"`
 		} `json:"comments"`
 	}
 	if err := json.Unmarshal(a.Body, &body); err != nil {
@@ -81,9 +83,19 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		Tier:       "T0",
 		Confidence: 1.0,
 	}
-	actionable, lowConf, processed := 0, 0, 0
+	actionable, lowConf, processed, stale := 0, 0, 0, 0
 	for _, c := range body.Comments {
 		if !c.IsBot || strings.Contains(c.Body, "review-coordinator-verdict") {
+			continue
+		}
+		// Bot comments layer across review cycles — nothing is overwritten — so
+		// an inline comment whose thread is resolved, or that was posted against
+		// an earlier head than the one this run judges, is a prior cycle's
+		// finding, not evidence about this head. Consolidating it re-litigates
+		// fixed findings and buries fresh ones in stale noise. Issue-level
+		// comments carry no commit anchor and are never dropped here.
+		if c.Resolved || (c.CommitID != "" && subject.HeadSHA != "" && c.CommitID != subject.HeadSHA) {
+			stale++
 			continue
 		}
 		processed++
@@ -127,19 +139,25 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		}
 	}
 
+	suffix := ""
+	if stale > 0 {
+		suffix = fmt.Sprintf(" (%d stale/resolved comments from earlier cycles excluded)", stale)
+	}
 	switch {
 	case processed == 0:
 		// An empty panel is not a reviewed panel: a PR opened minutes ago,
 		// before any bot has run, must not read as consolidated. Escalate
 		// (the local rung's fail-closed) rather than pass — a judge can
-		// confirm the panel is genuinely empty.
+		// confirm the panel is genuinely empty. An all-stale panel lands here
+		// too: every recorded finding predates this head, so the judged head
+		// has no live review yet.
 		v.Decision = DecisionEscalate
-		v.Why = "no bot review comments yet — cannot consolidate a panel"
+		v.Why = "no bot review comments for this head — cannot consolidate a panel" + suffix
 	case actionable > 0 || lowConf > 0:
 		v.Decision = DecisionEscalate
-		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment", processed, actionable, lowConf)
+		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment%s", processed, actionable, lowConf, suffix)
 	default:
-		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)", processed)
+		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)%s", processed, suffix)
 	}
 	return Record(st, run, []string{commentsEvidenceID}, v)
 }

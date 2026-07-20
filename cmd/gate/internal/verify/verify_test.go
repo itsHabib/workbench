@@ -386,6 +386,82 @@ func TestReviewsEmptyPanelEscalates(t *testing.T) {
 	}
 }
 
+// reviewsWithSubject mirrors reviewsWith but pins the judged head, so the
+// stale-comment filter has a head to anchor against.
+func reviewsWithSubject(t *testing.T, subject Subject, comments []map[string]any, model Model) Verdict {
+	t.Helper()
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"comments": comments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := Reviews(st, "run_t", evd.ID, subject, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestReviewsDropsStaleAndResolvedComments(t *testing.T) {
+	// Bot comments layer across cycles: a resolved thread and a comment
+	// anchored to an earlier head are prior-cycle findings, not evidence about
+	// the judged head. Only the head-anchored, unresolved comment reaches the
+	// extractor; the panel passes on its nit instead of re-escalating fixed
+	// findings.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"typo in comment","severity":"low","verdict":"nit","confidence":0.9}`,
+	}}
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "old P1, fixed cycles ago", "commit_id": "oldsha"},
+		{"author": "cursor[bot]", "is_bot": true, "body": "resolved finding", "commit_id": "headsha", "resolved": true},
+		{"author": "claude", "is_bot": true, "body": "typo", "commit_id": "headsha"},
+	}, m)
+	if v.Decision != DecisionPass {
+		t.Fatalf("stale/resolved findings must not escalate, got %s (%s)", v.Decision, v.Why)
+	}
+	if m.calls != 1 {
+		t.Fatalf("only the live comment may reach the extractor, got %d calls", m.calls)
+	}
+	if !strings.Contains(v.Why, "2 stale/resolved") {
+		t.Fatalf("why must surface the excluded count, got %q", v.Why)
+	}
+}
+
+func TestReviewsAllStalePanelEscalates(t *testing.T) {
+	// A panel where every finding predates the judged head is an unreviewed
+	// head, not a clean one: fail closed to judgment.
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "old finding", "commit_id": "oldsha"},
+	}, &scriptedModel{})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("all-stale panel must escalate, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+func TestReviewsUnanchoredCommentsAlwaysConsolidate(t *testing.T) {
+	// Issue-level comments carry no commit anchor and evidence recorded before
+	// this change carries none either — neither may be dropped as stale.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"summary finding","severity":"high","verdict":"actionable","confidence":0.9}`,
+	}}
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "issue-level summary"},
+	}, m)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("unanchored actionable comment must still escalate, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func TestReadinessReviewDecisionBlocks(t *testing.T) {
 	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
 	v := readinessFor(t, map[string]any{

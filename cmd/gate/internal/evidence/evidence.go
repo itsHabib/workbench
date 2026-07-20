@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
@@ -48,6 +50,14 @@ type Comment struct {
 	Path   string `json:"path,omitempty"`
 	Line   int    `json:"line,omitempty"`
 	Body   string `json:"body"`
+	// CommitID is the head commit the comment was originally posted against
+	// (original_commit_id). Empty for issue-level comments, which have no
+	// commit anchor. Verifiers use it to tell a finding about the judged head
+	// from one layered onto an earlier cycle.
+	CommitID string `json:"commit_id,omitempty"`
+	// Resolved reports whether the comment's review thread has been resolved
+	// on GitHub. Always false for issue-level comments (no threads there).
+	Resolved bool `json:"resolved,omitempty"`
 }
 
 type commentsBody struct {
@@ -105,14 +115,16 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 }
 
 type rawComment struct {
+	ID   int64 `json:"id"`
 	User struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
-	Path         string `json:"path"`
-	Line         *int   `json:"line"`
-	OriginalLine *int   `json:"original_line"`
-	Body         string `json:"body"`
+	Path             string `json:"path"`
+	Line             *int   `json:"line"`
+	OriginalLine     *int   `json:"original_line"`
+	Body             string `json:"body"`
+	OriginalCommitID string `json:"original_commit_id"`
 }
 
 const commentsPerPage = 100
@@ -122,36 +134,135 @@ const commentsPerPage = 100
 // exhaustion: the consolidator treats this artifact as the complete panel,
 // so a truncated fetch would silently drop findings.
 func fetchComments(pr PRRef) ([]Comment, error) {
-	var out []Comment
-	endpoints := []string{
-		fmt.Sprintf("repos/%s/pulls/%d/comments", pr.Repo, pr.Number),
-		fmt.Sprintf("repos/%s/issues/%d/comments", pr.Repo, pr.Number),
+	resolved, err := fetchResolvedIDs(pr)
+	if err != nil {
+		return nil, err
 	}
-	for _, ep := range endpoints {
-		for page := 1; ; page++ {
-			raw, err := gh("api", fmt.Sprintf("%s?per_page=%d&page=%d", ep, commentsPerPage, page))
-			if err != nil {
-				return nil, err
-			}
-			var rcs []rawComment
-			if err := json.Unmarshal(raw, &rcs); err != nil {
-				return nil, fmt.Errorf("evidence: parse comments: %w", err)
-			}
-			for _, rc := range rcs {
-				out = append(out, Comment{
-					Author: rc.User.Login,
-					IsBot:  rc.User.Type == "Bot",
-					Path:   rc.Path,
-					Line:   lineOf(rc),
-					Body:   rc.Body,
-				})
-			}
-			if len(rcs) < commentsPerPage {
-				break
-			}
-		}
+	inline, err := pagedComments(fmt.Sprintf("repos/%s/pulls/%d/comments", pr.Repo, pr.Number))
+	if err != nil {
+		return nil, err
+	}
+	issue, err := pagedComments(fmt.Sprintf("repos/%s/issues/%d/comments", pr.Repo, pr.Number))
+	if err != nil {
+		return nil, err
+	}
+	var out []Comment
+	for _, rc := range inline {
+		out = append(out, Comment{
+			Author:   rc.User.Login,
+			IsBot:    rc.User.Type == "Bot",
+			Path:     rc.Path,
+			Line:     lineOf(rc),
+			Body:     rc.Body,
+			CommitID: rc.OriginalCommitID,
+			Resolved: resolved[rc.ID],
+		})
+	}
+	for _, rc := range issue {
+		out = append(out, Comment{
+			Author: rc.User.Login,
+			IsBot:  rc.User.Type == "Bot",
+			Body:   rc.Body,
+		})
 	}
 	return out, nil
+}
+
+func pagedComments(ep string) ([]rawComment, error) {
+	var out []rawComment
+	for page := 1; ; page++ {
+		raw, err := gh("api", fmt.Sprintf("%s?per_page=%d&page=%d", ep, commentsPerPage, page))
+		if err != nil {
+			return nil, err
+		}
+		var rcs []rawComment
+		if err := json.Unmarshal(raw, &rcs); err != nil {
+			return nil, fmt.Errorf("evidence: parse comments: %w", err)
+		}
+		out = append(out, rcs...)
+		if len(rcs) < commentsPerPage {
+			return out, nil
+		}
+	}
+}
+
+// resolvedThreadsQuery pages a PR's review threads with each thread's
+// resolution state and its comments' REST database ids, so resolution can be
+// joined onto the REST comment fetch.
+const resolvedThreadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+  repository(owner:$owner,name:$name){pullRequest(number:$number){
+    reviewThreads(first:100,after:$cursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{fullDatabaseId}}}}}}}`
+
+// fetchResolvedIDs returns the REST ids of every inline comment whose review
+// thread is resolved. Resolution lives only on the GraphQL reviewThreads
+// surface; the REST comments endpoints don't carry it, so the two fetches are
+// joined by comment database id.
+func fetchResolvedIDs(pr PRRef) (map[int64]bool, error) {
+	owner, name, ok := strings.Cut(pr.Repo, "/")
+	if !ok {
+		return nil, fmt.Errorf("evidence: bad repo %q", pr.Repo)
+	}
+	out := make(map[int64]bool)
+	cursor := ""
+	for {
+		args := []string{"api", "graphql",
+			"-f", "query=" + resolvedThreadsQuery,
+			"-f", "owner=" + owner,
+			"-f", "name=" + name,
+			"-F", fmt.Sprintf("number=%d", pr.Number),
+		}
+		if cursor != "" {
+			args = append(args, "-f", "cursor="+cursor)
+		}
+		raw, err := gh(args...)
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			Data struct {
+				Repository struct {
+					PullRequest struct {
+						ReviewThreads struct {
+							PageInfo struct {
+								HasNextPage bool   `json:"hasNextPage"`
+								EndCursor   string `json:"endCursor"`
+							} `json:"pageInfo"`
+							Nodes []struct {
+								IsResolved bool `json:"isResolved"`
+								Comments   struct {
+									Nodes []struct {
+										FullDatabaseID string `json:"fullDatabaseId"`
+									} `json:"nodes"`
+								} `json:"comments"`
+							} `json:"nodes"`
+						} `json:"reviewThreads"`
+					} `json:"pullRequest"`
+				} `json:"repository"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("evidence: parse review threads: %w", err)
+		}
+		threads := resp.Data.Repository.PullRequest.ReviewThreads
+		for _, th := range threads.Nodes {
+			if !th.IsResolved {
+				continue
+			}
+			for _, c := range th.Comments.Nodes {
+				id, err := strconv.ParseInt(c.FullDatabaseID, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("evidence: parse thread comment id %q: %w", c.FullDatabaseID, err)
+				}
+				out[id] = true
+			}
+		}
+		if !threads.PageInfo.HasNextPage {
+			return out, nil
+		}
+		cursor = threads.PageInfo.EndCursor
+	}
 }
 
 func lineOf(rc rawComment) int {
