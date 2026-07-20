@@ -2,6 +2,7 @@ package driverstate
 
 import (
 	"fmt"
+	"sort"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 )
@@ -76,6 +77,9 @@ func Rollup(dir, parent string) (ParentRollup, error) {
 		}
 		out.Streams = append(out.Streams, row)
 	}
+	// Deterministic order: parentState.Streams is a map, so sort by stream id so
+	// the CLI rendering and any index-based assertion are stable across runs.
+	sort.Slice(out.Streams, func(i, j int) bool { return out.Streams[i].Stream < out.Streams[j].Stream })
 	return out, nil
 }
 
@@ -151,25 +155,36 @@ func frictionOf(rec dsc.StreamRecord) Friction {
 }
 
 // mirrorAgrees reports whether the parent's mirrored stream status is consistent
-// with the child's own record. Agreement fails only when the parent LEADS the
-// child (a higher progress rank — recorded ahead of the child's facts) or the
-// mirrored PR contradicts the child's PR. A child ahead of the parent's mirror
-// is normal mid-flight and agrees.
+// with the child's own record. It disagrees when the parent recorded ahead of
+// what the child can back up:
+//   - a PR the mirror names contradicts the child's PR;
+//   - the parent reached a TERMINAL status (merged/skipped/failed) the child did
+//     not reach identically — merged-vs-skipped is a contradiction, not a lead,
+//     and equal happy-path rank must not mask it;
+//   - the parent leads a still-in-flight child up the happy path.
+//
+// A child that is further along than the parent's mirror is normal mid-flight
+// and agrees; a terminal child under a non-terminal parent is the parent simply
+// not having caught up, and also agrees.
 func mirrorAgrees(parentRec, childRec dsc.StreamRecord) bool {
-	if progressRank(parentRec.Status) > progressRank(childRec.Status) {
-		return false
-	}
 	if parentRec.PR != 0 && childRec.PR != 0 && parentRec.PR != childRec.PR {
 		return false
 	}
-	return true
+	if terminalStatus(parentRec.Status) {
+		return parentRec.Status == childRec.Status
+	}
+	if terminalStatus(childRec.Status) {
+		return true
+	}
+	return happyRank(parentRec.Status) <= happyRank(childRec.Status)
 }
 
-// progressRank orders stream statuses along the happy path so a mirror that ran
-// ahead of its child is detectable. Terminal off-path statuses (failed, skipped)
-// and any unknown value rank low — the mirror never advances past them, so a
-// low rank only ever helps catch a parent that leads.
-func progressRank(status string) int {
+// happyRank orders the NON-terminal happy path (pending → dispatched → landed →
+// pr_open → merged) so a mirror leading a still-in-flight child is detectable.
+// merged is the happy terminus (rank 4); the off-path terminals (skipped,
+// failed) and any unknown value rank 0 — callers gate terminal statuses through
+// terminalStatus first, so those never rely on this rank.
+func happyRank(status string) int {
 	switch status {
 	case dsc.StatusDispatched:
 		return 1
@@ -177,7 +192,7 @@ func progressRank(status string) int {
 		return 2
 	case dsc.StatusPROpen:
 		return 3
-	case dsc.StatusMerged, dsc.StatusSkipped:
+	case dsc.StatusMerged:
 		return 4
 	}
 	return 0
@@ -191,7 +206,7 @@ func reachedBoundary(status, boundary string) bool {
 	if terminalStatus(status) {
 		return true
 	}
-	return progressRank(status) >= boundaryRank(boundary)
+	return happyRank(status) >= boundaryRank(boundary)
 }
 
 // boundaryRank maps a done boundary to the happy-path rank a stream must reach.

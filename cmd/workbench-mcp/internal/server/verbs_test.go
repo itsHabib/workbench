@@ -334,6 +334,33 @@ func TestTransitionIsIdempotentByFacts(t *testing.T) {
 	}
 }
 
+// TestTransitionReDispatchToNewChildGetsDistinctID guards the re-dispatch
+// collision: the state machine allows failed → dispatched, so a parent
+// re-dispatching a stream to a NEW child must not reuse the first dispatch's
+// deterministic id (which would silently dedupe the second delegation away). The
+// child_run discriminator keeps them distinct while a same-child retry stays
+// idempotent.
+func TestTransitionReDispatchToNewChildGetsDistinctID(t *testing.T) {
+	e1 := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c1"})}
+	e2 := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c2"})}
+	e1retry := driverstate.Event{Run: "dsr_p", Kind: dsc.KindStreamDispatched, Stream: "dss_a",
+		Body: factsOf(dsc.StreamDispatchedBody{ChildRun: "dsr_c1"})}
+	id1, err1 := deterministicEventID(e1)
+	id2, err2 := deterministicEventID(e2)
+	id1r, err3 := deterministicEventID(e1retry)
+	if err1 != nil || err2 != nil || err3 != nil {
+		t.Fatalf("id errors: %v %v %v", err1, err2, err3)
+	}
+	if id1 == id2 {
+		t.Errorf("re-dispatch to a new child collided: both %s", id1)
+	}
+	if id1 != id1r {
+		t.Errorf("same-child retry was not idempotent: %s vs %s", id1, id1r)
+	}
+}
+
 // TestRollupAndParentFilterThroughVerbs builds a parent + one delegated child
 // through driver_transition and asserts driver_rollup joins them and
 // driver_runs{parent} lists the child.

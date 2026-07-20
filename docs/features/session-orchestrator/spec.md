@@ -228,7 +228,7 @@ cross-check (F-4, `agrees`), and the friction rollup (F-5). Pure read, no lease.
    | kind | natural key |
    |---|---|
    | `run_imported` | `(repo, source, generated_at)` — the existing import dedupe key |
-   | `stream_dispatched` | `(run, stream)` |
+   | `stream_dispatched` | `(run, stream, child_run)` — child_run discriminates a re-dispatch to a NEW child (the state machine allows `failed → dispatched`); a bare re-dispatch with no child_run needs `driver_record` with an explicit id |
    | `stream_pr_opened` | `(run, stream)` |
    | `stream_merged` | `(run, stream)` |
    | `stream_attempt` | `(run, stream, seq)` |

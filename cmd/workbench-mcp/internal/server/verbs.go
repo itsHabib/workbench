@@ -62,7 +62,7 @@ var verbs = []verb{
 	},
 	{
 		name:        "driver_rollup",
-		description: "Join a parent run to its child sub-runs: one row per stream with the parent's mirrored status, the child's own status, the PR, per-child friction (gate cycles, retries, worktree conflict), and whether the mirror agrees with the child (false = the parent recorded ahead of the child's facts). The resume roster + parent↔child cross-check in one read — never touches a child's impl context.",
+		description: "Join a parent run to its child sub-runs: one row per stream with the parent's mirrored status, the child's own status, the PR, per-child friction (gate cycles, retries, worktree conflict), and whether the mirror agrees with the child (false = the parent recorded ahead of the child's facts). The resume roster + parent↔child cross-check in one read — never touches a child's impl context. boundary_reached reflects LEDGER state only: for a green boundary it is true once every stream reached pr_open, NOT a claim that local CI is green (that is enforced by the drive, not the ledger).",
 		schema:      json.RawMessage(`{"type":"object","properties":{"run":{"type":"string"}},"required":["run"]}`),
 		handle:      (*Server).rollupVerb,
 	},
@@ -235,6 +235,18 @@ func naturalKey(e driverstate.Event) (string, error) {
 			return "", fmt.Errorf("driver_transition: review_cycle facts: %w", err)
 		}
 		return e.Run + "|" + e.Stream + "|cycle|" + strconv.Itoa(b.Cycle), nil
+	case dsc.KindStreamDispatched:
+		// stream_dispatched is REPEATABLE — the state machine allows
+		// failed → dispatched, so a re-dispatch to a NEW child must not collide
+		// with the first. child_run is that discriminator (each delegation targets
+		// a distinct sub-run); a retry of the SAME dispatch reuses its child_run
+		// and stays idempotent. A bare re-dispatch with no child_run cannot be
+		// disambiguated here — use driver_record with an explicit id for that.
+		var b dsc.StreamDispatchedBody
+		if err := json.Unmarshal(e.Body, &b); err != nil {
+			return "", fmt.Errorf("driver_transition: stream_dispatched facts: %w", err)
+		}
+		return e.Run + "|" + e.Stream + "|dispatched|" + b.ChildRun, nil
 	case dsc.KindRunFinished:
 		return e.Run + "|finished", nil
 	default:
@@ -299,14 +311,14 @@ func ensureRun(e *driverstate.Event) (bool, error) {
 		return false, nil
 	}
 	if e.Kind != dsc.KindRunImported {
-		return false, fmt.Errorf("driver_record: event kind %q requires a run", e.Kind)
+		return false, fmt.Errorf("driverstate: event kind %q requires a run", e.Kind)
 	}
 	// Minting a run for an omitted-run import is only retry-safe if the import
 	// carries its (repo, source, generated_at) dedupe key — otherwise a
 	// lost-response retry mints a second genuine run. Refuse rather than
 	// duplicate (the shared predicate is the same one the CLI uses).
 	if !driverstate.ImportHasDedupeKey(*e) {
-		return false, fmt.Errorf("driver_record: a run_imported without an explicit run must carry (repo, source, generated_at) so a retried import cannot mint a duplicate run")
+		return false, fmt.Errorf("driverstate: a run_imported without an explicit run must carry (repo, source, generated_at) so a retried import cannot mint a duplicate run")
 	}
 	id, err := driverstate.NewRunID()
 	if err != nil {

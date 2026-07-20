@@ -138,6 +138,35 @@ func TestRollupJoinsChildren(t *testing.T) {
 	}
 }
 
+// TestMirrorAgrees pins the parent↔child agreement cross-check, especially the
+// terminal-status cases a happy-path-only rank would mask (merged vs skipped).
+func TestMirrorAgrees(t *testing.T) {
+	rec := func(status string, pr int) dsc.StreamRecord { return dsc.StreamRecord{Status: status, PR: pr} }
+	cases := []struct {
+		name          string
+		parent, child dsc.StreamRecord
+		want          bool
+	}{
+		{"both merged", rec(dsc.StatusMerged, 5), rec(dsc.StatusMerged, 5), true},
+		{"parent merged, child skipped — contradiction", rec(dsc.StatusMerged, 0), rec(dsc.StatusSkipped, 0), false},
+		{"parent merged, child pr_open — parent leads", rec(dsc.StatusMerged, 0), rec(dsc.StatusPROpen, 0), false},
+		{"parent failed, child pending — parent leads a terminal", rec(dsc.StatusFailed, 0), rec(dsc.StatusPending, 0), false},
+		{"both skipped", rec(dsc.StatusSkipped, 0), rec(dsc.StatusSkipped, 0), true},
+		{"parent pr_open, child merged — child ahead", rec(dsc.StatusPROpen, 5), rec(dsc.StatusMerged, 5), true},
+		{"parent dispatched, child pr_open — child ahead", rec(dsc.StatusDispatched, 0), rec(dsc.StatusPROpen, 0), true},
+		{"parent pr_open, child dispatched — parent leads", rec(dsc.StatusPROpen, 0), rec(dsc.StatusDispatched, 0), false},
+		{"pr mismatch", rec(dsc.StatusPROpen, 5), rec(dsc.StatusPROpen, 6), false},
+		{"parent dispatched, child failed — parent not ahead", rec(dsc.StatusDispatched, 0), rec(dsc.StatusFailed, 0), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := mirrorAgrees(c.parent, c.child); got != c.want {
+				t.Errorf("mirrorAgrees(%s, %s) = %t, want %t", c.parent.Status, c.child.Status, got, c.want)
+			}
+		})
+	}
+}
+
 // TestRollupCatchesMirrorAheadOfChild is the recorded-ahead-of-facts guard: the
 // parent mirror says merged but the child's own record only reached pr_open, so
 // the cross-check must flag disagreement (spec §4 D5).
