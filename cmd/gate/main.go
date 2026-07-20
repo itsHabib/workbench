@@ -294,14 +294,21 @@ func checkGrantStateDir(stateDir string, initState bool) error {
 		return nil
 	}
 	logPath := filepath.Join(stateDir, "log.jsonl")
-	if _, err := os.Stat(logPath); err == nil {
+	_, err := os.Stat(logPath)
+	if err == nil {
 		return nil
 	}
-	abs, err := filepath.Abs(stateDir)
-	if err != nil {
+	// Only a genuinely absent log reads as a fresh tree; a permission or I/O
+	// failure is its own problem and must surface as such, not masquerade as
+	// the refusal.
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("grant: check state dir: %w", err)
+	}
+	abs, absErr := filepath.Abs(stateDir)
+	if absErr != nil {
 		abs = stateDir
 	}
-	return fmt.Errorf("grant: state dir %s has no existing log.jsonl — refusing to mint into a fresh state tree; point -state at your canonical state dir, or pass -init to create a new one here", abs)
+	return fmt.Errorf("grant: state dir %q has no existing log.jsonl — refusing to mint into a fresh state tree; point -state at your canonical state dir, or pass -init to create a new one here", abs)
 }
 
 type gateResult struct {
