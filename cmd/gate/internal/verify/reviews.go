@@ -88,13 +88,7 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		if !c.IsBot || strings.Contains(c.Body, "review-coordinator-verdict") {
 			continue
 		}
-		// Bot comments layer across review cycles — nothing is overwritten — so
-		// an inline comment whose thread is resolved, or that was posted against
-		// an earlier head than the one this run judges, is a prior cycle's
-		// finding, not evidence about this head. Consolidating it re-litigates
-		// fixed findings and buries fresh ones in stale noise. Issue-level
-		// comments carry no commit anchor and are never dropped here.
-		if c.Resolved || (c.CommitID != "" && subject.HeadSHA != "" && c.CommitID != subject.HeadSHA) {
+		if staleComment(c.Resolved, c.CommitID, subject.HeadSHA) {
 			stale++
 			continue
 		}
@@ -160,6 +154,20 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)%s", processed, suffix)
 	}
 	return Record(st, run, []string{commentsEvidenceID}, v)
+}
+
+// staleComment reports whether a bot comment is a prior cycle's finding, not
+// evidence about the judged head. Bot comments layer across review cycles —
+// nothing is overwritten — so an inline comment whose thread is resolved, or
+// whose anchor commit differs from the judged head, would re-litigate fixed
+// findings and bury fresh ones in stale noise. A comment with no commit anchor
+// (issue-level, or evidence recorded before anchors existed) and any comment
+// judged without a known head are never stale — fail toward consolidating.
+func staleComment(resolved bool, commitID, headSHA string) bool {
+	if resolved {
+		return true
+	}
+	return commitID != "" && headSHA != "" && commitID != headSHA
 }
 
 func extractOne(ctx context.Context, comment string, model Model) (extraction, error) {
