@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -264,6 +265,96 @@ func reviewsFor(t *testing.T, comments []map[string]any) Verdict {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// scriptedModel returns one canned extraction per chat call, in order.
+type scriptedModel struct {
+	replies []string
+	calls   int
+}
+
+func (m *scriptedModel) chat(_ context.Context, _, _ string, _ json.RawMessage) (string, error) {
+	if m.calls >= len(m.replies) {
+		return "", errors.New("scriptedModel: no reply left")
+	}
+	r := m.replies[m.calls]
+	m.calls++
+	return r, nil
+}
+
+func (m *scriptedModel) impl() string { return "scripted" }
+
+func reviewsWith(t *testing.T, comments []map[string]any, model Model) Verdict {
+	t.Helper()
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"comments": comments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := Reviews(st, "run_t", evd.ID, subj, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestReviewsNoProblemCommentsPass(t *testing.T) {
+	// A panel of ship-its and nits must consolidate to pass: an approval or
+	// "no issues found" is not an actionable finding (the misread that
+	// escalated docs-only PRs to judgment).
+	m := &scriptedModel{replies: []string{
+		`{"headline":"no issues found","severity":"unknown","verdict":"none","confidence":0.95}`,
+		`{"headline":"all findings closed, ready to merge","severity":"unknown","verdict":"none","confidence":0.9}`,
+		`{"headline":"table widths uneven","severity":"low","verdict":"nit","confidence":0.9}`,
+	}}
+	v := reviewsWith(t, []map[string]any{
+		{"author": "cursor[bot]", "is_bot": true, "body": "reviewed, no issues"},
+		{"author": "claude", "is_bot": true, "body": "ready to merge"},
+		{"author": "codex[bot]", "is_bot": true, "body": "nit: table"},
+	}, m)
+	if v.Decision != DecisionPass {
+		t.Fatalf("no-problem panel must pass, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+func TestReviewsNoneDoesNotRaiseTier(t *testing.T) {
+	// A no-problem comment that quotes a severity badge (a resolved-P1
+	// summary) must not raise the run's tier.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"P1 resolved in current text","severity":"p1","verdict":"none","confidence":0.9}`,
+	}}
+	v := reviewsWith(t, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "P1 addressed"},
+	}, m)
+	if v.Tier != "T0" {
+		t.Fatalf("none verdict must not raise tier, got %s", v.Tier)
+	}
+	if v.Decision != DecisionPass {
+		t.Fatalf("resolved-P1 summary must pass, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+func TestReviewsActionableStillEscalates(t *testing.T) {
+	// The none bucket must not soften real findings: one actionable comment
+	// among ship-its still escalates.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"no issues","severity":"unknown","verdict":"none","confidence":0.95}`,
+		`{"headline":"nil deref on empty policy","severity":"high","verdict":"actionable","confidence":0.9}`,
+	}}
+	v := reviewsWith(t, []map[string]any{
+		{"author": "cursor[bot]", "is_bot": true, "body": "clean"},
+		{"author": "codex[bot]", "is_bot": true, "body": "bug"},
+	}, m)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("actionable finding must escalate, got %s (%s)", v.Decision, v.Why)
+	}
 }
 
 func TestReviewsEmptyPanelEscalates(t *testing.T) {
