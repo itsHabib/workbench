@@ -19,93 +19,127 @@ import (
 // error — callers must fail closed rather than classify a missing or truncated
 // diff as T0. A valid diff whose files carry no hunks (mode-only, rename-only,
 // binary) is real input, not an operational failure — it parses and classifies.
-//
-//nolint:gocognit,cyclop // see floor.Classify — same deferral.
 func ParseUnifiedDiff(r io.Reader) (Diff, error) {
-	var d Diff
-	var cur *FileChange
+	var p diffParser
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
-
-	flush := func() {
-		if cur != nil {
-			d.Files = append(d.Files, *cur)
-			cur = nil
-		}
-	}
-
-	// newFileMode records the "new file mode" header; New is only trusted once the
-	// "--- /dev/null" old-side header confirms it. A diff carrying "new file mode"
-	// alongside a real old path (--- a/<path>) is an edit, not a creation — the
-	// migration grader must not treat it as a fresh file (adversarial: spoofed New
-	// downgrades an edit to an applied migration).
-	newFileMode := false
 	for sc.Scan() {
-		line := sc.Text()
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			flush()
-			newFileMode = false
-			// seed both sides from the header; the +++/--- lines refine them. Both
-			// are classified (union) so a rename to a benign path can't shed the
-			// signals its old path carried.
-			oldPath, newPath := gitHeaderPaths(line)
-			cur = &FileChange{Path: newPath, OldPath: oldPath}
-		case strings.HasPrefix(line, "new file mode "):
-			newFileMode = true
-		case strings.HasPrefix(line, "rename to "):
-			if cur != nil {
-				cur.Path = stripAB(strings.TrimPrefix(line, "rename to "))
-			}
-		case strings.HasPrefix(line, "rename from "):
-			if cur != nil {
-				cur.OldPath = stripAB(strings.TrimPrefix(line, "rename from "))
-			}
-		case strings.HasPrefix(line, "+++ "):
-			p := strings.TrimPrefix(line, "+++ ")
-			if p != "/dev/null" && cur != nil {
-				cur.Path = stripAB(p)
-			}
-		case strings.HasPrefix(line, "--- "):
-			// old-path header. "--- /dev/null" is the only proof of a real creation.
-			p := strings.TrimPrefix(line, "--- ")
-			if cur != nil {
-				if p == "/dev/null" {
-					cur.New = newFileMode
-				} else {
-					cur.OldPath = stripAB(p)
-				}
-			}
-		case strings.HasPrefix(line, "@@"):
-			if cur != nil {
-				cur.Lines = append(cur.Lines, DiffLine{Op: OpHunk})
-			}
-		case strings.HasPrefix(line, "+"):
-			if cur != nil {
-				body := strings.TrimPrefix(line, "+")
-				cur.Added = append(cur.Added, body)
-				cur.Lines = append(cur.Lines, DiffLine{Op: OpAdd, Body: body})
-			}
-		case strings.HasPrefix(line, "-"):
-			if cur != nil {
-				body := strings.TrimPrefix(line, "-")
-				cur.Removed = append(cur.Removed, body)
-				cur.Lines = append(cur.Lines, DiffLine{Op: OpDel, Body: body})
-			}
-		case strings.HasPrefix(line, " "):
-			if cur != nil {
-				cur.Lines = append(cur.Lines, DiffLine{Op: OpCtx, Body: line[1:]})
-			}
-		}
+		p.handle(sc.Text())
 	}
-	flush()
+	p.flush()
 	if err := sc.Err(); err != nil {
 		return Diff{}, fmt.Errorf("scanning unified diff: %w", err)
 	}
-	if len(d.Files) == 0 {
+	if len(p.d.Files) == 0 {
 		return Diff{}, fmt.Errorf("no file headers parsed: empty or unrecognized diff input")
 	}
-	return d, nil
+	return p.d, nil
+}
+
+// diffParser accumulates FileChanges while scanning a unified diff.
+type diffParser struct {
+	d           Diff
+	cur         *FileChange
+	newFileMode bool // "new file mode" seen; New trusted only with --- /dev/null
+}
+
+func (p *diffParser) flush() {
+	if p.cur == nil {
+		return
+	}
+	p.d.Files = append(p.d.Files, *p.cur)
+	p.cur = nil
+}
+
+func (p *diffParser) handle(line string) {
+	switch {
+	case strings.HasPrefix(line, "diff --git "):
+		p.startFile(line)
+	case strings.HasPrefix(line, "new file mode "):
+		p.newFileMode = true
+	case strings.HasPrefix(line, "rename to "):
+		p.setRenameTo(line)
+	case strings.HasPrefix(line, "rename from "):
+		p.setRenameFrom(line)
+	case strings.HasPrefix(line, "+++ "):
+		p.setNewPath(line)
+	case strings.HasPrefix(line, "--- "):
+		p.setOldPath(line)
+	case strings.HasPrefix(line, "@@"):
+		p.markHunk()
+	case strings.HasPrefix(line, "+"):
+		p.addBody(OpAdd, strings.TrimPrefix(line, "+"))
+	case strings.HasPrefix(line, "-"):
+		p.addBody(OpDel, strings.TrimPrefix(line, "-"))
+	case strings.HasPrefix(line, " "):
+		p.addBody(OpCtx, line[1:])
+	}
+}
+
+func (p *diffParser) startFile(line string) {
+	p.flush()
+	p.newFileMode = false
+	// seed both sides from the header; the +++/--- lines refine them. Both
+	// are classified (union) so a rename to a benign path can't shed the
+	// signals its old path carried.
+	oldPath, newPath := gitHeaderPaths(line)
+	p.cur = &FileChange{Path: newPath, OldPath: oldPath}
+}
+
+func (p *diffParser) setRenameTo(line string) {
+	if p.cur == nil {
+		return
+	}
+	p.cur.Path = stripAB(strings.TrimPrefix(line, "rename to "))
+}
+
+func (p *diffParser) setRenameFrom(line string) {
+	if p.cur == nil {
+		return
+	}
+	p.cur.OldPath = stripAB(strings.TrimPrefix(line, "rename from "))
+}
+
+func (p *diffParser) setNewPath(line string) {
+	path := strings.TrimPrefix(line, "+++ ")
+	if path == "/dev/null" || p.cur == nil {
+		return
+	}
+	p.cur.Path = stripAB(path)
+}
+
+// setOldPath records the old-path header. "--- /dev/null" is the only proof of
+// a real creation — "new file mode" alone alongside a real old path is an edit.
+func (p *diffParser) setOldPath(line string) {
+	if p.cur == nil {
+		return
+	}
+	path := strings.TrimPrefix(line, "--- ")
+	if path == "/dev/null" {
+		p.cur.New = p.newFileMode
+		return
+	}
+	p.cur.OldPath = stripAB(path)
+}
+
+func (p *diffParser) markHunk() {
+	if p.cur == nil {
+		return
+	}
+	p.cur.Lines = append(p.cur.Lines, DiffLine{Op: OpHunk})
+}
+
+func (p *diffParser) addBody(op LineOp, body string) {
+	if p.cur == nil {
+		return
+	}
+	switch op {
+	case OpAdd:
+		p.cur.Added = append(p.cur.Added, body)
+	case OpDel:
+		p.cur.Removed = append(p.cur.Removed, body)
+	}
+	p.cur.Lines = append(p.cur.Lines, DiffLine{Op: op, Body: body})
 }
 
 // gitHeaderPaths pulls the a/ (old) and b/ (new) paths from a

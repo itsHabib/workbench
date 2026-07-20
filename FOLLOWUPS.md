@@ -66,30 +66,34 @@ All three are pre-existing behavior, byte-identical to the standalone repo —
 real observations, but classifier-behavior changes the byte-identical move
 must not smuggle in (same rule as tracelens above):
 
-- **Empty stdin classifies as T0 instead of failing.** `triage-floor` on
+- ~~**Empty stdin classifies as T0 instead of failing.** `triage-floor` on
   zero-byte input returns a T0 floor, so an upstream failure that yields
   empty output (`gh pr diff` auth/network error piped through) reads as
   "safe". A guard (empty diff → exit 1, operational failure) is owed to
   triage's own iteration — the A/B matrix pins today's shape, empty-stdin
-  case included.
+  case included.~~ Done 2026-07-20: fail-closed on empty stdin + scanner
+  errors (`triage-fail-closed-guards`).
 - **The control-plane rule covers the classifier's evidence, not its
   source.** `RUBRIC.md` / `labels/` / `mismatches.jsonl` fire T3;
   `cmd/triage/internal/{floor,advisory}/**` do not — equally true pre-move
   (`internal/floor/**` never matched). Extending it to the classifier
   source is a RUBRIC §5.4 policy change plus a corpus case, owed to
   triage's iteration.
-- **A diff line over the scanner's 16 MiB cap silently truncates the
+- ~~**A diff line over the scanner's 16 MiB cap silently truncates the
   parse.** `ParseUnifiedDiff` never checks `sc.Err()`, so `ErrTooLong`
   (e.g. a minified generated asset) classifies the partial diff instead of
   failing. Propagating scanner errors is a parser-behavior change; owed
-  with a corpus case that pins it.
-- **Hygiene nits in the moved floor code** (claude review, all pre-move):
+  with a corpus case that pins it.~~ Done 2026-07-20 with the fail-closed
+  guards above.
+- ~~**Hygiene nits in the moved floor code** (claude review, all pre-move):
   `sawCode` and `reLoosenGuard` are set/compiled then blanked out
   (vestigial or unimplemented heuristic — decide which), `hasCodeChange`
   merges `Added`+`Removed` into a throwaway slice, and `triage-advisory`'s
   main drops the `MarshalIndent` error where `triage-floor` propagates.
   Behavior-neutral cleanups, but the move ships the files byte-identical;
-  fold into the same triage iteration as the items above.
+  fold into the same triage iteration as the items above.~~ Done 2026-07-20:
+  vestigial `sawCode`/`reLoosenGuard` deleted, `hasCodeChange` iterates the
+  two slices, `triage-advisory` propagates the marshal error.
 
 ## flare migration — choices made
 
@@ -138,14 +142,16 @@ retest wasteful.
 sets the `CLAUDE_CODE_OAUTH_TOKEN` repo secret. Once set, @claude joins the
 reviewer set (@codex, @cursor) on the next PR.
 
-## cmd/triage: gocognit debt in internal/floor (2026-07-17)
+## ~~cmd/triage: gocognit debt in internal/floor (2026-07-17)~~
 
-`golangci-lint run ./...` flags `manifestIsDev`, `migrationStatements`, and
+~~`golangci-lint run ./...` flags `manifestIsDev`, `migrationStatements`, and
 `ParseUnifiedDiff` in `cmd/triage/internal/floor` for cognitive complexity.
 Pre-existing — the code arrived byte-identical with the tenant move (#51) and
 was outside every subsequent PR's diff. Fix is the house-style extraction
 (≤2 nesting per scope) the next time triage is touched; not worth a
-standalone churn PR.
+standalone churn PR.~~ Done 2026-07-20: house-style extraction paid the
+gocognit debt on those three; `Classify` still carries its own
+`nolint:gocognit,cyclop` (rubric-as-one-pass — separate deferral).
 
 ## Idea (parked 2026-07-17): an MCP surface for the merge-loop verbs
 

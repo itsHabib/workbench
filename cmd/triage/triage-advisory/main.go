@@ -59,7 +59,11 @@ func main() {
 		}
 		return
 	}
-	out, _ := json.MarshalIndent(v, "", "  ")
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "triage-advisory: encode:", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(out))
 }
 
