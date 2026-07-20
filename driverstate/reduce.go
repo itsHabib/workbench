@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 )
@@ -34,17 +33,7 @@ const (
 // Unknown event kinds are tolerated: the chain is verified across them, but
 // they are skipped in the fold and a warning is printed to stderr (spec §8).
 func Reduce(dir, run string) (dsc.RunState, error) {
-	if err := validateRunID(run); err != nil {
-		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
-	}
-	data, err := os.ReadFile(filepath.Join(runDir(dir, run), "events.jsonl"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return dsc.RunState{}, fmt.Errorf("driverstate: reduce: run %q not found: %w", run, err)
-		}
-		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
-	}
-	events, err := decodeLedger(trimWithWarning(data, "reduce", run))
+	events, err := Events(dir, run)
 	if err != nil {
 		return dsc.RunState{}, fmt.Errorf("driverstate: reduce: %w", err)
 	}
