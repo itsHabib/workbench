@@ -207,7 +207,6 @@ var (
 // §5.2 content signals — path-independent, on removed/added lines.
 var (
 	reRemovedControl = regexp.MustCompile(`(?i)\b(authorize|authenticate|authz|check_?permission|has_?permission|require_?(auth|login|role)|verify_|rate.?limit|ratelimit|acl|is_?admin|ensure_)\b`)
-	reLoosenGuard    = regexp.MustCompile(`(?i)(==\s*)|&&`) // heuristic; paired with removal context by caller
 	reUnbounded      = regexp.MustCompile(`(?i)\bselect\s+\*|limit\s+none|no.?limit|for\s*\{\s*\}|while\s*true`)
 	// secret/credential handling in code, regardless of path (Experiment 01: dossier#64
 	// handled AWS creds in s3store.rs — no "auth" in the path, floor missed the T3).
@@ -268,7 +267,6 @@ func Classify(d Diff) Result {
 	}
 
 	var added, removed int
-	sawCode := false
 
 	// §5.3 pre-pass: a lockfile change caused by a dev-only manifest change is itself
 	// dev — the lockfile alone can't say (no dev marking in lock formats), but the
@@ -379,7 +377,6 @@ func Classify(d Diff) Result {
 		// default: an unmatched code file with real (non-comment) changes is an internal change → T1
 		// (§5.1). A code file touched only in comments/blank lines is docs-grade → stays T0.
 		if reCodePath.MatchString(f.Path) {
-			sawCode = true
 			if !matchedPath && hasCodeChange(f) {
 				add("internal-change", T1, "code change: "+f.Path)
 			}
@@ -388,8 +385,6 @@ func Classify(d Diff) Result {
 			add("unknown-path", T1, "unclassified path: "+f.Path)
 		}
 	}
-	_ = sawCode
-	_ = reLoosenGuard
 
 	return Result{
 		Floor: floor, FloorS: floor.String(), Signals: sigs,
@@ -400,7 +395,14 @@ func Classify(d Diff) Result {
 // hasCodeChange reports whether a code file has a non-comment, non-blank added or removed line.
 // A change that only touches comments or blank lines in a code file is docs-grade, not behavior.
 func hasCodeChange(f FileChange) bool {
-	for _, ln := range append(append([]string{}, f.Added...), f.Removed...) {
+	if anyCodeLine(f.Added) {
+		return true
+	}
+	return anyCodeLine(f.Removed)
+}
+
+func anyCodeLine(lines []string) bool {
+	for _, ln := range lines {
 		if strings.TrimSpace(ln) != "" && !isComment(ln) {
 			return true
 		}
@@ -424,75 +426,118 @@ const (
 // a changed line in a runtime section, or a changed line that itself OPENS a
 // non-dev section (a compact JSON `"dependencies": {...}` or a newly-added
 // `[dependencies]` table), makes the whole change runtime.
-//
-//nolint:gocognit,cyclop // see Classify — same deferral.
 func manifestIsDev(f FileChange) bool {
 	if len(f.Lines) == 0 {
 		return legacyDevScan(f)
 	}
 	sec, sawChange, inString := secUnknown, false, false
 	for _, ln := range f.Lines {
-		if ln.Op == OpHunk {
-			// reset BOTH section and string state — the elided lines between hunks
-			// could open or close a string, so carrying inString across a boundary
-			// would skip a runtime dep in the next hunk (adversarial review of PR #4:
-			// a string opened after a dev change laundered a runtime dep to T1).
+		next, outcome := walkManifestLine(ln, sec, inString)
+		switch outcome {
+		case walkReset:
 			sec, inString = secUnknown, false
-			continue
-		}
-		// a line that opens/closes a TOML/Python multi-line string toggles string
-		// state; a `[section]`-shaped line INSIDE a string is content, not a header
-		// (adversarial: `[dev-dependencies]` buried in a docstring flips the section).
-		// A comment can't open a multi-line string, so an odd `"""` in a comment
-		// body is comment text, not a delimiter. Use the manifest-local comment
-		// test — in a manifest a `#[…]` line IS a comment (no Rust attributes), which
-		// the polyglot isComment excludes (adversarial re-review of PR #4).
-		if !isManifestComment(ln.Body) {
-			if n := strings.Count(ln.Body, `"""`) + strings.Count(ln.Body, "'''"); n%2 == 1 {
-				inString = !inString
-				continue
-			}
-		}
-		if inString {
-			continue
-		}
-		t := strings.TrimSpace(ln.Body)
-		// a bare `}`/`},` closes a JSON object section (devDependencies); without this
-		// a following top-level field (`"type": "module"`) would inherit secDev and a
-		// runtime field change would launder to T1 (adversarial: JSON brace tracking).
-		if sec != secUnknown && (t == "}" || t == "},") {
-			sec = secUnknown
-			continue
-		}
-		if reSectionHeader.MatchString(t) {
-			dev := reDevSection.MatchString(t)
-			sec = secRuntime
-			if dev {
-				sec = secDev
-			}
-			// a CHANGED line that opens a non-dev section is itself introducing
-			// runtime deps (compact-JSON block, freshly-added [dependencies]).
-			if ln.Op != OpCtx && !dev {
-				return false
-			}
-			continue
-		}
-		if ln.Op == OpCtx || t == "" || isManifestComment(ln.Body) {
-			continue
-		}
-		switch sec {
-		case secDev:
-			sawChange = true
-		case secRuntime:
+		case walkSkip:
+			sec, inString = next.sec, next.inString
+		case walkRuntime:
 			return false
-		default: // secUnknown — dev only if the dep NAME is a test framework (go.mod has no sections)
-			if !reTestDepName.MatchString(t) {
-				return false
-			}
-			sawChange = true
+		case walkDevChange:
+			sec, inString, sawChange = next.sec, next.inString, true
+		default: // walkContinue
+			sec, inString = next.sec, next.inString
 		}
 	}
 	return sawChange
+}
+
+// manifestWalk is the section/string state carried across ordered diff lines.
+type manifestWalk struct {
+	sec      section
+	inString bool
+}
+
+// walkOutcome classifies one ordered-diff line for manifestIsDev.
+type walkOutcome int
+
+const (
+	walkContinue  walkOutcome = iota // state updated; keep scanning
+	walkReset                        // hunk boundary: clear section + string
+	walkSkip                         // state updated; no change classification
+	walkRuntime                      // runtime dep change — whole file is not-dev
+	walkDevChange                    // a changed line in a confirmed-dev context
+)
+
+// walkManifestLine advances section/string state for one ordered diff line.
+func walkManifestLine(ln DiffLine, sec section, inString bool) (manifestWalk, walkOutcome) {
+	if ln.Op == OpHunk {
+		// reset BOTH section and string state — the elided lines between hunks
+		// could open or close a string, so carrying inString across a boundary
+		// would skip a runtime dep in the next hunk (adversarial review of PR #4:
+		// a string opened after a dev change laundered a runtime dep to T1).
+		return manifestWalk{}, walkReset
+	}
+	if toggled, next := toggleManifestString(ln.Body, inString); toggled {
+		return manifestWalk{sec: sec, inString: next}, walkSkip
+	}
+	if inString {
+		return manifestWalk{sec: sec, inString: true}, walkSkip
+	}
+	t := strings.TrimSpace(ln.Body)
+	// a bare `}`/`},` closes a JSON object section (devDependencies); without this
+	// a following top-level field (`"type": "module"`) would inherit secDev and a
+	// runtime field change would launder to T1 (adversarial: JSON brace tracking).
+	if sec != secUnknown && (t == "}" || t == "},") {
+		return manifestWalk{sec: secUnknown}, walkSkip
+	}
+	if reSectionHeader.MatchString(t) {
+		return applySectionHeader(ln, t)
+	}
+	if ln.Op == OpCtx || t == "" || isManifestComment(ln.Body) {
+		return manifestWalk{sec: sec}, walkSkip
+	}
+	return classifyManifestChange(sec, t)
+}
+
+// toggleManifestString reports whether ln opens/closes a TOML/Python multi-line
+// string and the resulting inString state. A `[section]`-shaped line INSIDE a
+// string is content, not a header. A comment can't open a multi-line string.
+func toggleManifestString(body string, inString bool) (toggled, next bool) {
+	if isManifestComment(body) {
+		return false, inString
+	}
+	n := strings.Count(body, `"""`) + strings.Count(body, "'''")
+	if n%2 == 0 {
+		return false, inString
+	}
+	return true, !inString
+}
+
+// applySectionHeader updates section state from a header line. A CHANGED line
+// that opens a non-dev section is itself introducing runtime deps.
+func applySectionHeader(ln DiffLine, trimmed string) (manifestWalk, walkOutcome) {
+	dev := reDevSection.MatchString(trimmed)
+	next := secRuntime
+	if dev {
+		next = secDev
+	}
+	if ln.Op != OpCtx && !dev {
+		return manifestWalk{sec: next}, walkRuntime
+	}
+	return manifestWalk{sec: next}, walkSkip
+}
+
+// classifyManifestChange grades a non-context changed line against the current section.
+func classifyManifestChange(sec section, trimmed string) (manifestWalk, walkOutcome) {
+	switch sec {
+	case secDev:
+		return manifestWalk{sec: sec}, walkDevChange
+	case secRuntime:
+		return manifestWalk{sec: sec}, walkRuntime
+	default: // secUnknown — dev only if the dep NAME is a test framework (go.mod has no sections)
+		if !reTestDepName.MatchString(trimmed) {
+			return manifestWalk{sec: sec}, walkRuntime
+		}
+		return manifestWalk{sec: sec}, walkDevChange
+	}
 }
 
 // isManifestComment reports whether a line is a comment in a dependency manifest.
@@ -599,8 +644,6 @@ const unterminatedComment = "\x00unterminated-block-comment"
 // `DEFAULT 'note -- v2');` on the closing line hid a following DROP). `;`
 // splits, `--` line comments, and `/* */` block comments are honored only
 // outside strings; `”` is an in-string escaped quote.
-//
-//nolint:gocognit,cyclop // see Classify — same deferral.
 func migrationStatements(added []string) []string {
 	s := strings.Join(added, "\n")
 	var out []string
@@ -612,70 +655,103 @@ func migrationStatements(added []string) []string {
 		cur.Reset()
 	}
 	for i := 0; i < len(s); {
-		switch c := s[i]; {
-		case c == '$' && dollarTag(s[i:]) != "": // Postgres dollar-quoting $tag$...$tag$
-			tag := dollarTag(s[i:])
-			cur.WriteString(tag)
-			i += len(tag)
-			if end := strings.Index(s[i:], tag); end >= 0 { // copy body + closing tag
-				cur.WriteString(s[i : i+end+len(tag)])
-				i += end + len(tag)
-			} else { // unterminated dollar-quote — fail closed
-				out = append(out, unterminatedComment)
-				flush()
-				return out
-			}
-		case c == '\'': // single-quoted string; honor '' and (in E'') backslash escapes
-			// backslash-escapes apply only to a STANDALONE E prefix — an identifier
-			// ending in e/E (sequence'...') is a plain string where `\` is literal
-			// (adversarial re-review of PR #4).
-			escapes := i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') &&
-				(i < 2 || (!isAlphaNum(s[i-2]) && s[i-2] != '_'))
-			cur.WriteByte(c)
-			i++
-			for i < len(s) {
-				if escapes && s[i] == '\\' && i+1 < len(s) { // E-string: \x is a 2-char literal
-					cur.WriteByte(s[i])
-					cur.WriteByte(s[i+1])
-					i += 2
-					continue
-				}
-				if s[i] == '\'' {
-					if i+1 < len(s) && s[i+1] == '\'' { // '' escaped quote, still inside
-						cur.WriteString("''")
-						i += 2
-						continue
-					}
-					cur.WriteByte('\'')
-					i++
-					break
-				}
-				cur.WriteByte(s[i])
-				i++
-			}
-		case c == '-' && i+1 < len(s) && s[i+1] == '-': // line comment to EOL
-			for i < len(s) && s[i] != '\n' {
-				i++
-			}
-		case c == '/' && i+1 < len(s) && s[i+1] == '*': // block comment to closing */
-			end := strings.Index(s[i+2:], "*/")
-			if end < 0 { // unterminated — fail closed, stop scanning
-				out = append(out, unterminatedComment)
-				flush()
-				return out
-			}
-			cur.WriteByte(' ')
-			i += 2 + end + 2
-		case c == ';':
+		next, failClosed := scanMigrationAt(s, i, &cur, flush)
+		if failClosed {
+			out = append(out, unterminatedComment)
 			flush()
-			i++
-		default:
-			cur.WriteByte(c)
-			i++
+			return out
 		}
+		i = next
 	}
 	flush()
 	return out
+}
+
+// scanMigrationAt advances one chunk of the migration scanner at s[i].
+// failClosed is true for an unterminated dollar-quote or block comment.
+func scanMigrationAt(s string, i int, cur *strings.Builder, flush func()) (next int, failClosed bool) {
+	switch c := s[i]; {
+	case c == '$' && dollarTag(s[i:]) != "":
+		return copyDollarQuote(s, i, cur)
+	case c == '\'':
+		return copySQLString(s, i, cur), false
+	case c == '-' && i+1 < len(s) && s[i+1] == '-':
+		return skipLineComment(s, i), false
+	case c == '/' && i+1 < len(s) && s[i+1] == '*':
+		return skipBlockComment(s, i, cur)
+	case c == ';':
+		flush()
+		return i + 1, false
+	default:
+		cur.WriteByte(c)
+		return i + 1, false
+	}
+}
+
+// copyDollarQuote copies a Postgres dollar-quote ($tag$...$tag$) into cur.
+// An unterminated quote fails closed.
+func copyDollarQuote(s string, i int, cur *strings.Builder) (next int, failClosed bool) {
+	tag := dollarTag(s[i:])
+	cur.WriteString(tag)
+	i += len(tag)
+	end := strings.Index(s[i:], tag)
+	if end < 0 {
+		return i, true
+	}
+	cur.WriteString(s[i : i+end+len(tag)])
+	return i + end + len(tag), false
+}
+
+// copySQLString copies a single-quoted SQL string into cur, honoring ” and
+// (in a standalone E” prefix) backslash escapes.
+func copySQLString(s string, i int, cur *strings.Builder) int {
+	// backslash-escapes apply only to a STANDALONE E prefix — an identifier
+	// ending in e/E (sequence'...') is a plain string where `\` is literal
+	// (adversarial re-review of PR #4).
+	escapes := i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') &&
+		(i < 2 || (!isAlphaNum(s[i-2]) && s[i-2] != '_'))
+	cur.WriteByte(s[i])
+	i++
+	for i < len(s) {
+		if escapes && s[i] == '\\' && i+1 < len(s) {
+			cur.WriteByte(s[i])
+			cur.WriteByte(s[i+1])
+			i += 2
+			continue
+		}
+		if s[i] != '\'' {
+			cur.WriteByte(s[i])
+			i++
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '\'' {
+			cur.WriteString("''")
+			i += 2
+			continue
+		}
+		cur.WriteByte('\'')
+		return i + 1
+	}
+	return i
+}
+
+// skipLineComment advances past a `--` line comment to EOL (or EOF).
+func skipLineComment(s string, i int) int {
+	for i < len(s) && s[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+// skipBlockComment advances past a `/* ... */` block comment, writing a space
+// into cur so adjacent tokens stay separated. Unterminated fails closed.
+func skipBlockComment(s string, i int, cur *strings.Builder) (next int, failClosed bool) {
+	end := strings.Index(s[i+2:], "*/")
+	if end < 0 {
+		return i, true
+	}
+	cur.WriteByte(' ')
+	return i + 2 + end + 2, false
 }
 
 // dollarTag returns the leading Postgres dollar-quote tag ($$ or $name$) at the
