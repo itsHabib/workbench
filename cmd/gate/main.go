@@ -106,6 +106,8 @@ func main() {
 		err = cmdJudge(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
+	case "next":
+		err = cmdNext(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "backtest":
@@ -124,12 +126,14 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|explain|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
+                                                     (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
   explain  -run run_x [-json | -html [-out path]]
+  next     [-json]                                   (what needs you: parked runs + grants)
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -239,10 +243,23 @@ func defaultFloorBin() string {
 	return "triage-floor"
 }
 
+// envOr returns environment variable key's value, or fallback when it is unset
+// or empty. It lets -state and -key default to GATE_STATE and GATE_KEY so the
+// operator's canonical dirs are ambient across every verb and shell — and so a
+// plain `gate grant` from the wrong cwd no longer risks minting into a fresh
+// relative "state" tree. An explicit flag still wins: the flag default is only
+// consulted when the flag is not passed.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func commonFlags(fs *flag.FlagSet) (stateDir, floorBin, keyDir *string) {
-	stateDir = fs.String("state", "state", "state directory (the substrate)")
+	stateDir = fs.String("state", envOr("GATE_STATE", "state"), "state directory (the substrate) [env GATE_STATE]")
 	floorBin = fs.String("floor", "", "path to triage-floor binary")
-	keyDir = fs.String("key", "", "key custody dir for the signing + anchor keys (default: user config dir; must be outside -state)")
+	keyDir = fs.String("key", envOr("GATE_KEY", ""), "key custody dir for the signing + anchor keys (default: user config dir; must be outside -state) [env GATE_KEY]")
 	return
 }
 
@@ -839,6 +856,55 @@ func explainHTMLFile(e env, run, path string) error {
 	}
 	fmt.Println(abs)
 	return nil
+}
+
+// cmdNext projects the log into what currently needs the operator — runs parked
+// for judgment and the grant ledger — with paste-ready commands. It is read-only
+// and sits OUTSIDE the decision code space that grant/gate/judge own: like
+// explain and audit it returns nil for success (exit 0) or an error (exit 4),
+// and never os.Exits a 0–3 that a driver would misread as a decision.
+func cmdNext(args []string) error {
+	fs := flag.NewFlagSet("next", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
+	help, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if help {
+		return nil
+	}
+	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	if err != nil {
+		return err
+	}
+	stateArg := stateArgFor(*stateDir)
+	if *asJSON {
+		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
+	}
+	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+}
+
+// stateArgFor decides whether next's suggested commands need an explicit -state.
+// When the inbox reads the ambient dir ($GATE_STATE, or the "state" fallback),
+// the commands omit -state and stay short — the operator's shell reproduces it.
+// When -state points somewhere the ambient shell would not, the flag is spliced
+// in so a pasted command targets the very log this inbox read.
+func stateArgFor(stateDir string) string {
+	if stateDir == envOr("GATE_STATE", "state") {
+		return ""
+	}
+	return " -state " + shellQuote(stateDir)
+}
+
+// shellQuote wraps s in double quotes when it holds whitespace, so a state path
+// with a space survives copy-paste into a shell. It is a hint formatter, not a
+// security boundary — next only ever quotes a path it was itself handed.
+func shellQuote(s string) string {
+	if strings.ContainsAny(s, " \t") {
+		return `"` + s + `"`
+	}
+	return s
 }
 
 func cmdAudit(args []string) error {
