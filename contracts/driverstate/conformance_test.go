@@ -269,6 +269,8 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		// would reject this body; the runtime deliberately does not.
 		{"stream_dispatched unknown field tolerated", KindStreamDispatched, `{"anything":true}`, false},
 		{"stream_dispatched malformed body rejected", KindStreamDispatched, `{"branch":5}`, true},
+		{"stream_dispatched child_run + conflict ok", KindStreamDispatched, `{"branch":"feat/x","child_run":"dsr_child","worktree_conflict":true}`, false},
+		{"run_imported child sub-run ok", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1","doc_path":"d"}],"parent":"dsr_p","parent_stream":"dss_1","done_boundary":"pr-open"}`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

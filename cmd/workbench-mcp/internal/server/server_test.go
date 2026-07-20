@@ -24,7 +24,7 @@ func TestInitializeHandshake(t *testing.T) {
 	}
 }
 
-func TestToolsListExposesExactlyTheFourVerbs(t *testing.T) {
+func TestToolsListExposesExactlyTheDriverVerbs(t *testing.T) {
 	s := New(t.TempDir())
 	resp := s.dispatch(rpcRequest{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "tools/list"})
 	res := resp.Result.(map[string]any)
@@ -33,7 +33,7 @@ func TestToolsListExposesExactlyTheFourVerbs(t *testing.T) {
 	for _, tl := range tools {
 		got[tl["name"].(string)] = true
 	}
-	want := []string{"driver_record", "driver_state", "driver_runs", "driver_verify"}
+	want := []string{"driver_record", "driver_transition", "driver_state", "driver_runs", "driver_verify", "driver_rollup"}
 	if len(got) != len(want) {
 		t.Fatalf("want %d verbs, got %d: %v", len(want), len(got), got)
 	}
