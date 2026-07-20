@@ -52,7 +52,11 @@ Functional:
 - FR2: grants are operator-minted only, HMAC-signed, key-scoped, action-scoped, and
   TTL-bounded; expired / out-of-scope / tampered grants refuse before any forwarding.
 - FR3: every request (pass or refuse) appends one JSONL artifact line sufficient to
-  replay the verdict offline.
+  *explain* the recorded verdict offline - artifact/schema version, the rule that
+  fired, a manifest+rule digest, a grant digest, and the canonical forwarded target.
+  (Full independent replay - re-running the matcher on logged inputs and reproducing
+  the verdict - is a v1 goal via `explain`; v0 explains, it does not promise to
+  replay, because some matched query values are too sensitive to log verbatim.)
 - FR4: refusals fail closed and print a remedy - the exact `custody grant` command a
   human types to unstick the work (gate's park-with-remedy pattern).
 - FR5: secrets live in the OS credential store, never in the manifest, the log, the
@@ -105,13 +109,26 @@ their contract shape - `(action, observables, rulebook, grant) -> verdict + rule
 one line. The prefix map means clients change exactly two things: base URL and auth
 header value.
 
-**D2 - grant envelope: grow the substrate, don't fork. (OPEN - reviewer call.)**
-Gate's grant is HMAC over (repo, max tier, TTL); custody needs (key, action set,
-TTL). Two options: (a) lift a domain-scoped grant envelope into `contracts` first and
-re-point gate at it, or (b) copy the envelope shape into custody now and converge
-later. (a) is the doctrine answer ("grow the existing grant substrate"); (b) ships v0
-without touching gate. Leaning (b) with a tracked follow-up, but this is the decision
-reviewers should weigh most.
+**D2 - grant envelope: copy the mechanism, version it, converge deliberately. (DECIDED.)**
+Ground truth from the code: there is no shared signed-grant type today.
+`contracts.Envelope` is the append-only JSONL *wrapper*; the real signed grant is
+`capability.Grant`, internal to gate, HMAC over (repo, action, tier, cycles, expiry,
+mintedBy), and its own comment notes the scheme carries no version and migrates by
+"mint fresh." Two things are separable: the *mechanism* (HMAC-sign-a-struct, TTL
+check, coded errors, loud-on-missing-key) which is identical across tools, and the
+*scope body* which differs (gate: repo/tier/cycles; custody: key/action-set) and
+always will. Decision: custody copies the mechanism into its own package now and
+stamps every grant with a `version` and `domain` field from the first commit; gate is
+not touched. Convergence - lifting the proven-identical mechanism into `contracts` and
+re-pointing gate through it (gate's short TTLs mint-fresh across the change) - is a
+deliberate later PR, taken when two real consumers have shaped the seam, not a
+prerequisite that puts a refactor of a live, merge-guarding component in front of code
+that does not exist yet. The reviewer's objection to plain copy ("two unversioned
+contracts to reconcile") is answered by versioning custody's grant from day one:
+convergence stays mechanical and non-breaking. Token prefix is visibly versioned
+(`cst1_...`). Cost accepted: for the pre-convergence window, custody grants are
+versioned and gate grants are not - a cosmetic inconsistency across two independent
+keys signing two independent state dirs, not a functional one.
 
 **D3 - the action set IS the ceiling.** No mapping of gate's T1/T2/T3 tiers onto
 custody; forcing a shared tier vocabulary generalizes two systems that only share an
@@ -139,17 +156,24 @@ beyond that - one implementation, one interface, per the no-generic-engine rule.
 
 ## 5. Data model
 
-**Key manifest** (`<state>/manifest.json`, operator-owned, out of repo):
+**Key manifest** (`<state>/manifest.json`, operator-owned, out of repo). Two seams are
+locked additively now so a later feature is a new field, not a shape change: a
+top-level `version`, and `inject` as a tagged list (`{kind, name, template}`) even
+though v0 accepts exactly one header entry. Unknown fields are rejected at load. The
+examples below show the loose (`hobbyvendor`) and tight (`tracker`) ends of the dial;
+`upstream` must be HTTPS with no userinfo/query/fragment, and injected header names may
+not be `Host`, a hop-by-hop/forwarding header, or `X-Custody-*`.
 
 ```jsonc
 {
+  "version": 1,
   "keys": {
     // high-stakes: a work issue tracker behind a personal access token,
     // where projects outside PROJ may hold export-controlled data
     "tracker": {
       "secret": "wincred:tracker-pat",
       "upstream": "https://issues.example.com",
-      "inject": { "header": "Authorization", "format": "Bearer {secret}" },
+      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
       "actions": {
         "read": {
           "rules": [
@@ -171,7 +195,7 @@ beyond that - one implementation, one interface, per the no-generic-engine rule.
     "hobbyvendor": {
       "secret": "wincred:hobbyvendor-key",
       "upstream": "https://api.hobbyvendor.example",
-      "inject": { "header": "Authorization", "format": "Bearer {secret}" },
+      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
       "actions": { "all": { "rules": [ { "methods": ["*"], "path": "/**" } ] } }
     }
   }
@@ -183,12 +207,16 @@ grant id, key name, action names, minted-at, TTL, minted-by (free-form,
 unauthenticated - same custody caveat as gate: human-mint is a key-custody
 precondition, not a property of the record).
 
-**Artifact log** (`<state>/log/requests.jsonl`, append-only): `ts`, `request_id`,
-`key`, `grant_id`, `verdict` (`pass` | `refused` | `denied` | `upstream_error`),
-`rule_fired` (action name + rule index, the tuning-evidence field), `method`, `path`,
-`query_keys`, `upstream_status`, `latency_ms`. Never bodies, never header values,
-never secrets. Plain JSONL, not hash-chained: a read log is tuning evidence, not a
-merge-authority record; revisit if custody grants ever gate an effectful verb chain.
+**Artifact log** (`<state>/log/requests.jsonl`, append-only): `schema_version`, `ts`,
+`request_id`, `key`, `grant_id` + `grant_digest`, `manifest_digest` + `rule_fired`
+(action name + rule index; the digest pins *which* manifest revision decided, since a
+later edit would otherwise re-point the index), `verdict` (`pass` | `refused` |
+`denied` | `upstream_error`), `method`, `canonical_target` + `raw_target_hash`,
+`query_keys`, `upstream_status`, `latency_ms`. Enough to *explain* the verdict offline
+(FR3); never bodies, never header values, never secrets. The exact final field set is
+settled while writing the logger (§8.2). Plain JSONL, not hash-chained: a read log is
+tuning evidence, not a merge-authority record; revisit if custody grants ever gate an
+effectful verb chain.
 
 **State dir**: `%USERPROFILE%\.custody\` - `manifest.json`, `mint.key` (HMAC key),
 `grants/`, `log/`. Same custody caveat as gate state: the mint key staying outside
@@ -241,18 +269,41 @@ granted action matches POST → `403 denied_no_action_match`, remedy names the m
 command, JSONL `verdict: denied`. The agent surfaces the remedy to the operator;
 nothing falls back to a raw secret.
 
-**C - path normalization (the bypass surface).** Request path is percent-decoded and
-dot-segment-normalized *before* rule matching; if decoding is ambiguous (double
-encoding, encoded separators changing the segment structure) the request is refused,
-not best-effort matched. Glob semantics are segment-wise: `*` matches within one path
-segment, `**` crosses segments. `/rest/api/2/issue/PROJ-*` therefore does not match
-`/rest/api/2/issue/PROJ-1/../OTHER-9`. This flow needs adversarial review.
+**C - canonical target identity (the load-bearing invariant).** The one rule the
+whole authorization rests on: **the exact semantic target that was matched is the
+target that is sent.** Matching a normalized path while forwarding the original bytes
+is the core hole (a full-width or `%2F`/`%252F`-encoded separator can match one
+segment yet resolve elsewhere once an upstream re-normalizes). So:
 
-**D - query rule.** `GET /tracker/rest/api/2/search?jql=project = PROJ AND ...` →
-rule requires query param `jql` to match `project *= *PROJ` → pass. A JQL of
-`project in (PROJ, OTHER)` does not match and is denied - crude and honest; the rule
-is a mustMatch regex, not a JQL parser. Expressiveness upgrades are v2, on evidence
-from `rule_fired` stats.
+- accept origin-form request targets only; refuse absolute-form, authority-form,
+  `CONNECT`, `*`, fragments, and malformed targets - a request line may never
+  influence the outbound host;
+- the outbound URL is built exclusively from the manifest's scheme+authority plus the
+  canonical decoded path (Go: set `URL.Path`, clear `RawPath`, let the stdlib
+  re-escape; parse and re-encode the query, never restore the original `RawQuery`);
+- decode once, remove dot segments, then anchored whole-path match; reject if decoding
+  reveals another escape, or reveals an encoded `/` or `\`, controls/NUL, or - for v0,
+  conservatively - non-ASCII / compatibility-normalizing characters;
+- segment globs range over a constrained character alphabet, not arbitrary
+  reserved/routing characters, so `PROJ-*` does not also admit `;` or vendor path
+  syntax.
+
+`/rest/api/2/issue/PROJ-*` therefore matches neither `.../PROJ-1/../OTHER-9` nor its
+encoded or full-width spellings; ambiguous input refuses rather than best-effort
+matches. The *invariant* is fixed here; the exhaustive list of rejected encoding
+classes is settled in implementation, against a table-driven adversarial test suite -
+not enumerated further in prose.
+
+**D - query rule, and the v0 scope line it forces.** A `mustMatch` regex cannot
+enforce result-set containment on an embedded query language: `jql=project = PROJ OR
+project = SECRET` satisfies a `project *= *PROJ` substring check yet returns a
+forbidden project, and repeated `?jql=...&jql=...` params create a matcher/upstream
+differential. So the v0 rule is: **endpoints carrying an embedded query language
+(search/JQL and kin) are deny-by-default** - a real parser is required before they
+open, and that is v2 work gated on evidence. Regex rules remain valid only for scalar
+query parameters, and only with full-value (anchored) semantics on a parameter
+constrained to occur exactly once. This narrows what v0 promises rather than pretending
+a regex closes the hole.
 
 **E - grant expiry mid-session.** TTL lapses between two calls → second call returns
 `401 refused_expired` + remedy → operator re-mints → work resumes. No grace period:
@@ -278,18 +329,40 @@ boundary:
 - **Single-box custody is not cryptographic.** The OS credential store is readable by
   any process in the operator's user session; a determined local agent could dig the
   secret out. What custody actually buys: the secret is out of plaintext files and
-  out of transcripts, every use is attributed and logged, and overreach becomes a
-  deliberate, loud act of going around a guardrail instead of an accidental step past
-  one. Discipline plus an audit trail, until custody of the mint key and the
-  credential store hardens.
-- **Path and query rules cannot see response bodies.** A scoped GET can still return
-  text the operator would rather agents not read if the rule is too loose. For
+  out of transcripts, every custody-mediated request is associated with a bearer grant
+  id and logged, and overreach becomes a deliberate, loud act of going around a
+  guardrail instead of an accidental step past one. Note the precise claim: there is
+  no *actor* attribution (grants are bearer tokens - any holder is any other holder),
+  and credential-store use that bypasses custody is neither visible nor logged.
+  Discipline plus an audit trail, until custody of the mint key and the credential
+  store hardens. The "deliberate-and-loud" property holds only once the canonical-target
+  (§7 C) and query-language (§7 D) rules are in place - before them, an ordinary
+  request can log as a normal pass while exceeding intended scope.
+- **A grant is replayable by any holder until it expires.** It is a bearer capability,
+  not a per-request or per-actor authorization; any process holding the token makes any
+  request its action set covers, for the token's whole TTL. This is why write actions
+  get short TTLs (§4 D6).
+- **Path and query rules cannot see response bodies**, so FR5's "no secret in any
+  response" is scoped to responses and errors *custody itself* generates - upstream
+  bodies are streamed back verbatim and unfiltered by design. A scoped GET can still
+  return text the operator would rather agents not read if the rule is too loose. For
   regulated data the actual control remains the execution boundary (local-only,
   approved environment); custody narrows reach and produces the audit trail that
   proves what was reached.
 - **Mint authority is key custody, not authentication.** Anyone who can run
   `custody grant` with the mint key can mint. Same precondition as gate: the mint key
   and the grant verb stay outside governed sessions' reach.
+
+### 8.2 Settled in implementation, not prose
+
+This design fixes the load-bearing invariants (§7 C canonical identity, §7 D
+deny-by-default, §4 D2 grant shape) and deliberately leaves the following to be worked
+out in code and tests rather than pre-specified here: the exact enumeration of rejected
+encoding classes (§7 C), the final artifact field list beyond the digests FR3 names,
+the manifest injection-seam details (tagged `inject` list, HTTPS-only upstream, header
+denylist, single-placeholder no-CRLF templates - all additive, so a wrong first guess
+is cheap to correct), and the guard's command-normalization depth (§ hooks). Each is a
+place where trying it is faster and more honest than theorizing it.
 
 ## 9. Rollout / implementation plan
 
@@ -324,6 +397,5 @@ Phases after the gate are not committed until it passes.
 
 The gate in §9 is the plan, and its signal is binary and baseline-free: grep the
 week's transcripts for the secret (zero hits), confirm the plaintext entry is gone,
-and re-run the matcher offline over the week's JSONL (`custody explain` in v1 makes
-this a verb) confirming every logged verdict replays identically - determinism you
-cannot replay is not determinism.
+and confirm `custody explain` reconstructs each recorded verdict from the log +
+manifest/grant digests (the v0 promise is explain, not independent replay - see FR3).
