@@ -470,7 +470,7 @@ func TestCycleCountUnreadableParks(t *testing.T) {
 func TestGrantFlagDefaultsThreeCycles(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "state")
-	if err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r"}); err != nil {
+	if err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r", "-init"}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := state.Open(stateDir, time.Now)
@@ -490,6 +490,39 @@ func TestGrantFlagDefaultsThreeCycles(t *testing.T) {
 	}
 	if g.MaxCycles != 3 {
 		t.Fatalf("default -max-cycles minted %d, want 3", g.MaxCycles)
+	}
+}
+
+// TestGrantRefusesFreshStateDir pins the misdirected-mint guard: minting into
+// a state dir with no existing log (e.g. the relative default from the wrong
+// cwd) must refuse and leave nothing behind, instead of silently creating a
+// fresh state tree whose grants the canonical one can't see.
+func TestGrantRefusesFreshStateDir(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r"})
+	if err == nil {
+		t.Fatal("mint into a fresh state dir must refuse without -init")
+	}
+	if !strings.Contains(err.Error(), "-init") {
+		t.Fatalf("refusal must point at -init: %v", err)
+	}
+	if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+		t.Fatalf("refused mint must not create the state dir: %v", statErr)
+	}
+}
+
+// TestGrantAcceptsExistingStateDir pins that the guard keys on the log's
+// existence, not on -init: a state dir that already holds log.jsonl mints
+// without any extra flag.
+func TestGrantAcceptsExistingStateDir(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r", "-init"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdGrant([]string{"-state", stateDir, "-key", filepath.Join(root, "keys"), "-repo", "o/r"}); err != nil {
+		t.Fatalf("mint into an existing state dir must not need -init: %v", err)
 	}
 }
 

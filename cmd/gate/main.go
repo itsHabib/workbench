@@ -126,7 +126,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|explain|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
-  grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h]
+  grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
   explain  -run run_x [-json | -html [-out path]]
@@ -257,6 +257,7 @@ func cmdGrant(args []string) error {
 	// CLI default is opinionated. 0 mints an explicitly unbounded grant.
 	maxCycles := fs.Int("max-cycles", 3, "review-cycle ceiling the grant may consume (0 = unbounded)")
 	ttl := fs.Duration("ttl", 24*time.Hour, "grant lifetime")
+	initState := fs.Bool("init", false, "allow minting into a state dir with no existing log (creates a fresh state tree)")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -266,6 +267,9 @@ func cmdGrant(args []string) error {
 	}
 	if *repo == "" {
 		return errors.New("grant: -repo required")
+	}
+	if err := checkGrantStateDir(*stateDir, *initState); err != nil {
+		return err
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
@@ -277,6 +281,27 @@ func cmdGrant(args []string) error {
 	}
 	fmt.Println(a.ID)
 	return nil
+}
+
+// checkGrantStateDir refuses to mint into a state dir with no existing log
+// unless -init explicitly asks for a fresh tree. The default -state is a
+// relative "state": run from the wrong cwd, minting would silently create a
+// brand-new state tree — with grants invisible to the canonical one — instead
+// of failing. A grant is spendable authorization, so a misdirected mint is a
+// four-hour hunt, not a cosmetic slip; make the fresh-tree case opt-in.
+func checkGrantStateDir(stateDir string, initState bool) error {
+	if initState {
+		return nil
+	}
+	logPath := filepath.Join(stateDir, "log.jsonl")
+	if _, err := os.Stat(logPath); err == nil {
+		return nil
+	}
+	abs, err := filepath.Abs(stateDir)
+	if err != nil {
+		abs = stateDir
+	}
+	return fmt.Errorf("grant: state dir %s has no existing log.jsonl — refusing to mint into a fresh state tree; point -state at your canonical state dir, or pass -init to create a new one here", abs)
 }
 
 type gateResult struct {
