@@ -341,6 +341,20 @@ func TestReviewsNoneDoesNotRaiseTier(t *testing.T) {
 	}
 }
 
+func TestReviewsLowConfidenceNoneEscalates(t *testing.T) {
+	// An uncertain "maybe it's a ship-it" must not silently pass: the
+	// low-confidence gate applies to none like any other verdict.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"probably fine?","severity":"unknown","verdict":"none","confidence":0.4}`,
+	}}
+	v := reviewsWith(t, []map[string]any{
+		{"author": "cursor[bot]", "is_bot": true, "body": "ambiguous"},
+	}, m)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("low-confidence none must escalate, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func TestReviewsActionableStillEscalates(t *testing.T) {
 	// The none bucket must not soften real findings: one actionable comment
 	// among ship-its still escalates.
