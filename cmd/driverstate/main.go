@@ -10,6 +10,7 @@
 //
 //	driverstate record [--run <id>] [--json]   < event.json
 //	driverstate state  --run <id> [--json]
+//	driverstate render --run <id>
 //	driverstate runs   [--repo <r>] [--live] [--json]
 //	driverstate verify --run <id> [--json]
 package main
@@ -33,7 +34,7 @@ func main() {
 // every verb writes and reads the one canonical ledger.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: driverstate record|state|runs|verify [flags]")
+		return fmt.Errorf("usage: driverstate record|state|render|runs|verify [flags]")
 	}
 	dir, source, err := driverstate.StateRoot()
 	if err != nil {
@@ -47,11 +48,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return cmdRecord(dir, rest, stdin, stdout)
 	case "state":
 		return cmdState(dir, rest, stdout)
+	case "render":
+		return cmdRender(dir, rest, stdout)
 	case "runs":
 		return cmdRuns(dir, rest, stdout)
 	case "verify":
 		return cmdVerify(dir, rest, stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want record|state|runs|verify)", cmd)
+		return fmt.Errorf("unknown command %q (want record|state|render|runs|verify)", cmd)
 	}
 }
