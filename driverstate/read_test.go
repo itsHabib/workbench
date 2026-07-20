@@ -155,6 +155,91 @@ func TestReduceStatusOverlayPerKind(t *testing.T) {
 	}
 }
 
+// TestReduceFoldsResumeLocators is the F3 resume acceptance: Reduce on a
+// ledger that carries stream_dispatched{branch,worktree} and
+// stream_attempt{commit} yields a RunState with all three locators, so
+// state --json exposes them with no CLI change.
+func TestReduceFoldsResumeLocators(t *testing.T) {
+	dir := t.TempDir()
+	run := "dsr_run1"
+	stream := "dss_a"
+	l, err := Claim(dir, run, "session:a")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	mustAppend(t, dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, dsc.RunImportedBody{
+		Repo: "r", Source: "s", Manifest: json.RawMessage(`{}`),
+		Streams: []dsc.StreamSpec{{Stream: stream, DocPath: "d.md"}},
+	}))
+	mustAppend(t, dir, l, ev("evt_2", dsc.KindStreamDispatched, stream, "session:a", baseTime.Add(time.Second), dsc.StreamDispatchedBody{
+		Branch:   "feat/resume-locators",
+		Worktree: "/tmp/wt-resume",
+	}))
+	mustAppend(t, dir, l, ev("evt_3", dsc.KindStreamAttempt, stream, "session:a", baseTime.Add(2*time.Second), dsc.StreamAttemptBody{
+		Seq: 1, DocPath: "d.md", Terminal: true, Commit: "deadbeef01",
+	}))
+
+	state, err := Reduce(dir, run)
+	if err != nil {
+		t.Fatalf("reduce: %v", err)
+	}
+	sr, ok := state.Streams[stream]
+	if !ok {
+		t.Fatalf("stream %q missing", stream)
+	}
+	if sr.Branch != "feat/resume-locators" {
+		t.Errorf("branch = %q, want feat/resume-locators", sr.Branch)
+	}
+	if sr.Worktree != "/tmp/wt-resume" {
+		t.Errorf("worktree = %q, want /tmp/wt-resume", sr.Worktree)
+	}
+	if len(sr.Attempts) != 1 {
+		t.Fatalf("want 1 attempt, got %d", len(sr.Attempts))
+	}
+	if sr.Attempts[0].Commit != "deadbeef01" {
+		t.Errorf("attempt commit = %q, want deadbeef01", sr.Attempts[0].Commit)
+	}
+	if sr.Status != dsc.StatusLanded {
+		t.Errorf("status = %q, want landed", sr.Status)
+	}
+}
+
+// TestReduceAbsentLocatorsTolerated covers old ledgers: a null/empty
+// stream_dispatched body and a stream_attempt without commit still fold,
+// leaving Branch/Worktree/Commit empty.
+func TestReduceAbsentLocatorsTolerated(t *testing.T) {
+	dir := t.TempDir()
+	run := "dsr_run1"
+	stream := "dss_a"
+	l, _ := Claim(dir, run, "session:a")
+	mustAppend(t, dir, l, ev("evt_1", dsc.KindRunImported, "", "session:a", baseTime, dsc.RunImportedBody{
+		Repo: "r", Source: "s", Manifest: json.RawMessage(`{}`),
+		Streams: []dsc.StreamSpec{{Stream: stream, DocPath: "d.md"}},
+	}))
+	mustAppend(t, dir, l, ev("evt_2", dsc.KindStreamDispatched, stream, "session:a", baseTime.Add(time.Second), nil))
+	mustAppend(t, dir, l, ev("evt_3", dsc.KindStreamAttempt, stream, "session:a", baseTime.Add(2*time.Second), dsc.StreamAttemptBody{
+		Seq: 1, DocPath: "d.md", Terminal: true,
+	}))
+
+	state, err := Reduce(dir, run)
+	if err != nil {
+		t.Fatalf("reduce: %v", err)
+	}
+	sr := state.Streams[stream]
+	if sr.Branch != "" || sr.Worktree != "" {
+		t.Fatalf("absent dispatch locators must stay empty, got branch=%q worktree=%q", sr.Branch, sr.Worktree)
+	}
+	if len(sr.Attempts) != 1 {
+		t.Fatalf("want 1 attempt, got %d", len(sr.Attempts))
+	}
+	if sr.Attempts[0].Commit != "" {
+		t.Fatalf("absent attempt commit must stay empty, got %q", sr.Attempts[0].Commit)
+	}
+	if sr.Status != dsc.StatusLanded {
+		t.Errorf("status = %q, want landed", sr.Status)
+	}
+}
+
 // TestReduceUnknownKindSkipped verifies that an unknown kind in the ledger is
 // skipped in the fold (no error, stream status unchanged) but the chain is
 // still verified across it.

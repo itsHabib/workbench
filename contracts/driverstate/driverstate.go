@@ -141,6 +141,19 @@ type StreamSpec struct {
 	Batch   int    `json:"batch,omitempty"`
 }
 
+// StreamDispatchedBody is the locator payload written when a stream is
+// dispatched into a worktree. Every field is optional: older ledgers omit
+// them, and a dispatch without a recovered locator still validates.
+type StreamDispatchedBody struct {
+	// Branch is the git branch the dispatch opened, when known.
+	Branch string `json:"branch,omitempty"`
+	// Worktree is the absolute path of the dispatch worktree, when known.
+	Worktree string `json:"worktree,omitempty"`
+	// Engine names the dispatching engine (e.g. "session") — live ledgers
+	// already carry it, so the typed body must too.
+	Engine string `json:"engine,omitempty"`
+}
+
 // StreamAttemptBody is one dispatch attempt on a stream. Seq is append-only
 // monotone (P2 enforces increase). A terminal attempt with FailureCategory set
 // lands the stream in failed; absent it, in landed.
@@ -149,6 +162,9 @@ type StreamAttemptBody struct {
 	DocPath         string `json:"doc_path"`
 	Terminal        bool   `json:"terminal"`
 	FailureCategory string `json:"failure_category,omitempty"`
+	// Commit is the head commit the attempt produced, when known — used by
+	// resume to match ledger state to a PR head SHA.
+	Commit string `json:"commit,omitempty"`
 }
 
 // StreamPROpenedBody records the PR a landed stream opened.
@@ -197,6 +213,10 @@ type StreamRecord struct {
 	PR          int             `json:"pr,omitempty"`
 	URL         string          `json:"url,omitempty"`
 	MergeCommit string          `json:"merge_commit,omitempty"`
+	// Branch is folded from stream_dispatched — the dispatch branch locator.
+	Branch string `json:"branch,omitempty"`
+	// Worktree is folded from stream_dispatched — the dispatch worktree locator.
+	Worktree string `json:"worktree,omitempty"`
 }
 
 // AttemptRecord is one folded attempt in a StreamRecord.
@@ -204,6 +224,8 @@ type AttemptRecord struct {
 	Seq             int    `json:"seq"`
 	Terminal        bool   `json:"terminal"`
 	FailureCategory string `json:"failure_category,omitempty"`
+	// Commit is folded from stream_attempt — the head commit the attempt produced.
+	Commit string `json:"commit,omitempty"`
 }
 
 // DecodeEvent is the tolerant reader for a single event: unknown additive

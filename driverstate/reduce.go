@@ -92,7 +92,7 @@ func applyEventToState(state *dsc.RunState, finished *bool, e Event) {
 	case dsc.KindRunImported:
 		applyRunImported(state, e)
 	case dsc.KindStreamDispatched:
-		setStreamStatus(state, e.Stream, dsc.StatusDispatched)
+		applyStreamDispatched(state, e)
 	case dsc.KindStreamAttempt:
 		applyStreamAttempt(state, e)
 	case dsc.KindStreamPROpened:
@@ -130,6 +130,20 @@ func applyRunImported(state *dsc.RunState, e Event) {
 	}
 }
 
+// applyStreamDispatched advances the stream to dispatched and folds optional
+// branch/worktree locators when the body carries them. A null or empty body
+// still sets status — older ledgers omit the locators.
+func applyStreamDispatched(state *dsc.RunState, e Event) {
+	rec := state.Streams[e.Stream]
+	rec.Status = dsc.StatusDispatched
+	var b dsc.StreamDispatchedBody
+	if err := json.Unmarshal(e.Body, &b); err == nil {
+		rec.Branch = b.Branch
+		rec.Worktree = b.Worktree
+	}
+	state.Streams[e.Stream] = rec
+}
+
 // applyStreamAttempt records the attempt and advances the stream status for a
 // terminal attempt (landed unless FailureCategory is set, in which case failed).
 func applyStreamAttempt(state *dsc.RunState, e Event) {
@@ -142,6 +156,7 @@ func applyStreamAttempt(state *dsc.RunState, e Event) {
 		Seq:             b.Seq,
 		Terminal:        b.Terminal,
 		FailureCategory: b.FailureCategory,
+		Commit:          b.Commit,
 	})
 	if b.Terminal {
 		rec.Status = dsc.StatusLanded
