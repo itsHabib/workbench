@@ -124,9 +124,13 @@ allowlist candidates.
 
 **Portfolio actions** (merges): gate + triage, state in `~/pers/gate` (the operator's
 machine — gate state deliberately lives outside any repo), grants minted by the operator,
-decisions in the hash-chained audit log. Ship *dispatch* policy is in scope but has no
-rulebook yet — dispatch decisions today are skill-level convention (/work-driver); it
-adopts this contract when it grows one.
+decisions in the hash-chained audit log.
+
+**Dispatch placement** (`cmd/dispatch`, phase 1): already an instance of this shape — a
+versioned, content-hashed policy file first-match-scanned against a task descriptor,
+fail-closed everywhere (an unmatched descriptor is an error, never a default placement),
+deterministic by law, with append-only receipts. It decides *placement* only; ship
+executes. New dispatch-policy work grows this rulebook rather than starting another.
 
 **Harness tool calls** (what a session may do): three settings layers with distinct jobs —
 
