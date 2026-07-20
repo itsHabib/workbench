@@ -2,6 +2,7 @@ package floor
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -13,8 +14,14 @@ import (
 // signals like the dev-dependency discriminator need to know which section
 // a changed line sits in, and only the ordered stream carries that.
 //
+// An input with no parseable file headers (empty or unrecognized bytes) and a
+// scanner error (including a line over the 16 MiB buffer cap) both return an
+// error — callers must fail closed rather than classify a missing or truncated
+// diff as T0. A valid diff whose files carry no hunks (mode-only, rename-only,
+// binary) is real input, not an operational failure — it parses and classifies.
+//
 //nolint:gocognit,cyclop // see floor.Classify — same deferral.
-func ParseUnifiedDiff(r io.Reader) Diff {
+func ParseUnifiedDiff(r io.Reader) (Diff, error) {
 	var d Diff
 	var cur *FileChange
 	sc := bufio.NewScanner(r)
@@ -92,7 +99,13 @@ func ParseUnifiedDiff(r io.Reader) Diff {
 		}
 	}
 	flush()
-	return d
+	if err := sc.Err(); err != nil {
+		return Diff{}, fmt.Errorf("scanning unified diff: %w", err)
+	}
+	if len(d.Files) == 0 {
+		return Diff{}, fmt.Errorf("no file headers parsed: empty or unrecognized diff input")
+	}
+	return d, nil
 }
 
 // gitHeaderPaths pulls the a/ (old) and b/ (new) paths from a

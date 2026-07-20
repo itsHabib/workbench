@@ -44,7 +44,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	res := floor.Classify(floor.ParseUnifiedDiff(strings.NewReader(diffText)))
+	d, err := floor.ParseUnifiedDiff(strings.NewReader(diffText))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "triage-advisory:", err)
+		os.Exit(1)
+	}
+	res := floor.Classify(d)
 	v := advisory.Merge(res, diffText, p)
 
 	if *verbose {

@@ -17,7 +17,11 @@ import (
 )
 
 func main() {
-	d := floor.ParseUnifiedDiff(os.Stdin)
+	d, err := floor.ParseUnifiedDiff(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "triage-floor:", err)
+		os.Exit(1)
+	}
 	res := floor.Classify(d)
 
 	if len(os.Args) > 1 && os.Args[1] == "-v" {

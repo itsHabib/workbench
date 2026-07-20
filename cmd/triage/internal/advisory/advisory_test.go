@@ -13,8 +13,13 @@ const diffText = "diff --git a/src/gate.go b/src/gate.go\n" +
 	"+		return allowMerge() // absence of signal must not allow\n" +
 	"+	}\n"
 
-func classify(raw string) floor.Result {
-	return floor.Classify(floor.ParseUnifiedDiff(strings.NewReader(raw)))
+func classify(t *testing.T, raw string) floor.Result {
+	t.Helper()
+	d, err := floor.ParseUnifiedDiff(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ParseUnifiedDiff: %v", err)
+	}
+	return floor.Classify(d)
 }
 
 func TestCheck(t *testing.T) {
@@ -89,7 +94,7 @@ func TestCheck(t *testing.T) {
 }
 
 func TestMerge(t *testing.T) {
-	res := classify(diffText) // internal change -> T1
+	res := classify(t, diffText) // internal change -> T1
 
 	t.Run("trusted escalation raises the floor", func(t *testing.T) {
 		v := Merge(res, diffText, Proposal{Escalate: "T3", Trigger: "gate-machinery", Evidence: "return allowMerge() // absence of signal must not allow"})
@@ -104,7 +109,7 @@ func TestMerge(t *testing.T) {
 		}
 	})
 	t.Run("advisory can never lower the floor", func(t *testing.T) {
-		auth := classify("diff --git a/internal/auth/s.go b/internal/auth/s.go\n+++ b/internal/auth/s.go\n@@\n+func check() {}\n")
+		auth := classify(t, "diff --git a/internal/auth/s.go b/internal/auth/s.go\n+++ b/internal/auth/s.go\n@@\n+func check() {}\n")
 		v := Merge(auth, diffText, Proposal{Escalate: "T2", Trigger: "gate-machinery", Evidence: "return allowMerge() // absence of signal must not allow"})
 		if v.Final != "T3" {
 			t.Fatalf("final = %s, want floor T3 to stand", v.Final)

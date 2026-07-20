@@ -6,8 +6,13 @@ import (
 )
 
 // classifyDiff is a test helper: parse raw diff text and classify.
-func classifyDiff(raw string) Result {
-	return Classify(ParseUnifiedDiff(strings.NewReader(raw)))
+func classifyDiff(t *testing.T, raw string) Result {
+	t.Helper()
+	d, err := ParseUnifiedDiff(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ParseUnifiedDiff: %v", err)
+	}
+	return Classify(d)
 }
 
 func TestFloor(t *testing.T) {
@@ -453,7 +458,7 @@ func TestFloor(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := classifyDiff(c.diff).Floor
+			got := classifyDiff(t, c.diff).Floor
 			if got != c.want {
 				t.Fatalf("floor = %s, want %s", got, c.want)
 			}
