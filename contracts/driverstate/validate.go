@@ -66,6 +66,8 @@ func ValidateBody(kind Kind, body json.RawMessage) error {
 	switch kind {
 	case KindRunImported:
 		return validateRunImported(body)
+	case KindStreamDispatched:
+		return validateStreamDispatched(body)
 	case KindStreamAttempt:
 		return validateStreamAttempt(body)
 	case KindStreamPROpened:
@@ -84,6 +86,17 @@ func unmarshalBody(kind Kind, body json.RawMessage, into any) error {
 		return fmt.Errorf("driverstate: %s body: %w", kind, err)
 	}
 	return nil
+}
+
+// validateStreamDispatched enforces only that the body, when present, decodes
+// as the locator shape — every field is optional, and legacy ledgers carry an
+// absent or null body (EncodeEvent emits null for an empty RawMessage).
+func validateStreamDispatched(body json.RawMessage) error {
+	if len(body) == 0 {
+		return nil
+	}
+	var b StreamDispatchedBody
+	return unmarshalBody(KindStreamDispatched, body, &b)
 }
 
 // Presence probes: decoding a required boolean/array/int into a value struct

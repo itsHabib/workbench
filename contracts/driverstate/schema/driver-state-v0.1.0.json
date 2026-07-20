@@ -71,8 +71,8 @@
       }
     },
     "stream_dispatched_body": {
-      "type": "object",
-      "description": "Locator payload written when a stream is dispatched into a worktree. Every field is optional — older ledgers omit them; a resumer folds the locators into StreamRecord when present.",
+      "type": ["object", "null"],
+      "description": "Locator payload written when a stream is dispatched into a worktree. Every field is optional and legacy ledgers may carry a null body (EncodeEvent emits null for an empty RawMessage) — a resumer folds the locators into StreamRecord when present.",
       "additionalProperties": false,
       "properties": {
         "branch": { "type": "string", "description": "The git branch the dispatch opened, when known." },

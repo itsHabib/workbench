@@ -17,13 +17,32 @@ import (
 // mirrors the contracts and contracts/execution walkers structurally.
 type objSchema struct {
 	XVersion   string               `json:"x-version"`
-	Type       string               `json:"type"`
+	Type       schemaType           `json:"type"`
 	Required   []string             `json:"required"`
 	Properties map[string]objSchema `json:"properties"`
 	Items      *objSchema           `json:"items"`
 	Enum       []string             `json:"enum"`
 	Const      string               `json:"const"`
 	Defs       map[string]objSchema `json:"$defs"`
+}
+
+// schemaType accepts JSON Schema's string-or-array `type` form — "object" and
+// ["object", "null"] both parse (stream_dispatched_body allows null for legacy
+// ledgers).
+type schemaType []string
+
+func (st *schemaType) UnmarshalJSON(data []byte) error {
+	var one string
+	if err := json.Unmarshal(data, &one); err == nil {
+		*st = schemaType{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return err
+	}
+	*st = schemaType(many)
+	return nil
 }
 
 func loadSchema(t *testing.T) objSchema {
@@ -244,7 +263,12 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"malformed json", KindStreamAttempt, `{"seq":`, true},
 		{"stream_dispatched locators ok", KindStreamDispatched, `{"branch":"feat/x","worktree":"/tmp/wt"}`, false},
 		{"stream_dispatched empty body ok", KindStreamDispatched, `{}`, false},
+		{"stream_dispatched null body ok (legacy ledgers)", KindStreamDispatched, `null`, false},
+		// Go-level tolerance: json.Unmarshal ignores unknown members. The
+		// schema's additionalProperties:false is stricter — a schema validator
+		// would reject this body; the runtime deliberately does not.
 		{"stream_dispatched unknown field tolerated", KindStreamDispatched, `{"anything":true}`, false},
+		{"stream_dispatched malformed body rejected", KindStreamDispatched, `{"branch":5}`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
