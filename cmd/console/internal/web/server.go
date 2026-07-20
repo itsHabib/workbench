@@ -42,6 +42,11 @@ func New(gate *gatecli.Client, host string) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// nosniff on every response — the app page and the /api/* JSON alike. gate's
+	// stdout carries untrusted strings (PR titles, escalation questions), and a
+	// browser that MIME-sniffed a directly-navigated /api response as HTML would
+	// run it with no CSP. Setting it here, before dispatch, covers every route.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// Loopback hardening: a page on any origin can still POST/GET to 127.0.0.1,
 	// so pin the Host header to the address we serve on. This refuses a
 	// DNS-rebinding attacker — a remote name re-resolved to 127.0.0.1 arrives
@@ -108,7 +113,6 @@ func (s *Server) handleApp(w http.ResponseWriter, _ *http.Request) {
 	// the header makes that a rule rather than a hope.
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(appPage)
 }

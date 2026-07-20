@@ -47,6 +47,11 @@ func TestNextProxiesGateJSON(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("content-type = %q", ct)
 	}
+	// nosniff must ride every response, /api/* included — gate's stdout carries
+	// untrusted strings, and a sniffed JSON body would run under no CSP.
+	if ns := rec.Header().Get("X-Content-Type-Options"); ns != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", ns)
+	}
 	var in struct {
 		Parked []any `json:"parked"`
 		Grants []any `json:"grants"`
