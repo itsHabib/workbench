@@ -71,7 +71,7 @@ func Rollup(dir, parent string) (ParentRollup, error) {
 		BoundaryReached: true,
 	}
 	for stream, rec := range parentState.Streams {
-		row := rollupStream(dir, stream, rec)
+		row := rollupStream(dir, parent, stream, rec)
 		if !reachedBoundary(rec.Status, boundary) {
 			out.BoundaryReached = false
 		}
@@ -86,7 +86,7 @@ func Rollup(dir, parent string) (ParentRollup, error) {
 // rollupStream builds one stream's row: the parent mirror facts plus, when the
 // stream delegated to a child, the child's ground-truth status, friction, and
 // the mirror-agreement verdict.
-func rollupStream(dir, stream string, parentRec dsc.StreamRecord) StreamRollup {
+func rollupStream(dir, parent, stream string, parentRec dsc.StreamRecord) StreamRollup {
 	row := StreamRollup{
 		Stream:       stream,
 		ChildRun:     parentRec.ChildRun,
@@ -102,6 +102,15 @@ func rollupStream(dir, stream string, parentRec dsc.StreamRecord) StreamRollup {
 	childState, err := Reduce(dir, parentRec.ChildRun)
 	if err != nil {
 		// Cannot read the child → cannot claim agreement.
+		row.Agrees = false
+		return row
+	}
+	// Verify the link is mutual before trusting the child's facts: the child's
+	// own run_imported must name THIS parent and stream. A mistaken child_run
+	// pointing at an unrelated sub-run must not have its PR reported here with a
+	// false agrees:true (spec §4 D5). Its own recorded parent is the ground truth.
+	if childState.Run.Parent != parent || (childState.Run.ParentStream != "" && childState.Run.ParentStream != stream) {
+		row.ChildStatus = childState.Streams[stream].Status
 		row.Agrees = false
 		return row
 	}

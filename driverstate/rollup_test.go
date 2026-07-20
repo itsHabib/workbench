@@ -138,6 +138,72 @@ func TestRollupJoinsChildren(t *testing.T) {
 	}
 }
 
+// TestChildImportsWithSharedKeyGetDistinctRuns is the sub-run isolation guard:
+// two children derived from one manifest share (repo, source, generated_at) but
+// name different parent streams, and must NOT dedupe into one run — the parent
+// linkage discriminates them (spec §4 D1).
+func TestChildImportsWithSharedKeyGetDistinctRuns(t *testing.T) {
+	dir := t.TempDir()
+	imp := func(run, stream string) Event {
+		return ev("evt_"+run, dsc.KindRunImported, "", "session:"+run, baseTime, dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-20T00:00:00Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: stream, DocPath: "d"}},
+			Parent: "dsr_parent", ParentStream: stream,
+		})
+	}
+	la, err := Claim(dir, "dsr_ca", "session:ca")
+	if err != nil {
+		t.Fatalf("claim ca: %v", err)
+	}
+	outA := mustAppend(t, dir, la, imp("dsr_ca", "dss_a"))
+	lb, err := Claim(dir, "dsr_cb", "session:cb")
+	if err != nil {
+		t.Fatalf("claim cb: %v", err)
+	}
+	outB := mustAppend(t, dir, lb, imp("dsr_cb", "dss_b"))
+	if outA.Run == outB.Run {
+		t.Fatalf("distinct children collapsed into one run: %s", outA.Run)
+	}
+	// And a genuine retry of child A's SAME import still dedupes to A.
+	retry := mustAppend(t, dir, la, imp("dsr_ca", "dss_a"))
+	if retry.Run != outA.Run {
+		t.Errorf("child A retry did not dedupe: %s vs %s", retry.Run, outA.Run)
+	}
+}
+
+// TestRollupRejectsMismatchedChildLink guards the join: a parent stream whose
+// child_run points at a sub-run that names a DIFFERENT parent must not have that
+// child's PR reported here with agrees:true (spec §4 D5, medium finding).
+func TestRollupRejectsMismatchedChildLink(t *testing.T) {
+	dir := t.TempDir()
+	// A child that belongs to a DIFFERENT parent, carrying its own PR + friction.
+	buildChild(t, dir, "dsr_stray", "dsr_other_parent", "dss_a", true, 1, 0, false)
+
+	pl, err := Claim(dir, "dsr_parent", "session:parent")
+	if err != nil {
+		t.Fatalf("claim parent: %v", err)
+	}
+	tm := baseTime.Add(time.Hour)
+	mustAppend(t, dir, pl, ev("evt_p_imp", dsc.KindRunImported, "", "session:parent", tm, dsc.RunImportedBody{
+		Repo: "itsHabib/workbench", Source: "docs/driver.md", Manifest: json.RawMessage(`{"v":1}`),
+		Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+	}))
+	// Parent mis-links this stream to the stray child.
+	buildParentMirror(t, dir, pl, &tm, "dss_a", "dsr_stray", 100, false)
+
+	r, err := Rollup(dir, "dsr_parent")
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	s := r.Streams[0]
+	if s.Agrees {
+		t.Errorf("mismatched child link must not agree: %+v", s)
+	}
+	if s.Friction.WorktreeConflict {
+		t.Errorf("stray child's facts must not be adopted: %+v", s)
+	}
+}
+
 // TestMirrorAgrees pins the parent↔child agreement cross-check, especially the
 // terminal-status cases a happy-path-only rank would mask (merged vs skipped).
 func TestMirrorAgrees(t *testing.T) {

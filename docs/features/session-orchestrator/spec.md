@@ -59,9 +59,12 @@ the engine's shape so the ceiling moves, not the declaration that an inline engi
 - N-2. **Contract stays v0.1.0.** Every field added is optional (Go `omitempty` ⟺ schema
   optional). Existing ledgers, canonical vectors, and the cross-language chain rule are
   unaffected. A version bump would break the `v` const gate for live runs and is not taken.
-- N-3. **Concurrency without a shared lock.** Children each write their OWN sub-run ledger
-  under their OWN lease, so N children dispatched in parallel never contend. The parent lease
-  guards only the parent ledger, which the parent writes serially as returns arrive.
+- N-3. **Concurrency isolated after import.** Children each write their OWN sub-run ledger
+  under their OWN lease, so once imported they never contend on each other's files. The one
+  shared point is the state-root `import.lock`, which every `run_imported` takes across its
+  cross-run dedupe scan — so child *creation* serializes briefly (bounded lock contention),
+  then runs fully independent. The parent lease guards only the parent ledger, which the
+  parent writes serially as returns arrive.
 - N-4. **Single writer per ledger** is preserved everywhere — the lease law is unchanged; it
   is simply applied per-sub-run instead of once for the whole batch.
 
@@ -173,6 +176,15 @@ it. It decides how far the engine pushes each stream and whether it attempts `ru
 No boundary needs a new event or a state-machine change — the terminal vocabulary
 (merged/skipped/failed) is unchanged; the boundary only governs the drive. `boundary_reached`
 is a derived condition the rollup reports (`all streams ≥ the boundary status`).
+
+**Honest limit of `boundary_reached`.** It reflects LEDGER state, not the world. For `green`
+the ledger carries no "CI is green" fact — `green` and `pr-open` both resolve to the `pr_open`
+milestone — so `boundary_reached:true` on a `green` run means "every stream reached an open PR,"
+NOT "CI passed"; the green wait is enforced by the *drive*, not provable from the ledger.
+Separately, `boundary_reached` measures the PARENT's mirror; a mirror that ran ahead of its
+child still reports reached, which is exactly why it must be read alongside the rollup's per-
+stream `agrees` (a `merged` parent over a `pr_open` child reports `boundary_reached:true` AND
+`agrees:false` — the pair is the signal, not either alone).
 
 ## 5. Data model (contract deltas — all additive, all optional)
 
@@ -293,9 +305,14 @@ act on ledger state without the git reconcile. A new session actor per generatio
 
 ## 8. Concurrency / consistency / failure model
 
-- **Parallel children, no contention (N-3).** Each child writes its own `dsr_C*` ledger under
-  its own lease. The parent writes only `dsr_P` and only when a return arrives, serially. There
-  is no shared file across the fan-out, so `ErrLocked` cannot occur between siblings.
+- **Parallel children, isolated after import (N-3).** Each child writes its own `dsr_C*`
+  ledger under its own lease. The parent writes only `dsr_P` and only when a return arrives,
+  serially. The one shared file across the fan-out is the state-root `import.lock`, which every
+  `run_imported` holds across its cross-run dedupe scan — so child *creation* serializes briefly
+  (bounded lock contention), but no two siblings ever contend on a data ledger, so `ErrLocked`
+  between siblings does not occur. Sibling identity is `(repo, source, generated_at, parent,
+  parent_stream)`: children off one manifest share the first three, so the parent linkage is what
+  keeps a second child's import from deduping into the first child's run (§4 D1).
 - **A child that dies** leaves its sub-run `open` with whatever it recorded (torn-tail tolerant
   as always). Resume reconciles it from git like any other mid-flight stream.
 - **Idempotent recording (D3).** Both parent mirror and child detail record through
@@ -313,6 +330,14 @@ act on ledger state without the git reconcile. A new session actor per generatio
 | O2 | mechanism | reducer folds + parent filter + rollup | fold review_cycles/child_run/worktree_conflict/parent into RunState/RunSummary; `Runs` parent filter; `Rollup(dir, parent)`; unit tests | ~250 |
 | O3 | MCP | `driver_transition` + `driver_rollup` + `driver_runs` parent | ergonomic recorder with deterministic ids; rollup verb; runs param; verbs_test | ~250 |
 | O4 | skill | thin-orchestrator prose + per-task contract | rewrite `--engine session` (subagent-per-task, structured return, reconcile step, done-boundary); registry sync | ~120 prose |
+
+> **Scope note.** O1–O3 (this repo's PR) deliver the **plane**: the ledger primitives the
+> orchestrator records through. O4 is the **consumer** and lives OUTSIDE this repo — the
+> canonical skill is `~/.claude/skills/work-driver/SKILL.md`, synced to the `pers/skills` /
+> `pers/cc-skills` registries, not versioned here. So the subagent-dispatch / structured-return /
+> serial-parent-recording *loop* is not in this diff and its end-to-end concurrency claim is not
+> provable by this PR's CI — it is validated by the operator-run §11 dogfood gate. This PR's CI
+> proves the primitives (contract, reducer, rollup, verbs) in isolation.
 
 O1→O2→O3 are the Go plane; O4 is prose consuming it. All in one feature branch/PR (the phases
 are one coherent change and the skill is prose, per the bigger-PR policy).

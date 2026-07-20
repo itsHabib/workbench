@@ -222,7 +222,10 @@ func naturalKey(e driverstate.Event) (string, error) {
 		if b.Repo == "" || b.Source == "" || b.GeneratedAt == "" {
 			return "", fmt.Errorf("driver_transition: run_imported facts must carry repo, source, generated_at (the retry-safe import key)")
 		}
-		return b.Repo + "|" + b.Source + "|" + b.GeneratedAt, nil
+		// Sibling children share (repo, source, generated_at); parent + parent_stream
+		// discriminate them so a second child's import id (and run) is distinct —
+		// matching Append's import dedupe key (spec §4 D1).
+		return b.Repo + "|" + b.Source + "|" + b.GeneratedAt + "|" + b.Parent + "|" + b.ParentStream, nil
 	case dsc.KindStreamAttempt:
 		var b dsc.StreamAttemptBody
 		if err := json.Unmarshal(e.Body, &b); err != nil {
