@@ -50,3 +50,23 @@ so `$GATE_KEY` reaches gate for the `audit` chain check.
   deliberate phase, not a gap to fill casually.
 - **Stdlib only in production.** No third-party production dependencies; the UI
   is one inlined, dependency-free HTML page served from `//go:embed`.
+
+## Testing the UI
+
+The Go layers (`gatecli`, the server) are covered by `httptest`. The embedded
+page is inline HTML+JS with no build step, so it is guarded in tiers:
+
+- **Tier 0 — committed, stdlib (`web/ui_contract_test.go`).** Asserts the seam
+  between markup and script: every `/api/...` path the page fetches resolves to
+  a real route, and the static elements the script binds to on load exist. This
+  catches the common embedded-page regression — an orphaned mount or a renamed
+  route — in plain `go test`, no browser.
+- **Tier 1 — deferred (a JS-execution smoke).** Confirming the fetch resolves
+  and the DOM populates without throwing needs a headless browser. The
+  charter-legal, Node-free way is a build-tag-gated `chromedp` test (Go-native
+  CDP over system Chrome — no npm, no `playwright install`). Not worth a
+  third-party dep for a page this small yet; revisit if the UI grows action
+  endpoints (judge/mint), where a JS bug would be consequential.
+- **Tier 2 — manual/agent.** Visual + layout judgment via the Playwright MCP
+  when a change warrants an eyeball. Nothing committed. We do NOT reintroduce a
+  Node/Playwright toolchain in CI (the closed-off `controlroom` carve-out).
