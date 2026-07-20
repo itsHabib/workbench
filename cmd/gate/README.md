@@ -30,7 +30,7 @@ open.
 
 ```
 go build -o gate.exe ./cmd/gate
-./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_...
+./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -auto           # frontier model judges from artifacts alone

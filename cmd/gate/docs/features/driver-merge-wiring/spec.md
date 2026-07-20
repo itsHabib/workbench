@@ -319,6 +319,7 @@ all closed:
 
 ```
 gate grant -repo R -action merge -max-tier T1 -max-cycles 3 -ttl 6h   → grt_…
+           (add -init only for the very first mint into a fresh -state tree)
 gate gate  -repo R -pr N -grant grt_…  [ -live ]                       → JSON + exit code
 ```
 
@@ -327,7 +328,7 @@ gate gate  -repo R -pr N -grant grt_…  [ -live ]                       → JSO
 ### 7a. Per-repo grant mint (driver, once per run)
 
 ```
-gate grant -repo owner/r -action merge -max-tier T1 -ttl 6h   # -max-cycles defaults to 3 (mf5)
+gate grant -repo owner/r -action merge -max-tier T1 -ttl 6h   # -max-cycles defaults to 3 (mf5); first mint into a fresh -state needs -init
 → grt_…   (printed id; the driver holds it for every gate call this run)
 ```
 
