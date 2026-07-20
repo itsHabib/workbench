@@ -18,7 +18,7 @@ const (
 	ollamaModel    = "qwen2.5:7b"
 	confidenceGate = 0.6
 
-	extractPrompt = `You EXTRACT structure from ONE AI code-review comment. Do NOT judge whether it is valid or already handled. Read off: (headline) the bot's OWN title or first line, cleaned of markdown, badges, and HTML comments — quote its words, do not paraphrase; (severity) the severity the bot itself stated (High/Medium/P1/P2), else "unknown"; (verdict) actionable if it reports a problem, nit if trivial or style, question if it asks something; (confidence) a 0.0-1.0 estimate that you extracted headline and severity correctly. Output JSON only.`
+	extractPrompt = `You EXTRACT structure from ONE AI code-review comment. Do NOT judge whether it is valid or already handled. Read off: (headline) the bot's OWN title or first line, cleaned of markdown, badges, and HTML comments — quote its words, do not paraphrase; (severity) the severity the bot itself stated (High/Medium/P1/P2), else "unknown"; (verdict) actionable if it reports a problem, nit if trivial or style, question if it asks something, none if it reports no problem — an approval, a "no issues found", or the bot's own statement that its findings are resolved or the change is ready; (confidence) a 0.0-1.0 estimate that you extracted headline and severity correctly. Output JSON only.`
 )
 
 var extractSchema = json.RawMessage(`{
@@ -26,7 +26,7 @@ var extractSchema = json.RawMessage(`{
   "properties": {
     "headline":   {"type": "string"},
     "severity":   {"type": "string"},
-    "verdict":    {"type": "string", "enum": ["actionable", "nit", "question"]},
+    "verdict":    {"type": "string", "enum": ["actionable", "nit", "question", "none"]},
     "confidence": {"type": "number"}
   },
   "required": ["headline", "severity", "verdict", "confidence"]
@@ -45,7 +45,7 @@ type extraction struct {
 // schema's enum. An unknown verdict must be treated as a failed extraction and
 // escalate, never be silently counted as "not actionable".
 func knownVerdict(v string) bool {
-	return v == "actionable" || v == "nit" || v == "question"
+	return v == "actionable" || v == "nit" || v == "question" || v == "none"
 }
 
 // Reviews consolidates the bot panel's comments via the selected model.
@@ -117,6 +117,11 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		if ex.Confidence < confidenceGate {
 			lowConf++
 		}
+		// A no-problem comment (approval, ship-it, findings-resolved note) may
+		// still quote a severity badge; it raises nothing.
+		if ex.Verdict == "none" {
+			continue
+		}
 		if severityTier(f.Severity) > tierRank(v.Tier) {
 			v.Tier = "T" + fmt.Sprint(severityTier(f.Severity))
 		}
@@ -134,7 +139,7 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		v.Decision = DecisionEscalate
 		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment", processed, actionable, lowConf)
 	default:
-		v.Why = fmt.Sprintf("%d bot comments, all nits/questions", processed)
+		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)", processed)
 	}
 	return Record(st, run, []string{commentsEvidenceID}, v)
 }
