@@ -1,13 +1,13 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/itsHabib/workbench/cmd/runway/internal/backend/local"
+	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
+	"github.com/itsHabib/workbench/cmd/runway/internal/backend/install"
 	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 	"github.com/itsHabib/workbench/cmd/runway/internal/journal"
 	"github.com/itsHabib/workbench/cmd/runway/internal/state"
@@ -45,7 +45,11 @@ func Reconcile(stateRoot, runID string) (ReconcileOutcome, error) {
 	}
 	_ = owner
 
-	cleanup, err := local.CleanupDurable(run.PrivateDir())
+	request, err := readReconcileRequest(run)
+	if err != nil {
+		return ReconcileOutcome{}, err
+	}
+	cleanup, err := install.CleanupDurable(request.Placement, run.PrivateDir())
 	if err != nil {
 		return ReconcileOutcome{}, err
 	}
@@ -138,7 +142,7 @@ func reconcileAppendTerminal(run state.RunDir, runID string, res execution.Resul
 	return ReconcileOutcome{Mutated: true, Result: &res, ExitCode: ExitFromResult(res)}, nil
 }
 
-func reconcileControllerLost(run state.RunDir, runID string, cleanup local.CleanupResult) (ReconcileOutcome, error) {
+func reconcileControllerLost(run state.RunDir, runID string, cleanup backend.CleanupResult) (ReconcileOutcome, error) {
 	reqBytes, err := os.ReadFile(run.RequestPath())
 	if err != nil {
 		return ReconcileOutcome{}, fmt.Errorf("controller: read request for reconcile: %w", err)
@@ -220,18 +224,17 @@ func reconcileStartedAt(run state.RunDir) string {
 }
 
 func reconcilePlacement(run state.RunDir, req execution.Request) execution.PlacementReceipt {
-	alloc := "none"
-	data, err := os.ReadFile(run.BackendPath())
-	if err == nil {
-		var a local.Allocation
-		if json.Unmarshal(data, &a) == nil && a.PID > 0 {
-			alloc = fmt.Sprintf("pid:%d", a.PID)
-		}
+	return install.ReadReceipt(req.Placement, run.PrivateDir())
+}
+
+func readReconcileRequest(run state.RunDir) (execution.Request, error) {
+	data, err := os.ReadFile(run.RequestPath())
+	if err != nil {
+		return execution.Request{}, fmt.Errorf("controller: read request for reconcile: %w", err)
 	}
-	return execution.PlacementReceipt{
-		Backend:        req.Placement.Backend,
-		Profile:        req.Placement.Profile,
-		AllocationID:   alloc,
-		StreamDelivery: execution.StreamDeliveryNone,
+	request, err := execution.DecodeRequest(data)
+	if err != nil {
+		return execution.Request{}, err
 	}
+	return request, nil
 }

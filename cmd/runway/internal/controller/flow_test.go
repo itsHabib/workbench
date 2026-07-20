@@ -190,6 +190,28 @@ func main() {
 	}
 }
 
+func TestFlowA_PreservesBackendCollectedArtifacts(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	be := &artifactCollectBackend{Backend: local.New()}
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 1000}, controller.Options{Backend: be})
+	if out.Result.Status != execution.StatusSucceeded {
+		t.Fatalf("status=%s reason=%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if len(out.Result.Artifacts) != 1 || out.Result.Artifacts[0].Name != "backend-report" {
+		t.Fatalf("artifacts=%+v", out.Result.Artifacts)
+	}
+}
+
+type artifactCollectBackend struct{ backend.Backend }
+
+func (b *artifactCollectBackend) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return []execution.Artifact{{Name: "backend-report", Path: "artifacts/backend.json", SHA256: strings.Repeat("a", 64), Size: 2}}, nil
+}
+
 func TestFlowE_MissingRequiredOutput(t *testing.T) {
 	h := newHarness(t)
 	h.writeProg("main.go", `package main
@@ -447,6 +469,45 @@ func main() {}
 		t.Fatalf("exit=%d", out.ExitCode)
 	}
 }
+
+func TestPlacementUnavailableProducesStartupReceiptAndExitFour(t *testing.T) {
+	h := newHarness(t)
+	h.writeProg("main.go", `package main
+func main() {}
+`)
+	work := goRunWork(h, "main.go", nil)
+	out := h.runWith(work, execution.Policy{DeadlineMS: 60000, CancelGraceMS: 100}, controller.Options{Backend: &placementUnavailableBackend{}})
+	if out.Result.Status != execution.StatusFailed || out.Result.ReasonCode != execution.ReasonPlacementUnavailable {
+		t.Fatalf("want failed/placement_unavailable, got %s/%s", out.Result.Status, out.Result.ReasonCode)
+	}
+	if out.Result.TerminalPhase != execution.PhaseStartup {
+		t.Fatalf("phase=%s", out.Result.TerminalPhase)
+	}
+	if out.ExitCode != controller.ExitPlacementUnavailable {
+		t.Fatalf("exit=%d", out.ExitCode)
+	}
+}
+
+type placementUnavailableBackend struct{}
+
+func (b *placementUnavailableBackend) Start(_ context.Context, _ backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+	if err := emit(execution.PhaseStartup, "placement_profile_resolved", nil); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
+}
+
+func (b *placementUnavailableBackend) Wait(_ context.Context, _ backend.Handle, _ backend.Emit) (backend.Exit, error) {
+	return backend.Exit{}, &backend.PlacementUnavailable{Backend: "capacity-test", Cap: 8}
+}
+
+func (b *placementUnavailableBackend) Cancel(_ context.Context, _ backend.Handle) error { return nil }
+
+func (b *placementUnavailableBackend) Collect(_ context.Context, _ backend.Handle, _ string) ([]execution.Artifact, error) {
+	return nil, nil
+}
+
+func (b *placementUnavailableBackend) Cleanup(_ context.Context, _ backend.Handle) error { return nil }
 
 type immediateWaitErr struct{}
 

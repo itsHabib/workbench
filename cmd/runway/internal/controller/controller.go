@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
-	"github.com/itsHabib/workbench/cmd/runway/internal/backend/local"
+	"github.com/itsHabib/workbench/cmd/runway/internal/backend/install"
 	"github.com/itsHabib/workbench/cmd/runway/internal/bundle"
 	"github.com/itsHabib/workbench/cmd/runway/internal/claim"
 	"github.com/itsHabib/workbench/cmd/runway/internal/expand"
@@ -48,8 +48,17 @@ func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, usageErr(err)
 	}
-	if err := checkLocalDefault(adm.Request.Placement); err != nil {
-		return Outcome{}, usageErr(err)
+	be := opts.Backend
+	if be == nil {
+		be, err = install.Resolve(adm.Request.Placement)
+		if err != nil {
+			return Outcome{}, usageErr(err)
+		}
+	}
+	if admitter, ok := be.(backend.Admitter); ok {
+		if err := admitter.Admit(adm.Work); err != nil {
+			return Outcome{}, usageErr(err)
+		}
 	}
 	runID, err := mintRunID()
 	if err != nil {
@@ -85,11 +94,8 @@ func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
 		started:  time.Now().UTC(),
 		deadline: time.Now().Add(time.Duration(adm.Request.Policy.DeadlineMS) * time.Millisecond),
 		grace:    time.Duration(adm.Request.Policy.CancelGraceMS) * time.Millisecond,
-		be:       opts.Backend,
+		be:       be,
 		gate:     &terminalGate{},
-	}
-	if c.be == nil {
-		c.be = local.New()
 	}
 	return c.execute()
 }
@@ -119,6 +125,7 @@ type ctrl struct {
 	gate     *terminalGate
 
 	allocID string
+	receipt execution.PlacementReceipt
 
 	emitMu sync.Mutex
 	phase  string // last canonical phase progressed into (emitMu)
@@ -130,6 +137,14 @@ type ctrl struct {
 func (c *ctrl) emit(phase, kind string, details map[string]any) error {
 	c.emitMu.Lock()
 	defer c.emitMu.Unlock()
+	if receipt, ok := details["receipt"].(execution.PlacementReceipt); ok {
+		c.receipt = receipt
+	}
+	if kind == execution.KindPlacementAllocated {
+		if id, ok := details["allocation_id"].(string); ok {
+			c.allocID = id
+		}
+	}
 	c.phase = phase
 	_, err := c.j.Append(phase, kind, details)
 	return err
@@ -179,10 +194,12 @@ type startResult struct {
 func (c *ctrl) startUnderDeadline() (backend.Handle, Outcome, bool, error) {
 	watchDone := make(chan struct{})
 	defer close(watchDone)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	startCh := make(chan startResult, 1)
 	go func() {
-		h, err := c.startBackend()
+		h, err := c.startBackend(ctx)
 		startCh <- startResult{h: h, err: err}
 	}()
 
@@ -191,13 +208,19 @@ func (c *ctrl) startUnderDeadline() (backend.Handle, Outcome, bool, error) {
 	select {
 	case sr := <-startCh:
 		if sr.err != nil {
+			if backend.IsPlacementUnavailable(sr.err) {
+				out, err := c.failEarly(execution.PhaseStartup, execution.ReasonPlacementUnavailable, sr.err)
+				return nil, out, true, err
+			}
 			out, err := c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, sr.err)
 			return nil, out, true, err
 		}
 		return sr.h, Outcome{}, false, nil
 	case <-deadlineCh:
+		cancel()
 		return c.interruptedStart(startCh, execution.ReasonDeadlineExceeded)
 	case <-cancelCh:
+		cancel()
 		return c.interruptedStart(startCh, execution.ReasonCancelRequested)
 	}
 }
@@ -263,7 +286,7 @@ func (c *ctrl) prepare() (Outcome, bool, error) {
 	}
 }
 
-func (c *ctrl) startBackend() (backend.Handle, error) {
+func (c *ctrl) startBackend(ctx context.Context) (backend.Handle, error) {
 	roots := expand.NewRoots(c.run.WorkspaceDir(), c.run.InputsDir(), c.run.ArtifactsDir())
 	prep, err := expand.Command(roots, c.adm.Work)
 	if err != nil {
@@ -274,24 +297,20 @@ func (c *ctrl) startBackend() (backend.Handle, error) {
 		return nil, err
 	}
 	childEnv := mergeEnv(os.Environ(), prep.Env, secrets)
-	emit := func(phase, kind string, details map[string]any) error {
-		if kind == execution.KindPlacementAllocated {
-			if id, ok := details["allocation_id"].(string); ok {
-				c.allocID = id
-			}
-		}
-		return c.emit(phase, kind, details)
-	}
-	return c.be.Start(context.Background(), backend.PreparedRun{
+	return c.be.Start(ctx, backend.PreparedRun{
 		RunID:      c.runID,
+		Work:       c.adm.Work,
 		Cwd:        prep.Cwd,
 		Argv:       prep.Argv,
 		Env:        childEnv,
+		Workspace:  roots.Workspace,
+		Inputs:     roots.Inputs,
+		Out:        roots.Out,
 		StdoutPath: c.run.StdoutLog(),
 		StderrPath: c.run.StderrLog(),
 		Secrets:    secretBytes,
 		PrivateDir: c.run.PrivateDir(),
-	}, emit)
+	}, c.emit)
 }
 
 type waitOutcome struct {
@@ -309,8 +328,16 @@ func (c *ctrl) runWorkload(h backend.Handle) (Outcome, error) {
 	}()
 
 	wo := c.awaitWorkload(h, waitCh)
+	if backend.IsPlacementUnavailable(wo.err) {
+		_ = c.be.Cleanup(context.Background(), h)
+		return c.failEarly(execution.PhaseStartup, execution.ReasonPlacementUnavailable, wo.err)
+	}
 	if wo.err != nil && wo.intent == "" {
 		_ = c.be.Cleanup(context.Background(), h)
+		phase := c.currentPhase()
+		if phase == "" || phase == execution.PhaseStartup {
+			return c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, wo.err)
+		}
 		return c.failEarly(execution.PhaseWorkload, execution.ReasonWorkloadFailed, wo.err)
 	}
 	return c.finalize(h, wo)
@@ -383,7 +410,10 @@ func (c *ctrl) watchCancel(done <-chan struct{}) <-chan struct{} {
 
 func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
 	exitCode := wo.exit.Code
-	arts, collectErr := collectOutputs(c.run.ArtifactsDir(), c.adm.Work.Outputs)
+	backendArts, backendCollectErr := c.be.Collect(context.Background(), h, c.run.ArtifactsDir())
+	outputArts, outputErr := collectOutputs(c.run.ArtifactsDir(), c.adm.Work.Outputs)
+	arts := append(backendArts, outputArts...)
+	collectErr := errors.Join(backendCollectErr, outputErr)
 	if collectErr == nil {
 		for _, a := range arts {
 			_ = c.emit(execution.PhaseCollection, execution.KindArtifactCollected, map[string]any{
@@ -531,6 +561,17 @@ func phaseOr(phase, fallback string) string {
 }
 
 func (c *ctrl) placementReceipt() execution.PlacementReceipt {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
+	if c.receipt.Backend != "" {
+		receipt := c.receipt
+		receipt.Backend = c.adm.Request.Placement.Backend
+		receipt.Profile = c.adm.Request.Placement.Profile
+		if c.allocID != "" {
+			receipt.AllocationID = c.allocID
+		}
+		return receipt
+	}
 	alloc := c.allocID
 	if alloc == "" {
 		alloc = "none"
@@ -582,16 +623,6 @@ func (c *ctrl) failEarly(phase, reason string, cause error) (Outcome, error) {
 
 func (c *ctrl) deadlineExceeded() bool {
 	return !time.Now().Before(c.deadline)
-}
-
-func checkLocalDefault(p execution.Placement) error {
-	if p.Backend != "local" {
-		return fmt.Errorf("controller: placement.backend %q is not installed (local only)", p.Backend)
-	}
-	if p.Profile != "default" {
-		return fmt.Errorf("controller: placement.profile %q is not installed (default only)", p.Profile)
-	}
-	return nil
 }
 
 func mintRunID() (string, error) {

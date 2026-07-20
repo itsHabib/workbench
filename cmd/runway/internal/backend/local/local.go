@@ -36,7 +36,7 @@ type handle struct {
 // Start launches ONE process group with the fully expanded argv. Never a
 // shell, never string interpolation. Secrets live only in process memory
 // and are redacted from captured logs (FR12/D8).
-func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
+func (b *Backend) Start(_ context.Context, prep backend.PreparedRun, emit backend.Emit) (backend.Handle, error) {
 	if len(prep.Argv) == 0 {
 		return nil, fmt.Errorf("local: argv is empty")
 	}
@@ -61,7 +61,7 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		return nil, fmt.Errorf("local: stderr pipe: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, prep.Argv[0], prep.Argv[1:]...)
+	cmd := exec.Command(prep.Argv[0], prep.Argv[1:]...)
 	cmd.Dir = prep.Cwd
 	cmd.Env = prep.Env
 	cmd.Stdout = stdoutW
