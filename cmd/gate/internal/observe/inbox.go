@@ -172,12 +172,19 @@ func judgeCommand(run, grant, stateArg string) string {
 	return fmt.Sprintf("gate judge%s -run %s -grant %s -decision <pass|block> -why \"...\"", stateArg, run, grant)
 }
 
+// datedGrant pairs a ledger row with its expiry instant so the ledger can sort
+// on the instant (below), not on the second-precision string GrantLine carries.
+type datedGrant struct {
+	line GrantLine
+	at   time.Time
+}
+
 // grantLines projects the grant ledger: every live grant, soonest-to-expire
 // first (the ones nearest needing a re-mint lead), followed by grants expired
 // within the recent window, most-recently-expired first. Grants expired longer
 // ago are omitted — neither spendable nor worth re-minting from.
 func grantLines(arts []state.Artifact, now time.Time) []GrantLine {
-	var live, expired []GrantLine
+	var live, expired []datedGrant
 	for _, a := range arts {
 		if a.Kind != state.KindGrant {
 			continue
@@ -205,16 +212,34 @@ func grantLines(arts []state.Artifact, now time.Time) []GrantLine {
 			}
 			line.Expired = true
 			line.Remaining = shortDur(since) + " ago"
-			expired = append(expired, line)
+			expired = append(expired, datedGrant{line, g.ExpiresAt})
 			continue
 		}
 		line.Remaining = "in " + shortDur(g.ExpiresAt.Sub(now))
-		live = append(live, line)
+		live = append(live, datedGrant{line, g.ExpiresAt})
 	}
-	// RFC3339 UTC strings sort lexically as they sort chronologically.
-	sort.Slice(live, func(i, j int) bool { return live[i].ExpiresAt < live[j].ExpiresAt })
-	sort.Slice(expired, func(i, j int) bool { return expired[i].ExpiresAt > expired[j].ExpiresAt })
-	return append(live, expired...)
+	// Sort on the instant, not the rendered second-precision string, so grants
+	// minted within the same second keep a stable, id-tiebroken order run to run.
+	sort.Slice(live, func(i, j int) bool { return grantBefore(live[i], live[j]) })
+	sort.Slice(expired, func(i, j int) bool { return grantBefore(expired[j], expired[i]) })
+	out := make([]GrantLine, 0, len(live)+len(expired))
+	for _, d := range live {
+		out = append(out, d.line)
+	}
+	for _, d := range expired {
+		out = append(out, d.line)
+	}
+	return out
+}
+
+// grantBefore orders two ledger rows by expiry instant, breaking exact ties on
+// id so the order is fully deterministic. Expired rows pass their args swapped
+// to get the reverse (most-recently-expired first).
+func grantBefore(a, b datedGrant) bool {
+	if !a.at.Equal(b.at) {
+		return a.at.Before(b.at)
+	}
+	return a.line.ID < b.line.ID
 }
 
 // shortDur renders d as a compact span using its largest one or two units:

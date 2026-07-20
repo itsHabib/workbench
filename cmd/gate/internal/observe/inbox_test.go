@@ -153,6 +153,21 @@ func TestBuildInboxGrants(t *testing.T) {
 	}
 }
 
+// TestBuildInboxGrantsDeterministicTie pins the review nit fix: two grants
+// sharing an expiry instant (indistinguishable at the second-precision string)
+// order deterministically by id, so `gate next` output doesn't churn run to run.
+func TestBuildInboxGrantsDeterministicTie(t *testing.T) {
+	exp := inboxBase.Add(time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrant, "run_mint", "grt_bbb", inboxBase, grant("o/r", exp)),
+		art(state.KindGrant, "run_mint", "grt_aaa", inboxBase, grant("o/r", exp)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.Grants) != 2 || in.Grants[0].ID != "grt_aaa" || in.Grants[1].ID != "grt_bbb" {
+		t.Fatalf("equal-expiry grants must order by id, got %+v", in.Grants)
+	}
+}
+
 // TestBuildInboxExpiryBoundaryMatchesCheck pins that a grant exactly at its
 // expiry reads as live, matching capability.Check (expired strictly after).
 func TestBuildInboxExpiryBoundaryMatchesCheck(t *testing.T) {
