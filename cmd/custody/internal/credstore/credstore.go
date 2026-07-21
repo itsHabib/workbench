@@ -28,6 +28,9 @@ type Store interface {
 // with the `custody keys set` remedy (spec §6, flow F).
 var ErrSecretUnavailable = errors.New("secret_unavailable")
 
+// maxSecretBytes is Windows Credential Manager's CRED_MAX_CREDENTIAL_BLOB_SIZE.
+const maxSecretBytes = 5 * 512
+
 // KeysSet reads a secret from r (the CLI passes os.Stdin) and writes it under
 // ref via s — the mechanism behind the `custody keys set` verb (spec §6). A
 // single trailing newline is trimmed so a piped `echo secret` does not store
@@ -37,9 +40,12 @@ func KeysSet(s Store, ref string, r io.Reader) error {
 	if ref == "" {
 		return errors.New("credstore: empty secret ref")
 	}
-	secret, err := io.ReadAll(r)
+	secret, err := io.ReadAll(io.LimitReader(r, maxSecretBytes+1))
 	if err != nil {
 		return fmt.Errorf("credstore: read secret for %q: %w", ref, err)
+	}
+	if len(secret) > maxSecretBytes {
+		return fmt.Errorf("credstore: secret for %q exceeds %d-byte limit", ref, maxSecretBytes)
 	}
 	secret = trimTrailingNewline(secret)
 	if len(secret) == 0 {

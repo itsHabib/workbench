@@ -18,7 +18,7 @@ func decode(r io.Reader) (*Manifest, error) {
 	if err := dec.Decode(&m); err != nil {
 		// encoding/json exposes no typed unknown-field error; this message is
 		// the only signal DisallowUnknownFields provides.
-		if strings.Contains(err.Error(), "unknown field") {
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
 			return nil, fmt.Errorf("%w: %v", ErrUnknownField, err)
 		}
 		return nil, fmt.Errorf("manifest: parse: %w", err)

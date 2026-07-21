@@ -146,6 +146,17 @@ func TestUpstream(t *testing.T) {
 	}
 }
 
+func TestUpstreamErrorDoesNotEchoUserinfo(t *testing.T) {
+	const upstream = "https://user:TOP-SECRET@example.com"
+	err := validateUpstream(upstream)
+	if err == nil {
+		t.Fatal("expected userinfo rejection")
+	}
+	if strings.Contains(err.Error(), "TOP-SECRET") {
+		t.Fatalf("error leaked upstream password: %v", err)
+	}
+}
+
 func TestSecretRef(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -164,6 +175,17 @@ func TestSecretRef(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestSecretRefErrorDoesNotEchoValue(t *testing.T) {
+	const secret = "TOP-SECRET-TOKEN"
+	err := validateSecretRef(secret)
+	if err == nil {
+		t.Fatal("expected bad secret ref")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked secret field: %v", err)
 	}
 }
 
@@ -259,7 +281,11 @@ func TestPredicate(t *testing.T) {
 		{"mustmatch", Predicate{MustMatch: &released, Occurs: "once"}, ErrMustMatchRejected},
 		{"noequals", Predicate{Occurs: "once"}, ErrMissingField},
 		{"badoccurs", Predicate{Equals: &released, Occurs: "twice"}, ErrBadPredicate},
-		{"emptyoccurs", Predicate{Equals: &released}, ErrBadPredicate},
+		{"emptyoccurs", Predicate{Equals: &released}, ErrMissingField},
+		{"wildcard-star", predicate("proj*"), ErrBadPredicate},
+		{"wildcard-question", predicate("proj?"), ErrBadPredicate},
+		{"wildcard-range", predicate("proj[0-9]"), ErrBadPredicate},
+		{"alternation", predicate("proj|other"), ErrBadPredicate},
 		{"ok", Predicate{Equals: &released, Occurs: "once"}, nil},
 	}
 	for _, tc := range cases {
@@ -270,6 +296,10 @@ func TestPredicate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func predicate(equals string) Predicate {
+	return Predicate{Equals: &equals, Occurs: "once"}
 }
 
 func TestUnknownNestedField(t *testing.T) {

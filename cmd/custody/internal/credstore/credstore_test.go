@@ -72,6 +72,21 @@ func TestKeysSetRejectsEmptyRef(t *testing.T) {
 	}
 }
 
+func TestKeysSetRejectsOversizedSecret(t *testing.T) {
+	f := newFake()
+	secret := strings.Repeat("x", maxSecretBytes+1)
+	err := KeysSet(f, "ref", strings.NewReader(secret))
+	if err == nil {
+		t.Fatal("expected oversized secret rejection")
+	}
+	if _, ok := f.secrets["ref"]; ok {
+		t.Fatal("oversized secret must not be stored")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatal("error leaked oversized secret")
+	}
+}
+
 // TestKeysSetNeverEchoesSecret guards the never-log-the-secret invariant at the
 // one seam that returns an error carrying caller-supplied context: the error
 // text must not contain the secret bytes.

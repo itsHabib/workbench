@@ -153,7 +153,7 @@ func validateSecretRef(secret string) error {
 		return fmt.Errorf("%w: secret", ErrMissingField)
 	}
 	if !strings.HasPrefix(secret, secretScheme) {
-		return fmt.Errorf("%w: %q wants %s<ref>", ErrBadSecretRef, secret, secretScheme)
+		return fmt.Errorf("%w: secret field must use %s<ref> form", ErrBadSecretRef, secretScheme)
 	}
 	if strings.TrimPrefix(secret, secretScheme) == "" {
 		return fmt.Errorf("%w: empty ref after %s", ErrBadSecretRef, secretScheme)
@@ -176,7 +176,7 @@ func validateUpstream(upstream string) error {
 		return fmt.Errorf("%w: %q has no host", ErrBadUpstream, upstream)
 	}
 	if u.User != nil {
-		return fmt.Errorf("%w: %q carries userinfo", ErrBadUpstream, upstream)
+		return fmt.Errorf("%w: upstream carries userinfo; remove credentials from the URL", ErrBadUpstream)
 	}
 	if u.RawQuery != "" || u.ForceQuery {
 		return fmt.Errorf("%w: %q carries a query", ErrBadUpstream, upstream)
@@ -234,6 +234,12 @@ func validatePredicate(p Predicate) error {
 	}
 	if p.Equals == nil {
 		return fmt.Errorf("%w: equals", ErrMissingField)
+	}
+	if strings.ContainsAny(*p.Equals, "*?[]|") {
+		return fmt.Errorf("%w: equals carries wildcard or alternation metacharacters", ErrBadPredicate)
+	}
+	if p.Occurs == "" {
+		return fmt.Errorf("%w: occurs", ErrMissingField)
 	}
 	if p.Occurs != "once" {
 		return fmt.Errorf("%w: occurs must be \"once\", got %q", ErrBadPredicate, p.Occurs)
