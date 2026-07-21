@@ -59,6 +59,41 @@ jobs:
       - name: tracelens corpus gate
         run: go run ./cmd/tracelens eval ./cmd/tracelens/testdata/corpus
 
+  # A short, budgeted fuzz smoke over the ledger byte parsers — the functions
+  # that read possibly-crash-torn, possibly-adversarial bytes off disk. This is a
+  # regression guard, not an exhaustive search: each target runs from its inlined
+  # seed corpus for a fixed EXECUTION-COUNT budget, and any panic or falsified
+  # invariant fails CI with the reproducing input written under testdata/fuzz.
+  # The deep search is a local `go test -fuzz` with a longer -fuzztime.
+  #
+  # The budget is a count (Nx), not a duration: a wall-clock -fuzztime races the
+  # worker-shutdown handshake at the deadline and can spuriously fail the run with
+  # "context deadline exceeded" even when no input crashed. A count is
+  # deterministic and has no deadline to race.
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: fuzz ledger byte parsers
+        # -run '^$' skips the unit tests so the budget goes entirely to fuzzing;
+        # each -fuzz regexp is end-anchored to select exactly one target.
+        run: |
+          budget=500000x
+          run_fuzz() {
+            echo "== fuzz $2 ($1) =="
+            go test "$1" -run '^$' -fuzz "$2" -fuzztime "$budget"
+          }
+          run_fuzz ./contracts/driverstate 'FuzzDecodeEvent$'
+          run_fuzz ./contracts/driverstate 'FuzzReadLedger$'
+          run_fuzz ./driverstate 'FuzzDecodeLedger$'
+          run_fuzz ./driverstate 'FuzzTornTailHeal$'
+
   # The boundary law, enforced mechanically instead of by discipline:
   # "share contracts, not call stacks." contracts imports nothing else in the
   # module; local (a shared mechanism package) imports at most contracts; no

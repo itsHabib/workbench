@@ -112,6 +112,12 @@ func TestRollupJoinsChildren(t *testing.T) {
 	if r.BoundaryReached {
 		t.Errorf("boundary_reached = true, want false (dss_b mid-flight)")
 	}
+	// Deterministic order is a documented guarantee (rollup.go sorts by stream id
+	// so CLI rendering and index-based reads are stable): assert ascending order,
+	// not just set membership.
+	if len(r.Streams) != 2 || r.Streams[0].Stream >= r.Streams[1].Stream {
+		t.Fatalf("streams must be sorted ascending by id, got %q then %q", r.Streams[0].Stream, r.Streams[1].Stream)
+	}
 	byStream := map[string]StreamRollup{}
 	for _, s := range r.Streams {
 		byStream[s.Stream] = s
@@ -135,6 +141,72 @@ func TestRollupJoinsChildren(t *testing.T) {
 	}
 	if b.Friction != (Friction{GateCycles: 0, Retries: 0, WorktreeConflict: false}) {
 		t.Errorf("dss_b friction = %+v, want zero", b.Friction)
+	}
+}
+
+// TestReachedBoundaryExact pins reachedBoundary at the EXACT boundary — the case
+// a happy-path test that only compares "below" vs "terminal" never exercises. A
+// stream whose status rank equals the boundary rank IS reached (>=, not >): a
+// pr-open-boundary run with a stream exactly at pr_open is done, not one rung
+// short. (Surfaced by a mutation audit: the CONDITIONALS_BOUNDARY mutant on the
+// >= at rollup.go survived until this case pinned it.)
+func TestReachedBoundaryExact(t *testing.T) {
+	cases := []struct {
+		name             string
+		status, boundary string
+		want             bool
+	}{
+		{"pr_open exactly at pr-open boundary is reached", dsc.StatusPROpen, dsc.DoneBoundaryPROpen, true},
+		{"pr_open exactly at green boundary is reached", dsc.StatusPROpen, dsc.DoneBoundaryGreen, true},
+		{"landed one rung below pr-open boundary is not reached", dsc.StatusLanded, dsc.DoneBoundaryPROpen, false},
+		{"pr_open below merged boundary is not reached", dsc.StatusPROpen, dsc.DoneBoundaryMerged, false},
+		{"pending below any boundary is not reached", dsc.StatusPending, dsc.DoneBoundaryPROpen, false},
+		{"terminal skipped short-circuits reached at the strict boundary", dsc.StatusSkipped, dsc.DoneBoundaryMerged, true},
+		{"terminal failed short-circuits reached at the strict boundary", dsc.StatusFailed, dsc.DoneBoundaryMerged, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := reachedBoundary(c.status, c.boundary); got != c.want {
+				t.Errorf("reachedBoundary(%q, %q) = %t, want %t", c.status, c.boundary, got, c.want)
+			}
+		})
+	}
+}
+
+// TestRollupSurfacesChildMergeCommit pins the merge-commit half of the resume
+// guarantee: when the parent mirror died between a child merging and mirroring
+// that merge up, the parent's own MergeCommit is empty, so the rollup must
+// surface the CHILD's merge commit — the same way it already surfaces the child's
+// PR. (Surfaced by a mutation audit: the `row.MergeCommit == ""` guard was
+// unpinned — both parent and child used the same commit in existing tests, so a
+// negated guard was invisible until a parent-with-none case forced the branch.)
+func TestRollupSurfacesChildMergeCommit(t *testing.T) {
+	dir := t.TempDir()
+	// The child ran all the way to merged (its record carries MergeCommit "mc").
+	buildChild(t, dir, "dsr_cm", "dsr_pm", "dss_a", false, 1, 0, true)
+
+	pl, err := Claim(dir, "dsr_pm", "session:parent")
+	if err != nil {
+		t.Fatalf("claim parent: %v", err)
+	}
+	tm := baseTime.Add(time.Hour)
+	mustAppend(t, dir, pl, ev("evt_pm_imp", dsc.KindRunImported, "", "session:parent", tm, dsc.RunImportedBody{
+		Repo: "itsHabib/workbench", Source: "docs/driver.md", Manifest: json.RawMessage(`{"v":1}`),
+		Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/a.md"}},
+	}))
+	// The parent mirror stops at pr_open — it never recorded the merge, so its own
+	// MergeCommit is empty.
+	buildParentMirror(t, dir, pl, &tm, "dss_a", "dsr_cm", 100, false)
+
+	r, err := Rollup(dir, "dsr_pm")
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if len(r.Streams) != 1 {
+		t.Fatalf("want 1 stream, got %d", len(r.Streams))
+	}
+	if s := r.Streams[0]; s.MergeCommit != "mc" {
+		t.Errorf("rollup must surface the child's merge commit when the parent mirror has none: got %q", s.MergeCommit)
 	}
 }
 
