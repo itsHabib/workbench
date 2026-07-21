@@ -76,6 +76,11 @@ func validatePath(p string) error {
 	if bad, r := firstDisallowedPathRune(p); bad {
 		return fmt.Errorf("%w: %q carries disallowed character %q", ErrBadPath, p, r)
 	}
+	for _, segment := range strings.Split(p, "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("%w: %q carries a dot-segment", ErrBadPath, p)
+		}
+	}
 	if _, err := path.Match(p, ""); err != nil {
 		return fmt.Errorf("%w: %q: %v", ErrBadPath, p, err)
 	}

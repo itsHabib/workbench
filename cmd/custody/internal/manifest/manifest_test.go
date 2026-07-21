@@ -284,6 +284,8 @@ func TestPath(t *testing.T) {
 		want error
 	}{
 		{"empty", "", ErrMissingField},
+		{"dot-segment", "/api/./issues", ErrBadPath},
+		{"dot-dot-segment", "/api/../issues", ErrBadPath},
 		{"relative", "rest/api", ErrBadPath},
 		{"bracket", "/issue/PROJ-[", ErrBadPath},
 		{"semicolon", "/issue/PROJ;evil", ErrBadPath},
