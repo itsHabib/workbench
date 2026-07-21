@@ -651,8 +651,11 @@ substrate, scoped by domain - which is exactly the custody story next).
 
 ## 9. Where it's going
 
-Three threads, all honestly marked. The pattern across them: the center of gravity
-keeps moving toward versioned artifacts and engine guarantees, with harness-specific
+Three threads, all honestly marked. Each one removes a reason a run still needs a
+human in the loop, so the direction they share is a fully autonomous cloud run - the
+loop in section 2 executing end to end with the operator reading the audit trail
+after, not gating it during. The pattern underneath: the center of gravity keeps
+moving toward versioned artifacts and engine guarantees, with harness-specific
 skills as thin projections.
 
 ### Custody: grants for credentials, not just merges
