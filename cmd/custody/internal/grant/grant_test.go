@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -65,6 +66,22 @@ func TestNewStoreRefusesSymlinkedKeyDirUnderState(t *testing.T) {
 	}
 	if _, err := NewStore(state, link); err == nil {
 		t.Fatal("expected refusal for symlinked key dir under state")
+	}
+}
+
+func TestNewStoreRefusesDanglingSymlinkedKeyDirUnderState(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	target := filepath.Join(state, "not-created-yet")
+	link := filepath.Join(root, "dangling-key-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := NewStore(state, link); err == nil {
+		t.Fatal("expected refusal for dangling symlinked key dir under state")
 	}
 }
 
@@ -209,6 +226,58 @@ func TestValidateMissingKeyIsLoud(t *testing.T) {
 	}
 	if _, err := s.Validate(tok, "tracker", now); !errors.Is(err, ErrKeyMissing) {
 		t.Fatalf("want ErrKeyMissing, got %v", err)
+	}
+}
+
+func TestValidateCorruptRecordIsNoGrant(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	g, tok, err := s.Mint("tracker", []string{"read"}, time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.stateDir, "grants", g.ID+".json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("corrupt record: %v", err)
+	}
+	if _, err := s.Validate(tok, "tracker", now); !errors.Is(err, ErrNoGrant) {
+		t.Fatalf("Validate: want ErrNoGrant, got %v", err)
+	}
+}
+
+func TestLoadOrCreateKeyConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "mint.key")
+	const workers = 16
+	start := make(chan struct{})
+	results := make(chan []byte, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			key, err := loadOrCreateKey(path)
+			results <- key
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("loadOrCreateKey: %v", err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read winner: %v", err)
+	}
+	for got := range results {
+		if string(got) != string(want) {
+			t.Fatal("concurrent creator returned a losing key")
+		}
 	}
 }
 

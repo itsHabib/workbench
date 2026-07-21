@@ -195,7 +195,7 @@ func (s *Store) save(g Grant) error {
 	if err != nil {
 		return fmt.Errorf("custody: encode grant: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, g.ID+".json"), data, 0o600); err != nil {
+	if err := atomicWriteFile(filepath.Join(dir, g.ID+".json"), data, 0o600); err != nil {
 		return fmt.Errorf("custody: write grant: %w", err)
 	}
 	return nil
@@ -213,7 +213,7 @@ func (s *Store) load(id string) (Grant, error) {
 	}
 	var g Grant
 	if err := json.Unmarshal(data, &g); err != nil {
-		return Grant{}, fmt.Errorf("custody: parse grant: %w", err)
+		return Grant{}, fmt.Errorf("%w: parse grant %s: %v", ErrNoGrant, id, err)
 	}
 	return g, nil
 }
@@ -302,10 +302,70 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("custody: mint key dir: %w", err)
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	created, err := createFileExclusive(path, key, 0o600)
+	if err != nil {
 		return nil, fmt.Errorf("custody: write mint key: %w", err)
 	}
+	if !created {
+		return loadKey(path)
+	}
 	return key, nil
+}
+
+func createFileExclusive(path string, data []byte, perm os.FileMode) (bool, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".custody-key-*.tmp")
+	if err != nil {
+		return false, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return false, err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return false, err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".custody-grant-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // dirWithin reports whether sub is the same directory as base or nested under
@@ -346,6 +406,20 @@ func resolvePath(path string) (string, error) {
 	}
 	if !os.IsNotExist(err) {
 		return "", err
+	}
+	info, lstatErr := os.Lstat(abs)
+	if lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(abs), target)
+		}
+		return resolvePath(target)
+	}
+	if lstatErr != nil && !os.IsNotExist(lstatErr) {
+		return "", lstatErr
 	}
 	parent := filepath.Dir(abs)
 	if parent == abs {

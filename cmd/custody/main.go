@@ -11,6 +11,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -89,6 +90,9 @@ func cmdGrant(args []string) error {
 	ttl := fs.Duration("ttl", 0, "grant lifetime (e.g. 8h)")
 	mintedBy := fs.String("minted-by", "operator", "free-form, UNAUTHENTICATED label of who minted this")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	acts, err := parseActions(*actions)
