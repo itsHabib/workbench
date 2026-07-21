@@ -97,14 +97,22 @@ type Store struct {
 // refusal exactly: a key dir equal to or nested under the state dir is refused
 // at startup rather than silently restoring the co-location the design removes.
 func NewStore(stateDir, keyDir string) (*Store, error) {
-	within, err := dirWithin(keyDir, stateDir)
+	resolvedState, err := resolvePath(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("custody: resolve state dir %q: %w", stateDir, err)
+	}
+	resolvedKey, err := resolvePath(keyDir)
+	if err != nil {
+		return nil, fmt.Errorf("custody: resolve key dir %q: %w", keyDir, err)
+	}
+	within, err := dirWithin(resolvedKey, resolvedState)
 	if err != nil {
 		return nil, err
 	}
 	if within {
 		return nil, fmt.Errorf("custody: mint key dir %q must be outside state dir %q", keyDir, stateDir)
 	}
-	return &Store{stateDir: stateDir, mintKeyPath: filepath.Join(keyDir, "mint.key")}, nil
+	return &Store{stateDir: resolvedState, mintKeyPath: filepath.Join(resolvedKey, "mint.key")}, nil
 }
 
 // Mint signs and persists a grant, returning it and its wire token. The mint
@@ -164,6 +172,9 @@ func (s *Store) Validate(tok, key string, now func() time.Time) (Grant, error) {
 	if !hmac.Equal([]byte(sign(mintKey, g)), []byte(sig)) {
 		return Grant{}, ErrBadSignature
 	}
+	if g.Version != Version || g.Domain != Domain {
+		return Grant{}, fmt.Errorf("%w: unsupported grant scheme", ErrBadSignature)
+	}
 	if g.Key != key {
 		return Grant{}, fmt.Errorf("%w: grant is for %q, asked %q", ErrWrongKey, g.Key, key)
 	}
@@ -220,7 +231,7 @@ func parseToken(tok string) (id, sig string, err error) {
 		return "", "", fmt.Errorf("%w: token prefix", ErrNoGrant)
 	}
 	id, sig, ok = strings.Cut(body, ".")
-	if !ok || !isHex(id) || !isHex(sig) {
+	if !ok || len(id) != 32 || len(sig) != sha256.Size*2 || !isHex(id) || !isHex(sig) {
 		return "", "", fmt.Errorf("%w: malformed token", ErrNoGrant)
 	}
 	return id, sig, nil
@@ -232,11 +243,23 @@ func parseToken(tok string) (id, sig string, err error) {
 // silently forgeable, so extend it only alongside a Version bump.
 func sign(key []byte, g Grant) string {
 	mac := hmac.New(sha256.New, key)
-	fmt.Fprint(mac, g.Version, "|", g.Domain, "|", g.ID, "|", g.Key, "|", g.MintedAt.Format(time.RFC3339Nano), "|", g.TTL.String(), "|", g.MintedBy, "|", len(g.Actions))
+	fmt.Fprint(mac, g.Version)
+	writeSignField(mac, g.Domain)
+	writeSignField(mac, g.ID)
+	writeSignField(mac, g.Key)
+	writeSignField(mac, g.MintedAt.Format(time.RFC3339Nano))
+	writeSignField(mac, g.TTL.String())
+	writeSignField(mac, g.MintedBy)
+	fmt.Fprint(mac, "|", len(g.Actions))
 	for _, a := range g.Actions {
-		fmt.Fprint(mac, "\x1f", a)
+		writeSignField(mac, a)
 	}
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func writeSignField(mac interface{ Write([]byte) (int, error) }, value string) {
+	fmt.Fprintf(mac, "|%d:", len(value))
+	_, _ = mac.Write([]byte(value))
 }
 
 // newID returns a 16-byte random hex id.
@@ -286,9 +309,8 @@ func loadOrCreateKey(path string) ([]byte, error) {
 }
 
 // dirWithin reports whether sub is the same directory as base or nested under
-// it, comparing cleaned absolute paths so spelling, ".", and ".." resolve
-// before the check. Copied from gate's newEnv guard: it refuses a mint-key dir
-// that would sit inside the state dir it must be a separate trust domain from.
+// it. Callers pass paths canonicalized by resolvePath so symlink spelling
+// cannot put the mint key inside state while appearing outside it.
 func dirWithin(sub, base string) (bool, error) {
 	absSub, err := filepath.Abs(sub)
 	if err != nil {
@@ -307,6 +329,33 @@ func dirWithin(sub, base string) (bool, error) {
 		return true, nil
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
+}
+
+// resolvePath returns an absolute path with every existing symlink resolved.
+// For a path that does not exist yet, it resolves the nearest existing parent
+// and appends the missing suffix. NewStore retains this canonical spelling so
+// later key creation does not follow the configured symlink spelling.
+func resolvePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err == nil {
+		return resolved, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	parent := filepath.Dir(abs)
+	if parent == abs {
+		return abs, nil
+	}
+	resolvedParent, err := resolvePath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(abs)), nil
 }
 
 // isHex reports whether s is non-empty and all lowercase-hex — the alphabet

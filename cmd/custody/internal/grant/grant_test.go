@@ -1,6 +1,7 @@
 package grant
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"os"
@@ -48,6 +49,22 @@ func TestNewStoreAllowsSiblingKeyDir(t *testing.T) {
 	root := t.TempDir()
 	if _, err := NewStore(filepath.Join(root, "state"), filepath.Join(root, "key")); err != nil {
 		t.Fatalf("sibling key dir should be allowed: %v", err)
+	}
+}
+
+func TestNewStoreRefusesSymlinkedKeyDirUnderState(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	keys := filepath.Join(state, "keys")
+	if err := os.MkdirAll(keys, 0o700); err != nil {
+		t.Fatalf("mkdir keys: %v", err)
+	}
+	link := filepath.Join(root, "key-link")
+	if err := os.Symlink(keys, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := NewStore(state, link); err == nil {
+		t.Fatal("expected refusal for symlinked key dir under state")
 	}
 }
 
@@ -134,6 +151,26 @@ func TestValidateRefusals(t *testing.T) {
 			want: ErrBadSignature,
 		},
 		{
+			name: "bad_signature_wrong_scheme",
+			mutate: func(t *testing.T, s *Store, g Grant, _ string) (string, string, func() time.Time) {
+				g.Version++
+				key, err := os.ReadFile(s.mintKeyPath)
+				if err != nil {
+					t.Fatalf("read mint key: %v", err)
+				}
+				g.Sig = sign(key, g)
+				data, err := json.Marshal(g)
+				if err != nil {
+					t.Fatalf("marshal wrong-scheme grant: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(s.stateDir, "grants", g.ID+".json"), data, 0o600); err != nil {
+					t.Fatalf("write wrong-scheme grant: %v", err)
+				}
+				return token(g), "tracker", mintClock
+			},
+			want: ErrBadSignature,
+		},
+		{
 			name: "wrong_key",
 			mutate: func(_ *testing.T, _ *Store, _ Grant, tok string) (string, string, func() time.Time) {
 				return tok, "hobbyvendor", mintClock
@@ -177,7 +214,7 @@ func TestValidateMissingKeyIsLoud(t *testing.T) {
 
 func TestMintValidatesInputs(t *testing.T) {
 	s := newStore(t)
-	now := fixedClock(time.Now())
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
 	cases := map[string]struct {
 		key     string
 		actions []string
@@ -193,6 +230,31 @@ func TestMintValidatesInputs(t *testing.T) {
 				t.Fatalf("expected Mint to reject %s", name)
 			}
 		})
+	}
+}
+
+func TestParseTokenRejectsWrongComponentLengths(t *testing.T) {
+	cases := []string{
+		"cst1_deadbeef." + strings.Repeat("a", sha256.Size*2),
+		"cst1_" + strings.Repeat("a", 32) + ".cafef00d",
+	}
+	for _, tok := range cases {
+		if _, _, err := parseToken(tok); !errors.Is(err, ErrNoGrant) {
+			t.Fatalf("parseToken(%q): want ErrNoGrant, got %v", tok, err)
+		}
+	}
+}
+
+func TestSignLengthPrefixesVariableFields(t *testing.T) {
+	g := Grant{Version: Version, Domain: Domain, ID: strings.Repeat("a", 32), Key: "tracker", MintedAt: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC), TTL: time.Hour}
+	a := g
+	a.MintedBy = "op|1\x1fread"
+	a.Actions = []string{"write"}
+	b := g
+	b.MintedBy = "op"
+	b.Actions = []string{"read|1\x1fwrite"}
+	if sign([]byte("key"), a) == sign([]byte("key"), b) {
+		t.Fatal("distinct grants produced the same signature pre-image")
 	}
 }
 
