@@ -269,6 +269,25 @@ story is why).
    the judgment carve-out; the comment says a judgment pass must not launder a
    missing floor.
 
+"Cannot override" is again just statement order in one function. `Reduce`
+(`cmd/gate/internal/verify/verify.go`) handles the block and the missing-floor cases
+and returns *before* it ever consults the judgment - so a judgment can only ever act
+on a verdict that was not already blocked:
+
+```go
+if out.Decision == DecisionBlock {
+    return out, nil          // red stays red - judgment is never reached
+}
+if !hasCode {
+    out.Decision = DecisionEscalate
+    return out, nil          // no floor ran - escalate, never silently pass
+}
+if judged != nil {
+    out.Decision = judged.Decision   // judgment only decides here, past both guards
+    return out, nil
+}
+```
+
 The ladder law is encoded as reducer errors plus pinned tests, all `verified` in
 `cmd/gate/internal/verify/verify.go`:
 
@@ -351,12 +370,44 @@ rungs, reducer, auto-judge) → `observe` (explain/audit/next, read-only).
 `grant`, `action`, `escalation`, `judgment`), grouped by run id, linked by a
 `Parents` field, hash-chained. Three properties fall out:
 
-- **An unverified action is unrepresentable** - an action's parents must name a
-  reducer verdict and a live grant; no code path records an outcome without them.
+- **No outcome exists without its lineage** - every action's parents must name the
+  reducer verdict it acted on and a live grant; no gate code path records an outcome
+  without both, and the reader rejects any that lack them.
 - **Observability needs nothing but state** - `explain` reconstructs the whole
   decision chain from the log alone.
 - **A parked artifact carries everything the eventual judge needs** - parking with
   a pointer back into prose is exactly the leak the design exists to prevent.
+
+In code, that first property is not a convention you have to remember - it is the
+shape of the one function that writes anything. Every outcome gate can reach
+(`blocked`, `parked_for_judgment`, `capability_refused`, `would_merge`) is recorded
+through a single closure in `act()` (`cmd/gate/main.go`), and the verdict id and
+grant id are its first two arguments - you cannot record an outcome and leave either
+out:
+
+```go
+record := func(kind, outcome string, extra map[string]any) error {
+    body := map[string]any{"outcome": outcome, "verdict": reducedID, "grant": grantID}
+    // ...
+    // Parents[0] = the reduced verdict; readers join outcome -> Parents[0] -> Subject.
+    _, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+    return err
+}
+```
+
+Two more code facts make "a *live* grant AND a supporting verdict" literal.
+First, the grant is re-checked at effect time, not just at run start - evidence
+gathering and verification take real time, so `act()` calls
+`capability.Check(...)` again and, if the TTL has lapsed, records
+`capability_refused` and nothing else. Second, the read side fails closed on the
+same contract: `cycleCount`, `explain`, and `audit` all resolve `Parents[0]` to the
+verdict, and error out ("outcome %s parent %s not in log") rather than assume a
+default if it is missing. This is the exact opposite of the `markMerged` bug from
+section 4, which wrote "merged" into State with nothing in its lineage - here an
+outcome cannot be recorded without both parents, and a forged one cannot be read as
+valid. (Enforced, to be precise, by `act()` being the sole writer plus readers
+failing closed - a runtime contract the hash chain makes tamper-evident, not a
+compile-time impossibility.)
 
 **Grants.** A **grant** is an operator-minted, HMAC-signed capability. `verified`
 fields in `cmd/gate/internal/capability/capability.go`: `Repo` + `Action` (scope),
