@@ -69,12 +69,15 @@ The single most important mental model. Every tool in this repo exists somewhere
 this path; when you wonder "what does X do," locate X on the loop.
 
 1. **Work is born in dossier** (a separate Rust tool: a markdown task corpus with a
-   typed MCP surface): project, then phase, then task.
-2. **Specs get prepped.** A skill turns N tasks into per-task spec docs plus a
-   *manifest* - a batching of which tasks can safely run in parallel, computed from
-   file overlap.
-3. **Dispatch.** Ship's **driver engine** (a separate TypeScript tool) runs the
-   durable state machine: import, dispatch, poll, judgment, land. Each parallel work
+   typed MCP surface): project, then phase, then task. The `/tdd` skill seeds it
+   from a design doc; `/work-driver-seed` breaks a described chunk into sized,
+   dependency-ordered tasks.
+2. **Specs get prepped.** The `/work-driver-prep` skill turns N tasks into per-task
+   spec docs plus a *manifest* - a batching of which tasks can safely run in
+   parallel, computed from file overlap.
+3. **Dispatch.** The `/work-driver` skill drives ship's **driver engine** (a
+   separate TypeScript tool), which runs the durable state machine: import,
+   dispatch, poll, judgment, land. Each parallel work
    item is a **stream**; each agent identity doing the work is a **seat**. Cloud
    seats are the default. Alternatively `--engine session` makes the Claude session
    itself the engine, recording every state transition through **workbench-mcp**
@@ -86,10 +89,12 @@ this path; when you wonder "what does X do," locate X on the loop.
    `docs/features/session-orchestrator/spec.md`.
 4. **A PR opens per stream**, ending with a `Provenance:` footer naming the seat,
    model, and pipeline that produced it.
-5. **The review panel fires** - several AI reviewers comment on the PR. A local
-   model runs a cheap extraction pre-pass over the comment pile (extract, don't
-   judge); a coordinator skill judges the findings; findings drive address cycles
-   that re-dispatch fixes onto the same PR branch.
+5. **The review panel fires** - several AI reviewers comment on the PR. The
+   `/review-digest` skill runs a cheap local-model extraction pre-pass over the
+   comment pile (extract, don't judge); `/review-coordinator` is the judge over the
+   reviewers; its findings drive address cycles that re-dispatch fixes onto the same
+   PR branch. (`/pr-risk` is the sibling skill that decides how much review a PR
+   needs in the first place, over triage's floor.)
 6. **Merge authorization.** `gate gate -repo <r> -pr <n> -grant <grt_...>` checks an
    operator-minted **grant** (a signed, scoped, expiring permission - section 6),
    gathers evidence from GitHub, runs the verifier ladder, reduces all verdicts into
@@ -106,11 +111,17 @@ this path; when you wonder "what does X do," locate X on the loop.
    dossier task closes.
 9. **Observe.** `gate explain` and `gate audit` reconstruct any decision from the
    log alone; `gate next` shows the operator what needs them; **console** renders
-   the same picture in a browser; **flare** pushes escalations as notifications.
+   the same picture in a browser; **flare** pushes escalations as notifications. The
+   operator's own read-outs are skills over the same artifacts: `/wip` for what is
+   in flight right now, `/shipped` for a retrospective on what landed, `/provenance`
+   for which pipeline produced each PR.
 
 Keep this loop in mind through section 4: steps 1 and 8 are the State plane, 3 is
 Execution, 5-6 are Verification, 6's grant is Capability, 9 is Observability, and
-the skills gluing them together are Composition.
+the skills named at each step are the Composition layer - thin policy files the
+agent runs, each one the *routine* that knows which tools to call in what order (no
+tool knows about another). The durable guarantees live in the binaries below them;
+the skills are the swappable rungs.
 
 ## 3. The repo and the boundary law
 
@@ -169,8 +180,9 @@ keeps only its reducer.
 **The house style is itself one of the durable contracts.** Six principles in the
 Dave Cheney lineage - no `else` / line-of-sight code, nesting at most two deep,
 policy separated from mechanism, composition of single-responsibility layers, small
-sharp APIs, errors are values - stamped into every repo's CLAUDE.md and enforced by
-golangci-lint (`.golangci.yml`: `gocognit`, `nestif`, `cyclop`, `revive`). The lint
+sharp APIs, errors are values - stamped identically into every repo's CLAUDE.md by
+the `/eng-philo` skill and enforced by golangci-lint (`.golangci.yml`: `gocognit`,
+`nestif`, `cyclop`, `revive`). The lint
 cannot make an agent name things the way you would, but it keeps the bones identical
 whether you are watching or not.
 
@@ -204,7 +216,7 @@ Who actually implements each plane today:
 | Verification | gate's `verify` (reducer + ladder); triage (floor + advisory); tracelens detectors; the `local` mechanism |
 | Capability | gate grants (HMAC, scope/TTL/tier/cycles); custody grants for vendor credentials (in flight - section 9); the pretool-guard hook (the harness's tier-3 floor) |
 | Observability | gate `explain`/`audit`/`next`; console (read-only web); flare; tracelens reports |
-| Composition | skills plus dispatch (placement policy as code) |
+| Composition | the loop skills (`/tdd`, `/work-driver-seed`, `/work-driver-prep`, `/work-driver`, `/review-digest`, `/review-coordinator`, `/pr-risk`, `/wip`, `/shipped`, `/provenance`) plus dispatch (placement policy as code) |
 
 Three amendments sharpen the model. Each one is a response to a real failure, not a
 principle for its own sake:
