@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "keys": {
+    "tracker": {
+      "secret": "wincred:tracker-pat",
+      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
+      "actions": { "read": { "rules": [ { "methods": ["GET"], "path": "/issue/PROJ-*" } ] } }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+package credstore
+
+import (
+	"errors"
+	"strings"
+	"testing"
+)
+
+// fakeStore is an in-memory Store for the platform-neutral logic tests. It
+// records the last-written secret so tests can assert what KeysSet stored
+// without touching the OS credential store.
+type fakeStore struct {
+	secrets map[string][]byte
+}
+
+func newFake() *fakeStore { return &fakeStore{secrets: map[string][]byte{}} }
+
+func (f *fakeStore) Get(ref string) ([]byte, error) {
+	s, ok := f.secrets[ref]
+	if !ok {
+		return nil, ErrSecretUnavailable
+	}
+	return s, nil
+}
+
+func (f *fakeStore) Set(ref string, secret []byte) error {
+	f.secrets[ref] = secret
+	return nil
+}
+
+func TestKeysSetTrimsTrailingNewline(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"lf", "s3cr3t\n", "s3cr3t"},
+		{"crlf", "s3cr3t\r\n", "s3cr3t"},
+		{"none", "s3cr3t", "s3cr3t"},
+		{"interior-preserved", "line1\nline2\n", "line1\nline2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			if err := KeysSet(f, "ref", strings.NewReader(tc.in)); err != nil {
+				t.Fatalf("KeysSet: %v", err)
+			}
+			got := string(f.secrets["ref"])
+			if got != tc.want {
+				t.Fatalf("stored %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKeysSetRejectsEmpty(t *testing.T) {
+	f := newFake()
+	err := KeysSet(f, "ref", strings.NewReader("\n"))
+	if err == nil {
+		t.Fatal("expected error for empty secret")
+	}
+	if _, ok := f.secrets["ref"]; ok {
+		t.Fatal("empty secret must not be stored")
+	}
+}
+
+func TestKeysSetRejectsEmptyRef(t *testing.T) {
+	f := newFake()
+	if err := KeysSet(f, "", strings.NewReader("x")); err == nil {
+		t.Fatal("expected error for empty ref")
+	}
+}
+
+// TestKeysSetNeverEchoesSecret guards the never-log-the-secret invariant at the
+// one seam that returns an error carrying caller-supplied context: the error
+// text must not contain the secret bytes.
+func TestKeysSetNeverEchoesSecret(t *testing.T) {
+	secret := "TOP-SECRET-VALUE"
+	err := KeysSet(errStore{}, "ref", strings.NewReader(secret))
+	if err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked the secret: %v", err)
+	}
+}
+
+// errStore always fails Set, without echoing the secret.
+type errStore struct{}
+
+func (errStore) Get(string) ([]byte, error) { return nil, ErrSecretUnavailable }
+func (errStore) Set(string, []byte) error   { return errors.New("store offline") }
+
+func TestGetMissingIsTyped(t *testing.T) {
+	f := newFake()
+	_, err := f.Get("absent")
+	if !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("error = %v, want ErrSecretUnavailable", err)
+	}
+}
