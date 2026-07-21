@@ -2,6 +2,7 @@ package driverstate
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
@@ -65,9 +66,28 @@ func FuzzTornTailHeal(f *testing.F) {
 
 // seedLedgers seeds both targets with real committed lines and adversarial
 // shapes: a torn (newline-free) tail, an empty file, and a bare newline.
+//
+// The valid line is built through ComputeHash/EncodeEvent, not hand-written
+// JSON: decodeLedger verifies Hash == ComputeHash(e), so a placeholder hash
+// would fail verifyLink on the first line and the fuzzer could never reach the
+// accepted-event round-trip branch (mutating arbitrary bytes into the exact
+// SHA-256 is infeasible). Anchoring the seed as a chain head (Prev empty, Hash
+// sealed) is what lets successful parses actually get fuzzed.
 func seedLedgers(f *testing.F) {
 	f.Helper()
-	l1 := []byte(`{"id":"evt_1","run":"dsr_1","v":"driver-state-v0.1.0","kind":"run_imported","time":"2026-07-16T12:00:00Z","actor":"session:a","ext_ref":"","body":{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1","doc_path":"d"}]},"prev":"","hash":"h"}`)
+	e := Event{
+		ID:    "evt_1",
+		Run:   "dsr_1",
+		V:     dsc.Version,
+		Kind:  dsc.KindRunImported,
+		Time:  baseTime,
+		Actor: "session:a",
+		Body:  json.RawMessage(`{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1","doc_path":"d"}]}`),
+		Prev:  "",
+	}
+	e.Hash = dsc.ComputeHash(e)
+	l1 := dsc.EncodeEvent(e) // no trailing newline
+
 	f.Add(append(append([]byte{}, l1...), '\n'))
 	f.Add(l1) // no trailing newline — a torn tail
 	f.Add([]byte("\n"))
