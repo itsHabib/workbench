@@ -44,14 +44,14 @@ func KeysSet(s Store, ref string, r io.Reader) error {
 	if ref == "" {
 		return errors.New("credstore: empty secret ref")
 	}
-	secret, err := io.ReadAll(io.LimitReader(r, maxSecretBytes+1))
+	secret, err := io.ReadAll(io.LimitReader(r, maxSecretBytes+2))
 	if err != nil {
 		return fmt.Errorf("credstore: read secret for %q: %w", ref, err)
 	}
+	secret = trimTrailingNewline(secret)
 	if len(secret) > maxSecretBytes {
 		return fmt.Errorf("%w: secret for %q exceeds %d-byte limit", ErrSecretTooLarge, ref, maxSecretBytes)
 	}
-	secret = trimTrailingNewline(secret)
 	if len(secret) == 0 {
 		return fmt.Errorf("credstore: empty secret for %q", ref)
 	}

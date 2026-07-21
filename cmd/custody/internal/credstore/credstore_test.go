@@ -90,6 +90,19 @@ func TestKeysSetRejectsOversizedSecret(t *testing.T) {
 	}
 }
 
+func TestKeysSetAcceptsMaximumSecretWithTrailingNewline(t *testing.T) {
+	secret := strings.Repeat("x", maxSecretBytes)
+	for _, newline := range []string{"\n", "\r\n"} {
+		f := newFake()
+		if err := KeysSet(f, "ref", strings.NewReader(secret+newline)); err != nil {
+			t.Fatalf("KeysSet with %q terminator: %v", newline, err)
+		}
+		if got := string(f.secrets["ref"]); got != secret {
+			t.Fatalf("stored %d bytes, want %d", len(got), len(secret))
+		}
+	}
+}
+
 // TestKeysSetNeverEchoesSecret guards the never-log-the-secret invariant at the
 // one seam that returns an error carrying caller-supplied context: the error
 // text must not contain the secret bytes.
