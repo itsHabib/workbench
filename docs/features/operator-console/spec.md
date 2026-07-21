@@ -56,6 +56,7 @@ This document designs judgment first and sets a binary validation gate. Under th
 8. The browser refreshes the case file and docket after success. It never replays a POST on page refresh.
 9. An audit failure or incompatible gate binary disables all action controls server-side and client-side while leaving read-only views available with a visible reason.
 10. Mint has no HTTP request handler in committed scope. Attempts to call the reserved Mint paths receive the normal non-route `404`; the capability advertisement omits Mint.
+11. Judge actions default disabled. `console serve` requires an explicit operator enablement flag, and P2 may enable it only after the deployment proves that governed agents cannot reach loopback or already possess the equivalent `gate judge` capability.
 
 ### 2.2 Non-functional requirements
 
@@ -67,7 +68,7 @@ This document designs judgment first and sets a binary validation gate. Under th
 | Authorization | A judgment requires a currently valid gate grant for the run's repo and `merge` action. Preview never reserves or extends a grant. |
 | Consistency | At most one judgment resolves a given escalation. Same-request retry is idempotent; a different request against resolved state is stale. |
 | Durability | Gate's canonical append-only ledger is the only durable action record; `gate audit` remains sufficient to reconstruct every successful action. |
-| Compatibility | Console enables writes only when the gate binary advertises an overlapping, exact action-protocol version and all required features. |
+| Compatibility | Console enables writes only when the gate binary advertises an overlapping, exact action-protocol version and all required features; preview and commit are bound to one gate binary identity. |
 | Operability | Production console code remains Go stdlib-only. `chromedp` is test-only, build-tagged, and drives an installed Chrome/Chromium. |
 | Latency | Preview and commit each use a 10-second subprocess deadline; timeout is visible and never interpreted as success. |
 | Request bounds | Action JSON bodies are at most 16 KiB; unknown fields and trailing JSON values are rejected. |
@@ -98,7 +99,7 @@ There is one new state class in console: bounded, in-memory **security state** (
 
 ### 3.1 Components
 
-- `cmd/gate`: adds a versioned compatibility projection, a read-only Judge preview, structured action errors, request-id idempotency, and stale-escalation guards. It continues to own all policy and persistence.
+- `cmd/gate`: adds a versioned compatibility projection with binary identity, a read-only Judge preview, structured action errors, request-id idempotency, and stale-escalation guards. It continues to own all policy and persistence.
 - `cmd/console/internal/gatecli`: captures stdout, stderr, and numeric exit status; validates gate's versioned JSON envelopes; requests previews; and executes only the exact argv returned by gate.
 - `cmd/console/internal/web`: owns Host/Origin/CSRF enforcement, session and intent lifetimes, strict JSON parsing, HTTP error mapping, and response headers. It does not interpret gate policy.
 - `cmd/console/internal/web/static/app.html`: renders the form, command review, final outcome, and disabled-state reasons. It never constructs a gate command or executes a returned action.
@@ -120,6 +121,7 @@ The console may validate transport schemas and identifiers needed to call gate. 
 | Stale/expired/wrong-scope/tampered grant | Yes | Gate checks again inside the committing invocation; HTTP maps the coded refusal. |
 | Incompatible/malformed gate binary output | Yes | Exact version/features check, strict envelope decoder, exit-code/body agreement; actions disabled on failure. |
 | Ledger edit, deletion, truncation, or anchor mismatch | Yes | `gate audit` before preview and inside commit; `423 audit_tampered`; controls disabled. |
+| Plain-HTTP loopback cookie exposure | Yes, bounded | Cookie omits `Secure` because `http://127.0.0.1` must work. Loopback bind, Host/Origin checks, and the same-user residual bound this; any future HTTPS listener must use `Secure` and a `__Host-` cookie. |
 | Local process under a different OS user | Partly | OS file/process/network permissions are the boundary; console adds no cross-user claim. |
 | Local process or agent under the **same OS user** that can issue arbitrary HTTP | **Not distinguishable from the operator** | It can fetch the cookie and CSRF token and forge Origin. CSRF is not authentication. This is an accepted residual for Judge and a no-go for Mint. |
 | Same-user process able to read memory, debug processes, or replace binaries | No | It already controls the console/gate trust base; no application-layer protocol can recover integrity. |
@@ -130,7 +132,7 @@ An unauthenticated localhost service cannot prove a human gesture. A same-user a
 
 For **Judge**, the design makes a narrower claim: the route resists remote-web confused-deputy attacks and accidental browser actions, while a same-user local process is inside the accepted trust boundary. This is tolerable only because Judge consumes an already-minted, repo/action/TTL-scoped grant and exposes no capability that the same process could not exercise with `gate judge` under the same OS identity. Command echo proves which argv the browser is consenting to; it does not prove who is behind the browser.
 
-This assumption must be printed in the security docs and is itself a validation-gate review item. If governed agents can reach loopback but are intentionally denied `gate judge`, the HTTP route would widen their capability and Judge is also a no-go until an OS-authenticated user-presence check exists.
+This assumption is a **hard precondition**, not an open deployment question. Judge defaults disabled. P2 may enable the route only after the validation evidence positively shows one of two conditions: governed agents cannot reach the listener, or they already have the equivalent ability to invoke `gate judge` under the same OS identity. If neither is proven, Judge is a no-go and remains copy-paste CLI. An explicit `console serve -enable-judge` operator flag records acceptance of the proven boundary, but the flag alone is not proof.
 
 ### 4.3 D1 — Mint is CLI-only under the current model
 
@@ -163,9 +165,11 @@ Gate adds `gate version -json` with an action protocol advertisement. P1 uses pr
 {
   "schema": "gate.compat.v1",
   "binary_version": "<build version or devel>",
+  "binary_id": "sha256:<digest of the running executable>",
   "protocols": { "console_actions": 1 },
   "features": [
     "judge_preview_v1",
+    "judge_binary_identity_v1",
     "judge_request_id_v1",
     "judge_stale_guard_v1",
     "structured_action_errors_v1"
@@ -173,9 +177,9 @@ Gate adds `gate version -json` with an action protocol advertisement. P1 uses pr
 }
 ```
 
-Missing command, malformed JSON, missing feature, or non-overlapping version leaves read-only console working but sets `actions_enabled:false` with `gate_incompatible`. Commit rechecks compatibility rather than trusting startup state.
+Missing command, malformed JSON, missing feature, non-overlapping version, or unavailable binary identity leaves read-only console working but sets `actions_enabled:false` with `gate_incompatible`. Commit rechecks compatibility rather than trusting startup state.
 
-Gate's read-only preview returns the canonical argument vector **after** argv element zero. Console prepends its configured executable path, stores that complete vector, displays that exact vector with platform-correct quoting, and executes it without a shell. Console never derives flags from form fields after preview.
+Gate's read-only preview returns the canonical argument vector **after** argv element zero. Console prepends its configured executable path, stores that complete vector, displays that exact vector with platform-correct quoting, and executes it without a shell. The vector includes `-expect-binary-id <preview binary_id>`; the binary that actually receives commit computes its own identity and refuses before any state read/write if it differs. A PATH/symlink change or upgrade therefore expires the preview even if the replacement advertises the same protocol version. Console never derives flags from form fields after preview.
 
 ### 4.6 D4 — No separate console journal
 
@@ -204,7 +208,8 @@ type actionSession struct {
 - Session ids and CSRF tokens come from `crypto/rand` with 256 bits of entropy.
 - Sessions expire 30 minutes after creation; there is no sliding extension.
 - Each CSRF token expires after 10 minutes or with the session, whichever is sooner, and is consumed on the first syntactically valid action POST regardless of its outcome.
-- Each session holds at most 16 unused CSRF tokens and 8 live intents; oldest entries are evicted.
+- `GET /api/action-session` creates or inspects the session but does not issue a token. `GET /api/action-csrf` issues exactly one token immediately before an action POST.
+- Each session holds at most 16 unused CSRF tokens and 8 live intents. Expired/used entries are collected; a full live set returns `429 csrf_token_limit` rather than silently evicting a token another tab is about to use.
 - Server restart invalidates every session, token, preview, and cached HTTP result.
 
 ### 5.2 Judge intent (memory only)
@@ -217,16 +222,17 @@ type judgeIntent struct {
     ExpiresAt   time.Time
     Argv        []string // complete argv including configured gate binary
     Command     string   // lossless display quoting of Argv
+    BinaryID    string
     Run         string
     RequestID   string
-    State       intentState // previewed | executing | complete
+    State       intentState // previewed | executing | timed_out | complete
     Result      *judgeResponse
 }
 ```
 
 - Preview intents expire after two minutes.
 - The server never accepts replacement argv or form fields on commit.
-- `executing` prevents concurrent execution. `complete` returns the cached response with `replayed:true` until session expiry.
+- `executing` prevents concurrent execution. After `CommandContext` has terminated and reaped a timed-out subprocess, the intent moves to `timed_out`; the same intent may transition back to `executing` on retry. Gate's request id makes the unknown outcome idempotent. `complete` returns the cached response with `replayed:true` until session expiry.
 - Cached results are convenience only. On restart, the case file reconstructs success from gate's ledger.
 
 ### 5.3 Gate ledger additions
@@ -271,12 +277,14 @@ The successful stdout envelope is:
 {
   "schema": "gate.judge-preview.v1",
   "request_id": "gact_…",
+  "binary_id": "sha256:…",
   "expires_at": "2026-07-21T19:02:00Z",
   "run": "run_…",
   "escalation_id": "art_…",
   "argv": [
     "judge", "-json", "-run", "run_…", "-grant", "grt_…",
     "-decision", "pass", "-why", "…", "-request-id", "gact_…",
+    "-expect-binary-id", "sha256:…",
     "-expect-escalation", "art_…"
   ]
 }
@@ -286,11 +294,12 @@ The real vector may also contain the configured `-state` argument. It must never
 
 ### 6.2 Judge commit
 
-The exact preview argv invokes normal `gate judge` with three additions:
+The exact preview argv invokes normal `gate judge` with four additions:
 
 - `-json` requests versioned result/error envelopes;
 - `-request-id` supplies idempotency identity;
-- `-expect-escalation` supplies the state precondition.
+- `-expect-escalation` supplies the state precondition;
+- `-expect-binary-id` binds consent to the executable that produced the preview.
 
 Gate performs an audited read, verifies that the named escalation is still the one unresolved target, checks request-id history, and rechecks the grant before the first new append. Concurrent writers use an optimistic head compare under gate's existing interprocess state lock: unrelated writes may trigger a bounded re-read/retry, but a changed target returns `stale_run`. The first authoritative append carries `request_id`; a second request cannot resolve the same escalation.
 
@@ -351,23 +360,23 @@ Capability refusals use gate exit `3` and a coded body. Invalid/stale/integrity/
 
 Error prose is for humans; callers branch only on these codes.
 
+`request_conflict` is a defensive gate invariant: normal browser flow cannot create it because gate generates the request id and console stores immutable argv. Its HTTP mapping still fails closed at `409`; it is an operator-visible integrity fault, not a prompt to retry with changed fields.
+
 ## 7. HTTP contract
 
 All `/api/action-*` and `/api/actions/*` responses set `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. Action POSTs require exact same-origin `Origin`, a valid Host, `Content-Type: application/json`, the host-only session cookie, and `X-CSRF-Token`.
 
 ### 7.1 `GET /api/action-session`
 
-Creates or reuses a session, issues one fresh single-use CSRF token, and reports whether actions are available.
+Creates or reuses a session and reports whether actions are available. It does not issue a CSRF token.
 
 ```json
 {
   "schema": "console.action-session.v1",
-  "csrf_token": "base64url…",
-  "csrf_expires_at": "2026-07-21T19:10:00Z",
   "session_expires_at": "2026-07-21T19:30:00Z",
   "actions_enabled": true,
   "disabled_reason": null,
-  "gate": { "binary_version": "…", "protocol": 1 },
+  "gate": { "binary_version": "…", "binary_id": "sha256:…", "protocol": 1 },
   "actions": ["judge"]
 }
 ```
@@ -380,7 +389,21 @@ console_session=<opaque>; Path=/; HttpOnly; SameSite=Strict; Max-Age=1800
 
 `Domain` is omitted, making it host-only. `Secure` is intentionally omitted because console serves plain HTTP on loopback; adding `Secure` would make the cookie unreliable on `http://127.0.0.1`. Loopback/Host/Origin controls and the stated same-user residual are the compensating boundary. A future HTTPS listener must add `Secure` and use a `__Host-` cookie.
 
-### 7.2 `POST /api/actions/judge/preview`
+### 7.2 `GET /api/action-csrf`
+
+Requires a valid action session and returns one fresh single-use token for the next POST:
+
+```json
+{
+  "schema": "console.csrf.v1",
+  "csrf_token": "base64url…",
+  "csrf_expires_at": "2026-07-21T19:10:00Z"
+}
+```
+
+The UI calls this only immediately before preview or commit, never speculatively on page load. At the 16-live-token cap it returns `429 csrf_token_limit`; the UI surfaces the condition and waits for tokens to be used/expire rather than evicting or silently retrying.
+
+### 7.3 `POST /api/actions/judge/preview`
 
 Request:
 
@@ -409,7 +432,7 @@ Response `200`:
 
 The browser displays `command.display` as text. It does not receive a field that can replace the stored argv. Preview consumes its CSRF token even when gate rejects the form; the UI obtains a new token for the next POST.
 
-### 7.3 `POST /api/actions/judge/commit`
+### 7.4 `POST /api/actions/judge/commit`
 
 Request:
 
@@ -431,7 +454,7 @@ Response `200` wraps gate's result without reinterpreting the outcome:
 
 A retry of the same completed intent returns the same body with `replayed:true`. A request while the intent is executing returns `409 action_in_progress` plus `Retry-After: 1`; it never starts a second subprocess.
 
-### 7.4 Mint and merge contracts
+### 7.5 Mint and merge contracts
 
 There are deliberately no routes for Mint or Merge:
 
@@ -443,7 +466,7 @@ POST /api/actions/merge         -> 404
 
 The static app contains no fetch call targeting them. Gate's returned merge command is text/copy data only.
 
-### 7.5 HTTP error envelope and mapping
+### 7.6 HTTP error envelope and mapping
 
 ```json
 {
@@ -467,6 +490,7 @@ The static app contains no fetch call targeting them. Gate's returned merge comm
 | `415` | `unsupported_media_type` | JSON content type required. |
 | `422` | `invalid_run`, `invalid_grant`, `invalid_decision`, `invalid_rationale` | Well-formed body with rejected field value. |
 | `423` | `audit_tampered` | All action controls lock; reason remains visible. |
+| `429` | `csrf_token_limit` | Too many unused tokens exist for this session; no token is evicted. |
 | `502` | `gate_unavailable`, `invalid_gate_response`, `action_internal` | Gate failed or violated its contract; no success is inferred. |
 | `503` | `gate_incompatible`, `actions_disabled` | Read-only console remains available; action controls stay disabled. |
 | `504` | `gate_timeout` | Outcome is unknown. Retry the **same commit intent**; request-id idempotency resolves it. |
@@ -478,14 +502,14 @@ Decision outcomes `blocked` and `parked_for_judgment` do not become HTTP errors 
 ### 8.1 Page load and control enablement
 
 1. Existing read-only case-file and audit requests run.
-2. Browser requests `/api/action-session`; server checks the live gate compatibility contract and a clean audit.
-3. If either fails, the response carries `actions_enabled:false`; the radios, rationale, preview, and commit controls are disabled, and the exact reason is visible.
+2. Browser requests `/api/action-session`; server checks explicit Judge enablement, the live gate compatibility/binary-identity contract, and a clean audit. No CSRF token is allocated on load.
+3. If any check fails, the response carries `actions_enabled:false`; the radios, rationale, preview, and commit controls are disabled, and the exact reason is visible.
 4. If enabled, decision radios remain empty. The grant field may use gate's current suggestion.
 
 ### 8.2 Preview and consent
 
 1. Operator selects pass/block and writes a rationale.
-2. Browser fetches a fresh CSRF token, then POSTs preview with exact same-origin `Origin` automatically supplied by the browser.
+2. Browser fetches a fresh token from `/api/action-csrf`, then POSTs preview with exact same-origin `Origin` automatically supplied by the browser.
 3. Console consumes the token, strictly decodes the body, rechecks compatibility/audit, and shells gate preview.
 4. Gate validates current run/grant state and returns a request id, escalation precondition, and canonical argv.
 5. Console stores the complete argv in a session-bound, two-minute intent and displays it.
@@ -495,9 +519,9 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 
 ### 8.3 Commit and returned action
 
-1. Browser fetches a new CSRF token and POSTs only `intent_id`.
-2. Server atomically moves the intent from `previewed` to `executing`.
-3. Gate re-audits, checks compatibility version, request-id history, unresolved escalation, and current grant, then records the judgment/reduction/action.
+1. Browser fetches a new token from `/api/action-csrf` and POSTs only `intent_id`.
+2. Server atomically moves the intent from `previewed` or `timed_out` to `executing`.
+3. Gate verifies its expected binary identity, re-audits, checks compatibility version, request-id history, unresolved escalation, and current grant, then records the judgment/reduction/action.
 4. Console validates exit/body agreement and caches the response under the intent.
 5. UI renders the permanent rationale and outcome. A returned merge command is pinned as copyable text; no handler can execute it.
 6. UI performs GET refreshes of case file, docket, and audit. Browser history receives only GET state, never a form-resubmittable document.
@@ -505,7 +529,7 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 ### 8.4 Double submit, retry, refresh, and restart
 
 - **Double click / same intent:** one request wins `executing`; the other gets `409 action_in_progress` or the cached `200 replayed:true`.
-- **Network timeout after commit:** retry the same intent. Console cache or gate request-id replay returns the original result without a second append.
+- **Network/subprocess timeout after commit:** once the timed-out process is terminated and reaped, the intent enters `timed_out`. Retry the same intent; it may execute again with the same request id, and console cache or gate replay/resume returns the original result without a second append.
 - **Refresh before commit:** preview is not auto-committed. The UI may recover the still-live intent from `sessionStorage`, but must show the command again and require the explicit commit click.
 - **Refresh after commit:** GET projections render the ledger result. No POST repeats.
 - **Console restart before commit:** cookie and intent are invalid; commit returns `410 session_expired`/`intent_expired`; re-preview from current state.
@@ -536,6 +560,7 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 
 - Read-only `next`, `explain`, and `audit` may continue if their existing contracts work.
 - The action-session response names the mismatch; action POSTs return `503 gate_incompatible`.
+- Preview stores gate's `binary_id`; commit's exact argv requires it. A changed PATH target, symlink target, or upgraded binary returns `503 gate_incompatible`/`action_protocol_unsupported` before mutation.
 - Unknown fields in a compatible newer envelope may be tolerated only where the versioned schema declares forward compatibility; missing required fields, unknown schema names, or exit/body mismatch fail closed.
 - Console never falls back to constructing a legacy `gate judge` command itself.
 
@@ -549,9 +574,10 @@ Mint may not begin merely because Judge “seems fine.” The validation gate is
 
 - Host aliases/port pinning and rejection of foreign/malformed Host.
 - Origin exact-match matrix, including missing, `null`, foreign, scheme/port/alias mismatch.
-- Cookie attributes, session absolute expiry, token expiry/use-once semantics, capacity eviction, and restart invalidation.
+- Cookie attributes, session absolute expiry, token expiry/use-once semantics, and restart invalidation.
+- No token on action-session load; just-in-time token issuance; 16-token cap returns `429` without eviction; concurrent tabs retain their own valid tokens.
 - Strict JSON decoder, size limit, rationale constraints, and no subprocess on transport-invalid requests.
-- Preview intent binding, edit invalidation contract, exact displayed/executed argv equivalence, timeout handling, and all error mappings.
+- Preview intent binding, edit invalidation contract, exact displayed/executed argv equivalence, binary-identity drift refusal, `timed_out` retry, and all error mappings.
 - Fake gate exit/body compatibility, audit tamper, incompatible version, malformed JSON, and missing features.
 - Gate tests for request-id idempotency, partial-write resume, two-request same-escalation race, stale escalation, stale/expired/wrong-scope grant, and audit tamper with zero unauthorized append.
 - Hygiene assertion that console imports no gate package.
@@ -569,7 +595,9 @@ A build-tagged `go test -tags=browser ./cmd/console/...` suite launches the real
 7. two tabs racing one escalation produce one success and one stale result;
 8. refresh never repeats a POST;
 9. expired intent and expired grant fail visibly;
-10. audit tamper and incompatible gate disable controls with the reason visible.
+10. audit tamper and incompatible gate disable controls with the reason visible;
+11. replacing/upgrading the configured gate binary after preview expires the intent without a commit;
+12. a subprocess timeout can retry the same intent and converges on one gate result.
 
 The browser job is a required CI check for P2 and validation changes. It may use the Chrome already installed on GitHub-hosted runners; it must not download a browser at test time.
 
@@ -593,10 +621,11 @@ Request Codex, Claude, Cursor, and Copilot on the design PR and again on the val
 Judge validation is **GO** only when all of the following are true on the final review head:
 
 1. Tier 0 and Tier 1 commands pass in CI and locally on the operator platform.
-2. A scripted 50-way same-escalation commit race records exactly one judgment path, every other request resolves as replay/in-progress/stale, and `gate audit` remains intact.
-3. The attack matrix records zero ledger mutations for bad Host, bad/missing Origin, bad/replayed CSRF, expired intent, stale run, expired/wrong-scope/bad-signature grant, incompatible gate, malformed gate output, and tampered audit.
-4. No unresolved critical/high finding remains from the four requested reviewers; accepted residuals are written into this threat model.
-5. Manual evidence shows the exact displayed argv equals the executed argv and the returned merge command is never executed.
+2. Deployment evidence proves governed agents cannot reach loopback or already possess equivalent `gate judge` capability; absent that proof, Judge remains disabled and the gate is NO-GO.
+3. A scripted 50-way same-escalation commit race records exactly one judgment path, every other request resolves as replay/in-progress/stale, and `gate audit` remains intact.
+4. The attack matrix records zero ledger mutations for bad Host, bad/missing Origin, bad/replayed CSRF, expired intent, stale run, expired/wrong-scope/bad-signature grant, binary drift, incompatible gate, malformed gate output, and tampered audit.
+5. No unresolved critical/high finding remains from the four requested reviewers; accepted residuals are written into this threat model.
+6. Manual evidence shows the exact displayed argv equals the executed argv and the returned merge command is never executed.
 
 Any failure is **NO-GO**: Judge remains copy-paste CLI, Mint remains CLI-only, and P3 stays task-less.
 
@@ -606,7 +635,7 @@ Passing this gate validates the shared action plane for bounded judgment. It doe
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Rough scope |
 |---|---|---|---|---|---:|
-| **P1 — action security plane + compatibility contract** | Build the fail-closed substrate before any route mutates | Gate `version -json`; Judge preview/result/error schemas; request-id + stale-escalation guards; exact argv generation; gatecli exit/envelope validation; session/cookie/Origin/CSRF/intent mechanism; audit/incompatibility lockout; Tier 0 tests | — | pre-gate, no browser mutation yet | 500–800 wLOC |
+| **P1 — action security plane + compatibility contract** | Build the fail-closed substrate before any route mutates | Gate `version -json` + binary identity; Judge preview/result/error schemas; request-id + stale-escalation guards; exact argv generation; gatecli exit/envelope validation; default-disabled Judge flag; session/cookie/Origin/just-in-time CSRF/intent mechanism; timeout retry; audit/incompatibility lockout; Tier 0 tests | — | pre-gate, no browser mutation yet | 500–800 wLOC |
 | **P2 — judgment form + end-to-end action** | Add the first bounded authority-bearing browser action | Case-file form; no default decision; rationale validation; preview/review/commit UX; result/merge-command rendering; refresh behavior; server routes; gate commit wiring; Tier 0 + chromedp scenarios | P1 | pre-gate | 400–700 wLOC |
 | **VALIDATION — adversarial proof** | Decide whether the action plane is safe enough to retain | Four-agent review; attack matrix; 50-way race; final-head browser run; manual exact-argv/no-merge evidence; fold fixes into P1/P2 contracts | P2 | **GO/NO-GO** | 100–250 wLOC/tests + evidence |
 | **P3 — Mint reconsideration (stub)** | Decide whether browser mint can ever prove human presence | Default result is CLI-only. Only after Judge GO: separate threat-model amendment; evaluate OS-mediated WebAuthn/user verification; registration/recovery; gate-bound parameters; new independent validation gate. No Judge code folded into this PR. | VALIDATION GO + separate human-presence proof | **currently NO-GO; task-less** | uncommitted |
@@ -621,7 +650,7 @@ Mint stays CLI-only unless a later reviewed design proves all of these:
 1. **Unforgeable user verification:** an OS/platform authenticator performs user verification and produces a cryptographic assertion bound to the exact repo, action, tier, cycles, TTL, expiry, and `init` choice. A click, typed phrase, delay, CAPTCHA, pointer gesture, Origin, or CSRF token does not qualify.
 2. **Gate verification:** gate—not console—verifies the assertion and binds it to the mint. Console never receives or handles signing-key bytes.
 3. **No automation fallback:** no MCP verb, API token, “remember me,” headless path, recovery bypass, or CLI flag can convert the browser flow into agent automation. The existing operator CLI may remain, governed by external key custody/tool guards.
-4. **Enrollment and recovery:** authenticator registration, replacement, loss, and reset have an explicit trust root that cannot be exercised by the same local agent being constrained.
+4. **Enrollment and recovery:** authenticator registration, replacement, loss, and reset have an explicit trust root that cannot be exercised by the same local agent being constrained, including through any endpoint on the loopback service.
 5. **Two-step consent:** gate returns the exact canonical mint argv/parameters and absolute local expiry for review; after review, a fresh user-verification assertion is bound to that immutable preview. Editing any field invalidates both.
 6. **Fresh-state safety:** `-init` is offered only on gate-attested fresh state and is included in the signed assertion; wrong-directory mint remains fail-closed.
 7. **Independent proof:** a dedicated Mint browser/adversarial suite demonstrates no grant artifact for forged/replayed/mismatched/expired assertions, concurrent tabs, restart, or tampered audit.
@@ -630,11 +659,10 @@ If any item is unavailable or disproportionate, retaining CLI-only mint is the s
 
 ## 12. Open questions
 
-No open question blocks P1 or P2. Reviewers should challenge these deliberately deferred forks:
+The Judge trust boundary is no longer an open default: absent positive deployment evidence, actions stay disabled and P2 is NO-GO. Reviewers should challenge these deliberately deferred forks:
 
-1. Is same-user local-process equivalence acceptable for Judge in the actual governed-agent environment, or do tool guards make the HTTP route a real capability widening? A “no” changes Judge to no-go; it does not weaken the controls.
-2. If Mint is ever reconsidered, is platform WebAuthn with required user verification supportable on the operator's browsers/OS without an automation fallback? Until proven, the answer is no.
-3. Does gate's request-id crash recovery need a general state batch/CAS primitive, or can a minimal guarded append plus idempotent resume preserve the existing state mechanism cleanly? P1 must settle this in gate's design before implementation.
+1. If Mint is ever reconsidered, is platform WebAuthn with required user verification supportable on the operator's browsers/OS without an automation fallback? Until proven, the answer is no.
+2. Does gate's request-id crash recovery need a general state batch/CAS primitive, or can a minimal guarded append plus idempotent resume preserve the existing state mechanism cleanly? P1 must settle this in gate's design before implementation.
 
 ## 13. Validation plan summary
 
