@@ -129,6 +129,46 @@ func TestMintValidateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMintDoesNotPersistBearerSignature(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	g, _, err := s.Mint("tracker", []string{"read"}, time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.stateDir, "grants", g.ID+".json"))
+	if err != nil {
+		t.Fatalf("read grant record: %v", err)
+	}
+	if strings.Contains(string(data), `"sig"`) || strings.Contains(string(data), g.Sig) {
+		t.Fatal("persisted grant record contains bearer signature")
+	}
+}
+
+func TestValidateRejectsRecordWhoseIDDoesNotMatchToken(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	g, _, err := s.Mint("tracker", []string{"read"}, time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.stateDir, "grants", g.ID+".json"))
+	if err != nil {
+		t.Fatalf("read grant record: %v", err)
+	}
+	otherID := strings.Repeat("a", 32)
+	if otherID == g.ID {
+		otherID = strings.Repeat("b", 32)
+	}
+	if err := os.WriteFile(filepath.Join(s.stateDir, "grants", otherID+".json"), data, 0o600); err != nil {
+		t.Fatalf("copy grant record: %v", err)
+	}
+	tok := tokenPrefix + otherID + "." + g.Sig
+	if _, err := s.Validate(tok, "tracker", now); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("Validate copied record error = %v, want %v", err, ErrBadSignature)
+	}
+}
+
 func TestValidateRefusals(t *testing.T) {
 	mintClock := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
 
@@ -142,7 +182,7 @@ func TestValidateRefusals(t *testing.T) {
 		{
 			name: "no_grant_unknown_id",
 			mutate: func(_ *testing.T, _ *Store, _ Grant, _ string) (string, string, func() time.Time) {
-				return "cst1_deadbeef.cafef00d", "tracker", mintClock
+				return "cst1_" + strings.Repeat("d", 32) + "." + strings.Repeat("c", 64), "tracker", mintClock
 			},
 			want: ErrNoGrant,
 		},

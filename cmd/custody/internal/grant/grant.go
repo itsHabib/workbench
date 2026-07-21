@@ -52,7 +52,7 @@ type Grant struct {
 	MintedAt time.Time     `json:"minted_at"`
 	TTL      time.Duration `json:"ttl"`
 	MintedBy string        `json:"minted_by"`
-	Sig      string        `json:"sig"`
+	Sig      string        `json:"-"` // bearer proof: returned in the token, never persisted
 }
 
 // Expiry is MintedAt + TTL. A grant is refused once now is past it.
@@ -176,6 +176,9 @@ func (s *Store) Validate(tok, key string, now func() time.Time) (Grant, error) {
 	g, err := s.load(id)
 	if err != nil {
 		return Grant{}, err
+	}
+	if g.ID != id {
+		return Grant{}, fmt.Errorf("%w: grant record id does not match token", ErrBadSignature)
 	}
 	mintKey, err := loadKey(s.mintKeyPath)
 	if err != nil {
