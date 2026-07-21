@@ -3,6 +3,7 @@
 package credstore
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -67,6 +68,7 @@ func (WinCred) Get(ref string) ([]byte, error) {
 		uintptr(unsafe.Pointer(&cred)),
 	)
 	if r1 == 0 {
+		callErr = credCallError(callErr)
 		if callErr == windows.ERROR_NOT_FOUND {
 			return nil, fmt.Errorf("%w: %q", ErrSecretUnavailable, ref)
 		}
@@ -111,6 +113,7 @@ func (WinCred) Set(ref string, secret []byte) error {
 	}
 	r1, _, callErr := procCredWriteW.Call(uintptr(unsafe.Pointer(&cred)), 0)
 	if r1 == 0 {
+		callErr = credCallError(callErr)
 		return fmt.Errorf("credstore: CredWrite %q: %w", ref, callErr)
 	}
 	return nil
@@ -126,7 +129,18 @@ func credDelete(ref string) error {
 	}
 	r1, _, callErr := procCredDeleteW.Call(uintptr(unsafe.Pointer(target)), uintptr(credTypeGeneric), 0)
 	if r1 == 0 {
-		return callErr
+		return credCallError(callErr)
 	}
 	return nil
+}
+
+func credCallError(callErr error) error {
+	if callErr != nil && callErr != windows.ERROR_SUCCESS {
+		return callErr
+	}
+	lastErr := windows.GetLastError()
+	if lastErr != nil && lastErr != windows.ERROR_SUCCESS {
+		return lastErr
+	}
+	return errors.New("Windows credential call failed without an error code")
 }

@@ -6,7 +6,23 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
+
+func TestCredCallErrorPreservesNonzeroError(t *testing.T) {
+	want := errors.New("call failed")
+	if got := credCallError(want); !errors.Is(got, want) {
+		t.Fatalf("credCallError = %v, want %v", got, want)
+	}
+}
+
+func TestCredCallErrorNeverReturnsSuccess(t *testing.T) {
+	got := credCallError(windows.ERROR_SUCCESS)
+	if got == nil || got == windows.ERROR_SUCCESS {
+		t.Fatalf("credCallError returned success for a failed call: %v", got)
+	}
+}
 
 // TestWinCredRoundTrip exercises the real Windows Credential Manager: write a
 // secret, read it back, confirm a missing ref is typed, then clean up. It skips
