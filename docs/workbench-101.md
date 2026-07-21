@@ -16,6 +16,41 @@ code currently disagree.
 
 ---
 
+## Orientation - the whole thing in one screen
+
+Skim this for the model; read the sections for the why. If you are an agent pointed
+at this file to ground yourself, this block is the summary and sections 2 (the loop)
+and 6 (gate) hold the load-bearing detail.
+
+- **What this repo is.** One Go module (`github.com/itsHabib/workbench`) holding a
+  family of small single-job binaries that let coding agents ship real PRs under
+  control. The point: safety-critical decisions live in code the model cannot skip,
+  not in prose it can. Slogan: *prose shrinks, guarantees grow.*
+- **The one law.** *Share contracts, not call stacks.* Tools never import each
+  other's decision logic; they compose through artifacts - typed JSON on disk plus
+  exit codes. Enforced by CI, not convention (section 3).
+- **The loop, one line.** dossier task → specs + parallel-safe manifest → ship's
+  driver dispatches N streams → a PR per stream → review panel + coordinator →
+  **gate** authorizes the merge from an operator-minted grant + a composed verdict →
+  merge → record → observe. Run by named skills (`/tdd`, `/work-driver`,
+  `/review-coordinator`, `/wip`, ...); section 2.
+- **The five planes.** State (remembers), Execution (does), Verification (judges),
+  Capability (bounds), Observability (explains) - plus Composition (the skills). The
+  diagnostic: every recurring failure is one plane doing another's job (section 4).
+- **The flagship, gate.** Decides whether a PR may merge, from evidence, via an
+  escalate-only verifier ladder (a deterministic floor a model layer can only
+  escalate above, never lower) and operator-minted grants, all recorded in a
+  hash-chained audit log. A local model may escalate but never block; premium
+  judgment resolves escalations but cannot override a code block (sections 5-6).
+- **Honest status.** Enforcement today is discipline plus an audit trail, not
+  prevention; live merge is a dry-run; the GitHub-boundary enforcement check is
+  built but dormant. The `verified`/`intent` markers and the section 12 drift log
+  keep the doc from overclaiming.
+- **The north star.** Fully autonomous cloud runs - the loop executing end to end
+  with the operator reading the audit trail after, not gating it during (section 9).
+
+---
+
 ## 1. Why this exists
 
 The operator of this repo stopped hand-writing code and made agents do essentially
