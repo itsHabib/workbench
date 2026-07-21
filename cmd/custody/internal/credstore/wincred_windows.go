@@ -149,5 +149,5 @@ func credCallError(callErr error) error {
 	if lastErr != nil && lastErr != windows.ERROR_SUCCESS {
 		return lastErr
 	}
-	return errors.New("Windows credential call failed without an error code")
+	return errors.New("windows credential call failed without an error code")
 }
