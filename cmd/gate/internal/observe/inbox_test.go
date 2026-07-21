@@ -3,6 +3,7 @@ package observe
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,6 +75,97 @@ func TestBuildInboxParked(t *testing.T) {
 	}
 }
 
+func TestBuildInboxCollapsesRunsByPR(t *testing.T) {
+	subject := map[string]any{"subject": map[string]any{
+		"repo": "o/widget", "number": 142, "head_sha": "deadbeef",
+	}}
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_old", "esc_old", inboxBase, esc("grt_a", "old park", "", "o/widget", 142)),
+		art(state.KindVerdict, "run_new", "vrd_new", inboxBase.Add(-time.Minute), subject),
+		// Append order is authoritative even when the clock moves backward.
+		art(state.KindAction, "run_new", "act_new", inboxBase.Add(-2*time.Minute), map[string]any{"outcome": "would_merge"}),
+	}
+
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.Parked) != 0 {
+		t.Fatalf("newer action for the same PR must suppress the old park, got %+v", in.Parked)
+	}
+}
+
+func TestBuildInboxRecoversSubjectDisplayFacts(t *testing.T) {
+	arts := []state.Artifact{
+		art(state.KindEvidence, "run_old", "evd_old", inboxBase, map[string]any{
+			"pr":   map[string]any{"repo": "o/widget", "number": 142},
+			"data": map[string]any{"title": "fix the docket", "headRefOid": "abc123"},
+		}),
+		// The legacy escalation body carries no subject; evidence recovers it.
+		art(state.KindEscalation, "run_old", "esc_old", inboxBase.Add(time.Minute), esc("grt_a", "needs judgment", "", "", 0)),
+	}
+
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.Parked) != 1 {
+		t.Fatalf("want one recovered actionable park, got %+v", in)
+	}
+	p := in.Parked[0]
+	if p.Repo != "o/widget" || p.Number != 142 || p.Title != "fix the docket" || p.HeadSHA != "abc123" {
+		t.Fatalf("display facts not recovered: %+v", p)
+	}
+	if p.URL != "https://github.com/o/widget/pull/142" {
+		t.Fatalf("canonical PR URL = %q", p.URL)
+	}
+}
+
+func TestBuildInboxNewestParkWinsForPR(t *testing.T) {
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_old", "esc_old", inboxBase, esc("grt_a", "old", "", "o/r", 7)),
+		art(state.KindEscalation, "run_new", "esc_new", inboxBase.Add(time.Minute), esc("grt_b", "new", "", "o/r", 7)),
+	}
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.Parked) != 1 || in.Parked[0].Run != "run_new" {
+		t.Fatalf("want only newest parked run for PR, got %+v", in.Parked)
+	}
+}
+
+func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
+	parked := []ParkedRun{
+		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale title"},
+		{Run: "run_merged", Repo: "o/r", Number: 2},
+		{Run: "run_unknown", Repo: "o/r", Number: 3},
+		{Run: "run_unexpected", Repo: "o/r", Number: 4},
+	}
+	lookup := func(_ string, number int) (LivePR, error) {
+		switch number {
+		case 1:
+			return LivePR{State: "OPEN", Title: "live title", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
+		case 2:
+			return LivePR{State: "MERGED"}, nil
+		case 3:
+			return LivePR{}, fmt.Errorf("lookup unavailable")
+		default:
+			return LivePR{State: "unexpected"}, nil
+		}
+	}
+
+	got := reconcileLive(parked, lookup)
+	if len(got) != 3 || got[0].Run != "run_open" || got[1].Run != "run_unknown" || got[2].Run != "run_unexpected" {
+		t.Fatalf("live reconcile = %+v", got)
+	}
+	if got[0].PRState != "OPEN" || got[0].Title != "live title" || got[0].HeadSHA != "abc" {
+		t.Fatalf("open PR was not enriched: %+v", got[0])
+	}
+	if got[1].PRState != "unknown" || !strings.Contains(got[1].PRStateReason, "lookup unavailable") {
+		t.Fatalf("failed lookup must remain visible as unknown: %+v", got[1])
+	}
+	if got[2].PRState != "unknown" || !strings.Contains(got[2].PRStateReason, "unexpected") {
+		t.Fatalf("unexpected state must remain visible as unknown: %+v", got[2])
+	}
+	var text bytes.Buffer
+	renderInbox(&text, Inbox{Parked: got})
+	if !strings.Contains(text.String(), "PR state unknown: lookup unavailable") {
+		t.Fatalf("text view must surface live lookup failure:\n%s", text.String())
+	}
+}
+
 // TestBuildInboxJudgeCommand pins that the suggested judge command carries the
 // run's own grant id and the stateArg, so resolving a park is a paste, never an
 // id hunt.
@@ -109,15 +201,15 @@ func TestBuildInboxUnparseableEscalation(t *testing.T) {
 		art(state.KindEscalation, "run_bad", "esc_bad", inboxBase, []string{"not", "an", "object"}),
 	}
 	in := buildInbox(arts, inboxBase, "")
-	if len(in.Parked) != 1 || in.Parked[0].Run != "run_bad" {
-		t.Fatalf("unparseable escalation must still list its run, got %+v", in.Parked)
+	if len(in.Parked) != 0 || len(in.Unattributed) != 1 || in.Unattributed[0].Run != "run_bad" {
+		t.Fatalf("unparseable escalation must stay visible but not actionable, got %+v", in)
 	}
-	if in.Parked[0].Question != "" {
-		t.Fatalf("want empty question for unparseable body, got %q", in.Parked[0].Question)
+	if in.Unattributed[0].Question != "" {
+		t.Fatalf("want empty question for unparseable body, got %q", in.Unattributed[0].Question)
 	}
 	// The grant placeholder keeps the command runnable-shaped even with no id.
-	if !strings.Contains(in.Parked[0].JudgeCommand, "-grant grt_...") {
-		t.Fatalf("missing grant placeholder: %q", in.Parked[0].JudgeCommand)
+	if !strings.Contains(in.Unattributed[0].JudgeCommand, "-grant grt_...") {
+		t.Fatalf("missing grant placeholder: %q", in.Unattributed[0].JudgeCommand)
 	}
 }
 
@@ -229,7 +321,7 @@ func TestNextTextRendersParked(t *testing.T) {
 
 	for _, want := range []string{
 		"awaiting judgment (1)",
-		"run_9f3a41c2  acme/widget#142  grant_tier_exceeded",
+		"acme/widget#142  run_9f3a41c2  grant_tier_exceeded",
 		`"verdict tier T2 exceeds grant ceiling T1; flake is known"`,
 		"→ gate judge -run run_9f3a41c2 -grant grt_a1b2c3d4 -decision <pass|block>",
 		"→ gate explain -run run_9f3a41c2 -html",

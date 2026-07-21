@@ -66,3 +66,20 @@ func TestPageMountPointsExist(t *testing.T) {
 		t.Error("page has no inline script block")
 	}
 }
+
+func TestDocketKeepsPRIdentityActionable(t *testing.T) {
+	page := string(appPage)
+	for _, want := range []string{
+		`class="pr-link"`,
+		`target="_blank" rel="noopener noreferrer"`,
+		`data.unattributed || []`,
+		`diagnostic history, not counted above`,
+		`PR state unknown`,
+		`p.pr_state_reason`,
+		`run ' + esc(p.run)`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("docket page missing actionable-identity contract %q", want)
+		}
+	}
+}

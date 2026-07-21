@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -17,8 +18,9 @@ import (
 // re-mint is one glance away). Like every observe view it renders; it never
 // decides — nothing here is scored or ranked by anything but age and expiry.
 type Inbox struct {
-	Parked []ParkedRun `json:"parked"`
-	Grants []GrantLine `json:"grants"`
+	Parked       []ParkedRun `json:"parked"`
+	Unattributed []ParkedRun `json:"unattributed"`
+	Grants       []GrantLine `json:"grants"`
 }
 
 // ParkedRun is one gate run stopped on an escalation, waiting for the operator's
@@ -29,6 +31,11 @@ type ParkedRun struct {
 	Run            string `json:"run"`
 	Repo           string `json:"repo,omitempty"`
 	Number         int    `json:"number,omitempty"`
+	Title          string `json:"title,omitempty"`
+	HeadSHA        string `json:"head_sha,omitempty"`
+	URL            string `json:"url,omitempty"`
+	PRState        string `json:"pr_state,omitempty"`
+	PRStateReason  string `json:"pr_state_reason,omitempty"`
 	Question       string `json:"question"`
 	Code           string `json:"code,omitempty"`
 	Grant          string `json:"grant,omitempty"`
@@ -103,6 +110,113 @@ func NextJSON(w io.Writer, st *state.Store, now func() time.Time, stateArg strin
 	return enc.Encode(in)
 }
 
+// PRLookup is the read-only mechanism used by the live inbox to check whether
+// a projected subject is still open. Gate's command layer supplies the GitHub
+// implementation; observe owns only the projection behavior.
+type PRLookup func(repo string, number int) (LivePR, error)
+
+// LivePR is the small display/status slice returned by a live PR read.
+type LivePR struct {
+	State   string
+	Title   string
+	HeadSHA string
+	URL     string
+}
+
+// NextJSONLive emits the console feed reconciled with current PR state. A
+// failed lookup remains visible as unknown; only a confirmed non-open PR is
+// removed from the attention queue.
+func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup) error {
+	in, err := collect(st, now, stateArg)
+	if err != nil {
+		return err
+	}
+	in.Parked = reconcileLive(in.Parked, lookup)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(in)
+}
+
+// NextTextLive is the human-readable form of NextJSONLive.
+func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup) error {
+	in, err := collect(st, now, stateArg)
+	if err != nil {
+		return err
+	}
+	in.Parked = reconcileLive(in.Parked, lookup)
+	renderInbox(w, in)
+	return nil
+}
+
+type liveResult struct {
+	index int
+	pr    LivePR
+	err   error
+}
+
+func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
+	results := make(chan liveResult, len(parked))
+	jobs := make(chan int, len(parked))
+	for i := range parked {
+		jobs <- i
+	}
+	close(jobs)
+
+	const maxWorkers = 8
+	for range min(len(parked), maxWorkers) {
+		go func() {
+			for i := range jobs {
+				p := parked[i]
+				pr, err := lookup(p.Repo, p.Number)
+				results <- liveResult{index: i, pr: pr, err: err}
+			}
+		}()
+	}
+
+	resolved := make([]liveResult, len(parked))
+	for range parked {
+		result := <-results
+		resolved[result.index] = result
+	}
+
+	out := make([]ParkedRun, 0, len(parked))
+	for i, p := range parked {
+		result := resolved[i]
+		if result.err != nil {
+			p.PRState = "unknown"
+			p.PRStateReason = result.err.Error()
+			out = append(out, p)
+			continue
+		}
+		state := strings.ToUpper(result.pr.State)
+		p.PRState = state
+		p = mergeLivePR(p, result.pr)
+		if state == "OPEN" {
+			out = append(out, p)
+			continue
+		}
+		if state != "MERGED" && state != "CLOSED" {
+			p.PRState = "unknown"
+			p.PRStateReason = fmt.Sprintf("GitHub returned unrecognized PR state %q", result.pr.State)
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func mergeLivePR(p ParkedRun, live LivePR) ParkedRun {
+	if live.Title != "" {
+		p.Title = live.Title
+	}
+	if live.HeadSHA != "" {
+		p.HeadSHA = live.HeadSHA
+	}
+	if live.URL != "" {
+		p.URL = live.URL
+	}
+	return p
+}
+
 // collect reads the log once and folds it into the inbox projection. The single
 // read is deliberate: parked runs and the grant ledger are two views of one
 // snapshot, never two scans that could disagree under a concurrent append.
@@ -115,9 +229,11 @@ func collect(st *state.Store, now func() time.Time, stateArg string) (Inbox, err
 }
 
 func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
+	parked, unattributed := parkedRuns(arts, stateArg)
 	return Inbox{
-		Parked: parkedRuns(arts, stateArg),
-		Grants: grantLines(arts, now),
+		Parked:       parked,
+		Unattributed: unattributed,
+		Grants:       grantLines(arts, now),
 	}
 }
 
@@ -126,36 +242,134 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 // resolves by appending an action (or a later escalation, if a judgment still
 // left it over-ceiling), so the last terminal in log order is the run's current
 // state. Output is oldest-park-first: age is a fact, not a priority call.
-func parkedRuns(arts []state.Artifact, stateArg string) []ParkedRun {
-	last := make(map[string]state.Artifact)
-	for _, a := range arts {
+func parkedRuns(arts []state.Artifact, stateArg string) ([]ParkedRun, []ParkedRun) {
+	last := make(map[string]terminalRun)
+	facts := make(map[string]runFacts)
+	for order, a := range arts {
+		facts[a.Run] = mergeRunFacts(facts[a.Run], factsFromArtifact(a))
 		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
-			last[a.Run] = a
+			last[a.Run] = terminalRun{artifact: a, order: order}
 		}
 	}
-	var parked []state.Artifact
-	for _, a := range last {
-		if a.Kind == state.KindEscalation {
-			parked = append(parked, a)
+
+	// A PR may be gated repeatedly, producing a fresh run each time. Reduce
+	// those runs by subject so a later terminal action also resolves older
+	// parked attempts for that PR.
+	latest := make(map[string]terminalRun)
+	var unattributed []ParkedRun
+	for run, terminal := range last {
+		f := facts[run]
+		if f.Repo == "" || f.Number == 0 {
+			if terminal.artifact.Kind == state.KindEscalation {
+				unattributed = append(unattributed, parkedFromEscalation(terminal.artifact, f, stateArg))
+			}
+			continue
+		}
+		key := fmt.Sprintf("%s#%d", f.Repo, f.Number)
+		terminal.facts = f
+		current, ok := latest[key]
+		if !ok || terminal.order > current.order {
+			latest[key] = terminal
 		}
 	}
-	sort.Slice(parked, func(i, j int) bool { return parked[i].Time.Before(parked[j].Time) })
-	out := make([]ParkedRun, 0, len(parked))
-	for _, a := range parked {
-		out = append(out, parkedFromEscalation(a, stateArg))
+
+	parked := make([]ParkedRun, 0, len(latest))
+	for _, terminal := range latest {
+		if terminal.artifact.Kind == state.KindEscalation {
+			parked = append(parked, parkedFromEscalation(terminal.artifact, terminal.facts, stateArg))
+		}
 	}
-	return out
+	sortParked(parked)
+	sortParked(unattributed)
+	return parked, unattributed
 }
 
-func parkedFromEscalation(a state.Artifact, stateArg string) ParkedRun {
+type terminalRun struct {
+	artifact state.Artifact
+	facts    runFacts
+	order    int
+}
+
+type runFacts struct {
+	Repo    string
+	Number  int
+	Title   string
+	HeadSHA string
+}
+
+type artifactFactsBody struct {
+	Repo    string `json:"repo"`
+	Number  int    `json:"number"`
+	Subject struct {
+		Repo    string `json:"repo"`
+		Number  int    `json:"number"`
+		HeadSHA string `json:"head_sha"`
+	} `json:"subject"`
+	PR struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	} `json:"pr"`
+	Data struct {
+		Title      string `json:"title"`
+		HeadRefOID string `json:"headRefOid"`
+	} `json:"data"`
+}
+
+func factsFromArtifact(a state.Artifact) runFacts {
+	var body artifactFactsBody
+	if err := json.Unmarshal(a.Body, &body); err != nil {
+		return runFacts{}
+	}
+	f := runFacts{Repo: body.Repo, Number: body.Number, Title: body.Data.Title, HeadSHA: body.Data.HeadRefOID}
+	if body.Subject.Repo != "" {
+		f.Repo = body.Subject.Repo
+		f.Number = body.Subject.Number
+		f.HeadSHA = body.Subject.HeadSHA
+	}
+	if body.PR.Repo != "" {
+		f.Repo = body.PR.Repo
+		f.Number = body.PR.Number
+	}
+	return f
+}
+
+func mergeRunFacts(old, next runFacts) runFacts {
+	if next.Repo != "" {
+		old.Repo = next.Repo
+	}
+	if next.Number != 0 {
+		old.Number = next.Number
+	}
+	if next.Title != "" {
+		old.Title = next.Title
+	}
+	if next.HeadSHA != "" {
+		old.HeadSHA = next.HeadSHA
+	}
+	return old
+}
+
+func sortParked(parked []ParkedRun) {
+	sort.Slice(parked, func(i, j int) bool {
+		if parked[i].ParkedAt != parked[j].ParkedAt {
+			return parked[i].ParkedAt < parked[j].ParkedAt
+		}
+		return parked[i].Run < parked[j].Run
+	})
+}
+
+func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) ParkedRun {
 	// Best-effort decode: an escalation with an unreadable body still lists its
 	// run, so a park is never silently dropped just because its body drifted.
 	var b escalationBody
 	_ = json.Unmarshal(a.Body, &b)
-	return ParkedRun{
+	facts = mergeRunFacts(facts, runFacts{Repo: b.Repo, Number: b.Number})
+	p := ParkedRun{
 		Run:            a.Run,
-		Repo:           b.Repo,
-		Number:         b.Number,
+		Repo:           facts.Repo,
+		Number:         facts.Number,
+		Title:          facts.Title,
+		HeadSHA:        facts.HeadSHA,
 		Question:       b.Question,
 		Code:           b.Code,
 		Grant:          b.Grant,
@@ -163,6 +377,10 @@ func parkedFromEscalation(a state.Artifact, stateArg string) ParkedRun {
 		JudgeCommand:   judgeCommand(a.Run, b.Grant, stateArg),
 		ExplainCommand: fmt.Sprintf("gate explain%s -run %s -html", stateArg, a.Run),
 	}
+	if p.Repo != "" && p.Number != 0 {
+		p.URL = fmt.Sprintf("https://github.com/%s/pull/%d", p.Repo, p.Number)
+	}
+	return p
 }
 
 func judgeCommand(run, grant, stateArg string) string {
@@ -272,6 +490,12 @@ func renderInbox(w io.Writer, in Inbox) {
 			renderParked(w, p)
 		}
 	}
+	if len(in.Unattributed) > 0 {
+		fmt.Fprintf(w, "legacy parked runs without a PR subject (%d)\n\n", len(in.Unattributed))
+		for _, p := range in.Unattributed {
+			renderParked(w, p)
+		}
+	}
 	if len(in.Grants) == 0 {
 		return
 	}
@@ -282,7 +506,7 @@ func renderInbox(w io.Writer, in Inbox) {
 func renderParked(w io.Writer, p ParkedRun) {
 	head := p.Run
 	if p.Repo != "" {
-		head = fmt.Sprintf("%s  %s#%d", p.Run, p.Repo, p.Number)
+		head = fmt.Sprintf("%s#%d  %s", p.Repo, p.Number, p.Run)
 	}
 	if p.Code != "" {
 		head += "  " + p.Code
@@ -290,6 +514,9 @@ func renderParked(w io.Writer, p ParkedRun) {
 	fmt.Fprintf(w, "  %s\n", head)
 	if p.Question != "" {
 		fmt.Fprintf(w, "  %q\n", p.Question)
+	}
+	if p.PRState == "unknown" {
+		fmt.Fprintf(w, "  PR state unknown: %s\n", p.PRStateReason)
 	}
 	fmt.Fprintf(w, "  → %s\n", p.JudgeCommand)
 	fmt.Fprintf(w, "  → %s\n\n", p.ExplainCommand)
