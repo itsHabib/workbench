@@ -35,6 +35,10 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	if isHelp(os.Args[1]) {
+		usage()
+		return
+	}
 	cmd, ok := lookup(os.Args[1])
 	if !ok {
 		fmt.Fprintf(os.Stderr, "custody: unknown verb %q\n\n", os.Args[1])
@@ -45,6 +49,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "custody:", err)
 		os.Exit(1)
 	}
+}
+
+func isHelp(arg string) bool {
+	return arg == "-h" || arg == "-help" || arg == "--help"
 }
 
 // commands is the verb registry. grant is live; keys and serve are placeholders
@@ -138,7 +146,7 @@ func envOr(key, fallback string) string {
 }
 
 // defaultStateDir is %USERPROFILE%\.custody (spec §5). Falls back to a
-// working-dir sibling when no home is resolvable.
+// .custody directory under the working directory when no home is resolvable.
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

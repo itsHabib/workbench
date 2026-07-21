@@ -55,7 +55,7 @@ type Grant struct {
 	Sig      string        `json:"-"` // bearer proof: returned in the token, never persisted
 }
 
-// Expiry is MintedAt + TTL. A grant is refused once now is past it.
+// Expiry is MintedAt + TTL. A grant is refused at or after this instant.
 func (g Grant) Expiry() time.Time { return g.MintedAt.Add(g.TTL) }
 
 // Covers reports whether the grant's action set includes action.
@@ -193,7 +193,7 @@ func (s *Store) Validate(tok, key string, now func() time.Time) (Grant, error) {
 	if g.Key != key {
 		return Grant{}, fmt.Errorf("%w: grant is for %q, asked %q", ErrWrongKey, g.Key, key)
 	}
-	if now().UTC().After(g.Expiry()) {
+	if !now().UTC().Before(g.Expiry()) {
 		return Grant{}, fmt.Errorf("%w: expired %s", ErrExpired, g.Expiry().Format(time.RFC3339))
 	}
 	return g, nil

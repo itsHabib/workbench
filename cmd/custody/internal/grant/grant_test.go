@@ -202,6 +202,14 @@ func TestValidateRefusals(t *testing.T) {
 			want: ErrExpired,
 		},
 		{
+			name: "expired_at_exact_boundary",
+			mutate: func(_ *testing.T, _ *Store, _ Grant, tok string) (string, string, func() time.Time) {
+				atExpiry := fixedClock(time.Date(2026, 7, 20, 20, 0, 0, 0, time.UTC))
+				return tok, "tracker", atExpiry
+			},
+			want: ErrExpired,
+		},
+		{
 			name: "bad_signature_tampered_token",
 			mutate: func(_ *testing.T, _ *Store, _ Grant, tok string) (string, string, func() time.Time) {
 				// Flip the last sig nibble; id still resolves the record.
