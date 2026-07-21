@@ -232,7 +232,7 @@ type judgeIntent struct {
 
 - Preview intents expire after two minutes.
 - The server never accepts replacement argv or form fields on commit.
-- `executing` prevents concurrent execution. After `CommandContext` has terminated and reaped a timed-out subprocess, the intent moves to `timed_out`; the same intent may transition back to `executing` on retry. Gate's request id makes the unknown outcome idempotent. `complete` returns the cached response with `replayed:true` until session expiry.
+- `executing` prevents concurrent execution. After `CommandContext` has terminated and reaped a timed-out subprocess, the intent moves to `timed_out`; the same intent may transition back to `executing` on retry. A repeated timeout returns to `timed_out`. The original two-minute `ExpiresAt` never slides or resets, so retries cannot keep an intent alive indefinitely. Gate's request id makes the unknown outcome idempotent. `complete` returns the cached response with `replayed:true` until session expiry.
 - Cached results are convenience only. On restart, the case file reconstructs success from gate's ledger.
 
 ### 5.3 Gate ledger additions
