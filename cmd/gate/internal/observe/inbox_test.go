@@ -159,6 +159,11 @@ func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
 	if got[2].PRState != "unknown" || !strings.Contains(got[2].PRStateReason, "unexpected") {
 		t.Fatalf("unexpected state must remain visible as unknown: %+v", got[2])
 	}
+	var text bytes.Buffer
+	renderInbox(&text, Inbox{Parked: got})
+	if !strings.Contains(text.String(), "PR state unknown: lookup unavailable") {
+		t.Fatalf("text view must surface live lookup failure:\n%s", text.String())
+	}
 }
 
 // TestBuildInboxJudgeCommand pins that the suggested judge command carries the

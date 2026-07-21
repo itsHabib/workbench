@@ -515,6 +515,9 @@ func renderParked(w io.Writer, p ParkedRun) {
 	if p.Question != "" {
 		fmt.Fprintf(w, "  %q\n", p.Question)
 	}
+	if p.PRState == "unknown" {
+		fmt.Fprintf(w, "  PR state unknown: %s\n", p.PRStateReason)
+	}
 	fmt.Fprintf(w, "  → %s\n", p.JudgeCommand)
 	fmt.Fprintf(w, "  → %s\n\n", p.ExplainCommand)
 }
