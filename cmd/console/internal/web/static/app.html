@@ -98,6 +98,8 @@
   .matter-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.8rem; }
   .matter-head .rid { font-family: var(--mono); font-size: 0.78rem; }
   .matter-head .repo { font-weight: 600; font-size: 0.88rem; }
+  .matter-head .pr-link { font-weight: 700; font-size: 0.9rem; text-decoration-thickness: 1px; text-underline-offset: 0.16em; }
+  .matter-title { margin-top: 0.35rem; font-family: var(--serif); font-size: 1rem; font-weight: 650; }
   .matter-head .when { margin-left: auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
   .question { margin: 0.5rem 0 0.55rem; padding: 0.45rem 0.75rem; border-left: 3px solid var(--escalate); background: var(--escalate-bg); border-radius: 0 6px 6px 0; font-family: var(--serif); font-size: 0.92rem; line-height: 1.5; }
   .cmd-row { display: flex; align-items: stretch; gap: 0.4rem; margin-top: 0.4rem; }
@@ -106,6 +108,9 @@
   .copy:hover { color: var(--ink); border-color: var(--muted); }
   .copy.done { color: var(--pass); border-color: var(--pass); }
   .open-hint { margin-left: auto; font-size: 0.78rem; color: var(--muted); }
+  .legacy { margin-top: 1rem; color: var(--muted); font-size: 0.82rem; }
+  .legacy summary { cursor: pointer; }
+  .legacy .card { margin-top: 0.55rem; }
 
   /* ---- grants ---- */
   .grant { display: grid; grid-template-columns: auto 1fr auto; gap: 0.3rem 0.8rem; align-items: baseline; padding: 0.55rem 1.1rem; font-size: 0.83rem; }
@@ -265,6 +270,7 @@
       return;
     }
     var parked = data.parked || [];
+    var unattributed = data.unattributed || [];
     var grants = data.grants || [];
     var html = "";
 
@@ -273,6 +279,13 @@
       html += '<div class="card"><div class="empty">Nothing awaits judgment.</div></div>';
     } else {
       html += '<div class="card">' + parked.map(parkedCard).join("") + "</div>";
+    }
+
+    if (unattributed.length > 0) {
+      html += '<details class="legacy"><summary>' + unattributed.length +
+        ' legacy parked run' + (unattributed.length === 1 ? "" : "s") +
+        ' without PR identity — diagnostic history, not counted above</summary>' +
+        '<div class="card">' + unattributed.map(parkedCard).join("") + "</div></details>";
     }
 
     html += '<div class="section-label">grants</div>';
@@ -289,15 +302,23 @@
   }
 
   function parkedCard(p) {
-    var subject = p.repo ? esc(p.repo) + "#" + esc(p.number) : "";
+    var subject = "";
+    if (p.repo) {
+      var label = esc(p.repo) + "#" + esc(p.number);
+      subject = p.url
+        ? '<a class="pr-link" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' + label + " ↗</a>"
+        : '<span class="repo">' + label + "</span>";
+    }
     var when = p.parked_at ? '<span class="when">parked ' + esc(p.parked_at.replace("T", " ").replace("Z", " UTC")) + "</span>" : "";
     var code = p.code ? '<span class="badge b-escalate">' + esc(p.code) + "</span>" : '<span class="badge b-escalate">parked</span>';
+    var liveState = p.pr_state === "unknown" ? '<span class="badge b-refused">PR state unknown</span>' : "";
+    var title = p.title ? '<div class="matter-title">' + esc(p.title) + "</div>" : "";
     var q = p.question ? '<div class="question">' + esc(p.question) + "</div>" : "";
     return (
       '<div class="matter" data-run="' + esc(p.run) + '">' +
-      '<div class="matter-head">' + code +
-      '<span class="repo">' + subject + "</span>" +
-      '<span class="rid muted">' + esc(p.run) + "</span>" + when + "</div>" +
+      '<div class="matter-head">' + subject + code + liveState + when + "</div>" +
+      title +
+      '<div class="rid muted">run ' + esc(p.run) + (p.head_sha ? " · head " + esc(p.head_sha.slice(0, 12)) : "") + "</div>" +
       q +
       cmdRow(p.judge_command) +
       cmdRow(p.explain_command) +
@@ -331,7 +352,7 @@
     var cards = view.querySelectorAll(".matter[data-run]");
     for (var i = 0; i < cards.length; i++) {
       cards[i].addEventListener("click", function (e) {
-        if (e.target.closest(".copy")) return; // copy button is not a navigation
+        if (e.target.closest(".copy, a")) return; // controls and PR links keep their own navigation
         go("/run/" + this.getAttribute("data-run"));
       });
     }

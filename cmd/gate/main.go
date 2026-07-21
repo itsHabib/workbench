@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -133,7 +134,7 @@ func usage() {
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
   explain  -run run_x [-json | -html [-out path]]
-  next     [-json]                                   (what needs you: parked runs + grants)
+  next     [-json] [-live]                           (what needs you: parked runs + grants)
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -867,6 +868,7 @@ func cmdNext(args []string) error {
 	fs := flag.NewFlagSet("next", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
+	live := fs.Bool("live", false, "reconcile parked subjects with current GitHub PR state")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -879,10 +881,33 @@ func cmdNext(args []string) error {
 		return err
 	}
 	stateArg := stateArgFor(*stateDir)
+	if *live && *asJSON {
+		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR)
+	}
+	if *live {
+		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR)
+	}
 	if *asJSON {
 		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
 	}
 	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+}
+
+func lookupLivePR(repo string, number int) (observe.LivePR, error) {
+	out, err := exec.Command("gh", "pr", "view", strconv.Itoa(number), "-R", repo, "--json", "state,title,headRefOid,url").Output()
+	if err != nil {
+		return observe.LivePR{}, fmt.Errorf("read PR %s#%d: %w", repo, number, err)
+	}
+	var pr struct {
+		State      string `json:"state"`
+		Title      string `json:"title"`
+		HeadRefOID string `json:"headRefOid"`
+		URL        string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &pr); err != nil {
+		return observe.LivePR{}, fmt.Errorf("decode PR %s#%d: %w", repo, number, err)
+	}
+	return observe.LivePR{State: pr.State, Title: pr.Title, HeadSHA: pr.HeadRefOID, URL: pr.URL}, nil
 }
 
 // stateArgFor decides whether next's suggested commands need an explicit -state.

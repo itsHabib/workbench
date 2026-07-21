@@ -24,7 +24,7 @@ func TestStatePassedThroughWhenSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The verb leads; -state is a flag of the verb, never before it.
-	want := []string{"next", "-state", "/s/state", "-json"}
+	want := []string{"next", "-state", "/s/state", "-json", "-live"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %v, want %v", got, want)
 	}
@@ -36,7 +36,7 @@ func TestStateOmittedWhenEmpty(t *testing.T) {
 	if _, err := c.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"next", "-json"}
+	want := []string{"next", "-json", "-live"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %v, want %v", got, want)
 	}

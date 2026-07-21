@@ -36,15 +36,17 @@ so `$GATE_KEY` reaches gate for the `audit` chain check.
 - **The console shells gate; it never imports or reads gate.** Its only data
   source is `internal/gatecli`, which runs the gate binary and returns gate's
   JSON verbatim. No `cmd/gate` import, no `log.jsonl` parsing — gate owns the
-  projection (`gate next -json`), so the console cannot drift from a schema it
+  projection (`gate next -json -live`), so the console cannot drift from a schema it
   does not parse. This is the workbench boundary law, enforced by CI's
   `hygiene` job.
 - **Loopback only, no auth.** `serve` refuses any non-loopback bind, pins the
   `Host` header to its own address (DNS-rebinding guard), and ships a strict CSP
   on the one embedded, self-contained page. It is an on-machine instrument, not
   a service.
-- **Read-only: it renders, it never decides.** There are NO mutating routes in
-  this version — judging and minting stay in the CLI. The docket shows each
+- **Read-only: it renders, it never decides.** The docket asks gate for a live,
+  read-only PR reconciliation so merged/closed subjects do not masquerade as
+  pending work; a failed lookup remains visible as unknown. There are NO
+  mutating routes in this version — judging and minting stay in the CLI. The docket shows each
   parked run's paste-ready `gate judge` command (copy button); the operator runs
   it. Adding action endpoints (a judgment form, a mint desk) is a later,
   deliberate phase, not a gap to fill casually.

@@ -43,10 +43,13 @@ validated (`run_[0-9a-f]+`) before it is ever forwarded.
 The UI is deliberately one plain page — not a multi-tab console. It has two
 views, switched client-side:
 
-- **docket** (`/`) — what needs you: runs awaiting judgment (each with its
-  question verbatim and a paste-ready `gate judge` / `gate explain` command,
-  copy button attached) and the grant ledger (live soonest-expiry first, then
-  recently expired). A quiet `chain intact` / `CHAIN TAMPERED` line sits in the
+- **docket** (`/`) — what needs you: one current parked run per open PR, with a
+  direct PR link, title, question verbatim, and a paste-ready `gate judge` /
+  `gate explain` command (copy button attached). `gate next -json -live` removes
+  confirmed merged/closed subjects; failed live lookups stay visible as unknown,
+  and truly unattributed legacy rows sit in a secondary diagnostic section. The
+  page also shows the grant ledger (live soonest-expiry first, then recently
+  expired). A quiet `chain intact` / `CHAIN TAMPERED` line sits in the
   masthead; a tamper finding raises a full-width banner.
 - **run trace** (`/run/<id>`) — the run's full causal chain rendered in gate's
   trace-view idiom (timeline rail, kind-shaped markers, provenance arcs,

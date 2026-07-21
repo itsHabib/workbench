@@ -51,9 +51,11 @@ func (c *Client) args(sub string, rest ...string) []string {
 	return append(a, rest...)
 }
 
-// Next returns the raw JSON of `gate next -json`.
+// Next returns the raw JSON of `gate next -json -live`. The live read keeps the
+// operator attention queue aligned with current PR state; gate still owns that
+// projection and fails unknown lookups visible.
 func (c *Client) Next(ctx context.Context) ([]byte, error) {
-	return c.run(ctx, c.bin, c.args("next", "-json")...)
+	return c.run(ctx, c.bin, c.args("next", "-json", "-live")...)
 }
 
 // Explain returns the raw JSON of `gate explain -run <id> -json`.
