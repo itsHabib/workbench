@@ -206,22 +206,41 @@ Who actually implements each plane today:
 | Observability | gate `explain`/`audit`/`next`; console (read-only web); flare; tracelens reports |
 | Composition | skills plus dispatch (placement policy as code) |
 
-Three amendments sharpen the model:
+Three amendments sharpen the model. Each one is a response to a real failure, not a
+principle for its own sake:
 
-- **Amendment 1:** Verification's internal structure is *mandated* - the
-  escalate-only ladder - or the plane is just "an LLM said so."
-- **Amendment 2:** Capability bounds *every effectful verb*, including State
-  writes. The motivating bug: a `markMerged` call persisting an unverified merge.
-  A verified write means a live grant AND a supporting verdict, mechanically.
-- **Amendment 3:** Observability is read-only and storeless - softened by one
-  deliberate exception: sinks like flare may keep *derived operational* state
-  (cursors, dedupe sets) but never own authoritative decisions.
+- **Amendment 1 - Verification must have a mandated internal structure, or it is
+  just "an LLM said so."** A plane that "produces a verdict" buys nothing if the
+  verdict is one model's unchecked opinion. So the structure is fixed for every
+  tool, not reinvented per tool: the escalate-only ladder (section 5), where a
+  deterministic floor always runs and the model layer may only escalate above it.
+  The failure this prevents: before the shared `contracts`, four different tools had
+  each hand-rolled their own "is this OK?" parser, so nobody owned what a verdict
+  even meant.
+- **Amendment 2 - Capability must bound every effectful verb, including writes to
+  State.** Gating the obvious action (the merge) is not enough if the bookkeeping
+  around it is unguarded. The motivating bug was a function called `markMerged`: it
+  wrote "this PR merged" into State without any check that it actually had -
+  Execution silently persisting an unverified fact. The fix makes such a write
+  *unrepresentable*: recording any outcome now requires both a live grant and a
+  supporting verdict, enforced in code rather than by convention.
+- **Amendment 3 - Observability is read-only and owns no authoritative state.** A
+  view that explains decisions must never *become* the source of one, or you can no
+  longer tell what actually happened from what some dashboard happened to cache. One
+  deliberate exception, because purity that forces bad engineering is not worth it:
+  a notification sink like flare may keep *derived operational* state - a cursor
+  marking how far it has read, a dedupe set so it does not notify twice - but never
+  an authoritative decision. The log stays the truth; flare only tails it.
 
-Plane leaks, named: unverified `markMerged` was Execution writing State without
-Verification. A merge policy living in skill prose was Composition carrying what
-Capability should enforce. Four independent verdict parsers meant Verification was
-unowned. A diagnostics tool hardcoding another tool's paths was Observability
-reimplementing State resolution.
+The payoff of naming the planes is a diagnostic: **every recurring failure turns out
+to be one plane doing another plane's job**, and identifying which plane makes the
+fix obvious. `markMerged` was Execution writing State without going through
+Verification (Amendment 2). A merge policy written in a skill's prose was
+Composition carrying what Capability should enforce - so it moved into a grant. A
+diagnostics tool that hardcoded another tool's state paths was Observability
+reimplementing State's own resolution - so it learned to read the artifacts instead
+of guessing the paths. Once the five planes are shared vocabulary, postmortems get
+shorter.
 
 ## 5. The ladder
 
