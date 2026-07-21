@@ -348,10 +348,16 @@ The ladder law is encoded as reducer errors plus pinned tests, all `verified` in
   "verdict tier %s exceeds grant ceiling %s"; `judge` routes back through `act()`,
   so a judgment pass cannot launder a high-risk tier past the ceiling.
 
-**What the tiers mean.** A **tier** classifies who must approve a change, and the
-classifier is a rubric file, not code intuition: `cmd/triage/RUBRIC.md` *is* the
-policy, editing it is itself a T3 change, and every classification records the
-rubric's git SHA.
+**What the tiers mean.** A **tier** classifies who must approve a change. The policy
+is written in `cmd/triage/RUBRIC.md` and compiled into the floor classifier
+(`cmd/triage/internal/floor/floor.go`), so the floor keys on the rubric's rules
+rather than ad-hoc judgment, and editing the rubric is itself a T3 change - the
+floor's own control-plane rule floors edits to `RUBRIC.md`, `CODEOWNERS`, and the
+`labels/` corpus at T3 (`verified`, `floor.go`). `intent`: the rubric *mandates*
+that each classification also record the rubric's git SHA for reproducibility, and
+the eval corpus (`labels/mismatches.jsonl`) carries it, but the shipped
+`triage-floor` / `triage-advisory` binaries do not yet emit it in their own output
+- see the drift log.
 
 | Tier | Name | Human requirement | Example floor triggers |
 |---|---|---|---|
@@ -365,10 +371,13 @@ Triage computes `floor = max(all deterministic signals that fire)`, then
 *raise*. Its trust boundary: a proposal's quoted evidence must appear **verbatim in
 the diff** or it contributes nothing; confidence is recorded, never trusted.
 Fail-closed defaults: agent failure keeps the floor but content-sensitive diffs bump
-to T2; a missing rubric means T2; an unknown path means T1, never T0. Exit codes: 0
-classified, 1 operational failure - an error is never a tier. `verified` down to
-the newest hardening: the floor fails closed on empty stdin and oversized diff lines
-(`cmd/triage/internal/floor/parse.go`, PR #70).
+to T2; an unknown path means T1, never T0; and empty or oversized-line stdin fails
+closed rather than classifying (`verified`, `cmd/triage/internal/floor/parse.go`,
+PR #70). Exit codes: 0 classified, 1 operational failure - an error is never a tier.
+(The rubric is compiled into the binary, not read at runtime, so a "missing rubric"
+is not a runtime state the classifier can fall back from - `RUBRIC.md`'s
+missing-rubric-means-T2 line is a rule for the human/eval process, not binary
+behavior.)
 
 **One ordering, structurally shared.** Tier ranking lives in one tiny package -
 `cmd/gate/internal/tier` - imported by *both* verdict composition and grant
@@ -879,6 +888,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | In no code anywhere - pure intent (closure Phase 1) |
+| Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Registered CLI placeholders returning "not yet implemented"; manifest+credstore in review, proxy engine queued |
 | `.github/workflows/gate.yml` | Built and merged but dormant: posts nothing until `GATE_ENFORCE=true` and a model-capable runner exist |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
