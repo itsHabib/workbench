@@ -69,7 +69,7 @@ func (WinCred) Get(ref string) ([]byte, error) {
 	)
 	if r1 == 0 {
 		callErr = credCallError(callErr)
-		if callErr == windows.ERROR_NOT_FOUND {
+		if errors.Is(callErr, windows.ERROR_NOT_FOUND) {
 			return nil, fmt.Errorf("%w: %q", ErrSecretUnavailable, ref)
 		}
 		return nil, fmt.Errorf("credstore: CredRead %q: %w", ref, callErr)

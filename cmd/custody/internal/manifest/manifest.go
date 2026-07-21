@@ -179,10 +179,10 @@ func validateUpstream(upstream string) error {
 		return fmt.Errorf("%w: upstream carries userinfo; remove credentials from the URL", ErrBadUpstream)
 	}
 	if u.RawQuery != "" || u.ForceQuery {
-		return fmt.Errorf("%w: %q carries a query", ErrBadUpstream, upstream)
+		return fmt.Errorf("%w: upstream carries a query; remove query parameters from the URL", ErrBadUpstream)
 	}
 	if u.Fragment != "" {
-		return fmt.Errorf("%w: %q carries a fragment", ErrBadUpstream, upstream)
+		return fmt.Errorf("%w: upstream carries a fragment; remove it from the URL", ErrBadUpstream)
 	}
 	return nil
 }
