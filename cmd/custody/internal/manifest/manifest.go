@@ -10,6 +10,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -67,9 +68,9 @@ type Rule struct {
 // embedded query languages are deny-by-default in v0 (spec §7 D). A mustMatch
 // field is captured only so its presence can be rejected with a named error.
 type Predicate struct {
-	Equals    *string `json:"equals"`
-	Occurs    string  `json:"occurs"`
-	MustMatch *string `json:"mustMatch"`
+	Equals    *string         `json:"equals"`
+	Occurs    string          `json:"occurs"`
+	MustMatch json.RawMessage `json:"mustMatch"`
 }
 
 // Named error classes so callers (and tests) branch on the code, never prose.
@@ -167,13 +168,13 @@ func validateUpstream(upstream string) error {
 	}
 	u, err := url.Parse(upstream)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %v", ErrBadUpstream, upstream, err)
+		return fmt.Errorf("%w: upstream URL is malformed", ErrBadUpstream)
 	}
 	if u.Scheme != "https" {
-		return fmt.Errorf("%w: %q must be https", ErrBadUpstream, upstream)
+		return fmt.Errorf("%w: upstream must use https", ErrBadUpstream)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("%w: %q has no host", ErrBadUpstream, upstream)
+		return fmt.Errorf("%w: upstream has no host", ErrBadUpstream)
 	}
 	if u.User != nil {
 		return fmt.Errorf("%w: upstream carries userinfo; remove credentials from the URL", ErrBadUpstream)
@@ -229,7 +230,7 @@ func validateRule(r Rule) error {
 }
 
 func validatePredicate(p Predicate) error {
-	if p.MustMatch != nil {
+	if len(p.MustMatch) != 0 {
 		return fmt.Errorf("%w: substring/regex predicates are deny-by-default in v0", ErrMustMatchRejected)
 	}
 	if p.Equals == nil {

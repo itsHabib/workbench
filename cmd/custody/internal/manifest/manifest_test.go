@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -157,6 +158,35 @@ func TestUpstreamErrorDoesNotEchoUserinfo(t *testing.T) {
 	}
 }
 
+func TestUpstreamErrorsNeverEchoRawURL(t *testing.T) {
+	const secret = "TOP-SECRET"
+	for _, upstream := range []string{
+		"http://user:" + secret + "@example.com",
+		"https:///?token=" + secret,
+		"https://example.com/%" + secret,
+	} {
+		err := validateUpstream(upstream)
+		if err == nil {
+			t.Fatalf("validateUpstream(%q) succeeded", upstream)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("error leaked raw upstream: %v", err)
+		}
+	}
+}
+
+func TestMustMatchNullIsRejected(t *testing.T) {
+	data, err := os.ReadFile("testdata/mustmatch.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	body := strings.Replace(string(data), `"project = PROJ"`, `null`, 1)
+	_, err = Load(strings.NewReader(body))
+	if !errors.Is(err, ErrMustMatchRejected) {
+		t.Fatalf("error = %v, want %v", err, ErrMustMatchRejected)
+	}
+}
+
 func TestSecretRef(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -278,7 +308,7 @@ func TestPredicate(t *testing.T) {
 		pred Predicate
 		want error
 	}{
-		{"mustmatch", Predicate{MustMatch: &released, Occurs: "once"}, ErrMustMatchRejected},
+		{"mustmatch", Predicate{MustMatch: json.RawMessage(`"released"`), Occurs: "once"}, ErrMustMatchRejected},
 		{"noequals", Predicate{Occurs: "once"}, ErrMissingField},
 		{"badoccurs", Predicate{Equals: &released, Occurs: "twice"}, ErrBadPredicate},
 		{"emptyoccurs", Predicate{Equals: &released}, ErrMissingField},
