@@ -26,7 +26,11 @@ type Store interface {
 // ErrSecretUnavailable is returned by Get when no secret exists for the ref. It
 // is a typed sentinel so the proxy can map it to a `500 secret_unavailable`
 // with the `custody keys set` remedy (spec §6, flow F).
-var ErrSecretUnavailable = errors.New("secret_unavailable")
+var (
+	ErrSecretUnavailable = errors.New("secret_unavailable")
+	// ErrSecretTooLarge reports a secret that exceeds the backend's hard limit.
+	ErrSecretTooLarge = errors.New("secret_too_large")
+)
 
 // maxSecretBytes is Windows Credential Manager's CRED_MAX_CREDENTIAL_BLOB_SIZE.
 const maxSecretBytes = 5 * 512
@@ -45,7 +49,7 @@ func KeysSet(s Store, ref string, r io.Reader) error {
 		return fmt.Errorf("credstore: read secret for %q: %w", ref, err)
 	}
 	if len(secret) > maxSecretBytes {
-		return fmt.Errorf("credstore: secret for %q exceeds %d-byte limit", ref, maxSecretBytes)
+		return fmt.Errorf("%w: secret for %q exceeds %d-byte limit", ErrSecretTooLarge, ref, maxSecretBytes)
 	}
 	secret = trimTrailingNewline(secret)
 	if len(secret) == 0 {

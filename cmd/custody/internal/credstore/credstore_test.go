@@ -79,6 +79,9 @@ func TestKeysSetRejectsOversizedSecret(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected oversized secret rejection")
 	}
+	if !errors.Is(err, ErrSecretTooLarge) {
+		t.Fatalf("error = %v, want ErrSecretTooLarge", err)
+	}
 	if _, ok := f.secrets["ref"]; ok {
 		t.Fatal("oversized secret must not be stored")
 	}

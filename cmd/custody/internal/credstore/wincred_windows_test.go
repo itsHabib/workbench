@@ -24,6 +24,14 @@ func TestCredCallErrorNeverReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestWinCredSetRejectsOversizedSecret(t *testing.T) {
+	var s WinCred
+	err := s.Set("oversized", make([]byte, maxSecretBytes+1))
+	if !errors.Is(err, ErrSecretTooLarge) {
+		t.Fatalf("Set oversized credential = %v, want ErrSecretTooLarge", err)
+	}
+}
+
 // TestWinCredRoundTrip exercises the real Windows Credential Manager: write a
 // secret, read it back, confirm a missing ref is typed, then clean up. It skips
 // (rather than fails) when the store is unavailable — a headless or locked-down

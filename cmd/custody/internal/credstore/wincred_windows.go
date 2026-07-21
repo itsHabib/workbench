@@ -97,6 +97,9 @@ func copyBlob(cred *credentialW) []byte {
 // Set writes secret under ref, overwriting any existing entry. The secret bytes
 // never appear in an error message.
 func (WinCred) Set(ref string, secret []byte) error {
+	if len(secret) > maxSecretBytes {
+		return fmt.Errorf("%w: secret for %q exceeds %d-byte limit", ErrSecretTooLarge, ref, maxSecretBytes)
+	}
 	target, err := windows.UTF16PtrFromString(targetPrefix + ref)
 	if err != nil {
 		return fmt.Errorf("credstore: bad ref %q: %w", ref, err)
