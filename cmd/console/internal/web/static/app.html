@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gate</title>
+<style>
+  :root {
+    --serif: "Charter", "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, Menlo, monospace;
+
+    --bg: #faf9f6;
+    --page: #ffffff;
+    --ink: #1c2024;
+    --muted: #6b7280;
+    --faint: #9aa3af;
+    --hairline: #e4e1da;
+    --card-border: #d9d5cc;
+    --card-shadow: 0 1px 2px rgba(28, 32, 36, 0.05);
+    --edge: #b3ada0;
+    --chip-bg: #f1efe9;
+
+    --pass: #1a7f4b;
+    --pass-bg: #e6f4ec;
+    --block: #b3352d;
+    --block-bg: #fbeae8;
+    --escalate: #a16207;
+    --escalate-bg: #fdf3e0;
+    --refused: #6d4fa3;
+    --refused-bg: #f0ebfa;
+    --neutral: #52606d;
+    --neutral-bg: #eef0f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10131a; --page: #161a23; --ink: #e8e6e1; --muted: #949dab; --faint: #6b7280;
+      --hairline: #262b36; --card-border: #2c3340; --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      --edge: #4a5262; --chip-bg: #1f242f;
+      --pass: #4ade80; --pass-bg: #12271b; --block: #f87171; --block-bg: #2c1615;
+      --escalate: #fbbf24; --escalate-bg: #2a2110; --refused: #c4b5fd; --refused-bg: #211a33;
+      --neutral: #9aa7b4; --neutral-bg: #1e242d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10131a; --page: #161a23; --ink: #e8e6e1; --muted: #949dab; --faint: #6b7280;
+    --hairline: #262b36; --card-border: #2c3340; --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --edge: #4a5262; --chip-bg: #1f242f;
+    --pass: #4ade80; --pass-bg: #12271b; --block: #f87171; --block-bg: #2c1615;
+    --escalate: #fbbf24; --escalate-bg: #2a2110; --refused: #c4b5fd; --refused-bg: #211a33;
+    --neutral: #9aa7b4; --neutral-bg: #1e242d;
+  }
+  :root[data-theme="light"] {
+    --bg: #faf9f6; --page: #ffffff; --ink: #1c2024; --muted: #6b7280; --faint: #9aa3af;
+    --hairline: #e4e1da; --card-border: #d9d5cc; --card-shadow: 0 1px 2px rgba(28,32,36,0.05);
+    --edge: #b3ada0; --chip-bg: #f1efe9;
+    --pass: #1a7f4b; --pass-bg: #e6f4ec; --block: #b3352d; --block-bg: #fbeae8;
+    --escalate: #a16207; --escalate-bg: #fdf3e0; --refused: #6d4fa3; --refused-bg: #f0ebfa;
+    --neutral: #52606d; --neutral-bg: #eef0f2;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 var(--sans); background: var(--bg); color: var(--ink); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  button { font-family: inherit; }
+
+  header { max-width: 820px; margin: 0 auto; padding: 2.25rem 1.5rem 0; }
+  .masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem 1rem; border-bottom: 2px solid var(--ink); padding-bottom: 0.7rem; }
+  .masthead h1 { margin: 0; font-family: var(--serif); font-size: 1.5rem; font-weight: 700; letter-spacing: 0.01em; }
+  .masthead .subtitle { color: var(--muted); font-family: var(--serif); font-style: italic; font-size: 1rem; }
+  .masthead .spacer { flex: 1; }
+  .refresh { border: 1px solid var(--card-border); background: var(--page); color: var(--muted); border-radius: 6px; padding: 0.28rem 0.7rem; font-size: 0.8rem; cursor: pointer; }
+  .refresh:hover { color: var(--ink); border-color: var(--muted); }
+  .statusline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; padding: 0.6rem 0 0; font-size: 0.8rem; color: var(--muted); }
+  .chain-ok { color: var(--pass); font-weight: 600; }
+  .chain-bad { color: var(--block); font-weight: 700; }
+  .statusline .mono { font-family: var(--mono); font-size: 0.76rem; }
+  .tamper-banner { max-width: 820px; margin: 1rem auto 0; padding: 0.7rem 1rem; border-radius: 8px; background: var(--block-bg); border: 1px solid var(--block); color: var(--block); font-weight: 650; }
+
+  main { max-width: 820px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+
+  .section-label { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 1.6rem 0 0.6rem; display: flex; align-items: baseline; gap: 0.5rem; }
+  .section-label .count { font-family: var(--mono); color: var(--ink); }
+  .card { background: var(--page); border: 1px solid var(--card-border); border-radius: 8px; box-shadow: var(--card-shadow); }
+  .muted { color: var(--muted); } .faint { color: var(--faint); } .mono { font-family: var(--mono); }
+
+  .badge { display: inline-block; padding: 0.08rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid transparent; white-space: nowrap; }
+  .b-pass { color: var(--pass); background: var(--pass-bg); border-color: color-mix(in srgb, var(--pass) 30%, transparent); }
+  .b-block { color: var(--block); background: var(--block-bg); border-color: color-mix(in srgb, var(--block) 30%, transparent); }
+  .b-escalate { color: var(--escalate); background: var(--escalate-bg); border-color: color-mix(in srgb, var(--escalate) 35%, transparent); }
+  .b-refused { color: var(--refused); background: var(--refused-bg); border-color: color-mix(in srgb, var(--refused) 30%, transparent); }
+  .b-unknown { color: var(--neutral); background: var(--neutral-bg); border-color: color-mix(in srgb, var(--neutral) 30%, transparent); }
+
+  /* ---- parked runs ---- */
+  .matter { padding: 0.85rem 1.1rem 0.9rem; cursor: pointer; }
+  .matter + .matter { border-top: 1px solid var(--hairline); }
+  .matter:hover { background: color-mix(in srgb, var(--chip-bg) 45%, transparent); }
+  .matter-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.8rem; }
+  .matter-head .rid { font-family: var(--mono); font-size: 0.78rem; }
+  .matter-head .repo { font-weight: 600; font-size: 0.88rem; }
+  .matter-head .when { margin-left: auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .question { margin: 0.5rem 0 0.55rem; padding: 0.45rem 0.75rem; border-left: 3px solid var(--escalate); background: var(--escalate-bg); border-radius: 0 6px 6px 0; font-family: var(--serif); font-size: 0.92rem; line-height: 1.5; }
+  .cmd-row { display: flex; align-items: stretch; gap: 0.4rem; margin-top: 0.4rem; }
+  .cmd { flex: 1; padding: 0.4rem 0.6rem; background: var(--chip-bg); border: 1px solid var(--hairline); border-radius: 6px; font-family: var(--mono); font-size: 0.74rem; overflow-x: auto; white-space: nowrap; color: var(--ink); }
+  .copy { border: 1px solid var(--card-border); background: var(--page); color: var(--muted); border-radius: 6px; padding: 0 0.6rem; font-size: 0.72rem; cursor: pointer; white-space: nowrap; }
+  .copy:hover { color: var(--ink); border-color: var(--muted); }
+  .copy.done { color: var(--pass); border-color: var(--pass); }
+  .open-hint { margin-left: auto; font-size: 0.78rem; color: var(--muted); }
+
+  /* ---- grants ---- */
+  .grant { display: grid; grid-template-columns: auto 1fr auto; gap: 0.3rem 0.8rem; align-items: baseline; padding: 0.55rem 1.1rem; font-size: 0.83rem; }
+  .grant + .grant { border-top: 1px solid var(--hairline); }
+  .grant .gid { font-family: var(--mono); font-size: 0.76rem; }
+  .grant .meta { color: var(--muted); }
+  .grant .meta .tier { font-family: var(--mono); font-weight: 650; color: var(--ink); }
+  .grant .exp { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; white-space: nowrap; }
+  .grant.expiring .exp { color: var(--escalate); font-weight: 600; }
+  .grant.expired { opacity: 0.6; }
+  .grant.expired .gid { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+  .empty { padding: 1.3rem 1.1rem; font-family: var(--serif); font-style: italic; color: var(--muted); font-size: 0.95rem; }
+  .error { max-width: 820px; margin: 1rem auto; padding: 0.9rem 1rem; border-radius: 8px; background: var(--block-bg); border: 1px solid color-mix(in srgb, var(--block) 40%, transparent); color: var(--block); font-size: 0.88rem; }
+  .error .mono { font-family: var(--mono); font-size: 0.8rem; }
+
+  /* ---- run view (trace) ---- */
+  .back { display: inline-block; font-size: 0.82rem; color: var(--muted); text-decoration: none; margin-top: 1.1rem; cursor: pointer; }
+  .back:hover { color: var(--ink); }
+  .run-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1rem; margin-top: 0.4rem; }
+  .run-head .rid { font-family: var(--mono); font-size: 0.9rem; }
+  .run-sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+
+  .graph-wrap { position: relative; margin-top: 1.2rem; }
+  svg.edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; z-index: 0; }
+  svg.edges path { fill: none; stroke: var(--edge); stroke-width: 1.25; opacity: 0.85; }
+  .row { position: relative; display: grid; grid-template-columns: 4rem 4rem 1fr; align-items: start; z-index: 1; }
+  .row + .row { margin-top: 0.8rem; }
+  .row-time { padding-top: 0.85rem; text-align: right; font-family: var(--mono); font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row-rail { position: relative; align-self: stretch; }
+  .marker { position: absolute; left: 50%; top: 0.95rem; width: 11px; height: 11px; transform: translateX(-50%); border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); z-index: 2; }
+  .marker[data-kind="verdict"] { background: var(--muted); }
+  .marker[data-kind="grant"] { border-radius: 2px; }
+  .marker[data-kind="judgment"] { border-radius: 2px; transform: translateX(-50%) rotate(45deg); background: var(--ink); border-color: var(--ink); }
+  .marker[data-kind="escalation"] { border-radius: 50% 50% 50% 0; transform: translateX(-50%) rotate(-45deg); }
+  .marker[data-kind="action"] { box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--muted); }
+  .node { position: relative; background: var(--page); border: 1px solid var(--card-border); border-radius: 8px; padding: 0.7rem 1rem 0.75rem; box-shadow: var(--card-shadow); }
+  .node.terminal { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink), var(--card-shadow); }
+  .node[data-kind="judgment"] { border-left: 3px solid var(--ink); }
+  .node-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.7rem; }
+  .node-kind { font-family: var(--serif); font-weight: 700; font-size: 0.95rem; text-transform: capitalize; }
+  .node-id { color: var(--faint); font-size: 0.72rem; font-family: var(--mono); }
+  .head-spacer { flex: 1; }
+  .terminal-tag { font-family: var(--serif); font-size: 0.7rem; font-style: italic; letter-spacing: 0.06em; color: var(--muted); }
+  .meta-line { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--muted); }
+  .meta-line .mv { color: var(--ink); } .meta-line .m { font-family: var(--mono); font-size: 0.76rem; }
+  .why { margin: 0.45rem 0 0; font-family: var(--serif); font-size: 0.92rem; line-height: 1.5; }
+  .findings { margin-top: 0.55rem; border-top: 1px solid var(--hairline); padding-top: 0.45rem; }
+  .findings summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+  .findings summary:hover { color: var(--ink); }
+  .findings ul { margin: 0.4rem 0 0; padding: 0; list-style: none; max-height: 22rem; overflow-y: auto; }
+  .findings li { padding: 0.3rem 0.2rem; font-size: 0.8rem; border-bottom: 1px solid var(--hairline); color: var(--muted); }
+  .findings li:last-child { border-bottom: none; }
+  .sev { display: inline-block; min-width: 3.4em; font-weight: 650; text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.05em; }
+  .sev-high, .sev-critical { color: var(--block); } .sev-medium { color: var(--escalate); }
+  .f-ev { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
+  .node .question { margin-top: 0.5rem; }
+  .kv { margin-top: 0.45rem; display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.8rem; font-size: 0.8rem; }
+  .kv dt { color: var(--faint); font-family: var(--mono); font-size: 0.74rem; } .kv dd { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+  .command-node { margin-top: 0.5rem; padding: 0.5rem 0.65rem; background: var(--chip-bg); border: 1px solid var(--hairline); border-radius: 6px; font-family: var(--mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+
+  .colophon { margin-top: 2.5rem; padding-top: 0.8rem; border-top: 1px solid var(--hairline); color: var(--faint); font-size: 0.74rem; font-family: var(--serif); font-style: italic; }
+  @media (max-width: 560px) { .row { grid-template-columns: 3rem 2.2rem 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="masthead">
+    <h1>gate</h1>
+    <span class="subtitle">what needs you</span>
+    <span class="spacer"></span>
+    <button class="refresh" id="refresh" type="button">refresh</button>
+  </div>
+  <div class="statusline" id="statusline"></div>
+</header>
+<div id="banner"></div>
+<main id="view"></main>
+
+<script>
+(function () {
+  "use strict";
+
+  var view = document.getElementById("view");
+  var statusline = document.getElementById("statusline");
+  var banner = document.getElementById("banner");
+  var lastArts = [];
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function el(id) { return document.getElementById(id); }
+
+  async function getJSON(url) {
+    var res = await fetch(url, { headers: { "Accept": "application/json" } });
+    var body = await res.json().catch(function () { return null; });
+    if (!res.ok) {
+      var msg = body && body.error ? body.error : ("HTTP " + res.status);
+      throw new Error(msg);
+    }
+    return body;
+  }
+
+  function errorHTML(context, err) {
+    return '<div class="error"><strong>' + esc(context) + '</strong><br><span class="mono">' + esc(err.message) + "</span></div>";
+  }
+
+  // ---------- routing ----------
+  function runIdFromPath() {
+    var m = location.pathname.match(/^\/run\/(run_[0-9a-f]+)$/);
+    return m ? m[1] : null;
+  }
+  function go(path) {
+    history.pushState(null, "", path);
+    route();
+  }
+  window.addEventListener("popstate", route);
+
+  function route() {
+    var id = runIdFromPath();
+    if (id) { renderRun(id); } else { renderDocket(); }
+  }
+
+  el("refresh").addEventListener("click", route);
+
+  // ---------- audit line ----------
+  async function renderAudit() {
+    banner.innerHTML = "";
+    try {
+      var a = await getJSON("/api/audit");
+      if (a.ok) {
+        statusline.innerHTML = '<span class="chain-ok">chain intact</span>' + auditTime();
+        return;
+      }
+      statusline.innerHTML = '<span class="chain-bad">CHAIN TAMPERED</span>' + auditTime();
+      banner.innerHTML = '<div class="tamper-banner">gate audit reports the log has been tampered with: <span class="mono">' + esc(a.reason) + "</span></div>";
+    } catch (err) {
+      statusline.innerHTML = '<span class="faint">audit unavailable — ' + esc(err.message) + "</span>";
+    }
+  }
+  function auditTime() {
+    var d = new Date();
+    var hh = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    return ' <span class="faint">· checked ' + hh + "</span>";
+  }
+
+  // ---------- docket ----------
+  async function renderDocket() {
+    document.title = "gate";
+    renderAudit();
+    view.innerHTML = '<p class="muted" style="padding:1rem 0">loading…</p>';
+    var data;
+    try {
+      data = await getJSON("/api/next");
+    } catch (err) {
+      view.innerHTML = errorHTML("Could not reach gate.", err);
+      return;
+    }
+    var parked = data.parked || [];
+    var grants = data.grants || [];
+    var html = "";
+
+    html += '<div class="section-label">awaiting judgment <span class="count">(' + parked.length + ")</span></div>";
+    if (parked.length === 0) {
+      html += '<div class="card"><div class="empty">Nothing awaits judgment.</div></div>';
+    } else {
+      html += '<div class="card">' + parked.map(parkedCard).join("") + "</div>";
+    }
+
+    html += '<div class="section-label">grants</div>';
+    if (grants.length === 0) {
+      html += '<div class="card"><div class="empty">No grants on record.</div></div>';
+    } else {
+      html += '<div class="card">' + grants.map(grantRow).join("") + "</div>";
+    }
+
+    html += '<p class="colophon">Every row is a projection of gate’s append-only, hash-chained log. This page renders; it never decides.</p>';
+    view.innerHTML = html;
+    wireCopy();
+    wireOpen();
+  }
+
+  function parkedCard(p) {
+    var subject = p.repo ? esc(p.repo) + "#" + esc(p.number) : "";
+    var when = p.parked_at ? '<span class="when">parked ' + esc(p.parked_at.replace("T", " ").replace("Z", " UTC")) + "</span>" : "";
+    var code = p.code ? '<span class="badge b-escalate">' + esc(p.code) + "</span>" : '<span class="badge b-escalate">parked</span>';
+    var q = p.question ? '<div class="question">' + esc(p.question) + "</div>" : "";
+    return (
+      '<div class="matter" data-run="' + esc(p.run) + '">' +
+      '<div class="matter-head">' + code +
+      '<span class="repo">' + subject + "</span>" +
+      '<span class="rid muted">' + esc(p.run) + "</span>" + when + "</div>" +
+      q +
+      cmdRow(p.judge_command) +
+      cmdRow(p.explain_command) +
+      '<div class="open-hint">click the run to open its trace →</div>' +
+      "</div>"
+    );
+  }
+
+  function cmdRow(cmd) {
+    if (!cmd) return "";
+    return '<div class="cmd-row"><code class="cmd">' + esc(cmd) + '</code>' +
+      '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>';
+  }
+
+  function grantRow(g) {
+    var cls = "grant" + (g.expired ? " expired" : (isExpiringSoon(g) ? " expiring" : ""));
+    var when = g.expired ? "expired " + esc(g.remaining) : esc(g.remaining);
+    return (
+      '<div class="' + cls + '">' +
+      '<span class="gid">' + esc(g.id) + "</span>" +
+      '<span class="meta">' + esc(g.repo) + " · " + esc(g.action) + " · ceiling <span class=\"tier\">" + esc(g.max_tier) + "</span></span>" +
+      '<span class="exp">' + when + "</span>" +
+      "</div>"
+    );
+  }
+  function isExpiringSoon(g) {
+    return !g.expired && /^in (\d+m|<1m)$/.test(g.remaining || "");
+  }
+
+  function wireOpen() {
+    var cards = view.querySelectorAll(".matter[data-run]");
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].addEventListener("click", function (e) {
+        if (e.target.closest(".copy")) return; // copy button is not a navigation
+        go("/run/" + this.getAttribute("data-run"));
+      });
+    }
+  }
+
+  function wireCopy() {
+    var btns = view.querySelectorAll(".copy[data-copy]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener("click", function (e) {
+        e.stopPropagation();
+        var text = this.getAttribute("data-copy");
+        var btn = this;
+        copyText(text).then(function () {
+          btn.textContent = "copied"; btn.classList.add("done");
+          setTimeout(function () { btn.textContent = "copy"; btn.classList.remove("done"); }, 1200);
+        });
+      });
+    }
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () { return fallbackCopy(text); });
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  // ---------- run view (trace) ----------
+  async function renderRun(id) {
+    document.title = "gate · " + id;
+    renderAudit();
+    view.innerHTML = '<a class="back" id="back">← what needs you</a><p class="muted" style="padding:1rem 0">loading ' + esc(id) + "…</p>";
+    el("back").addEventListener("click", function () { go("/"); });
+    var doc;
+    try {
+      doc = await getJSON("/api/run/" + encodeURIComponent(id));
+    } catch (err) {
+      view.innerHTML = '<a class="back" id="back2">← what needs you</a>' + errorHTML("Could not load run " + id + ".", err);
+      el("back2").addEventListener("click", function () { go("/"); });
+      return;
+    }
+    renderTrace(doc);
+  }
+
+  function badgeFor(decisionOrOutcome) {
+    var k = String(decisionOrOutcome || "").toLowerCase();
+    if (k === "pass" || k === "would_merge" || k === "merged" || k === "merge_not_implemented") return "b-pass";
+    if (k === "block" || k === "blocked") return "b-block";
+    if (k === "escalate" || k === "parked_for_judgment") return "b-escalate";
+    if (k === "capability_refused") return "b-refused";
+    return "b-unknown";
+  }
+
+  function findTerminal(arts) {
+    for (var i = arts.length - 1; i >= 0; i--) {
+      if (arts[i].kind === "escalation" || arts[i].kind === "action") return arts[i].id;
+    }
+    return null;
+  }
+
+  function renderTrace(doc) {
+    var arts = (doc && doc.artifacts) || [];
+    var terminalId = findTerminal(arts);
+    var head =
+      '<a class="back" id="back">← what needs you</a>' +
+      '<div class="run-head"><span class="rid">' + esc(doc.run) + "</span>" +
+      runSubject(arts) + "</div>" +
+      '<div class="run-sub">' + arts.length + " artifact" + (arts.length === 1 ? "" : "s") + "</div>";
+
+    var body = '<div class="graph-wrap" id="gw"><svg class="edges" id="edges" aria-hidden="true"></svg><div id="trace">';
+    for (var i = 0; i < arts.length; i++) body += nodeHTML(arts[i], arts[i].id === terminalId);
+    body += "</div></div>";
+    body += '<p class="colophon">Read verbatim from gate’s append-only, hash-chained log. To act on a parked run, copy its command from the list.</p>';
+
+    view.innerHTML = head + body;
+    lastArts = arts;
+    el("back").addEventListener("click", function () { go("/"); });
+    requestAnimationFrame(function () { drawEdges(arts); });
+    for (var d of view.querySelectorAll(".findings")) d.addEventListener("toggle", function () { requestAnimationFrame(function () { drawEdges(arts); }); });
+  }
+
+  function runSubject(arts) {
+    for (var i = 0; i < arts.length; i++) {
+      var v = arts[i].verdict;
+      if (v && v.subject && v.subject.repo) return '<span class="muted">' + esc(v.subject.repo) + "#" + esc(v.subject.number) + "</span>";
+      var f = arts[i].flat;
+      if (f && f.repo) return '<span class="muted">' + esc(f.repo) + "#" + esc(f.number) + "</span>";
+    }
+    return "";
+  }
+
+  function nodeHTML(n, isTerminal) {
+    var badge = "";
+    if (n.verdict && n.verdict.decision) badge = '<span class="badge ' + badgeFor(n.verdict.decision) + '">' + esc(n.verdict.decision) + "</span>";
+    else if (n.flat && n.flat.outcome) badge = '<span class="badge ' + badgeFor(n.flat.outcome) + '">' + esc(String(n.flat.outcome).replace(/_/g, " ")) + "</span>";
+
+    var body = "";
+    if (n.unparseable) body = '<p class="meta-line">(unparseable body)</p>';
+    else if (n.kind === "evidence") body = evidenceBody(n.evidence);
+    else if (n.kind === "verdict" || n.kind === "judgment") body = verdictBody(n.verdict);
+    else body = flatBody(n);
+
+    return (
+      '<div class="row"><div class="row-time">' + esc(n.time) + "</div>" +
+      '<div class="row-rail"><span class="marker" data-kind="' + esc(n.kind) + '" id="mk-' + esc(n.id) + '"></span></div>' +
+      '<article class="node' + (isTerminal ? " terminal" : "") + '" data-kind="' + esc(n.kind) + '">' +
+      '<div class="node-head"><span class="node-kind">' + esc(n.kind) + '</span><span class="node-id">' + esc(n.id) + "</span>" +
+      '<span class="head-spacer"></span>' + (isTerminal ? '<span class="terminal-tag">terminal</span>' : "") + badge + "</div>" +
+      body + "</article></div>"
+    );
+  }
+
+  function evidenceBody(e) {
+    if (!e) return "";
+    var size = "";
+    if (e.byte_count != null) size = e.byte_count + " B";
+    if (e.item_count != null) size = e.item_count + " item" + (e.item_count === 1 ? "" : "s");
+    return '<p class="meta-line"><span class="mv">' + esc(e.type) + "</span>" + (size ? ' <span class="faint">· ' + esc(size) + "</span>" : "") + "</p>";
+  }
+
+  function verdictBody(v) {
+    if (!v) return '<p class="meta-line">(unparseable body)</p>';
+    var conf = typeof v.confidence === "number" ? v.confidence.toFixed(2) : "?";
+    var html = '<p class="meta-line"><span class="mv">' + esc(v.producer) + "</span>" +
+      ' <span class="faint">·</span> <span class="m">' + esc(v.source) + "</span>" +
+      ' <span class="faint">·</span> tier <span class="mv m">' + esc(v.tier) + "</span>" +
+      ' <span class="faint">·</span> conf <span class="m">' + conf + "</span></p>";
+    if (v.why) html += '<p class="why">' + esc(v.why) + "</p>";
+    html += findingsBody(v.findings);
+    return html;
+  }
+
+  function findingsBody(findings) {
+    if (!findings || !findings.length) return "";
+    var items = "";
+    for (var i = 0; i < findings.length; i++) {
+      var f = findings[i];
+      var line = "";
+      if (f.severity) line += '<span class="sev sev-' + esc(String(f.severity).toLowerCase()) + '">' + esc(f.severity) + "</span> ";
+      line += '<span>' + esc(f.title) + "</span>";
+      if (f.locus) line += ' <span class="f-ev">' + esc(f.locus) + "</span>";
+      if (f.evidence) line += ' — <span class="f-ev">' + esc(f.evidence) + "</span>";
+      items += "<li>" + line + "</li>";
+    }
+    return '<details class="findings"><summary>' + findings.length + " finding" + (findings.length === 1 ? "" : "s") + "</summary><ul>" + items + "</ul></details>";
+  }
+
+  function flatBody(n) {
+    var f = n.flat || {};
+    var html = "";
+    if (f.question) html += '<div class="question">' + esc(f.question) + "</div>";
+    if (f.command) html += '<div class="command-node">' + esc(f.command) + "</div>";
+    if (f.repo && f.max_tier) html += '<p class="meta-line"><span class="mv">' + esc(f.repo) + "</span> · ceiling <span class=\"m mv\">" + esc(f.max_tier) + "</span></p>";
+    var known = { outcome: 1, verdict: 1, grant: 1, question: 1, command: 1, dry_run: 1, sig: 1 };
+    var rows = "";
+    for (var k in f) {
+      if (known[k]) continue;
+      var val = typeof f[k] === "object" ? JSON.stringify(f[k]) : String(f[k]);
+      rows += "<dt>" + esc(k) + "</dt><dd>" + esc(val) + "</dd>";
+    }
+    if (rows) html += '<dl class="kv">' + rows + "</dl>";
+    return html;
+  }
+
+  // ---- provenance arcs, ported from gate's trace-view ----
+  function markerCenter(id, wrapRect) {
+    var e = el("mk-" + id);
+    if (!e) return null;
+    var r = e.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - wrapRect.left, y: r.top + r.height / 2 - wrapRect.top };
+  }
+  function collectEdges(arts) {
+    var order = {};
+    arts.forEach(function (a, i) { order[a.id] = i; });
+    var edges = [];
+    arts.forEach(function (a) {
+      (a.parents || []).forEach(function (pid) {
+        if (!(pid in order)) return;
+        edges.push({ from: pid, to: a.id, lo: Math.min(order[pid], order[a.id]), hi: Math.max(order[pid], order[a.id]) });
+      });
+    });
+    edges.sort(function (a, b) { return (a.hi - a.lo) - (b.hi - b.lo); });
+    edges.forEach(function (e) {
+      var lane = 0;
+      edges.forEach(function (o) { if (o !== e && o.lane != null && o.lo < e.hi && e.lo < o.hi) lane = Math.max(lane, o.lane + 1); });
+      e.lane = lane;
+    });
+    return edges;
+  }
+  function drawEdges(arts) {
+    var svg = el("edges"), gw = el("gw");
+    if (!svg || !gw) return;
+    svg.innerHTML = "";
+    var rect = gw.getBoundingClientRect();
+    if (!rect.width) return;
+    svg.setAttribute("width", rect.width); svg.setAttribute("height", rect.height);
+    svg.setAttribute("viewBox", "0 0 " + rect.width + " " + rect.height);
+    collectEdges(arts).forEach(function (e) {
+      var p = markerCenter(e.from, rect), c = markerCenter(e.to, rect);
+      if (!p || !c) return;
+      var x = p.x - (14 + e.lane * 9);
+      var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", "M" + p.x + " " + p.y + " C" + x + " " + (p.y + (c.y - p.y) * 0.2) + ", " + x + " " + (c.y - (c.y - p.y) * 0.2) + ", " + c.x + " " + c.y);
+      svg.appendChild(path);
+    });
+  }
+  var raf;
+  window.addEventListener("resize", function () {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(function () {
+      if (!runIdFromPath()) return;
+      if (el("edges")) drawEdges(lastArts);
+    });
+  });
+
+  route();
+})();
+</script>
+</body>
+</html>
