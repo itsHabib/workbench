@@ -39,16 +39,17 @@ type credentialW struct {
 	CredentialBlob     *byte
 	Persist            uint32
 	AttributeCount     uint32
-	Attributes         uintptr
+	Attributes         uintptr // always nil; AttributeCount is always zero
 	TargetAlias        *uint16
 	UserName           *uint16
 }
 
 var (
-	advapi32       = windows.NewLazySystemDLL("advapi32.dll")
-	procCredReadW  = advapi32.NewProc("CredReadW")
-	procCredWriteW = advapi32.NewProc("CredWriteW")
-	procCredFree   = advapi32.NewProc("CredFree")
+	advapi32        = windows.NewLazySystemDLL("advapi32.dll")
+	procCredReadW   = advapi32.NewProc("CredReadW")
+	procCredWriteW  = advapi32.NewProc("CredWriteW")
+	procCredFree    = advapi32.NewProc("CredFree")
+	procCredDeleteW = advapi32.NewProc("CredDeleteW")
 )
 
 // Get reads the secret stored under ref. A missing entry returns
@@ -119,12 +120,11 @@ func (WinCred) Set(ref string, secret []byte) error {
 // integration test does not leave secrets in the operator's credential store;
 // it is intentionally not part of the Store interface (spec §4 D7: two methods).
 func credDelete(ref string) error {
-	proc := advapi32.NewProc("CredDeleteW")
 	target, err := windows.UTF16PtrFromString(targetPrefix + ref)
 	if err != nil {
 		return err
 	}
-	r1, _, callErr := proc.Call(uintptr(unsafe.Pointer(target)), uintptr(credTypeGeneric), 0)
+	r1, _, callErr := procCredDeleteW.Call(uintptr(unsafe.Pointer(target)), uintptr(credTypeGeneric), 0)
 	if r1 == 0 {
 		return callErr
 	}

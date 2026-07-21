@@ -16,13 +16,19 @@ func decode(r io.Reader) (*Manifest, error) {
 	dec.DisallowUnknownFields()
 	var m Manifest
 	if err := dec.Decode(&m); err != nil {
+		// encoding/json exposes no typed unknown-field error; this message is
+		// the only signal DisallowUnknownFields provides.
 		if strings.Contains(err.Error(), "unknown field") {
 			return nil, fmt.Errorf("%w: %v", ErrUnknownField, err)
 		}
 		return nil, fmt.Errorf("manifest: parse: %w", err)
 	}
-	if dec.More() {
-		return nil, fmt.Errorf("manifest: parse: trailing data after manifest")
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("manifest: parse: %w: extra JSON value", ErrTrailingData)
+		}
+		return nil, fmt.Errorf("manifest: parse: %w: %v", ErrTrailingData, err)
 	}
 	return &m, nil
 }

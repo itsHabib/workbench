@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,17 @@ func TestLoadFileValid(t *testing.T) {
 	hobby := m.Keys["hobbyvendor"]
 	if !hobby.Actions["all"].Rules[0].AllowExtraParams {
 		t.Error("allowExtraParams not parsed")
+	}
+}
+
+func TestLoadFileMissing(t *testing.T) {
+	path := "testdata/does-not-exist.json"
+	_, err := LoadFile(path)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error = %v, want os.ErrNotExist", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("error %q does not name path %q", err, path)
 	}
 }
 
@@ -267,5 +279,26 @@ func TestUnknownNestedField(t *testing.T) {
 	_, err := Load(strings.NewReader(body))
 	if !errors.Is(err, ErrUnknownField) {
 		t.Fatalf("error = %v, want ErrUnknownField", err)
+	}
+}
+
+func TestTrailingDataRejected(t *testing.T) {
+	valid := `{"version":1,"keys":{"k":{"secret":"wincred:x","upstream":"https://h.example","inject":[{"kind":"header","name":"Authorization","template":"{secret}"}],"actions":{"a":{"rules":[{"methods":["GET"],"path":"/x"}]}}}}}`
+	for _, suffix := range []string{`{}`, `]`, `true`} {
+		_, err := Load(strings.NewReader(valid + suffix))
+		if !errors.Is(err, ErrTrailingData) {
+			t.Fatalf("suffix %q: error = %v, want ErrTrailingData", suffix, err)
+		}
+	}
+}
+
+func TestValidationErrorsAreDeterministic(t *testing.T) {
+	bad := Key{}
+	m := &Manifest{Version: 1, Keys: map[string]Key{"z": bad, "a": bad}}
+	for range 20 {
+		err := m.validate()
+		if err == nil || !strings.Contains(err.Error(), `key "a"`) {
+			t.Fatalf("error = %v, want first sorted key", err)
+		}
 	}
 }

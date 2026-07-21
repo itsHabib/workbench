@@ -5,8 +5,8 @@
 // startup errors, never per-request surprises. It validates STRUCTURE only;
 // runtime request matching is the proxy engine's job and lives elsewhere.
 //
-// The zero value of a returned *Manifest is a valid, empty manifest; callers
-// obtain one only through Load, which guarantees every invariant below.
+// Callers obtain a *Manifest only through Load, which guarantees every
+// invariant below; an empty manifest is invalid.
 package manifest
 
 import (
@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -74,6 +75,7 @@ type Predicate struct {
 // Named error classes so callers (and tests) branch on the code, never prose.
 var (
 	ErrUnknownField       = errors.New("manifest_unknown_field")
+	ErrTrailingData       = errors.New("manifest_trailing_data")
 	ErrMissingField       = errors.New("manifest_missing_field")
 	ErrUnsupportedVersion = errors.New("manifest_unsupported_version")
 	ErrBadSecretRef       = errors.New("manifest_bad_secret_ref")
@@ -124,7 +126,8 @@ func (m *Manifest) validate() error {
 	if len(m.Keys) == 0 {
 		return fmt.Errorf("%w: keys", ErrMissingField)
 	}
-	for name, k := range m.Keys {
+	for _, name := range sortedKeys(m.Keys) {
+		k := m.Keys[name]
 		if err := validateKey(k); err != nil {
 			return fmt.Errorf("key %q: %w", name, err)
 		}
@@ -188,7 +191,8 @@ func validateActions(actions map[string]Action) error {
 	if len(actions) == 0 {
 		return fmt.Errorf("%w: actions", ErrMissingField)
 	}
-	for name, a := range actions {
+	for _, name := range sortedKeys(actions) {
+		a := actions[name]
 		if err := validateAction(a); err != nil {
 			return fmt.Errorf("action %q: %w", name, err)
 		}
@@ -215,7 +219,8 @@ func validateRule(r Rule) error {
 	if err := validatePath(r.Path); err != nil {
 		return err
 	}
-	for param, p := range r.Query {
+	for _, param := range sortedKeys(r.Query) {
+		p := r.Query[param]
 		if err := validatePredicate(p); err != nil {
 			return fmt.Errorf("query %q: %w", param, err)
 		}
@@ -234,4 +239,13 @@ func validatePredicate(p Predicate) error {
 		return fmt.Errorf("%w: occurs must be \"once\", got %q", ErrBadPredicate, p.Occurs)
 	}
 	return nil
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

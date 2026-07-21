@@ -54,11 +54,11 @@ func KeysSet(s Store, ref string, r io.Reader) error {
 // trimTrailingNewline drops one trailing "\r\n" or "\n" so a secret piped with
 // a shell newline stores clean, without touching interior or leading bytes.
 func trimTrailingNewline(b []byte) []byte {
-	if len(b) > 0 && b[len(b)-1] == '\n' {
-		b = b[:len(b)-1]
+	if len(b) >= 2 && b[len(b)-2] == '\r' && b[len(b)-1] == '\n' {
+		return b[:len(b)-2]
 	}
-	if len(b) > 0 && b[len(b)-1] == '\r' {
-		b = b[:len(b)-1]
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		return b[:len(b)-1]
 	}
 	return b
 }

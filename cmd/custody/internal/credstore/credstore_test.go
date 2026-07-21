@@ -37,6 +37,7 @@ func TestKeysSetTrimsTrailingNewline(t *testing.T) {
 		{"lf", "s3cr3t\n", "s3cr3t"},
 		{"crlf", "s3cr3t\r\n", "s3cr3t"},
 		{"none", "s3cr3t", "s3cr3t"},
+		{"bare-cr-preserved", "s3cr3t\r", "s3cr3t\r"},
 		{"interior-preserved", "line1\nline2\n", "line1\nline2"},
 	}
 	for _, tc := range cases {
