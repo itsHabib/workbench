@@ -81,8 +81,9 @@ func TestBuildInboxCollapsesRunsByPR(t *testing.T) {
 	}}
 	arts := []state.Artifact{
 		art(state.KindEscalation, "run_old", "esc_old", inboxBase, esc("grt_a", "old park", "", "o/widget", 142)),
-		art(state.KindVerdict, "run_new", "vrd_new", inboxBase.Add(time.Minute), subject),
-		art(state.KindAction, "run_new", "act_new", inboxBase.Add(2*time.Minute), map[string]any{"outcome": "would_merge"}),
+		art(state.KindVerdict, "run_new", "vrd_new", inboxBase.Add(-time.Minute), subject),
+		// Append order is authoritative even when the clock moves backward.
+		art(state.KindAction, "run_new", "act_new", inboxBase.Add(-2*time.Minute), map[string]any{"outcome": "would_merge"}),
 	}
 
 	in := buildInbox(arts, inboxBase.Add(time.Hour), "")

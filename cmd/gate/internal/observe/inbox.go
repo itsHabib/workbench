@@ -240,12 +240,12 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 // left it over-ceiling), so the last terminal in log order is the run's current
 // state. Output is oldest-park-first: age is a fact, not a priority call.
 func parkedRuns(arts []state.Artifact, stateArg string) ([]ParkedRun, []ParkedRun) {
-	last := make(map[string]state.Artifact)
+	last := make(map[string]terminalRun)
 	facts := make(map[string]runFacts)
-	for _, a := range arts {
+	for order, a := range arts {
 		facts[a.Run] = mergeRunFacts(facts[a.Run], factsFromArtifact(a))
 		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
-			last[a.Run] = a
+			last[a.Run] = terminalRun{artifact: a, order: order}
 		}
 	}
 
@@ -257,16 +257,16 @@ func parkedRuns(arts []state.Artifact, stateArg string) ([]ParkedRun, []ParkedRu
 	for run, terminal := range last {
 		f := facts[run]
 		if f.Repo == "" || f.Number == 0 {
-			if terminal.Kind == state.KindEscalation {
-				unattributed = append(unattributed, parkedFromEscalation(terminal, f, stateArg))
+			if terminal.artifact.Kind == state.KindEscalation {
+				unattributed = append(unattributed, parkedFromEscalation(terminal.artifact, f, stateArg))
 			}
 			continue
 		}
 		key := fmt.Sprintf("%s#%d", f.Repo, f.Number)
-		candidate := terminalRun{artifact: terminal, facts: f}
+		terminal.facts = f
 		current, ok := latest[key]
-		if !ok || terminalAfter(candidate.artifact, current.artifact) {
-			latest[key] = candidate
+		if !ok || terminal.order > current.order {
+			latest[key] = terminal
 		}
 	}
 
@@ -284,6 +284,7 @@ func parkedRuns(arts []state.Artifact, stateArg string) ([]ParkedRun, []ParkedRu
 type terminalRun struct {
 	artifact state.Artifact
 	facts    runFacts
+	order    int
 }
 
 type runFacts struct {
@@ -343,13 +344,6 @@ func mergeRunFacts(old, next runFacts) runFacts {
 		old.HeadSHA = next.HeadSHA
 	}
 	return old
-}
-
-func terminalAfter(a, b state.Artifact) bool {
-	if !a.Time.Equal(b.Time) {
-		return a.Time.After(b.Time)
-	}
-	return a.ID > b.ID
 }
 
 func sortParked(parked []ParkedRun) {
