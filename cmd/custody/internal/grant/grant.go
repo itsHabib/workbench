@@ -83,6 +83,11 @@ var (
 // error, not one of the four refusal classes.
 var ErrKeyMissing = errors.New("mint_key_missing")
 
+// ErrKeyInvalid fires when the persisted mint key is not the exact 32-byte
+// key this package creates. Signing with a truncated or empty key would turn
+// corrupted state into a weakened authorization boundary.
+var ErrKeyInvalid = errors.New("mint_key_invalid")
+
 // Store mints and reads grant records under a state dir, signing with a mint
 // key held in a SEPARATE trust domain. NewStore refuses to build a Store whose
 // key dir sits inside the state dir — co-locating the signing key with the
@@ -97,6 +102,13 @@ type Store struct {
 // refusal exactly: a key dir equal to or nested under the state dir is refused
 // at startup rather than silently restoring the co-location the design removes.
 func NewStore(stateDir, keyDir string) (*Store, error) {
+	within, err := dirWithin(keyDir, stateDir)
+	if err != nil {
+		return nil, err
+	}
+	if within {
+		return nil, fmt.Errorf("custody: mint key dir %q must be outside state dir %q", keyDir, stateDir)
+	}
 	resolvedState, err := resolvePath(stateDir)
 	if err != nil {
 		return nil, fmt.Errorf("custody: resolve state dir %q: %w", stateDir, err)
@@ -105,7 +117,7 @@ func NewStore(stateDir, keyDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("custody: resolve key dir %q: %w", keyDir, err)
 	}
-	within, err := dirWithin(resolvedKey, resolvedState)
+	within, err = dirWithin(resolvedKey, resolvedState)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +289,7 @@ func newID() (string, error) {
 func loadKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if err == nil {
-		return key, nil
+		return validateMintKey(path, key)
 	}
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: %s", ErrKeyMissing, path)
@@ -290,7 +302,7 @@ func loadKey(path string) ([]byte, error) {
 func loadOrCreateKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if err == nil {
-		return key, nil
+		return validateMintKey(path, key)
 	}
 	if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("custody: read mint key: %w", err)
@@ -308,6 +320,13 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	}
 	if !created {
 		return loadKey(path)
+	}
+	return key, nil
+}
+
+func validateMintKey(path string, key []byte) ([]byte, error) {
+	if len(key) != sha256.Size {
+		return nil, fmt.Errorf("%w: %s has %d bytes, want %d", ErrKeyInvalid, path, len(key), sha256.Size)
 	}
 	return key, nil
 }

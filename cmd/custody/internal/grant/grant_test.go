@@ -85,6 +85,25 @@ func TestNewStoreRefusesDanglingSymlinkedKeyDirUnderState(t *testing.T) {
 	}
 }
 
+func TestNewStoreRefusesKeySymlinkLocatedUnderState(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	link := filepath.Join(state, "key-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := NewStore(state, link); err == nil {
+		t.Fatal("expected refusal for key symlink located under state")
+	}
+}
+
 func TestMintValidateRoundTrip(t *testing.T) {
 	s := newStore(t)
 	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
@@ -226,6 +245,18 @@ func TestValidateMissingKeyIsLoud(t *testing.T) {
 	}
 	if _, err := s.Validate(tok, "tracker", now); !errors.Is(err, ErrKeyMissing) {
 		t.Fatalf("want ErrKeyMissing, got %v", err)
+	}
+}
+
+func TestLoadKeyRejectsWrongLength(t *testing.T) {
+	for _, size := range []int{0, 1, sha256.Size - 1, sha256.Size + 1} {
+		path := filepath.Join(t.TempDir(), "mint.key")
+		if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+			t.Fatalf("write %d-byte key: %v", size, err)
+		}
+		if _, err := loadKey(path); !errors.Is(err, ErrKeyInvalid) {
+			t.Fatalf("loadKey %d bytes: want ErrKeyInvalid, got %v", size, err)
+		}
 	}
 }
 
