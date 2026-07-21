@@ -23,8 +23,9 @@ import (
 // Manifest is a validated custody manifest. It is produced only by Load, so a
 // non-nil *Manifest has already passed every check in this package.
 type Manifest struct {
-	Version int            `json:"version"`
-	Keys    map[string]Key `json:"keys"`
+	Version        int            `json:"version"`
+	Keys           map[string]Key `json:"keys"`
+	versionPresent bool
 }
 
 // Key is one credential behind the proxy: the secret reference, the upstream it
@@ -118,7 +119,7 @@ func Load(r io.Reader) (*Manifest, error) {
 }
 
 func (m *Manifest) validate() error {
-	if m.Version == 0 {
+	if !m.versionPresent && m.Version == 0 {
 		return fmt.Errorf("%w: version", ErrMissingField)
 	}
 	if m.Version != 1 {

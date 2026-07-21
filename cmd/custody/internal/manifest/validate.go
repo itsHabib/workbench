@@ -14,8 +14,11 @@ import (
 func decode(r io.Reader) (*Manifest, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
-	var m Manifest
-	if err := dec.Decode(&m); err != nil {
+	var wire struct {
+		Version *int           `json:"version"`
+		Keys    map[string]Key `json:"keys"`
+	}
+	if err := dec.Decode(&wire); err != nil {
 		// encoding/json exposes no typed unknown-field error; this message is
 		// the only signal DisallowUnknownFields provides.
 		if strings.HasPrefix(err.Error(), "json: unknown field ") {
@@ -30,7 +33,12 @@ func decode(r io.Reader) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("manifest: parse: %w: %v", ErrTrailingData, err)
 	}
-	return &m, nil
+	m := &Manifest{Keys: wire.Keys}
+	if wire.Version != nil {
+		m.Version = *wire.Version
+		m.versionPresent = true
+	}
+	return m, nil
 }
 
 // validMethods is the set of HTTP methods a rule may name, plus the "*"

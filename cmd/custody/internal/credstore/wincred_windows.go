@@ -75,7 +75,11 @@ func (WinCred) Get(ref string) ([]byte, error) {
 		return nil, fmt.Errorf("credstore: CredRead %q: %w", ref, callErr)
 	}
 	defer procCredFree.Call(uintptr(unsafe.Pointer(cred)))
-	return copyBlob(cred), nil
+	secret := copyBlob(cred)
+	if len(secret) == 0 {
+		return nil, fmt.Errorf("%w: %q contains an empty credential", ErrSecretUnavailable, ref)
+	}
+	return secret, nil
 }
 
 // copyBlob copies the credential blob into a Go-owned slice so nothing points

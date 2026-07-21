@@ -45,6 +45,12 @@ func TestWinCredRoundTrip(t *testing.T) {
 	if !bytes.Equal(got, secret) {
 		t.Fatalf("round trip mismatch: got %d bytes, want %d", len(got), len(secret))
 	}
+	if err := s.Set(ref, nil); err != nil {
+		t.Fatalf("Set empty credential: %v", err)
+	}
+	if _, err := s.Get(ref); !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("Get empty credential = %v, want ErrSecretUnavailable", err)
+	}
 
 	if err := credDelete(ref); err != nil {
 		t.Fatalf("cleanup delete: %v", err)

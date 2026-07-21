@@ -103,6 +103,7 @@ func TestVersion(t *testing.T) {
 		want error
 	}{
 		{"missing", `{"keys":{}}`, ErrMissingField},
+		{"zero", `{"version":0,"keys":{}}`, ErrUnsupportedVersion},
 		{"unsupported", `{"version":2,"keys":{}}`, ErrUnsupportedVersion},
 	}
 	for _, tc := range cases {
