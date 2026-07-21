@@ -136,6 +136,7 @@ var deniedHeaders = map[string]bool{
 	"trailer":             true,
 	"transfer-encoding":   true,
 	"upgrade":             true,
+	"via":                 true,
 	"forwarded":           true,
 	"x-forwarded-for":     true,
 	"x-forwarded-host":    true,

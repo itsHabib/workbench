@@ -236,6 +236,7 @@ func TestInject(t *testing.T) {
 		{"host", []Injection{{Kind: "header", Name: "Host", Template: "{secret}"}}, ErrBadHeaderName},
 		{"hopbyhop", []Injection{{Kind: "header", Name: "Connection", Template: "{secret}"}}, ErrBadHeaderName},
 		{"forwarding", []Injection{{Kind: "header", Name: "X-Forwarded-For", Template: "{secret}"}}, ErrBadHeaderName},
+		{"via", []Injection{{Kind: "header", Name: "Via", Template: "{secret}"}}, ErrBadHeaderName},
 		{"custodyns", []Injection{{Kind: "header", Name: "X-Custody-Grant", Template: "{secret}"}}, ErrBadHeaderName},
 		{"badtoken", []Injection{{Kind: "header", Name: "Bad Header", Template: "{secret}"}}, ErrBadHeaderName},
 		{"crlf", []Injection{{Kind: "header", Name: "Authorization", Template: "Bearer {secret}\r\nX: y"}}, ErrBadTemplate},
