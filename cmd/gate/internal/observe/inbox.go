@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -154,10 +155,20 @@ type liveResult struct {
 
 func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 	results := make(chan liveResult, len(parked))
-	for i, p := range parked {
+	jobs := make(chan int, len(parked))
+	for i := range parked {
+		jobs <- i
+	}
+	close(jobs)
+
+	const maxWorkers = 8
+	for range min(len(parked), maxWorkers) {
 		go func() {
-			pr, err := lookup(p.Repo, p.Number)
-			results <- liveResult{index: i, pr: pr, err: err}
+			for i := range jobs {
+				p := parked[i]
+				pr, err := lookup(p.Repo, p.Number)
+				results <- liveResult{index: i, pr: pr, err: err}
+			}
 		}()
 	}
 
@@ -175,9 +186,15 @@ func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 			out = append(out, p)
 			continue
 		}
-		p.PRState = result.pr.State
+		state := strings.ToUpper(result.pr.State)
+		p.PRState = state
 		p = mergeLivePR(p, result.pr)
-		if result.pr.State == "OPEN" {
+		if state == "OPEN" {
+			out = append(out, p)
+			continue
+		}
+		if state != "MERGED" && state != "CLOSED" {
+			p.PRState = "unknown"
 			out = append(out, p)
 		}
 	}

@@ -130,6 +130,7 @@ func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
 		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale title"},
 		{Run: "run_merged", Repo: "o/r", Number: 2},
 		{Run: "run_unknown", Repo: "o/r", Number: 3},
+		{Run: "run_unexpected", Repo: "o/r", Number: 4},
 	}
 	lookup := func(_ string, number int) (LivePR, error) {
 		switch number {
@@ -137,13 +138,15 @@ func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
 			return LivePR{State: "OPEN", Title: "live title", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
 		case 2:
 			return LivePR{State: "MERGED"}, nil
-		default:
+		case 3:
 			return LivePR{}, fmt.Errorf("lookup unavailable")
+		default:
+			return LivePR{State: "unexpected"}, nil
 		}
 	}
 
 	got := reconcileLive(parked, lookup)
-	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_unknown" {
+	if len(got) != 3 || got[0].Run != "run_open" || got[1].Run != "run_unknown" || got[2].Run != "run_unexpected" {
 		t.Fatalf("live reconcile = %+v", got)
 	}
 	if got[0].PRState != "OPEN" || got[0].Title != "live title" || got[0].HeadSHA != "abc" {
@@ -151,6 +154,9 @@ func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
 	}
 	if got[1].PRState != "unknown" {
 		t.Fatalf("failed lookup must remain visible as unknown: %+v", got[1])
+	}
+	if got[2].PRState != "unknown" {
+		t.Fatalf("unexpected state must remain visible as unknown: %+v", got[2])
 	}
 }
 
