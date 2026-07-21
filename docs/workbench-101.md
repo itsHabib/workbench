@@ -808,8 +808,9 @@ Answers in parentheses; every one is derivable from the sections above.
     authority and unwind the floor and the grant separation.)*
 14. What do T2 and T3 require, and what's special about editing RUBRIC.md? *(T2 =
     owner review; T3 = owner + adversarial skeptic + author defense; the rubric is
-    control plane, so editing it floors at T3 and every classification records the
-    rubric's git SHA.)*
+    control plane, so editing it floors at T3. The rubric also mandates recording
+    its git SHA per classification, but the shipped triage binaries don't emit it
+    yet - intent, per the drift log.)*
 15. Name the four dimensions of a gate grant. *(scope - repo+action; tier ceiling;
     cycle ceiling; TTL - all HMAC-signed, minted only by the operator.)*
 16. In one sentence, what keeps verdict tiers and grant ceilings from drifting
