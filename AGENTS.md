@@ -26,7 +26,9 @@ Orientation block you can point an agent at to ground it fast.
   `contracts`). See `local/README.md` for the eval verdicts and the
   when-to-route-local rule. Its CLIs live at `cmd/local` and `cmd/eval`.
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
-  `cmd/<tool>/internal/`. Each tool keeps its own `AGENTS.md` + `docs/DESIGN.md`.
+  `cmd/<tool>/internal/`. Each tool keeps its own scoped guidance in
+  `cmd/<tool>/CLAUDE.md` + `docs/DESIGN.md` (per-tool `AGENTS.md` files do not exist
+  yet — read the tool's `CLAUDE.md` for its exit codes, invariants, and checks).
   Today: `flare` (the escalation-routing plane), `tracelens` (agent trace
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),
   `triage` (PR risk floor + escalate-only advisory; two binaries,
