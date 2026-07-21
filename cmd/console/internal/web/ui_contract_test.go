@@ -75,6 +75,7 @@ func TestDocketKeepsPRIdentityActionable(t *testing.T) {
 		`data.unattributed || []`,
 		`diagnostic history, not counted above`,
 		`PR state unknown`,
+		`p.pr_state_reason`,
 		`run ' + esc(p.run)`,
 	} {
 		if !strings.Contains(page, want) {

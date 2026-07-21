@@ -100,6 +100,7 @@
   .matter-head .repo { font-weight: 600; font-size: 0.88rem; }
   .matter-head .pr-link { font-weight: 700; font-size: 0.9rem; text-decoration-thickness: 1px; text-underline-offset: 0.16em; }
   .matter-title { margin-top: 0.35rem; font-family: var(--serif); font-size: 1rem; font-weight: 650; }
+  .state-note { margin-top: 0.35rem; color: var(--refused); font-family: var(--mono); font-size: 0.72rem; overflow-wrap: anywhere; }
   .matter-head .when { margin-left: auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
   .question { margin: 0.5rem 0 0.55rem; padding: 0.45rem 0.75rem; border-left: 3px solid var(--escalate); background: var(--escalate-bg); border-radius: 0 6px 6px 0; font-family: var(--serif); font-size: 0.92rem; line-height: 1.5; }
   .cmd-row { display: flex; align-items: stretch; gap: 0.4rem; margin-top: 0.4rem; }
@@ -312,6 +313,7 @@
     var when = p.parked_at ? '<span class="when">parked ' + esc(p.parked_at.replace("T", " ").replace("Z", " UTC")) + "</span>" : "";
     var code = p.code ? '<span class="badge b-escalate">' + esc(p.code) + "</span>" : '<span class="badge b-escalate">parked</span>';
     var liveState = p.pr_state === "unknown" ? '<span class="badge b-refused">PR state unknown</span>' : "";
+    var stateNote = p.pr_state_reason ? '<div class="state-note">' + esc(p.pr_state_reason) + "</div>" : "";
     var title = p.title ? '<div class="matter-title">' + esc(p.title) + "</div>" : "";
     var q = p.question ? '<div class="question">' + esc(p.question) + "</div>" : "";
     return (
@@ -319,6 +321,7 @@
       '<div class="matter-head">' + subject + code + liveState + when + "</div>" +
       title +
       '<div class="rid muted">run ' + esc(p.run) + (p.head_sha ? " · head " + esc(p.head_sha.slice(0, 12)) : "") + "</div>" +
+      stateNote +
       q +
       cmdRow(p.judge_command) +
       cmdRow(p.explain_command) +

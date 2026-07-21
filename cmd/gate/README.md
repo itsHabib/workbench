@@ -52,9 +52,10 @@ needs a human — runs parked for judgment (each with a paste-ready `gate judge`
 carrying the run's own grant id, so resolving a park is never an id hunt) and
 the grant ledger (live grants soonest-to-expire first, plus grants expired in
 the last day). It is read-only and sits outside the 0–3 decision codes: like
-`explain` and `audit` it exits 0 or 4. Pass `-live` to collapse repeated runs by
-PR and remove subjects GitHub confirms are merged/closed; lookup failures remain
-visible as unknown. Pass `-json` for the console feed.
+`explain` and `audit` it exits 0 or 4. The default projection collapses repeated
+runs by PR from log evidence alone. Pass `-live` to additionally remove subjects
+GitHub confirms are merged/closed; lookup failures remain visible as unknown.
+Pass `-json` for the console feed.
 
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on

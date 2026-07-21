@@ -35,6 +35,7 @@ type ParkedRun struct {
 	HeadSHA        string `json:"head_sha,omitempty"`
 	URL            string `json:"url,omitempty"`
 	PRState        string `json:"pr_state,omitempty"`
+	PRStateReason  string `json:"pr_state_reason,omitempty"`
 	Question       string `json:"question"`
 	Code           string `json:"code,omitempty"`
 	Grant          string `json:"grant,omitempty"`
@@ -183,6 +184,7 @@ func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 		result := resolved[i]
 		if result.err != nil {
 			p.PRState = "unknown"
+			p.PRStateReason = result.err.Error()
 			out = append(out, p)
 			continue
 		}
@@ -195,6 +197,7 @@ func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 		}
 		if state != "MERGED" && state != "CLOSED" {
 			p.PRState = "unknown"
+			p.PRStateReason = fmt.Sprintf("GitHub returned unrecognized PR state %q", result.pr.State)
 			out = append(out, p)
 		}
 	}

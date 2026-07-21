@@ -894,8 +894,12 @@ func cmdNext(args []string) error {
 }
 
 func lookupLivePR(repo string, number int) (observe.LivePR, error) {
-	out, err := exec.Command("gh", "pr", "view", strconv.Itoa(number), "-R", repo, "--json", "state,title,headRefOid,url").Output()
+	out, err := exec.Command("gh", "pr", "view", strconv.Itoa(number), "-R", repo, "--json", "state,title,headRefOid,url").CombinedOutput()
 	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail != "" {
+			return observe.LivePR{}, fmt.Errorf("read PR %s#%d: %w: %s", repo, number, err, detail)
+		}
 		return observe.LivePR{}, fmt.Errorf("read PR %s#%d: %w", repo, number, err)
 	}
 	var pr struct {

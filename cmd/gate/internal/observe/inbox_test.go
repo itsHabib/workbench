@@ -153,10 +153,10 @@ func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
 	if got[0].PRState != "OPEN" || got[0].Title != "live title" || got[0].HeadSHA != "abc" {
 		t.Fatalf("open PR was not enriched: %+v", got[0])
 	}
-	if got[1].PRState != "unknown" {
+	if got[1].PRState != "unknown" || !strings.Contains(got[1].PRStateReason, "lookup unavailable") {
 		t.Fatalf("failed lookup must remain visible as unknown: %+v", got[1])
 	}
-	if got[2].PRState != "unknown" {
+	if got[2].PRState != "unknown" || !strings.Contains(got[2].PRStateReason, "unexpected") {
 		t.Fatalf("unexpected state must remain visible as unknown: %+v", got[2])
 	}
 }
