@@ -134,9 +134,11 @@ func TestUpstream(t *testing.T) {
 		{"query", "https://issues.example.com?a=b", ErrBadUpstream},
 		{"fragment", "https://issues.example.com#frag", ErrBadUpstream},
 		{"nohost", "https:///path", ErrBadUpstream},
+		{"path", "https://issues.example.com/base", ErrBadUpstream},
+		{"deeppath", "https://issues.example.com/a/b/c", ErrBadUpstream},
 		{"missing", "", ErrMissingField},
 		{"ok", "https://issues.example.com", nil},
-		{"okpath", "https://issues.example.com/base", nil},
+		{"okslash", "https://issues.example.com/", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,6 +253,70 @@ func TestInject(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// manifestWithTemplate returns a minimal valid manifest whose one inject
+// template is tmpl. tmpl is marshaled with encoding/json, so a control byte in
+// tmpl becomes a proper \uXXXX escape and the manifest stays valid JSON — the
+// decoder then materializes that byte back into the string validation sees.
+func manifestWithTemplate(t *testing.T, tmpl string) string {
+	t.Helper()
+	quoted, err := json.Marshal(tmpl)
+	if err != nil {
+		t.Fatalf("marshal template: %v", err)
+	}
+	return `{"version":1,"keys":{"k":{"secret":"wincred:x","upstream":"https://h.example",` +
+		`"inject":[{"kind":"header","name":"Authorization","template":` + string(quoted) + `}],` +
+		`"actions":{"a":{"rules":[{"methods":["GET"],"path":"/x"}]}}}}}`
+}
+
+// TestTemplateControlBytesRejectedAtLoad pins the L1 tightening: a template
+// carrying any control byte (NUL, ESC, DEL, ...) fails closed at Load, while a
+// clean template still loads. Bytes are built with rune() so the source carries
+// no escape literals of its own.
+func TestTemplateControlBytesRejectedAtLoad(t *testing.T) {
+	bad := map[string]string{
+		"nul": "Bearer {secret}" + string(rune(0x00)),
+		"esc": "Bearer {secret}" + string(rune(0x1b)),
+		"del": "Bearer {secret}" + string(rune(0x7f)),
+		"tab": "Bearer {secret}" + string(rune(0x09)),
+		"cr":  "Bearer {secret}" + string(rune(0x0d)),
+	}
+	for name, tmpl := range bad {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(strings.NewReader(manifestWithTemplate(t, tmpl)))
+			if !errors.Is(err, ErrBadTemplate) {
+				t.Fatalf("error = %v, want ErrBadTemplate", err)
+			}
+		})
+	}
+	t.Run("clean", func(t *testing.T) {
+		if _, err := Load(strings.NewReader(manifestWithTemplate(t, "Bearer {secret}"))); err != nil {
+			t.Fatalf("clean template failed to load: %v", err)
+		}
+	})
+}
+
+// TestUpstreamPathRejectedAtLoad pins the L2 design-lock: an upstream carrying a
+// base path fails closed at Load (the proxy would silently drop it), while
+// scheme+host — with or without a bare root slash — loads.
+func TestUpstreamPathRejectedAtLoad(t *testing.T) {
+	body := func(upstream string) string {
+		return `{"version":1,"keys":{"k":{"secret":"wincred:x","upstream":"` + upstream + `",` +
+			`"inject":[{"kind":"header","name":"Authorization","template":"{secret}"}],` +
+			`"actions":{"a":{"rules":[{"methods":["GET"],"path":"/x"}]}}}}}`
+	}
+	for _, upstream := range []string{"https://api.example.com/base", "https://api.example.com/a/b/c"} {
+		_, err := Load(strings.NewReader(body(upstream)))
+		if !errors.Is(err, ErrBadUpstream) {
+			t.Fatalf("upstream %q: error = %v, want ErrBadUpstream", upstream, err)
+		}
+	}
+	for _, upstream := range []string{"https://api.example.com", "https://api.example.com/"} {
+		if _, err := Load(strings.NewReader(body(upstream))); err != nil {
+			t.Fatalf("upstream %q failed to load: %v", upstream, err)
+		}
 	}
 }
 
