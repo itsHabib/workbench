@@ -36,7 +36,7 @@ Split by consequence:
 
 | Band | Paths (repo) | Floor |
 |---|---|---|
-| Merge-authorization + the exit-code seam | workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, `cmd/gate/main.go` | **T3** |
+| Merge-authorization + the exit-code seam | workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, `cmd/gate/internal/capability/**`, `cmd/gate/main.go`, `cmd/triage/internal/floor/overrides.go` | **T3** |
 | Broader gate / driver / triage machinery | workbench rest of `cmd/gate/**` (`internal/evidence/**`, `internal/observe/**`, …), `cmd/triage/**`; ship `packages/driver/**` | **T2** |
 
 The T3 band is the merge-authorization state, the verifier ladder, and the

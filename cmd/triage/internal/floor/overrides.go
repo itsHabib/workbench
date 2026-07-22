@@ -47,7 +47,12 @@ var repoOverrides = map[string][]overrideRule{
 		// T3 band — merge-authorization and the load-bearing exit-code contract.
 		mustOverride("cmd/gate/internal/state/**", T3, "gate merge-authorization state"),
 		mustOverride("cmd/gate/internal/verify/**", T3, "gate verifier ladder"),
+		mustOverride("cmd/gate/internal/capability/**", T3, "gate grant minting/checking (signing path)"),
 		mustOverride("cmd/gate/main.go", T3, "gate exit-code contract"),
+		// T3 — this override table is classifier control-plane, same class as
+		// RUBRIC §5.4's labels/**: a bad glob here silently re-opens the blind
+		// spot, so its own edits earn the adversarial pass.
+		mustOverride("cmd/triage/internal/floor/overrides.go", T3, "classifier control-plane (override table)"),
 		// T2 band — the rest of gate, plus triage's own classifier machinery.
 		mustOverride("cmd/gate/**", T2, "gate machinery"),
 		mustOverride("cmd/triage/**", T2, "triage machinery"),

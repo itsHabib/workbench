@@ -38,7 +38,9 @@ func TestOverrideBandSplit(t *testing.T) {
 		// T3 band — merge-authorization + the load-bearing exit-code contract.
 		{"gate state", "cmd/gate/internal/state/anchor.go", T3},
 		{"gate verify ladder", "cmd/gate/internal/verify/floor.go", T3},
+		{"gate capability grants", "cmd/gate/internal/capability/capability.go", T3},
 		{"gate main exit-code seam", "cmd/gate/main.go", T3},
+		{"override table self-classification", "cmd/triage/internal/floor/overrides.go", T3},
 		// T2 band — the rest of gate, plus triage's own classifier machinery.
 		{"gate evidence", "cmd/gate/internal/evidence/evidence.go", T2},
 		{"gate observe", "cmd/gate/internal/observe/explain.go", T2},
