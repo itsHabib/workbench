@@ -1,7 +1,11 @@
-# Review-credit strategy — working state (2026-07-20)
+# Review-credit strategy — measure first, cut second (v2, 2026-07-22)
 
-Status: proposal — under review. Data sweep complete. Direction validated;
-policy pending sign-off after addressing review (see PR comments).
+Status: proposal v2 — restructured after design review (PR #90). The v1 draft
+routed reviewer sets by tier immediately; review found the cut was aimed by
+event counts, not cost, and removed the compensating control for the floor's
+known blind spot. v2 splits the work: **Phase 0 builds the measurement and the
+deterministic guardrail now (no-regret); Phase 1 — the actual reviewer cut —
+is parked behind that data.**
 
 ## Problem
 
@@ -21,6 +25,12 @@ confirm it's right or route by risk; at minimum instrument to get the data.
   the pool that runs dry. Cursor Bugbot = Cursor credits, auto-fires on all
   repos (account-level app, no in-repo config). Codex = ChatGPT sub
   (comment-triggered). Copilot = Copilot sub (`--add-reviewer`).
+- **Caveat that reshapes the whole strategy: the sweep counts *events*, not
+  *tokens*.** A diff review and a ship local-claude driver run bill the same
+  pool at wildly different sizes. "claude is the most active reviewer" proves
+  claude reviews are frequent, not that they are the drain. If reviews turn
+  out to be, say, ~15% of pool spend, cutting them ~70% saves ~10% and the
+  real intervention target is driver runs. Settling this is Phase 0's job.
 - **The review recipe is prose, not code:** `ship/CLAUDE.md` "Shipping
   Features" — add copilot reviewer, comment `@codex review` + `@claude
   review`, cursor fires itself, repeat 3 cycles. No code gates it; changing
@@ -33,9 +43,15 @@ confirm it's right or route by risk; at minimum instrument to get the data.
   `workbench/cmd/triage/docs/features/pr-risk-engine/spec.md`. Core bet:
   review load scales with risk, not PR count. Driver→pr-risk wiring is
   planned-not-built; `/pr-risk` is hand-invoked, recommend-only.
-- Instrumentation seams that already exist: `labels/mismatches.jsonl`
-  (per-/pr-risk-run log), review-coordinator JSON verdict, `revtriage.exe
-  -json` (local digest). Passive today.
+- **The floor's documented blind spot is gate machinery.** RUBRIC's held-out
+  eval (HELDOUT-01) found 15 under-calls, 8 of them gate-machinery — merge
+  gates, verifiers, driver paths the floor reads as "internal → T1". Under
+  blast-everything that was harmless (the panel was the compensating
+  control); any policy that routes on the floor alone inherits it.
+- Instrumentation seams that already exist: review-coordinator JSON verdict,
+  `revtriage.exe -json` (local digest). `labels/mismatches.jsonl` exists but
+  is the classifier's oracle — RUBRIC §5.4 floors any `labels/**` edit at T3.
+  **The spend log must be a fresh file, never an extension of it.**
 
 ## Data sweep — COMPLETE (results below)
 
@@ -55,63 +71,127 @@ inline bot comments per PR. Raw TSV: `pers/docs/review-sweep-2026-07-20.tsv`
 
 Totals: 622 bot review submissions, 990 inline comments in 30 days.
 
-**Headline: 71% of PRs (T0+T1) got the same review blast as the critical 5%.**
-Bot activity barely differentiates by risk today (1.8 vs 3.5 avg reviews) —
-spend is driven by PR count, exactly what the triage spec predicted.
-Encouraging validation: bots naturally comment ~2.4x more on T3 than T1, so
-the floor's tiers correlate with where findings actually concentrate.
+**Headline: review effort barely differentiates by risk.** T0/T1 (71% of PRs)
+average 1.8 reviews vs 3.5 on T3 — a 2× spread where the risk spread is far
+wider. Spend is driven by PR count, exactly what the triage spec predicted.
+Encouraging validation: bots naturally comment ~2.4× more densely on T3 than
+T1, so the floor's tiers correlate with where findings concentrate. But note
+the mass: 85×3.2 + 127×2.3 ≈ **564 of 990 inline findings (57%) land on
+T0/T1** — density favors T2/T3, mass does not. Any T0/T1 defunding trades
+away real findings; the honest claim is "spend down, loss unknown,
+instrumented to find out", never "zero loss". The TSV holds named
+counterexamples (ship#172: T0 policy doc, 6 reviews / 9 comments) and
+data-quality outliers to resolve (workbench#13: T0 with 24 reviews;
+workbench#51 / roxiq#134: `files=0` yet T0 — should hit fail-closed).
 
 **Per-bot activity (review submissions + comments, top 5 repos = 261 PRs):**
 
 | Bot | events | notes |
 |---|---|---|
-| claude[bot] | 397 | ~1.5/PR — **most active bot, 100% billed to the Max pool** |
-| codex | 393 | ChatGPT sub |
+| claude[bot] | 397 | ~1.5/PR — most active by events, 100% Max pool |
+| codex | 393 | ChatGPT sub — effectively tied with claude on engagement |
 | cursor[bot] | 362 | Cursor credits, auto-fires on every PR |
-| copilot | 142 | Copilot sub, cheapest |
+| copilot | 142 | Copilot sub — cheapest, and least engaged |
 
-claude[bot] being the single most active reviewer confirms the diagnosis:
-review blast is the Max-pool drain. Restricting @claude to T2/T3 (29% of
-PRs) cuts its review invocations ~70% with zero loss on the PRs where
-findings actually concentrate.
+Events ≠ efficacy and events ≠ tokens (see Established facts). This table
+justifies *instrumenting* claude's review cost, and it picks the T1
+single-reviewer default for Phase 1: **codex** (393 events), not copilot
+(142) — "cheapest adequate" must not select the least-engaged reviewer.
 
-## Strategy direction (draft — pending sweep numbers)
+## Phase 0 — measure + deterministic guardrail (build now, no-regret)
 
-Route review spend by tier instead of flat-blasting. Sketch:
+Nothing here changes who reviews what. It makes the system able to answer
+"what do reviews actually cost, and what would a cut actually lose" — and it
+closes the floor's known blind spot so Phase 1 has a safe signal to route on.
 
-- **T0 (tests/docs/generated):** no cloud bots. Local `/review-digest`-class
-  pass at most. Merge on CI green + gate.
-- **T1 (standard):** ONE cloud reviewer (cheapest adequate — likely codex or
-  copilot, since those subs are underused vs the Max pool), 1 cycle default;
-  escalate only if it flags something critical.
-- **T2 (sensitive):** current panel minus @claude, or panel with 1 cycle +
-  coordinator quorum; @claude only when the coordinator verdict is unclear.
-- **T3 (critical/gate-machinery):** full 4-bot panel + 3 cycles + adversarial
-  pass (per feedback_adversarial_workflow_for_gates). Spend is fine here.
-- **Cursor Bugbot:** decide per data — if its auto-fire on T0/T1 PRs produces
-  few unique findings, flip to mention-only in the Cursor dashboard
-  (account-level setting; operator action, not agent).
-- **Cycles:** cap at 1 by default; the 3-cycle cap becomes T2+/on-findings
-  only. Merge-early-on-ship-it already policy.
-- **Instrumentation to keep:** wire `/work-driver` to run `triage-floor` at
-  PR-open and append tier + reviewer-set + cycles-used + unique-findings-by-
-  bot to a jsonl (extend `labels/mismatches.jsonl` or new
-  `review-spend.jsonl`). After ~a month, re-evaluate which bots earn their
-  slot per tier (the spec's "advisory must earn its slot" discipline, applied
-  to reviewers).
+1. **Driver carries the tier.** Ship's driver classifies each stream's PR via
+   `triage-floor` at PR-observe time, fail-closed to T2 (missing binary,
+   exit 1, garbage output ⇒ T2 + warning, never T0/T1). Tier persists on the
+   stream and shows in status/render. Mechanism only.
+2. **Per-repo path overrides lift gate/driver/merge machinery to T2,
+   deterministically.** One rubric-shaped table in triage (e.g. ship's
+   `packages/driver/**`, workbench `cmd/gate/**`, merge/verify paths) —
+   floor + overrides, not floor alone. This is the compensating control for
+   HELDOUT-01's gate-machinery under-calls, cheap and testable now, useful
+   regardless of Phase 1's fate.
+3. **`review-spend.jsonl` — a fresh file** (ship state dir, same convention
+   as the store; never `labels/**`). One line per landed PR:
+   `{ts, repo, pr, head_sha, tier, reviewers_requested[], cycles_used,
+   findings_per_bot: {total, unique, critical}, claude_cost_proxy, fixes_pr?,
+   merged}`.
+   - `claude_cost_proxy`: a token proxy per claude review (diff bytes in +
+     review bytes out) — the number that answers "are reviews a material
+     fraction of the pool, or are driver runs the real drain".
+   - `unique` findings attribution reuses the review-coordinator verdict /
+     review-findings grouping — recorded, not re-judged.
+   - **Escaped-defect linkage:** when a PR declares it fixes a prior PR,
+     record `fixes_pr` so the original PR's tier + reviewer set can be
+     joined later. This is the only signal that ever catches "the cut
+     reviewer would have found it".
+   - Session-engine parity: in `--engine session` runs the skill appends the
+     same record itself (ship's land hook never fires there).
+   - Best-effort append — a write failure warns, never blocks a land.
+4. **Known coverage gap, stated:** hand-opened PRs outside the driver get no
+   spend record until the recipe itself runs `triage-floor` at PR-open —
+   that wiring rides with Phase 1's recipe change. Driver + session runs
+   cover the large majority of PRs; the gap is logged, not hidden.
 
-Implementation would be: update ship/CLAUDE.md recipe + /work-driver policy
-(prose), wire driver→pr-risk shell-out, add the spend log. Design-doc-first
-per feedback_design_doc_then_pr if it grows beyond prose edits.
+**Rollback/decision triggers (defined now, before any cut):**
 
-## Next steps on resume
+- If after ~30 days the cost proxy shows claude reviews < ~20% of Max-pool
+  spend, Phase 1's @claude cut is not worth its risk — retarget driver runs.
+- If escaped-defect linkage ever shows a fixed defect whose original PR was
+  T0/T1, that tier's reviewer set gets *stronger*, not weaker, until the
+  holdout says otherwise.
 
-1. ~~Sweep + baseline~~ done (tables above). 2. ~~Operator sign-off~~ approved
-2026-07-22 (operator handles the Cursor Bugbot dashboard toggle directly).
-3. ~~Seed~~ SEEDED 2026-07-22: dossier ship project, phase
-`review-credit-tiering`, 4 tasks (review-recipe-tiered → driver-triage-tier →
-review-spend-log; work-driver-skill-tier-policy after the recipe).
+## Phase 1 — tier-routed reviewer sets (PARKED, data-gated)
 
-Next: `/work-driver-prep project:ship:phase:review-credit-tiering`, then
-`/work-driver`. After ~30 days of review-spend.jsonl data, re-evaluate which
-bots earn their slot per tier.
+The v1 mapping, kept for when the data clears it (dossier tasks
+`review-recipe-tiered` + `work-driver-skill-tier-policy` are seeded and
+blocked on this gate):
+
+- **T0:** no cloud bots — contingent on promoting the local
+  `/review-digest`-class pass to *count as the review* (else it collides
+  with the no-self-merge rule), and on RUBRIC's narrow T0 slice, not the
+  floor's broader one.
+- **T1:** one cloud reviewer, 1 cycle — default **codex**; escalate on any
+  critical finding.
+- **T2:** panel minus @claude + coordinator quorum; @claude summoned on
+  murky verdicts.
+- **T3:** full 4-bot panel + 3 cycles + adversarial pass
+  (feedback_adversarial_workflow_for_gates). Spend is fine here.
+- **Cursor mention-only follow-through:** if Bugbot flips to mention-only
+  (operator dashboard act), the T2/T3 recipes must add the `@cursor review`
+  mention explicitly or the "full panel" quietly becomes 3 bots.
+- **Cycles:** cap 1 by default; 3 becomes T2+/on-findings only.
+
+**Unpark conditions (all of them):** 30 days of `review-spend.jsonl`; cost
+proxy shows reviews are a material pool fraction (else retarget); the
+gate-machinery path overrides are live; and either a shadow holdout (full
+panel on a random 10–15% of T0/T1 for the first month, compared against the
+routed set) is funded, or every "zero loss" claim stays dead and the cut is
+sold as "loss unknown, instrumented".
+
+## Open operator calls (not agent decisions)
+
+1. **Fund the shadow holdout?** It spends review credit on purpose to price
+   the cut's risk. Without it the re-eval can only see what the remaining
+   bots found.
+2. **Cursor Bugbot mention-only toggle** — account-level dashboard setting,
+   and its timing relative to Phase 1.
+
+## Next steps
+
+1. ~~Sweep + baseline~~ done (tables above).
+2. ~~Shape decision~~ 2026-07-22: measurement lives in THIS doc as Phase 0 —
+   no separate TDD (it would restate this context and drift), not a triage
+   sub-spec (the spend log and holdout are panel policy, out of triage's
+   scope; only the path-override table lands in triage).
+3. Dossier realigned to v2: `driver-triage-tier`, `review-spend-log` (token
+   proxy + fixes_pr folded in), `triage-path-overrides` are the Phase 0
+   batch; `review-recipe-tiered` + `work-driver-skill-tier-policy` blocked
+   behind the unpark conditions.
+4. `/work-driver-prep project:ship:phase:review-credit-tiering` → `/work-driver`
+   for the Phase 0 batch.
+5. ~30 days after the spend log lands: re-evaluate against the triggers
+   above; operator calls on holdout + cursor toggle decide Phase 1.
