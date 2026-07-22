@@ -31,8 +31,11 @@ In `cmd/custody/internal/grant`:
   from; empty = operator-minted root) and `BoundSource string` (transport
   source this grant is usable from; empty = unbound — usable on the localhost
   listener only; enforcement of the bind itself is P3, out of scope here).
-- Bump `Version` to 2 and `tokenPrefix` to `cst2_`. Version-1 tokens refuse
-  with the existing unsupported-scheme path; migration is re-mint (short TTLs).
+- Bump `Version` to 2 and `tokenPrefix` to `cst2_`. Version-1 tokens fail at
+  prefix parse in `parseToken` and refuse as `refused_no_grant` — the simple
+  path; do NOT accept both prefixes. (The version/domain check inside
+  `Validate` stays as the backstop for a forged `cst2_` token wrapping a v1
+  record.) Migration is re-mint (short TTLs).
 - New `Derive` on `Store`: validates the parent token live, then mints a child
   refusing on three coded errors: `refused_attenuation_actions` (child actions
   not a subset of parent's), `refused_attenuation_ttl` (child expiry after
@@ -57,7 +60,8 @@ Refusals print the coded error + remedy naming the exact mint command.
   branchable by callers.
 - A depth-2 chain presented to `Validate` refuses even though `Derive` never
   produced it (constructed directly in the test).
-- `cst1_` tokens refuse with the unsupported-scheme error.
+- `cst1_` tokens refuse as `refused_no_grant` (prefix parse); a hand-built
+  `cst2_` token over a version-1 record refuses via the version/domain check.
 - `bound_source` and `parent` are covered by the signature: mutating either in
   the persisted record invalidates the token.
 
@@ -71,8 +75,8 @@ subset + expiry-cap + depth invariants; every violating input refuses.
 
 ## Non-goals
 
-The tap listener and `refused_source_mismatch` enforcement (P3,
-`custody-tap-listener`); the resolver; receipt schema; delegation depth > 1;
-any gate changes.
+The tap listener and `refused_source_mismatch` enforcement (dossier task
+`custody-tap-listener` inside phase `gmr-placement` — TDD §9 P3); the
+resolver; receipt schema; delegation depth > 1; any gate changes.
 
 **Model/effort:** opus/extra — signing pre-image change on a security envelope; correctness-critical.

@@ -50,8 +50,11 @@ validation currently pins `^env:[A-Za-z_][A-Za-z0-9_]*$` in `validate.go` and
 the work-spec JSON schema. Extend both to also accept
 `custody:<key>/<action>[,<action>...]` where key and action match custody's
 name alphabet (lowercase alnum + `-`, non-empty; actions non-empty,
-comma-separated, no duplicates). `env:` behavior is untouched; every other
-scheme still refuses.
+comma-separated, no duplicates). This is a two-step check: the regex (in both
+`validate.go` and the JSON schema) covers structural shape only — the
+no-duplicate-actions rule needs an explicit semantic pass in `checkSecret`
+after the regex match, since a pattern cannot refuse `custody:key/read,read`.
+`env:` behavior is untouched; every other scheme still refuses.
 
 ## Acceptance
 
