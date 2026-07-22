@@ -78,15 +78,22 @@ func TestTolerantDecodeDefersToAdmission(t *testing.T) {
 }
 
 // TestUnknownFieldsIgnored is the tolerant-reader guarantee: a body carrying
-// a field this binary predates still decodes, and known fields survive.
+// a field this binary predates still decodes, and known fields survive. The
+// body is otherwise a fully valid receipt (≥1 grant, matching custody_log
+// entry) — a receipt exists only for runs carrying at least one custody:
+// ref, and grants[] carries minItems: 1 — so this test isolates
+// unknown-field tolerance instead of relying on an otherwise-invalid body.
 func TestUnknownFieldsIgnored(t *testing.T) {
-	body := []byte(`{"schema_version":"authority-receipt.v1","run_id":"run_1","allocation_id":"alloc_1","grants":[],"evidence":{"artifacts":[],"custody_log":[]},"teardown":{"status":"destroyed","at":"2026-07-22T00:00:00Z"},"future_field":{"x":1}}`)
+	body := []byte(`{"schema_version":"authority-receipt.v1","run_id":"run_1","allocation_id":"alloc_1","grants":[{"secret_name":"CUSTODY_GRANT_TRACKER","key":"tracker","parent_id":"cst2_parent0000000000000000001","parent_digest":"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1","parent_actions":["read"],"child_id":"cst2_child00000000000000000001","child_digest":"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2","actions":["read"],"bound_source":"172.30.0.7","minted_at":"2026-07-22T19:00:00Z","expiry":"2026-07-22T19:42:00Z","delivery":{"channel":"vsock","delivered_at":"2026-07-22T19:00:05Z","one_shot":true}}],"evidence":{"artifacts":[{"type":"changeset","sha256":"e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"}],"custody_log":[{"child_id":"cst2_child00000000000000000001","request_count":17,"lines_sha256":"f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6"}]},"teardown":{"status":"destroyed","at":"2026-07-22T00:00:00Z"},"future_field":{"x":1}}`)
 	r, err := DecodeReceipt(body)
 	if err != nil {
 		t.Fatalf("tolerant reader must ignore unknown fields: %v", err)
 	}
 	if r.RunID != "run_1" || r.Teardown.Status != TeardownDestroyed {
 		t.Fatalf("known fields did not survive an unknown-field body: %+v", r)
+	}
+	if len(r.Grants) != 1 || r.Grants[0].ChildID != "cst2_child00000000000000000001" {
+		t.Fatalf("the otherwise-valid grant must survive an unknown-field body: %+v", r.Grants)
 	}
 }
 
