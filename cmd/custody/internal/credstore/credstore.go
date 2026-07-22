@@ -30,6 +30,11 @@ var (
 	ErrSecretUnavailable = errors.New("secret_unavailable")
 	// ErrSecretTooLarge reports a secret that exceeds the backend's hard limit.
 	ErrSecretTooLarge = errors.New("secret_too_large")
+	// ErrSecretControlChar reports a secret carrying an interior control byte
+	// (any byte < 0x20, or 0x7f DEL). custody serve substitutes the stored
+	// secret into an injected `Authorization: Bearer <secret>` header, so a
+	// CR/LF/NUL byte is a header/request-splitting vector — reject it fail-closed.
+	ErrSecretControlChar = errors.New("secret_control_char")
 )
 
 // maxSecretBytes is Windows Credential Manager's CRED_MAX_CREDENTIAL_BLOB_SIZE.
@@ -55,10 +60,39 @@ func KeysSet(s Store, ref string, r io.Reader) error {
 	if len(secret) == 0 {
 		return fmt.Errorf("credstore: empty secret for %q", ref)
 	}
+	if i := indexControlChar(secret); i >= 0 {
+		// Name only the ref; never echo the secret bytes or the offending value.
+		return fmt.Errorf("%w: secret for %q contains a control byte at offset %d", ErrSecretControlChar, ref, i)
+	}
 	if err := s.Set(ref, secret); err != nil {
 		return fmt.Errorf("credstore: store secret for %q: %w", ref, err)
 	}
+	// Best-effort wipe of the local plaintext buffer so it does not linger in
+	// this reusable slice. Go-heap residue (string/GC copies) can still linger —
+	// best-effort only, acceptable under spec §8.1's threat model.
+	zero(secret)
 	return nil
+}
+
+// indexControlChar returns the offset of the first control byte (any byte
+// < 0x20, or 0x7f DEL) in b, or -1 when b carries none. Interior CR/LF/NUL in a
+// stored secret is a header-injection vector once the proxy substitutes it into
+// an injected header, so KeysSet rejects it fail-closed.
+func indexControlChar(b []byte) int {
+	for i, c := range b {
+		if c < 0x20 || c == 0x7f {
+			return i
+		}
+	}
+	return -1
+}
+
+// zero overwrites b in place. It is a best-effort scrub of a plaintext secret
+// buffer; it cannot reach copies the runtime may have made elsewhere.
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 // trimTrailingNewline drops one trailing "\r\n" or "\n" so a secret piped with
