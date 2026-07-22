@@ -1,9 +1,11 @@
-# Operator console actions — Technical Design Document
+# Operator console — actionable docket + authority-bearing actions — Technical Design Document
 
 **Status:** draft / proposal — **NOT a build commitment.** Judgment is designed through an executable validation gate; browser-based minting is a no-go under the current threat model.
 **Owner:** @itsHabib
 **Date:** 2026-07-21
-**Related:** [workbench charter](../../DESIGN.md), [operator-console brainstorm](brainstorm-2026-07-19.md), [actionable-docket correction](actionable-docket.md), [console design](../../../cmd/console/docs/DESIGN.md), [gate README](../../../cmd/gate/README.md), [auto-mode defaults](../../auto-mode-defaults.md)
+**Related:** [workbench charter](../../DESIGN.md), [operator-console brainstorm](brainstorm-2026-07-19.md), [console design](../../../cmd/console/docs/DESIGN.md), [gate README](../../../cmd/gate/README.md), [auto-mode defaults](../../auto-mode-defaults.md)
+
+*(The former `actionable-docket.md` read-only-projection correction is folded into this TDD as P0 — see §1 and §10.1 — so the whole console evolution is one reviewable design.)*
 
 > **Reviewers — focus areas:** (1) the local-process threat model and the narrow trust assumption that permits Judge but rejects Mint; (2) the Origin, Host, cookie, CSRF, preview, replay, and stale-state contracts in §§4–8; (3) the mint no-go criteria in §§4.3 and 11; (4) whether every failure maps closed without creating a second authority or audit record outside gate.
 
@@ -12,6 +14,8 @@
 ## 1. Problem & hypothesis
 
 Console v0 is deliberately loopback-only and read-only. It renders `gate next -json -live` as the actionable docket, shells `gate explain -json` for a case file, and shells `gate audit` for the masthead integrity signal. Gate owns every judgment, grant, signature, ledger write, capability check, and command. The console imports none of gate's decision logic and reads none of gate's files.
+
+One groundwork correction precedes the action work (**P0**, folded in from the former actionable-docket note). The read-only docket today renders gate's per-run parked projection *literally*: it shows dozens of stale parked rows for PRs that are already merged and leads with opaque `run_…` identifiers, so it fails its one question — *what needs me?* Judgment reads its case from that docket, so the projection must be correct **before** any authority-bearing action sits on top of it. P0 fixes this inside gate's read-only `next` projection (the console stays a pure renderer over it, and the audit log is never touched); its full detail is §10.1.
 
 The remaining operator friction is action-shaped:
 
@@ -635,13 +639,50 @@ Passing this gate validates the shared action plane for bounded judgment. It doe
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Rough scope |
 |---|---|---|---|---|---:|
-| **P1 — action security plane + compatibility contract** | Build the fail-closed substrate before any route mutates | Gate `version -json` + binary identity; Judge preview/result/error schemas; request-id + stale-escalation guards; exact argv generation; gatecli exit/envelope validation; default-disabled Judge flag; session/cookie/Origin/just-in-time CSRF/intent mechanism; timeout retry; audit/incompatibility lockout; Tier 0 tests | — | pre-gate, no browser mutation yet | 500–800 wLOC |
+| **P0 — read-only actionable-docket projection** | Make "what needs me?" true before any action sits on it | Reduce parked runs by PR *subject* (`repo#number`) not run ID — newest terminal artifact wins; recover repo/number/title/head-SHA + canonical PR URL from artifacts gate already emitted; separate truly unattributable legacy runs from the attention count; additive JSON fields; optional live OPEN/MERGED read (fail-visible); console renders a clickable `repo#number` with the run ID demoted to diagnostic detail. Detail: §10.1 | — | pre-gate, read-only (no mutation) | 300–500 wLOC |
+| **P1 — action security plane + compatibility contract** | Build the fail-closed substrate before any route mutates | Gate `version -json` + binary identity; Judge preview/result/error schemas; request-id + stale-escalation guards; exact argv generation; gatecli exit/envelope validation; default-disabled Judge flag; session/cookie/Origin/just-in-time CSRF/intent mechanism; timeout retry; audit/incompatibility lockout; Tier 0 tests | P0 | pre-gate, no browser mutation yet | 500–800 wLOC |
 | **P2 — judgment form + end-to-end action** | Add the first bounded authority-bearing browser action | Case-file form; no default decision; rationale validation; preview/review/commit UX; result/merge-command rendering; refresh behavior; server routes; gate commit wiring; Tier 0 + chromedp scenarios | P1 | pre-gate | 400–700 wLOC |
 | **VALIDATION — adversarial proof** | Decide whether the action plane is safe enough to retain | Four-agent review; attack matrix; 50-way race; final-head browser run; manual exact-argv/no-merge evidence; fold fixes into P1/P2 contracts | P2 | **GO/NO-GO** | 100–250 wLOC/tests + evidence |
 | **P3 — Mint reconsideration (stub)** | Decide whether browser mint can ever prove human presence | Default result is CLI-only. Only after Judge GO: separate threat-model amendment; evaluate OS-mediated WebAuthn/user verification; registration/recovery; gate-bound parameters; new independent validation gate. No Judge code folded into this PR. | VALIDATION GO + separate human-presence proof | **currently NO-GO; task-less** | uncommitted |
 | **P4 — optional hardening/follow-ups (stub)** | Respond to observed friction only | Possible secure-loopback HTTPS, broader action-result query, record/runs panes, accessibility hardening, operational telemetry—each demand-gated | prior evidence | not committed | uncommitted |
 
-P1, P2, validation, and any future P3 are separate PRs. Judge and Mint are never implemented together.
+P0, P1, P2, validation, and any future P3 are separate PRs. Judge and Mint are never implemented together.
+
+### 10.1 P0 detail — read-only actionable-docket projection correction
+
+P0 is read-only groundwork: it corrects gate's `next` projection so the docket answers *what needs me?* honestly. The append-only audit log is never touched; the correction lives in gate's read-only projection and the console stays a pure renderer over it. (Folded in from the former `actionable-docket.md`.)
+
+**Gate projection**
+
+1. Recover a run's PR subject from the artifacts already in the log — not only the escalation body. Support every shape gate has emitted over time: escalation `repo`/`number`, verdict or judgment `subject`, and PR evidence `pr` plus its `data` payload.
+2. Recover display facts when present: repository, PR number, title, judged head SHA; derive a canonical GitHub pull URL from repo + number.
+3. Reduce terminal state by PR subject, not only run ID. For all runs referring to the same `repo#number`, the newest terminal artifact wins: newest terminal is an escalation → exactly one actionable parked row; newest terminal is an action → no actionable row for that PR. A later judged/released run supersedes earlier parked attempts.
+4. Preserve per-run reduction before subject reduction: a later action in the same run still resolves that run as today.
+5. Never silently present a subject-less legacy run as an actionable PR. Keep truly unattributable parked runs in a separate JSON collection/count so they stay inspectable without inflating "needs attention".
+6. Add an explicit live-read mode: it may query GitHub read-only to retain OPEN PRs and drop MERGED/CLOSED. Lookup failure fails visible and keeps the row as `unknown` (never silently dropped). The default non-live projection stays deterministic and offline.
+7. Keep existing JSON fields compatible; new fields are additive. Text output leads with `repo#number` when known and keeps the run ID as diagnostic detail.
+
+**Console docket**
+
+1. Render each actionable item with a prominent clickable `repo#number` link; render title when available.
+2. Make the run ID secondary while preserving case-file navigation and copyable judge/explain commands.
+3. Show the main count from actionable PR-backed rows only.
+4. Show any unattributed legacy rows in a visually secondary, collapsed diagnostic section with case-file links — never mixed into "needs attention".
+5. Preserve escaping, loopback/host-pin/CSP posture, and read-only routes.
+
+**Tests**
+
+- Gate projection: two parked runs for one PR collapse to the newest; an action in a newer run suppresses an older parked run for the same PR; subject recovery from legacy verdict/evidence shapes; title, head SHA, and canonical PR URL projection; a truly unattributed escalation is separated from actionable rows; deterministic ordering across multiple PRs.
+- Console: clickable PR links, title rendering, secondary run IDs, the separated legacy section.
+- `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...`, `go test ./...`.
+- Dogfood the built `gate next -json` against the operator's live gate state; confirm already-resolved duplicate PRs disappear while genuinely-latest parked PRs remain.
+
+**Scope walls (P0)**
+
+- No judge or mint HTTP endpoints (those are P1+).
+- No mutation, compaction, or deletion of the gate audit log.
+- No GitHub mutation; live PR-state reads stay in gate, console only renders gate's live projection.
+- Do not fold in the four non-blocking console-v0 review observations unless a touched line requires a mechanical adjustment.
 
 ## 11. Mint go/no-go criteria
 
