@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -98,14 +99,16 @@ func cmdServe(args []string) error {
 }
 
 // loadManifest reads the manifest bytes once — for the digest that pins which
-// revision decided (spec §5) — then validates them through the loader. A bad
-// manifest fails startup, never a request.
+// revision decided (spec §5) — then validates those same bytes. The digest and
+// the enforced manifest come from one read, so a concurrent rewrite between two
+// reads can never make the recorded manifest_digest disagree with the manifest
+// the engine is actually enforcing. A bad manifest fails startup, never a request.
 func loadManifest(path string) (*manifest.Manifest, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("serve: read manifest %s: %w", path, err)
 	}
-	man, err := manifest.LoadFile(path)
+	man, err := manifest.Load(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", err
 	}

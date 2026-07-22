@@ -84,7 +84,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	transport := cfg.Transport
 	if transport == nil {
-		transport = http.DefaultTransport
+		transport = defaultTransport()
 	}
 	now := cfg.Now
 	if now == nil {
@@ -109,6 +109,18 @@ func New(cfg Config) (*Engine, error) {
 		noted:  map[string]bool{},
 	}
 	return e, nil
+}
+
+// defaultTransport clones the stdlib default transport and disables transparent
+// compression. Without this, Go's transport silently adds Accept-Encoding: gzip
+// on any request that did not set it, then decodes the gzip body and strips
+// Content-Encoding/Content-Length — so the agent would receive re-encoded bytes
+// and altered headers. custody promises to stream the upstream response verbatim
+// (spec §6), so it must relay whatever encoding the upstream chose, untouched.
+func defaultTransport() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DisableCompression = true
+	return t
 }
 
 // ServeHTTP runs the pipeline for one request and appends its artifact line. The
