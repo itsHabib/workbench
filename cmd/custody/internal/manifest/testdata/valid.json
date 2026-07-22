@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "keys": {
+    "tracker": {
+      "secret": "wincred:tracker-pat",
+      "upstream": "https://issues.example.com",
+      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
+      "actions": {
+        "read": {
+          "rules": [
+            { "methods": ["GET"], "path": "/rest/api/2/issue/PROJ-*" },
+            { "methods": ["GET"], "path": "/rest/api/2/project/PROJ/versions",
+              "query": { "state": { "equals": "released", "occurs": "once" } } }
+          ]
+        },
+        "comment": {
+          "rules": [
+            { "methods": ["POST"], "path": "/rest/api/2/issue/PROJ-*/comment" }
+          ]
+        }
+      },
+      "note": "Work tracker. PROJ only; other projects may hold export-controlled data."
+    },
+    "hobbyvendor": {
+      "secret": "wincred:hobbyvendor-key",
+      "upstream": "https://api.hobbyvendor.example",
+      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
+      "actions": { "all": { "rules": [ { "methods": ["*"], "path": "/**", "allowExtraParams": true } ] } }
+    }
+  }
+}

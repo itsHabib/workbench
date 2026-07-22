@@ -1,0 +1,69 @@
+//go:build windows
+
+package credstore
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+
+	"golang.org/x/sys/windows"
+)
+
+func TestCredCallErrorPreservesNonzeroError(t *testing.T) {
+	want := errors.New("call failed")
+	if got := credCallError(want); !errors.Is(got, want) {
+		t.Fatalf("credCallError = %v, want %v", got, want)
+	}
+}
+
+func TestCredCallErrorNeverReturnsSuccess(t *testing.T) {
+	got := credCallError(windows.ERROR_SUCCESS)
+	if got == nil || got == windows.ERROR_SUCCESS {
+		t.Fatalf("credCallError returned success for a failed call: %v", got)
+	}
+}
+
+func TestWinCredSetRejectsOversizedSecret(t *testing.T) {
+	var s WinCred
+	err := s.Set("oversized", make([]byte, maxSecretBytes+1))
+	if !errors.Is(err, ErrSecretTooLarge) {
+		t.Fatalf("Set oversized credential = %v, want ErrSecretTooLarge", err)
+	}
+}
+
+// TestWinCredRoundTrip exercises the real Windows Credential Manager: write a
+// secret, read it back, confirm a missing ref is typed, then clean up. It skips
+// (rather than fails) when the store is unavailable — a headless or locked-down
+// Windows environment where CredWrite cannot persist.
+func TestWinCredRoundTrip(t *testing.T) {
+	var s WinCred
+	const ref = "custody-test-roundtrip"
+	secret := []byte("integration-secret-\x00-bytes")
+
+	if err := s.Set(ref, secret); err != nil {
+		t.Skipf("credential store unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = credDelete(ref) })
+
+	got, err := s.Get(ref)
+	if err != nil {
+		t.Fatalf("Get after Set: %v", err)
+	}
+	if !bytes.Equal(got, secret) {
+		t.Fatalf("round trip mismatch: got %d bytes, want %d", len(got), len(secret))
+	}
+	if err := s.Set(ref, nil); err != nil {
+		t.Fatalf("Set empty credential: %v", err)
+	}
+	if _, err := s.Get(ref); !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("Get empty credential = %v, want ErrSecretUnavailable", err)
+	}
+
+	if err := credDelete(ref); err != nil {
+		t.Fatalf("cleanup delete: %v", err)
+	}
+	if _, err := s.Get(ref); !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("Get after delete = %v, want ErrSecretUnavailable", err)
+	}
+}
