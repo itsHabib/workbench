@@ -49,11 +49,14 @@ owner — not this repo's work to force.
 Both surfaced by the move review; both are real, and both are deliberately
 not the move's to fix (its contract is byte-identical output):
 
-- **`bestTandem` may skip a loop start after a partial periodic match**
+- ~~**`bestTandem` may skip a loop start after a partial periodic match**
   (e.g. `A,B,A,X,A,X,A,X` at period 2: the failed scan from 0 jumps past
   the real `A,X`-run start at 2). Changing the scan changes detector
   behavior, so it is owed to tracelens's own iteration with a corpus case
-  that pins the improvement — not to a relocation diff.
+  that pins the improvement — not to a relocation diff.~~ Done 2026-07-22
+  (PR #88): the `i=j` skip now fires only for confirmed runs
+  (`r>=minRepeats`); a stray match advances by one. Pinned by
+  `TestBestTandem_RunStartNotSkippedAfterStrayMatch`; corpus gate unchanged.
 - **A Claude stream truncated right after an `assistant` `tool_use` event
   decodes as "unrecognized ship event dialect"** (exit 2) instead of an
   analyzable aborted run — the dialect markers only key on `user`/`result`
