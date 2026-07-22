@@ -90,6 +90,7 @@ func cmdGrant(args []string) error {
 	actions := fs.String("actions", "", "comma-separated action names (e.g. read,comment)")
 	ttl := fs.Duration("ttl", 0, "grant lifetime (e.g. 8h)")
 	mintedBy := fs.String("minted-by", "operator", "free-form, UNAUTHENTICATED label of who minted this")
+	initKey := fs.Bool("init", false, "create a fresh mint key in -mint-key-dir if none exists yet (first-run opt-in)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -102,6 +103,9 @@ func cmdGrant(args []string) error {
 	}
 	store, err := grant.NewStore(*stateDir, *keyDir)
 	if err != nil {
+		return err
+	}
+	if err := store.RequireMintKey(*initKey); err != nil {
 		return err
 	}
 	_, tok, err := store.Mint(*key, acts, *ttl, *mintedBy, time.Now)
