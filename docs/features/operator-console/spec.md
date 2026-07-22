@@ -246,6 +246,7 @@ Gate assigns `request_id` during preview and carries it in the canonical argv. T
 
 - returns the prior result without appending when the recorded semantic inputs match;
 - resumes reduction/action if a crash left a matching judgment without its final action;
+- **reconciles the anchor without appending** when the matching terminal entry is the one unanchored tail entry of gate's crash window: gate rebinds the anchor over that single entry (prefix proven intact, same bounded rules as the append-path reconcile) and then returns the prior result. No new ledger entry is created — replay stays idempotent, and a crash between the final action's fsync and the anchor rename cannot leave a permanently unhealable log;
 - fails `request_conflict` if the id exists with different inputs.
 
 No signing key, CSRF token, session id, or preview intent enters the ledger.
@@ -306,7 +307,7 @@ The exact preview argv invokes normal `gate judge` with four additions:
 - `-expect-escalation` supplies the state precondition;
 - `-expect-binary-id` binds consent to the executable that produced the preview.
 
-Gate performs an audited read, verifies that the named escalation is still the one unresolved target, checks request-id history, and rechecks the grant before the first new append. Concurrent writers use an optimistic head compare under gate's existing interprocess state lock: unrelated writes may trigger a bounded re-read/retry, but a changed target returns `stale_run`. The first authoritative append carries `request_id`; a second request cannot resolve the same escalation.
+Gate performs an audited read, then checks request-id history **first**: an existing matching id short-circuits into replay/resume (or `request_conflict` on differing inputs) before any state precondition runs — a commit whose result was recorded but whose stdout the console never saw must replay, not bounce off `stale_run` because its own success resolved the escalation. Only for a new request id does gate verify that the named escalation is still the one unresolved target and recheck the grant before the first new append. Concurrent writers use an optimistic head compare under gate's existing interprocess state lock: unrelated writes may trigger a bounded re-read/retry, but a changed target returns `stale_run`. The first authoritative append carries `request_id`; a second request cannot resolve the same escalation.
 
 Successful stdout:
 
@@ -563,7 +564,7 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 
 **Incomplete-append is not tampering.** A commit subprocess killed between the log fsync and the anchor rename leaves gate's audit reporting its distinct `incomplete-append` fault: exactly one unanchored tail entry over a proven-intact anchored prefix — the named residue of the one-append crash window, and the expected outcome of reaping a timed-out committing subprocess. The clean-audit gate branches on gate's fault class, never on prose:
 
-- `incomplete-append` disables fresh previews and new intents but **permits exactly one action**: retrying the in-flight or `timed_out` intent with its original request id. That retry's gate invocation runs gate's own bounded anchor reconcile — it advances the anchor only after proving the pinned prefix intact and only across the single crash-window entry, refusing anything wider with its own coded error. The append heals the ledger or gate refuses; console repairs nothing itself.
+- `incomplete-append` disables fresh previews and new intents but **permits exactly one action**: retrying the in-flight or `timed_out` intent with its original request id. That retry's gate invocation runs gate's own bounded anchor reconcile — it advances the anchor only after proving the pinned prefix intact and only across the single crash-window entry, refusing anything wider with its own coded error. The heal takes whichever of two gate-owned forms fits the crash point: when the unanchored tail entry is *not* the retry's terminal result, the retry's append rebinds as it lands; when it *is* — the crash hit between the final action's fsync and the anchor rename — request-id replay performs the no-append anchor reconcile of §5.3 and returns the prior result. Either way gate heals or refuses; console repairs nothing itself.
 - Every other fault class — rewrite, truncation, deletion, broken chain — locks all action controls as `423 audit_tampered`, as above.
 
 Without this branch, the required `timed_out` retry could deadlock: the interrupted append trips the clean-audit gate, the lock prevents the retry, and the retry is the only thing that heals the interruption.
@@ -592,7 +593,7 @@ Mint may not begin merely because Judge “seems fine.” The validation gate is
 - Preview intent binding, edit invalidation contract, exact displayed/executed argv equivalence, binary-identity drift refusal, `timed_out` retry (including past preview `ExpiresAt`), and all error mappings.
 - Fake gate exit/body compatibility, audit tamper, incompatible version, malformed JSON, and missing features.
 - Clean-audit gate fault-class branch: `incomplete-append` permits only the same-intent retry (which heals or gate refuses); every other fault class locks as `audit_tampered`.
-- Gate tests for request-id idempotency, partial-write resume, two-request same-escalation race, stale escalation, stale/expired/wrong-scope grant, and audit tamper with zero unauthorized append.
+- Gate tests for request-id idempotency (checked before the stale-escalation precondition), partial-write resume, the no-append anchor reconcile on terminal-result replay, two-request same-escalation race, stale escalation, stale/expired/wrong-scope grant, and audit tamper with zero unauthorized append.
 - Hygiene assertion that console imports no gate package.
 
 **Tier 1 — executable browser JavaScript, required for the gate**
