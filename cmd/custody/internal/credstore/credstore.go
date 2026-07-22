@@ -14,10 +14,15 @@ import (
 	"io"
 )
 
-// Store reads and writes a named secret. Get returns ErrSecretUnavailable when
-// the reference has no entry. Implementations must never log or echo the secret
-// bytes. The interface is intentionally two methods (spec §4 D7): the proxy
-// needs Get, the `keys set` verb needs Set, and nothing else.
+// Store reads and writes a named secret. Get and Set both take the BARE ref —
+// the credstore ref with no manifest `wincred:` scheme (callers translate a
+// manifest secret field through manifest.SecretRef first). Any target
+// namespacing a backend needs (e.g. the WinCred `custody:` target prefix) is
+// that backend's private concern and never leaks into this ref. Get returns
+// ErrSecretUnavailable when the reference has no entry. Implementations must
+// never log or echo the secret bytes. The interface is intentionally two
+// methods (spec §4 D7): the proxy needs Get, the `keys set` verb needs Set, and
+// nothing else.
 type Store interface {
 	Get(ref string) ([]byte, error)
 	Set(ref string, secret []byte) error
