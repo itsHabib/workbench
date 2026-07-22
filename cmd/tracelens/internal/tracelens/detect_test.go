@@ -167,6 +167,22 @@ func TestBestTandem_PicksMostRepeated(t *testing.T) {
 	}
 }
 
+func TestBestTandem_RunStartNotSkippedAfterStrayMatch(t *testing.T) {
+	// A,B,A,X,A,X,A,X: the real period-2 run is (A,X)*3 starting at index 2.
+	// Scanning from 0, seq[2]==seq[0] extends the period-2 span to index 3
+	// with only 1 repeat — a stray match, not a real run. The old code still
+	// jumped i past that span (to 3), skipping index 2 and reporting repeats=2.
+	// The scan must not leap over the real run start.
+	seq := []string{"A", "B", "A", "X", "A", "X", "A", "X"}
+	sp, ok := bestTandem(seq, 2)
+	if !ok {
+		t.Fatal("expected a tandem")
+	}
+	if sp.period != 2 || sp.repeats != 3 || sp.start != 2 {
+		t.Fatalf("want start2 period2 repeats3, got %+v", sp)
+	}
+}
+
 // --- redundancy ------------------------------------------------------------
 
 func TestRedundancy_SameCallSameResult(t *testing.T) {
