@@ -242,7 +242,7 @@ type judgeIntent struct {
 
 ### 5.3 Gate ledger additions
 
-Gate assigns `request_id` during preview and carries it in the canonical argv. The judgment and final action artifacts record it additively. The final action artifact also records the canonical output command, if any. A retry with an existing request id:
+Gate assigns `request_id` during preview and carries it in the canonical argv. **Every artifact the action transaction writes — judgment, reduced verdict, and final action — records it additively**, so whichever single entry the one-append crash window strands unanchored, the tail carries the id the ledger-derived recovery of §8.7 needs; an intermediate-artifact crash must not orphan the recovery path. The final action artifact also records the canonical output command, if any. A retry with an existing request id:
 
 - returns the prior result without appending when the recorded semantic inputs match;
 - resumes reduction/action if a crash left a matching judgment without its final action;
@@ -460,6 +460,21 @@ Response `200` wraps gate's result without reinterpreting the outcome:
 
 A retry of the same completed intent returns the same body with `replayed:true`. A request while the intent is executing returns `409 action_in_progress` plus `Retry-After: 1`; it never starts a second subprocess.
 
+**Recovery commit (no live intent).** When the action-session check finds gate reporting `incomplete-append` and no live intent exists (§8.7's restart case), the action-session response carries the recovery target, obtained through gate's read surface:
+
+```json
+{ "actions_enabled": false, "recovery": { "request_id": "gact_…", "run": "run_…", "action": "judge" } }
+```
+
+The UI's sole enabled control invokes:
+
+```json
+POST /api/actions/judge/recover
+{ "request_id": "gact_…" }
+```
+
+Same Host, Origin, cookie, `X-CSRF-Token`, and content-type requirements as commit; a fresh session is acceptable because recovery carries no new consent (§8.7 — nothing new is appended). The response is the `console.judge-result.v1` body with `replayed:true` and `intent_id:null`. If gate no longer reports an unanchored tail matching the request id (another writer healed it, or the audit went clean), return `409 stale_run` — the UI refreshes and the case file shows the recorded result. Malformed or unknown-shape ids are `400 invalid_request`; every gate refusal maps through §7.6 unchanged. The route performs exactly gate's ledger-derived reconcile and can never append.
+
 ### 7.5 Mint and merge contracts
 
 There are deliberately no routes for Mint or Merge:
@@ -565,7 +580,7 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 **Incomplete-append is not tampering.** A commit subprocess killed between the log fsync and the anchor rename leaves gate's audit reporting its distinct `incomplete-append` fault: exactly one unanchored tail entry over a proven-intact anchored prefix — the named residue of the one-append crash window, and the expected outcome of reaping a timed-out committing subprocess. The clean-audit gate branches on gate's fault class, never on prose:
 
 - `incomplete-append` disables fresh previews and new intents but **permits exactly one action**: retrying the interrupted request with its original request id. That retry's gate invocation runs gate's own bounded anchor reconcile — it advances the anchor only after proving the pinned prefix intact and only across the single crash-window entry, refusing anything wider with its own coded error. The heal takes whichever of two gate-owned forms fits the crash point: when the unanchored tail entry is *not* the retry's terminal result, the retry's append rebinds as it lands; when it *is* — the crash hit between the final action's fsync and the anchor rename — request-id replay performs the no-append anchor reconcile of §5.3 and returns the recorded result. Either way gate heals or refuses; console repairs nothing itself.
-- **The request id survives console death because the ledger is its persistence, not console memory.** A live `timed_out` intent supplies it directly. When the console restarted (or the session expired) and no intent exists, the unanchored tail entry *itself* carries the recorded `request_id` (§5.3 records it on judgment and action artifacts): the action-session response surfaces a "complete interrupted action" affordance whose commit invokes gate's recovery form of the same contract — gate re-derives the request from its own ledger tail, proves the prefix, performs the bounded reconcile, and returns the recorded result. No new consent is required because nothing new is appended: the recorded judgment *is* the operator's consent, and the recovery only completes bookkeeping already fsync'd. Console obtains the tail's request id through gate's read surface, never by parsing the log itself. Fresh previews stay disabled until the audit is clean.
+- **The request id survives console death because the ledger is its persistence, not console memory.** A live `timed_out` intent supplies it directly. When the console restarted (or the session expired) and no intent exists, the unanchored tail entry *itself* carries the recorded `request_id` (§5.3 records it on every artifact the action transaction writes — judgment, reduced verdict, and final action — precisely so no crash point orphans it): the action-session response surfaces a "complete interrupted action" affordance whose `POST /api/actions/judge/recover` commit (§7.4) invokes gate's recovery form of the same contract — gate re-derives the request from its own ledger tail, proves the prefix, performs the bounded reconcile, and returns the recorded result. No new consent is required because nothing new is appended: the recorded judgment *is* the operator's consent, and the recovery only completes bookkeeping already fsync'd. Console obtains the tail's request id through gate's read surface, never by parsing the log itself. Fresh previews stay disabled until the audit is clean.
 - Every other fault class — rewrite, truncation, deletion, broken chain — locks all action controls as `423 audit_tampered`, as above.
 
 Without this branch, the required `timed_out` retry could deadlock: the interrupted append trips the clean-audit gate, the lock prevents the retry, and the retry is the only thing that heals the interruption.
