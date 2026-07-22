@@ -56,6 +56,20 @@ func TestOverrideBandSplit(t *testing.T) {
 	}
 }
 
+// TestOverrideRepoCaseInsensitive: GitHub owner/repo are case-insensitive, so a
+// mis-cased -repo must still hit the compensating control, never silently fall
+// back to the base floor. A gate-state path floors T3 regardless of casing.
+func TestOverrideRepoCaseInsensitive(t *testing.T) {
+	for _, repo := range []string{"itsHabib/workbench", "itshabib/workbench", "ITSHABIB/WORKBENCH"} {
+		t.Run(repo, func(t *testing.T) {
+			got := classifyRepoDiff(t, goFileDiff("cmd/gate/internal/state/anchor.go"), repo).Floor
+			if got != T3 {
+				t.Fatalf("floor with -repo %q = %s, want T3 (case-insensitive override)", repo, got)
+			}
+		})
+	}
+}
+
 // TestOverrideNoRepoPassthrough: with no -repo, the override paths classify at
 // their pre-override base tier (plain internal Go → T1). This is the no-flag
 // byte-identical guarantee: nothing raised without a repo.

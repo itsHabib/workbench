@@ -317,9 +317,11 @@ func ClassifyRepo(d Diff, repo string) Result {
 
 		// per-repo path overrides — HELDOUT-01's gate-machinery blind spot made a
 		// deterministic compensating control. Raise-only (max(floor, override));
-		// repoOverrides[repo] is nil for an empty/unknown repo, so the no-repo
-		// floor is byte-identical. Matched on either path so a rename can't shed it.
-		for _, o := range repoOverrides[repo] {
+		// the lookup is nil for an empty/unknown repo, so the no-repo floor is
+		// byte-identical. Matched on either path so a rename can't shed it. GitHub
+		// owner/repo are case-insensitive; lowercase the key (table keys are
+		// lowercased too) so a mis-cased -repo can't silently skip the control.
+		for _, o := range repoOverrides[strings.ToLower(repo)] {
 			if !f.matchAny(o.re) {
 				continue
 			}

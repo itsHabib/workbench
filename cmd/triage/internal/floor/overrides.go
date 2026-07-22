@@ -42,8 +42,11 @@ func mustOverride(glob string, tier Tier, why string) overrideRule {
 // exit-code rule and the broad gate rule); max(floor, override) resolves it to
 // the higher tier, so the bands need no mutual exclusion. Existing RUBRIC path
 // rules are untouched — labels/** already floors at T3, and it wins by max.
+// Keys are lowercased owner/repo: GitHub treats them case-insensitively, and
+// ClassifyRepo lowercases the -repo arg before indexing, so a mis-cased caller
+// (itshabib/workbench) still hits the control rather than silently skipping it.
 var repoOverrides = map[string][]overrideRule{
-	"itsHabib/workbench": {
+	"itshabib/workbench": {
 		// T3 band — merge-authorization and the load-bearing exit-code contract.
 		mustOverride("cmd/gate/internal/state/**", T3, "gate merge-authorization state"),
 		mustOverride("cmd/gate/internal/verify/**", T3, "gate verifier ladder"),
@@ -57,7 +60,7 @@ var repoOverrides = map[string][]overrideRule{
 		mustOverride("cmd/gate/**", T2, "gate machinery"),
 		mustOverride("cmd/triage/**", T2, "triage machinery"),
 	},
-	"itsHabib/ship": {
+	"itshabib/ship": {
 		// T2 band — the driver merge/state machine.
 		mustOverride("packages/driver/**", T2, "driver machinery"),
 	},
