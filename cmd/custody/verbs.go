@@ -36,7 +36,7 @@ func cmdKeys(args []string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return errUsageShown
 	}
 	if *name == "" {
 		return errors.New("keys set: -name is required")
@@ -61,7 +61,7 @@ func cmdServe(args []string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return errUsageShown
 	}
 	if err := requireLoopback(*addr); err != nil {
 		return err

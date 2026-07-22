@@ -89,7 +89,7 @@ substrate the same way `cmd/gate` does.
 
 ```
 agent ──► http://127.0.0.1:8127/<key>/<vendor-path>
-             │  X-Custody-Grant: cst_...
+             │  X-Custody-Grant: cst1_...
              ▼
          custody serve
              0. canonicalize the full origin-form target      (ambiguous → 400 refuse)
@@ -222,7 +222,7 @@ not be `Host`, a hop-by-hop/forwarding header, or `X-Custody-*`.
 }
 ```
 
-**Grant** (HMAC-signed token `cst_<id>.<sig>`, record persisted in `<state>/grants/`):
+**Grant** (HMAC-signed token `cst1_<id>.<sig>`, record persisted in `<state>/grants/`):
 grant id, key name, action names, minted-at, TTL, minted-by (free-form,
 unauthenticated - same custody caveat as gate: human-mint is a key-custody
 precondition, not a property of the record).
@@ -257,7 +257,7 @@ staying outside governed sessions' reach is what makes "operator-minted" mean an
 **HTTP surface** (localhost only):
 
 ```
-ANY /<key>/<vendor-path>[?query]     header: X-Custody-Grant: cst_...
+ANY /<key>/<vendor-path>[?query]     header: X-Custody-Grant: cst1_...
 ```
 
 - Pass: upstream response streamed back verbatim; custody adds
@@ -277,7 +277,7 @@ ANY /<key>/<vendor-path>[?query]     header: X-Custody-Grant: cst_...
 ```
 custody serve [-addr 127.0.0.1:8127] [-state <dir>]
 custody keys set -name <ref>            # secret read from stdin, written to credential store
-custody grant -key K -actions a,b -ttl 8h   →  cst_...
+custody grant -key K -actions a,b -ttl 8h   →  cst1_...
 custody log [-key K] [-since 24h]
 custody explain -req req_...            # v1: replay one decision from the log
 custody keys import -from <file>        # v1: drain a plaintext keys file, then delete it
