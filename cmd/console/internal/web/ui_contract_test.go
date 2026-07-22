@@ -72,6 +72,10 @@ func TestDocketKeepsPRIdentityActionable(t *testing.T) {
 	for _, want := range []string{
 		`class="pr-link"`,
 		`target="_blank" rel="noopener noreferrer"`,
+		// The PR title is rendered prominently above the demoted run id, so a
+		// docket row leads with the subject a human recognizes (§10.1 console 1).
+		`class="matter-title"`,
+		`esc(p.title)`,
 		`data.unattributed || []`,
 		`diagnostic history, not counted above`,
 		`PR state unknown`,
