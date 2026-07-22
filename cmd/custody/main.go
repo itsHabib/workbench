@@ -30,6 +30,11 @@ type command struct {
 	run     func(args []string) error
 }
 
+// errUsageShown signals that a verb's flag parser already printed the error and
+// its usage to stderr (flag.ContinueOnError does this on a bad flag), so main
+// exits non-zero without printing the message a redundant second time.
+var errUsageShown = errors.New("usage already shown")
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -46,7 +51,9 @@ func main() {
 		os.Exit(2)
 	}
 	if err := cmd.run(os.Args[2:]); err != nil {
-		fmt.Fprintln(os.Stderr, "custody:", err)
+		if !errors.Is(err, errUsageShown) {
+			fmt.Fprintln(os.Stderr, "custody:", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -95,7 +102,7 @@ func cmdGrant(args []string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return errUsageShown
 	}
 	acts, err := parseActions(*actions)
 	if err != nil {
