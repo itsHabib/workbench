@@ -194,6 +194,12 @@ func validateUpstream(upstream string) error {
 	if u.User != nil {
 		return fmt.Errorf("%w: upstream carries userinfo; remove credentials from the URL", ErrBadUpstream)
 	}
+	if u.Path != "" && u.Path != "/" {
+		// The serve proxy builds the outbound URL from the manifest scheme+authority
+		// plus the canonical request path only; a base path here would be silently
+		// dropped and the injected credential forwarded to the wrong endpoint. Reject.
+		return fmt.Errorf("%w: upstream must not carry a path; scheme+host only", ErrBadUpstream)
+	}
 	if u.RawQuery != "" || u.ForceQuery {
 		return fmt.Errorf("%w: upstream carries a query; remove query parameters from the URL", ErrBadUpstream)
 	}

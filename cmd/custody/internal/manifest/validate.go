@@ -189,18 +189,31 @@ func isHeaderToken(name string) bool {
 	return true
 }
 
-// validateTemplate enforces the single-placeholder, no-CRLF injection template
-// (spec §8.2): exactly one "{secret}" placeholder and no carriage return or
-// newline that could split the header.
+// validateTemplate enforces the single-placeholder, control-free injection
+// template (spec §8.2): exactly one "{secret}" placeholder and no control byte
+// (CR/LF or any other C0/DEL) that could split or smuggle the header.
 func validateTemplate(tmpl string) error {
 	if tmpl == "" {
 		return fmt.Errorf("%w: inject template", ErrMissingField)
 	}
-	if strings.ContainsAny(tmpl, "\r\n") {
-		return fmt.Errorf("%w: template carries CR/LF", ErrBadTemplate)
+	if hasControlByte(tmpl) {
+		return fmt.Errorf("%w: template carries a control byte", ErrBadTemplate)
 	}
 	if n := strings.Count(tmpl, "{secret}"); n != 1 {
 		return fmt.Errorf("%w: template must contain exactly one {secret}, got %d", ErrBadTemplate, n)
 	}
 	return nil
+}
+
+// hasControlByte reports whether s carries any ASCII control byte: every byte
+// below 0x20 (C0, including CR/LF/NUL/ESC) plus 0x7f (DEL). The scan is over
+// bytes, not runes, so a control byte smuggled inside a multi-byte sequence is
+// still caught.
+func hasControlByte(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
