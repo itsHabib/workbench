@@ -12,10 +12,6 @@ import (
 	"github.com/itsHabib/workbench/cmd/custody/internal/match"
 )
 
-// secretScheme prefixes a manifest secret ref; the credential store is keyed by
-// the ref after it (manifest guarantees the prefix at load).
-const secretScheme = "wincred:"
-
 // forwardable is the allowlist of agent request headers passed upstream. It is an
 // allowlist, not passthrough (spec §7 C): Authorization is injected (never
 // forwarded from the agent), Host is forced, hop-by-hop and X-Custody-* headers
@@ -59,10 +55,11 @@ func (e *Engine) forward(w http.ResponseWriter, r *http.Request, key manifest.Ke
 	}
 	rec.CanonicalTarget = outURL.String()
 
-	secret, err := e.secrets.Get(strings.TrimPrefix(key.Secret, secretScheme))
+	ref := manifest.SecretRef(key.Secret)
+	secret, err := e.secrets.Get(ref)
 	if err != nil {
 		e.refuse(w, rec, http.StatusInternalServerError, verdictRefused, "secret_unavailable",
-			"the credential for this key is not available", secretRemedy(key.Secret))
+			"the credential for this key is not available", secretRemedy(ref))
 		return
 	}
 	defer zeroBytes(secret)
@@ -180,10 +177,12 @@ func sanitizeHeaderValue(v string) string {
 }
 
 // secretRemedy names the exact command to store the missing secret (spec §6,
-// flow F). The verb is assembled from parts so the phrase is faithful without
-// hardcoding an adjacency a commit-message guard would trip on.
-func secretRemedy(secretRef string) string {
-	return fmt.Sprintf("%s %s set -name %s", "custody", "keys", strings.TrimPrefix(secretRef, secretScheme))
+// flow F). It takes the BARE credstore ref (via manifest.SecretRef) — the
+// scheme has already been stripped by the caller. The verb is assembled from
+// parts so the phrase is faithful without hardcoding an adjacency a
+// commit-message guard would trip on.
+func secretRemedy(ref string) string {
+	return fmt.Sprintf("%s %s set -name %s", "custody", "keys", ref)
 }
 
 // zeroBytes overwrites a secret slice so the plaintext credential does not linger

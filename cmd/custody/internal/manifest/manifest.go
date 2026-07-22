@@ -93,6 +93,17 @@ var (
 
 const secretScheme = "wincred:"
 
+// SecretRef is the single source for translating a manifest secret field into a
+// credstore ref: it strips the `wincred:` scheme and returns the BARE ref that
+// credstore.Store keys on. Callers that hold a manifest Key must route the
+// secret field through here rather than trimming the scheme inline, so the
+// scheme lives in exactly one place and can never drift between producer and
+// consumer. Load guarantees the prefix, so for a validated Key this is a plain
+// strip; on an unprefixed input it returns the string unchanged.
+func SecretRef(secret string) string {
+	return strings.TrimPrefix(secret, secretScheme)
+}
+
 // LoadFile reads and validates the manifest at path (spec §5).
 func LoadFile(path string) (*Manifest, error) {
 	f, err := os.Open(path)
