@@ -88,7 +88,7 @@ A compiled-in table maps `repo → [path glob → minimum tier]`, applied per fi
 
 | Band | Paths | Floor |
 |---|---|---|
-| Merge-authorization + the exit-code seam | workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, `cmd/gate/internal/capability/**` (grant minting/checking), `cmd/gate/main.go` (owns the 0/1/2/3/4 exit-code contract), plus `cmd/triage/internal/floor/overrides.go` (this override table — classifier control-plane) | **T3** |
+| Merge-authorization + the exit-code seam | workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, `cmd/gate/internal/capability/**` (grant minting/checking), `cmd/gate/internal/tier/**` (tier ordering), `cmd/gate/main.go` (owns the 0/1/2/3/4 exit-code contract), plus `cmd/triage/internal/floor/overrides.go` (this override table — classifier control-plane) | **T3** |
 | Broader gate / driver / triage machinery | workbench rest of `cmd/gate/**` (e.g. `internal/evidence/**`, `internal/observe/**`), `cmd/triage/**`; ship `packages/driver/**` | **T2** |
 
 *Why T3 for the first band: a fail-open in merge authorization or the exit-code contract drops @claude and the adversarial pass exactly where it matters most — HELDOUT-01's own blind labels put gate#3/#5/#9 at T3, and a T2 there would not. The bands need no mutual exclusion: a file matching both (e.g. `cmd/gate/main.go` matches the exit-code rule and the broad gate rule) resolves to the higher tier by max. Existing path rules are untouched — `labels/**` still floors T3 and wins by max.*

@@ -51,6 +51,7 @@ var repoOverrides = map[string][]overrideRule{
 		mustOverride("cmd/gate/internal/state/**", T3, "gate merge-authorization state"),
 		mustOverride("cmd/gate/internal/verify/**", T3, "gate verifier ladder"),
 		mustOverride("cmd/gate/internal/capability/**", T3, "gate grant minting/checking (signing path)"),
+		mustOverride("cmd/gate/internal/tier/**", T3, "gate tier ordering (verdict composition + grant ceilings)"),
 		mustOverride("cmd/gate/main.go", T3, "gate exit-code contract"),
 		// T3 — this override table is classifier control-plane, same class as
 		// RUBRIC §5.4's labels/**: a bad glob here silently re-opens the blind
