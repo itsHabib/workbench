@@ -128,7 +128,7 @@ func cmdDerive(args []string) error {
 	parent := fs.String("grant", "", "parent grant token (cst2_...) to derive from")
 	actions := fs.String("actions", "", "comma-separated child actions; must be a subset of the parent's")
 	ttl := fs.Duration("ttl", 0, "child lifetime (e.g. 2h); must not outlast the parent")
-	boundSource := fs.String("bound-source", "", "transport source the child is usable from (empty = unbound)")
+	boundSource := fs.String("bound-source", "", "transport source to bind the child to: recorded + signed now, enforced by the P3 tap listener — until then every grant works only on the localhost listener (empty = unbound)")
 	mintedBy := fs.String("minted-by", "operator", "free-form, UNAUTHENTICATED label of who derived this")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

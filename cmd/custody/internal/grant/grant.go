@@ -59,9 +59,11 @@ type Grant struct {
 	Actions []string `json:"actions"` // action names this grant covers
 	// Parent is the id of the grant this was derived from; empty means an
 	// operator-minted root. BoundSource is the transport source the grant is
-	// usable from; empty means unbound (usable on the localhost listener only —
-	// enforcement of the bind itself is P3, out of scope here). Both join the
-	// signature, so neither can be widened in the record without breaking it.
+	// meant to be bound to: recorded and signed now, but NOT enforced today —
+	// enforcement is the P3 tap listener's job, so until it lands every grant
+	// is usable only on the localhost listener regardless of this value. Empty
+	// means unbound. Both fields join the signature, so neither can be widened
+	// in the record without breaking it.
 	Parent      string        `json:"parent,omitempty"`
 	BoundSource string        `json:"bound_source,omitempty"`
 	MintedAt    time.Time     `json:"minted_at"`
