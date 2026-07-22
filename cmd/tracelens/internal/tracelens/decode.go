@@ -107,6 +107,27 @@ type eventEnvelope struct {
 	Type string `json:"type"`
 }
 
+// assistantCarriesToolUse reports whether a raw assistant event line carries at
+// least one tool_use content block — the Claude-dialect signal that survives a
+// run truncated before any system/user/result event. Any parse failure is a
+// no (it simply falls through to the other dialect checks).
+func assistantCarriesToolUse(line []byte) bool {
+	var ev claudeEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return false
+	}
+	blocks, err := decodeClaudeBlocks(ev.Message.Content)
+	if err != nil {
+		return false
+	}
+	for _, blk := range blocks {
+		if blk.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
 func detectShipDialect(raw []byte) (Dialect, error) {
 	seen := map[Dialect]bool{}
 	lines := bytes.Split(raw, []byte("\n"))
@@ -129,6 +150,14 @@ func detectShipDialect(raw []byte) (Dialect, error) {
 		case ev.Type == "tool_call" || ev.Type == "thinking" || ev.Type == "status":
 			seen[DialectShipCursor] = true
 		case ev.Type == "system" || ev.Type == "result" || ev.Type == "user":
+			seen[DialectShipClaude] = true
+		case ev.Type == "assistant" && assistantCarriesToolUse(line):
+			// A bare assistant text event stays dialect-neutral, but an
+			// assistant event carrying a tool_use block is Claude-specific
+			// (cursor emits a distinct tool_call event; codex uses item.*).
+			// Keying on it lets a Claude run truncated right after a tool_use —
+			// with no surviving system/user/result — still detect and decode
+			// as an aborted run instead of erroring as an unrecognized dialect.
 			seen[DialectShipClaude] = true
 		case strings.HasPrefix(ev.Type, "thread.") || strings.HasPrefix(ev.Type, "turn.") || strings.HasPrefix(ev.Type, "item."):
 			seen[DialectShipCodex] = true

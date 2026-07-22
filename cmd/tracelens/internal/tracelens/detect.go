@@ -363,13 +363,22 @@ func bestTandem(seq []string, minRepeats int) (span, bool) {
 		for i < len(seq) {
 			j := runEnd(seq, i, p)
 			r := (j - i) / p
-			if r >= minRepeats && better(span{i, p, r}, best, found) {
-				best, found = span{i, p, r}, true
-			}
-			if j > i+p {
+			if r >= minRepeats {
+				if better(span{i, p, r}, best, found) {
+					best, found = span{i, p, r}, true
+				}
+				// A confirmed run is maximal for this period from its
+				// earliest start: no period-p run starting at a position
+				// <= j-p crosses j. Runs starting inside (j-p, j) could
+				// extend past j and are leapt over — see FOLLOWUPS.
 				i = j
 				continue
 			}
+			// No valid run here: advance by one, never skip to j. A stray
+			// periodic match (seq[i+p] == seq[i]) can push j one past a real
+			// run start sitting just inside (i, j) — jumping to j leaps over
+			// it and undercounts the repeats. Cost stays low: unmatched scans
+			// don't extend far.
 			i++
 		}
 	}

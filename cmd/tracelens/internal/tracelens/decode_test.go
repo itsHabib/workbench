@@ -42,6 +42,24 @@ func TestDecodeShipEvents_DetectsAllDialects(t *testing.T) {
 	}
 }
 
+func TestDecodeShipEvents_TruncatedAtToolUseDecodesAsClaude(t *testing.T) {
+	// A Claude run killed right after an assistant tool_use: no system/user/
+	// result event survives, only an assistant event carrying a tool_use
+	// block. It must detect as Claude and decode into an analyzable aborted
+	// run — not error out as an unrecognized dialect.
+	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"read_file","input":{"path":"x.go"}}]}}`
+	got, err := DecodeShipEvents(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("DecodeShipEvents: %v", err)
+	}
+	if got.Dialect != DialectShipClaude {
+		t.Fatalf("dialect = %q, want %q", got.Dialect, DialectShipClaude)
+	}
+	if len(got.Trajectory.Steps) == 0 {
+		t.Fatal("expected the tool_use to decode into at least one step")
+	}
+}
+
 func TestDecodeShipEvents_MixedDialectFailsClosed(t *testing.T) {
 	in := strings.Join([]string{
 		`{"type":"tool_call","call_id":"c","name":"read","status":"running"}`,
