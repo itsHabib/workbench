@@ -55,14 +55,13 @@ func isHelp(arg string) bool {
 	return arg == "-h" || arg == "-help" || arg == "--help"
 }
 
-// commands is the verb registry. grant is live; keys and serve are placeholders
-// owned by other streams — registered so `custody keys`/`custody serve` report
-// intent rather than "unknown verb".
+// commands is the verb registry. Adding a verb is registering a command, not
+// editing a switch.
 func commands() []command {
 	return []command{
 		{name: "grant", summary: "mint a scoped, expiring action grant", run: cmdGrant},
-		{name: "keys", summary: "manage vendor secrets (not yet implemented)", run: notYetImplemented("keys")},
-		{name: "serve", summary: "run the credential proxy (not yet implemented)", run: notYetImplemented("serve")},
+		{name: "keys", summary: "manage vendor secrets (keys set)", run: cmdKeys},
+		{name: "serve", summary: "run the localhost credential proxy", run: cmdServe},
 	}
 }
 
@@ -73,12 +72,6 @@ func lookup(name string) (command, bool) {
 		}
 	}
 	return command{}, false
-}
-
-func notYetImplemented(name string) func([]string) error {
-	return func([]string) error {
-		return fmt.Errorf("%s: not yet implemented", name)
-	}
 }
 
 func usage() {
