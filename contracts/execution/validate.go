@@ -8,12 +8,17 @@ import (
 
 // Grammar the schema documents state but no runtime JSON-Schema validator
 // enforces — admission repeats it in Go (D8 pins this doubling for secret
-// refs; the digest and revision shapes follow the same rule).
+// refs; the digest and revision shapes follow the same rule). The secret-ref
+// grammar is two schemes today: env: (v0) and custody: (additive per
+// grant-materialized-rooms FR1) — custodyRefPattern covers structural shape
+// only; the no-duplicate-actions rule is a semantic pass a pattern cannot
+// express (see checkCustodyActions).
 var (
-	secretRefPattern = regexp.MustCompile(`^env:[A-Za-z_][A-Za-z0-9_]*$`)
-	hex64Pattern     = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	hex40Pattern     = regexp.MustCompile(`^[a-f0-9]{40}$`)
-	drivePattern     = regexp.MustCompile(`^[A-Za-z]:`)
+	envRefPattern     = regexp.MustCompile(`^env:[A-Za-z_][A-Za-z0-9_]*$`)
+	custodyRefPattern = regexp.MustCompile(`^custody:[a-z0-9-]+/[a-z0-9-]+(?:,[a-z0-9-]+)*$`)
+	hex64Pattern      = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	hex40Pattern      = regexp.MustCompile(`^[a-f0-9]{40}$`)
+	drivePattern      = regexp.MustCompile(`^[A-Za-z]:`)
 )
 
 // ValidateWorkSpec enforces the work-spec admission laws JSON Schema cannot
@@ -220,8 +225,28 @@ func checkSecret(i int, s Secret) error {
 	if s.Name == "" {
 		return fmt.Errorf("execution: secrets[%d].name is empty", i)
 	}
-	if !secretRefPattern.MatchString(s.Ref) {
-		return fmt.Errorf("execution: secrets[%d].ref %q must match ^env:[A-Za-z_][A-Za-z0-9_]*$; references are opaque names, never values (D8)", i, s.Ref)
+	switch {
+	case envRefPattern.MatchString(s.Ref):
+		return nil
+	case custodyRefPattern.MatchString(s.Ref):
+		return checkCustodyActions(i, s.Ref)
+	default:
+		return fmt.Errorf("execution: secrets[%d].ref %q must match ^env:[A-Za-z_][A-Za-z0-9_]*$ or ^custody:<key>/<action>[,<action>...]$; references are opaque names, never values (D8)", i, s.Ref)
+	}
+}
+
+// checkCustodyActions is the semantic half of the custody: grammar the regex
+// cannot express: the action list must be a set. custodyRefPattern alone
+// admits "custody:key/read,read" — structurally valid, semantically not a
+// set — so this pass runs after the regex match and refuses a repeat.
+func checkCustodyActions(i int, ref string) error {
+	actions := strings.Split(strings.SplitN(ref, "/", 2)[1], ",")
+	seen := make(map[string]bool, len(actions))
+	for _, a := range actions {
+		if seen[a] {
+			return fmt.Errorf("execution: secrets[%d].ref %q repeats action %q; actions must be a set, not a list (D8)", i, ref, a)
+		}
+		seen[a] = true
 	}
 	return nil
 }

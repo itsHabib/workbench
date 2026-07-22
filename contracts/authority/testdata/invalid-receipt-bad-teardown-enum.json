@@ -1,0 +1,26 @@
+{
+  "schema_version": "authority-receipt.v1",
+  "run_id": "run_01JQRUN0000000000000000RUN0",
+  "allocation_id": "alloc_01JQALLOC00000000000000001",
+  "grants": [
+    {
+      "secret_name": "CUSTODY_GRANT_TRACKER",
+      "key": "tracker",
+      "parent_id": "cst2_parent0000000000000000001",
+      "parent_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "parent_actions": ["read"],
+      "child_id": "cst2_child00000000000000000001",
+      "child_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "actions": ["read"],
+      "bound_source": "172.30.0.7",
+      "minted_at": "2026-07-22T19:00:00Z",
+      "expiry": "2026-07-22T19:42:00Z",
+      "delivery": { "channel": "vsock", "delivered_at": "2026-07-22T19:00:05Z", "one_shot": true }
+    }
+  ],
+  "evidence": {
+    "artifacts": [ { "type": "changeset", "sha256": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5" } ],
+    "custody_log": [ { "child_id": "cst2_child00000000000000000001", "request_count": 17, "lines_sha256": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6" } ]
+  },
+  "teardown": { "status": "vaporized", "at": "2026-07-22T19:43:00Z" }
+}

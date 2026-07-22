@@ -116,7 +116,7 @@
         "additionalProperties": false,
         "properties": {
           "name": { "type": "string" },
-          "ref": { "type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$", "description": "Opaque secret reference, never a value (D8). v0 accepts only env:NAME." }
+          "ref": { "type": "string", "pattern": "^(env:[A-Za-z_][A-Za-z0-9_]*|custody:[a-z0-9-]+/[a-z0-9-]+(,[a-z0-9-]+)*)$", "description": "Opaque secret reference, never a value (D8). Accepts env:NAME or custody:<key>/<action>[,<action>...] (additive per grant-materialized-rooms FR1) — the pattern covers structural shape only; no-duplicate-actions is a Go-side semantic check (checkCustodyActions)." }
         }
       }
     },

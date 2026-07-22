@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/authority/authority-receipt/v1",
+  "title": "Receipt",
+  "x-version": "authority-receipt.v1",
+  "description": "The room-authority receipt: one JSONL line per placed run that carried at least one custody: ref. Joins the grant chain (parent -> child, attenuation visible in-receipt), the delivery record, the evidence artifact digests, the custody log selector, and teardown status — self-contained, so a cold reader needs no external store. Vendor-neutral by law: no provider identifiers, no tool names beyond the portfolio's own.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "allocation_id", "grants", "evidence", "teardown"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "authority-receipt.v1" },
+    "run_id": { "type": "string", "description": "The Runway run this receipt covers." },
+    "allocation_id": { "type": "string", "description": "The rooms allocation from PlacementReceipt." },
+    "grants": {
+      "type": "array",
+      "description": "One entry per resolved custody: ref. A run's independent refs are entries here, never separate lines (§8: one derive per (run, ref)).",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "secret_name", "key", "parent_id", "parent_digest", "parent_actions",
+          "child_id", "child_digest", "actions", "bound_source", "minted_at",
+          "expiry", "delivery"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "secret_name": { "type": "string", "description": "The WorkSpec Secret.name this grant resolved." },
+          "key": { "type": "string", "description": "The custody key the ref named." },
+          "parent_id": { "type": "string", "description": "The operator-minted parent grant id." },
+          "parent_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "Digest of the parent grant record at derive time." },
+          "parent_actions": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The parent's granted actions, so attenuation is visible without an external lookup." },
+          "child_id": { "type": "string", "description": "The derived child grant id — the unambiguous selector over custody's log (Evidence.custody_log)." },
+          "child_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "Digest of the child grant record." },
+          "actions": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The child's granted actions — a subset-or-equal of parent_actions by construction (TDD §4 D1)." },
+          "bound_source": { "type": "string", "description": "The transport source (room tap address) this grant is usable from (TDD §4 D2b)." },
+          "minted_at": { "type": "string", "format": "date-time" },
+          "expiry": { "type": "string", "format": "date-time" },
+          "delivery": {
+            "type": "object",
+            "required": ["channel", "delivered_at", "one_shot"],
+            "additionalProperties": false,
+            "properties": {
+              "channel": { "type": "string", "description": "How the child token reached the guest, e.g. vsock." },
+              "delivered_at": { "type": "string", "format": "date-time" },
+              "one_shot": { "type": "boolean", "description": "Whether the delivery channel is first-read-then-delete." }
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["artifacts", "custody_log"],
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "description": "Digest refs into Result.Artifacts (contracts/execution). Type is an OPEN vocabulary — additive within the major version — so rooms can evolve artifact naming without a schema revision.",
+          "items": {
+            "type": "object",
+            "required": ["type", "sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        },
+        "custody_log": {
+          "type": "array",
+          "description": "One entry per grant: child_id is the unambiguous selector over custody's global, interleaved JSONL log; request_count and lines_sha256 pin what the selector returned at assembly time, so later log tampering is detectable against the receipt.",
+          "items": {
+            "type": "object",
+            "required": ["child_id", "request_count", "lines_sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "child_id": { "type": "string" },
+              "request_count": { "type": "integer", "minimum": 0 },
+              "lines_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "teardown": {
+      "type": "object",
+      "required": ["status", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["destroyed", "failed", "unknown"], "description": "unknown is a red flag a reader should surface, not silence (TDD §7 Flow F)." },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
