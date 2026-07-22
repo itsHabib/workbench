@@ -57,11 +57,16 @@ not the move's to fix (its contract is byte-identical output):
   (PR #88): the `i=j` skip now fires only for confirmed runs
   (`r>=minRepeats`); a stray match advances by one. Pinned by
   `TestBestTandem_RunStartNotSkippedAfterStrayMatch`; corpus gate unchanged.
-- **A Claude stream truncated right after an `assistant` `tool_use` event
+- ~~**A Claude stream truncated right after an `assistant` `tool_use` event
   decodes as "unrecognized ship event dialect"** (exit 2) instead of an
   analyzable aborted run — the dialect markers only key on `user`/`result`
   events. Same rule as above: a decoder-behavior change, owed to
-  tracelens's own iteration with a truncated-at-tool_use corpus case.
+  tracelens's own iteration with a truncated-at-tool_use corpus case.~~
+  Done 2026-07-22 (PR #88): an `assistant` event carrying a `tool_use` block
+  is now a Claude-dialect signal (cursor uses `tool_call`, codex `item.*`),
+  so the truncated run detects and decodes as an aborted trajectory. Pinned
+  by `TestDecodeShipEvents_TruncatedAtToolUseDecodesAsClaude`; a bare
+  assistant *text* event stays dialect-neutral.
 
 ## triage migration — deferred findings (2026-07-16, PR #51 review)
 
