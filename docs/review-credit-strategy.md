@@ -105,34 +105,47 @@ Nothing here changes who reviews what. It makes the system able to answer
 closes the floor's known blind spot so Phase 1 has a safe signal to route on.
 
 1. **Driver carries the tier — per head, not per PR.** Ship's driver
-   classifies each stream's PR via `triage-floor` at PR-observe time,
-   fail-closed to T2 (missing binary, exit 1, garbage output ⇒ T2 +
-   warning, never T0/T1). The tier is bound to the classified `head_sha`
-   and recomputed whenever the head moves (fix commits from later review
-   cycles can change the diff's risk class — a T1 PR that grows a
-   gate-machinery fix must re-tier); each `review_cycle` event carries the
-   tier of *its* head, and any routing always reads the current head's
-   tier. Persists on the stream, shows in status/render. Mechanism only.
-2. **Per-repo path overrides lift gate/driver/merge machinery to T2,
-   deterministically.** One rubric-shaped table in triage (e.g. ship's
-   `packages/driver/**`, workbench `cmd/gate/**`, merge/verify paths) —
-   floor + overrides, not floor alone. Repo identity enters through a new
-   `-repo owner/name` flag on `triage-floor` (today's seam is stdin-diff
-   only): callers that know the repo — driver, recipes, gate — pass it;
-   absent flag ⇒ overrides skipped and behavior is byte-identical to today,
-   so nothing global ever applies another repo's globs. Overrides only
-   raise, never lower; `-v` names each override hit. This is the
-   compensating control for HELDOUT-01's gate-machinery under-calls, cheap
-   and testable now, useful regardless of Phase 1's fate.
+   classifies each stream's PR via `triage-floor` at PR-observe time. The
+   tier is bound to the classified `head_sha` and recomputed whenever the
+   head moves (fix commits from later review cycles can change the diff's
+   risk class — a T1 PR that grows a gate-machinery fix must re-tier);
+   each `review_cycle` event carries the tier of *its* head, and any
+   routing always reads the current head's tier. Persists on the stream,
+   shows in status/render. Mechanism only.
+   **Classifier failure is its own state, never a fabricated tier:**
+   missing binary, exit 1, or garbage output records
+   `tier_source:"classifier_error"` (with no tier), warns, and routes at
+   the full-panel posture — today's behavior, strictly stronger than any
+   tier's route. A broken classifier must not silently take T2's weakened
+   route, and the spend log must not launder failure cycles into T2
+   statistics; classified heads record `tier_source:"classified"`.
+2. **Per-repo path overrides lift gate/driver/merge machinery,
+   deterministically — two bands, not one.** One rubric-shaped table in
+   triage, floor + overrides, not floor alone. The table splits by
+   consequence: **merge-authorization and signing paths floor at T3**
+   (workbench `cmd/gate/internal/state/**`, `verify/**`, grant/anchor/
+   exit-code machinery — HELDOUT-01's own labels put gate#3/#5/#9 at T3,
+   and under the parked mapping T2 would still drop @claude and the
+   adversarial pass exactly where a fail-open matters most); **broader
+   gate/driver machinery floors at T2** (ship `packages/driver/**`, the
+   rest of `cmd/gate/**`, `cmd/triage/**`). Repo identity enters through
+   a new `-repo owner/name` flag on `triage-floor` (today's seam is
+   stdin-diff only): callers that know the repo — driver, recipes, gate —
+   pass it; absent flag ⇒ overrides skipped and behavior is byte-identical
+   to today, so nothing global ever applies another repo's globs.
+   Overrides only raise, never lower; `-v` names each override hit. This
+   is the compensating control for HELDOUT-01's gate-machinery
+   under-calls, cheap and testable now, useful regardless of Phase 1's
+   fate.
 3. **`review-spend.jsonl` — a fresh file** (ship state dir, same convention
    as the store; never `labels/**`). Append-only *event* lines, keyed by
    `{repo, pr}` — not one-line-per-landed-PR, which would silently drop
    the closed, parked, stuck-open, and abandoned PRs whose reviews spent
    credits all the same (the expensive tail the loss analysis most needs):
    - a `review_cycle` event as each cycle completes:
-     `{ts, event:"review_cycle", repo, pr, head_sha, tier, cycle,
-     reviewers_requested[], findings_per_bot: {total, unique, critical},
-     claude_cost_proxy}`;
+     `{ts, event:"review_cycle", repo, pr, head_sha, tier, tier_source,
+     cycle, reviewers_requested[], findings_per_bot: {total, unique,
+     critical}, claude_cost_proxy}`;
    - a `terminal` event when the PR merges or closes:
      `{ts, event:"terminal", repo, pr, tier, cycles_used, merged,
      fixes_pr?}`. A PR still open at analysis time simply has no terminal
