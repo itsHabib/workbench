@@ -111,7 +111,7 @@ func TestMintValidateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if !strings.HasPrefix(tok, "cst1_") {
+	if !strings.HasPrefix(tok, "cst2_") {
 		t.Fatalf("token missing versioned prefix: %q", tok)
 	}
 	if g.Version != Version || g.Domain != Domain {
@@ -182,14 +182,14 @@ func TestValidateRefusals(t *testing.T) {
 		{
 			name: "no_grant_unknown_id",
 			mutate: func(_ *testing.T, _ *Store, _ Grant, _ string) (string, string, func() time.Time) {
-				return "cst1_" + strings.Repeat("d", 32) + "." + strings.Repeat("c", 64), "tracker", mintClock
+				return "cst2_" + strings.Repeat("d", 32) + "." + strings.Repeat("c", 64), "tracker", mintClock
 			},
 			want: ErrNoGrant,
 		},
 		{
 			name: "no_grant_bad_prefix",
 			mutate: func(_ *testing.T, _ *Store, _ Grant, tok string) (string, string, func() time.Time) {
-				return strings.TrimPrefix(tok, "cst1_"), "tracker", mintClock
+				return strings.TrimPrefix(tok, "cst2_"), "tracker", mintClock
 			},
 			want: ErrNoGrant,
 		},
@@ -383,8 +383,8 @@ func TestMintValidatesInputs(t *testing.T) {
 
 func TestParseTokenRejectsWrongComponentLengths(t *testing.T) {
 	cases := []string{
-		"cst1_deadbeef." + strings.Repeat("a", sha256.Size*2),
-		"cst1_" + strings.Repeat("a", 32) + ".cafef00d",
+		"cst2_deadbeef." + strings.Repeat("a", sha256.Size*2),
+		"cst2_" + strings.Repeat("a", 32) + ".cafef00d",
 	}
 	for _, tok := range cases {
 		if _, _, err := parseToken(tok); !errors.Is(err, ErrNoGrant) {
@@ -404,6 +404,184 @@ func TestSignLengthPrefixesVariableFields(t *testing.T) {
 	if sign([]byte("key"), a) == sign([]byte("key"), b) {
 		t.Fatal("distinct grants produced the same signature pre-image")
 	}
+}
+
+func TestMintDeriveValidateRoundTrip(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	_, parentTok, err := s.Mint("tracker", []string{"read", "comment", "label"}, 8*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	child, childTok, err := s.Derive(parentTok, []string{"read", "label"}, 2*time.Hour, "10.0.0.5", "agent", now)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+	if !strings.HasPrefix(childTok, "cst2_") {
+		t.Fatalf("child token missing versioned prefix: %q", childTok)
+	}
+	if child.Parent == "" || child.BoundSource != "10.0.0.5" {
+		t.Fatalf("child missing chain fields: %+v", child)
+	}
+	got, err := s.Validate(childTok, "tracker", now)
+	if err != nil {
+		t.Fatalf("Validate child: %v", err)
+	}
+	if !got.Covers("read") || !got.Covers("label") {
+		t.Fatalf("child should cover the derived subset: %v", got.Actions)
+	}
+	if got.Covers("comment") {
+		t.Fatalf("child covers an action outside its derived subset: %v", got.Actions)
+	}
+}
+
+func TestDeriveRefusesActionSuperset(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	_, parentTok, err := s.Mint("tracker", []string{"read"}, 8*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if _, _, err := s.Derive(parentTok, []string{"read", "comment"}, time.Hour, "", "agent", now); !errors.Is(err, ErrAttenuationActions) {
+		t.Fatalf("want ErrAttenuationActions, got %v", err)
+	}
+}
+
+func TestDeriveRefusesTTLPastParent(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	_, parentTok, err := s.Mint("tracker", []string{"read"}, 2*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if _, _, err := s.Derive(parentTok, []string{"read"}, 3*time.Hour, "", "agent", now); !errors.Is(err, ErrAttenuationTTL) {
+		t.Fatalf("want ErrAttenuationTTL, got %v", err)
+	}
+	// Equal expiry (child ttl == parent ttl at the same mint instant) is the
+	// boundary and must be allowed — attenuation is "no later", not "earlier".
+	if _, _, err := s.Derive(parentTok, []string{"read"}, 2*time.Hour, "", "agent", now); err != nil {
+		t.Fatalf("equal-expiry derive should be allowed: %v", err)
+	}
+}
+
+func TestDeriveRefusesGrandchild(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	_, parentTok, err := s.Mint("tracker", []string{"read", "comment"}, 8*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	_, childTok, err := s.Derive(parentTok, []string{"read"}, 4*time.Hour, "", "agent", now)
+	if err != nil {
+		t.Fatalf("Derive child: %v", err)
+	}
+	if _, _, err := s.Derive(childTok, []string{"read"}, time.Hour, "", "agent", now); !errors.Is(err, ErrChainDepth) {
+		t.Fatalf("deriving from a child must refuse ErrChainDepth, got %v", err)
+	}
+}
+
+func TestValidateRejectsDepthTwoChain(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	_, parentTok, err := s.Mint("tracker", []string{"read"}, 8*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	child, _, err := s.Derive(parentTok, []string{"read"}, 4*time.Hour, "", "agent", now)
+	if err != nil {
+		t.Fatalf("Derive child: %v", err)
+	}
+	// Hand-build a grandchild the Derive path would never mint: a valid signature
+	// over a record whose parent is itself derived. Validate must refuse it on
+	// depth, not merely trust that Derive declined to produce it.
+	id, err := newID()
+	if err != nil {
+		t.Fatalf("newID: %v", err)
+	}
+	grandchild := Grant{
+		Version: Version, Domain: Domain, ID: id, Key: "tracker",
+		Actions: []string{"read"}, Parent: child.ID,
+		MintedAt: now().UTC(), TTL: time.Hour, MintedBy: "agent",
+	}
+	grandchild.Sig = sign(readMintKey(t, s), grandchild)
+	if err := s.save(grandchild); err != nil {
+		t.Fatalf("save grandchild: %v", err)
+	}
+	if _, err := s.Validate(token(grandchild), "tracker", now); !errors.Is(err, ErrChainDepth) {
+		t.Fatalf("depth-2 chain: want ErrChainDepth, got %v", err)
+	}
+}
+
+func TestSignCoversParentAndBoundSource(t *testing.T) {
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	cases := map[string]func(g *Grant){
+		"parent":       func(g *Grant) { g.Parent = "" },
+		"bound_source": func(g *Grant) { g.BoundSource = "10.0.0.9" },
+	}
+	for name, tamper := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			_, parentTok, err := s.Mint("tracker", []string{"read"}, 8*time.Hour, "operator", now)
+			if err != nil {
+				t.Fatalf("Mint: %v", err)
+			}
+			child, childTok, err := s.Derive(parentTok, []string{"read"}, time.Hour, "10.0.0.5", "agent", now)
+			if err != nil {
+				t.Fatalf("Derive: %v", err)
+			}
+			tamper(&child)
+			data, err := json.Marshal(child)
+			if err != nil {
+				t.Fatalf("marshal tampered: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(s.stateDir, "grants", child.ID+".json"), data, 0o600); err != nil {
+				t.Fatalf("write tampered: %v", err)
+			}
+			if _, err := s.Validate(childTok, "tracker", now); !errors.Is(err, ErrBadSignature) {
+				t.Fatalf("mutating %s should break the signature: got %v", name, err)
+			}
+		})
+	}
+}
+
+func TestVersionOneTokenRefuses(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	root, _, err := s.Mint("tracker", []string{"read"}, 8*time.Hour, "operator", now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	// A cst1_ token refuses at the prefix as ErrNoGrant — the two prefixes are
+	// never both accepted.
+	legacy := "cst1_" + root.ID + "." + strings.Repeat("a", sha256.Size*2)
+	if _, err := s.Validate(legacy, "tracker", now); !errors.Is(err, ErrNoGrant) {
+		t.Fatalf("cst1_ token: want ErrNoGrant, got %v", err)
+	}
+	// A hand-built cst2_ token over a genuinely version-1 record: the signature
+	// verifies (we sign it), but the version/domain backstop still refuses.
+	id, err := newID()
+	if err != nil {
+		t.Fatalf("newID: %v", err)
+	}
+	v1 := Grant{Version: 1, Domain: Domain, ID: id, Key: "tracker", Actions: []string{"read"}, MintedAt: now().UTC(), TTL: 8 * time.Hour, MintedBy: "operator"}
+	v1.Sig = sign(readMintKey(t, s), v1)
+	if err := s.save(v1); err != nil {
+		t.Fatalf("save v1 record: %v", err)
+	}
+	if _, err := s.Validate(token(v1), "tracker", now); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("v1 record under cst2_ prefix: want ErrBadSignature (scheme), got %v", err)
+	}
+}
+
+// readMintKey reads the store's mint key bytes — used by tests that hand-build a
+// signed record the public API would never mint.
+func readMintKey(t *testing.T, s *Store) []byte {
+	t.Helper()
+	key, err := os.ReadFile(s.mintKeyPath)
+	if err != nil {
+		t.Fatalf("read mint key: %v", err)
+	}
+	return key
 }
 
 // flipLastHex flips the final hex character of s to a different hex digit.

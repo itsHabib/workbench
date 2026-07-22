@@ -60,6 +60,7 @@ func isHelp(arg string) bool {
 func commands() []command {
 	return []command{
 		{name: "grant", summary: "mint a scoped, expiring action grant", run: cmdGrant},
+		{name: "derive", summary: "mint a child grant attenuated from a parent", run: cmdDerive},
 		{name: "keys", summary: "manage vendor secrets (keys set)", run: cmdKeys},
 		{name: "serve", summary: "run the localhost credential proxy", run: cmdServe},
 	}
@@ -114,6 +115,63 @@ func cmdGrant(args []string) error {
 	}
 	fmt.Println(tok)
 	return nil
+}
+
+// cmdDerive mints a child grant attenuated from a parent token. The child
+// inherits the parent's key, so no -key flag: authority only narrows. A coded
+// attenuation refusal prints its remedy naming the exact mint command before the
+// error surfaces.
+func cmdDerive(args []string) error {
+	fs := flag.NewFlagSet("derive", flag.ContinueOnError)
+	stateDir := fs.String("state", envOr("CUSTODY_STATE", defaultStateDir()), "state directory (grants/logs/manifest) [env CUSTODY_STATE]")
+	keyDir := fs.String("mint-key-dir", envOr("CUSTODY_KEY_DIR", defaultKeyDir()), "mint-key dir; a separate trust domain, must be outside -state [env CUSTODY_KEY_DIR]")
+	parent := fs.String("grant", "", "parent grant token (cst2_...) to derive from")
+	actions := fs.String("actions", "", "comma-separated child actions; must be a subset of the parent's")
+	ttl := fs.Duration("ttl", 0, "child lifetime (e.g. 2h); must not outlast the parent")
+	boundSource := fs.String("bound-source", "", "transport source the child is usable from (empty = unbound)")
+	mintedBy := fs.String("minted-by", "operator", "free-form, UNAUTHENTICATED label of who derived this")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if *parent == "" {
+		return errors.New("derive: -grant <parent-token> is required")
+	}
+	acts, err := parseActions(*actions)
+	if err != nil {
+		return err
+	}
+	store, err := grant.NewStore(*stateDir, *keyDir)
+	if err != nil {
+		return err
+	}
+	_, tok, err := store.Derive(*parent, acts, *ttl, *boundSource, *mintedBy, time.Now)
+	if err != nil {
+		if remedy := deriveRemedy(err); remedy != "" {
+			fmt.Fprintln(os.Stderr, "custody:", remedy)
+		}
+		return err
+	}
+	fmt.Println(tok)
+	return nil
+}
+
+// deriveRemedy maps a coded attenuation refusal to a one-line remedy naming the
+// exact command to recover: a derived grant cannot be widened, so the fix is to
+// re-derive within bounds or mint a fresh root with `custody grant`. A
+// non-attenuation error carries its own message and gets no remedy.
+func deriveRemedy(err error) string {
+	switch {
+	case errors.Is(err, grant.ErrAttenuationActions):
+		return "remedy: pass -actions that are a subset of the parent's, or mint a fresh root: custody grant -key <key> -actions <actions> -ttl <ttl>"
+	case errors.Is(err, grant.ErrAttenuationTTL):
+		return "remedy: shorten -ttl to within the parent's remaining life, or mint a fresh root: custody grant -key <key> -actions <actions> -ttl <ttl>"
+	case errors.Is(err, grant.ErrChainDepth):
+		return "remedy: derive from the root grant (depth is capped at 1), or mint a fresh root: custody grant -key <key> -actions <actions> -ttl <ttl>"
+	}
+	return ""
 }
 
 // parseActions splits -actions on commas, trims each, and drops empties so

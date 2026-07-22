@@ -7,9 +7,15 @@
 // canonical scope, coded refusals, loud-on-missing-key) rather than imported:
 // per the repo's one rule a tenant shares types through contracts, never
 // another tenant's decision code. Grants are versioned from the first commit
-// (a `version`+`domain` field, a visibly versioned `cst1_` token prefix) so a
+// (a `version`+`domain` field, a visibly versioned `cst2_` token prefix) so a
 // later lift of the shared mechanism into contracts stays mechanical and
 // non-breaking — spec §4 D2, copy-then-converge.
+//
+// Grants also chain: Derive mints a child attenuated from a live parent —
+// narrower on every axis (actions a subset, expiry no later, delegation depth
+// capped at one) — with the attenuation carried in the signed envelope, not by
+// caller discipline. A child names its parent and the transport source it is
+// bound to; both join the signature.
 package grant
 
 import (
@@ -31,12 +37,14 @@ import (
 // is a field bump, not a silent reinterpretation. Bump Version only alongside a
 // signing-scheme change; grants are re-minted across it (short TTLs, mint-fresh).
 const (
-	Version = 1
+	Version = 2
 	Domain  = "custody"
 
 	// tokenPrefix versions the wire token so a scheme change is visible in the
-	// token itself, not just the record.
-	tokenPrefix = "cst1_"
+	// token itself, not just the record. Version 2 added parent-chaining and the
+	// bound source to the signed pre-image; a version-1 cst1_ token fails at the
+	// prefix and refuses as ErrNoGrant — the two prefixes are never both accepted.
+	tokenPrefix = "cst2_"
 )
 
 // Grant is the signed capability body. MintedBy is free-form and
@@ -44,15 +52,22 @@ const (
 // mint, not a verified identity. Mint authority is key custody (whoever can
 // read the mint key can sign), never a property of this field.
 type Grant struct {
-	Version  int           `json:"version"`
-	Domain   string        `json:"domain"`
-	ID       string        `json:"id"`
-	Key      string        `json:"key"`     // vendor key name the grant is scoped to
-	Actions  []string      `json:"actions"` // action names this grant covers
-	MintedAt time.Time     `json:"minted_at"`
-	TTL      time.Duration `json:"ttl"`
-	MintedBy string        `json:"minted_by"`
-	Sig      string        `json:"-"` // bearer proof: returned in the token, never persisted
+	Version int      `json:"version"`
+	Domain  string   `json:"domain"`
+	ID      string   `json:"id"`
+	Key     string   `json:"key"`     // vendor key name the grant is scoped to
+	Actions []string `json:"actions"` // action names this grant covers
+	// Parent is the id of the grant this was derived from; empty means an
+	// operator-minted root. BoundSource is the transport source the grant is
+	// usable from; empty means unbound (usable on the localhost listener only —
+	// enforcement of the bind itself is P3, out of scope here). Both join the
+	// signature, so neither can be widened in the record without breaking it.
+	Parent      string        `json:"parent,omitempty"`
+	BoundSource string        `json:"bound_source,omitempty"`
+	MintedAt    time.Time     `json:"minted_at"`
+	TTL         time.Duration `json:"ttl"`
+	MintedBy    string        `json:"minted_by"`
+	Sig         string        `json:"-"` // bearer proof: returned in the token, never persisted
 }
 
 // Expiry is MintedAt + TTL. A grant is refused at or after this instant.
@@ -75,6 +90,16 @@ var (
 	ErrExpired      = errors.New("refused_expired")
 	ErrBadSignature = errors.New("refused_bad_signature")
 	ErrWrongKey     = errors.New("refused_wrong_key")
+)
+
+// Attenuation refusals: Derive mints a child only when it narrows every axis.
+// Each is a coded error callers branch on. ErrChainDepth also fires at Validate
+// time for a presented chain deeper than one, so a depth-2 record assembled
+// outside Derive refuses per-request, not only at mint.
+var (
+	ErrAttenuationActions = errors.New("refused_attenuation_actions")
+	ErrAttenuationTTL     = errors.New("refused_attenuation_ttl")
+	ErrChainDepth         = errors.New("refused_chain_depth")
 )
 
 // ErrKeyMissing fires when the mint key is absent where one must already exist
@@ -187,11 +212,31 @@ func (s *Store) RequireMintKey(allowInit bool) error {
 	return fmt.Errorf("%w: %s — refusing to mint with a fresh mint key; point -mint-key-dir at your canonical key dir, or pass -init to create one here", ErrKeyMissing, s.mintKeyPath)
 }
 
-// Validate parses a token, loads its record, and checks signature, key scope,
-// and TTL for time now — returning the parsed grant so the caller can extract
-// the action set. Refusal order is: no usable grant, bad signature, wrong key,
-// expired. Signature is checked before any scope field is trusted.
+// Validate parses a token, loads its record, and checks signature, chain depth,
+// key scope, and TTL for time now — returning the parsed grant so the caller can
+// extract the action set. Refusal order is: no usable grant, bad signature, over
+// depth, wrong key, expired. Signature is checked before any scope field is
+// trusted; depth is checked before key/expiry so a forged deep chain refuses
+// even for the right key at the right time.
 func (s *Store) Validate(tok, key string, now func() time.Time) (Grant, error) {
+	g, err := s.authenticate(tok)
+	if err != nil {
+		return Grant{}, err
+	}
+	if g.Key != key {
+		return Grant{}, fmt.Errorf("%w: grant is for %q, asked %q", ErrWrongKey, g.Key, key)
+	}
+	if !now().UTC().Before(g.Expiry()) {
+		return Grant{}, fmt.Errorf("%w: expired %s", ErrExpired, g.Expiry().Format(time.RFC3339))
+	}
+	return g, nil
+}
+
+// authenticate does the key- and time-independent checks — parse, load, id
+// match, signature, scheme, chain depth — and returns the parsed grant. Validate
+// layers key scope and expiry on top; Derive reuses it to authenticate a parent
+// whose key the caller does not restate, since a child inherits the parent's key.
+func (s *Store) authenticate(tok string) (Grant, error) {
 	id, sig, err := parseToken(tok)
 	if err != nil {
 		return Grant{}, err
@@ -213,13 +258,102 @@ func (s *Store) Validate(tok, key string, now func() time.Time) (Grant, error) {
 	if g.Version != Version || g.Domain != Domain {
 		return Grant{}, fmt.Errorf("%w: unsupported grant scheme", ErrBadSignature)
 	}
-	if g.Key != key {
-		return Grant{}, fmt.Errorf("%w: grant is for %q, asked %q", ErrWrongKey, g.Key, key)
-	}
-	if !now().UTC().Before(g.Expiry()) {
-		return Grant{}, fmt.Errorf("%w: expired %s", ErrExpired, g.Expiry().Format(time.RFC3339))
+	if err := s.checkChainDepth(g); err != nil {
+		return Grant{}, err
 	}
 	return g, nil
+}
+
+// checkChainDepth refuses a presented grant whose parent record itself carries a
+// parent: delegation depth is capped at one, enforced here so a depth-2 chain
+// assembled outside Derive (an old binary, a hand-built record) refuses per
+// request, not only when Derive would decline to mint it. It loads the parent
+// record for its own parent field alone — not a live re-check of the parent's
+// signature chain — keeping validation pure crypto plus local records.
+func (s *Store) checkChainDepth(g Grant) error {
+	if g.Parent == "" {
+		return nil
+	}
+	parent, err := s.load(g.Parent)
+	if err != nil {
+		return err
+	}
+	if parent.Parent != "" {
+		return fmt.Errorf("%w: parent %s is itself derived", ErrChainDepth, g.Parent)
+	}
+	return nil
+}
+
+// Derive mints a child grant attenuated from a live parent token. It
+// authenticates the parent, refuses to chain past depth one, then refuses unless
+// the child narrows every axis — actions a subset of the parent's, expiry at or
+// before the parent's. The child inherits the parent's key, names the parent,
+// carries the bound source, is signed and persisted beside grants. Attenuation
+// is enforced in this signed envelope, never by caller discipline.
+func (s *Store) Derive(parentTok string, actions []string, ttl time.Duration, boundSource, mintedBy string, now func() time.Time) (Grant, string, error) {
+	if len(actions) == 0 {
+		return Grant{}, "", errors.New("custody: at least one action required")
+	}
+	if ttl <= 0 {
+		return Grant{}, "", errors.New("custody: ttl must be positive")
+	}
+	parent, err := s.authenticate(parentTok)
+	if err != nil {
+		return Grant{}, "", err
+	}
+	if !now().UTC().Before(parent.Expiry()) {
+		return Grant{}, "", fmt.Errorf("%w: parent expired %s", ErrExpired, parent.Expiry().Format(time.RFC3339))
+	}
+	if parent.Parent != "" {
+		return Grant{}, "", fmt.Errorf("%w: parent %s is itself derived", ErrChainDepth, parent.ID)
+	}
+	if !subset(actions, parent.Actions) {
+		return Grant{}, "", fmt.Errorf("%w: child actions %v exceed parent %v", ErrAttenuationActions, actions, parent.Actions)
+	}
+	id, err := newID()
+	if err != nil {
+		return Grant{}, "", err
+	}
+	child := Grant{
+		Version:     Version,
+		Domain:      Domain,
+		ID:          id,
+		Key:         parent.Key,
+		Actions:     append([]string(nil), actions...),
+		Parent:      parent.ID,
+		BoundSource: boundSource,
+		MintedAt:    now().UTC(),
+		TTL:         ttl,
+		MintedBy:    mintedBy,
+	}
+	if child.Expiry().After(parent.Expiry()) {
+		return Grant{}, "", fmt.Errorf("%w: child expiry %s after parent expiry %s", ErrAttenuationTTL, child.Expiry().Format(time.RFC3339), parent.Expiry().Format(time.RFC3339))
+	}
+	mintKey, err := loadKey(s.mintKeyPath)
+	if err != nil {
+		return Grant{}, "", err
+	}
+	child.Sig = sign(mintKey, child)
+	if err := s.save(child); err != nil {
+		return Grant{}, "", err
+	}
+	return child, token(child), nil
+}
+
+// subset reports whether every action in child appears in parent — the action
+// axis of attenuation. The parent set is small (a grant's action list), so a map
+// keeps the check linear without an ordering assumption.
+func subset(child, parent []string) bool {
+	set := make(map[string]struct{}, len(parent))
+	for _, a := range parent {
+		set[a] = struct{}{}
+	}
+	for _, a := range child {
+		if _, ok := set[a]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // save writes the record to <state>/grants/<id>.json. The grants dir and record
@@ -256,10 +390,10 @@ func (s *Store) load(id string) (Grant, error) {
 	return g, nil
 }
 
-// token renders the wire form cst1_<id>.<sig>.
+// token renders the wire form cst2_<id>.<sig>.
 func token(g Grant) string { return tokenPrefix + g.ID + "." + g.Sig }
 
-// parseToken splits cst1_<id>.<sig> and rejects anything malformed. id and sig
+// parseToken splits cst2_<id>.<sig> and rejects anything malformed. id and sig
 // are hex (Mint emits only hex), so validating the alphabet here also stops a
 // crafted token from steering the record path outside the grants dir — a
 // structurally invalid token is ErrNoGrant (no usable grant to check).
@@ -276,9 +410,11 @@ func parseToken(tok string) (id, sig string, err error) {
 }
 
 // sign is the HMAC over the canonical scope. Every field a scope lives in is
-// covered at a fixed position; a length-prefixed action list keeps
+// covered at a fixed position — version, domain, id, key, minted-at, ttl,
+// minted-by, parent, bound-source, then a length-prefixed action list that keeps
 // ["a,b"] distinct from ["a","b"]. A field outside this pre-image would be
-// silently forgeable, so extend it only alongside a Version bump.
+// silently forgeable, so extend it only alongside a Version bump; parent and
+// bound-source joined it at Version 2.
 func sign(key []byte, g Grant) string {
 	mac := hmac.New(sha256.New, key)
 	fmt.Fprint(mac, g.Version)
@@ -288,6 +424,8 @@ func sign(key []byte, g Grant) string {
 	writeSignField(mac, g.MintedAt.Format(time.RFC3339Nano))
 	writeSignField(mac, g.TTL.String())
 	writeSignField(mac, g.MintedBy)
+	writeSignField(mac, g.Parent)
+	writeSignField(mac, g.BoundSource)
 	fmt.Fprint(mac, "|", len(g.Actions))
 	for _, a := range g.Actions {
 		writeSignField(mac, a)
