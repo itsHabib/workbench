@@ -109,6 +109,47 @@ func TestValidateWorkSpec_Rejections(t *testing.T) {
 	}
 }
 
+// TestValidateWorkSpec_SecretRefGrammar is the grammar table test for the
+// two secret-ref schemes (D8): env: is unchanged; custody: admits a
+// key/action[,action...] shape over custody's name alphabet (lowercase
+// alnum + '-') and refuses malformed shapes and duplicate actions — the
+// no-duplicate-actions rule the regex alone cannot express.
+func TestValidateWorkSpec_SecretRefGrammar(t *testing.T) {
+	cases := []struct {
+		name  string
+		ref   string
+		admit bool
+	}{
+		{"env unchanged", "env:TRACKER_TOKEN", true},
+		{"custody single action", "custody:tracker/read", true},
+		{"custody multi action", "custody:tracker/read,comment", true},
+		{"custody hyphenated key and action", "custody:my-key/do-thing", true},
+		{"custody bare scheme", "custody:", false},
+		{"custody missing action", "custody:tracker/", false},
+		{"custody missing key", "custody:/read", false},
+		{"custody no slash", "custody:tracker", false},
+		{"custody duplicate actions", "custody:tracker/read,read", false},
+		{"custody uppercase key", "custody:Tracker/read", false},
+		{"custody empty action in list", "custody:tracker/read,", false},
+		{"custody trailing comma actions", "custody:tracker/read,comment,", false},
+		{"unknown scheme", "vault:x", false},
+		{"inline value", "hunter2", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := decodeWorkSpecFixture(t, "work-spec-name.json")
+			w.Secrets[0].Ref = c.ref
+			err := ValidateWorkSpec(w)
+			if c.admit && err != nil {
+				t.Errorf("%q must admit: %v", c.ref, err)
+			}
+			if !c.admit && err == nil {
+				t.Errorf("%q must refuse", c.ref)
+			}
+		})
+	}
+}
+
 func TestValidateRequest_Valid(t *testing.T) {
 	for _, f := range []string{"request.json", "request-local.json", "request-rooms.json"} {
 		if err := ValidateRequest(decodeRequestFixture(t, f)); err != nil {

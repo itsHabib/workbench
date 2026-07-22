@@ -1,0 +1,8 @@
+{
+  "schema_version": "authority-receipt.v2",
+  "run_id": "run_01JQRUN0000000000000000RUN0",
+  "allocation_id": "alloc_01JQALLOC00000000000000001",
+  "grants": [],
+  "evidence": { "artifacts": [], "custody_log": [] },
+  "teardown": { "status": "destroyed", "at": "2026-07-22T19:43:00Z" }
+}
