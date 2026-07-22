@@ -10,6 +10,7 @@
 package manifest
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,8 +77,14 @@ type Predicate struct {
 
 // Named error classes so callers (and tests) branch on the code, never prose.
 var (
-	ErrUnknownField       = errors.New("manifest_unknown_field")
-	ErrTrailingData       = errors.New("manifest_trailing_data")
+	ErrUnknownField = errors.New("manifest_unknown_field")
+	ErrTrailingData = errors.New("manifest_trailing_data")
+	// ErrDuplicateField marks a manifest that carries the same object key twice.
+	// encoding/json silently keeps the last value, so a duplicated key would let
+	// a tampered manifest present one value to a human reading top-to-bottom and
+	// load another — this rejects it so load stays fail-closed (spec §5). The
+	// error names the duplicated key.
+	ErrDuplicateField     = errors.New("manifest_duplicate_field")
 	ErrMissingField       = errors.New("manifest_missing_field")
 	ErrUnsupportedVersion = errors.New("manifest_unsupported_version")
 	ErrBadSecretRef       = errors.New("manifest_bad_secret_ref")
@@ -108,7 +115,14 @@ func LoadFile(path string) (*Manifest, error) {
 // all load-time errors. On success the returned *Manifest satisfies every §5
 // invariant.
 func Load(r io.Reader) (*Manifest, error) {
-	m, err := decode(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("manifest: read: %w", err)
+	}
+	if err := rejectDuplicateKeys(data); err != nil {
+		return nil, err
+	}
+	m, err := decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
