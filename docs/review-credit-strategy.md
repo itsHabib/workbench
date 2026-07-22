@@ -111,14 +111,27 @@ closes the floor's known blind spot so Phase 1 has a safe signal to route on.
 2. **Per-repo path overrides lift gate/driver/merge machinery to T2,
    deterministically.** One rubric-shaped table in triage (e.g. ship's
    `packages/driver/**`, workbench `cmd/gate/**`, merge/verify paths) —
-   floor + overrides, not floor alone. This is the compensating control for
-   HELDOUT-01's gate-machinery under-calls, cheap and testable now, useful
-   regardless of Phase 1's fate.
+   floor + overrides, not floor alone. Repo identity enters through a new
+   `-repo owner/name` flag on `triage-floor` (today's seam is stdin-diff
+   only): callers that know the repo — driver, recipes, gate — pass it;
+   absent flag ⇒ overrides skipped and behavior is byte-identical to today,
+   so nothing global ever applies another repo's globs. Overrides only
+   raise, never lower; `-v` names each override hit. This is the
+   compensating control for HELDOUT-01's gate-machinery under-calls, cheap
+   and testable now, useful regardless of Phase 1's fate.
 3. **`review-spend.jsonl` — a fresh file** (ship state dir, same convention
-   as the store; never `labels/**`). One line per landed PR:
-   `{ts, repo, pr, head_sha, tier, reviewers_requested[], cycles_used,
-   findings_per_bot: {total, unique, critical}, claude_cost_proxy, fixes_pr?,
-   merged}`.
+   as the store; never `labels/**`). Append-only *event* lines, keyed by
+   `{repo, pr}` — not one-line-per-landed-PR, which would silently drop
+   the closed, parked, stuck-open, and abandoned PRs whose reviews spent
+   credits all the same (the expensive tail the loss analysis most needs):
+   - a `review_cycle` event as each cycle completes:
+     `{ts, event:"review_cycle", repo, pr, head_sha, tier, cycle,
+     reviewers_requested[], findings_per_bot: {total, unique, critical},
+     claude_cost_proxy}`;
+   - a `terminal` event when the PR merges or closes:
+     `{ts, event:"terminal", repo, pr, tier, cycles_used, merged,
+     fixes_pr?}`. A PR still open at analysis time simply has no terminal
+     event — visible, not missing.
    - `claude_cost_proxy`: a token proxy per claude review (diff bytes in +
      review bytes out) — the number that answers "are reviews a material
      fraction of the pool, or are driver runs the real drain".
@@ -129,7 +142,7 @@ closes the floor's known blind spot so Phase 1 has a safe signal to route on.
      joined later. This is the only signal that ever catches "the cut
      reviewer would have found it".
    - Session-engine parity: in `--engine session` runs the skill appends the
-     same record itself (ship's land hook never fires there).
+     same records itself (ship's land hook never fires there).
    - Best-effort append — a write failure warns, never blocks a land.
 4. **Known coverage gap, stated:** hand-opened PRs outside the driver get no
    spend record until the recipe itself runs `triage-floor` at PR-open —
@@ -138,8 +151,15 @@ closes the floor's known blind spot so Phase 1 has a safe signal to route on.
 
 **Rollback/decision triggers (defined now, before any cut):**
 
-- If after ~30 days the cost proxy shows claude reviews < ~20% of Max-pool
-  spend, Phase 1's @claude cut is not worth its risk — retarget driver runs.
+- If after ~30 days claude reviews come out < ~20% of Max-pool spend,
+  Phase 1's @claude cut is not worth its risk — retarget driver runs.
+  **Denominator:** the proxy alone can't decide this — it has no pool
+  total. At re-eval the operator pulls the Claude usage view for the same
+  window (the whole Max pool: interactive + driver runs + reviews); the
+  numerator is the calibrated proxy sum (bytes/4 ≈ tokens). Coarse is
+  fine — the trigger asks "is this share material", not for a decimal.
+  If a finer split is wanted, driver-run transcripts already exist in
+  ship's store to proxy the driver share the same way.
 - If escaped-defect linkage ever shows a fixed defect whose original PR was
   T0/T1, that tier's reviewer set gets *stronger*, not weaker, until the
   holdout says otherwise.
