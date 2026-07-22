@@ -14,11 +14,11 @@ import (
 // credential; secret bytes never appear because there are none to leak.
 type unavailableStore struct{}
 
-func (unavailableStore) Get(ref string) ([]byte, error) {
+func (unavailableStore) Get(_ string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: credential store unsupported on this platform", credstore.ErrSecretUnavailable)
 }
 
-func (unavailableStore) Set(ref string, secret []byte) error {
+func (unavailableStore) Set(ref string, _ []byte) error {
 	return fmt.Errorf("credstore: %q: credential store unsupported on this platform", ref)
 }
 
