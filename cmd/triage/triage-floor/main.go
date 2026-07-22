@@ -18,9 +18,17 @@ import (
 )
 
 func main() {
-	repo := flag.String("repo", "", "repository identity owner/name; enables that repo's compiled-in path overrides (absent = none)")
-	verbose := flag.Bool("v", false, "human-readable output")
-	flag.Parse()
+	// Explicit ContinueOnError FlagSet, not the default ExitOnError: this binary
+	// is a load-bearing seam whose contract is exit 0 = classification, 1 =
+	// operational failure. stdlib ExitOnError would exit 0 on -h and 2 on a bad
+	// flag, both of which gate's exit-code ladder misreads. Map any parse error
+	// (including -h) to exit 1 so the seam only ever returns 0 for a real result.
+	fs := flag.NewFlagSet("triage-floor", flag.ContinueOnError)
+	repo := fs.String("repo", "", "repository identity owner/name; enables that repo's compiled-in path overrides (absent = none)")
+	verbose := fs.Bool("v", false, "human-readable output")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		os.Exit(1)
+	}
 
 	d, err := floor.ParseUnifiedDiff(os.Stdin)
 	if err != nil {
