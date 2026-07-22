@@ -96,6 +96,58 @@ func TestLoadErrorClasses(t *testing.T) {
 	}
 }
 
+// TestDuplicateKeys pins that a repeated object key fails closed with
+// ErrDuplicateField at any nesting depth — encoding/json would otherwise keep
+// the last value silently — while a clean manifest still loads.
+func TestDuplicateKeys(t *testing.T) {
+	t.Run("fixture top-level version", func(t *testing.T) {
+		_, err := LoadFile("testdata/duplicate-key.json")
+		if !errors.Is(err, ErrDuplicateField) {
+			t.Fatalf("error = %v, want ErrDuplicateField", err)
+		}
+		if !strings.Contains(err.Error(), "version") {
+			t.Fatalf("error %q does not name the duplicated key", err)
+		}
+	})
+
+	// A duplicate buried five objects deep — inside a rule's query predicate —
+	// must be caught just like a top-level one: keys > tracker > actions > read
+	// > rules[0] > query > state > (occurs repeated).
+	deepNested := `{
+	  "version": 1,
+	  "keys": {
+	    "tracker": {
+	      "secret": "wincred:tracker-pat",
+	      "upstream": "https://issues.example.com",
+	      "inject": [ { "kind": "header", "name": "Authorization", "template": "Bearer {secret}" } ],
+	      "actions": {
+	        "read": {
+	          "rules": [
+	            { "methods": ["GET"], "path": "/x",
+	              "query": { "state": { "equals": "released", "occurs": "once", "occurs": "once" } } }
+	          ]
+	        }
+	      }
+	    }
+	  }
+	}`
+	t.Run("nested inside query predicate", func(t *testing.T) {
+		_, err := Load(strings.NewReader(deepNested))
+		if !errors.Is(err, ErrDuplicateField) {
+			t.Fatalf("error = %v, want ErrDuplicateField", err)
+		}
+		if !strings.Contains(err.Error(), "occurs") {
+			t.Fatalf("error %q does not name the duplicated key", err)
+		}
+	})
+
+	t.Run("clean manifest still loads", func(t *testing.T) {
+		if _, err := LoadFile("testdata/valid.json"); err != nil {
+			t.Fatalf("clean manifest failed to load: %v", err)
+		}
+	})
+}
+
 func TestVersion(t *testing.T) {
 	cases := []struct {
 		name string
