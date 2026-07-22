@@ -108,15 +108,22 @@ func (WinCred) Set(ref string, secret []byte) error {
 	if err != nil {
 		return fmt.Errorf("credstore: username: %w", err)
 	}
+	// blob is custody's own copy of the plaintext so we can scrub it once the OS
+	// store holds its own copy, without mutating the caller's buffer. Best-effort:
+	// Go-heap residue (string/GC copies) can still linger — acceptable under spec
+	// §8.1's threat model. The defer keeps blob referenced across the syscall.
+	blob := make([]byte, len(secret))
+	copy(blob, secret)
+	defer zero(blob)
 	cred := credentialW{
 		Type:               credTypeGeneric,
 		TargetName:         target,
 		Persist:            credPersistLocalMachine,
-		CredentialBlobSize: uint32(len(secret)),
+		CredentialBlobSize: uint32(len(blob)),
 		UserName:           user,
 	}
-	if len(secret) > 0 {
-		cred.CredentialBlob = &secret[0]
+	if len(blob) > 0 {
+		cred.CredentialBlob = &blob[0]
 	}
 	r1, _, callErr := procCredWriteW.Call(uintptr(unsafe.Pointer(&cred)), 0)
 	if r1 == 0 {

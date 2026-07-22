@@ -24,7 +24,12 @@ func (f *fakeStore) Get(ref string) ([]byte, error) {
 }
 
 func (f *fakeStore) Set(ref string, secret []byte) error {
-	f.secrets[ref] = secret
+	// Copy like a real backend hands bytes to the OS store — KeysSet best-effort
+	// wipes the caller's buffer after Set returns, so recording the slice by
+	// reference would observe the scrub, not the secret.
+	cp := make([]byte, len(secret))
+	copy(cp, secret)
+	f.secrets[ref] = cp
 	return nil
 }
 
@@ -37,8 +42,6 @@ func TestKeysSetTrimsTrailingNewline(t *testing.T) {
 		{"lf", "s3cr3t\n", "s3cr3t"},
 		{"crlf", "s3cr3t\r\n", "s3cr3t"},
 		{"none", "s3cr3t", "s3cr3t"},
-		{"bare-cr-preserved", "s3cr3t\r", "s3cr3t\r"},
-		{"interior-preserved", "line1\nline2\n", "line1\nline2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,6 +52,69 @@ func TestKeysSetTrimsTrailingNewline(t *testing.T) {
 			got := string(f.secrets["ref"])
 			if got != tc.want {
 				t.Fatalf("stored %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestKeysSetRejectsControlChars covers the header/request-splitting screen: a
+// secret carrying an interior control byte (CR, LF, NUL, or any other) is
+// refused with ErrSecretControlChar and never stored. custody serve substitutes
+// the stored secret into an injected `Authorization: Bearer <secret>` header, so
+// these bytes are an injection vector. Failure messages must not print the
+// secret bytes.
+func TestKeysSetRejectsControlChars(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"embedded-cr", "abc\rdef"},
+		{"embedded-lf", "abc\ndef"},
+		{"embedded-nul", "abc\x00def"},
+		{"bare-trailing-cr", "s3cr3t\r"},
+		{"interior-lf-after-trim", "line1\nline2\n"},
+		{"embedded-del", "abc\x7fdef"},
+		{"embedded-tab", "abc\tdef"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			err := KeysSet(f, "ref", strings.NewReader(tc.in))
+			if !errors.Is(err, ErrSecretControlChar) {
+				t.Fatalf("error = %v, want ErrSecretControlChar", err)
+			}
+			if _, ok := f.secrets["ref"]; ok {
+				t.Fatal("secret with control byte must not be stored")
+			}
+			// The error must name only the ref, never echo the secret bytes.
+			if strings.Contains(err.Error(), tc.in) {
+				t.Fatal("error leaked the secret bytes")
+			}
+		})
+	}
+}
+
+// TestKeysSetAcceptsCleanSecret confirms the screen does not reject a legitimate
+// secret, including one arriving with a single trailing newline (trimmed before
+// the control-char check runs).
+func TestKeysSetAcceptsCleanSecret(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "sk-live-abc123XYZ", "sk-live-abc123XYZ"},
+		{"trailing-lf", "sk-live-abc123XYZ\n", "sk-live-abc123XYZ"},
+		{"printable-punct", "p@ss:w0rd/=+-_.~", "p@ss:w0rd/=+-_.~"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			if err := KeysSet(f, "ref", strings.NewReader(tc.in)); err != nil {
+				t.Fatalf("KeysSet rejected a clean secret: %v", err)
+			}
+			if got := string(f.secrets["ref"]); got != tc.want {
+				t.Fatalf("stored wrong bytes (len %d, want len %d)", len(got), len(tc.want))
 			}
 		})
 	}
