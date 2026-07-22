@@ -55,7 +55,10 @@ func Floor(st *state.Store, run, diffEvidenceID, floorBin string, subject Subjec
 		return state.Artifact{}, fmt.Errorf("verify: parse diff evidence: %w", err)
 	}
 
-	cmd := exec.Command(floorBin)
+	// Pass the PR's repo so triage-floor applies that repo's compiled-in path
+	// overrides — the deterministic compensating control for the gate-machinery
+	// blind spot. An empty repo is inert (the floor applies no overrides).
+	cmd := exec.Command(floorBin, "-repo", subject.Repo)
 	cmd.Stdin = strings.NewReader(body.Diff)
 	var out bytes.Buffer
 	cmd.Stdout = &out
