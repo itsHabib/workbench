@@ -119,8 +119,8 @@ func cmdGrant(args []string) error {
 
 // cmdDerive mints a child grant attenuated from a parent token. The child
 // inherits the parent's key, so no -key flag: authority only narrows. A coded
-// attenuation refusal prints its remedy naming the exact mint command before the
-// error surfaces.
+// attenuation refusal prints a remedy — the mint command to run, with
+// placeholders for the scope to fill in — before the error surfaces.
 func cmdDerive(args []string) error {
 	fs := flag.NewFlagSet("derive", flag.ContinueOnError)
 	stateDir := fs.String("state", envOr("CUSTODY_STATE", defaultStateDir()), "state directory (grants/logs/manifest) [env CUSTODY_STATE]")

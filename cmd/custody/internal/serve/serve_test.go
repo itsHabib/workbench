@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -55,11 +57,12 @@ func (c *capture) record(r *http.Request) {
 // harness wires an engine over a TLS upstream, a real grant store, a fake secret
 // store, an in-memory log, and a fixed clock.
 type harness struct {
-	engine  *Engine
-	token   string
-	log     *bytes.Buffer
-	now     time.Time
-	secrets fakeSecrets
+	engine   *Engine
+	token    string
+	log      *bytes.Buffer
+	now      time.Time
+	secrets  fakeSecrets
+	stateDir string
 }
 
 func manifestJSON(upstream string) string {
@@ -118,7 +121,7 @@ func newHarness(t *testing.T, upstream *httptest.Server, actions []string) *harn
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &harness{engine: engine, token: token, log: logBuf, now: now, secrets: secrets}
+	return &harness{engine: engine, token: token, log: logBuf, now: now, secrets: secrets, stateDir: stateDir}
 }
 
 // upstreamOK returns a TLS upstream that records requests and answers 200.
@@ -478,6 +481,70 @@ func TestNoSecretInLogsOrErrors(t *testing.T) {
 	// The grant token (bearer proof) must not appear verbatim in the log either.
 	if strings.Contains(h.log.String(), h.token) {
 		t.Fatal("grant token leaked into the log")
+	}
+}
+
+// A depth-2 chain reaching the proxy refuses as refused_chain_depth over HTTP —
+// the coded refusal survives the boundary, is a 401, and never forwards.
+func TestFlowChainDepthRefused(t *testing.T) {
+	cp := &capture{}
+	up := upstreamOK(t, cp)
+	h := newHarness(t, up, []string{"read"})
+	now := func() time.Time { return h.now }
+
+	// A legitimate depth-1 child of the root grant.
+	_, childTok, err := h.engine.grants.Derive(h.token, []string{"read"}, time.Hour, "", "test", now)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+	// Give the child's parent (the root) a parent of its own in the persisted
+	// record — the depth-2 shape an old binary could leave. Validate reads the
+	// parent record's parent field without re-signing it, so no re-sign is needed.
+	deepenParent(t, h.stateDir, tokenID(t, h.token))
+
+	w := do(h.engine, "GET", "/tracker/rest/api/2/issue/PROJ-1", http.Header{grantHeader: {childTok}}, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", w.Code, w.Body.String())
+	}
+	if got := decodeErr(t, w).Code; got != "refused_chain_depth" {
+		t.Fatalf("code = %q, want refused_chain_depth", got)
+	}
+	if cp.calls != 0 {
+		t.Fatal("a depth-2 chain must never reach upstream")
+	}
+}
+
+// tokenID extracts the grant id from a cst2_<id>.<sig> token.
+func tokenID(t *testing.T, tok string) string {
+	t.Helper()
+	body := strings.TrimPrefix(tok, "cst2_")
+	id, _, ok := strings.Cut(body, ".")
+	if !ok {
+		t.Fatalf("malformed token %q", tok)
+	}
+	return id
+}
+
+// deepenParent rewrites the grant record at id to carry a non-empty parent,
+// turning any grant derived from it into a depth-2 chain.
+func deepenParent(t *testing.T, stateDir, id string) {
+	t.Helper()
+	path := filepath.Join(stateDir, "grants", id+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read grant %s: %v", id, err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal grant %s: %v", id, err)
+	}
+	rec["parent"] = strings.Repeat("a", 32)
+	out, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal grant %s: %v", id, err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatalf("write grant %s: %v", id, err)
 	}
 }
 

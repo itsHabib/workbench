@@ -573,6 +573,47 @@ func TestVersionOneTokenRefuses(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsMalformedParentID(t *testing.T) {
+	s := newStore(t)
+	now := fixedClock(time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC))
+	// Mint a root so the mint key exists to sign the hand-built records below.
+	if _, _, err := s.Mint("tracker", []string{"read"}, 8*time.Hour, "operator", now); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	mintKey := readMintKey(t, s)
+	// A record's parent id is record-controlled and becomes a filename component.
+	// Each of these is validly signed — the signature passes — but the parent id
+	// fails the id-alphabet guard before it can steer a load outside the grants
+	// dir, so validation refuses as ErrNoGrant, never a traversal.
+	cases := map[string]string{
+		"traversal":  "../evil",
+		"uppercase":  strings.Repeat("A", 32),
+		"too_short":  strings.Repeat("a", 31),
+		"too_long":   strings.Repeat("a", 33),
+		"separators": strings.Repeat("a", 16) + "/" + strings.Repeat("b", 15),
+	}
+	for name, parent := range cases {
+		t.Run(name, func(t *testing.T) {
+			id, err := newID()
+			if err != nil {
+				t.Fatalf("newID: %v", err)
+			}
+			child := Grant{
+				Version: Version, Domain: Domain, ID: id, Key: "tracker",
+				Actions: []string{"read"}, Parent: parent,
+				MintedAt: now().UTC(), TTL: time.Hour, MintedBy: "agent",
+			}
+			child.Sig = sign(mintKey, child)
+			if err := s.save(child); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			if _, err := s.Validate(token(child), "tracker", now); !errors.Is(err, ErrNoGrant) {
+				t.Fatalf("malformed parent %q: want ErrNoGrant, got %v", parent, err)
+			}
+		})
+	}
+}
+
 // readMintKey reads the store's mint key bytes — used by tests that hand-build a
 // signed record the public API would never mint.
 func readMintKey(t *testing.T, s *Store) []byte {

@@ -269,10 +269,16 @@ func (s *Store) authenticate(tok string) (Grant, error) {
 // assembled outside Derive (an old binary, a hand-built record) refuses per
 // request, not only when Derive would decline to mint it. It loads the parent
 // record for its own parent field alone — not a live re-check of the parent's
-// signature chain — keeping validation pure crypto plus local records.
+// signature chain — keeping validation pure crypto plus local records. The
+// parent id is record-controlled and becomes a filename component, so it is
+// checked against the id alphabet (32 lowercase-hex) before load; a malformed
+// parent is ErrNoGrant, never a path that escapes the grants dir.
 func (s *Store) checkChainDepth(g Grant) error {
 	if g.Parent == "" {
 		return nil
+	}
+	if len(g.Parent) != 32 || !isHex(g.Parent) {
+		return fmt.Errorf("%w: malformed parent id", ErrNoGrant)
 	}
 	parent, err := s.load(g.Parent)
 	if err != nil {

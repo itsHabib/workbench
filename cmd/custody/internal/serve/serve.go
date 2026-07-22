@@ -226,6 +226,8 @@ func grantRefusal(err error) (int, string) {
 		return http.StatusUnauthorized, "refused_wrong_key"
 	case errors.Is(err, grant.ErrBadSignature):
 		return http.StatusUnauthorized, "refused_bad_signature"
+	case errors.Is(err, grant.ErrChainDepth):
+		return http.StatusUnauthorized, "refused_chain_depth"
 	}
 	return http.StatusUnauthorized, "refused_no_grant"
 }
