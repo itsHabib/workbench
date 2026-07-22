@@ -164,6 +164,29 @@ func (s *Store) Mint(key string, actions []string, ttl time.Duration, mintedBy s
 	return g, token(g), nil
 }
 
+// RequireMintKey enforces the fresh-mint-key opt-in, mirroring gate's
+// checkGrantStateDir guard. It refuses when no mint key exists yet unless
+// allowInit is set: an absent key without -init reads as a misdirected
+// -mint-key-dir, and minting a fresh key there would sign grants with an orphan
+// key that serve (reading the canonical key dir) later rejects as
+// refused_bad_signature — the silent split-brain that costs a four-hour hunt.
+// The error names the resolved key path so the wrong dir is obvious. With
+// allowInit an absent key is fine (Mint creates it on first use); a present key
+// always passes. Callers run this before Mint; Mint itself never gates creation.
+func (s *Store) RequireMintKey(allowInit bool) error {
+	if allowInit {
+		return nil
+	}
+	_, err := os.Stat(s.mintKeyPath)
+	if err == nil {
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("custody: check mint key: %w", err)
+	}
+	return fmt.Errorf("%w: %s — refusing to mint with a fresh mint key; point -mint-key-dir at your canonical key dir, or pass -init to create one here", ErrKeyMissing, s.mintKeyPath)
+}
+
 // Validate parses a token, loads its record, and checks signature, key scope,
 // and TTL for time now — returning the parsed grant so the caller can extract
 // the action set. Refusal order is: no usable grant, bad signature, wrong key,
