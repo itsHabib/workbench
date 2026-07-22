@@ -170,6 +170,31 @@ standalone churn PR.~~ Done 2026-07-20: house-style extraction paid the
 gocognit debt on those three; `Classify` still carries its own
 `nolint:gocognit,cyclop` (rubric-as-one-pass — separate deferral).
 
+## custody derive-attenuation — deferred findings (2026-07-22, PR #105 adversarial pass)
+
+Both surfaced by the skeptic pass on the parent-chained-grants PR; neither is a
+correctness hole in what shipped, and both are owed to custody's own iteration:
+
+- **The signing pre-image injectivity property test doesn't draw the new signed
+  fields.** `Parent` and `BoundSource` joined the `sign` pre-image at Version 2
+  and have example-level mutation coverage (`sign_covers_parent_and_bound_source`
+  mutates each in the persisted record and asserts the token invalidates), but
+  the cross-field-ambiguity property (the length-prefix injectivity generator
+  that pins `["a,b"]` ≠ `["a","b"]` across arbitrary field values) still only
+  draws the original fields. Extend that generator to draw `Parent`/`BoundSource`
+  so the ambiguity law covers the full v2 pre-image, not just its v1 subset.
+- **The parent-record hot-path load in `checkChainDepth` is an undocumented
+  cascade-revoke coupling.** `Validate` loads a child's parent record to read its
+  `parent` field (depth check); if that record is gone, `load` returns
+  `ErrNoGrant` and the child refuses. That is fail-closed and arguably desirable
+  — deleting a parent grant revokes its children — but it is a behavioral
+  coupling roots don't have (a root's validity depends only on its own record),
+  and it is nowhere written down. Decide whether cascade-revoke is intended
+  semantics (then document it in the custody design doc + a test that pins
+  "delete parent → child refuses") or an accident to sever (child carries the one
+  parent field it needs, no live parent load) — the P3 tap-listener work is the
+  natural place to settle it.
+
 ## Idea (parked 2026-07-17): an MCP surface for the merge-loop verbs
 
 Operator flagged mid-migration ("something to take on next maybe"): wrapping the
