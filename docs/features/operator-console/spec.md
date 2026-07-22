@@ -124,7 +124,7 @@ The console may validate transport schemas and identifiers needed to call gate. 
 | Accidental double click, refresh, retry, or concurrent tab | Yes | Single-use CSRF, intent state machine, gate request id, stale-escalation precondition, idempotent replay. |
 | Stale/expired/wrong-scope/tampered grant | Yes | Gate checks again inside the committing invocation; HTTP maps the coded refusal. |
 | Incompatible/malformed gate binary output | Yes | Exact version/features check, strict envelope decoder, exit-code/body agreement; actions disabled on failure. |
-| Ledger edit, deletion, truncation, or anchor mismatch | Yes | `gate audit` before preview and inside commit; `423 audit_tampered`; controls disabled. |
+| Ledger edit, deletion, truncation, or anchor mismatch | Yes | `gate audit` before preview and inside commit; `423 audit_tampered`; controls disabled. The sole carve-out is gate's named `incomplete-append` crash window, which permits only the same-intent retry that heals it (§8.7). |
 | Plain-HTTP loopback cookie exposure | Yes, bounded | Cookie omits `Secure` because `http://127.0.0.1` must work. Loopback bind, Host/Origin checks, and the same-user residual bound this; any future HTTPS listener must use `Secure` and a `__Host-` cookie. |
 | Local process under a different OS user | Partly | OS file/process/network permissions are the boundary; console adds no cross-user claim. |
 | Local process or agent under the **same OS user** that can issue arbitrary HTTP | **Not distinguishable from the operator** | It can fetch the cookie and CSRF token and forge Origin. CSRF is not authentication. This is an accepted residual for Judge and a no-go for Mint. |
@@ -236,7 +236,8 @@ type judgeIntent struct {
 
 - Preview intents expire after two minutes.
 - The server never accepts replacement argv or form fields on commit.
-- `executing` prevents concurrent execution. After `CommandContext` has terminated and reaped a timed-out subprocess, the intent moves to `timed_out`; the same intent may transition back to `executing` on retry. A repeated timeout returns to `timed_out`. The original two-minute `ExpiresAt` never slides or resets, so retries cannot keep an intent alive indefinitely. Gate's request id makes the unknown outcome idempotent. `complete` returns the cached response with `replayed:true` until session expiry.
+- `executing` prevents concurrent execution. After `CommandContext` has terminated and reaped a timed-out subprocess, the intent moves to `timed_out`; the same intent may transition back to `executing` on retry. A repeated timeout returns to `timed_out`. Gate's request id makes the unknown outcome idempotent. `complete` returns the cached response with `replayed:true` until session expiry.
+- `ExpiresAt` bounds **consent freshness only**: it gates the first `previewed` → `executing` transition and never slides or resets, so a stale preview cannot be committed late. Once an intent has entered `executing`, the preview clock stops applying — the intent survives in `timed_out` past `ExpiresAt` and stays retryable until a terminal result or session expiry. Expiring a committed intent would strand a possibly-written gate append and discard the request id needed to replay or resume it. Retries are idempotent by request id and bounded by the session lifetime, so a committed intent that outlives its preview window extends no authority. `410 intent_expired` therefore only ever answers the first commit of a stale preview, never a retry of a `timed_out` intent.
 - Cached results are convenience only. On restart, the case file reconstructs success from gate's ledger.
 
 ### 5.3 Gate ledger additions
@@ -496,7 +497,7 @@ The static app contains no fetch call targeting them. Gate's returned merge comm
 | `423` | `audit_tampered` | All action controls lock; reason remains visible. |
 | `429` | `csrf_token_limit` | Too many unused tokens exist for this session; no token is evicted. |
 | `502` | `gate_unavailable`, `invalid_gate_response`, `action_internal` | Gate failed or violated its contract; no success is inferred. |
-| `503` | `gate_incompatible`, `actions_disabled` | Read-only console remains available; action controls stay disabled. |
+| `503` | `gate_incompatible`, `actions_disabled`, `action_protocol_unsupported` | Read-only console remains available; action controls stay disabled. Binary-identity drift surfaces here (§8.8), never as a generic `502`. |
 | `504` | `gate_timeout` | Outcome is unknown. Retry the **same commit intent**; request-id idempotency resolves it. |
 
 Decision outcomes `blocked` and `parked_for_judgment` do not become HTTP errors when the judgment append succeeded. They return `200` with the gate result and its original exit code.
@@ -533,7 +534,7 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 ### 8.4 Double submit, retry, refresh, and restart
 
 - **Double click / same intent:** one request wins `executing`; the other gets `409 action_in_progress` or the cached `200 replayed:true`.
-- **Network/subprocess timeout after commit:** once the timed-out process is terminated and reaped, the intent enters `timed_out`. Retry the same intent; it may execute again with the same request id, and console cache or gate replay/resume returns the original result without a second append.
+- **Network/subprocess timeout after commit:** once the timed-out process is terminated and reaped, the intent enters `timed_out`. Retry the same intent; it may execute again with the same request id, and console cache or gate replay/resume returns the original result without a second append. The retry stays reachable past the preview `ExpiresAt` (§5.2) and across an `incomplete-append` audit fault the kill itself may have left (§8.7).
 - **Refresh before commit:** preview is not auto-committed. The UI may recover the still-live intent from `sessionStorage`, but must show the command again and require the explicit commit click.
 - **Refresh after commit:** GET projections render the ledger result. No POST repeats.
 - **Console restart before commit:** cookie and intent are invalid; commit returns `410 session_expired`/`intent_expired`; re-preview from current state.
@@ -560,6 +561,13 @@ The command echo is a consent artifact in the UI, not an identity proof. The tes
 - Gate-side: tampering is a hard `log_integrity_failed`; no judgment, reduction, action, or console journal entry is written.
 - Recovery is operational and out of band. The console offers no repair, reseal, truncate, or override button.
 
+**Incomplete-append is not tampering.** A commit subprocess killed between the log fsync and the anchor rename leaves gate's audit reporting its distinct `incomplete-append` fault: exactly one unanchored tail entry over a proven-intact anchored prefix — the named residue of the one-append crash window, and the expected outcome of reaping a timed-out committing subprocess. The clean-audit gate branches on gate's fault class, never on prose:
+
+- `incomplete-append` disables fresh previews and new intents but **permits exactly one action**: retrying the in-flight or `timed_out` intent with its original request id. That retry's gate invocation runs gate's own bounded anchor reconcile — it advances the anchor only after proving the pinned prefix intact and only across the single crash-window entry, refusing anything wider with its own coded error. The append heals the ledger or gate refuses; console repairs nothing itself.
+- Every other fault class — rewrite, truncation, deletion, broken chain — locks all action controls as `423 audit_tampered`, as above.
+
+Without this branch, the required `timed_out` retry could deadlock: the interrupted append trips the clean-audit gate, the lock prevents the retry, and the retry is the only thing that heals the interruption.
+
 ### 8.8 Gate incompatibility or malformed output
 
 - Read-only `next`, `explain`, and `audit` may continue if their existing contracts work.
@@ -581,8 +589,9 @@ Mint may not begin merely because Judge “seems fine.” The validation gate is
 - Cookie attributes, session absolute expiry, token expiry/use-once semantics, and restart invalidation.
 - No token on action-session load; just-in-time token issuance; 16-token cap returns `429` without eviction; concurrent tabs retain their own valid tokens.
 - Strict JSON decoder, size limit, rationale constraints, and no subprocess on transport-invalid requests.
-- Preview intent binding, edit invalidation contract, exact displayed/executed argv equivalence, binary-identity drift refusal, `timed_out` retry, and all error mappings.
+- Preview intent binding, edit invalidation contract, exact displayed/executed argv equivalence, binary-identity drift refusal, `timed_out` retry (including past preview `ExpiresAt`), and all error mappings.
 - Fake gate exit/body compatibility, audit tamper, incompatible version, malformed JSON, and missing features.
+- Clean-audit gate fault-class branch: `incomplete-append` permits only the same-intent retry (which heals or gate refuses); every other fault class locks as `audit_tampered`.
 - Gate tests for request-id idempotency, partial-write resume, two-request same-escalation race, stale escalation, stale/expired/wrong-scope grant, and audit tamper with zero unauthorized append.
 - Hygiene assertion that console imports no gate package.
 
