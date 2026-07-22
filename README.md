@@ -59,3 +59,20 @@ go test ./...
 ```
 
 Third-party Go dependencies are allowed.
+
+## Tenants
+
+Each binary under `cmd/<tool>/` is a tenant with its own docs. A couple worth
+pointing at directly:
+
+- **`gate`** — the merge-authorization boundary: scoped, tiered, time-boxed
+  grants, a verifier ladder, and a hash-chained decision log. Exit codes
+  (`0` pass / `1` blocked / `2` parked / `3` refused / `4` error) are the seam
+  callers branch on.
+- **`custody`** — a localhost credential broker. It holds a real vendor secret
+  in the OS credential store and forwards a narrowly-scoped set of requests to
+  one upstream, injecting the secret on the way out — so an agent can call an
+  API it is never handed the credential for. Every request is a pass (injected,
+  forwarded, logged) or a fail-closed refusal that names the command to unstick
+  it. Wire your first key end to end with
+  [`cmd/custody/docs/runbook.md`](cmd/custody/docs/runbook.md).
