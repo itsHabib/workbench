@@ -9,7 +9,7 @@
 
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---|---|
-| Production source | `cmd/triage/internal/floor/overrides.go` (new), floor integration point, `cmd/triage` flag wiring | ~120 | 120 |
+| Production source | `cmd/triage/internal/floor/overrides.go` (new), floor integration point, `cmd/triage/triage-floor/main.go` (the `-repo` flag), `cmd/gate/internal/verify/floor.go` (gate's shell-out passes `-repo`) | ~140 | 140 |
 | Tests | `overrides_test.go` (new), floor suite additions | ~180 | 90 |
 | Docs | `cmd/triage/docs/` + RUBRIC note | ~30 | 15 |
 | **Total** | | | **~225** |
@@ -24,8 +24,8 @@ triage-floor's documented blind spot is gate machinery: HELDOUT-01 found 15 unde
 
 Add a per-repo path-override table to triage-floor: a rubric-shaped, compiled-in map of `repo → [path glob → minimum tier]`, applied as `max(floor tier, override tier)` per file. **Two bands, split by consequence:**
 
-- **T3 band — merge-authorization and signing paths**: workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, grant/anchor/exit-code machinery. HELDOUT-01's own labels put gate#3/#5/#9 at T3; under the parked Phase 1 mapping, T2 would still drop @claude and the adversarial pass exactly where a fail-open matters most.
-- **T2 band — broader gate/driver machinery**: ship `packages/driver/**`, the rest of workbench `cmd/gate/**`, `cmd/triage/**`.
+- **T3 band — merge-authorization and signing paths**: workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, and `cmd/gate/main.go` (it owns the 0/1/2/3/4 exit-code contract — a load-bearing seam per the repo CLAUDE.md, squarely "exit-code machinery"). HELDOUT-01's own labels put gate#3/#5/#9 at T3; under the parked Phase 1 mapping, T2 would still drop @claude and the adversarial pass exactly where a fail-open matters most.
+- **T2 band — broader gate/driver machinery**: ship `packages/driver/**`, the rest of workbench `cmd/gate/**` (e.g. `internal/evidence/**`, `internal/observe/**`), `cmd/triage/**`.
 - Existing RUBRIC rules stay untouched (`labels/**` → T3 already holds).
 
 Mechanics:
@@ -38,7 +38,7 @@ Mechanics:
 
 ## Acceptance
 
-With `-repo itsHabib/workbench`: a diff touching only `cmd/gate/internal/state/anchor.go` classifies **T3**; a diff touching only `cmd/gate/main.go` classifies **T2**. Without `-repo`, behavior is byte-identical to today. A floor T3 stays T3 with overrides present. `-v` names each override hit. RUBRIC/docs state the two-band rule.
+With `-repo itsHabib/workbench`: a diff touching only `cmd/gate/internal/state/anchor.go` or only `cmd/gate/main.go` classifies **T3**; a diff touching only `cmd/gate/internal/evidence/evidence.go` classifies **T2**. Without `-repo`, behavior is byte-identical to today. A floor T3 stays T3 with overrides present. `-v` names each override hit. Gate's own shell-out to triage-floor (`cmd/gate/internal/verify/floor.go`) passes `-repo`. RUBRIC/docs state the two-band rule.
 
 ## Test plan
 

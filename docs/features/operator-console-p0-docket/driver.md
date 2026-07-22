@@ -30,7 +30,7 @@ conflict_notes:
   - kind: file_overlap
     file: cmd/gate/
     tasks: [console-p0-actionable-docket (this manifest), any concurrent gate-touching stream]
-    note: "single-stream manifest, so no intra-manifest conflict; safe to run concurrently with review-credit-tiering's triage-path-overrides (cmd/triage only) but NOT with other gate-touching work"
+    note: "single-stream manifest, so no intra-manifest conflict; safe to run concurrently with review-credit-tiering's triage-path-overrides (cmd/triage + one disjoint gate file, verify/floor.go) but NOT with other gate-touching work"
 ---
 
 # operator-console-p0-docket driver manifest

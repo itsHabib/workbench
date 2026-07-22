@@ -23,10 +23,14 @@ batches:
         runtime: local
         model: opus
         effort: extra
-        touches: [cmd/triage/internal/floor/overrides.go, cmd/triage/internal/floor/floor.go, cmd/triage/docs/]
+        touches: [cmd/triage/internal/floor/overrides.go, cmd/triage/internal/floor/floor.go, cmd/triage/triage-floor/main.go, cmd/gate/internal/verify/floor.go, cmd/triage/docs/]
         status: pending
 
-conflict_notes: []
+conflict_notes:
+  - kind: file_overlap
+    file: cmd/gate/
+    tasks: [triage-path-overrides (verify/floor.go only, ~10 LOC), console-p0-actionable-docket (next projection + console, other manifest)]
+    note: "cross-manifest: overrides touches exactly one gate file (the triage-floor shell-out gains -repo); console P0 touches the next-projection path — textually disjoint, safe to parallel-run; whichever merges second rebases trivially"
 ---
 
 # review-credit-tiering driver manifest (workbench side)
