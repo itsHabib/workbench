@@ -368,8 +368,9 @@ func bestTandem(seq []string, minRepeats int) (span, bool) {
 					best, found = span{i, p, r}, true
 				}
 				// A confirmed run is maximal for this period from its
-				// earliest start (no period-p run crosses j), so skipping to
-				// its end is safe and avoids rescanning it.
+				// earliest start: no period-p run starting at a position
+				// <= j-p crosses j. Runs starting inside (j-p, j) could
+				// extend past j and are leapt over — see FOLLOWUPS.
 				i = j
 				continue
 			}

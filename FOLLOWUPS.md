@@ -67,6 +67,15 @@ not the move's to fix (its contract is byte-identical output):
   so the truncated run detects and decodes as an aborted trajectory. Pinned
   by `TestDecodeShipEvents_TruncatedAtToolUseDecodesAsClaude`; a bare
   assistant *text* event stays dialect-neutral.
+- **`bestTandem`'s confirmed-run skip can leap a longer run starting inside
+  the confirmed one** (2026-07-22, PR #88 review). After a confirmed run
+  ending at `j`, `i = j` skips positions in `(j-p, j)`; a period-p run
+  starting there begins its extension checks past `j` and can extend beyond
+  it (e.g. `A,B,A,B,A,X,A,X,A,X` at p=2: the `(A,B)×2` run at 0 skips to 5,
+  hiding the longer `(A,X)×3` run at 4 — reported repeats undercount).
+  Pre-existing, not introduced by the PR #88 guard fix. Same rule as the
+  entries above: owed to tracelens's own iteration with a corpus case that
+  pins the improvement.
 
 ## triage migration — deferred findings (2026-07-16, PR #51 review)
 
