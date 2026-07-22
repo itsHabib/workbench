@@ -104,10 +104,15 @@ Nothing here changes who reviews what. It makes the system able to answer
 "what do reviews actually cost, and what would a cut actually lose" — and it
 closes the floor's known blind spot so Phase 1 has a safe signal to route on.
 
-1. **Driver carries the tier.** Ship's driver classifies each stream's PR via
-   `triage-floor` at PR-observe time, fail-closed to T2 (missing binary,
-   exit 1, garbage output ⇒ T2 + warning, never T0/T1). Tier persists on the
-   stream and shows in status/render. Mechanism only.
+1. **Driver carries the tier — per head, not per PR.** Ship's driver
+   classifies each stream's PR via `triage-floor` at PR-observe time,
+   fail-closed to T2 (missing binary, exit 1, garbage output ⇒ T2 +
+   warning, never T0/T1). The tier is bound to the classified `head_sha`
+   and recomputed whenever the head moves (fix commits from later review
+   cycles can change the diff's risk class — a T1 PR that grows a
+   gate-machinery fix must re-tier); each `review_cycle` event carries the
+   tier of *its* head, and any routing always reads the current head's
+   tier. Persists on the stream, shows in status/render. Mechanism only.
 2. **Per-repo path overrides lift gate/driver/merge machinery to T2,
    deterministically.** One rubric-shaped table in triage (e.g. ship's
    `packages/driver/**`, workbench `cmd/gate/**`, merge/verify paths) —
