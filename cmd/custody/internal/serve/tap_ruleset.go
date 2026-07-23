@@ -9,9 +9,10 @@ import "strings"
 //
 // "In force" needs BOTH halves on the custody port:
 //   - a source-restricted ACCEPT — the room may reach the listener, and
-//   - a DROP — every other source is denied.
+//   - a DROP or REJECT — every other source is denied (reject-with-tcp-reset
+//     is a legitimate deny too, so both verdicts count).
 //
-// The DROP is the security-critical half. The runbook's chains are
+// The deny is the security-critical half. The runbook's chains are
 // policy-ACCEPT (a host-wide policy-DROP risks locking the host out), so an
 // accept rule alone proves nothing: absent the drop, non-room traffic to the
 // port simply falls through to `policy accept`. Matching a bare `dport <port>`
@@ -32,7 +33,7 @@ func nftInForce(ruleset, port string) bool {
 		if containsField(f, "accept") && containsField(f, "saddr") {
 			accept = true
 		}
-		if containsField(f, "drop") {
+		if containsField(f, "drop") || containsField(f, "reject") {
 			deny = true
 		}
 	}
@@ -52,7 +53,7 @@ func iptablesInForce(save, port string) bool {
 		if containsField(f, "ACCEPT") && containsField(f, "-s") {
 			accept = true
 		}
-		if containsField(f, "DROP") {
+		if containsField(f, "DROP") || containsField(f, "REJECT") {
 			deny = true
 		}
 	}

@@ -120,25 +120,30 @@ feedback and confirm the right tool is installed.
 
 ### Check: nftables rule present
 
+The preflight requires BOTH rules on the port — a source-restricted accept
+(room may reach) AND a drop/reject (every other source denied). Under the
+policy-ACCEPT chain the deny rule is what actually restricts the port; without
+it, non-room traffic falls through to `policy accept`. `reject` (with tcp
+reset) counts as a deny alongside `drop`. These greps mirror what the prober
+checks, so a partial config produces no output:
+
 ```bash
-nft list ruleset | grep "dport $CUSTODY_PORT"
-# The preflight requires BOTH rules on the port:
-#   ip saddr 10.0.100.0/24 tcp dport 8127 accept   (room may reach)
-#   tcp dport 8127 ... drop                         (every other source denied)
-# Under the policy-ACCEPT chain the drop is what actually restricts the port —
-# without it, non-room traffic falls through to `policy accept`. A source-
-# unrestricted accept, or the accept alone, does NOT satisfy the preflight.
+# Accept half: a rule with saddr + this dport + accept.
+nft list ruleset | awk "/saddr/ && /dport $CUSTODY_PORT / && /accept/"
+# Deny half: a rule with this dport + drop or reject.
+nft list ruleset | awk "/dport $CUSTODY_PORT / && (/drop/ || /reject/)"
+# Both must print a line. A bare "dport 8127" grep would over-report.
 ```
 
 ### Check: iptables rule present (if not using nftables)
 
 ```bash
-iptables-save | grep -- "--dport $CUSTODY_PORT"
-# The preflight requires BOTH on the port:
-#   -A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT
-#   -A INPUT -p tcp --dport 8127 -j DROP
-# For an IPv6-only room subnet, the probe also reads ip6tables-save, so the
-# equivalent ip6tables ACCEPT+DROP pair satisfies it.
+# Accept half: -s + --dport + -j ACCEPT on one line.
+iptables-save | grep -- "--dport $CUSTODY_PORT " | grep -- "-s " | grep -- "-j ACCEPT"
+# Deny half: --dport + (DROP or REJECT).
+iptables-save | grep -- "--dport $CUSTODY_PORT " | grep -E -- "-j (DROP|REJECT)"
+# For an IPv6-only room subnet, run the same against ip6tables-save — the probe
+# reads it too, so the equivalent ip6tables ACCEPT + DROP/REJECT pair satisfies.
 ```
 
 ### Check: tap interface has the expected IP

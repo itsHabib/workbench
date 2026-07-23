@@ -422,6 +422,7 @@ func TestNftInForce(t *testing.T) {
 		want    bool
 	}{
 		{"accept + drop", nftAccept + "\n" + nftDrop, true},
+		{"accept + reject", nftAccept + "\ntcp dport 8127 reject with tcp reset", true},
 		{"ipv6 accept + drop", "ip6 saddr fd00:100::/64 tcp dport 8127 accept\n" + nftDrop, true},
 		{"accept only, no drop", nftAccept, false},
 		{"drop only", nftDrop, false},
@@ -446,6 +447,7 @@ func TestIptablesInForce(t *testing.T) {
 		want bool
 	}{
 		{"accept + drop", iptAccept + "\n" + iptDrop, true},
+		{"accept + reject", iptAccept + "\n-A INPUT -p tcp --dport 8127 -j REJECT --reject-with tcp-reset", true},
 		{"accept only, no drop", iptAccept, false},
 		{"drop only", iptDrop, false},
 		{"accept without source + drop", "-A INPUT -p tcp --dport 8127 -j ACCEPT\n" + iptDrop, false},
