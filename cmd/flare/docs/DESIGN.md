@@ -14,7 +14,8 @@ RED-TEAM #9). The gate's own backtest showed parking is the *hot* path (5/7 real
 silence-until-polled is the standing failure mode.
 
 flare closes the seam: it watches the artifact logs those planes already emit and pushes a
-notification (Windows toast, webhook, or Slack message) when something blocks or escalates. It
+notification — a Slack page (a `chat.postMessage` Block Kit card), with Windows toast
+and webhook as the other available channel types — when something blocks or escalates. It
 is the push half; `/wip` and `/status` remain the pull half.
 
 **Posture, stated plainly: flare is best-effort push over an authoritative pull. The artifact
@@ -86,16 +87,19 @@ their own shapes; `decision`/`tier` are never required of them.
 
 ## Channels
 
+- `slack` — the delivered surface. `net/http` POST to Slack's `chat.postMessage` using a
+  configured bot token and channel ID. The event renders as one severity-colored Block Kit card
+  (`renderSlackMessage`): a header that leads on the required action, a blockquoted *why*, a
+  primary `View PR` button when the event names a repo+number, and a small-print context footer;
+  the attachment's fallback is the lock-screen line. Delivery requires HTTP 200 **and** an
+  `{"ok":true}` response because Slack reports API errors in HTTP 200 bodies. The bot needs
+  `chat:write` and membership in the target channel. The token lives only in the operator's
+  local routes file and is never written to errors or logs.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.
 - `webhook` — `net/http` POST of the event JSON to a configured URL. **No default URL; nothing
   leaves the box unless the operator configures it.**
-- `slack` — `net/http` POST to Slack's `chat.postMessage` using a configured bot token and
-  channel ID. The event becomes one compact text line; delivery requires HTTP 200 and an
-  `{"ok":true}` response because Slack reports API errors in HTTP 200 bodies. The bot needs
-  `chat:write` and membership in the target channel. The token lives only in the operator's
-  local routes file and is never written to errors or logs.
 - `drop` — explicit silence (the only way to silence a matched event).
 
 Delivery is at-least-once-attempted, best-effort. A channel failure is journaled and the event
