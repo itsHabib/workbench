@@ -38,7 +38,7 @@ batches:
         runtime: local
         model: opus
         effort: extra
-        touches: [cmd/runway/internal/backend/rooms/]
+        touches: [cmd/runway/internal/backend/rooms/, cmd/runway/internal/controller/controller.go]
         status: pending
 
 conflict_notes:

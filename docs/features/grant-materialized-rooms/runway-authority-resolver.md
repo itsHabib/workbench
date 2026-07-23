@@ -9,7 +9,7 @@
 
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---|---|
-| Production source | `cmd/runway/internal/backend/rooms/` (new resolver + receipt assembly; wiring in `rooms.go`/`lifecycle.go`) | ~320 | 320 |
+| Production source | `cmd/runway/internal/backend/rooms/` (new resolver + receipt assembly; wiring in `rooms.go`/`lifecycle.go`), `cmd/runway/internal/controller/controller.go` (`resolveSecrets` routing) | ~340 | 340 |
 | Tests | resolver/TTL/receipt unit tests + reconcile-path test | ~340 | 170 |
 | **Total** | | | **~490** |
 
@@ -30,6 +30,14 @@ validation gate drives it end-to-end.
 Resolver lives in the rooms backend adapter (`cmd/runway/internal/backend/rooms`)
 — the only component reading both a grant and a placement:
 
+- **Controller routing (prerequisite):** `resolveSecrets` in
+  `cmd/runway/internal/controller/controller.go` runs before `be.Start` and
+  today rejects any ref that is not `env:` — a `custody:` ref admitted by
+  `contracts/execution` would fail preparation before the adapter ever sees
+  it. Extend it to pass `custody:` refs through to the backend adapter
+  untouched (no value expansion at the controller); a backend without a
+  custody resolver (e.g. local) refuses them with a coded unsupported error.
+  `env:` behavior unchanged.
 - **Resolve:** parse the ref grammar (already admitted by
   `contracts/execution`); find a live parent grant covering key+actions.
   None → refuse with `authority_unresolved` + the exact `custody grant`
@@ -77,6 +85,9 @@ idempotency (same durable inputs → byte-identical line); reconcile →
 ## Non-goals
 
 Console surfacing, driver-state ingestion of receipts (§10.2), batch
-coalescing (§10.3), per-room grant-to-source pinning (§10.1, P4).
+coalescing (§10.3). NOTE: the source-bound derive path (stamping the room tap
+source via `-bound-source`, D2b) is IN scope — §10.1 resolved per-room pinning
+into v0 through D2b; do not skip it. Only pinning mechanisms beyond D2b are
+deferred.
 
 **Model/effort:** opus/extra — the load-bearing composition; failure-model and TTL-cap correctness carry the design.

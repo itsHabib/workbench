@@ -32,11 +32,17 @@ In `cmd/custody/internal/serve` (+ `cmd/custody/main.go` flag wiring):
   behavior (custody's original NFR intact).
 - **Bind validation, fail closed at startup, coded errors:** refuse wildcard
   binds (`0.0.0.0`, `::`) and any address not on a tap interface. "Tap
-  interface" = interface-name-prefix check (settle the prefix on the
-  rooms-host) with an explicit override flag for non-standard names.
+  interface" = interface-name-prefix check, default prefix `tap`, overridable
+  via `-tap-if-prefix <prefix>` for non-standard names — the runbook
+  validation on the rooms-host confirms the real interface name and records
+  the override if the default doesn't match.
 - **Startup preflight guard:** `-tap-addr` fails closed unless the pinned
   source-restriction firewall rule is verifiably in force — probe the ruleset;
   refuse to serve with a coded error + remedy naming the runbook otherwise.
+  The probe sits behind a small ruleset seam (policy/mechanism split; tests
+  stub the seam); the Linux implementation targets nftables first with an
+  iptables-save fallback, and the runbook validation settles which one the
+  rooms-host actually uses.
 - **Per-request source enforcement (D2b):** on the tap listener, the transport
   source must equal the presented grant's `bound_source` —
   `refused_source_mismatch` otherwise; a grant with empty `bound_source`
