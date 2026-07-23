@@ -79,7 +79,7 @@ func TestExitCodesAreStable(t *testing.T) {
 		run := state.NewRunID()
 		v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 100 + i, HeadSHA: "abc"}, c.decision, c.tier)
 		id := recordReduced(t, e, run, v)
-		res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, c.live)
+		res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, c.live, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -102,7 +102,7 @@ func TestExitCodesAreStable(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 200, HeadSHA: "abc"}, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	res, code, err := act(e, run, expired.ID, v, id, gateResult{}, false)
+	res, code, err := act(e, run, expired.ID, v, id, gateResult{}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestEscalationCarriesPRSubject(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 41, HeadSHA: "abc"}, verify.DecisionEscalate, "T0")
 	id := recordReduced(t, e, run, v)
-	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false); err != nil || code != codeParked {
+	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
 		t.Fatalf("escalate: code %d err %v", code, err)
 	}
 	var subject struct {
@@ -140,7 +140,7 @@ func TestEscalationCarriesPRSubject(t *testing.T) {
 	run2 := state.NewRunID()
 	v2 := reducedVerdict(verify.Subject{Repo: "o/r", Number: 42, HeadSHA: "abc"}, verify.DecisionBlock, "T0")
 	id2 := recordReduced(t, e, run2, v2)
-	if _, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false); err != nil || code != codeBlocked {
+	if _, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false, nil); err != nil || code != codeBlocked {
 		t.Fatalf("block: code %d err %v", code, err)
 	}
 	var actionSubject struct {
@@ -186,7 +186,7 @@ func TestResultEmitsJudgedHeadSHA(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "deadbeef"}, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false)
+	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, nil)
 	if err != nil || code != codeMerge {
 		t.Fatalf("clean pass: code %d err %v", code, err)
 	}
@@ -281,7 +281,7 @@ func TestCycleCountRefusesTamperedLog(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(subject, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false); err != nil || code != codeMerge {
+	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, nil); err != nil || code != codeMerge {
 		t.Fatalf("clean first pass: code %d err %v", code, err)
 	}
 
@@ -303,7 +303,7 @@ func TestCycleCountRefusesTamperedLog(t *testing.T) {
 	run2 := state.NewRunID()
 	v2 := reducedVerdict(subject, verify.DecisionPass, "T0")
 	id2 := recordReduced(t, e, run2, v2)
-	_, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false)
+	_, code, err := act(e, run2, grantArt.ID, v2, id2, gateResult{}, false, nil)
 	if code != codeError || !errors.Is(err, errLogTampered) {
 		t.Fatalf("a tampered log must fail closed to codeError: got code %d err %v", code, err)
 	}
@@ -325,7 +325,7 @@ func TestCycleCapParksOverCap(t *testing.T) {
 		run := state.NewRunID()
 		v := reducedVerdict(subject, verify.DecisionPass, "T0")
 		id := recordReduced(t, e, run, v)
-		res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false)
+		res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,7 +337,7 @@ func TestCycleCapParksOverCap(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(subject, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false)
+	res, code, err := act(e, run, capped.ID, v, id, gateResult{}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestCycleCapParksOverCap(t *testing.T) {
 	otherRun := state.NewRunID()
 	other := reducedVerdict(verify.Subject{Repo: "o/r", Number: 8, HeadSHA: "def"}, verify.DecisionPass, "T0")
 	otherID := recordReduced(t, e, otherRun, other)
-	if _, code, err := act(e, otherRun, capped.ID, other, otherID, gateResult{}, false); err != nil || code != codeMerge {
+	if _, code, err := act(e, otherRun, capped.ID, other, otherID, gateResult{}, false, nil); err != nil || code != codeMerge {
 		t.Fatalf("fresh PR under the same grant: got code %d err %v", code, err)
 	}
 
@@ -367,7 +367,7 @@ func TestCycleCapParksOverCap(t *testing.T) {
 	}
 	retryRun := state.NewRunID()
 	retryID := recordReduced(t, e, retryRun, v)
-	if _, code, err := act(e, retryRun, wider.ID, v, retryID, gateResult{}, false); err != nil || code != codeMerge {
+	if _, code, err := act(e, retryRun, wider.ID, v, retryID, gateResult{}, false, nil); err != nil || code != codeMerge {
 		t.Fatalf("re-minted one-wider grant must unpark: got code %d err %v", code, err)
 	}
 }
@@ -387,14 +387,14 @@ func TestCycleCapJudgeCannotLaunderCeiling(t *testing.T) {
 		run := state.NewRunID()
 		v := reducedVerdict(subject, verify.DecisionPass, "T0")
 		id := recordReduced(t, e, run, v)
-		if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false); err != nil || code != codeMerge {
+		if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false, nil); err != nil || code != codeMerge {
 			t.Fatalf("cycle %d under the cap: code %d err %v", i, code, err)
 		}
 	}
 	run := state.NewRunID()
 	v := reducedVerdict(subject, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false); err != nil || code != codeParked {
+	if _, code, err := act(e, run, capped.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
 		t.Fatalf("cycle 3 over cap 2: code %d err %v", code, err)
 	}
 
@@ -402,7 +402,7 @@ func TestCycleCapJudgeCannotLaunderCeiling(t *testing.T) {
 	// exactly what cmdJudge does after appending a judgment verdict.
 	judged := reducedVerdict(subject, verify.DecisionPass, "T0")
 	jid := recordReduced(t, e, run, judged)
-	res, code, err := act(e, run, capped.ID, judged, jid, gateResult{}, false)
+	res, code, err := act(e, run, capped.ID, judged, jid, gateResult{}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestCycleCountSkipsCapabilityRefusals(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(subject, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	if _, code, err := act(e, run, expired.ID, v, id, gateResult{}, false); err != nil || code != codeRefused {
+	if _, code, err := act(e, run, expired.ID, v, id, gateResult{}, false, nil); err != nil || code != codeRefused {
 		t.Fatalf("expired grant: code %d err %v", code, err)
 	}
 
@@ -435,7 +435,7 @@ func TestCycleCountSkipsCapabilityRefusals(t *testing.T) {
 	}
 	retryRun := state.NewRunID()
 	retryID := recordReduced(t, e, retryRun, v)
-	if _, code, err := act(e, retryRun, fresh.ID, v, retryID, gateResult{}, false); err != nil || code != codeMerge {
+	if _, code, err := act(e, retryRun, fresh.ID, v, retryID, gateResult{}, false, nil); err != nil || code != codeMerge {
 		t.Fatalf("retry after refusal must have a full cycle budget: code %d err %v", code, err)
 	}
 }
@@ -455,7 +455,7 @@ func TestCycleCountUnreadableParks(t *testing.T) {
 	run := state.NewRunID()
 	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}, verify.DecisionPass, "T0")
 	id := recordReduced(t, e, run, v)
-	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false)
+	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,4 +776,34 @@ func TestExplainRejectsOutWithoutHTML(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "requires -html") {
 		t.Fatalf("want -out-requires-html error, got %v", err)
 	}
+}
+
+// TestAttachBriefFailOpen pins the escalation-brief contract: a successful
+// synthesis rides the body, any failure (or no synthesizer at all) costs only
+// the brief — the escalation body and its question are untouched either way.
+func TestAttachBriefFailOpen(t *testing.T) {
+	body := map[string]any{"question": "needs judgment"}
+	attachBrief(body, func(q string) (verify.Brief, error) {
+		if q != "needs judgment" {
+			t.Fatalf("synth must receive the park question, got %q", q)
+		}
+		return verify.Brief{WhatItIs: "a spec", Concern: "check is broken", Risk: "Medium", Recommendation: "author fixes"}, nil
+	})
+	b, ok := body["brief"].(verify.Brief)
+	if !ok || b.Concern != "check is broken" {
+		t.Fatalf("brief must ride the escalation body, got %+v", body["brief"])
+	}
+
+	failed := map[string]any{"question": "needs judgment"}
+	attachBrief(failed, func(string) (verify.Brief, error) {
+		return verify.Brief{}, errors.New("model down")
+	})
+	if _, present := failed["brief"]; present {
+		t.Fatal("a failed synthesis must not attach a brief")
+	}
+	if failed["question"] != "needs judgment" {
+		t.Fatal("fail-open must leave the raw question intact")
+	}
+
+	attachBrief(failed, nil) // nil synth: no-op, never a panic
 }

@@ -183,6 +183,58 @@ func TestSlackEscalationHasNoButton(t *testing.T) {
 	}
 }
 
+// TestSlackEscalationRendersBriefSections pins the zero-context page: an
+// escalation carrying gate's synthesized brief renders labeled
+// What/Concern/Risk/Recommendation sections instead of quoting the raw
+// machine reason, and the lock-screen fallback leads with the concern.
+func TestSlackEscalationRendersBriefSections(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "1 bot comments: 1 actionable, 0 low-confidence extractions — needs judgment",
+		Fields: map[string]string{
+			"run": "run_8", "repo": "itsHabib/rooms", "number": "84",
+			"brief_what":    "A design spec for a test harness meant to prove a microVM can't leak secrets.",
+			"brief_concern": "The harness's own pass/fail check is broken, so the test could show contained even if secrets escaped.",
+			"brief_risk":    "Medium — it's a spec, not shipping code.",
+			"brief_rec":     "Have the author fix the witness before merging.",
+		},
+	}
+	blob, err := json.Marshal(renderSlackMessage("C1", ev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	for _, want := range []string{
+		"*What it is:* A design spec",
+		"*The concern:* The harness's own pass/fail check is broken",
+		"*Risk:* Medium",
+		"*Recommendation:* Have the author fix the witness",
+		"View PR #84", // brief must not displace the click-target
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("brief card missing %q\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "low-confidence extractions") {
+		t.Fatalf("with a brief, the raw tally must not render on the card:\n%s", s)
+	}
+	if fb := slackFallback(ev); !strings.Contains(fb, "pass/fail check is broken") {
+		t.Fatalf("fallback must lead with the concern, got %q", fb)
+	}
+
+	// No brief: the card quotes the producer's reason exactly as before.
+	ev.Fields = map[string]string{"run": "run_8", "repo": "itsHabib/rooms", "number": "84"}
+	blob, err = json.Marshal(renderSlackMessage("C1", ev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blob), "needs judgment") {
+		t.Fatalf("brief-less escalation must still quote the reason:\n%s", blob)
+	}
+}
+
 func TestSlackFallbackLeadsWithActionAndTruncates(t *testing.T) {
 	lead := slackFallback(event.Event{Source: "gate", Severity: event.SevBlock})
 	if !strings.HasPrefix(lead, "🛑") {

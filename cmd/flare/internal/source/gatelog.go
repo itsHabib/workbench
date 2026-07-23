@@ -16,11 +16,22 @@ import (
 // read tolerantly — a missing body still notifies. The envelope and the verdict
 // come from contracts; this shape does not.
 type escalationBody struct {
-	Outcome  string `json:"outcome"`
-	Question string `json:"question"`
-	Code     string `json:"code"`
-	Repo     string `json:"repo"`
-	Number   int    `json:"number"`
+	Outcome  string           `json:"outcome"`
+	Question string           `json:"question"`
+	Code     string           `json:"code"`
+	Repo     string           `json:"repo"`
+	Number   int              `json:"number"`
+	Brief    *escalationBrief `json:"brief"`
+}
+
+// escalationBrief is gate's synthesized plain-language page for the
+// zero-context approver. Optional — older escalations and synthesis failures
+// carry none, and the card falls back to the raw question.
+type escalationBrief struct {
+	WhatItIs       string `json:"what_it_is"`
+	Concern        string `json:"concern"`
+	Risk           string `json:"risk"`
+	Recommendation string `json:"recommendation"`
 }
 
 // parseGateLog lifts events from gate artifact lines: every escalation, and
@@ -90,6 +101,7 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		fields["repo"] = b.Repo
 		fields["number"] = strconv.Itoa(b.Number)
 	}
+	briefFields(fields, b.Brief)
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
@@ -99,6 +111,26 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		Title:    title,
 		Body:     b.Question,
 		Fields:   fields,
+	}
+}
+
+// briefFields flattens the optional brief into event fields, so notify can
+// render its sections without knowing gate's body shape. Only non-empty
+// fields land — notify treats absence as "no brief, quote the question".
+func briefFields(fields map[string]string, b *escalationBrief) {
+	if b == nil {
+		return
+	}
+	for k, v := range map[string]string{
+		"brief_what":    b.WhatItIs,
+		"brief_concern": b.Concern,
+		"brief_risk":    b.Risk,
+		"brief_rec":     b.Recommendation,
+	} {
+		if v == "" {
+			continue
+		}
+		fields[k] = v
 	}
 }
 

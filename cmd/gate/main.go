@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -440,7 +441,14 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return res, codeError, err
 	}
 
-	return act(e, run, grantID, reduced, reducedArt.ID, res, live)
+	// An escalation pages a zero-context approver, so it carries a synthesized
+	// plain-language brief. Lazy: the model call happens only if the run
+	// actually parks, and only from what the run already recorded.
+	title := verify.PRTitle(e.st, bundle.View)
+	synth := func(question string) (verify.Brief, error) {
+		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+	}
+	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
 }
 
 // ciClassifyIfRed runs the conditional enrichment rung, last before
@@ -465,8 +473,12 @@ func ciClassifyIfRed(e env, run, viewEvidenceID, repo string, pr int, subject ve
 	return art.ID, nil
 }
 
+// briefFn lazily synthesizes the operator brief for an escalation, from the
+// park question it is handed. Nil means "no brief" (tests, degraded paths).
+type briefFn func(question string) (verify.Brief, error)
+
 // act turns the composed verdict plus the grant into an outcome artifact.
-func act(e env, run string, grantID string, reduced verify.Verdict, reducedID string, res gateResult, live bool) (gateResult, int, error) {
+func act(e env, run string, grantID string, reduced verify.Verdict, reducedID string, res gateResult, live bool, synth briefFn) (gateResult, int, error) {
 	res.Decision = reduced.Decision
 	res.Tier = reduced.Tier
 	res.Why = reduced.Why
@@ -487,6 +499,13 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		if kind == state.KindEscalation && reduced.Subject.Repo != "" && reduced.Subject.Number > 0 {
 			body["repo"] = reduced.Subject.Repo
 			body["number"] = reduced.Subject.Number
+		}
+		// The page must brief a reader with zero codebase context, so every
+		// escalation tries to carry a plain-language brief. Advisory and
+		// fail-open: a synthesis failure falls back to the raw question —
+		// never blocks or fails the park itself.
+		if kind == state.KindEscalation {
+			attachBrief(body, synth)
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
@@ -566,6 +585,23 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 }
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
+
+// attachBrief adds the synthesized operator brief to an escalation body.
+// Fail-open by contract: a model error costs only the nicer page (the sink
+// renders the raw question instead), never the escalation — a park must
+// reach the operator even when the model is down.
+func attachBrief(body map[string]any, synth briefFn) {
+	if synth == nil {
+		return
+	}
+	question, _ := body["question"].(string)
+	b, err := synth(question)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate: escalation brief synthesis failed (page falls back to the raw question): %v\n", err)
+		return
+	}
+	body["brief"] = b
+}
 
 // cycleCount derives how many review cycles this repo+PR has consumed, from
 // state alone — a caller-passed count is never trusted, because the caller is
@@ -757,7 +793,10 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, code, err := act(e, *run, *grantID, reduced, reducedArt.ID, gateResult{Run: *run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false)
+	// No brief on the judge path: the operator is already in the loop here,
+	// and a re-park after judgment is procedural (a ceiling), not a fresh
+	// zero-context page.
+	res, code, err := act(e, *run, *grantID, reduced, reducedArt.ID, gateResult{Run: *run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
 	if err != nil {
 		return err
 	}
