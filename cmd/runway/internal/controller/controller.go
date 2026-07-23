@@ -345,10 +345,11 @@ func (c *ctrl) resolveCustody(ctx context.Context, custody []execution.Secret) (
 		return backend.CustodyResolution{}, fmt.Errorf("controller: placement backend has no custody resolver (code: authority_unsupported)")
 	}
 	return resolver.ResolveCustody(ctx, backend.CustodyRequest{
-		Secrets:  custody,
-		Deadline: c.deadline,
-		Grace:    c.grace,
-		Now:      time.Now(),
+		Secrets:    custody,
+		Deadline:   c.deadline,
+		Grace:      c.grace,
+		Now:        time.Now(),
+		PrivateDir: c.run.PrivateDir(),
 	})
 }
 

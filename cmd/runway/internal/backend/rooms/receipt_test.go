@@ -224,19 +224,25 @@ func TestScanCustodyLogOversizedLineIsUnreadableNotPartial(t *testing.T) {
 	state := t.TempDir()
 	// A first valid line, then a line far past the 1 MiB scanner cap. A partial
 	// (count=1) result would be a silently wrong pin, so the whole scan is
-	// reported unreadable.
+	// discarded: count 0, and the empty-lines digest (never a schema-breaking "").
 	oversized := `{"grant_id":"child-a","blob":"` + strings.Repeat("x", 2<<20) + `"}`
 	writeCustodyLog(t, state, `{"grant_id":"child-a","verdict":"pass"}`, oversized)
 	count, digest := scanCustodyLog(state, "child-a")
-	if count != 0 || digest != "" {
-		t.Fatalf("oversized line must yield (0, \"\"), got (%d, %q)", count, digest)
+	if count != 0 {
+		t.Fatalf("oversized line must yield count 0 (not partial), got %d", count)
+	}
+	if digest != emptyLinesDigest || !bareHex64.MatchString(digest) {
+		t.Fatalf("digest %q must be the valid empty-lines digest", digest)
 	}
 }
 
-func TestScanCustodyLogMissingLogIsZero(t *testing.T) {
+func TestScanCustodyLogMissingLogIsZeroWithValidDigest(t *testing.T) {
 	count, digest := scanCustodyLog(t.TempDir(), "child-a")
-	if count != 0 || digest != "" {
-		t.Fatalf("missing log must yield (0, \"\"), got (%d, %q)", count, digest)
+	if count != 0 || digest != emptyLinesDigest {
+		t.Fatalf("missing log must yield (0, emptyLinesDigest), got (%d, %q)", count, digest)
+	}
+	if !bareHex64.MatchString(digest) {
+		t.Fatalf("digest %q must be bare 64-hex", digest)
 	}
 }
 

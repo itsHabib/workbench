@@ -152,10 +152,43 @@ func (b *Backend) AssembleAuthorityReceipt(records any, in backend.AuthorityRece
 	return writeReceiptArtifact(in.ArtifactsDir, line)
 }
 
+// AssembleReconcileReceipt assembles the room-authority receipt after controller
+// loss (§7 F) from the derive records persisted at resolve time. teardown status
+// is unknown — a red flag a reader surfaces, not silence. Returns ok=false when
+// the run carried no custody refs (no records file), so reconcile skips cleanly.
+func AssembleReconcileReceipt(privateDir, artifactsDir, runID, allocationID string, artifacts []execution.Artifact, at time.Time) (execution.Artifact, bool, error) {
+	records, ok, err := readDeriveRecords(privateDir)
+	if err != nil {
+		return execution.Artifact{}, false, err
+	}
+	if !ok || len(records) == 0 {
+		return execution.Artifact{}, false, nil
+	}
+	line, err := receiptLine(receiptInputs{
+		runID:        runID,
+		allocationID: allocationID,
+		records:      records,
+		artifacts:    artifacts,
+		custodyLog:   custodyLogEntries(custodyStateDir(), records),
+		teardown:     teardownFrom(authority.TeardownUnknown, at),
+	})
+	if err != nil {
+		return execution.Artifact{}, false, err
+	}
+	art, err := writeReceiptArtifact(artifactsDir, line)
+	if err != nil {
+		return execution.Artifact{}, false, err
+	}
+	return art, true, nil
+}
+
 // writeReceiptArtifact writes the receipt line under the artifacts dir and
 // returns its named artifact with the Runway-relative path convention
 // ("artifacts/<file>", forward-slashed) the Result contract requires.
 func writeReceiptArtifact(artifactsDir string, line []byte) (execution.Artifact, error) {
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		return execution.Artifact{}, fmt.Errorf("rooms: authority receipt dir: %w", err)
+	}
 	body := append(append([]byte(nil), line...), '\n')
 	if err := os.WriteFile(filepath.Join(artifactsDir, authorityReceiptFile), body, 0o600); err != nil {
 		return execution.Artifact{}, fmt.Errorf("rooms: write authority receipt: %w", err)
@@ -192,19 +225,27 @@ func custodyLogEntries(stateDir string, records []DeriveRecord) []authority.Cust
 	return out
 }
 
+// emptyLinesDigest is sha256 over zero selected lines — the digest a custody_log
+// entry carries when no requests matched or the log was unreadable. It is a
+// valid bare 64-hex (the schema requires the field), so the entry is never
+// schema-invalid, while request_count 0 says nothing was pinned.
+var emptyLinesDigest = hex.EncodeToString(sha256.New().Sum(nil))
+
 // scanCustodyLog counts and hashes the log lines whose grant_id equals childID.
 // The digest is over the selected raw lines in file order (bare 64-hex, the
 // shape evidence.custody_log[].lines_sha256 requires), so later tampering is
 // detectable against the receipt. A missing, unreadable, or over-long-line log
-// returns (0, ""): a partial count+digest would be a silently wrong pin, so on
-// any scan error the entry is treated as unreadable (§7 F), never partial.
+// returns (0, emptyLinesDigest): a partial count+digest would be a silently
+// wrong pin, so on any scan error the whole result is discarded (§7 F) — never
+// partial — but the digest stays valid hex rather than an empty, schema-breaking
+// string.
 func scanCustodyLog(stateDir, childID string) (int, string) {
 	if stateDir == "" {
-		return 0, ""
+		return 0, emptyLinesDigest
 	}
 	file, err := os.Open(filepath.Join(stateDir, "log", "requests.jsonl"))
 	if err != nil {
-		return 0, ""
+		return 0, emptyLinesDigest
 	}
 	defer file.Close()
 	hash := sha256.New()
@@ -224,10 +265,7 @@ func scanCustodyLog(stateDir, childID string) (int, string) {
 		hash.Write([]byte{'\n'})
 	}
 	if err := scanner.Err(); err != nil {
-		return 0, ""
-	}
-	if count == 0 {
-		return 0, ""
+		return 0, emptyLinesDigest
 	}
 	return count, hex.EncodeToString(hash.Sum(nil))
 }

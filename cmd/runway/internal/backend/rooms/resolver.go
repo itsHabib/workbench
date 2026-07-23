@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -115,21 +116,62 @@ type custodyPort interface {
 }
 
 // DeriveRecord is the resolver's per-ref output: the injectable child token plus
-// every durable field receipt assembly needs. ChildToken is the secret and is
-// deliberately absent from the receipt Grant.
+// every durable field receipt assembly needs. ChildToken is the bearer secret,
+// tagged json:"-" so it is injected into the room in-memory but never written to
+// the durable authority-records.json nor to the receipt Grant. The remaining
+// fields ARE persisted (§7 F: the receipt must still assemble after controller
+// death), so their json tags pin the on-disk shape read back at reconcile.
 type DeriveRecord struct {
-	SecretName    string
-	Key           string
-	ParentID      string
-	ParentDigest  string
-	ParentActions []string
-	ChildID       string
-	ChildDigest   string
-	ChildToken    string
-	Actions       []string
-	BoundSource   string
-	MintedAt      time.Time
-	Expiry        time.Time
+	SecretName    string    `json:"secret_name"`
+	Key           string    `json:"key"`
+	ParentID      string    `json:"parent_id"`
+	ParentDigest  string    `json:"parent_digest"`
+	ParentActions []string  `json:"parent_actions"`
+	ChildID       string    `json:"child_id"`
+	ChildDigest   string    `json:"child_digest"`
+	ChildToken    string    `json:"-"`
+	Actions       []string  `json:"actions"`
+	BoundSource   string    `json:"bound_source"`
+	MintedAt      time.Time `json:"minted_at"`
+	Expiry        time.Time `json:"expiry"`
+}
+
+// authorityRecordsFile is the durable, token-free copy of a run's derive records
+// under the run's private dir. It is the ONLY way the room-authority receipt can
+// assemble after controller death (§7 F): the in-memory records die with the
+// controller, so reconcile reads this file back.
+const authorityRecordsFile = "authority-records.json"
+
+// writeDeriveRecords persists the run's derive records under privateDir. The
+// child tokens are excluded by DeriveRecord's json tags — the durable copy holds
+// only the receipt-shaped facts, never a bearer secret at rest.
+func writeDeriveRecords(privateDir string, records []DeriveRecord) error {
+	data, err := json.Marshal(records)
+	if err != nil {
+		return fmt.Errorf("rooms: marshal derive records: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(privateDir, authorityRecordsFile), data, 0o600); err != nil {
+		return fmt.Errorf("rooms: write derive records: %w", err)
+	}
+	return nil
+}
+
+// readDeriveRecords reads the persisted derive records. A missing file returns
+// (nil, false, nil): the run carried no custody refs, so reconcile skips the
+// receipt cleanly rather than inventing one.
+func readDeriveRecords(privateDir string) ([]DeriveRecord, bool, error) {
+	data, err := os.ReadFile(filepath.Join(privateDir, authorityRecordsFile))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("rooms: read derive records: %w", err)
+	}
+	var records []DeriveRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, false, fmt.Errorf("rooms: parse derive records: %w", err)
+	}
+	return records, true, nil
 }
 
 // Resolver is the placement-side authority policy: parse a custody ref, find a
@@ -228,6 +270,11 @@ func (b *Backend) ResolveCustody(ctx context.Context, req backend.CustodyRequest
 		redact = append(redact, []byte(record.ChildToken))
 		records = append(records, record)
 	}
+	if req.PrivateDir != "" && len(records) > 0 {
+		if err := writeDeriveRecords(req.PrivateDir, records); err != nil {
+			return backend.CustodyResolution{}, err
+		}
+	}
 	return backend.CustodyResolution{Env: env, Redact: redact, Records: records}, nil
 }
 
@@ -325,7 +372,7 @@ func (c cliCustody) Derive(ctx context.Context, req deriveRequest) (childGrant, 
 	}
 	out, err := exec.CommandContext(ctx, c.bin, args...).Output()
 	if err != nil {
-		return childGrant{}, fmt.Errorf("custody derive: %w", err)
+		return childGrant{}, deriveError(err)
 	}
 	token := strings.TrimSpace(string(out))
 	id, err := grantIDFromToken(token)
@@ -345,6 +392,18 @@ func (c cliCustody) Derive(ctx context.Context, req deriveRequest) (childGrant, 
 		mintedAt:    record.MintedAt,
 		expiry:      record.expiry(),
 	}, nil
+}
+
+// deriveError wraps a custody derive failure, folding in the CLI's stderr (from
+// *exec.ExitError, populated by Output) so the operator sees WHY it refused —
+// expired parent, rejected source binding, missing key dir — not a bare exit
+// status. Falls back to the plain wrap when there is no captured stderr.
+func deriveError(err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		return fmt.Errorf("custody derive: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+	}
+	return fmt.Errorf("custody derive: %w", err)
 }
 
 // grantRecord mirrors the persisted custody grant fields the resolver reads. It

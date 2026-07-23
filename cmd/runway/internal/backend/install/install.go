@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend"
 	"github.com/itsHabib/workbench/cmd/runway/internal/backend/local"
@@ -42,6 +43,17 @@ func CleanupDurable(p execution.Placement, privateDir string) (backend.CleanupRe
 		return local.CleanupDurable(privateDir)
 	}
 	return backend.CleanupResult{Uncertain: true, AllocationID: "unknown"}, nil
+}
+
+// AssembleAuthorityReceiptDurable assembles the reconcile-time room-authority
+// receipt through the adapter that owns the placement, reading the derive
+// records persisted at resolve time (§7 F). ok is false when the placement has
+// no authority receipt (non-rooms, or a run that carried no custody refs).
+func AssembleAuthorityReceiptDurable(p execution.Placement, privateDir, artifactsDir, runID, allocationID string, artifacts []execution.Artifact, at time.Time) (execution.Artifact, bool, error) {
+	if p.Backend == "rooms" {
+		return roomsbackend.AssembleReconcileReceipt(privateDir, artifactsDir, runID, allocationID, artifacts, at)
+	}
+	return execution.Artifact{}, false, nil
 }
 
 // ReadReceipt recovers the adapter-authored placement receipt from

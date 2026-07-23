@@ -83,6 +83,10 @@ type CustodyRequest struct {
 	Deadline time.Time
 	Grace    time.Duration
 	Now      time.Time
+	// PrivateDir is the run's private dir. The resolver persists a token-free
+	// copy of the derive records there so the room-authority receipt can still
+	// assemble after controller death (§7 F). Empty disables persistence.
+	PrivateDir string
 }
 
 // CustodyResolution is the outcome of resolving custody: refs — the environment

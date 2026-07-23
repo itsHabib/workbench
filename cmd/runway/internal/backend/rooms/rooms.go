@@ -63,6 +63,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 	if err := validateSecrets(work); err != nil {
 		return err
 	}
+	if err := b.requireCustodyGateway(work); err != nil {
+		return err
+	}
 	if _, err := taskInput(work); err != nil {
 		return err
 	}
@@ -441,6 +444,24 @@ func taskInput(work execution.WorkSpec) (execution.Input, error) {
 		}
 	}
 	return execution.Input{}, fmt.Errorf("rooms: agent-cursor profile requires an input named %q", "task")
+}
+
+// requireCustodyGateway refuses at admission when the work carries a custody:
+// ref but no tap gateway is configured. Without it CUSTODY_BASE_<KEY> would be
+// empty, the room would boot and consume a slot, and guest vendor calls would
+// fail closed at runtime with no operator-facing reason — so fail fast, before
+// a slot is taken, with a coded diagnostic naming the fix.
+func (b *Backend) requireCustodyGateway(work execution.WorkSpec) error {
+	for _, secret := range work.Secrets {
+		ref, err := parseCustodyRef(secret.Name, secret.Ref)
+		if err != nil {
+			continue
+		}
+		if b.config.custodyBase(ref.key) == "" {
+			return fmt.Errorf("rooms: secret %q needs a custody base url but the tap gateway is unset (code: authority_gateway_unset); set %s", secret.Name, envTapGateway)
+		}
+	}
+	return nil
 }
 
 func validateSecrets(work execution.WorkSpec) error {
