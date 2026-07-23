@@ -122,19 +122,23 @@ feedback and confirm the right tool is installed.
 
 ```bash
 nft list ruleset | grep "dport $CUSTODY_PORT"
-# Expected: a source-restricted accept line, e.g.
-#   ip saddr 10.0.100.0/24 tcp dport 8127 accept
-# A bare "dport 8127 drop" or a "dport 8127 accept" WITHOUT a saddr does NOT
-# satisfy the preflight — the probe requires the source restriction on the rule.
+# The preflight requires BOTH rules on the port:
+#   ip saddr 10.0.100.0/24 tcp dport 8127 accept   (room may reach)
+#   tcp dport 8127 ... drop                         (every other source denied)
+# Under the policy-ACCEPT chain the drop is what actually restricts the port —
+# without it, non-room traffic falls through to `policy accept`. A source-
+# unrestricted accept, or the accept alone, does NOT satisfy the preflight.
 ```
 
 ### Check: iptables rule present (if not using nftables)
 
 ```bash
 iptables-save | grep -- "--dport $CUSTODY_PORT"
-# Expected: an ACCEPT line carrying a source restriction, e.g.
+# The preflight requires BOTH on the port:
 #   -A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT
-# A DROP line, or an ACCEPT without -s, does NOT satisfy the preflight.
+#   -A INPUT -p tcp --dport 8127 -j DROP
+# For an IPv6-only room subnet, the probe also reads ip6tables-save, so the
+# equivalent ip6tables ACCEPT+DROP pair satisfies it.
 ```
 
 ### Check: tap interface has the expected IP

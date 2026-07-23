@@ -400,50 +400,63 @@ func decodeTapErr(t *testing.T, w *httptest.ResponseRecorder) errorBody {
 
 // --- ruleset matching (the preflight's source-restriction policy) ---
 //
-// These guard the finding that a bare port match let a drop-only or
-// source-unrestricted rule pass the preflight: the matcher must require an
-// accept rule carrying a source restriction on the same line.
+// "In force" requires BOTH a source-restricted accept AND a drop on the custody
+// port: under the runbook's policy-accept chain the drop is the security-
+// critical half (without it, non-room traffic falls through to policy accept).
+// A bare port mention, a drop-only rule, or a source-unrestricted accept must
+// all fail; and port matching is field-exact so 8127 never matches 81270.
 
-func TestNftAllowsPort(t *testing.T) {
+const (
+	// nft: source-restricted accept + a port drop = restricted.
+	nftAccept = "ip saddr 10.0.100.0/24 tcp dport 8127 accept"
+	nftDrop   = "tcp dport 8127 log prefix \"x\" drop"
+	// iptables equivalents.
+	iptAccept = "-A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT"
+	iptDrop   = "-A INPUT -p tcp --dport 8127 -j DROP"
+)
+
+func TestNftInForce(t *testing.T) {
 	cases := []struct {
 		name    string
 		ruleset string
 		want    bool
 	}{
-		{"source-restricted accept", "ip saddr 10.0.100.0/24 tcp dport 8127 accept", true},
-		{"ipv6 source-restricted accept", "ip6 saddr fd00:100::/64 tcp dport 8127 accept", true},
-		{"drop only", "tcp dport 8127 log prefix \"x\" drop", false},
-		{"accept without saddr", "tcp dport 8127 accept", false},
-		{"saddr+accept on different rules", "ip saddr 10.0.100.0/24 accept\ntcp dport 8127 drop", false},
-		{"wrong port", "ip saddr 10.0.100.0/24 tcp dport 9999 accept", false},
+		{"accept + drop", nftAccept + "\n" + nftDrop, true},
+		{"ipv6 accept + drop", "ip6 saddr fd00:100::/64 tcp dport 8127 accept\n" + nftDrop, true},
+		{"accept only, no drop", nftAccept, false},
+		{"drop only", nftDrop, false},
+		{"accept without saddr + drop", "tcp dport 8127 accept\n" + nftDrop, false},
+		{"port as substring (81270)", "ip saddr 10.0.100.0/24 tcp dport 81270 accept\ntcp dport 81270 drop", false},
+		{"wrong port", "ip saddr 10.0.100.0/24 tcp dport 9999 accept\ntcp dport 9999 drop", false},
 		{"empty", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := nftAllowsPort(tc.ruleset, "8127"); got != tc.want {
-				t.Fatalf("nftAllowsPort(%q) = %v, want %v", tc.ruleset, got, tc.want)
+			if got := nftInForce(tc.ruleset, "8127"); got != tc.want {
+				t.Fatalf("nftInForce(%q) = %v, want %v", tc.ruleset, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestIptablesAllowsPort(t *testing.T) {
+func TestIptablesInForce(t *testing.T) {
 	cases := []struct {
 		name string
 		save string
 		want bool
 	}{
-		{"source-restricted accept", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT", true},
-		{"drop only", "-A INPUT -p tcp --dport 8127 -j DROP", false},
-		{"accept without source", "-A INPUT -p tcp --dport 8127 -j ACCEPT", false},
-		{"source+accept on different rules", "-A INPUT -s 10.0.100.0/24 -j ACCEPT\n-A INPUT -p tcp --dport 8127 -j DROP", false},
-		{"wrong port", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 9999 -j ACCEPT", false},
+		{"accept + drop", iptAccept + "\n" + iptDrop, true},
+		{"accept only, no drop", iptAccept, false},
+		{"drop only", iptDrop, false},
+		{"accept without source + drop", "-A INPUT -p tcp --dport 8127 -j ACCEPT\n" + iptDrop, false},
+		{"port as substring (81270)", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 81270 -j ACCEPT\n-A INPUT -p tcp --dport 81270 -j DROP", false},
+		{"wrong port", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 9999 -j ACCEPT\n-A INPUT -p tcp --dport 9999 -j DROP", false},
 		{"empty", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := iptablesAllowsPort(tc.save, "8127"); got != tc.want {
-				t.Fatalf("iptablesAllowsPort(%q) = %v, want %v", tc.save, got, tc.want)
+			if got := iptablesInForce(tc.save, "8127"); got != tc.want {
+				t.Fatalf("iptablesInForce(%q) = %v, want %v", tc.save, got, tc.want)
 			}
 		})
 	}
