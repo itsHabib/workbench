@@ -4,7 +4,8 @@ The workbench's escalation-routing plane: a small Go binary that tails
 producers' artifact logs (gate `log.jsonl`, ship `receipts.jsonl`) and, on
 block/escalate, delivers a Slack page — a `chat.postMessage` with a
 severity-colored Block Kit card that leads on the required action and carries a
-`View PR` button. Toast and webhook are the other available channel *types*.
+`View PR` button when the event names a repo and PR number. Toast and webhook are
+the other available channel *types*.
 Pure sink — it never gates, never blocks, never writes into a producer's state
 or takes a producer's lock.
 

@@ -14,7 +14,7 @@ RED-TEAM #9). The gate's own backtest showed parking is the *hot* path (5/7 real
 silence-until-polled is the standing failure mode.
 
 flare closes the seam: it watches the artifact logs those planes already emit and pushes a
-notification — a Slack page by default (a `chat.postMessage` Block Kit card), with Windows toast
+notification — a Slack page (a `chat.postMessage` Block Kit card), with Windows toast
 and webhook as the other available channel types — when something blocks or escalates. It
 is the push half; `/wip` and `/status` remain the pull half.
 
