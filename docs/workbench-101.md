@@ -6,7 +6,7 @@ the one law that holds the family together, and where it is going.
 
 Two status markers appear throughout, and the difference matters:
 
-- `verified` - confirmed against the code on `main` as of 2026-07-21.
+- `verified` - confirmed against the code on `main` as of 2026-07-23.
 - `intent` - designed and written down, but not yet code.
 
 Every claim cites the file that backs it. The paths are part of the teaching: when a
@@ -184,8 +184,10 @@ The layout, top level down:
 - **`contracts/`** - the shared vocabulary. `verified` contents: `verdict.go` (the
   Verdict type and its decision/class constants), `envelope.go` (the artifact
   envelope and its kinds), `schema.go` (the embedded `verdict-v0.3.0.json` schema),
-  plus sub-domains `contracts/driverstate` and `contracts/execution`, each carrying
-  types, JSON schemas, and pure validation. The carve-out that keeps this honest:
+  plus sub-domains `contracts/driverstate`, `contracts/execution`, and
+  `contracts/authority` (the room-authority receipt v1 + the `custody:` secret-ref
+  grammar, PR #104), each carrying types, JSON schemas, and pure validation. The
+  carve-out that keeps this honest:
   *contract-law validation* (pure, stdlib-only, I/O-free "is this a valid
   instance") lives beside the types; anything deciding what to *do* with a valid
   instance stays in the owning tool.
@@ -571,10 +573,18 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   CSP, `nosniff` on every response.
 - **custody** - the Capability plane extending from merges to credentials: a
   localhost credential broker so agents hold scoped, expiring, minted capabilities
-  instead of the operator's raw API keys. In flight - section 9 tells the story;
-  what is merged today (`verified`) is the HMAC grant envelope and the verb-registry
-  CLI (`cmd/custody/main.go`, `cmd/custody/internal/grant/`), with `keys` and
-  `serve` registered as explicit not-yet-implemented placeholders.
+  instead of the operator's raw API keys. **v0 shipped and usable end to end**
+  (`verified`): `keys` (store a secret in the OS credential store), `serve` (the
+  loopback proxy that validates a grant, matches an action, injects the secret, and
+  forwards to one upstream), `grant` (the HMAC-signed, action-scoped, TTL-bounded
+  capability), and `derive` (parent-chained attenuation) are all real commands
+  (`cmd/custody/main.go`); the runbook wires one key from nothing to a proxied call
+  (`cmd/custody/docs/runbook.md`). Still v0, and Windows-only today - `keys`/`serve`
+  back onto the Windows credential store, and `cmd/custody/store_other.go` stubs every
+  other OS to an `unavailableStore` (so `keys`/`serve` return "unsupported on this
+  platform"); no revoke (short TTL is the bound), one header inject shape, and the
+  `wincred:`/`custody:` ref-namespace reconcile is in flight. Section 9 tells where it
+  goes next (the gmr track).
 - **dispatch** - the placement-decision plane: a versioned, content-hashed policy
   file plus a task descriptor in, a deterministic placement (engine, provider,
   model, effort, runtime) plus an append-only receipt out
@@ -588,7 +598,10 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   backend (`cmd/runway/internal/backend/rooms/`) that places a work bundle into a
   microVM guest by shelling the Rooms CLI - and the first real WorkSpec has been
   placed through it end to end
-  (`docs/features/runway/EVIDENCE-first-rooms-placement.md`).
+  (`docs/features/runway/EVIDENCE-first-rooms-placement.md`). Newest: a **custody
+  secret-ref resolver + authority-receipt assembly** (#112) - runway resolves a
+  `custody:` secret ref and assembles the room-authority receipt, the join between
+  the Capability plane and execution (the gmr track).
 - **driverstate** (the CLI tenant) - the human/cron twin of the MCP surface over
   the ledger mechanism: `record` claims the run lease, appends, and releases in one
   shot. `verified` verbs: `record`, `state`, `render` (a human-readable run view),
@@ -703,12 +716,28 @@ substrate, scoped by domain - which is exactly the custody story next).
 
 ## 9. Where it's going
 
-Three threads, all honestly marked. Each one removes a reason a run still needs a
+Four threads, all honestly marked. Each one removes a reason a run still needs a
 human in the loop, so the direction they share is a fully autonomous cloud run - the
 loop in section 2 executing end to end with the operator reading the audit trail
 after, not gating it during. The pattern underneath: the center of gravity keeps
 moving toward versioned artifacts and engine guarantees, with harness-specific
 skills as thin projections.
+
+### Grant-materialized rooms (gmr): the current center of gravity
+
+The thread the others feed into. Custody made a credential a minted capability;
+runway made a run a controlled room. **gmr** (grant-materialized rooms,
+`docs/features/grant-materialized-rooms/spec.md`, TDD #91) joins them into
+*grant-as-environment*: the room a run executes in is materialized from an
+attenuated grant, so **only a parent-chained child token ever enters the room** -
+never the operator's identity, never a full-scope secret. What has landed is real
+and builds bottom-up: the `contracts/authority` receipt v1 + `custody:` secret-ref
+grammar (#104), custody's parent-chained `derive` attenuation (#105), the P3
+placement specs (#108), custody's second source-bound listener (#110), and runway's
+custody secret-ref resolver + authority-receipt assembly (#112) - the join point
+where runway resolves a `custody:` ref and assembles the room's authority receipt.
+It is the concrete continuation of the custody and enforcement threads below: the
+place the Capability plane and Execution finally meet.
 
 ### Custody: grants for credentials, not just merges
 
@@ -885,7 +914,7 @@ A backstop, not a prerequisite - every term here is also defined at first use ab
 - **fail closed** - unknown or absent input becomes park/refuse, never a silent
   pass; "absence never reads as green."
 
-## 12. Drift log - where docs and code disagree (verified 2026-07-21)
+## 12. Drift log - where docs and code disagree (verified 2026-07-23)
 
 The discipline: this repo prefers an honest list of disagreements over docs that
 quietly overclaim. Two directions of drift exist - docs behind code (stale) and
@@ -898,17 +927,16 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `cmd/driverstate/CLAUDE.md` verb list | Behind code: omits `render` and `rollup` |
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
 | `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; twelve tenants live under `cmd/` |
-| `README.md` layout section | Behind code: omits `dispatch`, `driverstate`, `runway`, `workbench-mcp`, `console`, `custody` |
-| Repo `CLAUDE.md` map | Behind code: omits `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
+| Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
 | Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | In no code anywhere - pure intent (closure Phase 1) |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
-| `custody keys` / `custody serve` | Registered CLI placeholders returning "not yet implemented"; manifest+credstore in review, proxy engine queued |
+| `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
 | `.github/workflows/gate.yml` | Built and merged but dormant: posts nothing until `GATE_ENFORCE=true` and a model-capable runner exist |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
 
-Confirmed-in-code anchors, for contrast (all re-checked 2026-07-21): the exit
+Confirmed-in-code anchors, for contrast (all re-checked 2026-07-23): the exit
 codes, verbs, ladder law, monotone reduce, and fail-closed unknowns; the eight
 grant refusal codes and the `-init` mint guard; the keyed anchor pinning head and
 count; the post-judgment ceiling re-check; the triage-floor exec seam; the hygiene
