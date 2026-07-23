@@ -240,7 +240,12 @@ Enough to *explain* the verdict offline (FR3); never bodies, never header values
 never secrets. The exact final field set is
 settled while writing the logger (§8.2). Plain JSONL, not hash-chained: a read log is
 tuning evidence, not a merge-authority record; revisit if custody grants ever gate an
-effectful verb chain.
+effectful verb chain. A log-write failure after startup (full disk, closed fd) is
+**surfaced to stderr, best-effort** - not swallowed, and deliberately not fail-closed:
+because the line is tuning evidence rather than an authority control, losing one must
+neither drop the request the caller already completed nor take custody offline. (A
+fail-closed latch here would turn a full disk into a credential-proxy outage; that is a
+different availability posture and would be an explicit spec change, not the default.)
 
 **State dir**: `%USERPROFILE%\.custody\` - `manifest.json`, `grants/`, `log/`. The HMAC
 **mint key is a separate trust domain and lives outside this tree** - its own dir with
@@ -424,8 +429,9 @@ boundary:
 This design fixes the load-bearing invariants (§7 C canonical identity, §7 D
 deny-by-default, §4 D2 grant shape) and deliberately leaves the following to be worked
 out in code and tests rather than pre-specified here: the exact enumeration of rejected
-encoding classes (§7 C), the final artifact field list beyond the digests FR3 names,
-the manifest injection-seam details (tagged `inject` list, HTTPS-only upstream, header
+encoding classes (§7 C), the final artifact field list beyond the digests FR3 names
+(and the log-write-failure posture that field list implies - settled to best-effort
+stderr surfacing, not fail-closed, per §5), the manifest injection-seam details (tagged `inject` list, HTTPS-only upstream, header
 denylist, single-placeholder no-CRLF templates - all additive, so a wrong first guess
 is cheap to correct), and the PreToolUse guard's command-normalization depth (that rule
 lives in the `hooks` repo's `pretool-guard`, not this doc - the phase-2 keys-file deny).

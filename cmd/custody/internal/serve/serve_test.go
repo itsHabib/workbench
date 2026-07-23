@@ -484,6 +484,58 @@ func TestNoSecretInLogsOrErrors(t *testing.T) {
 	}
 }
 
+// failWriter is a log sink that fails every write, standing in for a disk that
+// fills or an fd that closes after startup.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, io.ErrShortWrite }
+
+// A log-write failure after startup is surfaced to the error sink, not swallowed
+// (spec §5, §8.2), and the request the caller already sent still completes. The
+// surfaced line names the request and the failure only — never a secret byte.
+func TestLogWriteFailureSurfaced(t *testing.T) {
+	cp := &capture{}
+	up := upstreamOK(t, cp)
+	h := newHarness(t, up, []string{"read"})
+	// Swap in a sink that fails every write and a capture for the error channel.
+	h.engine.logger = NewLogger(failWriter{})
+	errBuf := &bytes.Buffer{}
+	h.engine.errLog = errBuf
+
+	hdr := http.Header{grantHeader: {h.token}, "Authorization": {"Bearer " + testSecret}}
+	w := do(h.engine, "GET", "/tracker/rest/api/2/issue/PROJ-123", hdr, nil)
+
+	// The request still completes — visibility only, not fail-closed.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (log failure must not fail the request); body=%s", w.Code, w.Body.String())
+	}
+	surfaced := errBuf.String()
+	if !strings.Contains(surfaced, "req_test") {
+		t.Fatalf("surfaced error should name the request id: %q", surfaced)
+	}
+	if !strings.Contains(surfaced, "artifact-log write failed") {
+		t.Fatalf("surfaced error should name the failure: %q", surfaced)
+	}
+	// The surfaced message carries only the sink error — no secret, no grant proof.
+	if strings.Contains(surfaced, testSecret) {
+		t.Fatal("secret bytes leaked into the surfaced error")
+	}
+	if strings.Contains(surfaced, h.token) {
+		t.Fatal("grant token leaked into the surfaced error")
+	}
+}
+
+// New defaults the error sink to os.Stderr, so an engine built without an ErrLog
+// still surfaces log-write failures rather than nil-panicking on the write.
+func TestErrLogDefaultsToStderr(t *testing.T) {
+	cp := &capture{}
+	up := upstreamOK(t, cp)
+	h := newHarness(t, up, []string{"read"})
+	if h.engine.errLog != os.Stderr {
+		t.Fatalf("errLog = %v, want os.Stderr default", h.engine.errLog)
+	}
+}
+
 // A depth-2 chain reaching the proxy refuses as refused_chain_depth over HTTP —
 // the coded refusal survives the boundary, is a 401, and never forwards.
 func TestFlowChainDepthRefused(t *testing.T) {
