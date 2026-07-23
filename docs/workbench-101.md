@@ -579,9 +579,12 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   forwards to one upstream), `grant` (the HMAC-signed, action-scoped, TTL-bounded
   capability), and `derive` (parent-chained attenuation) are all real commands
   (`cmd/custody/main.go`); the runbook wires one key from nothing to a proxied call
-  (`cmd/custody/docs/runbook.md`). Still v0 - no revoke (short TTL is the bound), one
-  header inject shape, and the `wincred:`/`custody:` ref-namespace reconcile is in
-  flight. Section 9 tells where it goes next (the gmr track).
+  (`cmd/custody/docs/runbook.md`). Still v0, and Windows-only today - `keys`/`serve`
+  back onto the Windows credential store, and `cmd/custody/store_other.go` stubs every
+  other OS to an `unavailableStore` (so `keys`/`serve` return "unsupported on this
+  platform"); no revoke (short TTL is the bound), one header inject shape, and the
+  `wincred:`/`custody:` ref-namespace reconcile is in flight. Section 9 tells where it
+  goes next (the gmr track).
 - **dispatch** - the placement-decision plane: a versioned, content-hashed policy
   file plus a task descriptor in, a deterministic placement (engine, provider,
   model, effort, runtime) plus an append-only receipt out
@@ -924,7 +927,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `cmd/driverstate/CLAUDE.md` verb list | Behind code: omits `render` and `rollup` |
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
 | `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; twelve tenants live under `cmd/` |
-| Repo `CLAUDE.md` map | Behind code: omits `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
+| Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
 | Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | In no code anywhere - pure intent (closure Phase 1) |
