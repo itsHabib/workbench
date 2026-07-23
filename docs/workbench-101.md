@@ -352,8 +352,16 @@ The ladder law is encoded as reducer errors plus pinned tests, all `verified` in
 is written in `cmd/triage/RUBRIC.md` and compiled into the floor classifier
 (`cmd/triage/internal/floor/floor.go`), so the floor keys on the rubric's rules
 rather than ad-hoc judgment, and editing the rubric is itself a T3 change - the
-floor's own control-plane rule floors edits to `RUBRIC.md`, `CODEOWNERS`, and the
-`labels/` corpus at T3 (`verified`, `floor.go`). `intent`: the rubric *mandates*
+floor's own control-plane rule floors edits to `RUBRIC.md`, `CODEOWNERS`, the
+`labels/` corpus, *and the override table below* at T3 (`verified`, `floor.go`).
+A newer control closes the floor's documented gate-machinery blind spot: a
+compiled-in **per-repo path-override table** (`cmd/triage/internal/floor/overrides.go`,
+enabled by a `-repo owner/name` flag) that raises specific paths to a floor tier -
+gate's authorization/signing internals (`state`, `verify`, `capability`, `tier`,
+the exit-code seam) to T3, broader gate/driver machinery to T2, raise-only and
+byte-identical without `-repo`. Ship's driver now shells `triage-floor` to classify
+each stream's PR and carry the tier (ship #233), so risk routing is wired, not just
+advisory. `intent`: the rubric *mandates*
 that each classification also record the rubric's git SHA for reproducibility, and
 the eval corpus (`labels/mismatches.jsonl`) carries it, but the shipped
 `triage-floor` / `triage-advisory` binaries do not yet emit it in their own output
@@ -727,13 +735,19 @@ is the target that is sent* - which is why the spec spends most of its ink on
 canonicalization, redirect refusal, and deny-by-default query handling, and why the
 threat-model section states plainly what a single-box broker does and does not buy.
 
-Status, precisely: the spec is merged; the grant envelope and CLI dispatcher are
-merged (`verified`, `cmd/custody/`); the manifest loader and credential store are
-in review; the proxy engine (`custody serve`) - the security-critical core - is
-queued. `intent` until the phase-1 validation gate passes: one real high-stakes key
-wired through custody for a week of normal agent use, zero raw-secret occurrences in
-transcripts, the plaintext entry deleted, and `custody log` answering "what did
-agents touch this week" in one command.
+Status, precisely: **v0 is shipped and usable end to end.** The grant envelope +
+CLI dispatcher, the manifest loader + credential store, the `custody serve` proxy
+engine (the security-critical core), and parent-chained `derive` grants are all
+merged (`cmd/custody/`), with a full wiring runbook at
+`cmd/custody/docs/runbook.md` - the chain is `keys set` (store the secret) →
+manifest entry (declare the allowed actions) → `serve` (loopback proxy) → `grant`
+(mint a TTL-bounded capability) → client call via `127.0.0.1:<port>/<key>/<path>`
+with an `X-Custody-Grant` header. Still `intent` until the phase-1 validation gate
+*retires the raw-secret path*: one real high-stakes key wired through custody for a
+week of normal agent use, zero raw-secret occurrences in transcripts, the plaintext
+entry deleted (`custody-drain`), and the request log answering "what did agents
+touch this week" in one command. So: the mechanism is here and callable today; the
+outstanding work is the evidence-driven drain, not the broker.
 
 ### Enforcement moves to GitHub's boundary
 
