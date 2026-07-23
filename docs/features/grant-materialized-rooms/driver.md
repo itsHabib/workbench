@@ -15,7 +15,7 @@ batches:
   - id: 1
     label: ready now — P1 + P2, conflict-free
     depends_on: []
-    status: pending
+    status: done
     streams:
       - task_id: tsk_01KY5C3ZENR2B7P3JZA51EPR6M
         task_slug: custody-derive-attenuation
@@ -25,7 +25,7 @@ batches:
         model: opus
         effort: extra
         touches: [cmd/custody/internal/grant/grant.go, cmd/custody/internal/grant/grant_test.go, cmd/custody/main.go]
-        status: pending
+        status: done
       - task_id: tsk_01KY5C46ZMB7Z7S59NP5RVVX2R
         task_slug: authority-receipt-contract
         spec_path: docs/features/grant-materialized-rooms/authority-receipt-contract.md
@@ -34,7 +34,7 @@ batches:
         model: sonnet
         effort: extra
         touches: [contracts/authority/, contracts/execution/validate.go, contracts/execution/schema/work-spec-v0.1.0.json]
-        status: pending
+        status: done
 
 conflict_notes:
   - kind: cross_phase_batch
