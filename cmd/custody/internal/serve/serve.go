@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -43,9 +44,14 @@ type Config struct {
 	Grants         *grant.Store
 	Secrets        credstore.Store
 	LogWriter      io.Writer
-	Transport      http.RoundTripper
-	Now            func() time.Time
-	NewRequestID   func() string
+	// ErrLog receives one line when an artifact-log write fails, so a sink that
+	// dies after startup (full disk, closed fd) is visible instead of silently
+	// swallowed (spec §5, §8.2). Best-effort visibility only — a failed line does
+	// not fail the request. Defaults to os.Stderr when nil.
+	ErrLog       io.Writer
+	Transport    http.RoundTripper
+	Now          func() time.Time
+	NewRequestID func() string
 }
 
 // Engine is the http.Handler that serves the proxy. It is safe for concurrent
@@ -59,6 +65,7 @@ type Engine struct {
 	secrets        credstore.Store
 	client         *http.Client
 	logger         *Logger
+	errLog         io.Writer
 	now            func() time.Time
 	newID          func() string
 
@@ -94,6 +101,10 @@ func New(cfg Config) (*Engine, error) {
 	if newID == nil {
 		newID = randomRequestID
 	}
+	errLog := cfg.ErrLog
+	if errLog == nil {
+		errLog = os.Stderr
+	}
 	e := &Engine{
 		manifest:       cfg.Manifest,
 		manifestDigest: cfg.ManifestDigest,
@@ -104,6 +115,7 @@ func New(cfg Config) (*Engine, error) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		logger: NewLogger(cfg.LogWriter),
+		errLog: errLog,
 		now:    now,
 		newID:  newID,
 		noted:  map[string]bool{},
@@ -139,7 +151,14 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e.process(w, r, &rec)
 	rec.LatencyMs = e.now().Sub(start).Milliseconds()
-	_ = e.logger.write(rec)
+	// The request already completed; a log-write failure is a visibility problem,
+	// not a fail-closed condition (spec §5: the artifact log is tuning evidence,
+	// not a merge-authority control). Surface it rather than swallow it. The error
+	// names the sink failure only — rec is a sanitized logRecord and write wraps
+	// the io.Writer error, so no secret or header byte rides along.
+	if err := e.logger.write(rec); err != nil {
+		fmt.Fprintf(e.errLog, "custody: artifact-log write failed for request %s: %v\n", reqID, err)
+	}
 }
 
 // process is the spec §3 pipeline as a straight line of guard clauses; each
