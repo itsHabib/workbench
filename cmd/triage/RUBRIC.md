@@ -80,6 +80,19 @@ Fire on line content regardless of filename — closes the "danger in an unnamed
 
 LOC/file-count nudges within T0↔T1 only. Size never sets T2/T3 and never alone lifts a well-tested pure change out of T0. A 3-line auth change outranks a 2,000-line tested codegen regeneration.
 
+## §5.7 Per-repo path overrides (the deterministic gate-machinery floor)
+
+§5.4 covers only triage's *own* control plane; another repo's gate/driver/merge machinery reads as "internal → T1" from its path alone (HELDOUT-01: 8 of 15 under-calls were exactly this). Under blast-everything the 4-bot panel was the compensating control; any policy routing review on the floor alone inherits the blind spot. This section makes that compensating control **deterministic** for the repos whose layout we own.
+
+A compiled-in table maps `repo → [path glob → minimum tier]`, applied per file as **`max(floor, override)`** — overrides only ever **raise**, never lower. Repo identity comes from a `-repo owner/name` flag (driver, recipes, and gate's ladder all pass it); **absent `-repo` ⇒ overrides skipped, behavior byte-identical to the pre-override floor**, and no repo's globs ever apply to another. The table encodes OUR repo layout, so changing it is a reviewed PR — exactly the bar for a classifier control-plane change. Every override hit is its own `path-override` finding (band label + file path), so a `-v` verdict stays explainable. Two bands, split by consequence:
+
+| Band | Paths | Floor |
+|---|---|---|
+| Merge-authorization + the exit-code seam | workbench `cmd/gate/internal/state/**`, `cmd/gate/internal/verify/**`, `cmd/gate/internal/capability/**` (grant minting/checking), `cmd/gate/internal/tier/**` (tier ordering), `cmd/gate/main.go` (owns the 0/1/2/3/4 exit-code contract), plus `cmd/triage/internal/floor/overrides.go` (this override table — classifier control-plane) | **T3** |
+| Broader gate / driver / triage machinery | workbench rest of `cmd/gate/**` (e.g. `internal/evidence/**`, `internal/observe/**`), `cmd/triage/**`; ship `packages/driver/**` | **T2** |
+
+*Why T3 for the first band: a fail-open in merge authorization or the exit-code contract drops @claude and the adversarial pass exactly where it matters most — HELDOUT-01's own blind labels put gate#3/#5/#9 at T3, and a T2 there would not. The bands need no mutual exclusion: a file matching both (e.g. `cmd/gate/main.go` matches the exit-code rule and the broad gate rule) resolves to the higher tier by max. Existing path rules are untouched — `labels/**` still floors T3 and wins by max.*
+
 ## Agent advisory pass (spec §6)
 
 After the floor, an agent may propose an escalation for the *semantic residual* the deterministic signals can't express. Constraints: escalate-only, logged `{floor, proposed, why}`. Its dogfood job is to prove it fires usefully above the floor — if it never does, v0 ships deterministic-only.
@@ -88,7 +101,7 @@ Known escalation triggers (grow this list as the dogfood surfaces them; graduate
 - `trust-boundary-widening` — a logic change widening a trust boundary without matching a content pattern (sandbox-disable, CI checking out untrusted PR-head, network/VM isolation edits, secrets plumbing below the keyword threshold) → propose T2/T3;
 - `production-default` — a default whose production impact needs understanding, not pattern-matching → propose T2;
 - `invariant-relocation` — **a refactor that relocates policy / invariant / state-machine-bearing code, or a change to what such code enforces** (even if behavior-preserving, even if it looks mechanical) → propose **T2**. *(Experiment 01: dossier#67 moved the task state-machine guards to a new module; the floor read "internal change → T1" while both blind labelers wanted owner review. Mechanical-looking ≠ low-risk when the code owns invariants.)*
-- `gate-machinery` — code that decides what merges, ships, or passes verification in ANY repo (merge gates, verifiers, review-cycle enforcement, preflight/doctor gates, escape-detection predicates — a bug fails open) → propose T2/T3. *(HELDOUT-01: 8 of the 15 held-out under-calls. §5.4 deliberately covers only triage's own control plane; other repos' gate code is semantic.)*
+- `gate-machinery` — code that decides what merges, ships, or passes verification in ANY repo (merge gates, verifiers, review-cycle enforcement, preflight/doctor gates, escape-detection predicates — a bug fails open) → propose T2/T3. *(HELDOUT-01: 8 of the 15 held-out under-calls. §5.4 covers only triage's own control plane. For the repos whose layout we own, §5.7's per-repo path overrides now floor this deterministically when `-repo` is passed; this trigger remains the compensating control for OTHER repos and for machinery outside the compiled-in globs.)*
 - `plan-of-record` — a design doc that SETS policy (merge authority, trust ladders, escalation rules) rather than describing code → propose T2. *(HELDOUT-01: ship#172/#182 — "non-policy docs → T0" mis-prices a doc that is itself the policy.)*
 
 ## Auto-merge safe slice (v0)

@@ -251,12 +251,24 @@ func isComment(line string) bool {
 	return false
 }
 
-// Classify computes the deterministic floor for a parsed diff.
+// Classify computes the deterministic floor for a parsed diff, applying no
+// per-repo path overrides. Byte-identical to the pre-override floor — the
+// advisory pass and the eval corpus call this form. See ClassifyRepo for the
+// repo-aware entry point.
+func Classify(d Diff) Result {
+	return ClassifyRepo(d, "")
+}
+
+// ClassifyRepo is Classify with a repo identity ("owner/name") that enables
+// that repo's compiled-in path overrides (overrides.go). Overrides only ever
+// RAISE the floor — max(floor, override) per file — so ClassifyRepo(d, "")
+// and any unknown repo are byte-identical to Classify(d).
+//
 // line-of-sight pass; decomposing it is owed to triage's own iteration with
 // the labels corpus pinning behavior — not to a relocation diff.
 //
 //nolint:gocognit,cyclop // the classifier core carries the whole rubric in one
-func Classify(d Diff) Result {
+func ClassifyRepo(d Diff, repo string) Result {
 	var sigs []Signal
 	floor := T0
 	add := func(name string, tier Tier, why string) {
@@ -301,6 +313,20 @@ func Classify(d Diff) Result {
 				add(r.name, r.tier, r.why+": "+f.Path)
 				matchedPath = true
 			}
+		}
+
+		// per-repo path overrides — HELDOUT-01's gate-machinery blind spot made a
+		// deterministic compensating control. Raise-only (max(floor, override));
+		// the lookup is nil for an empty/unknown repo, so the no-repo floor is
+		// byte-identical. Matched on either path so a rename can't shed it. GitHub
+		// owner/repo are case-insensitive; lowercase the key (table keys are
+		// lowercased too) so a mis-cased -repo can't silently skip the control.
+		for _, o := range repoOverrides[strings.ToLower(repo)] {
+			if !f.matchAny(o.re) {
+				continue
+			}
+			add("path-override", o.tier, o.why+": "+f.Path)
+			matchedPath = true
 		}
 
 		// §5.1 DB migrations — graded by content, not blanket T3. Docs/tests in a
