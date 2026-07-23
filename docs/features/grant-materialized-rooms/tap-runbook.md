@@ -38,6 +38,13 @@ This is the address to pass as `-tap-addr $TAP_IP:$CUSTODY_PORT`.
 
 Choose **nftables** (preferred) or **iptables** depending on what the rooms-host uses.
 
+> **Do NOT install a host-wide default-drop policy.** These rules scope a `drop`
+> to the custody port only, leaving every other port (SSH, etc.) untouched. A
+> base `input` chain with `policy drop` would silently drop *new* inbound
+> connections that don't match an accept rule — including a fresh SSH session —
+> and can lock you out of the rooms-host. The chain policy below is `accept`;
+> only traffic to the custody port from outside the room subnet is dropped.
+
 ### 2a. nftables
 
 ```bash
@@ -45,17 +52,27 @@ ROOM_SUBNET=10.0.100.0/24  # replace with actual room subnet
 CUSTODY_PORT=8127
 
 nft add table inet custody_tap 2>/dev/null || true
+# policy ACCEPT — this chain only restricts the custody port; it must not
+# govern the rest of the host's inbound traffic.
 nft add chain inet custody_tap input \
-    "{ type filter hook input priority 0; policy drop; }"
-# Allow established/related connections.
-nft add rule inet custody_tap input \
-    ct state established,related accept
+    "{ type filter hook input priority 0; policy accept; }"
 # Allow ONLY the room subnet to reach the custody port.
 nft add rule inet custody_tap input \
     ip saddr "$ROOM_SUBNET" tcp dport "$CUSTODY_PORT" accept
-# Log and drop everything else to the custody port.
+# Log and drop any OTHER source reaching the custody port. Everything not
+# destined for the custody port falls through to `policy accept`, untouched.
 nft add rule inet custody_tap input \
     tcp dport "$CUSTODY_PORT" log prefix "custody-tap-drop: " drop
+```
+
+**IPv6 room subnets:** if guests reach the room over IPv6 (pure IPv6 or a ULA),
+add the `ip6` twin of the accept rule — the `ip saddr` rule above matches IPv4
+only, so an IPv6 guest would fall to the port drop:
+
+```bash
+ROOM_SUBNET6=fd00:100::/64  # the room's IPv6 subnet, if any
+nft add rule inet custody_tap input \
+    ip6 saddr "$ROOM_SUBNET6" tcp dport "$CUSTODY_PORT" accept
 ```
 
 Persist across reboots:
@@ -71,13 +88,25 @@ nft list ruleset > /etc/nftables.d/custody-tap.nft
 ROOM_SUBNET=10.0.100.0/24
 CUSTODY_PORT=8127
 
-# Allow the room subnet.
+# Allow the room subnet to the custody port, then drop only OTHER sources to
+# that port. No -P INPUT DROP: the default policy stays untouched so SSH and
+# everything else keep working.
 iptables -A INPUT -s "$ROOM_SUBNET" -p tcp --dport "$CUSTODY_PORT" -j ACCEPT
-# Drop everything else to the custody port.
 iptables -A INPUT -p tcp --dport "$CUSTODY_PORT" -j DROP
 
 # Persist (Debian/Ubuntu):
 iptables-save > /etc/iptables/rules.v4
+```
+
+**IPv6 room subnets:** the rules above are IPv4-only (`iptables`). For an IPv6
+room subnet, add the `ip6tables` twin (an IPv4-only ACCEPT won't match an IPv6
+guest, so it would be dropped):
+
+```bash
+ROOM_SUBNET6=fd00:100::/64
+ip6tables -A INPUT -s "$ROOM_SUBNET6" -p tcp --dport "$CUSTODY_PORT" -j ACCEPT
+ip6tables -A INPUT -p tcp --dport "$CUSTODY_PORT" -j DROP
+ip6tables-save > /etc/iptables/rules.v6
 ```
 
 ---
@@ -93,14 +122,19 @@ feedback and confirm the right tool is installed.
 
 ```bash
 nft list ruleset | grep "dport $CUSTODY_PORT"
-# Expected: a line containing "dport 8127 accept"
+# Expected: a source-restricted accept line, e.g.
+#   ip saddr 10.0.100.0/24 tcp dport 8127 accept
+# A bare "dport 8127 drop" or a "dport 8127 accept" WITHOUT a saddr does NOT
+# satisfy the preflight — the probe requires the source restriction on the rule.
 ```
 
 ### Check: iptables rule present (if not using nftables)
 
 ```bash
 iptables-save | grep -- "--dport $CUSTODY_PORT"
-# Expected: one or more lines containing --dport 8127
+# Expected: an ACCEPT line carrying a source restriction, e.g.
+#   -A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT
+# A DROP line, or an ACCEPT without -s, does NOT satisfy the preflight.
 ```
 
 ### Check: tap interface has the expected IP
@@ -149,6 +183,7 @@ echo "Set -tap-if-prefix to the prefix of $TAP_IFACE" >> deployment-notes.txt
 | Code | Meaning | Remedy |
 |---|---|---|
 | `refused_unbound_on_tap` | Grant has no `bound_source` | Derive a bound child: `custody derive -grant <parent> -bound-source <ip> …` |
+| `refused_grant_source_invalid` | Grant's `bound_source` is not a valid IP | Grant record is malformed; re-derive a bound child |
 | `refused_source_mismatch` | Transport source ≠ grant's `bound_source` | Originate the request from the bound IP, or derive a new grant |
 
 ---

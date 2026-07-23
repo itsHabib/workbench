@@ -157,8 +157,18 @@ func (h *tapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	grantIP := net.ParseIP(boundSrc)
+	if grantIP == nil {
+		// A malformed bound_source is a grant data-integrity problem, not a
+		// source mismatch — keep it a distinct code so logs don't misattribute
+		// it. The engine's full Validate (signature covers bound_source) is the
+		// backstop; this just fails closed with a diagnosable reason.
+		h.tapRefuse(w, r, "refused_grant_source_invalid",
+			"grant bound source is not a valid IP address",
+			"the grant record is malformed; re-derive a bound child: custody derive -grant <parent> -actions <acts> -ttl <ttl> -bound-source <your-ip>")
+		return
+	}
 	clientIP := net.ParseIP(clientHost)
-	if grantIP == nil || clientIP == nil || !grantIP.Equal(clientIP) {
+	if clientIP == nil || !grantIP.Equal(clientIP) {
 		h.tapRefuse(w, r, "refused_source_mismatch",
 			"transport source does not match the grant's bound source",
 			"ensure the request originates from "+boundSrc+", or derive a new grant: custody derive -grant <parent> -actions <acts> -ttl <ttl> -bound-source "+clientHost)

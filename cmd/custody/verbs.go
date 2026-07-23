@@ -117,7 +117,13 @@ func cmdServe(args []string) error {
 			Handler:           serve.NewTapHandler(engine, grants),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
-		go func() { _ = tapSrv.Serve(tapListener) }()
+		go func() {
+			// Serve only returns on error; surface it so a dead tap listener
+			// isn't silent while the localhost listener keeps running.
+			if err := tapSrv.Serve(tapListener); err != nil {
+				fmt.Fprintf(os.Stderr, "custody serve: tap listener stopped: %v\n", err)
+			}
+		}()
 		fmt.Fprintf(os.Stderr, "custody serve: tap listener on %s\n", *tapAddr)
 	}
 	srv := &http.Server{Handler: engine, ReadHeaderTimeout: 10 * time.Second}

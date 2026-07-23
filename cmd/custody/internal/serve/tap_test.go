@@ -397,3 +397,54 @@ func decodeTapErr(t *testing.T, w *httptest.ResponseRecorder) errorBody {
 	}
 	return body
 }
+
+// --- ruleset matching (the preflight's source-restriction policy) ---
+//
+// These guard the finding that a bare port match let a drop-only or
+// source-unrestricted rule pass the preflight: the matcher must require an
+// accept rule carrying a source restriction on the same line.
+
+func TestNftAllowsPort(t *testing.T) {
+	cases := []struct {
+		name    string
+		ruleset string
+		want    bool
+	}{
+		{"source-restricted accept", "ip saddr 10.0.100.0/24 tcp dport 8127 accept", true},
+		{"ipv6 source-restricted accept", "ip6 saddr fd00:100::/64 tcp dport 8127 accept", true},
+		{"drop only", "tcp dport 8127 log prefix \"x\" drop", false},
+		{"accept without saddr", "tcp dport 8127 accept", false},
+		{"saddr+accept on different rules", "ip saddr 10.0.100.0/24 accept\ntcp dport 8127 drop", false},
+		{"wrong port", "ip saddr 10.0.100.0/24 tcp dport 9999 accept", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nftAllowsPort(tc.ruleset, "8127"); got != tc.want {
+				t.Fatalf("nftAllowsPort(%q) = %v, want %v", tc.ruleset, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIptablesAllowsPort(t *testing.T) {
+	cases := []struct {
+		name string
+		save string
+		want bool
+	}{
+		{"source-restricted accept", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 8127 -j ACCEPT", true},
+		{"drop only", "-A INPUT -p tcp --dport 8127 -j DROP", false},
+		{"accept without source", "-A INPUT -p tcp --dport 8127 -j ACCEPT", false},
+		{"source+accept on different rules", "-A INPUT -s 10.0.100.0/24 -j ACCEPT\n-A INPUT -p tcp --dport 8127 -j DROP", false},
+		{"wrong port", "-A INPUT -s 10.0.100.0/24 -p tcp --dport 9999 -j ACCEPT", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := iptablesAllowsPort(tc.save, "8127"); got != tc.want {
+				t.Fatalf("iptablesAllowsPort(%q) = %v, want %v", tc.save, got, tc.want)
+			}
+		})
+	}
+}
