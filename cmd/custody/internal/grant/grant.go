@@ -85,6 +85,23 @@ func (g Grant) Covers(action string) bool {
 	return false
 }
 
+// BoundSource returns the bound_source field of the grant record identified
+// by tok without checking the signature, key scope, or expiry. The caller is
+// expected to pass tok to Validate before trusting any other grant field; this
+// method exists only to let callers enforce transport-source gating before the
+// full validation pipeline runs. A malformed or missing token returns an error.
+func (s *Store) BoundSource(tok string) (string, error) {
+	id, _, err := parseToken(tok)
+	if err != nil {
+		return "", err
+	}
+	g, err := s.load(id)
+	if err != nil {
+		return "", err
+	}
+	return g.BoundSource, nil
+}
+
 // Coded refusals: callers branch on the code, never on prose. These are the
 // four grant-layer refusal classes of spec §6.
 var (
