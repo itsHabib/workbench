@@ -60,6 +60,9 @@ func Run(specPath, bundleDir, stateRoot string, opts Options) (Outcome, error) {
 			return Outcome{}, usageErr(err)
 		}
 	}
+	if err := requireCustodySupport(be, adm.Work.Secrets); err != nil {
+		return Outcome{}, usageErr(err)
+	}
 	runID, err := mintRunID()
 	if err != nil {
 		return Outcome{}, err
@@ -126,6 +129,11 @@ type ctrl struct {
 
 	allocID string
 	receipt execution.PlacementReceipt
+
+	// authorityRecords holds the backend's opaque custody derive records between
+	// placement and collection so the room-authority receipt can be assembled at
+	// finalize (grant-materialized rooms §5). Nil for env:-only runs.
+	authorityRecords any
 
 	emitMu sync.Mutex
 	phase  string // last canonical phase progressed into (emitMu)
@@ -212,6 +220,10 @@ func (c *ctrl) startUnderDeadline() (backend.Handle, Outcome, bool, error) {
 				out, err := c.failEarly(execution.PhaseStartup, execution.ReasonPlacementUnavailable, sr.err)
 				return nil, out, true, err
 			}
+			if u, ok := backend.AsAuthorityUnresolved(sr.err); ok {
+				out, err := c.failAuthorityUnresolved(u)
+				return nil, out, true, err
+			}
 			out, err := c.failEarly(execution.PhaseStartup, execution.ReasonStartupFailed, sr.err)
 			return nil, out, true, err
 		}
@@ -292,9 +304,20 @@ func (c *ctrl) startBackend(ctx context.Context) (backend.Handle, error) {
 	if err != nil {
 		return nil, err
 	}
-	secrets, secretBytes, err := resolveSecrets(c.adm.Work.Secrets)
+	secrets, secretBytes, custody, err := resolveSecrets(c.adm.Work.Secrets)
 	if err != nil {
 		return nil, err
+	}
+	if len(custody) > 0 {
+		resolution, err := c.resolveCustody(ctx, custody)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range resolution.Env {
+			secrets[k] = v
+		}
+		secretBytes = append(secretBytes, resolution.Redact...)
+		c.authorityRecords = resolution.Records
 	}
 	childEnv := mergeEnv(os.Environ(), prep.Env, secrets)
 	return c.be.Start(ctx, backend.PreparedRun{
@@ -311,6 +334,22 @@ func (c *ctrl) startBackend(ctx context.Context) (backend.Handle, error) {
 		Secrets:    secretBytes,
 		PrivateDir: c.run.PrivateDir(),
 	}, c.emit)
+}
+
+// resolveCustody hands the run's custody: refs to the backend's resolver. The
+// admission gate (requireCustodySupport) guarantees the capability is present;
+// a backend that lost it between admission and start is still handled closed.
+func (c *ctrl) resolveCustody(ctx context.Context, custody []execution.Secret) (backend.CustodyResolution, error) {
+	resolver, ok := c.be.(backend.CustodyResolver)
+	if !ok {
+		return backend.CustodyResolution{}, fmt.Errorf("controller: placement backend has no custody resolver (code: authority_unsupported)")
+	}
+	return resolver.ResolveCustody(ctx, backend.CustodyRequest{
+		Secrets:  custody,
+		Deadline: c.deadline,
+		Grace:    c.grace,
+		Now:      time.Now(),
+	})
 }
 
 type waitOutcome struct {
@@ -432,12 +471,41 @@ func (c *ctrl) finalize(h backend.Handle, wo waitOutcome) (Outcome, error) {
 		_ = c.emit(execution.PhaseCleanup, execution.KindCleanupCompleted, nil)
 	}
 
+	arts = c.appendAuthorityReceipt(arts, cleanupErr)
 	res := c.buildResult(exitCode, arts, wo, collectErr, cleanupErr)
 	committed, _, err := c.gate.commit(c.run, c.j, res)
 	if err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
+}
+
+// appendAuthorityReceipt assembles and names the room-authority receipt when the
+// run carried custody: refs and the backend can author one. Teardown status
+// follows the cleanup outcome (destroyed on success, failed otherwise, §5). A
+// receipt failure is journaled but never masks the workload's own terminal
+// truth — the receipt is evidence, not a gate.
+func (c *ctrl) appendAuthorityReceipt(arts []execution.Artifact, cleanupErr error) []execution.Artifact {
+	if c.authorityRecords == nil {
+		return arts
+	}
+	receipter, ok := c.be.(backend.AuthorityReceipter)
+	if !ok {
+		return arts
+	}
+	art, err := receipter.AssembleAuthorityReceipt(c.authorityRecords, backend.AuthorityReceiptInputs{
+		RunID:        c.runID,
+		AllocationID: c.allocID,
+		ArtifactsDir: c.run.ArtifactsDir(),
+		Artifacts:    arts,
+		TeardownOK:   cleanupErr == nil,
+		TeardownAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		_ = c.emit(execution.PhaseCollection, "authority_receipt_failed", map[string]any{"error": err.Error()})
+		return arts
+	}
+	return append(arts, art)
 }
 
 func (c *ctrl) buildResult(exitCode int, arts []execution.Artifact, wo waitOutcome, collectErr, cleanupErr error) execution.Result {
@@ -621,6 +689,44 @@ func (c *ctrl) failEarly(phase, reason string, cause error) (Outcome, error) {
 	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
 }
 
+// failAuthorityUnresolved commits the placement refusal for an unresolvable
+// custody: ref (grant-materialized rooms §7 B): a startup-phase failure carrying
+// reason_code authority_unresolved and the exact `custody grant` remedy in the
+// diagnostics, so the driver can park the stream for a human to mint.
+func (c *ctrl) failAuthorityUnresolved(u *backend.AuthorityUnresolved) (Outcome, error) {
+	_ = c.emit(execution.PhaseStartup, execution.ReasonAuthorityUnresolved, map[string]any{
+		"error":  u.Error(),
+		"ref":    u.Ref,
+		"remedy": u.Remedy,
+	})
+	ended := time.Now().UTC()
+	res := execution.Result{
+		SchemaVersion: execution.SchemaVersion,
+		RunID:         c.runID,
+		RequestID:     c.adm.Request.RequestID,
+		RequestSHA256: sha256Hex(c.adm.RequestBytes),
+		WorkSHA256:    sha256Hex(c.adm.WorkBytes),
+		Status:        execution.StatusFailed,
+		TerminalPhase: execution.PhaseStartup,
+		ReasonCode:    execution.ReasonAuthorityUnresolved,
+		StartedAt:     c.started.Format(time.RFC3339Nano),
+		EndedAt:       ended.Format(time.RFC3339Nano),
+		Placement:     c.placementReceipt(),
+		Causes:        []execution.Cause{},
+		Diagnostics: []execution.Diagnostic{{
+			Code:    execution.ReasonAuthorityUnresolved,
+			Message: u.Reason,
+			Details: map[string]any{"ref": u.Ref, "remedy": u.Remedy},
+		}},
+		Artifacts: []execution.Artifact{},
+	}
+	committed, _, err := c.gate.commit(c.run, c.j, res)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{RunID: c.runID, Result: committed, ExitCode: ExitFromResult(committed)}, nil
+}
+
 func (c *ctrl) deadlineExceeded() bool {
 	return !time.Now().Before(c.deadline)
 }
@@ -638,22 +744,55 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func resolveSecrets(secrets []execution.Secret) (map[string]string, [][]byte, error) {
+// resolveSecrets expands env: refs into the child environment and passes
+// custody: refs THROUGH to the backend untouched — no value expansion at the
+// controller (grant-materialized rooms §4). The returned custody slice is the
+// backend's to resolve via its CustodyResolver capability. Any other scheme is
+// refused. env: behavior is unchanged.
+func resolveSecrets(secrets []execution.Secret) (map[string]string, [][]byte, []execution.Secret, error) {
 	out := make(map[string]string, len(secrets))
 	vals := make([][]byte, 0, len(secrets))
+	var custody []execution.Secret
 	for i, s := range secrets {
+		if strings.HasPrefix(s.Ref, "custody:") {
+			custody = append(custody, s)
+			continue
+		}
 		name, ok := strings.CutPrefix(s.Ref, "env:")
 		if !ok {
-			return nil, nil, fmt.Errorf("controller: secrets[%d].ref %q is not env:NAME", i, s.Ref)
+			return nil, nil, nil, fmt.Errorf("controller: secrets[%d].ref %q is not env:NAME or custody:<key>/<actions>", i, s.Ref)
 		}
 		v, ok := os.LookupEnv(name)
 		if !ok {
-			return nil, nil, fmt.Errorf("controller: secret env %q is unset", name)
+			return nil, nil, nil, fmt.Errorf("controller: secret env %q is unset", name)
 		}
 		out[s.Name] = v
 		vals = append(vals, []byte(v))
 	}
-	return out, vals, nil
+	return out, vals, custody, nil
+}
+
+// hasCustodySecret reports whether any ref is a custody: ref.
+func hasCustodySecret(secrets []execution.Secret) bool {
+	for _, s := range secrets {
+		if strings.HasPrefix(s.Ref, "custody:") {
+			return true
+		}
+	}
+	return false
+}
+
+// requireCustodySupport refuses at admission when a custody: ref is placed onto
+// a backend with no custody resolver: the ref cannot be honored and must not
+// fall back to a raw secret (coded authority_unsupported).
+func requireCustodySupport(be backend.Backend, secrets []execution.Secret) error {
+	if !hasCustodySecret(secrets) {
+		return nil
+	}
+	if _, ok := be.(backend.CustodyResolver); ok {
+		return nil
+	}
+	return fmt.Errorf("controller: placement backend has no custody resolver (code: authority_unsupported); custody: secret refs cannot be honored here")
 }
 
 func mergeEnv(base []string, roots map[string]string, secrets map[string]string) []string {

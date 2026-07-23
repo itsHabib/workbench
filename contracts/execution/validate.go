@@ -290,6 +290,9 @@ var terminalLaws = map[string]terminalLaw{
 	ReasonControllerLost:       {StatusFailed, phaseSet(PhaseTerminal)},    // Flow F (reconcile-written)
 	ReasonDeadlineExceeded:     {StatusTimedOut, nil},                      // Flow C — phase at interruption
 	ReasonCancelRequested:      {StatusCancelled, nil},                     // Flow D — phase at interruption
+	// A custody: ref with no live parent grant refuses before or as the room
+	// is placed; either canonical pre-workload phase is legal (gmr §7 B).
+	ReasonAuthorityUnresolved: {StatusFailed, phaseSet(PhasePreparation, PhaseStartup)},
 }
 
 func phaseSet(phases ...string) map[string]bool {

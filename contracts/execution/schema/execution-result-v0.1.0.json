@@ -15,7 +15,7 @@
     "work_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Digest of the exact submitted work.json bytes (D5); identical across placements of the same work." },
     "status": { "type": "string", "enum": ["succeeded", "failed", "timed_out", "cancelled"] },
     "terminal_phase": { "type": "string", "enum": ["admission", "preparation", "startup", "workload", "collection", "cleanup", "terminal"] },
-    "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable"] },
+    "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable", "authority_unresolved"] },
     "started_at": { "type": "string", "format": "date-time" },
     "ended_at": { "type": "string", "format": "date-time" },
     "workload_exit_code": { "type": "integer", "description": "Absent when no workload process ran. Zero is not sufficient for success (D7)." },
@@ -43,7 +43,7 @@
         "additionalProperties": false,
         "properties": {
           "phase": { "type": "string", "enum": ["admission", "preparation", "startup", "workload", "collection", "cleanup", "terminal"] },
-          "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable"] },
+          "reason_code": { "type": "string", "enum": ["completed", "preparation_failed", "startup_failed", "workload_failed", "deadline_exceeded", "cancel_requested", "collection_failed", "cleanup_failed", "controller_lost", "placement_unavailable", "authority_unresolved"] },
           "message": { "type": "string" }
         }
       }

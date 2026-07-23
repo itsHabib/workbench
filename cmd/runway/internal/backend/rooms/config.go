@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 const (
-	envImage = "RUNWAY_ROOMS_IMAGE"
-	envModel = "RUNWAY_ROOMS_MODEL"
-	envBin   = "RUNWAY_ROOMS_BIN"
+	envImage      = "RUNWAY_ROOMS_IMAGE"
+	envModel      = "RUNWAY_ROOMS_MODEL"
+	envBin        = "RUNWAY_ROOMS_BIN"
+	envTapGateway = "RUNWAY_ROOMS_TAP_GATEWAY"
+	envTapSource  = "RUNWAY_ROOMS_TAP_SOURCE"
 )
 
 const defaultModel = "composer-2.5"
@@ -24,6 +27,12 @@ type Config struct {
 	Image    string
 	Model    string
 	Poll     time.Duration
+	// TapGateway is the profile-shaped custody base URL host the guest reaches
+	// custody at (D6), e.g. "http://172.30.0.1:8127"; CUSTODY_BASE_<KEY> is this
+	// plus "/<key>". TapSource is the transport source a derived child is bound
+	// to (D2b). Both come from the placement profile, never compiled-in.
+	TapGateway string
+	TapSource  string
 }
 
 // ConfigFromEnvironment resolves the one installed Rooms profile. Host paths
@@ -46,13 +55,29 @@ func ConfigFromEnvironment() (Config, error) {
 		model = defaultModel
 	}
 	return Config{
-		Launcher: "sudo",
-		Prefix:   []string{"-E", roomsBin},
-		Image:    image,
-		Model:    model,
-		Poll:     10 * time.Millisecond,
+		Launcher:   "sudo",
+		Prefix:     []string{"-E", roomsBin},
+		Image:      image,
+		Model:      model,
+		Poll:       10 * time.Millisecond,
+		TapGateway: os.Getenv(envTapGateway),
+		TapSource:  os.Getenv(envTapSource),
 	}, nil
 }
+
+// custodyBase renders the guest-facing CUSTODY_BASE_<KEY> value for key from the
+// profile's tap gateway (D6): "<gateway>/<key>". An unset gateway yields an
+// empty base — the guest then has no reachable custody endpoint and vendor calls
+// fail closed, never fall back.
+func (c Config) custodyBase(key string) string {
+	if c.TapGateway == "" {
+		return ""
+	}
+	return strings.TrimRight(c.TapGateway, "/") + "/" + key
+}
+
+// tapSource is the transport source a derived child is bound to (D2b).
+func (c Config) tapSource() string { return c.TapSource }
 
 func (c Config) validate() error {
 	if c.Launcher == "" {

@@ -248,6 +248,10 @@ const (
 	ReasonCleanupFailed        = "cleanup_failed"
 	ReasonControllerLost       = "controller_lost"
 	ReasonPlacementUnavailable = "placement_unavailable"
+	// ReasonAuthorityUnresolved is a placement/preparation refusal: a custody:
+	// secret ref named a key+actions with no live parent grant covering them,
+	// so no room boots and no secret falls back (grant-materialized rooms §7 B).
+	ReasonAuthorityUnresolved = "authority_unresolved"
 )
 
 // Required v0 event kinds. Kind is an OPEN vocabulary — additive within a

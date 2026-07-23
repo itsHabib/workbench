@@ -34,11 +34,16 @@ var allowedSecrets = map[string]struct{}{
 	"CURSOR_API_KEY":    {},
 }
 
-// Backend runs the resolved agent-cursor profile through the Rooms CLI.
-type Backend struct{ config Config }
+// Backend runs the resolved agent-cursor profile through the Rooms CLI. port is
+// the seam onto custody for custody: secret resolution; it defaults to the CLI
+// implementation and is swapped for a fake in tests.
+type Backend struct {
+	config Config
+	port   custodyPort
+}
 
 // New returns a Rooms adapter with an already-resolved profile.
-func New(config Config) *Backend { return &Backend{config: config} }
+func New(config Config) *Backend { return &Backend{config: config, port: defaultCLICustody()} }
 
 // NewFromEnvironment resolves the installed agent-cursor profile.
 func NewFromEnvironment() (*Backend, error) {
@@ -440,6 +445,12 @@ func taskInput(work execution.WorkSpec) (execution.Input, error) {
 
 func validateSecrets(work execution.WorkSpec) error {
 	for _, secret := range work.Secrets {
+		if strings.HasPrefix(secret.Ref, "custody:") {
+			// custody: refs deliver a derived child token over vsock (D6), not
+			// through SSH SendEnv, so the SendEnv allowlist does not gate them —
+			// the resolver validates the ref grammar and parent grant instead.
+			continue
+		}
 		if _, ok := allowedSecrets[secret.Name]; ok {
 			continue
 		}

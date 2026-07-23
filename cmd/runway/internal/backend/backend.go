@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/itsHabib/workbench/contracts/execution"
 )
@@ -72,6 +73,81 @@ type CleanupResult struct {
 // created (for example, supported secret names).
 type Admitter interface {
 	Admit(execution.WorkSpec) error
+}
+
+// CustodyRequest asks a backend to resolve custody: secret refs into injectable
+// child tokens at placement time (grant-materialized rooms §4). Deadline and
+// Grace bound the derived child's TTL (D4); Now anchors the cap deterministically.
+type CustodyRequest struct {
+	Secrets  []execution.Secret
+	Deadline time.Time
+	Grace    time.Duration
+	Now      time.Time
+}
+
+// CustodyResolution is the outcome of resolving custody: refs — the environment
+// additions the guest needs (CUSTODY_GRANT_<KEY> / CUSTODY_BASE_<KEY>, D6), the
+// child-token bytes to redact from captured logs, and an opaque records handle
+// the controller carries back to AssembleAuthorityReceipt at collection.
+type CustodyResolution struct {
+	Env     map[string]string
+	Redact  [][]byte
+	Records any
+}
+
+// CustodyResolver is an optional backend capability: resolve custody: secret
+// refs (live parent-grant lookup + attenuated, source-bound derive). A backend
+// that does not implement it cannot place custody-scoped authority — the
+// controller refuses such a request at admission with a coded unsupported error.
+type CustodyResolver interface {
+	ResolveCustody(ctx context.Context, req CustodyRequest) (CustodyResolution, error)
+}
+
+// AuthorityReceiptInputs carries the durable, at-collection facts the receipt
+// joins to the derive records: identity, the collected Result artifacts whose
+// digests become evidence refs, and whether teardown destroyed the room.
+type AuthorityReceiptInputs struct {
+	RunID        string
+	AllocationID string
+	ArtifactsDir string
+	Artifacts    []execution.Artifact
+	TeardownOK   bool
+	// TeardownAt is the teardown instant, supplied by the caller (never read from
+	// the wall clock inside assembly) so re-collection from the same durable
+	// inputs rewrites a byte-identical line (§8).
+	TeardownAt time.Time
+}
+
+// AuthorityReceipter is an optional backend capability: assemble and persist the
+// room-authority receipt (grant-materialized rooms §5) from records produced by
+// ResolveCustody plus AuthorityReceiptInputs, returning the naming artifact so
+// the controller lists it in Result.Artifacts. Assembly is idempotent from
+// durable inputs.
+type AuthorityReceipter interface {
+	AssembleAuthorityReceipt(records any, in AuthorityReceiptInputs) (execution.Artifact, error)
+}
+
+// AuthorityUnresolved is a placement refusal: no live parent grant covers a
+// custody: ref's key+actions, so no room boots and no secret falls back to a
+// raw value (grant-materialized rooms §7 B, FR6). It carries the exact operator
+// remedy for the run's diagnostics.
+type AuthorityUnresolved struct {
+	Ref    string
+	Reason string
+	Remedy string
+}
+
+func (e *AuthorityUnresolved) Error() string {
+	return fmt.Sprintf("authority_unresolved: %s (ref %s); remedy: %s", e.Reason, e.Ref, e.Remedy)
+}
+
+// AsAuthorityUnresolved reports whether err is an authority-unresolved refusal.
+func AsAuthorityUnresolved(err error) (*AuthorityUnresolved, bool) {
+	var u *AuthorityUnresolved
+	if errors.As(err, &u) {
+		return u, true
+	}
+	return nil, false
 }
 
 // Backend is the placement seam. Collect/Cleanup exist for later lifecycle
