@@ -69,6 +69,15 @@ page is inline HTML+JS with no build step, so it is guarded in tiers:
   CDP over system Chrome — no npm, no `playwright install`). Not worth a
   third-party dep for a page this small yet; revisit if the UI grows action
   endpoints (judge/mint), where a JS bug would be consequential.
-- **Tier 2 — manual/agent.** Visual + layout judgment via the Playwright MCP
-  when a change warrants an eyeball. Nothing committed. We do NOT reintroduce a
-  Node/Playwright toolchain in CI (the closed-off `controlroom` carve-out).
+- **Tier 2 — committed browser e2e (`e2e/`, Playwright).** A test-only Node
+  suite that drives the real `console` binary against committed, deterministic
+  gate-state fixtures and asserts the rendered DOM: the docket (parked run +
+  judge/explain commands carrying `-state`), audit intact vs. tampered, the empty
+  inbox, and the loopback/Host-pinning/CSP/nosniff security posture. Node stays
+  **confined to `cmd/console/e2e/`** (its own `package.json`, a `.bin/` +
+  `node_modules/` that are gitignored) — it never enters the Go module or the
+  production build, so `go build/vet/test ./...` are unaffected. See
+  `e2e/README.md` for the run + fixture-regen steps. Not yet wired into CI (a
+  follow-up adds the job); it lands runnable locally.
+- **Tier 3 — manual/agent.** Visual + layout judgment via the Playwright MCP
+  when a change warrants an eyeball. Nothing committed.
