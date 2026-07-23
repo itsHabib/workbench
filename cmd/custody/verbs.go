@@ -52,9 +52,15 @@ func cmdKeys(args []string) error {
 // (failing closed at startup), binds a loopback-only listener, and serves the
 // engine. The listener refuses any non-loopback bind: the proxy holds real
 // credentials and must never be reachable off the box (spec §6, NFR).
+//
+// When -tap-addr is provided a second listener is started on the tap gateway
+// address using the same engine. The tap listener adds source-binding
+// enforcement and requires a preflight firewall check before opening.
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8127", "loopback listen address")
+	tapAddr := fs.String("tap-addr", "", "tap gateway listen address for room guest access (empty = localhost only)")
+	tapIfPrefix := fs.String("tap-if-prefix", "tap", "interface name prefix for tap bind validation (default tap)")
 	stateDir := fs.String("state", envOr("CUSTODY_STATE", defaultStateDir()), "state dir (manifest/grants/log) [env CUSTODY_STATE]")
 	keyDir := fs.String("mint-key-dir", envOr("CUSTODY_KEY_DIR", defaultKeyDir()), "mint-key dir; a separate trust domain, must be outside -state [env CUSTODY_KEY_DIR]")
 	if err := fs.Parse(args); err != nil {
@@ -65,6 +71,14 @@ func cmdServe(args []string) error {
 	}
 	if err := requireLoopback(*addr); err != nil {
 		return err
+	}
+	if *tapAddr != "" {
+		if err := serve.ValidateTapAddr(*tapAddr, *tapIfPrefix); err != nil {
+			return err
+		}
+		if err := serve.PreflightFirewall(*tapAddr, serve.DefaultProber()); err != nil {
+			return err
+		}
 	}
 	man, digest, err := loadManifest(filepath.Join(*stateDir, "manifest.json"))
 	if err != nil {
@@ -94,6 +108,18 @@ func cmdServe(args []string) error {
 		return fmt.Errorf("serve: listen on %s: %w", *addr, err)
 	}
 	fmt.Fprintf(os.Stderr, "custody serve: listening on %s (state %s)\n", *addr, *stateDir)
+	if *tapAddr != "" {
+		tapListener, err := net.Listen("tcp", *tapAddr)
+		if err != nil {
+			return fmt.Errorf("serve: listen on tap-addr %s: %w", *tapAddr, err)
+		}
+		tapSrv := &http.Server{
+			Handler:           serve.NewTapHandler(engine, grants),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() { _ = tapSrv.Serve(tapListener) }()
+		fmt.Fprintf(os.Stderr, "custody serve: tap listener on %s\n", *tapAddr)
+	}
 	srv := &http.Server{Handler: engine, ReadHeaderTimeout: 10 * time.Second}
 	return srv.Serve(listener)
 }
