@@ -1,10 +1,12 @@
 # flare
 
 The workbench's escalation-routing plane: a small Go binary that tails
-producers' artifact logs (gate `log.jsonl`, ship `receipts.jsonl`) and pushes
-a notification (Windows toast, webhook) on block/escalate. Pure sink — it
-never gates, never blocks, never writes into a producer's state or takes a
-producer's lock.
+producers' artifact logs (gate `log.jsonl`, ship `receipts.jsonl`) and, on
+block/escalate, delivers a Slack page — a `chat.postMessage` with a
+severity-colored Block Kit card that leads on the required action and carries a
+`View PR` button. Toast and webhook are the other available channel *types*.
+Pure sink — it never gates, never blocks, never writes into a producer's state
+or takes a producer's lock.
 
 `docs/DESIGN.md` is the contract: sources and their read shapes, the routes
 table, dedupe/throttle, cursor integrity, and the non-goals. Change behavior
@@ -19,8 +21,12 @@ there first.
   parser). Mechanism only; knows nothing about routing.
 - `internal/route` — the declarative routes table + severity-monotone
   throttle. All policy comes from config.
-- `internal/notify` — one event to one channel (toast via `powershell.exe`
-  5.1 — pwsh 7 cannot project WinRT; webhook via `net/http`).
+- `internal/notify` — one event to one channel. `slack` posts to
+  `chat.postMessage` with a bearer token and renders a severity-colored Block
+  Kit card (`renderSlackMessage` → `slackBlocks` → `prButton`); delivery counts
+  only on HTTP 200 **and** `"ok": true` in the body. `toast` shells
+  `powershell.exe` 5.1 (pwsh 7 cannot project WinRT); `webhook` POSTs the event
+  JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
   delivery journal (the dedupe substrate) + cursors with the `last_poll`
   liveness fact.

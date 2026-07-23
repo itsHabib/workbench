@@ -3,8 +3,10 @@
 One Go binary that pushes a notification when something in the
 workbench blocks or escalates. It tails the artifact logs other tools already
 emit — gate's state log, ship's run receipts — matches events against a small
-routes table, and raises a Windows toast, posts a webhook, or sends a Slack
-message. A parked run should not have to wait for someone to ask.
+routes table, and sends a Slack page (a `chat.postMessage` Block Kit card that
+leads on the required action, with a `View PR` button); Windows toast and
+webhook are the other available channel types. A parked run should not have to
+wait for someone to ask.
 
 flare is a pure sink: it never gates, never blocks, and never writes into any
 producer's state. **It is best-effort push over an authoritative pull — the
