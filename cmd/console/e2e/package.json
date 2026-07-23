@@ -4,6 +4,9 @@
   "private": true,
   "description": "Playwright browser e2e for cmd/console, driving the real console binary against committed gate-state fixtures. Test-only; confined to this directory, never part of the Go module or production build.",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "gen-fixtures": "node scripts/gen-fixtures.mjs",
     "test": "playwright test",

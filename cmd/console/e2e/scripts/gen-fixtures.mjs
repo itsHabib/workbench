@@ -19,7 +19,7 @@
 // Times use whole-second UTC ("...Z"), whose RFC3339Nano form is identical, so
 // gate re-formats them to the same string it hashes.
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -36,11 +36,19 @@ const KIND_PREFIX = {
   judgment: "jdg",
 };
 
+// IDs are DETERMINISTIC, not random: gate never inspects them (they only feed
+// the prev/hash chain), and randomness would churn every committed fixture line
+// on each `npm run gen-fixtures`. A monotonic counter per kind keeps them unique
+// within a run yet byte-stable across regenerations of an unchanged scenario.
+const seq = {};
 function id(kind) {
-  return KIND_PREFIX[kind] + "_" + randomBytes(8).toString("hex");
+  seq[kind] = (seq[kind] || 0) + 1;
+  return KIND_PREFIX[kind] + "_" + String(seq[kind]).padStart(16, "0");
 }
+let runSeq = 0;
 function runID() {
-  return "run_" + randomBytes(8).toString("hex");
+  runSeq += 1;
+  return "run_" + String(runSeq).padStart(16, "0");
 }
 
 // hashArtifact mirrors state.hashArtifact exactly. `bodyRaw` is the verbatim

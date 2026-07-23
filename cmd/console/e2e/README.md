@@ -65,6 +65,11 @@ mirrors `state.hashArtifact` byte-for-byte:
 npm run gen-fixtures
 ```
 
+The generator uses deterministic (seeded) artifact/run IDs, so regeneration is
+**byte-stable**: re-running it on an unchanged scenario leaves the committed
+fixtures identical (`git status` stays clean) — a real change is the only thing
+that shows a diff.
+
 Edit `scripts/gen-fixtures.mjs` to change subjects, questions, or the tamper
 mutation. If you change gate's `hashArtifact` or artifact serialization, re-run
 this and the anchoring step will keep the fixtures audit-clean.

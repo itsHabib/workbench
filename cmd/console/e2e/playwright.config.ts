@@ -20,5 +20,7 @@ export default defineConfig({
     trace: "retain-on-failure",
     // baseURL is set per-test from the console the harness launches.
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Desktop Chrome already applied via the global `use` above; the project only
+  // needs a name.
+  projects: [{ name: "chromium" }],
 });

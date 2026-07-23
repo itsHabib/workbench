@@ -24,6 +24,9 @@ test.describe("audit — tampered", () => {
     const banner = page.locator(".tamper-banner");
     await expect(banner).toBeVisible();
     await expect(banner).toContainText("tampered");
+    // "body hash mismatch" couples to gate's audit error wording (see
+    // cmd/gate's chain-replay reason). If gate rephrases that reason, update
+    // this assertion in lockstep.
     await expect(banner).toContainText("body hash mismatch");
   });
 

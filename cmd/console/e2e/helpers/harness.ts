@@ -1,16 +1,10 @@
 import { execFileSync, spawn, ChildProcess } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { delimiter, join } from "node:path";
+import { here as e2eDir, gateBin, consoleBin, shimDir } from "../paths";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const e2eDir = join(here, "..");
 const fixturesDir = join(e2eDir, "fixtures");
-const binExt = process.platform === "win32" ? ".exe" : "";
-const gateBin = join(e2eDir, ".bin", "gate" + binExt);
-const consoleBin = join(e2eDir, ".bin", "console" + binExt);
 
 export interface Console {
   baseURL: string;
@@ -65,8 +59,21 @@ export function startConsole(fixture: string): Promise<Console> {
       // GATE_KEY reaches gate so `audit` resolves the anchor key. GATE_STATE is
       // deliberately UNSET so `gate next` splices -state into the paste-ready
       // judge/explain commands (the regression guard the docket spec asserts).
-      env: { ...process.env, GATE_KEY: keyDir, GATE_STATE: "" },
+      //
+      // PATH is prefixed with shimDir so gate's `next -live` reconcile runs the
+      // FAKE gh (see paths.ts) instead of any real, authenticated gh on the host
+      // — making the fixture reconcile a deterministic no-op that never mutates
+      // or drops the parked row from external GitHub state.
+      env: {
+        ...process.env,
+        GATE_KEY: keyDir,
+        GATE_STATE: "",
+        PATH: shimDir + delimiter + (process.env.PATH ?? ""),
+      },
       stdio: ["ignore", "pipe", "pipe"],
+      // Unix: own process group, so killTree can signal the whole group and take
+      // any in-flight `gate` child down with it (Windows uses taskkill /T below).
+      detached: process.platform !== "win32",
     },
   );
 
@@ -121,10 +128,17 @@ function killTree(child: ChildProcess) {
     }
     return;
   }
+  // Negative pid signals the whole process group (spawned detached above), so an
+  // in-flight `gate` subprocess dies too and cannot keep a handle on stateDir
+  // during rmSync. Fall back to a direct kill if the group is already gone.
   try {
-    child.kill("SIGKILL");
+    process.kill(-child.pid, "SIGKILL");
   } catch {
-    /* already gone */
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
   }
 }
 

@@ -1,19 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { repoRoot, binDir, gateBin, consoleBin, writeGhShim } from "./paths";
 
 // Build the gate + console binaries from source once, before any spec runs. A
 // stale gate binary once made the docket error out — building fresh here is the
 // point, not a convenience. Binaries land in .bin/ (gitignored); the harness
-// references them by fixed path.
-export const here = dirname(fileURLToPath(import.meta.url));
-export const repoRoot = join(here, "..", "..", "..");
-export const binDir = join(here, ".bin");
-const exe = process.platform === "win32" ? ".exe" : "";
-export const gateBin = join(binDir, "gate" + exe);
-export const consoleBin = join(binDir, "console" + exe);
-
+// references them by fixed path (see paths.ts, the single source of truth for
+// the .bin/ layout).
 export default function globalSetup() {
   mkdirSync(binDir, { recursive: true });
   const go = (out: string, pkg: string) =>
@@ -23,4 +16,8 @@ export default function globalSetup() {
     });
   go(gateBin, "./cmd/gate");
   go(consoleBin, "./cmd/console");
+
+  // Write the fake gh the harness shadows onto the console's PATH, so gate's
+  // -live PR reconcile is a deterministic no-op regardless of ambient gh auth.
+  writeGhShim();
 }
