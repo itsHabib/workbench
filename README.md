@@ -37,7 +37,9 @@ see the layout below.
   `cmd/local` (agent co-processor) and `cmd/eval` (the local-exportability
   oracle).
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
-  `cmd/<tool>/internal/`. Today: `flare`, `tracelens`, `triage` (two binaries), `gate`, `local`, `eval`.
+  `cmd/<tool>/internal/`. Twelve today: `console`, `custody`, `dispatch`,
+  `driverstate`, `eval`, `flare`, `gate`, `local`, `runway`, `tracelens`,
+  `triage` (two binaries — `triage-floor`, `triage-advisory`), `workbench-mcp`.
 - `docs/DESIGN.md` — the repo's charter: the single-module decision and why,
   what's in and out, the boundary law, the lazy-migration policy, and the
   triggers that would later split `contracts` into its own module.
