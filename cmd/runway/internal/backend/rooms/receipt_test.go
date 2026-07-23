@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,10 @@ import (
 	"github.com/itsHabib/workbench/contracts/authority"
 	"github.com/itsHabib/workbench/contracts/execution"
 )
+
+// bareHex64 is the digest shape the receipt schema requires for
+// evidence.custody_log[].lines_sha256 and evidence.artifacts[].sha256.
+var bareHex64 = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 // durableInputs is a fixed set of at-collection facts standing in for what the
 // derive records, collected artifacts, and teardown outcome durably hold.
@@ -34,12 +40,12 @@ func durableInputs(teardown authority.Teardown) receiptInputs {
 			Expiry:        minted.Add(42 * time.Minute),
 		}},
 		artifacts: []execution.Artifact{
-			{Name: "witness.pcap", SHA256: "c1c1"},
-			{Name: "witness.json", SHA256: "d2d2"},
-			{Name: "changeset.diff", SHA256: "e3e3"},
-			{Name: "result.json", SHA256: "f4f4"},
+			{Name: "witness.pcap", SHA256: strings.Repeat("c", 64)},
+			{Name: "witness.json", SHA256: strings.Repeat("d", 64)},
+			{Name: "changeset.diff", SHA256: strings.Repeat("e", 64)},
+			{Name: "result.json", SHA256: strings.Repeat("f", 64)},
 		},
-		custodyLog: []authority.CustodyLogEntry{{ChildID: "childid", RequestCount: 3, LinesSHA256: "sha256:ff"}},
+		custodyLog: []authority.CustodyLogEntry{{ChildID: "childid", RequestCount: 3, LinesSHA256: strings.Repeat("a", 64)}},
 		teardown:   teardown,
 	}
 }
@@ -101,8 +107,25 @@ func TestReceiptDecodesWithAttenuationAndEvidence(t *testing.T) {
 	if got.Evidence.CustodyLog[0].RequestCount != 3 {
 		t.Fatalf("custody_log=%+v", got.Evidence.CustodyLog)
 	}
+	assertEvidenceDigestsBareHex(t, got.Evidence)
 	if got.Teardown.Status != authority.TeardownDestroyed {
 		t.Fatalf("teardown=%+v", got.Teardown)
+	}
+}
+
+// assertEvidenceDigestsBareHex checks every evidence digest is bare 64-hex, the
+// shape the schema requires (never sha256:-prefixed).
+func assertEvidenceDigestsBareHex(t *testing.T, ev authority.Evidence) {
+	t.Helper()
+	for _, e := range ev.CustodyLog {
+		if !bareHex64.MatchString(e.LinesSHA256) {
+			t.Fatalf("lines_sha256 %q must be bare 64-hex", e.LinesSHA256)
+		}
+	}
+	for _, a := range ev.Artifacts {
+		if !bareHex64.MatchString(a.SHA256) {
+			t.Fatalf("evidence sha256 %q must be bare 64-hex", a.SHA256)
+		}
 	}
 }
 
@@ -165,6 +188,55 @@ func TestAssembleAuthorityReceiptWritesNamedArtifact(t *testing.T) {
 	}
 	if art.SHA256 != art2.SHA256 || !bytes.Equal(first, second) {
 		t.Fatalf("re-collection not byte-identical:\n%s\n%s", first, second)
+	}
+}
+
+func writeCustodyLog(t *testing.T, stateDir string, lines ...string) {
+	t.Helper()
+	dir := filepath.Join(stateDir, "log")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "requests.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScanCustodyLogFiltersByChildAndDigestIsBareHex(t *testing.T) {
+	state := t.TempDir()
+	writeCustodyLog(t, state,
+		`{"grant_id":"child-a","verdict":"pass"}`,
+		`{"grant_id":"child-b","verdict":"pass"}`,
+		`{"grant_id":"child-a","verdict":"denied"}`,
+		`not-json`,
+	)
+	count, digest := scanCustodyLog(state, "child-a")
+	if count != 2 {
+		t.Fatalf("count=%d want 2 (only child-a lines)", count)
+	}
+	if !bareHex64.MatchString(digest) {
+		t.Fatalf("digest %q must be bare 64-hex (no sha256: prefix)", digest)
+	}
+}
+
+func TestScanCustodyLogOversizedLineIsUnreadableNotPartial(t *testing.T) {
+	state := t.TempDir()
+	// A first valid line, then a line far past the 1 MiB scanner cap. A partial
+	// (count=1) result would be a silently wrong pin, so the whole scan is
+	// reported unreadable.
+	oversized := `{"grant_id":"child-a","blob":"` + strings.Repeat("x", 2<<20) + `"}`
+	writeCustodyLog(t, state, `{"grant_id":"child-a","verdict":"pass"}`, oversized)
+	count, digest := scanCustodyLog(state, "child-a")
+	if count != 0 || digest != "" {
+		t.Fatalf("oversized line must yield (0, \"\"), got (%d, %q)", count, digest)
+	}
+}
+
+func TestScanCustodyLogMissingLogIsZero(t *testing.T) {
+	count, digest := scanCustodyLog(t.TempDir(), "child-a")
+	if count != 0 || digest != "" {
+		t.Fatalf("missing log must yield (0, \"\"), got (%d, %q)", count, digest)
 	}
 }
 

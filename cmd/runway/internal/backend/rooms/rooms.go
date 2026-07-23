@@ -462,9 +462,7 @@ func validateSecrets(work execution.WorkSpec) error {
 func roomsEnv(prep backend.PreparedRun) []string {
 	values := envMap(prep.Env)
 	keep := []string{"HOME", "LOGNAME", "PATH", "ROOMS_MAX_POOL", "RUST_LOG", "TEMP", "TMP", "TMPDIR", "USER"}
-	for _, secret := range prep.Work.Secrets {
-		keep = append(keep, secret.Name)
-	}
+	keep = append(keep, secretEnvNames(prep.Work.Secrets)...)
 	out := make([]string, 0, len(keep))
 	seen := map[string]struct{}{}
 	for _, name := range keep {
@@ -477,6 +475,25 @@ func roomsEnv(prep backend.PreparedRun) []string {
 		}
 	}
 	return out
+}
+
+// secretEnvNames is the set of env var names each declared secret contributes to
+// the room, so roomsEnv's keep-list forwards exactly those. A custody: ref
+// delivers two provider-shaped vars (the child token and its base URL, D6) whose
+// names derive from the ref's KEY, not from the secret name — so both survive
+// regardless of how the WorkSpec named the secret, and CUSTODY_BASE_<KEY> is no
+// longer silently dropped. Any other ref contributes its own secret name.
+func secretEnvNames(secrets []execution.Secret) []string {
+	names := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		ref, err := parseCustodyRef(s.Name, s.Ref)
+		if err != nil {
+			names = append(names, s.Name)
+			continue
+		}
+		names = append(names, "CUSTODY_GRANT_"+envKey(ref.key), "CUSTODY_BASE_"+envKey(ref.key))
+	}
+	return names
 }
 
 func envMap(env []string) map[string]string {

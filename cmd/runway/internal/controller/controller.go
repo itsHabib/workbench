@@ -499,10 +499,19 @@ func (c *ctrl) appendAuthorityReceipt(arts []execution.Artifact, cleanupErr erro
 		ArtifactsDir: c.run.ArtifactsDir(),
 		Artifacts:    arts,
 		TeardownOK:   cleanupErr == nil,
-		TeardownAt:   time.Now().UTC(),
+		// TeardownAt is the wall clock at this single finalize call. Assembly is a
+		// pure function of it, so ONE run writes one stable line — but a re-run of
+		// collection (reconcile, §7 F) would pick a new "now" and break byte
+		// idempotency. When reconcile re-assembly lands, this must be sourced from
+		// durable run state (persisted at teardown, read back), not time.Now.
+		TeardownAt: time.Now().UTC(),
 	})
 	if err != nil {
-		_ = c.emit(execution.PhaseCollection, "authority_receipt_failed", map[string]any{"error": err.Error()})
+		// Emit at the cleanup phase, not collection: cleanup_completed already
+		// advanced the journal to cleanup, and a collection-phase event here would
+		// regress phase order (execution terminal law). The error is surfaced, not
+		// swallowed — it just must not rewind the phase.
+		_ = c.emit(execution.PhaseCleanup, "authority_receipt_failed", map[string]any{"error": err.Error()})
 		return arts
 	}
 	return append(arts, art)

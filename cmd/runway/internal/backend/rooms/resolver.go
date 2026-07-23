@@ -256,12 +256,29 @@ type cliCustody struct {
 func defaultCLICustody() cliCustody {
 	return cliCustody{
 		bin:      envOrDefault("RUNWAY_CUSTODY_BIN", "custody"),
-		stateDir: os.Getenv("CUSTODY_STATE"),
+		stateDir: defaultCustodyStateDir(),
 		keyDir:   os.Getenv("CUSTODY_KEY_DIR"),
 		parentToken: func(key string) string {
 			return os.Getenv("RUNWAY_CUSTODY_PARENT_" + envKey(key))
 		},
 	}
+}
+
+// defaultCustodyStateDir resolves the custody state root the SAME way the custody
+// CLI does: CUSTODY_STATE when set, otherwise $HOME/.custody (cmd/custody/main.go
+// defaultStateDir), falling back to ".custody" when no home is resolvable. This
+// is a cross-tool contract — an empty state dir would target the wrong grants/
+// location and misjudge every parent grant — so it stays in lockstep with
+// custody's own default.
+func defaultCustodyStateDir() string {
+	if v := os.Getenv("CUSTODY_STATE"); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".custody"
+	}
+	return filepath.Join(home, ".custody")
 }
 
 // ParentGrant reads the staged parent token for key and its persisted record.
@@ -283,7 +300,7 @@ func (c cliCustody) ParentGrant(key string) (parentGrant, error) {
 		digest:  digest,
 		token:   token,
 		actions: record.Actions,
-		expiry:  record.MintedAt.Add(record.TTL),
+		expiry:  record.expiry(),
 	}, nil
 }
 
@@ -326,13 +343,22 @@ func (c cliCustody) Derive(ctx context.Context, req deriveRequest) (childGrant, 
 		actions:     record.Actions,
 		boundSource: record.BoundSource,
 		mintedAt:    record.MintedAt,
-		expiry:      record.MintedAt.Add(record.TTL),
+		expiry:      record.expiry(),
 	}, nil
 }
 
 // grantRecord mirrors the persisted custody grant fields the resolver reads. It
 // is a local view of custody's OUTPUT artifact, not an import of its package —
 // the same posture the adapter takes toward rooms' lifecycle records.
+//
+// Cross-tool on-disk format (verified against cmd/custody/internal/grant: the
+// Grant struct's json tags + save's json.Marshal): "minted_at" is an RFC 3339
+// timestamp and "ttl" is a Go time.Duration serialized as its underlying int64
+// NANOSECONDS (Duration has no MarshalJSON). Custody computes expiry as
+// MintedAt.Add(TTL) (grant.Grant.Expiry), so this record decodes the same two
+// fields and reproduces that math exactly. If custody ever switches to an
+// absolute expires_at or a string/seconds TTL, this struct and expiry() must move
+// with it — the live-parent check depends on the format matching.
 type grantRecord struct {
 	ID          string        `json:"id"`
 	Actions     []string      `json:"actions"`
@@ -341,6 +367,10 @@ type grantRecord struct {
 	MintedAt    time.Time     `json:"minted_at"`
 	TTL         time.Duration `json:"ttl"`
 }
+
+// expiry reproduces custody's grant.Grant.Expiry (MintedAt + TTL) from the
+// on-disk record, so the resolver's live/expired judgment matches custody's own.
+func (r grantRecord) expiry() time.Time { return r.MintedAt.Add(r.TTL) }
 
 // readGrantRecord reads <state>/grants/<id>.json and returns the parsed record
 // plus the sha256:… digest of the exact bytes on disk.

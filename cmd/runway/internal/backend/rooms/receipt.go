@@ -128,7 +128,10 @@ func teardownFrom(status string, at time.Time) authority.Teardown {
 // run's artifacts dir, and returns the naming artifact for Result.Artifacts.
 func (b *Backend) AssembleAuthorityReceipt(records any, in backend.AuthorityReceiptInputs) (execution.Artifact, error) {
 	derived, ok := records.([]DeriveRecord)
-	if !ok || len(derived) == 0 {
+	if !ok {
+		return execution.Artifact{}, fmt.Errorf("rooms: authority receipt records are %T, want []DeriveRecord", records)
+	}
+	if len(derived) == 0 {
 		return execution.Artifact{}, fmt.Errorf("rooms: no derive records for authority receipt")
 	}
 	status := authority.TeardownDestroyed
@@ -167,9 +170,10 @@ func writeReceiptArtifact(artifactsDir string, line []byte) (execution.Artifact,
 }
 
 // custodyStateDir is the custody state root whose log/requests.jsonl the receipt
-// pins per child. Read from custody's own env so the adapter follows the same
-// state the operator ran `custody serve` against.
-func custodyStateDir() string { return os.Getenv("CUSTODY_STATE") }
+// pins per child. It resolves the SAME location custody's CLI uses: CUSTODY_STATE
+// when set, else $HOME/.custody (see cmd/custody/main.go defaultStateDir), so the
+// adapter reads the same state the operator ran custody against.
+func custodyStateDir() string { return defaultCustodyStateDir() }
 
 // custodyLogEntries pins, per child grant, what custody's interleaved log holds:
 // the request count and a digest of the exact lines whose grant_id is the child
@@ -189,8 +193,11 @@ func custodyLogEntries(stateDir string, records []DeriveRecord) []authority.Cust
 }
 
 // scanCustodyLog counts and hashes the log lines whose grant_id equals childID.
-// The digest is over the selected raw lines in file order, so later tampering is
-// detectable against the receipt. A missing or unreadable log returns (0, "").
+// The digest is over the selected raw lines in file order (bare 64-hex, the
+// shape evidence.custody_log[].lines_sha256 requires), so later tampering is
+// detectable against the receipt. A missing, unreadable, or over-long-line log
+// returns (0, ""): a partial count+digest would be a silently wrong pin, so on
+// any scan error the entry is treated as unreadable (§7 F), never partial.
 func scanCustodyLog(stateDir, childID string) (int, string) {
 	if stateDir == "" {
 		return 0, ""
@@ -216,8 +223,11 @@ func scanCustodyLog(stateDir, childID string) (int, string) {
 		hash.Write(line)
 		hash.Write([]byte{'\n'})
 	}
+	if err := scanner.Err(); err != nil {
+		return 0, ""
+	}
 	if count == 0 {
 		return 0, ""
 	}
-	return count, "sha256:" + hex.EncodeToString(hash.Sum(nil))
+	return count, hex.EncodeToString(hash.Sum(nil))
 }
