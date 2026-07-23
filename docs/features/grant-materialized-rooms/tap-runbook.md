@@ -118,6 +118,12 @@ runs a programmatic preflight check at startup via `PreflightFirewall` (see
 `cmd/custody/internal/serve/tap.go`) but the manual checks below give faster
 feedback and confirm the right tool is installed.
 
+> **Address family matters.** The preflight checks the firewall of the SAME
+> family as the tap bind address: an IPv6 `-tap-addr` is verified against nft
+> `ip6 saddr` rules / `ip6tables-save`, an IPv4 one against `ip saddr` /
+> `iptables-save`. An IPv4 rule does not protect an IPv6 listener (they are
+> governed by separate tables), so run the check that matches your tap address.
+
 ### Check: nftables rule present
 
 The preflight requires BOTH rules on the port — a source-restricted accept

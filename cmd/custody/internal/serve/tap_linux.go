@@ -18,44 +18,49 @@ func DefaultProber() RulesetProber { return linuxProber{} }
 
 type linuxProber struct{}
 
-// InForce checks that the custody port is restricted to the room source.
+// InForce checks that the custody port is restricted to the room source for the
+// tap listener's OWN address family. The family is load-bearing: an IPv4 rule
+// does not protect an IPv6 listener (ip6tables/nft ip6 are separate), so a
+// family-blind check would let an IPv6 tap pass on a coincidental IPv4 rule
+// while its listener sits unprotected.
 func (linuxProber) InForce(tapAddr string) (bool, error) {
-	_, port, err := net.SplitHostPort(tapAddr)
+	host, port, err := net.SplitHostPort(tapAddr)
 	if err != nil {
 		return false, fmt.Errorf("parse tap addr %q: %w", tapAddr, err)
 	}
-	if _, err := exec.LookPath("nft"); err == nil {
-		return probeNftables(port)
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false, fmt.Errorf("tap addr host %q is not an IP", host)
 	}
-	return probeIPTables(port)
+	v6 := ip.To4() == nil
+	if _, err := exec.LookPath("nft"); err == nil {
+		return probeNftables(port, v6)
+	}
+	return probeIPTables(port, v6)
 }
 
 // probeNftables runs `nft list ruleset` and reports whether it proves the
-// custody port is restricted (source-restricted accept AND a drop; see
-// nftInForce).
-func probeNftables(port string) (bool, error) {
+// custody port is restricted for the tap's family (family-matching
+// source-restricted accept AND a drop/reject; see nftInForce).
+func probeNftables(port string, v6 bool) (bool, error) {
 	out, err := exec.Command("nft", "list", "ruleset").Output()
 	if err != nil {
 		return false, fmt.Errorf("nft: %w", err)
 	}
-	return nftInForce(string(out), port), nil
+	return nftInForce(string(out), port, v6), nil
 }
 
-// probeIPTables runs `iptables-save` and, for IPv6 room subnets, `ip6tables-save`,
-// reporting whether either proves the custody port is restricted. A missing
-// `ip6tables-save` is not fatal — the IPv4 result already stands; only a failing
-// `iptables-save` fails closed.
-func probeIPTables(port string) (bool, error) {
-	out4, err := exec.Command("iptables-save").Output()
+// probeIPTables runs the family-matching save tool — `ip6tables-save` for an
+// IPv6 tap, `iptables-save` for IPv4 — so an IPv6 listener is never judged
+// against IPv4 rules or vice versa. A failing save tool fails closed.
+func probeIPTables(port string, v6 bool) (bool, error) {
+	tool := "iptables-save"
+	if v6 {
+		tool = "ip6tables-save"
+	}
+	out, err := exec.Command(tool).Output()
 	if err != nil {
-		return false, fmt.Errorf("iptables-save: %w", err)
+		return false, fmt.Errorf("%s: %w", tool, err)
 	}
-	if iptablesInForce(string(out4), port) {
-		return true, nil
-	}
-	out6, err := exec.Command("ip6tables-save").Output()
-	if err != nil {
-		return false, nil
-	}
-	return iptablesInForce(string(out6), port), nil
+	return iptablesInForce(string(out), port), nil
 }

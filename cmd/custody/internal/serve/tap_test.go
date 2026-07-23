@@ -416,25 +416,30 @@ const (
 )
 
 func TestNftInForce(t *testing.T) {
+	nft6Accept := "ip6 saddr fd00:100::/64 tcp dport 8127 accept"
 	cases := []struct {
 		name    string
 		ruleset string
+		v6      bool
 		want    bool
 	}{
-		{"accept + drop", nftAccept + "\n" + nftDrop, true},
-		{"accept + reject", nftAccept + "\ntcp dport 8127 reject with tcp reset", true},
-		{"ipv6 accept + drop", "ip6 saddr fd00:100::/64 tcp dport 8127 accept\n" + nftDrop, true},
-		{"accept only, no drop", nftAccept, false},
-		{"drop only", nftDrop, false},
-		{"accept without saddr + drop", "tcp dport 8127 accept\n" + nftDrop, false},
-		{"port as substring (81270)", "ip saddr 10.0.100.0/24 tcp dport 81270 accept\ntcp dport 81270 drop", false},
-		{"wrong port", "ip saddr 10.0.100.0/24 tcp dport 9999 accept\ntcp dport 9999 drop", false},
-		{"empty", "", false},
+		{"v4 accept + drop", nftAccept + "\n" + nftDrop, false, true},
+		{"v4 accept + reject", nftAccept + "\ntcp dport 8127 reject with tcp reset", false, true},
+		{"v6 accept + drop", nft6Accept + "\n" + nftDrop, true, true},
+		// Cross-family: an IPv4 accept must not satisfy an IPv6 tap, or vice versa.
+		{"v4 rule but v6 tap", nftAccept + "\n" + nftDrop, true, false},
+		{"v6 rule but v4 tap", nft6Accept + "\n" + nftDrop, false, false},
+		{"accept only, no drop", nftAccept, false, false},
+		{"drop only", nftDrop, false, false},
+		{"accept without saddr + drop", "tcp dport 8127 accept\n" + nftDrop, false, false},
+		{"port as substring (81270)", "ip saddr 10.0.100.0/24 tcp dport 81270 accept\ntcp dport 81270 drop", false, false},
+		{"wrong port", "ip saddr 10.0.100.0/24 tcp dport 9999 accept\ntcp dport 9999 drop", false, false},
+		{"empty", "", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := nftInForce(tc.ruleset, "8127"); got != tc.want {
-				t.Fatalf("nftInForce(%q) = %v, want %v", tc.ruleset, got, tc.want)
+			if got := nftInForce(tc.ruleset, "8127", tc.v6); got != tc.want {
+				t.Fatalf("nftInForce(%q, v6=%v) = %v, want %v", tc.ruleset, tc.v6, got, tc.want)
 			}
 		})
 	}
