@@ -102,23 +102,31 @@ func TestAssembleReconcileReceiptNoRecordsSkips(t *testing.T) {
 	}
 }
 
-func TestRequireCustodyGatewayRefusesWhenUnset(t *testing.T) {
+func TestRequireCustodyConfigRefusesWhenUnset(t *testing.T) {
 	work := execution.WorkSpec{Secrets: []execution.Secret{{Name: "CUSTODY_GRANT_TRACKER", Ref: "custody:tracker/read"}}}
 
-	unset := New(Config{Launcher: "x", Image: "i", Model: "m"}) // no TapGateway
-	err := unset.requireCustodyGateway(work)
-	if err == nil || !strings.Contains(err.Error(), "authority_gateway_unset") {
+	// Gateway unset -> authority_gateway_unset (empty CUSTODY_BASE).
+	noGw := New(Config{Launcher: "x", Image: "i", Model: "m", TapSource: "10.0.0.5"})
+	if err := noGw.requireCustodyConfig(work); err == nil || !strings.Contains(err.Error(), "authority_gateway_unset") {
 		t.Fatalf("want authority_gateway_unset refusal, got %v", err)
 	}
 
-	set := New(Config{Launcher: "x", Image: "i", Model: "m", TapGateway: "http://gw:8127"})
-	if err := set.requireCustodyGateway(work); err != nil {
-		t.Fatalf("gateway set must admit: %v", err)
+	// Gateway set but source unset -> authority_source_unset (would derive an
+	// unbound child the tap listener then refuses).
+	noSrc := New(Config{Launcher: "x", Image: "i", Model: "m", TapGateway: "http://gw:8127"})
+	if err := noSrc.requireCustodyConfig(work); err == nil || !strings.Contains(err.Error(), "authority_source_unset") {
+		t.Fatalf("want authority_source_unset refusal, got %v", err)
 	}
-	// env: refs are unaffected by the gateway guard.
+
+	// Both set -> admit.
+	set := New(Config{Launcher: "x", Image: "i", Model: "m", TapGateway: "http://gw:8127", TapSource: "10.0.0.5"})
+	if err := set.requireCustodyConfig(work); err != nil {
+		t.Fatalf("gateway+source set must admit: %v", err)
+	}
+	// env: refs are unaffected by the custody config guard.
 	envOnly := execution.WorkSpec{Secrets: []execution.Secret{{Name: "CURSOR_API_KEY", Ref: "env:CURSOR_API_KEY"}}}
-	if err := unset.requireCustodyGateway(envOnly); err != nil {
-		t.Fatalf("env-only work must not trip the gateway guard: %v", err)
+	if err := noGw.requireCustodyConfig(envOnly); err != nil {
+		t.Fatalf("env-only work must not trip the custody config guard: %v", err)
 	}
 }
 

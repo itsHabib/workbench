@@ -63,7 +63,7 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 	if err := validateSecrets(work); err != nil {
 		return err
 	}
-	if err := b.requireCustodyGateway(work); err != nil {
+	if err := b.requireCustodyConfig(work); err != nil {
 		return err
 	}
 	if _, err := taskInput(work); err != nil {
@@ -446,12 +446,15 @@ func taskInput(work execution.WorkSpec) (execution.Input, error) {
 	return execution.Input{}, fmt.Errorf("rooms: agent-cursor profile requires an input named %q", "task")
 }
 
-// requireCustodyGateway refuses at admission when the work carries a custody:
-// ref but no tap gateway is configured. Without it CUSTODY_BASE_<KEY> would be
-// empty, the room would boot and consume a slot, and guest vendor calls would
-// fail closed at runtime with no operator-facing reason — so fail fast, before
-// a slot is taken, with a coded diagnostic naming the fix.
-func (b *Backend) requireCustodyGateway(work execution.WorkSpec) error {
+// requireCustodyConfig refuses at admission when the work carries a custody:
+// ref but the tap config it needs is unset. Two ways to fail closed at runtime,
+// both after a slot (and, for the source case, a minted child token) are already
+// consumed — so fail fast here instead, with a coded diagnostic naming the fix:
+//   - tap gateway unset -> CUSTODY_BASE_<KEY> is empty, guest vendor calls fail
+//     with no operator-facing reason.
+//   - tap source unset -> the child is derived UNBOUND, and the tap listener
+//     refuses the guest's first call on its D2b source binding.
+func (b *Backend) requireCustodyConfig(work execution.WorkSpec) error {
 	for _, secret := range work.Secrets {
 		ref, err := parseCustodyRef(secret.Name, secret.Ref)
 		if err != nil {
@@ -459,6 +462,9 @@ func (b *Backend) requireCustodyGateway(work execution.WorkSpec) error {
 		}
 		if b.config.custodyBase(ref.key) == "" {
 			return fmt.Errorf("rooms: secret %q needs a custody base url but the tap gateway is unset (code: authority_gateway_unset); set %s", secret.Name, envTapGateway)
+		}
+		if b.config.tapSource() == "" {
+			return fmt.Errorf("rooms: secret %q requires a source-bound child but the tap source is unset (code: authority_source_unset); set %s", secret.Name, envTapSource)
 		}
 	}
 	return nil
