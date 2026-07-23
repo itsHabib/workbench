@@ -186,6 +186,13 @@ func reconcileControllerLost(run state.RunDir, runID string, cleanup backend.Cle
 			Details: map[string]any{"allocation_id": cleanup.AllocationID},
 		})
 	}
+	// A run that carried custody: refs still owes its room-authority receipt after
+	// controller loss (§7 F): assemble it from the persisted derive records with
+	// teardown status unknown. Best-effort — a receipt failure must not block the
+	// terminal controller_lost truth this reconcile exists to write.
+	if art, ok, aerr := install.AssembleAuthorityReceiptDurable(req.Placement, run.PrivateDir(), run.ArtifactsDir(), runID, res.Placement.AllocationID, res.Artifacts, ended); aerr == nil && ok {
+		res.Artifacts = append(res.Artifacts, art)
+	}
 	if err := execution.ValidateResult(res); err != nil {
 		return ReconcileOutcome{}, fmt.Errorf("controller: invalid controller_lost result: %w", err)
 	}

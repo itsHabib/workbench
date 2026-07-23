@@ -34,11 +34,16 @@ var allowedSecrets = map[string]struct{}{
 	"CURSOR_API_KEY":    {},
 }
 
-// Backend runs the resolved agent-cursor profile through the Rooms CLI.
-type Backend struct{ config Config }
+// Backend runs the resolved agent-cursor profile through the Rooms CLI. port is
+// the seam onto custody for custody: secret resolution; it defaults to the CLI
+// implementation and is swapped for a fake in tests.
+type Backend struct {
+	config Config
+	port   custodyPort
+}
 
 // New returns a Rooms adapter with an already-resolved profile.
-func New(config Config) *Backend { return &Backend{config: config} }
+func New(config Config) *Backend { return &Backend{config: config, port: defaultCLICustody()} }
 
 // NewFromEnvironment resolves the installed agent-cursor profile.
 func NewFromEnvironment() (*Backend, error) {
@@ -56,6 +61,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 		return err
 	}
 	if err := validateSecrets(work); err != nil {
+		return err
+	}
+	if err := b.requireCustodyConfig(work); err != nil {
 		return err
 	}
 	if _, err := taskInput(work); err != nil {
@@ -438,8 +446,38 @@ func taskInput(work execution.WorkSpec) (execution.Input, error) {
 	return execution.Input{}, fmt.Errorf("rooms: agent-cursor profile requires an input named %q", "task")
 }
 
+// requireCustodyConfig refuses at admission when the work carries a custody:
+// ref but the tap config it needs is unset. Two ways to fail closed at runtime,
+// both after a slot (and, for the source case, a minted child token) are already
+// consumed — so fail fast here instead, with a coded diagnostic naming the fix:
+//   - tap gateway unset -> CUSTODY_BASE_<KEY> is empty, guest vendor calls fail
+//     with no operator-facing reason.
+//   - tap source unset -> the child is derived UNBOUND, and the tap listener
+//     refuses the guest's first call on its D2b source binding.
+func (b *Backend) requireCustodyConfig(work execution.WorkSpec) error {
+	for _, secret := range work.Secrets {
+		ref, err := parseCustodyRef(secret.Name, secret.Ref)
+		if err != nil {
+			continue
+		}
+		if b.config.custodyBase(ref.key) == "" {
+			return fmt.Errorf("rooms: secret %q needs a custody base url but the tap gateway is unset (code: authority_gateway_unset); set %s", secret.Name, envTapGateway)
+		}
+		if b.config.tapSource() == "" {
+			return fmt.Errorf("rooms: secret %q requires a source-bound child but the tap source is unset (code: authority_source_unset); set %s", secret.Name, envTapSource)
+		}
+	}
+	return nil
+}
+
 func validateSecrets(work execution.WorkSpec) error {
 	for _, secret := range work.Secrets {
+		if strings.HasPrefix(secret.Ref, "custody:") {
+			// custody: refs deliver a derived child token over vsock (D6), not
+			// through SSH SendEnv, so the SendEnv allowlist does not gate them —
+			// the resolver validates the ref grammar and parent grant instead.
+			continue
+		}
 		if _, ok := allowedSecrets[secret.Name]; ok {
 			continue
 		}
@@ -451,9 +489,7 @@ func validateSecrets(work execution.WorkSpec) error {
 func roomsEnv(prep backend.PreparedRun) []string {
 	values := envMap(prep.Env)
 	keep := []string{"HOME", "LOGNAME", "PATH", "ROOMS_MAX_POOL", "RUST_LOG", "TEMP", "TMP", "TMPDIR", "USER"}
-	for _, secret := range prep.Work.Secrets {
-		keep = append(keep, secret.Name)
-	}
+	keep = append(keep, secretEnvNames(prep.Work.Secrets)...)
 	out := make([]string, 0, len(keep))
 	seen := map[string]struct{}{}
 	for _, name := range keep {
@@ -466,6 +502,25 @@ func roomsEnv(prep backend.PreparedRun) []string {
 		}
 	}
 	return out
+}
+
+// secretEnvNames is the set of env var names each declared secret contributes to
+// the room, so roomsEnv's keep-list forwards exactly those. A custody: ref
+// delivers two provider-shaped vars (the child token and its base URL, D6) whose
+// names derive from the ref's KEY, not from the secret name — so both survive
+// regardless of how the WorkSpec named the secret, and CUSTODY_BASE_<KEY> is no
+// longer silently dropped. Any other ref contributes its own secret name.
+func secretEnvNames(secrets []execution.Secret) []string {
+	names := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		ref, err := parseCustodyRef(s.Name, s.Ref)
+		if err != nil {
+			names = append(names, s.Name)
+			continue
+		}
+		names = append(names, "CUSTODY_GRANT_"+envKey(ref.key), "CUSTODY_BASE_"+envKey(ref.key))
+	}
+	return names
 }
 
 func envMap(env []string) map[string]string {

@@ -296,6 +296,29 @@ func TestRoomPresentRejectsUnreadableAndFindsID(t *testing.T) {
 	}
 }
 
+func TestRoomsEnvForwardsBothCustodyVars(t *testing.T) {
+	prep := backend.PreparedRun{
+		Work: execution.WorkSpec{
+			Secrets: []execution.Secret{{Name: "CUSTODY_GRANT_TRACKER", Ref: "custody:tracker/read"}},
+		},
+		// The controller injects both the child token and the base URL; roomsEnv
+		// must forward BOTH to the room, not just the one whose name matches the
+		// secret. The base URL is derived from the ref key, never a secret name.
+		Env: []string{
+			"PATH=/usr/bin",
+			"CUSTODY_GRANT_TRACKER=cst2_child.sig",
+			"CUSTODY_BASE_TRACKER=http://gw:8127/tracker",
+		},
+	}
+	got := envMap(roomsEnv(prep))
+	if got["CUSTODY_GRANT_TRACKER"] != "cst2_child.sig" {
+		t.Fatalf("CUSTODY_GRANT_TRACKER dropped: %v", got)
+	}
+	if got["CUSTODY_BASE_TRACKER"] != "http://gw:8127/tracker" {
+		t.Fatalf("CUSTODY_BASE_TRACKER dropped by keep-list: %v", got)
+	}
+}
+
 func helperBackend(t *testing.T, scenario string) (*Backend, backend.PreparedRun) {
 	t.Helper()
 	dir := t.TempDir()

@@ -294,7 +294,7 @@ func TestEnumsMatchConstants(t *testing.T) {
 	reasons := []string{ReasonCompleted, ReasonPreparationFailed, ReasonStartupFailed,
 		ReasonWorkloadFailed, ReasonDeadlineExceeded, ReasonCancelRequested,
 		ReasonCollectionFailed, ReasonCleanupFailed, ReasonControllerLost,
-		ReasonPlacementUnavailable}
+		ReasonPlacementUnavailable, ReasonAuthorityUnresolved}
 
 	event := loadSchemaDoc(t, EventSchema)
 	assertSetEqual(t, "event.phase.enum", event.child(t, "phase").Enum, phases)
