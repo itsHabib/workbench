@@ -35,6 +35,26 @@ func TestAlternationMatch(t *testing.T) {
 	}
 }
 
+func TestBriefedEscalationRoutesByBrief(t *testing.T) {
+	c := config.Config{
+		Channels: map[string]config.Channel{"phone": {Type: config.ChannelSlack}, "drop": {Type: config.ChannelDrop}},
+		Routes: []config.Route{
+			{Match: config.Match{Source: "gate", Kind: "escalation", Briefed: "yes"}, Channel: "phone"},
+			{Match: config.Match{Source: "gate", Kind: "escalation", Briefed: "no"}, Channel: "drop"},
+		},
+		CatchAll: "drop",
+	}
+	r := New(c, time.Now)
+	briefed := event.Event{Source: "gate", Kind: "escalation", Fields: map[string]string{"briefed": "yes"}}
+	if d := r.Route(briefed); d.Channel != "phone" {
+		t.Fatalf("a briefed escalation must page phone, got %+v", d)
+	}
+	procedural := event.Event{Source: "gate", Kind: "escalation", Fields: map[string]string{"briefed": "no"}}
+	if d := r.Route(procedural); d.Channel != "drop" {
+		t.Fatalf("a no-brief (procedural) escalation must drop, not page, got %+v", d)
+	}
+}
+
 func TestThrottleIsSeverityMonotone(t *testing.T) {
 	now := time.Now()
 	r := New(cfg(), func() time.Time { return now })

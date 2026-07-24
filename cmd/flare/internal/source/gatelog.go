@@ -101,6 +101,12 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		fields["repo"] = b.Repo
 		fields["number"] = strconv.Itoa(b.Number)
 	}
+	// A routable signal for brief-presence: routing pages a human only for
+	// escalations gate briefed, and keeps procedural/no-brief parks off Slack.
+	fields["briefed"] = "no"
+	if b.Brief != nil {
+		fields["briefed"] = "yes"
+	}
 	briefFields(fields, b.Brief)
 	return event.Event{
 		Source:   src.Name,
