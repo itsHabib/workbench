@@ -15,7 +15,7 @@ batches:
   - id: 1
     label: tap listener first (resolver depends on it)
     depends_on: []
-    status: pending
+    status: done
     streams:
       - task_id: tsk_01KY5C4H62K3M32GZ6QC6EG83J
         task_slug: custody-tap-listener
@@ -25,11 +25,11 @@ batches:
         model: sonnet
         effort: extra
         touches: [cmd/custody/internal/serve/, cmd/custody/main.go, docs/features/grant-materialized-rooms/tap-runbook.md]
-        status: pending
+        status: done
   - id: 2
     label: resolver + receipt + e2e gate (after batch 1)
     depends_on: [1]
-    status: pending
+    status: done
     streams:
       - task_id: tsk_01KY5C4W89NFM3P9H8QXBBF9KG
         task_slug: runway-authority-resolver
@@ -39,7 +39,7 @@ batches:
         model: opus
         effort: extra
         touches: [cmd/runway/internal/backend/rooms/, cmd/runway/internal/controller/controller.go]
-        status: pending
+        status: done
 
 conflict_notes:
   - kind: dep_signal

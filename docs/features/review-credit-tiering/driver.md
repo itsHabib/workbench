@@ -9,6 +9,7 @@ repo: workbench
 repo_url: https://github.com/itsHabib/workbench
 branch_prefix: review-credit-
 default_runtime: local
+default_provider: claude
 
 batches:
   - id: 1
