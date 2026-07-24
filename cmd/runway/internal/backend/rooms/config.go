@@ -14,6 +14,7 @@ const (
 	envBin        = "RUNWAY_ROOMS_BIN"
 	envTapGateway = "RUNWAY_ROOMS_TAP_GATEWAY"
 	envTapSource  = "RUNWAY_ROOMS_TAP_SOURCE"
+	envWitness    = "RUNWAY_ROOMS_WITNESS"
 )
 
 const defaultModel = "composer-2.5"
@@ -33,6 +34,11 @@ type Config struct {
 	// to (D2b). Both come from the placement profile, never compiled-in.
 	TapGateway string
 	TapSource  string
+	// Witness runs each placement under `rooms --witness` (default on), so the
+	// room's egress is recorded host-side into witness.json/witness.pcap and
+	// digested into the room-authority receipt. It fails the room closed on a
+	// host without tcpdump, so it is an opt-out (RUNWAY_ROOMS_WITNESS=0).
+	Witness bool
 }
 
 // ConfigFromEnvironment resolves the one installed Rooms profile. Host paths
@@ -62,7 +68,20 @@ func ConfigFromEnvironment() (Config, error) {
 		Poll:       10 * time.Millisecond,
 		TapGateway: os.Getenv(envTapGateway),
 		TapSource:  os.Getenv(envTapSource),
+		Witness:    witnessEnabled(),
 	}, nil
+}
+
+// witnessEnabled reports whether placements run under `rooms --witness` (default
+// on). Set RUNWAY_ROOMS_WITNESS to a falsey value (0/false/off/no) to disable it
+// — e.g. on a host without tcpdump, where --witness fails the room closed.
+func witnessEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envWitness))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 // custodyBase renders the guest-facing CUSTODY_BASE_<KEY> value for key from the

@@ -66,6 +66,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 	if err := b.requireCustodyConfig(work); err != nil {
 		return err
 	}
+	if err := b.reserveWitnessPaths(work); err != nil {
+		return err
+	}
 	if _, err := taskInput(work); err != nil {
 		return err
 	}
@@ -150,9 +153,15 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 			ImageSHA256:    imageSHA,
 			StreamDelivery: execution.StreamDeliveryTerminalReplay,
 			Enforced: map[string]any{
-				"cpu":              1,
-				"memory_mib":       256,
-				"network":          "egress",
+				"cpu":        1,
+				"memory_mib": 256,
+				// No --egress is passed, so the room is never blocked. Report the
+				// honest posture: with --witness the egress is recorded ("observe",
+				// rooms' name for record-don't-block); without it the room is open
+				// AND unobserved ("open"). Claiming "egress" — or "observe" when
+				// nothing observes — would overstate what actually ran.
+				"network":          networkPosture(b.config.Witness),
+				"witness":          b.config.Witness,
 				"rootfs":           "readonly_overlay",
 				"secret_transport": "ssh_sendenv",
 				"secret_names":     []string{"ANTHROPIC_API_KEY", "CURSOR_API_KEY"},
@@ -259,7 +268,7 @@ func (h *handle) awaitStartup(ctx context.Context, emit backend.Emit) error {
 
 // Collect waits for Rooms' host-side `--out` copy. The controller subsequently
 // validates and hashes the declared Runway outputs from that same directory.
-func (b *Backend) Collect(ctx context.Context, bh backend.Handle, _ string) ([]execution.Artifact, error) {
+func (b *Backend) Collect(ctx context.Context, bh backend.Handle, artifactsDir string) ([]execution.Artifact, error) {
 	h, err := asHandle(bh)
 	if err != nil {
 		return nil, err
@@ -273,7 +282,7 @@ func (b *Backend) Collect(ctx context.Context, bh backend.Handle, _ string) ([]e
 		case "collection_started":
 			continue
 		case "collection_done":
-			return nil, nil
+			return collectWitnessArtifacts(ctx, artifactsDir)
 		case "collection_failed":
 			return nil, fmt.Errorf("rooms: collection failed: %s", record.Error)
 		case "cleanup_done", "cleanup_failed":
@@ -325,7 +334,7 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 
 func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []string {
 	args := append([]string(nil), b.config.Prefix...)
-	return append(args,
+	args = append(args,
 		"run",
 		"--runner", "cursor",
 		"--image", b.config.Image,
@@ -336,6 +345,13 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []st
 		"--out", prep.Out,
 		"--lifecycle", lifecycle,
 	)
+	// --witness records the room's egress host-side (witness.json/witness.pcap in
+	// --out); Collect surfaces those files as evidence for the room-authority
+	// receipt. It requires --out (already passed) and host tcpdump.
+	if b.config.Witness {
+		args = append(args, "--witness")
+	}
+	return args
 }
 
 func (h *handle) allocated(record lifecycleRecord, emit backend.Emit) error {
@@ -543,6 +559,74 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 		details["command"] = record.Command
 	}
 	return details
+}
+
+// witnessEvidence are the host-witness files Rooms writes into --out under
+// --witness. They are not WorkSpec-declared outputs, so the adapter surfaces
+// them from Collect for the room-authority receipt (receipt.evidenceType names
+// them by suffix). Order is stable so the receipt's evidence list is
+// deterministic.
+var witnessEvidence = []string{"witness.json", "witness.pcap"}
+
+// networkPosture reports the honest network enforcement for the receipt. No
+// --egress is ever passed, so the room is never blocked: with --witness its
+// egress is recorded ("observe", rooms' name for record-don't-block); without it
+// the room is open AND unobserved ("open"). Reporting "observe" unconditionally
+// would claim observation a witness-off placement does not perform.
+func networkPosture(witness bool) string {
+	if witness {
+		return "observe"
+	}
+	return "open"
+}
+
+// reserveWitnessPaths refuses a WorkSpec that declares an output at a path the
+// host witness will write (witness.json/witness.pcap). Under --witness both the
+// witness and the workload write into the same --out root, so the witness could
+// overwrite the workload's file — and collectOutputs would then accept the
+// witness bytes as a required output the workload never produced. Fail closed at
+// admission, before any durable state.
+func (b *Backend) reserveWitnessPaths(work execution.WorkSpec) error {
+	if !b.config.Witness {
+		return nil
+	}
+	for _, out := range work.Outputs {
+		for _, reserved := range witnessEvidence {
+			if filepath.ToSlash(out.Path) == reserved {
+				return fmt.Errorf("rooms: output %q collides with reserved host-witness path %q; rename the output or set %s=0", out.Name, reserved, envWitness)
+			}
+		}
+	}
+	return nil
+}
+
+// collectWitnessArtifacts hashes whichever witness files Rooms dropped into the
+// collected `--out` dir and returns them as named artifacts (path convention
+// "artifacts/<name>", matching collectOutputs). A missing file is skipped, not an
+// error: --witness may be off, or a run may produce no pcap.
+func collectWitnessArtifacts(ctx context.Context, outRoot string) ([]execution.Artifact, error) {
+	arts := make([]execution.Artifact, 0, len(witnessEvidence))
+	for _, name := range witnessEvidence {
+		path := filepath.Join(outRoot, name)
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("rooms: stat witness evidence %q: %w", name, err)
+		}
+		sum, err := fileSHA256(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("rooms: hash witness evidence %q: %w", name, err)
+		}
+		arts = append(arts, execution.Artifact{
+			Name:   name,
+			Path:   filepath.ToSlash(filepath.Join("artifacts", name)),
+			SHA256: sum,
+			Size:   info.Size(),
+		})
+	}
+	return arts, nil
 }
 
 func fileSHA256(ctx context.Context, path string) (string, error) {
