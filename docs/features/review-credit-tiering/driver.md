@@ -15,7 +15,7 @@ batches:
   - id: 1
     label: path overrides (ready now)
     depends_on: []
-    status: pending
+    status: done
     streams:
       - task_id: tsk_01KY5CNX02N5SPYE130PTBJHX1
         task_slug: triage-path-overrides
@@ -25,7 +25,7 @@ batches:
         model: opus
         effort: extra
         touches: [cmd/triage/internal/floor/overrides.go, cmd/triage/internal/floor/floor.go, cmd/triage/triage-floor/main.go, cmd/gate/internal/verify/floor.go, cmd/triage/docs/]
-        status: pending
+        status: done
 
 conflict_notes:
   - kind: file_overlap

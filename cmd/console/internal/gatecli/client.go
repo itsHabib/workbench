@@ -35,6 +35,11 @@ func New(bin, state string, run Runner) *Client {
 	return &Client{bin: bin, state: state, run: run}
 }
 
+// State returns the gate state dir this client shells against. The console
+// surfaces it so the run view can render a paste-ready `gate judge` command
+// carrying -state, exactly as `gate next` already bakes it into the docket's.
+func (c *Client) State() string { return c.state }
+
 // runIDRe bounds what Explain forwards to gate: a run id is run_ + hex. Exec
 // args are not shell-interpreted, so this is defense in depth plus a clean
 // rejection of a junk path before a subprocess is spawned.
