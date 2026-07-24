@@ -153,6 +153,10 @@
   .no-brief-note { margin-top: 0.65rem; font-size: 0.79rem; color: var(--faint); font-style: italic; font-family: var(--serif); line-height: 1.5; }
   .panel .cmd-row { margin-top: 0.85rem; }
   .panel .open-hint { margin: 0.3rem 0 0; }
+  .judge-actions { margin-top: 0.85rem; display: grid; gap: 0.4rem; }
+  .judge-actions .cmd-row { margin-top: 0; }
+  .judge-row { align-items: center; }
+  .judge-row .badge { flex: none; }
   .panel-foot { margin-top: 0.85rem; padding-top: 0.6rem; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; font-size: 0.73rem; color: var(--faint); font-family: var(--mono); overflow-wrap: anywhere; }
   .panel-foot b { color: var(--muted); font-weight: 600; }
 
@@ -398,6 +402,16 @@
   }
 
   // ---------- run view (trace) ----------
+  // The console's -state dir, fetched once, so the run view can render a fully
+  // paste-ready judge command (the docket already gets it baked in by gate next).
+  var cfgState = null;
+  async function loadConfig() {
+    if (cfgState !== null) return cfgState;
+    try { var c = await getJSON("/api/config"); cfgState = (c && c.state) || ""; }
+    catch (e) { cfgState = ""; }
+    return cfgState;
+  }
+
   async function renderRun(id) {
     document.title = "gate · " + id;
     renderAudit();
@@ -411,7 +425,8 @@
       el("back2").addEventListener("click", function () { go("/"); });
       return;
     }
-    renderTrace(doc);
+    var state = await loadConfig();
+    renderTrace(doc, state);
   }
 
   function badgeFor(decisionOrOutcome) {
@@ -433,7 +448,7 @@
 
   var RISK_RE = /^\s*(low|medium|high)\b/i;
 
-  function renderTrace(doc) {
+  function renderTrace(doc, state) {
     var arts = (doc && doc.artifacts) || [];
     var term = findTerminal(arts);
     var reducer = null, verifiers = [], evidence = [];
@@ -448,7 +463,7 @@
     var checks = verifiers.map(checkRow).join("") + (reducer ? synthesisRow(reducer) : "");
     var html =
       '<a class="back" id="back">← what needs you</a>' +
-      briefPanel(doc.run, term, reducer, verifiers) +
+      briefPanel(doc.run, term, reducer, verifiers, state) +
       '<div class="section-label">how gate got here <span class="count">' +
         verifiers.length + (verifiers.length === 1 ? " check" : " checks") + "</span></div>" +
       '<div class="card"><div class="ladder">' +
@@ -464,7 +479,7 @@
   // The decision panel — mirrors flare's escalation Slack card: outcome + subject,
   // then gate's synthesized brief (What it is / The concern / Risk / Recommendation)
   // when present, else gate's own verdict text verbatim. It never editorializes.
-  function briefPanel(run, term, reducer, verifiers) {
+  function briefPanel(run, term, reducer, verifiers, state) {
     var flat = (term && term.flat) || {};
     var outcome = flat.outcome || (reducer ? decisionOutcome(reducer.decision) : "");
     var repo = flat.repo || subjectRepo(verifiers, reducer);
@@ -476,12 +491,16 @@
 
     var action = "";
     if (outcome === "parked_for_judgment" && grant) {
-      // Decision-neutral template — the console never pre-decides a judgment (pass|block is the operator's call).
-      var cmd = 'gate judge -run ' + run + ' -grant ' + grant + ' -decision <pass|block> -why "…"';
+      // Offer BOTH judgments, each fully formed (carrying -state) with a -why
+      // pre-drafted from gate's own verdicts. Both ways are shown equally — the
+      // console suggests wording and saves typing; it never pre-decides.
+      var base = "gate judge" + (state ? " -state " + shellArg(state) : "") + " -run " + run + " -grant " + grant;
+      var passCmd = base + ' -decision pass -why "' + judgeWhy("pass", reducer, verifiers, flat) + '"';
+      var blockCmd = base + ' -decision block -why "' + judgeWhy("block", reducer, verifiers, flat) + '"';
       action =
-        '<div class="cmd-row"><code class="cmd">' + esc(cmd) + '</code>' +
-        '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>' +
-        '<div class="open-hint faint">add your <span class="mono">-state</span>, or copy the exact command from the inbox</div>';
+        '<div class="judge-actions">' + judgeRow("pass", passCmd) + judgeRow("block", blockCmd) + "</div>" +
+        '<div class="open-hint faint">Both ready to run — copy one, tweak the reason if you like.' +
+        (state ? "" : ' <span class="mono">-state</span> unknown here; copy the exact command from the inbox.') + "</div>";
     }
 
     var foot = "";
@@ -586,6 +605,29 @@
     }
     return '<details class="findings"><summary>' + findings.length + " finding" + (findings.length === 1 ? "" : "s") + "</summary><ul>" + items + "</ul></details>";
   }
+
+  // ---- judge commands (both ways, pre-drafted) ----
+  function judgeRow(kind, cmd) {
+    var cls = kind === "pass" ? "b-pass" : "b-block";
+    return '<div class="cmd-row judge-row">' +
+      '<span class="badge ' + cls + '">' + kind + "</span>" +
+      '<code class="cmd">' + esc(cmd) + "</code>" +
+      '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>';
+  }
+  // A drafted -why the operator can accept or edit — pass restates the floor's
+  // read, block restates the reason gate raised. Both are gate's own words, not
+  // the console's judgment.
+  function judgeWhy(kind, reducer, verifiers, flat) {
+    if (kind === "pass") {
+      var floor = firstSource(verifiers, "triage-floor");
+      return floor && floor.why ? sanitizeWhy("cleared — " + floor.why) : "cleared after review";
+    }
+    var reason = firstSeg((reducer && reducer.why) || (flat && flat.question) || "");
+    return reason ? sanitizeWhy("blocked — " + reason) : "blocked";
+  }
+  function firstSeg(s) { return String(s || "").split(";")[0].trim(); }
+  function sanitizeWhy(s) { return String(s).replace(/"/g, "'"); } // keep the -why "..." shell string intact
+  function shellArg(v) { return /\s/.test(v) ? '"' + v + '"' : v; }
 
   // ---- small helpers ----
   function glyphFor(d) { return d === "pass" ? "✓" : d === "block" ? "✕" : d === "capability_refused" ? "⊘" : "!"; }

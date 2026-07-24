@@ -34,6 +34,7 @@ func New(gate *gatecli.Client, host string) *Server {
 	s.mux.HandleFunc("GET /api/next", s.handleNext)
 	s.mux.HandleFunc("GET /api/run/{id}", s.handleRun)
 	s.mux.HandleFunc("GET /api/audit", s.handleAudit)
+	s.mux.HandleFunc("GET /api/config", s.handleConfig)
 	// The single page is served for the root and for any /run/<id> deep link;
 	// its own script picks the view from the path.
 	s.mux.HandleFunc("GET /{$}", s.handleApp)
@@ -100,6 +101,19 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, err := json.Marshal(st)
+	if err != nil {
+		s.gateError(w, err)
+		return
+	}
+	writeJSON(w, b)
+}
+
+// handleConfig exposes the console's own read-only config — today just the gate
+// state dir — so the page can render a complete, paste-ready judge command. It
+// carries no gate data and makes no decision; it reports how this console was
+// launched.
+func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
+	b, err := json.Marshal(map[string]string{"state": s.gate.State()})
 	if err != nil {
 		s.gateError(w, err)
 		return
