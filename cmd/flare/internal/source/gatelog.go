@@ -86,7 +86,7 @@ func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, er
 
 func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	var b escalationBody
-	json.Unmarshal(env.Body, &b) // tolerant: a missing body still notifies
+	json.Unmarshal(env.Body, &b) // tolerant: an undecodable body leaves Brief nil → briefed "no" → drops under the briefed routes, never a corrupt page
 	title := fmt.Sprintf("%s: parked for judgment (%s)", src.Name, env.Run)
 	if b.Outcome != "" {
 		title = fmt.Sprintf("%s: %s (%s)", src.Name, strings.ReplaceAll(b.Outcome, "_", " "), env.Run)

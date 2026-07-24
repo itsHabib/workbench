@@ -42,7 +42,7 @@ func TestBriefedEscalationRoutesByBrief(t *testing.T) {
 			{Match: config.Match{Source: "gate", Kind: "escalation", Briefed: "yes"}, Channel: "phone"},
 			{Match: config.Match{Source: "gate", Kind: "escalation", Briefed: "no"}, Channel: "drop"},
 		},
-		CatchAll: "drop",
+		CatchAll: "phone", // a real notifying catch-all (config.validate refuses a drop catch-all)
 	}
 	r := New(c, time.Now)
 	briefed := event.Event{Source: "gate", Kind: "escalation", Fields: map[string]string{"briefed": "yes"}}
