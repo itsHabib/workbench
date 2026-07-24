@@ -83,6 +83,8 @@ func TestSynthesizeBriefFailsClosedToNoBrief(t *testing.T) {
 		"model error": {err: errors.New("anthropic: status 529")},
 		"bad json":    {reply: "not json"},
 		"empty core":  {reply: `{"what_it_is":"","concern":"","risk":"Low","recommendation":"merge"}`},
+		"empty risk":  {reply: `{"what_it_is":"a spec","concern":"broken check","risk":"","recommendation":"merge"}`},
+		"empty rec":   {reply: `{"what_it_is":"a spec","concern":"broken check","risk":"Low","recommendation":""}`},
 	}
 	for name, m := range cases {
 		if _, err := SynthesizeBrief(context.Background(), m, subject, title, question, verdicts); err == nil {

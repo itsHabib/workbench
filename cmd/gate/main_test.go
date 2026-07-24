@@ -154,6 +154,73 @@ func TestEscalationCarriesPRSubject(t *testing.T) {
 }
 
 // unmarshalKindBody decodes the body of run's sole artifact of the given kind.
+// TestEscalationCarriesSynthesizedBrief pins the happy path: a content park
+// under a valid grant records the synthesized brief on its escalation body,
+// and the added post-synthesis grant re-check does not disturb it.
+func TestEscalationCarriesSynthesizedBrief(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 84, HeadSHA: "abc"}, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	synth := func(q string) (verify.Brief, error) {
+		if q != "test" {
+			t.Fatalf("synth must receive the park question, got %q", q)
+		}
+		return verify.Brief{WhatItIs: "a spec", Concern: "broken check", Risk: "Medium", Recommendation: "author fixes"}, nil
+	}
+	_, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, synth)
+	if err != nil || code != codeParked {
+		t.Fatalf("content park: code %d err %v", code, err)
+	}
+	var body struct {
+		Brief verify.Brief `json:"brief"`
+	}
+	unmarshalKindBody(t, e, run, state.KindEscalation, &body)
+	if body.Brief.Concern != "broken check" {
+		t.Fatalf("escalation must carry the synthesized brief, got %+v", body.Brief)
+	}
+}
+
+// TestEscalationGrantExpiresDuringSynthesis pins the TOCTOU fix: a grant live
+// at the pre-synthesis check but expired by the time a slow synthesis returns
+// must refuse — the post-synthesis re-check catches it, and no escalation is
+// ever recorded under the expired grant. The grant TTL is short and the synth
+// call sleeps past it, so the second check sees an expiry the first could not.
+func TestEscalationGrantExpiresDuringSynthesis(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", 80*time.Millisecond, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	v := reducedVerdict(verify.Subject{Repo: "o/r", Number: 84, HeadSHA: "abc"}, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	slowSynth := func(string) (verify.Brief, error) {
+		time.Sleep(300 * time.Millisecond) // outlast the grant TTL, as a stalled model call would
+		return verify.Brief{WhatItIs: "a spec", Concern: "broken check", Risk: "Medium", Recommendation: "author fixes"}, nil
+	}
+	res, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, slowSynth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("expiry during synthesis must refuse: got code %d outcome %q", code, res.Outcome)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.Kind == state.KindEscalation {
+			t.Fatal("an escalation must never record under a grant that expired during synthesis")
+		}
+	}
+}
+
 func unmarshalKindBody(t *testing.T, e env, run, kind string, into any) {
 	t.Helper()
 	arts, err := e.st.Run(run)

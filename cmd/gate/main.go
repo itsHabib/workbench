@@ -441,9 +441,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return res, codeError, err
 	}
 
-	// An escalation pages a zero-context approver, so it carries a synthesized
-	// plain-language brief. Lazy: the model call happens only if the run
-	// actually parks, and only from what the run already recorded.
+	// A content escalation carries a synthesized brief; lazy — the model call fires only if the run actually parks, and only over what it already recorded.
 	title := verify.PRTitle(e.st, bundle.View)
 	synth := func(question string) (verify.Brief, error) {
 		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
@@ -500,13 +498,6 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 			body["repo"] = reduced.Subject.Repo
 			body["number"] = reduced.Subject.Number
 		}
-		// The page must brief a reader with zero codebase context, so every
-		// escalation tries to carry a plain-language brief. Advisory and
-		// fail-open: a synthesis failure falls back to the raw question —
-		// never blocks or fails the park itself.
-		if kind == state.KindEscalation {
-			attachBrief(body, synth)
-		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		_, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
@@ -528,9 +519,23 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		return res, codeBlocked, record(state.KindAction, "blocked", nil)
 	}
 	if reduced.Decision == verify.DecisionEscalate {
+		// A content park is the one escalation that pages a zero-context reader,
+		// so it carries a synthesized brief; the procedural parks below are
+		// authorization facts a findings brief can't illuminate and skip the
+		// model call. Advisory + fail-open: synthesis failure just drops the
+		// brief (the sink quotes the raw question), never blocks the park.
+		body := map[string]any{"question": reduced.Why}
+		attachBrief(body, synth)
+		// Synthesis can stall to the model's HTTP timeout, outlasting the TTL
+		// the pre-synthesis check saw. Re-check at write time so an escalation
+		// never records under a grant that expired mid-synthesis.
+		if _, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now); err != nil {
+			res.Outcome = "capability_refused"
+			res.Why = err.Error()
+			return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
+		}
 		res.Outcome = "parked_for_judgment"
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
-			map[string]any{"question": reduced.Why})
+		return res, codeParked, record(state.KindEscalation, "parked_for_judgment", body)
 	}
 	if !grant.TierWithin(reduced.Tier) {
 		res.Outcome = "parked_for_judgment"
@@ -586,10 +591,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
 
-// attachBrief adds the synthesized operator brief to an escalation body.
-// Fail-open by contract: a model error costs only the nicer page (the sink
-// renders the raw question instead), never the escalation — a park must
-// reach the operator even when the model is down.
+// attachBrief adds the synthesized operator brief to an escalation body, fail-open: a synthesis error drops the brief (the sink quotes the raw question), never the park.
 func attachBrief(body map[string]any, synth briefFn) {
 	if synth == nil {
 		return

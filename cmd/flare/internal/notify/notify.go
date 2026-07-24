@@ -145,9 +145,7 @@ func slackBlocks(ev event.Event) []slackBlock {
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: headline(ev), Emoji: true}},
 	}
-	// The synthesized brief is the card body when the producer sent one — a
-	// zero-context reader gets What/Concern/Risk/Recommendation instead of
-	// the raw machine reason. No brief, the reason renders as before.
+	// A synthesized brief is the card body when the producer sent one; else the raw reason renders as before.
 	body := briefBlock(ev)
 	if body == "" {
 		body = whyBlock(ev.Body)
