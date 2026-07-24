@@ -20,13 +20,14 @@ permissions:
 
 jobs:
   gate:
-    # DORMANT until armed. gate's full ladder needs triage-floor + a model
-    # backend (Ollama today) that a stock GitHub-hosted runner does not have, so
-    # this stays OFF until the runtime is sorted (point gate's model rungs at a
-    # cloud model, or run on a box-side runner) AND the operator arms it by
-    # setting repo variable GATE_ENFORCE=true. Until then it posts nothing and
-    # enforces nothing. See docs/enforcement.md. (Also skips non-PR CI runs — a
-    # push to main has no PR to gate.)
+    # DORMANT until armed. The runtime is now self-contained on a stock hosted
+    # runner: triage-floor is built in-workflow (below) and the advisory rungs
+    # use the cloud model backend (-model-backend cloud), so no local Ollama is
+    # needed. The two remaining requirements are operator acts: set repo variable
+    # GATE_ENFORCE=true AND provide the ANTHROPIC_API_KEY secret. Until
+    # GATE_ENFORCE=true this posts nothing and enforces nothing. See
+    # docs/enforcement.md. (Also skips non-PR CI runs — a push to main has no PR
+    # to gate.)
     if: github.event.workflow_run.event == 'pull_request' && vars.GATE_ENFORCE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -52,9 +53,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Built from the base checkout above — never from PR head.
-      - name: Build gate
-        run: go build -o gate ./cmd/gate
+      # Built from the base checkout above — never from PR head. triage-floor
+      # (gate's floor rung) is built here too so the hosted runner has it on the
+      # workspace; its path is passed to gate via -floor below.
+      - name: Build gate + triage-floor
+        run: |
+          go build -o gate ./cmd/gate
+          go build -o triage-floor ./cmd/triage/triage-floor
 
       # Resolve the PR from the event. Same-repo PRs populate pull_requests[0];
       # fork PRs arrive with an empty pull_requests[], so fall back to the
@@ -147,6 +152,11 @@ jobs:
         if: steps.pr.outputs.found == 'true'
         env:
           PR: ${{ steps.pr.outputs.number }}
+          # Cloud model backend (Anthropic) so the two advisory rungs need no
+          # local Ollama on the hosted runner. Fork-safe: this step runs only in
+          # the trusted base context (workflow_run), never fork code, so the
+          # secret is never exposed to a PR/fork.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
           TMP=$(mktemp -d)
@@ -157,7 +167,8 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys")
           echo "minted ephemeral grant"
           set +e
-          JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys")
+          JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
+            -model-backend cloud -floor "$PWD/triage-floor")
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.
