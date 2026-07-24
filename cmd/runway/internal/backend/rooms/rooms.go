@@ -150,9 +150,14 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 			ImageSHA256:    imageSHA,
 			StreamDelivery: execution.StreamDeliveryTerminalReplay,
 			Enforced: map[string]any{
-				"cpu":              1,
-				"memory_mib":       256,
-				"network":          "egress",
+				"cpu":        1,
+				"memory_mib": 256,
+				// The room runs egress-open (no --egress is passed); with --witness
+				// its egress is host-recorded but not blocked. Report that honestly
+				// — "observe" is rooms' own name for the record-don't-block policy —
+				// rather than claiming "egress" enforcement that does not happen.
+				"network":          "observe",
+				"witness":          b.config.Witness,
 				"rootfs":           "readonly_overlay",
 				"secret_transport": "ssh_sendenv",
 				"secret_names":     []string{"ANTHROPIC_API_KEY", "CURSOR_API_KEY"},
@@ -259,7 +264,7 @@ func (h *handle) awaitStartup(ctx context.Context, emit backend.Emit) error {
 
 // Collect waits for Rooms' host-side `--out` copy. The controller subsequently
 // validates and hashes the declared Runway outputs from that same directory.
-func (b *Backend) Collect(ctx context.Context, bh backend.Handle, _ string) ([]execution.Artifact, error) {
+func (b *Backend) Collect(ctx context.Context, bh backend.Handle, artifactsDir string) ([]execution.Artifact, error) {
 	h, err := asHandle(bh)
 	if err != nil {
 		return nil, err
@@ -273,7 +278,7 @@ func (b *Backend) Collect(ctx context.Context, bh backend.Handle, _ string) ([]e
 		case "collection_started":
 			continue
 		case "collection_done":
-			return nil, nil
+			return collectWitnessArtifacts(ctx, artifactsDir)
 		case "collection_failed":
 			return nil, fmt.Errorf("rooms: collection failed: %s", record.Error)
 		case "cleanup_done", "cleanup_failed":
@@ -325,7 +330,7 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 
 func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []string {
 	args := append([]string(nil), b.config.Prefix...)
-	return append(args,
+	args = append(args,
 		"run",
 		"--runner", "cursor",
 		"--image", b.config.Image,
@@ -336,6 +341,13 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []st
 		"--out", prep.Out,
 		"--lifecycle", lifecycle,
 	)
+	// --witness records the room's egress host-side (witness.json/witness.pcap in
+	// --out); Collect surfaces those files as evidence for the room-authority
+	// receipt. It requires --out (already passed) and host tcpdump.
+	if b.config.Witness {
+		args = append(args, "--witness")
+	}
+	return args
 }
 
 func (h *handle) allocated(record lifecycleRecord, emit backend.Emit) error {
@@ -543,6 +555,42 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 		details["command"] = record.Command
 	}
 	return details
+}
+
+// witnessEvidence are the host-witness files Rooms writes into --out under
+// --witness. They are not WorkSpec-declared outputs, so the adapter surfaces
+// them from Collect for the room-authority receipt (receipt.evidenceType names
+// them by suffix). Order is stable so the receipt's evidence list is
+// deterministic.
+var witnessEvidence = []string{"witness.json", "witness.pcap"}
+
+// collectWitnessArtifacts hashes whichever witness files Rooms dropped into the
+// collected `--out` dir and returns them as named artifacts (path convention
+// "artifacts/<name>", matching collectOutputs). A missing file is skipped, not an
+// error: --witness may be off, or a run may produce no pcap.
+func collectWitnessArtifacts(ctx context.Context, outRoot string) ([]execution.Artifact, error) {
+	arts := make([]execution.Artifact, 0, len(witnessEvidence))
+	for _, name := range witnessEvidence {
+		path := filepath.Join(outRoot, name)
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("rooms: stat witness evidence %q: %w", name, err)
+		}
+		sum, err := fileSHA256(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("rooms: hash witness evidence %q: %w", name, err)
+		}
+		arts = append(arts, execution.Artifact{
+			Name:   name,
+			Path:   filepath.ToSlash(filepath.Join("artifacts", name)),
+			SHA256: sum,
+			Size:   info.Size(),
+		})
+	}
+	return arts, nil
 }
 
 func fileSHA256(ctx context.Context, path string) (string, error) {

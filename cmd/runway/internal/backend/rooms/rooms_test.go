@@ -211,6 +211,69 @@ func TestRoomsArgvContainsNoResolvedSecret(t *testing.T) {
 	}
 }
 
+func TestRunArgsWitnessFlagTracksConfig(t *testing.T) {
+	be, prep := helperBackend(t, "success")
+	task, err := taskPath(prep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lc := filepath.Join(prep.PrivateDir, lifecycleFile)
+
+	be.config.Witness = true
+	if !hasFlag(be.runArgs(prep, task, lc), "--witness") {
+		t.Fatalf("witness on: --witness must be in argv: %v", be.runArgs(prep, task, lc))
+	}
+	be.config.Witness = false
+	if hasFlag(be.runArgs(prep, task, lc), "--witness") {
+		t.Fatalf("witness off: --witness must not appear: %v", be.runArgs(prep, task, lc))
+	}
+}
+
+func TestCollectWitnessArtifactsSurfacesPresentEvidence(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "witness.json"), []byte(`{"tap":"tap-fc1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// witness.pcap intentionally absent — a run may produce no pcap; it is skipped.
+	arts, err := collectWitnessArtifacts(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("json present, pcap absent -> 1 artifact, got %d: %+v", len(arts), arts)
+	}
+	got := arts[0]
+	if got.Name != "witness.json" || got.Path != "artifacts/witness.json" {
+		t.Fatalf("artifact name/path = %q / %q", got.Name, got.Path)
+	}
+	if got.SHA256 == "" || got.Size == 0 {
+		t.Fatalf("artifact missing hash/size: %+v", got)
+	}
+	// The load-bearing link: the collected witness classifies as receipt evidence.
+	if kind, ok := evidenceType(got.Name); !ok || kind != "witness_json" {
+		t.Fatalf("witness.json must classify as witness_json evidence, got %q ok=%v", kind, ok)
+	}
+}
+
+func TestCollectWitnessArtifactsEmptyWhenNoneEmitted(t *testing.T) {
+	arts, err := collectWitnessArtifacts(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 0 {
+		t.Fatalf("no witness files -> no artifacts, got %+v", arts)
+	}
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestStartHonorsContextDuringGuestStartup(t *testing.T) {
 	be, prep := helperBackend(t, "slow_start")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
