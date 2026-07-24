@@ -87,6 +87,35 @@ func TestGateLogEscalationCarriesPRSubject(t *testing.T) {
 	}
 }
 
+// TestGateLogEscalationCarriesBrief pins the plain-language page: an
+// escalation body with gate's synthesized brief surfaces it as brief_*
+// fields for notify's sections, and one without stays brief-less so the card
+// falls back to quoting the question.
+func TestGateLogEscalationCarriesBrief(t *testing.T) {
+	withBrief := `{"id":"esc_b","kind":"escalation","run":"run_8","time":"2026-07-08T16:40:00Z","body":{"outcome":"parked_for_judgment","question":"1 actionable — needs judgment","repo":"itsHabib/rooms","number":84,"brief":{"what_it_is":"A design spec for a test harness.","concern":"The harness pass check is broken.","risk":"Medium — spec, not shipping code.","recommendation":"Have the author fix the witness first."}},"prev":"h1","hash":"h2"}`
+	src := gateFile(t, escLine+"\n"+withBrief+"\n")
+	events, _, err := Read(src, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("want both escalations, got %d: %+v", len(events), events)
+	}
+	if f := events[0].Fields; f["brief_what"] != "" || f["brief_concern"] != "" {
+		t.Fatalf("brief-less escalation must not invent brief fields, got %+v", f)
+	}
+	f := events[1].Fields
+	if f["brief_what"] != "A design spec for a test harness." ||
+		f["brief_concern"] != "The harness pass check is broken." ||
+		f["brief_risk"] != "Medium — spec, not shipping code." ||
+		f["brief_rec"] != "Have the author fix the witness first." {
+		t.Fatalf("escalation must surface its brief fields, got %+v", f)
+	}
+	if events[1].Body != "1 actionable — needs judgment" {
+		t.Fatalf("the raw question must stay the event body (webhook/fallback), got %q", events[1].Body)
+	}
+}
+
 func TestTornFinalLineIsLeftForNextPoll(t *testing.T) {
 	src := gateFile(t, escLine+"\n"+`{"id":"esc_2","kind":"esc`)
 	events, cur, err := Read(src, Cursor{})

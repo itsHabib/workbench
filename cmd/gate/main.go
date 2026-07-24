@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -440,7 +441,12 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return res, codeError, err
 	}
 
-	return act(e, run, grantID, reduced, reducedArt.ID, res, live)
+	// A content escalation carries a synthesized brief; lazy — the model call fires only if the run actually parks, and only over what it already recorded.
+	title := verify.PRTitle(e.st, bundle.View)
+	synth := func(question string) (verify.Brief, error) {
+		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+	}
+	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
 }
 
 // ciClassifyIfRed runs the conditional enrichment rung, last before
@@ -465,8 +471,12 @@ func ciClassifyIfRed(e env, run, viewEvidenceID, repo string, pr int, subject ve
 	return art.ID, nil
 }
 
+// briefFn lazily synthesizes the operator brief for an escalation, from the
+// park question it is handed. Nil means "no brief" (tests, degraded paths).
+type briefFn func(question string) (verify.Brief, error)
+
 // act turns the composed verdict plus the grant into an outcome artifact.
-func act(e env, run string, grantID string, reduced verify.Verdict, reducedID string, res gateResult, live bool) (gateResult, int, error) {
+func act(e env, run string, grantID string, reduced verify.Verdict, reducedID string, res gateResult, live bool, synth briefFn) (gateResult, int, error) {
 	res.Decision = reduced.Decision
 	res.Tier = reduced.Tier
 	res.Why = reduced.Why
@@ -509,9 +519,23 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		return res, codeBlocked, record(state.KindAction, "blocked", nil)
 	}
 	if reduced.Decision == verify.DecisionEscalate {
+		// A content park is the one escalation that pages a zero-context reader,
+		// so it carries a synthesized brief; the procedural parks below are
+		// authorization facts a findings brief can't illuminate and skip the
+		// model call. Advisory + fail-open: synthesis failure just drops the
+		// brief (the sink quotes the raw question), never blocks the park.
+		body := map[string]any{"question": reduced.Why}
+		attachBrief(body, synth)
+		// Synthesis can stall to the model's HTTP timeout, outlasting the TTL
+		// the pre-synthesis check saw. Re-check at write time so an escalation
+		// never records under a grant that expired mid-synthesis.
+		if _, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now); err != nil {
+			res.Outcome = "capability_refused"
+			res.Why = err.Error()
+			return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
+		}
 		res.Outcome = "parked_for_judgment"
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
-			map[string]any{"question": reduced.Why})
+		return res, codeParked, record(state.KindEscalation, "parked_for_judgment", body)
 	}
 	if !grant.TierWithin(reduced.Tier) {
 		res.Outcome = "parked_for_judgment"
@@ -566,6 +590,20 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 }
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
+
+// attachBrief adds the synthesized operator brief to an escalation body, fail-open: a synthesis error drops the brief (the sink quotes the raw question), never the park.
+func attachBrief(body map[string]any, synth briefFn) {
+	if synth == nil {
+		return
+	}
+	question, _ := body["question"].(string)
+	b, err := synth(question)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate: escalation brief synthesis failed (page falls back to the raw question): %v\n", err)
+		return
+	}
+	body["brief"] = b
+}
 
 // cycleCount derives how many review cycles this repo+PR has consumed, from
 // state alone — a caller-passed count is never trusted, because the caller is
@@ -757,7 +795,10 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, code, err := act(e, *run, *grantID, reduced, reducedArt.ID, gateResult{Run: *run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false)
+	// No brief on the judge path: the operator is already in the loop here,
+	// and a re-park after judgment is procedural (a ceiling), not a fresh
+	// zero-context page.
+	res, code, err := act(e, *run, *grantID, reduced, reducedArt.ID, gateResult{Run: *run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
 	if err != nil {
 		return err
 	}

@@ -145,8 +145,13 @@ func slackBlocks(ev event.Event) []slackBlock {
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: headline(ev), Emoji: true}},
 	}
-	if why := whyBlock(ev.Body); why != "" {
-		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: why}})
+	// A synthesized brief is the card body when the producer sent one; else the raw reason renders as before.
+	body := briefBlock(ev)
+	if body == "" {
+		body = whyBlock(ev.Body)
+	}
+	if body != "" {
+		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: body}})
 	}
 	if btn, ok := prButton(ev); ok {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: []any{btn}})
@@ -230,6 +235,26 @@ func whyBlock(body string) string {
 	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
 }
 
+// briefBlock renders the producer's synthesized plain-language brief as
+// labeled lines. Empty when the event carries no brief fields; the words are
+// the producer's, flare only labels them.
+func briefBlock(ev event.Event) string {
+	var lines []string
+	add := func(label, key string) {
+		if v := compact(ev.Fields[key]); v != "" {
+			lines = append(lines, "*"+label+":* "+v)
+		}
+	}
+	add("What it is", "brief_what")
+	add("The concern", "brief_concern")
+	add("Risk", "brief_risk")
+	add("Recommendation", "brief_rec")
+	if len(lines) == 0 {
+		return ""
+	}
+	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
+}
+
 // subject is the short "repo#n" the header carries when the event names one.
 func subject(ev event.Event) string {
 	repo, num := ev.Fields["repo"], ev.Fields["number"]
@@ -276,10 +301,15 @@ func slackFooter(ev event.Event) string {
 }
 
 // slackFallback is the notification/preview text (the lock-screen line): the
-// action first, then the reason, capped to Slack's text limit.
+// action first, then the reason — the brief's concern when the producer sent
+// one, else the raw body — capped to Slack's text limit.
 func slackFallback(ev event.Event) string {
 	t := headline(ev)
-	if why := compact(ev.Body); why != "" {
+	why := compact(ev.Fields["brief_concern"])
+	if why == "" {
+		why = compact(ev.Body)
+	}
+	if why != "" {
 		t += " — " + why
 	}
 	return truncateRunes(t, slackTextLimit)
