@@ -86,7 +86,7 @@ func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, er
 
 func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	var b escalationBody
-	json.Unmarshal(env.Body, &b) // tolerant: a missing body still notifies
+	json.Unmarshal(env.Body, &b) // tolerant: an undecodable body leaves Brief nil → briefed "no" → drops under the briefed routes, never a corrupt page
 	title := fmt.Sprintf("%s: parked for judgment (%s)", src.Name, env.Run)
 	if b.Outcome != "" {
 		title = fmt.Sprintf("%s: %s (%s)", src.Name, strings.ReplaceAll(b.Outcome, "_", " "), env.Run)
@@ -100,6 +100,12 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	if b.Repo != "" && b.Number > 0 {
 		fields["repo"] = b.Repo
 		fields["number"] = strconv.Itoa(b.Number)
+	}
+	// A routable signal for brief-presence: routing pages a human only for
+	// escalations gate briefed, and keeps procedural/no-brief parks off Slack.
+	fields["briefed"] = "no"
+	if b.Brief != nil {
+		fields["briefed"] = "yes"
 	}
 	briefFields(fields, b.Brief)
 	return event.Event{

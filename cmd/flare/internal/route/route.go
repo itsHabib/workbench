@@ -82,7 +82,10 @@ func matches(m config.Match, ev event.Event) bool {
 	if !matchField(m.Outcome, ev.Fields["outcome"]) {
 		return false
 	}
-	return matchField(m.Code, ev.Fields["code"])
+	if !matchField(m.Code, ev.Fields["code"]) {
+		return false
+	}
+	return matchField(m.Briefed, ev.Fields["briefed"])
 }
 
 // matchField: empty pattern matches anything; otherwise exact match against

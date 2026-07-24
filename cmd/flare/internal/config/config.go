@@ -52,6 +52,11 @@ type Match struct {
 	Decision string `json:"decision,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 	Code     string `json:"code,omitempty"`
+	// Briefed matches an escalation by whether gate synthesized a plain-language
+	// brief for it ("yes") or not ("no"). It lets routing page a human only for
+	// escalations that carry a zero-context brief, and keep procedural/no-brief
+	// parks (readiness, review-consolidation churn) off the paging channel.
+	Briefed string `json:"briefed,omitempty"`
 }
 
 // Route sends matching events to one channel, optionally throttled to at
