@@ -114,6 +114,9 @@ func (s *Server) handleApp(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The page is embedded and changes only on a rebuild+restart; never let a
+	// browser serve a stale copy across a redeploy (the JSON routes already do this).
+	w.Header().Set("Cache-Control", "no-store")
 	w.Write(appPage)
 }
 

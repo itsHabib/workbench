@@ -128,38 +128,51 @@
   .error { max-width: 820px; margin: 1rem auto; padding: 0.9rem 1rem; border-radius: 8px; background: var(--block-bg); border: 1px solid color-mix(in srgb, var(--block) 40%, transparent); color: var(--block); font-size: 0.88rem; }
   .error .mono { font-family: var(--mono); font-size: 0.8rem; }
 
-  /* ---- run view (trace) ---- */
+  /* ---- run view: back link ---- */
   .back { display: inline-block; font-size: 0.82rem; color: var(--muted); text-decoration: none; margin-top: 1.1rem; cursor: pointer; }
   .back:hover { color: var(--ink); }
-  .run-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1rem; margin-top: 0.4rem; }
-  .run-head .rid { font-family: var(--mono); font-size: 0.9rem; }
-  .run-sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
 
-  .graph-wrap { position: relative; margin-top: 1.2rem; }
-  svg.edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; z-index: 0; }
-  svg.edges path { fill: none; stroke: var(--edge); stroke-width: 1.25; opacity: 0.85; }
-  .row { position: relative; display: grid; grid-template-columns: 4rem 4rem 1fr; align-items: start; z-index: 1; }
-  .row + .row { margin-top: 0.8rem; }
-  .row-time { padding-top: 0.85rem; text-align: right; font-family: var(--mono); font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .row-rail { position: relative; align-self: stretch; }
-  .marker { position: absolute; left: 50%; top: 0.95rem; width: 11px; height: 11px; transform: translateX(-50%); border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); z-index: 2; }
-  .marker[data-kind="verdict"] { background: var(--muted); }
-  .marker[data-kind="grant"] { border-radius: 2px; }
-  .marker[data-kind="judgment"] { border-radius: 2px; transform: translateX(-50%) rotate(45deg); background: var(--ink); border-color: var(--ink); }
-  .marker[data-kind="escalation"] { border-radius: 50% 50% 50% 0; transform: translateX(-50%) rotate(-45deg); }
-  .marker[data-kind="action"] { box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--muted); }
-  .node { position: relative; background: var(--page); border: 1px solid var(--card-border); border-radius: 8px; padding: 0.7rem 1rem 0.75rem; box-shadow: var(--card-shadow); }
-  .node.terminal { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink), var(--card-shadow); }
-  .node[data-kind="judgment"] { border-left: 3px solid var(--ink); }
-  .node-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.7rem; }
-  .node-kind { font-family: var(--serif); font-weight: 700; font-size: 0.95rem; text-transform: capitalize; }
-  .node-id { color: var(--faint); font-size: 0.72rem; font-family: var(--mono); }
-  .head-spacer { flex: 1; }
-  .terminal-tag { font-family: var(--serif); font-size: 0.7rem; font-style: italic; letter-spacing: 0.06em; color: var(--muted); }
-  .meta-line { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--muted); }
-  .meta-line .mv { color: var(--ink); } .meta-line .m { font-family: var(--mono); font-size: 0.76rem; }
-  .why { margin: 0.45rem 0 0; font-family: var(--serif); font-size: 0.92rem; line-height: 1.5; }
-  .findings { margin-top: 0.55rem; border-top: 1px solid var(--hairline); padding-top: 0.45rem; }
+  /* ---- run view: decision panel (flare escalation-card language) ---- */
+  .panel { margin-top: 1rem; background: var(--page); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--card-shadow); overflow: hidden; }
+  .panel-accent { height: 3px; background: var(--neutral); }
+  .panel-accent.a-escalate { background: var(--escalate); }
+  .panel-accent.a-pass { background: var(--pass); }
+  .panel-accent.a-block { background: var(--block); }
+  .panel-accent.a-refused { background: var(--refused); }
+  .panel-body { padding: 1rem 1.2rem 1.1rem; }
+  .panel-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem 0.8rem; }
+  .panel-headline { font-family: var(--serif); font-size: 1.18rem; font-weight: 700; }
+  .panel-sub { margin-left: auto; }
+  .panel-subject { font-family: var(--mono); font-size: 0.82rem; font-weight: 600; text-decoration-thickness: 1px; text-underline-offset: 0.16em; white-space: nowrap; }
+  .brief-fields { margin: 0.75rem 0 0; display: grid; gap: 0.5rem; }
+  .brief-field { font-size: 0.93rem; line-height: 1.55; font-family: var(--serif); overflow-wrap: anywhere; }
+  .brief-field .bl { font-weight: 700; }
+  .brief-field .bl.risk-low { color: var(--pass); }
+  .brief-field .bl.risk-medium { color: var(--escalate); }
+  .brief-field .bl.risk-high { color: var(--block); }
+  .no-brief-note { margin-top: 0.65rem; font-size: 0.79rem; color: var(--faint); font-style: italic; font-family: var(--serif); line-height: 1.5; }
+  .panel .cmd-row { margin-top: 0.85rem; }
+  .panel .open-hint { margin: 0.3rem 0 0; }
+  .panel-foot { margin-top: 0.85rem; padding-top: 0.6rem; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; font-size: 0.73rem; color: var(--faint); font-family: var(--mono); overflow-wrap: anywhere; }
+  .panel-foot b { color: var(--muted); font-weight: 600; }
+
+  /* ---- run view: verifier ladder ---- */
+  .ladder { padding: 0.2rem 0.3rem; }
+  .check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.7rem; padding: 0.6rem 0.8rem; }
+  .check + .check { border-top: 1px solid var(--hairline); }
+  .check.synthesis { border-top: 1px solid var(--card-border); background: color-mix(in srgb, var(--chip-bg) 40%, transparent); }
+  .check-glyph { width: 1.1rem; text-align: center; font-weight: 700; font-size: 0.95rem; }
+  .g-pass { color: var(--pass); } .g-escalate { color: var(--escalate); } .g-block { color: var(--block); } .g-refused { color: var(--refused); } .g-synthesis { color: var(--muted); }
+  .check-src { font-weight: 650; font-size: 0.9rem; min-width: 7rem; }
+  .check-tier { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
+  .check-why { flex: 1 1 15rem; font-family: var(--serif); font-size: 0.9rem; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+  .check-producer { flex-basis: 100%; margin: 0.1rem 0 0 1.8rem; font-family: var(--mono); font-size: 0.68rem; color: var(--faint); }
+  .check .findings { flex-basis: 100%; margin-left: 1.8rem; }
+  .evfoot { margin-top: 0.95rem; font-size: 0.79rem; color: var(--faint); font-family: var(--serif); }
+  .evfoot .ev-item { font-family: var(--mono); font-size: 0.73rem; color: var(--muted); }
+
+  /* ---- findings (shared with the ladder rows) ---- */
+  .findings { margin-top: 0.4rem; border-top: 1px solid var(--hairline); padding-top: 0.45rem; }
   .findings summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
   .findings summary:hover { color: var(--ink); }
   .findings ul { margin: 0.4rem 0 0; padding: 0; list-style: none; max-height: 22rem; overflow-y: auto; }
@@ -168,13 +181,9 @@
   .sev { display: inline-block; min-width: 3.4em; font-weight: 650; text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.05em; }
   .sev-high, .sev-critical { color: var(--block); } .sev-medium { color: var(--escalate); }
   .f-ev { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
-  .node .question { margin-top: 0.5rem; }
-  .kv { margin-top: 0.45rem; display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.8rem; font-size: 0.8rem; }
-  .kv dt { color: var(--faint); font-family: var(--mono); font-size: 0.74rem; } .kv dd { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; overflow-wrap: anywhere; }
-  .command-node { margin-top: 0.5rem; padding: 0.5rem 0.65rem; background: var(--chip-bg); border: 1px solid var(--hairline); border-radius: 6px; font-family: var(--mono); font-size: 0.76rem; overflow-wrap: anywhere; }
 
   .colophon { margin-top: 2.5rem; padding-top: 0.8rem; border-top: 1px solid var(--hairline); color: var(--faint); font-size: 0.74rem; font-family: var(--serif); font-style: italic; }
-  @media (max-width: 560px) { .row { grid-template-columns: 3rem 2.2rem 1fr; } }
+  @media (max-width: 560px) { .check-src { min-width: 0; } .panel-sub { margin-left: 0; } }
 </style>
 </head>
 <body>
@@ -197,7 +206,6 @@
   var view = document.getElementById("view");
   var statusline = document.getElementById("statusline");
   var banner = document.getElementById("banner");
-  var lastArts = [];
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -415,83 +423,152 @@
     return "b-unknown";
   }
 
+  // The terminal artifact: the escalation (parked) or action (merged) that closed the run.
   function findTerminal(arts) {
     for (var i = arts.length - 1; i >= 0; i--) {
-      if (arts[i].kind === "escalation" || arts[i].kind === "action") return arts[i].id;
+      if (arts[i].kind === "escalation" || arts[i].kind === "action") return arts[i];
     }
     return null;
   }
 
+  var RISK_RE = /^\s*(low|medium|high)\b/i;
+
   function renderTrace(doc) {
     var arts = (doc && doc.artifacts) || [];
-    var terminalId = findTerminal(arts);
-    var head =
-      '<a class="back" id="back">← what needs you</a>' +
-      '<div class="run-head"><span class="rid">' + esc(doc.run) + "</span>" +
-      runSubject(arts) + "</div>" +
-      '<div class="run-sub">' + arts.length + " artifact" + (arts.length === 1 ? "" : "s") + "</div>";
-
-    var body = '<div class="graph-wrap" id="gw"><svg class="edges" id="edges" aria-hidden="true"></svg><div id="trace">';
-    for (var i = 0; i < arts.length; i++) body += nodeHTML(arts[i], arts[i].id === terminalId);
-    body += "</div></div>";
-    body += '<p class="colophon">Read verbatim from gate’s append-only, hash-chained log. To act on a parked run, copy its command from the list.</p>';
-
-    view.innerHTML = head + body;
-    lastArts = arts;
-    el("back").addEventListener("click", function () { go("/"); });
-    requestAnimationFrame(function () { drawEdges(arts); });
-    for (var d of view.querySelectorAll(".findings")) d.addEventListener("toggle", function () { requestAnimationFrame(function () { drawEdges(arts); }); });
-  }
-
-  function runSubject(arts) {
+    var term = findTerminal(arts);
+    var reducer = null, verifiers = [], evidence = [];
     for (var i = 0; i < arts.length; i++) {
-      var v = arts[i].verdict;
-      if (v && v.subject && v.subject.repo) return '<span class="muted">' + esc(v.subject.repo) + "#" + esc(v.subject.number) + "</span>";
-      var f = arts[i].flat;
-      if (f && f.repo) return '<span class="muted">' + esc(f.repo) + "#" + esc(f.number) + "</span>";
+      var a = arts[i];
+      if (a.kind === "evidence") { evidence.push(a); continue; }
+      if ((a.kind === "verdict" || a.kind === "judgment") && a.verdict) {
+        if (a.verdict.source === "reducer") reducer = a.verdict; else verifiers.push(a.verdict);
+      }
     }
-    return "";
+
+    var checks = verifiers.map(checkRow).join("") + (reducer ? synthesisRow(reducer) : "");
+    var html =
+      '<a class="back" id="back">← what needs you</a>' +
+      briefPanel(doc.run, term, reducer, verifiers) +
+      '<div class="section-label">how gate got here <span class="count">' +
+        verifiers.length + (verifiers.length === 1 ? " check" : " checks") + "</span></div>" +
+      '<div class="card"><div class="ladder">' +
+        (checks || '<div class="empty">No verifier verdicts recorded.</div>') + "</div></div>" +
+      evidenceFoot(evidence) +
+      '<p class="colophon">Read verbatim from gate’s append-only, hash-chained log. This page renders; it never decides.</p>';
+
+    view.innerHTML = html;
+    el("back").addEventListener("click", function () { go("/"); });
+    wireCopy();
   }
 
-  function nodeHTML(n, isTerminal) {
-    var badge = "";
-    if (n.verdict && n.verdict.decision) badge = '<span class="badge ' + badgeFor(n.verdict.decision) + '">' + esc(n.verdict.decision) + "</span>";
-    else if (n.flat && n.flat.outcome) badge = '<span class="badge ' + badgeFor(n.flat.outcome) + '">' + esc(String(n.flat.outcome).replace(/_/g, " ")) + "</span>";
+  // The decision panel — mirrors flare's escalation Slack card: outcome + subject,
+  // then gate's synthesized brief (What it is / The concern / Risk / Recommendation)
+  // when present, else gate's own verdict text verbatim. It never editorializes.
+  function briefPanel(run, term, reducer, verifiers) {
+    var flat = (term && term.flat) || {};
+    var outcome = flat.outcome || (reducer ? decisionOutcome(reducer.decision) : "");
+    var repo = flat.repo || subjectRepo(verifiers, reducer);
+    var number = flat.number;
+    var tier = reducer ? reducer.tier : "";
+    var grant = flat.grant || "";
 
-    var body = "";
-    if (n.unparseable) body = '<p class="meta-line">(unparseable body)</p>';
-    else if (n.kind === "evidence") body = evidenceBody(n.evidence);
-    else if (n.kind === "verdict" || n.kind === "judgment") body = verdictBody(n.verdict);
-    else body = flatBody(n);
+    var body = flat.brief ? realBrief(flat.brief) : synthBrief(flat, reducer, verifiers);
+
+    var action = "";
+    if (outcome === "parked_for_judgment" && grant) {
+      var cmd = 'gate judge -run ' + run + ' -grant ' + grant + ' -decision pass -why "…"';
+      action =
+        '<div class="cmd-row"><code class="cmd">' + esc(cmd) + '</code>' +
+        '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>' +
+        '<div class="open-hint faint">add your <span class="mono">-state</span>, or copy the exact command from the inbox</div>';
+    }
+
+    var foot = "";
+    if (tier) foot += "<span><b>tier</b> " + esc(tier) + "</span>";
+    foot += "<span><b>run</b> " + esc(run) + "</span>";
+    if (grant) foot += "<span><b>grant</b> " + esc(grant) + "</span>";
 
     return (
-      '<div class="row"><div class="row-time">' + esc(n.time) + "</div>" +
-      '<div class="row-rail"><span class="marker" data-kind="' + esc(n.kind) + '" id="mk-' + esc(n.id) + '"></span></div>' +
-      '<article class="node' + (isTerminal ? " terminal" : "") + '" data-kind="' + esc(n.kind) + '">' +
-      '<div class="node-head"><span class="node-kind">' + esc(n.kind) + '</span><span class="node-id">' + esc(n.id) + "</span>" +
-      '<span class="head-spacer"></span>' + (isTerminal ? '<span class="terminal-tag">terminal</span>' : "") + badge + "</div>" +
-      body + "</article></div>"
+      '<div class="panel"><div class="panel-accent ' + accentFor(outcome) + '"></div><div class="panel-body">' +
+      '<div class="panel-top">' +
+        '<span class="badge ' + badgeFor(outcome) + '">' + esc(outcomeWord(outcome)) + "</span>" +
+        '<span class="panel-headline">' + esc(headlineFor(outcome)) + "</span>" +
+        subjectLink(repo, number) +
+      "</div>" +
+      body + action +
+      '<div class="panel-foot">' + foot + "</div>" +
+      "</div></div>"
     );
   }
 
-  function evidenceBody(e) {
-    if (!e) return "";
-    var size = "";
-    if (e.byte_count != null) size = e.byte_count + " B";
-    if (e.item_count != null) size = e.item_count + " item" + (e.item_count === 1 ? "" : "s");
-    return '<p class="meta-line"><span class="mv">' + esc(e.type) + "</span>" + (size ? ' <span class="faint">· ' + esc(size) + "</span>" : "") + "</p>";
+  // gate's synthesized brief — the four fields flare renders, same labels + order.
+  function realBrief(b) {
+    var rows = [
+      ["What it is", b.what_it_is, ""],
+      ["The concern", b.concern, ""],
+      ["Risk", b.risk, riskClass(b.risk)],
+      ["Recommendation", b.recommendation, ""]
+    ];
+    var out = "";
+    for (var i = 0; i < rows.length; i++) {
+      if (!rows[i][1]) continue;
+      out += '<div class="brief-field"><span class="bl ' + rows[i][2] + '">' + esc(rows[i][0]) + ":</span> " + esc(rows[i][1]) + "</div>";
+    }
+    return '<div class="brief-fields">' + out + "</div>";
+  }
+  function riskClass(r) { var m = RISK_RE.exec(r || ""); return m ? "risk-" + m[1].toLowerCase() : ""; }
+
+  // No gate brief (procedural / no-review park): restate gate's own verdicts
+  // verbatim. The console renders — it never invents a recommendation gate didn't make.
+  function synthBrief(flat, reducer, verifiers) {
+    var out = "";
+    var floor = firstSource(verifiers, "triage-floor");
+    if (floor && floor.why) {
+      out += '<div class="brief-field"><span class="bl">What it is:</span> ' + esc((floor.tier ? floor.tier + " — " : "") + floor.why) + "</div>";
+    }
+    var why = (reducer && reducer.why) || flat.question || "";
+    if (why) out += '<div class="brief-field"><span class="bl">Why it’s parked:</span> ' + esc(why) + "</div>";
+    if (!out) out = '<div class="brief-field muted">No verdict detail recorded.</div>';
+    return '<div class="brief-fields">' + out + "</div>" +
+      '<div class="no-brief-note">Gate synthesizes a plain-language brief only for content escalations. This is a procedural park — shown from its verdicts verbatim.</div>';
   }
 
-  function verdictBody(v) {
-    if (!v) return '<p class="meta-line">(unparseable body)</p>';
-    var conf = typeof v.confidence === "number" ? v.confidence.toFixed(2) : "?";
-    var html = '<p class="meta-line"><span class="mv">' + esc(v.producer) + "</span>" +
-      ' <span class="faint">·</span> <span class="m">' + esc(v.source) + "</span>" +
-      ' <span class="faint">·</span> tier <span class="mv m">' + esc(v.tier) + "</span>" +
-      ' <span class="faint">·</span> conf <span class="m">' + conf + "</span></p>";
-    if (v.why) html += '<p class="why">' + esc(v.why) + "</p>";
-    html += findingsBody(v.findings);
-    return html;
+  function checkRow(v) {
+    var d = String(v.decision || "").toLowerCase();
+    return (
+      '<div class="check">' +
+      '<span class="check-glyph ' + glyphClass(d) + '">' + glyphFor(d) + "</span>" +
+      '<span class="check-src">' + esc(prettySource(v.source)) + "</span>" +
+      '<span class="check-tier">' + esc(v.tier || "") + "</span>" +
+      '<span class="check-why">' + esc(v.why || "") + "</span>" +
+      (v.producer ? '<span class="check-producer">' + esc(v.producer) + "</span>" : "") +
+      findingsBody(v.findings) +
+      "</div>"
+    );
+  }
+
+  function synthesisRow(r) {
+    var d = String(r.decision || "").toLowerCase();
+    var verb = d === "escalate" ? "escalated to you" : d === "pass" ? "cleared to merge" : d === "block" ? "blocked" : esc(d);
+    return (
+      '<div class="check synthesis">' +
+      '<span class="check-glyph g-synthesis">Σ</span>' +
+      '<span class="check-src">reducer</span>' +
+      '<span class="check-tier">' + esc(r.tier || "") + "</span>" +
+      '<span class="check-why">worst decision wins → <strong>' + verb + "</strong></span>" +
+      "</div>"
+    );
+  }
+
+  function evidenceFoot(evidence) {
+    if (!evidence.length) return "";
+    var items = [];
+    for (var i = 0; i < evidence.length; i++) {
+      var e = evidence[i].evidence;
+      var t = e && e.type ? e.type : evidence[i].kind;
+      items.push('<span class="ev-item">' + esc(t) + "</span>");
+    }
+    return '<div class="evfoot">Inputs gate gathered: ' + items.join(" · ") + "</div>";
   }
 
   function findingsBody(findings) {
@@ -501,7 +578,7 @@
       var f = findings[i];
       var line = "";
       if (f.severity) line += '<span class="sev sev-' + esc(String(f.severity).toLowerCase()) + '">' + esc(f.severity) + "</span> ";
-      line += '<span>' + esc(f.title) + "</span>";
+      line += "<span>" + esc(f.title) + "</span>";
       if (f.locus) line += ' <span class="f-ev">' + esc(f.locus) + "</span>";
       if (f.evidence) line += ' — <span class="f-ev">' + esc(f.evidence) + "</span>";
       items += "<li>" + line + "</li>";
@@ -509,73 +586,53 @@
     return '<details class="findings"><summary>' + findings.length + " finding" + (findings.length === 1 ? "" : "s") + "</summary><ul>" + items + "</ul></details>";
   }
 
-  function flatBody(n) {
-    var f = n.flat || {};
-    var html = "";
-    if (f.question) html += '<div class="question">' + esc(f.question) + "</div>";
-    if (f.command) html += '<div class="command-node">' + esc(f.command) + "</div>";
-    if (f.repo && f.max_tier) html += '<p class="meta-line"><span class="mv">' + esc(f.repo) + "</span> · ceiling <span class=\"m mv\">" + esc(f.max_tier) + "</span></p>";
-    var known = { outcome: 1, verdict: 1, grant: 1, question: 1, command: 1, dry_run: 1, sig: 1 };
-    var rows = "";
-    for (var k in f) {
-      if (known[k]) continue;
-      var val = typeof f[k] === "object" ? JSON.stringify(f[k]) : String(f[k]);
-      rows += "<dt>" + esc(k) + "</dt><dd>" + esc(val) + "</dd>";
+  // ---- small helpers ----
+  function glyphFor(d) { return d === "pass" ? "✓" : d === "block" ? "✕" : d === "capability_refused" ? "⊘" : "!"; }
+  function glyphClass(d) { return d === "pass" ? "g-pass" : d === "block" ? "g-block" : d === "capability_refused" ? "g-refused" : "g-escalate"; }
+  function prettySource(s) { return String(s || "") === "review-consolidation" ? "review panel" : String(s || ""); }
+  function firstSource(list, src) { for (var i = 0; i < list.length; i++) { if (list[i].source === src) return list[i]; } return null; }
+  function decisionOutcome(d) {
+    d = String(d || "").toLowerCase();
+    return d === "escalate" ? "parked_for_judgment" : d === "pass" ? "would_merge" : d === "block" ? "blocked" : d;
+  }
+  function outcomeWord(o) {
+    o = String(o || "").toLowerCase();
+    if (o === "parked_for_judgment") return "parked for you";
+    if (o === "would_merge") return "would merge";
+    if (o === "blocked") return "blocked";
+    if (o === "capability_refused") return "refused";
+    return o.replace(/_/g, " ") || "recorded";
+  }
+  function headlineFor(o) {
+    o = String(o || "").toLowerCase();
+    if (o === "parked_for_judgment") return "Your call";
+    if (o === "would_merge") return "Ready to merge";
+    if (o === "blocked") return "Blocked from merging";
+    if (o === "capability_refused") return "Capability refused";
+    return "Decision recorded";
+  }
+  function accentFor(o) {
+    o = String(o || "").toLowerCase();
+    if (o === "would_merge") return "a-pass";
+    if (o === "blocked") return "a-block";
+    if (o === "capability_refused") return "a-refused";
+    if (o === "parked_for_judgment") return "a-escalate";
+    return "";
+  }
+  function subjectRepo(verifiers, reducer) {
+    var all = reducer ? verifiers.concat([reducer]) : verifiers;
+    for (var i = 0; i < all.length; i++) {
+      var s = all[i].subject;
+      if (s && s.repo) return s.repo;
     }
-    if (rows) html += '<dl class="kv">' + rows + "</dl>";
-    return html;
+    return "";
   }
-
-  // ---- provenance arcs, ported from gate's trace-view ----
-  function markerCenter(id, wrapRect) {
-    var e = el("mk-" + id);
-    if (!e) return null;
-    var r = e.getBoundingClientRect();
-    return { x: r.left + r.width / 2 - wrapRect.left, y: r.top + r.height / 2 - wrapRect.top };
+  function subjectLink(repo, number) {
+    if (!repo || number == null) return "";
+    var label = esc(repo) + "#" + esc(number);
+    var url = "https://github.com/" + repo + "/pull/" + number;
+    return '<a class="panel-sub panel-subject" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + " ↗</a>";
   }
-  function collectEdges(arts) {
-    var order = {};
-    arts.forEach(function (a, i) { order[a.id] = i; });
-    var edges = [];
-    arts.forEach(function (a) {
-      (a.parents || []).forEach(function (pid) {
-        if (!(pid in order)) return;
-        edges.push({ from: pid, to: a.id, lo: Math.min(order[pid], order[a.id]), hi: Math.max(order[pid], order[a.id]) });
-      });
-    });
-    edges.sort(function (a, b) { return (a.hi - a.lo) - (b.hi - b.lo); });
-    edges.forEach(function (e) {
-      var lane = 0;
-      edges.forEach(function (o) { if (o !== e && o.lane != null && o.lo < e.hi && e.lo < o.hi) lane = Math.max(lane, o.lane + 1); });
-      e.lane = lane;
-    });
-    return edges;
-  }
-  function drawEdges(arts) {
-    var svg = el("edges"), gw = el("gw");
-    if (!svg || !gw) return;
-    svg.innerHTML = "";
-    var rect = gw.getBoundingClientRect();
-    if (!rect.width) return;
-    svg.setAttribute("width", rect.width); svg.setAttribute("height", rect.height);
-    svg.setAttribute("viewBox", "0 0 " + rect.width + " " + rect.height);
-    collectEdges(arts).forEach(function (e) {
-      var p = markerCenter(e.from, rect), c = markerCenter(e.to, rect);
-      if (!p || !c) return;
-      var x = p.x - (14 + e.lane * 9);
-      var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M" + p.x + " " + p.y + " C" + x + " " + (p.y + (c.y - p.y) * 0.2) + ", " + x + " " + (c.y - (c.y - p.y) * 0.2) + ", " + c.x + " " + c.y);
-      svg.appendChild(path);
-    });
-  }
-  var raf;
-  window.addEventListener("resize", function () {
-    cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(function () {
-      if (!runIdFromPath()) return;
-      if (el("edges")) drawEdges(lastArts);
-    });
-  });
 
   route();
 })();
