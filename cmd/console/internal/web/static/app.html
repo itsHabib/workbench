@@ -468,7 +468,7 @@
     var flat = (term && term.flat) || {};
     var outcome = flat.outcome || (reducer ? decisionOutcome(reducer.decision) : "");
     var repo = flat.repo || subjectRepo(verifiers, reducer);
-    var number = flat.number;
+    var number = flat.number != null ? flat.number : subjectNumber(verifiers, reducer);
     var tier = reducer ? reducer.tier : "";
     var grant = flat.grant || "";
 
@@ -476,7 +476,8 @@
 
     var action = "";
     if (outcome === "parked_for_judgment" && grant) {
-      var cmd = 'gate judge -run ' + run + ' -grant ' + grant + ' -decision pass -why "…"';
+      // Decision-neutral template — the console never pre-decides a judgment (pass|block is the operator's call).
+      var cmd = 'gate judge -run ' + run + ' -grant ' + grant + ' -decision <pass|block> -why "…"';
       action =
         '<div class="cmd-row"><code class="cmd">' + esc(cmd) + '</code>' +
         '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>' +
@@ -549,13 +550,13 @@
 
   function synthesisRow(r) {
     var d = String(r.decision || "").toLowerCase();
-    var verb = d === "escalate" ? "escalated to you" : d === "pass" ? "cleared to merge" : d === "block" ? "blocked" : esc(d);
+    var verb = d === "escalate" ? "escalated to you" : d === "pass" ? "cleared to merge" : d === "block" ? "blocked" : d;
     return (
       '<div class="check synthesis">' +
       '<span class="check-glyph g-synthesis">Σ</span>' +
       '<span class="check-src">reducer</span>' +
       '<span class="check-tier">' + esc(r.tier || "") + "</span>" +
-      '<span class="check-why">worst decision wins → <strong>' + verb + "</strong></span>" +
+      '<span class="check-why">worst decision wins → <strong>' + esc(verb) + "</strong></span>" +
       "</div>"
     );
   }
@@ -626,6 +627,14 @@
       if (s && s.repo) return s.repo;
     }
     return "";
+  }
+  function subjectNumber(verifiers, reducer) {
+    var all = reducer ? verifiers.concat([reducer]) : verifiers;
+    for (var i = 0; i < all.length; i++) {
+      var s = all[i].subject;
+      if (s && s.number != null) return s.number;
+    }
+    return null;
   }
   function subjectLink(repo, number) {
     if (!repo || number == null) return "";
