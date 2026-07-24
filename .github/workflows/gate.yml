@@ -147,6 +147,9 @@ jobs:
         if: steps.pr.outputs.found == 'true'
         env:
           PR: ${{ steps.pr.outputs.number }}
+          # CI has no local ollama, so the advisory rungs + the escalation brief
+          # run on the cloud backend (Haiku); requires the repo ANTHROPIC_API_KEY secret.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
           TMP=$(mktemp -d)
@@ -157,7 +160,7 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys")
           echo "minted ephemeral grant"
           set +e
-          JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys")
+          JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" -model-backend cloud)
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.
