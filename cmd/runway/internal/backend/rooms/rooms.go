@@ -66,6 +66,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 	if err := b.requireCustodyConfig(work); err != nil {
 		return err
 	}
+	if err := b.reserveWitnessPaths(work); err != nil {
+		return err
+	}
 	if _, err := taskInput(work); err != nil {
 		return err
 	}
@@ -152,11 +155,12 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 			Enforced: map[string]any{
 				"cpu":        1,
 				"memory_mib": 256,
-				// The room runs egress-open (no --egress is passed); with --witness
-				// its egress is host-recorded but not blocked. Report that honestly
-				// — "observe" is rooms' own name for the record-don't-block policy —
-				// rather than claiming "egress" enforcement that does not happen.
-				"network":          "observe",
+				// No --egress is passed, so the room is never blocked. Report the
+				// honest posture: with --witness the egress is recorded ("observe",
+				// rooms' name for record-don't-block); without it the room is open
+				// AND unobserved ("open"). Claiming "egress" — or "observe" when
+				// nothing observes — would overstate what actually ran.
+				"network":          networkPosture(b.config.Witness),
 				"witness":          b.config.Witness,
 				"rootfs":           "readonly_overlay",
 				"secret_transport": "ssh_sendenv",
@@ -563,6 +567,38 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 // them by suffix). Order is stable so the receipt's evidence list is
 // deterministic.
 var witnessEvidence = []string{"witness.json", "witness.pcap"}
+
+// networkPosture reports the honest network enforcement for the receipt. No
+// --egress is ever passed, so the room is never blocked: with --witness its
+// egress is recorded ("observe", rooms' name for record-don't-block); without it
+// the room is open AND unobserved ("open"). Reporting "observe" unconditionally
+// would claim observation a witness-off placement does not perform.
+func networkPosture(witness bool) string {
+	if witness {
+		return "observe"
+	}
+	return "open"
+}
+
+// reserveWitnessPaths refuses a WorkSpec that declares an output at a path the
+// host witness will write (witness.json/witness.pcap). Under --witness both the
+// witness and the workload write into the same --out root, so the witness could
+// overwrite the workload's file — and collectOutputs would then accept the
+// witness bytes as a required output the workload never produced. Fail closed at
+// admission, before any durable state.
+func (b *Backend) reserveWitnessPaths(work execution.WorkSpec) error {
+	if !b.config.Witness {
+		return nil
+	}
+	for _, out := range work.Outputs {
+		for _, reserved := range witnessEvidence {
+			if filepath.ToSlash(out.Path) == reserved {
+				return fmt.Errorf("rooms: output %q collides with reserved host-witness path %q; rename the output or set %s=0", out.Name, reserved, envWitness)
+			}
+		}
+	}
+	return nil
+}
 
 // collectWitnessArtifacts hashes whichever witness files Rooms dropped into the
 // collected `--out` dir and returns them as named artifacts (path convention

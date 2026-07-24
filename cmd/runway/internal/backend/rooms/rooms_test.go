@@ -253,6 +253,29 @@ func TestCollectWitnessArtifactsSurfacesPresentEvidence(t *testing.T) {
 	if kind, ok := evidenceType(got.Name); !ok || kind != "witness_json" {
 		t.Fatalf("witness.json must classify as witness_json evidence, got %q ok=%v", kind, ok)
 	}
+	// Pin the pcap branch too — evidenceType checks "pcap" before "witness", so a
+	// future reorder that broke witness.pcap classification would be caught here.
+	if kind, ok := evidenceType("witness.pcap"); !ok || kind != "witness_pcap" {
+		t.Fatalf("witness.pcap must classify as witness_pcap evidence, got %q ok=%v", kind, ok)
+	}
+}
+
+func TestReserveWitnessPathsRejectsOutputCollision(t *testing.T) {
+	on := New(Config{Launcher: "x", Image: "i", Model: "m", Witness: true})
+	collide := execution.WorkSpec{Outputs: []execution.Output{{Name: "result", Path: "witness.json"}}}
+	if err := on.reserveWitnessPaths(collide); err == nil {
+		t.Fatal("an output declared at witness.json must be refused under --witness")
+	}
+	// A normal output is fine.
+	ok := execution.WorkSpec{Outputs: []execution.Output{{Name: "result", Path: "result.json"}}}
+	if err := on.reserveWitnessPaths(ok); err != nil {
+		t.Fatalf("a non-reserved output must pass, got %v", err)
+	}
+	// Witness off -> no reservation, the collision is harmless.
+	off := New(Config{Launcher: "x", Image: "i", Model: "m", Witness: false})
+	if err := off.reserveWitnessPaths(collide); err != nil {
+		t.Fatalf("witness off: no reservation, got %v", err)
+	}
 }
 
 func TestCollectWitnessArtifactsEmptyWhenNoneEmitted(t *testing.T) {
