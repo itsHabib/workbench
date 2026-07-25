@@ -464,6 +464,166 @@ func TestNeedsGrantRendersText(t *testing.T) {
 	}
 }
 
+// subjectVerdict builds a verdict artifact carrying a PR subject — the shape the
+// ready-to-merge projection recovers repo/number/title/head_sha from, since a
+// would_merge action body carries only the outcome and merge command.
+func subjectVerdict(run, id string, at time.Time, repo string, number int, title, headSHA string) state.Artifact {
+	return art(state.KindVerdict, run, id, at, map[string]any{
+		"subject": map[string]any{"repo": repo, "number": number, "head_sha": headSHA},
+		"data":    map[string]any{"title": title},
+	})
+}
+
+// wouldMerge builds the would_merge action body main.go writes: the outcome plus
+// the paste-ready merge command.
+func wouldMerge(command string) map[string]any {
+	return map[string]any{"outcome": "would_merge", "verdict": "vrd_x", "grant": "grt_x", "command": command, "dry_run": true}
+}
+
+// TestReadyToMergeBase pins the base projection: a run whose latest terminal is a
+// would_merge action surfaces exactly one ready row carrying the subject facts
+// and the action body's own merge command.
+func TestReadyToMergeBase(t *testing.T) {
+	cmd := "gh pr merge 142 -R o/widget --squash --delete-branch --match-head-commit deadbeef"
+	arts := []state.Artifact{
+		subjectVerdict("run_a", "vrd_a", inboxBase, "o/widget", 142, "fix the docket", "deadbeef"),
+		art(state.KindAction, "run_a", "act_a", inboxBase.Add(time.Minute), wouldMerge(cmd)),
+	}
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.ReadyToMerge) != 1 {
+		t.Fatalf("want one ready row, got %+v", in.ReadyToMerge)
+	}
+	r := in.ReadyToMerge[0]
+	if r.Run != "run_a" || r.Repo != "o/widget" || r.Number != 142 || r.Title != "fix the docket" || r.HeadSHA != "deadbeef" {
+		t.Fatalf("ready row facts wrong: %+v", r)
+	}
+	if r.MergeCommand != cmd {
+		t.Fatalf("merge_command = %q, want %q", r.MergeCommand, cmd)
+	}
+	if r.URL != "https://github.com/o/widget/pull/142" {
+		t.Fatalf("canonical PR URL = %q", r.URL)
+	}
+}
+
+// TestReadyToMergeSupersededByLaterTerminal pins the freshness core: a would_merge
+// followed by a later terminal for the SAME subject (here a re-park) must drop —
+// a stale ready card with a merge command for a since-reopened decision is the
+// exact failure to avoid.
+func TestReadyToMergeSupersededByLaterTerminal(t *testing.T) {
+	arts := []state.Artifact{
+		subjectVerdict("run_old", "vrd_old", inboxBase, "o/r", 7, "t", "sha1"),
+		art(state.KindAction, "run_old", "act_old", inboxBase.Add(time.Minute), wouldMerge("gh pr merge 7 -R o/r")),
+		// A newer run for the same PR parks — supersedes the earlier would_merge.
+		art(state.KindEscalation, "run_new", "esc_new", inboxBase.Add(2*time.Minute), esc("grt_a", "re-parked", "grant_tier_exceeded", "o/r", 7)),
+	}
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.ReadyToMerge) != 0 {
+		t.Fatalf("a later terminal for the subject must supersede the would_merge, got %+v", in.ReadyToMerge)
+	}
+	if len(in.Parked) != 1 {
+		t.Fatalf("the re-park should show as parked, got %+v", in.Parked)
+	}
+}
+
+// TestReadyToMergeNewerWouldMergeWins pins that a newer would_merge run for the
+// same PR replaces the older, keeping one row keyed to the latest run.
+func TestReadyToMergeNewerWouldMergeWins(t *testing.T) {
+	arts := []state.Artifact{
+		subjectVerdict("run_old", "vrd_old", inboxBase, "o/r", 7, "t", "old"),
+		art(state.KindAction, "run_old", "act_old", inboxBase.Add(time.Minute), wouldMerge("gh pr merge 7 -R o/r --match-head-commit old")),
+		subjectVerdict("run_new", "vrd_new", inboxBase.Add(2*time.Minute), "o/r", 7, "t", "new"),
+		art(state.KindAction, "run_new", "act_new", inboxBase.Add(3*time.Minute), wouldMerge("gh pr merge 7 -R o/r --match-head-commit new")),
+	}
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.ReadyToMerge) != 1 || in.ReadyToMerge[0].Run != "run_new" {
+		t.Fatalf("newest would_merge must win, got %+v", in.ReadyToMerge)
+	}
+	if in.ReadyToMerge[0].HeadSHA != "new" {
+		t.Fatalf("newest run facts must win, got %+v", in.ReadyToMerge[0])
+	}
+}
+
+// TestReadyToMergeNonWouldMergeTerminalExcluded pins that a subject whose latest
+// terminal is any action OTHER than would_merge (blocked here) never appears.
+func TestReadyToMergeNonWouldMergeTerminalExcluded(t *testing.T) {
+	arts := []state.Artifact{
+		subjectVerdict("run_b", "vrd_b", inboxBase, "o/r", 9, "t", "sha"),
+		art(state.KindAction, "run_b", "act_b", inboxBase.Add(time.Minute), map[string]any{"outcome": "blocked"}),
+	}
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if len(in.ReadyToMerge) != 0 {
+		t.Fatalf("a blocked terminal must not appear in ready_to_merge, got %+v", in.ReadyToMerge)
+	}
+}
+
+// TestReconcileReadyLiveDropsClosedKeepsOpen mirrors the parked reconcile law for
+// ready rows: a merged/closed PR drops, an open one stays (enriched), a failed
+// lookup stays visible.
+func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
+	rows := []ReadyRow{
+		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale"},
+		{Run: "run_merged", Repo: "o/r", Number: 2},
+		{Run: "run_closed", Repo: "o/r", Number: 3},
+		{Run: "run_unknown", Repo: "o/r", Number: 4},
+	}
+	lookup := func(_ string, number int) (LivePR, error) {
+		switch number {
+		case 1:
+			return LivePR{State: "OPEN", Title: "live", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
+		case 2:
+			return LivePR{State: "MERGED"}, nil
+		case 3:
+			return LivePR{State: "CLOSED"}, nil
+		default:
+			return LivePR{}, fmt.Errorf("lookup unavailable")
+		}
+	}
+	got := reconcileReadyLive(rows, lookup)
+	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_unknown" {
+		t.Fatalf("merged/closed must drop, open + failed-lookup must stay: %+v", got)
+	}
+	if got[0].Title != "live" || got[0].HeadSHA != "abc" {
+		t.Fatalf("open ready row was not enriched: %+v", got[0])
+	}
+}
+
+// TestReadyToMergeJSONShape pins the ready_to_merge JSON field name and shape the
+// console feed consumes.
+func TestReadyToMergeJSONShape(t *testing.T) {
+	arts := []state.Artifact{
+		subjectVerdict("run_a", "vrd_a", inboxBase, "o/widget", 142, "fix", "deadbeef"),
+		art(state.KindAction, "run_a", "act_a", inboxBase.Add(time.Minute), wouldMerge("gh pr merge 142 -R o/widget")),
+	}
+	raw, err := json.Marshal(buildInbox(arts, inboxBase.Add(time.Hour), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"ready_to_merge"`) || !strings.Contains(string(raw), `"merge_command"`) {
+		t.Fatalf("ready_to_merge JSON shape wrong:\n%s", raw)
+	}
+	var in Inbox
+	if err := json.Unmarshal(raw, &in); err != nil {
+		t.Fatal(err)
+	}
+	if len(in.ReadyToMerge) != 1 || in.ReadyToMerge[0].MergeCommand != "gh pr merge 142 -R o/widget" {
+		t.Fatalf("ready row round-trip wrong: %+v", in.ReadyToMerge)
+	}
+}
+
+// TestReadyToMergeRendersText pins the symmetric text section.
+func TestReadyToMergeRendersText(t *testing.T) {
+	in := Inbox{ReadyToMerge: []ReadyRow{
+		{Run: "run_a", Repo: "o/widget", Number: 142, Title: "fix the docket", MergeCommand: "gh pr merge 142 -R o/widget"},
+	}}
+	var buf bytes.Buffer
+	renderInbox(&buf, in)
+	for _, want := range []string{"ready to merge (1)", "o/widget#142  run_a", `"fix the docket"`, "→ gh pr merge 142 -R o/widget"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("text render missing %q\n---\n%s", want, buf.String())
+		}
+	}
+}
+
 func TestShortDur(t *testing.T) {
 	cases := []struct {
 		d    time.Duration
