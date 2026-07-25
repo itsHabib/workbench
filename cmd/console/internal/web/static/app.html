@@ -286,13 +286,29 @@
     var parked = data.parked || [];
     var unattributed = data.unattributed || [];
     var grants = data.grants || [];
+    var ready = data.ready_to_merge || [];
+    var needsGrant = data.needs_grant || [];
     var html = "";
+
+    // Ready to merge leads: a clean, judged PR is one copy-and-run from landed —
+    // the most actionable state on the docket. Hidden entirely when empty.
+    if (ready.length > 0) {
+      html += '<div class="section-label">ready to merge <span class="count">(' + ready.length + ")</span></div>";
+      html += '<div class="card">' + ready.map(readyCard).join("") + "</div>";
+    }
 
     html += '<div class="section-label">awaiting judgment <span class="count">(' + parked.length + ")</span></div>";
     if (parked.length === 0) {
       html += '<div class="card"><div class="empty">Nothing awaits judgment.</div></div>';
     } else {
       html += '<div class="card">' + parked.map(parkedCard).join("") + "</div>";
+    }
+
+    // Repos whose merge grant has lapsed — a paste-ready re-mint per row. Hidden
+    // when empty (a covered repo never trains the operator to ignore this).
+    if (needsGrant.length > 0) {
+      html += '<div class="section-label">needs a grant <span class="count">(' + needsGrant.length + ")</span></div>";
+      html += '<div class="card">' + needsGrant.map(needsGrantCard).join("") + "</div>";
     }
 
     if (unattributed.length > 0) {
@@ -347,6 +363,43 @@
     if (!cmd) return "";
     return '<div class="cmd-row"><code class="cmd">' + esc(cmd) + '</code>' +
       '<button class="copy" type="button" data-copy="' + esc(cmd) + '">copy</button></div>';
+  }
+
+  // A ready-to-merge card: the clickable PR subject + title, run demoted to a
+  // diagnostic line, and gate's own paste-ready merge command with a copy button.
+  function readyCard(r) {
+    var subject = "";
+    if (r.repo) {
+      var label = esc(r.repo) + "#" + esc(r.number);
+      subject = r.url
+        ? '<a class="pr-link" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' + label + " ↗</a>"
+        : '<span class="repo">' + label + "</span>";
+    }
+    var title = r.title ? '<div class="matter-title">' + esc(r.title) + "</div>" : "";
+    return (
+      '<div class="matter" data-run="' + esc(r.run) + '">' +
+      '<div class="matter-head">' + subject + '<span class="badge b-pass">ready to merge</span></div>' +
+      title +
+      '<div class="rid muted">run ' + esc(r.run) + (r.head_sha ? " · head " + esc(r.head_sha.slice(0, 12)) : "") + "</div>" +
+      cmdRow(r.merge_command) +
+      '<div class="open-hint">click the run to open its trace →</div>' +
+      "</div>"
+    );
+  }
+
+  // A needs-a-grant card: the repo, its lapsed grant state (+ open-PR count on
+  // the live path), the last-expired stamp, and a paste-ready re-mint command.
+  function needsGrantCard(g) {
+    var open = (g.open_prs || g.open_prs === 0) ? '<span class="when">' + esc(g.open_prs) + ' open PR' + (g.open_prs === 1 ? "" : "s") + "</span>" : "";
+    var state = '<span class="badge b-refused">' + esc(g.grant_state) + "</span>";
+    var expired = g.last_expired_at ? '<div class="rid muted">last expired ' + esc(g.last_expired_at.replace("T", " ").replace("Z", " UTC")) + "</div>" : "";
+    return (
+      '<div class="matter">' +
+      '<div class="matter-head"><span class="repo">' + esc(g.repo) + "</span>" + state + open + "</div>" +
+      expired +
+      cmdRow(g.suggested_mint) +
+      "</div>"
+    );
   }
 
   // Dual PASS/BLOCK judge commands on a docket card, built from gate's own

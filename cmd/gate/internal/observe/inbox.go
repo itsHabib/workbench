@@ -22,6 +22,24 @@ type Inbox struct {
 	Unattributed []ParkedRun     `json:"unattributed"`
 	Grants       []GrantLine     `json:"grants"`
 	NeedsGrant   []NeedsGrantRow `json:"needs_grant,omitempty"`
+	ReadyToMerge []ReadyRow      `json:"ready_to_merge,omitempty"`
+}
+
+// ReadyRow is one PR whose latest terminal artifact is a would_merge action:
+// judged clean under its grant, the dry-run merge command written and waiting
+// for the operator to run it. MergeCommand is that paste-ready `gh pr merge`
+// (the action body's own command), so landing a ready PR is one copy away. A
+// row appears only while the would_merge action is still the subject's newest
+// terminal — a later park/block/newer run supersedes it — and, on the live
+// path, only while the PR is still open.
+type ReadyRow struct {
+	Run          string `json:"run"`
+	Repo         string `json:"repo,omitempty"`
+	Number       int    `json:"number,omitempty"`
+	Title        string `json:"title,omitempty"`
+	HeadSHA      string `json:"head_sha,omitempty"`
+	URL          string `json:"url,omitempty"`
+	MergeCommand string `json:"merge_command"`
 }
 
 // NeedsGrantRow is one repo whose gate runs were refused for want of a live
@@ -154,6 +172,7 @@ func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg s
 		return err
 	}
 	in.Parked = reconcileLive(in.Parked, lookup)
+	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, lookup)
 	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -167,6 +186,7 @@ func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg s
 		return err
 	}
 	in.Parked = reconcileLive(in.Parked, lookup)
+	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, lookup)
 	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
 	renderInbox(w, in)
 	return nil
@@ -198,30 +218,40 @@ type liveResult struct {
 	err   error
 }
 
-func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
-	results := make(chan liveResult, len(parked))
-	jobs := make(chan int, len(parked))
-	for i := range parked {
+// resolveLive fans n subject lookups over a bounded worker pool and returns the
+// results indexed by position — the shared mechanism both the parked and the
+// ready-to-merge reconcilers drive their per-subject GitHub reads through, so a
+// single freshness policy lives in one place.
+func resolveLive(n int, lookup func(i int) (LivePR, error)) []liveResult {
+	results := make(chan liveResult, n)
+	jobs := make(chan int, n)
+	for i := range n {
 		jobs <- i
 	}
 	close(jobs)
 
 	const maxWorkers = 8
-	for range min(len(parked), maxWorkers) {
+	for range min(n, maxWorkers) {
 		go func() {
 			for i := range jobs {
-				p := parked[i]
-				pr, err := lookup(p.Repo, p.Number)
+				pr, err := lookup(i)
 				results <- liveResult{index: i, pr: pr, err: err}
 			}
 		}()
 	}
 
-	resolved := make([]liveResult, len(parked))
-	for range parked {
+	resolved := make([]liveResult, n)
+	for range n {
 		result := <-results
 		resolved[result.index] = result
 	}
+	return resolved
+}
+
+func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
+	resolved := resolveLive(len(parked), func(i int) (LivePR, error) {
+		return lookup(parked[i].Repo, parked[i].Number)
+	})
 
 	out := make([]ParkedRun, 0, len(parked))
 	for i, p := range parked {
@@ -246,6 +276,63 @@ func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 		}
 	}
 	return out
+}
+
+// reconcileReadyLive enforces the ready-row freshness law against current PR
+// state. A row is DROPPED on a confirmed non-mergeable fact — the PR has since
+// MERGED or CLOSED, or its head has MOVED past the SHA the would_merge command
+// pins (both SHAs non-empty and differing): a push after verification means the
+// new head was never gated, so the paste-ready `--match-head-commit <old sha>`
+// would refuse and the PR needs re-gating. A row is KEPT on anything ambiguous —
+// a failed lookup, an unrecognized state, or an empty live SHA — because the
+// safe default is never to silently hide a possibly-mergeable PR; the trade-off
+// is that a DRAFT/odd-state PR can linger with a stale command until re-gated.
+func reconcileReadyLive(rows []ReadyRow, lookup PRLookup) []ReadyRow {
+	resolved := resolveLive(len(rows), func(i int) (LivePR, error) {
+		return lookup(rows[i].Repo, rows[i].Number)
+	})
+
+	out := make([]ReadyRow, 0, len(rows))
+	for i, r := range rows {
+		result := resolved[i]
+		if result.err != nil {
+			out = append(out, r)
+			continue
+		}
+		st := strings.ToUpper(result.pr.State)
+		if st == "MERGED" || st == "CLOSED" {
+			continue
+		}
+		if headMoved(r.HeadSHA, result.pr.HeadSHA) {
+			continue
+		}
+		out = append(out, mergeLiveReady(r, result.pr))
+	}
+	return out
+}
+
+// headMoved reports whether the live head has confirmably moved past the SHA the
+// ready row's merge command pins. Only a confirmed mismatch — both SHAs present
+// and differing — counts; an empty live SHA is not a confirmation and keeps the
+// row (per the keep-on-ambiguous default).
+func headMoved(recorded, live string) bool {
+	return recorded != "" && live != "" && recorded != live
+}
+
+// mergeLiveReady refreshes a ready row's display facts from the live PR read,
+// preferring the live value when present — the same enrichment mergeLivePR does
+// for a parked row.
+func mergeLiveReady(r ReadyRow, live LivePR) ReadyRow {
+	if live.Title != "" {
+		r.Title = live.Title
+	}
+	if live.HeadSHA != "" {
+		r.HeadSHA = live.HeadSHA
+	}
+	if live.URL != "" {
+		r.URL = live.URL
+	}
+	return r
 }
 
 func mergeLivePR(p ParkedRun, live LivePR) ParkedRun {
@@ -279,7 +366,103 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 		Unattributed: unattributed,
 		Grants:       grantLines(arts, now),
 		NeedsGrant:   needsGrantRows(arts, now, stateArg),
+		ReadyToMerge: readyToMergeRuns(arts),
 	}
+}
+
+// readyToMergeRuns finds every PR whose latest terminal artifact is a
+// would_merge action — judged clean, dry-run, awaiting the operator's merge. It
+// mirrors parkedRuns' reduction exactly: fold per-run subject facts, take each
+// run's latest terminal (action or escalation, by log/chain order), then reduce
+// runs by subject keeping the newest terminal. A subject surfaces only when that
+// newest terminal is a would_merge action — a later park, block, or a newer run
+// for the same PR supersedes it and drops the row, so a stale "ready to merge"
+// with a merge command for an already-resolved PR cannot linger.
+func readyToMergeRuns(arts []state.Artifact) []ReadyRow {
+	last := make(map[string]terminalRun)
+	facts := make(map[string]runFacts)
+	for order, a := range arts {
+		facts[a.Run] = mergeRunFacts(facts[a.Run], factsFromArtifact(a))
+		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
+			last[a.Run] = terminalRun{artifact: a, order: order}
+		}
+	}
+
+	latest := make(map[string]terminalRun)
+	for run, terminal := range last {
+		f := facts[run]
+		if f.Repo == "" || f.Number == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%s#%d", f.Repo, f.Number)
+		terminal.facts = f
+		current, ok := latest[key]
+		if !ok || terminal.order > current.order {
+			latest[key] = terminal
+		}
+	}
+
+	rows := make([]ReadyRow, 0, len(latest))
+	for _, terminal := range latest {
+		row, ok := readyRowFromTerminal(terminal)
+		if !ok {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	sortReady(rows)
+	return rows
+}
+
+// actionBody is the slice of a KindAction body the ready-to-merge projection
+// reads: the outcome that classifies the action and, for a would_merge, the
+// paste-ready merge command gate wrote. A deliberate copy of main.go's write
+// shape, kept here so the projection stays decoupled from the command layer.
+type actionBody struct {
+	Outcome string `json:"outcome"`
+	Command string `json:"command"`
+}
+
+// readyRowFromTerminal returns a ready row when the subject's newest terminal is
+// a would_merge action, and false for any other terminal (an escalation, or an
+// action whose outcome is blocked / capability_refused / merge_not_implemented).
+func readyRowFromTerminal(t terminalRun) (ReadyRow, bool) {
+	if t.artifact.Kind != state.KindAction {
+		return ReadyRow{}, false
+	}
+	var b actionBody
+	if err := json.Unmarshal(t.artifact.Body, &b); err != nil {
+		return ReadyRow{}, false
+	}
+	if b.Outcome != "would_merge" {
+		return ReadyRow{}, false
+	}
+	row := ReadyRow{
+		Run:          t.artifact.Run,
+		Repo:         t.facts.Repo,
+		Number:       t.facts.Number,
+		Title:        t.facts.Title,
+		HeadSHA:      t.facts.HeadSHA,
+		MergeCommand: b.Command,
+	}
+	if row.Repo != "" && row.Number != 0 {
+		row.URL = fmt.Sprintf("https://github.com/%s/pull/%d", row.Repo, row.Number)
+	}
+	return row, true
+}
+
+// sortReady orders ready rows deterministically across runs: repo → number →
+// run — ready rows carry no age to rank by.
+func sortReady(rows []ReadyRow) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Repo != rows[j].Repo {
+			return rows[i].Repo < rows[j].Repo
+		}
+		if rows[i].Number != rows[j].Number {
+			return rows[i].Number < rows[j].Number
+		}
+		return rows[i].Run < rows[j].Run
+	})
 }
 
 // parkedRuns finds every run whose latest terminal artifact is an escalation —
@@ -659,12 +842,36 @@ func renderInbox(w io.Writer, in Inbox) {
 			renderParked(w, p)
 		}
 	}
+	renderReadyToMerge(w, in.ReadyToMerge)
 	renderNeedsGrant(w, in.NeedsGrant)
 	if len(in.Grants) == 0 {
 		return
 	}
 	fmt.Fprintln(w, "grants")
 	renderGrants(w, in.Grants)
+}
+
+// renderReadyToMerge lists the PRs gate has judged clean and is ready to land,
+// each with its paste-ready merge command — symmetric with the parked section.
+func renderReadyToMerge(w io.Writer, rows []ReadyRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "ready to merge (%d)\n\n", len(rows))
+	for _, r := range rows {
+		head := r.Run
+		if r.Repo != "" {
+			head = fmt.Sprintf("%s#%d  %s", r.Repo, r.Number, r.Run)
+		}
+		fmt.Fprintf(w, "  %s\n", head)
+		if r.Title != "" {
+			fmt.Fprintf(w, "  %q\n", r.Title)
+		}
+		if r.HeadSHA != "" {
+			fmt.Fprintf(w, "  head %s\n", r.HeadSHA)
+		}
+		fmt.Fprintf(w, "  → %s\n\n", r.MergeCommand)
+	}
 }
 
 // renderNeedsGrant lists the repos whose merge grant has lapsed, each with its

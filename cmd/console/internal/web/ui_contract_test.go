@@ -87,3 +87,31 @@ func TestDocketKeepsPRIdentityActionable(t *testing.T) {
 		}
 	}
 }
+
+// TestDocketRendersActionableSections pins that the two actionable sections read
+// from gate's arrays and hide on empty: ready-to-merge (with the paste-ready
+// merge command) and needs-a-grant (with the paste-ready mint).
+func TestDocketRendersActionableSections(t *testing.T) {
+	page := string(appPage)
+	for _, want := range []string{
+		// Reads the gate arrays with an empty-array fallback → no section on empty.
+		`data.ready_to_merge || []`,
+		`data.needs_grant || []`,
+		`if (ready.length > 0)`,
+		`if (needsGrant.length > 0)`,
+		// Section labels + the card renderers wired into them.
+		`ready to merge <span`,
+		`needs a grant <span`,
+		`ready.map(readyCard)`,
+		`needsGrant.map(needsGrantCard)`,
+		// The paste-ready commands each card surfaces.
+		`cmdRow(r.merge_command)`,
+		`cmdRow(g.suggested_mint)`,
+		// A ready card opens its trace: wireOpen binds .matter[data-run].
+		`'<div class="matter" data-run="' + esc(r.run)`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("docket page missing actionable-section contract %q", want)
+		}
+	}
+}
