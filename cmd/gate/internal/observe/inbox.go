@@ -173,18 +173,20 @@ func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg s
 }
 
 // enrichNeedsGrant attaches a live open-PR count to each needs_grant row via the
-// PRLister seam. It is best-effort: a per-repo lookup failure DROPS that repo
-// from the surface (a row with no verifiable open-PR count is not worth paging
-// on), while every other repo survives — the projection never fails as a whole.
+// PRLister seam. It is best-effort and degrades a row rather than dropping it: a
+// per-repo lookup failure KEEPS the row with OpenPRs left nil (omitted from
+// JSON), mirroring how reconcileLive degrades a parked row to "unknown". The
+// lapsed grant is the primary signal — dropping the whole row when gh is
+// unreachable would reintroduce the very invisible needs-a-grant state this
+// surface exists to kill. The projection never fails as a whole.
 func enrichNeedsGrant(rows []NeedsGrantRow, lister PRLister) []NeedsGrantRow {
 	out := make([]NeedsGrantRow, 0, len(rows))
 	for _, r := range rows {
 		n, err := lister(r.Repo)
-		if err != nil {
-			continue
+		if err == nil {
+			count := n
+			r.OpenPRs = &count
 		}
-		count := n
-		r.OpenPRs = &count
 		out = append(out, r)
 	}
 	return out
@@ -513,7 +515,7 @@ type grantNeededBody struct {
 	At     string `json:"at"`
 }
 
-// needsGrantRow folds one repo's latest refusal facts (across dedup) into a row.
+// needsGrantAgg folds one repo's latest refusal facts (across dedup) into a row.
 type needsGrantAgg struct {
 	reason string
 	at     time.Time
@@ -544,7 +546,11 @@ func needsGrantRows(arts []state.Artifact, now time.Time, stateArg string) []Nee
 		}
 		at := grantNeededAt(b.At, a.Time)
 		cur, seen := latest[b.Repo]
-		if seen && !at.After(cur.at) {
+		// Most-recent wins; on an equal timestamp the later log-order record wins
+		// (RFC3339 is second-precision, so two same-second refusals must not fold
+		// to the earlier one). Artifacts arrive in log order, so `at.Before(cur.at)`
+		// — strict — keeps the last-seen on ties.
+		if seen && at.Before(cur.at) {
 			continue
 		}
 		latest[b.Repo] = needsGrantAgg{reason: b.Reason, at: at}

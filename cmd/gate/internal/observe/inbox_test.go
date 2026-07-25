@@ -355,6 +355,26 @@ func TestNeedsGrantDedupsToMostRecent(t *testing.T) {
 	}
 }
 
+// TestNeedsGrantEqualTimestampLastLogOrderWins pins the tie-break: two refusals
+// for one repo sharing a (second-precision) timestamp must fold to the LATER
+// log-order record, matching "most-recent wins" even when the clock can't
+// distinguish them.
+func TestNeedsGrantEqualTimestampLastLogOrderWins(t *testing.T) {
+	same := inboxBase.Add(-time.Hour)
+	arts := []state.Artifact{
+		// Earlier in log order: absent. Later in log order: expired. Same timestamp.
+		art(state.KindGrantNeeded, "run_a", "gnd_a", same, needed("o/r", "grant_absent", same)),
+		art(state.KindGrantNeeded, "run_b", "gnd_b", same, needed("o/r", "grant_expired", same)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 1 {
+		t.Fatalf("want one folded row, got %+v", in.NeedsGrant)
+	}
+	if in.NeedsGrant[0].GrantState != "expired" {
+		t.Fatalf("on an equal timestamp the later log-order record must win, got %+v", in.NeedsGrant[0])
+	}
+}
+
 // TestNeedsGrantAbsentHasNoExpiry pins that an absent grant reads grant_state
 // "absent" and carries no last_expired_at — there was never an expiry to name.
 func TestNeedsGrantAbsentHasNoExpiry(t *testing.T) {
@@ -393,7 +413,8 @@ func TestSuggestedMintParsesToGrant(t *testing.T) {
 }
 
 // TestEnrichNeedsGrantBestEffort pins the live enrichment contract: a per-repo
-// gh failure DROPS that repo, every other repo survives with its open-PR count,
+// gh failure KEEPS the row with a nil OpenPRs (degrade, not drop — the lapsed
+// grant is the primary signal), every reachable repo carries its open-PR count,
 // and the projection as a whole never fails.
 func TestEnrichNeedsGrantBestEffort(t *testing.T) {
 	rows := []NeedsGrantRow{
@@ -408,15 +429,21 @@ func TestEnrichNeedsGrantBestEffort(t *testing.T) {
 		return 2, nil
 	}
 	got := enrichNeedsGrant(rows, lister)
-	if len(got) != 2 {
-		t.Fatalf("a per-repo failure must drop only that repo, got %+v", got)
+	if len(got) != 3 {
+		t.Fatalf("a per-repo failure must keep the row, not drop it, got %+v", got)
 	}
+	byRepo := make(map[string]NeedsGrantRow, len(got))
 	for _, r := range got {
-		if r.Repo == "o/broken" {
-			t.Fatalf("the failing repo must be dropped, got %+v", got)
-		}
+		byRepo[r.Repo] = r
+	}
+	broken, ok := byRepo["o/broken"]
+	if !ok || broken.OpenPRs != nil {
+		t.Fatalf("the failing repo must survive with nil open_prs, got %+v", broken)
+	}
+	for _, repo := range []string{"o/ok", "o/also-ok"} {
+		r := byRepo[repo]
 		if r.OpenPRs == nil || *r.OpenPRs != 2 {
-			t.Fatalf("surviving row must carry its open-PR count, got %+v", r)
+			t.Fatalf("reachable row %s must carry its open-PR count, got %+v", repo, r)
 		}
 	}
 }

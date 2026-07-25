@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -747,6 +748,21 @@ func TestRunGateAbsentGrantPersistsGrantNeeded(t *testing.T) {
 	}
 	if b.Reason != "grant_absent" {
 		t.Fatalf("reason = %q, want grant_absent", b.Reason)
+	}
+}
+
+// TestRecordGrantNeededSkipsEmptyTree pins the fresh-tree guard: recording a
+// refusal into an empty/fresh -state dir must write NOTHING and must not create
+// log.jsonl or the anchor — otherwise a misdirected cwd would materialize a
+// state tree that bypasses checkGrantStateDir's fresh-tree refusal.
+func TestRecordGrantNeededSkipsEmptyTree(t *testing.T) {
+	e := testEnv(t) // brand-new state + key dirs, no log yet
+	recordGrantNeeded(e, "o/r", fmt.Errorf("%w: no such grant", state.ErrNotFound))
+	if arts := grantNeededArts(t, e); len(arts) != 0 {
+		t.Fatalf("recording into an empty tree must write nothing, got %d", len(arts))
+	}
+	if _, err := os.Stat(filepath.Join(e.stateDir, "log.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("recording into an empty tree must not create the log (stat err: %v)", err)
 	}
 }
 

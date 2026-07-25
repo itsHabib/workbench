@@ -465,6 +465,20 @@ func recordGrantNeeded(e env, repo string, checkErr error) {
 	if reason == "" {
 		return
 	}
+	// Never CREATE a state tree to record a refusal. A grant_absent refused
+	// against an empty/fresh -state dir (a misdirected cwd) would otherwise
+	// materialize log.jsonl + anchor here, silently bypassing checkGrantStateDir's
+	// fresh-tree refusal and inviting a spendable grant into the wrong tree. An
+	// existing grant (so grant_expired, and any real absent-in-a-live-tree case)
+	// implies a non-empty log; a truly empty tree records nothing.
+	arts, err := e.st.List(nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate: record grant_needed: read log: %v\n", err)
+		return
+	}
+	if len(arts) == 0 {
+		return
+	}
 	body := map[string]any{
 		"repo":   repo,
 		"reason": reason,
@@ -999,7 +1013,9 @@ func lookupLivePR(repo string, number int) (observe.LivePR, error) {
 // (observe drops a repo whose lookup errors), so a repo gh can't reach never
 // fails the whole projection.
 func lookupOpenPRCount(repo string) (int, error) {
-	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--json", "number").CombinedOutput()
+	// --limit overrides gh's default page of 30, or a busy repo's open_prs would
+	// silently cap at 30 and undercount.
+	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number").CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail != "" {
