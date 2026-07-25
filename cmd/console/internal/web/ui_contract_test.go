@@ -107,6 +107,8 @@ func TestDocketRendersActionableSections(t *testing.T) {
 		// The paste-ready commands each card surfaces.
 		`cmdRow(r.merge_command)`,
 		`cmdRow(g.suggested_mint)`,
+		// A ready card opens its trace: wireOpen binds .matter[data-run].
+		`'<div class="matter" data-run="' + esc(r.run)`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("docket page missing actionable-section contract %q", want)

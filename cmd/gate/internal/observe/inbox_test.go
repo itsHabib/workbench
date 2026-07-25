@@ -561,7 +561,7 @@ func TestReadyToMergeNonWouldMergeTerminalExcluded(t *testing.T) {
 // lookup stays visible.
 func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
 	rows := []ReadyRow{
-		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale"},
+		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale", HeadSHA: "abc"},
 		{Run: "run_merged", Repo: "o/r", Number: 2},
 		{Run: "run_closed", Repo: "o/r", Number: 3},
 		{Run: "run_unknown", Repo: "o/r", Number: 4},
@@ -569,6 +569,7 @@ func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
 	lookup := func(_ string, number int) (LivePR, error) {
 		switch number {
 		case 1:
+			// Live head matches the recorded sha — still ready, enriched.
 			return LivePR{State: "OPEN", Title: "live", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
 		case 2:
 			return LivePR{State: "MERGED"}, nil
@@ -584,6 +585,32 @@ func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
 	}
 	if got[0].Title != "live" || got[0].HeadSHA != "abc" {
 		t.Fatalf("open ready row was not enriched: %+v", got[0])
+	}
+}
+
+// TestReconcileReadyLiveDropsOnHeadMove pins the stale-command guard: an OPEN PR
+// whose live head SHA has moved past the sha the would_merge command pins is
+// DROPPED (the new head was never gated). A matching live sha stays, an empty
+// live sha stays (ambiguous), and a failed lookup stays.
+func TestReconcileReadyLiveDropsOnHeadMove(t *testing.T) {
+	rows := []ReadyRow{
+		{Run: "run_moved", Repo: "o/r", Number: 1, HeadSHA: "gated1", MergeCommand: "gh pr merge 1 --match-head-commit gated1"},
+		{Run: "run_same", Repo: "o/r", Number: 2, HeadSHA: "gated2"},
+		{Run: "run_emptylive", Repo: "o/r", Number: 3, HeadSHA: "gated3"},
+	}
+	lookup := func(_ string, number int) (LivePR, error) {
+		switch number {
+		case 1:
+			return LivePR{State: "OPEN", HeadSHA: "pushed1"}, nil
+		case 2:
+			return LivePR{State: "OPEN", HeadSHA: "gated2"}, nil
+		default:
+			return LivePR{State: "OPEN"}, nil // empty live sha — not a confirmation
+		}
+	}
+	got := reconcileReadyLive(rows, lookup)
+	if len(got) != 2 || got[0].Run != "run_same" || got[1].Run != "run_emptylive" {
+		t.Fatalf("a confirmed head move must drop; match + empty-live-sha must stay: %+v", got)
 	}
 }
 
@@ -613,11 +640,11 @@ func TestReadyToMergeJSONShape(t *testing.T) {
 // TestReadyToMergeRendersText pins the symmetric text section.
 func TestReadyToMergeRendersText(t *testing.T) {
 	in := Inbox{ReadyToMerge: []ReadyRow{
-		{Run: "run_a", Repo: "o/widget", Number: 142, Title: "fix the docket", MergeCommand: "gh pr merge 142 -R o/widget"},
+		{Run: "run_a", Repo: "o/widget", Number: 142, Title: "fix the docket", HeadSHA: "deadbeef", MergeCommand: "gh pr merge 142 -R o/widget"},
 	}}
 	var buf bytes.Buffer
 	renderInbox(&buf, in)
-	for _, want := range []string{"ready to merge (1)", "o/widget#142  run_a", `"fix the docket"`, "→ gh pr merge 142 -R o/widget"} {
+	for _, want := range []string{"ready to merge (1)", "o/widget#142  run_a", `"fix the docket"`, "head deadbeef", "→ gh pr merge 142 -R o/widget"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("text render missing %q\n---\n%s", want, buf.String())
 		}

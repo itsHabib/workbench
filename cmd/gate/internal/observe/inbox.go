@@ -278,11 +278,15 @@ func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
 	return out
 }
 
-// reconcileReadyLive drops a ready row whose PR has since merged or closed, so a
-// runnable merge command never lingers for a PR that is already gone. It mirrors
-// reconcileLive's freshness law exactly: only a CONFIRMED non-open PR (MERGED or
-// CLOSED) is removed; a failed lookup or an unrecognized state stays visible, so
-// a flaky `gh` read never silently hides a mergeable PR.
+// reconcileReadyLive enforces the ready-row freshness law against current PR
+// state. A row is DROPPED on a confirmed non-mergeable fact — the PR has since
+// MERGED or CLOSED, or its head has MOVED past the SHA the would_merge command
+// pins (both SHAs non-empty and differing): a push after verification means the
+// new head was never gated, so the paste-ready `--match-head-commit <old sha>`
+// would refuse and the PR needs re-gating. A row is KEPT on anything ambiguous —
+// a failed lookup, an unrecognized state, or an empty live SHA — because the
+// safe default is never to silently hide a possibly-mergeable PR; the trade-off
+// is that a DRAFT/odd-state PR can linger with a stale command until re-gated.
 func reconcileReadyLive(rows []ReadyRow, lookup PRLookup) []ReadyRow {
 	resolved := resolveLive(len(rows), func(i int) (LivePR, error) {
 		return lookup(rows[i].Repo, rows[i].Number)
@@ -299,9 +303,20 @@ func reconcileReadyLive(rows []ReadyRow, lookup PRLookup) []ReadyRow {
 		if st == "MERGED" || st == "CLOSED" {
 			continue
 		}
+		if headMoved(r.HeadSHA, result.pr.HeadSHA) {
+			continue
+		}
 		out = append(out, mergeLiveReady(r, result.pr))
 	}
 	return out
+}
+
+// headMoved reports whether the live head has confirmably moved past the SHA the
+// ready row's merge command pins. Only a confirmed mismatch — both SHAs present
+// and differing — counts; an empty live SHA is not a confirmation and keeps the
+// row (per the keep-on-ambiguous default).
+func headMoved(recorded, live string) bool {
+	return recorded != "" && live != "" && recorded != live
 }
 
 // mergeLiveReady refreshes a ready row's display facts from the live PR read,
@@ -436,8 +451,8 @@ func readyRowFromTerminal(t terminalRun) (ReadyRow, bool) {
 	return row, true
 }
 
-// sortReady orders ready rows by subject then run, so the projection is
-// deterministic run to run — age is a fact here too, not a priority call.
+// sortReady orders ready rows deterministically across runs: repo → number →
+// run — ready rows carry no age to rank by.
 func sortReady(rows []ReadyRow) {
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Repo != rows[j].Repo {
@@ -851,6 +866,9 @@ func renderReadyToMerge(w io.Writer, rows []ReadyRow) {
 		fmt.Fprintf(w, "  %s\n", head)
 		if r.Title != "" {
 			fmt.Fprintf(w, "  %q\n", r.Title)
+		}
+		if r.HeadSHA != "" {
+			fmt.Fprintf(w, "  head %s\n", r.HeadSHA)
 		}
 		fmt.Fprintf(w, "  → %s\n\n", r.MergeCommand)
 	}

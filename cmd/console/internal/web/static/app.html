@@ -377,11 +377,12 @@
     }
     var title = r.title ? '<div class="matter-title">' + esc(r.title) + "</div>" : "";
     return (
-      '<div class="matter">' +
+      '<div class="matter" data-run="' + esc(r.run) + '">' +
       '<div class="matter-head">' + subject + '<span class="badge b-pass">ready to merge</span></div>' +
       title +
       '<div class="rid muted">run ' + esc(r.run) + (r.head_sha ? " · head " + esc(r.head_sha.slice(0, 12)) : "") + "</div>" +
       cmdRow(r.merge_command) +
+      '<div class="open-hint">click the run to open its trace →</div>' +
       "</div>"
     );
   }
