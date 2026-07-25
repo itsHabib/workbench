@@ -664,6 +664,129 @@ func TestBacktestLeavesNoSpendableGrantInDurableState(t *testing.T) {
 	}
 }
 
+// grantNeededArts returns every grant_needed artifact in the store.
+func grantNeededArts(t *testing.T, e env) []state.Artifact {
+	t.Helper()
+	arts, err := e.st.List(func(a state.Artifact) bool { return a.Kind == state.KindGrantNeeded })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
+}
+
+// TestRunGateExpiredGrantPersistsGrantNeeded pins Half 1: the top-level
+// capability refusal on an expired grant records exactly one grant_needed
+// artifact (reason grant_expired, the repo), while still returning codeRefused —
+// and the record is NOT an outcome, so it never counts as a review cycle.
+func TestRunGateExpiredGrantPersistsGrantNeeded(t *testing.T) {
+	e := testEnv(t)
+	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 3, "test", -time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, err := runGate(e, "o/r", 7, expired.ID, false, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("expired grant: got code %d outcome %q, want refusal", code, res.Outcome)
+	}
+	arts := grantNeededArts(t, e)
+	if len(arts) != 1 {
+		t.Fatalf("want exactly one grant_needed artifact, got %d", len(arts))
+	}
+	var b struct {
+		Repo   string `json:"repo"`
+		Reason string `json:"reason"`
+		At     string `json:"at"`
+	}
+	if err := json.Unmarshal(arts[0].Body, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Repo != "o/r" || b.Reason != "grant_expired" || b.At == "" {
+		t.Fatalf("grant_needed body = %+v, want repo o/r reason grant_expired with a timestamp", b)
+	}
+	// The record must never read as a consumed cycle: isOutcome ignores it, so a
+	// later run's cycle count is unaffected by the persisted refusal.
+	if isOutcome(arts[0]) {
+		t.Fatal("grant_needed must not be an outcome — it would burn a review cycle")
+	}
+	n, err := cycleCount(e.st, verify.Subject{Repo: "o/r", Number: 7}, state.NewRunID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a persisted refusal must not count as a cycle, got %d", n)
+	}
+}
+
+// TestRunGateAbsentGrantPersistsGrantNeeded pins that a grant id naming nothing
+// records reason grant_absent.
+func TestRunGateAbsentGrantPersistsGrantNeeded(t *testing.T) {
+	e := testEnv(t)
+	// A store with at least one artifact so newEnv's anchor is initialized.
+	if _, err := capability.Mint(e.st, e.keyPath, "o/other", "merge", "T1", 3, "test", time.Hour, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	res, code, err := runGate(e, "o/r", 7, "grt_does_not_exist", false, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("absent grant: got code %d outcome %q, want refusal", code, res.Outcome)
+	}
+	arts := grantNeededArts(t, e)
+	if len(arts) != 1 {
+		t.Fatalf("want one grant_needed artifact, got %d", len(arts))
+	}
+	var b struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(arts[0].Body, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Reason != "grant_absent" {
+		t.Fatalf("reason = %q, want grant_absent", b.Reason)
+	}
+}
+
+// TestRunGateScopeMismatchDoesNotPersist pins that a non-materialization refusal
+// class — here a scope mismatch — records NO grant_needed artifact: it is a
+// misconfiguration, not a "mint a grant for this repo" fact.
+func TestRunGateScopeMismatchDoesNotPersist(t *testing.T) {
+	e := testEnv(t)
+	// A live grant for a DIFFERENT repo: the check fails on scope, not expiry/absence.
+	other, err := capability.Mint(e.st, e.keyPath, "o/other", "merge", "T1", 3, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, err := runGate(e, "o/r", 7, other.ID, false, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("scope mismatch: got code %d outcome %q, want refusal", code, res.Outcome)
+	}
+	if arts := grantNeededArts(t, e); len(arts) != 0 {
+		t.Fatalf("a scope-mismatch refusal must not persist grant_needed, got %d", len(arts))
+	}
+}
+
+// TestGrantNeededReasonClassification pins the reason mapping directly.
+func TestGrantNeededReasonClassification(t *testing.T) {
+	if got := grantNeededReason(capability.ErrExpired); got != "grant_expired" {
+		t.Fatalf("expired = %q, want grant_expired", got)
+	}
+	if got := grantNeededReason(state.ErrNotFound); got != "grant_absent" {
+		t.Fatalf("not-found = %q, want grant_absent", got)
+	}
+	for _, e := range []error{capability.ErrSignature, capability.ErrScope, capability.ErrKeyMissing} {
+		if got := grantNeededReason(e); got != "" {
+			t.Fatalf("non-materialization error %v classified as %q, want none", e, got)
+		}
+	}
+}
+
 // TestExplainJSONFlag pins that explain -json emits one JSON document from the
 // fixture store without changing the text path.
 func TestExplainJSONFlag(t *testing.T) {

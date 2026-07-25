@@ -18,9 +18,25 @@ import (
 // re-mint is one glance away). Like every observe view it renders; it never
 // decides — nothing here is scored or ranked by anything but age and expiry.
 type Inbox struct {
-	Parked       []ParkedRun `json:"parked"`
-	Unattributed []ParkedRun `json:"unattributed"`
-	Grants       []GrantLine `json:"grants"`
+	Parked       []ParkedRun     `json:"parked"`
+	Unattributed []ParkedRun     `json:"unattributed"`
+	Grants       []GrantLine     `json:"grants"`
+	NeedsGrant   []NeedsGrantRow `json:"needs_grant,omitempty"`
+}
+
+// NeedsGrantRow is one repo whose gate runs were refused for want of a live
+// grant, surfaced so a re-mint is one paste away. It appears only for a repo
+// with no currently-live merge grant: a live grant — even one about to expire —
+// suppresses it, so this surface never trains the operator to re-mint a grant
+// that already covers the repo. SuggestedMint is a paste-ready `gate grant`,
+// carrying the same -state arg the inbox read under. OpenPRs is populated only
+// on the live path; the non-live projection omits it.
+type NeedsGrantRow struct {
+	Repo          string `json:"repo"`
+	GrantState    string `json:"grant_state"` // "expired" | "absent"
+	LastExpiredAt string `json:"last_expired_at,omitempty"`
+	OpenPRs       *int   `json:"open_prs,omitempty"`
+	SuggestedMint string `json:"suggested_mint"`
 }
 
 // ParkedRun is one gate run stopped on an escalation, waiting for the operator's
@@ -115,6 +131,12 @@ func NextJSON(w io.Writer, st *state.Store, now func() time.Time, stateArg strin
 // implementation; observe owns only the projection behavior.
 type PRLookup func(repo string, number int) (LivePR, error)
 
+// PRLister counts a repo's open PRs — the live enrichment seam for needs_grant[].
+// Gate's command layer supplies the `gh pr list` implementation. It is called
+// best-effort: a per-repo error drops that repo from needs_grant[] (see
+// enrichNeedsGrant), never fails the whole projection.
+type PRLister func(repo string) (int, error)
+
 // LivePR is the small display/status slice returned by a live PR read.
 type LivePR struct {
 	State   string
@@ -126,26 +148,46 @@ type LivePR struct {
 // NextJSONLive emits the console feed reconciled with current PR state. A
 // failed lookup remains visible as unknown; only a confirmed non-open PR is
 // removed from the attention queue.
-func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup) error {
+func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup, lister PRLister) error {
 	in, err := collect(st, now, stateArg)
 	if err != nil {
 		return err
 	}
 	in.Parked = reconcileLive(in.Parked, lookup)
+	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(in)
 }
 
 // NextTextLive is the human-readable form of NextJSONLive.
-func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup) error {
+func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup, lister PRLister) error {
 	in, err := collect(st, now, stateArg)
 	if err != nil {
 		return err
 	}
 	in.Parked = reconcileLive(in.Parked, lookup)
+	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
 	renderInbox(w, in)
 	return nil
+}
+
+// enrichNeedsGrant attaches a live open-PR count to each needs_grant row via the
+// PRLister seam. It is best-effort: a per-repo lookup failure DROPS that repo
+// from the surface (a row with no verifiable open-PR count is not worth paging
+// on), while every other repo survives — the projection never fails as a whole.
+func enrichNeedsGrant(rows []NeedsGrantRow, lister PRLister) []NeedsGrantRow {
+	out := make([]NeedsGrantRow, 0, len(rows))
+	for _, r := range rows {
+		n, err := lister(r.Repo)
+		if err != nil {
+			continue
+		}
+		count := n
+		r.OpenPRs = &count
+		out = append(out, r)
+	}
+	return out
 }
 
 type liveResult struct {
@@ -234,6 +276,7 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 		Parked:       parked,
 		Unattributed: unattributed,
 		Grants:       grantLines(arts, now),
+		NeedsGrant:   needsGrantRows(arts, now, stateArg),
 	}
 }
 
@@ -460,6 +503,120 @@ func grantBefore(a, b datedGrant) bool {
 	return a.line.ID < b.line.ID
 }
 
+// grantNeededBody is the slice of a grant_needed artifact the inbox reads: the
+// repo the refused run targeted, the machine-readable reason, and the refusal
+// timestamp. A deliberate copy of the record main.go writes, kept here so the
+// projection stays decoupled from the command layer's write shape.
+type grantNeededBody struct {
+	Repo   string `json:"repo"`
+	Reason string `json:"reason"`
+	At     string `json:"at"`
+}
+
+// needsGrantRow folds one repo's latest refusal facts (across dedup) into a row.
+type needsGrantAgg struct {
+	reason string
+	at     time.Time
+}
+
+// needsGrantRows folds the grant_needed artifacts into one row per repo whose
+// merge grant has genuinely lapsed. The dedup laws it enforces are the
+// correctness core of this surface — a false "needs a grant" for a covered repo
+// trains the operator to ignore it:
+//   - A repo with a currently-LIVE merge grant (not expired at now, matching
+//     capability.Check exactly) is SUPPRESSED — even if that grant is close to
+//     expiring, it still covers the repo now.
+//   - A repo with only expired/absent grants shows exactly ONE row, folding
+//     multiple refusal records into the most-recent one (latest timestamp wins
+//     the grant_state and last_expired_at).
+//
+// Rows carry no open-PR count here; the live path enriches them via PRLister.
+func needsGrantRows(arts []state.Artifact, now time.Time, stateArg string) []NeedsGrantRow {
+	live := liveMergeGrantRepos(arts, now)
+	latest := make(map[string]needsGrantAgg)
+	for _, a := range arts {
+		if a.Kind != state.KindGrantNeeded {
+			continue
+		}
+		var b grantNeededBody
+		if err := json.Unmarshal(a.Body, &b); err != nil || b.Repo == "" {
+			continue
+		}
+		at := grantNeededAt(b.At, a.Time)
+		cur, seen := latest[b.Repo]
+		if seen && !at.After(cur.at) {
+			continue
+		}
+		latest[b.Repo] = needsGrantAgg{reason: b.Reason, at: at}
+	}
+
+	rows := make([]NeedsGrantRow, 0, len(latest))
+	for repo, ag := range latest {
+		if live[repo] {
+			continue
+		}
+		rows = append(rows, newNeedsGrantRow(repo, ag, stateArg))
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Repo < rows[j].Repo })
+	return rows
+}
+
+// liveMergeGrantRepos is the set of repos with a currently-live merge grant. It
+// reuses grantLines' expiry rule verbatim — expired strictly after the instant,
+// so a grant at exactly its expiry is still live — so the suppression test can
+// never drift from what capability.Check would authorize.
+func liveMergeGrantRepos(arts []state.Artifact, now time.Time) map[string]bool {
+	live := make(map[string]bool)
+	for _, a := range arts {
+		if a.Kind != state.KindGrant {
+			continue
+		}
+		var g grantBody
+		if err := json.Unmarshal(a.Body, &g); err != nil {
+			continue
+		}
+		if g.Action != "merge" || now.After(g.ExpiresAt) {
+			continue
+		}
+		live[g.Repo] = true
+	}
+	return live
+}
+
+// newNeedsGrantRow builds a row from a repo's folded refusal facts. last_expired_at
+// is set only for an expired grant (an absent grant never had an expiry to name).
+func newNeedsGrantRow(repo string, ag needsGrantAgg, stateArg string) NeedsGrantRow {
+	gstate := "expired"
+	if ag.reason == "grant_absent" {
+		gstate = "absent"
+	}
+	row := NeedsGrantRow{
+		Repo:          repo,
+		GrantState:    gstate,
+		SuggestedMint: suggestedMint(repo, stateArg),
+	}
+	if gstate == "expired" {
+		row.LastExpiredAt = ag.at.UTC().Format(time.RFC3339)
+	}
+	return row
+}
+
+// grantNeededAt prefers the record's own timestamp field, falling back to the
+// artifact's log time when the body carried none (or an unparseable one).
+func grantNeededAt(bodyAt string, artTime time.Time) time.Time {
+	if t, err := time.Parse(time.RFC3339, bodyAt); err == nil {
+		return t
+	}
+	return artTime
+}
+
+// suggestedMint is the paste-ready re-mint command for a lapsed repo. It splices
+// stateArg the same way judgeCommand does, so a copied command targets the very
+// state dir this inbox read. Tier and TTL mirror `gate grant`'s own defaults.
+func suggestedMint(repo, stateArg string) string {
+	return fmt.Sprintf("gate grant%s -repo %s -action merge -max-tier T1 -ttl 24h", stateArg, repo)
+}
+
 // shortDur renders d as a compact span using its largest one or two units:
 // "45m", "5h49m", "2d3h". Sub-minute spans collapse to "<1m" so a grant seconds
 // from expiry doesn't read as "0m".
@@ -496,11 +653,32 @@ func renderInbox(w io.Writer, in Inbox) {
 			renderParked(w, p)
 		}
 	}
+	renderNeedsGrant(w, in.NeedsGrant)
 	if len(in.Grants) == 0 {
 		return
 	}
 	fmt.Fprintln(w, "grants")
 	renderGrants(w, in.Grants)
+}
+
+// renderNeedsGrant lists the repos whose merge grant has lapsed, each with its
+// paste-ready re-mint — symmetric with the grants ledger below it.
+func renderNeedsGrant(w io.Writer, rows []NeedsGrantRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "needs a grant (%d)\n\n", len(rows))
+	for _, r := range rows {
+		head := fmt.Sprintf("  %s  %s", r.Repo, r.GrantState)
+		if r.OpenPRs != nil {
+			head += fmt.Sprintf("  %d open PR(s)", *r.OpenPRs)
+		}
+		fmt.Fprintln(w, head)
+		if r.LastExpiredAt != "" {
+			fmt.Fprintf(w, "  last expired %s\n", r.LastExpiredAt)
+		}
+		fmt.Fprintf(w, "  → %s\n\n", r.SuggestedMint)
+	}
 }
 
 func renderParked(w io.Writer, p ParkedRun) {

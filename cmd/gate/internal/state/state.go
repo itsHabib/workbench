@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,16 +28,29 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindGrantNeeded records a gate run refused for want of a live grant — a
+	// durable, surfaceable fact, NOT a decision. It is deliberately outside the
+	// action/escalation outcome families: the cycle count, the reducer, and the
+	// auto-judge all ignore it, so persisting a refusal never counts as a review
+	// cycle or contaminates a decision chain. The projection folds it into the
+	// inbox's needs_grant[] surface.
+	KindGrantNeeded = "grant_needed"
 )
 
 var kindPrefix = map[string]string{
-	KindEvidence:   "evd",
-	KindVerdict:    "vrd",
-	KindGrant:      "grt",
-	KindAction:     "act",
-	KindEscalation: "esc",
-	KindJudgment:   "jdg",
+	KindEvidence:    "evd",
+	KindVerdict:     "vrd",
+	KindGrant:       "grt",
+	KindAction:      "act",
+	KindEscalation:  "esc",
+	KindJudgment:    "jdg",
+	KindGrantNeeded: "gnd",
 }
+
+// ErrNotFound is returned by Get when no artifact carries the requested id. It
+// is a sentinel so callers can classify a genuine absent artifact (e.g. a grant
+// id that names nothing) apart from an I/O or parse failure.
+var ErrNotFound = errors.New("artifact not found")
 
 // Artifact is the one unit of communication between packages. Parents carry
 // provenance: a verdict names the evidence it judged, an action names the
@@ -267,7 +281,7 @@ func (s *Store) Get(id string) (Artifact, error) {
 		return Artifact{}, err
 	}
 	if len(all) == 0 {
-		return Artifact{}, fmt.Errorf("state: artifact %s not found", id)
+		return Artifact{}, fmt.Errorf("state: artifact %s: %w", id, ErrNotFound)
 	}
 	return all[0], nil
 }

@@ -271,6 +271,172 @@ func TestBuildInboxExpiryBoundaryMatchesCheck(t *testing.T) {
 	}
 }
 
+// needed builds a grant_needed record body, the shape main.go's recordGrantNeeded writes.
+func needed(repo, reason string, at time.Time) map[string]any {
+	return map[string]any{"repo": repo, "reason": reason, "at": at.UTC().Format(time.RFC3339)}
+}
+
+// TestNeedsGrantExpiredOnlyShows pins the base dedup law: a repo whose only
+// grant record is an expired refusal shows exactly one row, grant_state
+// "expired", with the refusal timestamp as last_expired_at and no live grant to
+// suppress it.
+func TestNeedsGrantExpiredOnlyShows(t *testing.T) {
+	at := inboxBase.Add(-time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/widget", "grant_expired", at)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 1 {
+		t.Fatalf("want exactly one needs_grant row, got %d: %+v", len(in.NeedsGrant), in.NeedsGrant)
+	}
+	r := in.NeedsGrant[0]
+	if r.Repo != "o/widget" || r.GrantState != "expired" {
+		t.Fatalf("row = %+v, want o/widget expired", r)
+	}
+	if r.LastExpiredAt != at.UTC().Format(time.RFC3339) {
+		t.Fatalf("last_expired_at = %q, want %q", r.LastExpiredAt, at.UTC().Format(time.RFC3339))
+	}
+	if r.OpenPRs != nil {
+		t.Fatalf("non-live projection must omit open_prs, got %v", *r.OpenPRs)
+	}
+}
+
+// TestNeedsGrantLiveGrantSuppresses pins the suppression law: a repo with a
+// currently-live merge grant never appears, even though it carries a refusal
+// record from before the grant was minted.
+func TestNeedsGrantLiveGrantSuppresses(t *testing.T) {
+	at := inboxBase.Add(-2 * time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/api", "grant_expired", at)),
+		art(state.KindGrant, "run_mint", "grt_live", inboxBase, grant("o/api", inboxBase.Add(5*time.Hour))),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 0 {
+		t.Fatalf("a live grant must suppress needs_grant, got %+v", in.NeedsGrant)
+	}
+}
+
+// TestNeedsGrantLiveButExpiringSuppresses pins that a grant still live at now —
+// even one about to expire — suppresses the row: only a genuinely lapsed repo
+// shows. Matches capability.Check (live up to and including the expiry instant).
+func TestNeedsGrantLiveButExpiringSuppresses(t *testing.T) {
+	at := inboxBase.Add(-2 * time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/api", "grant_expired", at)),
+		// Live by one minute, and even exactly at the expiry instant is still live.
+		art(state.KindGrant, "run_mint", "grt_soon", inboxBase, grant("o/api", inboxBase.Add(time.Minute))),
+		art(state.KindGrant, "run_mint", "grt_edge", inboxBase, grant("o/edge", inboxBase)),
+		art(state.KindGrantNeeded, "run_r2", "gnd_2", at, needed("o/edge", "grant_expired", at)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 0 {
+		t.Fatalf("a live-but-expiring grant (and one exactly at expiry) must suppress, got %+v", in.NeedsGrant)
+	}
+}
+
+// TestNeedsGrantDedupsToMostRecent pins that many refusals for one repo fold
+// into a single row carrying the most-recent record's grant_state and timestamp.
+func TestNeedsGrantDedupsToMostRecent(t *testing.T) {
+	early := inboxBase.Add(-3 * time.Hour)
+	mid := inboxBase.Add(-2 * time.Hour)
+	late := inboxBase.Add(-1 * time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_a", "gnd_a", early, needed("o/r", "grant_absent", early)),
+		art(state.KindGrantNeeded, "run_b", "gnd_b", late, needed("o/r", "grant_expired", late)),
+		art(state.KindGrantNeeded, "run_c", "gnd_c", mid, needed("o/r", "grant_absent", mid)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 1 {
+		t.Fatalf("multiple refusals for one repo must fold to one row, got %+v", in.NeedsGrant)
+	}
+	r := in.NeedsGrant[0]
+	if r.GrantState != "expired" || r.LastExpiredAt != late.UTC().Format(time.RFC3339) {
+		t.Fatalf("dedup must keep the most-recent record, got %+v", r)
+	}
+}
+
+// TestNeedsGrantAbsentHasNoExpiry pins that an absent grant reads grant_state
+// "absent" and carries no last_expired_at — there was never an expiry to name.
+func TestNeedsGrantAbsentHasNoExpiry(t *testing.T) {
+	at := inboxBase.Add(-time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/r", "grant_absent", at)),
+	}
+	in := buildInbox(arts, inboxBase, "")
+	if len(in.NeedsGrant) != 1 || in.NeedsGrant[0].GrantState != "absent" {
+		t.Fatalf("want one absent row, got %+v", in.NeedsGrant)
+	}
+	if in.NeedsGrant[0].LastExpiredAt != "" {
+		t.Fatalf("absent grant must carry no last_expired_at, got %q", in.NeedsGrant[0].LastExpiredAt)
+	}
+}
+
+// TestSuggestedMintParsesToGrant pins that suggested_mint is a valid `gate grant`
+// invocation and carries -state when the inbox read under an explicit state dir.
+func TestSuggestedMintParsesToGrant(t *testing.T) {
+	at := inboxBase.Add(-time.Hour)
+	arts := []state.Artifact{
+		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/r", "grant_expired", at)),
+	}
+	in := buildInbox(arts, inboxBase, " -state /custom")
+	cmd := in.NeedsGrant[0].SuggestedMint
+	for _, want := range []string{"gate grant ", "-repo o/r", "-action merge", "-max-tier T1", "-ttl 24h", "-state /custom"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("suggested_mint %q missing %q", cmd, want)
+		}
+	}
+	// Ambient state dir omits -state, keeping the command short.
+	in2 := buildInbox(arts, inboxBase, "")
+	if strings.Contains(in2.NeedsGrant[0].SuggestedMint, "-state") {
+		t.Fatalf("ambient state dir must omit -state, got %q", in2.NeedsGrant[0].SuggestedMint)
+	}
+}
+
+// TestEnrichNeedsGrantBestEffort pins the live enrichment contract: a per-repo
+// gh failure DROPS that repo, every other repo survives with its open-PR count,
+// and the projection as a whole never fails.
+func TestEnrichNeedsGrantBestEffort(t *testing.T) {
+	rows := []NeedsGrantRow{
+		{Repo: "o/ok", GrantState: "expired"},
+		{Repo: "o/broken", GrantState: "absent"},
+		{Repo: "o/also-ok", GrantState: "expired"},
+	}
+	lister := func(repo string) (int, error) {
+		if repo == "o/broken" {
+			return 0, fmt.Errorf("gh unreachable")
+		}
+		return 2, nil
+	}
+	got := enrichNeedsGrant(rows, lister)
+	if len(got) != 2 {
+		t.Fatalf("a per-repo failure must drop only that repo, got %+v", got)
+	}
+	for _, r := range got {
+		if r.Repo == "o/broken" {
+			t.Fatalf("the failing repo must be dropped, got %+v", got)
+		}
+		if r.OpenPRs == nil || *r.OpenPRs != 2 {
+			t.Fatalf("surviving row must carry its open-PR count, got %+v", r)
+		}
+	}
+}
+
+// TestNeedsGrantRendersText pins the symmetric text section.
+func TestNeedsGrantRendersText(t *testing.T) {
+	two := 2
+	in := Inbox{NeedsGrant: []NeedsGrantRow{
+		{Repo: "o/r", GrantState: "expired", LastExpiredAt: "2026-07-19T08:00:00Z", OpenPRs: &two,
+			SuggestedMint: "gate grant -repo o/r -action merge -max-tier T1 -ttl 24h"},
+	}}
+	var buf bytes.Buffer
+	renderInbox(&buf, in)
+	for _, want := range []string{"needs a grant (1)", "o/r  expired", "2 open PR(s)", "last expired 2026-07-19T08:00:00Z", "→ gate grant -repo o/r"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("text render missing %q\n---\n%s", want, buf.String())
+		}
+	}
+}
+
 func TestShortDur(t *testing.T) {
 	cases := []struct {
 		d    time.Duration

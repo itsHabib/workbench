@@ -389,6 +389,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	// precedes model construction so a missing/invalid grant refuses (codeRefused)
 	// before a missing ANTHROPIC_API_KEY could hard-error the model backend.
 	if _, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now); err != nil {
+		recordGrantNeeded(e, repo, err)
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
 		return res, codeRefused, nil
@@ -447,6 +448,44 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+// recordGrantNeeded persists the top-level capability refusal as a durable,
+// surfaceable fact — the refusal that otherwise vanished with exit 3 and no
+// artifact. It records ONLY a genuine absent or expired grant; every other
+// refusal class (bad signature, scope mismatch, a missing signing key) is a
+// configuration fault, not a "mint a grant" fact, and is left unrecorded. The
+// record is a KindGrantNeeded artifact, which isOutcome/the reducer/the cycle
+// count all ignore, so it never pollutes a decision chain. The refusal precedes
+// any run id, so a standalone run id is minted for the record alone. Best-effort:
+// a write failure is logged, never surfaced as the run's exit code — the refusal
+// itself (codeRefused) is the caller's contract.
+func recordGrantNeeded(e env, repo string, checkErr error) {
+	reason := grantNeededReason(checkErr)
+	if reason == "" {
+		return
+	}
+	body := map[string]any{
+		"repo":   repo,
+		"reason": reason,
+		"at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	if _, err := e.st.Append(state.KindGrantNeeded, state.NewRunID(), nil, body); err != nil {
+		fmt.Fprintf(os.Stderr, "gate: record grant_needed failed: %v\n", err)
+	}
+}
+
+// grantNeededReason classifies a capability.Check error into the recordable
+// reasons, or "" for a class that is not a grant-materialization fact. Only an
+// expired grant and an absent one (an id that names nothing) qualify.
+func grantNeededReason(err error) string {
+	if errors.Is(err, capability.ErrExpired) {
+		return "grant_expired"
+	}
+	if errors.Is(err, state.ErrNotFound) {
+		return "grant_absent"
+	}
+	return ""
 }
 
 // ciClassifyIfRed runs the conditional enrichment rung, last before
@@ -923,10 +962,10 @@ func cmdNext(args []string) error {
 	}
 	stateArg := stateArgFor(*stateDir)
 	if *live && *asJSON {
-		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR)
+		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR, lookupOpenPRCount)
 	}
 	if *live {
-		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR)
+		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR, lookupOpenPRCount)
 	}
 	if *asJSON {
 		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
@@ -953,6 +992,28 @@ func lookupLivePR(repo string, number int) (observe.LivePR, error) {
 		return observe.LivePR{}, fmt.Errorf("decode PR %s#%d: %w", repo, number, err)
 	}
 	return observe.LivePR{State: pr.State, Title: pr.Title, HeadSHA: pr.HeadRefOID, URL: pr.URL}, nil
+}
+
+// lookupOpenPRCount is the live open-PR enumeration seam for needs_grant[]: one
+// bounded `gh pr list` per lapsed-grant repo. It is best-effort at the call site
+// (observe drops a repo whose lookup errors), so a repo gh can't reach never
+// fails the whole projection.
+func lookupOpenPRCount(repo string) (int, error) {
+	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--json", "number").CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail != "" {
+			return 0, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
+		}
+		return 0, fmt.Errorf("list PRs %s: %w", repo, err)
+	}
+	var prs []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return 0, fmt.Errorf("decode PRs %s: %w", repo, err)
+	}
+	return len(prs), nil
 }
 
 // stateArgFor decides whether next's suggested commands need an explicit -state.
