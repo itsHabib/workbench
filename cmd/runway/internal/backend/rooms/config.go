@@ -2,6 +2,7 @@ package rooms
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,12 +10,13 @@ import (
 )
 
 const (
-	envImage      = "RUNWAY_ROOMS_IMAGE"
-	envModel      = "RUNWAY_ROOMS_MODEL"
-	envBin        = "RUNWAY_ROOMS_BIN"
-	envTapGateway = "RUNWAY_ROOMS_TAP_GATEWAY"
-	envTapSource  = "RUNWAY_ROOMS_TAP_SOURCE"
-	envWitness    = "RUNWAY_ROOMS_WITNESS"
+	envImage       = "RUNWAY_ROOMS_IMAGE"
+	envModel       = "RUNWAY_ROOMS_MODEL"
+	envBin         = "RUNWAY_ROOMS_BIN"
+	envTapGateway  = "RUNWAY_ROOMS_TAP_GATEWAY"
+	envTapSource   = "RUNWAY_ROOMS_TAP_SOURCE"
+	envWitness     = "RUNWAY_ROOMS_WITNESS"
+	envEgressExtra = "RUNWAY_ROOMS_EGRESS_EXTRA"
 )
 
 const defaultModel = "composer-2.5"
@@ -39,6 +41,12 @@ type Config struct {
 	// digested into the room-authority receipt. It fails the room closed on a
 	// host without tcpdump, so it is an opt-out (RUNWAY_ROOMS_WITNESS=0).
 	Witness bool
+	// EgressExtra are additional allowlist destinations (hostnames or IP/CIDR
+	// literals) appended to the enforced egress allowlist when a custody ref is
+	// present — the escape hatch for a host whose IPs rotate past rooms' launch-
+	// time DNS pin (e.g. a pinned git-host CIDR, or the guest's DNS resolver).
+	// From RUNWAY_ROOMS_EGRESS_EXTRA, comma-separated.
+	EgressExtra []string
 }
 
 // ConfigFromEnvironment resolves the one installed Rooms profile. Host paths
@@ -61,15 +69,32 @@ func ConfigFromEnvironment() (Config, error) {
 		model = defaultModel
 	}
 	return Config{
-		Launcher:   "sudo",
-		Prefix:     []string{"-E", roomsBin},
-		Image:      image,
-		Model:      model,
-		Poll:       10 * time.Millisecond,
-		TapGateway: os.Getenv(envTapGateway),
-		TapSource:  os.Getenv(envTapSource),
-		Witness:    witnessEnabled(),
+		Launcher:    "sudo",
+		Prefix:      []string{"-E", roomsBin},
+		Image:       image,
+		Model:       model,
+		Poll:        10 * time.Millisecond,
+		TapGateway:  os.Getenv(envTapGateway),
+		TapSource:   os.Getenv(envTapSource),
+		Witness:     witnessEnabled(),
+		EgressExtra: splitList(os.Getenv(envEgressExtra)),
 	}, nil
+}
+
+// splitList splits a comma-separated env value into trimmed, non-empty entries.
+// An unset or all-blank value yields nil, so the egress allowlist appends
+// nothing rather than a stray empty destination rooms would reject.
+func splitList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, entry := range strings.Split(value, ",") {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 // witnessEnabled reports whether placements run under `rooms --witness` (default
@@ -97,6 +122,22 @@ func (c Config) custodyBase(key string) string {
 
 // tapSource is the transport source a derived child is bound to (D2b).
 func (c Config) tapSource() string { return c.TapSource }
+
+// tapGatewayHost is the bare host of the custody tap gateway — the destination
+// the egress allowlist must permit so guest vendor calls reach the proxy. It
+// strips the scheme and port from TapGateway ("http://172.30.0.1:8127" ->
+// "172.30.0.1"); an unset or unparseable gateway yields "" so the caller omits
+// the entry rather than allowlisting a garbage destination.
+func (c Config) tapGatewayHost() string {
+	if c.TapGateway == "" {
+		return ""
+	}
+	parsed, err := url.Parse(c.TapGateway)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return parsed.Hostname()
+}
 
 func (c Config) validate() error {
 	if c.Launcher == "" {

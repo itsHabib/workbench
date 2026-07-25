@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,7 +123,8 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		return nil, fmt.Errorf("rooms: prepared run is missing out/private roots")
 	}
 	lifecyclePath := filepath.Join(prep.PrivateDir, lifecycleFile)
-	args := b.runArgs(prep, task, lifecyclePath)
+	allow := b.egressAllowlist(prep.Work)
+	args := b.runArgs(prep, task, lifecyclePath, allow)
 
 	captures, err := openCapture(prep)
 	if err != nil {
@@ -155,12 +157,13 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 			Enforced: map[string]any{
 				"cpu":        1,
 				"memory_mib": 256,
-				// No --egress is passed, so the room is never blocked. Report the
-				// honest posture: with --witness the egress is recorded ("observe",
-				// rooms' name for record-don't-block); without it the room is open
-				// AND unobserved ("open"). Claiming "egress" — or "observe" when
-				// nothing observes — would overstate what actually ran.
-				"network":          networkPosture(b.config.Witness),
+				// Report the honest network posture. When a custody ref is present
+				// the room runs behind the enforced --egress allowlist ("egress").
+				// Otherwise no wall is installed: with --witness the egress is
+				// recorded ("observe", rooms' name for record-don't-block); without
+				// it the room is open AND unobserved ("open"). Claiming enforcement
+				// a placement did not perform would overstate what actually ran.
+				"network":          networkPosture(len(allow) > 0, b.config.Witness),
 				"witness":          b.config.Witness,
 				"rootfs":           "readonly_overlay",
 				"secret_transport": "ssh_sendenv",
@@ -332,7 +335,7 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 	}
 }
 
-func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []string {
+func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string, allow []string) []string {
 	args := append([]string(nil), b.config.Prefix...)
 	args = append(args,
 		"run",
@@ -351,7 +354,81 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []st
 	if b.config.Witness {
 		args = append(args, "--witness")
 	}
+	// --egress allowlist:<dests> installs the host-side firewall wall that forces
+	// every guest packet through the custody proxy: without it, CUSTODY_BASE_ is
+	// only soft configuration and a compromised guest could dial the vendor CDN
+	// directly. allow is non-empty only when a custody ref is present (so
+	// non-custody placements keep today's open network), and always carries the
+	// git host — rooms clones AND pushes the repo IN-GUEST, so a proxy-only
+	// allowlist would sever git.
+	if len(allow) > 0 {
+		args = append(args, "--egress", "allowlist:"+strings.Join(allow, ","))
+	}
 	return args
+}
+
+// egressAllowlist is the enforced egress destination set for this placement, or
+// nil when no custody ref is present (the room then keeps the open network
+// today's non-custody placements rely on). When a custody ref IS present, the
+// wall must permit exactly the destinations a placed agent legitimately needs:
+// the custody proxy (so scoped vendor calls reach it) and the git host (rooms
+// clones + pushes the repo in-guest), plus any operator-configured extras.
+// Everything else is dropped, so the proxy cannot be bypassed.
+func (b *Backend) egressAllowlist(work execution.WorkSpec) []string {
+	if !hasCustodyRef(work) {
+		return nil
+	}
+	candidates := []string{b.config.tapGatewayHost(), gitHost(work.Workspace.URL)}
+	candidates = append(candidates, b.config.EgressExtra...)
+	out := make([]string, 0, len(candidates))
+	seen := map[string]struct{}{}
+	for _, dest := range candidates {
+		if dest == "" {
+			continue
+		}
+		if _, ok := seen[dest]; ok {
+			continue
+		}
+		seen[dest] = struct{}{}
+		out = append(out, dest)
+	}
+	return out
+}
+
+// hasCustodyRef reports whether any declared secret is a custody: ref — the
+// signal that this placement routes vendor calls through the proxy and so must
+// run behind the enforced egress wall.
+func hasCustodyRef(work execution.WorkSpec) bool {
+	for _, secret := range work.Secrets {
+		if _, err := parseCustodyRef(secret.Name, secret.Ref); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// gitHost extracts the bare host of a repo URL so the egress allowlist can
+// permit the git clone + push rooms performs in-guest. It handles the https
+// form ("https://github.com/o/r" -> "github.com") and the scp-like ssh form
+// ("git@github.com:o/r.git" -> "github.com"). An unparseable URL yields "",
+// which the caller drops — a placement whose git host cannot be determined
+// would then fail its in-guest clone under the wall, surfacing loudly rather
+// than silently allowlisting the wrong host.
+func gitHost(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	// scp-like: user@host:path — no scheme, so url.Parse yields no host.
+	if at := strings.LastIndex(rawURL, "@"); at != -1 {
+		rest := rawURL[at+1:]
+		if host, _, ok := strings.Cut(rest, ":"); ok && host != "" {
+			return host
+		}
+	}
+	return ""
 }
 
 func (h *handle) allocated(record lifecycleRecord, emit backend.Emit) error {
@@ -568,12 +645,17 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 // deterministic.
 var witnessEvidence = []string{"witness.json", "witness.pcap"}
 
-// networkPosture reports the honest network enforcement for the receipt. No
-// --egress is ever passed, so the room is never blocked: with --witness its
-// egress is recorded ("observe", rooms' name for record-don't-block); without it
-// the room is open AND unobserved ("open"). Reporting "observe" unconditionally
-// would claim observation a witness-off placement does not perform.
-func networkPosture(witness bool) string {
+// networkPosture reports the honest network enforcement for the receipt. When
+// the room runs behind the enforced --egress allowlist the posture is "egress"
+// (traffic is blocked to all but the permitted destinations). Otherwise no wall
+// is installed: with --witness the egress is recorded ("observe", rooms' name
+// for record-don't-block); without it the room is open AND unobserved ("open").
+// Reporting "egress" or "observe" a placement did not perform would overstate
+// what actually ran.
+func networkPosture(egress, witness bool) string {
+	if egress {
+		return "egress"
+	}
 	if witness {
 		return "observe"
 	}

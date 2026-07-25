@@ -199,7 +199,7 @@ func TestRoomsArgvContainsNoResolvedSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := be.runArgs(prep, task, filepath.Join(prep.PrivateDir, lifecycleFile))
+	args := be.runArgs(prep, task, filepath.Join(prep.PrivateDir, lifecycleFile), nil)
 	if strings.Contains(strings.Join(args, " "), "fixture-secret") {
 		t.Fatalf("secret leaked into argv: %v", args)
 	}
@@ -220,12 +220,12 @@ func TestRunArgsWitnessFlagTracksConfig(t *testing.T) {
 	lc := filepath.Join(prep.PrivateDir, lifecycleFile)
 
 	be.config.Witness = true
-	if !hasFlag(be.runArgs(prep, task, lc), "--witness") {
-		t.Fatalf("witness on: --witness must be in argv: %v", be.runArgs(prep, task, lc))
+	if !hasFlag(be.runArgs(prep, task, lc, nil), "--witness") {
+		t.Fatalf("witness on: --witness must be in argv: %v", be.runArgs(prep, task, lc, nil))
 	}
 	be.config.Witness = false
-	if hasFlag(be.runArgs(prep, task, lc), "--witness") {
-		t.Fatalf("witness off: --witness must not appear: %v", be.runArgs(prep, task, lc))
+	if hasFlag(be.runArgs(prep, task, lc, nil), "--witness") {
+		t.Fatalf("witness off: --witness must not appear: %v", be.runArgs(prep, task, lc, nil))
 	}
 }
 
