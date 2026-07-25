@@ -160,10 +160,22 @@ A grant is minted by the operator (`grant` verb), HMAC-signed with a local
 key, and checked before any evidence is gathered — and again before a
 judgment is applied, because resolving an escalation is effectful. Refusals
 are coded errors (`grant_expired`, `grant_scope_mismatch`,
-`grant_bad_signature`, `grant_tier_exceeded`), exit 3, nothing recorded but
-the refusal. Review-cycle policy that used to live in skill prose (cycle
-caps, coordinator thresholds) becomes grant fields and reducer configuration
-as the integration matures.
+`grant_bad_signature`, `grant_tier_exceeded`), exit 3. Review-cycle policy that
+used to live in skill prose (cycle caps, coordinator thresholds) becomes grant
+fields and reducer configuration as the integration matures.
+
+The top-level refusal — a run stopped before evidence for want of a live grant
+— also leaves a durable trace: a `grant_needed` artifact carrying the repo, the
+reason (`grant_expired` vs `grant_absent`), and a timestamp. It is deliberately
+*not* a decision: it sits outside the action/escalation outcome families, so the
+cycle count, the reducer, and the auto-judge all ignore it — persisting a
+refusal never burns a review cycle or contaminates a decision chain. `next`
+folds these records into a deduped `needs_grant[]` surface (one row per lapsed
+repo, live-grant repos suppressed) so a re-mint is one paste away. It records
+only a genuine absent/expired grant, and only when the state log already exists:
+a refusal must never *create* a fresh state tree, which would bypass the
+mint-time fresh-tree guard. Other refusal classes (scope, signature, missing
+key) are misconfigurations, not grant-materialization facts, and record nothing.
 
 ## Composition with existing tools
 
