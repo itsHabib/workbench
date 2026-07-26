@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +64,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 		return err
 	}
 	if err := b.requireCustodyConfig(work); err != nil {
+		return err
+	}
+	if err := b.requireEgressConfig(work); err != nil {
 		return err
 	}
 	if err := b.reserveWitnessPaths(work); err != nil {
@@ -358,9 +360,7 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string, allo
 	// every guest packet through the custody proxy: without it, CUSTODY_BASE_ is
 	// only soft configuration and a compromised guest could dial the vendor CDN
 	// directly. allow is non-empty only when a custody ref is present (so
-	// non-custody placements keep today's open network), and always carries the
-	// git host — rooms clones AND pushes the repo IN-GUEST, so a proxy-only
-	// allowlist would sever git.
+	// non-custody placements keep today's open network).
 	if len(allow) > 0 {
 		args = append(args, "--egress", "allowlist:"+strings.Join(allow, ","))
 	}
@@ -369,17 +369,21 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string, allo
 
 // egressAllowlist is the enforced egress destination set for this placement, or
 // nil when no custody ref is present (the room then keeps the open network
-// today's non-custody placements rely on). When a custody ref IS present, the
-// wall must permit exactly the destinations a placed agent legitimately needs:
-// the custody proxy (so scoped vendor calls reach it) and the git host (rooms
-// clones + pushes the repo in-guest), plus any operator-configured extras.
-// Everything else is dropped, so the proxy cannot be bypassed.
+// today's non-custody placements rely on). When a custody ref IS present the
+// wall permits the custody proxy (so scoped vendor calls reach it) plus the
+// operator-configured EgressExtra — which MUST carry the git egress the in-guest
+// clone/push needs. That is deliberately NOT derived from the repo URL: rooms
+// pins an allowlist hostname to a host-resolved IP once at launch, but the
+// untrusted guest resolves the name itself and a multi-IP host (e.g. GitHub)
+// hands it a DIFFERENT IP, which the wall then drops — host-validated. Reliable
+// git egress therefore needs the git CIDR + the guest's DNS resolver IP(s), both
+// deployment-specific, so Admit fails closed (requireEgressConfig) unless
+// EgressExtra is set. Everything else is dropped, so the proxy cannot be bypassed.
 func (b *Backend) egressAllowlist(work execution.WorkSpec) []string {
 	if !hasCustodyRef(work) {
 		return nil
 	}
-	candidates := []string{b.config.tapGatewayHost(), gitHost(work.Workspace.URL)}
-	candidates = append(candidates, b.config.EgressExtra...)
+	candidates := append([]string{b.config.tapGatewayHost()}, b.config.EgressExtra...)
 	out := make([]string, 0, len(candidates))
 	seen := map[string]struct{}{}
 	for _, dest := range candidates {
@@ -405,30 +409,6 @@ func hasCustodyRef(work execution.WorkSpec) bool {
 		}
 	}
 	return false
-}
-
-// gitHost extracts the bare host of a repo URL so the egress allowlist can
-// permit the git clone + push rooms performs in-guest. It handles the https
-// form ("https://github.com/o/r" -> "github.com") and the scp-like ssh form
-// ("git@github.com:o/r.git" -> "github.com"). An unparseable URL yields "",
-// which the caller drops — a placement whose git host cannot be determined
-// would then fail its in-guest clone under the wall, surfacing loudly rather
-// than silently allowlisting the wrong host.
-func gitHost(rawURL string) string {
-	if rawURL == "" {
-		return ""
-	}
-	if parsed, err := url.Parse(rawURL); err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	// scp-like: user@host:path — no scheme, so url.Parse yields no host.
-	if at := strings.LastIndex(rawURL, "@"); at != -1 {
-		rest := rawURL[at+1:]
-		if host, _, ok := strings.Cut(rest, ":"); ok && host != "" {
-			return host
-		}
-	}
-	return ""
 }
 
 func (h *handle) allocated(record lifecycleRecord, emit backend.Emit) error {
@@ -559,6 +539,26 @@ func (b *Backend) requireCustodyConfig(work execution.WorkSpec) error {
 		if b.config.tapSource() == "" {
 			return fmt.Errorf("rooms: secret %q requires a source-bound child but the tap source is unset (code: authority_source_unset); set %s", secret.Name, envTapSource)
 		}
+	}
+	return nil
+}
+
+// requireEgressConfig fails admission when a custody ref would install the egress
+// wall but no git egress is configured. The wall drops everything but the tap
+// gateway, and rooms clones+pushes the repo IN-GUEST, so without an explicit git
+// egress the placement's clone dies mid-run with no operator-facing reason. Git
+// egress cannot be auto-derived from the repo URL: an allowlist hostname is
+// pinned to a host-resolved IP once at launch, but the untrusted guest resolves
+// the name itself and a multi-IP host (GitHub) hands it a different IP the wall
+// then drops (host-validated). So the operator must supply the git CIDR + the
+// guest's DNS resolver IP(s) via EgressExtra; refuse fast here with the remedy
+// rather than let a slot (and a minted child token) burn on a doomed clone.
+func (b *Backend) requireEgressConfig(work execution.WorkSpec) error {
+	if !hasCustodyRef(work) {
+		return nil
+	}
+	if len(b.config.EgressExtra) == 0 {
+		return fmt.Errorf("rooms: custody placement runs behind the egress wall but no git egress is configured (code: egress_config_unset); set %s to the git host CIDR + the guest DNS resolver IP(s), e.g. %s=140.82.112.0/20,1.1.1.1,8.8.8.8", envEgressExtra, envEgressExtra)
 	}
 	return nil
 }

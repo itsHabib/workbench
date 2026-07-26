@@ -17,7 +17,10 @@ func custodyWork(url string) execution.WorkSpec {
 }
 
 func TestEgressAllowlistOnlyWhenCustodyRefPresent(t *testing.T) {
-	b := &Backend{config: Config{TapGateway: "http://172.30.0.1:8127"}}
+	b := &Backend{config: Config{
+		TapGateway:  "http://172.30.0.1:8127",
+		EgressExtra: []string{"140.82.112.0/20", "1.1.1.1"},
+	}}
 
 	// No custody ref: the room keeps the open network non-custody placements
 	// rely on — no wall, so nil.
@@ -29,35 +32,61 @@ func TestEgressAllowlistOnlyWhenCustodyRefPresent(t *testing.T) {
 		t.Fatalf("no custody ref must yield no allowlist, got %v", got)
 	}
 
-	// Custody ref present: proxy host + git host, in that order.
+	// Custody ref present: proxy host first, then the operator-supplied git
+	// egress. The git host is NOT auto-derived from the URL — hostname pins are
+	// unreliable for multi-IP hosts, so git egress comes only from EgressExtra.
 	got := b.egressAllowlist(custodyWork("https://github.com/itsHabib/rooms"))
-	want := []string{"172.30.0.1", "github.com"}
+	want := []string{"172.30.0.1", "140.82.112.0/20", "1.1.1.1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("allowlist = %v, want %v", got, want)
 	}
 }
 
-func TestEgressAllowlistAppendsExtrasDedupedDroppingEmpties(t *testing.T) {
+func TestEgressAllowlistDedupesAndDropsEmpties(t *testing.T) {
+	// A dup of the gateway host among the extras: the gateway wins its slot and
+	// the dup is dropped, order preserved.
 	b := &Backend{config: Config{
 		TapGateway:  "http://172.30.0.1:8127",
-		EgressExtra: []string{"10.0.0.53", "github.com"}, // resolver CIDR + a dup of the git host
+		EgressExtra: []string{"172.30.0.1", "1.1.1.1"},
 	}}
 	got := b.egressAllowlist(custodyWork("https://github.com/itsHabib/rooms"))
-	want := []string{"172.30.0.1", "github.com", "10.0.0.53"}
+	want := []string{"172.30.0.1", "1.1.1.1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("allowlist = %v, want %v (dedup github.com, keep order)", got, want)
+		t.Fatalf("allowlist = %v, want %v (dedup gateway, keep order)", got, want)
 	}
 
 	// An unset gateway drops that entry rather than allowlisting an empty dest.
 	b.config.TapGateway = ""
+	b.config.EgressExtra = []string{"140.82.112.0/20"}
 	got = b.egressAllowlist(custodyWork("https://github.com/itsHabib/rooms"))
-	for _, d := range got {
-		if d == "" {
-			t.Fatalf("empty destination leaked into allowlist: %v", got)
-		}
-	}
-	if got[0] != "github.com" {
+	if len(got) != 1 || got[0] != "140.82.112.0/20" {
 		t.Fatalf("unset gateway must be omitted, got %v", got)
+	}
+}
+
+func TestRequireEgressConfigFailsClosed(t *testing.T) {
+	// Custody ref present but no git egress configured: admission must refuse —
+	// the wall would sever the in-guest clone with no operator-facing reason.
+	b := &Backend{config: Config{TapGateway: "http://172.30.0.1:8127"}}
+	err := b.requireEgressConfig(custodyWork("https://github.com/itsHabib/rooms"))
+	if err == nil {
+		t.Fatal("custody ref + empty EgressExtra must fail admission")
+	}
+	if !strings.Contains(err.Error(), envEgressExtra) {
+		t.Fatalf("error must name the remedy env var %s: %v", envEgressExtra, err)
+	}
+
+	// With git egress configured, admission passes.
+	b.config.EgressExtra = []string{"140.82.112.0/20", "1.1.1.1"}
+	if err := b.requireEgressConfig(custodyWork("https://github.com/itsHabib/rooms")); err != nil {
+		t.Fatalf("configured EgressExtra must pass: %v", err)
+	}
+
+	// No custody ref: no wall, so EgressExtra is irrelevant — must pass.
+	plain := execution.WorkSpec{Secrets: []execution.Secret{{Name: "CURSOR_API_KEY", Ref: "env:CURSOR_API_KEY"}}}
+	b.config.EgressExtra = nil
+	if err := b.requireEgressConfig(plain); err != nil {
+		t.Fatalf("non-custody placement must not require egress config: %v", err)
 	}
 }
 
@@ -70,29 +99,14 @@ func TestRunArgsEgressFlagTracksAllowlist(t *testing.T) {
 	lc := "lifecycle.ndjson"
 
 	// Non-empty allowlist -> a single --egress allowlist:<joined> flag.
-	args := be.runArgs(prep, task, lc, []string{"172.30.0.1", "github.com"})
-	if got := flagValue(args, "--egress"); got != "allowlist:172.30.0.1,github.com" {
-		t.Fatalf("--egress = %q, want allowlist:172.30.0.1,github.com; argv=%v", got, args)
+	args := be.runArgs(prep, task, lc, []string{"172.30.0.1", "140.82.112.0/20"})
+	if got := flagValue(args, "--egress"); got != "allowlist:172.30.0.1,140.82.112.0/20" {
+		t.Fatalf("--egress = %q, want allowlist:172.30.0.1,140.82.112.0/20; argv=%v", got, args)
 	}
 
 	// Empty allowlist -> no flag at all (the non-custody, open-network case).
 	if hasFlag(be.runArgs(prep, task, lc, nil), "--egress") {
 		t.Fatalf("nil allowlist must not add --egress")
-	}
-}
-
-func TestGitHostParsesHTTPSAndSCPForms(t *testing.T) {
-	cases := map[string]string{
-		"https://github.com/itsHabib/rooms":     "github.com",
-		"https://github.com/itsHabib/rooms.git": "github.com",
-		"git@github.com:itsHabib/rooms.git":     "github.com",
-		"http://gitea.internal:3000/o/r.git":    "gitea.internal",
-		"":                                      "",
-	}
-	for in, want := range cases {
-		if got := gitHost(in); got != want {
-			t.Fatalf("gitHost(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
