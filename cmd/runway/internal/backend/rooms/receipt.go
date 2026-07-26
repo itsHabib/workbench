@@ -54,9 +54,21 @@ func assembleReceipt(in receiptInputs) authority.Receipt {
 	}
 }
 
+// deliveryChannelSendEnv is the honest transport the child token actually takes
+// today: the resolver forwards it as CUSTODY_GRANT_<KEY> in the `rooms run`
+// environment, which rooms passes to the guest over SSH SendEnv (matching
+// Enforced["secret_transport"]). This is NOT the vsock first-read-then-delete
+// path the grant-materialized-rooms spec (D6/§6) ultimately intends — moving to
+// rooms `--secret` vsock is a tracked cross-repo follow-up — so the receipt must
+// report SendEnv, not overstate a vsock one-shot the run never performed.
+const deliveryChannelSendEnv = "ssh_sendenv"
+
 // grantFromRecord maps one derive record to a receipt grant. The child token is
 // deliberately dropped: the receipt records what authority existed, never the
-// bearer secret itself.
+// bearer secret itself. Delivery reports the transport that actually ran (SSH
+// SendEnv), not the aspirational vsock one-shot: an env var persists in the
+// guest process environment for the session, so it is not one-shot, and
+// claiming otherwise would make the receipt lie about the run's real posture.
 func grantFromRecord(r DeriveRecord) authority.Grant {
 	return authority.Grant{
 		SecretName:    r.SecretName,
@@ -71,9 +83,9 @@ func grantFromRecord(r DeriveRecord) authority.Grant {
 		MintedAt:      r.MintedAt.UTC().Format(time.RFC3339),
 		Expiry:        r.Expiry.UTC().Format(time.RFC3339),
 		Delivery: authority.Delivery{
-			Channel:     "vsock",
+			Channel:     deliveryChannelSendEnv,
 			DeliveredAt: r.MintedAt.UTC().Format(time.RFC3339),
-			OneShot:     true,
+			OneShot:     false,
 		},
 	}
 }

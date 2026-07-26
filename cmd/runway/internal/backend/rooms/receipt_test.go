@@ -88,8 +88,10 @@ func TestReceiptDecodesWithAttenuationAndEvidence(t *testing.T) {
 	if g.ParentActions[1] != "comment" || g.Actions[0] != "read" || g.BoundSource != "172.30.0.7" {
 		t.Fatalf("attenuation not visible in-receipt: %+v", g)
 	}
-	if g.Delivery.Channel != "vsock" || !g.Delivery.OneShot {
-		t.Fatalf("delivery=%+v", g.Delivery)
+	// Delivery reports the transport that actually ran — SSH SendEnv, not a
+	// vsock one-shot the run never performed (env vars persist for the session).
+	if g.Delivery.Channel != deliveryChannelSendEnv || g.Delivery.OneShot {
+		t.Fatalf("delivery=%+v; want channel=%s one_shot=false", g.Delivery, deliveryChannelSendEnv)
 	}
 	// Only recognized witness/changeset artifacts become evidence refs; result.json is dropped.
 	if len(got.Evidence.Artifacts) != 3 {
