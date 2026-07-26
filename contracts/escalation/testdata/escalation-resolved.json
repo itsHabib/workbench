@@ -1,0 +1,16 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_5555555555555555",
+  "grant": "grt_6666666666666666",
+  "question": "the reviewer panel disagrees on whether the retry loop can wedge",
+  "run_id": "run_0123012301230123",
+  "repo": "itsHabib/ship",
+  "number": 126,
+  "resolution": {
+    "decision": "pass",
+    "who": "operator",
+    "at": "2026-07-25T18:30:00Z",
+    "judgment_id": "jdg_7777777777777777"
+  }
+}

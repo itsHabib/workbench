@@ -28,6 +28,16 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindResolution records how a parked escalation was resolved: the decision a
+	// human returned, who they are, when, and the judgment id it produced. It is
+	// provenance, NOT a decision — the effect (the judgment + re-reduction + the
+	// resulting action) is recorded by the existing judge mechanism; this stamp
+	// only names who closed the loop and links the judgment, parented to the
+	// escalation it resolves. It sits outside the action/escalation outcome
+	// families on purpose: the cycle count and the parked/ready projections
+	// ignore it, so recording a resolution never counts as a review cycle or
+	// masquerades as a fresh park.
+	KindResolution = "resolution"
 	// KindGrantNeeded records a gate run refused for want of a live grant — a
 	// durable, surfaceable fact, NOT a decision. It is deliberately outside the
 	// action/escalation outcome families: the cycle count, the reducer, and the
@@ -44,6 +54,7 @@ var kindPrefix = map[string]string{
 	KindAction:      "act",
 	KindEscalation:  "esc",
 	KindJudgment:    "jdg",
+	KindResolution:  "res",
 	KindGrantNeeded: "gnd",
 }
 

@@ -32,6 +32,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 // The exit-code contract — the one surface the driver branches on. gate owns
@@ -56,11 +57,12 @@ const (
 	codeError   = 4
 )
 
-// parkCodeCountUnreadable marks an escalation parked because the cycle count
-// could not be derived. Authorization parks carry a machine-readable code so
-// the cycle count can exclude them structurally, never by prose matching;
-// the ceiling parks reuse the capability package's coded error strings.
-const parkCodeCountUnreadable = "cycle_count_unreadable"
+// The machine-readable park codes an escalation carries live in the shared
+// contract (escalation.Code*): authorization parks carry a code so the cycle
+// count can exclude them structurally, never by prose matching. The count-
+// unreadable and cycle/tier-ceiling codes equal capability's own error strings
+// by construction — TestParkCodesMatchCapability pins that equality so the
+// contract vocabulary and gate's errors can never drift.
 
 // errLogTampered fires when the state log fails its integrity check at the
 // point the cycle count is derived. It is a hard fault (codeError), not a
@@ -106,6 +108,8 @@ func main() {
 		err = cmdGate(os.Args[2:])
 	case "judge":
 		err = cmdJudge(os.Args[2:])
+	case "resolve":
+		err = cmdResolve(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
 	case "next":
@@ -128,12 +132,13 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
+  resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
   audit
@@ -544,16 +549,35 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		for k, v := range extra {
 			body[k] = v
 		}
-		// An escalation pages the operator; carry the PR subject so a
-		// notification sink can render a direct click-target instead of a
-		// bare run id.
-		if kind == state.KindEscalation && reduced.Subject.Repo != "" && reduced.Subject.Number > 0 {
-			body["repo"] = reduced.Subject.Repo
-			body["number"] = reduced.Subject.Number
-		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		_, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+		return err
+	}
+
+	// recordEscalation writes a park as a typed escalation.V1 — the
+	// shared contract that replaced the untyped map this site used to emit and
+	// two readers redeclared. It carries the PR subject when the park names one,
+	// so a notification sink renders a direct click-target instead of a bare run
+	// id. The write shape is unchanged on the wire; only the type is now shared.
+	recordEscalation := func(question, code string, brief *escalation.Brief) error {
+		body := escalation.V1{
+			SchemaVersion: escalation.SchemaVersion,
+			Outcome:       "parked_for_judgment",
+			Verdict:       reducedID,
+			Grant:         grantID,
+			Question:      question,
+			RunID:         run,
+			Code:          code,
+			Brief:         brief,
+		}
+		if reduced.Subject.Repo != "" && reduced.Subject.Number > 0 {
+			body.Repo = reduced.Subject.Repo
+			body.Number = reduced.Subject.Number
+		}
+		// Parents[0] = the reduced verdict is a contract: cycleCount joins
+		// outcome → Parents[0] → Subject, and fails closed on anything else.
+		_, err := e.st.Append(state.KindEscalation, run, []string{reducedID, grantID}, body)
 		return err
 	}
 
@@ -577,8 +601,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		// authorization facts a findings brief can't illuminate and skip the
 		// model call. Advisory + fail-open: synthesis failure just drops the
 		// brief (the sink quotes the raw question), never blocks the park.
-		body := map[string]any{"question": reduced.Why}
-		attachBrief(body, synth)
+		brief := synthBrief(reduced.Why, synth)
 		// Synthesis can stall to the model's HTTP timeout, outlasting the TTL
 		// the pre-synthesis check saw. Re-check at write time so an escalation
 		// never records under a grant that expired mid-synthesis.
@@ -588,13 +611,12 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 			return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
 		}
 		res.Outcome = "parked_for_judgment"
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment", body)
+		return res, codeParked, recordEscalation(reduced.Why, "", brief)
 	}
 	if !grant.TierWithin(reduced.Tier) {
 		res.Outcome = "parked_for_judgment"
 		res.Why = fmt.Sprintf("verdict tier %s exceeds grant ceiling %s; %s", reduced.Tier, grant.MaxTier, reduced.Why)
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
-			map[string]any{"question": res.Why, "code": capability.ErrTierCeiling.Error()})
+		return res, codeParked, recordEscalation(res.Why, escalation.CodeTierExceeded, nil)
 	}
 	// The cycle number is state-derived, never caller-passed — the driver is
 	// the identity the cap bounds. An unreadable count parks: absence never
@@ -614,8 +636,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	if err != nil {
 		res.Outcome = "parked_for_judgment"
 		res.Why = fmt.Sprintf("cycle count unreadable: %v; %s", err, reduced.Why)
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
-			map[string]any{"question": res.Why, "code": parkCodeCountUnreadable})
+		return res, codeParked, recordEscalation(res.Why, escalation.CodeCountUnreadable, nil)
 	}
 	if !grant.CyclesWithin(n + 1) {
 		// A ceiling park resolves by re-minting a wider -max-cycles grant —
@@ -624,8 +645,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		res.Outcome = "parked_for_judgment"
 		res.Why = fmt.Sprintf("%s: cycle %d exceeds grant ceiling %d; re-mint a wider -max-cycles grant to proceed; %s",
 			capability.ErrCycleExceeded, n+1, grant.MaxCycles, reduced.Why)
-		return res, codeParked, record(state.KindEscalation, "parked_for_judgment",
-			map[string]any{"question": res.Why, "code": capability.ErrCycleExceeded.Error()})
+		return res, codeParked, recordEscalation(res.Why, escalation.CodeCycleExceeded, nil)
 	}
 
 	// --match-head-commit pins the merge to the exact SHA the evidence was
@@ -644,18 +664,26 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
 
-// attachBrief adds the synthesized operator brief to an escalation body, fail-open: a synthesis error drops the brief (the sink quotes the raw question), never the park.
-func attachBrief(body map[string]any, synth briefFn) {
+// synthBrief synthesizes the operator brief for a content park and returns it
+// as the typed contract Brief, fail-open: a nil synth or a synthesis error
+// yields no brief (the sink quotes the raw question), never a failed park. The
+// contract Brief mirrors verify.Brief field-for-field, so the map is a plain
+// field copy — no re-tagging.
+func synthBrief(question string, synth briefFn) *escalation.Brief {
 	if synth == nil {
-		return
+		return nil
 	}
-	question, _ := body["question"].(string)
 	b, err := synth(question)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gate: escalation brief synthesis failed (page falls back to the raw question): %v\n", err)
-		return
+		return nil
 	}
-	body["brief"] = b
+	return &escalation.Brief{
+		WhatItIs:       b.WhatItIs,
+		Concern:        b.Concern,
+		Risk:           b.Risk,
+		Recommendation: b.Recommendation,
+	}
 }
 
 // cycleCount derives how many review cycles this repo+PR has consumed, from
@@ -808,56 +836,181 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return err
 	}
-	verdicts, escalationID, subject, err := runVerdicts(arts)
+	_, escalationID, _, err := runVerdicts(arts)
 	if err != nil {
 		return err
 	}
 	if escalationID == "" {
 		return fmt.Errorf("judge: run %s has no escalation to resolve", *run)
 	}
-
-	// Capability bounds judgment too — resolving an escalation is effectful.
-	if _, err := capability.Check(e.st, e.keyPath, *grantID, subject.Repo, "merge", time.Now); err != nil {
-		return fmt.Errorf("capability_refused: %w", err)
-	}
-
-	judgment := verify.Verdict{
-		Subject:    subject,
-		Source:     "operator-judgment",
-		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
-		Decision:   *decision,
-		Tier:       "T0",
-		Confidence: 1.0,
-		Why:        *why,
-	}
-	if *auto {
-		judgment, err = verify.AutoJudge(arts, subject)
-		if err != nil {
-			return err
-		}
-	}
-	jArt, err := e.st.Append(state.KindJudgment, *run, []string{escalationID}, judgment)
-	if err != nil {
-		return err
-	}
-	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
-	if err != nil {
-		return err
-	}
-	reducedArt, err := verify.Record(e.st, *run, []string{jArt.ID}, reduced)
-	if err != nil {
-		return err
-	}
-	// No brief on the judge path: the operator is already in the loop here,
-	// and a re-park after judgment is procedural (a ceiling), not a fresh
-	// zero-context page.
-	res, code, err := act(e, *run, *grantID, reduced, reducedArt.ID, gateResult{Run: *run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
+	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, *decision, *why, *auto)
 	if err != nil {
 		return err
 	}
 	printJSON(res)
 	os.Exit(code)
 	return nil
+}
+
+// applyJudgment records a decision against a run's parked escalation and returns
+// the outcome — the shared core of `judge` (keyed on the run) and `resolve`
+// (keyed on the escalation id a notification carries). It appends the judgment
+// parented to escalationID, re-reduces with it, and re-runs act so the grant
+// ceiling re-applies exactly as on the original gate run — a judgment can never
+// launder a ceiling. It never prints or exits: the caller owns that, so resolve
+// can stamp the resolution before it exits. The returned judgment id is empty
+// only when capability refused before any judgment was appended, so a caller
+// stamps a resolution exactly when a decision was actually recorded.
+func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto bool) (gateResult, int, string, error) {
+	arts, err := e.st.Run(run)
+	if err != nil {
+		return gateResult{}, 0, "", err
+	}
+	verdicts, _, subject, err := runVerdicts(arts)
+	if err != nil {
+		return gateResult{}, 0, "", err
+	}
+	// Capability bounds judgment too — resolving an escalation is effectful.
+	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now); err != nil {
+		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
+	}
+	judgment := verify.Verdict{
+		Subject:    subject,
+		Source:     "operator-judgment",
+		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision:   decision,
+		Tier:       "T0",
+		Confidence: 1.0,
+		Why:        why,
+	}
+	if auto {
+		judgment, err = verify.AutoJudge(arts, subject)
+		if err != nil {
+			return gateResult{}, 0, "", err
+		}
+	}
+	jArt, err := e.st.Append(state.KindJudgment, run, []string{escalationID}, judgment)
+	if err != nil {
+		return gateResult{}, 0, "", err
+	}
+	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
+	if err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	reducedArt, err := verify.Record(e.st, run, []string{jArt.ID}, reduced)
+	if err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	// No brief on the judge path: the operator is already in the loop here, and a
+	// re-park after judgment is procedural (a ceiling), not a fresh zero-context
+	// page.
+	res, code, err := act(e, run, grantID, reduced, reducedArt.ID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
+	return res, code, jArt.ID, err
+}
+
+func validateResolveFlags(escID, grantID, decision, why, who string) error {
+	if escID == "" || grantID == "" {
+		return errors.New("resolve: -escalation and -grant required")
+	}
+	if who == "" {
+		return errors.New("resolve: -who required (the resolution stamp records who decided)")
+	}
+	if why == "" {
+		return errors.New("resolve: -why required")
+	}
+	if decision != verify.DecisionPass && decision != verify.DecisionBlock {
+		return errors.New("resolve: -decision must be pass or block")
+	}
+	return nil
+}
+
+// cmdResolve is the resolution seam — the effect side of the Escalation plane's
+// agent→human→agent return path. Where `judge` is keyed on a run id (the
+// operator already at a terminal), `resolve` is keyed on the ESCALATION id a
+// notification carries: it is what a decision ingested by the back-channel
+// drives. It resolves the id to its run, records the decision through the shared
+// judgment core (so the grant ceiling re-applies — a resolution can never
+// launder a ceiling), then stamps a resolution artifact naming the decision,
+// who, when, and the judgment it produced, parented to the escalation. Only gate
+// writes into gate's log, so the effect lives here; the transport that carries
+// (id, decision) in from a notification is a SEPARATE component (cmd/escalate),
+// never flare — flare stays a read-only sink (Amendment 3).
+//
+// Like judge it exits on the gate exit-code contract (0/1/2/3), so the same
+// driver branch reads a resolve outcome as it reads a gate run.
+func cmdResolve(args []string) error {
+	fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	escID := fs.String("escalation", "", "the escalation artifact id to resolve")
+	grantID := fs.String("grant", "", "grant artifact id")
+	decision := fs.String("decision", "", "pass or block")
+	why := fs.String("why", "", "the decision's reasoning")
+	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	help, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if help {
+		return nil
+	}
+	if err := validateResolveFlags(*escID, *grantID, *decision, *why, *who); err != nil {
+		return err
+	}
+	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	if err != nil {
+		return err
+	}
+	run, err := runOfEscalation(e, *escID)
+	if err != nil {
+		return err
+	}
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, *decision, *why, false)
+	if err != nil {
+		return err
+	}
+	// Stamp the resolution only when a judgment was actually recorded (a
+	// capability refusal appends none): the stamp claims the loop closed, so it
+	// must never outrun the judgment it links.
+	if judgmentID != "" {
+		if err := stampResolution(e, run, *escID, judgmentID, *decision, *who); err != nil {
+			return err
+		}
+	}
+	printJSON(res)
+	os.Exit(code)
+	return nil
+}
+
+// runOfEscalation resolves an escalation id to the run it belongs to, so a
+// caller holding only the id a notification carried can drive that run's
+// judgment. It rejects an absent id or a wrong-kind id loudly, so a mistyped or
+// non-escalation id never silently resolves the wrong run.
+func runOfEscalation(e env, escID string) (string, error) {
+	a, err := e.st.Get(escID)
+	if err != nil {
+		return "", fmt.Errorf("resolve: escalation %s: %w", escID, err)
+	}
+	if a.Kind != state.KindEscalation {
+		return "", fmt.Errorf("resolve: artifact %s is a %s, not an escalation", escID, a.Kind)
+	}
+	return a.Run, nil
+}
+
+// stampResolution records the closed-loop provenance the judge path lacks: a
+// resolution artifact naming the decision, who made it, when, and the judgment
+// it produced — parented to the escalation it resolves and the judgment it
+// links. It is provenance, not a decision (the effect was the judgment + act
+// re-reduction the shared core already recorded), so it lands in its own
+// artifact kind that the cycle count and the parked/ready projections ignore.
+func stampResolution(e env, run, escID, judgmentID, decision, who string) error {
+	res := escalation.Resolution{
+		Decision:   decision,
+		Who:        who,
+		At:         time.Now().UTC().Format(time.RFC3339),
+		JudgmentID: judgmentID,
+	}
+	_, err := e.st.Append(state.KindResolution, run, []string{escID, judgmentID}, res)
+	return err
 }
 
 // runVerdicts loads a run's non-reduced verifier verdicts, its escalation id,

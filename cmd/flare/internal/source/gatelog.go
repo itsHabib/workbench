@@ -9,30 +9,16 @@ import (
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 	"github.com/itsHabib/workbench/contracts"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
-// escalationBody is gate's escalation payload. It is a body kind flare renders
-// but not part of the shared verdict contract, so it stays local here and is
-// read tolerantly — a missing body still notifies. The envelope and the verdict
-// come from contracts; this shape does not.
-type escalationBody struct {
-	Outcome  string           `json:"outcome"`
-	Question string           `json:"question"`
-	Code     string           `json:"code"`
-	Repo     string           `json:"repo"`
-	Number   int              `json:"number"`
-	Brief    *escalationBrief `json:"brief"`
-}
-
-// escalationBrief is gate's synthesized plain-language page for the
-// zero-context approver. Optional — older escalations and synthesis failures
-// carry none, and the card falls back to the raw question.
-type escalationBrief struct {
-	WhatItIs       string `json:"what_it_is"`
-	Concern        string `json:"concern"`
-	Risk           string `json:"risk"`
-	Recommendation string `json:"recommendation"`
-}
+// The escalation body flare renders is now the shared contract
+// (contracts/escalation.V1), decoded through escalation.DecodeBody —
+// the same tolerant read this file used to do against a locally-redeclared
+// struct. Tolerance is preserved deliberately: DecodeBody applies no version
+// gate, and flare treats any decode error as "no body", so an older or drifted
+// escalation still notifies rather than failing the read. flare stays a pure
+// sink (Amendment 3): it renders this contract, it never writes into it.
 
 // parseGateLog lifts events from gate artifact lines: every escalation, and
 // every verdict whose decision is block or escalate. Everything else in the
@@ -85,8 +71,7 @@ func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, er
 }
 
 func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
-	var b escalationBody
-	json.Unmarshal(env.Body, &b) // tolerant: an undecodable body leaves Brief nil → briefed "no" → drops under the briefed routes, never a corrupt page
+	b, _ := escalation.DecodeBody(env.Body) // tolerant: an undecodable body yields the zero value (Brief nil → briefed "no" → drops under the briefed routes), never a corrupt page
 	title := fmt.Sprintf("%s: parked for judgment (%s)", src.Name, env.Run)
 	if b.Outcome != "" {
 		title = fmt.Sprintf("%s: %s (%s)", src.Name, strings.ReplaceAll(b.Outcome, "_", " "), env.Run)
@@ -123,7 +108,7 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 // briefFields flattens the optional brief into event fields, so notify can
 // render its sections without knowing gate's body shape. Only non-empty
 // fields land — notify treats absence as "no brief, quote the question".
-func briefFields(fields map[string]string, b *escalationBrief) {
+func briefFields(fields map[string]string, b *escalation.Brief) {
 	if b == nil {
 		return
 	}

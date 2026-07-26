@@ -16,6 +16,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 // testEnv builds an env over throwaway state and key dirs (the key dir a
@@ -984,32 +985,237 @@ func TestExplainRejectsOutWithoutHTML(t *testing.T) {
 	}
 }
 
-// TestAttachBriefFailOpen pins the escalation-brief contract: a successful
-// synthesis rides the body, any failure (or no synthesizer at all) costs only
-// the brief — the escalation body and its question are untouched either way.
-func TestAttachBriefFailOpen(t *testing.T) {
-	body := map[string]any{"question": "needs judgment"}
-	attachBrief(body, func(q string) (verify.Brief, error) {
+// TestSynthBriefFailOpen pins the escalation-brief contract: a successful
+// synthesis returns the typed contract Brief (field-for-field from
+// verify.Brief), any failure (or no synthesizer at all) returns nil — the park
+// falls back to the raw question and never fails on a missing brief.
+func TestSynthBriefFailOpen(t *testing.T) {
+	got := synthBrief("needs judgment", func(q string) (verify.Brief, error) {
 		if q != "needs judgment" {
 			t.Fatalf("synth must receive the park question, got %q", q)
 		}
 		return verify.Brief{WhatItIs: "a spec", Concern: "check is broken", Risk: "Medium", Recommendation: "author fixes"}, nil
 	})
-	b, ok := body["brief"].(verify.Brief)
-	if !ok || b.Concern != "check is broken" {
-		t.Fatalf("brief must ride the escalation body, got %+v", body["brief"])
+	if got == nil || got.Concern != "check is broken" || got.WhatItIs != "a spec" {
+		t.Fatalf("brief must map field-for-field onto the contract Brief, got %+v", got)
 	}
 
-	failed := map[string]any{"question": "needs judgment"}
-	attachBrief(failed, func(string) (verify.Brief, error) {
+	failed := synthBrief("needs judgment", func(string) (verify.Brief, error) {
 		return verify.Brief{}, errors.New("model down")
 	})
-	if _, present := failed["brief"]; present {
-		t.Fatal("a failed synthesis must not attach a brief")
-	}
-	if failed["question"] != "needs judgment" {
-		t.Fatal("fail-open must leave the raw question intact")
+	if failed != nil {
+		t.Fatalf("a failed synthesis must yield no brief, got %+v", failed)
 	}
 
-	attachBrief(failed, nil) // nil synth: no-op, never a panic
+	if synthBrief("needs judgment", nil) != nil { // nil synth: no brief, never a panic
+		t.Fatal("a nil synthesizer must yield no brief")
+	}
+}
+
+// TestParkCodesMatchCapability pins the no-drift law between the shared park-code
+// vocabulary and gate's own capability errors: the contract enum values MUST
+// equal the strings gate persists, or a reader keying on the contract enum would
+// silently miss a real park. Adopting the typed body changed no wire value, and
+// this test keeps it that way.
+func TestParkCodesMatchCapability(t *testing.T) {
+	if escalation.CodeTierExceeded != capability.ErrTierCeiling.Error() {
+		t.Errorf("CodeTierExceeded %q != capability.ErrTierCeiling %q", escalation.CodeTierExceeded, capability.ErrTierCeiling.Error())
+	}
+	if escalation.CodeCycleExceeded != capability.ErrCycleExceeded.Error() {
+		t.Errorf("CodeCycleExceeded %q != capability.ErrCycleExceeded %q", escalation.CodeCycleExceeded, capability.ErrCycleExceeded.Error())
+	}
+	if escalation.CodeCountUnreadable != "cycle_count_unreadable" {
+		t.Errorf("CodeCountUnreadable %q != gate's persisted cycle_count_unreadable", escalation.CodeCountUnreadable)
+	}
+}
+
+// recordVerifier appends a non-reducer verifier verdict so runVerdicts finds the
+// subject to judge — the shape a real gate run records before it reduces. The
+// reduced verdict act consumes is passed separately (Source "reducer"), which
+// runVerdicts skips.
+func recordVerifier(t *testing.T, e env, run string, subject verify.Subject, decision string) {
+	t.Helper()
+	v := verify.Verdict{
+		Subject:    subject,
+		Source:     "readiness",
+		Producer:   verify.Producer{Class: verify.ClassLocal},
+		Decision:   decision,
+		Tier:       "T0",
+		Confidence: 1.0,
+		Why:        "the reviewer panel disagrees",
+	}
+	if _, err := verify.Record(e.st, run, nil, v); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func firstOfKind(t *testing.T, e env, run, kind string) state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.Kind == kind {
+			return a
+		}
+	}
+	t.Fatalf("run %s has no %s artifact", run, kind)
+	return state.Artifact{}
+}
+
+// TestParkWritesTypedV1 pins D1's write side: a content park writes a
+// body that is a valid V1 — it carries the schema version, decodes
+// through the shared contract, and passes the strict Validate. This is the proof
+// the untyped map became the typed contract on the wire.
+func TestParkWritesTypedV1(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 41, HeadSHA: "abc"}
+	v := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	if _, code, err := act(e, run, grantArt.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("escalate: code %d err %v", code, err)
+	}
+
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	body, err := escalation.DecodeBody(esc.Body)
+	if err != nil {
+		t.Fatalf("the park body must decode through the shared contract: %v", err)
+	}
+	if body.SchemaVersion != escalation.SchemaVersion {
+		t.Fatalf("park body must carry schema_version %q, got %q", escalation.SchemaVersion, body.SchemaVersion)
+	}
+	if err := escalation.Validate(body); err != nil {
+		t.Fatalf("a real park body must pass the strict contract law: %v", err)
+	}
+	if body.Repo != "o/r" || body.Number != 41 || body.RunID != run || body.Grant != grantArt.ID {
+		t.Fatalf("park body lost provenance: %+v", body)
+	}
+	if body.Resolution != nil {
+		t.Fatalf("a fresh park must carry no resolution, got %+v", body.Resolution)
+	}
+}
+
+// TestResolveClosesLoop is the end-to-end thread D2 exists to prove: a parked
+// escalation, resolved by its id, records a judgment parented to that escalation
+// AND stamps a resolution artifact with full provenance — and the hash chain
+// still verifies. This exercises the exact helpers cmdResolve composes
+// (runOfEscalation → applyJudgment → stampResolution), minus the os.Exit wrapper.
+func TestResolveClosesLoop(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 126, HeadSHA: "abc"}
+	// A real run records its verifier verdicts before it reduces; the park then
+	// stands on the reduced escalate.
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+
+	// The back-channel holds only the escalation id a notification carried;
+	// runOfEscalation recovers the run from it.
+	gotRun, err := runOfEscalation(e, esc.ID)
+	if err != nil {
+		t.Fatalf("runOfEscalation: %v", err)
+	}
+	if gotRun != run {
+		t.Fatalf("runOfEscalation resolved the wrong run: got %s want %s", gotRun, run)
+	}
+
+	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "the retry has a ceiling; safe to land", false)
+	if err != nil {
+		t.Fatalf("applyJudgment: %v", err)
+	}
+	if judgmentID == "" {
+		t.Fatal("a recorded decision must return its judgment id")
+	}
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+		t.Fatalf("stampResolution: %v", err)
+	}
+
+	assertJudgmentParented(t, e, run, esc.ID, judgmentID)
+	assertResolutionStamp(t, e, run, esc.ID, judgmentID, res.Decision)
+	assertChainIntact(t, e)
+	_ = code // the terminal code depends on the reduce ladder; the loop's provenance is the invariant under test.
+}
+
+// assertJudgmentParented checks the run's judgment is the one resolve recorded
+// and is parented to the escalation it resolves.
+func assertJudgmentParented(t *testing.T, e env, run, escID, wantJID string) {
+	t.Helper()
+	jArt := firstOfKind(t, e, run, state.KindJudgment)
+	if jArt.ID != wantJID {
+		t.Fatalf("judgment id mismatch: stamped %s, recorded %s", wantJID, jArt.ID)
+	}
+	if len(jArt.Parents) == 0 || jArt.Parents[0] != escID {
+		t.Fatalf("judgment must be parented to the escalation, got parents %v", jArt.Parents)
+	}
+}
+
+// assertResolutionStamp checks the resolution artifact carries full provenance
+// and links both the escalation and the judgment.
+func assertResolutionStamp(t *testing.T, e env, run, escID, jID, wantDecision string) {
+	t.Helper()
+	resArt := firstOfKind(t, e, run, state.KindResolution)
+	stamp, err := decodeResolution(resArt.Body)
+	if err != nil {
+		t.Fatalf("resolution body must decode: %v", err)
+	}
+	if stamp.Decision != wantDecision || stamp.Who != "operator" || stamp.JudgmentID != jID || stamp.At == "" {
+		t.Fatalf("resolution lost provenance: %+v", stamp)
+	}
+	if len(resArt.Parents) != 2 || resArt.Parents[0] != escID || resArt.Parents[1] != jID {
+		t.Fatalf("resolution must be parented to [escalation, judgment], got %v", resArt.Parents)
+	}
+}
+
+// assertChainIntact checks the append-only log still audits clean — closing the
+// loop must leave the hash chain verifiable.
+func assertChainIntact(t *testing.T, e env) {
+	t.Helper()
+	audit, err := e.st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.OK {
+		t.Fatalf("the chain must still verify after the loop closes: %s", audit.Reason)
+	}
+}
+
+// TestRunOfEscalationRejectsWrongKind pins that resolve fails loudly on an id
+// that is not an escalation, so a mistyped or wrong-kind id never resolves the
+// wrong run.
+func TestRunOfEscalationRejectsWrongKind(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A grant artifact is a real id of the wrong kind.
+	if _, err := runOfEscalation(e, grantArt.ID); err == nil {
+		t.Fatal("a non-escalation id must be rejected")
+	}
+	if _, err := runOfEscalation(e, "esc_deadbeef"); err == nil {
+		t.Fatal("an absent escalation id must be rejected")
+	}
+}
+
+func decodeResolution(body []byte) (escalation.Resolution, error) {
+	var r escalation.Resolution
+	if err := json.Unmarshal(body, &r); err != nil {
+		return escalation.Resolution{}, err
+	}
+	return r, nil
 }

@@ -1,0 +1,8 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_aaaaaaaaaaaaaaaa",
+  "grant": "grt_bbbbbbbbbbbbbbbb",
+  "question": "carries a code the schema enum forbids; only the schema DOCUMENT constrains it",
+  "code": "vaporized"
+}

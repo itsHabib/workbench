@@ -34,6 +34,11 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindResolution is the closed-loop stamp a parked escalation receives once a
+	// human's decision returns through the resolution back-channel — the missing
+	// seam the Escalation plane formalizes. Its body is a contracts/escalation
+	// Resolution, parented to the escalation it resolves.
+	KindResolution = "resolution"
 )
 
 // Verdict decodes the envelope body as a Verdict when the envelope carries one.
