@@ -66,6 +66,9 @@ func (b *Backend) Admit(work execution.WorkSpec) error {
 	if err := b.requireCustodyConfig(work); err != nil {
 		return err
 	}
+	if err := b.requireEgressConfig(work); err != nil {
+		return err
+	}
 	if err := b.reserveWitnessPaths(work); err != nil {
 		return err
 	}
@@ -122,7 +125,8 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 		return nil, fmt.Errorf("rooms: prepared run is missing out/private roots")
 	}
 	lifecyclePath := filepath.Join(prep.PrivateDir, lifecycleFile)
-	args := b.runArgs(prep, task, lifecyclePath)
+	allow := b.egressAllowlist(prep.Work)
+	args := b.runArgs(prep, task, lifecyclePath, allow)
 
 	captures, err := openCapture(prep)
 	if err != nil {
@@ -155,12 +159,13 @@ func (b *Backend) Start(ctx context.Context, prep backend.PreparedRun, emit back
 			Enforced: map[string]any{
 				"cpu":        1,
 				"memory_mib": 256,
-				// No --egress is passed, so the room is never blocked. Report the
-				// honest posture: with --witness the egress is recorded ("observe",
-				// rooms' name for record-don't-block); without it the room is open
-				// AND unobserved ("open"). Claiming "egress" — or "observe" when
-				// nothing observes — would overstate what actually ran.
-				"network":          networkPosture(b.config.Witness),
+				// Report the honest network posture. When a custody ref is present
+				// the room runs behind the enforced --egress allowlist ("egress").
+				// Otherwise no wall is installed: with --witness the egress is
+				// recorded ("observe", rooms' name for record-don't-block); without
+				// it the room is open AND unobserved ("open"). Claiming enforcement
+				// a placement did not perform would overstate what actually ran.
+				"network":          networkPosture(len(allow) > 0, b.config.Witness),
 				"witness":          b.config.Witness,
 				"rootfs":           "readonly_overlay",
 				"secret_transport": "ssh_sendenv",
@@ -332,7 +337,7 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 	}
 }
 
-func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []string {
+func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string, allow []string) []string {
 	args := append([]string(nil), b.config.Prefix...)
 	args = append(args,
 		"run",
@@ -351,7 +356,59 @@ func (b *Backend) runArgs(prep backend.PreparedRun, task, lifecycle string) []st
 	if b.config.Witness {
 		args = append(args, "--witness")
 	}
+	// --egress allowlist:<dests> installs the host-side firewall wall that forces
+	// every guest packet through the custody proxy: without it, CUSTODY_BASE_ is
+	// only soft configuration and a compromised guest could dial the vendor CDN
+	// directly. allow is non-empty only when a custody ref is present (so
+	// non-custody placements keep today's open network).
+	if len(allow) > 0 {
+		args = append(args, "--egress", "allowlist:"+strings.Join(allow, ","))
+	}
 	return args
+}
+
+// egressAllowlist is the enforced egress destination set for this placement, or
+// nil when no custody ref is present (the room then keeps the open network
+// today's non-custody placements rely on). When a custody ref IS present the
+// wall permits the custody proxy (so scoped vendor calls reach it) plus the
+// operator-configured EgressExtra — which MUST carry the git egress the in-guest
+// clone/push needs. That is deliberately NOT derived from the repo URL: rooms
+// pins an allowlist hostname to a host-resolved IP once at launch, but the
+// untrusted guest resolves the name itself and a multi-IP host (e.g. GitHub)
+// hands it a DIFFERENT IP, which the wall then drops — host-validated. Reliable
+// git egress therefore needs the git CIDR + the guest's DNS resolver IP(s), both
+// deployment-specific, so Admit fails closed (requireEgressConfig) unless
+// EgressExtra is set. Everything else is dropped, so the proxy cannot be bypassed.
+func (b *Backend) egressAllowlist(work execution.WorkSpec) []string {
+	if !hasCustodyRef(work) {
+		return nil
+	}
+	candidates := append([]string{b.config.tapGatewayHost()}, b.config.EgressExtra...)
+	out := make([]string, 0, len(candidates))
+	seen := map[string]struct{}{}
+	for _, dest := range candidates {
+		if dest == "" {
+			continue
+		}
+		if _, ok := seen[dest]; ok {
+			continue
+		}
+		seen[dest] = struct{}{}
+		out = append(out, dest)
+	}
+	return out
+}
+
+// hasCustodyRef reports whether any declared secret is a custody: ref — the
+// signal that this placement routes vendor calls through the proxy and so must
+// run behind the enforced egress wall.
+func hasCustodyRef(work execution.WorkSpec) bool {
+	for _, secret := range work.Secrets {
+		if _, err := parseCustodyRef(secret.Name, secret.Ref); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *handle) allocated(record lifecycleRecord, emit backend.Emit) error {
@@ -486,6 +543,26 @@ func (b *Backend) requireCustodyConfig(work execution.WorkSpec) error {
 	return nil
 }
 
+// requireEgressConfig fails admission when a custody ref would install the egress
+// wall but no git egress is configured. The wall drops everything but the tap
+// gateway, and rooms clones+pushes the repo IN-GUEST, so without an explicit git
+// egress the placement's clone dies mid-run with no operator-facing reason. Git
+// egress cannot be auto-derived from the repo URL: an allowlist hostname is
+// pinned to a host-resolved IP once at launch, but the untrusted guest resolves
+// the name itself and a multi-IP host (GitHub) hands it a different IP the wall
+// then drops (host-validated). So the operator must supply the git CIDR + the
+// guest's DNS resolver IP(s) via EgressExtra; refuse fast here with the remedy
+// rather than let a slot (and a minted child token) burn on a doomed clone.
+func (b *Backend) requireEgressConfig(work execution.WorkSpec) error {
+	if !hasCustodyRef(work) {
+		return nil
+	}
+	if len(b.config.EgressExtra) == 0 {
+		return fmt.Errorf("rooms: custody placement runs behind the egress wall but no git egress is configured (code: egress_config_unset); set %s to the git host CIDR + the guest DNS resolver IP(s), e.g. %s=140.82.112.0/20,1.1.1.1,8.8.8.8", envEgressExtra, envEgressExtra)
+	}
+	return nil
+}
+
 func validateSecrets(work execution.WorkSpec) error {
 	for _, secret := range work.Secrets {
 		if strings.HasPrefix(secret.Ref, "custody:") {
@@ -568,12 +645,17 @@ func roomsDetails(record lifecycleRecord) map[string]any {
 // deterministic.
 var witnessEvidence = []string{"witness.json", "witness.pcap"}
 
-// networkPosture reports the honest network enforcement for the receipt. No
-// --egress is ever passed, so the room is never blocked: with --witness its
-// egress is recorded ("observe", rooms' name for record-don't-block); without it
-// the room is open AND unobserved ("open"). Reporting "observe" unconditionally
-// would claim observation a witness-off placement does not perform.
-func networkPosture(witness bool) string {
+// networkPosture reports the honest network enforcement for the receipt. When
+// the room runs behind the enforced --egress allowlist the posture is "egress"
+// (traffic is blocked to all but the permitted destinations). Otherwise no wall
+// is installed: with --witness the egress is recorded ("observe", rooms' name
+// for record-don't-block); without it the room is open AND unobserved ("open").
+// Reporting "egress" or "observe" a placement did not perform would overstate
+// what actually ran.
+func networkPosture(egress, witness bool) string {
+	if egress {
+		return "egress"
+	}
 	if witness {
 		return "observe"
 	}
