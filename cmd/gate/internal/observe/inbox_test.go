@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,9 +193,15 @@ func TestReconcileInboxFetchesOncePerDistinctRepo(t *testing.T) {
 			{Repo: "o/d", GrantState: "absent"},
 		},
 	}
+	// resolveRepos calls fetch from multiple worker goroutines concurrently, so
+	// the counter map must be guarded — a plain map write would race (CI runs
+	// -race) and can panic on concurrent writes.
+	var mu sync.Mutex
 	calls := make(map[string]int)
 	fetch := func(repo string) (map[int]LivePR, error) {
+		mu.Lock()
 		calls[repo]++
+		mu.Unlock()
 		return map[int]LivePR{}, nil
 	}
 	reconcileInbox(in, fetch)

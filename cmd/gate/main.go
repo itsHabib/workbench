@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -1007,10 +1008,19 @@ func cmdNext(args []string) error {
 // a repo gh can't reach never fails the whole projection.
 func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
-	// silently cap at 30 and undercount.
-	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url").CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(out))
+	// silently cap at 30 and undercount. It may still truncate a repo with >1000
+	// open PRs — any still-open PR outside the page would then be absent from the
+	// map and reconciled as "not open" (dropped) — so the boundary is surfaced
+	// below rather than paginated away.
+	cmd := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
+	// Capture stdout and stderr separately: gh can write progress/deprecation/
+	// rate-limit banners to stderr even on a zero exit, and interleaving them
+	// into the JSON buffer would turn a clean read into a confusing decode error.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
 			return nil, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
 		}
@@ -1022,8 +1032,11 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 		HeadRefOID string `json:"headRefOid"`
 		URL        string `json:"url"`
 	}
-	if err := json.Unmarshal(out, &prs); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
 		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
+	}
+	if len(prs) == 1000 {
+		fmt.Fprintf(os.Stderr, "gate: gh pr list for %s hit the 1000 limit; some open PRs may be treated as closed\n", repo)
 	}
 	m := make(map[int]observe.LivePR, len(prs))
 	for _, pr := range prs {
