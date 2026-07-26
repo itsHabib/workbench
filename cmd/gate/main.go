@@ -964,6 +964,19 @@ func cmdResolve(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Replay + stale-id guard: only the run's current unresolved terminal is
+	// resolvable. A retried notification callback, a double-tapped Slack button,
+	// or an action on a stale page would otherwise append a SECOND authoritative
+	// outcome for one park — a later `blocked` replacing an earlier `would_merge`,
+	// or two resolutions for one escalation. This fails closed before any judgment
+	// is recorded.
+	open, err := escalationIsOpen(e, run, *escID)
+	if err != nil {
+		return err
+	}
+	if !open {
+		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
+	}
 	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, *decision, *why, false)
 	if err != nil {
 		return err
@@ -994,6 +1007,26 @@ func runOfEscalation(e env, escID string) (string, error) {
 		return "", fmt.Errorf("resolve: artifact %s is a %s, not an escalation", escID, a.Kind)
 	}
 	return a.Run, nil
+}
+
+// escalationIsOpen reports whether escID is the run's current unresolved terminal
+// — the newest action-or-escalation artifact in log order. A later terminal
+// means the park already resolved (an action) or was superseded by a re-park (a
+// newer escalation), so it is no longer resolvable. This mirrors the inbox's
+// parked-run reduction: a run is parked iff its latest terminal is an escalation,
+// and here specifically iff that escalation is THIS one.
+func escalationIsOpen(e env, run, escID string) (bool, error) {
+	arts, err := e.st.Run(run)
+	if err != nil {
+		return false, err
+	}
+	newest := ""
+	for _, a := range arts {
+		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
+			newest = a.ID
+		}
+	}
+	return newest == escID, nil
 }
 
 // stampResolution records the closed-loop provenance the judge path lacks: a

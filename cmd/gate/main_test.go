@@ -1208,6 +1208,56 @@ func assertChainIntact(t *testing.T, e env) {
 	}
 }
 
+// TestEscalationIsOpenGuard pins the replay/stale-id guard: an escalation is
+// resolvable only while it is the run's newest terminal. Once a resolve records
+// a terminal action (the merge), the same escalation id is no longer open — a
+// retried callback or a double-tapped button must not append a second
+// authoritative outcome for one park.
+func TestEscalationIsOpenGuard(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 126, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+
+	// Fresh park: the escalation is the newest terminal → open.
+	open, err := escalationIsOpen(e, run, esc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !open {
+		t.Fatal("a fresh park's escalation must be open")
+	}
+
+	// Resolve it (pass → would_merge writes a terminal action).
+	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "safe to land", false)
+	if err != nil {
+		t.Fatalf("applyJudgment: %v", err)
+	}
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later terminal action now supersedes the escalation → no longer open, so
+	// a replayed resolve of the same id is refused.
+	open, err = escalationIsOpen(e, run, esc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open {
+		t.Fatal("a resolved escalation must not read as open — the replay guard would let a second outcome land")
+	}
+}
+
 // TestRunOfEscalationRejectsWrongKind pins that resolve fails loudly on an id
 // that is not an escalation, so a mistyped or wrong-kind id never resolves the
 // wrong run.

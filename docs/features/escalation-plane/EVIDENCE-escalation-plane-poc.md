@@ -166,6 +166,31 @@ decided, *when*, and the *judgment it produced* — the provenance a bare judgme
 artifact lacked — and links both. `gate audit` confirms none of it broke the
 hash chain.
 
+## Hardening (added in review)
+
+Two independent reviews (a Fable-model pass + gate's bot panel) converged on
+replay/idempotence as the sharpest gap; it was fixed and re-demonstrated:
+
+```
+# (A) first resolve → would_merge, exit 0   (as above)
+
+# (B) REPLAY the same escalation (a double-tapped button, even flipping pass→block):
+$ escalate resolve -escalation esc_57c65c406a982a72 -decision block -who attacker …
+gate: resolve: escalation esc_57c65c406a982a72 is not the run's open park —
+      it was already resolved or superseded by a re-park; nothing to resolve
+(exit 4)
+
+# (C) a well-formed but nonexistent escalation id — gate's own diagnostic now surfaces
+#     through escalate (previously a silent nonzero exit with empty stdout):
+$ escalate resolve -escalation esc_deadbeef …
+gate: resolve: escalation esc_deadbeef: state: artifact esc_deadbeef: artifact not found
+(exit 4)
+```
+
+(B) proves a retried notification callback or a double-tapped Slack button cannot
+append a second authoritative outcome for one park — the guard fails closed
+*before* any judgment is recorded.
+
 ## Reproduce
 
 ```bash

@@ -229,25 +229,27 @@ flare never appears in the resolution flow — that is the point.
 
 ## 7a. Known gaps to close before day-to-day use (from review)
 
-An independent (Fable-model) review returned **merge-with-nits**: no boundary-law
-violation, no state-corrupting bug. The seam is real; these are the follow-ups it
-surfaced, captured so they aren't lost — none blocks the POC merge, but the
-starred ones gate a *live transport* (§8 step 3).
+Two independent reviews — a Fable-model pass and gate's own bot panel (codex) —
+converged: **merge-with-nits**, no boundary-law violation, no state-corrupting
+bug. Both flagged replay/idempotence as the sharpest gap, so it was **fixed in
+review** rather than deferred; the rest are captured follow-ups.
 
-- **★ Idempotence / replay guard.** `gate resolve` has no already-resolved check.
-  Harmless at a single-shot CLI (it matches `judge`'s re-runnability), but a live
-  transport that retries (Slack re-sends action callbacks on a slow ack, and a
-  double-tapped button is routine) would append a fresh judgment+resolution each
-  time. Before any transport: reject/no-op when a `KindResolution` already parents
-  the escalation, or the run's latest state is no longer parked.
+- **✓ Idempotence / replay + stale-id guard (fixed).** `gate resolve` now refuses
+  unless the escalation is the run's current unresolved terminal
+  (`escalationIsOpen`, mirroring the inbox's parked-run reduction). A retried
+  notification callback, a double-tapped Slack button, or an action on a stale
+  page can no longer append a second authoritative outcome (a later `blocked`
+  replacing an earlier `would_merge`) — it fails closed before any judgment is
+  recorded. Pinned by `TestEscalationIsOpenGuard`. This also closes the stale-id
+  case (resolving an old esc id after a re-park is refused).
+- **✓ gate diagnostics on a hard error (fixed).** `escalate`'s runner streams
+  gate's stderr straight through, so a `gate resolve` exit 4 (e.g. a well-formed
+  but nonexistent escalation id) shows the operator gate's own diagnostic instead
+  of a silent nonzero exit with empty stdout.
 - **★ `who` is asserted, not authenticated.** The ingest only checks `who` is
   non-empty. Fine under gate's local-trust model; the moment a transport exists,
   `who` must derive from the transport's verified identity (e.g. the Slack user
   id), never the request payload.
-- **★ Stale escalation ids.** A resolve can re-park, so a run accumulates
-  escalations; `runOfEscalation` checks kind, not recency, so resolving an *old*
-  esc id judges the run's current verdict set while parenting provenance to a
-  stale park. Reject a non-latest escalation when adding the replay guard.
 - **Judge/resolve provenance asymmetry.** A hand-run `gate judge` closes the same
   loop without a `KindResolution` stamp, so "who closed this park?" is answerable
   from the log for the back-channel path only. Extend the stamp to the judge path
@@ -270,8 +272,9 @@ event's internal id, unrendered. A minimal path to a real day-to-day loop:
    next to the existing judge line. Rendering only — Amendment 3-safe. After this,
    the loop already works: Slack page on the phone → paste one line in a terminal.
    The cheapest dogfood loop; should land within days of merge.
-2. **Idempotence + recency guards in `gate resolve`** (§7a ★) — the prerequisite
-   for any retrying transport.
+2. **Authenticate `who`** (§7a) — the remaining prerequisite for a retrying
+   transport (the replay/idempotence guard already landed in review). When a
+   transport exists, derive `who` from its verified identity, not the payload.
 3. **`escalate serve` — the live transport.** A small HTTP listener *in
    cmd/escalate* taking Slack interactive-action callbacks: flare renders
    Approve/Block buttons (rendering only; the callback URL points at escalate,

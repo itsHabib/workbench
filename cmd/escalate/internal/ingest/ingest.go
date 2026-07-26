@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -124,13 +125,16 @@ func (c *Client) args(d Decision) []string {
 
 // execRunner runs the gate binary for real. A non-zero exit is gate's decision
 // contract, so its code is returned (never an error); only a failure to START
-// the binary is an error. stdout rides along on both paths — gate prints its
-// JSON outcome there even when it exits non-zero.
+// the binary is an error. gate's stderr streams straight through to escalate's
+// stderr, so a hard error (exit 4 — e.g. a well-formed but nonexistent
+// escalation id) still shows the operator gate's own diagnostic instead of a
+// silent nonzero exit with empty stdout. gate's JSON outcome is captured on
+// stdout so the caller can re-emit it.
 func execRunner(ctx context.Context, bin string, args ...string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err == nil {
 		return stdout.Bytes(), 0, nil
@@ -139,5 +143,5 @@ func execRunner(ctx context.Context, bin string, args ...string) ([]byte, int, e
 	if errors.As(err, &ee) {
 		return stdout.Bytes(), ee.ExitCode(), nil
 	}
-	return stdout.Bytes(), 0, fmt.Errorf("escalate: run gate %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	return stdout.Bytes(), 0, fmt.Errorf("escalate: run gate %s: %w", strings.Join(args, " "), err)
 }
