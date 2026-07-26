@@ -1029,6 +1029,20 @@ func TestParkCodesMatchCapability(t *testing.T) {
 	}
 }
 
+// TestDecisionVocabMatchesVerify pins that the contract's resolution decision
+// vocabulary equals gate's verdict decisions, so the back-channel's pass/block
+// and gate's ladder can never drift — the symmetry TestParkCodesMatchCapability
+// gives the park codes. resolve validates against verify's constants and the
+// contract validates against its own; this keeps the two spellings identical.
+func TestDecisionVocabMatchesVerify(t *testing.T) {
+	if escalation.DecisionPass != verify.DecisionPass {
+		t.Errorf("DecisionPass %q != verify.DecisionPass %q", escalation.DecisionPass, verify.DecisionPass)
+	}
+	if escalation.DecisionBlock != verify.DecisionBlock {
+		t.Errorf("DecisionBlock %q != verify.DecisionBlock %q", escalation.DecisionBlock, verify.DecisionBlock)
+	}
+}
+
 // recordVerifier appends a non-reducer verifier verdict so runVerdicts finds the
 // subject to judge — the shape a real gate run records before it reduces. The
 // reduced verdict act consumes is passed separately (Source "reducer"), which

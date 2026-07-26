@@ -68,9 +68,13 @@ type V1 struct {
 	// Optional: procedural parks and synthesis failures carry none, and the sink
 	// falls back to the raw Question.
 	Brief *Brief `json:"brief,omitempty"`
-	// Resolution is the closed-loop stamp: absent at park time, populated by the
-	// resolution back-channel once a human decides. Its presence is the fact that
-	// the agent→human→agent loop closed, with provenance.
+	// Resolution is the closed-loop stamp — decision, who, when, and the judgment
+	// it produced. It is NEVER written into the park artifact: the log is
+	// append-only, so the park is immutable. The back-channel appends a STANDALONE
+	// KindResolution artifact (whose body is a Resolution), and this embedded field
+	// is the PROJECTED view a reader fills by joining that artifact back to the
+	// escalation. So it is absent on every real park body today; a projection is
+	// the only thing that ever populates it (deferred — see the plane spec).
 	Resolution *Resolution `json:"resolution,omitempty"`
 }
 
@@ -89,10 +93,10 @@ type Brief struct {
 // Resolution is the decision a human returned for a parked escalation, recorded
 // with provenance: what they decided, who they are, when, and the id of the
 // judgment artifact the decision produced. It is the missing seam this contract
-// formalizes — the agent→human→agent return path — and doubles as the body of
-// the standalone resolution artifact the back-channel appends (parented to the
-// escalation it resolves) and as the embedded V1.Resolution a reader
-// projects.
+// formalizes — the agent→human→agent return path. It is the body of the
+// standalone KindResolution artifact the back-channel appends (parented to the
+// escalation it resolves and the judgment it links); a reader can also project
+// it onto V1.Resolution by joining that artifact back to the park.
 type Resolution struct {
 	Decision   string `json:"decision"`
 	Who        string `json:"who"`

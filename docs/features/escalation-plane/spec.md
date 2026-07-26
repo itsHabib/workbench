@@ -79,7 +79,7 @@ mechanism, and — newly — a resolution ingest with an audit trail.
 
 **This is a proposal, not a fait accompli.** A 6th plane is a real cost (more
 vocabulary, another boundary to police). The POC's job is to make the seam
-concrete enough to decide honestly, not to declare victory. See §8 open questions.
+concrete enough to decide honestly, not to declare victory. See §9 open questions.
 
 ## 4. The contract: `contracts/escalation` (`escalation.v1`)
 
@@ -223,9 +223,73 @@ flare never appears in the resolution flow — that is the point.
   point is the human's call). `gate judge -auto` remains the automated path.
 - **No admission validator.** Per the leaf posture, `contracts/escalation` runs no
   runtime JSON-Schema validator; structural laws the schema states are future
-  admission input.
+  admission input. `Validate` therefore has no production caller yet — the
+  tolerant read path deliberately skips it and the writer builds valid bodies
+  in-code; it earns its keep when admission arrives.
 
-## 8. Open questions (including the ones the operator raised)
+## 7a. Known gaps to close before day-to-day use (from review)
+
+An independent (Fable-model) review returned **merge-with-nits**: no boundary-law
+violation, no state-corrupting bug. The seam is real; these are the follow-ups it
+surfaced, captured so they aren't lost — none blocks the POC merge, but the
+starred ones gate a *live transport* (§8 step 3).
+
+- **★ Idempotence / replay guard.** `gate resolve` has no already-resolved check.
+  Harmless at a single-shot CLI (it matches `judge`'s re-runnability), but a live
+  transport that retries (Slack re-sends action callbacks on a slow ack, and a
+  double-tapped button is routine) would append a fresh judgment+resolution each
+  time. Before any transport: reject/no-op when a `KindResolution` already parents
+  the escalation, or the run's latest state is no longer parked.
+- **★ `who` is asserted, not authenticated.** The ingest only checks `who` is
+  non-empty. Fine under gate's local-trust model; the moment a transport exists,
+  `who` must derive from the transport's verified identity (e.g. the Slack user
+  id), never the request payload.
+- **★ Stale escalation ids.** A resolve can re-park, so a run accumulates
+  escalations; `runOfEscalation` checks kind, not recency, so resolving an *old*
+  esc id judges the run's current verdict set while parenting provenance to a
+  stale park. Reject a non-latest escalation when adding the replay guard.
+- **Judge/resolve provenance asymmetry.** A hand-run `gate judge` closes the same
+  loop without a `KindResolution` stamp, so "who closed this park?" is answerable
+  from the log for the back-channel path only. Extend the stamp to the judge path
+  (with `who=operator`), or have a reader treat its absence as "resolved via
+  judge" — decide *before* a projection reads the resolution.
+- **Nits.** `applyJudgment` takes seven positional params (a params struct would
+  remove the transposition hazard); the demo seed lives as an env-guarded `go
+  test` (fold into a hidden gate verb if it outlives the POC).
+
+## 8. Adoption sequence — from "merged" to "used"
+
+The gap between merged and used is precisely: **nothing the operator sees today
+carries the escalation id or the resolve command.** `gate next` still prints the
+`gate judge -run …` line; flare's Slack page carries the esc id only as the
+event's internal id, unrendered. A minimal path to a real day-to-day loop:
+
+1. **Surface the paste-ready resolve line (immediate, small, read-only).** Teach
+   `gate next`/the inbox and flare's Slack card to render
+   `escalate resolve -escalation esc_… -grant grt_… -decision <pass|block> -who … -why "…"`
+   next to the existing judge line. Rendering only — Amendment 3-safe. After this,
+   the loop already works: Slack page on the phone → paste one line in a terminal.
+   The cheapest dogfood loop; should land within days of merge.
+2. **Idempotence + recency guards in `gate resolve`** (§7a ★) — the prerequisite
+   for any retrying transport.
+3. **`escalate serve` — the live transport.** A small HTTP listener *in
+   cmd/escalate* taking Slack interactive-action callbacks: flare renders
+   Approve/Block buttons (rendering only; the callback URL points at escalate,
+   never flare), escalate verifies the Slack signature, maps the ack to
+   `ingest.Decision` with `who` from the *verified* Slack identity, shells `gate
+   resolve`. This is the real remote-approval unlock. Constraint: resolve still
+   needs a live grant at resolve time, so remote approval only works inside an
+   unexpired grant window (coherent — a resolution can't outrun delegation — but
+   mint before stepping away).
+4. **Project the resolution.** `gate next -json` + console join `KindResolution`
+   to show "resolved by X at T" on recently-cleared parks — after the judge/resolve
+   asymmetry (§7a) is resolved, so the projection isn't lying about judge-path
+   decisions.
+5. **Then decide the plane question** (§3) from usage evidence, as its own
+   workbench-101 doc PR. Agent→agent resolution rides the same seam unchanged;
+   build it only when a concrete bot-resolver use case exists.
+
+## 9. Open questions (including the ones the operator raised)
 
 - **Is this channel agent→agent too?** The POC is agent→human→agent (a human
   decides). But the ingest surface is decision-source-agnostic: `ingest.Decision`
@@ -251,7 +315,7 @@ flare never appears in the resolution flow — that is the point.
   `V1.Resolution`, the console gets a closed-loop view for free — but that couples
   the projection to the resolution artifact join. Deferred.
 
-## 9. Validation
+## 10. Validation
 
 Proven end-to-end through the real binaries — see
 `EVIDENCE-escalation-plane-poc.md`: a gate park writes a typed `escalation.v1`

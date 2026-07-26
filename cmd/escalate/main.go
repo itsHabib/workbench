@@ -80,7 +80,9 @@ func cmdResolve(args []string) error {
 	if err != nil {
 		return err
 	}
-	os.Stdout.Write(out)
+	if _, err := os.Stdout.Write(out); err != nil {
+		return err
+	}
 	os.Exit(code)
 	return nil
 }

@@ -35,7 +35,7 @@
     },
     "resolution": {
       "type": "object",
-      "description": "The closed-loop stamp: absent at park time, populated once a human's decision returns through the resolution back-channel. Its presence is the fact that the agent->human->agent loop closed, with provenance. Doubles as the body of the standalone resolution artifact the back-channel appends parented to the escalation.",
+      "description": "The closed-loop stamp: decision, who, when, and the judgment it produced. It is NEVER written into the immutable park artifact (the log is append-only) — the back-channel appends a standalone resolution artifact, and this embedded field is the projected view a reader fills by joining that artifact back to the escalation. Its shape doubles as the body of that standalone artifact. Absent on every real park body today; a projection is the only thing that populates it.",
       "required": ["decision", "who", "at", "judgment_id"],
       "additionalProperties": false,
       "properties": {
