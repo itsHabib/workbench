@@ -23,6 +23,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"time"
@@ -136,6 +139,7 @@ func usage() {
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
+           [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -963,6 +967,10 @@ func cmdNext(args []string) error {
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
 	live := fs.Bool("live", false, "reconcile parked subjects with current GitHub PR state")
+	// Debug/experimental: profile the live reconcile. Off unless a path is given.
+	cpuProfile := fs.String("cpuprofile", "", "debug: write a CPU profile to this path")
+	blockProfile := fs.String("blockprofile", "", "debug: write a block profile to this path")
+	traceOut := fs.String("trace", "", "debug: write a runtime execution trace to this path")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -970,16 +978,21 @@ func cmdNext(args []string) error {
 	if help {
 		return nil
 	}
+	stop, err := startNextProfiling(*cpuProfile, *blockProfile, *traceOut)
+	if err != nil {
+		return err
+	}
+	defer stop()
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
 		return err
 	}
 	stateArg := stateArgFor(*stateDir)
 	if *live && *asJSON {
-		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR, lookupOpenPRCount)
+		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
 	}
 	if *live {
-		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupLivePR, lookupOpenPRCount)
+		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
 	}
 	if *asJSON {
 		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
@@ -987,49 +1000,91 @@ func cmdNext(args []string) error {
 	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
 }
 
-func lookupLivePR(repo string, number int) (observe.LivePR, error) {
-	out, err := exec.Command("gh", "pr", "view", strconv.Itoa(number), "-R", repo, "--json", "state,title,headRefOid,url").CombinedOutput()
+// lookupOpenPRs is the batched live seam: ONE `gh pr list` per repo returns all
+// its open PRs keyed by number, serving the parked/ready reconcilers and the
+// needs_grant count from a single subprocess — O(repos), not O(PRs). It is
+// best-effort at the call site (observe degrades a repo whose fetch errors), so
+// a repo gh can't reach never fails the whole projection.
+func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
+	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
+	// silently cap at 30 and undercount.
+	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url").CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail != "" {
-			return observe.LivePR{}, fmt.Errorf("read PR %s#%d: %w: %s", repo, number, err, detail)
+			return nil, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
 		}
-		return observe.LivePR{}, fmt.Errorf("read PR %s#%d: %w", repo, number, err)
+		return nil, fmt.Errorf("list PRs %s: %w", repo, err)
 	}
-	var pr struct {
-		State      string `json:"state"`
+	var prs []struct {
+		Number     int    `json:"number"`
 		Title      string `json:"title"`
 		HeadRefOID string `json:"headRefOid"`
 		URL        string `json:"url"`
 	}
-	if err := json.Unmarshal(out, &pr); err != nil {
-		return observe.LivePR{}, fmt.Errorf("decode PR %s#%d: %w", repo, number, err)
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
 	}
-	return observe.LivePR{State: pr.State, Title: pr.Title, HeadSHA: pr.HeadRefOID, URL: pr.URL}, nil
+	m := make(map[int]observe.LivePR, len(prs))
+	for _, pr := range prs {
+		m[pr.Number] = observe.LivePR{State: "OPEN", Title: pr.Title, HeadSHA: pr.HeadRefOID, URL: pr.URL}
+	}
+	return m, nil
 }
 
-// lookupOpenPRCount is the live open-PR enumeration seam for needs_grant[]: one
-// bounded `gh pr list` per lapsed-grant repo. It is best-effort at the call site
-// (observe drops a repo whose lookup errors), so a repo gh can't reach never
-// fails the whole projection.
-func lookupOpenPRCount(repo string) (int, error) {
-	// --limit overrides gh's default page of 30, or a busy repo's open_prs would
-	// silently cap at 30 and undercount.
-	out, err := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number").CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail != "" {
-			return 0, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
+// startNextProfiling arms the optional debug profilers for a `gate next` run —
+// CPU, block, and execution trace — each only when its path is set. It returns a
+// single stop closure that flushes all three in reverse order (trace, block,
+// CPU), so `defer stop()` at the top of cmdNext captures the whole run. It is a
+// debug/experimental aid for profiling the live reconcile, not part of the
+// decision path.
+func startNextProfiling(cpuPath, blockPath, tracePath string) (func(), error) {
+	var stops []func()
+	stop := func() {
+		for i := len(stops) - 1; i >= 0; i-- {
+			stops[i]()
 		}
-		return 0, fmt.Errorf("list PRs %s: %w", repo, err)
 	}
-	var prs []struct {
-		Number int `json:"number"`
+	if cpuPath != "" {
+		f, err := os.Create(cpuPath)
+		if err != nil {
+			stop()
+			return nil, fmt.Errorf("next: create cpuprofile: %w", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			f.Close()
+			stop()
+			return nil, fmt.Errorf("next: start cpuprofile: %w", err)
+		}
+		stops = append(stops, func() { pprof.StopCPUProfile(); f.Close() })
 	}
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return 0, fmt.Errorf("decode PRs %s: %w", repo, err)
+	if blockPath != "" {
+		f, err := os.Create(blockPath)
+		if err != nil {
+			stop()
+			return nil, fmt.Errorf("next: create blockprofile: %w", err)
+		}
+		runtime.SetBlockProfileRate(1)
+		stops = append(stops, func() {
+			_ = pprof.Lookup("block").WriteTo(f, 0)
+			runtime.SetBlockProfileRate(0)
+			f.Close()
+		})
 	}
-	return len(prs), nil
+	if tracePath != "" {
+		f, err := os.Create(tracePath)
+		if err != nil {
+			stop()
+			return nil, fmt.Errorf("next: create trace: %w", err)
+		}
+		if err := trace.Start(f); err != nil {
+			f.Close()
+			stop()
+			return nil, fmt.Errorf("next: start trace: %w", err)
+		}
+		stops = append(stops, func() { trace.Stop(); f.Close() })
+	}
+	return stop, nil
 }
 
 // stateArgFor decides whether next's suggested commands need an explicit -state.

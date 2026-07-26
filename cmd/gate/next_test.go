@@ -157,3 +157,28 @@ func captureStdout(t *testing.T, fn func() error) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TestStartNextProfilingWritesCPUProfile pins the debug profiling seam: passing
+// a cpuprofile path produces a non-empty profile after the stop closure flushes.
+func TestStartNextProfilingWritesCPUProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cpu.pprof")
+	stop, err := startNextProfiling(path, "", "")
+	if err != nil {
+		t.Fatalf("startNextProfiling: %v", err)
+	}
+	// A little work so the CPU profile has at least one sample to flush.
+	sum := 0
+	for i := 0; i < 1_000_000; i++ {
+		sum += i
+	}
+	_ = sum
+	stop()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat cpu profile: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("cpu profile is empty")
+	}
+}

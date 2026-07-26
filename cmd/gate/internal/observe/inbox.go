@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -144,18 +143,21 @@ func NextJSON(w io.Writer, st *state.Store, now func() time.Time, stateArg strin
 	return enc.Encode(in)
 }
 
-// PRLookup is the read-only mechanism used by the live inbox to check whether
-// a projected subject is still open. Gate's command layer supplies the GitHub
-// implementation; observe owns only the projection behavior.
-type PRLookup func(repo string, number int) (LivePR, error)
+// OpenPRs is the one live seam the inbox reconciles against: it returns every
+// OPEN PR for a repo, keyed by number, in a single call. Gate's command layer
+// supplies the `gh pr list` implementation. It is the whole batching win — one
+// subprocess per DISTINCT repo instead of one `gh pr view` per row — and it
+// serves all three live surfaces at once: the parked reconcile, the
+// ready-to-merge reconcile, and the needs_grant open-PR count. It is called
+// best-effort per repo: a repo whose fetch errors degrades that repo's rows
+// (parked→unknown, ready→kept, needs_grant→nil count) but never fails the whole
+// projection.
+type OpenPRs func(repo string) (map[int]LivePR, error)
 
-// PRLister counts a repo's open PRs — the live enrichment seam for needs_grant[].
-// Gate's command layer supplies the `gh pr list` implementation. It is called
-// best-effort: a per-repo error drops that repo from needs_grant[] (see
-// enrichNeedsGrant), never fails the whole projection.
-type PRLister func(repo string) (int, error)
-
-// LivePR is the small display/status slice returned by a live PR read.
+// LivePR is the small display/status slice carried for one open PR. On the live
+// path State is always "OPEN" — a PR present in a repo's open set is open by
+// construction; a PR absent from it (with no fetch error) is not open and its
+// row drops.
 type LivePR struct {
 	State   string
 	Title   string
@@ -163,150 +165,198 @@ type LivePR struct {
 	URL     string
 }
 
-// NextJSONLive emits the console feed reconciled with current PR state. A
-// failed lookup remains visible as unknown; only a confirmed non-open PR is
-// removed from the attention queue.
-func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup, lister PRLister) error {
+// liveRepos is the result of the batched per-repo fetch: the open-PR map for
+// each repo whose fetch succeeded, plus the error for each repo whose fetch
+// failed. A repo appears in exactly one of the two maps. It is the single
+// snapshot every live surface reconciles against, so parked, ready, and
+// needs_grant can never disagree about which repos were reachable.
+type liveRepos struct {
+	open map[string]map[int]LivePR
+	errs map[string]error
+}
+
+// lookup resolves one subject against the batched snapshot: the fetch error for
+// its repo (keep-with-reason), or whether the PR is in the repo's open set
+// (present→open+facts, absent→not open→drop).
+func (l liveRepos) lookup(repo string, number int) (pr LivePR, open bool, err error) {
+	if e := l.errs[repo]; e != nil {
+		return LivePR{}, false, e
+	}
+	pr, open = l.open[repo][number]
+	return pr, open, nil
+}
+
+// NextJSONLive emits the console feed reconciled with current PR state. A repo
+// whose fetch fails keeps its rows visible (parked as unknown); only a PR
+// confirmably absent from its repo's open set is removed from the queue.
+func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, fetch OpenPRs) error {
 	in, err := collect(st, now, stateArg)
 	if err != nil {
 		return err
 	}
-	in.Parked = reconcileLive(in.Parked, lookup)
-	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, lookup)
-	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
+	in = reconcileInbox(in, fetch)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(in)
 }
 
 // NextTextLive is the human-readable form of NextJSONLive.
-func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, lookup PRLookup, lister PRLister) error {
+func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, fetch OpenPRs) error {
 	in, err := collect(st, now, stateArg)
 	if err != nil {
 		return err
 	}
-	in.Parked = reconcileLive(in.Parked, lookup)
-	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, lookup)
-	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, lister)
+	in = reconcileInbox(in, fetch)
 	renderInbox(w, in)
 	return nil
 }
 
-// enrichNeedsGrant attaches a live open-PR count to each needs_grant row via the
-// PRLister seam. It is best-effort and degrades a row rather than dropping it: a
-// per-repo lookup failure KEEPS the row with OpenPRs left nil (omitted from
-// JSON), mirroring how reconcileLive degrades a parked row to "unknown". The
-// lapsed grant is the primary signal — dropping the whole row when gh is
-// unreachable would reintroduce the very invisible needs-a-grant state this
-// surface exists to kill. The projection never fails as a whole.
-func enrichNeedsGrant(rows []NeedsGrantRow, lister PRLister) []NeedsGrantRow {
-	out := make([]NeedsGrantRow, 0, len(rows))
-	for _, r := range rows {
-		n, err := lister(r.Repo)
-		if err == nil {
-			count := n
-			r.OpenPRs = &count
+// reconcileInbox is the one live pass: fetch each distinct repo's open PRs ONCE
+// (in parallel), then reconcile every row LOCALLY against that snapshot. The
+// cost is O(distinct repos), never O(rows) — the whole point of the batched
+// seam. All three surfaces reconcile against the same snapshot.
+func reconcileInbox(in Inbox, fetch OpenPRs) Inbox {
+	live := resolveRepos(distinctRepos(in), fetch)
+	in.Parked = reconcileLive(in.Parked, live)
+	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, live)
+	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, live)
+	return in
+}
+
+// distinctRepos collects the deduplicated set of repos across every live
+// surface, so each repo is fetched exactly once even when many rows share it.
+func distinctRepos(in Inbox) []string {
+	seen := make(map[string]struct{})
+	for _, p := range in.Parked {
+		if p.Repo != "" {
+			seen[p.Repo] = struct{}{}
 		}
-		out = append(out, r)
 	}
-	return out
+	for _, r := range in.ReadyToMerge {
+		if r.Repo != "" {
+			seen[r.Repo] = struct{}{}
+		}
+	}
+	for _, r := range in.NeedsGrant {
+		if r.Repo != "" {
+			seen[r.Repo] = struct{}{}
+		}
+	}
+	repos := make([]string, 0, len(seen))
+	for repo := range seen {
+		repos = append(repos, repo)
+	}
+	return repos
 }
 
-type liveResult struct {
-	index int
-	pr    LivePR
-	err   error
+type repoResult struct {
+	repo string
+	prs  map[int]LivePR
+	err  error
 }
 
-// resolveLive fans n subject lookups over a bounded worker pool and returns the
-// results indexed by position — the shared mechanism both the parked and the
-// ready-to-merge reconcilers drive their per-subject GitHub reads through, so a
-// single freshness policy lives in one place.
-func resolveLive(n int, lookup func(i int) (LivePR, error)) []liveResult {
-	results := make(chan liveResult, n)
-	jobs := make(chan int, n)
-	for i := range n {
-		jobs <- i
+// resolveRepos fetches each repo's open-PR map ONCE, fanned over a bounded
+// worker pool, and folds the results into one snapshot indexed by repo. One
+// fetch per repo is the batching invariant the tests pin.
+func resolveRepos(repos []string, fetch OpenPRs) liveRepos {
+	n := len(repos)
+	results := make(chan repoResult, n)
+	jobs := make(chan string, n)
+	for _, repo := range repos {
+		jobs <- repo
 	}
 	close(jobs)
 
 	const maxWorkers = 8
 	for range min(n, maxWorkers) {
 		go func() {
-			for i := range jobs {
-				pr, err := lookup(i)
-				results <- liveResult{index: i, pr: pr, err: err}
+			for repo := range jobs {
+				prs, err := fetch(repo)
+				results <- repoResult{repo: repo, prs: prs, err: err}
 			}
 		}()
 	}
 
-	resolved := make([]liveResult, n)
+	live := liveRepos{open: make(map[string]map[int]LivePR, n), errs: make(map[string]error, n)}
 	for range n {
-		result := <-results
-		resolved[result.index] = result
+		res := <-results
+		if res.err != nil {
+			live.errs[res.repo] = res.err
+			continue
+		}
+		live.open[res.repo] = res.prs
 	}
-	return resolved
+	return live
 }
 
-func reconcileLive(parked []ParkedRun, lookup PRLookup) []ParkedRun {
-	resolved := resolveLive(len(parked), func(i int) (LivePR, error) {
-		return lookup(parked[i].Repo, parked[i].Number)
-	})
-
+// reconcileLive reconciles the parked rows against the batched snapshot: a repo
+// fetch error keeps the row visible as unknown (the failed-lookup default); a PR
+// present in its repo's open set is OPEN and enriched; a PR absent from the set
+// (no fetch error) is not open — merged or closed — and drops.
+func reconcileLive(parked []ParkedRun, live liveRepos) []ParkedRun {
 	out := make([]ParkedRun, 0, len(parked))
-	for i, p := range parked {
-		result := resolved[i]
-		if result.err != nil {
+	for _, p := range parked {
+		pr, open, err := live.lookup(p.Repo, p.Number)
+		if err != nil {
 			p.PRState = "unknown"
-			p.PRStateReason = result.err.Error()
+			p.PRStateReason = err.Error()
 			out = append(out, p)
 			continue
 		}
-		state := strings.ToUpper(result.pr.State)
-		p.PRState = state
-		p = mergeLivePR(p, result.pr)
-		if state == "OPEN" {
-			out = append(out, p)
+		if !open {
 			continue
 		}
-		if state != "MERGED" && state != "CLOSED" {
-			p.PRState = "unknown"
-			p.PRStateReason = fmt.Sprintf("GitHub returned unrecognized PR state %q", result.pr.State)
-			out = append(out, p)
-		}
+		p.PRState = "OPEN"
+		out = append(out, mergeLivePR(p, pr))
 	}
 	return out
 }
 
-// reconcileReadyLive enforces the ready-row freshness law against current PR
-// state. A row is DROPPED on a confirmed non-mergeable fact — the PR has since
-// MERGED or CLOSED, or its head has MOVED past the SHA the would_merge command
-// pins (both SHAs non-empty and differing): a push after verification means the
-// new head was never gated, so the paste-ready `--match-head-commit <old sha>`
-// would refuse and the PR needs re-gating. A row is KEPT on anything ambiguous —
-// a failed lookup, an unrecognized state, or an empty live SHA — because the
-// safe default is never to silently hide a possibly-mergeable PR; the trade-off
-// is that a DRAFT/odd-state PR can linger with a stale command until re-gated.
-func reconcileReadyLive(rows []ReadyRow, lookup PRLookup) []ReadyRow {
-	resolved := resolveLive(len(rows), func(i int) (LivePR, error) {
-		return lookup(rows[i].Repo, rows[i].Number)
-	})
-
+// reconcileReadyLive enforces the ready-row freshness law against the batched
+// snapshot. A row is DROPPED on a confirmed non-mergeable fact — the PR is
+// absent from its repo's open set (since MERGED or CLOSED), or its head has
+// MOVED past the SHA the would_merge command pins (both SHAs non-empty and
+// differing): a push after verification means the new head was never gated, so
+// the paste-ready `--match-head-commit <old sha>` would refuse and the PR needs
+// re-gating. A row is KEPT on anything ambiguous — a repo fetch error, or an
+// empty live SHA — because the safe default is never to silently hide a
+// possibly-mergeable PR.
+func reconcileReadyLive(rows []ReadyRow, live liveRepos) []ReadyRow {
 	out := make([]ReadyRow, 0, len(rows))
-	for i, r := range rows {
-		result := resolved[i]
-		if result.err != nil {
+	for _, r := range rows {
+		pr, open, err := live.lookup(r.Repo, r.Number)
+		if err != nil {
 			out = append(out, r)
 			continue
 		}
-		st := strings.ToUpper(result.pr.State)
-		if st == "MERGED" || st == "CLOSED" {
+		if !open {
 			continue
 		}
-		if headMoved(r.HeadSHA, result.pr.HeadSHA) {
+		if headMoved(r.HeadSHA, pr.HeadSHA) {
 			continue
 		}
-		out = append(out, mergeLiveReady(r, result.pr))
+		out = append(out, mergeLiveReady(r, pr))
+	}
+	return out
+}
+
+// enrichNeedsGrant attaches a live open-PR count to each needs_grant row from
+// the batched snapshot — len of the repo's open set, no extra `gh` call. It is
+// best-effort and degrades a row rather than dropping it: a repo whose fetch
+// failed KEEPS the row with OpenPRs left nil (omitted from JSON). The lapsed
+// grant is the primary signal — dropping the whole row when gh is unreachable
+// would reintroduce the very invisible needs-a-grant state this surface exists
+// to kill. The projection never fails as a whole.
+func enrichNeedsGrant(rows []NeedsGrantRow, live liveRepos) []NeedsGrantRow {
+	out := make([]NeedsGrantRow, 0, len(rows))
+	for _, r := range rows {
+		if live.errs[r.Repo] != nil {
+			out = append(out, r)
+			continue
+		}
+		count := len(live.open[r.Repo])
+		r.OpenPRs = &count
+		out = append(out, r)
 	}
 	return out
 }

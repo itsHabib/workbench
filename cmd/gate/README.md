@@ -55,7 +55,14 @@ the last day). It is read-only and sits outside the 0–3 decision codes: like
 `explain` and `audit` it exits 0 or 4. The default projection collapses repeated
 runs by PR from log evidence alone. Pass `-live` to additionally remove subjects
 GitHub confirms are merged/closed; lookup failures remain visible as unknown.
-Pass `-json` for the console feed.
+The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
+`gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
+needs-grant surfaces from one snapshot. Pass `-json` for the console feed.
+
+For profiling that live reconcile, `next` accepts three debug/experimental
+flags — `-cpuprofile <path>`, `-blockprofile <path>`, `-trace <path>` — each
+writing the corresponding `runtime/pprof` (or `runtime/trace`) artifact for the
+run. They are off unless a path is given and touch nothing on the decision path.
 
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on

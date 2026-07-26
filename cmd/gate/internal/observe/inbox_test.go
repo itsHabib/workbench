@@ -126,43 +126,111 @@ func TestBuildInboxNewestParkWinsForPR(t *testing.T) {
 	}
 }
 
-func TestReconcileLiveKeepsOnlyConfirmedOpenOrUnknown(t *testing.T) {
+// snapshot builds a liveRepos from a per-repo open-PR map and a per-repo error
+// map — the batched result the row reconcilers read against, without spinning
+// the worker pool.
+func snapshot(open map[string]map[int]LivePR, errs map[string]error) liveRepos {
+	if open == nil {
+		open = map[string]map[int]LivePR{}
+	}
+	if errs == nil {
+		errs = map[string]error{}
+	}
+	return liveRepos{open: open, errs: errs}
+}
+
+// TestReconcileLiveKeepsOpenDropsAbsentUnknownOnError pins the parked reconcile
+// against the batched snapshot: a PR present in its repo's open set stays OPEN
+// and enriched; a PR absent from the set (no fetch error) is not open and drops;
+// a repo whose fetch errored keeps its rows visible as unknown.
+func TestReconcileLiveKeepsOpenDropsAbsentUnknownOnError(t *testing.T) {
 	parked := []ParkedRun{
 		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale title"},
-		{Run: "run_merged", Repo: "o/r", Number: 2},
-		{Run: "run_unknown", Repo: "o/r", Number: 3},
-		{Run: "run_unexpected", Repo: "o/r", Number: 4},
+		{Run: "run_absent", Repo: "o/r", Number: 2},
+		{Run: "run_broken", Repo: "o/broken", Number: 3},
 	}
-	lookup := func(_ string, number int) (LivePR, error) {
-		switch number {
-		case 1:
-			return LivePR{State: "OPEN", Title: "live title", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
-		case 2:
-			return LivePR{State: "MERGED"}, nil
-		case 3:
-			return LivePR{}, fmt.Errorf("lookup unavailable")
-		default:
-			return LivePR{State: "unexpected"}, nil
-		}
-	}
+	live := snapshot(
+		map[string]map[int]LivePR{
+			"o/r": {1: {State: "OPEN", Title: "live title", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}},
+		},
+		map[string]error{"o/broken": fmt.Errorf("lookup unavailable")},
+	)
 
-	got := reconcileLive(parked, lookup)
-	if len(got) != 3 || got[0].Run != "run_open" || got[1].Run != "run_unknown" || got[2].Run != "run_unexpected" {
+	got := reconcileLive(parked, live)
+	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_broken" {
 		t.Fatalf("live reconcile = %+v", got)
 	}
 	if got[0].PRState != "OPEN" || got[0].Title != "live title" || got[0].HeadSHA != "abc" {
 		t.Fatalf("open PR was not enriched: %+v", got[0])
 	}
 	if got[1].PRState != "unknown" || !strings.Contains(got[1].PRStateReason, "lookup unavailable") {
-		t.Fatalf("failed lookup must remain visible as unknown: %+v", got[1])
-	}
-	if got[2].PRState != "unknown" || !strings.Contains(got[2].PRStateReason, "unexpected") {
-		t.Fatalf("unexpected state must remain visible as unknown: %+v", got[2])
+		t.Fatalf("failed repo fetch must remain visible as unknown: %+v", got[1])
 	}
 	var text bytes.Buffer
 	renderInbox(&text, Inbox{Parked: got})
 	if !strings.Contains(text.String(), "PR state unknown: lookup unavailable") {
 		t.Fatalf("text view must surface live lookup failure:\n%s", text.String())
+	}
+}
+
+// TestReconcileInboxFetchesOncePerDistinctRepo pins the batching invariant — the
+// whole point of the seam: the lister is called ONCE per DISTINCT repo, never
+// once per row, even with many rows spread across few repos.
+func TestReconcileInboxFetchesOncePerDistinctRepo(t *testing.T) {
+	in := Inbox{
+		Parked: []ParkedRun{
+			{Run: "p1", Repo: "o/a", Number: 1},
+			{Run: "p2", Repo: "o/a", Number: 2},
+			{Run: "p3", Repo: "o/b", Number: 3},
+		},
+		ReadyToMerge: []ReadyRow{
+			{Run: "r1", Repo: "o/a", Number: 4},
+			{Run: "r2", Repo: "o/c", Number: 5},
+		},
+		NeedsGrant: []NeedsGrantRow{
+			{Repo: "o/b", GrantState: "expired"},
+			{Repo: "o/d", GrantState: "absent"},
+		},
+	}
+	calls := make(map[string]int)
+	fetch := func(repo string) (map[int]LivePR, error) {
+		calls[repo]++
+		return map[int]LivePR{}, nil
+	}
+	reconcileInbox(in, fetch)
+
+	// Four distinct repos across 3 parked + 2 ready + 2 needs_grant rows.
+	if len(calls) != 4 {
+		t.Fatalf("want 4 distinct-repo fetches, got %d: %+v", len(calls), calls)
+	}
+	for repo, n := range calls {
+		if n != 1 {
+			t.Fatalf("repo %s fetched %d times, want exactly 1 (O(repos), not O(rows))", repo, n)
+		}
+	}
+}
+
+// TestReconcileInboxRepoErrorPreservesEverySurface pins that a single repo whose
+// fetch errors degrades — never drops — every surface: parked stays as unknown,
+// ready stays as-is, needs_grant stays with a nil OpenPRs.
+func TestReconcileInboxRepoErrorPreservesEverySurface(t *testing.T) {
+	in := Inbox{
+		Parked:       []ParkedRun{{Run: "p", Repo: "o/broken", Number: 1}},
+		ReadyToMerge: []ReadyRow{{Run: "r", Repo: "o/broken", Number: 2, MergeCommand: "gh pr merge 2"}},
+		NeedsGrant:   []NeedsGrantRow{{Repo: "o/broken", GrantState: "expired"}},
+	}
+	fetch := func(_ string) (map[int]LivePR, error) {
+		return nil, fmt.Errorf("gh unreachable")
+	}
+	got := reconcileInbox(in, fetch)
+	if len(got.Parked) != 1 || got.Parked[0].PRState != "unknown" {
+		t.Fatalf("parked must survive as unknown on a repo error: %+v", got.Parked)
+	}
+	if len(got.ReadyToMerge) != 1 || got.ReadyToMerge[0].Run != "r" {
+		t.Fatalf("ready must survive as-is on a repo error: %+v", got.ReadyToMerge)
+	}
+	if len(got.NeedsGrant) != 1 || got.NeedsGrant[0].OpenPRs != nil {
+		t.Fatalf("needs_grant must survive with nil open_prs on a repo error: %+v", got.NeedsGrant)
 	}
 }
 
@@ -422,13 +490,14 @@ func TestEnrichNeedsGrantBestEffort(t *testing.T) {
 		{Repo: "o/broken", GrantState: "absent"},
 		{Repo: "o/also-ok", GrantState: "expired"},
 	}
-	lister := func(repo string) (int, error) {
-		if repo == "o/broken" {
-			return 0, fmt.Errorf("gh unreachable")
-		}
-		return 2, nil
-	}
-	got := enrichNeedsGrant(rows, lister)
+	live := snapshot(
+		map[string]map[int]LivePR{
+			"o/ok":      {10: {State: "OPEN"}, 11: {State: "OPEN"}},
+			"o/also-ok": {20: {State: "OPEN"}, 21: {State: "OPEN"}},
+		},
+		map[string]error{"o/broken": fmt.Errorf("gh unreachable")},
+	)
+	got := enrichNeedsGrant(rows, live)
 	if len(got) != 3 {
 		t.Fatalf("a per-repo failure must keep the row, not drop it, got %+v", got)
 	}
@@ -562,26 +631,19 @@ func TestReadyToMergeNonWouldMergeTerminalExcluded(t *testing.T) {
 func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
 	rows := []ReadyRow{
 		{Run: "run_open", Repo: "o/r", Number: 1, Title: "stale", HeadSHA: "abc"},
-		{Run: "run_merged", Repo: "o/r", Number: 2},
-		{Run: "run_closed", Repo: "o/r", Number: 3},
-		{Run: "run_unknown", Repo: "o/r", Number: 4},
+		{Run: "run_absent", Repo: "o/r", Number: 2},
+		{Run: "run_broken", Repo: "o/broken", Number: 3},
 	}
-	lookup := func(_ string, number int) (LivePR, error) {
-		switch number {
-		case 1:
-			// Live head matches the recorded sha — still ready, enriched.
-			return LivePR{State: "OPEN", Title: "live", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}, nil
-		case 2:
-			return LivePR{State: "MERGED"}, nil
-		case 3:
-			return LivePR{State: "CLOSED"}, nil
-		default:
-			return LivePR{}, fmt.Errorf("lookup unavailable")
-		}
-	}
-	got := reconcileReadyLive(rows, lookup)
-	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_unknown" {
-		t.Fatalf("merged/closed must drop, open + failed-lookup must stay: %+v", got)
+	live := snapshot(
+		map[string]map[int]LivePR{
+			// Present + head matches the recorded sha — still ready, enriched.
+			"o/r": {1: {State: "OPEN", Title: "live", HeadSHA: "abc", URL: "https://github.com/o/r/pull/1"}},
+		},
+		map[string]error{"o/broken": fmt.Errorf("lookup unavailable")},
+	)
+	got := reconcileReadyLive(rows, live)
+	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_broken" {
+		t.Fatalf("absent (merged/closed) must drop, open + failed-fetch must stay: %+v", got)
 	}
 	if got[0].Title != "live" || got[0].HeadSHA != "abc" {
 		t.Fatalf("open ready row was not enriched: %+v", got[0])
@@ -598,17 +660,14 @@ func TestReconcileReadyLiveDropsOnHeadMove(t *testing.T) {
 		{Run: "run_same", Repo: "o/r", Number: 2, HeadSHA: "gated2"},
 		{Run: "run_emptylive", Repo: "o/r", Number: 3, HeadSHA: "gated3"},
 	}
-	lookup := func(_ string, number int) (LivePR, error) {
-		switch number {
-		case 1:
-			return LivePR{State: "OPEN", HeadSHA: "pushed1"}, nil
-		case 2:
-			return LivePR{State: "OPEN", HeadSHA: "gated2"}, nil
-		default:
-			return LivePR{State: "OPEN"}, nil // empty live sha — not a confirmation
-		}
-	}
-	got := reconcileReadyLive(rows, lookup)
+	live := snapshot(map[string]map[int]LivePR{
+		"o/r": {
+			1: {State: "OPEN", HeadSHA: "pushed1"}, // head moved past gated1
+			2: {State: "OPEN", HeadSHA: "gated2"},  // matches
+			3: {State: "OPEN"},                     // empty live sha — not a confirmation
+		},
+	}, nil)
+	got := reconcileReadyLive(rows, live)
 	if len(got) != 2 || got[0].Run != "run_same" || got[1].Run != "run_emptylive" {
 		t.Fatalf("a confirmed head move must drop; match + empty-live-sha must stay: %+v", got)
 	}
