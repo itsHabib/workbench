@@ -374,7 +374,7 @@ func cmdGate(args []string) error {
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
-	reviewsOptional := fs.Bool("reviews-optional", false, "treat an absent GitHub review decision as acceptable (do not escalate) — for the enforced-check context where gate's own review-consolidation is the review gate")
+	reviewsOptional := fs.Bool("reviews-optional", false, "reviews advisory: readiness does not escalate on an absent GitHub review decision, and the model-based review-consolidation rung is SKIPPED (it would not gate, so its paid model calls are pure cost) — for the enforced CI check, which has no judge to resolve a review park. Review judgment stays in the operator/driver flow. A GitHub CHANGES_REQUESTED still blocks via readiness")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -437,11 +437,22 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	if err != nil {
 		return res, codeError, err
 	}
-	reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
-	if err != nil {
-		return res, codeError, err
+	// The model-based review-consolidation rung is SKIPPED when reviews are advisory
+	// (reviewsOptional — the enforced CI check). It escalates on uncertainty, and an
+	// ephemeral CI run has no judge to resolve the park, so gating on it would
+	// freeze a clean PR; and since it would not gate, running it is pure paid model
+	// calls per PR for no decision. Review judgment stays in the operator/driver
+	// flow, which DOES run and gate the rung. The enforced check gates on the
+	// DETERMINISTIC rungs — readiness, floor (+ ci-classify on red CI). A
+	// GitHub-reported CHANGES_REQUESTED still blocks via readiness (code-class).
+	verdictIDs := []string{readinessArt.ID, floorArt.ID}
+	if !reviewsOptional {
+		reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
+		if err != nil {
+			return res, codeError, err
+		}
+		verdictIDs = append(verdictIDs, reviewsArt.ID)
 	}
-	verdictIDs := []string{readinessArt.ID, floorArt.ID, reviewsArt.ID}
 	ciID, err := ciClassifyIfRed(e, run, bundle.View, repo, pr, subject, model)
 	if err != nil {
 		return res, codeError, err

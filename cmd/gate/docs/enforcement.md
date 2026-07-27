@@ -206,61 +206,29 @@ and why each choice is the safe one:
   an escalation, and per-run ephemeral state makes cross-run cycle counting
   meaningless. So the ceilings are opened wide and the check stands or falls on
   the ladder alone.
-- It runs with **`-reviews-optional`**. gate's readiness rung normally escalates
-  when GitHub reports no review decision — a signal a human judge resolves in the
-  driver context. But this check IS the enforced review gate (its
-  review-consolidation rung consolidates the bot panel), and the canary requires
-  no *separate* GitHub review, so GitHub reports an empty `reviewDecision` by
-  design. Without `-reviews-optional` a clean PR would escalate → park →
-  `gate=failure` forever, making the **green path unreachable in CI** and freezing
-  `main` once the check is required. The flag suppresses only the *absence*
-  escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
-  and empty CI still escalates. **The flag is passed only when the CURRENT head
-  has actually been reviewed by a bot**, signalled either way: a bot *review
-  submission* whose `commit_id == HEAD_SHA` (how a bot with inline findings
-  reports), **or** codex's clean-pass *issue comment* — matched **narrowly** by
-  codex's exact login **and** its "Reviewed commit: `<sha>`" sentinel **and** the
-  head's short sha. The narrowness is load-bearing: accepting any `type == "Bot"`
-  comment that merely names the head sha would let an **infra** bot (codecov,
-  deploy-preview, github-actions CI-summary — none of which review code, and which
-  re-post per-push comments embedding the current head sha) satisfy the guard, so
-  an unreviewed head could reach `success` (a fail-open the adversarial pass
-  caught). A stale codex comment names an *old* sha, so the head-sha match keeps it
-  current. The policy is
-  enabled only when at least one of these is present; otherwise the run goes
-  *without* the flag so readiness escalates and parks — fail closed until the bots
-  review this head. That closes the stale-evidence path where an old unanchored
-  "no issues" comment could otherwise satisfy the review rung once the
-  `reviewDecision` backstop is removed, while still letting a clean review (which
-  codex delivers as an issue comment) reach `gate=success`.
-  (Discovered in Phase-3 dry-observe: every canary
-  PR had an empty `reviewDecision`, so the escalation fired on all of them.)
-  **Liveness residual (fail-closed):** gate runs on `CI` completion, but a bot
-  posts its review asynchronously — often *after* CI finishes. The first gate run
-  then sees no current-head review and **parks** (`gate=failure`); the review
-  landing later posts no `CI` event, so the status stays parked until a re-trigger
-  (a new push, or a manual CI re-run) re-evaluates and observes the review. This
-  is safe (a clean PR is held, never wrongly passed), but a clean PR needs a nudge
-  to go green. The clean fix — a trusted `pull_request_review`/comment-driven
-  re-evaluation trigger — is a follow-up; the driver/operator re-runs in the
-  meantime.
-  Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
-  "Request changes" on a repo with no branch-protection review requirement does
-  not populate `reviewDecision`, and the review-consolidation rung filters to bot
-  authors — so a standing non-bot change-request is not surfaced when the bot
-  panel is clean. A *GitHub-reported* `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still
-  blocks unconditionally. Closing the gap means reading the raw
-  `latestReviews[].state` and blocking on a standing non-bot change-request even
-  when `reviewDecision` is empty; `-reviews-optional` makes this pre-existing gap
-  observable, it does not create it. A second low-severity residual is inherent to
-  commit-status enforcement: the head-review guard is checked when gate runs, and
-  gate runs only on a `CI` completion, so if the qualifying bot review is
-  *dismissed after* `gate=success` is posted, no `CI` event re-fires gate and the
-  persisted success survives until the next push. Fully closing it needs a
-  `pull_request_review` (dismissed) trigger — out of scope (no bespoke enforcement
-  machinery beyond the status check). Low practical risk: dismissing a bot review
-  to un-validate a green is a privileged action that gains a merge-capable actor
-  nothing they cannot already do, and gate judged a valid review at run time.
+- It runs with **`-reviews-optional`**, which makes **reviews advisory** for the
+  enforced check. Two things follow from it. (1) Readiness does **not** escalate on
+  an absent GitHub `reviewDecision` — the canary requires no *separate* GitHub
+  review, so an empty decision is expected, not a reason to park. (2) The
+  model-based **review-consolidation rung is skipped**: it would not gate here, so
+  running it would only spend paid model calls per PR for no decision. So the
+  enforced check stands or falls on the rungs it can
+  verify **autonomously and deterministically**: CI green, readiness (mergeable,
+  not a draft, no `CHANGES_REQUESTED`), and the risk floor.
+
+  Why split it out: review consolidation is a **model judgment** that escalates on
+  uncertainty (a genuinely clean bot review often extracts at low confidence). The
+  CI run is ephemeral and has **no judge** to resolve that park, so gating on it
+  would freeze a clean PR with no auto-green path. Trying to auto-recognize a clean
+  review from comment text proved **unsound** (the adversarial pass broke every
+  heuristic — a concern can always be phrased to fit). So review *judgment* stays
+  in the **operator/driver flow**, where a human consolidates the bot panel — which
+  is where it belongs. The enforced check shuts the un-gated-merge bypass and holds
+  the deterministic floor; it does not pretend to adjudicate reviews on its own.
+  A **GitHub-reported** `CHANGES_REQUESTED`/`REVIEW_REQUIRED` is *not* advisory —
+  it blocks via readiness (a code-class block), independent of the reviews rung.
+  (Discovered in Phase-3 dry-observe: every canary PR had an empty `reviewDecision`,
+  so the old review-gating design parked every one of them.)
 - It maps gate's exit code to the status **fail-closed**: `state=success` only
   for exit 0 (`would_merge`); block, park, and refuse all post `state=failure`;
   any other code posts `state=error`. If any earlier step fails (build, PR
