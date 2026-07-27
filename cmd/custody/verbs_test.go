@@ -33,6 +33,19 @@ func TestKeysUsageAndBadSubcommand(t *testing.T) {
 	}
 }
 
+func TestLogUsageAndBadSubcommand(t *testing.T) {
+	if err := cmdLog([]string{"-h"}); err != nil {
+		t.Fatalf("log -h: %v", err)
+	}
+	if err := cmdLog([]string{"bogus"}); err == nil {
+		t.Fatal("log bogus: want error")
+	}
+	err := cmdLog([]string{"rollup", "-state", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "custody serve") {
+		t.Fatalf("log rollup without a log: %v, want the has-serve-run remedy", err)
+	}
+}
+
 func TestServeHelpSucceeds(t *testing.T) {
 	if err := cmdServe([]string{"-h"}); err != nil {
 		t.Fatalf("serve -h: %v", err)

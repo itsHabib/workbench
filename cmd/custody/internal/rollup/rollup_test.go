@@ -1,0 +1,193 @@
+package rollup
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+)
+
+// line builds one schema-v1 log line. Overrides are merged over the base map.
+func line(t *testing.T, overrides map[string]any) string {
+	t.Helper()
+	base := map[string]any{
+		"schema_version": 1,
+		"ts":             "2026-07-26T10:00:00Z",
+		"request_id":     "req-1",
+		"verdict":        "pass",
+		"method":         "GET",
+		"latency_ms":     100,
+	}
+	for k, v := range overrides {
+		base[k] = v
+	}
+	data, err := json.Marshal(base)
+	if err != nil {
+		t.Fatalf("marshal line: %v", err)
+	}
+	return string(data)
+}
+
+func TestAggregateCounts(t *testing.T) {
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira", "grant_id": "g1", "upstream_status": 200, "latency_ms": 100}),
+		line(t, map[string]any{"key": "jira", "grant_id": "g1", "upstream_status": 200, "latency_ms": 300}),
+		line(t, map[string]any{"key": "jira", "grant_id": "g2", "verdict": "denied", "method": "POST", "canonical_target": "/rest/api/2/issue", "latency_ms": 5}),
+		line(t, map[string]any{"verdict": "refused", "latency_ms": 1}),
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if sum.Total != 4 {
+		t.Fatalf("Total = %d, want 4", sum.Total)
+	}
+	if sum.ByVerdict["pass"] != 2 || sum.ByVerdict["denied"] != 1 || sum.ByVerdict["refused"] != 1 {
+		t.Fatalf("ByVerdict = %v", sum.ByVerdict)
+	}
+	jira := sum.Keys["jira"]
+	if jira == nil || jira.Total != 3 {
+		t.Fatalf("jira summary = %+v", jira)
+	}
+	if jira.DistinctGrants != 2 {
+		t.Fatalf("DistinctGrants = %d, want 2", jira.DistinctGrants)
+	}
+	if jira.UpstreamStatus["200"] != 2 {
+		t.Fatalf("UpstreamStatus = %v", jira.UpstreamStatus)
+	}
+	if got := jira.DeniedTargets; len(got) != 1 || got[0].Target != "POST /rest/api/2/issue" || got[0].Count != 1 {
+		t.Fatalf("DeniedTargets = %v", got)
+	}
+	none := sum.Keys["(none)"]
+	if none == nil || none.ByVerdict["refused"] != 1 {
+		t.Fatalf("(none) summary = %+v", none)
+	}
+	if sum.Window.From != "2026-07-26T10:00:00Z" || sum.Window.To != "2026-07-26T10:00:00Z" {
+		t.Fatalf("Window = %+v", sum.Window)
+	}
+}
+
+func TestAggregateLatencyPercentiles(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 100; i++ {
+		lines = append(lines, line(t, map[string]any{"key": "jira", "latency_ms": i}))
+	}
+	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	lat := sum.Keys["jira"].Latency
+	if lat.P50 != 50 || lat.P95 != 95 || lat.Max != 100 {
+		t.Fatalf("Latency = %+v, want p50=50 p95=95 max=100", lat)
+	}
+}
+
+func TestAggregateSingleValuePercentiles(t *testing.T) {
+	sum, err := Aggregate(strings.NewReader(line(t, map[string]any{"key": "jira", "latency_ms": 42})), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	lat := sum.Keys["jira"].Latency
+	if lat.P50 != 42 || lat.P95 != 42 || lat.Max != 42 {
+		t.Fatalf("Latency = %+v, want all 42", lat)
+	}
+}
+
+func TestAggregateSinceWindowIsLogAnchored(t *testing.T) {
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-20T10:00:00Z"}),
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-26T09:00:00Z"}),
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-26T10:00:00Z"}),
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if sum.Total != 2 {
+		t.Fatalf("Total = %d, want 2 (the 07-20 record is outside 24h of the newest)", sum.Total)
+	}
+	if sum.Window.From != "2026-07-26T09:00:00Z" {
+		t.Fatalf("Window.From = %s, want the windowed span", sum.Window.From)
+	}
+}
+
+func TestAggregateSkipsBadLines(t *testing.T) {
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira"}),
+		"{torn json",
+		line(t, map[string]any{"key": "jira", "schema_version": 2}),
+		line(t, map[string]any{"key": "jira", "ts": "not-a-time"}),
+		"",
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if sum.Total != 1 || sum.Malformed != 2 || sum.UnsupportedSchema != 1 {
+		t.Fatalf("Total=%d Malformed=%d UnsupportedSchema=%d, want 1/2/1", sum.Total, sum.Malformed, sum.UnsupportedSchema)
+	}
+}
+
+func TestDeniedTargetsOrderedAndCapped(t *testing.T) {
+	var lines []string
+	for i := 0; i < 12; i++ {
+		target := "/rest/api/3/path-" + string(rune('a'+i))
+		lines = append(lines, line(t, map[string]any{"key": "jira", "verdict": "denied", "canonical_target": target}))
+	}
+	for i := 0; i < 3; i++ {
+		lines = append(lines, line(t, map[string]any{"key": "jira", "verdict": "denied", "canonical_target": "/rest/api/3/hot", "query_keys": []string{"jql"}}))
+	}
+	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	got := sum.Keys["jira"].DeniedTargets
+	if len(got) != maxDeniedTargets {
+		t.Fatalf("len(DeniedTargets) = %d, want cap %d", len(got), maxDeniedTargets)
+	}
+	if got[0].Target != "GET /rest/api/3/hot" || got[0].Count != 3 {
+		t.Fatalf("top denied = %+v, want the ×3 target first", got[0])
+	}
+	for i := 2; i < len(got); i++ {
+		if got[i-1].Target > got[i].Target {
+			t.Fatalf("ties not lexicographic at %d: %s > %s", i, got[i-1].Target, got[i].Target)
+		}
+	}
+	if sum.Keys["jira"].DeniedQueryKeys["jql"] != 3 {
+		t.Fatalf("DeniedQueryKeys = %v", sum.Keys["jira"].DeniedQueryKeys)
+	}
+}
+
+func TestAggregateDeterministicJSON(t *testing.T) {
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira", "grant_id": "g1", "upstream_status": 200}),
+		line(t, map[string]any{"key": "confluence", "verdict": "denied", "canonical_target": "/wiki/x"}),
+		line(t, map[string]any{"verdict": "refused"}),
+	}, "\n")
+	var outs [][]byte
+	for i := 0; i < 2; i++ {
+		sum, err := Aggregate(strings.NewReader(log), 0)
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		data, err := json.Marshal(sum)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		outs = append(outs, data)
+	}
+	if !bytes.Equal(outs[0], outs[1]) {
+		t.Fatalf("same log produced different artifacts:\n%s\n%s", outs[0], outs[1])
+	}
+}
+
+func TestAggregateEmptyLog(t *testing.T) {
+	sum, err := Aggregate(strings.NewReader(""), time.Hour)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if sum.Total != 0 || len(sum.Keys) != 0 {
+		t.Fatalf("empty log rolled up to %+v", sum)
+	}
+}

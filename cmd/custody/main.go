@@ -70,6 +70,7 @@ func commands() []command {
 		{name: "derive", summary: "mint a child grant attenuated from a parent", run: cmdDerive},
 		{name: "keys", summary: "manage vendor secrets (keys set)", run: cmdKeys},
 		{name: "serve", summary: "run the localhost credential proxy", run: cmdServe},
+		{name: "log", summary: "read the request-log artifact (log rollup)", run: cmdLog},
 	}
 }
 
