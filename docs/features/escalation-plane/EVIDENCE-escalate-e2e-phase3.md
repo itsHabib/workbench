@@ -52,19 +52,23 @@ and the tunnel, then doing a real tap. The **Slack-app + tunnel setup checklist*
 lives in `escalate-serve.md` (steps 1–7). Once that is done, the real phone-tap
 evidence-gather is:
 
-1. **Mint a grant** (human-only) and export its key so serve can drive resolve:
+1. **Mint a grant** (human-only) and export its key so serve can drive resolve.
+   The key dir must be a **sibling** of the state dir — gate's `newEnv` refuses a
+   key dir equal to or nested beneath `-state` (`cmd/gate/main.go`), so
+   `~/pers/gate/keys`, not `~/pers/gate/state/keys`:
 
    ```
    gate grant -repo itsHabib/workbench -max-tier T2 -ttl 168h -state ~/pers/gate/state
-   export GATE_KEY=~/pers/gate/state/keys   # or gate's default key dir
+   export GATE_KEY=~/pers/gate/keys          # sibling of state, per Phase 1's repro
+   export GATE_STATE=~/pers/gate/state       # so bare gate commands below read this ledger
    ```
 
 2. **Seed a park** to tap. A live `gate gate` needs a GitHub PR that is awkward to
    arrange on demand; the reproducible offline seed is gate's own act-path harness
-   (same one Phase 1 used):
+   (same one Phase 1 used) — note the key dir is the sibling, not under state:
 
    ```
-   GATE_DEMO_STATE=~/pers/gate/state GATE_DEMO_KEY=~/pers/gate/state/keys \
+   GATE_DEMO_STATE=~/pers/gate/state GATE_DEMO_KEY=~/pers/gate/keys \
      go test ./cmd/gate -run TestSeedDemoState -count=1 -v
    # → DEMO_SEEDED grant=grt_… run=run_… escalation=esc_… code=2
    ```
@@ -79,12 +83,17 @@ evidence-gather is:
    ngrok http 8099            # set the https URL as the Slack app's Request URL
    ```
 
-4. **Tap Approve on your phone** in the Slack card flare posted. Expect the card to
-   update to “✅ merged by @you” and the loop to close. Capture:
+4. **Tap Approve on your phone** in the Slack card flare posted. `gate resolve`
+   follows the non-live path: it records **`would_merge`** and **emits the
+   `gh pr merge` command** — it does not merge for you (this is the same outcome
+   the automated e2e asserts). So expect the resolution to land and the park to
+   move to `ready_to_merge`; then run the emitted merge command yourself to
+   complete the merge. Capture (the `-state` flag is required so these read the
+   seeded ledger, not a default/relative one):
 
    ```
-   gate next            # the park is gone (1 → 0)
-   gate audit           # chain intact; a `resolution` artifact carries the verified who
+   gate next  -state ~/pers/gate/state   # the park is gone (1 → 0), now ready_to_merge
+   gate audit -state ~/pers/gate/state   # chain intact; a `resolution` artifact carries the verified who
    ```
 
 5. **Paste the transcript here** under a new `## Real phone tap` section, mirroring
