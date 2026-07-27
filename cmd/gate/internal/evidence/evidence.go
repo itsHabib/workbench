@@ -129,6 +129,10 @@ type rawComment struct {
 	// is deliberately not used: it stays pinned to the head the comment was first
 	// posted against, so a live comment on the judged head could read as stale.
 	CommitID string `json:"commit_id"`
+	// State is set only on review submissions (pulls/.../reviews): COMMENTED,
+	// APPROVED, CHANGES_REQUESTED, DISMISSED. Empty for comments. A DISMISSED
+	// review has been withdrawn and must not count as review evidence.
+	State string `json:"state"`
 }
 
 const commentsPerPage = 100
@@ -179,11 +183,28 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 			Body:   rc.Body,
 		})
 	}
-	for _, rv := range reviews {
-		// A review with no top-level body (an inline-only review, or a bare
-		// approval) adds no evidence of its own — its inline comments are already
-		// captured above. Skip it to avoid an empty extraction.
-		if strings.TrimSpace(rv.Body) == "" {
+	out = append(out, reviewBodies(reviews)...)
+	return out, nil
+}
+
+// reviewBodies reduces a PR's review submissions (oldest-first) to the review
+// bodies worth judging: each author's LATEST non-dismissed review that carries a
+// top-level body. A bot can submit several reviews without a new commit (request
+// changes, then approve) — all sharing a commit_id, so staleComment cannot tell
+// the superseded one apart; only the latest reflects the author's current stance.
+// A DISMISSED review is withdrawn evidence; a body-less review (inline-only or a
+// bare approval) adds nothing its inline comments don't already carry.
+func reviewBodies(reviews []rawComment) []Comment {
+	latest := map[string]int{}
+	for i, rv := range reviews {
+		if rv.State == "DISMISSED" || strings.TrimSpace(rv.Body) == "" {
+			continue
+		}
+		latest[rv.User.Login] = i
+	}
+	var out []Comment
+	for i, rv := range reviews {
+		if idx, ok := latest[rv.User.Login]; !ok || idx != i {
 			continue
 		}
 		out = append(out, Comment{
@@ -193,7 +214,7 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 			CommitID: rv.CommitID,
 		})
 	}
-	return out, nil
+	return out
 }
 
 func pagedComments(ep string) ([]rawComment, error) {
