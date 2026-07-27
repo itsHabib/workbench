@@ -93,31 +93,25 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 			continue
 		}
 		processed++
-		if cleanReviewSentinel(c.Author, c.Body, c.Path) {
-			// A bot's fixed CLEAN-review boilerplate is a deterministic "no
-			// findings" signal — do not let an uncertain model extraction of this
-			// obvious clean text escalate a genuinely clean review. Its real
-			// findings (if any) ride as SEPARATE inline comments, which still go
-			// through the model below. Counts as a processed, non-actionable review.
-			v.Findings = append(v.Findings, Finding{
-				Title: fmt.Sprintf("[%s] clean review — no issues found", strings.TrimSuffix(c.Author, "[bot]")),
-				Locus: locus(c.Path, c.Line),
-			})
-			continue
-		}
 		f, verdict, lowc := classifyComment(c.Author, c.Body, c.Path, c.Line, model)
 		v.Findings = append(v.Findings, f)
 		if verdict == "" { // extraction failed or out-of-enum: unreadable, escalate
 			lowConf++
 			continue
 		}
-		if f.Confidence < v.Confidence {
-			v.Confidence = f.Confidence
-		}
+		v.Confidence = min(v.Confidence, f.Confidence)
 		if verdict == "actionable" {
 			actionable++
 		}
-		if lowc {
+		// A low-confidence extraction normally escalates. Exception: codex's fixed
+		// clean-pass sentinel is a deterministic clean signal, so an uncertain
+		// non-actionable ("none") extraction of it must not park a clean review.
+		// The model still READS the whole body, and an ACTIONABLE verdict is NEVER
+		// rescued — so a comment that leads clean then raises a concern (or any
+		// finding the model reads) still escalates. The rescue only overrides the
+		// CONFIDENCE penalty on a model-confirmed-clean codex sentinel comment.
+		rescued := verdict != "actionable" && cleanReviewSentinel(c.Author, c.Body, c.Path)
+		if lowc && !rescued {
 			lowConf++
 		}
 		// A no-problem comment (approval, ship-it, findings-resolved note) may

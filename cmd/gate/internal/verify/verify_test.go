@@ -434,35 +434,45 @@ func TestCleanReviewSentinelScope(t *testing.T) {
 	}
 }
 
-func TestReviewsCleanSentinelPassesWithoutModel(t *testing.T) {
-	// A bot's clean-review sentinel must consolidate to PASS deterministically,
-	// WITHOUT a model call — the scriptedModel has no replies, so any extractOne
-	// reaching it would error into a low-confidence escalation and fail this test.
-	// This is the fix that lets a genuinely clean, reviewed PR reach gate=success
-	// instead of parking on an uncertain cloud extraction of "no issues".
+func TestReviewsCleanSentinelRescuesLowConfidence(t *testing.T) {
 	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
-	m := &scriptedModel{}
+	codex := "chatgpt-codex-connector[bot]"
+
+	// codex's clean comment extracts as a LOW-confidence "none" (haiku
+	// uncertainty). Normally that escalates; the sentinel overrides the confidence
+	// penalty so a genuinely clean review passes.
+	m := &scriptedModel{replies: []string{
+		`{"headline":"no issues","severity":"none","verdict":"none","confidence":0.3}`,
+	}}
 	v := reviewsWithSubject(t, head, []map[string]any{
-		{"author": "chatgpt-codex-connector[bot]", "is_bot": true,
-			"body": "Codex Review: Didn't find any major issues. Hooray!"},
+		{"author": codex, "is_bot": true, "body": "Codex Review: Didn't find any major issues. Hooray!"},
 	}, m)
 	if v.Decision != DecisionPass {
-		t.Fatalf("a clean-sentinel review must pass, got %s (%s)", v.Decision, v.Why)
-	}
-	if m.calls != 0 {
-		t.Fatalf("a clean-sentinel review must not call the model, got %d calls", m.calls)
+		t.Fatalf("a clean-sentinel low-confidence none must be rescued to pass, got %s (%s)", v.Decision, v.Why)
 	}
 
-	// The sentinel is a clean-summary fast path only; a real finding on the same
-	// head still goes through the model and escalates (worst-wins).
+	// A sentinel-PREFIXED comment the model reads as ACTIONABLE is NEVER rescued —
+	// the model reads the whole body, so a clean lead-in that then raises a concern
+	// still escalates.
 	m2 := &scriptedModel{replies: []string{
-		`{"headline":"real bug","severity":"high","verdict":"actionable","confidence":0.9}`,
+		`{"headline":"command injection","severity":"high","verdict":"actionable","confidence":0.3}`,
 	}}
 	v = reviewsWithSubject(t, head, []map[string]any{
-		{"author": "cursor[bot]", "is_bot": true, "body": "found a real bug", "commit_id": "headsha"},
+		{"author": codex, "is_bot": true, "body": "Codex Review: Didn't find any major issues, but exec(userInput) is injection."},
 	}, m2)
 	if v.Decision != DecisionEscalate {
-		t.Fatalf("an actionable finding must still escalate, got %s (%s)", v.Decision, v.Why)
+		t.Fatalf("an actionable sentinel-prefixed comment must still escalate, got %s (%s)", v.Decision, v.Why)
+	}
+
+	// A non-codex bot's low-confidence none is NOT rescued (still escalates).
+	m3 := &scriptedModel{replies: []string{
+		`{"headline":"maybe","severity":"none","verdict":"none","confidence":0.3}`,
+	}}
+	v = reviewsWithSubject(t, head, []map[string]any{
+		{"author": "cursor[bot]", "is_bot": true, "body": "Didn't find any major issues"},
+	}, m3)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("a non-codex low-confidence none must still escalate, got %s (%s)", v.Decision, v.Why)
 	}
 }
 
