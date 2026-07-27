@@ -91,12 +91,15 @@ jobs:
           EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
-          # commits->pulls lists the open PRs whose head is this commit — same-repo
+          # commits->pulls lists the PRs whose head is this commit — same-repo
           # PRs reliably, and fork PRs too (their head lands in the base repo's
-          # refs/pull/*). Refuse any head that backs more than one open PR,
-          # regardless of which path the event arrived on.
+          # refs/pull/*). It returns CLOSED/MERGED PRs as well, so filter to open
+          # ones: a historical closed PR that once had this head must not count
+          # toward ambiguity and wrongly refuse a legitimately-unique open PR.
+          # Refuse any head that backs more than one OPEN PR, regardless of which
+          # path the event arrived on.
           nums=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-            --jq '[.[].number] | unique')
+            --jq '[.[] | select(.state == "open") | .number] | unique')
           n=$(printf '%s' "$nums" | jq 'length')
           if [ "$n" -gt 1 ]; then
             echo "ambiguous: ${HEAD_SHA} backs ${n} PRs (${nums}); refusing to gate any of them"
@@ -286,7 +289,7 @@ jobs:
                   # else — more than one, none, or a query error (which yields the
                   # literal "ambiguous") — posts failure. Fail closed by default.
                   postn=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-                    --jq '[.[].number] | unique | length' 2>/dev/null || echo ambiguous)
+                    --jq '[.[] | select(.state == "open") | .number] | unique | length' 2>/dev/null || echo ambiguous)
                   if [ "$postn" = "1" ]; then
                     STATE=success; DESC="would_merge (${tier})"
                   else
