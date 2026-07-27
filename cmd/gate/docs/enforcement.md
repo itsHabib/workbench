@@ -217,6 +217,15 @@ and why each choice is the safe one:
   escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
   and empty CI still escalates. (Discovered in Phase-3 dry-observe: every canary
   PR had an empty `reviewDecision`, so the escalation fired on all of them.)
+  Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
+  "Request changes" on a repo with no branch-protection review requirement does
+  not populate `reviewDecision`, and the review-consolidation rung filters to bot
+  authors — so a standing non-bot change-request is not surfaced when the bot
+  panel is clean. A *GitHub-reported* `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still
+  blocks unconditionally. Closing the gap means reading the raw
+  `latestReviews[].state` and blocking on a standing non-bot change-request even
+  when `reviewDecision` is empty; `-reviews-optional` makes this pre-existing gap
+  observable, it does not create it.
 - It maps gate's exit code to the status **fail-closed**: `state=success` only
   for exit 0 (`would_merge`); block, park, and refuse all post `state=failure`;
   any other code posts `state=error`. If any earlier step fails (build, PR
