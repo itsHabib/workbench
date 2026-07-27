@@ -32,6 +32,34 @@ func TestReduceCodeBlockIsFinal(t *testing.T) {
 	}
 }
 
+func TestReduceReviewsAdvisoryExclusion(t *testing.T) {
+	// Reviews-advisory (the enforced CI check) excludes the review-consolidation
+	// verdict from the reduction. Pin that this cannot weaken the deterministic
+	// rungs: with ONLY readiness + floor (no reviews verdict), a readiness code
+	// block still dominates, and a clean readiness+floor still composes to pass —
+	// hasCode is satisfied by readiness+floor alone.
+	blocked, err := Reduce(subj, []Verdict{
+		{Source: "readiness", Producer: code, Decision: DecisionBlock, Tier: "T0", Confidence: 1, Why: "PR is a draft"},
+		{Source: "triage-floor", Producer: code, Decision: DecisionPass, Tier: "T0", Confidence: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Decision != DecisionBlock {
+		t.Fatalf("a code block must still dominate with reviews excluded, got %s", blocked.Decision)
+	}
+	passed, err := Reduce(subj, []Verdict{
+		{Source: "readiness", Producer: code, Decision: DecisionPass, Tier: "T0", Confidence: 1},
+		{Source: "triage-floor", Producer: code, Decision: DecisionPass, Tier: "T0", Confidence: 1},
+	})
+	if err != nil {
+		t.Fatalf("readiness+floor (no reviews) must satisfy hasCode and reduce cleanly: %v", err)
+	}
+	if passed.Decision != DecisionPass {
+		t.Fatalf("a clean readiness+floor must pass with reviews excluded, got %s", passed.Decision)
+	}
+}
+
 func TestReduceLocalCannotBlock(t *testing.T) {
 	_, err := Reduce(subj, []Verdict{
 		{Source: "review-consolidation", Producer: local, Decision: DecisionBlock, Tier: "T0", Confidence: 1},
