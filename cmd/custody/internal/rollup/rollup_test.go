@@ -112,6 +112,42 @@ func TestAggregateSinceWindowIsLogAnchored(t *testing.T) {
 	}
 }
 
+func TestAggregateWindowMixedFractionalTimestamps(t *testing.T) {
+	// RFC3339Nano drops trailing zeros, so whole-second stamps ("…00Z") sit
+	// alongside fractional ones ("…00.5Z") — and the strings sort in the wrong
+	// chronological order. The window must compare parsed times.
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-26T10:00:00Z"}),
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-26T10:00:00.5Z"}),
+		line(t, map[string]any{"key": "jira", "ts": "2026-07-25T09:00:00.5Z"}),
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), time.Hour)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if sum.Total != 2 {
+		t.Fatalf("Total = %d, want 2 (newest is the fractional 10:00:00.5Z; the 07-25 record is out)", sum.Total)
+	}
+	if sum.Window.From != "2026-07-26T10:00:00Z" || sum.Window.To != "2026-07-26T10:00:00.5Z" {
+		t.Fatalf("Window = %+v, want chronological boundaries, not string-order ones", sum.Window)
+	}
+}
+
+func TestDeniedWithoutTargetBucketsAsUnrecorded(t *testing.T) {
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "jira", "verdict": "denied", "method": "POST"}),
+		line(t, map[string]any{"key": "jira", "verdict": "denied", "method": "POST"}),
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	got := sum.Keys["jira"].DeniedTargets
+	if len(got) != 1 || got[0].Target != "POST (target unrecorded)" || got[0].Count != 2 {
+		t.Fatalf("DeniedTargets = %v, want one explicit unrecorded bucket", got)
+	}
+}
+
 func TestAggregateSkipsBadLines(t *testing.T) {
 	log := strings.Join([]string{
 		line(t, map[string]any{"key": "jira"}),

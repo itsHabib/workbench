@@ -181,6 +181,9 @@ func (e *Engine) process(w http.ResponseWriter, r *http.Request, rec *logRecord)
 	rec.Key = target.Key
 	rec.QueryKeys = target.QueryKeys
 	rec.RawTargetHash = sha256hex(target.Raw)
+	// Stamp the canonical vendor path now so a refusal/denial line records what
+	// was attempted; forward overwrites it with the full upstream URL on pass.
+	rec.CanonicalTarget = target.Path
 
 	key, ok := e.manifest.Keys[target.Key]
 	if !ok {

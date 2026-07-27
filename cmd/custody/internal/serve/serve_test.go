@@ -230,8 +230,12 @@ func TestFlowBDeniedWithRemedy(t *testing.T) {
 	if cp.calls != 0 {
 		t.Fatal("a denied request must never reach upstream")
 	}
-	if lastLog(t, h.log).Verdict != verdictDenied {
+	rec := lastLog(t, h.log)
+	if rec.Verdict != verdictDenied {
 		t.Fatal("verdict should be denied")
+	}
+	if rec.CanonicalTarget != "/rest/api/2/issue/PROJ-1/comment" {
+		t.Fatalf("denied line should record the attempted canonical path, got %q", rec.CanonicalTarget)
 	}
 }
 

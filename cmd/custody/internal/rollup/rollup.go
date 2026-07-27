@@ -45,6 +45,12 @@ type Record struct {
 	QueryKeys       []string `json:"query_keys"`
 	UpstreamStatus  int      `json:"upstream_status"`
 	LatencyMs       int64    `json:"latency_ms"`
+
+	// when is Timestamp parsed once at read time. All ordering uses it:
+	// RFC3339Nano strings do NOT sort chronologically when fractional and
+	// whole-second stamps mix ("…00Z" > "…00.5Z" byte-wise), and the writer's
+	// RFC3339Nano format drops trailing zeros, so that mix genuinely occurs.
+	when time.Time
 }
 
 // Window is the observed time span of the aggregated records.
@@ -93,6 +99,9 @@ type Summary struct {
 	UnsupportedSchema int                    `json:"unsupported_schema_lines,omitempty"`
 	ByVerdict         map[string]int         `json:"by_verdict"`
 	Keys              map[string]*KeySummary `json:"keys"`
+
+	windowFrom time.Time
+	windowTo   time.Time
 }
 
 // Aggregate reads request-log JSONL from r and rolls it up. A non-zero since
@@ -152,30 +161,31 @@ func parse(line []byte, sum *Summary) (Record, bool) {
 		sum.UnsupportedSchema++
 		return Record{}, false
 	}
-	if _, err := time.Parse(time.RFC3339Nano, rec.Timestamp); err != nil {
+	when, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+	if err != nil {
 		sum.Malformed++
 		return Record{}, false
 	}
+	rec.when = when
 	return rec, true
 }
 
-// window drops records older than since before the newest record. Timestamps
-// were validated in parse, so they order correctly as RFC3339 strings.
+// window drops records older than since before the newest record, comparing
+// the timestamps parsed in parse — never the strings.
 func window(records []Record, since time.Duration) []Record {
 	if since <= 0 || len(records) == 0 {
 		return records
 	}
-	newest := records[0].Timestamp
+	newest := records[0].when
 	for _, rec := range records {
-		if rec.Timestamp > newest {
-			newest = rec.Timestamp
+		if rec.when.After(newest) {
+			newest = rec.when
 		}
 	}
-	edge, _ := time.Parse(time.RFC3339Nano, newest)
-	cutoff := edge.Add(-since).Format(time.RFC3339Nano)
+	cutoff := newest.Add(-since)
 	kept := records[:0]
 	for _, rec := range records {
-		if rec.Timestamp >= cutoff {
+		if !rec.when.Before(cutoff) {
 			kept = append(kept, rec)
 		}
 	}
@@ -186,7 +196,7 @@ func window(records []Record, since time.Duration) []Record {
 func (s *Summary) add(rec Record) {
 	s.Total++
 	s.ByVerdict[rec.Verdict]++
-	s.stretchWindow(rec.Timestamp)
+	s.stretchWindow(rec)
 	key := rec.Key
 	if key == "" {
 		key = noKey
@@ -204,13 +214,16 @@ func (s *Summary) add(rec Record) {
 	ks.add(rec)
 }
 
-// stretchWindow widens the observed span to include ts.
-func (s *Summary) stretchWindow(ts string) {
-	if s.Window.From == "" || ts < s.Window.From {
-		s.Window.From = ts
+// stretchWindow widens the observed span to include rec, comparing parsed
+// times; the Window strings echo the boundary records' original timestamps.
+func (s *Summary) stretchWindow(rec Record) {
+	if s.Window.From == "" || rec.when.Before(s.windowFrom) {
+		s.Window.From = rec.Timestamp
+		s.windowFrom = rec.when
 	}
-	if ts > s.Window.To {
-		s.Window.To = ts
+	if s.Window.To == "" || rec.when.After(s.windowTo) {
+		s.Window.To = rec.Timestamp
+		s.windowTo = rec.when
 	}
 }
 
@@ -232,7 +245,13 @@ func (k *KeySummary) add(rec Record) {
 	if rec.Verdict != "denied" {
 		return
 	}
-	k.denied[rec.Method+" "+rec.CanonicalTarget]++
+	// Logs written before serve stamped the canonical path on denials carry an
+	// empty target; keep those buckets honest instead of collapsing per method.
+	target := rec.CanonicalTarget
+	if target == "" {
+		target = "(target unrecorded)"
+	}
+	k.denied[rec.Method+" "+target]++
 	for _, q := range rec.QueryKeys {
 		if k.DeniedQueryKeys == nil {
 			k.DeniedQueryKeys = map[string]int{}
