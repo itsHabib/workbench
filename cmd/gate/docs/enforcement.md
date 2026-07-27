@@ -166,12 +166,16 @@ and why each choice is the safe one:
   branch be up to date) narrows that window further, and a single-protected-base
   repo is barely exposed.
 - It is bounded by a **`concurrency` group keyed on the head branch** with
-  `cancel-in-progress`, and it **skips CI runs that were themselves cancelled**.
-  Each run makes real model calls, so without this a PR force-pushed in a loop
-  would fan out one paid gate run per push; the concurrency collapse caps that at
-  one in-flight run per branch (`ci.yml` carries the matching group so superseded
-  CI runs cancel at the source). Cancelling a superseded gate run is safe: it
-  leaves the required context absent until the surviving run posts — fail closed.
+  `cancel-in-progress`. Each run makes real model calls, so without this a PR
+  force-pushed in a loop would fan out one paid gate run per push; the concurrency
+  collapse caps that at one in-flight run per branch (`ci.yml` carries the matching
+  group so superseded CI runs cancel at the source). Cancelling a superseded gate
+  run is safe: it leaves the required context absent until the surviving run posts
+  — fail closed. It deliberately does **not** filter on CI conclusion: a cancelled
+  or red CI run must still reach gate so readiness sees the non-green rollup and
+  blocks (overwriting any stale `gate=success`). A conclusion filter would let a
+  user with Actions rights cancel CI to preserve a stale success — a fail-open —
+  so the DoS bound is the concurrency group alone.
 - It runs gate as a **dry run (never `-live`)** against an **ephemeral,
   per-run state + key dir** (`mktemp -d`, minted with `-init` since the dir is
   fresh each run), mirroring the backtest `newEphemeralEnv` precedent. No signing

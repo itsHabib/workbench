@@ -37,12 +37,14 @@ jobs:
     # GATE_ENFORCE=true AND provide the ANTHROPIC_API_KEY secret. Until
     # GATE_ENFORCE=true this posts nothing and enforces nothing. See
     # docs/enforcement.md. (Also skips non-PR CI runs — a push to main has no PR
-    # to gate — and CI runs that were themselves cancelled, which have nothing
-    # gateable and would only burn a paid run. A red/failed CI run still gates:
-    # gate reads the red rollup and blocks with an explicit failure status.)
+    # to gate.) It runs on EVERY PR CI conclusion, including cancelled/failed: a
+    # cancelled or red run must still reach gate so readiness sees the non-green
+    # rollup and blocks (overwriting any stale gate=success on the head). Skipping
+    # cancelled runs would let a user with Actions rights cancel CI to keep a
+    # persistent stale success alive — a fail-open. The DoS bound is the
+    # concurrency group above, not a conclusion filter.
     if: >-
       github.event.workflow_run.event == 'pull_request'
-      && github.event.workflow_run.conclusion != 'cancelled'
       && vars.GATE_ENFORCE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
