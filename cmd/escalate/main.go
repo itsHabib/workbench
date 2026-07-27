@@ -20,9 +20,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+	"github.com/itsHabib/workbench/cmd/escalate/internal/serve"
 )
 
 // codeIngestError is escalate's own failure code, deliberately outside gate's
@@ -41,6 +45,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "escalate:", err)
 			os.Exit(codeIngestError)
 		}
+	case "serve":
+		if err := cmdServe(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "escalate:", err)
+			os.Exit(codeIngestError)
+		}
 	default:
 		usage()
 		os.Exit(codeIngestError)
@@ -48,8 +57,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: escalate resolve -escalation esc_x -decision pass|block -grant grt_x -why "..." -who NAME [-gate gate] [-state DIR]
-  ingests a human's decision for a parked escalation and drives `+"`gate resolve`"+`.
+	fmt.Fprintln(os.Stderr, `usage:
+  escalate resolve -escalation esc_x -decision pass|block -grant grt_x -why "..." -who NAME [-gate gate] [-state DIR]
+    ingests a human's decision for a parked escalation and drives `+"`gate resolve`"+`.
+  escalate serve [-addr 127.0.0.1:8099] [-gate gate] [-state DIR]
+    runs the Slack interactive-action ingress; SLACK_SIGNING_SECRET must be set.
   exit code is gate resolve's (0/1/2/3/4); an ingest-side failure exits 5.
   -state defaults to $GATE_STATE; -gate defaults to the gate binary on PATH.`)
 }
@@ -85,4 +97,45 @@ func cmdResolve(args []string) error {
 	}
 	os.Exit(code)
 	return nil
+}
+
+// cmdServe runs the Slack interactive-action ingress: the same ingest mechanism
+// as resolve, fed by a signed HTTP callback instead of CLI flags. The signing
+// secret comes from SLACK_SIGNING_SECRET and is REQUIRED — an ingress with no
+// secret would accept forged decisions, so serve refuses to start without one
+// rather than expose an unauthenticated endpoint.
+func cmdServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", "127.0.0.1:8099", "listen address (loopback by default; a tunnel exposes it)")
+	gateBin := fs.String("gate", "gate", "path to the gate binary")
+	stateDir := fs.String("state", os.Getenv("GATE_STATE"), "gate state dir (default $GATE_STATE)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	secret := os.Getenv("SLACK_SIGNING_SECRET")
+	if secret == "" {
+		return errors.New("serve: SLACK_SIGNING_SECRET is required (refusing to run an unauthenticated ingress)")
+	}
+	handler := serve.New(serve.Config{
+		Secret:    []byte(secret),
+		Ingest:    ingest.New(*gateBin, *stateDir, nil),
+		FindGrant: serve.GateGrantFinder(*gateBin, *stateDir),
+	})
+	// This listener faces a public tunnel, and signature verification only runs
+	// after the body is read — so an unauthenticated slow client could otherwise
+	// hold connections open indefinitely and exhaust goroutines before auth ever
+	// runs. Bounded read/write timeouts cap that. WriteTimeout is the roomiest:
+	// the handler shells `gate resolve` synchronously before it responds.
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+	log.Printf("escalate serve: listening on %s (gate=%s state=%q)", *addr, *gateBin, *stateDir)
+	return srv.ListenAndServe()
 }

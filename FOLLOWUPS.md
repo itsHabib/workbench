@@ -11,6 +11,25 @@ shows up (users tripping on it past the quick-start), consider a distinct
 binary name — operator's call; renaming a CLI is a breaking change to every
 skill that shells to it.
 
+## gate `resolve` open-check→append is not atomic (cross-process double-apply)
+
+`gate resolve` reads `escalationIsOpen` and then appends the judgment, verdict,
+action, and resolution as separate writes; gate locks each append, not the
+check→transition as a whole. So two concurrent resolves of the same escalation
+can both pass the open-check before either records a terminal, then both append
+authoritative outcomes — potentially conflicting pass/block for one park. This
+predates `escalate serve`: two parallel CLI `escalate resolve` invocations race
+identically.
+
+`escalate serve` mitigates the common case with a process-local per-escalation
+lock (`cmd/escalate/internal/serve` `escLocks`), which fully serializes the
+single-process ingress that is the Phase-1 deployment. It does NOT cover a
+second serve process on the same `-state` or a CLI resolve racing an HTTP
+callback. The durable fix belongs in gate: make resolve an atomic
+compare-and-resolve (a per-run file lock around the open-check→append, or a
+single append that fails if the run's terminal moved). Owner: gate. Surfaced by
+codex review on workbench #137 (`escalate serve` Phase 1).
+
 ## Lazy-migration queue (graduate in when next touched)
 
 New planes are born here; existing tools migrate in when next in hand, not as a
