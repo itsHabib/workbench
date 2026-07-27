@@ -257,8 +257,13 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
+          # -stamp=false: this run's state/key dir is erased by the EXIT trap
+          # above, so a gate/authorized status posted here would carry a run+hash
+          # whose only audit ledger is already destroyed — an unverifiable stamp.
+          # The workflow's own status-posting step (the trusted, armed rail) owns
+          # any CI-side stamp; the binary must not double-post from the ephemeral run.
           JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
-            -model-backend cloud -floor "$PWD/triage-floor")
+            -model-backend cloud -floor "$PWD/triage-floor" -stamp=false)
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.

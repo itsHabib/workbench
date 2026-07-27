@@ -24,8 +24,13 @@ type Run struct {
 // Node is one artifact in a run projection, with kind-specific fields extracted
 // from the body. Unparseable bodies are flagged explicitly rather than dropped.
 type Node struct {
-	ID       string           `json:"id"`
-	Kind     string           `json:"kind"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Hash is the artifact's chain hash — the tamper-evident anchor. explain
+	// surfaces it so a skeptic can match the hash a gate/authorized stamp carries
+	// to the deciding action artifact here, closing the receipt's verification
+	// path (the stamp's run selects this projection; its hash pins to this node).
+	Hash     string           `json:"hash,omitempty"`
 	Time     string           `json:"time"`
 	Parents  []string         `json:"parents,omitempty"`
 	Evidence *EvidenceSummary `json:"evidence,omitempty"`
@@ -96,6 +101,9 @@ func Explain(w io.Writer, st *state.Store, run string) error {
 	fmt.Fprintf(w, "run %s — %d artifacts\n\n", run, len(proj.Artifacts))
 	for _, n := range proj.Artifacts {
 		fmt.Fprintf(w, "%s  %s  %s\n", n.Time, n.Kind, n.ID)
+		if n.Hash != "" {
+			fmt.Fprintf(w, "         hash: %s\n", n.Hash)
+		}
 		if len(n.Parents) > 0 {
 			fmt.Fprintf(w, "         from: %v\n", n.Parents)
 		}
@@ -120,6 +128,7 @@ func projectNode(a state.Artifact) Node {
 	n := Node{
 		ID:      a.ID,
 		Kind:    a.Kind,
+		Hash:    a.Hash,
 		Time:    a.Time.Format("15:04:05"),
 		Parents: a.Parents,
 	}
