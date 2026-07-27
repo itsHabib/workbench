@@ -175,6 +175,33 @@ func TestNoKeys(t *testing.T) {
 	}
 }
 
+func TestKeyName(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		want error
+	}{
+		{"ok", "tracker", nil},
+		{"ok-punct", "jira-echo_v2.dc", nil},
+		{"uppercase", "Tracker", ErrBadKeyName},
+		{"sentinel-none", "(none)", ErrBadKeyName},
+		{"sentinel-other", "(other)", ErrBadKeyName},
+		{"dot", ".", ErrBadKeyName},
+		{"dotdot", "..", ErrBadKeyName},
+		{"space", "a b", ErrBadKeyName},
+		{"empty", "", ErrBadKeyName},
+		{"too-long", strings.Repeat("a", 65), ErrBadKeyName},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateKeyName(tc.key)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpstream(t *testing.T) {
 	cases := []struct {
 		name     string
