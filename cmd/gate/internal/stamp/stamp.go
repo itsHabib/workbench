@@ -16,8 +16,10 @@
 package stamp
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 // Context is the commit-status context gate posts under. It is deliberately
@@ -25,6 +27,12 @@ import (
 // skips only its own exact "gate" context, and this one is always success, so
 // it is never a check gate blocks itself on.
 const Context = "gate/authorized"
+
+// postTimeout bounds the status POST. The stamp is best-effort and strictly
+// downstream of a finished decision, so a hung gh or a stalled GitHub must never
+// hold the outcome/exit-code seam hostage: the deadline fires, Post returns an
+// error the caller logs, and gate exits on its decision regardless.
+const postTimeout = 10 * time.Second
 
 // Authorized is one provenance stamp: the exact commit gate judged (HeadSHA),
 // the decision's run id, and the deciding action artifact's chain hash.
@@ -47,14 +55,17 @@ func Post(a Authorized) error {
 	if err := a.validate(); err != nil {
 		return err
 	}
-	out, err := exec.Command("gh", a.args()...).Output()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), postTimeout)
+	defer cancel()
+	if _, err := exec.CommandContext(ctx, "gh", a.args()...).Output(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("stamp: gh status post timed out after %s", postTimeout)
+		}
 		if ee, ok := err.(*exec.ExitError); ok {
 			return fmt.Errorf("stamp: gh status post: %s", ee.Stderr)
 		}
 		return fmt.Errorf("stamp: gh status post: %w", err)
 	}
-	_ = out
 	return nil
 }
 
