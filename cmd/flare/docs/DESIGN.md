@@ -80,6 +80,12 @@ their own shapes; `decision`/`tier` are never required of them.
   means truncation. Either mismatch **fires a flare itself** (`cursor-alert`) and resweeps
   from zero (dedupe prevents re-paging) — never a silent reset.
 - **ship-receipts:** offset only (no chain); shrink → same alert + resweep.
+- **cursors.json corrupt:** a cursor *file* that exists but does not parse is recoverable, not
+  fatal. The cycle quarantines it aside (`cursors.json.corrupt-<nanos>`, kept for forensics),
+  fires a `cursor-alert`, and resweeps from empty (dedupe prevents re-paging) — the same
+  "never a silent reset" contract as a chain mismatch, extended so a corrupt file can never
+  silently *wedge* the loop either. Writes are torn-proof: each save renders to a unique
+  `os.CreateTemp` file and renames, so no two writers share a temp to interleave into.
 - **watcher-down:** flare cannot supervise itself in v0. Honest mitigations: `watch` updates a
   `last_poll` timestamp every cycle; `flare status` exits non-zero when that is stale (wired
   into the sign-on `/health` surface, where the operator already looks); catch-up on start
@@ -163,10 +169,20 @@ omitted = any. When a match needs logic the table can't express, that is a signa
 ## CLI
 
 - `flare watch` — poll loop (catch-up sweep first, then tick).
-- `flare sweep` — one catch-up pass, then exit. Exit 0 = swept clean; non-zero = config/source
+- `flare sweep` — one catch-up pass, then exit. Exit 0 = swept clean; 1 = config/source
   error.
 - `flare status` — JSON health (last poll, per-source cursor, journal tail). Exit 0 healthy,
-  1 stale/never-ran, 2 config error.
+  1 stale/never-ran, 2 config error. A corrupt cursor file reports `healthy:false` +
+  `cursors_corrupt:true` and exits 1 (not a raw parse error) — the watcher is down, and
+  `/health` must be able to see why.
+
+**Single-instance (`watch` + `sweep`).** Both take an exclusive OS advisory lock on
+`~/.flare/watch.lock` (flock on Unix, `LockFileEx` on Windows) before touching state, and
+exit **3** if another flare already holds it. Two writers into the journal + cursors — a
+second watcher, or a manual `sweep` racing a running watcher — is what corrupted
+`cursors.json` (each side rename-replacing a shared temp with interleaved bytes); the lock
+makes that unrepresentable. The lock is process-lifetime and OS-released on crash (no stale
+lock to reap). `status` never locks — it only reads.
 
 ## Non-goals (v0)
 

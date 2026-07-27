@@ -7,10 +7,15 @@
 //	flare watch  [-config path]   poll loop (catch-up sweep first)
 //	flare sweep  [-config path]   one catch-up pass, then exit
 //	flare status [-config path]   health as JSON; exit 1 when stale
+//
+// watch and sweep are single-instance: both take an exclusive lock on the state
+// dir and exit 3 if another flare already holds it (two writers corrupt the
+// journal + cursors). status is lock-free — it only reads.
 package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -65,6 +70,12 @@ func run(verb, cfgPath, stateDir string) int {
 }
 
 func watch(cfg config.Config, j *journal.Journal) int {
+	release, err := j.LockWatch()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flare watch: %v\n", err)
+		return 3
+	}
+	defer release()
 	r := route.New(cfg, time.Now)
 	for {
 		if err := cycle(cfg, j, r); err != nil {
@@ -75,6 +86,12 @@ func watch(cfg config.Config, j *journal.Journal) int {
 }
 
 func sweep(cfg config.Config, j *journal.Journal) int {
+	release, err := j.LockWatch()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flare sweep: %v\n", err)
+		return 3
+	}
+	defer release()
 	if err := cycle(cfg, j, route.New(cfg, time.Now)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -92,7 +109,7 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	if err != nil {
 		return err
 	}
-	cur, err := j.LoadCursors()
+	cur, err := recoverCorruptCursors(cfg, j, r)
 	if err != nil {
 		return err
 	}
@@ -117,6 +134,44 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 		return fmt.Errorf("source(s) failed to poll: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// recoverCorruptCursors self-heals a corrupt cursor file instead of wedging the
+// loop. A corrupt cursors.json is *why* flare stopped delivering, so the
+// recovery must be as loud as a source chain break: it PAGES the operator
+// through the normal notify path (dispatch → catch-all → Slack), and only then
+// quarantines the bad file and resweeps from empty (dedupe prevents re-paging).
+// If the page cannot be delivered, it holds the corrupt file and returns an
+// error so the next cycle retries — the gap is never hidden behind a freshly
+// healthy status, and a failed page never silently loses the alert.
+func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Router) (journal.Cursors, error) {
+	cur, err := j.LoadCursors()
+	if !errors.Is(err, journal.ErrCursorsCorrupt) {
+		return cur, err
+	}
+	if !dispatch(cfg, j, r, corruptCursorsAlert()) {
+		return journal.Cursors{}, fmt.Errorf("cursors.json corrupt: recovery alert undelivered, holding for retry")
+	}
+	if _, err := j.QuarantineCursors(); err != nil {
+		return journal.Cursors{}, err
+	}
+	return cur, nil
+}
+
+// corruptCursorsAlert is the page a corrupt cursor file raises. It carries no
+// source route, so it lands on the catch-all channel like a source cursor-alert;
+// severity escalate keeps a throttle from dropping it.
+func corruptCursorsAlert() event.Event {
+	return event.Event{
+		Source:   "flare",
+		ID:       "cursor-alert:flare:cursors-corrupt",
+		Kind:     "cursor-alert",
+		Time:     time.Now(),
+		Severity: event.SevEscalate,
+		Title:    "flare: cursors.json was corrupt — quarantined, resweeping",
+		Body:     "flare's own cursor file did not parse. It has been set aside and the sources are being reswept from the start (dedupe prevents re-paging). Deliveries resume automatically; check for a delivery gap around this alert.",
+		Fields:   map[string]string{},
+	}
 }
 
 func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src config.Source, cur source.Cursor, seen map[string]bool) (source.Cursor, error) {
@@ -185,23 +240,30 @@ func journalOK(j *journal.Journal, e journal.Entry) bool {
 // visible where the operator already looks, so wire this into /health).
 func status(cfg config.Config, j *journal.Journal) int {
 	cur, err := j.LoadCursors()
-	if err != nil {
+	corrupt := errors.Is(err, journal.ErrCursorsCorrupt)
+	if err != nil && !corrupt {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
 	stale := time.Duration(3*cfg.PollSeconds) * time.Second
-	healthy := !cur.LastPoll.IsZero() && time.Since(cur.LastPoll) < stale
+	healthy := !corrupt && !cur.LastPoll.IsZero() && time.Since(cur.LastPoll) < stale
 	tail, err := j.Tail(10)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	out, _ := json.MarshalIndent(map[string]any{
+	report := map[string]any{
 		"healthy":   healthy,
 		"last_poll": cur.LastPoll,
 		"cursors":   cur.Sources,
 		"recent":    tail,
-	}, "", "  ")
+	}
+	// A corrupt cursor file is why the watcher can't advance — surface it here
+	// (where /health looks) instead of erroring out with a raw parse failure.
+	if corrupt {
+		report["cursors_corrupt"] = true
+	}
+	out, _ := json.MarshalIndent(report, "", "  ")
 	fmt.Println(string(out))
 	if !healthy {
 		return 1

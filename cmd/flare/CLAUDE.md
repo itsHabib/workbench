@@ -57,6 +57,11 @@ there first.
 - A corrupt artifact line fails the read loudly; it must not read as quiet.
 - Errored deliveries stay unsettled (the cursor holds) so they retry;
   delivered/dropped/throttled settle.
+- Single-instance: `watch`/`sweep` take an OS lock on `~/.flare/watch.lock` and
+  refuse (exit 3) if another flare holds it — two writers corrupt the state.
+  `status` never locks. Cursor saves use a unique temp (never a shared name).
+- A corrupt `cursors.json` is recovered, not fatal: quarantined aside +
+  `cursor-alert` + resweep from empty — it must never silently wedge the loop.
 - Resolve buttons render ONLY for a resolvable park (kind `escalation` + an
   artifact id) on an opted-in channel; a verdict-escalate, a cursor-alert, or a
   park missing its id never gets Approve/Block. flare renders the button; it
