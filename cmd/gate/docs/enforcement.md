@@ -216,13 +216,18 @@ and why each choice is the safe one:
   `main` once the check is required. The flag suppresses only the *absence*
   escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
   and empty CI still escalates. **The flag is passed only when the CURRENT head
-  has actually been reviewed by a bot**: the workflow counts bot *review
-  submissions* whose `commit_id == HEAD_SHA` (a review submission is anchored to
-  the head it reviewed, unlike an issue-level comment) and enables the policy only
-  when that count is ≥1; otherwise it runs *without* the flag so readiness
-  escalates and the run parks — fail closed until the bots review this head. That
-  closes the stale-evidence path where an old unanchored "no issues" comment could
-  otherwise satisfy the review rung once the `reviewDecision` backstop is removed.
+  has actually been reviewed by a bot**, signalled either way: a bot *review
+  submission* whose `commit_id == HEAD_SHA` (how a bot with inline findings
+  reports), **or** a bot *issue comment naming the head commit* (how codex reports
+  a CLEAN pass — "Reviewed commit: `<sha>`", an issue comment, not a review
+  submission). A stale comment names an *old* sha, so matching the current head's
+  short sha in a bot comment body is a reliable current-head signal. The policy is
+  enabled only when at least one of these is present; otherwise the run goes
+  *without* the flag so readiness escalates and parks — fail closed until the bots
+  review this head. That closes the stale-evidence path where an old unanchored
+  "no issues" comment could otherwise satisfy the review rung once the
+  `reviewDecision` backstop is removed, while still letting a clean review (which
+  codex delivers as an issue comment) reach `gate=success`.
   (Discovered in Phase-3 dry-observe: every canary
   PR had an empty `reviewDecision`, so the escalation fired on all of them.)
   Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
