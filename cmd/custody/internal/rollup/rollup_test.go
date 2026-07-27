@@ -3,6 +3,7 @@ package rollup
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +193,39 @@ func TestDeniedTargetsOrderedAndCapped(t *testing.T) {
 	}
 	if sum.Keys["jira"].DeniedQueryKeys["jql"] != 3 {
 		t.Fatalf("DeniedQueryKeys = %v", sum.Keys["jira"].DeniedQueryKeys)
+	}
+}
+
+func TestOversizedLineSkippedNotFatal(t *testing.T) {
+	huge := line(t, map[string]any{"key": "jira", "canonical_target": strings.Repeat("a", maxLineBytes+1024)})
+	log := huge + "\n" + line(t, map[string]any{"key": "jira"}) + "\n"
+	sum, err := Aggregate(strings.NewReader(log), 0)
+	if err != nil {
+		t.Fatalf("Aggregate must skip an oversized line, not fail: %v", err)
+	}
+	if sum.Total != 1 || sum.Malformed != 1 {
+		t.Fatalf("Total=%d Malformed=%d, want 1/1 (huge line skipped, next line still read)", sum.Total, sum.Malformed)
+	}
+}
+
+func TestKeyCardinalityCapped(t *testing.T) {
+	var lines []string
+	for i := 0; i < maxKeys+20; i++ {
+		lines = append(lines, line(t, map[string]any{"key": fmt.Sprintf("probe-%03d", i), "verdict": "refused"}))
+	}
+	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if len(sum.Keys) > maxKeys+1 {
+		t.Fatalf("len(Keys) = %d, want at most %d (+1 overflow bucket)", len(sum.Keys), maxKeys)
+	}
+	other := sum.Keys[overflowKey]
+	if other == nil || other.Total != 20 {
+		t.Fatalf("overflow bucket = %+v, want the 20 past-cap keys folded in", other)
+	}
+	if sum.Total != maxKeys+20 {
+		t.Fatalf("Total = %d — capping buckets must not drop records", sum.Total)
 	}
 }
 

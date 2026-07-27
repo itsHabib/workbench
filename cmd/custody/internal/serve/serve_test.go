@@ -421,6 +421,9 @@ func TestUnknownKey(t *testing.T) {
 	if decodeErr(t, w).Code != "unknown_key" {
 		t.Fatal("code should be unknown_key")
 	}
+	if got := lastLog(t, h.log).Key; got != "" {
+		t.Fatalf("an unresolved (attacker-chosen) prefix must not be logged as a key, got %q", got)
+	}
 }
 
 // wrong-key grant -> 401 (the dot-segment key-boundary case is safe).

@@ -8,6 +8,7 @@ package rollup
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,19 @@ const maxDeniedTargets = 10
 // noKey buckets log lines that never resolved a key (unknown key, malformed
 // grant header) so refusal pressure is visible without inventing a key name.
 const noKey = "(none)"
+
+// overflowKey absorbs keys past maxKeys. Logs written before serve stopped
+// stamping unresolved prefixes can carry attacker-chosen key names; the cap
+// keeps the artifact bounded no matter what the log holds.
+const overflowKey = "(other)"
+
+// maxKeys bounds the distinct key buckets in one rollup — far above any real
+// manifest, low enough that a probed log cannot balloon the artifact.
+const maxKeys = 100
+
+// maxLineBytes bounds one log line; a longer line is counted as malformed and
+// skipped, never fatal — the reader's fail-soft promise covers size too.
+const maxLineBytes = 1 << 20
 
 // Record is the read-side view of one request-log line (log schema v1). Only
 // the fields the rollup consumes are declared; unknown fields are ignored so
@@ -131,23 +145,56 @@ func read(r io.Reader) ([]Record, *Summary, error) {
 		Keys:          map[string]*KeySummary{},
 	}
 	var records []Record
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
+	br := bufio.NewReaderSize(r, 64*1024)
+	for {
+		line, tooLong, err := readLine(br)
+		if err != nil && err != io.EOF {
+			return nil, nil, fmt.Errorf("rollup: scan log: %w", err)
+		}
+		records = fold(records, line, tooLong, sum)
+		if err == io.EOF {
+			return records, sum, nil
+		}
+	}
+}
+
+// readLine reads one newline-terminated line. A line longer than maxLineBytes
+// is discarded and reported as tooLong instead of failing the whole read. The
+// returned error is io.EOF only at end of input.
+func readLine(br *bufio.Reader) (line []byte, tooLong bool, err error) {
+	for {
+		frag, err := br.ReadSlice('\n')
+		if len(line)+len(frag) > maxLineBytes {
+			tooLong = true
+			line = nil
+		}
+		if !tooLong {
+			line = append(line, frag...)
+		}
+		if err == bufio.ErrBufferFull {
 			continue
 		}
-		rec, ok := parse(line, sum)
-		if !ok {
-			continue
+		if err != nil && err != io.EOF {
+			return nil, false, err
 		}
-		records = append(records, rec)
+		return bytes.TrimSuffix(line, []byte("\n")), tooLong, err
 	}
-	if err := sc.Err(); err != nil {
-		return nil, nil, fmt.Errorf("rollup: scan log: %w", err)
+}
+
+// fold accounts one raw line into the record list or the skip counters.
+func fold(records []Record, line []byte, tooLong bool, sum *Summary) []Record {
+	if tooLong {
+		sum.Malformed++
+		return records
 	}
-	return records, sum, nil
+	if len(line) == 0 {
+		return records
+	}
+	rec, ok := parse(line, sum)
+	if !ok {
+		return records
+	}
+	return append(records, rec)
 }
 
 // parse decodes one line, bumping the right counter when it is unusable.
@@ -200,6 +247,9 @@ func (s *Summary) add(rec Record) {
 	key := rec.Key
 	if key == "" {
 		key = noKey
+	}
+	if s.Keys[key] == nil && len(s.Keys) >= maxKeys {
+		key = overflowKey
 	}
 	ks := s.Keys[key]
 	if ks == nil {
