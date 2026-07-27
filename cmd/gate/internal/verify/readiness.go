@@ -8,6 +8,16 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
 
+// gateContext is the commit-status context gate posts its own verdict under
+// (see .github/workflows/gate.yml "Post gate status", -f context=gate). Once
+// gate is an enforced required check, a prior failure/error gate status on the
+// same head is itself a non-green rollup entry — so readiness must skip it, or
+// gate would block on its own past verdict and a red gate could only clear on a
+// new push (a self-deadlock). Every OTHER non-green check still blocks, so
+// fail-closed is unchanged. The match is exact: an unrelated check such as
+// "gate-foo" is not gate's context and still blocks.
+const gateContext = "gate"
+
 type prView struct {
 	State             string        `json:"state"`
 	IsDraft           bool          `json:"isDraft"`
@@ -63,6 +73,9 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
 	}
 	for _, c := range pv.StatusCheckRollup {
+		if checkName(c.Name, c.Context) == gateContext {
+			continue
+		}
 		if c.green() {
 			continue
 		}
