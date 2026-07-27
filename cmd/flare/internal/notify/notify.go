@@ -17,6 +17,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 const (
@@ -34,7 +35,7 @@ func Send(ch config.Channel, ev event.Event) error {
 	case config.ChannelWebhook:
 		return webhook(ch.URL, ev)
 	case config.ChannelSlack:
-		return slack(ch.Token, ch.ChannelID, ev)
+		return slack(ch.Token, ch.ChannelID, ch.ResolveActions, ev)
 	case config.ChannelDrop:
 		return nil
 	}
@@ -73,11 +74,20 @@ type slackText struct {
 	Emoji bool   `json:"emoji,omitempty"`
 }
 
+// slackButton is one Block Kit button element in two flavors. A LINK button
+// (View PR) carries a URL and Slack just opens it — no callback, no app needed.
+// An INTERACTIVE button (Approve/Block) carries an ActionID and a Value instead:
+// tapping it POSTs a signed interaction callback to the Slack app's configured
+// Request URL, which fronts `escalate serve`. The two are mutually exclusive —
+// URL is empty on an interactive button, ActionID/Value empty on a link — so a
+// single struct with omitempty renders both without a union type.
 type slackButton struct {
-	Type  string    `json:"type"`
-	Text  slackText `json:"text"`
-	URL   string    `json:"url,omitempty"`
-	Style string    `json:"style,omitempty"`
+	Type     string    `json:"type"`
+	Text     slackText `json:"text"`
+	URL      string    `json:"url,omitempty"`
+	ActionID string    `json:"action_id,omitempty"`
+	Value    string    `json:"value,omitempty"`
+	Style    string    `json:"style,omitempty"`
 }
 
 type slackResponse struct {
@@ -85,13 +95,13 @@ type slackResponse struct {
 	Error string `json:"error"`
 }
 
-func slack(token, channel string, ev event.Event) error {
+func slack(token, channel string, resolveActions bool, ev event.Event) error {
 	client := &http.Client{Timeout: 15 * time.Second}
-	return postSlack(client, slackPostMessageURL, token, channel, ev)
+	return postSlack(client, slackPostMessageURL, token, channel, resolveActions, ev)
 }
 
-func postSlack(client *http.Client, endpoint, token, channel string, ev event.Event) error {
-	body, err := json.Marshal(renderSlackMessage(channel, ev))
+func postSlack(client *http.Client, endpoint, token, channel string, resolveActions bool, ev event.Event) error {
+	body, err := json.Marshal(renderSlackMessage(channel, resolveActions, ev))
 	if err != nil {
 		return fmt.Errorf("notify: slack channel %q: encode message: %w", channel, err)
 	}
@@ -130,18 +140,18 @@ func requestCause(err error) error {
 // renderSlackMessage turns an event into a Block Kit message: one colored
 // attachment whose blocks lead on the required action, plus a notification
 // fallback so the lock-screen line still leads on the action.
-func renderSlackMessage(channel string, ev event.Event) slackRequest {
+func renderSlackMessage(channel string, resolveActions bool, ev event.Event) slackRequest {
 	return slackRequest{
 		Channel: channel,
 		Attachments: []slackAttachment{{
 			Color:    severityColor(ev.Severity),
 			Fallback: slackFallback(ev),
-			Blocks:   slackBlocks(ev),
+			Blocks:   slackBlocks(ev, resolveActions),
 		}},
 	}
 }
 
-func slackBlocks(ev event.Event) []slackBlock {
+func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: headline(ev), Emoji: true}},
 	}
@@ -153,11 +163,64 @@ func slackBlocks(ev event.Event) []slackBlock {
 	if body != "" {
 		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: body}})
 	}
-	if btn, ok := prButton(ev); ok {
-		blocks = append(blocks, slackBlock{Type: "actions", Elements: []any{btn}})
+	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
+		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
 	}
 	footer := slackText{Type: "mrkdwn", Text: slackFooter(ev)}
 	return append(blocks, slackBlock{Type: "context", Elements: []any{footer}})
+}
+
+// actionElements builds the card's one actions block: the View PR link when the
+// event names a PR, then the Approve/Block resolve buttons when the channel has
+// opted in AND the event is a resolvable park. The link and the resolve buttons
+// share one actions row (Slack renders them side by side), so a briefed park on
+// a resolve-actions channel gets "View PR · Approve · Block" — read, then act,
+// without leaving Slack.
+func actionElements(ev event.Event, resolveActions bool) []any {
+	var elements []any
+	if btn, ok := prButton(ev); ok {
+		elements = append(elements, btn)
+	}
+	if resolveActions && resolvablePark(ev) {
+		elements = append(elements, approveButton(ev), blockButton(ev))
+	}
+	return elements
+}
+
+// resolvablePark reports whether this event is one `escalate` can actually
+// resolve: a gate PARK (Kind "escalation") that still carries its artifact id.
+// It deliberately excludes the other things that reach SevEscalate — a verdict
+// with an escalate decision, a cursor-alert — because those are not parked
+// escalations under a grant, so rendering Approve/Block on them would offer a
+// tap that `gate resolve` would refuse. The id must be present because it is the
+// button value the callback joins back to the parked run.
+func resolvablePark(ev event.Event) bool {
+	return ev.Kind == "escalation" && ev.ID != ""
+}
+
+// approveButton / blockButton render the two interactive resolve buttons. Each
+// carries the SHARED action_id vocabulary (escalation.ActionApprove/ActionBlock)
+// that escalate's serve parses, and the escalation artifact id as its value so a
+// verified callback resolves the right park with nothing pasted. flare only
+// paints them; the tap is handled by escalate, never flare (Amendment 3).
+func approveButton(ev event.Event) slackButton {
+	return slackButton{
+		Type:     "button",
+		Text:     slackText{Type: "plain_text", Text: "Approve", Emoji: true},
+		ActionID: escalation.ActionApprove,
+		Value:    ev.ID,
+		Style:    "primary",
+	}
+}
+
+func blockButton(ev event.Event) slackButton {
+	return slackButton{
+		Type:     "button",
+		Text:     slackText{Type: "plain_text", Text: "Block", Emoji: true},
+		ActionID: escalation.ActionBlock,
+		Value:    ev.ID,
+		Style:    "danger",
+	}
 }
 
 // headline is the one line that must make the required action obvious: a plain

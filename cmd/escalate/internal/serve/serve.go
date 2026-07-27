@@ -43,12 +43,6 @@ const (
 	hdrSig = "X-Slack-Signature"
 	hdrTS  = "X-Slack-Request-Timestamp"
 
-	// actionApprove / actionBlock are the two button action_ids flare renders.
-	// The action_id — not a client-chosen field — selects the verdict, so a tap
-	// maps to exactly one of gate's decisions.
-	actionApprove = "approve"
-	actionBlock   = "block"
-
 	// maxSkew bounds how old a signed request may be. Slack recommends five
 	// minutes; anything staler is rejected before parsing, so a captured request
 	// cannot be replayed hours later.
@@ -80,37 +74,70 @@ type GrantFinder func(ctx context.Context, escID string) (string, error)
 
 // Config assembles a Server. Secret and Ingest are required; a nil Now uses
 // time.Now. FindGrant is required in production but injectable for tests.
+// Authorize is the authorization gate (below); a nil Authorize is fail-closed —
+// it denies every caller — so a Server built without one resolves nothing.
 type Config struct {
 	Secret    []byte
 	Ingest    *ingest.Client
 	FindGrant GrantFinder
+	// Authorize reports whether the VERIFIED Slack user id may resolve a park. It
+	// runs after signature verification: the signature proves Slack sent the
+	// callback, this proves the human behind it is allowed to act. Without it any
+	// member of the escalation channel could tap Approve/Block and move a live
+	// merge gate — authentication is not authorization. A nil Authorize denies
+	// everyone (fail-closed); build one with AllowUsers.
+	Authorize func(slackUserID string) bool
 	Now       func() time.Time
 }
 
 // Server is the Slack callback ingress. It implements http.Handler, so a caller
 // wires it straight into http.ListenAndServe. Construct it with New; its zero
-// value is not useful (it needs a signing secret and an ingest client).
+// value is not useful (it needs a signing secret, an ingest client, and an
+// authorizer).
 type Server struct {
 	secret    []byte
 	ingest    *ingest.Client
 	findGrant GrantFinder
+	authorize func(string) bool
 	now       func() time.Time
 	locks     *escLocks
 }
 
-// New builds a Server from cfg. A nil Now falls back to time.Now.
+// New builds a Server from cfg. A nil Now falls back to time.Now; a nil Authorize
+// falls back to deny-all, so authorization must be configured explicitly — an
+// unset allowlist never silently accepts everyone.
 func New(cfg Config) *Server {
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
 	}
+	authorize := cfg.Authorize
+	if authorize == nil {
+		authorize = func(string) bool { return false }
+	}
 	return &Server{
 		secret:    cfg.Secret,
 		ingest:    cfg.Ingest,
 		findGrant: cfg.FindGrant,
+		authorize: authorize,
 		now:       now,
 		locks:     &escLocks{m: make(map[string]*sync.Mutex)},
 	}
+}
+
+// AllowUsers builds an authorizer that admits exactly the given Slack user ids —
+// the immutable `Uxxxx` ids, never handles (a handle can be renamed onto another
+// account). An empty list admits no one, so a misconfigured allowlist fails
+// closed rather than open. This is the authorization the ingress needs before a
+// channel-wide button is safe: only the listed operators can resolve a park.
+func AllowUsers(ids ...string) func(string) bool {
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			allowed[id] = true
+		}
+	}
+	return func(id string) bool { return id != "" && allowed[id] }
 }
 
 // escLocks serializes callbacks per escalation id WITHIN this process. The HTTP
@@ -168,9 +195,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
 	}
-	d, err := decisionFromPayload(body)
+	d, userID, err := decisionFromPayload(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Authorization, after authentication: the signature proved Slack sent this,
+	// now prove the verified human may act. A channel member who is not an
+	// authorized operator is refused here — before any lock, lookup, or resolve —
+	// so a button visible to a whole channel still resolves only for the allowlist.
+	if !s.authorize(userID) {
+		http.Error(w, "not authorized to resolve escalations", http.StatusForbidden)
 		return
 	}
 	// Serialize everything below per escalation id: the lookup and resolve for one
@@ -250,52 +285,55 @@ type slackPayload struct {
 	} `json:"actions"`
 }
 
-// decisionFromPayload maps a verified callback body to a Decision, minus the
-// grant (the handler reads that from the parked escalation). Slack posts the
-// callback as application/x-www-form-urlencoded with a single `payload` field
-// holding URL-encoded JSON. `who` and the verdict come only from the payload's
-// own identity and action_id — there is no client-settable who to honor, and a
-// stray `who` key in the JSON is ignored by construction.
-func decisionFromPayload(body []byte) (ingest.Decision, error) {
+// decisionFromPayload maps a verified callback body to a Decision plus the
+// verified Slack user id the handler authorizes on — minus the grant (the
+// handler reads that from the parked escalation). Slack posts the callback as
+// application/x-www-form-urlencoded with a single `payload` field holding
+// URL-encoded JSON. `who`, the verdict, and the returned id come only from the
+// payload's own identity and action_id — there is no client-settable who to
+// honor, and a stray `who` key in the JSON is ignored by construction.
+func decisionFromPayload(body []byte) (ingest.Decision, string, error) {
 	form, err := url.ParseQuery(string(body))
 	if err != nil {
-		return ingest.Decision{}, fmt.Errorf("serve: parse form: %w", err)
+		return ingest.Decision{}, "", fmt.Errorf("serve: parse form: %w", err)
 	}
 	raw := form.Get("payload")
 	if raw == "" {
-		return ingest.Decision{}, errors.New("serve: no payload field")
+		return ingest.Decision{}, "", errors.New("serve: no payload field")
 	}
 	var p slackPayload
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
-		return ingest.Decision{}, fmt.Errorf("serve: decode payload: %w", err)
+		return ingest.Decision{}, "", fmt.Errorf("serve: decode payload: %w", err)
 	}
 	if len(p.Actions) == 0 {
-		return ingest.Decision{}, errors.New("serve: payload carries no action")
+		return ingest.Decision{}, "", errors.New("serve: payload carries no action")
 	}
 	verdict, err := verdictFor(p.Actions[0].ActionID)
 	if err != nil {
-		return ingest.Decision{}, err
+		return ingest.Decision{}, "", err
 	}
 	who := slackWho(p.User.Username, p.User.Name, p.User.ID)
 	if who == "" {
-		return ingest.Decision{}, errors.New("serve: no verified slack identity in payload")
+		return ingest.Decision{}, "", errors.New("serve: no verified slack identity in payload")
 	}
 	return ingest.Decision{
 		Escalation: p.Actions[0].Value,
 		Verdict:    verdict,
 		Who:        who,
 		Why:        fmt.Sprintf("%s in Slack by %s", verdictWord(verdict), who),
-	}, nil
+	}, p.User.ID, nil
 }
 
-// verdictFor maps a button's action_id to gate's decision vocabulary. An unknown
-// action_id is rejected rather than defaulted, so a malformed or unexpected
-// button never silently approves or blocks.
+// verdictFor maps a button's action_id to gate's decision vocabulary. The
+// action_id vocabulary is the shared contract flare renders and serve parses
+// (escalation.ActionApprove / ActionBlock); the mapping to a decision is serve's
+// policy. An unknown action_id is rejected rather than defaulted, so a malformed
+// or unexpected button never silently approves or blocks.
 func verdictFor(actionID string) (string, error) {
 	switch actionID {
-	case actionApprove:
+	case escalation.ActionApprove:
 		return escalation.DecisionPass, nil
-	case actionBlock:
+	case escalation.ActionBlock:
 		return escalation.DecisionBlock, nil
 	}
 	return "", fmt.Errorf("serve: unknown action_id %q", actionID)

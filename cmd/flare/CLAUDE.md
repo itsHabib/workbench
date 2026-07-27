@@ -31,10 +31,13 @@ there first.
   throttle. All policy comes from config.
 - `internal/notify` — one event to one channel. `slack` posts to
   `chat.postMessage` with a bearer token and renders a severity-colored Block
-  Kit card (`renderSlackMessage` → `slackBlocks` → `prButton`); delivery counts
-  only on HTTP 200 **and** `"ok": true` in the body. `toast` shells
-  `powershell.exe` 5.1 (pwsh 7 cannot project WinRT); `webhook` POSTs the event
-  JSON via `net/http`.
+  Kit card (`renderSlackMessage` → `slackBlocks` → `actionElements`); delivery
+  counts only on HTTP 200 **and** `"ok": true` in the body. The actions row
+  carries the `View PR` link and — when the channel opts in with
+  `resolve_actions` AND the event is a resolvable park (`resolvablePark`) — the
+  **Approve/Block** interactive buttons (render-only; the tap is `escalate`'s,
+  never flare's — Amendment 3). `toast` shells `powershell.exe` 5.1 (pwsh 7
+  cannot project WinRT); `webhook` POSTs the event JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
   delivery journal (the dedupe substrate) + cursors with the `last_poll`
   liveness fact.
@@ -54,6 +57,10 @@ there first.
 - A corrupt artifact line fails the read loudly; it must not read as quiet.
 - Errored deliveries stay unsettled (the cursor holds) so they retry;
   delivered/dropped/throttled settle.
+- Resolve buttons render ONLY for a resolvable park (kind `escalation` + an
+  artifact id) on an opted-in channel; a verdict-escalate, a cursor-alert, or a
+  park missing its id never gets Approve/Block. flare renders the button; it
+  never handles the tap (the callback targets `escalate serve`).
 
 ## Checks
 

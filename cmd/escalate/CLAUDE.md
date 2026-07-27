@@ -37,9 +37,13 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   `docs/features/escalation-plane/escalate-serve.md`): a Slack interactive-action
   ingress. It VERIFIES the Slack signature (HMAC-SHA256 over the raw body,
   constant-time, ±5-min window) before trusting anything, derives `who` from the
-  *verified* identity (never a client field), reads the grant from the parked
-  escalation via `gate next -json`, and drives the same `ingest.Client.Resolve`.
-  `SLACK_SIGNING_SECRET` is **required** — it refuses to start unauthenticated.
+  *verified* identity (never a client field), then AUTHORIZES that verified user
+  against an allowlist (`ESCALATE_ALLOWED_SLACK_USERS`, Slack user ids) — an
+  authentic but unlisted channel member is refused 403 before any resolve, because
+  authentication is not authorization. It then reads the grant from the parked
+  escalation via `gate next -json` and drives the same `ingest.Client.Resolve`.
+  Both `SLACK_SIGNING_SECRET` and `ESCALATE_ALLOWED_SLACK_USERS` are **required** —
+  it refuses to start unauthenticated OR with no authorized users (fail-closed).
   Like `resolve`, it shells `gate` with no `-key`, so set `GATE_KEY` (or use
   gate's default key dir) or gate refuses the grant with `grant_bad_signature`.
   Binds loopback by default; a tunnel (ngrok/cloudflared) exposes it to Slack.
