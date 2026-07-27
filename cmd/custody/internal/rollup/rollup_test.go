@@ -221,11 +221,30 @@ func TestKeyCardinalityCapped(t *testing.T) {
 		t.Fatalf("len(Keys) = %d, want at most %d including the overflow bucket", len(sum.Keys), maxKeys)
 	}
 	other := sum.Keys[overflowKey]
-	if other == nil || other.Total != 21 {
-		t.Fatalf("overflow bucket = %+v, want the 21 past-cap keys folded in", other)
+	if other == nil || other.Total != 22 {
+		t.Fatalf("overflow bucket = %+v, want the 22 past-cap keys folded in", other)
 	}
 	if sum.Total != maxKeys+20 {
 		t.Fatalf("Total = %d — capping buckets must not drop records", sum.Total)
+	}
+}
+
+func TestNoKeyBucketSurvivesTheCap(t *testing.T) {
+	var lines []string
+	for i := 0; i < maxKeys+10; i++ {
+		lines = append(lines, line(t, map[string]any{"key": fmt.Sprintf("probe-%03d", i), "verdict": "refused"}))
+	}
+	lines = append(lines, line(t, map[string]any{"verdict": "refused"})) // no key resolved
+	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	none := sum.Keys[noKey]
+	if none == nil || none.Total != 1 {
+		t.Fatalf("(none) bucket = %+v — unknown-key pressure must never hide inside the overflow bucket", none)
+	}
+	if len(sum.Keys) > maxKeys {
+		t.Fatalf("len(Keys) = %d, want at most %d including both sentinels", len(sum.Keys), maxKeys)
 	}
 }
 

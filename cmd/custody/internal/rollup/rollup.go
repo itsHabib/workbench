@@ -257,7 +257,10 @@ func (s *Summary) add(rec Record) {
 	if key == "" {
 		key = noKey
 	}
-	if s.Keys[key] == nil && len(s.Keys) >= maxKeys-1 && key != overflowKey {
+	// Both synthetic buckets always insert — "(none)" is unknown-key pressure
+	// and must never hide inside "(other)" — so real keys cap at maxKeys-2 and
+	// the total, sentinels included, never exceeds maxKeys.
+	if key != noKey && key != overflowKey && s.Keys[key] == nil && len(s.Keys) >= maxKeys-2 {
 		key = overflowKey
 	}
 	ks := s.Keys[key]
