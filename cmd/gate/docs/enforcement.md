@@ -150,10 +150,56 @@ and why each choice is the safe one:
   pending, queued, in-progress — as a block (fail closed); reading mid-flight
   CI would block spuriously. On timeout it proceeds anyway, which can only make
   gate block, never pass.
+- It **refuses any head SHA that backs more than one open PR**, and the check is
+  **unconditional** — it runs whether the event named a same-repo PR or this is a
+  fork PR. The `gate` status is commit-scoped, so gating one PR when a second
+  shares the head could stamp the easier PR's green onto the other (a
+  review-policy-differential bypass). On an ambiguous head the resolver **posts an
+  explicit `gate=failure`** (it does *not* rely on an absent context): a persistent
+  `gate=success` from when the head backed a single PR would otherwise linger and
+  satisfy the newcomer, so the failure **overwrites** it — non-green for every PR
+  on the head. The uniqueness check is also **repeated at post time**, immediately
+  before a `success` is written, to catch a second PR opened *during* the paid run
+  (a query failure there is treated as ambiguous → failure, fail closed). Residual:
+  a PR opened on an already-`success` head is briefly green until its own CI → gate
+  run detects the ambiguity and overwrites; `strict` branch protection (require the
+  branch be up to date) narrows that window further, and a single-protected-base
+  repo is barely exposed.
+- Its **first step posts `gate=pending`** to the head, before any cancellable
+  work (checkout, build, resolve). A persistent `gate=success` from an earlier
+  single-PR run would otherwise survive if this run were cancelled mid-build (a
+  user with Actions rights could cancel to keep the stale green satisfying a
+  newly-opened second PR). Posting pending up front marks the head non-green until
+  the real verdict lands; a cancel then leaves pending, which branch protection
+  blocks (fail closed). gate's own pending is excluded from both the settle-wait
+  (`select(.name != "gate")`) and readiness (`isOwnGateStatus`), so it never
+  self-blocks.
+- It is bounded by a **`concurrency` group keyed on the head branch** with
+  `cancel-in-progress`. Each run makes real model calls, so without this a PR
+  force-pushed in a loop would fan out one paid gate run per push; the concurrency
+  collapse caps that at one in-flight run per branch (`ci.yml` carries the matching
+  group so superseded CI runs cancel at the source). Cancelling a superseded gate
+  run is safe: it leaves the required context absent until the surviving run posts
+  — fail closed. It deliberately does **not** filter on CI conclusion: a cancelled
+  or red CI run must still reach gate so readiness sees the non-green rollup and
+  blocks (overwriting any stale `gate=success`). A conclusion filter would let a
+  user with Actions rights cancel CI to preserve a stale success — a fail-open —
+  so the DoS bound is the concurrency group alone.
+
+  **Accepted cost residual (named, not closed):** the concurrency group bounds
+  *concurrent* runs, not *total* spend over time. A **paced** attacker who pushes
+  only after each run reaches the model call — and across several branches — still
+  drives ~one paid `claude-haiku-4-5` call per push. This is a **cost** exposure,
+  never a fail-open (every run still fails closed; no bad PR becomes mergeable).
+  It is accepted for the canary (a private repo where fork traffic is negligible
+  and haiku calls are ~sub-cent); a real per-actor/repo **spend budget** before
+  the cloud rung is future work, not built here — tracked alongside the other
+  open items below.
 - It runs gate as a **dry run (never `-live`)** against an **ephemeral,
-  per-run state + key dir** (`mktemp -d`), mirroring the backtest
-  `newEphemeralEnv` precedent. No signing secret is stored in CI: the grant is
-  minted and spent inside the throwaway dir and erased with it.
+  per-run state + key dir** (`mktemp -d`, minted with `-init` since the dir is
+  fresh each run), mirroring the backtest `newEphemeralEnv` precedent. No signing
+  secret is stored in CI: the grant is minted and spent inside the throwaway dir
+  and erased with it.
 - The grant is minted `-max-tier T3 -max-cycles 0`. The check is meant to
   reflect gate's **ladder verdict** (block / escalate / pass), not a tier or
   cycle ceiling: a CI runner has no operator to re-mint a wider grant or judge
