@@ -124,6 +124,28 @@ const (
 	DecisionBlock = "block"
 )
 
+// Slack interactive-action ids — the vocabulary a Slack Approve/Block button
+// carries when the operator resolves a parked escalation from the card. They
+// are shared here for the SAME reason V1 is: two tools sit on opposite ends of
+// this wire and must not drift. flare (the read-only router) RENDERS a button
+// whose action_id is one of these and whose value is the escalation artifact
+// id; escalate's serve transport PARSES that action_id back to a decision. Both
+// import this leaf; neither imports the other (the boundary law). A literal
+// "approve"/"block" duplicated on each side would be exactly the implicit,
+// drift-prone contract this package exists to retire.
+//
+// The button's VALUE (not defined here — it is just the id) carries the
+// escalation artifact id the resolution is keyed on, so a verified callback
+// joins straight back to the parked run without the operator pasting anything.
+//
+// These are vocabulary only. The action_id → decision mapping is the parser's
+// policy and lives with the transport that reads a callback (escalate's serve),
+// not here — this leaf never decides, it only names.
+const (
+	ActionApprove = "approve"
+	ActionBlock   = "block"
+)
+
 // DecodeBody tolerantly decodes an escalation artifact body: unknown fields
 // (from an older or newer writer) are ignored, and NO version gate rejects —
 // the routing and projection readers must still render a body that predates

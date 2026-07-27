@@ -31,7 +31,7 @@ few buttons on flare's card, and a small HTTP front door in `escalate`.
 
 ## The two new pieces
 
-### 1. flare renders the buttons (Observability-safe)
+### 1. flare renders the buttons (Observability-safe) — **built (Phase 2)**
 
 flare's briefed-escalation Slack card gains an `actions` block with **Approve** and
 **Block** buttons. Each button's `value` carries the **escalation id** (already in
@@ -43,6 +43,15 @@ handles the tap.
 > Boundary check: flare must NOT call `escalate` or `gate`. It only sets Slack's
 > `action_id`/`value` and lets Slack POST the callback to the configured URL. The
 > decision path never re-enters flare.
+
+**As built:** the button `action_id`s are the shared `contracts/escalation`
+vocabulary (`ActionApprove` / `ActionBlock`) — flare renders them, `escalate serve`
+parses them, neither imports the other (the boundary law). Rendering is gated on a
+per-channel `resolve_actions` opt-in that is **off by default**: a rendered button
+with no configured Slack Request URL is a dead tap, so the toggle *is* the
+operator's "the ingress is wired" signal. And it fires only for a **resolvable
+park** — event kind `escalation` carrying its artifact id — never for a
+verdict-escalate or a cursor-alert, which `gate resolve` would refuse.
 
 ### 2. `escalate serve` — the HTTP ingress
 
@@ -107,10 +116,44 @@ parked* escalation under an *already live* grant. The blast radius is exactly
    ingress + auth + the `who`-from-verified-identity path. ✅ **SHIPPED** — see
    `EVIDENCE-escalate-serve-phase1.md` for the five-callback transcript (forged /
    stale / valid / replay / wrong-secret) against the real binaries.
-2. **flare button rendering** — add the `actions` block; wire the Slack app's
-   interactivity Request URL to the tunnel.
+2. **flare button rendering** — add the `actions` block; the shared action-id
+   vocabulary lives in `contracts/escalation`; rendering is gated on a per-channel
+   `resolve_actions` opt-in. ✅ **SHIPPED** — flare renders Approve/Block on a
+   resolvable park, pinned by `notify` tests. Operator infra remains: create the
+   Slack app, enable interactivity, point its Request URL at the tunnel (setup
+   checklist below). No ngrok wired here.
 3. **End-to-end over ngrok** — a real tap on a phone → merge, captured as evidence
-   (mirroring the CLI evidence in `EVIDENCE-escalation-plane-poc.md`).
+   (mirroring the CLI evidence in `EVIDENCE-escalation-plane-poc.md`). ⏳ **NEXT** —
+   the fail-closed e2e harness + phone-tap runbook land in the following increment;
+   only the operator infra setup (the checklist below) + the real tap remain.
+
+## Slack-app + tunnel setup (operator infra — the human boundary)
+
+The code for Phases 2–3 is complete; standing up the Slack app and the tunnel is
+manual, one-time operator work. In order:
+
+1. **Create a Slack app** (api.slack.com/apps → *From scratch*) in the workspace
+   the escalation channel lives in.
+2. **Bot token scopes** (OAuth & Permissions): `chat:write`. Install to the
+   workspace; copy the bot token (`xoxb-…`) into flare's routes file as the
+   channel `token`, and invite the bot to the channel.
+3. **Signing secret** (Basic Information → App Credentials): copy it to the box
+   running `escalate serve` as `SLACK_SIGNING_SECRET` — serve refuses to start
+   without it. It must be the SAME secret for both flare's Slack app and serve, or
+   every callback fails signature verification.
+4. **Run the ingress under a live grant's key:** `escalate serve` shells
+   `gate resolve` with no `-key`, so export `GATE_KEY` (or use gate's default key
+   dir) and mint the grant *before* stepping away — a remote approval only works
+   inside an unexpired grant window.
+5. **Tunnel:** `escalate serve -addr 127.0.0.1:8099 -state ~/pers/gate/state &`
+   then `ngrok http 8099` → copy the `https://<random>.ngrok.app` URL.
+6. **Interactivity** (Interactivity & Shortcuts → toggle on): set the Request URL
+   to the tunnel URL. Save.
+7. **Arm flare:** set `"resolve_actions": true` on the escalation channel in the
+   routes file. The next briefed park renders live Approve/Block buttons.
+
+Until steps 1–7 are done the buttons stay dark (the opt-in is off), so nothing
+renders a dead tap.
 
 ### Phase 1 as shipped — two notes for Phase 2/3
 

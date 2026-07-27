@@ -60,10 +60,10 @@ func TestSlackWhoPrefersHandle(t *testing.T) {
 // TestVerdictFor pins the action_id → decision map and that an unknown button
 // is rejected, never defaulted.
 func TestVerdictFor(t *testing.T) {
-	if v, err := verdictFor(actionApprove); err != nil || v != escalation.DecisionPass {
+	if v, err := verdictFor(escalation.ActionApprove); err != nil || v != escalation.DecisionPass {
 		t.Fatalf("approve → %q,%v, want pass", v, err)
 	}
-	if v, err := verdictFor(actionBlock); err != nil || v != escalation.DecisionBlock {
+	if v, err := verdictFor(escalation.ActionBlock); err != nil || v != escalation.DecisionBlock {
 		t.Fatalf("block → %q,%v, want block", v, err)
 	}
 	if _, err := verdictFor("whatever"); err == nil {

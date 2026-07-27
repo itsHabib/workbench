@@ -95,6 +95,19 @@ their own shapes; `decision`/`tier` are never required of them.
   `{"ok":true}` response because Slack reports API errors in HTTP 200 bodies. The bot needs
   `chat:write` and membership in the target channel. The token lives only in the operator's
   local routes file and is never written to errors or logs.
+  - **Resolve actions (opt-in).** When a slack channel sets `"resolve_actions": true`, a
+    *resolvable* parked escalation (a gate park — event kind `escalation` — carrying its
+    artifact id) additionally renders **Approve** and **Block** interactive buttons beside the
+    `View PR` link. Each button carries the shared `contracts/escalation` action-id vocabulary
+    (`ActionApprove` / `ActionBlock`) and the escalation artifact id as its value, so a signed
+    Slack callback resolves the right park with nothing pasted. flare only *paints* the buttons —
+    the tap is handled by `escalate serve`, never flare (Amendment 3). The toggle is **off by
+    default and deliberately so**: the buttons only work once the Slack app's interactivity
+    Request URL is pointed at a running `escalate serve` (behind a tunnel), and a rendered button
+    with no configured Request URL is a dead tap. Turning it on is the operator's signal that the
+    ingress is wired. Buttons never render for the other things that reach `SevEscalate` (a
+    verdict with an escalate decision, a cursor-alert, a park missing its id) — those are not
+    resolvable, so offering Approve/Block on them would be a tap `gate resolve` would refuse.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.

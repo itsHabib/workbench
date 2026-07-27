@@ -42,6 +42,16 @@ type Channel struct {
 	URL       string `json:"url,omitempty"`
 	Token     string `json:"token,omitempty"`
 	ChannelID string `json:"channel,omitempty"`
+	// ResolveActions renders Approve/Block buttons on a parked-escalation card so
+	// the operator resolves it from the Slack message instead of a terminal. It is
+	// OFF by default and deliberately opt-in: the buttons only work once the Slack
+	// app's interactivity Request URL is pointed at a running `escalate serve`
+	// (via a tunnel), and a rendered button with no configured Request URL is a
+	// dead tap ("this app is not configured to handle interactions"). Turning it
+	// on is the operator's signal that the ingress is wired — flare itself still
+	// renders only; the tap is handled by escalate, never flare (Amendment 3).
+	// Only meaningful on a slack channel.
+	ResolveActions bool `json:"resolve_actions,omitempty"`
 }
 
 // Match selects events. Every set field must match; omitted means any.

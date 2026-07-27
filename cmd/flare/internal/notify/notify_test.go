@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 func TestSlackPostRendersBlockKit(t *testing.T) {
@@ -44,7 +45,7 @@ func TestSlackPostRendersBlockKit(t *testing.T) {
 		Body:     "review found a critical issue\nthat needs judgment",
 		Fields:   map[string]string{"decision": "block", "repo": "itsHabib/workbench", "number": "33"},
 	}
-	if err := postSlack(server.Client(), server.URL, token, channel, ev); err != nil {
+	if err := postSlack(server.Client(), server.URL, token, channel, false, ev); err != nil {
 		t.Fatal(err)
 	}
 	if got.Channel != channel {
@@ -84,7 +85,7 @@ func TestSlackMessageRendersOnce(t *testing.T) {
 	// The blocks live inside the attachment and there is no top-level text, so
 	// Slack renders the card exactly once — not a summary line stacked above a
 	// card that repeats it. The notification line lives on the fallback.
-	msg := renderSlackMessage("C1", event.Event{
+	msg := renderSlackMessage("C1", false, event.Event{
 		Source:   "gate",
 		Severity: event.SevBlock,
 		Body:     "tier over ceiling",
@@ -110,7 +111,7 @@ func TestSlackMessageRendersOnce(t *testing.T) {
 // click-target: an escalation naming a PR renders the same View PR button and
 // header subject verdicts get.
 func TestSlackEscalationHasPRButton(t *testing.T) {
-	msg := renderSlackMessage("C1", event.Event{
+	msg := renderSlackMessage("C1", false, event.Event{
 		Source:   "gate",
 		Kind:     "escalation",
 		Severity: event.SevEscalate,
@@ -136,7 +137,7 @@ func TestSlackEscalationHasPRButton(t *testing.T) {
 }
 
 func TestSlackVerdictHasPRButton(t *testing.T) {
-	msg := renderSlackMessage("C1", event.Event{
+	msg := renderSlackMessage("C1", false, event.Event{
 		Source:   "gate",
 		Kind:     "verdict",
 		Severity: event.SevEscalate,
@@ -163,7 +164,7 @@ func TestSlackVerdictHasPRButton(t *testing.T) {
 }
 
 func TestSlackEscalationHasNoButton(t *testing.T) {
-	msg := renderSlackMessage("C1", event.Event{
+	msg := renderSlackMessage("C1", false, event.Event{
 		Source:   "gate",
 		Kind:     "escalation",
 		Severity: event.SevEscalate,
@@ -201,7 +202,7 @@ func TestSlackEscalationRendersBriefSections(t *testing.T) {
 			"brief_rec":     "Have the author fix the witness before merging.",
 		},
 	}
-	blob, err := json.Marshal(renderSlackMessage("C1", ev))
+	blob, err := json.Marshal(renderSlackMessage("C1", false, ev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +227,7 @@ func TestSlackEscalationRendersBriefSections(t *testing.T) {
 
 	// No brief: the card quotes the producer's reason exactly as before.
 	ev.Fields = map[string]string{"run": "run_8", "repo": "itsHabib/rooms", "number": "84"}
-	blob, err = json.Marshal(renderSlackMessage("C1", ev))
+	blob, err = json.Marshal(renderSlackMessage("C1", false, ev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestSlackAPIFailureIsAnError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := postSlack(server.Client(), server.URL, token, channel, event.Event{Source: "gate"})
+	err := postSlack(server.Client(), server.URL, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, server.URL, channel, "invalid_payload")
 }
 
@@ -274,7 +275,7 @@ func TestSlackNetworkFailureIsAnError(t *testing.T) {
 	endpoint := server.URL
 	server.Close()
 
-	err := postSlack(client, endpoint, token, channel, event.Event{Source: "gate"})
+	err := postSlack(client, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "request")
 }
 
@@ -283,7 +284,7 @@ func TestSlackBuildRequestFailureIsSafe(t *testing.T) {
 	const channel = "C123"
 	const endpoint = "://secret-endpoint"
 
-	err := postSlack(http.DefaultClient, endpoint, token, channel, event.Event{Source: "gate"})
+	err := postSlack(http.DefaultClient, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "build request")
 }
 
@@ -302,4 +303,130 @@ func assertSafeSlackError(t *testing.T, err error, token, endpoint, channel, wan
 			t.Fatalf("error = %v, want %q", err, substring)
 		}
 	}
+}
+
+// resolveButtons collects every interactive resolve button (one carrying an
+// action_id) across the card's blocks, so a test can assert on the exact
+// Approve/Block set flare rendered rather than substring-matching JSON.
+func resolveButtons(blocks []slackBlock) []slackButton {
+	var out []slackButton
+	for _, b := range blocks {
+		if b.Type != "actions" {
+			continue
+		}
+		for _, el := range b.Elements {
+			btn, ok := el.(slackButton)
+			if ok && btn.ActionID != "" {
+				out = append(out, btn)
+			}
+		}
+	}
+	return out
+}
+
+// TestSlackResolveButtonsRenderOnOptIn pins the Phase-2 acceptance: with the
+// channel opted in, a briefed parked escalation renders Approve and Block
+// interactive buttons carrying the SHARED action-id vocabulary and the
+// escalation id as their value — the exact shape escalate's serve parses — and
+// still keeps the View PR link. The buttons are rendered by value comparison,
+// not JSON substrings, so a drift in field names fails loudly.
+func TestSlackResolveButtonsRenderOnOptIn(t *testing.T) {
+	msg := renderSlackMessage("C1", true, event.Event{
+		Source:   "gate",
+		ID:       "esc-abc123",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "repo": "itsHabib/workbench", "number": "137",
+			"brief_what": "escalate serve", "briefed": "yes",
+		},
+	})
+	btns := resolveButtons(msg.Attachments[0].Blocks)
+	if len(btns) != 2 {
+		t.Fatalf("want exactly Approve+Block resolve buttons, got %d: %+v", len(btns), btns)
+	}
+	approve, block := btns[0], btns[1]
+	if approve.ActionID != escalation.ActionApprove || approve.Style != "primary" {
+		t.Fatalf("approve button = %+v, want action_id %q style primary", approve, escalation.ActionApprove)
+	}
+	if block.ActionID != escalation.ActionBlock || block.Style != "danger" {
+		t.Fatalf("block button = %+v, want action_id %q style danger", block, escalation.ActionBlock)
+	}
+	for _, b := range btns {
+		if b.Value != "esc-abc123" {
+			t.Fatalf("button value = %q, want the escalation id the callback joins on", b.Value)
+		}
+		if b.URL != "" {
+			t.Fatalf("an interactive button must carry no url (Slack routes it to the app), got %q", b.URL)
+		}
+	}
+	// The click-target link survives beside the resolve buttons.
+	if !strings.Contains(string(mustJSON(t, msg)), "View PR #137") {
+		t.Fatalf("resolve buttons must not displace the View PR link:\n%s", mustJSON(t, msg))
+	}
+}
+
+// TestSlackResolveButtonsRequireOptIn pins that the buttons are DARK by default:
+// the very same parked escalation on a channel that has not opted in renders no
+// resolve buttons (a tap would be dead until the Slack app's Request URL is
+// wired), while the View PR link still renders.
+func TestSlackResolveButtonsRequireOptIn(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		ID:       "esc-abc123",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields:   map[string]string{"repo": "itsHabib/workbench", "number": "137"},
+	}
+	msg := renderSlackMessage("C1", false, ev)
+	if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+		t.Fatalf("resolve buttons must be off unless the channel opts in, got %+v", btns)
+	}
+	if !strings.Contains(string(mustJSON(t, msg)), "View PR #137") {
+		t.Fatalf("opt-out must not drop the View PR link:\n%s", mustJSON(t, msg))
+	}
+}
+
+// TestSlackResolveButtonsOnlyOnResolvableParks pins the correctness guard: even
+// opted in, resolve buttons render ONLY for a gate park (Kind "escalation") that
+// carries its artifact id. The other things that reach SevEscalate — a verdict
+// with an escalate decision, a cursor-alert, a park missing its id — are not
+// resolvable by `escalate`, so offering Approve/Block on them would be a tap
+// gate would refuse.
+func TestSlackResolveButtonsOnlyOnResolvableParks(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   event.Event
+	}{
+		{"verdict-escalate", event.Event{
+			Source: "gate", ID: "v1", Kind: "verdict", Severity: event.SevEscalate,
+			Fields: map[string]string{"decision": "escalate", "repo": "itsHabib/rooms", "number": "71"},
+		}},
+		{"cursor-alert", event.Event{
+			Source: "gate", ID: "cursor-alert:gate:0001", Kind: "cursor-alert", Severity: event.SevEscalate,
+		}},
+		{"park-missing-id", event.Event{
+			Source: "gate", ID: "", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/workbench", "number": "9"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, tc.ev)
+			if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+				t.Fatalf("%s must carry no resolve buttons, got %+v", tc.name, btns)
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

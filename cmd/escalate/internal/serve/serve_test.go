@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 var testSecret = []byte("8f742231b10c8537228d4e5a1a1a2d3f")
@@ -89,7 +90,7 @@ func fixedGrant(grant string, calls *int) GrantFinder {
 // passes; a tampered signature, a stale timestamp, missing headers, and an
 // unconfigured secret each fail — before any body is parsed.
 func TestVerify(t *testing.T) {
-	body := formBody(payloadJSON(actionApprove, "esc_a", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_a", "michael"))
 	ts := strconv.FormatInt(fixedNow.Unix(), 10)
 	good := sign(testSecret, ts, body)
 
@@ -138,7 +139,7 @@ func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 	grantCalls := 0
 	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
-	body := formBody(payloadJSON(actionApprove, "esc_abc", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
@@ -176,7 +177,7 @@ func TestServeHTTPBlockButtonMapsToBlock(t *testing.T) {
 	grantCalls := 0
 	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
-	body := formBody(payloadJSON(actionBlock, "esc_abc", "michael"))
+	body := formBody(payloadJSON(escalation.ActionBlock, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
@@ -224,7 +225,7 @@ func TestServeHTTPRejectsUnsigned(t *testing.T) {
 	grantCalls := 0
 	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
-	body := formBody(payloadJSON(actionApprove, "esc_abc", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	req := signedRequest(testSecret, fixedNow, body)
 	req.Header.Set(hdrSig, "v0=forged")
 	rec := httptest.NewRecorder()
@@ -264,7 +265,7 @@ func TestServeHTTPReplayLeansOnGuard(t *testing.T) {
 		Now:       func() time.Time { return fixedNow },
 	})
 
-	body := formBody(payloadJSON(actionApprove, "esc_deadbeef", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_deadbeef", "michael"))
 	first := httptest.NewRecorder()
 	srv.ServeHTTP(first, signedRequest(testSecret, fixedNow, body))
 	second := httptest.NewRecorder()
@@ -328,7 +329,7 @@ func TestServeHTTPNotParkedIsConflict(t *testing.T) {
 	}
 	srv := newServer(cr, notParked)
 
-	body := formBody(payloadJSON(actionApprove, "esc_abc", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
@@ -365,7 +366,7 @@ func TestServeHTTPSerializesSameEscalation(t *testing.T) {
 		Now:       func() time.Time { return fixedNow },
 	})
 
-	body := formBody(payloadJSON(actionApprove, "esc_abc", "michael"))
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)

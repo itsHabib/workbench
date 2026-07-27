@@ -43,12 +43,6 @@ const (
 	hdrSig = "X-Slack-Signature"
 	hdrTS  = "X-Slack-Request-Timestamp"
 
-	// actionApprove / actionBlock are the two button action_ids flare renders.
-	// The action_id — not a client-chosen field — selects the verdict, so a tap
-	// maps to exactly one of gate's decisions.
-	actionApprove = "approve"
-	actionBlock   = "block"
-
 	// maxSkew bounds how old a signed request may be. Slack recommends five
 	// minutes; anything staler is rejected before parsing, so a captured request
 	// cannot be replayed hours later.
@@ -288,14 +282,16 @@ func decisionFromPayload(body []byte) (ingest.Decision, error) {
 	}, nil
 }
 
-// verdictFor maps a button's action_id to gate's decision vocabulary. An unknown
-// action_id is rejected rather than defaulted, so a malformed or unexpected
-// button never silently approves or blocks.
+// verdictFor maps a button's action_id to gate's decision vocabulary. The
+// action_id vocabulary is the shared contract flare renders and serve parses
+// (escalation.ActionApprove / ActionBlock); the mapping to a decision is serve's
+// policy. An unknown action_id is rejected rather than defaulted, so a malformed
+// or unexpected button never silently approves or blocks.
 func verdictFor(actionID string) (string, error) {
 	switch actionID {
-	case actionApprove:
+	case escalation.ActionApprove:
 		return escalation.DecisionPass, nil
-	case actionBlock:
+	case escalation.ActionBlock:
 		return escalation.DecisionBlock, nil
 	}
 	return "", fmt.Errorf("serve: unknown action_id %q", actionID)
