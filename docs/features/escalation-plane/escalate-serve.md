@@ -77,6 +77,13 @@ Handler outline (one Slack interactive-action POST):
 4. **Respond in-channel** — update the Slack message ("✅ merged / ⛔ blocked by
    @user") from gate's returned JSON + exit code.
 
+> ⚠️ **Not yet built — and it forces the handler async.** Today `serve` responds
+> synchronously *after* `gate resolve` returns (up to 25s). Slack requires an
+> interactive callback be acked within ~3s, so before the real phone tap this must
+> become: ack 200 immediately, run resolve in the background, then POST the outcome
+> to the callback's `response_url` to update the card. Tracked in `FOLLOWUPS.md`
+> (codex P1 on #140) — the next increment on this seam.
+
 Where does the **grant** come from? The escalation body carries its `grant` id
 (`escalation.V1.Grant`), so `serve` can read it from the parked escalation rather
 than requiring the operator to paste it. (Resolve still re-checks the grant is
