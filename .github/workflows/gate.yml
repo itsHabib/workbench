@@ -128,7 +128,12 @@ jobs:
           # query is load-bearing (uniqueness gates the whole run), so a query
           # FAILURE must not silently exit under set -e and leave a stale success —
           # capture it and overwrite with an error.
-          if ! raw=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls"); then
+          # --paginate: the endpoint returns 30 records/page; without it an
+          # attacker could push a restrictive open PR onto page 2 while an easier
+          # one sits on page 1, so the first-page-only filter sees just the easier
+          # PR and greens the head for both. --jq '.[]' streams every page's
+          # elements; jq -s below slurps them into one array before filtering.
+          if ! raw=$(gh api --paginate "repos/${REPO}/commits/${HEAD_SHA}/pulls" --jq '.[]'); then
             overwrite_and_refuse "could not resolve open PRs for head (query failed)" error
           fi
           # Count only OPEN PRs whose HEAD is this exact SHA. The endpoint also
@@ -137,7 +142,7 @@ jobs:
           # different tip. Those are gated on their OWN head, not this one, so
           # neither must count toward this head's ambiguity (else a valid lower PR
           # in a stack, or a head with an old closed PR, could never clear).
-          nums=$(printf '%s' "$raw" | jq -c --arg sha "$HEAD_SHA" \
+          nums=$(printf '%s' "$raw" | jq -s -c --arg sha "$HEAD_SHA" \
             '[.[] | select(.state == "open" and .head.sha == $sha) | .number] | unique')
           n=$(printf '%s' "$nums" | jq 'length')
           # Refuse any head that backs more than one OPEN PR (regardless of path):
@@ -328,8 +333,8 @@ jobs:
                   # Success posts ONLY when the open PRs headed by this SHA are
                   # exactly [RESOLVED_PR]; a query error (→ literal "mismatch") or
                   # any other set posts failure. Fail closed by default.
-                  postok=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" 2>/dev/null \
-                    | jq -r --arg sha "$HEAD_SHA" --argjson pr "${RESOLVED_PR}" \
+                  postok=$(gh api --paginate "repos/${REPO}/commits/${HEAD_SHA}/pulls" --jq '.[]' 2>/dev/null \
+                    | jq -s -r --arg sha "$HEAD_SHA" --argjson pr "${RESOLVED_PR}" \
                       '([.[] | select(.state == "open" and .head.sha == $sha) | .number] | unique) == [$pr]' 2>/dev/null || echo mismatch)
                   if [ "$postok" = "true" ]; then
                     STATE=success; DESC="would_merge (${tier})"
