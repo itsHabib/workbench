@@ -1,8 +1,9 @@
-# The Escalation plane
+# The Escalation seam — typed contract + resolution back-channel
 
-**Status:** POC (built end-to-end; the plane-promotion argument is a proposal, not a settled decision).
+**Status:** Merged POC (workbench PR #130). **Decision: ship as a contract + seam,
+NOT a 6th plane** (see §3) — `workbench-101.md`'s five planes stay unamended.
 **Scope:** the typed escalation contract, the resolution back-channel that closes
-the agent→human→agent loop, and the case for modeling Escalation as its own plane.
+the agent→human→agent loop, and an honest read of whether escalation is its own plane.
 
 ---
 
@@ -51,35 +52,51 @@ That homeless seam is the argument. In the plane vocabulary: **resolution ingest
 is a responsibility with no plane**, so it defaulted to "a human's muscle
 memory." Naming Escalation as a plane gives it an owner and a contract.
 
-## 3. Why a 6th plane (and not a bolt-on to an existing one)
+## 3. Contract + seam — not (yet) a 6th plane
 
-The honest counter-argument is: *escalation is already covered — the park is
-Verification, the routing is Observability, done.* That is exactly the "one plane
-doing another's job" trap the diagnostic warns about. Walk the alternatives:
+The tempting next move is to name "Escalation" a sixth plane. This work
+deliberately does **not** — and after building it, that is the right call. The
+reasoning, kept because the question will recur.
 
-- **Put resolution ingest in Verification (gate)?** Partly right — the *effect*
-  (record a judgment, re-reduce, re-apply the ceiling) must live in gate, because
-  only gate may write gate's log. This POC does put the effect there (`gate
-  resolve`, §5). But the *ingest surface* — the thing a notification's ack, a
-  webhook, a future gate UI all post to — is not a verification concern; it is a
-  transport-agnostic front door. Folding it entirely into gate re-answers "who
-  owns escalation?" with "gate does, again," which is the muddle the plane model
-  exists to dissolve.
-- **Put it in Observability (flare)?** Forbidden, and correctly so. Amendment 3:
-  Observability is read-only and owns no authoritative decision. A flare that
-  wrote a resolution would be a dashboard *becoming* a source of truth — the exact
-  failure Amendment 3 was written to prevent. So the resolution ingest *cannot*
-  be a flare change. It must be a new component.
+Resolution ingest genuinely can't live in either incumbent unchanged:
 
-Once resolution ingest can live in neither incumbent without breaking that
-incumbent's charter, it is its own responsibility. That is what "a plane" means
-here: **a surface where a contract can live** — versionable, testable, auditable.
-Escalation qualifies: it has a typed contract (§4), a push origin, a routing
-mechanism, and — newly — a resolution ingest with an audit trail.
+- **Verification (gate)** owns the *effect* — record a judgment, re-reduce,
+  re-apply the ceiling — because only gate may write gate's log. `gate resolve`
+  (§5) puts it there, correctly. But the *ingest surface* — the front door a
+  Slack ack, a webhook, a gate UI all post to — is not a verification concern.
+- **Observability (flare)** is forbidden from it. Amendment 3: a read-only view
+  must never become a source of truth. A flare that wrote a resolution is the
+  exact failure that amendment prevents. So the ingest *cannot* be a flare
+  change — it must be a new component.
 
-**This is a proposal, not a fait accompli.** A 6th plane is a real cost (more
-vocabulary, another boundary to police). The POC's job is to make the seam
-concrete enough to decide honestly, not to declare victory. See §9 open questions.
+That is a real seam with no prior owner. But **"a responsibility neither
+incumbent can hold" is the argument for a contract, not automatically for a
+plane.** Weigh it honestly:
+
+- The push origin is **Verification** (the gate park). The routing is
+  **Observability** (flare). The resolution effect is **Verification +
+  Capability** (`gate resolve` reuses the judge core + the grant). The only
+  genuinely new thing is a *thin* ingest transport.
+- A flow that crosses three planes is not thereby a fourth plane.
+  `contracts/driverstate` spans Execution + State and is a **contract**, not a
+  plane. Escalation is the same shape: **a typed contract + a thin new
+  component.**
+- The diagnostic payoff you actually want — *"who owns the return path?"* — comes
+  from naming the **contract**, which forces the question and gives it a typed
+  home. You do not need to inflate the plane count to get it.
+
+**Decision: ship as a contract + seam; leave `workbench-101.md`'s five planes
+unamended.** Revisit plane-hood only if the ingest grows a second transport and
+"resolution ingest" starts to look like a role *multiple tools* serve — i.e. from
+usage, not from this doc (§8 step 5).
+
+One cleanup this decision implies, done alongside this note: flare's own docs call
+it "the escalation-routing **plane**." That is a mislabel — flare is an
+Observability **sink**, not a plane; "escalation-routing" is its cargo. It is also
+half of why "flare + escalation" reads as redundant: the word *escalation* was
+already bolted onto flare. flare and `escalate` are not redundant — they are
+**opposite arrows** (flare routes outbound and is read-only; `escalate` ingests
+inbound decisions, which Amendment 3 forbids flare from doing).
 
 ## 4. The contract: `contracts/escalation` (`escalation.v1`)
 

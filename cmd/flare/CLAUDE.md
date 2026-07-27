@@ -1,13 +1,20 @@
 # flare
 
-The workbench's escalation-routing plane: a small Go binary that tails
-producers' artifact logs (gate `log.jsonl`, ship `receipts.jsonl`) and, on
-block/escalate, delivers a Slack page — a `chat.postMessage` with a
-severity-colored Block Kit card that leads on the required action and carries a
-`View PR` button when the event names a repo and PR number. Toast and webhook are
-the other available channel *types*.
+The workbench's escalation/block **routing sink** — an Observability tool, not a
+plane. A small Go binary that tails producers' artifact logs (gate `log.jsonl`,
+ship `receipts.jsonl`) and, on block/escalate, delivers a Slack page — a
+`chat.postMessage` with a severity-colored Block Kit card that leads on the
+required action and carries a `View PR` button when the event names a repo and PR
+number. Toast and webhook are the other available channel *types*.
 Pure sink — it never gates, never blocks, never writes into a producer's state
 or takes a producer's lock.
+
+**Not to be confused with `contracts/escalation` / `cmd/escalate`.** flare is the
+*outbound* arrow (system → human, read-only routing). It routes an escalation
+*out*; it never ingests the human's decision *back* — that inbound arrow is
+`cmd/escalate` → `gate resolve`, a separate component precisely because Amendment
+3 forbids a read-only sink from writing a decision. "escalation-routing" is
+flare's cargo, not a plane it owns; flare serves Observability.
 
 `docs/DESIGN.md` is the contract: sources and their read shapes, the routes
 table, dedupe/throttle, cursor integrity, and the non-goals. Change behavior
