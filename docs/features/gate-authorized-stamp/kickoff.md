@@ -177,4 +177,9 @@ Built and verified end-to-end. Uncommitted on the working tree.
   exit 0 → status live on the head carrying run+hash. Skeptic path confirmed: `gate audit` →
   "chain intact", and the stamped hash is exactly the run's `action` artifact (`would_merge`).
   Success gradient #1 + #2 met. #3 (armed-CI parity via `gate.yml:261-265`) still open.
-- **Checks.** gofmt/vet/golangci-lint/`go test ./cmd/gate/...` all green.
+- **Verification path made real.** `gate explain -run` now surfaces each artifact's chain
+  `hash` (text + JSON; `observe.Node` had dropped it), so a skeptic can read run+hash off the
+  stamp, run `gate explain -run <run>`, and match the deciding action node's hash directly —
+  the receipt is now verifiable through the documented CLI, not just by raw state inspection.
+- **Checks.** gofmt/vet/golangci-lint/`go test ./cmd/gate/...` all green (incl. the refreshed
+  `explain.golden`).

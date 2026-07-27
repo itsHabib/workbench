@@ -1,6 +1,7 @@
 run run_explain_fixture — 7 artifacts
 
 14:30:00  grant  grt_8fc483df98c50ac6
+         hash: df561b65c14f20a566f19f13cdc588d0f2e978198c89f1716785ebddfb1ba25b
          repo: o/r
          action: merge
          max_tier: T1
@@ -10,9 +11,11 @@ run run_explain_fixture — 7 artifacts
          sig: fixture
 
 14:30:00  evidence  evd_e44dbad96c32dc06
+         hash: 6e2c51d447646f38d223c6d1c0e66cb8438eb3950cc4727049cacd49ce044665
          diff evidence: 18 bytes
 
 14:30:00  verdict  vrd_344689409e39c85c
+         hash: aa914200e975089dab46d8830b3e556497f0bec247422558b39ba51dc4f4f0b8
          from: [evd_e44dbad96c32dc06]
          floor [code/triage-floor] → block tier=T1 conf=0.95
          why: test failure in CI
@@ -20,18 +23,22 @@ run run_explain_fixture — 7 artifacts
              evidence: FAIL pkg/foo
 
 14:30:00  judgment  jdg_f683783edd459e87
+         hash: 6c7d5af21ebf5a553c58f2e310c86d8c49f773a263019ecf5d511e0e492c6ac3
          from: [vrd_344689409e39c85c]
          operator [judgment] → pass tier=T0 conf=1.00
          why: acceptable risk
 
 14:30:00  escalation  esc_85b46c7fa371d58f
+         hash: 2427102afad158a7e74abd8167378a6e83e061335e94a1d2c70ec5e650b9535d
          from: [vrd_344689409e39c85c]
          question: tier exceeds ceiling
 
 14:30:00  action  act_114d45e3148c623d
+         hash: 21e495672cdb47544da1d962c2007fb478ce128e51b1ed275ac7f8e750de1093
          from: [vrd_344689409e39c85c]
          outcome: blocked
 
 14:30:00  evidence  evd_522a03704c43075c
+         hash: 29a974fd5ba832792b1e7ca4471996e2ef295a9c7a8fa4fa9c3a35cbb00eb3bf
          (unparseable body)
 
