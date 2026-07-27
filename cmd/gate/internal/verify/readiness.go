@@ -72,10 +72,17 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	if pv.State != "MERGED" && pv.ReviewDecision != "" && pv.ReviewDecision != "APPROVED" {
 		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
 	}
+	// effectiveChecks counts only non-gate rollup entries: gate's own status is
+	// its prior verdict on this head, not independent CI signal, so it must not
+	// count toward "CI was recorded" below — otherwise a gate-only rollup would
+	// mask the absence of real CI and pass silently, the exact hazard the
+	// empty-signal escalation exists to catch.
+	var effectiveChecks int
 	for _, c := range pv.StatusCheckRollup {
 		if checkName(c.Name, c.Context) == gateContext {
 			continue
 		}
+		effectiveChecks++
 		if c.green() {
 			continue
 		}
@@ -99,8 +106,8 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	// backtested PR has no live review signal), mirroring the block checks
 	// above; the empty-CI branch is not, matching its long-standing behavior.
 	var escalations []string
-	if len(pv.StatusCheckRollup) == 0 {
-		escalations = append(escalations, "no CI checks recorded for this head")
+	if effectiveChecks == 0 {
+		escalations = append(escalations, "no non-gate CI checks recorded for this head")
 	}
 	if pv.State != "MERGED" && pv.ReviewDecision == "" {
 		escalations = append(escalations, "no review decision reported by GitHub")
@@ -112,7 +119,7 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 		return art, subject, err
 	}
 	v.Why = fmt.Sprintf("state=%s draft=%v mergeable=%s checks=%d green",
-		pv.State, pv.IsDraft, pv.Mergeable, len(pv.StatusCheckRollup))
+		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
 	art, err := Record(st, run, []string{viewEvidenceID}, v)
 	return art, subject, err
 }
