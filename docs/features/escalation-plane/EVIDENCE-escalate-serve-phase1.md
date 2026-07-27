@@ -73,6 +73,16 @@ HTTP 401
 signature verification failed
 ```
 
+### (6) CONCURRENT double-tap (two Approves fired at once) — exactly once
+```
+tap A → HTTP 200  would_merge
+tap B → HTTP 409  escalation is not currently parked
+```
+The per-escalation lock serializes the two; the winner resolves and the loser
+finds the park already closed. The log recorded **exactly one** `resolution`
+(`who:"@michael"`) — the concurrency the HTTP transport introduces cannot
+double-apply. (Added after codex's P1 review of the first push.)
+
 ## The loop closed with provenance
 
 After the Approve, the inbox went from 1 parked to **0**, and a `resolution`

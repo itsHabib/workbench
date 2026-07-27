@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
@@ -56,6 +57,12 @@ const (
 	// maxBody caps the request body a single Slack callback can carry, so a
 	// hostile client cannot exhaust memory before the signature is even checked.
 	maxBody = 1 << 20
+
+	// codeGateError is gate's hard-error exit (a state read/write failure, not a
+	// decision). Unlike gate's decision codes 0–3, it means no decision landed,
+	// so serve reports it as an HTTP failure — Slack must retry, not treat the
+	// callback as acknowledged.
+	codeGateError = 4
 )
 
 // GrantFinder resolves a parked escalation id to the grant its run parked under.
@@ -83,6 +90,7 @@ type Server struct {
 	ingest    *ingest.Client
 	findGrant GrantFinder
 	now       func() time.Time
+	locks     *escLocks
 }
 
 // New builds a Server from cfg. A nil Now falls back to time.Now.
@@ -96,7 +104,37 @@ func New(cfg Config) *Server {
 		ingest:    cfg.Ingest,
 		findGrant: cfg.FindGrant,
 		now:       now,
+		locks:     &escLocks{m: make(map[string]*sync.Mutex)},
 	}
+}
+
+// escLocks serializes callbacks per escalation id. The HTTP transport serves
+// each callback in its own goroutine, so two taps for the SAME escalation — a
+// double-tap, or a Slack retry racing the first — can arrive concurrently. Gate's
+// open-check and its terminal append are not one atomic step, so without this
+// both could pass the open-check before either records an action and both would
+// resolve one park. This holds one lock per escalation across the whole
+// lookup→resolve, so the second waits and then finds the park already closed
+// (refused, not double-applied). Different escalations never contend. Entries
+// are not reclaimed: they are bounded by the escalations a run ever parks, so
+// the growth is negligible for this ingress.
+type escLocks struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}
+
+// lock acquires the per-id mutex and returns its release. The outer mutex guards
+// only the tiny map lookup; the per-id mutex is what callers actually hold.
+func (k *escLocks) lock(id string) func() {
+	k.mu.Lock()
+	l, ok := k.m[id]
+	if !ok {
+		l = new(sync.Mutex)
+		k.m[id] = l
+	}
+	k.mu.Unlock()
+	l.Lock()
+	return l.Unlock
 }
 
 // ServeHTTP handles one Slack interactive-action callback. The order is the
@@ -124,6 +162,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Serialize everything below per escalation id: the lookup and resolve for one
+	// escalation run under one lock, so concurrent taps for it can't both act.
+	defer s.locks.lock(d.Escalation)()
 	grant, err := s.findGrant(r.Context(), d.Escalation)
 	if errors.Is(err, ErrNotParked) {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -262,16 +303,19 @@ func slackWho(username, name, id string) string {
 }
 
 // writeOutcome relays gate's result once gate has actually run: gate's JSON body
-// plus its exit code. The HTTP status is 200 whenever gate returned a decision
-// at all — merge, block, re-park, or refusal — because the SIGNED CALLBACK was
-// successfully ingested and driven; gate's decision is DATA in the body, not the
-// transport's health. That split matters: Slack retries any non-2xx callback, so
-// a legitimate block returned as a 4xx would be replayed. Ingress-level failures
-// (bad signature, bad payload, a park that is gone, gate unrunnable) are the ones
-// that get a 4xx/5xx — they short-circuit before this, above. The Slack card
-// update in Phase 2 reads gate's outcome+exit_code from this body.
+// plus its exit code. The HTTP status splits on whether a DECISION LANDED. Gate's
+// decision codes 0–3 (merge / block / re-park / refuse) are landed decisions, so
+// they are 200 — the callback was ingested and driven, the outcome is DATA in the
+// body, and Slack must NOT retry a decision that already happened. Gate's hard
+// error (code 4) is NOT a decision — the resolution may never have been recorded
+// — so it is a 502: Slack should retry rather than treat the tap as acknowledged.
+// Ingress-level failures (bad signature, bad payload, a park that is gone, gate
+// unrunnable) get their own 4xx/5xx above and never reach here.
 func writeOutcome(w http.ResponseWriter, out []byte, code int) {
 	w.Header().Set("Content-Type", "application/json")
+	if code == codeGateError {
+		w.WriteHeader(http.StatusBadGateway)
+	}
 	if len(out) == 0 {
 		fmt.Fprintf(w, `{"exit_code":%d}`, code)
 		return

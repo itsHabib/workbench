@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -274,11 +276,11 @@ func TestServeHTTPReplayLeansOnGuard(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first tap should merge (200), got %d", first.Code)
 	}
-	// The replayed tap reached gate and gate's guard refused it: the callback was
-	// still ingested (200), and gate's refusal — exit 4, the "open park"
-	// diagnostic — is reported in the body. serve did not dedupe; the guard did.
-	if second.Code != http.StatusOK {
-		t.Fatalf("replayed tap reached gate, so status is 200 with the refusal in body, got %d", second.Code)
+	// The replayed tap reached gate and gate's guard refused it with exit 4. serve
+	// did not dedupe — the guard did — and it surfaces the refusal as a 502 (no
+	// new decision landed), with gate's "open park" diagnostic in the body.
+	if second.Code != http.StatusBadGateway {
+		t.Fatalf("a gate exit-4 refusal should be 502, got %d", second.Code)
 	}
 	if !strings.Contains(second.Body.String(), "open park") {
 		t.Fatalf("the guard's refusal diagnostic must pass through, got %s", second.Body)
@@ -335,6 +337,46 @@ func TestServeHTTPNotParkedIsConflict(t *testing.T) {
 	}
 	if len(cr.calls) != 0 {
 		t.Fatalf("resolve must not run when the escalation is not parked")
+	}
+}
+
+// TestServeHTTPSerializesSameEscalation proves the per-escalation lock: many
+// concurrent taps for one escalation never have their resolves overlap, so two
+// callbacks can't both pass gate's open-check before either records a terminal.
+// Run under -race, it also asserts the lock itself is race-free.
+func TestServeHTTPSerializesSameEscalation(t *testing.T) {
+	var inflight, maxSeen int32
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
+		n := atomic.AddInt32(&inflight, 1)
+		for {
+			m := atomic.LoadInt32(&maxSeen)
+			if n <= m || atomic.CompareAndSwapInt32(&maxSeen, m, n) {
+				break
+			}
+		}
+		time.Sleep(3 * time.Millisecond)
+		atomic.AddInt32(&inflight, -1)
+		return []byte(`{}`), 0, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	body := formBody(payloadJSON(actionApprove, "esc_abc", "michael"))
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			srv.ServeHTTP(httptest.NewRecorder(), signedRequest(testSecret, fixedNow, body))
+		}()
+	}
+	wg.Wait()
+	if maxSeen > 1 {
+		t.Fatalf("same-escalation resolves overlapped (max inflight %d), want serialized to 1", maxSeen)
 	}
 }
 

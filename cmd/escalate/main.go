@@ -23,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/cmd/escalate/internal/serve"
@@ -118,11 +119,23 @@ func cmdServe(args []string) error {
 	if secret == "" {
 		return errors.New("serve: SLACK_SIGNING_SECRET is required (refusing to run an unauthenticated ingress)")
 	}
-	srv := serve.New(serve.Config{
+	handler := serve.New(serve.Config{
 		Secret:    []byte(secret),
 		Ingest:    ingest.New(*gateBin, *stateDir, nil),
 		FindGrant: serve.GateGrantFinder(*gateBin, *stateDir),
 	})
+	// This listener faces a public tunnel, and signature verification only runs
+	// after the body is read — so an unauthenticated slow client could otherwise
+	// hold connections open indefinitely and exhaust goroutines before auth ever
+	// runs. Bounded read/write timeouts cap that. WriteTimeout is the roomiest:
+	// the handler shells `gate resolve` synchronously before it responds.
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
 	log.Printf("escalate serve: listening on %s (gate=%s state=%q)", *addr, *gateBin, *stateDir)
-	return http.ListenAndServe(*addr, srv)
+	return srv.ListenAndServe()
 }
