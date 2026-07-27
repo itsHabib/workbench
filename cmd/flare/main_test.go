@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,6 +30,44 @@ func TestSweepFailsWhenASourceCannotBeRead(t *testing.T) {
 	}
 	if code := sweep(cfg, j); code == 0 {
 		t.Fatal("sweep must exit non-zero when a configured source cannot be read")
+	}
+}
+
+func TestCorruptCursorsPagesThenQuarantinesAndResweeps(t *testing.T) {
+	// A corrupt cursor file is why flare goes dark, so recovery must PAGE the
+	// operator through the notify path (journaled), not silently reset — and it
+	// must quarantine only after that alert settles, handing back an empty cursor
+	// so the cycle resweeps.
+	dir := t.TempDir()
+	j, err := journal.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cursors.json"), []byte(`{"last_poll":"x"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Version:  config.Version,
+		Sources:  []config.Source{{Name: "gate", Kind: config.SourceGateLog, Path: "/x"}},
+		Channels: map[string]config.Channel{"quiet": {Type: config.ChannelDrop}},
+		CatchAll: "quiet",
+	}
+	cur, err := recoverCorruptCursors(cfg, j, route.New(cfg, time.Now))
+	if err != nil {
+		t.Fatalf("recovery must succeed once the alert settles, got %v", err)
+	}
+	if len(cur.Sources) != 0 || !cur.LastPoll.IsZero() {
+		t.Fatalf("recovered cursors must be empty so the cycle resweeps, got %+v", cur)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "cursors.json")); !os.IsNotExist(statErr) {
+		t.Fatal("the corrupt file must be quarantined after the alert is delivered")
+	}
+	tail, err := j.Tail(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) != 1 || tail[0].EventID != "cursor-alert:flare:cursors-corrupt" {
+		t.Fatalf("recovery must route the corruption alert through the notifier, got %+v", tail)
 	}
 }
 

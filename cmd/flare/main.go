@@ -109,7 +109,7 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	if err != nil {
 		return err
 	}
-	cur, err := loadCursorsRecover(j)
+	cur, err := recoverCorruptCursors(cfg, j, r)
 	if err != nil {
 		return err
 	}
@@ -136,26 +136,42 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	return nil
 }
 
-// loadCursorsRecover loads the cursors, self-healing a corrupt file instead of
-// wedging the loop: it quarantines the unparseable state aside, journals a
-// cursor-alert (never a silent reset — DESIGN "cursor integrity"), and returns
-// the empty cursor so the cycle resweeps from zero. Dedupe via the journal keeps
-// the resweep from re-paging what already got through.
-func loadCursorsRecover(j *journal.Journal) (journal.Cursors, error) {
+// recoverCorruptCursors self-heals a corrupt cursor file instead of wedging the
+// loop. A corrupt cursors.json is *why* flare stopped delivering, so the
+// recovery must be as loud as a source chain break: it PAGES the operator
+// through the normal notify path (dispatch → catch-all → Slack), and only then
+// quarantines the bad file and resweeps from empty (dedupe prevents re-paging).
+// If the page cannot be delivered, it holds the corrupt file and returns an
+// error so the next cycle retries — the gap is never hidden behind a freshly
+// healthy status, and a failed page never silently loses the alert.
+func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Router) (journal.Cursors, error) {
 	cur, err := j.LoadCursors()
 	if !errors.Is(err, journal.ErrCursorsCorrupt) {
 		return cur, err
 	}
-	bak, qErr := j.QuarantineCursors()
-	if qErr != nil {
-		return journal.Cursors{}, qErr
+	if !dispatch(cfg, j, r, corruptCursorsAlert()) {
+		return journal.Cursors{}, fmt.Errorf("cursors.json corrupt: recovery alert undelivered, holding for retry")
 	}
-	note := "cursors.json was corrupt; quarantined and resweeping"
-	if bak != "" {
-		note = fmt.Sprintf("cursors.json was corrupt; quarantined to %s and resweeping", filepath.Base(bak))
+	if _, err := j.QuarantineCursors(); err != nil {
+		return journal.Cursors{}, err
 	}
-	journalOK(j, journal.Entry{Time: time.Now(), Kind: journal.CursorAlert, Source: "flare", Note: note})
 	return cur, nil
+}
+
+// corruptCursorsAlert is the page a corrupt cursor file raises. It carries no
+// source route, so it lands on the catch-all channel like a source cursor-alert;
+// severity escalate keeps a throttle from dropping it.
+func corruptCursorsAlert() event.Event {
+	return event.Event{
+		Source:   "flare",
+		ID:       "cursor-alert:flare:cursors-corrupt",
+		Kind:     "cursor-alert",
+		Time:     time.Now(),
+		Severity: event.SevEscalate,
+		Title:    "flare: cursors.json was corrupt — quarantined, resweeping",
+		Body:     "flare's own cursor file did not parse. It has been set aside and the sources are being reswept from the start (dedupe prevents re-paging). Deliveries resume automatically; check for a delivery gap around this alert.",
+		Fields:   map[string]string{},
+	}
 }
 
 func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src config.Source, cur source.Cursor, seen map[string]bool) (source.Cursor, error) {
