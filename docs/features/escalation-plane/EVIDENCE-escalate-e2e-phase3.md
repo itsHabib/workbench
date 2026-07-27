@@ -32,7 +32,7 @@ Phase-2↔serve contract composes, meeting at the contract, never a cross-import
 | Test | Asserts |
 |---|---|
 | `TestApproveTapResolvesPark` | Approve → 200 `would_merge`; resolve driven with the joined grant, mapped `pass`, and `who` = the verified `@handle (id)` |
-| `TestBlockTapRecordsBlock` | Block → 200 `would_block`, decision `block` |
+| `TestBlockTapRecordsBlock` | Block → 200 `blocked` (the real gate resolve outcome), decision `block` |
 | `TestForgedSignatureRejected` | wrong signing secret → 401, gate never driven |
 | `TestStaleTimestampRejected` | valid HMAC but 10-min-old timestamp → 401 on the window |
 | `TestUnsignedRejected` | no signature headers → 401 |

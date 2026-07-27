@@ -74,7 +74,7 @@ func next(state string) int {
 }
 
 // resolve journals the decision serve drove and echoes gate's outcome JSON: a
-// pass exits 0 (would_merge), a block exits 1 (would_block) — both landed
+// pass exits 0 (would_merge), a block exits 1 (blocked) — both landed
 // decisions in gate's 0..3 space, which serve relays as HTTP 200. It records the
 // id as resolved so a subsequent next() shows the park gone. It carries none of
 // gate's real ladder logic; it is the sink the e2e asserts against.
@@ -89,9 +89,13 @@ func resolve(state string, args []string) int {
 	}
 	journal(state, inv)
 	markResolved(state, inv.Escalation)
+	// Match the real gate resolve outcomes exactly (cmd/gate/main.go): a pass is
+	// the dry-run "would_merge" (exit 0), a block is "blocked" (exit codeBlocked=1)
+	// — NOT "would_block", which gate never emits. A drifting stub would validate a
+	// response production never returns.
 	outcome, code := "would_merge", 0
 	if inv.Decision == "block" {
-		outcome, code = "would_block", 1
+		outcome, code = "blocked", 1
 	}
 	body := map[string]any{
 		"run":      "run_stub",

@@ -51,7 +51,9 @@ func TestBlockTapRecordsBlock(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("block tap status = %d, want 200; body: %s", code, body)
 	}
-	if !strings.Contains(body, `"outcome":"would_block"`) || !strings.Contains(body, `"decision":"block"`) {
+	// "blocked" is the real gate resolve block outcome (cmd/gate/main.go), not
+	// "would_block" — the stub is contract-faithful only if it matches.
+	if !strings.Contains(body, `"outcome":"blocked"`) || !strings.Contains(body, `"decision":"block"`) {
 		t.Fatalf("block outcome not relayed: %s", body)
 	}
 	assertField(t, onlyInvocation(t, s), "decision", escalation.DecisionBlock)
