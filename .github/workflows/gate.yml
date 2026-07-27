@@ -257,47 +257,26 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
-          # -reviews-optional makes gate's own review-consolidation the review gate
-          # (the repo requires no separate GitHub review, so an absent reviewDecision
-          # is expected — without this the green path is unreachable and a clean PR
-          # parks forever). readiness still BLOCKS an explicit CHANGES_REQUESTED.
+          # -reviews-optional = REVIEWS ADVISORY for the enforced CI check. The
+          # model-based review-consolidation rung escalates on uncertainty, and this
+          # ephemeral CI run has no judge to resolve a park, so gating on it would
+          # freeze a clean PR (a clean bot review extracts low-confidence -> park,
+          # with no auto-green path). Under this flag: readiness does NOT escalate on
+          # an absent GitHub review decision, and the reviews rung still runs and is
+          # recorded (advisory) but does NOT gate. The check enforces the
+          # DETERMINISTIC rungs it can verify autonomously — CI green, readiness
+          # (mergeable, not draft, no CHANGES_REQUESTED), and the risk floor. Review
+          # JUDGMENT stays in the operator/driver flow (where a human judges the bot
+          # panel), which is where model-based review consolidation belongs. Trying
+          # to auto-recognize a clean review from comment text proved unsound
+          # (adversarial pass), so this splits the boundary rather than guessing.
           #
-          # But that policy is safe ONLY when the CURRENT head has actually been
-          # reviewed by a bot; otherwise a stale unanchored "no issues" could satisfy
-          # the review rung once the reviewDecision backstop is gone. A bot signals a
-          # current-head review two ways, and BOTH count:
-          #   1. a REVIEW submission (pulls/reviews) whose commit_id == HEAD_SHA and
-          #      that is not DISMISSED — how bots with inline findings report; and
-          #   2. codex's CLEAN-pass issue COMMENT. codex reports "no issues" as an
-          #      issue comment, not a review submission, and stamps it
-          #      "Reviewed commit: <sha>". This path is DELIBERATELY NARROW: it
-          #      accepts ONLY codex's exact login AND its "Reviewed commit" sentinel
-          #      AND the head's short sha. It must NOT accept any bot + a bare sha
-          #      substring — infra bots (codecov, deploy-preview, github-actions
-          #      CI-summary) re-post per-push comments that embed the current head
-          #      sha and are NOT code reviews; accepting those would let an unreviewed
-          #      head reach success (a real fail-open the adversarial pass caught).
-          # Without either signal, run WITHOUT -reviews-optional so readiness
-          # escalates and the run parks — fail closed until a review bot reviews this
-          # head. (Query failure -> 0 -> fail closed.)
-          botsub=$(gh api --paginate "repos/${REPO}/pulls/${PR}/reviews" \
-            --jq "[.[] | select(.user.type == \"Bot\" and .commit_id == \"${HEAD_SHA}\" and .state != \"DISMISSED\")] | length" 2>/dev/null | jq -s 'add // 0')
-          botcom=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
-            --jq "[.[] | select(.user.login == \"chatgpt-codex-connector[bot]\" and (.body | contains(\"Reviewed commit\")) and (.body | contains(\"${HEAD_SHA:0:10}\")))] | length" 2>/dev/null | jq -s 'add // 0')
-          botrev=$(( ${botsub:-0} + ${botcom:-0} ))
-          REVIEWS_OPT=""
-          if [ "${botrev:-0}" -ge 1 ]; then
-            REVIEWS_OPT="-reviews-optional"
-          else
-            echo "no current-head bot review on ${HEAD_SHA} (subs=${botsub:-0} coms=${botcom:-0}); running without -reviews-optional (will park)"
-          fi
-          # -stamp=false: this run's state/key dir is erased by the EXIT trap
-          # above, so a gate/authorized status posted here would carry a run+hash
-          # whose only audit ledger is already destroyed — an unverifiable stamp.
-          # The workflow's own status-posting step (the trusted, armed rail) owns
-          # any CI-side stamp; the binary must not double-post from the ephemeral run.
+          # -stamp=false: this run's state/key dir is erased by the EXIT trap above,
+          # so a gate/authorized status posted here would carry a run+hash whose only
+          # audit ledger is already destroyed — an unverifiable stamp. The workflow's
+          # own status-posting step (the trusted, armed rail) owns any CI-side stamp.
           JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
-            -model-backend cloud ${REVIEWS_OPT} -floor "$PWD/triage-floor" -stamp=false)
+            -model-backend cloud -reviews-optional -floor "$PWD/triage-floor" -stamp=false)
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.
