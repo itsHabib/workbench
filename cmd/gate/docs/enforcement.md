@@ -175,13 +175,16 @@ them. (The workflow first shipped — dormant, never armed — on the standalone
 itsHabib/gate; since the `cmd/gate` tenant move it ships here, so the armable
 canary is itsHabib/workbench.)
 
-0. **Resolve the runtime, then arm the workflow (it ships dormant).** The `gate`
-   workflow is guarded by repo variable `GATE_ENFORCE` — it posts and enforces
-   nothing until that is set to `true`, because gate's ladder needs `triage-floor`
-   + a model backend a stock GitHub-hosted runner lacks (see "Known residuals").
-   First decide the runtime — point gate's model rungs at a cloud model API (so it
-   runs on a plain hosted runner), or use a box-side runner that has the deps —
-   then `gh variable set GATE_ENFORCE --body true --repo itsHabib/workbench`.
+0. **Arm the workflow (it ships dormant).** The `gate` workflow is guarded by
+   repo variable `GATE_ENFORCE` — it posts and enforces nothing until that is set
+   to `true`. The runtime the earlier "Known residuals" flagged is now resolved:
+   the workflow builds `triage-floor` from base and runs gate's advisory rungs
+   against a cloud model (`-model-backend cloud`), so it runs on a stock hosted
+   runner with no box-side dependency. Arming therefore takes two settings:
+   provision the `ANTHROPIC_API_KEY` secret (a **funded** key — the cloud rungs
+   are a real API call, not the Max-subscription path), then
+   `gh variable set GATE_ENFORCE --body true --repo itsHabib/workbench`. Disarm at
+   any time with `gh variable set GATE_ENFORCE --body false --repo itsHabib/workbench`.
 
 On the protected branch (`main`):
 
@@ -245,34 +248,51 @@ does not assert:
 
 ### Known residuals of the CI check
 
-Two are fail-closed (they can only make the check block, never wrongly pass);
-one is a runtime dependency the check needs before it is functional in GitHub
-CI. Named here rather than implied-closed.
+Both residuals below are now **resolved**; the record is kept so the history is
+legible and so the cost the resolution introduced is stated plainly.
 
-- **The check needs gate's ladder dependencies present on the runner — not yet
-  wired for a hosted CI runner.** gate's floor rung shells the `triage-floor`
-  binary (which lives outside this module), and its review-consolidation rung
-  calls a local model at `localhost:11434`. On the operator's box both are
-  present, so the check runs its full ladder there. A stock GitHub-hosted runner
-  has neither: with no `triage-floor` on PATH gate exits `error` (4) before it
-  prints a verdict, and with no local model the review rung escalates every PR —
-  so a clean PR could never reach a green `would_merge`. Making the check
-  functional on a hosted runner therefore requires provisioning those
-  dependencies (or a runner that has them); until then the workflow's fail-closed
-  posture holds (a broken run posts `error`, never `success`), but the green path
-  is unreachable in hosted CI. This is a live design question, not a settled
-  choice — it is called out so the runbook above is not read as "already
-  enforced on hosted CI."
-- **gate's readiness reads its own `gate` status (self-reference).** Readiness
-  reads the PR's full status rollup, which includes the `gate` context this
-  workflow posts. A prior `failure`/`error` `gate` status on the same head SHA
-  is therefore a non-green check gate will itself block on when it re-runs — so a
-  transient gate failure does not clear until a new commit pushes a fresh head.
-  This is fail-closed (a stale red gate can only keep blocking, never wave a PR
-  through) and clears on the next push. The full fix is to have readiness skip
-  the rollup entry whose context equals gate's own — deferred until the runner
-  dependency above is settled, since the runtime shape may change what the check
-  reads.
+- **Runner dependencies — RESOLVED (cloud model backend + triage-floor built in
+  CI).** The check earlier needed gate's ladder dependencies present on the
+  runner: its floor rung shells the `triage-floor` binary (outside this module),
+  and its review-consolidation rung needed a model. A stock GitHub-hosted runner
+  had neither, so the green path was unreachable there. The workflow now closes
+  both: it **builds `triage-floor` from base** (`go build -o triage-floor
+  ./cmd/triage/triage-floor`) alongside gate, and runs gate's advisory rungs
+  against a **cloud model** (`-model-backend cloud`, default
+  `claude-haiku-4-5-20251001`) instead of a local `localhost:11434` model. A
+  clean PR can therefore reach a green `would_merge` on a plain hosted runner.
+
+  The cost of this resolution, named: the cloud rungs are **real Anthropic API
+  calls**, not the Max-subscription path, so arming requires a **funded**
+  `ANTHROPIC_API_KEY` secret on the repo. The call count per gated PR run is not
+  flat — it scales with the evidence on the head:
+  - the **review-consolidation** rung makes one structured `claude-haiku-4-5`
+    call **per eligible bot review comment** on the current head (it extracts
+    each comment separately), so a head with N panel comments costs ~N calls;
+  - the **ci-classify** rung runs **only when CI is red** and makes up to
+    `ciAdvisoryBudget` (4) advisory calls **per red run** (one per floor-abstaining
+    failed-step chunk; overflow escalates rather than spends).
+
+  In the common case — a handful of bot comments and green CI — that is a low
+  single-digit number of haiku-tier calls; it grows with panel size on the head
+  and, on red CI, with the number of failing runs. Cheap per call, but it
+  **recurs on every push to every gated PR**, so the standing cost scales with
+  gated-PR churn (and panel verbosity), not with repo count. The fail-closed
+  posture is unchanged: a run that cannot reach a verdict (missing key, build
+  failure, a crash) posts `error`, never `success`.
+
+- **Readiness self-reference — RESOLVED (readiness skips gate's own context).**
+  Readiness reads the PR's full status rollup, which includes the `gate` context
+  this workflow posts. A prior `failure`/`error` `gate` status on the same head
+  SHA was therefore a non-green check gate would itself block on when it re-ran —
+  a red gate could only clear on a new push (a self-deadlock). It was always
+  fail-closed (a stale red gate could only keep blocking, never wave a PR
+  through), but it was a real correctness/UX defect for a *required* check.
+  `verify/readiness.go` now **skips the single rollup entry whose context equals
+  gate's own `gate` context** when computing blocks, so gate never blocks on its
+  own past verdict. The match is exact: every other non-green check still blocks,
+  and an unrelated check such as `gate-foo` is not gate's context and still
+  blocks. Pinned by `TestReadinessSkipsOwnGateContext`.
 
 ## See also
 

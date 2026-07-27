@@ -8,6 +8,26 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
 
+// gateContext is the commit-status context gate posts its own verdict under
+// (see .github/workflows/gate.yml "Post gate status", -f context=gate). Once
+// gate is an enforced required check, a prior failure/error gate status on the
+// same head is itself a non-green rollup entry — so readiness must skip it, or
+// gate would block on its own past verdict and a red gate could only clear on a
+// new push (a self-deadlock). Every OTHER non-green check still blocks, so
+// fail-closed is unchanged.
+const gateContext = "gate"
+
+// isOwnGateStatus reports whether a rollup entry is gate's OWN posted verdict:
+// a commit *status* whose context is gate's. gate posts a commit status
+// (`gh api .../statuses -f context=gate`), which surfaces in the rollup as a
+// StatusContext — Context set, Name empty. The match is deliberately narrow: a
+// check-RUN literally named "gate" (Name set) is NOT gate's status and still
+// blocks, so an unrelated Actions job named "gate" can never be silently
+// dropped. An unrelated context like "gate-foo" is not gate's context either.
+func isOwnGateStatus(c rollupCheck) bool {
+	return c.Name == "" && c.Context == gateContext
+}
+
 type prView struct {
 	State             string        `json:"state"`
 	IsDraft           bool          `json:"isDraft"`
@@ -62,7 +82,17 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	if pv.State != "MERGED" && pv.ReviewDecision != "" && pv.ReviewDecision != "APPROVED" {
 		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
 	}
+	// effectiveChecks counts only non-gate rollup entries: gate's own status is
+	// its prior verdict on this head, not independent CI signal, so it must not
+	// count toward "CI was recorded" below — otherwise a gate-only rollup would
+	// mask the absence of real CI and pass silently, the exact hazard the
+	// empty-signal escalation exists to catch.
+	var effectiveChecks int
 	for _, c := range pv.StatusCheckRollup {
+		if isOwnGateStatus(c) {
+			continue
+		}
+		effectiveChecks++
 		if c.green() {
 			continue
 		}
@@ -86,8 +116,8 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	// backtested PR has no live review signal), mirroring the block checks
 	// above; the empty-CI branch is not, matching its long-standing behavior.
 	var escalations []string
-	if len(pv.StatusCheckRollup) == 0 {
-		escalations = append(escalations, "no CI checks recorded for this head")
+	if effectiveChecks == 0 {
+		escalations = append(escalations, "no non-gate CI checks recorded for this head")
 	}
 	if pv.State != "MERGED" && pv.ReviewDecision == "" {
 		escalations = append(escalations, "no review decision reported by GitHub")
@@ -99,7 +129,7 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 		return art, subject, err
 	}
 	v.Why = fmt.Sprintf("state=%s draft=%v mergeable=%s checks=%d green",
-		pv.State, pv.IsDraft, pv.Mergeable, len(pv.StatusCheckRollup))
+		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
 	art, err := Record(st, run, []string{viewEvidenceID}, v)
 	return art, subject, err
 }

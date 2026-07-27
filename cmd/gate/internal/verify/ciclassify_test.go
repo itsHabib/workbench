@@ -518,6 +518,15 @@ func TestRedChecks(t *testing.T) {
 		{[]map[string]any{{"name": "ci", "status": "IN_PROGRESS"}}, false},
 		{[]map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}, false},
 		{nil, false},
+		// gate's own red status is its prior verdict, not an external red check:
+		// excluded so the self-deadlock cannot leak back in through ci-classify.
+		{[]map[string]any{{"context": "gate", "state": "FAILURE"}}, false},
+		// but a real red check alongside a red gate is still detected...
+		{[]map[string]any{{"context": "gate", "state": "FAILURE"}, {"name": "ci", "conclusion": "FAILURE"}}, true},
+		// ...and a lookalike like gate-foo is not gate's context — still red.
+		{[]map[string]any{{"context": "gate-foo", "state": "FAILURE"}}, true},
+		// ...and a check-RUN named "gate" (Name set) is not gate's status — still red.
+		{[]map[string]any{{"name": "gate", "conclusion": "FAILURE"}}, true},
 	}
 	for _, c := range cases {
 		st, err := state.Open(t.TempDir(), time.Now)

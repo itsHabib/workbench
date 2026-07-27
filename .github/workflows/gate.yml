@@ -163,8 +163,11 @@ jobs:
           # Erase the ephemeral state/key dir on exit — no minted grant or key
           # survives the step, matching the "erased with it" guarantee.
           trap 'rm -rf "$TMP"' EXIT
+          # -init: the mktemp state dir is intentionally fresh every run, so gate
+          # must be told to create a new state tree rather than refuse to mint
+          # into one with no existing log.jsonl (its default fail-closed posture).
           GRT=$(./gate grant -repo "$REPO" -action merge -max-tier T3 -max-cycles 0 -ttl 1h \
-            -state "$TMP/state" -key "$TMP/keys")
+            -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
           JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
