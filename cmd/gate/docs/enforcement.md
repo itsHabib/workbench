@@ -235,6 +235,15 @@ and why each choice is the safe one:
   codex delivers as an issue comment) reach `gate=success`.
   (Discovered in Phase-3 dry-observe: every canary
   PR had an empty `reviewDecision`, so the escalation fired on all of them.)
+  **Liveness residual (fail-closed):** gate runs on `CI` completion, but a bot
+  posts its review asynchronously — often *after* CI finishes. The first gate run
+  then sees no current-head review and **parks** (`gate=failure`); the review
+  landing later posts no `CI` event, so the status stays parked until a re-trigger
+  (a new push, or a manual CI re-run) re-evaluates and observes the review. This
+  is safe (a clean PR is held, never wrongly passed), but a clean PR needs a nudge
+  to go green. The clean fix — a trusted `pull_request_review`/comment-driven
+  re-evaluation trigger — is a follow-up; the driver/operator re-runs in the
+  meantime.
   Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
   "Request changes" on a repo with no branch-protection review requirement does
   not populate `reviewDecision`, and the review-consolidation rung filters to bot
