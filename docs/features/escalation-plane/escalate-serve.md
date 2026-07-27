@@ -131,8 +131,12 @@ parked* escalation under an *already live* grant. The blast radius is exactly
    Slack app, enable interactivity, point its Request URL at the tunnel (setup
    checklist below). No ngrok wired here.
 3. **End-to-end over ngrok** — a real tap on a phone → merge, captured as evidence
-   (mirroring the CLI evidence in `EVIDENCE-escalation-plane-poc.md`). ⏳ **NEXT** —
-   the fail-closed e2e harness + phone-tap runbook land in the following increment;
+   (mirroring the CLI evidence in `EVIDENCE-escalation-plane-poc.md`). 🛠 **SCAFFOLDED**
+   — `cmd/escalate/e2e` drives the real `escalate serve` binary over HTTP with
+   signed Slack callbacks built from the shared vocabulary (loopback stands in for
+   the tunnel, a recording stub gate for the real gate), proving the input path +
+   the fail-closed matrix (9 cases). The harness + the real phone-tap runbook +
+   the automated-vs-real coverage boundary are in `EVIDENCE-escalate-e2e-phase3.md`;
    only the operator infra setup (the checklist below) + the real tap remain.
 
 ## Slack-app + tunnel setup (operator infra — the human boundary)
