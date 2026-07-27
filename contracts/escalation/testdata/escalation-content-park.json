@@ -1,0 +1,16 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_1111111111111111",
+  "grant": "grt_2222222222222222",
+  "question": "the reviewer panel disagrees on whether the retry loop can wedge",
+  "run_id": "run_abcabcabcabcabca",
+  "repo": "itsHabib/ship",
+  "number": 126,
+  "brief": {
+    "what_it_is": "A change to how the driver retries a failed dispatch.",
+    "concern": "Under a specific failure it might retry forever instead of giving up.",
+    "risk": "Medium — it is not shipping user code, but a wedged driver blocks the queue.",
+    "recommendation": "Ask the author to confirm the retry has a ceiling, then pass."
+  }
+}

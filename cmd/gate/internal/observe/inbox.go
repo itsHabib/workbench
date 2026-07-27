@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 // Inbox is a read-only projection of everything currently awaiting the operator,
@@ -109,16 +110,12 @@ type grantBody struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// escalationBody is the slice of an escalation body the inbox reads: the parked
-// run's question and its machine-readable park code, the grant it ran under, and
-// the PR subject when the escalation carried one.
-type escalationBody struct {
-	Question string `json:"question"`
-	Code     string `json:"code"`
-	Grant    string `json:"grant"`
-	Repo     string `json:"repo"`
-	Number   int    `json:"number"`
-}
+// The inbox reads the parked run's escalation body — question, park code, grant,
+// PR subject — through the shared contract (escalation.DecodeBody), the same
+// tolerant read that used to run against a locally-redeclared struct. This is
+// one of the three readers the typed contract collapsed onto a single source of
+// truth; the projection still renders best-effort, so a drifted body never drops
+// a park from the inbox.
 
 // NextText renders the inbox as scannable text. stateArg is spliced into the
 // paste-ready commands (empty for the ambient state dir; " -state <dir>" for an
@@ -639,8 +636,7 @@ func sortParked(parked []ParkedRun) {
 func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) ParkedRun {
 	// Best-effort decode: an escalation with an unreadable body still lists its
 	// run, so a park is never silently dropped just because its body drifted.
-	var b escalationBody
-	_ = json.Unmarshal(a.Body, &b)
+	b, _ := escalation.DecodeBody(a.Body)
 	facts = mergeRunFacts(facts, runFacts{Repo: b.Repo, Number: b.Number})
 	p := ParkedRun{
 		Run:            a.Run,

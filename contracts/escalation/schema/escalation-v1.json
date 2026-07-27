@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/escalation/escalation/v1",
+  "title": "EscalationV1",
+  "x-version": "escalation.v1",
+  "description": "One agent->human push: a gate run parked for judgment. Exactly one line per park. Carries why it parked, under which grant and verdict, about which PR, the plain-language brief for a zero-context approver, and — once a human decides — the resolution that closes the agent->human->agent loop with provenance. The typed replacement for the untyped body gate wrote and two readers redeclared.",
+  "type": "object",
+  "required": ["schema_version", "outcome", "verdict", "grant", "question"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "escalation.v1" },
+    "outcome": { "type": "string", "description": "Gate's outcome string for the park (today always parked_for_judgment). Leads a notification title, so it is part of the wire shape." },
+    "verdict": { "type": "string", "description": "The reduced verdict id the park stands on — provenance the inbox reads to build a paste-ready command." },
+    "grant": { "type": "string", "description": "The grant id the run ran under. The resolution back-channel re-checks it so the ceiling re-applies on resolve." },
+    "question": { "type": "string", "description": "The park reason a zero-context reader sees first. An escalation with no question is a page with no ask." },
+    "run_id": { "type": "string", "description": "The gate run this park belongs to. Optional and additive: the envelope already carries the run, but a self-contained body resolves it without the envelope." },
+    "code": {
+      "type": "string",
+      "enum": ["grant_tier_exceeded", "cycle_count_unreadable", "grant_cycle_exceeded"],
+      "description": "The machine-readable park code. Absent on a content park (which carries a brief instead); present on the procedural parks. Values equal gate's own persisted park codes, so the typed body changed no wire value."
+    },
+    "repo": { "type": "string", "description": "The PR's repo (owner/name), when the park names one." },
+    "number": { "type": "integer", "minimum": 1, "description": "The PR number, when the park names one — with repo, a direct click-target for the sink." },
+    "brief": {
+      "type": "object",
+      "description": "The one-screen plain-language page for a zero-context approver, translated from findings. Optional: procedural parks and synthesis failures carry none. Field names mirror gate's verify.Brief exactly.",
+      "required": ["what_it_is", "concern", "risk", "recommendation"],
+      "additionalProperties": false,
+      "properties": {
+        "what_it_is": { "type": "string" },
+        "concern": { "type": "string" },
+        "risk": { "type": "string" },
+        "recommendation": { "type": "string" }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "description": "The closed-loop stamp: decision, who, when, and the judgment it produced. It is NEVER written into the immutable park artifact (the log is append-only) — the back-channel appends a standalone resolution artifact, and this embedded field is the projected view a reader fills by joining that artifact back to the escalation. Its shape doubles as the body of that standalone artifact. Absent on every real park body today; a projection is the only thing that populates it.",
+      "required": ["decision", "who", "at", "judgment_id"],
+      "additionalProperties": false,
+      "properties": {
+        "decision": { "type": "string", "enum": ["pass", "block"], "description": "The human's decision, mirroring gate's verdict vocabulary." },
+        "who": { "type": "string", "description": "Who decided — the provenance a bare judgment artifact lacks." },
+        "at": { "type": "string", "format": "date-time", "description": "When the decision was recorded, RFC 3339 UTC." },
+        "judgment_id": { "type": "string", "description": "The id of the KindJudgment artifact this decision produced — the link from the resolution to the effect gate recorded." }
+      }
+    }
+  }
+}

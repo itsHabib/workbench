@@ -1,0 +1,88 @@
+// Command escalate is the resolution back-channel of the Escalation plane: it
+// ingests the decision a notification carried back for a parked escalation and
+// drives gate's `resolve` verb to record it — closing the agent→human→agent
+// loop WITHOUT flare (the router) ever writing a decision. It is the missing
+// seam the plane formalizes: gate emits the park (push origin), flare routes it
+// (Observability), and this component owns the resolution ingest that no plane
+// owned before.
+//
+// It composes through gate's CLI seam — shelling the gate binary, never
+// importing it — exactly as the console composes through gate's read seam, so
+// the workbench boundary law holds (share artifacts + exit codes, not call
+// stacks). The exit code is a faithful pass-through of `gate resolve`'s
+// (0 merge / 1 blocked / 2 parked / 3 refused / 4 error); an escalate-side
+// failure to even reach gate — a malformed decision, gate not runnable — exits
+// 5, outside gate's code space so the two never collide.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+
+	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+)
+
+// codeIngestError is escalate's own failure code, deliberately outside gate's
+// 0–4 decision space so a caller can tell "escalate could not ingest" apart
+// from any decision gate returned.
+const codeIngestError = 5
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+		os.Exit(codeIngestError)
+	}
+	switch os.Args[1] {
+	case "resolve":
+		if err := cmdResolve(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "escalate:", err)
+			os.Exit(codeIngestError)
+		}
+	default:
+		usage()
+		os.Exit(codeIngestError)
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, `usage: escalate resolve -escalation esc_x -decision pass|block -grant grt_x -why "..." -who NAME [-gate gate] [-state DIR]
+  ingests a human's decision for a parked escalation and drives `+"`gate resolve`"+`.
+  exit code is gate resolve's (0/1/2/3/4); an ingest-side failure exits 5.
+  -state defaults to $GATE_STATE; -gate defaults to the gate binary on PATH.`)
+}
+
+func cmdResolve(args []string) error {
+	fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
+	gateBin := fs.String("gate", "gate", "path to the gate binary")
+	stateDir := fs.String("state", os.Getenv("GATE_STATE"), "gate state dir (default $GATE_STATE)")
+	escID := fs.String("escalation", "", "the escalation artifact id a notification carried")
+	decision := fs.String("decision", "", "pass or block")
+	grantID := fs.String("grant", "", "grant artifact id")
+	why := fs.String("why", "", "the decision's reasoning")
+	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	c := ingest.New(*gateBin, *stateDir, nil)
+	out, code, err := c.Resolve(context.Background(), ingest.Decision{
+		Escalation: *escID,
+		Verdict:    *decision,
+		Who:        *who,
+		Why:        *why,
+		Grant:      *grantID,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stdout.Write(out); err != nil {
+		return err
+	}
+	os.Exit(code)
+	return nil
+}

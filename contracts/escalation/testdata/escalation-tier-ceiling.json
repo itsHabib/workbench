@@ -1,0 +1,11 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_3333333333333333",
+  "grant": "grt_4444444444444444",
+  "question": "verdict tier T2 exceeds grant ceiling T1; the change touches the merge path",
+  "run_id": "run_defdefdefdefdefd",
+  "code": "grant_tier_exceeded",
+  "repo": "itsHabib/ship",
+  "number": 130
+}

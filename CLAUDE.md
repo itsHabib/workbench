@@ -36,6 +36,10 @@ Orientation block you can point an agent at to ground it fast.
   3 refused / 4 error are a load-bearing seam),
   `console` (a local, read-only web view of gate's inbox — parked runs + the
   grant ledger — that shells the gate binary for its data and never imports it),
+  `escalate` (the Escalation plane's resolution back-channel — ingests a human's
+  decision for a parked escalation and drives `gate resolve` to close the
+  agent→human→agent loop, shelling gate and never importing it; see
+  `docs/features/escalation-plane/spec.md`),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.

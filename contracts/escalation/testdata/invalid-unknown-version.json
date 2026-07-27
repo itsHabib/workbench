@@ -1,0 +1,7 @@
+{
+  "schema_version": "escalation.v2",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_8888888888888888",
+  "grant": "grt_9999999999999999",
+  "question": "otherwise valid, but declares a version this reader does not accept"
+}
