@@ -257,14 +257,29 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
-          # -reviews-optional: this check IS the enforced review gate (its
-          # review-consolidation rung consolidates the bot panel), and the repo
-          # requires no separate GitHub review, so an absent reviewDecision is
-          # expected — do not escalate on it, or the green path is unreachable in
-          # CI (a clean PR would park forever). readiness still BLOCKS on an
-          # explicit CHANGES_REQUESTED/REVIEW_REQUIRED.
+          # -reviews-optional makes gate's own review-consolidation the review gate
+          # (the repo requires no separate GitHub review, so an absent reviewDecision
+          # is expected — without this the green path is unreachable and a clean PR
+          # parks forever). readiness still BLOCKS an explicit CHANGES_REQUESTED.
+          #
+          # But that policy is safe ONLY when the CURRENT head has actually been
+          # reviewed by a bot: issue-level bot comments are unanchored, so a stale
+          # "no issues" from an OLD head could otherwise satisfy the review rung once
+          # the reviewDecision backstop is gone. A bot REVIEW submission carries the
+          # commit_id it reviewed, so require >=1 bot review bound to HEAD_SHA before
+          # enabling the policy. Without one, run WITHOUT -reviews-optional so
+          # readiness escalates and the run parks — fail closed until the bots review
+          # this head. (Query failure -> 0 -> fail closed.)
+          botrev=$(gh api --paginate "repos/${REPO}/pulls/${PR}/reviews" \
+            --jq "[.[] | select(.user.type == \"Bot\" and .commit_id == \"${HEAD_SHA}\")] | length" 2>/dev/null | jq -s 'add // 0')
+          REVIEWS_OPT=""
+          if [ "${botrev:-0}" -ge 1 ]; then
+            REVIEWS_OPT="-reviews-optional"
+          else
+            echo "no current-head bot review on ${HEAD_SHA}; running without -reviews-optional (will park)"
+          fi
           JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
-            -model-backend cloud -reviews-optional -floor "$PWD/triage-floor")
+            -model-backend cloud ${REVIEWS_OPT} -floor "$PWD/triage-floor")
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.

@@ -215,7 +215,15 @@ and why each choice is the safe one:
   `gate=failure` forever, making the **green path unreachable in CI** and freezing
   `main` once the check is required. The flag suppresses only the *absence*
   escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
-  and empty CI still escalates. (Discovered in Phase-3 dry-observe: every canary
+  and empty CI still escalates. **The flag is passed only when the CURRENT head
+  has actually been reviewed by a bot**: the workflow counts bot *review
+  submissions* whose `commit_id == HEAD_SHA` (a review submission is anchored to
+  the head it reviewed, unlike an issue-level comment) and enables the policy only
+  when that count is ≥1; otherwise it runs *without* the flag so readiness
+  escalates and the run parks — fail closed until the bots review this head. That
+  closes the stale-evidence path where an old unanchored "no issues" comment could
+  otherwise satisfy the review rung once the `reviewDecision` backstop is removed.
+  (Discovered in Phase-3 dry-observe: every canary
   PR had an empty `reviewDecision`, so the escalation fired on all of them.)
   Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
   "Request changes" on a repo with no branch-protection review requirement does
