@@ -105,12 +105,14 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		}
 		// A low-confidence extraction normally escalates. Exception: codex's fixed
 		// clean-pass sentinel is a deterministic clean signal, so an uncertain
-		// non-actionable ("none") extraction of it must not park a clean review.
-		// The model still READS the whole body, and an ACTIONABLE verdict is NEVER
-		// rescued — so a comment that leads clean then raises a concern (or any
-		// finding the model reads) still escalates. The rescue only overrides the
-		// CONFIDENCE penalty on a model-confirmed-clean codex sentinel comment.
-		rescued := verdict != "actionable" && cleanReviewSentinel(c.Author, c.Body, c.Path)
+		// "none" extraction of it must not park a clean review. The rescue is
+		// restricted to verdict=="none" ONLY: the sentinel asserts NO findings, so
+		// any other verdict (nit, question, and of course actionable) is a real
+		// read the model returned and must stand — the model still READS the whole
+		// body, and a comment that leads clean then raises a concern still
+		// escalates. The rescue only overrides the CONFIDENCE penalty on a
+		// model-confirmed-clean codex sentinel comment.
+		rescued := verdict == "none" && cleanReviewSentinel(c.Author, c.Body, c.Path)
 		if lowc && !rescued {
 			lowConf++
 		}
