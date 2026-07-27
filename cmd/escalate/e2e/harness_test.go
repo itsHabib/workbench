@@ -109,7 +109,13 @@ func startServer(t *testing.T) *server {
 	port := freePort(t)
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	cmd := exec.Command(escalateBin, "serve", "-addr", addr, "-gate", stubGateBin, "-state", stateDir)
-	cmd.Env = append(os.Environ(), "SLACK_SIGNING_SECRET="+signingSecret)
+	// serve requires BOTH a signing secret (authn) and an allowlist (authz) or it
+	// refuses to start; the suite authorizes only `operator`, so an unlisted-user
+	// tap can prove the 403 authz gate.
+	cmd.Env = append(os.Environ(),
+		"SLACK_SIGNING_SECRET="+signingSecret,
+		"ESCALATE_ALLOWED_SLACK_USERS="+operator.ID,
+	)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start serve: %v", err)

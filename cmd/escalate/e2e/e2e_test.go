@@ -168,6 +168,21 @@ func TestUnknownActionRejected(t *testing.T) {
 	assertNoResolve(t, s)
 }
 
+// TestUnauthorizedUserForbidden: an authentic tap from a Slack user NOT on the
+// allowlist is refused 403 and never drives gate. The signature is valid (same
+// secret) — what fails is authorization: the button is visible to the whole
+// channel, but only the allowlisted operator can resolve. This is the authz gate
+// the real tunnel needs before a channel-wide button is safe.
+func TestUnauthorizedUserForbidden(t *testing.T) {
+	s := startServer(t)
+	intruder := slackUser{ID: "U9INTRUDER", Username: "intruder"}
+	code, _ := s.tap(escalation.ActionApprove, intruder)
+	if code != 403 {
+		t.Fatalf("unlisted user status = %d, want 403", code)
+	}
+	assertNoResolve(t, s)
+}
+
 func onlyInvocation(t *testing.T, s *server) map[string]string {
 	t.Helper()
 	inv := s.invocations()

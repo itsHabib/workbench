@@ -36,20 +36,21 @@ Phase-2↔serve contract composes, meeting at the contract, never a cross-import
 | `TestForgedSignatureRejected` | wrong signing secret → 401, gate never driven |
 | `TestStaleTimestampRejected` | valid HMAC but 10-min-old timestamp → 401 on the window |
 | `TestUnsignedRejected` | no signature headers → 401 |
+| `TestUnauthorizedUserForbidden` | an authentic tap from a user NOT on the allowlist → 403, gate never driven (authn ≠ authz) |
 | `TestReplayRefused` | same tap twice → 200 then 409 (park left the inbox), exactly one resolve |
 | `TestConcurrentDoubleTapResolvesOnce` | two Approves at once → one 200, one 409, exactly one resolve — never a double-apply |
 | `TestForgedWhoIgnored` | a smuggled top-level `"who":"attacker"` is ignored; `who` = the verified identity |
 | `TestUnknownActionRejected` | an unknown `action_id` → 400, never a silent resolve |
 
 ```
-ok  github.com/itsHabib/workbench/cmd/escalate/e2e   (9/9 pass, ~15s)
+ok  github.com/itsHabib/workbench/cmd/escalate/e2e   (10/10 pass, ~10s)
 ```
 
 ## What remains — operator infra + the real tap
 
 Everything below is the human boundary the run stops at: standing up the Slack app
 and the tunnel, then doing a real tap. The **Slack-app + tunnel setup checklist**
-lives in `escalate-serve.md` (steps 1–7). Once that is done, the real phone-tap
+lives in `escalate-serve.md` (steps 1–8). Once that is done, the real phone-tap
 evidence-gather is:
 
 1. **Mint a grant** (human-only) and export its key so serve can drive resolve.
@@ -75,10 +76,13 @@ evidence-gather is:
 
    (Or let a real gated PR park naturally — then flare pages it with live buttons.)
 
-3. **Run the ingress + tunnel** (from the setup checklist):
+3. **Run the ingress + tunnel** (from the setup checklist). serve requires both a
+   signing secret (authn) and an allowlist of Slack user ids (authz) or it refuses
+   to start:
 
    ```
    SLACK_SIGNING_SECRET=<app signing secret> \
+   ESCALATE_ALLOWED_SLACK_USERS=<your Slack Uxxxx id> \
      escalate serve -addr 127.0.0.1:8099 -state ~/pers/gate/state &
    ngrok http 8099            # set the https URL as the Slack app's Request URL
    ```
@@ -106,7 +110,8 @@ evidence-gather is:
 | flare renders the button | proven by `notify` tests (Phase 2) | live Slack card |
 | Slack signs + POSTs the callback | modeled: v0-signed callback fixture | real Slack |
 | the public tunnel | loopback stand-in | real ngrok |
-| serve verifies + maps + looks up grant | **real serve binary** | real serve binary |
+| serve authenticates + authorizes the tapper | **real serve binary** (403 on unlisted user pinned) | real serve binary |
+| serve maps + looks up grant | **real serve binary** | real serve binary |
 | gate records the resolution | recording stub (contract-faithful) | **real gate** (keys, chain) |
 
 The only rows the real tap adds are the live Slack sign/POST, the public tunnel,
