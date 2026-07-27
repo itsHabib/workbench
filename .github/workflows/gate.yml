@@ -108,16 +108,22 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           }
-          # commits->pulls lists the PRs whose head is this commit — same-repo PRs
-          # reliably, and fork PRs too (their head lands in the base repo's
-          # refs/pull/*). It returns CLOSED/MERGED PRs too, so filter to OPEN ones.
-          # This query is load-bearing (uniqueness gates the whole run), so a query
+          # commits->pulls lists PRs ASSOCIATED with this commit — same-repo PRs
+          # and fork PRs (their head lands in the base repo's refs/pull/*). This
+          # query is load-bearing (uniqueness gates the whole run), so a query
           # FAILURE must not silently exit under set -e and leave a stale success —
           # capture it and overwrite with an error.
-          if ! nums=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-              --jq '[.[] | select(.state == "open") | .number] | unique'); then
+          if ! raw=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls"); then
             overwrite_and_refuse "could not resolve open PRs for head (query failed)" error
           fi
+          # Count only OPEN PRs whose HEAD is this exact SHA. The endpoint also
+          # returns CLOSED/MERGED PRs, and PRs merely ASSOCIATED with the commit —
+          # e.g. a stacked PR that contains it in history but has advanced to a
+          # different tip. Those are gated on their OWN head, not this one, so
+          # neither must count toward this head's ambiguity (else a valid lower PR
+          # in a stack, or a head with an old closed PR, could never clear).
+          nums=$(printf '%s' "$raw" | jq -c --arg sha "$HEAD_SHA" \
+            '[.[] | select(.state == "open" and .head.sha == $sha) | .number] | unique')
           n=$(printf '%s' "$nums" | jq 'length')
           # Refuse any head that backs more than one OPEN PR (regardless of path):
           # the gate status is commit-scoped, so gating one could stamp its green
@@ -304,8 +310,8 @@ jobs:
                   # ONLY when the head still backs exactly one open PR; anything
                   # else — more than one, none, or a query error (which yields the
                   # literal "ambiguous") — posts failure. Fail closed by default.
-                  postn=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-                    --jq '[.[] | select(.state == "open") | .number] | unique | length' 2>/dev/null || echo ambiguous)
+                  postn=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" 2>/dev/null \
+                    | jq --arg sha "$HEAD_SHA" '[.[] | select(.state == "open" and .head.sha == $sha) | .number] | unique | length' 2>/dev/null || echo ambiguous)
                   if [ "$postn" = "1" ]; then
                     STATE=success; DESC="would_merge (${tier})"
                   else
