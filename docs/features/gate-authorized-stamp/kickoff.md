@@ -183,3 +183,22 @@ Built and verified end-to-end. Uncommitted on the working tree.
   the receipt is now verifiable through the documented CLI, not just by raw state inspection.
 - **Checks.** gofmt/vet/golangci-lint/`go test ./cmd/gate/...` all green (incl. the refreshed
   `explain.golden`).
+
+### Known limitation — commit-scoped rail (accepted)
+
+A `gate/authorized` **commit status** is commit-scoped by nature: it rides the exact rail branch
+protection watches, which is why it's the load-bearing surface (a PR comment can't gate a
+merge). The tradeoff is that once posted, a PR *opened or retargeted onto the same head SHA
+later* inherits the status — the pre-post "sole open PR on the head" guard cannot see a PR that
+does not yet exist. This is not fixable without leaving the branch-protection rail, so it is
+**accepted and mitigated, not prevented**:
+
+- The stamp is **self-identifying** — `description` carries `#<num>` and `target_url` points at
+  the exact PR gate authorized — so a viewer on an inheriting PR sees which PR the stamp is for,
+  not a bare green.
+- The stamp is a **legibility marker, not a security control** (stated up front): the
+  authorization is the exit code + the hash-chained log, never the status. An inherited stamp
+  authorizes nothing; it only points at the one real decision, verifiable via `gate explain -run`.
+
+A future hardening pass could add a PR-scoped receipt *comment* alongside the status, or reconcile
+stale/inherited stamps — out of scope for this POC.
