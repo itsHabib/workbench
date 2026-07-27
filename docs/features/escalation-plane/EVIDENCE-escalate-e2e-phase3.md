@@ -53,28 +53,41 @@ and the tunnel, then doing a real tap. The **Slack-app + tunnel setup checklist*
 lives in `escalate-serve.md` (steps 1–8). Once that is done, the real phone-tap
 evidence-gather is:
 
-1. **Mint a grant** (human-only) and export its key so serve can drive resolve.
-   The key dir must be a **sibling** of the state dir — gate's `newEnv` refuses a
-   key dir equal to or nested beneath `-state` (`cmd/gate/main.go`), so
-   `~/pers/gate/keys`, not `~/pers/gate/state/keys`:
+1. **Point every command at the same keys + ledger — export these FIRST, before
+   any `gate` command.** `gate grant` signs with whatever `GATE_KEY` is set *at
+   mint time*, and serve must later open the ledger with the SAME keys or gate
+   rejects the grant (`grant_bad_signature`); exporting after the mint would sign
+   with `defaultKeyDir()` and then read with a different dir. The key dir must also
+   be a **sibling** of the state dir — gate's `newEnv` refuses a key dir at or
+   beneath `-state` (`cmd/gate/main.go`) — so `~/pers/gate/keys`, not
+   `~/pers/gate/state/keys`:
 
    ```
-   gate grant -repo itsHabib/workbench -max-tier T2 -ttl 168h -state ~/pers/gate/state
-   export GATE_KEY=~/pers/gate/keys          # sibling of state, per Phase 1's repro
-   export GATE_STATE=~/pers/gate/state       # so bare gate commands below read this ledger
+   export GATE_KEY=~/pers/gate/keys      # sibling of state; set BEFORE any gate command
+   export GATE_STATE=~/pers/gate/state   # so the bare gate commands below read this ledger
    ```
 
-2. **Seed a park** to tap. A live `gate gate` needs a GitHub PR that is awkward to
-   arrange on demand; the reproducible offline seed is gate's own act-path harness
-   (same one Phase 1 used) — note the key dir is the sibling, not under state:
+2. **Get a parked escalation to tap** — either path:
+
+   **a) Offline demo seed** (no GitHub PR needed; a live `gate gate` needs a PR
+   that is awkward to arrange on demand). `TestSeedDemoState` mints its OWN grant
+   and park through gate's act-path — the same one Phase 1 used. **That grant
+   carries a hard-coded 1-hour TTL**, so it is what the park resolves under, not a
+   grant you mint separately; complete the tap within the hour or re-seed. It signs
+   with `GATE_DEMO_KEY`, which must be the same sibling key dir:
 
    ```
    GATE_DEMO_STATE=~/pers/gate/state GATE_DEMO_KEY=~/pers/gate/keys \
      go test ./cmd/gate -run TestSeedDemoState -count=1 -v
-   # → DEMO_SEEDED grant=grt_… run=run_… escalation=esc_… code=2
+   # → DEMO_SEEDED grant=grt_… run=run_… escalation=esc_… code=2   (grant TTL: 1h)
    ```
 
-   (Or let a real gated PR park naturally — then flare pages it with live buttons.)
+   **b) Real park** (no expiry pressure). Mint a longer-lived grant yourself and
+   let a real gated PR park under it — flare then pages it with live buttons:
+
+   ```
+   gate grant -repo itsHabib/workbench -max-tier T2 -ttl 168h -state ~/pers/gate/state
+   ```
 
 3. **Run the ingress + tunnel** (from the setup checklist). serve requires both a
    signing secret (authn) and an allowlist of Slack user ids (authz) or it refuses
