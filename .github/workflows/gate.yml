@@ -275,10 +275,23 @@ jobs:
                 # A pass is honoured only if it is bound to the head this status
                 # targets and the outcome agrees with the code. Any mismatch means
                 # the live head moved (or the run is inconsistent): fail closed.
-                if [ "$JUDGED" = "$HEAD_SHA" ] && [ "$outcome" = "would_merge" ]; then
-                  STATE=success; DESC="would_merge (${tier})"
-                else
+                if [ "$JUDGED" != "$HEAD_SHA" ] || [ "$outcome" != "would_merge" ]; then
                   STATE=error; DESC="stale: head moved during gate run"
+                else
+                  # Re-check uniqueness at POST time (TOCTOU): a second PR may have
+                  # opened on this head AFTER the Resolve step's check but before
+                  # this paid run finished. A commit-scoped success would satisfy
+                  # that newcomer's required context unevaluated. Success is posted
+                  # ONLY when the head still backs exactly one open PR; anything
+                  # else — more than one, none, or a query error (which yields the
+                  # literal "ambiguous") — posts failure. Fail closed by default.
+                  postn=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
+                    --jq '[.[].number] | unique | length' 2>/dev/null || echo ambiguous)
+                  if [ "$postn" = "1" ]; then
+                    STATE=success; DESC="would_merge (${tier})"
+                  else
+                    STATE=failure; DESC="ambiguous at post: head backs ${postn} open PRs; refusing"
+                  fi
                 fi
                 ;;
               1) STATE=failure; DESC="blocked: $(trunc "$why")" ;;

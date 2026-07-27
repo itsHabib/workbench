@@ -154,8 +154,17 @@ and why each choice is the safe one:
   **unconditional** — it runs whether the event named a same-repo PR or this is a
   fork PR. The `gate` status is commit-scoped, so gating one PR when a second
   shares the head could stamp the easier PR's green onto the other (a
-  review-policy-differential bypass). An ambiguous head posts nothing → the
-  required context is absent → branch protection blocks all of them (fail closed).
+  review-policy-differential bypass). On an ambiguous head the resolver **posts an
+  explicit `gate=failure`** (it does *not* rely on an absent context): a persistent
+  `gate=success` from when the head backed a single PR would otherwise linger and
+  satisfy the newcomer, so the failure **overwrites** it — non-green for every PR
+  on the head. The uniqueness check is also **repeated at post time**, immediately
+  before a `success` is written, to catch a second PR opened *during* the paid run
+  (a query failure there is treated as ambiguous → failure, fail closed). Residual:
+  a PR opened on an already-`success` head is briefly green until its own CI → gate
+  run detects the ambiguity and overwrites; `strict` branch protection (require the
+  branch be up to date) narrows that window further, and a single-protected-base
+  repo is barely exposed.
 - It is bounded by a **`concurrency` group keyed on the head branch** with
   `cancel-in-progress`, and it **skips CI runs that were themselves cancelled**.
   Each run makes real model calls, so without this a PR force-pushed in a loop
