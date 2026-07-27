@@ -47,6 +47,30 @@ func TestReviewBodies(t *testing.T) {
 	}
 }
 
+func TestReviewBodiesBodylessLatestSupersedes(t *testing.T) {
+	// A bot first flags a finding, then clears it with a bare APPROVED (no body).
+	// The later approval supersedes the finding, so nothing is emitted — the
+	// earlier body must not keep escalating the gate.
+	in := []rawComment{
+		rawReview("codex[bot]", "Bot", "found a real bug", "sha1", "CHANGES_REQUESTED"),
+		rawReview("codex[bot]", "Bot", "", "sha1", "APPROVED"),
+	}
+	if out := reviewBodies(in); len(out) != 0 {
+		t.Fatalf("a later bare approval must supersede the earlier finding, got %+v", out)
+	}
+
+	// But a DISMISSED later review does not supersede — dismissing withdraws that
+	// review, leaving the earlier active finding as the current stance.
+	in = []rawComment{
+		rawReview("codex[bot]", "Bot", "found a real bug", "sha1", "CHANGES_REQUESTED"),
+		rawReview("codex[bot]", "Bot", "never mind", "sha1", "DISMISSED"),
+	}
+	out := reviewBodies(in)
+	if len(out) != 1 || out[0].Body != "found a real bug" {
+		t.Fatalf("a dismissed later review must not supersede the active finding, got %+v", out)
+	}
+}
+
 func TestReviewBodiesAllDismissedOrEmpty(t *testing.T) {
 	in := []rawComment{
 		rawReview("codex[bot]", "Bot", "old finding", "sha1", "DISMISSED"),

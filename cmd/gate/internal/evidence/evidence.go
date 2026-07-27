@@ -195,9 +195,15 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 // A DISMISSED review is withdrawn evidence; a body-less review (inline-only or a
 // bare approval) adds nothing its inline comments don't already carry.
 func reviewBodies(reviews []rawComment) []Comment {
+	// The author's current stance is their latest NON-DISMISSED review — INCLUDING
+	// a bare approval with no body: a later "APPROVED" supersedes an earlier
+	// actionable body, so that finding must not keep escalating. Find that latest
+	// review per author first (regardless of body), then emit it only if it
+	// carries a body; a bodyless latest review (or one whose only later reviews
+	// were dismissed) contributes nothing.
 	latest := map[string]int{}
 	for i, rv := range reviews {
-		if rv.State == "DISMISSED" || strings.TrimSpace(rv.Body) == "" {
+		if rv.State == "DISMISSED" {
 			continue
 		}
 		latest[rv.User.Login] = i
@@ -205,6 +211,9 @@ func reviewBodies(reviews []rawComment) []Comment {
 	var out []Comment
 	for i, rv := range reviews {
 		if idx, ok := latest[rv.User.Login]; !ok || idx != i {
+			continue
+		}
+		if strings.TrimSpace(rv.Body) == "" {
 			continue
 		}
 		out = append(out, Comment{

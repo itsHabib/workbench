@@ -233,7 +233,15 @@ and why each choice is the safe one:
   blocks unconditionally. Closing the gap means reading the raw
   `latestReviews[].state` and blocking on a standing non-bot change-request even
   when `reviewDecision` is empty; `-reviews-optional` makes this pre-existing gap
-  observable, it does not create it.
+  observable, it does not create it. A second low-severity residual is inherent to
+  commit-status enforcement: the head-review guard is checked when gate runs, and
+  gate runs only on a `CI` completion, so if the qualifying bot review is
+  *dismissed after* `gate=success` is posted, no `CI` event re-fires gate and the
+  persisted success survives until the next push. Fully closing it needs a
+  `pull_request_review` (dismissed) trigger — out of scope (no bespoke enforcement
+  machinery beyond the status check). Low practical risk: dismissing a bot review
+  to un-validate a green is a privileged action that gains a merge-capable actor
+  nothing they cannot already do, and gate judged a valid review at run time.
 - It maps gate's exit code to the status **fail-closed**: `state=success` only
   for exit 0 (`would_merge`); block, park, and refuse all post `state=failure`;
   any other code posts `state=error`. If any earlier step fails (build, PR
