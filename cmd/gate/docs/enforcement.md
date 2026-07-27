@@ -218,10 +218,15 @@ and why each choice is the safe one:
   and empty CI still escalates. **The flag is passed only when the CURRENT head
   has actually been reviewed by a bot**, signalled either way: a bot *review
   submission* whose `commit_id == HEAD_SHA` (how a bot with inline findings
-  reports), **or** a bot *issue comment naming the head commit* (how codex reports
-  a CLEAN pass — "Reviewed commit: `<sha>`", an issue comment, not a review
-  submission). A stale comment names an *old* sha, so matching the current head's
-  short sha in a bot comment body is a reliable current-head signal. The policy is
+  reports), **or** codex's clean-pass *issue comment* — matched **narrowly** by
+  codex's exact login **and** its "Reviewed commit: `<sha>`" sentinel **and** the
+  head's short sha. The narrowness is load-bearing: accepting any `type == "Bot"`
+  comment that merely names the head sha would let an **infra** bot (codecov,
+  deploy-preview, github-actions CI-summary — none of which review code, and which
+  re-post per-push comments embedding the current head sha) satisfy the guard, so
+  an unreviewed head could reach `success` (a fail-open the adversarial pass
+  caught). A stale codex comment names an *old* sha, so the head-sha match keeps it
+  current. The policy is
   enabled only when at least one of these is present; otherwise the run goes
   *without* the flag so readiness escalates and parks — fail closed until the bots
   review this head. That closes the stale-evidence path where an old unanchored
