@@ -491,6 +491,32 @@ func TestReviewsUnanchoredCommentsAlwaysConsolidate(t *testing.T) {
 	}
 }
 
+func TestReviewsJudgesReviewBodies(t *testing.T) {
+	// Evidence now includes review-SUBMISSION bodies (commit-anchored, no
+	// path/line) — a bot's finding in its top-level review body must be judged
+	// like any comment, not skipped. A body anchored to the judged head with an
+	// actionable finding escalates.
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	m := &scriptedModel{replies: []string{
+		`{"headline":"body finding","severity":"high","verdict":"actionable","confidence":0.9}`,
+	}}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "top-level review body finding", "commit_id": "headsha"},
+	}, m)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an actionable current-head review body must escalate, got %s (%s)", v.Decision, v.Why)
+	}
+
+	// A review body from an EARLIER head is stale and must be dropped — it cannot
+	// stand in for review of the current head. Alone, that leaves an empty panel.
+	v = reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "old-head no issues", "commit_id": "oldsha"},
+	}, &scriptedModel{})
+	if v.Decision != DecisionEscalate || !strings.Contains(v.Why, "no bot review comments for this head") {
+		t.Fatalf("a stale review body must be dropped (empty-panel escalate), got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func TestReadinessReviewDecisionBlocks(t *testing.T) {
 	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
 	v := readinessFor(t, map[string]any{

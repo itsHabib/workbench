@@ -150,6 +150,16 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Review SUBMISSION bodies (pulls/.../reviews), not just comments. A bot can
+	// put an actionable finding in its top-level review body rather than an inline
+	// comment; that body is invisible in the two comment endpoints above, so a
+	// verifier judging only comments could pass a head whose review body objected.
+	// A review submission carries the commit_id it reviewed, so it is anchored —
+	// staleComment drops one from an earlier head, keeping the panel head-current.
+	reviews, err := pagedComments(fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number))
+	if err != nil {
+		return nil, err
+	}
 	var out []Comment
 	for _, rc := range inline {
 		out = append(out, Comment{
@@ -167,6 +177,20 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 			Author: rc.User.Login,
 			IsBot:  rc.User.Type == "Bot",
 			Body:   rc.Body,
+		})
+	}
+	for _, rv := range reviews {
+		// A review with no top-level body (an inline-only review, or a bare
+		// approval) adds no evidence of its own — its inline comments are already
+		// captured above. Skip it to avoid an empty extraction.
+		if strings.TrimSpace(rv.Body) == "" {
+			continue
+		}
+		out = append(out, Comment{
+			Author:   rv.User.Login,
+			IsBot:    rv.User.Type == "Bot",
+			Body:     rv.Body,
+			CommitID: rv.CommitID,
 		})
 	}
 	return out, nil
