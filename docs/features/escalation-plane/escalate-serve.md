@@ -104,11 +104,25 @@ parked* escalation under an *already live* grant. The blast radius is exactly
 
 1. **`escalate serve` + signature verification** (no flare change yet) — testable
    with a `curl` of a captured Slack payload against a seeded park. Proves the
-   ingress + auth + the `who`-from-verified-identity path.
+   ingress + auth + the `who`-from-verified-identity path. ✅ **SHIPPED** — see
+   `EVIDENCE-escalate-serve-phase1.md` for the five-callback transcript (forged /
+   stale / valid / replay / wrong-secret) against the real binaries.
 2. **flare button rendering** — add the `actions` block; wire the Slack app's
    interactivity Request URL to the tunnel.
 3. **End-to-end over ngrok** — a real tap on a phone → merge, captured as evidence
    (mirroring the CLI evidence in `EVIDENCE-escalation-plane-poc.md`).
+
+### Phase 1 as shipped — two notes for Phase 2/3
+
+- **Grant lookup uses the console read seam.** `serve` reads the grant from
+  `gate next -json` (which now projects each parked run's `escalation` id) and
+  joins on it — never importing gate, never trusting a client-supplied grant. A
+  resolved park drops out of that inbox, so a replayed tap is refused at the
+  lookup (409 `ErrNotParked`) ahead of gate's `escalationIsOpen` backstop.
+- **`serve` shells `gate resolve` with no `-key`.** So the process needs
+  `GATE_KEY` (or gate's default key dir) pointed at the operator's signing keys,
+  exactly as the `resolve` CLI does — otherwise gate refuses the grant with
+  `grant_bad_signature`. `-state` still comes from the flag / `$GATE_STATE`.
 
 ## Out of scope (for this increment)
 

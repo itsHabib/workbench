@@ -62,7 +62,14 @@ type NeedsGrantRow struct {
 // one the run parked under, read from the escalation itself, so resolving a park
 // never means hunting an id out of the log.
 type ParkedRun struct {
-	Run            string `json:"run"`
+	Run string `json:"run"`
+	// Escalation is the id of the escalation artifact this park stands on — the
+	// key a resolution is driven against (`gate resolve -escalation`). It is
+	// projected so a remote resolver (a Slack callback, a future gate UI) holding
+	// only the escalation id can join it to the grant the run parked under,
+	// without hunting the id out of the log. Empty only when the body predates
+	// the artifact id being carried.
+	Escalation     string `json:"escalation,omitempty"`
 	Repo           string `json:"repo,omitempty"`
 	Number         int    `json:"number,omitempty"`
 	Title          string `json:"title,omitempty"`
@@ -640,6 +647,7 @@ func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) Par
 	facts = mergeRunFacts(facts, runFacts{Repo: b.Repo, Number: b.Number})
 	p := ParkedRun{
 		Run:            a.Run,
+		Escalation:     a.ID,
 		Repo:           facts.Repo,
 		Number:         facts.Number,
 		Title:          facts.Title,

@@ -67,6 +67,12 @@ func TestBuildInboxParked(t *testing.T) {
 	if in.Parked[0].Question != "q c2 still over cap" || in.Parked[0].Code != "grant_cycle_exceeded" {
 		t.Fatalf("re-parked run must carry the latest escalation, got %+v", in.Parked[0])
 	}
+	// The projected escalation id is the LATEST park's artifact id — the key a
+	// remote resolver joins to the grant. It must track the re-park, not the id
+	// of the escalation an earlier judgment already resolved.
+	if in.Parked[0].Escalation != "esc_c2" {
+		t.Fatalf("re-parked escalation id = %q, want esc_c2", in.Parked[0].Escalation)
+	}
 	a := in.Parked[1]
 	if a.Repo != "o/widget" || a.Number != 142 || a.Grant != "grt_a" {
 		t.Fatalf("parked run A subject/grant wrong: %+v", a)

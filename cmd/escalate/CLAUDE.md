@@ -25,8 +25,24 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   read-only sink (Amendment 3) and is architecturally forbidden from writing a
   decision. The resolution ingest therefore *cannot* be a flare change.
 - **Transport-agnostic ingest.** `ingest.Decision` is the shape a Slack action
-  ack, a webhook POST, or a future gate UI would carry. The POC fills it from CLI
-  flags; wiring a live transport onto it is the obvious next step.
+  ack, a webhook POST, or a future gate UI would carry. The `resolve` verb fills
+  it from CLI flags; the `serve` verb fills it from a signed Slack callback —
+  two transports over one contract, the same `ingest.Client` mechanism under
+  both.
+
+## Verbs
+
+- `escalate resolve …` — the CLI transport: a human's decision as flags.
+- `escalate serve [-addr] [-gate] [-state]` — the HTTP transport (Phase 1 of
+  `docs/features/escalation-plane/escalate-serve.md`): a Slack interactive-action
+  ingress. It VERIFIES the Slack signature (HMAC-SHA256 over the raw body,
+  constant-time, ±5-min window) before trusting anything, derives `who` from the
+  *verified* identity (never a client field), reads the grant from the parked
+  escalation via `gate next -json`, and drives the same `ingest.Client.Resolve`.
+  `SLACK_SIGNING_SECRET` is **required** — it refuses to start unauthenticated.
+  Like `resolve`, it shells `gate` with no `-key`, so set `GATE_KEY` (or use
+  gate's default key dir) or gate refuses the grant with `grant_bad_signature`.
+  Binds loopback by default; a tunnel (ngrok/cloudflared) exposes it to Slack.
 
 ## Exit codes
 
