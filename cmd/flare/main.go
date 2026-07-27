@@ -1,6 +1,8 @@
-// flare — the escalation-routing plane. A pure sink: it tails the artifact
-// logs other planes emit and pushes a notification when something blocks or
-// escalates. It never gates, never blocks, never writes into a producer.
+// flare — the escalation/block routing sink (an Observability tool, not a
+// plane). A pure sink: it tails the artifact logs producers emit and pushes a
+// notification when something blocks or escalates. It never gates, never blocks,
+// never writes into a producer — the inbound decision path is cmd/escalate, not
+// flare (Amendment 3).
 //
 //	flare watch  [-config path]   poll loop (catch-up sweep first)
 //	flare sweep  [-config path]   one catch-up pass, then exit

@@ -1,4 +1,4 @@
-# flare — the escalation-routing plane (v0)
+# flare — the escalation/block routing sink (v0)
 
 **Status:** v0 design, 2026-07-08
 **Owner:** operator

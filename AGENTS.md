@@ -29,7 +29,8 @@ Orientation block you can point an agent at to ground it fast.
   `cmd/<tool>/internal/`. Each tool keeps its own scoped guidance in
   `cmd/<tool>/CLAUDE.md` + `docs/DESIGN.md` (per-tool `AGENTS.md` files do not exist
   yet — read the tool's `CLAUDE.md` for its exit codes, invariants, and checks).
-  Today: `flare` (the escalation-routing plane), `tracelens` (agent trace
+  Today: `flare` (the escalation/block routing sink — an Observability tool, not
+  a plane), `tracelens` (agent trace
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),
   `triage` (PR risk floor + escalate-only advisory; two binaries,
   `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),

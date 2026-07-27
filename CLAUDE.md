@@ -27,7 +27,8 @@ Orientation block you can point an agent at to ground it fast.
   when-to-route-local rule. Its CLIs live at `cmd/local` and `cmd/eval`.
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
   `cmd/<tool>/internal/`. Each tool keeps its own `CLAUDE.md` + `docs/DESIGN.md`.
-  Today: `flare` (the escalation-routing plane), `tracelens` (agent trace
+  Today: `flare` (the escalation/block routing sink — an Observability tool, not
+  a plane), `tracelens` (agent trace
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),
   `triage` (PR risk floor + escalate-only advisory; two binaries,
   `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),
@@ -36,10 +37,10 @@ Orientation block you can point an agent at to ground it fast.
   3 refused / 4 error are a load-bearing seam),
   `console` (a local, read-only web view of gate's inbox — parked runs + the
   grant ledger — that shells the gate binary for its data and never imports it),
-  `escalate` (the Escalation plane's resolution back-channel — ingests a human's
+  `escalate` (the escalation resolution back-channel — ingests a human's
   decision for a parked escalation and drives `gate resolve` to close the
-  agent→human→agent loop, shelling gate and never importing it; see
-  `docs/features/escalation-plane/spec.md`),
+  agent→human→agent loop, shelling gate and never importing it; a contract+seam,
+  not a plane — see `docs/features/escalation-plane/spec.md`),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions.
