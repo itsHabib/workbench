@@ -100,6 +100,15 @@ jobs:
           n=$(printf '%s' "$nums" | jq 'length')
           if [ "$n" -gt 1 ]; then
             echo "ambiguous: ${HEAD_SHA} backs ${n} PRs (${nums}); refusing to gate any of them"
+            # Posting NOTHING is not enough: commit statuses persist, so a prior
+            # gate=success from when this head backed a single PR would linger and
+            # satisfy the newcomer's required context. OVERWRITE it with an
+            # explicit failure so the required `gate` context is non-green for
+            # every PR on this head (fail closed for all of them).
+            gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+              -f state=failure -f context=gate \
+              -f description="ambiguous: head backs ${n} open PRs; refusing to gate" \
+              -f target_url="${RUN_URL}" >/dev/null
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
