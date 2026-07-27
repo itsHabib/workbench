@@ -178,9 +178,11 @@ func (e *Engine) process(w http.ResponseWriter, r *http.Request, rec *logRecord)
 			"reissue in origin form with an unencoded path — no encoded separators, dot-segments, or non-ASCII")
 		return
 	}
-	rec.Key = target.Key
 	rec.QueryKeys = target.QueryKeys
 	rec.RawTargetHash = sha256hex(target.Raw)
+	// Stamp the canonical vendor path now so a refusal/denial line records what
+	// was attempted; forward overwrites it with the full upstream URL on pass.
+	rec.CanonicalTarget = target.Path
 
 	key, ok := e.manifest.Keys[target.Key]
 	if !ok {
@@ -189,6 +191,10 @@ func (e *Engine) process(w http.ResponseWriter, r *http.Request, rec *logRecord)
 			"add the key to the manifest, or correct the /<key> path prefix")
 		return
 	}
+	// Only a RESOLVED key is logged: an unknown prefix is attacker-chosen input,
+	// and stamping it would let unauthenticated probes grow the log's key
+	// cardinality without bound. The raw-target hash still correlates the line.
+	rec.Key = target.Key
 	g, err := e.grants.Validate(r.Header.Get(grantHeader), target.Key, e.now)
 	if err != nil {
 		status, code := grantRefusal(err)

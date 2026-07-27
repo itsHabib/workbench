@@ -85,6 +85,7 @@ var (
 	// load another — this rejects it so load stays fail-closed (spec §5). The
 	// error names the duplicated key.
 	ErrDuplicateField     = errors.New("manifest_duplicate_field")
+	ErrBadKeyName         = errors.New("manifest_bad_key_name")
 	ErrMissingField       = errors.New("manifest_missing_field")
 	ErrUnsupportedVersion = errors.New("manifest_unsupported_version")
 	ErrBadSecretRef       = errors.New("manifest_bad_secret_ref")
@@ -154,12 +155,47 @@ func (m *Manifest) validate() error {
 		return fmt.Errorf("%w: keys", ErrMissingField)
 	}
 	for _, name := range sortedKeys(m.Keys) {
+		if err := ValidateKeyName(name); err != nil {
+			return err
+		}
 		k := m.Keys[name]
 		if err := validateKey(k); err != nil {
 			return fmt.Errorf("key %q: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// ValidateKeyName pins key names to a conservative charset. A key name is a
+// URL path prefix on the proxy, so anything outside lowercase alphanumerics
+// plus ._- invites routing ambiguity — and the restriction guarantees a name
+// can never collide with a synthetic rollup bucket like "(none)"/"(other)".
+func ValidateKeyName(name string) error {
+	if name == "" || len(name) > 64 {
+		return fmt.Errorf("%w: key name must be 1-64 characters", ErrBadKeyName)
+	}
+	// "." and ".." pass the charset but are dot-segments: canonicalization
+	// removes them from every request target, so such a key could never be
+	// reached — refuse at load rather than serve an unreachable entry.
+	if name == "." || name == ".." {
+		return fmt.Errorf("%w: key %q is a dot-segment and can never be routed", ErrBadKeyName, name)
+	}
+	for i := 0; i < len(name); i++ {
+		if !isKeyNameByte(name[i]) {
+			return fmt.Errorf("%w: key %q may use only a-z, 0-9, '.', '_', '-'", ErrBadKeyName, name)
+		}
+	}
+	return nil
+}
+
+func isKeyNameByte(c byte) bool {
+	if c >= 'a' && c <= 'z' {
+		return true
+	}
+	if c >= '0' && c <= '9' {
+		return true
+	}
+	return c == '.' || c == '_' || c == '-'
 }
 
 func validateKey(k Key) error {

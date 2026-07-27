@@ -263,22 +263,33 @@ jobs:
           # parks forever). readiness still BLOCKS an explicit CHANGES_REQUESTED.
           #
           # But that policy is safe ONLY when the CURRENT head has actually been
-          # reviewed by a bot: issue-level bot comments are unanchored, so a stale
-          # "no issues" from an OLD head could otherwise satisfy the review rung once
-          # the reviewDecision backstop is gone. A bot REVIEW submission carries the
-          # commit_id it reviewed, so require >=1 bot review bound to HEAD_SHA before
-          # enabling the policy. Without one, run WITHOUT -reviews-optional so
-          # readiness escalates and the run parks — fail closed until the bots review
-          # this head. (Query failure -> 0 -> fail closed.)
-          # A DISMISSED review is withdrawn — it must not satisfy the head-review
-          # requirement (else a dismissed clean review could enable the policy).
-          botrev=$(gh api --paginate "repos/${REPO}/pulls/${PR}/reviews" \
+          # reviewed by a bot; otherwise a stale unanchored "no issues" could satisfy
+          # the review rung once the reviewDecision backstop is gone. A bot signals a
+          # current-head review two ways, and BOTH count:
+          #   1. a REVIEW submission (pulls/reviews) whose commit_id == HEAD_SHA and
+          #      that is not DISMISSED — how bots with inline findings report; and
+          #   2. codex's CLEAN-pass issue COMMENT. codex reports "no issues" as an
+          #      issue comment, not a review submission, and stamps it
+          #      "Reviewed commit: <sha>". This path is DELIBERATELY NARROW: it
+          #      accepts ONLY codex's exact login AND its "Reviewed commit" sentinel
+          #      AND the head's short sha. It must NOT accept any bot + a bare sha
+          #      substring — infra bots (codecov, deploy-preview, github-actions
+          #      CI-summary) re-post per-push comments that embed the current head
+          #      sha and are NOT code reviews; accepting those would let an unreviewed
+          #      head reach success (a real fail-open the adversarial pass caught).
+          # Without either signal, run WITHOUT -reviews-optional so readiness
+          # escalates and the run parks — fail closed until a review bot reviews this
+          # head. (Query failure -> 0 -> fail closed.)
+          botsub=$(gh api --paginate "repos/${REPO}/pulls/${PR}/reviews" \
             --jq "[.[] | select(.user.type == \"Bot\" and .commit_id == \"${HEAD_SHA}\" and .state != \"DISMISSED\")] | length" 2>/dev/null | jq -s 'add // 0')
+          botcom=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+            --jq "[.[] | select(.user.login == \"chatgpt-codex-connector[bot]\" and (.body | contains(\"Reviewed commit\")) and (.body | contains(\"${HEAD_SHA:0:10}\")))] | length" 2>/dev/null | jq -s 'add // 0')
+          botrev=$(( ${botsub:-0} + ${botcom:-0} ))
           REVIEWS_OPT=""
           if [ "${botrev:-0}" -ge 1 ]; then
             REVIEWS_OPT="-reviews-optional"
           else
-            echo "no current-head bot review on ${HEAD_SHA}; running without -reviews-optional (will park)"
+            echo "no current-head bot review on ${HEAD_SHA} (subs=${botsub:-0} coms=${botcom:-0}); running without -reviews-optional (will park)"
           fi
           # -stamp=false: this run's state/key dir is erased by the EXIT trap
           # above, so a gate/authorized status posted here would carry a run+hash
