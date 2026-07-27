@@ -19,18 +19,19 @@ var operator = slackUser{ID: "U1MICHAEL", Username: "michael"}
 const wantWho = "@michael (U1MICHAEL)"
 
 // TestApproveTapResolvesPark is the happy path: a validly-signed Approve tap on a
-// parked escalation drives gate resolve to a merge, and serve relays gate's 200
-// outcome. It proves the whole ngrok-carried input path — signature, the
-// action_id→pass map, the who-from-verified-identity, the grant joined from the
-// parked escalation — through the real serve binary.
+// parked escalation is ACKED immediately (200), and the background resolve then
+// drives gate to a merge. It proves the whole ngrok-carried input path —
+// signature, the action_id→pass map, the who-from-verified-identity, the grant
+// joined from the parked escalation — through the real serve binary, now that the
+// authoritative work runs off the request path.
 func TestApproveTapResolvesPark(t *testing.T) {
 	s := startServer(t)
 	code, body := s.tap(escalation.ActionApprove, operator)
 	if code != 200 {
-		t.Fatalf("approve tap status = %d, want 200; body: %s", code, body)
+		t.Fatalf("approve tap status = %d, want 200 (ack); body: %s", code, body)
 	}
-	if !strings.Contains(body, `"outcome":"would_merge"`) || !strings.Contains(body, `"decision":"pass"`) {
-		t.Fatalf("approve outcome not relayed: %s", body)
+	if !strings.Contains(body, "Recording") {
+		t.Fatalf("ack should replace the card with a working state, got: %s", body)
 	}
 	inv := onlyInvocation(t, s)
 	assertField(t, inv, "escalation", s.esc)
@@ -43,18 +44,12 @@ func TestApproveTapResolvesPark(t *testing.T) {
 }
 
 // TestBlockTapRecordsBlock pins that the Block button drives a block decision:
-// the action_id maps to gate's block verdict, and serve relays the (still landed,
-// so HTTP 200) outcome.
+// the tap is acked (200), and the background resolve records gate's block verdict.
 func TestBlockTapRecordsBlock(t *testing.T) {
 	s := startServer(t)
 	code, body := s.tap(escalation.ActionBlock, operator)
 	if code != 200 {
-		t.Fatalf("block tap status = %d, want 200; body: %s", code, body)
-	}
-	// "blocked" is the real gate resolve block outcome (cmd/gate/main.go), not
-	// "would_block" — the stub is contract-faithful only if it matches.
-	if !strings.Contains(body, `"outcome":"blocked"`) || !strings.Contains(body, `"decision":"block"`) {
-		t.Fatalf("block outcome not relayed: %s", body)
+		t.Fatalf("block tap status = %d, want 200 (ack); body: %s", code, body)
 	}
 	assertField(t, onlyInvocation(t, s), "decision", escalation.DecisionBlock)
 }
@@ -99,26 +94,31 @@ func TestUnsignedRejected(t *testing.T) {
 	assertNoResolve(t, s)
 }
 
-// TestReplayRefused: the SAME valid tap fired twice resolves once. The first
-// resolves the park, which drops it from the inbox serve reads the grant from, so
-// the second finds no park (409) — the first line of the replay defense, ahead of
-// gate's own open-check.
-func TestReplayRefused(t *testing.T) {
+// TestReplayResolvesOnce: the SAME valid tap fired twice resolves once. Both taps
+// are acked (200), but the first resolves the park — which drops it from the inbox
+// serve reads the grant from — so the second's background lookup finds no park and
+// records nothing. This is the first line of the replay defense, ahead of gate's
+// own open-check. The taps are sequenced (wait for the first to land) so the
+// outcome is deterministic.
+func TestReplayResolvesOnce(t *testing.T) {
 	s := startServer(t)
 	if code, body := s.tap(escalation.ActionApprove, operator); code != 200 {
-		t.Fatalf("first tap status = %d, want 200; body: %s", code, body)
+		t.Fatalf("first tap status = %d, want 200 (ack); body: %s", code, body)
 	}
-	code, _ := s.tap(escalation.ActionApprove, operator)
-	if code != 409 {
-		t.Fatalf("replay status = %d, want 409 (park already resolved)", code)
+	s.waitInvocations(1) // the first tap's background resolve lands before the replay
+	if code, body := s.tap(escalation.ActionApprove, operator); code != 200 {
+		t.Fatalf("replay status = %d, want 200 (ack); body: %s", code, body)
 	}
-	onlyInvocation(t, s) // exactly one resolve landed
+	s.settle()
+	if inv := s.invocations(); len(inv) != 1 {
+		t.Fatalf("replay must resolve exactly once, got %d: %+v", len(inv), inv)
+	}
 }
 
 // TestConcurrentDoubleTapResolvesOnce: two Approves fired at once — the
-// concurrency the HTTP transport introduces — resolve exactly once. serve's
-// per-escalation lock serializes them; the winner resolves and the loser finds
-// the park already closed.
+// concurrency the HTTP transport introduces — resolve exactly once. Both are
+// acked (200); serve's per-escalation lock serializes the background resolves, so
+// the winner resolves and the loser finds the park already closed.
 func TestConcurrentDoubleTapResolvesOnce(t *testing.T) {
 	s := startServer(t)
 	var wg sync.WaitGroup
@@ -131,12 +131,14 @@ func TestConcurrentDoubleTapResolvesOnce(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	got := map[int]int{codes[0]: 1}
-	got[codes[1]]++
-	if got[200] != 1 || got[409] != 1 {
-		t.Fatalf("double-tap statuses = %v, want exactly one 200 and one 409", codes)
+	if codes[0] != 200 || codes[1] != 200 {
+		t.Fatalf("both taps should ack 200, got %v", codes)
 	}
-	onlyInvocation(t, s) // exactly one resolve landed, never a double-apply
+	s.waitInvocations(1)
+	s.settle()
+	if inv := s.invocations(); len(inv) != 1 {
+		t.Fatalf("a double-tap must resolve exactly once, got %d: %+v", len(inv), inv)
+	}
 }
 
 // TestForgedWhoIgnored: a top-level "who":"attacker" smuggled into the callback
@@ -187,7 +189,7 @@ func TestUnauthorizedUserForbidden(t *testing.T) {
 
 func onlyInvocation(t *testing.T, s *server) map[string]string {
 	t.Helper()
-	inv := s.invocations()
+	inv := s.waitInvocations(1)
 	if len(inv) != 1 {
 		t.Fatalf("want exactly one resolve invocation, got %d: %+v", len(inv), inv)
 	}

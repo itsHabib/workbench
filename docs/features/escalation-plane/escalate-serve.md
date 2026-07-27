@@ -71,18 +71,27 @@ Handler outline (one Slack interactive-action POST):
    Who: <verified slack user id/name>, Why: <"approved in Slack by @user">, Grant:
    <the run's grant>}`. `who` comes from the *verified* Slack identity in the
    payload, **never** from a field the client could set.
-3. **Drive `ingest.Client.Resolve`** — exactly the path the CLI takes. The replay
+3. **Ack within Slack's ~3s window** — the handler verifies + authorizes
+   synchronously, then responds 200 immediately, replacing the card with a working
+   state ("⏳ Recording …") that drops the now-stale Approve/Block buttons. The
+   authoritative work runs off the request path.
+4. **Drive `ingest.Client.Resolve` in the background** — exactly the path the CLI
+   takes, under the per-escalation lock and a detached, bounded context. The replay
    guard (`escalationIsOpen`, already merged) makes Slack's at-least-once callback
    retries and double-taps safe: the second one is refused, not double-applied.
-4. **Respond in-channel** — update the Slack message ("✅ merged / ⛔ blocked by
-   @user") from gate's returned JSON + exit code.
+5. **Deliver the outcome to `response_url`** — POST a `replace_original` card
+   ("✅ merged / ⛔ blocked / ☑️ already resolved") derived from gate's exit code, so
+   the operator sees the result without the handler ever blocking on the resolve.
 
-> ⚠️ **Not yet built — and it forces the handler async.** Today `serve` responds
-> synchronously *after* `gate resolve` returns (up to 25s). Slack requires an
-> interactive callback be acked within ~3s, so before the real phone tap this must
-> become: ack 200 immediately, run resolve in the background, then POST the outcome
-> to the callback's `response_url` to update the card. Tracked in `FOLLOWUPS.md`
-> (codex P1 on #140) — the next increment on this seam.
+> ✅ **Built (this increment).** The handler acks 200 immediately (Slack's ~3s
+> window) and runs the grant lookup + `gate resolve` in a background goroutine,
+> then POSTs the final outcome to the interaction's `response_url` with
+> `replace_original`. `response_url` is captured from the payload and guarded to an
+> https Slack host before any POST (SSRF defense in depth, even though it rides the
+> signed callback). The security gate stays synchronous — an unsigned, malformed,
+> or unauthorized tap is still refused before the ack and never spawns background
+> work. The serve unit tests cover the ack-before-resolve + card vocabulary; the
+> e2e drives the async ack→background-resolve→journal path through the real binary.
 
 Where does the **grant** come from? The escalation body carries its `grant` id
 (`escalation.V1.Grant`), so `serve` can read it from the parked escalation rather

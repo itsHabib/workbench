@@ -181,6 +181,28 @@ func (s *server) tap(actionID string, user slackUser) (int, string) {
 	return s.post(sign(s.secret, ts, body), ts, body)
 }
 
+// waitInvocations polls the stub gate's resolve journal until at least n
+// invocations are recorded. serve now acks the tap immediately and runs the
+// resolve in the background, so a test waits for the journal to catch up rather
+// than reading it right after the 200 ack.
+func (s *server) waitInvocations(n int) []map[string]string {
+	s.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if inv := s.invocations(); len(inv) >= n {
+			return inv
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("want >= %d resolve invocation(s), got %d after 5s", n, len(s.invocations()))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// settle waits a short grace period for any in-flight background resolve to land,
+// so a test can assert a NEGATIVE — no second invocation — with confidence.
+func (s *server) settle() { time.Sleep(300 * time.Millisecond) }
+
 // invocations reads back every resolve the stub gate journaled, so a test can
 // assert exactly what serve drove gate with.
 func (s *server) invocations() []map[string]string {
