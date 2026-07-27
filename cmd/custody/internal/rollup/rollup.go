@@ -37,9 +37,18 @@ const noKey = "(none)"
 // keeps the artifact bounded no matter what the log holds.
 const overflowKey = "(other)"
 
-// maxKeys bounds the distinct key buckets in one rollup — far above any real
-// manifest, low enough that a probed log cannot balloon the artifact.
+// maxKeys bounds the distinct key buckets in one rollup INCLUDING the overflow
+// bucket — far above any real manifest, low enough that a probed log cannot
+// balloon the artifact.
 const maxKeys = 100
+
+// maxMethods and maxQueryKeys bound the per-key method and denied-query-key
+// maps the same way: both strings are client-chosen tokens, so without a cap a
+// loopback prober could grow the artifact without bound.
+const (
+	maxMethods   = 10
+	maxQueryKeys = 20
+)
 
 // maxLineBytes bounds one log line; a longer line is counted as malformed and
 // skipped, never fatal — the reader's fail-soft promise covers size too.
@@ -248,7 +257,7 @@ func (s *Summary) add(rec Record) {
 	if key == "" {
 		key = noKey
 	}
-	if s.Keys[key] == nil && len(s.Keys) >= maxKeys {
+	if s.Keys[key] == nil && len(s.Keys) >= maxKeys-1 && key != overflowKey {
 		key = overflowKey
 	}
 	ks := s.Keys[key]
@@ -281,7 +290,7 @@ func (s *Summary) stretchWindow(rec Record) {
 func (k *KeySummary) add(rec Record) {
 	k.Total++
 	k.ByVerdict[rec.Verdict]++
-	k.ByMethod[rec.Method]++
+	k.ByMethod[bounded(k.ByMethod, rec.Method, maxMethods)]++
 	k.latencies = append(k.latencies, rec.LatencyMs)
 	if rec.GrantID != "" {
 		k.grants[rec.GrantID] = struct{}{}
@@ -306,8 +315,21 @@ func (k *KeySummary) add(rec Record) {
 		if k.DeniedQueryKeys == nil {
 			k.DeniedQueryKeys = map[string]int{}
 		}
-		k.DeniedQueryKeys[q]++
+		k.DeniedQueryKeys[bounded(k.DeniedQueryKeys, q, maxQueryKeys)]++
 	}
+}
+
+// bounded returns name, or the overflow bucket once counts holds limit-1
+// other entries — every count map in the artifact stays bounded no matter how
+// many distinct client-chosen tokens the log carries.
+func bounded(counts map[string]int, name string, limit int) string {
+	if _, ok := counts[name]; ok {
+		return name
+	}
+	if len(counts) >= limit-1 && name != overflowKey {
+		return overflowKey
+	}
+	return name
 }
 
 // finish derives the ordered/derived fields once all records are folded in.

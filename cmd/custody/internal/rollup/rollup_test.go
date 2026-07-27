@@ -217,15 +217,42 @@ func TestKeyCardinalityCapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Aggregate: %v", err)
 	}
-	if len(sum.Keys) > maxKeys+1 {
-		t.Fatalf("len(Keys) = %d, want at most %d (+1 overflow bucket)", len(sum.Keys), maxKeys)
+	if len(sum.Keys) > maxKeys {
+		t.Fatalf("len(Keys) = %d, want at most %d including the overflow bucket", len(sum.Keys), maxKeys)
 	}
 	other := sum.Keys[overflowKey]
-	if other == nil || other.Total != 20 {
-		t.Fatalf("overflow bucket = %+v, want the 20 past-cap keys folded in", other)
+	if other == nil || other.Total != 21 {
+		t.Fatalf("overflow bucket = %+v, want the 21 past-cap keys folded in", other)
 	}
 	if sum.Total != maxKeys+20 {
 		t.Fatalf("Total = %d — capping buckets must not drop records", sum.Total)
+	}
+}
+
+func TestMethodAndQueryKeyCardinalityCapped(t *testing.T) {
+	var lines []string
+	for i := 0; i < maxMethods+5; i++ {
+		lines = append(lines, line(t, map[string]any{"key": "jira", "method": fmt.Sprintf("M%02d", i)}))
+	}
+	for i := 0; i < maxQueryKeys+5; i++ {
+		lines = append(lines, line(t, map[string]any{"key": "jira", "verdict": "denied", "query_keys": []string{fmt.Sprintf("q%02d", i)}}))
+	}
+	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	jira := sum.Keys["jira"]
+	if len(jira.ByMethod) > maxMethods {
+		t.Fatalf("len(ByMethod) = %d, want at most %d", len(jira.ByMethod), maxMethods)
+	}
+	if jira.ByMethod[overflowKey] == 0 {
+		t.Fatal("past-cap methods should fold into the overflow bucket")
+	}
+	if len(jira.DeniedQueryKeys) > maxQueryKeys {
+		t.Fatalf("len(DeniedQueryKeys) = %d, want at most %d", len(jira.DeniedQueryKeys), maxQueryKeys)
+	}
+	if jira.DeniedQueryKeys[overflowKey] == 0 {
+		t.Fatal("past-cap query keys should fold into the overflow bucket")
 	}
 }
 
