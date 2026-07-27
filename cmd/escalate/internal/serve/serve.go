@@ -69,6 +69,12 @@ const (
 	// in flight, and a wedged gate is still capped.
 	resolveTimeout = 25 * time.Second
 
+	// deliverTimeout bounds the outcome POST to response_url. It is a FRESH budget,
+	// started after the resolve returns — never the resolve's leftover deadline, or
+	// a resolve that ran near resolveTimeout would leave the card stuck on the ack
+	// with no outcome ever delivered.
+	deliverTimeout = 10 * time.Second
+
 	// gate's resolve exit codes, its decision contract passed through faithfully:
 	// 0 merge / 1 blocked / 2 parked / 3 refused. Anything else (notably 4, gate's
 	// hard error) means no clean decision landed.
@@ -124,6 +130,11 @@ type Server struct {
 	// a resolve or delivery failure has no HTTP status left to ride, so it goes to
 	// the log (and, when it can, to the Slack card).
 	log *log.Logger
+	// inflight tracks the accepted-but-unfinished background resolves so a caller
+	// can DRAIN them on graceful shutdown (Wait). Since the ack removes the card's
+	// buttons and Slack won't retry a 200, a redeploy or SIGTERM that dropped an
+	// in-flight resolve would silently lose the decision; draining closes that.
+	inflight sync.WaitGroup
 }
 
 // New builds a Server from cfg. A nil Now falls back to time.Now; a nil Authorize
@@ -240,28 +251,49 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// it. Ack now (Slack's ~3s window) so the tap reads as received, then run the
 	// resolve — which can exceed 3s — off the request path and report its outcome
 	// to response_url. The ack replaces the card's buttons so the tap can't be
-	// repeated while the resolve is in flight.
+	// repeated while the resolve is in flight. Count the work in before spawning so
+	// a graceful shutdown drains it (Wait) rather than dropping the acked decision.
+	s.inflight.Add(1)
 	writeAck(w, cb)
 	go s.process(cb)
 }
+
+// Wait blocks until every accepted resolution's background work has finished. A
+// caller drains it during graceful shutdown — after the HTTP server has stopped
+// accepting — so a redeploy or SIGTERM doesn't drop an acked-but-unrecorded tap.
+// It is bounded in practice: each resolve is capped by resolveTimeout and each
+// delivery by deliverTimeout.
+func (s *Server) Wait() { s.inflight.Wait() }
 
 // process runs the authoritative resolution off the request path, after the ack.
 // It holds the per-escalation lock across the whole lookup→resolve (so concurrent
 // taps for one escalation can't both act) and bounds the work with an independent
 // context — a client / Slack / tunnel disconnect must NOT cancel `gate resolve`
 // mid-append, since gate writes the judgment, verdict, action, and resolution
-// separately and a half-written transaction would let a retry double-apply. Its
-// only channels back to the operator are the Slack card (deliver) and the log.
+// separately and a half-written transaction would let a retry double-apply.
+// Delivery runs under a FRESH context so a resolve that used most of resolveTimeout
+// can still post its outcome. A panic in one resolve is contained to that resolve
+// (recovered + logged), not allowed to take down the whole ingress. Its only
+// channels back to the operator are the Slack card (deliver) and the log.
 func (s *Server) process(cb callback) {
+	defer s.inflight.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Printf("escalate serve: resolve %s panicked: %v", cb.decision.Escalation, r)
+		}
+	}()
 	defer s.locks.lock(cb.decision.Escalation)()
+
 	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
 	defer cancel()
-
 	code, err := s.resolve(ctx, cb.decision)
 	if err != nil {
 		s.log.Printf("escalate serve: resolve %s: %v", cb.decision.Escalation, err)
 	}
-	s.deliver(ctx, cb, code, err)
+
+	dctx, dcancel := context.WithTimeout(context.Background(), deliverTimeout)
+	defer dcancel()
+	s.deliver(dctx, cb, code, err)
 }
 
 // resolve reads the grant from the parked escalation and drives the ingest
@@ -462,7 +494,7 @@ func writeAck(w http.ResponseWriter, cb callback) {
 	w.Header().Set("Content-Type", "application/json")
 	msg := responseMessage{
 		ReplaceOriginal: true,
-		Text:            fmt.Sprintf("⏳ Recording %s's %s…", cb.decision.Who, verdictWord(cb.decision.Verdict)),
+		Text:            fmt.Sprintf("⏳ Recording %s's decision…", cb.decision.Who),
 	}
 	// The ack body is best-effort presentation; the decision is already committed
 	// to the background, so a failed encode changes the card, not the outcome.

@@ -23,7 +23,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
@@ -34,6 +36,12 @@ import (
 // 0–4 decision space so a caller can tell "escalate could not ingest" apart
 // from any decision gate returned.
 const codeIngestError = 5
+
+// resolveDrainTimeout bounds the graceful HTTP shutdown on a signal. The
+// authoritative drain of in-flight resolves is handler.Wait (each resolve is
+// self-bounded by serve's own timeouts); this only caps how long Shutdown waits
+// for active request handlers, which return as soon as they have acked.
+const resolveDrainTimeout = 40 * time.Second
 
 func main() {
 	if len(os.Args) < 2 {
@@ -152,7 +160,38 @@ func cmdServe(args []string) error {
 		WriteTimeout:      10 * time.Second,
 	}
 	log.Printf("escalate serve: listening on %s (gate=%s state=%q, %d authorized user(s))", *addr, *gateBin, *stateDir, len(allowed))
-	return srv.ListenAndServe()
+	return serveUntilSignal(srv, handler)
+}
+
+// serveUntilSignal runs the ingress until ListenAndServe fails or an interrupt /
+// SIGTERM arrives, then shuts down GRACEFULLY: stop accepting, then drain the
+// accepted-but-unfinished background resolves (handler.Wait). Because a tap is
+// acked with a 200 before its resolve runs, Slack will not retry it — so a
+// redeploy that killed the process mid-resolve would silently lose the decision.
+// Draining on a controlled shutdown closes that window. (A hard crash / SIGKILL
+// mid-resolve is the residual gap; its durable fix — persist-before-ack — is
+// tracked in FOLLOWUPS.md.)
+func serveUntilSignal(srv *http.Server, handler *serve.Server) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		stop()
+	}
+	log.Printf("escalate serve: signal received, draining in-flight resolutions…")
+	shutCtx, cancel := context.WithTimeout(context.Background(), resolveDrainTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("escalate serve: http shutdown: %v", err)
+	}
+	handler.Wait()
+	return nil
 }
 
 // splitList parses a comma-separated env list into trimmed, non-empty entries,

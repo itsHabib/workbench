@@ -354,6 +354,45 @@ func TestServeHTTPAcksBeforeResolve(t *testing.T) {
 	sink.wait(t, 1)
 }
 
+// TestWaitDrainsInflight proves the graceful-drain seam: after a tap is acked,
+// Wait blocks until that accepted resolve's background work finishes — so a
+// shutdown can drain in-flight resolutions instead of dropping an acked-but-
+// unrecorded decision (Slack won't retry a 200).
+func TestWaitDrainsInflight(t *testing.T) {
+	release := make(chan struct{})
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
+		<-release
+		return []byte(`{}`), 0, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
+	srv.ServeHTTP(httptest.NewRecorder(), signedRequest(testSecret, fixedNow, body))
+
+	waited := make(chan struct{})
+	go func() { srv.Wait(); close(waited) }()
+
+	select {
+	case <-waited:
+		t.Fatal("Wait returned while a resolve was still in flight — an acked decision could be dropped on shutdown")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-waited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not return after the in-flight resolve drained")
+	}
+	sink.wait(t, 1)
+}
+
 // TestServeHTTPReplayForwardsBothToGuard proves serve does NOT implement its own
 // idempotency: it forwards every signed tap to `gate resolve` and faithfully
 // surfaces the guard's refusal on the second (as a gate-error card, gate exit 4).

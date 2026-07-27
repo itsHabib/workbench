@@ -41,6 +41,22 @@ open UX question (what the card shows during the run, whether to drop the button
 was answered by the default: the ack card shows "⏳ Recording …" and drops the
 buttons immediately. See `docs/features/escalation-plane/escalate-serve.md`.
 
+## `escalate serve`: durable resolution across a HARD crash (2026-07-27, codex P1 follow-on on #150)
+
+The async ack (#150) acks the Slack tap with a 200 before `gate resolve` runs, so
+Slack never retries it. A **graceful** shutdown (SIGTERM / Ctrl-C / redeploy) now
+drains the in-flight resolves before exit (`Server.Wait`, wired in `cmdServe`), so
+the controlled case is covered. The residual gap is a **hard** stop mid-resolve —
+SIGKILL, panic in the runtime, power loss — after the 200 but before gate records
+the decision: the tap is lost silently (buttons already gone, no Slack retry).
+
+Durable fix (deferred — it is a real rearchitecture, not proportionate to the POC
+single-operator ingress): persist the accepted decision to disk BEFORE acking, and
+replay any unfinished entries on startup — an at-least-once accept log in front of
+`gate resolve` (whose `escalationIsOpen` guard already makes replay idempotent).
+Owner: `escalate serve`. Warranted once the ingress is always-on / multi-operator
+rather than a phone-tap POC behind an off-by-default toggle.
+
 ## Lazy-migration queue (graduate in when next touched)
 
 New planes are born here; existing tools migrate in when next in hand, not as a
