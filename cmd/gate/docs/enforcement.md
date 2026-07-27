@@ -165,6 +165,15 @@ and why each choice is the safe one:
   run detects the ambiguity and overwrites; `strict` branch protection (require the
   branch be up to date) narrows that window further, and a single-protected-base
   repo is barely exposed.
+- Its **first step posts `gate=pending`** to the head, before any cancellable
+  work (checkout, build, resolve). A persistent `gate=success` from an earlier
+  single-PR run would otherwise survive if this run were cancelled mid-build (a
+  user with Actions rights could cancel to keep the stale green satisfying a
+  newly-opened second PR). Posting pending up front marks the head non-green until
+  the real verdict lands; a cancel then leaves pending, which branch protection
+  blocks (fail closed). gate's own pending is excluded from both the settle-wait
+  (`select(.name != "gate")`) and readiness (`isOwnGateStatus`), so it never
+  self-blocks.
 - It is bounded by a **`concurrency` group keyed on the head branch** with
   `cancel-in-progress`. Each run makes real model calls, so without this a PR
   force-pushed in a loop would fan out one paid gate run per push; the concurrency
@@ -176,6 +185,16 @@ and why each choice is the safe one:
   blocks (overwriting any stale `gate=success`). A conclusion filter would let a
   user with Actions rights cancel CI to preserve a stale success — a fail-open —
   so the DoS bound is the concurrency group alone.
+
+  **Accepted cost residual (named, not closed):** the concurrency group bounds
+  *concurrent* runs, not *total* spend over time. A **paced** attacker who pushes
+  only after each run reaches the model call — and across several branches — still
+  drives ~one paid `claude-haiku-4-5` call per push. This is a **cost** exposure,
+  never a fail-open (every run still fails closed; no bad PR becomes mergeable).
+  It is accepted for the canary (a private repo where fork traffic is negligible
+  and haiku calls are ~sub-cent); a real per-actor/repo **spend budget** before
+  the cloud rung is future work, not built here — tracked alongside the other
+  open items below.
 - It runs gate as a **dry run (never `-live`)** against an **ephemeral,
   per-run state + key dir** (`mktemp -d`, minted with `-init` since the dir is
   fresh each run), mirroring the backtest `newEphemeralEnv` precedent. No signing

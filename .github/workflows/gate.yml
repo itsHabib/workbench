@@ -55,6 +55,21 @@ jobs:
       # workflow_run exposes the run's web URL; used as the status target link.
       RUN_URL: ${{ github.event.workflow_run.html_url }}
     steps:
+      # Invalidate any prior status on this head FIRST, before any cancellable
+      # work (checkout, build, resolve). A persistent gate=success from an earlier
+      # single-PR run would otherwise survive if THIS run is cancelled mid-build —
+      # a user with Actions rights could cancel the run during that window to keep
+      # the stale green satisfying a newly-opened second PR. Posting `pending`
+      # marks the head non-green until this run's real verdict lands; if the run
+      # is cancelled, pending remains and branch protection blocks (fail closed).
+      # This is the first thing the job does, so no bypass window precedes it.
+      - name: Invalidate prior gate status
+        run: |
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=pending -f context=gate \
+            -f description="gate: evaluating" \
+            -f target_url="${RUN_URL}" >/dev/null || true
+
       # No `ref:` on purpose. workflow_run checks out the DEFAULT BRANCH (the
       # trusted base), never the PR/fork head. This is load-bearing: gate is
       # built from base so a PR cannot edit gate's own code to neuter the check
