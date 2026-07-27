@@ -91,38 +91,52 @@ jobs:
           EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
-          # commits->pulls lists the PRs whose head is this commit — same-repo
-          # PRs reliably, and fork PRs too (their head lands in the base repo's
-          # refs/pull/*). It returns CLOSED/MERGED PRs as well, so filter to open
-          # ones: a historical closed PR that once had this head must not count
-          # toward ambiguity and wrongly refuse a legitimately-unique open PR.
-          # Refuse any head that backs more than one OPEN PR, regardless of which
-          # path the event arrived on.
-          nums=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
-            --jq '[.[] | select(.state == "open") | .number] | unique')
-          n=$(printf '%s' "$nums" | jq 'length')
-          if [ "$n" -gt 1 ]; then
-            echo "ambiguous: ${HEAD_SHA} backs ${n} PRs (${nums}); refusing to gate any of them"
-            # Posting NOTHING is not enough: commit statuses persist, so a prior
-            # gate=success from when this head backed a single PR would linger and
-            # satisfy the newcomer's required context. OVERWRITE it with an
-            # explicit failure so the required `gate` context is non-green for
-            # every PR on this head (fail closed for all of them).
+          # overwrite_and_refuse posts a non-success gate status to HEAD_SHA and
+          # bails. Used whenever we cannot safely resolve a unique open PR: a
+          # persistent gate=success from a prior single-PR run would otherwise
+          # linger (commit statuses persist) and satisfy a newcomer's required
+          # context. Overwriting it keeps the head non-green (best-effort — a POST
+          # failure here is a total-gh-outage residual). Fail closed.
+          overwrite_and_refuse() {
+            echo "refusing to gate ${HEAD_SHA}: $1"
             gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
-              -f state=failure -f context=gate \
-              -f description="ambiguous: head backs ${n} open PRs; refusing to gate" \
-              -f target_url="${RUN_URL}" >/dev/null
+              -f state="$2" -f context=gate \
+              -f description="$(printf '%s' "gate: $1" | head -c 110)" \
+              -f target_url="${RUN_URL}" >/dev/null || true
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
+          }
+          # commits->pulls lists the PRs whose head is this commit — same-repo PRs
+          # reliably, and fork PRs too (their head lands in the base repo's
+          # refs/pull/*). It returns CLOSED/MERGED PRs too, so filter to OPEN ones.
+          # This query is load-bearing (uniqueness gates the whole run), so a query
+          # FAILURE must not silently exit under set -e and leave a stale success —
+          # capture it and overwrite with an error.
+          if ! nums=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/pulls" \
+              --jq '[.[] | select(.state == "open") | .number] | unique'); then
+            overwrite_and_refuse "could not resolve open PRs for head (query failed)" error
           fi
-          # Prefer the event's same-repo PR number; fall back to the API's sole
-          # entry (fork PRs carry no pull_requests[] in the workflow_run event).
-          num="${EVENT_PR}"
-          if [ -z "$num" ]; then
-            num=$(printf '%s' "$nums" | jq -r '.[0] // empty')
+          n=$(printf '%s' "$nums" | jq 'length')
+          # Refuse any head that backs more than one OPEN PR (regardless of path):
+          # the gate status is commit-scoped, so gating one could stamp its green
+          # onto the head a second shares.
+          if [ "$n" -gt 1 ]; then
+            overwrite_and_refuse "ambiguous: head backs ${n} open PRs" failure
+          fi
+          # Gate the SOLE OPEN PR the API reports — it is authoritative. Do NOT
+          # blindly trust the event's PR number: it may name a PR that has since
+          # merged/closed while a DIFFERENT open PR now heads this SHA, and gate
+          # would then judge the closed one (leniently — readiness exempts MERGED
+          # subjects) and stamp that verdict onto the open one. Fall back to the
+          # event number ONLY when the API lists no open PR (association can lag
+          # briefly for a fresh same-repo PR).
+          if [ "$n" -eq 1 ]; then
+            num=$(printf '%s' "$nums" | jq -r '.[0]')
+          else
+            num="${EVENT_PR}"
           fi
           if [ -z "$num" ]; then
-            echo "no PR resolves for ${HEAD_SHA}; nothing to gate"
+            echo "no open PR resolves for ${HEAD_SHA}; nothing to gate"
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
