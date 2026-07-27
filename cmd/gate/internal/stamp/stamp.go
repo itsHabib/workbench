@@ -19,6 +19,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -57,6 +59,18 @@ func Post(a Authorized) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), postTimeout)
 	defer cancel()
+	// A commit status is commit-scoped, but gate authorized exactly one PR. If the
+	// head backs more than one open PR, stamping it would paint gate's green onto a
+	// PR gate never evaluated — the same ambiguity the workflow rail refuses
+	// (gate.yml). Fail closed: resolve the head's open PRs first and post nothing
+	// when the mapping is not unambiguous (including when it cannot be resolved).
+	n, err := a.openPRCount(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 1 {
+		return fmt.Errorf("stamp: head %s backs %d open PRs; refusing an ambiguous stamp", a.HeadSHA, n)
+	}
 	if _, err := exec.CommandContext(ctx, "gh", a.args()...).Output(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("stamp: gh status post timed out after %s", postTimeout)
@@ -67,6 +81,37 @@ func Post(a Authorized) error {
 		return fmt.Errorf("stamp: gh status post: %w", err)
 	}
 	return nil
+}
+
+// openPRCount reports how many OPEN PRs share this head SHA. A commit status is
+// commit-scoped, so more than one makes any stamp ambiguous — matching the
+// workflow rail's guard. A merged/closed PR on the same head is not counted: it
+// can never receive a misleading live stamp.
+func (a Authorized) openPRCount(ctx context.Context) (int, error) {
+	out, err := exec.CommandContext(ctx, "gh", a.prsArgs()...).Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return 0, fmt.Errorf("stamp: resolve PRs for head %s timed out after %s", a.HeadSHA, postTimeout)
+		}
+		if ee, ok := err.(*exec.ExitError); ok {
+			return 0, fmt.Errorf("stamp: resolve PRs for head %s: %s", a.HeadSHA, ee.Stderr)
+		}
+		return 0, fmt.Errorf("stamp: resolve PRs for head %s: %w", a.HeadSHA, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("stamp: parse open-PR count for head %s: %w", a.HeadSHA, err)
+	}
+	return n, nil
+}
+
+// prsArgs builds the gh query for the head's open PRs. Split out so the guard's
+// wiring is unit-testable without a network or a gh binary.
+func (a Authorized) prsArgs() []string {
+	return []string{
+		"api", "repos/" + a.Repo + "/commits/" + a.HeadSHA + "/pulls",
+		"--jq", `[.[] | select(.state=="open")] | length`,
+	}
 }
 
 // validate refuses an incomplete stamp: a status with no head SHA has nothing

@@ -37,6 +37,19 @@ func TestArgsCarryRunAndHashBoundToHead(t *testing.T) {
 	}
 }
 
+func TestPRsArgsResolveHeadAssociatedOpenPRs(t *testing.T) {
+	a := Authorized{Repo: "itsHabib/workbench", HeadSHA: "deadbeef"}
+	got := strings.Join(a.prsArgs(), " ")
+	if !strings.Contains(got, "repos/itsHabib/workbench/commits/deadbeef/pulls") {
+		t.Errorf("ambiguity guard must query the head's associated PRs\ngot: %s", got)
+	}
+	// The count must exclude closed/merged PRs — only an open PR can receive a
+	// misleading live stamp.
+	if !strings.Contains(got, `state=="open"`) {
+		t.Errorf("ambiguity guard must count only open PRs\ngot: %s", got)
+	}
+}
+
 func TestValidateRefusesIncompleteStamp(t *testing.T) {
 	cases := map[string]Authorized{
 		"no repo":     {HeadSHA: "sha", Run: "run_x", Hash: "h"},
