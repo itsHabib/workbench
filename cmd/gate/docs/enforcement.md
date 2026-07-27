@@ -277,10 +277,20 @@ nothing.
 
 ## What this closes on the canary, and what stays open
 
-With the runbook above applied on the canary repo, this change **closes the
-direct-merge-without-gate bypass on the canary**: a merge to `main` requires
-the green `gate` check, and with admin bypass disallowed that holds even for an
-administrator. The named bypass above is shut on this one repo.
+**Status: ARMED on `itsHabib/workbench`.** Branch protection on `main` now
+requires the `gate` status check, disallows admin bypass (`enforce_admins`), and
+requires PRs (no direct pushes); `GATE_ENFORCE=true` with a funded
+`ANTHROPIC_API_KEY`. Proven end-to-end on real PRs: a gate-green PR **merges**, a
+gate-`failure` PR is **BLOCKED**, and a PR with the `gate` context **absent** is
+**BLOCKED**. The enforced check gates on the **deterministic** rungs it can verify
+autonomously — CI green, readiness, and the risk floor; model-based **review
+judgment is advisory** in the CI check and stays in the operator/driver flow (see
+the `-reviews-optional` bullet above for why an autonomous ephemeral run must not
+gate on it).
+
+This **closes the direct-merge-without-gate bypass on the canary**: a merge to
+`main` requires the green `gate` check, and with admin bypass disallowed that
+holds even for an administrator. The named bypass above is shut on this one repo.
 
 What it does **not** close — stated plainly, because implying otherwise is the
 failure this document exists to correct:
