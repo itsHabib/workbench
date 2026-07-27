@@ -425,8 +425,12 @@ func TestCleanReviewSentinelScope(t *testing.T) {
 		{"wrong bot cannot use the phrase", "cursor[bot]", clean, "", false},
 		{"embedded finding not anchored", codex, "Line 5 has a bug. Didn't find any major issues elsewhere.", "", false},
 		{"lead-in reassurance then finding", codex, "Reviewed. Didn't find any major issues, but exec(userInput) is injection.", "", false},
-		{"exact codex prefix then a concern (length bound)", codex, "Codex Review: Didn't find any major issues, but exec(userInput) on line 12 is a command injection vulnerability.", "", false},
+		{"exact codex prefix then a long concern", codex, "Codex Review: Didn't find any major issues, but exec(userInput) on line 12 is a command injection vulnerability.", "", false},
+		{"exact codex prefix then a SHORT concern (comma)", codex, "Codex Review: Didn't find any major issues, but nil can panic.", "", false},
+		{"clean then a new-sentence concern", codex, "Codex Review: Didn't find any major issues. Line 5 can panic.", "", false},
+		{"clean tail then trailing content after the !", codex, "Codex Review: Didn't find any major issues. Hooray! But line 5 panics.", "", false},
 		{"clean with the real footer stripped", codex, "Codex Review: Didn't find any major issues. Hooray!\n\n**Reviewed commit:** `abc123`\n\n<details><summary>About Codex</summary>lots of boilerplate here that is very long indeed</details>", "", true},
+		{"clean long enthusiastic tail", codex, "Codex Review: Didn't find any major issues. Can't wait for the next one!", "", true},
 		{"unrelated codex comment", codex, "Working on it, will update.", "", false},
 	}
 	for _, c := range cases {
