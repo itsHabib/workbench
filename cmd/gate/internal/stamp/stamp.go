@@ -36,10 +36,12 @@ const Context = "gate/authorized"
 // error the caller logs, and gate exits on its decision regardless.
 const postTimeout = 10 * time.Second
 
-// Authorized is one provenance stamp: the exact commit gate judged (HeadSHA),
-// the decision's run id, and the deciding action artifact's chain hash.
+// Authorized is one provenance stamp: the PR gate evaluated (Repo + Number),
+// the exact commit it judged (HeadSHA), the decision's run id, and the deciding
+// action artifact's chain hash.
 type Authorized struct {
 	Repo    string // owner/repo, as passed to gh
+	Number  int    // the PR gate evaluated — the stamp posts only if it is the sole open PR on the head
 	HeadSHA string
 	Run     string
 	Hash    string
@@ -59,17 +61,19 @@ func Post(a Authorized) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), postTimeout)
 	defer cancel()
-	// A commit status is commit-scoped, but gate authorized exactly one PR. If the
-	// head backs more than one open PR, stamping it would paint gate's green onto a
-	// PR gate never evaluated — the same ambiguity the workflow rail refuses
-	// (gate.yml). Fail closed: resolve the head's open PRs first and post nothing
-	// when the mapping is not unambiguous (including when it cannot be resolved).
-	n, err := a.openPRCount(ctx)
+	// A commit status is commit-scoped, but gate authorized exactly one PR. Post
+	// only when the evaluated PR is the SOLE open PR on this head. Two ways this
+	// fails, both to a PR gate never evaluated: more than one open PR shares the
+	// head (ambiguous), or the head's one open PR is a DIFFERENT PR because the
+	// evaluated one merged/closed. Fail closed on either — and on an unresolvable
+	// head — so the same-head guard the workflow rail documents (gate.yml) holds
+	// here too, and is not fooled by a merged evaluated PR.
+	open, err := a.openPRNumbers(ctx)
 	if err != nil {
 		return err
 	}
-	if n > 1 {
-		return fmt.Errorf("stamp: head %s backs %d open PRs; refusing an ambiguous stamp", a.HeadSHA, n)
+	if len(open) != 1 || open[0] != a.Number {
+		return fmt.Errorf("stamp: head %s does not map uniquely to evaluated PR #%d (open PRs on head: %v); refusing", a.HeadSHA, a.Number, open)
 	}
 	if _, err := exec.CommandContext(ctx, "gh", a.args()...).Output(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -83,34 +87,38 @@ func Post(a Authorized) error {
 	return nil
 }
 
-// openPRCount reports how many OPEN PRs share this head SHA. A commit status is
-// commit-scoped, so more than one makes any stamp ambiguous — matching the
-// workflow rail's guard. A merged/closed PR on the same head is not counted: it
-// can never receive a misleading live stamp.
-func (a Authorized) openPRCount(ctx context.Context) (int, error) {
+// openPRNumbers resolves the numbers of the OPEN PRs that share this head SHA.
+// The stamp posts only when this is exactly the evaluated PR. A merged/closed PR
+// on the same head is excluded: it can take no live stamp, and its presence must
+// not stand in for the open PR the guard actually checks.
+func (a Authorized) openPRNumbers(ctx context.Context) ([]int, error) {
 	out, err := exec.CommandContext(ctx, "gh", a.prsArgs()...).Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return 0, fmt.Errorf("stamp: resolve PRs for head %s timed out after %s", a.HeadSHA, postTimeout)
+			return nil, fmt.Errorf("stamp: resolve PRs for head %s timed out after %s", a.HeadSHA, postTimeout)
 		}
 		if ee, ok := err.(*exec.ExitError); ok {
-			return 0, fmt.Errorf("stamp: resolve PRs for head %s: %s", a.HeadSHA, ee.Stderr)
+			return nil, fmt.Errorf("stamp: resolve PRs for head %s: %s", a.HeadSHA, ee.Stderr)
 		}
-		return 0, fmt.Errorf("stamp: resolve PRs for head %s: %w", a.HeadSHA, err)
+		return nil, fmt.Errorf("stamp: resolve PRs for head %s: %w", a.HeadSHA, err)
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("stamp: parse open-PR count for head %s: %w", a.HeadSHA, err)
+	var nums []int
+	for _, f := range strings.Fields(string(out)) {
+		n, err := strconv.Atoi(f)
+		if err != nil {
+			return nil, fmt.Errorf("stamp: parse PR number %q for head %s: %w", f, a.HeadSHA, err)
+		}
+		nums = append(nums, n)
 	}
-	return n, nil
+	return nums, nil
 }
 
-// prsArgs builds the gh query for the head's open PRs. Split out so the guard's
-// wiring is unit-testable without a network or a gh binary.
+// prsArgs builds the gh query for the head's open PR numbers. Split out so the
+// guard's wiring is unit-testable without a network or a gh binary.
 func (a Authorized) prsArgs() []string {
 	return []string{
 		"api", "repos/" + a.Repo + "/commits/" + a.HeadSHA + "/pulls",
-		"--jq", `[.[] | select(.state=="open")] | length`,
+		"--jq", `.[] | select(.state=="open") | .number`,
 	}
 }
 
@@ -120,6 +128,9 @@ func (a Authorized) prsArgs() []string {
 func (a Authorized) validate() error {
 	if a.Repo == "" || a.HeadSHA == "" {
 		return fmt.Errorf("stamp: repo and head sha required")
+	}
+	if a.Number <= 0 {
+		return fmt.Errorf("stamp: a positive PR number is required to scope the stamp")
 	}
 	if a.Run == "" || a.Hash == "" {
 		return fmt.Errorf("stamp: run and hash required for a verifiable stamp")
@@ -140,17 +151,18 @@ func (a Authorized) args() []string {
 	}
 }
 
-// description is the machine-verifiable payload a skeptic reads off the PR:
-// run selects the artifact group (gate explain -run), hash is the tamper-
-// evident anchor (gate audit). run_<16hex> + a sha256 hash fit well under the
-// 140-char status-description ceiling.
+// description is the machine-verifiable payload a skeptic reads off the PR: the
+// PR gate evaluated names itself (so a viewer on any PR sharing the head knows
+// which one was authorized), run selects the artifact group (gate explain -run),
+// and hash is the tamper-evident anchor (gate audit). #num + run_<16hex> + a
+// sha256 hash fit well under the 140-char status-description ceiling.
 func (a Authorized) description() string {
-	return fmt.Sprintf("gate authorized · run=%s hash=%s", a.Run, a.Hash)
+	return fmt.Sprintf("gate authorized · #%d · run=%s hash=%s", a.Number, a.Run, a.Hash)
 }
 
-// targetURL points at the exact commit judged — a real, clickable page. The
-// verifiable identifiers live in the description; this is the human landing
-// spot, bound to the same head SHA the status is posted against.
+// targetURL points at the PR gate evaluated — a real, clickable page that names
+// the authorized PR directly, so the status is unambiguous even though it rides
+// a commit-scoped rail. The verifiable identifiers live in the description.
 func (a Authorized) targetURL() string {
-	return fmt.Sprintf("https://github.com/%s/commit/%s", a.Repo, a.HeadSHA)
+	return fmt.Sprintf("https://github.com/%s/pull/%d", a.Repo, a.Number)
 }

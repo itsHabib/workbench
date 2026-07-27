@@ -703,12 +703,14 @@ func emitAuthorizedStamp(res gateResult, code int, on bool) {
 		return
 	}
 	// res.PR is "owner/repo#number" on every path that reaches codeMerge, so the
-	// repo the status posts to is derived from the result itself — one source,
-	// no separate repo argument to keep in sync across the gate/judge/resolve
-	// call sites.
-	repo, _, _ := strings.Cut(res.PR, "#")
+	// repo + PR number the status scopes to are derived from the result itself —
+	// one source, nothing extra to keep in sync across the gate/judge/resolve call
+	// sites. A malformed number leaves num==0, which the stamp rejects in validate.
+	repo, numStr, _ := strings.Cut(res.PR, "#")
+	num, _ := strconv.Atoi(numStr)
 	err := stamp.Post(stamp.Authorized{
 		Repo:    repo,
+		Number:  num,
 		HeadSHA: res.HeadSHA,
 		Run:     res.Run,
 		Hash:    res.Hash,
