@@ -93,7 +93,7 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 			continue
 		}
 		processed++
-		if cleanReviewSentinel(c.Body) {
+		if cleanReviewSentinel(c.Author, c.Body, c.Path) {
 			// A bot's fixed CLEAN-review boilerplate is a deterministic "no
 			// findings" signal — do not let an uncertain model extraction of this
 			// obvious clean text escalate a genuinely clean review. Its real
@@ -175,27 +175,39 @@ func classifyComment(author, body, path string, line int, model Model) (Finding,
 	return f, ex.Verdict, ex.Confidence < confidenceGate
 }
 
-// cleanReviewSentinel recognizes a review bot's fixed CLEAN-pass boilerplate — a
+// cleanReviewSentinel recognizes codex's fixed CLEAN-pass boilerplate — a
 // deterministic "no findings" signal that must not be second-guessed by an
-// uncertain model extraction. codex posts "Didn't find any major issues" when,
-// and only when, it raised nothing; when it has findings it posts them as
-// separate inline comments (extracted normally here) under a different summary.
-// Matching this exact phrase keeps a clean, reviewed PR from parking on a
-// low-confidence extraction of an obviously-clean signal — the difference between
-// the enforced check being usable and freezing every clean PR. Only bot comments
-// reach here, so this cannot be spoofed by a non-bot author. Extend the set as
-// other review bots' clean sentinels are confirmed.
-func cleanReviewSentinel(body string) bool {
+// uncertain model extraction, so a genuinely clean, reviewed PR does not park on
+// a low-confidence extraction of an obviously-clean signal (the difference
+// between the enforced check being usable and freezing every clean PR).
+//
+// The match is deliberately narrow on three axes, so it can never swallow a real
+// finding — the fail-open an earlier, broader cut would have allowed:
+//   - AUTHOR: only codex's exact login. The "this phrase means clean" invariant
+//     is codex-specific; cursor/Copilot DO fold findings into prose comments, so
+//     the phrase must never be honored from them.
+//   - ISSUE-LEVEL ONLY (empty path): codex posts findings as separate INLINE
+//     comments (which carry a path); its issue-level summary carries none. A
+//     comment with a path is a potential finding and always goes to the model.
+//   - ANCHORED: the trimmed body must START WITH the boilerplate, not merely
+//     contain it, so a finding appended after a reassuring lead-in cannot hide.
+func cleanReviewSentinel(author, body, path string) bool {
+	if author != codexLogin || path != "" {
+		return false
+	}
+	trimmed := strings.TrimSpace(body)
 	for _, s := range cleanReviewSentinels {
-		if strings.Contains(body, s) {
+		if strings.HasPrefix(trimmed, s) {
 			return true
 		}
 	}
 	return false
 }
 
+const codexLogin = "chatgpt-codex-connector[bot]"
+
 var cleanReviewSentinels = []string{
-	"Didn't find any major issues", // codex clean-pass issue comment
+	"Codex Review: Didn't find any major issues", // codex clean-pass issue comment
 }
 
 // staleComment reports whether a bot comment is a prior cycle's finding, not

@@ -411,6 +411,29 @@ func TestReviewsEmptyPanelEscalates(t *testing.T) {
 
 // reviewsWithSubject mirrors reviewsWith but pins the judged head, so the
 // stale-comment filter has a head to anchor against.
+func TestCleanReviewSentinelScope(t *testing.T) {
+	codex := "chatgpt-codex-connector[bot]"
+	clean := "Codex Review: Didn't find any major issues. Hooray!"
+	cases := []struct {
+		name         string
+		author, body string
+		path         string
+		want         bool
+	}{
+		{"codex issue-level clean", codex, clean, "", true},
+		{"codex inline (has path) never sentinel", codex, clean, "file.go", false},
+		{"wrong bot cannot use the phrase", "cursor[bot]", clean, "", false},
+		{"embedded finding not anchored", codex, "Line 5 has a bug. Didn't find any major issues elsewhere.", "", false},
+		{"lead-in reassurance then finding", codex, "Reviewed. Didn't find any major issues, but exec(userInput) is injection.", "", false},
+		{"unrelated codex comment", codex, "Working on it, will update.", "", false},
+	}
+	for _, c := range cases {
+		if got := cleanReviewSentinel(c.author, c.body, c.path); got != c.want {
+			t.Errorf("%s: cleanReviewSentinel = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestReviewsCleanSentinelPassesWithoutModel(t *testing.T) {
 	// A bot's clean-review sentinel must consolidate to PASS deterministically,
 	// WITHOUT a model call — the scriptedModel has no replies, so any extractOne
