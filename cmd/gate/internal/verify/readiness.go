@@ -14,9 +14,19 @@ import (
 // same head is itself a non-green rollup entry — so readiness must skip it, or
 // gate would block on its own past verdict and a red gate could only clear on a
 // new push (a self-deadlock). Every OTHER non-green check still blocks, so
-// fail-closed is unchanged. The match is exact: an unrelated check such as
-// "gate-foo" is not gate's context and still blocks.
+// fail-closed is unchanged.
 const gateContext = "gate"
+
+// isOwnGateStatus reports whether a rollup entry is gate's OWN posted verdict:
+// a commit *status* whose context is gate's. gate posts a commit status
+// (`gh api .../statuses -f context=gate`), which surfaces in the rollup as a
+// StatusContext — Context set, Name empty. The match is deliberately narrow: a
+// check-RUN literally named "gate" (Name set) is NOT gate's status and still
+// blocks, so an unrelated Actions job named "gate" can never be silently
+// dropped. An unrelated context like "gate-foo" is not gate's context either.
+func isOwnGateStatus(c rollupCheck) bool {
+	return c.Name == "" && c.Context == gateContext
+}
 
 type prView struct {
 	State             string        `json:"state"`
@@ -79,7 +89,7 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	// empty-signal escalation exists to catch.
 	var effectiveChecks int
 	for _, c := range pv.StatusCheckRollup {
-		if checkName(c.Name, c.Context) == gateContext {
+		if isOwnGateStatus(c) {
 			continue
 		}
 		effectiveChecks++

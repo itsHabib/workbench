@@ -594,6 +594,20 @@ func TestReadinessSkipsOwnGateContext(t *testing.T) {
 	if v.Decision != DecisionBlock {
 		t.Fatalf("a red gate-lookalike check must still block, got %s (%s)", v.Decision, v.Why)
 	}
+
+	// Commit-status only: a check-RUN literally named "gate" (populates Name,
+	// not Context) is NOT gate's own status and must still block when red — so
+	// an unrelated Actions job named "gate" is never silently dropped.
+	v = readinessFor(t, map[string]any{
+		"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "APPROVED",
+		"statusCheckRollup": []map[string]any{
+			{"name": "ci", "conclusion": "SUCCESS"},
+			{"name": "gate", "conclusion": "FAILURE"},
+		},
+	})
+	if v.Decision != DecisionBlock {
+		t.Fatalf("a red check-run named gate (not gate's status) must still block, got %s (%s)", v.Decision, v.Why)
+	}
 }
 
 func TestReadinessGateOnlyRollupEscalates(t *testing.T) {

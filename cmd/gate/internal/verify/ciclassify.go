@@ -442,8 +442,9 @@ func RedChecks(st *state.Store, viewEvidenceID string) (bool, error) {
 		// FailedRunLogs for a run that produced no failed-workflow log, so
 		// ci-classify escalates ("no red-run logs for a red check") and re-posts
 		// gate=failure — the self-deadlock the readiness skip is meant to break,
-		// leaking back in through this rung. Exact match, like readiness.
-		if checkName(c.Name, c.Context) == gateContext {
+		// leaking back in through this rung. Narrow match (readiness's helper): a
+		// check-run named "gate" is not gate's status and still counts.
+		if isOwnGateStatus(c) {
 			continue
 		}
 		if redCheck(c) {

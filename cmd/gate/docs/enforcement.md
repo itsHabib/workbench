@@ -262,15 +262,24 @@ legible and so the cost the resolution introduced is stated plainly.
   `claude-haiku-4-5-20251001`) instead of a local `localhost:11434` model. A
   clean PR can therefore reach a green `would_merge` on a plain hosted runner.
 
-  The cost of this resolution, named: the cloud rungs are a **real Anthropic API
-  call**, not the Max-subscription path, so arming requires a **funded**
-  `ANTHROPIC_API_KEY` secret on the repo. Each gated PR run makes roughly one to
-  two structured `claude-haiku-4-5` calls — the review-consolidation rung always,
-  and the ci-classify rung only when CI is red. That is cheap per run (haiku-tier,
-  short structured prompts) but it **recurs on every push to every gated PR**, so
-  the standing cost scales with gated-PR churn, not with repo count. The
-  fail-closed posture is unchanged: a run that cannot reach a verdict (missing
-  key, build failure, a crash) posts `error`, never `success`.
+  The cost of this resolution, named: the cloud rungs are **real Anthropic API
+  calls**, not the Max-subscription path, so arming requires a **funded**
+  `ANTHROPIC_API_KEY` secret on the repo. The call count per gated PR run is not
+  flat — it scales with the evidence on the head:
+  - the **review-consolidation** rung makes one structured `claude-haiku-4-5`
+    call **per eligible bot review comment** on the current head (it extracts
+    each comment separately), so a head with N panel comments costs ~N calls;
+  - the **ci-classify** rung runs **only when CI is red** and makes up to
+    `ciAdvisoryBudget` (4) advisory calls **per red run** (one per floor-abstaining
+    failed-step chunk; overflow escalates rather than spends).
+
+  In the common case — a handful of bot comments and green CI — that is a low
+  single-digit number of haiku-tier calls; it grows with panel size on the head
+  and, on red CI, with the number of failing runs. Cheap per call, but it
+  **recurs on every push to every gated PR**, so the standing cost scales with
+  gated-PR churn (and panel verbosity), not with repo count. The fail-closed
+  posture is unchanged: a run that cannot reach a verdict (missing key, build
+  failure, a crash) posts `error`, never `success`.
 
 - **Readiness self-reference — RESOLVED (readiness skips gate's own context).**
   Readiness reads the PR's full status rollup, which includes the `gate` context

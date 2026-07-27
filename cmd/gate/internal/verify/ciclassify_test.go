@@ -525,6 +525,8 @@ func TestRedChecks(t *testing.T) {
 		{[]map[string]any{{"context": "gate", "state": "FAILURE"}, {"name": "ci", "conclusion": "FAILURE"}}, true},
 		// ...and a lookalike like gate-foo is not gate's context — still red.
 		{[]map[string]any{{"context": "gate-foo", "state": "FAILURE"}}, true},
+		// ...and a check-RUN named "gate" (Name set) is not gate's status — still red.
+		{[]map[string]any{{"name": "gate", "conclusion": "FAILURE"}}, true},
 	}
 	for _, c := range cases {
 		st, err := state.Open(t.TempDir(), time.Now)
