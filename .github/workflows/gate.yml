@@ -65,10 +65,24 @@ jobs:
       # This is the first thing the job does, so no bypass window precedes it.
       - name: Invalidate prior gate status
         run: |
-          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -f state=pending -f context=gate \
-            -f description="gate: evaluating" \
-            -f target_url="${RUN_URL}" >/dev/null || true
+          # Best-effort is not enough here: if this write silently failed and the
+          # run were then cancelled mid-build, a stale gate=success would survive —
+          # the exact window this step exists to close. Make invalidation a VERIFIED
+          # prerequisite: retry a few times, and FAIL the job if it never lands, so
+          # we never proceed into cancellable work believing the head was
+          # invalidated when it wasn't (a failed job is loud and posts no success).
+          for attempt in 1 2 3; do
+            if gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+                 -f state=pending -f context=gate \
+                 -f description="gate: evaluating" \
+                 -f target_url="${RUN_URL}" >/dev/null; then
+              exit 0
+            fi
+            echo "invalidation attempt ${attempt} failed; retrying" >&2
+            sleep 2
+          done
+          echo "could not invalidate prior gate status after retries" >&2
+          exit 1
 
       # No `ref:` on purpose. workflow_run checks out the DEFAULT BRANCH (the
       # trusted base), never the PR/fork head. This is load-bearing: gate is
