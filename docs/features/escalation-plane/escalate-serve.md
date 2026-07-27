@@ -104,6 +104,7 @@ parked* escalation under an *already live* grant. The blast radius is exactly
 |---|---|---|
 | Forged callback (anyone POSTs a decision) | Slack signature verification, constant-time, timestamp window | **new in `serve`** |
 | `who` spoofed | `who` derived from the *verified* Slack identity, never the payload body | **new in `serve`** |
+| **Unauthorized (but authentic) user resolves** — any channel member taps the button | `ESCALATE_ALLOWED_SLACK_USERS` allowlist of Slack user ids, checked *after* the signature; an unlisted user is refused 403 before any lookup/resolve. serve **refuses to start** with no allowlist (fail-closed). Authentication ≠ authorization. | **new in Phase 2** |
 | Replay / double-tap / Slack retry | `escalationIsOpen` guard refuses a non-open park | ✅ merged |
 | Approval outside delegation | `gate resolve` re-checks the grant is live at resolve time | ✅ merged |
 | flare becoming a decision-writer | callback targets `escalate`, not flare; flare only renders | by construction |
@@ -141,18 +142,24 @@ manual, one-time operator work. In order:
    running `escalate serve` as `SLACK_SIGNING_SECRET` — serve refuses to start
    without it. It must be the SAME secret for both flare's Slack app and serve, or
    every callback fails signature verification.
-4. **Run the ingress under a live grant's key:** `escalate serve` shells
+4. **Authorize yourself** (who may resolve): set `ESCALATE_ALLOWED_SLACK_USERS`
+   to your Slack **user id** (the immutable `Uxxxx`, comma-separated for more than
+   one) on the box running serve. serve **refuses to start** without it — a signed
+   callback only proves Slack sent it, not that the tapper may move a merge gate,
+   so without an allowlist any channel member could resolve. Find your id in Slack:
+   profile → *Copy member ID*.
+5. **Run the ingress under a live grant's key:** `escalate serve` shells
    `gate resolve` with no `-key`, so export `GATE_KEY` (or use gate's default key
    dir) and mint the grant *before* stepping away — a remote approval only works
    inside an unexpired grant window.
-5. **Tunnel:** `escalate serve -addr 127.0.0.1:8099 -state ~/pers/gate/state &`
+6. **Tunnel:** `escalate serve -addr 127.0.0.1:8099 -state ~/pers/gate/state &`
    then `ngrok http 8099` → copy the `https://<random>.ngrok.app` URL.
-6. **Interactivity** (Interactivity & Shortcuts → toggle on): set the Request URL
+7. **Interactivity** (Interactivity & Shortcuts → toggle on): set the Request URL
    to the tunnel URL. Save.
-7. **Arm flare:** set `"resolve_actions": true` on the escalation channel in the
+8. **Arm flare:** set `"resolve_actions": true` on the escalation channel in the
    routes file. The next briefed park renders live Approve/Block buttons.
 
-Until steps 1–7 are done the buttons stay dark (the opt-in is off), so nothing
+Until steps 1–8 are done the buttons stay dark (the opt-in is off), so nothing
 renders a dead tap.
 
 ### Phase 1 as shipped — two notes for Phase 2/3

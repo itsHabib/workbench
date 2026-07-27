@@ -70,11 +70,17 @@ func (c *captured) runner(_ context.Context, _ string, args ...string) ([]byte, 
 	return c.out, c.code, nil
 }
 
+// allowAll authorizes every user; the shared constructor uses it so tests that
+// exercise the authn / mapping / replay paths are not entangled with the authz
+// gate, which TestUnauthorizedUserForbidden covers on its own.
+func allowAll(string) bool { return true }
+
 func newServer(cr *captured, findGrant GrantFinder) *Server {
 	return New(Config{
 		Secret:    testSecret,
 		Ingest:    ingest.New("gate", "", cr.runner),
 		FindGrant: findGrant,
+		Authorize: allowAll,
 		Now:       func() time.Time { return fixedNow },
 	})
 }
@@ -262,6 +268,7 @@ func TestServeHTTPReplayLeansOnGuard(t *testing.T) {
 		Secret:    testSecret,
 		Ingest:    ingest.New("gate", "", runner),
 		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
 		Now:       func() time.Time { return fixedNow },
 	})
 
@@ -363,6 +370,7 @@ func TestServeHTTPSerializesSameEscalation(t *testing.T) {
 		Secret:    testSecret,
 		Ingest:    ingest.New("gate", "", runner),
 		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
 		Now:       func() time.Time { return fixedNow },
 	})
 
@@ -390,5 +398,65 @@ func TestServeHTTPRejectsNonPost(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
+// TestServeHTTPAuthorizesVerifiedUser is the authorization gate after
+// authentication: with an allowlist of just U1, an authentic callback from U1
+// resolves, but an equally-authentic callback from an unlisted user is refused
+// 403 before any grant lookup or resolve — so a button visible to a whole
+// channel still only resolves for the operator. The signature is valid in BOTH
+// cases; what differs is who tapped.
+func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
+	cr := &captured{out: []byte(`{}`), code: 0}
+	grantCalls := 0
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", cr.runner),
+		FindGrant: fixedGrant("grt_live", &grantCalls),
+		Authorize: AllowUsers("U1"),
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	// payloadJSON stamps user id U1, who is on the allowlist → resolves.
+	okBody := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
+	okRec := httptest.NewRecorder()
+	srv.ServeHTTP(okRec, signedRequest(testSecret, fixedNow, okBody))
+	if okRec.Code != http.StatusOK {
+		t.Fatalf("allowlisted user status = %d, want 200; body %s", okRec.Code, okRec.Body)
+	}
+
+	// A different, equally-authentic user (U2) is refused; gate is never driven.
+	intruder := `{"type":"block_actions","user":{"id":"U2","username":"intruder"},` +
+		`"actions":[{"action_id":"approve","value":"esc_no"}]}`
+	noRec := httptest.NewRecorder()
+	srv.ServeHTTP(noRec, signedRequest(testSecret, fixedNow, formBody(intruder)))
+	if noRec.Code != http.StatusForbidden {
+		t.Fatalf("unlisted user status = %d, want 403", noRec.Code)
+	}
+	if len(cr.calls) != 1 {
+		t.Fatalf("only the allowlisted resolve should reach gate, got %d: %v", len(cr.calls), cr.calls)
+	}
+	if grantCalls != 1 {
+		t.Fatalf("grant lookup ran %d times, want 1 (the refused tap never looks up)", grantCalls)
+	}
+}
+
+// TestAllowUsers pins the allowlist predicate: listed ids pass, unlisted and the
+// empty id fail, and an EMPTY allowlist admits no one (fail-closed).
+func TestAllowUsers(t *testing.T) {
+	allow := AllowUsers("U1", "U2", "")
+	for _, id := range []string{"U1", "U2"} {
+		if !allow(id) {
+			t.Fatalf("AllowUsers should admit listed id %q", id)
+		}
+	}
+	for _, id := range []string{"U3", "", "u1"} {
+		if allow(id) {
+			t.Fatalf("AllowUsers must reject id %q", id)
+		}
+	}
+	if AllowUsers()("U1") {
+		t.Fatal("an empty allowlist must admit no one (fail-closed)")
 	}
 }

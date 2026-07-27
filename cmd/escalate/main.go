@@ -23,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
@@ -61,7 +62,9 @@ func usage() {
   escalate resolve -escalation esc_x -decision pass|block -grant grt_x -why "..." -who NAME [-gate gate] [-state DIR]
     ingests a human's decision for a parked escalation and drives `+"`gate resolve`"+`.
   escalate serve [-addr 127.0.0.1:8099] [-gate gate] [-state DIR]
-    runs the Slack interactive-action ingress; SLACK_SIGNING_SECRET must be set.
+    runs the Slack interactive-action ingress. SLACK_SIGNING_SECRET must be set
+    (authenticates the callback) and ESCALATE_ALLOWED_SLACK_USERS must list the
+    Slack user id(s) allowed to resolve (comma-separated; authorizes the tapper).
   exit code is gate resolve's (0/1/2/3/4); an ingest-side failure exits 5.
   -state defaults to $GATE_STATE; -gate defaults to the gate binary on PATH.`)
 }
@@ -119,10 +122,20 @@ func cmdServe(args []string) error {
 	if secret == "" {
 		return errors.New("serve: SLACK_SIGNING_SECRET is required (refusing to run an unauthenticated ingress)")
 	}
+	// Authorization is required too, and for the same reason: a signed callback
+	// only proves Slack sent it, not that the tapper may move a merge gate. Without
+	// an allowlist any member of the escalation channel could resolve a park, so
+	// serve refuses to start with no authorized users rather than expose a
+	// channel-wide control. Ids are the immutable Slack `Uxxxx`, comma-separated.
+	allowed := splitList(os.Getenv("ESCALATE_ALLOWED_SLACK_USERS"))
+	if len(allowed) == 0 {
+		return errors.New("serve: ESCALATE_ALLOWED_SLACK_USERS is required (a comma-separated allowlist of Slack user ids; refusing to run an ingress any channel member could resolve)")
+	}
 	handler := serve.New(serve.Config{
 		Secret:    []byte(secret),
 		Ingest:    ingest.New(*gateBin, *stateDir, nil),
 		FindGrant: serve.GateGrantFinder(*gateBin, *stateDir),
+		Authorize: serve.AllowUsers(allowed...),
 	})
 	// This listener faces a public tunnel, and signature verification only runs
 	// after the body is read — so an unauthenticated slow client could otherwise
@@ -136,6 +149,19 @@ func cmdServe(args []string) error {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 	}
-	log.Printf("escalate serve: listening on %s (gate=%s state=%q)", *addr, *gateBin, *stateDir)
+	log.Printf("escalate serve: listening on %s (gate=%s state=%q, %d authorized user(s))", *addr, *gateBin, *stateDir, len(allowed))
 	return srv.ListenAndServe()
+}
+
+// splitList parses a comma-separated env list into trimmed, non-empty entries,
+// so " U1 , , U2 " yields [U1 U2] and an unset or blank var yields none (which
+// the caller treats as fail-closed).
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
