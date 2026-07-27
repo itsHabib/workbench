@@ -411,6 +411,38 @@ func TestReviewsEmptyPanelEscalates(t *testing.T) {
 
 // reviewsWithSubject mirrors reviewsWith but pins the judged head, so the
 // stale-comment filter has a head to anchor against.
+func TestReviewsCleanSentinelPassesWithoutModel(t *testing.T) {
+	// A bot's clean-review sentinel must consolidate to PASS deterministically,
+	// WITHOUT a model call — the scriptedModel has no replies, so any extractOne
+	// reaching it would error into a low-confidence escalation and fail this test.
+	// This is the fix that lets a genuinely clean, reviewed PR reach gate=success
+	// instead of parking on an uncertain cloud extraction of "no issues".
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	m := &scriptedModel{}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "chatgpt-codex-connector[bot]", "is_bot": true,
+			"body": "Codex Review: Didn't find any major issues. Hooray!"},
+	}, m)
+	if v.Decision != DecisionPass {
+		t.Fatalf("a clean-sentinel review must pass, got %s (%s)", v.Decision, v.Why)
+	}
+	if m.calls != 0 {
+		t.Fatalf("a clean-sentinel review must not call the model, got %d calls", m.calls)
+	}
+
+	// The sentinel is a clean-summary fast path only; a real finding on the same
+	// head still goes through the model and escalates (worst-wins).
+	m2 := &scriptedModel{replies: []string{
+		`{"headline":"real bug","severity":"high","verdict":"actionable","confidence":0.9}`,
+	}}
+	v = reviewsWithSubject(t, head, []map[string]any{
+		{"author": "cursor[bot]", "is_bot": true, "body": "found a real bug", "commit_id": "headsha"},
+	}, m2)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an actionable finding must still escalate, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func reviewsWithSubject(t *testing.T, subject Subject, comments []map[string]any, model Model) Verdict {
 	t.Helper()
 	st, err := state.Open(t.TempDir(), time.Now)

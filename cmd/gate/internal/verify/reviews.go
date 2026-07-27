@@ -93,39 +93,36 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 			continue
 		}
 		processed++
-		ex, err := extractOne(context.Background(), c.Body, model)
-		if err != nil {
-			lowConf++
-			v.Findings = append(v.Findings, Finding{Title: "extraction failed: " + err.Error(), Locus: locus(c.Path, c.Line)})
+		if cleanReviewSentinel(c.Body) {
+			// A bot's fixed CLEAN-review boilerplate is a deterministic "no
+			// findings" signal — do not let an uncertain model extraction of this
+			// obvious clean text escalate a genuinely clean review. Its real
+			// findings (if any) ride as SEPARATE inline comments, which still go
+			// through the model below. Counts as a processed, non-actionable review.
+			v.Findings = append(v.Findings, Finding{
+				Title: fmt.Sprintf("[%s] clean review — no issues found", strings.TrimSuffix(c.Author, "[bot]")),
+				Locus: locus(c.Path, c.Line),
+			})
 			continue
 		}
-		// An out-of-enum verdict from the cloud backend (whose schema is a
-		// steer, not a grammar) is an unreadable extraction: escalate exactly
-		// as a failed one, never fall through as "not actionable".
-		if !knownVerdict(ex.Verdict) {
-			lowConf++
-			v.Findings = append(v.Findings, Finding{Title: "extraction failed: out-of-enum verdict " + ex.Verdict, Locus: locus(c.Path, c.Line)})
-			continue
-		}
-		f := Finding{
-			Title:      fmt.Sprintf("[%s] %s (%s)", strings.TrimSuffix(c.Author, "[bot]"), ex.Headline, ex.Verdict),
-			Severity:   normSeverity(ex.Severity),
-			Locus:      locus(c.Path, c.Line),
-			Confidence: ex.Confidence,
-		}
+		f, verdict, lowc := classifyComment(c.Author, c.Body, c.Path, c.Line, model)
 		v.Findings = append(v.Findings, f)
-		if ex.Confidence < v.Confidence {
-			v.Confidence = ex.Confidence
+		if verdict == "" { // extraction failed or out-of-enum: unreadable, escalate
+			lowConf++
+			continue
 		}
-		if ex.Verdict == "actionable" {
+		if f.Confidence < v.Confidence {
+			v.Confidence = f.Confidence
+		}
+		if verdict == "actionable" {
 			actionable++
 		}
-		if ex.Confidence < confidenceGate {
+		if lowc {
 			lowConf++
 		}
 		// A no-problem comment (approval, ship-it, findings-resolved note) may
 		// still quote a severity badge; it raises nothing.
-		if ex.Verdict == "none" {
+		if verdict == "none" {
 			continue
 		}
 		if severityTier(f.Severity) > tierRank(v.Tier) {
@@ -154,6 +151,51 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)%s", processed, suffix)
 	}
 	return Record(st, run, []string{commentsEvidenceID}, v)
+}
+
+// classifyComment extracts one bot comment into a Finding and its verdict. A
+// failed or out-of-enum extraction (the cloud schema is a steer, not a grammar)
+// returns an empty verdict with an explanatory finding — the caller treats that
+// as a low-confidence, escalate-worthy signal, never as "not actionable". The
+// third return is whether a readable extraction was below the confidence gate.
+func classifyComment(author, body, path string, line int, model Model) (Finding, string, bool) {
+	ex, err := extractOne(context.Background(), body, model)
+	if err != nil {
+		return Finding{Title: "extraction failed: " + err.Error(), Locus: locus(path, line)}, "", false
+	}
+	if !knownVerdict(ex.Verdict) {
+		return Finding{Title: "extraction failed: out-of-enum verdict " + ex.Verdict, Locus: locus(path, line)}, "", false
+	}
+	f := Finding{
+		Title:      fmt.Sprintf("[%s] %s (%s)", strings.TrimSuffix(author, "[bot]"), ex.Headline, ex.Verdict),
+		Severity:   normSeverity(ex.Severity),
+		Locus:      locus(path, line),
+		Confidence: ex.Confidence,
+	}
+	return f, ex.Verdict, ex.Confidence < confidenceGate
+}
+
+// cleanReviewSentinel recognizes a review bot's fixed CLEAN-pass boilerplate — a
+// deterministic "no findings" signal that must not be second-guessed by an
+// uncertain model extraction. codex posts "Didn't find any major issues" when,
+// and only when, it raised nothing; when it has findings it posts them as
+// separate inline comments (extracted normally here) under a different summary.
+// Matching this exact phrase keeps a clean, reviewed PR from parking on a
+// low-confidence extraction of an obviously-clean signal — the difference between
+// the enforced check being usable and freezing every clean PR. Only bot comments
+// reach here, so this cannot be spoofed by a non-bot author. Extend the set as
+// other review bots' clean sentinels are confirmed.
+func cleanReviewSentinel(body string) bool {
+	for _, s := range cleanReviewSentinels {
+		if strings.Contains(body, s) {
+			return true
+		}
+	}
+	return false
+}
+
+var cleanReviewSentinels = []string{
+	"Didn't find any major issues", // codex clean-pass issue comment
 }
 
 // staleComment reports whether a bot comment is a prior cycle's finding, not
