@@ -216,15 +216,34 @@ and why each choice is the safe one:
   `main` once the check is required. The flag suppresses only the *absence*
   escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
   and empty CI still escalates. **The flag is passed only when the CURRENT head
-  has actually been reviewed by a bot**: the workflow counts bot *review
-  submissions* whose `commit_id == HEAD_SHA` (a review submission is anchored to
-  the head it reviewed, unlike an issue-level comment) and enables the policy only
-  when that count is ≥1; otherwise it runs *without* the flag so readiness
-  escalates and the run parks — fail closed until the bots review this head. That
-  closes the stale-evidence path where an old unanchored "no issues" comment could
-  otherwise satisfy the review rung once the `reviewDecision` backstop is removed.
+  has actually been reviewed by a bot**, signalled either way: a bot *review
+  submission* whose `commit_id == HEAD_SHA` (how a bot with inline findings
+  reports), **or** codex's clean-pass *issue comment* — matched **narrowly** by
+  codex's exact login **and** its "Reviewed commit: `<sha>`" sentinel **and** the
+  head's short sha. The narrowness is load-bearing: accepting any `type == "Bot"`
+  comment that merely names the head sha would let an **infra** bot (codecov,
+  deploy-preview, github-actions CI-summary — none of which review code, and which
+  re-post per-push comments embedding the current head sha) satisfy the guard, so
+  an unreviewed head could reach `success` (a fail-open the adversarial pass
+  caught). A stale codex comment names an *old* sha, so the head-sha match keeps it
+  current. The policy is
+  enabled only when at least one of these is present; otherwise the run goes
+  *without* the flag so readiness escalates and parks — fail closed until the bots
+  review this head. That closes the stale-evidence path where an old unanchored
+  "no issues" comment could otherwise satisfy the review rung once the
+  `reviewDecision` backstop is removed, while still letting a clean review (which
+  codex delivers as an issue comment) reach `gate=success`.
   (Discovered in Phase-3 dry-observe: every canary
   PR had an empty `reviewDecision`, so the escalation fired on all of them.)
+  **Liveness residual (fail-closed):** gate runs on `CI` completion, but a bot
+  posts its review asynchronously — often *after* CI finishes. The first gate run
+  then sees no current-head review and **parks** (`gate=failure`); the review
+  landing later posts no `CI` event, so the status stays parked until a re-trigger
+  (a new push, or a manual CI re-run) re-evaluates and observes the review. This
+  is safe (a clean PR is held, never wrongly passed), but a clean PR needs a nudge
+  to go green. The clean fix — a trusted `pull_request_review`/comment-driven
+  re-evaluation trigger — is a follow-up; the driver/operator re-runs in the
+  meantime.
   Known residual (pre-existing, defense-in-depth follow-up): a human *top-level*
   "Request changes" on a repo with no branch-protection review requirement does
   not populate `reviewDecision`, and the review-consolidation rung filters to bot
