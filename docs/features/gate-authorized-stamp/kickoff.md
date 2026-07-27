@@ -155,10 +155,13 @@ Built and verified end-to-end. Uncommitted on the working tree.
 
 - **Phase-0 spike cleared.** Ambient `gh` token (`repo` scope) POSTs a `gate/authorized`
   commit status — no 403. Binary-emit is viable; no token-scope gap.
-- **Self-reference trap: no decision-code change needed.** Success-only is sufficient —
-  `readiness.go green()` treats `state=SUCCESS` as green, so the `gate/authorized` entry is
-  skipped in the block loop (holds on `main` and after PR #134's exact-`gate` skip). The stamp
-  never blocks gate's own readiness.
+- **Self-reference trap: needed a readiness exclusion (two vectors).** Success-only handles the
+  *block* vector (`green()` treats `state=SUCCESS` as green, so a `gate/authorized` entry never
+  blocks). But PR #134 added a second vector: readiness counts *effective (non-`gate`) checks*
+  to fire the empty-CI escalation, and `gate/authorized` is not the exact `gate` context — so a
+  posted stamp would count as real CI and let a later run pass a head with no CI (a fail-open
+  codex caught, P1). Fix: `isOwnGateStatus` now also excludes `gate/authorized` from both the
+  block loop and the effective-CI count, pinned to `stamp.Context` by a drift test.
 - **Code.** `cmd/gate/internal/stamp/` (new mechanism package — `gh api` status POST, stdlib
   only, no tenant import). `gateResult.Hash` added; the pass path in `act` surfaces the action
   artifact's chain hash. `emitAuthorizedStamp` fires at every merge-authorizing entry point —

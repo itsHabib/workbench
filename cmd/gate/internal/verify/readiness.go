@@ -17,15 +17,28 @@ import (
 // fail-closed is unchanged.
 const gateContext = "gate"
 
-// isOwnGateStatus reports whether a rollup entry is gate's OWN posted verdict:
-// a commit *status* whose context is gate's. gate posts a commit status
-// (`gh api .../statuses -f context=gate`), which surfaces in the rollup as a
-// StatusContext — Context set, Name empty. The match is deliberately narrow: a
-// check-RUN literally named "gate" (Name set) is NOT gate's status and still
-// blocks, so an unrelated Actions job named "gate" can never be silently
-// dropped. An unrelated context like "gate-foo" is not gate's context either.
+// authorizedContext is gate's OWN provenance stamp — the success commit status
+// the binary posts on a pass (see internal/stamp, stamp.Context). Like
+// gateContext it is gate's prior verdict on this head, not independent CI, so
+// readiness must exclude it from both the block loop and the effective-CI count.
+// Otherwise a judge/resolve pass that stamps a head with no real CI would let a
+// LATER run read that stamp as a recorded check and skip the empty-CI escalation
+// — the stamp manufacturing the very signal that escalation exists to catch.
+// TestReadinessAuthorizedContextMatchesStamp pins this equal to stamp.Context so
+// the two can never drift.
+const authorizedContext = "gate/authorized"
+
+// isOwnGateStatus reports whether a rollup entry is one of gate's OWN posted
+// statuses: a commit *status* whose context is gate's verdict context or its
+// authorization-stamp context. gate posts commit statuses
+// (`gh api .../statuses -f context=gate` / `context=gate/authorized`), which
+// surface in the rollup as StatusContexts — Context set, Name empty. The match
+// is deliberately narrow: a check-RUN literally named "gate" (Name set) is NOT
+// gate's status and still blocks, so an unrelated Actions job named "gate" can
+// never be silently dropped. An unrelated context like "gate-foo" is not gate's
+// either.
 func isOwnGateStatus(c rollupCheck) bool {
-	return c.Name == "" && c.Context == gateContext
+	return c.Name == "" && (c.Context == gateContext || c.Context == authorizedContext)
 }
 
 type prView struct {
