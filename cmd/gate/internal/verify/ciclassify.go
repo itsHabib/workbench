@@ -436,6 +436,16 @@ func RedChecks(st *state.Store, viewEvidenceID string) (bool, error) {
 		return false, fmt.Errorf("verify: parse view evidence: %w", err)
 	}
 	for _, c := range body.Data.StatusCheckRollup {
+		// Skip gate's own status for the same reason readiness does: a stale red
+		// gate status on this head is gate's own prior verdict, not an external
+		// red check to classify. Counting it here would send runGate to
+		// FailedRunLogs for a run that produced no failed-workflow log, so
+		// ci-classify escalates ("no red-run logs for a red check") and re-posts
+		// gate=failure — the self-deadlock the readiness skip is meant to break,
+		// leaking back in through this rung. Exact match, like readiness.
+		if checkName(c.Name, c.Context) == gateContext {
+			continue
+		}
 		if redCheck(c) {
 			return true, nil
 		}
