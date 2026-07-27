@@ -34,6 +34,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
+	"github.com/itsHabib/workbench/cmd/gate/internal/stamp"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
@@ -356,6 +357,12 @@ type gateResult struct {
 	// it was computed against. Empty on paths that finalize before evidence
 	// (a pre-evidence capability refusal, a hard error with no verdict).
 	HeadSHA string `json:"head_sha"`
+	// Hash is the deciding action artifact's chain hash — the tamper-evident
+	// anchor a downstream legibility marker (the gate/authorized commit status)
+	// carries so a skeptic can pin the stamp to a real, audit-replayable
+	// decision. Set only on the pass path (the one path that stamps); empty on
+	// block/park/refuse/error, which post nothing.
+	Hash string `json:"hash,omitempty"`
 }
 
 func cmdGate(args []string) error {
@@ -365,6 +372,7 @@ func cmdGate(args []string) error {
 	pr := fs.Int("pr", 0, "PR number")
 	grantID := fs.String("grant", "", "grant artifact id")
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
+	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
 	reviewsOptional := fs.Bool("reviews-optional", false, "treat an absent GitHub review decision as acceptable (do not escalate) — for the enforced-check context where gate's own review-consolidation is the review gate")
 	help, err := parseFlags(fs, args)
@@ -385,6 +393,7 @@ func cmdGate(args []string) error {
 	if err != nil {
 		return err
 	}
+	emitAuthorizedStamp(res, code, *stampOn)
 	printJSON(res)
 	os.Exit(code)
 	return nil
@@ -550,6 +559,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// out-of-band status binds to it, never to a head captured before the run.
 	res.HeadSHA = reduced.Subject.HeadSHA
 
+	// actionHash captures the hash of the last artifact record appended, so the
+	// pass path can surface the deciding action artifact's chain hash onto the
+	// result for the downstream stamp. Zero until record runs; only the pass
+	// path reads it.
+	var actionHash string
 	record := func(kind, outcome string, extra map[string]any) error {
 		body := map[string]any{"outcome": outcome, "verdict": reducedID, "grant": grantID}
 		for k, v := range extra {
@@ -557,7 +571,8 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+		art, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+		actionHash = art.Hash
 		return err
 	}
 
@@ -660,15 +675,51 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	mergeCmd := fmt.Sprintf("gh pr merge %d -R %s --squash --delete-branch --match-head-commit %s",
 		subjectNumber(reduced), reduced.Subject.Repo, reduced.Subject.HeadSHA)
 	res.Action = mergeCmd
+	// The pass path records first, then surfaces the action artifact's chain
+	// hash onto the result: record() runs as a side effect during return-arg
+	// evaluation, so res is copied before it sets actionHash — set res.Hash
+	// explicitly here instead. This is the one path a downstream stamp reads.
 	if !live {
 		res.Outcome = "would_merge"
-		return res, codeMerge, record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+		err := record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+		res.Hash = actionHash
+		return res, codeMerge, err
 	}
 	res.Outcome = "merge_not_implemented"
-	return res, codeMerge, record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+	err = record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+	res.Hash = actionHash
+	return res, codeMerge, err
 }
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
+
+// emitAuthorizedStamp posts the gate/authorized provenance stamp — but only on
+// a merge authorization (exit 0), so a block/park/refuse/error posts nothing.
+// It is strictly downstream of the decision: a side effect of a pass read off
+// the finished result, never an input to act. Best-effort — a post failure is
+// a warning on stderr, never a change to the exit code the caller already
+// holds; the audit chain, not the stamp, is the authorization.
+func emitAuthorizedStamp(res gateResult, code int, on bool) {
+	if !on || code != codeMerge {
+		return
+	}
+	// res.PR is "owner/repo#number" on every path that reaches codeMerge, so the
+	// repo + PR number the status scopes to are derived from the result itself —
+	// one source, nothing extra to keep in sync across the gate/judge/resolve call
+	// sites. A malformed number leaves num==0, which the stamp rejects in validate.
+	repo, numStr, _ := strings.Cut(res.PR, "#")
+	num, _ := strconv.Atoi(numStr)
+	err := stamp.Post(stamp.Authorized{
+		Repo:    repo,
+		Number:  num,
+		HeadSHA: res.HeadSHA,
+		Run:     res.Run,
+		Hash:    res.Hash,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate: authorized stamp not posted (decision stands): %v\n", err)
+	}
+}
 
 // synthBrief synthesizes the operator brief for a content park and returns it
 // as the typed contract Brief, fail-open: a nil synth or a synthesis error
@@ -823,6 +874,7 @@ func cmdJudge(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the judgment's reasoning")
 	auto := fs.Bool("auto", false, "let a frontier model judge from the artifacts alone")
+	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -853,6 +905,7 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return err
 	}
+	emitAuthorizedStamp(res, code, *stampOn)
 	printJSON(res)
 	os.Exit(code)
 	return nil
@@ -952,6 +1005,7 @@ func cmdResolve(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the decision's reasoning")
 	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when the resolution authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -995,6 +1049,11 @@ func cmdResolve(args []string) error {
 			return err
 		}
 	}
+	// A resolution that authorizes the merge earns the same PR-visible receipt as
+	// a direct gate/judge pass — the stamp reflects the authorization, whichever
+	// entry point produced it. Downstream of the resolution stamp above, gated on
+	// codeMerge, best-effort.
+	emitAuthorizedStamp(res, code, *stampOn)
 	printJSON(res)
 	os.Exit(code)
 	return nil
