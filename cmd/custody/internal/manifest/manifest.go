@@ -174,6 +174,12 @@ func ValidateKeyName(name string) error {
 	if name == "" || len(name) > 64 {
 		return fmt.Errorf("%w: key name must be 1-64 characters", ErrBadKeyName)
 	}
+	// "." and ".." pass the charset but are dot-segments: canonicalization
+	// removes them from every request target, so such a key could never be
+	// reached — refuse at load rather than serve an unreachable entry.
+	if name == "." || name == ".." {
+		return fmt.Errorf("%w: key %q is a dot-segment and can never be routed", ErrBadKeyName, name)
+	}
 	for i := 0; i < len(name); i++ {
 		if !isKeyNameByte(name[i]) {
 			return fmt.Errorf("%w: key %q may use only a-z, 0-9, '.', '_', '-'", ErrBadKeyName, name)

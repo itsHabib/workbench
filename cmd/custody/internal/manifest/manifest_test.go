@@ -186,6 +186,8 @@ func TestKeyName(t *testing.T) {
 		{"uppercase", "Tracker", ErrBadKeyName},
 		{"sentinel-none", "(none)", ErrBadKeyName},
 		{"sentinel-other", "(other)", ErrBadKeyName},
+		{"dot", ".", ErrBadKeyName},
+		{"dotdot", "..", ErrBadKeyName},
 		{"space", "a b", ErrBadKeyName},
 		{"empty", "", ErrBadKeyName},
 		{"too-long", strings.Repeat("a", 65), ErrBadKeyName},

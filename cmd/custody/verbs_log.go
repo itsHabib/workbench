@@ -83,6 +83,7 @@ func renderKey(w io.Writer, key string, ks *rollup.KeySummary) {
 	fmt.Fprintf(w, "  %s: %d req · %s · grants %d · p50 %dms p95 %dms max %dms\n",
 		key, ks.Total, countLine(ks.ByVerdict), ks.DistinctGrants,
 		ks.Latency.P50, ks.Latency.P95, ks.Latency.Max)
+	fmt.Fprintf(w, "    methods: %s\n", countLine(ks.ByMethod))
 	if ks.MethodOverflow > 0 {
 		fmt.Fprintf(w, "    methods past cap: %d req\n", ks.MethodOverflow)
 	}
