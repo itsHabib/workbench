@@ -6,7 +6,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,6 +32,11 @@ var testSecret = []byte("8f742231b10c8537228d4e5a1a1a2d3f")
 // "now" without touching the wall clock.
 var fixedNow = time.Unix(1_700_000_000, 0)
 
+// testResponseURL is a Slack-shaped response_url the fixtures carry, so the async
+// deliver path runs. The sink installed by withSink captures the card, so the
+// value is never actually POSTed — its host is only exercised by TestCheckSlackURL.
+const testResponseURL = "https://hooks.slack.com/actions/T01/B02/xyz"
+
 func sign(secret []byte, ts string, body []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	fmt.Fprintf(mac, "v0:%s:%s", ts, body)
@@ -41,6 +50,15 @@ func formBody(payloadJSON string) []byte {
 }
 
 func payloadJSON(actionID, value, username string) string {
+	return fmt.Sprintf(
+		`{"type":"block_actions","user":{"id":"U1","username":%q},"response_url":%q,"actions":[{"action_id":%q,"value":%q}]}`,
+		username, testResponseURL, actionID, value,
+	)
+}
+
+// payloadJSONNoURL omits response_url — the shape a CLI-built or malformed
+// callback carries, where the outcome cannot be delivered to a Slack card.
+func payloadJSONNoURL(actionID, value, username string) string {
 	return fmt.Sprintf(
 		`{"type":"block_actions","user":{"id":"U1","username":%q},"actions":[{"action_id":%q,"value":%q}]}`,
 		username, actionID, value,
@@ -70,19 +88,80 @@ func (c *captured) runner(_ context.Context, _ string, args ...string) ([]byte, 
 	return c.out, c.code, nil
 }
 
+// deliverSink stands in for the real response_url POST (postResponse): it records
+// every outcome card serve delivers and signals `done` for each, so a test can
+// wait for the ASYNC resolve+delivery to finish before asserting. It is installed
+// by withSink, replacing the https/Slack-host transport with an in-memory capture.
+type deliverSink struct {
+	mu    sync.Mutex
+	cards [][]byte
+	urls  []string
+	done  chan struct{}
+}
+
+func newDeliverSink() *deliverSink { return &deliverSink{done: make(chan struct{}, 64)} }
+
+func (d *deliverSink) deliver(_ context.Context, respURL string, body []byte) error {
+	d.mu.Lock()
+	d.cards = append(d.cards, body)
+	d.urls = append(d.urls, respURL)
+	d.mu.Unlock()
+	d.done <- struct{}{}
+	return nil
+}
+
+// wait blocks until n outcomes have been delivered — the synchronization every
+// async test leans on: after wait returns, the resolve for each is complete and
+// its recorded argv is safe to read (the channel send happens-after the resolve).
+func (d *deliverSink) wait(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		select {
+		case <-d.done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for outcome delivery %d of %d", i+1, n)
+		}
+	}
+}
+
+// texts renders each delivered card's text, so a test can assert the human
+// outcome vocabulary the operator sees.
+func (d *deliverSink) texts() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, 0, len(d.cards))
+	for _, c := range d.cards {
+		var m responseMessage
+		_ = json.Unmarshal(c, &m)
+		out = append(out, m.Text)
+	}
+	return out
+}
+
+// withSink replaces a server's outcome transport with an in-memory sink and
+// silences its background log, so async tests capture the card without a real
+// Slack endpoint and don't spew to stderr.
+func withSink(s *Server) *deliverSink {
+	sink := newDeliverSink()
+	s.post = sink.deliver
+	s.log = log.New(io.Discard, "", 0)
+	return sink
+}
+
 // allowAll authorizes every user; the shared constructor uses it so tests that
 // exercise the authn / mapping / replay paths are not entangled with the authz
-// gate, which TestUnauthorizedUserForbidden covers on its own.
+// gate, which TestServeHTTPAuthorizesVerifiedUser covers on its own.
 func allowAll(string) bool { return true }
 
-func newServer(cr *captured, findGrant GrantFinder) *Server {
-	return New(Config{
+func newServer(cr *captured, findGrant GrantFinder) (*Server, *deliverSink) {
+	s := New(Config{
 		Secret:    testSecret,
 		Ingest:    ingest.New("gate", "", cr.runner),
 		FindGrant: findGrant,
 		Authorize: allowAll,
 		Now:       func() time.Time { return fixedNow },
 	})
+	return s, withSink(s)
 }
 
 func fixedGrant(grant string, calls *int) GrantFinder {
@@ -138,20 +217,22 @@ func TestVerify(t *testing.T) {
 }
 
 // TestServeHTTPMapsPayloadToDecision is the end-to-end mapping proof: a signed
-// Approve callback drives `gate resolve` with the verdict, escalation id, grant,
-// who, and why derived from the request — and returns gate's outcome on 200.
+// Approve callback acks 200, then — asynchronously — drives `gate resolve` with
+// the verdict, escalation id, grant, who, and why derived from the request, and
+// delivers an approved-merge card to the interaction's response_url.
 func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 	cr := &captured{out: []byte(`{"outcome":"would_merge"}`), code: 0}
 	grantCalls := 0
-	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+	srv, sink := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
 	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
+		t.Fatalf("ack status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
+	sink.wait(t, 1)
 	if grantCalls != 1 {
 		t.Fatalf("grant finder called %d times, want 1", grantCalls)
 	}
@@ -169,50 +250,54 @@ func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 	if !reflect.DeepEqual(cr.calls[0], want) {
 		t.Fatalf("argv mismatch:\n got=%v\nwant=%v", cr.calls[0], want)
 	}
-	if strings.TrimSpace(rec.Body.String()) != `{"outcome":"would_merge"}` {
-		t.Fatalf("gate outcome must pass through, got %s", rec.Body)
+	if got := sink.texts()[0]; !strings.Contains(got, "Approved by @michael (U1)") {
+		t.Fatalf("outcome card = %q, want an approved-merge card", got)
 	}
 }
 
-// TestServeHTTPBlockButtonMapsToBlock pins the other button: Block → gate's
-// block decision, with a matching why. The status is 200 — the callback was
-// ingested and drove gate; the block is a landed decision reported in the body,
-// not a transport failure (so Slack never retries it).
+// TestServeHTTPBlockButtonMapsToBlock pins the other button: Block → gate's block
+// decision, delivered as a blocked card. The ack is 200 (the tap was received);
+// the block is a landed decision reported on the card, not a transport failure.
 func TestServeHTTPBlockButtonMapsToBlock(t *testing.T) {
 	cr := &captured{out: []byte(`{"outcome":"blocked"}`), code: 1}
 	grantCalls := 0
-	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+	srv, sink := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
 	body := formBody(payloadJSON(escalation.ActionBlock, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("a landed decision should be 200, got %d", rec.Code)
+		t.Fatalf("ack status = %d, want 200", rec.Code)
 	}
+	sink.wait(t, 1)
 	if len(cr.calls) != 1 || cr.calls[0][6] != "block" {
 		t.Fatalf("want a single block resolve, got %v", cr.calls)
+	}
+	if got := sink.texts()[0]; !strings.Contains(got, "Blocked by @michael (U1)") {
+		t.Fatalf("outcome card = %q, want a blocked card", got)
 	}
 }
 
 // TestServeHTTPWhoFromVerifiedIdentity is the security-critical case: `who` is
 // derived from the verified Slack identity, never from a client-settable field.
-// The payload smuggles a top-level "who":"attacker"; the recorded who must be
-// the signed user, and the smuggled field must be ignored by construction.
+// The payload smuggles a top-level "who":"attacker"; the recorded who must be the
+// signed user, and the smuggled field must be ignored by construction.
 func TestServeHTTPWhoFromVerifiedIdentity(t *testing.T) {
 	cr := &captured{out: []byte(`{}`), code: 0}
 	grantCalls := 0
-	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+	srv, sink := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
 	hostile := `{"who":"attacker","type":"block_actions","user":{"id":"U9","username":"realuser"},` +
-		`"actions":[{"action_id":"approve","value":"esc_beef"}]}`
+		`"response_url":"` + testResponseURL + `","actions":[{"action_id":"approve","value":"esc_beef"}]}`
 	body := formBody(hostile)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
+		t.Fatalf("ack status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
+	sink.wait(t, 1)
 	argv := cr.calls[0]
 	who := argv[len(argv)-1]
 	if who != "@realuser (U9)" {
@@ -223,13 +308,106 @@ func TestServeHTTPWhoFromVerifiedIdentity(t *testing.T) {
 	}
 }
 
-// TestServeHTTPRejectsUnsigned proves rejection happens BEFORE the decision
-// path: a bad signature returns 401 and neither the grant lookup nor the resolve
-// ever runs, so a forged callback cannot reach gate.
+// TestServeHTTPAcksBeforeResolve is the core of the increment: the handler acks
+// within Slack's ~3s window WITHOUT waiting for `gate resolve`. With the resolve
+// blocked, ServeHTTP still returns 200, and the resolve is proven to still be
+// in flight — the sync path never waits on the slow authoritative write.
+func TestServeHTTPAcksBeforeResolve(t *testing.T) {
+	release := make(chan struct{})
+	resolved := make(chan struct{})
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
+		<-release
+		close(resolved)
+		return []byte(`{}`), 0, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
+	rec := httptest.NewRecorder()
+	acked := make(chan struct{})
+	go func() {
+		srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
+		close(acked)
+	}()
+
+	select {
+	case <-acked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeHTTP did not ack while gate resolve was blocked — the handler is still synchronous")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, want 200", rec.Code)
+	}
+	select {
+	case <-resolved:
+		t.Fatal("gate resolve completed before it was released — it did not run in the background")
+	default:
+	}
+	close(release)
+	sink.wait(t, 1)
+}
+
+// TestServeHTTPReplayForwardsBothToGuard proves serve does NOT implement its own
+// idempotency: it forwards every signed tap to `gate resolve` and faithfully
+// surfaces the guard's refusal on the second (as a gate-error card, gate exit 4).
+// Slack retries and double-taps are made safe by gate's escalationIsOpen guard,
+// not by serve swallowing the retry. The taps are sequenced (wait for the first
+// outcome before the replay) so the ordering is deterministic.
+func TestServeHTTPReplayForwardsBothToGuard(t *testing.T) {
+	call := 0
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
+		call++
+		if call == 1 {
+			return []byte(`{"outcome":"would_merge"}`), 0, nil
+		}
+		return []byte(`{"outcome":"error","why":"escalation is not the run's open park"}`), 4, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_deadbeef", "michael"))
+	first := httptest.NewRecorder()
+	srv.ServeHTTP(first, signedRequest(testSecret, fixedNow, body))
+	sink.wait(t, 1) // the first tap resolves before the replay fires
+	second := httptest.NewRecorder()
+	srv.ServeHTTP(second, signedRequest(testSecret, fixedNow, body))
+	sink.wait(t, 1)
+
+	if call != 2 {
+		t.Fatalf("serve must forward both taps to the guard, got %d resolve calls", call)
+	}
+	if first.Code != http.StatusOK || second.Code != http.StatusOK {
+		t.Fatalf("both taps ack 200, got %d and %d", first.Code, second.Code)
+	}
+	texts := sink.texts()
+	if !strings.Contains(texts[0], "Approved") {
+		t.Fatalf("first card = %q, want the merge outcome", texts[0])
+	}
+	if !strings.Contains(texts[1], "Gate error") {
+		t.Fatalf("second card = %q, want the guard's gate-error outcome", texts[1])
+	}
+}
+
+// TestServeHTTPRejectsUnsigned proves rejection happens BEFORE the ack: a bad
+// signature returns 401 and neither the grant lookup nor the resolve ever runs,
+// so a forged callback cannot reach gate or spawn a background resolve.
 func TestServeHTTPRejectsUnsigned(t *testing.T) {
 	cr := &captured{out: []byte(`{}`), code: 0}
 	grantCalls := 0
-	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+	srv, _ := newServer(cr, fixedGrant("grt_live", &grantCalls))
 
 	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	req := signedRequest(testSecret, fixedNow, body)
@@ -248,56 +426,9 @@ func TestServeHTTPRejectsUnsigned(t *testing.T) {
 	}
 }
 
-// TestServeHTTPReplayLeansOnGuard proves serve does NOT implement its own
-// idempotency: it forwards every signed tap to `gate resolve` and faithfully
-// surfaces the guard's refusal on the second. Slack retries and double-taps are
-// made safe by gate's escalationIsOpen guard (already merged), not by serve
-// swallowing the retry — so the replayed tap reaches gate and is refused there.
-func TestServeHTTPReplayLeansOnGuard(t *testing.T) {
-	call := 0
-	// First tap merges; the replayed tap hits gate's guard, which refuses a park
-	// that is no longer open (gate exit 4 with its own diagnostic).
-	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
-		call++
-		if call == 1 {
-			return []byte(`{"outcome":"would_merge"}`), 0, nil
-		}
-		return []byte(`{"outcome":"error","why":"escalation is not the run's open park"}`), 4, nil
-	}
-	srv := New(Config{
-		Secret:    testSecret,
-		Ingest:    ingest.New("gate", "", runner),
-		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
-		Authorize: allowAll,
-		Now:       func() time.Time { return fixedNow },
-	})
-
-	body := formBody(payloadJSON(escalation.ActionApprove, "esc_deadbeef", "michael"))
-	first := httptest.NewRecorder()
-	srv.ServeHTTP(first, signedRequest(testSecret, fixedNow, body))
-	second := httptest.NewRecorder()
-	srv.ServeHTTP(second, signedRequest(testSecret, fixedNow, body))
-
-	if call != 2 {
-		t.Fatalf("serve must forward both taps to the guard, got %d resolve calls", call)
-	}
-	if first.Code != http.StatusOK {
-		t.Fatalf("first tap should merge (200), got %d", first.Code)
-	}
-	// The replayed tap reached gate and gate's guard refused it with exit 4. serve
-	// did not dedupe — the guard did — and it surfaces the refusal as a 502 (no
-	// new decision landed), with gate's "open park" diagnostic in the body.
-	if second.Code != http.StatusBadGateway {
-		t.Fatalf("a gate exit-4 refusal should be 502, got %d", second.Code)
-	}
-	if !strings.Contains(second.Body.String(), "open park") {
-		t.Fatalf("the guard's refusal diagnostic must pass through, got %s", second.Body)
-	}
-}
-
 // TestServeHTTPRejectsBadPayload covers the malformed-but-signed cases: an
 // unknown action_id, a missing payload field, and an empty identity are each a
-// 4xx that never reaches gate.
+// synchronous 4xx that never acks and never reaches gate.
 func TestServeHTTPRejectsBadPayload(t *testing.T) {
 	cases := []struct {
 		name string
@@ -311,7 +442,7 @@ func TestServeHTTPRejectsBadPayload(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cr := &captured{code: 0}
 			grantCalls := 0
-			srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+			srv, _ := newServer(cr, fixedGrant("grt_live", &grantCalls))
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, tc.body))
 			if rec.Code < 400 || rec.Code >= 500 {
@@ -324,27 +455,75 @@ func TestServeHTTPRejectsBadPayload(t *testing.T) {
 	}
 }
 
-// TestServeHTTPNotParkedIsConflict pins the first line of the replay defense: a
-// signed tap whose escalation is no longer parked (already resolved, superseded,
-// or never parked) is a clean 409 — an "already handled" — not a server error,
-// and it never reaches gate. This is the path a real double-tap hits, since a
-// resolved park drops out of the inbox serve reads the grant from.
-func TestServeHTTPNotParkedIsConflict(t *testing.T) {
+// TestServeHTTPNotParkedReportsAlreadyResolved pins the first line of the replay
+// defense under the async model: a signed tap whose escalation is no longer
+// parked acks 200 (the tap was received), never reaches gate resolve, and the
+// delivered card reads as a benign "already resolved" — the path a real
+// double-tap hits, since a resolved park drops out of the inbox serve reads.
+func TestServeHTTPNotParkedReportsAlreadyResolved(t *testing.T) {
 	cr := &captured{code: 0}
 	notParked := func(_ context.Context, escID string) (string, error) {
 		return "", fmt.Errorf("%w: %s not in gate inbox", ErrNotParked, escID)
 	}
-	srv := newServer(cr, notParked)
+	srv, sink := newServer(cr, notParked)
 
 	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("a not-parked escalation should be 409, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, want 200", rec.Code)
 	}
+	sink.wait(t, 1)
 	if len(cr.calls) != 0 {
 		t.Fatalf("resolve must not run when the escalation is not parked")
+	}
+	if got := sink.texts()[0]; !strings.Contains(got, "Already resolved") {
+		t.Fatalf("outcome card = %q, want an already-resolved card", got)
+	}
+}
+
+// TestServeHTTPNoResponseURLStillResolves proves the decision is authoritative
+// even when the callback carries no response_url: the resolve still runs (the
+// decision lands in gate), only the card delivery is skipped. Delivery is
+// best-effort presentation; the resolution is not.
+func TestServeHTTPNoResponseURLStillResolves(t *testing.T) {
+	var calls int32
+	resolved := make(chan struct{})
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, int, error) {
+		atomic.AddInt32(&calls, 1)
+		close(resolved)
+		return []byte(`{}`), 0, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(_ context.Context, _ string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+
+	body := formBody(payloadJSONNoURL(escalation.ActionApprove, "esc_abc", "michael"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, want 200", rec.Code)
+	}
+	select {
+	case <-resolved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resolve did not run for a callback with no response_url")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("resolve ran %d times, want 1", got)
+	}
+	// No response_url means no card delivery — the sink must stay silent.
+	select {
+	case <-sink.done:
+		t.Fatal("delivered a card despite the callback carrying no response_url")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -373,6 +552,7 @@ func TestServeHTTPSerializesSameEscalation(t *testing.T) {
 		Authorize: allowAll,
 		Now:       func() time.Time { return fixedNow },
 	})
+	sink := withSink(srv)
 
 	body := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
 	var wg sync.WaitGroup
@@ -384,6 +564,7 @@ func TestServeHTTPSerializesSameEscalation(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	sink.wait(t, 8) // every tap's background resolve completes
 	if maxSeen > 1 {
 		t.Fatalf("same-escalation resolves overlapped (max inflight %d), want serialized to 1", maxSeen)
 	}
@@ -393,7 +574,7 @@ func TestServeHTTPSerializesSameEscalation(t *testing.T) {
 func TestServeHTTPRejectsNonPost(t *testing.T) {
 	cr := &captured{code: 0}
 	grantCalls := 0
-	srv := newServer(cr, fixedGrant("grt_live", &grantCalls))
+	srv, _ := newServer(cr, fixedGrant("grt_live", &grantCalls))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -403,10 +584,10 @@ func TestServeHTTPRejectsNonPost(t *testing.T) {
 
 // TestServeHTTPAuthorizesVerifiedUser is the authorization gate after
 // authentication: with an allowlist of just U1, an authentic callback from U1
-// resolves, but an equally-authentic callback from an unlisted user is refused
-// 403 before any grant lookup or resolve — so a button visible to a whole
-// channel still only resolves for the operator. The signature is valid in BOTH
-// cases; what differs is who tapped.
+// acks and resolves, but an equally-authentic callback from an unlisted user is
+// refused 403 before the ack and before any grant lookup or resolve — so a button
+// visible to a whole channel still only resolves for the operator. The signature
+// is valid in BOTH cases; what differs is who tapped.
 func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
 	cr := &captured{out: []byte(`{}`), code: 0}
 	grantCalls := 0
@@ -417,6 +598,7 @@ func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
 		Authorize: AllowUsers("U1"),
 		Now:       func() time.Time { return fixedNow },
 	})
+	sink := withSink(srv)
 
 	// payloadJSON stamps user id U1, who is on the allowlist → resolves.
 	okBody := formBody(payloadJSON(escalation.ActionApprove, "esc_abc", "michael"))
@@ -425,10 +607,11 @@ func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
 	if okRec.Code != http.StatusOK {
 		t.Fatalf("allowlisted user status = %d, want 200; body %s", okRec.Code, okRec.Body)
 	}
+	sink.wait(t, 1)
 
 	// A different, equally-authentic user (U2) is refused; gate is never driven.
 	intruder := `{"type":"block_actions","user":{"id":"U2","username":"intruder"},` +
-		`"actions":[{"action_id":"approve","value":"esc_no"}]}`
+		`"response_url":"` + testResponseURL + `","actions":[{"action_id":"approve","value":"esc_no"}]}`
 	noRec := httptest.NewRecorder()
 	srv.ServeHTTP(noRec, signedRequest(testSecret, fixedNow, formBody(intruder)))
 	if noRec.Code != http.StatusForbidden {
@@ -458,5 +641,67 @@ func TestAllowUsers(t *testing.T) {
 	}
 	if AllowUsers()("U1") {
 		t.Fatal("an empty allowlist must admit no one (fail-closed)")
+	}
+}
+
+// TestOutcomeText pins the card vocabulary: each gate exit code maps to its
+// outcome line, ErrNotParked reads as a benign already-resolved (not a failure),
+// any other error is a generic "could not record", and an out-of-space code is a
+// gate error the operator should retry.
+func TestOutcomeText(t *testing.T) {
+	cb := callback{decision: ingest.Decision{Who: "@michael (U1)"}}
+	cases := []struct {
+		name string
+		code int
+		err  error
+		want string
+	}{
+		{"merge", 0, nil, "Approved by @michael (U1)"},
+		{"blocked", 1, nil, "Blocked by @michael (U1)"},
+		{"parked", 2, nil, "Re-parked"},
+		{"refused", 3, nil, "Refused"},
+		{"gate error", 4, nil, "Gate error"},
+		{"not parked", 0, fmt.Errorf("%w: esc_x", ErrNotParked), "Already resolved"},
+		{"other error", 0, errors.New("boom"), "Could not record"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := outcomeText(cb, tc.code, tc.err); !strings.Contains(got, tc.want) {
+				t.Fatalf("outcomeText = %q, want containing %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheckSlackURL is the SSRF guard: postResponse may POST only to an https URL
+// on a slack.com host, so a forged-but-somehow-signed payload can never aim the
+// ingress at an internal address.
+func TestCheckSlackURL(t *testing.T) {
+	for _, u := range []string{
+		"https://hooks.slack.com/actions/T/B/x",
+		"https://slack.com/x",
+	} {
+		if err := checkSlackURL(u); err != nil {
+			t.Fatalf("checkSlackURL(%q) = %v, want nil", u, err)
+		}
+	}
+	for _, u := range []string{
+		"http://hooks.slack.com/x",           // not https
+		"https://evil.com/x",                 // wrong host
+		"https://hooks.slack.com.evil.com/x", // suffix trickery
+		"https://127.0.0.1/x",                // internal
+		"::not a url",                        // unparseable
+	} {
+		if err := checkSlackURL(u); err == nil {
+			t.Fatalf("checkSlackURL(%q) = nil, want error", u)
+		}
+	}
+}
+
+// TestPostResponseRejectsNonSlackURL proves the guard runs inside the default
+// transport: a non-Slack response_url is refused before any network call.
+func TestPostResponseRejectsNonSlackURL(t *testing.T) {
+	if err := postResponse(context.Background(), "https://evil.example/x", []byte(`{}`)); err == nil {
+		t.Fatal("postResponse must refuse a non-Slack response_url")
 	}
 }

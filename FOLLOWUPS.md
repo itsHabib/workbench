@@ -30,34 +30,16 @@ compare-and-resolve (a per-run file lock around the open-check→append, or a
 single append that fails if the run's terminal moved). Owner: gate. Surfaced by
 codex review on workbench #137 (`escalate serve` Phase 1).
 
-## `escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async (2026-07-27, codex P1 on #140)
+## ~~`escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async~~ (2026-07-27, codex P1 on #140)
 
-`ServeHTTP` runs the grant lookup **and** `gate resolve` synchronously before it
-responds, and permits that up to `resolveTimeout` (25s). Slack, however, requires
-an interactive-action callback be acknowledged within **~3 seconds**, and a normal
-`gate resolve` (which shells `gate`, which may shell `gh`) can exceed that. So a
-real tap on a slow run lands the decision but Slack still reports the tap as
-failed; worse, the callback's `response_url` is currently ignored and there is no
-`chat.update` path, so the original Approve/Block buttons stay live with no
-outcome shown.
-
-This is invisible today — `resolve_actions` is off and no Slack app is wired — but
-it is **load-bearing for the real phone tap (Phase 3's goal)**: the tap won't read
-as successful until it's fixed. It is NOT folded into #140 on purpose: the fix
-changes the HTTP contract the *merged* Phase 1 (#137) established (synchronous →
-immediate-ack + async result) and rewrites what every serve test + the e2e assert,
-so it deserves its own reviewed increment, not a rushed rearchitecture inside the
-flare-rendering PR.
-
-Concrete shape (no Slack token needed — `response_url` is a per-interaction
-webhook, valid ~30 min / 5 uses): (1) capture `response_url` from the payload;
-(2) after authn+authz, respond **200 immediately** with an ephemeral ack
-("working…"); (3) run findGrant + resolve in the already-detached background
-context; (4) POST the final outcome to `response_url` (`replace_original`) to
-update the card to "✅ merged / ⛔ blocked by @who" and drop the now-stale buttons.
-Open UX question for the operator: what the card shows during the ~2–15s gate run,
-and whether to disable the buttons on ack. Owner: `escalate serve`. Surfaced by
-codex review on workbench #140 (flare resolve buttons, Phase 2).
+**Done.** `ServeHTTP` now verifies + authorizes synchronously, acks 200 within
+Slack's ~3s window (replacing the card with a working state that drops the stale
+buttons), and runs the grant lookup + `gate resolve` in a background goroutine —
+then POSTs the outcome to the interaction's `response_url` (`replace_original`,
+✅ merged / ⛔ blocked / ☑️ already resolved), guarded to an https Slack host. The
+open UX question (what the card shows during the run, whether to drop the buttons)
+was answered by the default: the ack card shows "⏳ Recording …" and drops the
+buttons immediately. See `docs/features/escalation-plane/escalate-serve.md`.
 
 ## Lazy-migration queue (graduate in when next touched)
 

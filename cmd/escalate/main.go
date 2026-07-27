@@ -140,14 +140,16 @@ func cmdServe(args []string) error {
 	// This listener faces a public tunnel, and signature verification only runs
 	// after the body is read — so an unauthenticated slow client could otherwise
 	// hold connections open indefinitely and exhaust goroutines before auth ever
-	// runs. Bounded read/write timeouts cap that. WriteTimeout is the roomiest:
-	// the handler shells `gate resolve` synchronously before it responds.
+	// runs. Bounded read/write timeouts cap that. The handler now acks within
+	// Slack's ~3s window and runs `gate resolve` in the background (delivering the
+	// outcome to response_url), so the response itself is fast — a tight
+	// WriteTimeout is enough; the detached resolve has its own bound in serve.
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      10 * time.Second,
 	}
 	log.Printf("escalate serve: listening on %s (gate=%s state=%q, %d authorized user(s))", *addr, *gateBin, *stateDir, len(allowed))
 	return srv.ListenAndServe()

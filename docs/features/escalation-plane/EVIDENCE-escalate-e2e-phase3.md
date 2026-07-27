@@ -29,16 +29,22 @@ Phase-2↔serve contract composes, meeting at the contract, never a cross-import
 
 ### Cases (all green — real serve binary, over HTTP)
 
+serve now **acks the tap immediately (200)** and runs `gate resolve` in the
+background, delivering the outcome to the interaction's `response_url` — so the
+happy-path cases assert the 200 ack, then wait for the stub gate's resolve journal
+to catch up (the authoritative work is off the request path). The security
+rejections stay synchronous — they never reach the background.
+
 | Test | Asserts |
 |---|---|
-| `TestApproveTapResolvesPark` | Approve → 200 `would_merge`; resolve driven with the joined grant, mapped `pass`, and `who` = the verified `@handle (id)` |
-| `TestBlockTapRecordsBlock` | Block → 200 `blocked` (the real gate resolve outcome), decision `block` |
+| `TestApproveTapResolvesPark` | Approve → 200 ack (working-state card); the background resolve is driven with the joined grant, mapped `pass`, and `who` = the verified `@handle (id)` |
+| `TestBlockTapRecordsBlock` | Block → 200 ack; the background resolve records decision `block` |
 | `TestForgedSignatureRejected` | wrong signing secret → 401, gate never driven |
 | `TestStaleTimestampRejected` | valid HMAC but 10-min-old timestamp → 401 on the window |
 | `TestUnsignedRejected` | no signature headers → 401 |
 | `TestUnauthorizedUserForbidden` | an authentic tap from a user NOT on the allowlist → 403, gate never driven (authn ≠ authz) |
-| `TestReplayRefused` | same tap twice → 200 then 409 (park left the inbox), exactly one resolve |
-| `TestConcurrentDoubleTapResolvesOnce` | two Approves at once → one 200, one 409, exactly one resolve — never a double-apply |
+| `TestReplayResolvesOnce` | same tap twice → 200 then 200 (both acked); the park left the inbox after the first, so exactly one resolve lands |
+| `TestConcurrentDoubleTapResolvesOnce` | two Approves at once → both 200; the per-escalation lock serializes the background resolves, so exactly one lands — never a double-apply |
 | `TestForgedWhoIgnored` | a smuggled top-level `"who":"attacker"` is ignored; `who` = the verified identity |
 | `TestUnknownActionRejected` | an unknown `action_id` → 400, never a silent resolve |
 
@@ -100,13 +106,16 @@ evidence-gather is:
    ngrok http 8099            # set the https URL as the Slack app's Request URL
    ```
 
-4. **Tap Approve on your phone** in the Slack card flare posted. `gate resolve`
-   follows the non-live path: it records **`would_merge`** and **emits the
-   `gh pr merge` command** — it does not merge for you (this is the same outcome
-   the automated e2e asserts). So expect the resolution to land and the park to
-   move to `ready_to_merge`; then run the emitted merge command yourself to
-   complete the merge. Capture (the `-state` flag is required so these read the
-   seeded ledger, not a default/relative one):
+4. **Tap Approve on your phone** in the Slack card flare posted. The card updates
+   immediately to a working state ("⏳ Recording …", buttons gone) — serve's ~3s
+   ack — and then, when the background `gate resolve` lands, to the final outcome
+   ("✅ Approved by @you — gate authorized the merge") via the interaction's
+   `response_url`. `gate resolve` follows the non-live path: it records
+   **`would_merge`** and **emits the `gh pr merge` command** — it does not merge
+   for you (the same outcome the automated e2e asserts). So expect the resolution
+   to land and the park to move to `ready_to_merge`; then run the emitted merge
+   command yourself to complete the merge. Capture (the `-state` flag is required
+   so these read the seeded ledger, not a default/relative one):
 
    ```
    gate next  -state ~/pers/gate/state   # the park is gone (1 → 0), now ready_to_merge

@@ -44,6 +44,10 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   escalation via `gate next -json` and drives the same `ingest.Client.Resolve`.
   Both `SLACK_SIGNING_SECRET` and `ESCALATE_ALLOWED_SLACK_USERS` are **required** —
   it refuses to start unauthenticated OR with no authorized users (fail-closed).
+  It **acks the tap within Slack's ~3s window** (verify + authorize are synchronous;
+  the card is replaced with a working state that drops the buttons) and runs the
+  grant lookup + `gate resolve` in the background, delivering the outcome to the
+  interaction's `response_url` (`replace_original`, guarded to an https Slack host).
   Like `resolve`, it shells `gate` with no `-key`, so set `GATE_KEY` (or use
   gate's default key dir) or gate refuses the grant with `grant_bad_signature`.
   Binds loopback by default; a tunnel (ngrok/cloudflared) exposes it to Slack.
