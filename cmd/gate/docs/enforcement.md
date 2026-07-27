@@ -210,8 +210,9 @@ and why each choice is the safe one:
   enforced check. Two things follow from it. (1) Readiness does **not** escalate on
   an absent GitHub `reviewDecision` — the canary requires no *separate* GitHub
   review, so an empty decision is expected, not a reason to park. (2) The
-  model-based **review-consolidation rung still runs and is recorded (advisory)
-  but does NOT gate**. So the enforced check stands or falls on the rungs it can
+  model-based **review-consolidation rung is skipped**: it would not gate here, so
+  running it would only spend paid model calls per PR for no decision. So the
+  enforced check stands or falls on the rungs it can
   verify **autonomously and deterministically**: CI green, readiness (mergeable,
   not a draft, no `CHANGES_REQUESTED`), and the risk floor.
 

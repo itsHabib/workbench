@@ -262,8 +262,8 @@ jobs:
           # ephemeral CI run has no judge to resolve a park, so gating on it would
           # freeze a clean PR (a clean bot review extracts low-confidence -> park,
           # with no auto-green path). Under this flag: readiness does NOT escalate on
-          # an absent GitHub review decision, and the reviews rung still runs and is
-          # recorded (advisory) but does NOT gate. The check enforces the
+          # an absent GitHub review decision, and the reviews rung is SKIPPED (it
+          # would not gate, so its paid model calls would be pure cost). The check enforces the
           # DETERMINISTIC rungs it can verify autonomously — CI green, readiness
           # (mergeable, not draft, no CHANGES_REQUESTED), and the risk floor. Review
           # JUDGMENT stays in the operator/driver flow (where a human judges the bot
