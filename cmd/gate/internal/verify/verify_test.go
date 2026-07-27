@@ -235,7 +235,30 @@ func readinessFor(t *testing.T, view map[string]any) Verdict {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, subj)
+	art, _, err := Readiness(st, "run_t", evd.ID, subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// readinessOptFor drives readiness with reviewsOptional=true (the enforced-check
+// context) so the absent-review-decision escalation is suppressed.
+func readinessOptFor(t *testing.T, view map[string]any) Verdict {
+	t.Helper()
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": view})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, subj, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,6 +491,32 @@ func TestReviewsUnanchoredCommentsAlwaysConsolidate(t *testing.T) {
 	}
 }
 
+func TestReviewsJudgesReviewBodies(t *testing.T) {
+	// Evidence now includes review-SUBMISSION bodies (commit-anchored, no
+	// path/line) — a bot's finding in its top-level review body must be judged
+	// like any comment, not skipped. A body anchored to the judged head with an
+	// actionable finding escalates.
+	head := Subject{Repo: "o/r", Number: 1, HeadSHA: "headsha"}
+	m := &scriptedModel{replies: []string{
+		`{"headline":"body finding","severity":"high","verdict":"actionable","confidence":0.9}`,
+	}}
+	v := reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "top-level review body finding", "commit_id": "headsha"},
+	}, m)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an actionable current-head review body must escalate, got %s (%s)", v.Decision, v.Why)
+	}
+
+	// A review body from an EARLIER head is stale and must be dropped — it cannot
+	// stand in for review of the current head. Alone, that leaves an empty panel.
+	v = reviewsWithSubject(t, head, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "old-head no issues", "commit_id": "oldsha"},
+	}, &scriptedModel{})
+	if v.Decision != DecisionEscalate || !strings.Contains(v.Why, "no bot review comments for this head") {
+		t.Fatalf("a stale review body must be dropped (empty-panel escalate), got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func TestReadinessReviewDecisionBlocks(t *testing.T) {
 	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
 	v := readinessFor(t, map[string]any{
@@ -607,6 +656,50 @@ func TestReadinessSkipsOwnGateContext(t *testing.T) {
 	})
 	if v.Decision != DecisionBlock {
 		t.Fatalf("a red check-run named gate (not gate's status) must still block, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+func TestReadinessReviewsOptional(t *testing.T) {
+	greenCheck := []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}}
+
+	// The green path: a clean, mergeable PR with green CI and an ABSENT review
+	// decision PASSES under reviewsOptional — the enforced-check context, where
+	// gate's own review-consolidation is the review gate and the repo requires no
+	// separate GitHub review. Without the flag this same view escalates
+	// (TestReadinessEmptyReviewDecisionEscalates pins that), so the flag is what
+	// makes gate=success reachable in CI.
+	v := readinessOptFor(t, map[string]any{
+		"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": greenCheck,
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("reviews-optional + absent review decision + green CI must pass, got %s (%s)", v.Decision, v.Why)
+	}
+	// The audit trail must record that the pass accepted an absent review only
+	// because reviews were optional — reconstructable from state alone.
+	if !strings.Contains(v.Why, "reviews-optional") {
+		t.Fatalf("reviews-optional pass must record the policy in Why, got %q", v.Why)
+	}
+
+	// reviewsOptional suppresses ONLY the absence escalation. An explicit
+	// non-APPROVED decision still BLOCKS — a human who requested changes is not
+	// waved through.
+	for _, d := range []string{"CHANGES_REQUESTED", "REVIEW_REQUIRED"} {
+		v = readinessOptFor(t, map[string]any{
+			"state": "OPEN", "mergeable": "MERGEABLE",
+			"reviewDecision": d, "statusCheckRollup": greenCheck,
+		})
+		if v.Decision != DecisionBlock {
+			t.Fatalf("reviews-optional must still block on %s, got %s (%s)", d, v.Decision, v.Why)
+		}
+	}
+
+	// reviewsOptional does NOT relax the empty-CI signal: no non-gate checks
+	// still escalates (CI is expected even when a review is not).
+	v = readinessOptFor(t, map[string]any{
+		"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": []map[string]any{},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("reviews-optional must still escalate on empty CI, got %s (%s)", v.Decision, v.Why)
 	}
 }
 

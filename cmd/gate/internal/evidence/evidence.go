@@ -129,6 +129,10 @@ type rawComment struct {
 	// is deliberately not used: it stays pinned to the head the comment was first
 	// posted against, so a live comment on the judged head could read as stale.
 	CommitID string `json:"commit_id"`
+	// State is set only on review submissions (pulls/.../reviews): COMMENTED,
+	// APPROVED, CHANGES_REQUESTED, DISMISSED. Empty for comments. A DISMISSED
+	// review has been withdrawn and must not count as review evidence.
+	State string `json:"state"`
 }
 
 const commentsPerPage = 100
@@ -147,6 +151,16 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 		return nil, err
 	}
 	issue, err := pagedComments(fmt.Sprintf("repos/%s/issues/%d/comments", pr.Repo, pr.Number))
+	if err != nil {
+		return nil, err
+	}
+	// Review SUBMISSION bodies (pulls/.../reviews), not just comments. A bot can
+	// put an actionable finding in its top-level review body rather than an inline
+	// comment; that body is invisible in the two comment endpoints above, so a
+	// verifier judging only comments could pass a head whose review body objected.
+	// A review submission carries the commit_id it reviewed, so it is anchored —
+	// staleComment drops one from an earlier head, keeping the panel head-current.
+	reviews, err := pagedComments(fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number))
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +183,47 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 			Body:   rc.Body,
 		})
 	}
+	out = append(out, reviewBodies(reviews)...)
 	return out, nil
+}
+
+// reviewBodies reduces a PR's review submissions (oldest-first) to the review
+// bodies worth judging: each author's LATEST non-dismissed review that carries a
+// top-level body. A bot can submit several reviews without a new commit (request
+// changes, then approve) — all sharing a commit_id, so staleComment cannot tell
+// the superseded one apart; only the latest reflects the author's current stance.
+// A DISMISSED review is withdrawn evidence; a body-less review (inline-only or a
+// bare approval) adds nothing its inline comments don't already carry.
+func reviewBodies(reviews []rawComment) []Comment {
+	// The author's current stance is their latest NON-DISMISSED review — INCLUDING
+	// a bare approval with no body: a later "APPROVED" supersedes an earlier
+	// actionable body, so that finding must not keep escalating. Find that latest
+	// review per author first (regardless of body), then emit it only if it
+	// carries a body; a bodyless latest review (or one whose only later reviews
+	// were dismissed) contributes nothing.
+	latest := map[string]int{}
+	for i, rv := range reviews {
+		if rv.State == "DISMISSED" {
+			continue
+		}
+		latest[rv.User.Login] = i
+	}
+	var out []Comment
+	for i, rv := range reviews {
+		if idx, ok := latest[rv.User.Login]; !ok || idx != i {
+			continue
+		}
+		if strings.TrimSpace(rv.Body) == "" {
+			continue
+		}
+		out = append(out, Comment{
+			Author:   rv.User.Login,
+			IsBot:    rv.User.Type == "Bot",
+			Body:     rv.Body,
+			CommitID: rv.CommitID,
+		})
+	}
+	return out
 }
 
 func pagedComments(ep string) ([]rawComment, error) {

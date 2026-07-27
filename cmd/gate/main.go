@@ -374,6 +374,7 @@ func cmdGate(args []string) error {
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
+	reviewsOptional := fs.Bool("reviews-optional", false, "treat an absent GitHub review decision as acceptable (do not escalate) — for the enforced-check context where gate's own review-consolidation is the review gate")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -388,7 +389,7 @@ func cmdGate(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, code, err := runGate(e, *repo, *pr, *grantID, *live, *modelBackend)
+	res, code, err := runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
 	if err != nil {
 		return err
 	}
@@ -400,7 +401,7 @@ func cmdGate(args []string) error {
 
 // runGate is one thin vertical pass: capability, evidence, verification,
 // reduction, outcome.
-func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string) (gateResult, int, error) {
+func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
 	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
@@ -428,7 +429,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	}
 
 	// The verifier ladder: three rungs, each a verdict artifact.
-	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, subject)
+	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, subject, reviewsOptional)
 	if err != nil {
 		return res, codeError, err
 	}
@@ -1447,7 +1448,7 @@ func runBacktest(repo, prs, floorBin string) error {
 		if err != nil {
 			return fmt.Errorf("backtest: bad pr %q", s)
 		}
-		res, _, err := runGate(e, repo, n, grantArt.ID, false, "local")
+		res, _, err := runGate(e, repo, n, grantArt.ID, false, "local", false)
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
 			continue
