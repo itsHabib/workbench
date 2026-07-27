@@ -104,6 +104,14 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, rev
 	}
 	v.Why = fmt.Sprintf("state=%s draft=%v mergeable=%s checks=%d green",
 		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
+	// Persist the policy choice in the verdict when it actually changed the
+	// outcome: a pass that accepted an ABSENT review decision only because
+	// reviews were optional must say so, or the audit log cannot tell an
+	// intentional acceptance from readiness wrongly passing an unverified PR
+	// (gate's decisions must be reconstructable from state alone).
+	if reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
+		v.Why += "; reviews-optional: absent GitHub review decision accepted"
+	}
 	art, err := Record(st, run, []string{viewEvidenceID}, v)
 	return art, subject, err
 }

@@ -648,6 +648,11 @@ func TestReadinessReviewsOptional(t *testing.T) {
 	if v.Decision != DecisionPass {
 		t.Fatalf("reviews-optional + absent review decision + green CI must pass, got %s (%s)", v.Decision, v.Why)
 	}
+	// The audit trail must record that the pass accepted an absent review only
+	// because reviews were optional — reconstructable from state alone.
+	if !strings.Contains(v.Why, "reviews-optional") {
+		t.Fatalf("reviews-optional pass must record the policy in Why, got %q", v.Why)
+	}
 
 	// reviewsOptional suppresses ONLY the absence escalation. An explicit
 	// non-APPROVED decision still BLOCKS — a human who requested changes is not
