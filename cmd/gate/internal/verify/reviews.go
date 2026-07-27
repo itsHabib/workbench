@@ -191,20 +191,31 @@ func cleanReviewSentinel(author, body, path string) bool {
 	if author != codexLogin || path != "" {
 		return false
 	}
-	trimmed := strings.TrimSpace(body)
-	for _, s := range cleanReviewSentinels {
-		if strings.HasPrefix(trimmed, s) {
-			return true
+	// Match codex's COMPLETE clean-pass format, not just a prefix — else a body
+	// that leads "Codex Review: Didn't find any major issues, but <concern>" would
+	// pass. codex's clean comment is: the sentinel + a short positive tail, then a
+	// fixed footer (the "Reviewed commit" line and the About-Codex <details>
+	// block). Strip the footer and require the remaining SUBSTANCE to be the
+	// sentinel plus only a short tail: a real concern appended after the lead-in
+	// runs well past that bound, so a mixed comment can never match.
+	substance := body
+	for _, marker := range []string{"Reviewed commit", "<details>"} {
+		if i := strings.Index(substance, marker); i >= 0 {
+			substance = substance[:i]
 		}
 	}
-	return false
+	substance = strings.TrimSpace(substance)
+	return strings.HasPrefix(substance, cleanReviewSentinel0) && len(substance) <= cleanSentinelMaxLen
 }
 
-const codexLogin = "chatgpt-codex-connector[bot]"
-
-var cleanReviewSentinels = []string{
-	"Codex Review: Didn't find any major issues", // codex clean-pass issue comment
-}
+const (
+	codexLogin           = "chatgpt-codex-connector[bot]"
+	cleanReviewSentinel0 = "Codex Review: Didn't find any major issues" // codex clean-pass issue comment
+	// cleanSentinelMaxLen bounds the clean substance (sentinel + a short positive
+	// tail, e.g. "... Can't wait for the next one!"). A concern appended after the
+	// lead-in pushes past it, so a mixed comment fails the match.
+	cleanSentinelMaxLen = 90
+)
 
 // staleComment reports whether a bot comment is a prior cycle's finding, not
 // evidence about the judged head. Bot comments layer across review cycles —
