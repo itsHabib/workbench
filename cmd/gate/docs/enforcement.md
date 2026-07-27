@@ -206,6 +206,17 @@ and why each choice is the safe one:
   an escalation, and per-run ephemeral state makes cross-run cycle counting
   meaningless. So the ceilings are opened wide and the check stands or falls on
   the ladder alone.
+- It runs with **`-reviews-optional`**. gate's readiness rung normally escalates
+  when GitHub reports no review decision — a signal a human judge resolves in the
+  driver context. But this check IS the enforced review gate (its
+  review-consolidation rung consolidates the bot panel), and the canary requires
+  no *separate* GitHub review, so GitHub reports an empty `reviewDecision` by
+  design. Without `-reviews-optional` a clean PR would escalate → park →
+  `gate=failure` forever, making the **green path unreachable in CI** and freezing
+  `main` once the check is required. The flag suppresses only the *absence*
+  escalation; an explicit `CHANGES_REQUESTED`/`REVIEW_REQUIRED` still **blocks**,
+  and empty CI still escalates. (Discovered in Phase-3 dry-observe: every canary
+  PR had an empty `reviewDecision`, so the escalation fired on all of them.)
 - It maps gate's exit code to the status **fail-closed**: `state=success` only
   for exit 0 (`would_merge`); block, park, and refuse all post `state=failure`;
   any other code posts `state=error`. If any earlier step fails (build, PR

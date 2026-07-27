@@ -686,7 +686,7 @@ func TestRunGateExpiredGrantPersistsGrantNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, err := runGate(e, "o/r", 7, expired.ID, false, "local")
+	res, code, err := runGate(e, "o/r", 7, expired.ID, false, "local", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestRunGateAbsentGrantPersistsGrantNeeded(t *testing.T) {
 	if _, err := capability.Mint(e.st, e.keyPath, "o/other", "merge", "T1", 3, "test", time.Hour, time.Now); err != nil {
 		t.Fatal(err)
 	}
-	res, code, err := runGate(e, "o/r", 7, "grt_does_not_exist", false, "local")
+	res, code, err := runGate(e, "o/r", 7, "grt_does_not_exist", false, "local", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -777,7 +777,7 @@ func TestRunGateScopeMismatchDoesNotPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, err := runGate(e, "o/r", 7, other.ID, false, "local")
+	res, code, err := runGate(e, "o/r", 7, other.ID, false, "local", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,16 @@ type prView struct {
 // Readiness is the deterministic gh read-back: draft state, CI rollup, and
 // mergeability. Producer class: code — its blocks are final; no judgment can
 // talk a red check green.
-func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (state.Artifact, Subject, error) {
+// reviewsOptional, when true, tells readiness that an ABSENT GitHub review
+// decision is acceptable — do not escalate on it. This is for the enforced-check
+// context (gate.yml as a required status check): the gate run is itself the
+// review gate (its review-consolidation rung consolidates the bot panel), and
+// the repo deliberately requires no separate GitHub review, so GitHub reports an
+// empty reviewDecision by design. Default false preserves the driver/judge
+// behavior, where an empty decision escalates for a human to confirm. It only
+// suppresses the ABSENCE escalation; an explicit non-APPROVED decision
+// (CHANGES_REQUESTED, REVIEW_REQUIRED) still blocks below.
+func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
 	a, err := st.Get(viewEvidenceID)
 	if err != nil {
 		return state.Artifact{}, subject, err
@@ -62,42 +71,7 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 		Tier:       "T0",
 		Confidence: 1.0,
 	}
-	var blocks []string
-	if pv.IsDraft {
-		blocks = append(blocks, "PR is a draft")
-	}
-	if pv.Mergeable == "CONFLICTING" {
-		blocks = append(blocks, "merge conflicts against base")
-	}
-	// UNKNOWN means GitHub is still computing mergeability — not ready is
-	// not green. Merged subjects are exempt: they have no live mergeability,
-	// and gating a historical PR (backtest) is about its recorded evidence.
-	if pv.State != "MERGED" && pv.Mergeable != "MERGEABLE" && pv.Mergeable != "CONFLICTING" {
-		blocks = append(blocks, "mergeability not yet determined ("+pv.Mergeable+")")
-	}
-	// The review decision is GitHub's own merge-policy readback. An explicit
-	// CHANGES_REQUESTED, a missing required approval, or any state this code
-	// doesn't know blocks — resolve it on GitHub, not past it. Empty is not a
-	// block but is not green either: it escalates below, alongside empty CI.
-	if pv.State != "MERGED" && pv.ReviewDecision != "" && pv.ReviewDecision != "APPROVED" {
-		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
-	}
-	// effectiveChecks counts only non-gate rollup entries: gate's own status is
-	// its prior verdict on this head, not independent CI signal, so it must not
-	// count toward "CI was recorded" below — otherwise a gate-only rollup would
-	// mask the absence of real CI and pass silently, the exact hazard the
-	// empty-signal escalation exists to catch.
-	var effectiveChecks int
-	for _, c := range pv.StatusCheckRollup {
-		if isOwnGateStatus(c) {
-			continue
-		}
-		effectiveChecks++
-		if c.green() {
-			continue
-		}
-		blocks = append(blocks, fmt.Sprintf("check not green: %s (%s)", checkName(c.Name, c.Context), c.status()))
-	}
+	blocks, effectiveChecks := readinessBlocks(pv)
 	if len(blocks) > 0 {
 		v.Decision = DecisionBlock
 		v.Why = fmt.Sprint(blocks)
@@ -119,7 +93,7 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 	if effectiveChecks == 0 {
 		escalations = append(escalations, "no non-gate CI checks recorded for this head")
 	}
-	if pv.State != "MERGED" && pv.ReviewDecision == "" {
+	if !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
 		escalations = append(escalations, "no review decision reported by GitHub")
 	}
 	if len(escalations) > 0 {
@@ -132,6 +106,48 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject) (st
 		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
 	art, err := Record(st, run, []string{viewEvidenceID}, v)
 	return art, subject, err
+}
+
+// readinessBlocks computes the hard blocks from a PR view and the count of
+// non-gate checks (effectiveChecks) the caller uses for the empty-CI escalation.
+// A block is final; the caller records a block verdict without escalating.
+func readinessBlocks(pv prView) (blocks []string, effectiveChecks int) {
+	if pv.IsDraft {
+		blocks = append(blocks, "PR is a draft")
+	}
+	if pv.Mergeable == "CONFLICTING" {
+		blocks = append(blocks, "merge conflicts against base")
+	}
+	// UNKNOWN means GitHub is still computing mergeability — not ready is
+	// not green. Merged subjects are exempt: they have no live mergeability,
+	// and gating a historical PR (backtest) is about its recorded evidence.
+	if pv.State != "MERGED" && pv.Mergeable != "MERGEABLE" && pv.Mergeable != "CONFLICTING" {
+		blocks = append(blocks, "mergeability not yet determined ("+pv.Mergeable+")")
+	}
+	// The review decision is GitHub's own merge-policy readback. An explicit
+	// CHANGES_REQUESTED, a missing required approval, or any state this code
+	// doesn't know blocks — resolve it on GitHub, not past it. Empty is not a
+	// block but is not green either: it escalates in the caller (unless reviews
+	// are optional there), alongside empty CI.
+	if pv.State != "MERGED" && pv.ReviewDecision != "" && pv.ReviewDecision != "APPROVED" {
+		blocks = append(blocks, "review decision: "+pv.ReviewDecision)
+	}
+	// effectiveChecks counts only non-gate rollup entries: gate's own status is
+	// its prior verdict on this head, not independent CI signal, so it must not
+	// count toward "CI was recorded" — otherwise a gate-only rollup would mask
+	// the absence of real CI and pass silently, the exact hazard the empty-signal
+	// escalation exists to catch.
+	for _, c := range pv.StatusCheckRollup {
+		if isOwnGateStatus(c) {
+			continue
+		}
+		effectiveChecks++
+		if c.green() {
+			continue
+		}
+		blocks = append(blocks, fmt.Sprintf("check not green: %s (%s)", checkName(c.Name, c.Context), c.status()))
+	}
+	return blocks, effectiveChecks
 }
 
 func checkName(name, context string) string {

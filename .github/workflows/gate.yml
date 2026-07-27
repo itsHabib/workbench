@@ -257,8 +257,14 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
+          # -reviews-optional: this check IS the enforced review gate (its
+          # review-consolidation rung consolidates the bot panel), and the repo
+          # requires no separate GitHub review, so an absent reviewDecision is
+          # expected — do not escalate on it, or the green path is unreachable in
+          # CI (a clean PR would park forever). readiness still BLOCKS on an
+          # explicit CHANGES_REQUESTED/REVIEW_REQUIRED.
           JSON=$(./gate gate -repo "$REPO" -pr "$PR" -grant "$GRT" -state "$TMP/state" -key "$TMP/keys" \
-            -model-backend cloud -floor "$PWD/triage-floor")
+            -model-backend cloud -reviews-optional -floor "$PWD/triage-floor")
           CODE=$?
           set -e
           # Persist the raw outcome for the status-posting step and the summary.
