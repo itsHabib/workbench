@@ -63,6 +63,11 @@ const (
 	// so serve reports it as an HTTP failure — Slack must retry, not treat the
 	// callback as acknowledged.
 	codeGateError = 4
+
+	// resolveTimeout bounds the detached gate resolve so a hung subprocess cannot
+	// pin a goroutine forever. It sits under main's 30s WriteTimeout so the
+	// handler still has room to write gate's outcome after resolve returns.
+	resolveTimeout = 25 * time.Second
 )
 
 // GrantFinder resolves a parked escalation id to the grant its run parked under.
@@ -108,16 +113,22 @@ func New(cfg Config) *Server {
 	}
 }
 
-// escLocks serializes callbacks per escalation id. The HTTP transport serves
-// each callback in its own goroutine, so two taps for the SAME escalation — a
-// double-tap, or a Slack retry racing the first — can arrive concurrently. Gate's
-// open-check and its terminal append are not one atomic step, so without this
-// both could pass the open-check before either records an action and both would
-// resolve one park. This holds one lock per escalation across the whole
-// lookup→resolve, so the second waits and then finds the park already closed
-// (refused, not double-applied). Different escalations never contend. Entries
-// are not reclaimed: they are bounded by the escalations a run ever parks, so
-// the growth is negligible for this ingress.
+// escLocks serializes callbacks per escalation id WITHIN this process. The HTTP
+// transport serves each callback in its own goroutine, so two taps for the SAME
+// escalation — a double-tap, or a Slack retry racing the first — can arrive
+// concurrently. Gate's open-check and its terminal append are not one atomic
+// step, so without this both could pass the open-check before either records an
+// action and both would resolve one park. This holds one lock per escalation
+// across the whole lookup→resolve, so the second waits and then finds the park
+// already closed (refused, not double-applied). Different escalations never
+// contend. Entries are not reclaimed: they are bounded by the escalations a run
+// ever parks, so the growth is negligible for this single-process ingress.
+//
+// SCOPE: this covers the Phase-1 deployment — ONE serve process behind one
+// tunnel. It does NOT serialize a second serve process on the same -state, nor a
+// CLI `escalate resolve` racing an HTTP callback; that race predates serve (two
+// parallel CLI resolves collide identically) and its durable fix is an atomic
+// compare-and-resolve in gate, tracked in FOLLOWUPS.md.
 type escLocks struct {
 	mu sync.Mutex
 	m  map[string]*sync.Mutex
@@ -165,7 +176,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Serialize everything below per escalation id: the lookup and resolve for one
 	// escalation run under one lock, so concurrent taps for it can't both act.
 	defer s.locks.lock(d.Escalation)()
-	grant, err := s.findGrant(r.Context(), d.Escalation)
+	// Detach the authoritative write from the request lifecycle. The tap is
+	// authenticated and we are committed to acting on it, so a client / Slack /
+	// tunnel disconnect must NOT cancel r.Context() and kill `gate resolve`
+	// mid-append — gate writes the judgment, verdict, action, and resolution
+	// separately, and a half-written transaction (a judgment with no terminal
+	// action) would let a retry double-apply. A bounded independent context caps
+	// a hung gate without letting the transport abort a decision in flight.
+	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
+	defer cancel()
+	grant, err := s.findGrant(ctx, d.Escalation)
 	if errors.Is(err, ErrNotParked) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -175,7 +195,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Grant = grant
-	out, code, err := s.ingest.Resolve(r.Context(), d)
+	out, code, err := s.ingest.Resolve(ctx, d)
 	if err != nil {
 		http.Error(w, "resolve: "+err.Error(), http.StatusBadGateway)
 		return
@@ -289,17 +309,25 @@ func verdictWord(verdict string) string {
 	return "approved"
 }
 
-// slackWho picks the most human of the verified identity fields, preferring a
-// handle over the opaque user id. It is the ONLY source of `who`: the resolution
-// records who Slack said tapped the button, not who a payload claimed to be.
+// slackWho renders the verified identity for the resolution's `who`, keeping
+// BOTH the immutable Slack user id and the human handle when it has them:
+// "@handle (Uxxxx)". The id is the only stable, unique identifier — a handle can
+// be renamed or shared — so it must be recorded, not just used as a fallback;
+// the handle is kept because a bare id is unreadable in an audit. It is the ONLY
+// source of `who`: the resolution records who Slack said tapped the button, not
+// who a payload claimed to be.
 func slackWho(username, name, id string) string {
-	if username != "" {
-		return "@" + username
+	handle := username
+	if handle == "" {
+		handle = name
 	}
-	if name != "" {
-		return "@" + name
+	if handle == "" {
+		return id
 	}
-	return id
+	if id == "" {
+		return "@" + handle
+	}
+	return "@" + handle + " (" + id + ")"
 }
 
 // writeOutcome relays gate's result once gate has actually run: gate's JSON body

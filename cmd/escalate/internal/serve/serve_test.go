@@ -156,8 +156,8 @@ func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 		"-escalation", "esc_abc",
 		"-grant", "grt_live",
 		"-decision", "pass",
-		"-why", "approved in Slack by @michael",
-		"-who", "@michael",
+		"-why", "approved in Slack by @michael (U1)",
+		"-who", "@michael (U1)",
 	}
 	if !reflect.DeepEqual(cr.calls[0], want) {
 		t.Fatalf("argv mismatch:\n got=%v\nwant=%v", cr.calls[0], want)
@@ -208,8 +208,8 @@ func TestServeHTTPWhoFromVerifiedIdentity(t *testing.T) {
 	}
 	argv := cr.calls[0]
 	who := argv[len(argv)-1]
-	if who != "@realuser" {
-		t.Fatalf("who = %q, want @realuser (from verified identity, not the payload's who field)", who)
+	if who != "@realuser (U9)" {
+		t.Fatalf("who = %q, want @realuser (U9) — from the verified identity, not the payload's who field", who)
 	}
 	if strings.Contains(strings.Join(argv, " "), "attacker") {
 		t.Fatalf("a client-supplied who must never reach gate: %v", argv)

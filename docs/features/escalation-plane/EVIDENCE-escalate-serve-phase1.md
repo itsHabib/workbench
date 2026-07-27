@@ -49,14 +49,15 @@ HTTP 200
   "decision": "pass",
   "tier": "T0",
   "outcome": "would_merge",
-  "why": "judgment: approved in Slack by @michael",
+  "why": "judgment: approved in Slack by @michael (U1)",
   "action": "gh pr merge 126 -R itsHabib/ship --squash --delete-branch --match-head-commit abc123",
   "head_sha": "abc123"
 }
 ```
-`who` = `@michael` came from the **verified** Slack identity in the signed
-payload — not from any client-settable field. A top-level `"who":"attacker"`
-smuggled into the JSON is ignored by construction (see the unit test).
+`who` = `@michael (U1)` came from the **verified** Slack identity in the signed
+payload — the mutable handle *and* the immutable Slack user id, never a
+client-settable field. A top-level `"who":"attacker"` smuggled into the JSON is
+ignored by construction (see the unit test).
 
 ### (4) REPLAY the same tap — refused, not double-applied
 ```
@@ -80,7 +81,7 @@ tap B → HTTP 409  escalation is not currently parked
 ```
 The per-escalation lock serializes the two; the winner resolves and the loser
 finds the park already closed. The log recorded **exactly one** `resolution`
-(`who:"@michael"`) — the concurrency the HTTP transport introduces cannot
+(`who:"@michael (U1)"`) — the concurrency the HTTP transport introduces cannot
 double-apply. (Added after codex's P1 review of the first push.)
 
 ## The loop closed with provenance
@@ -91,7 +92,7 @@ artifact was appended, carrying the verified `who`:
 ```json
 {"kind":"resolution","run":"run_b2637869b4cd6d18",
  "parents":["esc_93b8e2b0c7be74f9","jdg_37a5c41119365220"],
- "body":{"decision":"pass","who":"@michael","at":"2026-07-27T04:41:29Z","judgment_id":"jdg_37a5c41119365220"}}
+ "body":{"decision":"pass","who":"@michael (U1)","at":"2026-07-27T04:41:29Z","judgment_id":"jdg_37a5c41119365220"}}
 ```
 
 `gate audit` → **chain intact**.

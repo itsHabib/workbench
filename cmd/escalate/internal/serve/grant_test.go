@@ -44,8 +44,9 @@ func TestSlackWhoPrefersHandle(t *testing.T) {
 	cases := []struct {
 		username, name, id, want string
 	}{
-		{"michael", "Michael H", "U1", "@michael"},
-		{"", "Michael H", "U1", "@Michael H"},
+		{"michael", "Michael H", "U1", "@michael (U1)"},
+		{"", "Michael H", "U1", "@Michael H (U1)"},
+		{"michael", "Michael H", "", "@michael"},
 		{"", "", "U1", "U1"},
 		{"", "", "", ""},
 	}
