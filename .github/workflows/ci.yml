@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel a PR's superseded CI runs when a new commit lands: without this a
+# rapid push loop spawns O(pushes) CI runs, each of which fans out a gate run
+# (see .github/workflows/gate.yml). One live run per PR (or per main-push ref)
+# caps that fan-out at the source. Keyed by ref so main pushes serialize too.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # One module, so `check` runs the whole tree: a shared `contracts` change must
 # retest every consumer, and module-wide `go test` is faster + safer than
 # path-filtering that could green a tool whose contract shifted under it.

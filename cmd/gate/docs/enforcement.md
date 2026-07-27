@@ -150,10 +150,24 @@ and why each choice is the safe one:
   pending, queued, in-progress — as a block (fail closed); reading mid-flight
   CI would block spuriously. On timeout it proceeds anyway, which can only make
   gate block, never pass.
+- It **refuses any head SHA that backs more than one open PR**, and the check is
+  **unconditional** — it runs whether the event named a same-repo PR or this is a
+  fork PR. The `gate` status is commit-scoped, so gating one PR when a second
+  shares the head could stamp the easier PR's green onto the other (a
+  review-policy-differential bypass). An ambiguous head posts nothing → the
+  required context is absent → branch protection blocks all of them (fail closed).
+- It is bounded by a **`concurrency` group keyed on the head branch** with
+  `cancel-in-progress`, and it **skips CI runs that were themselves cancelled**.
+  Each run makes real model calls, so without this a PR force-pushed in a loop
+  would fan out one paid gate run per push; the concurrency collapse caps that at
+  one in-flight run per branch (`ci.yml` carries the matching group so superseded
+  CI runs cancel at the source). Cancelling a superseded gate run is safe: it
+  leaves the required context absent until the surviving run posts — fail closed.
 - It runs gate as a **dry run (never `-live`)** against an **ephemeral,
-  per-run state + key dir** (`mktemp -d`), mirroring the backtest
-  `newEphemeralEnv` precedent. No signing secret is stored in CI: the grant is
-  minted and spent inside the throwaway dir and erased with it.
+  per-run state + key dir** (`mktemp -d`, minted with `-init` since the dir is
+  fresh each run), mirroring the backtest `newEphemeralEnv` precedent. No signing
+  secret is stored in CI: the grant is minted and spent inside the throwaway dir
+  and erased with it.
 - The grant is minted `-max-tier T3 -max-cycles 0`. The check is meant to
   reflect gate's **ladder verdict** (block / escalate / pass), not a tier or
   cycle ceiling: a CI runner has no operator to re-mint a wider grant or judge
