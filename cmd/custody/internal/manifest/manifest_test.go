@@ -192,7 +192,7 @@ func TestKeyName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateKeyName(tc.key)
+			err := ValidateKeyName(tc.key)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}

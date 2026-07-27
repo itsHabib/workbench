@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/itsHabib/workbench/cmd/custody/internal/manifest"
 )
 
 // SchemaVersion pins the rollup artifact shape so a downstream reader can
@@ -32,9 +34,11 @@ const maxDeniedTargets = 10
 // grant header) so refusal pressure is visible without inventing a key name.
 const noKey = "(none)"
 
-// overflowKey absorbs keys past maxKeys. Logs written before serve stopped
-// stamping unresolved prefixes can carry attacker-chosen key names; the cap
-// keeps the artifact bounded no matter what the log holds.
+// overflowKey absorbs keys past maxKeys — and any historical key name outside
+// the manifest.ValidateKeyName charset (logs written before serve stopped
+// stamping unresolved prefixes can carry attacker-chosen names, including
+// literal "(none)"/"(other)"). Because a VALID key name can never contain a
+// parenthesis, real traffic can never merge into a synthetic bucket.
 const overflowKey = "(other)"
 
 // maxKeys bounds the distinct key buckets in one rollup INCLUDING the overflow
@@ -43,8 +47,10 @@ const overflowKey = "(other)"
 const maxKeys = 100
 
 // maxMethods and maxQueryKeys bound the per-key method and denied-query-key
-// maps the same way: both strings are client-chosen tokens, so without a cap a
-// loopback prober could grow the artifact without bound.
+// maps: both strings are client-chosen tokens, so without a cap a loopback
+// prober could grow the artifact without bound. Past-cap entries increment a
+// structural overflow COUNTER, never an in-map marker — a real token could
+// spell any marker string, so overflow must live outside the map's namespace.
 const (
 	maxMethods   = 10
 	maxQueryKeys = 20
@@ -97,14 +103,16 @@ type Target struct {
 
 // KeySummary aggregates every record that resolved to one manifest key.
 type KeySummary struct {
-	Total           int            `json:"total"`
-	ByVerdict       map[string]int `json:"by_verdict"`
-	ByMethod        map[string]int `json:"by_method"`
-	UpstreamStatus  map[string]int `json:"upstream_status,omitempty"`
-	Latency         Latency        `json:"latency"`
-	DistinctGrants  int            `json:"distinct_grants"`
-	DeniedTargets   []Target       `json:"denied_targets,omitempty"`
-	DeniedQueryKeys map[string]int `json:"denied_query_keys,omitempty"`
+	Total            int            `json:"total"`
+	ByVerdict        map[string]int `json:"by_verdict"`
+	ByMethod         map[string]int `json:"by_method"`
+	MethodOverflow   int            `json:"method_overflow,omitempty"`
+	UpstreamStatus   map[string]int `json:"upstream_status,omitempty"`
+	Latency          Latency        `json:"latency"`
+	DistinctGrants   int            `json:"distinct_grants"`
+	DeniedTargets    []Target       `json:"denied_targets,omitempty"`
+	DeniedQueryKeys  map[string]int `json:"denied_query_keys,omitempty"`
+	QueryKeyOverflow int            `json:"denied_query_key_overflow,omitempty"`
 
 	latencies []int64
 	grants    map[string]struct{}
@@ -253,16 +261,7 @@ func (s *Summary) add(rec Record) {
 	s.Total++
 	s.ByVerdict[rec.Verdict]++
 	s.stretchWindow(rec)
-	key := rec.Key
-	if key == "" {
-		key = noKey
-	}
-	// Both synthetic buckets always insert — "(none)" is unknown-key pressure
-	// and must never hide inside "(other)" — so real keys cap at maxKeys-2 and
-	// the total, sentinels included, never exceeds maxKeys.
-	if key != noKey && key != overflowKey && s.Keys[key] == nil && len(s.Keys) >= maxKeys-2 {
-		key = overflowKey
-	}
+	key := bucketKey(s.Keys, rec.Key)
 	ks := s.Keys[key]
 	if ks == nil {
 		ks = &KeySummary{
@@ -274,6 +273,25 @@ func (s *Summary) add(rec Record) {
 		s.Keys[key] = ks
 	}
 	ks.add(rec)
+}
+
+// bucketKey maps a record's key to its summary bucket. An empty key never
+// resolved ("(none)" — unknown-key pressure, always its own bucket); a name
+// outside the manifest charset is historical junk a current manifest could not
+// declare and folds into "(other)", which also absorbs keys past the cap. Both
+// synthetic buckets always insert, so real keys cap at maxKeys-2 and the
+// total, sentinels included, never exceeds maxKeys.
+func bucketKey(keys map[string]*KeySummary, key string) string {
+	if key == "" {
+		return noKey
+	}
+	if manifest.ValidateKeyName(key) != nil {
+		return overflowKey
+	}
+	if keys[key] == nil && len(keys) >= maxKeys-2 {
+		return overflowKey
+	}
+	return key
 }
 
 // stretchWindow widens the observed span to include rec, comparing parsed
@@ -293,7 +311,9 @@ func (s *Summary) stretchWindow(rec Record) {
 func (k *KeySummary) add(rec Record) {
 	k.Total++
 	k.ByVerdict[rec.Verdict]++
-	k.ByMethod[bounded(k.ByMethod, rec.Method, maxMethods)]++
+	if counted(k.ByMethod, rec.Method, maxMethods) {
+		k.MethodOverflow++
+	}
 	k.latencies = append(k.latencies, rec.LatencyMs)
 	if rec.GrantID != "" {
 		k.grants[rec.GrantID] = struct{}{}
@@ -318,21 +338,21 @@ func (k *KeySummary) add(rec Record) {
 		if k.DeniedQueryKeys == nil {
 			k.DeniedQueryKeys = map[string]int{}
 		}
-		k.DeniedQueryKeys[bounded(k.DeniedQueryKeys, q, maxQueryKeys)]++
+		if counted(k.DeniedQueryKeys, q, maxQueryKeys) {
+			k.QueryKeyOverflow++
+		}
 	}
 }
 
-// bounded returns name, or the overflow bucket once counts holds limit-1
-// other entries — every count map in the artifact stays bounded no matter how
-// many distinct client-chosen tokens the log carries.
-func bounded(counts map[string]int, name string, limit int) string {
-	if _, ok := counts[name]; ok {
-		return name
+// counted increments counts[name], or reports overflow when name is new and
+// the map is at limit — the caller tracks past-cap volume in a separate
+// counter so no token string can ever collide with an overflow marker.
+func counted(counts map[string]int, name string, limit int) (overflow bool) {
+	if _, ok := counts[name]; !ok && len(counts) >= limit {
+		return true
 	}
-	if len(counts) >= limit-1 && name != overflowKey {
-		return overflowKey
-	}
-	return name
+	counts[name]++
+	return false
 }
 
 // finish derives the ordered/derived fields once all records are folded in.

@@ -254,24 +254,46 @@ func TestMethodAndQueryKeyCardinalityCapped(t *testing.T) {
 		lines = append(lines, line(t, map[string]any{"key": "jira", "method": fmt.Sprintf("M%02d", i)}))
 	}
 	for i := 0; i < maxQueryKeys+5; i++ {
-		lines = append(lines, line(t, map[string]any{"key": "jira", "verdict": "denied", "query_keys": []string{fmt.Sprintf("q%02d", i)}}))
+		lines = append(lines, line(t, map[string]any{"key": "jira", "verdict": "denied", "method": "M00", "query_keys": []string{fmt.Sprintf("q%02d", i)}}))
 	}
 	sum, err := Aggregate(strings.NewReader(strings.Join(lines, "\n")), 0)
 	if err != nil {
 		t.Fatalf("Aggregate: %v", err)
 	}
 	jira := sum.Keys["jira"]
-	if len(jira.ByMethod) > maxMethods {
-		t.Fatalf("len(ByMethod) = %d, want at most %d", len(jira.ByMethod), maxMethods)
+	if len(jira.ByMethod) != maxMethods {
+		t.Fatalf("len(ByMethod) = %d, want the cap %d", len(jira.ByMethod), maxMethods)
 	}
-	if jira.ByMethod[overflowKey] == 0 {
-		t.Fatal("past-cap methods should fold into the overflow bucket")
+	if jira.MethodOverflow != 5 {
+		t.Fatalf("MethodOverflow = %d, want the 5 past-cap records counted structurally", jira.MethodOverflow)
 	}
-	if len(jira.DeniedQueryKeys) > maxQueryKeys {
-		t.Fatalf("len(DeniedQueryKeys) = %d, want at most %d", len(jira.DeniedQueryKeys), maxQueryKeys)
+	if len(jira.DeniedQueryKeys) != maxQueryKeys {
+		t.Fatalf("len(DeniedQueryKeys) = %d, want the cap %d", len(jira.DeniedQueryKeys), maxQueryKeys)
 	}
-	if jira.DeniedQueryKeys[overflowKey] == 0 {
-		t.Fatal("past-cap query keys should fold into the overflow bucket")
+	if jira.QueryKeyOverflow != 5 {
+		t.Fatalf("QueryKeyOverflow = %d, want the 5 past-cap keys counted structurally", jira.QueryKeyOverflow)
+	}
+}
+
+func TestHistoricalSentinelNamedKeysFoldIntoOverflow(t *testing.T) {
+	// A pre-validation log can carry key names a current manifest could never
+	// declare — including literal "(none)"/"(other)". Those must fold into the
+	// overflow bucket, never masquerade as (or pollute) a synthetic bucket.
+	log := strings.Join([]string{
+		line(t, map[string]any{"key": "(none)", "verdict": "refused"}),
+		line(t, map[string]any{"key": "(other)", "verdict": "refused"}),
+		line(t, map[string]any{"key": "Probe Key!", "verdict": "refused"}),
+		line(t, map[string]any{"verdict": "refused"}), // genuinely unresolved
+	}, "\n")
+	sum, err := Aggregate(strings.NewReader(log), 0)
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if got := sum.Keys[overflowKey]; got == nil || got.Total != 3 {
+		t.Fatalf("overflow bucket = %+v, want the 3 invalid-named historical keys", got)
+	}
+	if got := sum.Keys[noKey]; got == nil || got.Total != 1 {
+		t.Fatalf("(none) bucket = %+v, want only the genuinely unresolved record", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -50,25 +51,31 @@ func cmdLog(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(sum)
 	}
-	renderRollup(os.Stdout, sum)
-	return nil
+	return renderRollup(os.Stdout, sum)
 }
 
 // renderRollup prints the human view of a rollup: one header line, the verdict
-// mix, then a block per key in sorted order.
-func renderRollup(w io.Writer, sum *rollup.Summary) {
-	fmt.Fprintf(w, "custody log rollup — %d requests", sum.Total)
+// mix, then a block per key in sorted order. Writes go through one buffered
+// writer, which records the first write error for Flush to surface — a closed
+// or full stdout must fail the command, not truncate the report silently.
+func renderRollup(w io.Writer, sum *rollup.Summary) error {
+	bw := bufio.NewWriter(w)
+	fmt.Fprintf(bw, "custody log rollup — %d requests", sum.Total)
 	if sum.Total > 0 {
-		fmt.Fprintf(w, "  %s → %s", sum.Window.From, sum.Window.To)
+		fmt.Fprintf(bw, "  %s → %s", sum.Window.From, sum.Window.To)
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(bw)
 	if sum.Malformed > 0 || sum.UnsupportedSchema > 0 {
-		fmt.Fprintf(w, "  skipped: %d malformed, %d unsupported-schema lines\n", sum.Malformed, sum.UnsupportedSchema)
+		fmt.Fprintf(bw, "  skipped: %d malformed, %d unsupported-schema lines\n", sum.Malformed, sum.UnsupportedSchema)
 	}
-	fmt.Fprintf(w, "  verdicts: %s\n", countLine(sum.ByVerdict))
+	fmt.Fprintf(bw, "  verdicts: %s\n", countLine(sum.ByVerdict))
 	for _, key := range sortedKeys(sum.Keys) {
-		renderKey(w, key, sum.Keys[key])
+		renderKey(bw, key, sum.Keys[key])
 	}
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("log rollup: write report: %w", err)
+	}
+	return nil
 }
 
 // renderKey prints one key's block.
@@ -76,6 +83,9 @@ func renderKey(w io.Writer, key string, ks *rollup.KeySummary) {
 	fmt.Fprintf(w, "  %s: %d req · %s · grants %d · p50 %dms p95 %dms max %dms\n",
 		key, ks.Total, countLine(ks.ByVerdict), ks.DistinctGrants,
 		ks.Latency.P50, ks.Latency.P95, ks.Latency.Max)
+	if ks.MethodOverflow > 0 {
+		fmt.Fprintf(w, "    methods past cap: %d req\n", ks.MethodOverflow)
+	}
 	if len(ks.UpstreamStatus) > 0 {
 		fmt.Fprintf(w, "    upstream: %s\n", countLine(ks.UpstreamStatus))
 	}
@@ -84,6 +94,9 @@ func renderKey(w io.Writer, key string, ks *rollup.KeySummary) {
 	}
 	if len(ks.DeniedQueryKeys) > 0 {
 		fmt.Fprintf(w, "    denied query keys: %s\n", countLine(ks.DeniedQueryKeys))
+	}
+	if ks.QueryKeyOverflow > 0 {
+		fmt.Fprintf(w, "    denied query keys past cap: %d\n", ks.QueryKeyOverflow)
 	}
 }
 

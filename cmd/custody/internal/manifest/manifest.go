@@ -155,7 +155,7 @@ func (m *Manifest) validate() error {
 		return fmt.Errorf("%w: keys", ErrMissingField)
 	}
 	for _, name := range sortedKeys(m.Keys) {
-		if err := validateKeyName(name); err != nil {
+		if err := ValidateKeyName(name); err != nil {
 			return err
 		}
 		k := m.Keys[name]
@@ -166,11 +166,11 @@ func (m *Manifest) validate() error {
 	return nil
 }
 
-// validateKeyName pins key names to a conservative charset. A key name is a
+// ValidateKeyName pins key names to a conservative charset. A key name is a
 // URL path prefix on the proxy, so anything outside lowercase alphanumerics
 // plus ._- invites routing ambiguity — and the restriction guarantees a name
 // can never collide with a synthetic rollup bucket like "(none)"/"(other)".
-func validateKeyName(name string) error {
+func ValidateKeyName(name string) error {
 	if name == "" || len(name) > 64 {
 		return fmt.Errorf("%w: key name must be 1-64 characters", ErrBadKeyName)
 	}
