@@ -1,9 +1,13 @@
 package driverstate
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+	"unicode"
 )
 
 // ErrUnknownVersion is the version-gate failure: the event declares a contract
@@ -76,9 +80,128 @@ func ValidateBody(kind Kind, body json.RawMessage) error {
 		return validateStreamMerged(body)
 	case KindReviewCycle:
 		return validateReviewCycle(body)
+	case KindClosureFacts:
+		return validateClosureFacts(body)
+	case KindIntervention:
+		return validateIntervention(body)
 	default:
 		return nil
 	}
+}
+
+func validateClosureFacts(body json.RawMessage) error {
+	var b ClosureFactsBody
+	if err := unmarshalBody(KindClosureFacts, body, &b); err != nil {
+		return err
+	}
+	var rawFields map[string]json.RawMessage
+	if err := unmarshalBody(KindClosureFacts, body, &rawFields); err != nil {
+		return err
+	}
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"task_ref", b.TaskRef}, {"seat", b.Seat}, {"harness", b.Harness},
+		{"model", b.Model}, {"provider", b.Provider}, {"effort", b.Effort},
+		{"review_producer", b.ReviewProducer}, {"catalog_revision", b.CatalogRevision},
+		{"review_artifact_id", b.ReviewArtifactID},
+		{"review_artifact_digest", b.ReviewArtifactDigest},
+		{"review_head_sha", b.ReviewHeadSHA}, {"ship_run_ref", b.ShipRunRef},
+		{"gate_run_ref", b.GateRunRef},
+	}
+	present := 0
+	for _, field := range values {
+		if _, exists := rawFields[field.name]; !exists {
+			continue
+		}
+		present++
+		if !validClosureString(field.value) {
+			return fmt.Errorf("driverstate: closure_facts body: %s is malformed", field.name)
+		}
+	}
+	if present == 0 {
+		return errors.New("driverstate: closure_facts body: at least one fact is required")
+	}
+	return validateClosureFactFormats(b)
+}
+
+func validClosureString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed != "" && trimmed == value && len(value) <= 256
+}
+
+func validateClosureFactFormats(b ClosureFactsBody) error {
+	switch {
+	case b.TaskRef != "" && !strings.HasPrefix(b.TaskRef, "tsk_"):
+		return errors.New("driverstate: closure_facts body: task_ref must start with tsk_")
+	case b.ShipRunRef != "" && !strings.HasPrefix(b.ShipRunRef, "drv_"):
+		return errors.New("driverstate: closure_facts body: ship_run_ref must start with drv_")
+	case b.GateRunRef != "" && !strings.HasPrefix(b.GateRunRef, "run_"):
+		return errors.New("driverstate: closure_facts body: gate_run_ref must start with run_")
+	case b.ReviewHeadSHA != "" && !validHex(b.ReviewHeadSHA, 40):
+		return errors.New("driverstate: closure_facts body: review_head_sha must be 40 lowercase hexadecimal characters")
+	case b.ReviewArtifactDigest != "" && !validDigest(b.ReviewArtifactDigest):
+		return errors.New("driverstate: closure_facts body: review_artifact_digest must be 64 lowercase hexadecimal characters")
+	case b.CatalogRevision != "" && !validCatalogRevision(b.CatalogRevision):
+		return errors.New("driverstate: closure_facts body: catalog_revision must be a full source commit SHA or sha256:<64 lowercase hexadecimal characters>")
+	}
+	return nil
+}
+
+func validateIntervention(body json.RawMessage) error {
+	var b InterventionBody
+	if err := unmarshalBody(KindIntervention, body, &b); err != nil {
+		return err
+	}
+	if _, err := time.Parse(time.RFC3339, b.Time); err != nil {
+		return errors.New("driverstate: intervention body: time must be RFC3339")
+	}
+	if b.Kind != InterventionGenuineJudgment && b.Kind != InterventionMechanismRepair {
+		return fmt.Errorf("driverstate: intervention body: unknown kind %q", b.Kind)
+	}
+	if !validReasonCode(b.ReasonCode) {
+		return errors.New("driverstate: intervention body: reason_code must be a lowercase hyphenated identifier")
+	}
+	if strings.TrimSpace(b.Actor) == "" || len(b.Actor) > 256 {
+		return errors.New("driverstate: intervention body: actor is required")
+	}
+	if b.Kind == InterventionGenuineJudgment && strings.TrimSpace(b.QuestionRef) == "" {
+		return errors.New("driverstate: intervention body: genuine-judgment requires question_ref")
+	}
+	return nil
+}
+
+func validReasonCode(value string) bool {
+	if value == "" || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsLower(r) || unicode.IsDigit(r) || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validDigest(value string) bool {
+	return validHex(value, 64)
+}
+
+func validCatalogRevision(value string) bool {
+	if strings.HasPrefix(value, "sha256:") {
+		return validHex(value[len("sha256:"):], 64)
+	}
+	return validHex(value, 40) || validHex(value, 64)
+}
+
+func validHex(value string, size int) bool {
+	if len(value) != size || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func unmarshalBody(kind Kind, body json.RawMessage, into any) error {

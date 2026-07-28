@@ -394,6 +394,12 @@ func streamStatus(events []Event, stream string) string {
 // next status or ErrIllegalTransition{From, Event}.
 func applyStream(cur string, e Event) (string, error) {
 	illegal := ErrIllegalTransition{From: cur, Event: string(e.Kind)}
+	if passivePROpenKind(e.Kind) {
+		if cur == dsc.StatusPROpen {
+			return dsc.StatusPROpen, nil
+		}
+		return "", illegal
+	}
 	switch e.Kind {
 	case dsc.KindStreamDispatched:
 		if cur == dsc.StatusPending || cur == dsc.StatusFailed {
@@ -422,10 +428,6 @@ func applyStream(cur string, e Event) (string, error) {
 		if cur == dsc.StatusLanded {
 			return dsc.StatusPROpen, nil
 		}
-	case dsc.KindReviewCycle:
-		if cur == dsc.StatusPROpen {
-			return dsc.StatusPROpen, nil
-		}
 	case dsc.KindStreamMerged:
 		if cur == dsc.StatusPROpen {
 			return dsc.StatusMerged, nil
@@ -436,6 +438,10 @@ func applyStream(cur string, e Event) (string, error) {
 		}
 	}
 	return "", illegal
+}
+
+func passivePROpenKind(kind dsc.Kind) bool {
+	return kind == dsc.KindReviewCycle || kind == dsc.KindClosureFacts || kind == dsc.KindIntervention
 }
 
 // checkSeq enforces append-only monotone stream_attempt seq per stream: a new

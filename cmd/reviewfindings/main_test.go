@@ -34,20 +34,38 @@ func (f fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, er
 func TestProduceExactHeadArtifact(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	item := reviewComment(head)
+	opts := validOptions(t, head)
+	opts.catalogRevision = strings.Repeat("c", 40)
 	artifact, err := produce(context.Background(), fakeRunner{
 		pr: pullRequest{HeadRefOID: head, State: "OPEN"}, comments: []comment{item},
-	}, validOptions(t, head), time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC))
+	}, opts, time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if artifact.Subject.HeadSHA != head || artifact.Producer.Harness != "codex" {
 		t.Fatalf("unexpected artifact identity: %+v", artifact)
 	}
+	if artifact.Producer.CatalogRevision != opts.catalogRevision {
+		t.Fatalf("catalog revision = %q, want %q", artifact.Producer.CatalogRevision, opts.catalogRevision)
+	}
 	if !strings.HasPrefix(artifact.ArtifactID, "rf_") {
 		t.Fatalf("artifact id = %q", artifact.ArtifactID)
 	}
 	if err := reviewfindings.Validate(artifact); err != nil {
 		t.Fatalf("artifact rejected by shared contract: %v", err)
+	}
+}
+
+func TestProduceRefusesMalformedCatalogRevision(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	opts := validOptions(t, head)
+	opts.catalogRevision = "dirty"
+	_, err := produce(context.Background(), fakeRunner{
+		pr:       pullRequest{HeadRefOID: head, State: "OPEN"},
+		comments: []comment{reviewComment(head)},
+	}, opts, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "catalog_revision") {
+		t.Fatalf("produce() error = %v, want catalog revision refusal", err)
 	}
 }
 

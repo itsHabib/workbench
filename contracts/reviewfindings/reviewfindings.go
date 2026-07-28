@@ -48,9 +48,10 @@ type Subject struct {
 
 // Producer records the harness-native implementation that emitted the artifact.
 type Producer struct {
-	ID          string    `json:"id"`
-	Harness     string    `json:"harness"`
-	GeneratedAt time.Time `json:"generated_at"`
+	ID              string    `json:"id"`
+	Harness         string    `json:"harness"`
+	CatalogRevision string    `json:"catalog_revision,omitempty"`
+	GeneratedAt     time.Time `json:"generated_at"`
 }
 
 // Panel records requested, completed, and explicitly missing reviewers.
@@ -87,10 +88,31 @@ func Decode(data []byte) (Artifact, error) {
 	if err := json.Unmarshal(data, &artifact); err != nil {
 		return Artifact{}, fmt.Errorf("findings file is not valid JSON: %w", err)
 	}
+	if err := validateDecodedCatalogRevision(data); err != nil {
+		return Artifact{}, err
+	}
 	if err := Validate(artifact); err != nil {
 		return Artifact{}, err
 	}
 	return artifact, nil
+}
+
+func validateDecodedCatalogRevision(data []byte) error {
+	var document struct {
+		Producer map[string]json.RawMessage `json:"producer"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil
+	}
+	raw, present := document.Producer["catalog_revision"]
+	if !present {
+		return nil
+	}
+	var revision string
+	if err := json.Unmarshal(raw, &revision); err != nil || !validCatalogRevision(revision) {
+		return errors.New("producer catalog_revision must be a full source commit SHA or sha256:<64 lowercase hexadecimal characters>")
+	}
+	return nil
 }
 
 // Validate enforces the shared transport and consistency laws.
@@ -123,6 +145,9 @@ func Validate(artifact Artifact) error {
 	}
 	if err := validateBounded("producer harness", artifact.Producer.Harness, 128); err != nil {
 		return err
+	}
+	if artifact.Producer.CatalogRevision != "" && !validCatalogRevision(artifact.Producer.CatalogRevision) {
+		return errors.New("producer catalog_revision must be a full source commit SHA or sha256:<64 lowercase hexadecimal characters>")
 	}
 	if err := validatePanel(artifact.Panel); err != nil {
 		return err
@@ -292,6 +317,21 @@ func validRepo(repo string) bool {
 
 func validSHA(value string) bool {
 	if len(value) != 40 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validCatalogRevision(value string) bool {
+	if strings.HasPrefix(value, "sha256:") {
+		return validLowerHex(value[len("sha256:"):], 64)
+	}
+	return validLowerHex(value, 40) || validLowerHex(value, 64)
+}
+
+func validLowerHex(value string, size int) bool {
+	if len(value) != size || value != strings.ToLower(value) {
 		return false
 	}
 	_, err := hex.DecodeString(value)

@@ -151,6 +151,8 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 		{"StreamPROpenedBody", reflect.TypeOf(StreamPROpenedBody{}), root.def(t, "stream_pr_opened_body")},
 		{"StreamMergedBody", reflect.TypeOf(StreamMergedBody{}), root.def(t, "stream_merged_body")},
 		{"ReviewCycleBody", reflect.TypeOf(ReviewCycleBody{}), root.def(t, "review_cycle_body")},
+		{"ClosureFactsBody", reflect.TypeOf(ClosureFactsBody{}), root.def(t, "closure_facts_body")},
+		{"InterventionBody", reflect.TypeOf(InterventionBody{}), root.def(t, "intervention_body")},
 	}
 	for _, c := range cases {
 		assertObjectConforms(t, c.name, c.typ, c.obj)
@@ -260,6 +262,14 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"review_cycle bad cycle", KindReviewCycle, `{"cycle":0,"panel_settled":true,"findings":0}`, true},
 		{"review_cycle missing panel_settled", KindReviewCycle, `{"cycle":1,"findings":0}`, true},
 		{"review_cycle missing findings", KindReviewCycle, `{"cycle":1,"panel_settled":false}`, true},
+		{"closure facts ok", KindClosureFacts, `{"task_ref":"tsk_1","catalog_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review_artifact_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`, false},
+		{"closure facts empty", KindClosureFacts, `{}`, true},
+		{"closure facts malformed catalog", KindClosureFacts, `{"catalog_revision":"dirty"}`, true},
+		{"closure facts present empty catalog", KindClosureFacts, `{"task_ref":"tsk_1","catalog_revision":""}`, true},
+		{"closure facts malformed head", KindClosureFacts, `{"review_head_sha":"abc"}`, true},
+		{"intervention judgment ok", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael","question_ref":"esc_1"}`, false},
+		{"intervention judgment missing question", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael"}`, true},
+		{"intervention unknown classification", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"other","reason_code":"unknown","actor":"human:michael"}`, true},
 		{"malformed json", KindStreamAttempt, `{"seq":`, true},
 		{"stream_dispatched locators ok", KindStreamDispatched, `{"branch":"feat/x","worktree":"/tmp/wt"}`, false},
 		{"stream_dispatched empty body ok", KindStreamDispatched, `{}`, false},

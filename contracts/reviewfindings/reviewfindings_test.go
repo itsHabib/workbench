@@ -32,6 +32,9 @@ func TestValidateRefusesMalformedArtifacts(t *testing.T) {
 		},
 		"panel overlap":            func(a *Artifact) { a.Panel.Missing = []string{"codex"} },
 		"repo interior whitespace": func(a *Artifact) { a.Subject.Repo = "owner name/repo" },
+		"malformed catalog revision": func(a *Artifact) {
+			a.Producer.CatalogRevision = "sha256:not-a-digest"
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -41,6 +44,34 @@ func TestValidateRefusesMalformedArtifacts(t *testing.T) {
 				t.Fatal("Validate() error = nil, want refusal")
 			}
 		})
+	}
+}
+
+func TestCatalogRevisionCompatibility(t *testing.T) {
+	tests := []string{
+		"",
+		strings.Repeat("a", 40),
+		strings.Repeat("b", 64),
+		"sha256:" + strings.Repeat("c", 64),
+	}
+	for _, revision := range tests {
+		artifact := validArtifact()
+		artifact.Producer.CatalogRevision = revision
+		if err := Validate(artifact); err != nil {
+			t.Fatalf("Validate(catalog_revision=%q) error = %v", revision, err)
+		}
+	}
+}
+
+func TestDecodeRefusesPresentEmptyCatalogRevision(t *testing.T) {
+	artifact := validArtifact()
+	data, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `"generated_at"`, `"catalog_revision":"","generated_at"`, 1))
+	if _, err := Decode(data); err == nil || !strings.Contains(err.Error(), "catalog_revision") {
+		t.Fatalf("Decode() error = %v, want present malformed provenance refusal", err)
 	}
 }
 

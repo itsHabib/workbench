@@ -26,6 +26,11 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "harness": { "$ref": "#/$defs/id" },
+        "catalog_revision": {
+          "type": "string",
+          "description": "Optional canonical skill-catalog provenance. Legacy V1 artifacts may omit it but cannot complete a closure receipt.",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})$"
+        },
         "generated_at": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": true

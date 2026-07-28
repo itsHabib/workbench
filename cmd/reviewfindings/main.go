@@ -54,13 +54,14 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type options struct {
-	repo      string
-	pr        int
-	head      string
-	requested listFlag
-	completed listFlag
-	out       string
-	producer  string
+	repo            string
+	pr              int
+	head            string
+	requested       listFlag
+	completed       listFlag
+	out             string
+	producer        string
+	catalogRevision string
 }
 
 type listFlag []string
@@ -101,7 +102,7 @@ func main() {
 
 func run(ctx context.Context, args []string, runner commandRunner, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "github" {
-		fmt.Fprintln(stderr, "usage: reviewfindings github -repo owner/repo -pr N -head SHA -requested bots -completed bots -out path")
+		fmt.Fprintln(stderr, "usage: reviewfindings github -repo owner/repo -pr N -head SHA -requested bots -completed bots -catalog-revision REV -out path")
 		return exitError
 	}
 	opts, err := parseOptions(args[1:])
@@ -143,6 +144,7 @@ func parseOptions(args []string) (options, error) {
 	flags.Var(&opts.completed, "completed", "comma-separated completed reviewers")
 	flags.StringVar(&opts.out, "out", "", "output artifact path")
 	flags.StringVar(&opts.producer, "producer", "codex:reviewfindings-github", "producer id")
+	flags.StringVar(&opts.catalogRevision, "catalog-revision", "", "canonical skill-catalog commit SHA or sha256 digest")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -252,7 +254,10 @@ func buildArtifact(opts options, comments []comment, now time.Time) (reviewfindi
 			Type: reviewfindings.SubjectPullRequest, Repo: strings.ToLower(opts.repo),
 			Number: opts.pr, HeadSHA: strings.ToLower(opts.head),
 		},
-		Producer: reviewfindings.Producer{ID: opts.producer, Harness: "codex", GeneratedAt: now},
+		Producer: reviewfindings.Producer{
+			ID: opts.producer, Harness: "codex",
+			CatalogRevision: opts.catalogRevision, GeneratedAt: now,
+		},
 		Panel: reviewfindings.Panel{
 			Requested: requested, Completed: completedList, Missing: missing,
 		},
