@@ -25,6 +25,9 @@ from Ship's existing address, review, Gate-handoff, and land path.
 
 - Emit facts already known at ReviewFindingsV1 consumption, address dispatch and
   result, Gate handoff, and merge readback.
+- Persist the typed producer catalog revision from the consumed
+  `ReviewFindingsV1`; never reconstruct it from an installed path, producer id,
+  or current checkout.
 - Preserve transactional at-most-once consumption and address-time stale-head
   checks.
 - Record explicit failures/interventions; never infer judgment or panel
@@ -35,6 +38,9 @@ from Ship's existing address, review, Gate-handoff, and land path.
 
 - A fake address → new head → review → Gate ref → land sequence reconstructs one
   complete receipt.
+- Missing catalog revision accepts legacy review input but keeps the closure
+  receipt explicitly incomplete; malformed provenance refuses at schema
+  validation.
 - Duplicate address/land calls do not duplicate terminal closure.
 - Stale/refused paths produce typed failure/intervention facts and no false
   completion.

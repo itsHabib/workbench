@@ -28,6 +28,10 @@ without copying Claude lifecycle prose or implementing another parser.
 - Add a repository-owned Codex source that uses connected GitHub access when
   available and invokes `reviewfindings github` for pagination, exact-head
   filtering, schema validation, and atomic output.
+- Resolve the canonical `cc-skills` source revision at invocation time, refuse
+  when the relevant catalog/skill source is dirty or the revision is unknown,
+  and pass that value through `reviewfindings github --catalog-revision` into
+  the typed producer provenance. Do not infer it later in Ship.
 - Hand the artifact path to `ship driver address`; keep Ship authoritative for
   duplicate consumption, cycle capacity, and address-time head validation.
 - Surface requested, completed, and missing reviewers. Silence is never clean.
@@ -41,6 +45,7 @@ without copying Claude lifecycle prose or implementing another parser.
 - A temporary Codex home discovers the native skill.
 - The Claude projection is unchanged.
 - Fixture validation pins the exact producer and Ship handoff commands.
+- The generated artifact carries the catalog revision used by the fresh task.
 - Stale-head, malformed, and empty-unsourced cases stop before Ship dispatch.
 
 ## Test plan

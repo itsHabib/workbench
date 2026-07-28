@@ -16,15 +16,6 @@ batches:
     depends_on: []
     status: pending
     streams:
-      - task_id: tsk_01KYMQGTM65YSFX1QF3J0RZ5Y0
-        task_slug: codex-native-reviewfindings-producer
-        repo: cc-skills
-        repo_url: https://github.com/itsHabib/cc-skills
-        spec_path: docs/features/agentic-workbench-closure/driver/codex-native-reviewfindings-producer.md
-        branch_name: codex/native-reviewfindings-producer
-        runtime: local
-        touches: [catalog.yaml, skills/review-coordinator, targets/codex/review-coordinator]
-        status: pending
       - task_id: tsk_01KYMQGTQ9J7SJ2S64YWMATPSA
         task_slug: provider-neutral-gate-judge
         repo: workbench
@@ -41,13 +32,22 @@ batches:
         spec_path: docs/features/agentic-workbench-closure/driver/closure-receipt-contract.md
         branch_name: codex/closure-receipt-contract
         runtime: local
-        touches: [contracts/driverstate, cmd/driverstate, docs/features/agentic-workbench-closure]
+        touches: [contracts/driverstate, contracts/reviewfindings, cmd/driverstate, cmd/reviewfindings, docs/features/agentic-workbench-closure]
         status: pending
   - id: 2
     label: consumers
     depends_on: [1]
     status: pending
     streams:
+      - task_id: tsk_01KYMQGTM65YSFX1QF3J0RZ5Y0
+        task_slug: codex-native-reviewfindings-producer
+        repo: cc-skills
+        repo_url: https://github.com/itsHabib/cc-skills
+        spec_path: docs/features/agentic-workbench-closure/driver/codex-native-reviewfindings-producer.md
+        branch_name: codex/native-reviewfindings-producer
+        runtime: local
+        touches: [catalog.yaml, skills/review-coordinator, targets/codex/review-coordinator]
+        status: pending
       - task_id: tsk_01KYMQHPRCJYZ91HYHMVMFCD2T
         task_slug: exact-head-panel-completeness
         repo: workbench
@@ -66,24 +66,14 @@ batches:
         runtime: local
         touches: [packages/driver/src/driverstate-emit.ts, packages/driver/src/engine.ts]
         status: pending
-  - id: 3
-    label: live validation
-    depends_on: [2]
-    status: pending
-    streams:
-      - task_id: tsk_01KYMQJCD7PMB767VE7Y78MD4D
-        task_slug: fresh-codex-exact-head-closure-dogfood
-        repo: ship
-        repo_url: https://github.com/itsHabib/ship
-        spec_path: docs/features/agentic-workbench-closure/driver/fresh-codex-exact-head-closure-dogfood.md
-        branch_name: codex/closure-dogfood
-        runtime: local
-        touches: [live-validation-only]
-        status: pending
 conflict_notes:
   - kind: file_overlap
     file: cmd/gate
     tasks: [provider-neutral-gate-judge, exact-head-panel-completeness]
+  - kind: dep_signal
+    from: codex-native-reviewfindings-producer
+    to: closure-receipt-contract
+    reason: the native producer emits the merged typed catalog-revision field
   - kind: dep_signal
     from: exact-head-panel-completeness
     to: provider-neutral-gate-judge
@@ -92,10 +82,6 @@ conflict_notes:
     from: emit-codex-closure-receipt
     to: closure-receipt-contract
     reason: Ship emits only the merged Workbench contract
-  - kind: dep_signal
-    from: fresh-codex-exact-head-closure-dogfood
-    to: all implementation streams
-    reason: live validation exercises the complete path
 ---
 
 # Agentic Workbench Codex closure driver
@@ -113,10 +99,17 @@ only the parent-ledger owner and never overrides a child's repository.
 
 ## Batches
 
-1. Independent foundations: native Codex skill, provider-neutral Gate judge,
-   and closure receipt contract.
-2. Consumers: exact-head panel completeness and Ship receipt emission.
-3. Live validation: fresh Codex exact-head address → review → Gate → merge.
+1. Independent foundations: provider-neutral Gate judge and closure receipt
+   contract.
+2. Consumers: native Codex skill, exact-head panel completeness, and Ship
+   receipt emission.
+
+The parent session ledger contains only the five implementation streams above.
+After they merge and the parent reaches `run_finished`, execute
+`fresh-codex-exact-head-closure-dogfood.md` as a separate live validation run
+owned by its Dossier task. It imports its own concrete Ship cloud stream and
+records that run's PR and receipt; it is not mirrored as an implementation
+stream and must not borrow another stream's PR to terminalize this parent.
 
 Full Phase 1 Gate B remains partially unexecuted because this program is
 explicitly forbidden from invoking Claude. The Codex leg is the acceptance

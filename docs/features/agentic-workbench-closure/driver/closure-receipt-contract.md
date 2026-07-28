@@ -24,6 +24,11 @@ Codex review/address/Gate/land loop is reconstructable from typed artifacts.
 ## Behavior
 
 - Reuse existing run, stream, attempt, review-cycle, PR, and merge facts.
+- Extend `ReviewFindingsV1.producer` compatibly with an optional typed
+  `catalog_revision` (`sha256:<hex>` or source commit SHA), and extend
+  `reviewfindings github` with the corresponding explicit producer flag.
+  Existing V1 artifacts remain valid, but cannot complete a closure receipt
+  without this provenance.
 - Add only missing receipt facts: seat/harness, model/provider/effort, native
   producer id, catalog revision, review artifact id/digest/head, linked Ship and
   Gate refs, and typed interventions.
@@ -36,6 +41,9 @@ Codex review/address/Gate/land loop is reconstructable from typed artifacts.
 ## Acceptance
 
 - One complete sequence validates, reduces, and renders with every required ref.
+- Producer catalog revision survives schema validation and is joined to the
+  exact review artifact; missing or malformed revision leaves closure
+  incomplete without rejecting legacy ReviewFindingsV1 input.
 - Malformed identifiers, mismatched heads, ambiguous intervention
   classification, and duplicate terminal closure refuse or remain incomplete.
 - Old conformance fixtures stay readable.
