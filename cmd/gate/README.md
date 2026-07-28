@@ -105,6 +105,12 @@ hash-chained judgment or its reduced verdict reached disk before the caller saw
 success, the same run/escalation/grant retry reuses that artifact and appends
 only the missing next stage. Once an outcome exists, the same retry is a
 duplicate refusal.
+If the judgment's original grant expires during that interruption, a new live
+grant for the same repo/action may reauthorize the remaining reduction/action;
+the immutable judgment retains its original grant parent and the outcome names
+the replacement grant. Retry flags cannot change the persisted decision, and a
+resolution stamp records the resumed verdict rather than the caller's repeated
+flag.
 The configured executable path is the provider policy; Gate neither selects
 nor names a model vendor.
 

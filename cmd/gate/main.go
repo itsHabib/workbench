@@ -984,10 +984,10 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
 	if persisted, ok := artifactForParent(arts, state.KindJudgment, escalationID); ok {
-		if !stateArtifactHasParent(persisted, grantID) {
-			return gateResult{}, 0, "", errors.New("judgment_wrong_grant: persisted judgment belongs to a different grant")
+		if _, err := persistedJudgmentGrant(e, persisted, escalationID, subject); err != nil {
+			return gateResult{}, 0, "", err
 		}
-		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted)
+		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted, opts)
 	}
 	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {
@@ -1003,12 +1003,42 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
 }
 
-func resumeJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact) (gateResult, int, string, error) {
+func resumeJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact, opts judgmentOptions) (gateResult, int, string, error) {
 	judgment, err := verify.Load(jArt)
 	if err != nil {
 		return gateResult{}, 0, jArt.ID, err
 	}
+	if err := validateJudgmentRetry(judgment, opts); err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
 	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
+}
+
+func persistedJudgmentGrant(e env, judgment state.Artifact, escalationID string, subject verify.Subject) (string, error) {
+	for _, parentID := range judgment.Parents {
+		if parentID == escalationID {
+			continue
+		}
+		artifact, err := e.st.Get(parentID)
+		if err != nil {
+			return "", fmt.Errorf("judgment_missing_grant_lineage: %w", err)
+		}
+		if artifact.Kind == state.KindGrant {
+			atJudgment := func() time.Time { return judgment.Time }
+			if _, err := capability.Check(e.st, e.keyPath, parentID, subject.Repo, "merge", atJudgment); err != nil {
+				return "", fmt.Errorf("judgment_invalid_grant_lineage: %w", err)
+			}
+			return parentID, nil
+		}
+	}
+	return "", errors.New("judgment_missing_grant_lineage: persisted judgment has no grant parent")
+}
+
+func validateJudgmentRetry(judgment verify.Verdict, opts judgmentOptions) error {
+	if opts.Decision != "" && opts.Decision != judgment.Decision {
+		return fmt.Errorf("judgment_retry_conflict: persisted decision is %s, retry requested %s", judgment.Decision, opts.Decision)
+	}
+	return nil
 }
 
 func finishJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact, judgment verify.Verdict) (gateResult, int, string, error) {
@@ -1193,7 +1223,7 @@ func cmdResolve(args []string) error {
 	// capability refusal appends none): the stamp claims the loop closed, so it
 	// must never outrun the judgment it links.
 	if judgmentID != "" {
-		if err := stampResolution(e, run, *escID, judgmentID, *decision, *who); err != nil {
+		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who); err != nil {
 			return err
 		}
 	}

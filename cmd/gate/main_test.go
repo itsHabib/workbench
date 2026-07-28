@@ -1370,6 +1370,68 @@ func TestRetryResumesAfterReducedVerdictPersisted(t *testing.T) {
 	}
 }
 
+func TestRetryReauthorizesPersistedJudgmentWithReplacementGrant(t *testing.T) {
+	e, run, _, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Second, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, expired.ID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	replacement, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	if err != nil {
+		t.Fatalf("replacement grant must resume immutable content judgment: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("reauthorized resume = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	outcome := lastOfKind(t, e, run, state.KindAction)
+	if !stateArtifactHasParent(outcome, replacement.ID) {
+		t.Fatalf("outcome does not name replacement grant: %v", outcome.Parents)
+	}
+	if stateArtifactHasParent(outcome, expired.ID) {
+		t.Fatalf("outcome incorrectly authorized by expired grant: %v", outcome.Parents)
+	}
+}
+
+func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
+	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
+		t.Fatalf("conflicting retry error = %v", err)
+	}
+	if _, ok := artifactForParent(mustRunArtifacts(t, e, run), state.KindVerdict, jArt.ID); ok {
+		t.Fatal("conflicting retry advanced the judgment chain")
+	}
+	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	assertResolutionStamp(t, e, run, esc.ID, gotID, verify.DecisionPass)
+}
+
+func mustRunArtifacts(t *testing.T, e env, run string) []state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
+}
+
 func resumableJudgmentFixture(t *testing.T) (env, string, string, verify.Subject, state.Artifact, verify.Verdict, []verify.Verdict) {
 	t.Helper()
 	e := testEnv(t)
