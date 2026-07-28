@@ -517,8 +517,8 @@ go build ./... && go vet ./... && golangci-lint run ./... && go test ./...
 Known local quirk to expect and ignore: `observe.TestExplainGolden` fails on a
 Windows checkout (CRLF golden, no `.gitattributes`); it passes on Linux CI.
 
-Then the real acceptance — the eval blocked since 2026-07-13. `run-cloud`
-(`cmd/gate/docs/features/ci-classify/eval/run-cloud/main.go`) already calls
+Then the real acceptance — the eval blocked since 2026-07-13. `ci-classify-eval`
+(`cmd/gate/tools/ci-classify-eval/main.go`) already calls
 `verify.ModelBackend("cloud")`, so **it needs no gateway-specific code change**:
 exporting the three variables is enough. During validation, its fixture decoder
 was corrected to preserve the frozen dataset's string metadata as opaque JSON;
@@ -529,7 +529,7 @@ configuration approach is the right shape.
 export ANTHROPIC_BASE_URL=...   # gateway origin + provider prefix
 export ANTHROPIC_API_KEY=...    # gateway-issued token
 export GATE_CLOUD_MODEL=...      # model ID served by the gateway
-go run ./cmd/gate/docs/features/ci-classify/eval/run-cloud \
+go run ./cmd/gate/tools/ci-classify-eval \
   -out cmd/gate/docs/features/ci-classify/eval/ci-eval-raw.gateway.jsonl
 pwsh cmd/gate/docs/features/ci-classify/eval/floor-score.ps1 -raw ci-eval-raw.gateway.jsonl
 ```
@@ -603,7 +603,7 @@ artifacts, and golden files are the easy misses.
 7. A 401 produces an error mentioning re-authentication, with no silent retry.
 8. A gateway redirect is refused before the key can be forwarded to its target.
 9. The frozen ci-classify eval runs with the three variables exported and **no
-   gateway-specific code in `run-cloud`**, clearing coverage ≥ 60% / on-handled
+   gateway-specific code in `ci-classify-eval`**, clearing coverage ≥ 60% / on-handled
    ≥ 90%, with `cloud-eval-results.md` updated to real numbers and the model
    named.
 10. `FOLLOWUPS.md` records the cursor-runtime gateway incompatibility (§3.3) and
@@ -616,7 +616,7 @@ artifacts, and golden files are the easy misses.
 |---|---|---|---|---|---|
 | 1. Configuration seam | Make the existing cloud backend gateway-aware without changing direct behavior. | Add pure URL resolution; read the three Anthropic/gate variables at construction; require a gateway model; sanitize transport and auth errors; add focused unit tests. | none | ~150–300 weighted LOC | Unit tests pin direct compatibility, prefix preservation, validation, redaction, and 401/403 behavior. |
 | 2. Documentation and static review | Make the operator contract discoverable and prove no deployment detail entered the repo. | Update gate/root guidance and `FOLLOWUPS.md`; inspect the diff and generated artifacts using the §6 checklist. | Phase 1 | ~40–100 weighted LOC | **VALIDATION GATE A:** module checks and public-repo review pass before any live credential is used. |
-| 3. Live gateway validation | Prove the native protocol works through the configured deployment. | Run the frozen ci-classify eval unchanged; score it; record model and results; inspect emitted JSONL for endpoint/key leakage. | Gate A and operator-provided runtime configuration | generated eval result + short results note | **VALIDATION GATE B / go-no-go:** coverage ≥60%, on-handled accuracy ≥90%, no secret/endpoint leakage, and no change to `run-cloud`. |
+| 3. Live gateway validation | Prove the native protocol works through the configured deployment. | Run the frozen ci-classify eval unchanged; score it; record model and results; inspect emitted JSONL for endpoint/key leakage. | Gate A and operator-provided runtime configuration | generated eval result + short results note | **VALIDATION GATE B / go-no-go:** coverage ≥60%, on-handled accuracy ≥90%, no secret/endpoint leakage, and no change to `ci-classify-eval`. |
 | 4. Follow-on consumers | Consider the `local.Ask` escalation hook and OpenAI-compatible transport only after a real caller exists. | Materialize separate task(s) from `FOLLOWUPS.md` if demand appears. | Gate B plus concrete consumer | unestimated; intentionally uncommitted | Post-gate stub; requires a separate design decision. |
 
 Only Phases 1–3 are part of this initiative. Phase 4 is recorded to make the
