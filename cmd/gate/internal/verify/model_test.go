@@ -262,6 +262,39 @@ func TestCloudModelGatewayTransportErrorIsRedacted(t *testing.T) {
 	}
 }
 
+func TestCloudModelGatewayDoesNotFollowRedirect(t *testing.T) {
+	t.Parallel()
+	hit := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hit <- r.Header.Get("x-api-key")
+	}))
+	t.Cleanup(target.Close)
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(gateway.Close)
+
+	m := &cloudModel{
+		model:   "model-placeholder",
+		apiKey:  "placeholder-key",
+		url:     gateway.URL,
+		gateway: true,
+		client:  cloudHTTPClient(true),
+	}
+	_, err := m.chat(context.Background(), "system", "user", json.RawMessage(`{"type":"object"}`))
+	if err == nil || !strings.Contains(err.Error(), "302") {
+		t.Fatalf("expected redacted redirect status, got %v", err)
+	}
+	if strings.Contains(err.Error(), target.URL) {
+		t.Fatalf("error leaked redirect target: %v", err)
+	}
+	select {
+	case key := <-hit:
+		t.Fatalf("redirect target received x-api-key %q", key)
+	default:
+	}
+}
+
 type recordingModel struct {
 	called bool
 }
@@ -331,6 +364,9 @@ func TestCIClassifyBackendSelection(t *testing.T) {
 		if cloud.model != cloudModelDefault || cloud.url != anthropicDirectURL || cloud.gateway {
 			t.Fatalf("direct cloud model changed: %+v", cloud)
 		}
+		if cloud.client.CheckRedirect != nil {
+			t.Fatal("direct cloud model must retain default redirect behavior")
+		}
 	})
 	t.Run("gateway requires model", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "test-key")
@@ -361,6 +397,9 @@ func TestCIClassifyBackendSelection(t *testing.T) {
 		}
 		if !cloud.gateway {
 			t.Fatal("gateway mode not recorded")
+		}
+		if cloud.client.CheckRedirect == nil {
+			t.Fatal("gateway redirect policy not installed")
 		}
 	})
 }

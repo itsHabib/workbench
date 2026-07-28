@@ -108,13 +108,24 @@ func newCloudModel(apiKey, model, base string) (Model, error) {
 	if err != nil {
 		return nil, err
 	}
+	gateway := base != ""
 	return &cloudModel{
 		model:   model,
 		apiKey:  apiKey,
 		url:     endpoint,
-		gateway: base != "",
-		client:  &http.Client{Timeout: 3 * time.Minute},
+		gateway: gateway,
+		client:  cloudHTTPClient(gateway),
 	}, nil
+}
+
+func cloudHTTPClient(gateway bool) *http.Client {
+	client := &http.Client{Timeout: 3 * time.Minute}
+	if gateway {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return client
 }
 
 func resolveAnthropicURL(base string) (string, error) {

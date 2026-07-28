@@ -64,6 +64,7 @@ waiting on a key since 2026-07-13.
   `cloudModelDefault` for the direct path.
 - Fail legibly for invalid configuration and authentication failures without
   exposing the API key or resolved endpoint.
+- Refuse gateway redirects so `x-api-key` cannot cross an origin boundary.
 - Run the existing frozen ci-classify eval through the gateway with no change to
   the eval harness.
 
@@ -72,7 +73,7 @@ waiting on a key since 2026-07-13.
 | Quality | Target |
 |---|---|
 | Compatibility | With `ANTHROPIC_BASE_URL` unset, request URL, headers, model default, response parsing, and gate exit behavior remain unchanged. |
-| Security | Neither credential nor resolved endpoint is emitted in logs, errors, verdicts, fixtures, or generated eval artifacts. |
+| Security | Neither credential nor resolved endpoint is emitted in logs, errors, verdicts, fixtures, or generated eval artifacts; gateway redirects are never followed. |
 | Reliability | Invalid base URLs fail during model construction; 401/403 responses fail without retry; all existing truncation and malformed-response guards remain fail-closed. |
 | Performance | No extra network round trip or subprocess; URL, key, and model are resolved once per short-lived gate process. |
 | Operability | Configuration errors name the missing or invalid variable, and 401/403 errors direct the operator to re-authenticate. |
@@ -428,9 +429,11 @@ Failure behavior is explicit:
 3. 401/403 fails once with a re-authentication hint. Other non-2xx responses keep
    the current capped body only when direct mode is active; gateway mode returns
    status plus a stable category so a reflected body cannot leak routing details.
-4. A successful HTTP response still fails closed on decode errors, truncation,
+4. Gateway 3xx responses are returned to the caller and handled through the same
+   redacted status path. The client never follows a redirect with `x-api-key`.
+5. A successful HTTP response still fails closed on decode errors, truncation,
    empty tool input, or missing tool-use blocks exactly as today.
-5. There is no automatic fallback from gateway to direct provider; that would
+6. There is no automatic fallback from gateway to direct provider; that would
    bypass the configured egress boundary.
 
 ## 5. Implementation
@@ -489,6 +492,8 @@ with `url` pointed at it. Add:
   not** contain the key (§4.5, §4.6).
 - A gateway non-2xx response that reflects its request URL does not expose that
   URL, while the direct-mode error contract stays unchanged.
+- A cross-origin redirect is not followed and the redirect target receives no
+  request or `x-api-key`.
 - Base URL set with no model configured → legible error, not a request.
 - `impl()` returns the model ID and contains **no** host, origin, or key — assert
   on the absence, so a later "helpful" addition trips a test.
@@ -595,12 +600,13 @@ artifacts, and golden files are the easy misses.
 6. Base URL set with no model configured fails with an error naming the missing
    config, not a 404 from the gateway.
 7. A 401 produces an error mentioning re-authentication, with no silent retry.
-8. The frozen ci-classify eval runs with the three variables exported and **no
+8. A gateway redirect is refused before the key can be forwarded to its target.
+9. The frozen ci-classify eval runs with the three variables exported and **no
    code change to `run-cloud`**, clearing coverage ≥ 60% / on-handled ≥ 90%, with
    `cloud-eval-results.md` updated to real numbers and the model named.
-9. `FOLLOWUPS.md` records the cursor-runtime gateway incompatibility (§3.3) and
+10. `FOLLOWUPS.md` records the cursor-runtime gateway incompatibility (§3.3) and
    the construction-time key read (§4.2).
-10. The §6 review gate passes.
+11. The §6 review gate passes.
 
 ## 9. Rollout / implementation plan
 
