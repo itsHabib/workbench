@@ -799,8 +799,10 @@ a fresh Claude seat each close one real actionable-review loop through the same 
 artifact boundary, with zero mechanism-repair interventions - and the intervention
 taxonomy is itself typed, so an unclassifiable event counts as mechanism repair;
 absence never reads as clean. The key artifact at the review-address seam,
-`ReviewFindingsV1`, is still `intent` - it appears in no code anywhere
-(`verified` by search). Meanwhile the parts that have landed are real: the
+`ReviewFindingsV1`, has landed at Ship's exact-head, at-most-once address
+boundary; Workbench now publishes the shared Go/schema vocabulary and a
+Codex/GitHub producer (`contracts/reviewfindings`, `cmd/reviewfindings`).
+Meanwhile the parts that have landed are real: the
 driver-state validation gate passed 2026-07-17
 (`docs/features/driver-state/spec.md` §11), the thin-orchestrator session engine
 landed with parent/child rollups, and the invariant-dense core (hash chain,
@@ -809,8 +811,8 @@ asserting the laws over the whole input space rather than hand-picked examples -
 including the property that distinct import keys mint distinct runs, the exact
 class of a real bug.
 
-Still open, and worth saying plainly: live merge, the multiple-judgment reject, and
-`ReviewFindingsV1` are intentions, not results.
+Still open, and worth saying plainly: live merge, the multiple-judgment reject,
+the two-harness Gate B dogfood, and Claude-independent `gate judge -auto`.
 
 ## 10. Self-test
 
@@ -930,7 +932,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
 | Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
-| `ReviewFindingsV1` | In no code anywhere - pure intent (closure Phase 1) |
+| `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
 | `.github/workflows/gate.yml` | Built and merged but dormant: posts nothing until `GATE_ENFORCE=true` and a model-capable runner exist |
