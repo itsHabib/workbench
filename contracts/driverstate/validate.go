@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // ErrUnknownVersion is the version-gate failure: the event declares a contract
@@ -173,16 +172,26 @@ func validateIntervention(body json.RawMessage) error {
 }
 
 func validReasonCode(value string) bool {
-	if value == "" || value[0] == '-' || value[len(value)-1] == '-' {
+	if value == "" {
 		return false
 	}
+	afterHyphen := true
 	for _, r := range value {
-		if unicode.IsLower(r) || unicode.IsDigit(r) || r == '-' {
+		if r == '-' {
+			if afterHyphen {
+				return false
+			}
+			afterHyphen = true
 			continue
 		}
-		return false
+		if r < 'a' || r > 'z' {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		afterHyphen = false
 	}
-	return true
+	return !afterHyphen
 }
 
 func validDigest(value string) bool {
