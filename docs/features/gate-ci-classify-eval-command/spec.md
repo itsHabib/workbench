@@ -36,7 +36,9 @@ keeping the frozen prompts, fixtures, evidence, and results where they belong.
   to the caller; only repository-owned defaults are rooted automatically.
 - Keep prompts, schema, fixtures, scoring scripts, raw output, and result notes
   under the existing documentation feature directory.
-- Update all invocation references and remove the old Go package directory.
+- Update invocation references in `docs/features/gateway/spec.md` and
+  `cmd/gate/docs/features/ci-classify/eval/cloud-eval-results.md`, then remove
+  the old Go package directory.
 
 ## Acceptance
 
@@ -62,4 +64,4 @@ keeping the frozen prompts, fixtures, evidence, and results where they belong.
 - Changing classifier policy, prompts, thresholds, fixtures, provider semantics,
   or recorded gateway results.
 - Generalizing a framework for arbitrary evals.
-
+- Moving or changing the nested `eval/build/go.mod` extractor fixture.
