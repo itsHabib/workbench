@@ -26,13 +26,17 @@ push. The closure receipt must record and verify the cloud runtime.
    checkout or push its branch.
 6. Run fresh exact-head review; demonstrate that an incomplete configured panel
    parks.
-7. Run Gate with an operator-minted grant and execute only its exact emitted
+7. Resolve the recorded park through the provider-neutral judgment seam using a
+   judgment bound to the parked run, grant, repository, PR, and head. Prefer the
+   configured Codex auto-judge; stop for operator judgment if the provider
+   cannot decide. Apply the verdict, then rerun Gate on the unchanged head.
+8. Only after Gate passes, execute its exact emitted
    `gh pr merge ... --match-head-commit ...` command.
-8. Run `ship driver land <driver-run-id> --pr <n>` immediately after the
+9. Run `ship driver land <driver-run-id> --pr <n>` immediately after the
    commit-pinned merge. Its already-merged readback path must record the merge
    SHA/time, finalize the authoritative closure receipt, and reach terminal
    closure; it must not issue a second merge.
-9. Link the receipt, run, stream, PR, Gate, merge, producer, catalog revision,
+10. Link the receipt, run, stream, PR, Gate, judgment, merge, producer, catalog revision,
    model, and interventions in Dossier.
 
 If no implementation PR receives an actionable finding, use a canary PR with a
@@ -45,7 +49,8 @@ genuine reversible defect. The defective head must never merge.
   rejected before dispatch.
 - The addressed stream reaches terminal success and changes the same PR's head
   without operator checkout/push.
-- The new-head panel settles and Gate authorizes that exact head.
+- The new-head panel park is resolved by a bound provider-neutral judgment, and
+  rerun Gate authorizes that exact unchanged head.
 - Ship's land path reads back the Gate-pinned merge and finalizes the receipt.
 - Receipt is reconstructable and contains zero mechanism-repair interventions.
 - Operator action occurs only for a Gate-requested grant or genuine judgment.
