@@ -113,6 +113,9 @@ the immutable judgment retains its original grant parent and the outcome names
 the replacement grant. Retry flags cannot change the persisted decision, and a
 resolution stamp records the resumed verdict rather than the caller's repeated
 flag.
+Gate rechecks the live grant after a configured provider returns and
+immediately before appending its judgment, so a grant that expires during a
+long provider call authorizes no state mutation.
 The configured executable path is the provider policy; Gate neither selects
 nor names a model vendor.
 

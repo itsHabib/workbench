@@ -157,6 +157,7 @@ type env struct {
 	stateDir string
 	keyPath  string
 	floorBin string
+	now      func() time.Time
 }
 
 func newEnv(stateDir, floorBin, keyDir string) (env, error) {
@@ -192,7 +193,7 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	if floorBin == "" {
 		floorBin = defaultFloorBin()
 	}
-	return env{st: st, stateDir: stateDir, keyPath: keyPath, floorBin: floorBin}, nil
+	return env{st: st, stateDir: stateDir, keyPath: keyPath, floorBin: floorBin, now: time.Now}, nil
 }
 
 // stateDirTag is a stable, filesystem-safe tag for a state dir, so its anchor
@@ -904,6 +905,7 @@ type judgmentOptions struct {
 	Auto            bool
 	ArtifactPath    string
 	ProviderCommand string
+	beforeAppend    func()
 }
 
 func cmdJudge(args []string) error {
@@ -979,7 +981,7 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now)
+	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now)
 	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
@@ -992,6 +994,12 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {
 		return gateResult{}, 0, "", err
+	}
+	if opts.beforeAppend != nil {
+		opts.beforeAppend()
+	}
+	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now); err != nil {
+		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
 	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID, grantID}, judgment)
 	if errors.Is(err, state.ErrAlreadyExists) {

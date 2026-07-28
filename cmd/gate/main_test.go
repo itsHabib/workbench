@@ -1401,6 +1401,26 @@ func TestRetryReauthorizesPersistedJudgmentWithReplacementGrant(t *testing.T) {
 	}
 }
 
+func TestProviderDelayExpiryRefusesBeforeJudgmentAppend(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	now := time.Now()
+	e.now = func() time.Time { return now }
+	opts := judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "provider completed after the grant expired",
+		beforeAppend: func() {
+			now = now.Add(2 * time.Hour)
+		},
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts); err == nil || !strings.Contains(err.Error(), capability.ErrExpired.Error()) {
+		t.Fatalf("post-provider expiry error = %v", err)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 0 {
+		t.Fatalf("expired provider result mutated judgment state: %d artifacts", got)
+	}
+}
+
 func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
 	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
 	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
