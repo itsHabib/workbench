@@ -7,17 +7,23 @@
 
 ## Goal
 
-Prove the completed Codex path on one real Ship-managed PR with an actionable,
-sourced finding and no manual PR-branch checkout or push.
+Prove the completed Codex path on one real PR created by a Ship **cloud**
+stream, with an actionable sourced finding and no manual PR-branch checkout or
+push. The closure receipt must record and verify the cloud runtime.
 
 ## Procedure
 
 1. Start a fresh Codex task and invoke the catalog-installed native producer.
-2. Pin the live reviewed head and emit `ReviewFindingsV1`.
+2. Verify from Ship's durable run/stream state that the selected PR originated
+   from a cloud stream; pin the live reviewed head and emit
+   `ReviewFindingsV1`.
 3. Submit it once to `ship driver address`.
-4. Probe stale-head, malformed, and duplicate delivery; all must refuse before
-   dispatch.
-5. Let Ship update the existing PR branch and record the new head.
+4. Probe stale-head, malformed, replayed, cycle-exhausted, empty/unsourced, and
+   source/panel-inconsistent artifacts; Ship itself must refuse every probe
+   before dispatch.
+5. Run `ship driver run <driver-run-id>` until the addressed stream reaches
+   terminal success. Only then read and record the new PR head; do not manually
+   checkout or push its branch.
 6. Run fresh exact-head review; demonstrate that an incomplete configured panel
    parks.
 7. Run Gate with an operator-minted grant and execute only its emitted
@@ -30,8 +36,11 @@ genuine reversible defect. The defective head must never merge.
 
 ## Acceptance
 
-- Exact-head artifact accepted once and rejected on replay.
-- Address changes the same PR's head without operator checkout/push.
+- The receipt proves the PR originated from a Ship cloud stream.
+- Exact-head artifact is accepted once; every refusal probe in step 4 is
+  rejected before dispatch.
+- The addressed stream reaches terminal success and changes the same PR's head
+  without operator checkout/push.
 - The new-head panel settles and Gate authorizes that exact head.
 - Receipt is reconstructable and contains zero mechanism-repair interventions.
 - Operator action occurs only for a Gate-requested grant or genuine judgment.
