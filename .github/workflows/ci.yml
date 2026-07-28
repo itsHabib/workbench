@@ -170,7 +170,7 @@ jobs:
           grep -F '    types: [created, edited, deleted]' "$workflow"
           grep -F "github.event.comment.user.login == 'chatgpt-codex-connector[bot]'" "$workflow"
           grep -F "github.event.review.user.login == 'coderabbitai[bot]'" "$workflow"
-          grep -F 'ref: ${{ github.event.repository.default_branch }}' "$workflow"
+          grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
           if grep -Eq '^  (pull_request|pull_request_target):' "$workflow"; then
             echo "gate workflow must not run privileged work from a PR-head trigger" >&2
             exit 1
