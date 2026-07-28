@@ -64,6 +64,10 @@ var kindPrefix = map[string]string{
 	KindGrantNeeded: "gnd",
 }
 
+// ErrAlreadyExists is returned by AppendIfAbsent when the run already carries
+// the requested artifact kind.
+var ErrAlreadyExists = errors.New("artifact already exists")
+
 // ErrNotFound is returned by Get when no artifact carries the requested id. It
 // is a sentinel so callers can classify a genuine absent artifact (e.g. a grant
 // id that names nothing) apart from an I/O or parse failure.
@@ -137,6 +141,35 @@ func (s *Store) Append(kind, run string, parents []string, body any) (Artifact, 
 		return Artifact{}, err
 	}
 	defer unlock()
+	return s.appendLocked(kind, run, parents, raw)
+}
+
+// AppendIfAbsent atomically appends kind only when run has no artifact of that
+// kind. The check and append share the store lock, so concurrent consumers
+// cannot both record a supposedly at-most-once effect.
+func (s *Store) AppendIfAbsent(kind, run string, parents []string, body any) (Artifact, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer unlock()
+	existing, err := s.scan(func(a Artifact) bool {
+		return a.Run == run && a.Kind == kind
+	})
+	if err != nil {
+		return Artifact{}, err
+	}
+	if len(existing) > 0 {
+		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
+	}
+	return s.appendLocked(kind, run, parents, raw)
+}
+
+func (s *Store) appendLocked(kind, run string, parents []string, raw json.RawMessage) (Artifact, error) {
 	prev, err := s.lastHash()
 	if err != nil {
 		return Artifact{}, err

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -51,5 +52,38 @@ func TestConcurrentAppendKeepsChainIntact(t *testing.T) {
 	}
 	if !res.OK {
 		t.Fatalf("chain broken under concurrency at %s: %s", res.Artifact, res.Reason)
+	}
+}
+
+func TestAppendIfAbsentAllowsOneConcurrentWinner(t *testing.T) {
+	st, err := Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const writers = 12
+	var wg sync.WaitGroup
+	results := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(writer int) {
+			defer wg.Done()
+			_, err := st.AppendIfAbsent(KindJudgment, "run_once", nil, map[string]int{"writer": writer})
+			results <- err
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	winners := 0
+	for err := range results {
+		if err == nil {
+			winners++
+			continue
+		}
+		if !errors.Is(err, ErrAlreadyExists) {
+			t.Fatalf("unexpected refusal: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("concurrent at-most-once append had %d winners, want 1", winners)
 	}
 }

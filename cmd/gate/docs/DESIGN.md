@@ -28,7 +28,7 @@ stdout, never prose. Packages, dependencies pointing strictly downward:
 | `internal/state` | append-only, hash-chained, fs-locked artifact log — the substrate everything writes through |
 | `internal/capability` | HMAC-signed grants: scoped, timed, tier-capped |
 | `internal/evidence` | real GitHub reads via `gh`, recorded as evidence artifacts |
-| `internal/verify` | the verdict schema, the verifier rungs, the monotone reducer, the auto-judge |
+| `internal/verify` | the verdict schema, the verifier rungs, the monotone reducer, the provider-neutral judgment contract |
 | `internal/observe` | `explain`/`audit` — read-only, storeless, state-fed |
 | `cmd/gate` | composition: wires one vertical pass per invocation |
 
@@ -132,7 +132,7 @@ tools align to. Its two load-bearing choices:
    Collapsing them into one severity axis fails on the first real PR.
 2. **`Producer` is a structured `{class, impl}` pair.** Class (`code`,
    `local-model`, `judgment`) carries the ladder semantics; impl (`qwen2.5:7b`,
-   `claude-cli`, `operator`) is provenance only — the reducer must never
+   `codex:gpt-5`, `operator`) is provenance only — the reducer must never
    branch on it. This was originally a `"class/impl"` string convention, and
    it silently broke class matching; the schema now makes the distinction
    structural, and `Reduce` rejects unknown classes outright.
@@ -188,10 +188,15 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
 - **The driver merge tail** calls `gate` via exit codes — the same pattern as
   gating a driver run on a trace check: a Go binary gating an engine from
   outside, no engine surgery.
-- **`judge -auto`** hands a frontier model (via the `claude` CLI) only what
-  state holds: the escalation, the verifier verdicts, the recorded diff. If a
-  good judgment needs more than the artifacts carry, that is a contract bug
-  to fix in the artifacts, not a reason to let the judge read outside state.
+- **Judgment is provider-neutral.** `judge -auto` runs only an explicitly
+  configured executable. Gate writes a versioned `gate-judgment-v1` request to
+  its stdin and reads the same versioned response from stdout; there is no
+  implicit provider fallback. `judge -judgment` accepts the response as a file
+  for a native Codex-produced artifact path. Both bind the decision to the
+  parked run, escalation and question, exact PR head, and presented grant
+  ceiling before any state append. If a good judgment needs more than the
+  recorded context carries, that is a contract bug in the artifacts, not a
+  reason to let the judge read outside state.
 
 ## Deliberately out of v0, with triggers
 

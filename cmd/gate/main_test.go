@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
@@ -1148,7 +1149,7 @@ func TestResolveClosesLoop(t *testing.T) {
 		t.Fatalf("runOfEscalation resolved the wrong run: got %s want %s", gotRun, run)
 	}
 
-	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "the retry has a ceiling; safe to land", false)
+	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
@@ -1163,6 +1164,116 @@ func TestResolveClosesLoop(t *testing.T) {
 	assertResolutionStamp(t, e, run, esc.ID, judgmentID, res.Decision)
 	assertChainIntact(t, e)
 	_ = code // the terminal code depends on the reduce ladder; the loop's provenance is the invariant under test.
+}
+
+func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 127, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
+		t.Fatalf("first judgment: %v", err)
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+		t.Fatalf("duplicate error = %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("duplicate refusal mutated state: before %d artifacts, after %d", len(before), len(after))
+	}
+}
+
+func TestAtMostOneJudgmentProperty(t *testing.T) {
+	property := func(attempts []bool) bool {
+		var arts []state.Artifact
+		accepted := 0
+		for _, attempt := range attempts {
+			if !attempt || hasJudgment(arts) {
+				continue
+			}
+			arts = append(arts, state.Artifact{Kind: state.KindJudgment})
+			accepted++
+		}
+		return accepted <= 1
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("at-most-one judgment property: %v", err)
+	}
+}
+
+func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 128, HeadSHA: "current"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	escBody, err := escalation.DecodeBody(esc.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := verify.JudgmentArtifactV1{
+		Version:      verify.JudgmentV1,
+		Run:          run,
+		EscalationID: esc.ID,
+		Subject:      verify.Subject{Repo: "o/r", Number: 128, HeadSHA: "stale"},
+		Grant:        verify.JudgmentGrantV1{ID: grantArt.ID, MaxTier: "T2"},
+		Question:     escBody.Question,
+		Producer:     "codex:test",
+		Decision:     verify.DecisionPass,
+		Tier:         "T0",
+		Confidence:   1,
+		Why:          "test",
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "judgment.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := judgmentOptions{ArtifactPath: path}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_stale_head") {
+		t.Fatalf("stale-head error = %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("stale refusal mutated state: before %d artifacts, after %d", len(before), len(after))
+	}
 }
 
 // assertJudgmentParented checks the run's judgment is the one resolve recorded
@@ -1239,7 +1350,7 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 
 	// Resolve it (pass → would_merge writes a terminal action).
-	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "safe to land", false)
+	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}

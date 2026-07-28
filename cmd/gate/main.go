@@ -142,7 +142,7 @@ func usage() {
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
@@ -858,23 +858,52 @@ func outcomeSubjectMatches(byID map[string]state.Artifact, a state.Artifact, sub
 	return v.Subject.Repo == subject.Repo && v.Subject.Number == subject.Number, nil
 }
 
-// validateJudgeFlags enforces the judge subcommand's flag contract: a run and
-// grant are always required; a manual decision needs both a -why and a
-// pass/block -decision, while -auto supplies both from the artifacts.
-func validateJudgeFlags(run, grantID, decision, why string, auto bool) error {
+// validateJudgeFlags enforces one judgment source: operator flags, a submitted
+// artifact, or an explicitly configured provider command.
+func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 	if run == "" || grantID == "" {
 		return errors.New("judge: -run and -grant required")
 	}
-	if auto {
+	modes := 0
+	if opts.Auto {
+		modes++
+	}
+	if opts.ArtifactPath != "" {
+		modes++
+	}
+	if opts.Decision != "" || opts.Why != "" {
+		modes++
+	}
+	if modes != 1 {
+		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
+	}
+	if opts.Auto {
+		if opts.ProviderCommand == "" {
+			return errors.New("judge_provider_unconfigured: -auto requires -provider-command <executable>")
+		}
 		return nil
 	}
-	if why == "" {
-		return errors.New("judge: -why required (or -auto)")
+	if opts.ProviderCommand != "" {
+		return errors.New("judge: -provider-command requires -auto")
 	}
-	if decision != verify.DecisionPass && decision != verify.DecisionBlock {
-		return errors.New("judge: -decision must be pass or block (or use -auto)")
+	if opts.ArtifactPath != "" {
+		return nil
+	}
+	if opts.Why == "" {
+		return errors.New("judge: -why required")
+	}
+	if opts.Decision != verify.DecisionPass && opts.Decision != verify.DecisionBlock {
+		return errors.New("judge: -decision must be pass or block")
 	}
 	return nil
+}
+
+type judgmentOptions struct {
+	Decision        string
+	Why             string
+	Auto            bool
+	ArtifactPath    string
+	ProviderCommand string
 }
 
 func cmdJudge(args []string) error {
@@ -884,7 +913,9 @@ func cmdJudge(args []string) error {
 	grantID := fs.String("grant", "", "grant artifact id")
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the judgment's reasoning")
-	auto := fs.Bool("auto", false, "let a frontier model judge from the artifacts alone")
+	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
+	auto := fs.Bool("auto", false, "run an explicitly configured provider command over the versioned request")
+	providerCommand := fs.String("provider-command", "", "provider executable for -auto; request on stdin, judgment artifact on stdout")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -893,7 +924,14 @@ func cmdJudge(args []string) error {
 	if help {
 		return nil
 	}
-	if err := validateJudgeFlags(*run, *grantID, *decision, *why, *auto); err != nil {
+	opts := judgmentOptions{
+		Decision:        *decision,
+		Why:             *why,
+		Auto:            *auto,
+		ArtifactPath:    *artifactPath,
+		ProviderCommand: *providerCommand,
+	}
+	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
@@ -912,7 +950,7 @@ func cmdJudge(args []string) error {
 	if escalationID == "" {
 		return fmt.Errorf("judge: run %s has no escalation to resolve", *run)
 	}
-	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, *decision, *why, *auto)
+	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, opts)
 	if err != nil {
 		return err
 	}
@@ -931,7 +969,7 @@ func cmdJudge(args []string) error {
 // can stamp the resolution before it exits. The returned judgment id is empty
 // only when capability refused before any judgment was appended, so a caller
 // stamps a resolution exactly when a decision was actually recorded.
-func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto bool) (gateResult, int, string, error) {
+func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOptions) (gateResult, int, string, error) {
 	arts, err := e.st.Run(run)
 	if err != nil {
 		return gateResult{}, 0, "", err
@@ -941,25 +979,21 @@ func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now); err != nil {
+	if hasJudgment(arts) {
+		return gateResult{}, 0, "", errors.New("judgment_duplicate: run already has a judgment")
+	}
+	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now)
+	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
-	judgment := verify.Verdict{
-		Subject:    subject,
-		Source:     "operator-judgment",
-		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
-		Decision:   decision,
-		Tier:       "T0",
-		Confidence: 1.0,
-		Why:        why,
+	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
+	if err != nil {
+		return gateResult{}, 0, "", err
 	}
-	if auto {
-		judgment, err = verify.AutoJudge(arts, subject)
-		if err != nil {
-			return gateResult{}, 0, "", err
-		}
+	jArt, err := e.st.AppendIfAbsent(state.KindJudgment, run, []string{escalationID}, judgment)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, "", errors.New("judgment_duplicate: run already has a judgment")
 	}
-	jArt, err := e.st.Append(state.KindJudgment, run, []string{escalationID}, judgment)
 	if err != nil {
 		return gateResult{}, 0, "", err
 	}
@@ -976,6 +1010,53 @@ func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto
 	// page.
 	res, code, err := act(e, run, grantID, reduced, reducedArt.ID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
 	return res, code, jArt.ID, err
+}
+
+func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subject verify.Subject, grantID, maxTier string, opts judgmentOptions) (verify.Verdict, error) {
+	if !opts.Auto && opts.ArtifactPath == "" {
+		return verify.Verdict{
+			Subject:    subject,
+			Source:     "operator-judgment",
+			Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+			Decision:   opts.Decision,
+			Tier:       "T0",
+			Confidence: 1.0,
+			Why:        opts.Why,
+		}, nil
+	}
+	request, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, maxTier)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	if opts.Auto {
+		return verify.AutoJudge(opts.ProviderCommand, request)
+	}
+	artifact, err := readJudgmentArtifact(opts.ArtifactPath)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	return verify.ValidateJudgment(artifact, request)
+}
+
+func hasJudgment(arts []state.Artifact) bool {
+	for _, artifact := range arts {
+		if artifact.Kind == state.KindJudgment {
+			return true
+		}
+	}
+	return false
+}
+
+func readJudgmentArtifact(path string) (verify.JudgmentArtifactV1, error) {
+	if path == "-" {
+		return verify.DecodeJudgmentArtifact(os.Stdin)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return verify.JudgmentArtifactV1{}, fmt.Errorf("judge: open judgment artifact: %w", err)
+	}
+	defer f.Close()
+	return verify.DecodeJudgmentArtifact(f)
 }
 
 func validateResolveFlags(escID, grantID, decision, why, who string) error {
@@ -1048,7 +1129,7 @@ func cmdResolve(args []string) error {
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
 	}
-	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, *decision, *why, false)
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why})
 	if err != nil {
 		return err
 	}

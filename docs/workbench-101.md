@@ -503,11 +503,14 @@ naive state layer lost data three runs out of three under a six-process concurre
 stress; the retry-all lock posture exists because Windows returns ACCESS_DENIED
 (delete-pending), not EEXIST, on a racing create.
 
-**Judgment.** `gate judge -auto` hands the frontier model only what state holds -
-the escalation question, the verifier verdicts, the recorded diff (`verified`,
-`cmd/gate/internal/verify/judge.go`, which also wraps the material in
-untrusted-data markers and fails closed on an unparseable reply). If a good judgment
-would need more than the artifacts carry, that is a contract bug in the artifacts.
+**Judgment.** `gate judge -auto` hands an explicitly configured provider command
+only what state holds - the escalation question, the verifier verdicts, the
+recorded diff (`verified`, `cmd/gate/internal/verify/judge.go`, which also wraps
+the material in untrusted-data markers and fails closed on an unparseable reply).
+The provider-neutral `gate-judgment-v1` request/response binds run, escalation,
+exact PR head, question, and grant ceiling; there is no implicit CLI fallback.
+If a good judgment would need more than the artifacts carry, that is a contract
+bug in the artifacts.
 Backtesting agreed with real merge history 3 for 3, including reasoning out a
 fork-PR trust boundary from the recorded diff alone.
 
@@ -811,8 +814,8 @@ asserting the laws over the whole input space rather than hand-picked examples -
 including the property that distinct import keys mint distinct runs, the exact
 class of a real bug.
 
-Still open, and worth saying plainly: live merge, the multiple-judgment reject,
-the two-harness Gate B dogfood, and Claude-independent `gate judge -auto`.
+Still open, and worth saying plainly: live merge, the reducer's general
+multiple-judgment reject, and the two-harness Gate B dogfood.
 
 ## 10. Self-test
 
