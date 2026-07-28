@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/contracts/reviewfindings"
 )
@@ -103,6 +104,28 @@ func TestRunnerFailureRefuses(t *testing.T) {
 	_, err := produce(context.Background(), fakeRunner{err: errors.New("boom")}, validOptions(t, head), time.Now())
 	if err == nil {
 		t.Fatal("produce() error = nil")
+	}
+}
+
+func TestRunClassifiesRunnerFailureAsOperational(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	opts := validOptions(t, head)
+	args := []string{
+		"github", "-repo", opts.repo, "-pr", "1", "-head", head,
+		"-requested", "codex", "-completed", "codex", "-out", opts.out,
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), args, fakeRunner{err: errors.New("network unavailable")}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("run() code = %d, want %d", code, exitError)
+	}
+}
+
+func TestTruncateUTF8KeepsCompleteRunes(t *testing.T) {
+	value := strings.Repeat("a", 511) + "é"
+	got := truncateUTF8(value, 512)
+	if !utf8.ValidString(got) || len([]byte(got)) > 512 {
+		t.Fatalf("truncateUTF8() = %q (%d bytes)", got, len([]byte(got)))
 	}
 }
 

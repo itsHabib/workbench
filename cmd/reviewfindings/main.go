@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/contracts/reviewfindings"
 )
@@ -33,6 +34,13 @@ type commandRunner interface {
 }
 
 type execRunner struct{}
+
+type refusalError struct {
+	err error
+}
+
+func (e refusalError) Error() string { return e.err.Error() }
+func (e refusalError) Unwrap() error { return e.err }
 
 func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -104,6 +112,10 @@ func run(ctx context.Context, args []string, runner commandRunner, stdout, stder
 	artifact, err := produce(ctx, runner, opts, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		var refused refusalError
+		if !errors.As(err, &refused) {
+			return exitError
+		}
 		return exitRefused
 	}
 	data, err := json.MarshalIndent(artifact, "", "  ")
@@ -157,11 +169,11 @@ func produce(ctx context.Context, runner commandRunner, opts options, now time.T
 		return reviewfindings.Artifact{}, err
 	}
 	if !strings.EqualFold(pr.State, "OPEN") {
-		return reviewfindings.Artifact{}, fmt.Errorf("refused: pull request is %s", pr.State)
+		return reviewfindings.Artifact{}, refusef("pull request is %s", pr.State)
 	}
 	if !strings.EqualFold(pr.HeadRefOID, opts.head) {
-		return reviewfindings.Artifact{}, fmt.Errorf(
-			"refused: requested head %s is stale; live head is %s", opts.head, pr.HeadRefOID,
+		return reviewfindings.Artifact{}, refusef(
+			"requested head %s is stale; live head is %s", opts.head, pr.HeadRefOID,
 		)
 	}
 	comments, err := fetchComments(ctx, runner, opts)
@@ -174,11 +186,11 @@ func produce(ctx context.Context, runner commandRunner, opts options, now time.T
 	}
 	digest, err := reviewfindings.CanonicalSHA256(artifact)
 	if err != nil {
-		return reviewfindings.Artifact{}, fmt.Errorf("refused: malformed artifact: %w", err)
+		return reviewfindings.Artifact{}, refusalError{fmt.Errorf("malformed artifact: %w", err)}
 	}
 	artifact.ArtifactID = "rf_" + digest[:32]
 	if err := reviewfindings.Validate(artifact); err != nil {
-		return reviewfindings.Artifact{}, fmt.Errorf("refused: malformed artifact: %w", err)
+		return reviewfindings.Artifact{}, refusalError{fmt.Errorf("malformed artifact: %w", err)}
 	}
 	return artifact, nil
 }
@@ -226,7 +238,7 @@ func buildArtifact(opts options, comments []comment, now time.Time) (reviewfindi
 		findings = append(findings, findingFromComment(reviewer, item))
 	}
 	if len(findings) == 0 {
-		return reviewfindings.Artifact{}, errors.New("refused: no sourced exact-head inline findings")
+		return reviewfindings.Artifact{}, refusalError{errors.New("no sourced exact-head inline findings")}
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
 	requested := sortedUnique(opts.requested)
@@ -250,9 +262,7 @@ func buildArtifact(opts options, comments []comment, now time.Time) (reviewfindi
 
 func findingFromComment(reviewer string, item comment) reviewfindings.Finding {
 	summary := firstLine(item.Body)
-	if len([]byte(summary)) > 512 {
-		summary = string([]byte(summary)[:512])
-	}
+	summary = truncateUTF8(summary, 512)
 	severity := "advisory"
 	if match := severityPattern.FindString(item.Body); match != "" {
 		severity = strings.ToLower(match)
@@ -265,6 +275,21 @@ func findingFromComment(reviewer string, item comment) reviewfindings.Finding {
 			URL: item.HTMLURL, File: item.Path, Line: item.Line,
 		}},
 	}
+}
+
+func truncateUTF8(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
+}
+
+func refusef(format string, args ...any) error {
+	return refusalError{fmt.Errorf("refused: "+format, args...)}
 }
 
 func firstLine(value string) string {

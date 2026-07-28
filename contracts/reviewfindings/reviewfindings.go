@@ -3,6 +3,7 @@
 package reviewfindings
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -134,11 +136,13 @@ func CanonicalSHA256(artifact Artifact) (string, error) {
 		return "", err
 	}
 	projection := canonicalProjection(artifact)
-	data, err := json.Marshal(projection)
-	if err != nil {
+	var data bytes.Buffer
+	encoder := json.NewEncoder(&data)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(projection); err != nil {
 		return "", fmt.Errorf("marshal canonical findings: %w", err)
 	}
-	sum := sha256.Sum256(data)
+	sum := sha256.Sum256(bytes.TrimSuffix(data.Bytes(), []byte{'\n'}))
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -215,7 +219,7 @@ func validateFinding(finding Finding, completed map[string]struct{}) error {
 		}
 		keys = append(keys, sourceKey(source))
 	}
-	return unique("finding sources", keys)
+	return uniqueRaw("finding sources", keys)
 }
 
 func validateSource(source Source, completed map[string]struct{}) error {
@@ -269,10 +273,21 @@ func unique(name string, values []string) error {
 	return nil
 }
 
+func uniqueRaw(name string, values []string) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			return fmt.Errorf("%s must be unique", name)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
 func validRepo(repo string) bool {
 	parts := strings.Split(repo, "/")
-	return len(parts) == 2 && strings.TrimSpace(parts[0]) == parts[0] &&
-		strings.TrimSpace(parts[1]) == parts[1] && parts[0] != "" && parts[1] != ""
+	return len(parts) == 2 && parts[0] != "" && parts[1] != "" &&
+		strings.IndexFunc(repo, unicode.IsSpace) == -1
 }
 
 func validSHA(value string) bool {

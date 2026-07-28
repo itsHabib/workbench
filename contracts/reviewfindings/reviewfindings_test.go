@@ -30,7 +30,8 @@ func TestValidateRefusesMalformedArtifacts(t *testing.T) {
 		"source outside completed": func(a *Artifact) {
 			a.Findings[0].Sources[0].Reviewer = "claude"
 		},
-		"panel overlap": func(a *Artifact) { a.Panel.Missing = []string{"codex"} },
+		"panel overlap":            func(a *Artifact) { a.Panel.Missing = []string{"codex"} },
+		"repo interior whitespace": func(a *Artifact) { a.Subject.Repo = "owner name/repo" },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -45,7 +46,9 @@ func TestValidateRefusesMalformedArtifacts(t *testing.T) {
 
 func TestCanonicalSHA256IgnoresTransportAndOrdering(t *testing.T) {
 	left := validArtifact()
+	left.Findings[0].Evidence = "<sub>review evidence</sub>"
 	right := validArtifact()
+	right.Findings[0].Evidence = left.Findings[0].Evidence
 	right.ArtifactID = "rf_regenerated"
 	right.Producer.GeneratedAt = right.Producer.GeneratedAt.Add(time.Hour)
 	right.Panel.Requested = []string{"claude", "codex"}
@@ -61,6 +64,10 @@ func TestCanonicalSHA256IgnoresTransportAndOrdering(t *testing.T) {
 	}
 	if leftDigest != rightDigest {
 		t.Fatalf("digest changed across transport/order variation: %s != %s", leftDigest, rightDigest)
+	}
+	const shipDigest = "a9dceebffa6a5cb0669aece8c10c30ca633913ce5795b9f44577abaae2af4da1"
+	if leftDigest != shipDigest {
+		t.Fatalf("digest = %s, want Ship conformance vector %s", leftDigest, shipDigest)
 	}
 }
 
