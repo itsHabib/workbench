@@ -97,12 +97,46 @@ func TestDecodeJudgmentArtifactRefusesMalformedAndUnknownFields(t *testing.T) {
 	cases := []string{
 		`{"version":`,
 		`{"version":"gate-judgment-v1","future_authority":true}`,
+		`{"version":"gate-judgment-v1"}`,
+		`{"version":"gate-judgment-v1","confidence":null}`,
 		`{} {}`,
 	}
 	for _, raw := range cases {
 		if _, err := DecodeJudgmentArtifact(strings.NewReader(raw)); err == nil {
 			t.Fatalf("malformed artifact accepted: %s", raw)
 		}
+	}
+}
+
+func TestDecodeJudgmentArtifactPreservesZeroConfidence(t *testing.T) {
+	_, artifact := judgmentFixture()
+	artifact.Confidence = 0
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeJudgmentArtifact(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Confidence != 0 {
+		t.Fatalf("confidence = %v, want legitimate zero", got.Confidence)
+	}
+}
+
+func TestValidateJudgmentTrimsProducerAndRefusesWhitespaceOnly(t *testing.T) {
+	request, artifact := judgmentFixture()
+	artifact.Producer = "  codex:gpt-5  "
+	got, err := ValidateJudgment(artifact, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Producer.Impl != "codex:gpt-5" {
+		t.Fatalf("producer = %q, want trimmed provenance", got.Producer.Impl)
+	}
+	artifact.Producer = " \t "
+	if _, err := ValidateJudgment(artifact, request); err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance") {
+		t.Fatalf("whitespace-only producer error = %v", err)
 	}
 }
 

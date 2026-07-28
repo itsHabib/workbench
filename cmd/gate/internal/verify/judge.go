@@ -77,6 +77,20 @@ type JudgmentArtifactV1 struct {
 	Why          string          `json:"why"`
 }
 
+type judgmentArtifactWire struct {
+	Version      string          `json:"version"`
+	Run          string          `json:"run"`
+	EscalationID string          `json:"escalation_id"`
+	Subject      Subject         `json:"subject"`
+	Grant        JudgmentGrantV1 `json:"grant"`
+	Question     string          `json:"question"`
+	Producer     string          `json:"producer"`
+	Decision     string          `json:"decision"`
+	Tier         string          `json:"tier"`
+	Confidence   *float64        `json:"confidence"`
+	Why          string          `json:"why"`
+}
+
 // NewJudgmentRequest builds the provider request purely from recorded state.
 func NewJudgmentRequest(arts []state.Artifact, run, escalationID string, subject Subject, grantID, maxTier string) (JudgmentRequestV1, error) {
 	ctx, err := judgeContext(arts)
@@ -102,14 +116,29 @@ func NewJudgmentRequest(arts []state.Artifact, run, escalationID string, subject
 func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
-	var artifact JudgmentArtifactV1
-	if err := dec.Decode(&artifact); err != nil {
+	var wire judgmentArtifactWire
+	if err := dec.Decode(&wire); err != nil {
 		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: %w", err)
 	}
 	if err := ensureEOF(dec); err != nil {
 		return JudgmentArtifactV1{}, err
 	}
-	return artifact, nil
+	if wire.Confidence == nil {
+		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: confidence is required and must be numeric")
+	}
+	return JudgmentArtifactV1{
+		Version:      wire.Version,
+		Run:          wire.Run,
+		EscalationID: wire.EscalationID,
+		Subject:      wire.Subject,
+		Grant:        wire.Grant,
+		Question:     wire.Question,
+		Producer:     wire.Producer,
+		Decision:     wire.Decision,
+		Tier:         wire.Tier,
+		Confidence:   *wire.Confidence,
+		Why:          wire.Why,
+	}, nil
 }
 
 func ensureEOF(dec *json.Decoder) error {
@@ -146,7 +175,8 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	if !tier.Valid(artifact.Tier) || tier.Rank(artifact.Tier) > tier.Rank(request.Grant.MaxTier) {
 		return Verdict{}, fmt.Errorf("judgment_tier_exceeded: %q exceeds %q", artifact.Tier, request.Grant.MaxTier)
 	}
-	if artifact.Producer == "" || strings.TrimSpace(artifact.Why) == "" {
+	producer := strings.TrimSpace(artifact.Producer)
+	if producer == "" || strings.TrimSpace(artifact.Why) == "" {
 		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer and why are required")
 	}
 	if artifact.Confidence < 0 || artifact.Confidence > 1 {
@@ -155,7 +185,7 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	return Verdict{
 		Subject:    request.Subject,
 		Source:     "submitted-judgment",
-		Producer:   Producer{Class: ClassJudgment, Impl: artifact.Producer},
+		Producer:   Producer{Class: ClassJudgment, Impl: producer},
 		Decision:   artifact.Decision,
 		Tier:       artifact.Tier,
 		Confidence: artifact.Confidence,
