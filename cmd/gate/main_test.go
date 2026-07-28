@@ -1205,11 +1205,12 @@ func TestAtMostOneJudgmentProperty(t *testing.T) {
 	property := func(attempts []bool) bool {
 		var arts []state.Artifact
 		accepted := 0
+		const escalationID = "esc_once"
 		for _, attempt := range attempts {
-			if !attempt || hasJudgment(arts) {
+			if !attempt || hasJudgment(arts, escalationID) {
 				continue
 			}
-			arts = append(arts, state.Artifact{Kind: state.KindJudgment})
+			arts = append(arts, state.Artifact{Kind: state.KindJudgment, Parents: []string{escalationID}})
 			accepted++
 		}
 		return accepted <= 1
@@ -1274,6 +1275,70 @@ func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	if len(after) != len(before) {
 		t.Fatalf("stale refusal mutated state: before %d artifacts, after %d", len(before), len(after))
 	}
+}
+
+func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
+	e := testEnv(t)
+	narrow, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 129, HeadSHA: "abc"}
+	codePass := verify.Verdict{
+		Subject: subject, Source: "triage-floor",
+		Producer: verify.Producer{Class: verify.ClassCode},
+		Decision: verify.DecisionPass, Tier: "T2", Confidence: 1, Why: "sensitive path",
+	}
+	if _, err := verify.Record(e.st, run, nil, codePass); err != nil {
+		t.Fatal(err)
+	}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	reduced, err := verify.Reduce(subject, []verify.Verdict{
+		codePass,
+		{
+			Subject: subject, Source: "readiness",
+			Producer: verify.Producer{Class: verify.ClassLocal},
+			Decision: verify.DecisionEscalate, Tier: "T0", Confidence: 1, Why: "panel disagreement",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rvID := recordReduced(t, e, run, reduced)
+	if _, code, err := act(e, run, narrow.ID, reduced, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("content park: code %d err %v", code, err)
+	}
+	contentPark := firstOfKind(t, e, run, state.KindEscalation)
+	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe"}); err != nil || code != codeParked {
+		t.Fatalf("narrow-grant judgment should re-park at ceiling: code %d err %v", code, err)
+	}
+	ceilingPark := lastOfKind(t, e, run, state.KindEscalation)
+	if ceilingPark.ID == contentPark.ID {
+		t.Fatal("judgment did not create a distinct ceiling park")
+	}
+	wider, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier"}); err != nil || code != codeMerge {
+		t.Fatalf("new ceiling park must accept its own judgment: code %d err %v", code, err)
+	}
+}
+
+func lastOfKind(t *testing.T, e env, run, kind string) state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := len(arts) - 1; i >= 0; i-- {
+		if arts[i].Kind == kind {
+			return arts[i]
+		}
+	}
+	t.Fatalf("run %s has no %s artifact", run, kind)
+	return state.Artifact{}
 }
 
 // assertJudgmentParented checks the run's judgment is the one resolve recorded

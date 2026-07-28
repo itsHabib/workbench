@@ -55,7 +55,7 @@ func TestConcurrentAppendKeepsChainIntact(t *testing.T) {
 	}
 }
 
-func TestAppendIfAbsentAllowsOneConcurrentWinner(t *testing.T) {
+func TestAppendIfAbsentParentAllowsOneConcurrentWinner(t *testing.T) {
 	st, err := Open(t.TempDir(), time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestAppendIfAbsentAllowsOneConcurrentWinner(t *testing.T) {
 		wg.Add(1)
 		go func(writer int) {
 			defer wg.Done()
-			_, err := st.AppendIfAbsent(KindJudgment, "run_once", nil, map[string]int{"writer": writer})
+			_, err := st.AppendIfAbsentParent(KindJudgment, "run_once", "esc_once", []string{"esc_once"}, map[string]int{"writer": writer})
 			results <- err
 		}(i)
 	}

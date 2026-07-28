@@ -97,7 +97,9 @@ provider echoes every binding and adds:
 
 A Codex task may instead save that response and submit it with `-judgment`.
 Unknown fields, wrong run/escalation/grant, stale head, a tier above the
-presented ceiling, and a second judgment all refuse before the log changes.
+presented ceiling, and a second judgment for the same escalation all refuse
+before the log changes. A judgment that legitimately produces a newer ceiling
+park may be followed by a judgment bound to that new escalation.
 The configured executable path is the provider policy; Gate neither selects
 nor names a model vendor.
 

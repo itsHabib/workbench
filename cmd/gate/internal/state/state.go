@@ -64,8 +64,8 @@ var kindPrefix = map[string]string{
 	KindGrantNeeded: "gnd",
 }
 
-// ErrAlreadyExists is returned by AppendIfAbsent when the run already carries
-// the requested artifact kind.
+// ErrAlreadyExists is returned by AppendIfAbsentParent when the run already
+// carries the requested artifact kind parented to the same artifact.
 var ErrAlreadyExists = errors.New("artifact already exists")
 
 // ErrNotFound is returned by Get when no artifact carries the requested id. It
@@ -144,10 +144,11 @@ func (s *Store) Append(kind, run string, parents []string, body any) (Artifact, 
 	return s.appendLocked(kind, run, parents, raw)
 }
 
-// AppendIfAbsent atomically appends kind only when run has no artifact of that
-// kind. The check and append share the store lock, so concurrent consumers
-// cannot both record a supposedly at-most-once effect.
-func (s *Store) AppendIfAbsent(kind, run string, parents []string, body any) (Artifact, error) {
+// AppendIfAbsentParent atomically appends kind only when run has no artifact
+// of that kind parented to uniqueParent. The check and append share the store
+// lock, so concurrent consumers cannot both record the same at-most-once
+// effect while a later effect with a different parent remains representable.
+func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []string, body any) (Artifact, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
@@ -158,7 +159,7 @@ func (s *Store) AppendIfAbsent(kind, run string, parents []string, body any) (Ar
 	}
 	defer unlock()
 	existing, err := s.scan(func(a Artifact) bool {
-		return a.Run == run && a.Kind == kind
+		return a.Run == run && a.Kind == kind && hasParent(a.Parents, uniqueParent)
 	})
 	if err != nil {
 		return Artifact{}, err
@@ -167,6 +168,15 @@ func (s *Store) AppendIfAbsent(kind, run string, parents []string, body any) (Ar
 		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
 	}
 	return s.appendLocked(kind, run, parents, raw)
+}
+
+func hasParent(parents []string, want string) bool {
+	for _, parent := range parents {
+		if parent == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) appendLocked(kind, run string, parents []string, raw json.RawMessage) (Artifact, error) {

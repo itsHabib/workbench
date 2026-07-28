@@ -979,8 +979,8 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	if hasJudgment(arts) {
-		return gateResult{}, 0, "", errors.New("judgment_duplicate: run already has a judgment")
+	if hasJudgment(arts, escalationID) {
+		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
 	}
 	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now)
 	if err != nil {
@@ -990,9 +990,9 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	if err != nil {
 		return gateResult{}, 0, "", err
 	}
-	jArt, err := e.st.AppendIfAbsent(state.KindJudgment, run, []string{escalationID}, judgment)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID}, judgment)
 	if errors.Is(err, state.ErrAlreadyExists) {
-		return gateResult{}, 0, "", errors.New("judgment_duplicate: run already has a judgment")
+		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
 	}
 	if err != nil {
 		return gateResult{}, 0, "", err
@@ -1038,9 +1038,18 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 	return verify.ValidateJudgment(artifact, request)
 }
 
-func hasJudgment(arts []state.Artifact) bool {
+func hasJudgment(arts []state.Artifact, escalationID string) bool {
 	for _, artifact := range arts {
-		if artifact.Kind == state.KindJudgment {
+		if artifact.Kind == state.KindJudgment && stateArtifactHasParent(artifact, escalationID) {
+			return true
+		}
+	}
+	return false
+}
+
+func stateArtifactHasParent(artifact state.Artifact, parentID string) bool {
+	for _, parent := range artifact.Parents {
+		if parent == parentID {
 			return true
 		}
 	}
