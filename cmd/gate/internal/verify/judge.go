@@ -1,13 +1,15 @@
 package verify
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"os/exec"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
 )
 
 // The premium rung: a frontier model resolves an escalation. The judge sees
@@ -25,8 +27,10 @@ Decide whether the escalated concerns block the merge or not. Code-verifier bloc
 are not yours to override — you only resolve escalations. Be strict about
 correctness risks, lenient about style and doc nits.
 
-Your reply's final line must be exactly (no markdown fence):
-VERDICT: {"decision": "pass" or "block", "why": "<one or two sentences naming the findings that drove it>", "confidence": <0.0-1.0>}
+Return exactly one gate-judgment-v1 JSON object, with no markdown. Echo the
+request's run, escalation_id, subject, grant, and question exactly; identify
+your implementation in producer; set decision to pass or block; set tier no
+higher than the presented grant ceiling; and include confidence and why.
 `
 
 const (
@@ -34,91 +38,204 @@ const (
 	artifactsEnd   = "=== END ARTIFACTS ==="
 )
 
-type judgeReply struct {
-	Decision   string  `json:"decision"`
-	Why        string  `json:"why"`
-	Confidence float64 `json:"confidence"`
+// JudgmentV1 is the provider-neutral judgment contract version.
+const JudgmentV1 = "gate-judgment-v1"
+
+// JudgmentGrantV1 binds a judgment to the presented capability. The signature
+// stays in gate state; providers receive only the id and ceiling they must echo.
+type JudgmentGrantV1 struct {
+	ID      string `json:"id"`
+	MaxTier string `json:"max_tier"`
 }
 
-// The premium rung runs the strongest model we have, at high reasoning effort.
-// It fires only on a parked PR (an escalation), so the cost is bounded to the
-// cases a human would otherwise adjudicate. Model and effort are CLI config —
-// which reasoner to invoke — not judgment data; this is the same class of
-// environmental dependency as the judge already having `claude` on PATH. The
-// effective model and effort are recorded on the judgment verdict (Producer.Impl),
-// so a run stays reconstructable even when the defaults are overridden.
-// GATE_JUDGE_MODEL / GATE_JUDGE_EFFORT override for tuning without a rebuild.
-const (
-	defaultJudgeModel  = "claude-opus-4-8"
-	defaultJudgeEffort = "high"
-)
-
-func judgeModel() string {
-	if m := os.Getenv("GATE_JUDGE_MODEL"); m != "" {
-		return m
-	}
-	return defaultJudgeModel
+// JudgmentRequestV1 is the complete provider input. Context contains only
+// recorded artifacts, never a checkout or ambient conversation.
+type JudgmentRequestV1 struct {
+	Version      string          `json:"version"`
+	Run          string          `json:"run"`
+	EscalationID string          `json:"escalation_id"`
+	Subject      Subject         `json:"subject"`
+	Grant        JudgmentGrantV1 `json:"grant"`
+	Question     string          `json:"question"`
+	Context      string          `json:"context"`
 }
 
-func judgeEffort() string {
-	if e := os.Getenv("GATE_JUDGE_EFFORT"); e != "" {
-		return e
-	}
-	return defaultJudgeEffort
+// JudgmentArtifactV1 is the provider-neutral submission accepted by Gate.
+// Every authority-relevant binding is repeated so Gate can validate it before
+// appending anything to the hash-chained log.
+type JudgmentArtifactV1 struct {
+	Version      string          `json:"version"`
+	Run          string          `json:"run"`
+	EscalationID string          `json:"escalation_id"`
+	Subject      Subject         `json:"subject"`
+	Grant        JudgmentGrantV1 `json:"grant"`
+	Question     string          `json:"question"`
+	Producer     string          `json:"producer"`
+	Decision     string          `json:"decision"`
+	Tier         string          `json:"tier"`
+	Confidence   float64         `json:"confidence"`
+	Why          string          `json:"why"`
 }
 
-// judgeEnv forces CLAUDE_CODE_EFFORT_LEVEL to the chosen effort. The Claude Code
-// CLI lets that variable take precedence over the --effort flag, so appending it
-// LAST — Go's exec resolves a duplicated key to its last value — guarantees an
-// ambient operator/CI default cannot silently downgrade the premium judge.
-func judgeEnv(effort string) []string {
-	return append(os.Environ(), "CLAUDE_CODE_EFFORT_LEVEL="+effort)
+type judgmentArtifactWire struct {
+	Version      string          `json:"version"`
+	Run          string          `json:"run"`
+	EscalationID string          `json:"escalation_id"`
+	Subject      Subject         `json:"subject"`
+	Grant        JudgmentGrantV1 `json:"grant"`
+	Question     string          `json:"question"`
+	Producer     string          `json:"producer"`
+	Decision     string          `json:"decision"`
+	Tier         string          `json:"tier"`
+	Confidence   *float64        `json:"confidence"`
+	Why          string          `json:"why"`
 }
 
-// judgeCommand builds the claude CLI invocation. The prompt is NOT an argument
-// here — the caller pipes it via stdin, because an oversized-PR judgment carries
-// the diff evidence and would exceed the OS command-line limit (~32 KiB on
-// Windows). `claude -p` with no positional prompt reads it from stdin.
-func judgeCommand(model, effort string) *exec.Cmd {
-	cmd := exec.Command("claude", "-p", "--model", model, "--effort", effort)
-	cmd.Env = judgeEnv(effort)
-	return cmd
-}
-
-// AutoJudge builds the judgment context purely from a run's artifacts and asks
-// a frontier model (via the claude CLI) to resolve the escalation.
-func AutoJudge(arts []state.Artifact, subject Subject) (Verdict, error) {
+// NewJudgmentRequest builds the provider request purely from recorded state.
+func NewJudgmentRequest(arts []state.Artifact, run, escalationID string, subject Subject, grantID, maxTier string) (JudgmentRequestV1, error) {
 	ctx, err := judgeContext(arts)
 	if err != nil {
-		return Verdict{}, err
+		return JudgmentRequestV1{}, err
 	}
-	model, effort := judgeModel(), judgeEffort()
-	prompt := judgePrompt + "\n\n" + artifactsBegin + "\n" + ctx + "\n" + artifactsEnd
-	cmd := judgeCommand(model, effort)
-	cmd.Stdin = strings.NewReader(prompt)
+	question, err := escalationQuestion(arts, escalationID)
+	if err != nil {
+		return JudgmentRequestV1{}, err
+	}
+	return JudgmentRequestV1{
+		Version:      JudgmentV1,
+		Run:          run,
+		EscalationID: escalationID,
+		Subject:      subject,
+		Grant:        JudgmentGrantV1{ID: grantID, MaxTier: maxTier},
+		Question:     question,
+		Context:      judgePrompt + "\n\n" + artifactsBegin + "\n" + ctx + "\n" + artifactsEnd,
+	}, nil
+}
+
+// DecodeJudgmentArtifact strictly decodes one versioned submission.
+func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	var wire judgmentArtifactWire
+	if err := dec.Decode(&wire); err != nil {
+		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: %w", err)
+	}
+	if err := ensureEOF(dec); err != nil {
+		return JudgmentArtifactV1{}, err
+	}
+	if wire.Confidence == nil {
+		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: confidence is required and must be numeric")
+	}
+	return JudgmentArtifactV1{
+		Version:      wire.Version,
+		Run:          wire.Run,
+		EscalationID: wire.EscalationID,
+		Subject:      wire.Subject,
+		Grant:        wire.Grant,
+		Question:     wire.Question,
+		Producer:     wire.Producer,
+		Decision:     wire.Decision,
+		Tier:         wire.Tier,
+		Confidence:   *wire.Confidence,
+		Why:          wire.Why,
+	}, nil
+}
+
+func ensureEOF(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err == io.EOF {
+		return nil
+	}
+	return fmt.Errorf("judgment_malformed: trailing JSON value")
+}
+
+// ValidateJudgment validates every binding before the caller appends state.
+func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (Verdict, error) {
+	if artifact.Version != JudgmentV1 {
+		return Verdict{}, fmt.Errorf("judgment_version_unsupported: %q", artifact.Version)
+	}
+	if artifact.Run != request.Run {
+		return Verdict{}, fmt.Errorf("judgment_wrong_run: got %s want %s", artifact.Run, request.Run)
+	}
+	if artifact.EscalationID != request.EscalationID || artifact.Question != request.Question {
+		return Verdict{}, fmt.Errorf("judgment_wrong_escalation: submission does not match %s", request.EscalationID)
+	}
+	if artifact.Subject != request.Subject {
+		return Verdict{}, fmt.Errorf("judgment_stale_head: got %s want %s", artifact.Subject.HeadSHA, request.Subject.HeadSHA)
+	}
+	if artifact.Subject.HeadSHA == "" {
+		return Verdict{}, fmt.Errorf("judgment_stale_head: recorded subject has no exact head")
+	}
+	if artifact.Grant != request.Grant {
+		return Verdict{}, fmt.Errorf("judgment_wrong_grant: submission does not match presented grant")
+	}
+	if artifact.Decision != DecisionPass && artifact.Decision != DecisionBlock {
+		return Verdict{}, fmt.Errorf("judgment_bad_decision: %q", artifact.Decision)
+	}
+	if !tier.Valid(artifact.Tier) || tier.Rank(artifact.Tier) > tier.Rank(request.Grant.MaxTier) {
+		return Verdict{}, fmt.Errorf("judgment_tier_exceeded: %q exceeds %q", artifact.Tier, request.Grant.MaxTier)
+	}
+	producer := strings.TrimSpace(artifact.Producer)
+	if producer == "" || strings.TrimSpace(artifact.Why) == "" {
+		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer and why are required")
+	}
+	if artifact.Confidence < 0 || artifact.Confidence > 1 {
+		return Verdict{}, fmt.Errorf("judgment_bad_confidence: %v", artifact.Confidence)
+	}
+	return Verdict{
+		Subject:    request.Subject,
+		Source:     "submitted-judgment",
+		Producer:   Producer{Class: ClassJudgment, Impl: producer},
+		Decision:   artifact.Decision,
+		Tier:       artifact.Tier,
+		Confidence: artifact.Confidence,
+		Why:        artifact.Why,
+	}, nil
+}
+
+// AutoJudge runs only the explicitly supplied provider executable. The request
+// rides stdin and the artifact rides stdout, avoiding command-line size limits.
+func AutoJudge(command string, request JudgmentRequestV1) (Verdict, error) {
+	if strings.TrimSpace(command) == "" {
+		return Verdict{}, fmt.Errorf("judge_provider_unconfigured: pass -provider-command <executable>")
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return Verdict{}, fmt.Errorf("verify: marshal judgment request: %w", err)
+	}
+	cmd := exec.Command(command)
+	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return Verdict{}, fmt.Errorf("verify: claude cli: %s", ee.Stderr)
+			return Verdict{}, fmt.Errorf("judge_provider_failed: %s", strings.TrimSpace(string(ee.Stderr)))
 		}
-		return Verdict{}, fmt.Errorf("verify: claude cli: %w", err)
+		return Verdict{}, fmt.Errorf("judge_provider_failed: %w", err)
 	}
-	reply, err := parseJudgeReply(string(out))
+	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
 		return Verdict{}, err
 	}
-	if reply.Decision != DecisionPass && reply.Decision != DecisionBlock {
-		return Verdict{}, fmt.Errorf("verify: judge returned decision %q", reply.Decision)
+	return ValidateJudgment(artifact, request)
+}
+
+func escalationQuestion(arts []state.Artifact, escalationID string) (string, error) {
+	for _, artifact := range arts {
+		if artifact.Kind != state.KindEscalation || artifact.ID != escalationID {
+			continue
+		}
+		var body struct {
+			Question string `json:"question"`
+		}
+		if err := json.Unmarshal(artifact.Body, &body); err != nil {
+			return "", fmt.Errorf("judgment_malformed_escalation: %w", err)
+		}
+		if body.Question == "" {
+			return "", fmt.Errorf("judgment_malformed_escalation: question is empty")
+		}
+		return body.Question, nil
 	}
-	return Verdict{
-		Subject:    subject,
-		Source:     "auto-judge",
-		Producer:   Producer{Class: ClassJudgment, Impl: "claude-cli:" + model + ":" + effort},
-		Decision:   reply.Decision,
-		Tier:       "T0",
-		Confidence: reply.Confidence,
-		Why:        reply.Why,
-	}, nil
+	return "", fmt.Errorf("judgment_wrong_escalation: %s not found", escalationID)
 }
 
 // scrub neutralizes the artifact markers inside embedded content, so quoted
@@ -192,21 +309,4 @@ func writeDiffSection(b *strings.Builder, a state.Artifact) {
 		diff = diff[:diffCap] + "\n[... diff truncated ...]"
 	}
 	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s\n```\n\n", a.ID, scrub(diff))
-}
-
-// parseJudgeReply reads the object after the LAST "VERDICT:" marker, so JSON
-// or decoy markers quoted earlier — in reasoning or in echoed artifact
-// content — can't be mistaken for the decision. No marker, no judgment:
-// fail closed.
-func parseJudgeReply(out string) (judgeReply, error) {
-	idx := strings.LastIndex(out, "VERDICT:")
-	if idx < 0 {
-		return judgeReply{}, fmt.Errorf("verify: judge output has no VERDICT line: %.200s", out)
-	}
-	var r judgeReply
-	dec := json.NewDecoder(strings.NewReader(out[idx+len("VERDICT:"):]))
-	if err := dec.Decode(&r); err != nil {
-		return judgeReply{}, fmt.Errorf("verify: parse judge reply: %w", err)
-	}
-	return r, nil
 }

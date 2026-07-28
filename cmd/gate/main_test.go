@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
@@ -1148,7 +1149,7 @@ func TestResolveClosesLoop(t *testing.T) {
 		t.Fatalf("runOfEscalation resolved the wrong run: got %s want %s", gotRun, run)
 	}
 
-	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "the retry has a ceiling; safe to land", false)
+	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
@@ -1163,6 +1164,406 @@ func TestResolveClosesLoop(t *testing.T) {
 	assertResolutionStamp(t, e, run, esc.ID, judgmentID, res.Decision)
 	assertChainIntact(t, e)
 	_ = code // the terminal code depends on the reduce ladder; the loop's provenance is the invariant under test.
+}
+
+func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 127, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
+		t.Fatalf("first judgment: %v", err)
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+		t.Fatalf("duplicate error = %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("duplicate refusal mutated state: before %d artifacts, after %d", len(before), len(after))
+	}
+}
+
+func TestAtMostOneJudgmentProperty(t *testing.T) {
+	property := func(attempts []bool) bool {
+		var arts []state.Artifact
+		accepted := 0
+		const escalationID = "esc_once"
+		for _, attempt := range attempts {
+			if _, exists := artifactForParent(arts, state.KindJudgment, escalationID); !attempt || exists {
+				continue
+			}
+			arts = append(arts, state.Artifact{Kind: state.KindJudgment, Parents: []string{escalationID}})
+			accepted++
+		}
+		return accepted <= 1
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("at-most-one judgment property: %v", err)
+	}
+}
+
+func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 128, HeadSHA: "current"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	escBody, err := escalation.DecodeBody(esc.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := verify.JudgmentArtifactV1{
+		Version:      verify.JudgmentV1,
+		Run:          run,
+		EscalationID: esc.ID,
+		Subject:      verify.Subject{Repo: "o/r", Number: 128, HeadSHA: "stale"},
+		Grant:        verify.JudgmentGrantV1{ID: grantArt.ID, MaxTier: "T2"},
+		Question:     escBody.Question,
+		Producer:     "codex:test",
+		Decision:     verify.DecisionPass,
+		Tier:         "T0",
+		Confidence:   1,
+		Why:          "test",
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "judgment.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := judgmentOptions{ArtifactPath: path}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_stale_head") {
+		t.Fatalf("stale-head error = %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("stale refusal mutated state: before %d artifacts, after %d", len(before), len(after))
+	}
+}
+
+func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
+	e := testEnv(t)
+	narrow, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 129, HeadSHA: "abc"}
+	codePass := verify.Verdict{
+		Subject: subject, Source: "triage-floor",
+		Producer: verify.Producer{Class: verify.ClassCode},
+		Decision: verify.DecisionPass, Tier: "T2", Confidence: 1, Why: "sensitive path",
+	}
+	if _, err := verify.Record(e.st, run, nil, codePass); err != nil {
+		t.Fatal(err)
+	}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	reduced, err := verify.Reduce(subject, []verify.Verdict{
+		codePass,
+		{
+			Subject: subject, Source: "readiness",
+			Producer: verify.Producer{Class: verify.ClassLocal},
+			Decision: verify.DecisionEscalate, Tier: "T0", Confidence: 1, Why: "panel disagreement",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rvID := recordReduced(t, e, run, reduced)
+	if _, code, err := act(e, run, narrow.ID, reduced, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("content park: code %d err %v", code, err)
+	}
+	contentPark := firstOfKind(t, e, run, state.KindEscalation)
+	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe"}); err != nil || code != codeParked {
+		t.Fatalf("narrow-grant judgment should re-park at ceiling: code %d err %v", code, err)
+	}
+	ceilingPark := lastOfKind(t, e, run, state.KindEscalation)
+	if ceilingPark.ID == contentPark.ID {
+		t.Fatal("judgment did not create a distinct ceiling park")
+	}
+	wider, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier"}); err != nil || code != codeMerge {
+		t.Fatalf("new ceiling park must accept its own judgment: code %d err %v", code, err)
+	}
+}
+
+func TestRetryResumesPersistedJudgmentBeforeReduction(t *testing.T) {
+	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{})
+	if err != nil {
+		t.Fatalf("resume after persisted judgment: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("resume result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 1 {
+		t.Fatalf("resume appended %d judgments for one escalation", got)
+	}
+}
+
+func TestRetryResumesAfterReducedVerdictPersisted(t *testing.T) {
+	e, run, grantID, subject, esc, judgment, verdicts := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced); err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{})
+	if err != nil {
+		t.Fatalf("resume after anchor-style post-fsync interruption: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("resume result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+}
+
+func TestRetryReauthorizesPersistedJudgmentWithReplacementGrant(t *testing.T) {
+	e, run, _, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Second, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, expired.ID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	replacement, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	if err != nil {
+		t.Fatalf("replacement grant must resume immutable content judgment: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("reauthorized resume = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	outcome := lastOfKind(t, e, run, state.KindAction)
+	if !stateArtifactHasParent(outcome, replacement.ID) {
+		t.Fatalf("outcome does not name replacement grant: %v", outcome.Parents)
+	}
+	if stateArtifactHasParent(outcome, expired.ID) {
+		t.Fatalf("outcome incorrectly authorized by expired grant: %v", outcome.Parents)
+	}
+}
+
+func TestProviderDelayExpiryRefusesBeforeJudgmentAppend(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	now := time.Now()
+	e.now = func() time.Time { return now }
+	opts := judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "provider completed after the grant expired",
+		beforeAppend: func() {
+			now = now.Add(2 * time.Hour)
+		},
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts); err == nil || !strings.Contains(err.Error(), capability.ErrExpired.Error()) {
+		t.Fatalf("post-provider expiry error = %v", err)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 0 {
+		t.Fatalf("expired provider result mutated judgment state: %d artifacts", got)
+	}
+}
+
+func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
+	e, run, originalGrant, subject, esc, judgment, verdicts := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, originalGrant}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reducedArt, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", -time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, code, err := act(e, run, expired.ID, reduced, reducedArt.ID, gateResult{}, false, nil); err != nil || code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("refusal setup = code %d outcome %q err %v", code, res.Outcome, err)
+	}
+	replacement, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	if err != nil {
+		t.Fatalf("replacement grant must resume after capability refusal: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("replacement result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	completed := 0
+	for _, artifact := range arts {
+		if stateArtifactHasParent(artifact, reducedArt.ID) && completedJudgmentOutcome(artifact) {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("completed outcomes = %d, want exactly one", completed)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+		t.Fatalf("post-authorization duplicate error = %v", err)
+	}
+}
+
+func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
+	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
+		t.Fatalf("conflicting retry error = %v", err)
+	}
+	if _, ok := artifactForParent(mustRunArtifacts(t, e, run), state.KindVerdict, jArt.ID); ok {
+		t.Fatal("conflicting retry advanced the judgment chain")
+	}
+	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	assertResolutionStamp(t, e, run, esc.ID, gotID, verify.DecisionPass)
+}
+
+func mustRunArtifacts(t *testing.T, e env, run string) []state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
+}
+
+func resumableJudgmentFixture(t *testing.T) (env, string, string, verify.Subject, state.Artifact, verify.Verdict, []verify.Verdict) {
+	t.Helper()
+	e := testEnv(t)
+	grant, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 130, HeadSHA: "abc"}
+	codePass := verify.Verdict{
+		Subject: subject, Source: "triage-floor",
+		Producer: verify.Producer{Class: verify.ClassCode},
+		Decision: verify.DecisionPass, Tier: "T0", Confidence: 1, Why: "floor passes",
+	}
+	localEscalate := verify.Verdict{
+		Subject: subject, Source: "review-consolidation",
+		Producer: verify.Producer{Class: verify.ClassLocal},
+		Decision: verify.DecisionEscalate, Tier: "T0", Confidence: 1, Why: "panel disagreement",
+	}
+	for _, verdict := range []verify.Verdict{codePass, localEscalate} {
+		if _, err := verify.Record(e.st, run, nil, verdict); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verdicts := []verify.Verdict{codePass, localEscalate}
+	reduced, err := verify.Reduce(subject, verdicts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reducedID := recordReduced(t, e, run, reduced)
+	if _, code, err := act(e, run, grant.ID, reduced, reducedID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	judgment := verify.Verdict{
+		Subject: subject, Source: "operator-judgment",
+		Producer: verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision: verify.DecisionPass, Tier: "T0", Confidence: 1, Why: "safe",
+	}
+	return e, run, grant.ID, subject, esc, judgment, verdicts
+}
+
+func countKindParent(arts []state.Artifact, kind, parentID string) int {
+	count := 0
+	for _, artifact := range arts {
+		if artifact.Kind == kind && stateArtifactHasParent(artifact, parentID) {
+			count++
+		}
+	}
+	return count
+}
+
+func lastOfKind(t *testing.T, e env, run, kind string) state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := len(arts) - 1; i >= 0; i-- {
+		if arts[i].Kind == kind {
+			return arts[i]
+		}
+	}
+	t.Fatalf("run %s has no %s artifact", run, kind)
+	return state.Artifact{}
 }
 
 // assertJudgmentParented checks the run's judgment is the one resolve recorded
@@ -1239,7 +1640,7 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 
 	// Resolve it (pass → would_merge writes a terminal action).
-	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, verify.DecisionPass, "safe to land", false)
+	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}

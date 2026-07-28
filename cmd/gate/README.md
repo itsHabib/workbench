@@ -36,7 +36,8 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
-./gate.exe judge -run run_... -grant grt_... -auto           # frontier model judges from artifacts alone
+./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
+./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176
@@ -66,7 +67,60 @@ run. They are off unless a path is given and touch nothing on the decision path.
 
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on
-PATH or `-floor`); the `claude` CLI for `judge -auto`.
+PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
+`-provider-command` names an executable implementing the contract below.
+
+### Provider-neutral judgment
+
+Gate sends an explicitly configured `-provider-command` one
+`gate-judgment-v1` request as JSON on stdin and accepts one strict
+`gate-judgment-v1` artifact on stdout. The request contains only recorded
+state: run and escalation ids, the exact PR subject/head, the presented grant
+id and tier ceiling, the recorded question, and the artifact context. The
+provider echoes every binding and adds:
+
+```json
+{
+  "version": "gate-judgment-v1",
+  "run": "run_...",
+  "escalation_id": "esc_...",
+  "subject": {"repo": "owner/repo", "number": 181, "head_sha": "<exact SHA>"},
+  "grant": {"id": "grt_...", "max_tier": "T2"},
+  "question": "<exact recorded question>",
+  "producer": "codex:gpt-5",
+  "decision": "pass",
+  "tier": "T0",
+  "confidence": 0.9,
+  "why": "<reasoning>"
+}
+```
+
+A Codex task may instead save that response and submit it with `-judgment`.
+Unknown fields, wrong run/escalation/grant, stale head, a tier above the
+presented ceiling, and a second judgment for the same escalation all refuse
+before the log changes. A judgment that legitimately produces a newer ceiling
+park may be followed by a judgment bound to that new escalation.
+`confidence` is required and numeric (`0` is valid; omitted or `null` is not),
+and producer provenance is trimmed and must remain non-empty.
+Judgment application is resumable across process interruption: if the
+hash-chained judgment or its reduced verdict reached disk before the caller saw
+success, the same run/escalation/grant retry reuses that artifact and appends
+only the missing next stage. Once an outcome exists, the same retry is a
+duplicate refusal.
+If the judgment's original grant expires during that interruption, a new live
+grant for the same repo/action may reauthorize the remaining reduction/action;
+the immutable judgment retains its original grant parent and the outcome names
+the replacement grant. Retry flags cannot change the persisted decision, and a
+resolution stamp records the resumed verdict rather than the caller's repeated
+flag.
+Gate rechecks the live grant after a configured provider returns and
+immediately before appending its judgment, so a grant that expires during a
+long provider call authorizes no state mutation.
+A later `capability_refused` action remains audit history but does not complete
+the persisted judgment chain; a replacement live grant may still append the
+single authorized outcome.
+The configured executable path is the provider policy; Gate neither selects
+nor names a model vendor.
 
 ## How it decides
 
@@ -92,7 +146,8 @@ One `gate` invocation is a single pass:
 5. **Outcome** — pass within the grant ceiling clears the merge and prints the
    exact `gh pr merge` command (`-live` execution is not wired yet; the dry run
    records `would_merge`); escalations park with the full question embedded; a
-   later `judge` (operator or `-auto` frontier model) resolves the escalation
+   later `judge` (operator, submitted artifact, or explicitly configured
+   `-auto` provider) resolves the escalation
    from the recorded artifacts alone — and still cannot exceed the grant
    ceiling. Clearing a merge is a decision plus a printed command, not a
    forced merge: see [docs/enforcement.md](docs/enforcement.md).

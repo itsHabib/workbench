@@ -50,7 +50,8 @@ never records the token or resolved endpoint in verdict artifacts or errors.
 
 Constraints that are design decisions, not omissions:
 
-- **State is the only channel.** Verifiers, the judge, `explain`, and `audit`
+- **State is the only channel.** Verifiers, the provider-neutral judge,
+  `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path
   conventions.
 - **The ladder law lives in code.** Local producers can never block, judgment

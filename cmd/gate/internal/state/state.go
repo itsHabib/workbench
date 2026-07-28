@@ -64,6 +64,10 @@ var kindPrefix = map[string]string{
 	KindGrantNeeded: "gnd",
 }
 
+// ErrAlreadyExists is returned by AppendIfAbsentParent when the run already
+// carries the requested artifact kind parented to the same artifact.
+var ErrAlreadyExists = errors.New("artifact already exists")
+
 // ErrNotFound is returned by Get when no artifact carries the requested id. It
 // is a sentinel so callers can classify a genuine absent artifact (e.g. a grant
 // id that names nothing) apart from an I/O or parse failure.
@@ -137,6 +141,70 @@ func (s *Store) Append(kind, run string, parents []string, body any) (Artifact, 
 		return Artifact{}, err
 	}
 	defer unlock()
+	return s.appendLocked(kind, run, parents, raw)
+}
+
+// AppendIfAbsentParent atomically appends kind only when run has no artifact
+// of that kind parented to uniqueParent. The check and append share the store
+// lock, so concurrent consumers cannot both record the same at-most-once
+// effect while a later effect with a different parent remains representable.
+func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []string, body any) (Artifact, error) {
+	return s.AppendIfAbsentParentKinds(kind, []string{kind}, run, uniqueParent, parents, body)
+}
+
+// AppendIfAbsentParentKinds is AppendIfAbsentParent across an artifact family.
+// It is used when several kinds represent mutually exclusive outcomes.
+func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any) (Artifact, error) {
+	return s.AppendIfAbsentParentWhere(kind, uniqueKinds, run, uniqueParent, parents, body, nil)
+}
+
+// AppendIfAbsentParentWhere applies an optional conflict predicate while the
+// uniqueness check holds the store lock. A nil predicate treats every matching
+// kind/parent as a conflict.
+func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool) (Artifact, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer unlock()
+	existing, err := s.scan(func(a Artifact) bool {
+		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
+			return false
+		}
+		return conflicts == nil || conflicts(a)
+	})
+	if err != nil {
+		return Artifact{}, err
+	}
+	if len(existing) > 0 {
+		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
+	}
+	return s.appendLocked(kind, run, parents, raw)
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasParent(parents []string, want string) bool {
+	for _, parent := range parents {
+		if parent == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) appendLocked(kind, run string, parents []string, raw json.RawMessage) (Artifact, error) {
 	prev, err := s.lastHash()
 	if err != nil {
 		return Artifact{}, err
