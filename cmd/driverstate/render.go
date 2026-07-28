@@ -87,6 +87,9 @@ func writeClosureBlock(w io.Writer, receipt dsc.ClosureReceipt) {
 	if receipt.TaskRef != "" {
 		fmt.Fprintf(w, "      task %s\n", receipt.TaskRef)
 	}
+	if receipt.OpeningPRRef != "" {
+		fmt.Fprintf(w, "      opened %s\n", receipt.OpeningPRRef)
+	}
 	if receipt.PRRef != "" {
 		fmt.Fprintf(w, "      pr %s\n", receipt.PRRef)
 	}
@@ -96,8 +99,14 @@ func writeClosureBlock(w io.Writer, receipt dsc.ClosureReceipt) {
 	if receipt.ReviewArtifactID != "" {
 		fmt.Fprintf(w, "      review %s @ %s\n", receipt.ReviewArtifactID, shortCommit(receipt.ReviewHeadSHA))
 	}
+	if receipt.FinalReviewedHeadSHA != "" {
+		fmt.Fprintf(w, "      final review @ %s\n", shortCommit(receipt.FinalReviewedHeadSHA))
+	}
 	if receipt.GateRunRef != "" {
-		fmt.Fprintf(w, "      gate %s\n", receipt.GateRunRef)
+		fmt.Fprintf(w, "      gate %s @ %s\n", receipt.GateRunRef, shortCommit(receipt.GateHeadSHA))
+	}
+	if receipt.MergeHeadSHA != "" {
+		fmt.Fprintf(w, "      merge head %s\n", shortCommit(receipt.MergeHeadSHA))
 	}
 	if len(receipt.Missing) > 0 {
 		fmt.Fprintf(w, "      missing: %s\n", strings.Join(receipt.Missing, ", "))

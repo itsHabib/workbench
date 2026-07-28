@@ -21,19 +21,24 @@ their prior reduced shape.
 A receipt is complete only when its existing lifecycle reaches exactly one
 merge and the join contains:
 
-- task, Ship run, PR/head, and Gate run references;
+- task, Ship run, opening PR/head, final PR/head, and Gate run references;
 - seat, harness, model, provider, and effort;
 - native review producer and catalog revision;
-- review artifact id, canonical 64-hex digest, and exact reviewed head;
+- address review artifact id, canonical 64-hex digest, and exact opening head;
+- authoritative final-reviewed, Gate-judged, and merged head SHAs;
 - at least one recorded review cycle and the merge commit.
 
-The reviewed head must equal the head recorded by `stream_pr_opened`, and the
-PR number on `stream_merged` must name that same opened PR. Conflicting repeated
-facts, a head or PR mismatch, or duplicate terminal merge facts remain visibly
-contradictory and cannot complete. An absent catalog revision is the only
-legacy-compatible provenance case: `ReviewFindingsV1` still validates, but its
-closure receipt remains incomplete. A present malformed revision refuses
-contract validation.
+The address artifact's `review_head_sha` must equal the opening head recorded
+by `stream_pr_opened`. After address changes the branch, a separate
+`final_reviewed_head_sha` in `closure_facts` records the head that passed fresh
+review; `gate_head_sha` and `stream_merged.head_sha` must both equal it. The
+receipt retains `opening_pr_ref` as history and exposes `pr_ref` at the final
+head. The PR number on `stream_merged` must still name that same PR.
+Conflicting repeated facts, a head or PR mismatch, or duplicate terminal merge
+facts remain visibly contradictory and cannot complete. An absent catalog
+revision is the only legacy-compatible provenance case: `ReviewFindingsV1`
+still validates, but its closure receipt remains incomplete. A present
+malformed revision refuses contract validation.
 
 Catalog revisions are either a full lowercase source commit SHA (40 or 64
 hexadecimal characters) or `sha256:` followed by 64 lowercase hexadecimal

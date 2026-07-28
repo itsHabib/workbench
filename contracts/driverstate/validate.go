@@ -106,7 +106,10 @@ func validateClosureFacts(body json.RawMessage) error {
 		{"review_producer", b.ReviewProducer}, {"catalog_revision", b.CatalogRevision},
 		{"review_artifact_id", b.ReviewArtifactID},
 		{"review_artifact_digest", b.ReviewArtifactDigest},
-		{"review_head_sha", b.ReviewHeadSHA}, {"ship_run_ref", b.ShipRunRef},
+		{"review_head_sha", b.ReviewHeadSHA},
+		{"final_reviewed_head_sha", b.FinalReviewedHeadSHA},
+		{"gate_head_sha", b.GateHeadSHA},
+		{"ship_run_ref", b.ShipRunRef},
 		{"gate_run_ref", b.GateRunRef},
 	}
 	present := 0
@@ -140,6 +143,10 @@ func validateClosureFactFormats(b ClosureFactsBody) error {
 		return errors.New("driverstate: closure_facts body: gate_run_ref must start with run_")
 	case b.ReviewHeadSHA != "" && !validHex(b.ReviewHeadSHA, 40):
 		return errors.New("driverstate: closure_facts body: review_head_sha must be 40 lowercase hexadecimal characters")
+	case b.FinalReviewedHeadSHA != "" && !validHex(b.FinalReviewedHeadSHA, 40):
+		return errors.New("driverstate: closure_facts body: final_reviewed_head_sha must be 40 lowercase hexadecimal characters")
+	case b.GateHeadSHA != "" && !validHex(b.GateHeadSHA, 40):
+		return errors.New("driverstate: closure_facts body: gate_head_sha must be 40 lowercase hexadecimal characters")
 	case b.ReviewArtifactDigest != "" && !validDigest(b.ReviewArtifactDigest):
 		return errors.New("driverstate: closure_facts body: review_artifact_digest must be 64 lowercase hexadecimal characters")
 	case b.CatalogRevision != "" && !validCatalogRevision(b.CatalogRevision):
@@ -344,6 +351,13 @@ func validateStreamMerged(body json.RawMessage) error {
 	}
 	if b.MergedAt == "" {
 		return fmt.Errorf("driverstate: stream_merged body: merged_at is empty")
+	}
+	var rawFields map[string]json.RawMessage
+	if err := unmarshalBody(KindStreamMerged, body, &rawFields); err != nil {
+		return err
+	}
+	if _, present := rawFields["head_sha"]; present && !validHex(b.HeadSHA, 40) {
+		return fmt.Errorf("driverstate: stream_merged body: head_sha must be 40 lowercase hexadecimal characters")
 	}
 	return nil
 }

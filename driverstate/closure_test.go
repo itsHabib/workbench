@@ -10,14 +10,17 @@ import (
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 )
 
-func TestFoldClosureReceiptComplete(t *testing.T) {
+func TestFoldClosureReceiptAddressCycleCompletesOnFinalHead(t *testing.T) {
 	events := closureEvents(t, strings.Repeat("a", 40), strings.Repeat("a", 40), 1)
 	state := FoldEvents(events)
 	receipt := state.Streams["dss_1"].Closure
 	if receipt == nil || !receipt.Complete {
 		t.Fatalf("closure = %+v, want complete", receipt)
 	}
-	if receipt.PRRef != "itsHabib/ship#184@"+strings.Repeat("a", 40) {
+	if receipt.OpeningPRRef != "itsHabib/ship#184@"+strings.Repeat("a", 40) {
+		t.Fatalf("opening_pr_ref = %q", receipt.OpeningPRRef)
+	}
+	if receipt.PRRef != "itsHabib/ship#184@"+strings.Repeat("f", 40) {
 		t.Fatalf("pr_ref = %q", receipt.PRRef)
 	}
 	if receipt.ReviewCycles != 1 || receipt.Outcome != "merged" {
@@ -46,7 +49,7 @@ func TestFoldClosureReceiptContradictionsStayIncomplete(t *testing.T) {
 		merges     int
 		reason     string
 	}{
-		{"mismatched exact head", strings.Repeat("b", 40), 1, "review_head_mismatch"},
+		{"mismatched actionable review head", strings.Repeat("b", 40), 1, "review_artifact_head_mismatch"},
 		{"duplicate terminal closure", strings.Repeat("a", 40), 2, "duplicate_terminal_closure"},
 	}
 	for _, test := range tests {
@@ -55,6 +58,49 @@ func TestFoldClosureReceiptContradictionsStayIncomplete(t *testing.T) {
 			receipt := FoldEvents(events).Streams["dss_1"].Closure
 			if receipt == nil || receipt.Complete || !contains(receipt.Contradictions, test.reason) {
 				t.Fatalf("closure = %+v, want contradiction %q", receipt, test.reason)
+			}
+		})
+	}
+}
+
+func TestFoldClosureReceiptFinalHeadJoinsMustAgree(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*dsc.ClosureFactsBody, *dsc.StreamMergedBody)
+		reason string
+	}{
+		{
+			name: "Gate judged stale final head",
+			mutate: func(facts *dsc.ClosureFactsBody, _ *dsc.StreamMergedBody) {
+				facts.GateHeadSHA = strings.Repeat("9", 40)
+			},
+			reason: "gate_head_mismatch",
+		},
+		{
+			name: "merge readback differs from final review",
+			mutate: func(_ *dsc.ClosureFactsBody, merged *dsc.StreamMergedBody) {
+				merged.HeadSHA = strings.Repeat("8", 40)
+			},
+			reason: "merge_head_mismatch",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			events := closureEvents(t, strings.Repeat("a", 40), strings.Repeat("a", 40), 1)
+			var facts dsc.ClosureFactsBody
+			if err := json.Unmarshal(events[4].Body, &facts); err != nil {
+				t.Fatal(err)
+			}
+			var merged dsc.StreamMergedBody
+			if err := json.Unmarshal(events[len(events)-1].Body, &merged); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&facts, &merged)
+			events[4].Body = mustBody(t, facts)
+			events[len(events)-1].Body = mustBody(t, merged)
+			receipt := FoldEvents(events).Streams["dss_1"].Closure
+			if receipt == nil || receipt.Complete || !contains(receipt.Contradictions, test.reason) {
+				t.Fatalf("closure = %+v, want final-head contradiction %q", receipt, test.reason)
 			}
 		})
 	}
@@ -128,6 +174,7 @@ func TestLegacyLedgerHasNoSyntheticClosure(t *testing.T) {
 
 func closureEvents(t *testing.T, prHead, reviewHead string, merges int) []Event {
 	t.Helper()
+	finalHead := strings.Repeat("f", 40)
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	event := func(kind dsc.Kind, body any) Event {
 		at = at.Add(time.Second)
@@ -153,14 +200,15 @@ func closureEvents(t *testing.T, prHead, reviewHead string, merges int) []Event 
 			Provider: "openai", Effort: "high", ReviewProducer: "codex:github-plugin",
 			CatalogRevision: strings.Repeat("c", 40), ReviewArtifactID: "rf_1",
 			ReviewArtifactDigest: strings.Repeat("d", 64),
-			ReviewHeadSHA:        reviewHead, ShipRunRef: "drv_1", GateRunRef: "run_1",
+			ReviewHeadSHA:        reviewHead, FinalReviewedHeadSHA: finalHead,
+			GateHeadSHA: finalHead, ShipRunRef: "drv_1", GateRunRef: "run_1",
 		}),
 		event(dsc.KindReviewCycle, dsc.ReviewCycleBody{Cycle: 1, PanelSettled: true, Findings: 1}),
 	}
 	for index := 0; index < merges; index++ {
 		events = append(events, event(dsc.KindStreamMerged, dsc.StreamMergedBody{
 			PR: 184, MergeCommit: strings.Repeat("e", 40),
-			MergedAt: at.Add(time.Second).Format(time.RFC3339),
+			MergedAt: at.Add(time.Second).Format(time.RFC3339), HeadSHA: finalHead,
 		}))
 	}
 	return events

@@ -218,6 +218,9 @@ type StreamMergedBody struct {
 	PR          int    `json:"pr"`
 	MergeCommit string `json:"merge_commit"`
 	MergedAt    string `json:"merged_at"`
+	// HeadSHA is the exact PR head GitHub merged. Legacy events may omit it,
+	// but a closure receipt cannot complete without the final-head join.
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 // ReviewCycleBody records one review cycle on an open PR — first-class from
@@ -243,6 +246,8 @@ type ClosureFactsBody struct {
 	ReviewArtifactID     string `json:"review_artifact_id,omitempty"`
 	ReviewArtifactDigest string `json:"review_artifact_digest,omitempty"`
 	ReviewHeadSHA        string `json:"review_head_sha,omitempty"`
+	FinalReviewedHeadSHA string `json:"final_reviewed_head_sha,omitempty"`
+	GateHeadSHA          string `json:"gate_head_sha,omitempty"`
 	ShipRunRef           string `json:"ship_run_ref,omitempty"`
 	GateRunRef           string `json:"gate_run_ref,omitempty"`
 }
@@ -273,6 +278,7 @@ type InterventionBody struct {
 type ClosureReceipt struct {
 	WorkflowRef          string             `json:"workflow_ref"`
 	TaskRef              string             `json:"task_ref,omitempty"`
+	OpeningPRRef         string             `json:"opening_pr_ref,omitempty"`
 	PRRef                string             `json:"pr_ref,omitempty"`
 	ShipRunRef           string             `json:"ship_run_ref,omitempty"`
 	GateRunRef           string             `json:"gate_run_ref,omitempty"`
@@ -286,6 +292,9 @@ type ClosureReceipt struct {
 	ReviewArtifactID     string             `json:"review_artifact_id,omitempty"`
 	ReviewArtifactDigest string             `json:"review_artifact_digest,omitempty"`
 	ReviewHeadSHA        string             `json:"review_head_sha,omitempty"`
+	FinalReviewedHeadSHA string             `json:"final_reviewed_head_sha,omitempty"`
+	GateHeadSHA          string             `json:"gate_head_sha,omitempty"`
+	MergeHeadSHA         string             `json:"merge_head_sha,omitempty"`
 	ReviewCycles         int                `json:"review_cycles"`
 	Interventions        []InterventionBody `json:"interventions,omitempty"`
 	MergeCommit          string             `json:"merge_commit,omitempty"`

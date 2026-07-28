@@ -60,7 +60,7 @@
         "generated_at": { "type": "string" },
         "manifest": { "type": "object", "description": "The driver.md frontmatter, verbatim." },
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream_spec" } },
-        "ship_run_ref": { "type": "string" },
+        "ship_run_ref": { "type": "string", "pattern": "^drv_" },
         "parent": { "type": "string", "description": "The parent run id (dsr_…) for a child sub-run; empty on a parent or standalone run (session-orchestrator spec §4 D1)." },
         "parent_stream": { "type": "string", "description": "The parent stream (dss_…) this child sub-run implements; empty on a parent or standalone run." },
         "done_boundary": { "type": "string", "description": "The per-run done policy: green | pr-open | merged. Empty reads as merged. Governs the drive only — no new event or state-machine transition (spec §4 D7)." }
@@ -119,7 +119,8 @@
       "properties": {
         "pr": { "type": "integer", "minimum": 1 },
         "merge_commit": { "type": "string" },
-        "merged_at": { "type": "string" }
+        "merged_at": { "type": "string" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
       }
     },
     "review_cycle_body": {
@@ -150,6 +151,8 @@
         "review_artifact_id": { "type": "string", "minLength": 1 },
         "review_artifact_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "review_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "final_reviewed_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "gate_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "ship_run_ref": { "type": "string", "pattern": "^drv_" },
         "gate_run_ref": { "type": "string", "pattern": "^run_" }
       }

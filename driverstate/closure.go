@@ -47,12 +47,37 @@ func foldClosure(events []Event, stream string) dsc.ClosureReceipt {
 	for _, event := range events {
 		acc.apply(event)
 	}
+	setClosurePRRefs(&acc)
+	validateClosureHeadJoins(&acc)
+	validateClosureLifecycleJoins(&acc)
+	finalizeClosure(&acc.receipt)
+	return acc.receipt
+}
+
+func setClosurePRRefs(acc *closureAccumulator) {
 	if acc.repo != "" && acc.pr > 0 && acc.prHead != "" {
-		acc.receipt.PRRef = fmt.Sprintf("%s#%d@%s", acc.repo, acc.pr, acc.prHead)
+		acc.receipt.OpeningPRRef = fmt.Sprintf("%s#%d@%s", acc.repo, acc.pr, acc.prHead)
 	}
+	if acc.repo != "" && acc.pr > 0 && acc.receipt.FinalReviewedHeadSHA != "" {
+		acc.receipt.PRRef = fmt.Sprintf("%s#%d@%s", acc.repo, acc.pr, acc.receipt.FinalReviewedHeadSHA)
+	}
+}
+
+func validateClosureHeadJoins(acc *closureAccumulator) {
 	if acc.receipt.ReviewHeadSHA != "" && acc.prHead != "" && acc.receipt.ReviewHeadSHA != acc.prHead {
-		addContradiction(&acc.receipt, "review_head_mismatch")
+		addContradiction(&acc.receipt, "review_artifact_head_mismatch")
 	}
+	if acc.receipt.GateHeadSHA != "" && acc.receipt.FinalReviewedHeadSHA != "" &&
+		acc.receipt.GateHeadSHA != acc.receipt.FinalReviewedHeadSHA {
+		addContradiction(&acc.receipt, "gate_head_mismatch")
+	}
+	if acc.receipt.MergeHeadSHA != "" && acc.receipt.FinalReviewedHeadSHA != "" &&
+		acc.receipt.MergeHeadSHA != acc.receipt.FinalReviewedHeadSHA {
+		addContradiction(&acc.receipt, "merge_head_mismatch")
+	}
+}
+
+func validateClosureLifecycleJoins(acc *closureAccumulator) {
 	if acc.pr > 0 && acc.mergedPR > 0 && acc.pr != acc.mergedPR {
 		addContradiction(&acc.receipt, "merged_pr_mismatch")
 	}
@@ -62,8 +87,6 @@ func foldClosure(events []Event, stream string) dsc.ClosureReceipt {
 	if acc.mergeCount > 1 {
 		addContradiction(&acc.receipt, "duplicate_terminal_closure")
 	}
-	finalizeClosure(&acc.receipt)
-	return acc.receipt
 }
 
 type closureAccumulator struct {
@@ -130,6 +153,7 @@ func (a *closureAccumulator) applyMerged(raw json.RawMessage) {
 		addContradiction(&a.receipt, "merged_pr_conflict")
 	}
 	a.receipt.MergeCommit = body.MergeCommit
+	setClosureFact(&a.receipt, "merge_head_sha", &a.receipt.MergeHeadSHA, body.HeadSHA)
 	a.receipt.Outcome = "merged"
 }
 
@@ -154,6 +178,8 @@ func applyClosureFacts(receipt *dsc.ClosureReceipt, raw json.RawMessage) {
 		{"review_artifact_id", &receipt.ReviewArtifactID, body.ReviewArtifactID},
 		{"review_artifact_digest", &receipt.ReviewArtifactDigest, body.ReviewArtifactDigest},
 		{"review_head_sha", &receipt.ReviewHeadSHA, body.ReviewHeadSHA},
+		{"final_reviewed_head_sha", &receipt.FinalReviewedHeadSHA, body.FinalReviewedHeadSHA},
+		{"gate_head_sha", &receipt.GateHeadSHA, body.GateHeadSHA},
 		{"ship_run_ref", &receipt.ShipRunRef, body.ShipRunRef},
 		{"gate_run_ref", &receipt.GateRunRef, body.GateRunRef},
 	}
@@ -188,6 +214,7 @@ func finalizeClosure(receipt *dsc.ClosureReceipt) {
 		value string
 	}{
 		{"task_ref", receipt.TaskRef},
+		{"opening_pr_ref", receipt.OpeningPRRef},
 		{"pr_ref", receipt.PRRef},
 		{"ship_run_ref", receipt.ShipRunRef},
 		{"gate_run_ref", receipt.GateRunRef},
@@ -201,6 +228,9 @@ func finalizeClosure(receipt *dsc.ClosureReceipt) {
 		{"review_artifact_id", receipt.ReviewArtifactID},
 		{"review_artifact_digest", receipt.ReviewArtifactDigest},
 		{"review_head_sha", receipt.ReviewHeadSHA},
+		{"final_reviewed_head_sha", receipt.FinalReviewedHeadSHA},
+		{"gate_head_sha", receipt.GateHeadSHA},
+		{"merge_head_sha", receipt.MergeHeadSHA},
 		{"merge_commit", receipt.MergeCommit},
 		{"outcome", receipt.Outcome},
 	}
