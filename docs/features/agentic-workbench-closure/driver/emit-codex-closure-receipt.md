@@ -32,7 +32,8 @@ from Ship's existing address, review, Gate-handoff, and land path.
   checks.
 - Record explicit failures/interventions; never infer judgment or panel
   completeness.
-- Do not add a receipt database or modify ReviewFindingsV1 parsing.
+- Narrowly adopt the optional typed catalog-revision field in Ship's existing
+  ReviewFindingsV1 parser; do not redesign parsing or add a receipt database.
 
 ## Acceptance
 
@@ -53,4 +54,4 @@ from Ship's existing address, review, Gate-handoff, and land path.
 
 ## Non-goals
 
-Native skill implementation, parser changes, or receipt analytics.
+Native skill implementation, broad parser redesign, or receipt analytics.

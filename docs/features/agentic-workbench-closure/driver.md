@@ -32,7 +32,7 @@ batches:
         spec_path: docs/features/agentic-workbench-closure/driver/closure-receipt-contract.md
         branch_name: codex/closure-receipt-contract
         runtime: local
-        touches: [contracts/driverstate, contracts/reviewfindings, cmd/driverstate, cmd/reviewfindings, docs/features/agentic-workbench-closure]
+        touches: [contracts/driverstate, contracts/reviewfindings, driverstate, cmd/driverstate, cmd/reviewfindings, docs/features/agentic-workbench-closure]
         status: pending
   - id: 2
     label: consumers
