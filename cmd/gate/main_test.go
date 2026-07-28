@@ -1207,7 +1207,7 @@ func TestAtMostOneJudgmentProperty(t *testing.T) {
 		accepted := 0
 		const escalationID = "esc_once"
 		for _, attempt := range attempts {
-			if !attempt || hasJudgment(arts, escalationID) {
+			if _, exists := artifactForParent(arts, state.KindJudgment, escalationID); !attempt || exists {
 				continue
 			}
 			arts = append(arts, state.Artifact{Kind: state.KindJudgment, Parents: []string{escalationID}})
@@ -1324,6 +1324,102 @@ func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
 	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier"}); err != nil || code != codeMerge {
 		t.Fatalf("new ceiling park must accept its own judgment: code %d err %v", code, err)
 	}
+}
+
+func TestRetryResumesPersistedJudgmentBeforeReduction(t *testing.T) {
+	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{})
+	if err != nil {
+		t.Fatalf("resume after persisted judgment: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("resume result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 1 {
+		t.Fatalf("resume appended %d judgments for one escalation", got)
+	}
+}
+
+func TestRetryResumesAfterReducedVerdictPersisted(t *testing.T) {
+	e, run, grantID, subject, esc, judgment, verdicts := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced); err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{})
+	if err != nil {
+		t.Fatalf("resume after anchor-style post-fsync interruption: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("resume result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+}
+
+func resumableJudgmentFixture(t *testing.T) (env, string, string, verify.Subject, state.Artifact, verify.Verdict, []verify.Verdict) {
+	t.Helper()
+	e := testEnv(t)
+	grant, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 130, HeadSHA: "abc"}
+	codePass := verify.Verdict{
+		Subject: subject, Source: "triage-floor",
+		Producer: verify.Producer{Class: verify.ClassCode},
+		Decision: verify.DecisionPass, Tier: "T0", Confidence: 1, Why: "floor passes",
+	}
+	localEscalate := verify.Verdict{
+		Subject: subject, Source: "review-consolidation",
+		Producer: verify.Producer{Class: verify.ClassLocal},
+		Decision: verify.DecisionEscalate, Tier: "T0", Confidence: 1, Why: "panel disagreement",
+	}
+	for _, verdict := range []verify.Verdict{codePass, localEscalate} {
+		if _, err := verify.Record(e.st, run, nil, verdict); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verdicts := []verify.Verdict{codePass, localEscalate}
+	reduced, err := verify.Reduce(subject, verdicts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reducedID := recordReduced(t, e, run, reduced)
+	if _, code, err := act(e, run, grant.ID, reduced, reducedID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	judgment := verify.Verdict{
+		Subject: subject, Source: "operator-judgment",
+		Producer: verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision: verify.DecisionPass, Tier: "T0", Confidence: 1, Why: "safe",
+	}
+	return e, run, grant.ID, subject, esc, judgment, verdicts
+}
+
+func countKindParent(arts []state.Artifact, kind, parentID string) int {
+	count := 0
+	for _, artifact := range arts {
+		if artifact.Kind == kind && stateArtifactHasParent(artifact, parentID) {
+			count++
+		}
+	}
+	return count
 }
 
 func lastOfKind(t *testing.T, e env, run, kind string) state.Artifact {

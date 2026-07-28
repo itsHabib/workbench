@@ -149,6 +149,12 @@ func (s *Store) Append(kind, run string, parents []string, body any) (Artifact, 
 // lock, so concurrent consumers cannot both record the same at-most-once
 // effect while a later effect with a different parent remains representable.
 func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []string, body any) (Artifact, error) {
+	return s.AppendIfAbsentParentKinds(kind, []string{kind}, run, uniqueParent, parents, body)
+}
+
+// AppendIfAbsentParentKinds is AppendIfAbsentParent across an artifact family.
+// It is used when several kinds represent mutually exclusive outcomes.
+func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any) (Artifact, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
@@ -159,7 +165,7 @@ func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []s
 	}
 	defer unlock()
 	existing, err := s.scan(func(a Artifact) bool {
-		return a.Run == run && a.Kind == kind && hasParent(a.Parents, uniqueParent)
+		return a.Run == run && contains(uniqueKinds, a.Kind) && hasParent(a.Parents, uniqueParent)
 	})
 	if err != nil {
 		return Artifact{}, err
@@ -168,6 +174,15 @@ func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []s
 		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
 	}
 	return s.appendLocked(kind, run, parents, raw)
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func hasParent(parents []string, want string) bool {

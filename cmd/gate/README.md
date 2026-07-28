@@ -100,6 +100,11 @@ Unknown fields, wrong run/escalation/grant, stale head, a tier above the
 presented ceiling, and a second judgment for the same escalation all refuse
 before the log changes. A judgment that legitimately produces a newer ceiling
 park may be followed by a judgment bound to that new escalation.
+Judgment application is resumable across process interruption: if the
+hash-chained judgment or its reduced verdict reached disk before the caller saw
+success, the same run/escalation/grant retry reuses that artifact and appends
+only the missing next stage. Once an outcome exists, the same retry is a
+duplicate refusal.
 The configured executable path is the provider policy; Gate neither selects
 nor names a model vendor.
 

@@ -582,7 +582,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		art, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+		art, err := e.st.AppendIfAbsentParentKinds(kind, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body)
 		actionHash = art.Hash
 		return err
 	}
@@ -609,7 +609,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.Append(state.KindEscalation, run, []string{reducedID, grantID}, body)
+		_, err := e.st.AppendIfAbsentParentKinds(state.KindEscalation, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body)
 		return err
 	}
 
@@ -979,37 +979,72 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	if hasJudgment(arts, escalationID) {
-		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
-	}
 	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now)
 	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
+	}
+	if persisted, ok := artifactForParent(arts, state.KindJudgment, escalationID); ok {
+		if !stateArtifactHasParent(persisted, grantID) {
+			return gateResult{}, 0, "", errors.New("judgment_wrong_grant: persisted judgment belongs to a different grant")
+		}
+		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted)
 	}
 	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {
 		return gateResult{}, 0, "", err
 	}
-	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID}, judgment)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID, grantID}, judgment)
 	if errors.Is(err, state.ErrAlreadyExists) {
 		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
 	}
 	if err != nil {
-		return gateResult{}, 0, "", err
+		return gateResult{}, 0, jArt.ID, err
+	}
+	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
+}
+
+func resumeJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact) (gateResult, int, string, error) {
+	judgment, err := verify.Load(jArt)
+	if err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
+}
+
+func finishJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact, judgment verify.Verdict) (gateResult, int, string, error) {
+	if reducedArt, ok := artifactForParent(arts, state.KindVerdict, jArt.ID); ok {
+		if hasOutcomeFor(arts, reducedArt.ID) {
+			return gateResult{}, 0, jArt.ID, errors.New("judgment_duplicate: escalation judgment already produced an outcome")
+		}
+		reduced, err := verify.Load(reducedArt)
+		if err != nil {
+			return gateResult{}, 0, jArt.ID, err
+		}
+		return actAfterJudgment(e, run, grantID, subject, jArt.ID, reducedArt.ID, reduced)
 	}
 	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
 	if err != nil {
 		return gateResult{}, 0, jArt.ID, err
 	}
-	reducedArt, err := verify.Record(e.st, run, []string{jArt.ID}, reduced)
+	reducedArt, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, jArt.ID, errors.New("judgment_resume_in_progress: reduced verdict already recorded")
+	}
 	if err != nil {
 		return gateResult{}, 0, jArt.ID, err
 	}
+	return actAfterJudgment(e, run, grantID, subject, jArt.ID, reducedArt.ID, reduced)
+}
+
+func actAfterJudgment(e env, run, grantID string, subject verify.Subject, judgmentID, reducedID string, reduced verify.Verdict) (gateResult, int, string, error) {
 	// No brief on the judge path: the operator is already in the loop here, and a
 	// re-park after judgment is procedural (a ceiling), not a fresh zero-context
 	// page.
-	res, code, err := act(e, run, grantID, reduced, reducedArt.ID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
-	return res, code, jArt.ID, err
+	res, code, err := act(e, run, grantID, reduced, reducedID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, judgmentID, errors.New("judgment_duplicate: escalation judgment already produced an outcome")
+	}
+	return res, code, judgmentID, err
 }
 
 func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subject verify.Subject, grantID, maxTier string, opts judgmentOptions) (verify.Verdict, error) {
@@ -1038,9 +1073,21 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 	return verify.ValidateJudgment(artifact, request)
 }
 
-func hasJudgment(arts []state.Artifact, escalationID string) bool {
+func artifactForParent(arts []state.Artifact, kind, parentID string) (state.Artifact, bool) {
 	for _, artifact := range arts {
-		if artifact.Kind == state.KindJudgment && stateArtifactHasParent(artifact, escalationID) {
+		if artifact.Kind == kind && stateArtifactHasParent(artifact, parentID) {
+			return artifact, true
+		}
+	}
+	return state.Artifact{}, false
+}
+
+func hasOutcomeFor(arts []state.Artifact, reducedID string) bool {
+	for _, artifact := range arts {
+		if artifact.Kind != state.KindAction && artifact.Kind != state.KindEscalation {
+			continue
+		}
+		if stateArtifactHasParent(artifact, reducedID) {
 			return true
 		}
 	}
