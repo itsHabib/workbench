@@ -44,6 +44,8 @@ Catalog revisions are either a full lowercase source commit SHA (40 or 64
 hexadecimal characters) or `sha256:` followed by 64 lowercase hexadecimal
 characters. `reviewfindings github` accepts the value through
 `-catalog-revision`; native producers should always supply it.
+Gate run references use the canonical `run_<lowercase-hex>` shape; a bare
+`run_` prefix or non-hex suffix refuses and cannot complete a receipt.
 
 ## Intervention law
 

@@ -154,7 +154,7 @@
         "final_reviewed_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "gate_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "ship_run_ref": { "type": "string", "pattern": "^drv_" },
-        "gate_run_ref": { "type": "string", "pattern": "^run_" }
+        "gate_run_ref": { "type": "string", "pattern": "^run_[0-9a-f]+$" }
       }
     },
     "intervention_body": {

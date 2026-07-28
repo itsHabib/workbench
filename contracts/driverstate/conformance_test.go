@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type objSchema struct {
 	Items      *objSchema           `json:"items"`
 	Enum       []string             `json:"enum"`
 	Const      string               `json:"const"`
+	Pattern    string               `json:"pattern"`
 	Defs       map[string]objSchema `json:"$defs"`
 }
 
@@ -185,6 +187,23 @@ func TestSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestGateRunRefSchemaAndGoParity(t *testing.T) {
+	pattern := loadSchema(t).def(t, "closure_facts_body").child(t, "gate_run_ref").Pattern
+	if pattern != `^run_[0-9a-f]+$` {
+		t.Fatalf("gate_run_ref pattern = %q", pattern)
+	}
+	tests := []string{"run_0", "run_01ab", "run_", "run_xyz", "run_ABC", "other_01"}
+	for _, value := range tests {
+		schemaAccepts, err := regexp.MatchString(pattern, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if schemaAccepts != ValidGateRunRef(value) {
+			t.Fatalf("gate run ref %q parity drift: schema=%v Go=%v", value, schemaAccepts, ValidGateRunRef(value))
+		}
+	}
+}
+
 // TestUnknownFieldsIgnored is the tolerant-reader guarantee: an event body
 // carrying a field this binary predates still decodes, and known fields survive.
 func TestUnknownFieldsIgnored(t *testing.T) {
@@ -273,6 +292,9 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"closure facts malformed catalog", KindClosureFacts, `{"catalog_revision":"dirty"}`, true},
 		{"closure facts present empty catalog", KindClosureFacts, `{"task_ref":"tsk_1","catalog_revision":""}`, true},
 		{"closure facts malformed head", KindClosureFacts, `{"review_head_sha":"abc"}`, true},
+		{"closure facts canonical gate ref", KindClosureFacts, `{"gate_run_ref":"run_01ab"}`, false},
+		{"closure facts prefix-only gate ref", KindClosureFacts, `{"gate_run_ref":"run_"}`, true},
+		{"closure facts nonhex gate ref", KindClosureFacts, `{"gate_run_ref":"run_xyz"}`, true},
 		{"intervention judgment ok", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael","question_ref":"esc_1"}`, false},
 		{"intervention numbered reason ok", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"mechanism-repair","reason_code":"auth-refresh-2","actor":"human:michael"}`, false},
 		{"intervention judgment missing question", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael"}`, true},

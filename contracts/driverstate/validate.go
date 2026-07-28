@@ -139,8 +139,8 @@ func validateClosureFactFormats(b ClosureFactsBody) error {
 		return errors.New("driverstate: closure_facts body: task_ref must start with tsk_")
 	case b.ShipRunRef != "" && !strings.HasPrefix(b.ShipRunRef, "drv_"):
 		return errors.New("driverstate: closure_facts body: ship_run_ref must start with drv_")
-	case b.GateRunRef != "" && !strings.HasPrefix(b.GateRunRef, "run_"):
-		return errors.New("driverstate: closure_facts body: gate_run_ref must start with run_")
+	case b.GateRunRef != "" && !ValidGateRunRef(b.GateRunRef):
+		return errors.New("driverstate: closure_facts body: gate_run_ref must be run_ followed by lowercase hexadecimal characters")
 	case b.ReviewHeadSHA != "" && !validHex(b.ReviewHeadSHA, 40):
 		return errors.New("driverstate: closure_facts body: review_head_sha must be 40 lowercase hexadecimal characters")
 	case b.FinalReviewedHeadSHA != "" && !validHex(b.FinalReviewedHeadSHA, 40):
@@ -203,6 +203,24 @@ func validReasonCode(value string) bool {
 
 func validDigest(value string) bool {
 	return validHex(value, 64)
+}
+
+// ValidGateRunRef reports whether value has Gate's canonical run_<lower-hex>
+// identity shape.
+func ValidGateRunRef(value string) bool {
+	const prefix = "run_"
+	if !strings.HasPrefix(value, prefix) || len(value) == len(prefix) {
+		return false
+	}
+	for _, r := range value[len(prefix):] {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r < 'a' || r > 'f' {
+			return false
+		}
+	}
+	return true
 }
 
 func validCatalogRevision(value string) bool {

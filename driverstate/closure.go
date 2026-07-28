@@ -84,6 +84,9 @@ func validateClosureLifecycleJoins(acc *closureAccumulator) {
 	if acc.receipt.ShipRunRef != "" && !strings.HasPrefix(acc.receipt.ShipRunRef, "drv_") {
 		addContradiction(&acc.receipt, "ship_run_ref_malformed")
 	}
+	if acc.receipt.GateRunRef != "" && !dsc.ValidGateRunRef(acc.receipt.GateRunRef) {
+		addContradiction(&acc.receipt, "gate_run_ref_malformed")
+	}
 	if acc.mergeCount > 1 {
 		addContradiction(&acc.receipt, "duplicate_terminal_closure")
 	}
