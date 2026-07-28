@@ -73,6 +73,32 @@ func TestProduceRefusesEmptyOrUnsourcedExactHead(t *testing.T) {
 	}
 }
 
+func TestProduceUsesOriginalReviewedHead(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	item := reviewComment(strings.Repeat("b", 40))
+	_, err := produce(context.Background(), fakeRunner{
+		pr: pullRequest{HeadRefOID: head, State: "OPEN"}, comments: []comment{item},
+	}, validOptions(t, head), time.Now())
+	if err == nil || !strings.Contains(err.Error(), "no sourced") {
+		t.Fatalf("produce() error = %v, want stale original-head refusal", err)
+	}
+}
+
+func TestProduceCanonicalizesCompletedReviewer(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	opts := validOptions(t, head)
+	opts.completed = listFlag{"Codex"}
+	artifact, err := produce(context.Background(), fakeRunner{
+		pr: pullRequest{HeadRefOID: head, State: "OPEN"}, comments: []comment{reviewComment(head)},
+	}, opts, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Panel.Completed[0] != "codex" {
+		t.Fatalf("completed = %v", artifact.Panel.Completed)
+	}
+}
+
 func TestRunDoesNotReplaceOutputOnRefusal(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	opts := validOptions(t, head)
@@ -141,7 +167,7 @@ func validOptions(t *testing.T, head string) options {
 func reviewComment(head string) comment {
 	item := comment{
 		ID: 1, Body: "[P1] Refuse the stale head", HTMLURL: "https://github.com/itsHabib/ship/pull/1#discussion_r1",
-		Path: "packages/driver/src/engine.ts", Line: 10, CommitID: head,
+		Path: "packages/driver/src/engine.ts", Line: 10, OriginalCommitID: head,
 	}
 	item.User.Login = "chatgpt-codex-connector[bot]"
 	return item

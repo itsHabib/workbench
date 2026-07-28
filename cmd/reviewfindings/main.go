@@ -82,13 +82,13 @@ type pullRequest struct {
 }
 
 type comment struct {
-	ID       int64  `json:"id"`
-	Body     string `json:"body"`
-	HTMLURL  string `json:"html_url"`
-	Path     string `json:"path"`
-	Line     int    `json:"line"`
-	CommitID string `json:"commit_id"`
-	User     struct {
+	ID               int64  `json:"id"`
+	Body             string `json:"body"`
+	HTMLURL          string `json:"html_url"`
+	Path             string `json:"path"`
+	Line             int    `json:"line"`
+	OriginalCommitID string `json:"original_commit_id"`
+	User             struct {
 		Login string `json:"login"`
 	} `json:"user"`
 }
@@ -225,11 +225,13 @@ func fetchComments(ctx context.Context, runner commandRunner, opts options) ([]c
 }
 
 func buildArtifact(opts options, comments []comment, now time.Time) (reviewfindings.Artifact, error) {
-	completed := stringSet(opts.completed)
+	requested := canonicalReviewers(opts.requested)
+	completedList := canonicalReviewers(opts.completed)
+	completed := stringSet(completedList)
 	findings := make([]reviewfindings.Finding, 0, len(comments))
 	for _, item := range comments {
 		reviewer := canonicalReviewer(item.User.Login)
-		if _, ok := completed[reviewer]; !ok || !strings.EqualFold(item.CommitID, opts.head) {
+		if _, ok := completed[reviewer]; !ok || !strings.EqualFold(item.OriginalCommitID, opts.head) {
 			continue
 		}
 		if strings.TrimSpace(item.Body) == "" {
@@ -241,8 +243,6 @@ func buildArtifact(opts options, comments []comment, now time.Time) (reviewfindi
 		return reviewfindings.Artifact{}, refusalError{errors.New("no sourced exact-head inline findings")}
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
-	requested := sortedUnique(opts.requested)
-	completedList := sortedUnique(opts.completed)
 	missing := difference(requested, completedList)
 	return reviewfindings.Artifact{
 		SchemaVersion: reviewfindings.SchemaVersion,
@@ -326,6 +326,14 @@ func sortedUnique(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func canonicalReviewers(values []string) []string {
+	canonical := make([]string, 0, len(values))
+	for _, value := range values {
+		canonical = append(canonical, canonicalReviewer(value))
+	}
+	return sortedUnique(canonical)
 }
 
 func difference(all, present []string) []string {
