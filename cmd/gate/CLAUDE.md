@@ -30,6 +30,24 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, golangci-lint, `go test
 Known local quirk: `observe.TestExplainGolden` fails on a Windows checkout
 (CRLF golden, no `.gitattributes`); it passes on Linux CI.
 
+## Cloud model egress
+
+`-model-backend cloud` uses the Anthropic-native Messages protocol. It honors
+the standard provider variables and needs no gateway-specific configuration:
+
+```bash
+export ANTHROPIC_API_KEY=<provider-or-gateway-token>
+export ANTHROPIC_BASE_URL=<gateway-origin-and-provider-prefix> # optional
+export GATE_CLOUD_MODEL=<served-model-id>                       # required with a base URL
+```
+
+With `ANTHROPIC_BASE_URL` unset, gate uses the direct provider endpoint and its
+existing default model. With it set, gate preserves the URL's path prefix,
+appends `/v1/messages`, and requires `GATE_CLOUD_MODEL`; the gateway's served
+catalogue may not contain the direct-provider default. Token acquisition is an
+operator action. Gate reads all three values once at process construction and
+never records the token or resolved endpoint in verdict artifacts or errors.
+
 Constraints that are design decisions, not omissions:
 
 - **State is the only channel.** Verifiers, the judge, `explain`, and `audit`
