@@ -63,7 +63,7 @@ func loadEvalInputs(evalDir string) (evalInputs, error) {
 	return evalInputs{prompt: prompt, schema: schema, rows: rows}, nil
 }
 
-func runCloudEval(paths resolvedPaths) error {
+func runCloudEval(paths resolvedPaths) (runErr error) {
 	inputs, err := loadEvalInputs(paths.evalDir)
 	if err != nil {
 		return err
@@ -78,7 +78,11 @@ func runCloudEval(paths resolvedPaths) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); runErr == nil {
+			runErr = err
+		}
+	}()
 
 	for _, row := range inputs.rows {
 		content, err := verify.ModelChat(context.Background(), model, string(inputs.prompt), row.Input, inputs.schema)

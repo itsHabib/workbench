@@ -82,7 +82,7 @@ func TestResolvePaths_defaultEvalDirUnderRepoRoot(t *testing.T) {
 	}
 }
 
-func TestResolvePaths_explicitEvalDirRelativeToCaller(t *testing.T) {
+func TestResolvePaths_explicitEvalDirPassedThrough(t *testing.T) {
 	source := testSourceDir(t)
 	root, err := findModuleRoot(source)
 	if err != nil {

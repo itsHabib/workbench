@@ -27,6 +27,7 @@ type resolvedPaths struct {
 }
 
 func commandSourceDir() string {
+	// Compiled binaries built elsewhere must use -repo-root; go run embeds this checkout's source path.
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return "."
