@@ -323,7 +323,11 @@ type canonicalFinding struct {
 }
 
 func canonicalProjection(artifact Artifact) canonicalArtifact {
-	panel := artifact.Panel
+	panel := Panel{
+		Requested: append([]string(nil), artifact.Panel.Requested...),
+		Completed: append([]string(nil), artifact.Panel.Completed...),
+		Missing:   append([]string(nil), artifact.Panel.Missing...),
+	}
 	sort.Strings(panel.Requested)
 	sort.Strings(panel.Completed)
 	sort.Strings(panel.Missing)

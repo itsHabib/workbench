@@ -71,6 +71,18 @@ func TestCanonicalSHA256IgnoresTransportAndOrdering(t *testing.T) {
 	}
 }
 
+func TestCanonicalSHA256DoesNotMutatePanel(t *testing.T) {
+	artifact := validArtifact()
+	artifact.Panel.Requested = []string{"codex", "claude"}
+	before := append([]string(nil), artifact.Panel.Requested...)
+	if _, err := CanonicalSHA256(artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Panel.Requested[0] != before[0] || artifact.Panel.Requested[1] != before[1] {
+		t.Fatalf("panel mutated: got %v want %v", artifact.Panel.Requested, before)
+	}
+}
+
 func TestPanelPartitionProperty(t *testing.T) {
 	const seed = int64(20260727)
 	random := rand.New(rand.NewSource(seed))

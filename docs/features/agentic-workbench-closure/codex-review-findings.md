@@ -88,6 +88,10 @@ does not infer that silence means clean.
 - Ship durable consumption:
   `packages/store/src/review-artifacts.ts` in `itsHabib/ship`
 
+JSON Schema counts Unicode characters, while Ship's contract deliberately
+bounds UTF-8 bytes. The schema marks those limits with `x-maxBytes`; enforcing
+readers use the Go validator or Ship parser for byte-exact validation.
+
 ## Remaining phases
 
 This slice does not claim Gate B. It leaves:

@@ -49,8 +49,8 @@
         "properties": {
           "id": { "$ref": "#/$defs/id" },
           "severity": { "$ref": "#/$defs/id" },
-          "summary": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "evidence": { "type": "string", "minLength": 1, "maxLength": 32768 },
+          "summary": { "type": "string", "minLength": 1, "x-maxBytes": 512 },
+          "evidence": { "type": "string", "minLength": 1, "x-maxBytes": 32768 },
           "sources": {
             "type": "array",
             "minItems": 1,
@@ -61,8 +61,8 @@
               "properties": {
                 "reviewer": { "$ref": "#/$defs/id" },
                 "comment_id": { "$ref": "#/$defs/id" },
-                "url": { "type": "string", "format": "uri", "maxLength": 2048 },
-                "file": { "type": "string", "minLength": 1, "maxLength": 1024 },
+                "url": { "type": "string", "format": "uri", "x-maxBytes": 2048 },
+                "file": { "type": "string", "minLength": 1, "x-maxBytes": 1024 },
                 "line": { "type": "integer", "minimum": 1 }
               },
               "additionalProperties": true
@@ -75,7 +75,7 @@
   },
   "additionalProperties": true,
   "$defs": {
-    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "id": { "type": "string", "minLength": 1, "x-maxBytes": 128 },
     "panel": {
       "type": "array",
       "maxItems": 16,
