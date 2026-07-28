@@ -60,9 +60,9 @@ func main() {
 			continue
 		}
 		var row struct {
-			Input    string         `json:"input"`
-			Expected string         `json:"expected"`
-			Meta     map[string]any `json:"meta"`
+			Input    string          `json:"input"`
+			Expected string          `json:"expected"`
+			Meta     json.RawMessage `json:"meta"`
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
 			fmt.Fprintln(os.Stderr, err)

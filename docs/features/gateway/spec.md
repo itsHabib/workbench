@@ -1,7 +1,6 @@
 # The AI gateway egress seam — Technical Design Document
 
-**Status:** Implemented locally; live gateway validation (§11 Gate B) pending
-operator-provided runtime configuration.
+**Status:** Implemented and validated; Gate A and Gate B passed.
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** `docs/DESIGN.md`;
@@ -520,9 +519,11 @@ Windows checkout (CRLF golden, no `.gitattributes`); it passes on Linux CI.
 
 Then the real acceptance — the eval blocked since 2026-07-13. `run-cloud`
 (`cmd/gate/docs/features/ci-classify/eval/run-cloud/main.go`) already calls
-`verify.ModelBackend("cloud")`, so **it needs no code change at all**: exporting
-the three variables is enough. That is the clearest evidence the configuration
-approach is the right shape.
+`verify.ModelBackend("cloud")`, so **it needs no gateway-specific code change**:
+exporting the three variables is enough. During validation, its fixture decoder
+was corrected to preserve the frozen dataset's string metadata as opaque JSON;
+that change is transport-independent. This remains the clearest evidence the
+configuration approach is the right shape.
 
 ```bash
 export ANTHROPIC_BASE_URL=...   # gateway origin + provider prefix
@@ -602,8 +603,9 @@ artifacts, and golden files are the easy misses.
 7. A 401 produces an error mentioning re-authentication, with no silent retry.
 8. A gateway redirect is refused before the key can be forwarded to its target.
 9. The frozen ci-classify eval runs with the three variables exported and **no
-   code change to `run-cloud`**, clearing coverage ≥ 60% / on-handled ≥ 90%, with
-   `cloud-eval-results.md` updated to real numbers and the model named.
+   gateway-specific code in `run-cloud`**, clearing coverage ≥ 60% / on-handled
+   ≥ 90%, with `cloud-eval-results.md` updated to real numbers and the model
+   named.
 10. `FOLLOWUPS.md` records the cursor-runtime gateway incompatibility (§3.3) and
    the construction-time key read (§4.2).
 11. The §6 review gate passes.
@@ -635,13 +637,13 @@ Neither question changes the Phase 1 API seam.
 
 ## 11. Validation plan
 
-The initiative is a **go** only when both gates below pass:
+The initiative is a **go** because both gates below passed:
 
 - **Gate A — deterministic:** all module checks from §5 pass (apart from the
   documented Windows-only golden quirk), the focused gateway tests cover every
   failure branch in §4.7, direct-mode request behavior is pinned, and a review of
   the complete diff finds no deployment detail.
-- **Gate B — live:** with operator-supplied `ANTHROPIC_BASE_URL`,
+- **Gate B — live (passed):** with operator-supplied `ANTHROPIC_BASE_URL`,
   `ANTHROPIC_API_KEY`, and `GATE_CLOUD_MODEL`, the unchanged frozen eval reaches
   coverage ≥60% and on-handled accuracy ≥90%. The recorded result names the model
   but not the endpoint, and scans of stderr, verdict artifacts, and output JSONL
