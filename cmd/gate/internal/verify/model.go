@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -14,7 +15,7 @@ import (
 var ollamaClient = &http.Client{Timeout: 3 * time.Minute}
 
 const (
-	anthropicURL       = "https://api.anthropic.com/v1/messages"
+	anthropicDirectURL = "https://api.anthropic.com/v1/messages"
 	anthropicVersion   = "2023-06-01"
 	cloudModelDefault  = "claude-haiku-4-5-20251001"
 	structuredToolName = "structured_output"
@@ -83,26 +84,59 @@ func (m *localModel) chat(ctx context.Context, system, user string, schema json.
 	return cr.Message.Content, nil
 }
 
+// cloudModel snapshots its key at construction because gate is a short-lived
+// CLI. A future daemon must inject a key source instead of reusing this shape.
 type cloudModel struct {
-	model  string
-	apiKey string
-	url    string
-	client *http.Client
+	model   string
+	apiKey  string
+	url     string
+	gateway bool
+	client  *http.Client
 }
 
-func newCloudModel(apiKey, model string) (Model, error) {
+func newCloudModel(apiKey, model, base string) (Model, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("cloud model: ANTHROPIC_API_KEY not set")
+	}
+	if base != "" && model == "" {
+		return nil, fmt.Errorf("cloud model: GATE_CLOUD_MODEL not set")
 	}
 	if model == "" {
 		model = cloudModelDefault
 	}
+	endpoint, err := resolveAnthropicURL(base)
+	if err != nil {
+		return nil, err
+	}
 	return &cloudModel{
-		model:  model,
-		apiKey: apiKey,
-		url:    anthropicURL,
-		client: &http.Client{Timeout: 3 * time.Minute},
+		model:   model,
+		apiKey:  apiKey,
+		url:     endpoint,
+		gateway: base != "",
+		client:  &http.Client{Timeout: 3 * time.Minute},
 	}, nil
+}
+
+func resolveAnthropicURL(base string) (string, error) {
+	if base == "" {
+		return anthropicDirectURL, nil
+	}
+	endpoint, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("cloud model: invalid ANTHROPIC_BASE_URL")
+	}
+	if !endpoint.IsAbs() || endpoint.Host == "" {
+		return "", fmt.Errorf("cloud model: ANTHROPIC_BASE_URL must be absolute")
+	}
+	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {
+		return "", fmt.Errorf("cloud model: ANTHROPIC_BASE_URL must use http or https")
+	}
+	if endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return "", fmt.Errorf("cloud model: ANTHROPIC_BASE_URL must not contain userinfo, query, or fragment")
+	}
+	// Preserve a gateway's provider prefix. Dropping it sends /v1/messages to
+	// the gateway root, which commonly fails with an unhelpful 405.
+	return endpoint.JoinPath("v1/messages").String(), nil
 }
 
 func (m *cloudModel) impl() string { return m.model }
@@ -143,14 +177,13 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", m.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	resp, err := m.client.Do(httpReq)
+	resp, err := m.do(ctx, httpReq)
 	if err != nil {
-		return "", fmt.Errorf("anthropic: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, body)
+	if err := m.statusError(resp); err != nil {
+		return "", err
 	}
 	// The success body is capped like the error path: a 200 is model-shaped,
 	// but a bounded read still refuses to buffer an unbounded response into
@@ -177,6 +210,9 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 		return "", fmt.Errorf("anthropic decode: %w", err)
 	}
 	if envelope.Type == "error" && envelope.Error != nil {
+		if m.gateway {
+			return "", fmt.Errorf("anthropic: gateway response error")
+		}
 		return "", fmt.Errorf("anthropic: %s: %s", envelope.Error.Type, envelope.Error.Message)
 	}
 	// A max_tokens stop means the tool input was cut mid-JSON: even if it
@@ -203,13 +239,46 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 	return "", fmt.Errorf("anthropic: no tool_use block in response")
 }
 
+func (m *cloudModel) do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	resp, err := m.client.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !m.gateway {
+		return nil, fmt.Errorf("anthropic: %w", err)
+	}
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("anthropic: request failed: %w", ctx.Err())
+	}
+	return nil, fmt.Errorf("anthropic: request failed")
+}
+
+func (m *cloudModel) statusError(resp *http.Response) error {
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	if !m.gateway {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, body)
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("anthropic: authentication failed (status %d); re-authenticate and retry", resp.StatusCode)
+	}
+	return fmt.Errorf("anthropic: gateway status %d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
+}
+
 // ModelBackend selects a Model implementation for the gate rungs.
 func ModelBackend(backend string) (Model, error) {
 	switch backend {
 	case "", "local":
 		return newLocalModel(ollamaURL), nil
 	case "cloud":
-		return newCloudModel(os.Getenv("ANTHROPIC_API_KEY"), cloudModelDefault)
+		base := os.Getenv("ANTHROPIC_BASE_URL")
+		model := ""
+		if base != "" {
+			model = os.Getenv("GATE_CLOUD_MODEL")
+		}
+		return newCloudModel(os.Getenv("ANTHROPIC_API_KEY"), model, base)
 	default:
 		return nil, fmt.Errorf("unknown model backend %q", backend)
 	}

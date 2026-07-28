@@ -81,6 +81,10 @@ go test ./...
 CI (`.github/workflows/ci.yml`) additionally runs `go test -race` and the
 `hygiene` boundary-law assertions. Third-party Go dependencies are allowed.
 
+Gate's `-model-backend cloud` honors `ANTHROPIC_BASE_URL` and
+`ANTHROPIC_API_KEY`; a gateway needs no bespoke transport configuration.
+`GATE_CLOUD_MODEL` selects the gateway's served model ID.
+
 <!-- local-offload:start -->
 ## Local-first offload
 
