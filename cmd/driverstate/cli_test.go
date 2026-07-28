@@ -353,6 +353,29 @@ streams:
 	}
 }
 
+func TestWriteClosureBlockIncludesEveryJoinRef(t *testing.T) {
+	var output bytes.Buffer
+	writeClosureBlock(&output, dsc.ClosureReceipt{
+		WorkflowRef: "dsr_1/dss_1", TaskRef: "tsk_1",
+		PRRef:      "itsHabib/ship#184@" + strings.Repeat("a", 40),
+		ShipRunRef: "drv_1", GateRunRef: "run_1",
+		ReviewArtifactID: "rf_1", ReviewHeadSHA: strings.Repeat("a", 40),
+		Complete: true,
+	})
+	for _, required := range []string{
+		"closure complete: dsr_1/dss_1",
+		"task tsk_1",
+		"pr itsHabib/ship#184@" + strings.Repeat("a", 40),
+		"ship drv_1",
+		"review rf_1 @ aaaaaaa",
+		"gate run_1",
+	} {
+		if !strings.Contains(output.String(), required) {
+			t.Fatalf("render missing %q:\n%s", required, output.String())
+		}
+	}
+}
+
 func TestCLIRenderDeterministic(t *testing.T) {
 	dir := t.TempDir()
 	seedRenderLifecycle(t, dir)

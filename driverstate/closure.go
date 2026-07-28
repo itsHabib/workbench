@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 )
@@ -54,6 +55,9 @@ func foldClosure(events []Event, stream string) dsc.ClosureReceipt {
 	}
 	if acc.pr > 0 && acc.mergedPR > 0 && acc.pr != acc.mergedPR {
 		addContradiction(&acc.receipt, "merged_pr_mismatch")
+	}
+	if acc.receipt.ShipRunRef != "" && !strings.HasPrefix(acc.receipt.ShipRunRef, "drv_") {
+		addContradiction(&acc.receipt, "ship_run_ref_malformed")
 	}
 	if acc.mergeCount > 1 {
 		addContradiction(&acc.receipt, "duplicate_terminal_closure")

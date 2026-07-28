@@ -74,6 +74,26 @@ func TestFoldClosureReceiptRefusesMergedPRIdentityMismatch(t *testing.T) {
 	}
 }
 
+func TestFoldClosureReceiptRefusesMalformedImportedShipRunRef(t *testing.T) {
+	events := closureEvents(t, strings.Repeat("a", 40), strings.Repeat("a", 40), 1)
+	var imported dsc.RunImportedBody
+	if err := json.Unmarshal(events[0].Body, &imported); err != nil {
+		t.Fatal(err)
+	}
+	imported.ShipRunRef = "run_not_ship"
+	events[0].Body = mustBody(t, imported)
+	var facts dsc.ClosureFactsBody
+	if err := json.Unmarshal(events[4].Body, &facts); err != nil {
+		t.Fatal(err)
+	}
+	facts.ShipRunRef = ""
+	events[4].Body = mustBody(t, facts)
+	receipt := FoldEvents(events).Streams["dss_1"].Closure
+	if receipt == nil || receipt.Complete || !contains(receipt.Contradictions, "ship_run_ref_malformed") {
+		t.Fatalf("closure = %+v, want malformed Ship ref contradiction", receipt)
+	}
+}
+
 func TestClosureReceiptExactHeadAndTerminalModel(t *testing.T) {
 	for sequence := 1; sequence <= 128; sequence++ {
 		prHead := fmt.Sprintf("%040x", sequence)

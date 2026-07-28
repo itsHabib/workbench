@@ -270,6 +270,15 @@ func validateRunImported(body json.RawMessage) error {
 	if b.Source == "" {
 		return fmt.Errorf("driverstate: run_imported body: source is empty")
 	}
+	var rawFields map[string]json.RawMessage
+	if err := unmarshalBody(KindRunImported, body, &rawFields); err != nil {
+		return err
+	}
+	if _, present := rawFields["ship_run_ref"]; present {
+		if strings.TrimSpace(b.ShipRunRef) == "" || !strings.HasPrefix(b.ShipRunRef, "drv_") {
+			return fmt.Errorf("driverstate: run_imported body: ship_run_ref must start with drv_")
+		}
+	}
 	for i, s := range b.Streams {
 		if s.Stream == "" {
 			return fmt.Errorf("driverstate: run_imported body: streams[%d].stream is empty", i)

@@ -84,6 +84,15 @@ func writeClosureBlock(w io.Writer, receipt dsc.ClosureReceipt) {
 		status = "complete"
 	}
 	fmt.Fprintf(w, "    closure %s: %s\n", status, receipt.WorkflowRef)
+	if receipt.TaskRef != "" {
+		fmt.Fprintf(w, "      task %s\n", receipt.TaskRef)
+	}
+	if receipt.PRRef != "" {
+		fmt.Fprintf(w, "      pr %s\n", receipt.PRRef)
+	}
+	if receipt.ShipRunRef != "" {
+		fmt.Fprintf(w, "      ship %s\n", receipt.ShipRunRef)
+	}
 	if receipt.ReviewArtifactID != "" {
 		fmt.Fprintf(w, "      review %s @ %s\n", receipt.ReviewArtifactID, shortCommit(receipt.ReviewHeadSHA))
 	}
