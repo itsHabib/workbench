@@ -1,14 +1,17 @@
 name: gate
 
-# Fork-safe enforcement check. Triggering on workflow_run (not pull_request /
-# pull_request_target) runs this in the TRUSTED base-repo context with a token
-# that can post commit statuses, even for fork PRs, WITHOUT executing any fork
-# code. It also fires only after CI has finished, so the PR's other checks have
-# a settled state to read.
+# Fork-safe enforcement check. workflow_run performs the first evaluation after
+# CI settles. Narrow bot-only review events re-evaluate a parked exact-head panel
+# when evidence arrives later. Every path runs the workflow from the trusted
+# default branch and checks out only that base — never PR/fork code.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    types: [created, edited, deleted]
 
 # Least privilege: post the gate status, read the code/PR/checks/logs gate
 # needs as evidence. No write access to contents or pull-requests.
@@ -18,22 +21,21 @@ permissions:
   actions: read
   pull-requests: read
 
-# Bound the paid work. Each gate run makes real model calls; without this a PR
-# force-pushed in a loop would spawn one full gate run per push. Collapse to a
-# single in-flight run per head branch — a newer CI completion cancels the older
-# gate run, which is the correct one to keep (it judges the newer head). This is
-# a cost/DoS bound, not a correctness one: cancellation leaves the required
+# Bound the work. Collapse workflow_run and late-review re-evaluations to one
+# in-flight run per PR — newer evidence cancels the older run, which is the
+# correct one to keep. This is a cost/DoS bound, not a correctness one:
+# cancellation leaves the required
 # `gate` context absent, which fail-closed blocks until the surviving run posts.
 concurrency:
-  group: gate-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  group: gate-${{ github.repository }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
   gate:
     # DORMANT until armed. The runtime is now self-contained on a stock hosted
-    # runner: triage-floor is built in-workflow (below) and the advisory rungs
-    # use the cloud model backend (-model-backend cloud), so no local Ollama is
-    # needed. The two remaining requirements are operator acts: set repo variable
+    # runner: gate and triage-floor are built in-workflow (below), and the
+    # optional red-CI classifier has a cloud backend. The two remaining
+    # requirements are operator acts: set repo variable
     # GATE_ENFORCE=true AND provide the ANTHROPIC_API_KEY secret. Until
     # GATE_ENFORCE=true this posts nothing and enforces nothing. See
     # docs/enforcement.md. (Also skips non-PR CI runs — a push to main has no PR
@@ -44,25 +46,58 @@ jobs:
     # persistent stale success alive — a fail-open. The DoS bound is the
     # concurrency group above, not a conclusion filter.
     if: >-
-      github.event.workflow_run.event == 'pull_request'
-      && vars.GATE_ENFORCE == 'true'
+      vars.GATE_ENFORCE == 'true'
+      && (
+        (github.event_name == 'workflow_run'
+          && github.event.workflow_run.event == 'pull_request')
+        || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
+        || (github.event_name == 'pull_request_review'
+          && (
+            github.event.review.user.login == 'chatgpt-codex-connector[bot]'
+            || github.event.review.user.login == 'cursor[bot]'
+            || github.event.review.user.login == 'claude[bot]'
+            || github.event.review.user.login == 'copilot-pull-request-reviewer[bot]'
+            || github.event.review.user.login == 'github-copilot[bot]'
+            || github.event.review.user.login == 'coderabbitai[bot]'
+          ))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      # workflow_run exposes the run's web URL; used as the status target link.
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.event.issue.number }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+      RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
     steps:
-      # Invalidate any prior status on this head FIRST, before any cancellable
-      # work (checkout, build, resolve). A persistent gate=success from an earlier
+      # issue_comment does not carry the PR head. Resolve that one missing event
+      # fact read-only from GitHub before the first status write. Review events
+      # and workflow_run already carry HEAD_SHA and skip the API call.
+      - name: Resolve event head
+        run: |
+          set -euo pipefail
+          if [ -n "${HEAD_SHA}" ]; then
+            exit 0
+          fi
+          if [ -z "${EVENT_PR}" ]; then
+            echo "event did not identify a pull request" >&2
+            exit 1
+          fi
+          HEAD_SHA=$(gh pr view "${EVENT_PR}" -R "${REPO}" --json headRefOid --jq .headRefOid)
+          test -n "${HEAD_SHA}"
+          echo "HEAD_SHA=${HEAD_SHA}" >> "$GITHUB_ENV"
+
+      # Invalidate any prior status on this head before any cancellable
+      # work (checkout, build, PR resolve). A persistent gate=success from an earlier
       # single-PR run would otherwise survive if THIS run is cancelled mid-build —
       # a user with Actions rights could cancel the run during that window to keep
       # the stale green satisfying a newly-opened second PR. Posting `pending`
       # marks the head non-green until this run's real verdict lands; if the run
       # is cancelled, pending remains and branch protection blocks (fail closed).
-      # This is the first thing the job does, so no bypass window precedes it.
+      # It is the first effectful step; issue_comment's required read-only head
+      # lookup is the only step before it.
       - name: Invalidate prior gate status
         run: |
           # Best-effort is not enough here: if this write silently failed and the
@@ -84,14 +119,13 @@ jobs:
           echo "could not invalidate prior gate status after retries" >&2
           exit 1
 
-      # No `ref:` on purpose. workflow_run checks out the DEFAULT BRANCH (the
-      # trusted base), never the PR/fork head. This is load-bearing: gate is
-      # built from base so a PR cannot edit gate's own code to neuter the check
-      # that governs it. persist-credentials: false — the base build needs no
-      # git credentials, so none are left in the runner's git config.
+      # Explicit default-branch ref is load-bearing now that review events also
+      # trigger this workflow: their event SHA may be a PR merge ref. Gate must
+      # always build from trusted base code, never PR/fork code.
       - name: Checkout base (trusted)
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Set up Go
@@ -116,10 +150,6 @@ jobs:
       # and branch protection blocks on the absent context (fail closed).
       - name: Resolve PR number
         id: pr
-        env:
-          # Passed via env, never interpolated into the script body — the same
-          # expression-injection hygiene every other step here follows.
-          EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
           # overwrite_and_refuse posts a non-success gate status to HEAD_SHA and

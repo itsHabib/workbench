@@ -531,8 +531,10 @@ capability plane is discipline plus an audit trail, not prevention."* Gate becom
 *enforcing* only when a repo's branch protection requires the gate status check. The
 machinery for that now exists in this repo (`verified`,
 `.github/workflows/gate.yml`) and is worth reading as a security artifact in its own
-right: it triggers on `workflow_run` so it runs in the trusted base-repo context
-even for fork PRs; it builds gate from the *base* checkout so a PR cannot edit
+right: it starts on `workflow_run` and narrowly re-evaluates on allowlisted bot
+review events so late panel evidence cannot leave a stale park; every path runs
+the trusted default-branch workflow even for fork PRs. It builds gate from the
+*base* checkout so a PR cannot edit
 gate's own code to neuter the check that governs it; it mints an ephemeral grant
 into a throwaway temp dir so no signing secret ever touches CI; and it binds the
 posted status to the exact judged SHA so a force-push cannot get a green stamped

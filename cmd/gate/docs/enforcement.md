@@ -135,16 +135,19 @@ The `.github/workflows/gate.yml` workflow turns the verdict above into a
 `gate` commit status the canary's branch protection can require. Its shape,
 and why each choice is the safe one:
 
-- It triggers on **`workflow_run`** completed for the `CI` workflow — not
-  `pull_request`, and not `pull_request_target`. `workflow_run` runs in the
-  **trusted base-repo context** with a token that can post a commit status,
-  even for a fork PR, *without checking out or executing any fork code*. That
-  is the fork-safe pattern: a fork cannot exfiltrate a secret or subvert the
-  run, because its code never runs in the privileged context. It also fires
-  only after CI has settled.
+- Its initial evaluation triggers on **`workflow_run`** completed for `CI`.
+  A parked panel is re-evaluated on narrow bot-only `pull_request_review`
+  events (submitted or dismissed) and exact-actor Codex `issue_comment`
+  events (created, edited, or deleted), so late evidence and withdrawn evidence
+  both refresh the required status. It does not use `pull_request` or
+  `pull_request_target`. Every trigger loads the workflow from the trusted
+  default branch and the job's actor allowlist rejects arbitrary comments
+  before any privileged step runs.
 - It checks out the **default branch (base), never the PR/fork head** — the
-  checkout has no `ref:`. gate is therefore built from base, so a PR cannot
-  edit gate's own source to neuter the check that governs it.
+  checkout pins `ref: ${{ github.event.repository.default_branch }}` explicitly
+  because a review event's event SHA may name a PR merge ref. gate is therefore
+  built from base, so a PR cannot edit gate's own source to neuter the check
+  that governs it.
 - Before running gate it **waits (bounded) for every non-`gate` check to
   settle**. gate reads the PR's status rollup and treats any non-green check —
   pending, queued, in-progress — as a block (fail closed); reading mid-flight
@@ -165,8 +168,10 @@ and why each choice is the safe one:
   run detects the ambiguity and overwrites; `strict` branch protection (require the
   branch be up to date) narrows that window further, and a single-protected-base
   repo is barely exposed.
-- Its **first step posts `gate=pending`** to the head, before any cancellable
-  work (checkout, build, resolve). A persistent `gate=success` from an earlier
+- Its **first effectful step posts `gate=pending`** to the head, before any
+  cancellable work (checkout, build, PR resolve). `issue_comment` lacks a head
+  SHA, so that event performs one read-only PR-head lookup first. A persistent
+  `gate=success` from an earlier
   single-PR run would otherwise survive if this run were cancelled mid-build (a
   user with Actions rights could cancel to keep the stale green satisfying a
   newly-opened second PR). Posting pending up front marks the head non-green until
@@ -174,11 +179,11 @@ and why each choice is the safe one:
   blocks (fail closed). gate's own pending is excluded from both the settle-wait
   (`select(.name != "gate")`) and readiness (`isOwnGateStatus`), so it never
   self-blocks.
-- It is bounded by a **`concurrency` group keyed on the head branch** with
+- It is bounded by a **`concurrency` group keyed on the PR** (with a branch
+  fallback when a fresh `workflow_run` has no PR association yet) with
   `cancel-in-progress`. Each run makes real model calls, so without this a PR
   force-pushed in a loop would fan out one paid gate run per push; the concurrency
-  collapse caps that at one in-flight run per branch (`ci.yml` carries the matching
-  group so superseded CI runs cancel at the source). Cancelling a superseded gate
+  collapse caps that at one in-flight run per PR. Cancelling a superseded gate
   run is safe: it leaves the required context absent until the surviving run posts
   — fail closed. It deliberately does **not** filter on CI conclusion: a cancelled
   or red CI run must still reach gate so readiness sees the non-green rollup and
@@ -206,22 +211,26 @@ and why each choice is the safe one:
   an escalation, and per-run ephemeral state makes cross-run cycle counting
   meaningless. So the ceilings are opened wide and the check stands or falls on
   the ladder alone.
-- It runs with **`-reviews-optional`**, which makes **reviews advisory** for the
-  enforced check. Two things follow from it. (1) Readiness does **not** escalate on
+- It runs with **`-reviews-optional`**, which makes **model review judgment
+  advisory**, not panel completeness. Two things follow from it. (1) Readiness
+  does **not** escalate on
   an absent GitHub `reviewDecision` — the canary requires no *separate* GitHub
   review, so an empty decision is expected, not a reason to park. (2) The
-  model-based **review-consolidation rung is skipped**: it would not gate here, so
-  running it would only spend paid model calls per PR for no decision. So the
-  enforced check stands or falls on the rungs it can
+  model-based **review-consolidation rung is skipped**. The deterministic
+  `ReviewPanelV1` completeness rung still requires every configured reviewer
+  on the exact head, accepting the authenticated Codex clean-result sentinel
+  as a narrow structured completion signal. So the enforced check stands or
+  falls on the rungs it can
   verify **autonomously and deterministically**: CI green, readiness (mergeable,
-  not a draft, no `CHANGES_REQUESTED`), and the risk floor.
+  not a draft, no `CHANGES_REQUESTED`), the risk floor, and panel completeness.
 
   Why split it out: review consolidation is a **model judgment** that escalates on
   uncertainty (a genuinely clean bot review often extracts at low confidence). The
   CI run is ephemeral and has **no judge** to resolve that park, so gating on it
-  would freeze a clean PR with no auto-green path. Trying to auto-recognize a clean
-  review from comment text proved **unsound** (the adversarial pass broke every
-  heuristic — a concern can always be phrased to fit). So review *judgment* stays
+  would freeze a clean PR with no auto-green path. Inferring approval from
+  arbitrary comment prose remains **unsound**; the only comment completion is
+  the authenticated Codex connector's structured exact-head sentinel. Review
+  *judgment* stays
   in the **operator/driver flow**, where a human consolidates the bot panel — which
   is where it belongs. The enforced check shuts the un-gated-merge bypass and holds
   the deterministic floor; it does not pretend to adjudicate reviews on its own.
