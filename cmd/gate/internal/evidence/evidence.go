@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
 // PRRef names the subject under the gate.
@@ -25,6 +26,7 @@ type Bundle struct {
 	View     string // gh pr view JSON (checks, draft, mergeable, review decision)
 	Diff     string // unified diff
 	Comments string // bot review comments (inline + issue-level)
+	Panel    string // ReviewPanelV1 declaration + exact-head completion evidence
 }
 
 type viewBody struct {
@@ -78,6 +80,12 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.View = a.ID
+	var viewed struct {
+		HeadRefOid string `json:"headRefOid"`
+	}
+	if err := json.Unmarshal(view, &viewed); err != nil {
+		return b, fmt.Errorf("evidence: parse PR head: %w", err)
+	}
 
 	// method "api" records only that GitHub served the diff — not head/merge_base:
 	// gh pr diff reads by PR number and doesn't report which head it rendered, so
@@ -111,6 +119,15 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.Comments = a.ID
+	panel := fetchPanel(pr, viewed.HeadRefOid)
+	if err := reviewpanel.Validate(panel); err != nil {
+		return b, err
+	}
+	a, err = st.Append(state.KindEvidence, run, nil, panel)
+	if err != nil {
+		return b, err
+	}
+	b.Panel = a.ID
 	return b, nil
 }
 

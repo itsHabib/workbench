@@ -61,6 +61,10 @@ Constraints that are design decisions, not omissions:
   Verdict/Producer/Subject/Finding are aliases of the shared contract types;
   the reducer, the ladder law, and all tier logic stay here — decisions never
   live in the contract.
+- **Panel completeness is exact-head evidence.** `ReviewPanelV1` records the
+  repository-owned expected set and completed/pending/missing/unknown state.
+  Its code verifier parks every incomplete state; findings remain a separate
+  review-consolidation verdict.
 - **State and keys live outside the repo.** The migration was code-only: a
   running gate's `-state` and `-key` dirs are operational data on the
   operator's machine, never files in this tree.

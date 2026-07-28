@@ -53,6 +53,11 @@ log entry. Consequences the code enforces:
   composed verdict, and the escalation artifact embeds the full question.
   Parking with a pointer back into prose is the leak this design exists to
   prevent.
+- **A clean panel is evidence, not an empty findings list.** `ReviewPanelV1`
+  records `.ship.json`'s required set and the exact-head disposition of each
+  reviewer. The panel-completeness code rung escalates missing, pending,
+  unknown, and stale-head state separately from the local model's finding
+  extraction, so one clean reviewer cannot stand in for silent peers.
 
 ### Concurrency
 

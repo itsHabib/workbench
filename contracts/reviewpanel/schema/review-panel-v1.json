@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/reviewpanel/schema/review-panel-v1.json",
+  "title": "ReviewPanelV1",
+  "type": "object",
+  "required": ["schema_version", "subject", "declaration", "completed", "pending", "missing", "unknown"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "subject": {
+      "type": "object",
+      "required": ["repo", "number", "head_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "number": { "type": "integer", "minimum": 1 },
+        "head_sha": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "declaration": {
+      "type": "object",
+      "required": ["path", "expected"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string" },
+        "expected": { "$ref": "#/$defs/names" }
+      },
+      "additionalProperties": false
+    },
+    "completed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "actor", "state", "head_sha", "review_id"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "actor": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "minLength": 1 },
+          "head_sha": { "type": "string", "minLength": 1 },
+          "review_id": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "pending": { "$ref": "#/$defs/names" },
+    "missing": { "$ref": "#/$defs/names" },
+    "unknown": { "$ref": "#/$defs/names" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "names": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -305,7 +305,7 @@ call and can never ship a bad result. Either property sends the work down; neith
 keeps it up. And never trust self-reported confidence (section 1's confident-garbage
 story is why).
 
-**The verifier ladder** is the same law inside gate, with three rungs by producer
+**The verifier ladder** is the same law inside gate, with three producer
 *class*:
 
 1. **Deterministic floor** (class `code`) - always runs, can never be lowered.

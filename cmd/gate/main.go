@@ -448,11 +448,15 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	// GitHub-reported CHANGES_REQUESTED still blocks via readiness (code-class).
 	verdictIDs := []string{readinessArt.ID, floorArt.ID}
 	if !reviewsOptional {
+		panelArt, err := verify.PanelCompleteness(e.st, run, bundle.Panel, subject)
+		if err != nil {
+			return res, codeError, err
+		}
 		reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
 		if err != nil {
 			return res, codeError, err
 		}
-		verdictIDs = append(verdictIDs, reviewsArt.ID)
+		verdictIDs = append(verdictIDs, panelArt.ID, reviewsArt.ID)
 	}
 	ciID, err := ciClassifyIfRed(e, run, bundle.View, repo, pr, subject, model)
 	if err != nil {
