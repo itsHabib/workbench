@@ -79,6 +79,27 @@ func TestClassifyPanelRejectsHumanAndUnknownState(t *testing.T) {
 	}
 }
 
+func TestClassifyPanelCodeRabbitActor(t *testing.T) {
+	panel := reviewpanel.Evidence{
+		SchemaVersion: 1,
+		Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: "head"},
+		Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"coderabbit"}},
+	}
+	current := rawReview("coderabbitai[bot]", "Bot", "", "head", "COMMENTED")
+	current.ID = 1
+	got := classifyPanel(panel, []rawComment{current}, nil)
+	if len(got.Completed) != 1 || got.Completed[0].Name != "coderabbit" || len(got.Missing) != 0 {
+		t.Fatalf("current-head CodeRabbit review not completed: %+v", got)
+	}
+
+	stale := rawReview("coderabbitai[bot]", "Bot", "", "old", "COMMENTED")
+	stale.ID = 2
+	got = classifyPanel(panel, []rawComment{stale}, nil)
+	if len(got.Completed) != 0 || len(got.Missing) != 1 || got.Missing[0] != "coderabbit" {
+		t.Fatalf("stale CodeRabbit review did not remain missing: %+v", got)
+	}
+}
+
 func bits(value int) int {
 	count := 0
 	for value > 0 {

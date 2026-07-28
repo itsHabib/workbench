@@ -162,10 +162,11 @@ func actorPresent(expected string, actors []string) bool {
 func actorMatches(expected, actor string) bool {
 	actor = strings.ToLower(strings.TrimSuffix(actor, "[bot]"))
 	aliases := map[string][]string{
-		"codex":   {"codex", "chatgpt-codex-connector"},
-		"cursor":  {"cursor"},
-		"claude":  {"claude"},
-		"copilot": {"copilot-pull-request-reviewer", "github-copilot"},
+		"codex":      {"codex", "chatgpt-codex-connector"},
+		"cursor":     {"cursor"},
+		"claude":     {"claude"},
+		"copilot":    {"copilot-pull-request-reviewer", "github-copilot"},
+		"coderabbit": {"coderabbitai"},
 	}
 	values, ok := aliases[expected]
 	if !ok {
