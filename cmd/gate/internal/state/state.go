@@ -155,6 +155,13 @@ func (s *Store) AppendIfAbsentParent(kind, run, uniqueParent string, parents []s
 // AppendIfAbsentParentKinds is AppendIfAbsentParent across an artifact family.
 // It is used when several kinds represent mutually exclusive outcomes.
 func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any) (Artifact, error) {
+	return s.AppendIfAbsentParentWhere(kind, uniqueKinds, run, uniqueParent, parents, body, nil)
+}
+
+// AppendIfAbsentParentWhere applies an optional conflict predicate while the
+// uniqueness check holds the store lock. A nil predicate treats every matching
+// kind/parent as a conflict.
+func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool) (Artifact, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
@@ -165,7 +172,10 @@ func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run
 	}
 	defer unlock()
 	existing, err := s.scan(func(a Artifact) bool {
-		return a.Run == run && contains(uniqueKinds, a.Kind) && hasParent(a.Parents, uniqueParent)
+		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
+			return false
+		}
+		return conflicts == nil || conflicts(a)
 	})
 	if err != nil {
 		return Artifact{}, err

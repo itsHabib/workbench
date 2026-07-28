@@ -583,7 +583,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		art, err := e.st.AppendIfAbsentParentKinds(kind, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body)
+		art, err := e.st.AppendIfAbsentParentWhere(kind, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
 		actionHash = art.Hash
 		return err
 	}
@@ -610,7 +610,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.AppendIfAbsentParentKinds(state.KindEscalation, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body)
+		_, err := e.st.AppendIfAbsentParentWhere(state.KindEscalation, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
 		return err
 	}
 
@@ -1125,11 +1125,25 @@ func hasOutcomeFor(arts []state.Artifact, reducedID string) bool {
 		if artifact.Kind != state.KindAction && artifact.Kind != state.KindEscalation {
 			continue
 		}
-		if stateArtifactHasParent(artifact, reducedID) {
+		if stateArtifactHasParent(artifact, reducedID) && completedJudgmentOutcome(artifact) {
 			return true
 		}
 	}
 	return false
+}
+
+func completedJudgmentOutcome(artifact state.Artifact) bool {
+	if artifact.Kind == state.KindEscalation {
+		return true
+	}
+	if artifact.Kind != state.KindAction {
+		return false
+	}
+	var body outcomeBody
+	if err := json.Unmarshal(artifact.Body, &body); err != nil {
+		return true
+	}
+	return body.Outcome != "capability_refused"
 }
 
 func stateArtifactHasParent(artifact state.Artifact, parentID string) bool {

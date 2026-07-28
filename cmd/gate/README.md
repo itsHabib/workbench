@@ -116,6 +116,9 @@ flag.
 Gate rechecks the live grant after a configured provider returns and
 immediately before appending its judgment, so a grant that expires during a
 long provider call authorizes no state mutation.
+A later `capability_refused` action remains audit history but does not complete
+the persisted judgment chain; a replacement live grant may still append the
+single authorized outcome.
 The configured executable path is the provider policy; Gate neither selects
 nor names a model vendor.
 

@@ -1421,6 +1421,53 @@ func TestProviderDelayExpiryRefusesBeforeJudgmentAppend(t *testing.T) {
 	}
 }
 
+func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
+	e, run, originalGrant, subject, esc, judgment, verdicts := resumableJudgmentFixture(t)
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, originalGrant}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reducedArt, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", -time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, code, err := act(e, run, expired.ID, reduced, reducedArt.ID, gateResult{}, false, nil); err != nil || code != codeRefused || res.Outcome != "capability_refused" {
+		t.Fatalf("refusal setup = code %d outcome %q err %v", code, res.Outcome, err)
+	}
+	replacement, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	if err != nil {
+		t.Fatalf("replacement grant must resume after capability refusal: %v", err)
+	}
+	if code != codeMerge || res.Outcome != "would_merge" || gotID != jArt.ID {
+		t.Fatalf("replacement result = code %d outcome %q judgment %s", code, res.Outcome, gotID)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	completed := 0
+	for _, artifact := range arts {
+		if stateArtifactHasParent(artifact, reducedArt.ID) && completedJudgmentOutcome(artifact) {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("completed outcomes = %d, want exactly one", completed)
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+		t.Fatalf("post-authorization duplicate error = %v", err)
+	}
+}
+
 func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
 	e, run, grantID, _, esc, judgment, _ := resumableJudgmentFixture(t)
 	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantID}, judgment)
