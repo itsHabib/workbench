@@ -34,6 +34,10 @@ boundary law).
   Unknown verbs return JSON-RPC `MethodNotFound`. Structured ledger errors
   (`ErrIllegalTransition` / `ErrChainBroken` / `ErrLocked`) come back as
   `isError` tool results so a driving agent sees and corrects them (spec §7 F2).
+- **Retry identity follows event cardinality.** One-per-stream transitions key
+  on run/stream; attempts and review cycles use their sequence; repeatable
+  `closure_facts` and `intervention` transitions use canonical fact content.
+  Exact retries dedupe, while distinct records must never collapse.
 
 ## Register
 

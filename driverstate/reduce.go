@@ -69,6 +69,7 @@ func FoldEvents(events []Event) dsc.RunState {
 		}
 		applyEventToState(&state, &finished, e)
 	}
+	foldClosures(events, &state)
 	if finished {
 		state.Run.Status = RunStatusFinished
 		return state

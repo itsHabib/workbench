@@ -3,6 +3,9 @@
 `reviewfindings github` is a Codex-native producer for Ship's
 `ReviewFindingsV1` address artifact. It reads exact-head inline review comments
 through `gh`, emits the shared contract, and never dispatches or merges.
+Native producers pass `-catalog-revision` with the full canonical catalog
+commit SHA or `sha256:<digest>`. Omitting it remains valid for legacy callers,
+but the resulting artifact cannot complete a closure receipt.
 
 The shared vocabulary and validation law live in
 `contracts/reviewfindings`. Ship owns consumption, durable duplicate protection,

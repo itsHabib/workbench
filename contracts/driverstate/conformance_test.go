@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type objSchema struct {
 	Items      *objSchema           `json:"items"`
 	Enum       []string             `json:"enum"`
 	Const      string               `json:"const"`
+	Pattern    string               `json:"pattern"`
 	Defs       map[string]objSchema `json:"$defs"`
 }
 
@@ -151,6 +153,8 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 		{"StreamPROpenedBody", reflect.TypeOf(StreamPROpenedBody{}), root.def(t, "stream_pr_opened_body")},
 		{"StreamMergedBody", reflect.TypeOf(StreamMergedBody{}), root.def(t, "stream_merged_body")},
 		{"ReviewCycleBody", reflect.TypeOf(ReviewCycleBody{}), root.def(t, "review_cycle_body")},
+		{"ClosureFactsBody", reflect.TypeOf(ClosureFactsBody{}), root.def(t, "closure_facts_body")},
+		{"InterventionBody", reflect.TypeOf(InterventionBody{}), root.def(t, "intervention_body")},
 	}
 	for _, c := range cases {
 		assertObjectConforms(t, c.name, c.typ, c.obj)
@@ -180,6 +184,23 @@ func TestEnumsMatchConstants(t *testing.T) {
 func TestSchemaVersion(t *testing.T) {
 	if v := loadSchema(t).XVersion; v != SchemaVersion {
 		t.Errorf("schema x-version = %q, want %q", v, SchemaVersion)
+	}
+}
+
+func TestGateRunRefSchemaAndGoParity(t *testing.T) {
+	pattern := loadSchema(t).def(t, "closure_facts_body").child(t, "gate_run_ref").Pattern
+	if pattern != `^run_[0-9a-f]+$` {
+		t.Fatalf("gate_run_ref pattern = %q", pattern)
+	}
+	tests := []string{"run_0", "run_01ab", "run_", "run_xyz", "run_ABC", "other_01"}
+	for _, value := range tests {
+		schemaAccepts, err := regexp.MatchString(pattern, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if schemaAccepts != ValidGateRunRef(value) {
+			t.Fatalf("gate run ref %q parity drift: schema=%v Go=%v", value, schemaAccepts, ValidGateRunRef(value))
+		}
 	}
 }
 
@@ -244,6 +265,9 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"run_imported missing manifest", KindRunImported, `{"repo":"r","source":"s","streams":[]}`, true},
 		{"run_imported stream missing doc_path", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1"}]}`, true},
 		{"run_imported missing streams", KindRunImported, `{"repo":"r","source":"s"}`, true},
+		{"run_imported ship ref ok", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[],"ship_run_ref":"drv_1"}`, false},
+		{"run_imported malformed ship ref", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[],"ship_run_ref":"run_1"}`, true},
+		{"run_imported present empty ship ref", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[],"ship_run_ref":""}`, true},
 		{"stream_attempt ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":false}`, false},
 		{"stream_attempt with commit ok", KindStreamAttempt, `{"seq":1,"doc_path":"d","terminal":true,"commit":"abc123"}`, false},
 		{"stream_attempt bad seq", KindStreamAttempt, `{"seq":0,"doc_path":"d","terminal":false}`, true},
@@ -253,6 +277,9 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"stream_pr_opened ok", KindStreamPROpened, `{"pr":12,"url":"u","head_sha":"abc"}`, false},
 		{"stream_pr_opened bad pr", KindStreamPROpened, `{"pr":0,"url":"u","head_sha":"abc"}`, true},
 		{"stream_merged ok", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":"2026-07-16T12:00:00Z"}`, false},
+		{"stream_merged exact head ok", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":"2026-07-16T12:00:00Z","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, false},
+		{"stream_merged malformed head", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":"2026-07-16T12:00:00Z","head_sha":"abc"}`, true},
+		{"stream_merged present empty head", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":"2026-07-16T12:00:00Z","head_sha":""}`, true},
 		{"stream_merged empty merge_commit", KindStreamMerged, `{"pr":12,"merge_commit":"","merged_at":"t"}`, true},
 		{"stream_merged empty merged_at", KindStreamMerged, `{"pr":12,"merge_commit":"abc","merged_at":""}`, true},
 		{"stream_merged missing merged_at", KindStreamMerged, `{"pr":12,"merge_commit":"abc"}`, true},
@@ -260,6 +287,20 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"review_cycle bad cycle", KindReviewCycle, `{"cycle":0,"panel_settled":true,"findings":0}`, true},
 		{"review_cycle missing panel_settled", KindReviewCycle, `{"cycle":1,"findings":0}`, true},
 		{"review_cycle missing findings", KindReviewCycle, `{"cycle":1,"panel_settled":false}`, true},
+		{"closure facts ok", KindClosureFacts, `{"task_ref":"tsk_1","catalog_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review_artifact_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`, false},
+		{"closure facts empty", KindClosureFacts, `{}`, true},
+		{"closure facts malformed catalog", KindClosureFacts, `{"catalog_revision":"dirty"}`, true},
+		{"closure facts present empty catalog", KindClosureFacts, `{"task_ref":"tsk_1","catalog_revision":""}`, true},
+		{"closure facts malformed head", KindClosureFacts, `{"review_head_sha":"abc"}`, true},
+		{"closure facts canonical gate ref", KindClosureFacts, `{"gate_run_ref":"run_01ab"}`, false},
+		{"closure facts prefix-only gate ref", KindClosureFacts, `{"gate_run_ref":"run_"}`, true},
+		{"closure facts nonhex gate ref", KindClosureFacts, `{"gate_run_ref":"run_xyz"}`, true},
+		{"intervention judgment ok", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael","question_ref":"esc_1"}`, false},
+		{"intervention numbered reason ok", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"mechanism-repair","reason_code":"auth-refresh-2","actor":"human:michael"}`, false},
+		{"intervention judgment missing question", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"genuine-judgment","reason_code":"reviewer-disagreement","actor":"human:michael"}`, true},
+		{"intervention unknown classification", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"other","reason_code":"unknown","actor":"human:michael"}`, true},
+		{"intervention double hyphen reason", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"mechanism-repair","reason_code":"auth--refresh","actor":"human:michael"}`, true},
+		{"intervention unicode reason", KindIntervention, `{"time":"2026-07-28T00:00:00Z","kind":"mechanism-repair","reason_code":"réparation","actor":"human:michael"}`, true},
 		{"malformed json", KindStreamAttempt, `{"seq":`, true},
 		{"stream_dispatched locators ok", KindStreamDispatched, `{"branch":"feat/x","worktree":"/tmp/wt"}`, false},
 		{"stream_dispatched empty body ok", KindStreamDispatched, `{}`, false},
