@@ -44,8 +44,11 @@ Codex review/address/Gate/land loop is reconstructable from typed artifacts.
 - Producer catalog revision survives schema validation and is joined to the
   exact review artifact; missing or malformed revision leaves closure
   incomplete without rejecting legacy ReviewFindingsV1 input.
-- Malformed identifiers, mismatched heads, ambiguous intervention
-  classification, and duplicate terminal closure refuse or remain incomplete.
+- A present malformed catalog revision refuses schema validation; only an
+  absent revision receives legacy compatibility and remains incomplete.
+- Other malformed identifiers, mismatched heads, ambiguous intervention
+  classification, and duplicate terminal closure refuse or remain incomplete
+  according to the existing driver-state contract.
 - Old conformance fixtures stay readable.
 
 ## Test plan
