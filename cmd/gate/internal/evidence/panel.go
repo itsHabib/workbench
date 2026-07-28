@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -24,7 +25,7 @@ type requestedResponse struct {
 	} `json:"users"`
 }
 
-func fetchPanel(pr PRRef, headSHA string, reviews []rawComment) reviewpanel.Evidence {
+func fetchPanel(pr PRRef, headSHA string, reviews []rawComment, comments []Comment) reviewpanel.Evidence {
 	panel := reviewpanel.Evidence{
 		SchemaVersion: reviewpanel.SchemaVersion,
 		Subject: reviewpanel.Subject{
@@ -49,7 +50,7 @@ func fetchPanel(pr PRRef, headSHA string, reviews []rawComment) reviewpanel.Evid
 		panel.Unknown = append([]string(nil), expected...)
 		return panel
 	}
-	return classifyPanel(panel, reviews, requested)
+	return classifyPanel(panel, reviews, requested, comments)
 }
 
 func fetchExpectedReviewers(repo string) ([]string, string, error) {
@@ -109,12 +110,19 @@ func fetchRequestedReviewers(pr PRRef) ([]string, error) {
 	return out, nil
 }
 
-func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested []string) reviewpanel.Evidence {
+func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested []string, comments []Comment) reviewpanel.Evidence {
 	for _, expected := range panel.Declaration.Expected {
 		if review, ok := latestExactHeadReview(expected, panel.Subject.HeadSHA, reviews); ok {
 			panel.Completed = append(panel.Completed, reviewpanel.Reviewer{
 				Name: expected, Actor: review.User.Login, State: review.State,
 				HeadSHA: review.CommitID, ReviewID: review.ID,
+			})
+			continue
+		}
+		if comment, ok := codexCleanCompletion(expected, panel.Subject.HeadSHA, comments); ok {
+			panel.Completed = append(panel.Completed, reviewpanel.Reviewer{
+				Name: expected, Actor: comment.Author, State: "CLEAN",
+				HeadSHA: panel.Subject.HeadSHA, ReviewID: comment.ID,
 			})
 			continue
 		}
@@ -125,6 +133,27 @@ func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested [
 		panel.Missing = append(panel.Missing, expected)
 	}
 	return panel
+}
+
+var codexReviewedCommit = regexp.MustCompile("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`\\r?$")
+
+func codexCleanCompletion(expected, headSHA string, comments []Comment) (Comment, bool) {
+	if expected != "codex" {
+		return Comment{}, false
+	}
+	for i := len(comments) - 1; i >= 0; i-- {
+		comment := comments[i]
+		if comment.Author != "chatgpt-codex-connector[bot]" || !comment.IsBot ||
+			comment.CommitID != "" || comment.Path != "" ||
+			!strings.HasPrefix(comment.Body, "Codex Review: Didn't find any major issues.") {
+			continue
+		}
+		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
+		if len(match) == 2 && strings.HasPrefix(headSHA, match[1]) {
+			return comment, true
+		}
+	}
+	return Comment{}, false
 }
 
 func latestExactHeadReview(expected, headSHA string, reviews []rawComment) (rawComment, bool) {

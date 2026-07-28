@@ -47,6 +47,7 @@ type diffBody struct {
 
 // Comment is one review comment as verifiers will consume it.
 type Comment struct {
+	ID     int64  `json:"id,omitempty"`
 	Author string `json:"author"`
 	IsBot  bool   `json:"is_bot"`
 	Path   string `json:"path,omitempty"`
@@ -70,7 +71,7 @@ type commentsBody struct {
 type reviewFetchers struct {
 	reviews  func(PRRef) ([]rawComment, error)
 	comments func(PRRef, []rawComment) ([]Comment, error)
-	panel    func(PRRef, string, []rawComment) reviewpanel.Evidence
+	panel    func(PRRef, string, []rawComment, []Comment) reviewpanel.Evidence
 }
 
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
@@ -151,7 +152,7 @@ func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]C
 	if err != nil {
 		return nil, reviewpanel.Evidence{}, err
 	}
-	return comments, fetchers.panel(pr, headSHA, reviews), nil
+	return comments, fetchers.panel(pr, headSHA, reviews, comments), nil
 }
 
 type rawComment struct {
@@ -197,6 +198,7 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	var out []Comment
 	for _, rc := range inline {
 		out = append(out, Comment{
+			ID:       rc.ID,
 			Author:   rc.User.Login,
 			IsBot:    rc.User.Type == "Bot",
 			Path:     rc.Path,
@@ -208,6 +210,7 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	}
 	for _, rc := range issue {
 		out = append(out, Comment{
+			ID:     rc.ID,
 			Author: rc.User.Login,
 			IsBot:  rc.User.Type == "Bot",
 			Body:   rc.Body,
@@ -251,6 +254,7 @@ func reviewBodies(reviews []rawComment) []Comment {
 			continue
 		}
 		out = append(out, Comment{
+			ID:       rv.ID,
 			Author:   rv.User.Login,
 			IsBot:    rv.User.Type == "Bot",
 			Body:     rv.Body,

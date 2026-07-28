@@ -239,10 +239,10 @@ jobs:
         if: steps.pr.outputs.found == 'true'
         env:
           PR: ${{ steps.pr.outputs.number }}
-          # Cloud model backend (Anthropic) so the two advisory rungs need no
-          # local Ollama on the hosted runner. Fork-safe: this step runs only in
-          # the trusted base context (workflow_run), never fork code, so the
-          # secret is never exposed to a PR/fork.
+          # Cloud backend remains available to the red-CI classifier; paid
+          # review consolidation is skipped below. Fork-safe: this step runs
+          # only in the trusted base context (workflow_run), never fork code,
+          # so the secret is never exposed to a PR/fork.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
@@ -257,19 +257,15 @@ jobs:
             -state "$TMP/state" -key "$TMP/keys" -init)
           echo "minted ephemeral grant"
           set +e
-          # -reviews-optional = REVIEWS ADVISORY for the enforced CI check. The
-          # model-based review-consolidation rung escalates on uncertainty, and this
-          # ephemeral CI run has no judge to resolve a park, so gating on it would
-          # freeze a clean PR (a clean bot review extracts low-confidence -> park,
-          # with no auto-green path). Under this flag: readiness does NOT escalate on
-          # an absent GitHub review decision, and the reviews rung is SKIPPED (it
-          # would not gate, so its paid model calls would be pure cost). The check enforces the
-          # DETERMINISTIC rungs it can verify autonomously — CI green, readiness
-          # (mergeable, not draft, no CHANGES_REQUESTED), and the risk floor. Review
-          # JUDGMENT stays in the operator/driver flow (where a human judges the bot
-          # panel), which is where model-based review consolidation belongs. Trying
-          # to auto-recognize a clean review from comment text proved unsound
-          # (adversarial pass), so this splits the boundary rather than guessing.
+          # -reviews-optional skips only paid review-consolidation for the enforced
+          # CI check. Exact-head panel completeness remains deterministic and
+          # required. The local-model rung escalates on uncertainty, and this
+          # ephemeral CI run has no judge for a model-only park. Under this flag,
+          # readiness accepts an absent GitHub aggregate review decision and the
+          # paid findings rung is skipped. Deterministic readiness, risk floor, and
+          # panel completeness still gate; panel completion comes from exact-head
+          # review submissions or the authenticated Codex clean-result sentinel,
+          # never arbitrary review prose.
           #
           # -stamp=false: this run's state/key dir is erased by the EXIT trap above,
           # so a gate/authorized status posted here would carry a run+hash whose only

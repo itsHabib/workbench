@@ -19,13 +19,13 @@ func TestReviewAppearingBetweenReadsCannotCompleteSnapshot(t *testing.T) {
 			remote = append(remote, appeared)
 			return reviewBodies(snapshot), nil
 		},
-		panel: func(_ PRRef, head string, snapshot []rawComment) reviewpanel.Evidence {
+		panel: func(_ PRRef, head string, snapshot []rawComment, comments []Comment) reviewpanel.Evidence {
 			panel := reviewpanel.Evidence{
 				SchemaVersion: 1,
 				Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: head},
 				Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"codex"}},
 			}
-			return classifyPanel(panel, snapshot, nil)
+			return classifyPanel(panel, snapshot, nil, comments)
 		},
 	}
 	comments, panel, err := fetchReviewEvidence(pr, "head", fetchers)

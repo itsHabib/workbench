@@ -57,7 +57,10 @@ log entry. Consequences the code enforces:
   records `.ship.json`'s required set and the exact-head disposition of each
   reviewer. The panel-completeness code rung escalates missing, pending,
   unknown, and stale-head state separately from the local model's finding
-  extraction, so one clean reviewer cannot stand in for silent peers.
+  extraction, so one clean reviewer cannot stand in for silent peers. A clean
+  Codex issue comment counts only from the exact connector actor with its
+  structured `Reviewed commit` sentinel bound to the current head; arbitrary
+  prose and stale or malformed sentinels remain incomplete.
 
 ### Concurrency
 
