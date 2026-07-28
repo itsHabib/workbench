@@ -24,7 +24,7 @@ type requestedResponse struct {
 	} `json:"users"`
 }
 
-func fetchPanel(pr PRRef, headSHA string) reviewpanel.Evidence {
+func fetchPanel(pr PRRef, headSHA string, reviews []rawComment) reviewpanel.Evidence {
 	panel := reviewpanel.Evidence{
 		SchemaVersion: reviewpanel.SchemaVersion,
 		Subject: reviewpanel.Subject{
@@ -44,11 +44,6 @@ func fetchPanel(pr PRRef, headSHA string) reviewpanel.Evidence {
 		return panel
 	}
 
-	reviews, err := pagedComments(fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number))
-	if err != nil {
-		panel.Unknown = append([]string(nil), expected...)
-		return panel
-	}
 	requested, err := fetchRequestedReviewers(pr)
 	if err != nil {
 		panel.Unknown = append([]string(nil), expected...)
