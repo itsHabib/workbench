@@ -51,7 +51,7 @@ head must never merge.
 ## Acceptance
 
 - The receipt proves the PR originated from a Ship cloud stream.
-- Exact-head artifact is accepted once; every refusal probe in step 4 is
+- Exact-head artifact is accepted once; every refusal probe in step 5 is
   rejected before dispatch.
 - The addressed stream reaches terminal success and changes the same PR's head
   without operator checkout/push.
