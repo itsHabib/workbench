@@ -136,7 +136,7 @@ func resolveAnthropicURL(base string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cloud model: invalid ANTHROPIC_BASE_URL")
 	}
-	if !endpoint.IsAbs() || endpoint.Host == "" {
+	if !endpoint.IsAbs() || endpoint.Hostname() == "" {
 		return "", fmt.Errorf("cloud model: ANTHROPIC_BASE_URL must be absolute")
 	}
 	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {

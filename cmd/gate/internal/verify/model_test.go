@@ -100,6 +100,7 @@ func TestResolveAnthropicURLRejectsInvalidBase(t *testing.T) {
 	}{
 		{name: "malformed", base: "://bad"},
 		{name: "relative", base: "provider/anthropic"},
+		{name: "empty hostname", base: "https://:443/provider"},
 		{name: "unsupported scheme", base: "ftp://example.invalid/provider"},
 		{name: "userinfo", base: "https://user:pass@example.invalid/provider"},
 		{name: "query", base: "https://example.invalid/provider?route=anthropic"},
