@@ -13,35 +13,40 @@ push. The closure receipt must record and verify the cloud runtime.
 
 ## Procedure
 
-1. Start a fresh Codex task and invoke the catalog-installed native producer.
-2. Verify from Ship's durable run/stream state that the selected PR originated
+1. Import and run a focused Ship stream with `runtime: cloud` and
+   `autoCreatePR` against the target repository. If no implementation stream is
+   suitable, launch the reversible canary through this same cloud path. Wait
+   for Ship to record its PR URL and terminal stream state.
+2. Start a fresh Codex task and invoke the catalog-installed native producer.
+3. Verify from Ship's durable run/stream state that the selected PR originated
    from a cloud stream; pin the live reviewed head and emit
    `ReviewFindingsV1`.
-3. Submit it once to `ship driver address`.
-4. Probe stale-head, malformed, replayed, cycle-exhausted, empty/unsourced, and
+4. Submit it once to `ship driver address`.
+5. Probe stale-head, malformed, replayed, cycle-exhausted, empty/unsourced, and
    source/panel-inconsistent artifacts; Ship itself must refuse every probe
    before dispatch.
-5. Run `ship driver run <driver-run-id>` until the addressed stream reaches
+6. Run `ship driver run <driver-run-id>` until the addressed stream reaches
    terminal success. Only then read and record the new PR head; do not manually
    checkout or push its branch.
-6. Run fresh exact-head review; demonstrate that an incomplete configured panel
+7. Run fresh exact-head review; demonstrate that an incomplete configured panel
    parks.
-7. Resolve the recorded park through the provider-neutral judgment seam using a
+8. Resolve the recorded park through the provider-neutral judgment seam using a
    judgment bound to the parked run, grant, repository, PR, and head. Prefer the
    configured Codex auto-judge; stop for operator judgment if the provider
    cannot decide. Branch on the judgment command's exit code and reduced result;
    do not create a new Gate run for the same incomplete panel.
-8. Only after the judged run passes, execute the judgment result's exact emitted
+9. Only after the judged run passes, execute the judgment result's exact emitted
    `gh pr merge ... --match-head-commit ...` command.
-9. Run `ship driver land <driver-run-id> --pr <n>` immediately after the
+10. Run `ship driver land <driver-run-id> --pr <n>` immediately after the
    commit-pinned merge. Its already-merged readback path must record the merge
    SHA/time, finalize the authoritative closure receipt, and reach terminal
    closure; it must not issue a second merge.
-10. Link the receipt, run, stream, PR, Gate, judgment, merge, producer, catalog revision,
-   model, and interventions in Dossier.
+11. Link the receipt, run, stream, PR, Gate, judgment, merge, producer, catalog
+    revision, model, and interventions in Dossier.
 
-If no implementation PR receives an actionable finding, use a canary PR with a
-genuine reversible defect. The defective head must never merge.
+If no implementation PR receives an actionable finding, the cloud stream in
+step 1 must create a canary PR with a genuine reversible defect. The defective
+head must never merge.
 
 ## Acceptance
 

@@ -23,7 +23,7 @@ batches:
         spec_path: docs/features/agentic-workbench-closure/driver/codex-native-reviewfindings-producer.md
         branch_name: codex/native-reviewfindings-producer
         runtime: local
-        touches: [cc-skills/catalog.yaml, cc-skills/skills/review-coordinator, cc-skills/targets/codex/review-coordinator]
+        touches: [catalog.yaml, skills/review-coordinator, targets/codex/review-coordinator]
         status: pending
       - task_id: tsk_01KYMQGTQ9J7SJ2S64YWMATPSA
         task_slug: provider-neutral-gate-judge
@@ -64,7 +64,7 @@ batches:
         spec_path: docs/features/agentic-workbench-closure/driver/emit-codex-closure-receipt.md
         branch_name: codex/emit-closure-receipt
         runtime: local
-        touches: [ship/packages/driver/src/driverstate-emit.ts, ship/packages/driver/src/engine.ts]
+        touches: [packages/driver/src/driverstate-emit.ts, packages/driver/src/engine.ts]
         status: pending
   - id: 3
     label: live validation
