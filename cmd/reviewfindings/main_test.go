@@ -125,7 +125,7 @@ func TestRunDoesNotReplaceOutputOnRefusal(t *testing.T) {
 	}
 }
 
-func TestRunnerFailureRefuses(t *testing.T) {
+func TestProduceReturnsErrorOnRunnerFailure(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	_, err := produce(context.Background(), fakeRunner{err: errors.New("boom")}, validOptions(t, head), time.Now())
 	if err == nil {

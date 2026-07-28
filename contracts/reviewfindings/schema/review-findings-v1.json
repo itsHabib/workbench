@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/itsHabib/workbench/contracts/reviewfindings/schema/review-findings-v1.json",
   "title": "ReviewFindingsV1",
+  "description": "Structural schema. x-maxBytes documents limits enforced by Workbench Validate and Ship's parser; standard JSON Schema validators do not enforce that extension.",
   "type": "object",
   "required": ["schema_version", "artifact_id", "decision", "subject", "producer", "panel", "findings"],
   "properties": {
