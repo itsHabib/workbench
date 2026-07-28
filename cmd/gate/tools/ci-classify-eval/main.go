@@ -1,7 +1,12 @@
 // ci-classify-eval emits ci-classify eval JSONL via gate's cloud Model backend.
-// Usage (from any working directory, ANTHROPIC_API_KEY set):
+// Usage from the workbench module root (ANTHROPIC_API_KEY set):
 //
 //	go run ./cmd/gate/tools/ci-classify-eval -out cmd/gate/docs/features/ci-classify/eval/ci-eval-raw.haiku-cloud.jsonl
+//
+// To run elsewhere, build from the module root and pass the checkout explicitly:
+//
+//	go build -o /tmp/ci-classify-eval ./cmd/gate/tools/ci-classify-eval
+//	cd /tmp && ./ci-classify-eval -repo-root /path/to/workbench -out ci-eval-raw.haiku-cloud.jsonl
 package main
 
 import (
