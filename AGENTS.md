@@ -27,8 +27,9 @@ Orientation block you can point an agent at to ground it fast.
   when-to-route-local rule. Its CLIs live at `cmd/local` and `cmd/eval`.
 - `cmd/<tool>/` — one binary per tool; its guts stay private under
   `cmd/<tool>/internal/`. Each tool keeps its own scoped guidance in
-  `cmd/<tool>/CLAUDE.md` + `docs/DESIGN.md` (per-tool `AGENTS.md` files do not exist
-  yet — read the tool's `CLAUDE.md` for its exit codes, invariants, and checks).
+  `cmd/<tool>/CLAUDE.md` + `docs/DESIGN.md`; its `AGENTS.md` is a small Codex
+  pointer to that canonical scoped guidance. CI requires the pair so either
+  harness discovers the same exit codes, invariants, and checks.
   Today: `flare` (the escalation/block routing sink — an Observability tool, not
   a plane), `tracelens` (agent trace
   diagnostics — consumed via its CLI exit-code seam, never as a Go import),

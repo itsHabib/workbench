@@ -116,6 +116,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: scoped agent guidance is discoverable
+        run: |
+          fail=0
+          for claude in cmd/*/CLAUDE.md; do
+            dir=${claude%/CLAUDE.md}
+            agents="$dir/AGENTS.md"
+            if [ ! -f "$agents" ]; then
+              echo "$dir has CLAUDE.md but no AGENTS.md" >&2
+              fail=1
+              continue
+            fi
+            if ! grep -q 'adjacent `CLAUDE.md`' "$agents"; then
+              echo "$agents must point Codex at the canonical scoped guidance" >&2
+              fail=1
+            fi
+          done
+          exit $fail
       - name: contracts is a leaf
         # Every contracts domain (contracts, contracts/execution, ...) is its
         # own leaf: it imports nothing else in the module, not even a sibling
