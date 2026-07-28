@@ -32,13 +32,12 @@ gateway-specific configuration was written to stderr or verdict artifacts.
 export ANTHROPIC_BASE_URL=...   # gateway origin + provider prefix
 export ANTHROPIC_API_KEY=...    # gateway-issued token
 export GATE_CLOUD_MODEL=claude-sonnet-4-6
-go run ./cmd/gate/docs/features/ci-classify/eval/run-cloud \
-  -eval-dir cmd/gate/docs/features/ci-classify/eval \
+go run ./cmd/gate/tools/ci-classify-eval \
   -out cmd/gate/docs/features/ci-classify/eval/ci-eval-raw.gateway.jsonl
 pwsh cmd/gate/docs/features/ci-classify/eval/floor-score.ps1 \
   -s cmd/gate/docs/features/ci-classify/eval \
   -raw ci-eval-raw.gateway.jsonl
 ```
 
-`run-cloud` keeps metadata opaque so it can replay the frozen dataset's string
+`ci-classify-eval` keeps metadata opaque so it can replay the frozen dataset's string
 metadata without imposing an unrelated object shape.
