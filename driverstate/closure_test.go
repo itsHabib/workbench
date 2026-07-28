@@ -60,6 +60,20 @@ func TestFoldClosureReceiptContradictionsStayIncomplete(t *testing.T) {
 	}
 }
 
+func TestFoldClosureReceiptRefusesMergedPRIdentityMismatch(t *testing.T) {
+	events := closureEvents(t, strings.Repeat("a", 40), strings.Repeat("a", 40), 1)
+	var merged dsc.StreamMergedBody
+	if err := json.Unmarshal(events[len(events)-1].Body, &merged); err != nil {
+		t.Fatal(err)
+	}
+	merged.PR = 185
+	events[len(events)-1].Body = mustBody(t, merged)
+	receipt := FoldEvents(events).Streams["dss_1"].Closure
+	if receipt == nil || receipt.Complete || !contains(receipt.Contradictions, "merged_pr_mismatch") {
+		t.Fatalf("closure = %+v, want merged PR identity contradiction", receipt)
+	}
+}
+
 func TestClosureReceiptExactHeadAndTerminalModel(t *testing.T) {
 	for sequence := 1; sequence <= 128; sequence++ {
 		prHead := fmt.Sprintf("%040x", sequence)

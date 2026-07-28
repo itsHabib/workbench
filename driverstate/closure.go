@@ -39,58 +39,94 @@ func closureStreams(events []Event) []string {
 }
 
 func foldClosure(events []Event, stream string) dsc.ClosureReceipt {
-	receipt := dsc.ClosureReceipt{WorkflowRef: events[0].Run + "/" + stream}
-	var repo, prHead string
-	pr := 0
-	mergeCount := 0
+	acc := closureAccumulator{
+		stream:  stream,
+		receipt: dsc.ClosureReceipt{WorkflowRef: events[0].Run + "/" + stream},
+	}
 	for _, event := range events {
-		if event.Kind == dsc.KindRunImported {
-			var body dsc.RunImportedBody
-			if json.Unmarshal(event.Body, &body) == nil {
-				repo = body.Repo
-				setClosureFact(&receipt, "ship_run_ref", &receipt.ShipRunRef, body.ShipRunRef)
-			}
-			continue
+		acc.apply(event)
+	}
+	if acc.repo != "" && acc.pr > 0 && acc.prHead != "" {
+		acc.receipt.PRRef = fmt.Sprintf("%s#%d@%s", acc.repo, acc.pr, acc.prHead)
+	}
+	if acc.receipt.ReviewHeadSHA != "" && acc.prHead != "" && acc.receipt.ReviewHeadSHA != acc.prHead {
+		addContradiction(&acc.receipt, "review_head_mismatch")
+	}
+	if acc.pr > 0 && acc.mergedPR > 0 && acc.pr != acc.mergedPR {
+		addContradiction(&acc.receipt, "merged_pr_mismatch")
+	}
+	if acc.mergeCount > 1 {
+		addContradiction(&acc.receipt, "duplicate_terminal_closure")
+	}
+	finalizeClosure(&acc.receipt)
+	return acc.receipt
+}
+
+type closureAccumulator struct {
+	stream     string
+	receipt    dsc.ClosureReceipt
+	repo       string
+	prHead     string
+	pr         int
+	mergedPR   int
+	mergeCount int
+}
+
+func (a *closureAccumulator) apply(event Event) {
+	if event.Kind == dsc.KindRunImported {
+		var body dsc.RunImportedBody
+		if json.Unmarshal(event.Body, &body) == nil {
+			a.repo = body.Repo
+			setClosureFact(&a.receipt, "ship_run_ref", &a.receipt.ShipRunRef, body.ShipRunRef)
 		}
-		if event.Stream != stream {
-			continue
-		}
-		switch event.Kind {
-		case dsc.KindClosureFacts:
-			applyClosureFacts(&receipt, event.Body)
-		case dsc.KindIntervention:
-			var body dsc.InterventionBody
-			if json.Unmarshal(event.Body, &body) == nil {
-				receipt.Interventions = append(receipt.Interventions, body)
-			}
-		case dsc.KindStreamPROpened:
-			var body dsc.StreamPROpenedBody
-			if json.Unmarshal(event.Body, &body) == nil {
-				pr = body.PR
-				prHead = body.HeadSHA
-			}
-		case dsc.KindReviewCycle:
-			receipt.ReviewCycles++
-		case dsc.KindStreamMerged:
-			var body dsc.StreamMergedBody
-			if json.Unmarshal(event.Body, &body) == nil {
-				mergeCount++
-				receipt.MergeCommit = body.MergeCommit
-				receipt.Outcome = "merged"
-			}
-		}
+		return
 	}
-	if repo != "" && pr > 0 && prHead != "" {
-		receipt.PRRef = fmt.Sprintf("%s#%d@%s", repo, pr, prHead)
+	if event.Stream != a.stream {
+		return
 	}
-	if receipt.ReviewHeadSHA != "" && prHead != "" && receipt.ReviewHeadSHA != prHead {
-		addContradiction(&receipt, "review_head_mismatch")
+	switch event.Kind {
+	case dsc.KindClosureFacts:
+		applyClosureFacts(&a.receipt, event.Body)
+	case dsc.KindIntervention:
+		a.applyIntervention(event.Body)
+	case dsc.KindStreamPROpened:
+		a.applyPROpened(event.Body)
+	case dsc.KindReviewCycle:
+		a.receipt.ReviewCycles++
+	case dsc.KindStreamMerged:
+		a.applyMerged(event.Body)
 	}
-	if mergeCount > 1 {
-		addContradiction(&receipt, "duplicate_terminal_closure")
+}
+
+func (a *closureAccumulator) applyIntervention(raw json.RawMessage) {
+	var body dsc.InterventionBody
+	if json.Unmarshal(raw, &body) == nil {
+		a.receipt.Interventions = append(a.receipt.Interventions, body)
 	}
-	finalizeClosure(&receipt)
-	return receipt
+}
+
+func (a *closureAccumulator) applyPROpened(raw json.RawMessage) {
+	var body dsc.StreamPROpenedBody
+	if json.Unmarshal(raw, &body) == nil {
+		a.pr = body.PR
+		a.prHead = body.HeadSHA
+	}
+}
+
+func (a *closureAccumulator) applyMerged(raw json.RawMessage) {
+	var body dsc.StreamMergedBody
+	if json.Unmarshal(raw, &body) != nil {
+		return
+	}
+	a.mergeCount++
+	if a.mergedPR == 0 {
+		a.mergedPR = body.PR
+	}
+	if a.mergedPR != body.PR {
+		addContradiction(&a.receipt, "merged_pr_conflict")
+	}
+	a.receipt.MergeCommit = body.MergeCommit
+	a.receipt.Outcome = "merged"
 }
 
 func applyClosureFacts(receipt *dsc.ClosureReceipt, raw json.RawMessage) {

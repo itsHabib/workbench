@@ -27,12 +27,13 @@ merge and the join contains:
 - review artifact id, canonical 64-hex digest, and exact reviewed head;
 - at least one recorded review cycle and the merge commit.
 
-The reviewed head must equal the head recorded by `stream_pr_opened`.
-Conflicting repeated facts, a head mismatch, or duplicate terminal merge facts
-remain visibly contradictory and cannot complete. An absent catalog revision
-is the only legacy-compatible provenance case: `ReviewFindingsV1` still
-validates, but its closure receipt remains incomplete. A present malformed
-revision refuses contract validation.
+The reviewed head must equal the head recorded by `stream_pr_opened`, and the
+PR number on `stream_merged` must name that same opened PR. Conflicting repeated
+facts, a head or PR mismatch, or duplicate terminal merge facts remain visibly
+contradictory and cannot complete. An absent catalog revision is the only
+legacy-compatible provenance case: `ReviewFindingsV1` still validates, but its
+closure receipt remains incomplete. A present malformed revision refuses
+contract validation.
 
 Catalog revisions are either a full lowercase source commit SHA (40 or 64
 hexadecimal characters) or `sha256:` followed by 64 lowercase hexadecimal
