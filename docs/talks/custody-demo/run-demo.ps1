@@ -94,7 +94,7 @@ Assert-Status -Label 'cross-surface path is denied at custody' -Actual $crossSur
 
 if (-not [string]::IsNullOrWhiteSpace($StateDir)) {
     Write-Beat '4. AUDIT — summarize what custody allowed and refused'
-    & custody log -state $StateDir -key jira-microscope -since 1h
+    & custody log rollup -state $StateDir -since 1h
     if ($LASTEXITCODE -ne 0) {
         throw "custody log exited $LASTEXITCODE"
     }
