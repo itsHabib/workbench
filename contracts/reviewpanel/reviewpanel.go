@@ -3,6 +3,7 @@
 package reviewpanel
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -44,6 +45,25 @@ type Reviewer struct {
 	State    string `json:"state"`
 	HeadSHA  string `json:"head_sha"`
 	ReviewID int64  `json:"review_id"`
+}
+
+// MarshalJSON keeps every schema-required collection an array even when a
+// producer leaves its Go slice nil. ReviewPanelV1 does not permit null arrays.
+func (e Evidence) MarshalJSON() ([]byte, error) {
+	type plain Evidence
+	e.Declaration.Expected = nonNil(e.Declaration.Expected)
+	e.Completed = nonNil(e.Completed)
+	e.Pending = nonNil(e.Pending)
+	e.Missing = nonNil(e.Missing)
+	e.Unknown = nonNil(e.Unknown)
+	return json.Marshal(plain(e))
+}
+
+func nonNil[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
 }
 
 // Validate enforces contract consistency without deciding whether an
@@ -90,6 +110,9 @@ func validateCompleted(e Evidence) (map[string]struct{}, error) {
 			reviewer.HeadSHA == "" || reviewer.ReviewID < 1 {
 			return nil, errors.New("reviewpanel: completed reviewer fields are required")
 		}
+		if !validReviewerState(reviewer.State) {
+			return nil, fmt.Errorf("reviewpanel: completed reviewer %s has invalid state %s", reviewer.Name, reviewer.State)
+		}
 		if reviewer.HeadSHA != e.Subject.HeadSHA {
 			return nil, fmt.Errorf("reviewpanel: completed reviewer %s is stale", reviewer.Name)
 		}
@@ -99,6 +122,14 @@ func validateCompleted(e Evidence) (map[string]struct{}, error) {
 		seen[reviewer.Name] = struct{}{}
 	}
 	return seen, nil
+}
+
+func validReviewerState(state string) bool {
+	switch state {
+	case "APPROVED", "COMMENTED", "CHANGES_REQUESTED", "CLEAN":
+		return true
+	}
+	return false
 }
 
 func addDispositions(seen map[string]struct{}, sets ...[]string) error {

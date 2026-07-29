@@ -27,30 +27,12 @@ permissions:
   actions: read
   pull-requests: read
 
-# Bound the work. Collapse workflow_run and late-review re-evaluations to one
-# in-flight run per PR — newer evidence cancels the older run, which is the
-# correct one to keep. This is a cost/DoS bound, not a correctness one:
-# cancellation leaves the required
-# `gate` context absent, which fail-closed blocks until the surviving run posts.
-concurrency:
-  group: gate-${{ github.repository }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.event.issue.number || inputs.pr || github.event.workflow_run.head_branch || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  gate:
-    # DORMANT until armed. The runtime is now self-contained on a stock hosted
-    # runner: gate and triage-floor are built in-workflow (below), and the
-    # optional red-CI classifier has a cloud backend. The two remaining
-    # requirements are operator acts: set repo variable
-    # GATE_ENFORCE=true AND provide the ANTHROPIC_API_KEY secret. Until
-    # GATE_ENFORCE=true this posts nothing and enforces nothing. See
-    # docs/enforcement.md. (Also skips non-PR CI runs — a push to main has no PR
-    # to gate.) It runs on EVERY PR CI conclusion, including cancelled/failed: a
-    # cancelled or red run must still reach gate so readiness sees the non-green
-    # rollup and blocks (overwriting any stale gate=success on the head). Skipping
-    # cancelled runs would let a user with Actions rights cancel CI to keep a
-    # persistent stale success alive — a fail-open. The DoS bound is the
-    # concurrency group above, not a conclusion filter.
+  identity:
+    # Resolve one stable PR number before the effectful gate job enters its
+    # per-PR concurrency group. This includes workflow_run payloads whose
+    # pull_requests association is empty; keying those by head_branch would not
+    # collide with a deletion-triggered issue_comment run for the same PR.
     if: >-
       vars.GATE_ENFORCE == 'true'
       && (
@@ -69,34 +51,110 @@ jobs:
           && inputs.pr != '')
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.pr.outputs.number }}
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+      RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+      UPSTREAM_NAME: ${{ github.event.workflow_run.name }}
+    steps:
+      - name: Resolve stable PR identity
+        id: pr
+        run: |
+          set -euo pipefail
+          invalidate_and_fail() {
+            if [ -n "${HEAD_SHA}" ]; then
+              gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+                -f state=pending -f context=gate \
+                -f description="gate: could not resolve stable PR identity" \
+                -f target_url="${RUN_URL}" >/dev/null || true
+            fi
+            echo "$1" >&2
+            exit 1
+          }
+
+          # The unprivileged review-signal workflow attests the bot event and PR
+          # number in a run-scoped artifact. Validate it before using its key.
+          if [ "${UPSTREAM_NAME}" = "gate-review-signal" ]; then
+            dir="${RUNNER_TEMP}/gate-review-signal"
+            gh run download "${UPSTREAM_RUN_ID}" -R "${REPO}" \
+              -n gate-review-signal -D "$dir"
+            signal="$dir/gate-review-signal.json"
+            test "$(jq -r '.actor_type' "$signal")" = "Bot"
+            test -n "$(jq -r '.reviewer' "$signal")"
+            EVENT_PR=$(jq -r '.pr' "$signal")
+          fi
+          # Direct PR-number events are already stable. CI workflow_run is the
+          # exception: its association can be absent or stale, so always derive
+          # the identity from the exact upstream head below.
+          if [ -n "${EVENT_PR}" ] && [ "${UPSTREAM_NAME}" != "CI" ]; then
+            test "${EVENT_PR}" -ge 1
+            echo "number=${EVENT_PR}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          test -n "${HEAD_SHA}" ||
+            invalidate_and_fail "event did not identify a PR or head"
+          if ! raw=$(gh api --paginate \
+            "repos/${REPO}/commits/${HEAD_SHA}/pulls" --jq '.[]'); then
+            invalidate_and_fail "could not resolve PR association for ${HEAD_SHA}"
+          fi
+          nums=$(printf '%s' "$raw" | jq -s -c --arg sha "$HEAD_SHA" \
+            '[.[] | select(.state == "open" and .head.sha == $sha) | .number] | unique')
+          n=$(printf '%s' "$nums" | jq 'length')
+
+          # GitHub can omit workflow_run.pull_requests while the commit
+          # association catches up. Resolve the same exact head through its
+          # repository-qualified branch, never by branch name alone.
+          if [ "$n" -eq 0 ] && [ -n "${HEAD_OWNER}" ] && [ -n "${HEAD_BRANCH}" ]; then
+            if ! raw=$(gh api --paginate \
+              "repos/${REPO}/pulls?state=open&head=${HEAD_OWNER}:${HEAD_BRANCH}&per_page=100" \
+              --jq '.[]'); then
+              invalidate_and_fail "could not resolve branch PR for ${HEAD_SHA}"
+            fi
+            nums=$(printf '%s' "$raw" | jq -s -c --arg sha "$HEAD_SHA" \
+              '[.[] | select(.head.sha == $sha) | .number] | unique')
+            n=$(printf '%s' "$nums" | jq 'length')
+          fi
+          if [ "$n" -ne 1 ]; then
+            invalidate_and_fail "head ${HEAD_SHA} resolves to ${n} open PRs"
+          fi
+          echo "number=$(printf '%s' "$nums" | jq -r '.[0]')" >> "$GITHUB_OUTPUT"
+
+  gate:
+    # DORMANT until armed. The runtime is now self-contained on a stock hosted
+    # runner: gate and triage-floor are built in-workflow (below), and the
+    # optional red-CI classifier has a cloud backend. The two remaining
+    # requirements are operator acts: set repo variable
+    # GATE_ENFORCE=true AND provide the ANTHROPIC_API_KEY secret. Until
+    # GATE_ENFORCE=true this posts nothing and enforces nothing. See
+    # docs/enforcement.md. It runs on EVERY PR CI conclusion, including
+    # cancelled/failed: readiness must overwrite any stale success.
+    needs: identity
+    if: needs.identity.result == 'success' && needs.identity.outputs.pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Every trigger uses the same resolved PR identity. Identity jobs may
+    # overlap but cannot post success; success-capable evaluations serialize.
+    concurrency:
+      group: gate-${{ github.repository }}-pr-${{ needs.identity.outputs.pr }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      EVENT_PR: ${{ needs.identity.outputs.pr }}
       # A review-signal workflow_run may identify a merge ref rather than the
       # PR head, so leave it blank and resolve the live head read-only below.
       HEAD_SHA: ${{ (github.event.workflow_run.name == 'CI' && github.event.workflow_run.head_sha) || '' }}
       RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
-      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
     steps:
-      # workflow_run does not carry the upstream review actor. The unprivileged
-      # signal workflow attests its Bot-only event and PR number in a run-scoped
-      # artifact. Validate it before the first status write or checkout.
-      - name: Validate bot review signal
-        if: github.event.workflow_run.name == 'gate-review-signal'
-        run: |
-          set -euo pipefail
-          dir="${RUNNER_TEMP}/gate-review-signal"
-          gh run download "${UPSTREAM_RUN_ID}" -R "${REPO}" \
-            -n gate-review-signal -D "$dir"
-          signal="$dir/gate-review-signal.json"
-          test "$(jq -r '.actor_type' "$signal")" = "Bot"
-          test -n "$(jq -r '.reviewer' "$signal")"
-          EVENT_PR=$(jq -r '.pr' "$signal")
-          test "$EVENT_PR" -ge 1
-          echo "EVENT_PR=${EVENT_PR}" >> "$GITHUB_ENV"
-
       # issue_comment and review-signal workflow_run do not carry a trustworthy
       # PR head. Resolve that fact read-only before the first status write. The
       # CI workflow_run path already carries HEAD_SHA and skips the API call.
@@ -105,10 +163,6 @@ jobs:
           set -euo pipefail
           if [ -n "${HEAD_SHA}" ]; then
             exit 0
-          fi
-          if [ -z "${EVENT_PR}" ]; then
-            echo "event did not identify a pull request" >&2
-            exit 1
           fi
           HEAD_SHA=$(gh pr view "${EVENT_PR}" -R "${REPO}" --json headRefOid --jq .headRefOid)
           test -n "${HEAD_SHA}"

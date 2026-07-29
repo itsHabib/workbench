@@ -194,17 +194,20 @@ and why each choice is the safe one:
   blocks (fail closed). gate's own pending is excluded from both the settle-wait
   (`select(.name != "gate")`) and readiness (`isOwnGateStatus`), so it never
   self-blocks.
-- It is bounded by a **`concurrency` group keyed on the PR** (with a branch
-  fallback when a fresh `workflow_run` has no PR association yet) with
-  `cancel-in-progress`. Each run makes real model calls, so without this a PR
-  force-pushed in a loop would fan out one paid gate run per push; the concurrency
-  collapse caps that at one in-flight run per PR. Cancelling a superseded gate
-  run is safe: it leaves the required context absent until the surviving run posts
-  — fail closed. It deliberately does **not** filter on CI conclusion: a cancelled
-  or red CI run must still reach gate so readiness sees the non-green rollup and
-  blocks (overwriting any stale `gate=success`). A conclusion filter would let a
-  user with Actions rights cancel CI to preserve a stale success — a fail-open —
-  so the DoS bound is the concurrency group alone.
+- An **identity job resolves one stable PR number before concurrency**.
+  For a `workflow_run` whose PR association is empty, it resolves the exact head
+  through commit associations and then a repository-qualified branch fallback;
+  ambiguity or failure posts pending to the known head and stops. The effectful
+  gate job then uses only that resolved PR in its `cancel-in-progress`
+  concurrency group. A CI run and a Codex comment deletion for the same PR
+  therefore collide even when their trigger payloads expose different fields.
+  Each run makes real model calls, so the concurrency collapse caps that at one
+  in-flight run per PR. Cancelling a superseded gate run is safe: the surviving
+  run posts pending before cancellable work. Gate deliberately does **not**
+  filter on CI conclusion: a cancelled or red CI run must still reach readiness
+  and overwrite any stale `gate=success`. The identity jobs may overlap because
+  they perform only resolution plus fail-closed pending on refusal; status-writing
+  evaluations capable of posting success do not.
 
   **Accepted cost residual (named, not closed):** the concurrency group bounds
   *concurrent* runs, not *total* spend over time. A **paced** attacker who pushes

@@ -34,7 +34,7 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "actor": { "type": "string", "minLength": 1 },
-          "state": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "enum": ["APPROVED", "COMMENTED", "CHANGES_REQUESTED", "CLEAN"] },
           "head_sha": { "type": "string", "minLength": 1 },
           "review_id": { "type": "integer", "minimum": 1 }
         },

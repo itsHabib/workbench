@@ -534,7 +534,10 @@ machinery for that now exists in this repo (`verified`,
 right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
 signal feeds late panel evidence back through that same writable trusted-base
 rail, including for fork PRs. The signal keys on GitHub's bot identity rather
-than a fixed reviewer catalog. Provider prose and sticky issue comments are not
+than a fixed reviewer catalog. An identity job resolves every trigger
+to one PR number before the success-capable Gate job enters per-PR concurrency,
+including `workflow_run` events whose PR association is temporarily empty.
+Provider prose and sticky issue comments are not
 authority; without a formal exact-head review or shared head-bound artifact,
 the reviewer remains incomplete and the provider-neutral judgment path handles
 the park. When the default branch changes `.ship.json`,

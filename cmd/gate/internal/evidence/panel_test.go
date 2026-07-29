@@ -101,6 +101,32 @@ func TestClassifyPanelCodeRabbitActor(t *testing.T) {
 	}
 }
 
+func TestActorMatchesReviewerAliases(t *testing.T) {
+	tests := []struct {
+		expected string
+		actor    string
+	}{
+		{"codex", "chatgpt-codex-connector[bot]"},
+		{"codex", "codex[bot]"},
+		{"cursor", "cursor[bot]"},
+		{"claude", "claude[bot]"},
+		{"copilot", "copilot-pull-request-reviewer[bot]"},
+		{"copilot", "github-copilot[bot]"},
+		{"coderabbit", "coderabbitai[bot]"},
+		{"custom", "custom[bot]"},
+	}
+	for _, test := range tests {
+		t.Run(test.expected+"/"+test.actor, func(t *testing.T) {
+			if !actorMatches(test.expected, test.actor) {
+				t.Fatalf("%q did not match %q", test.actor, test.expected)
+			}
+		})
+	}
+	if actorMatches("claude", "chatgpt-codex-connector[bot]") {
+		t.Fatal("cross-provider actor alias matched")
+	}
+}
+
 func TestClassifyPanelCodexCleanIssueComment(t *testing.T) {
 	const head = "e96af9fbfc123456789012345678901234567890"
 	panel := reviewpanel.Evidence{
