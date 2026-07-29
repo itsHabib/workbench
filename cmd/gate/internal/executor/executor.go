@@ -105,8 +105,7 @@ func (session *Session) merge(ctx context.Context, argv []string, runner command
 }
 
 type installationToken struct {
-	value     string
-	expiresAt time.Time
+	value string
 }
 
 func (token *installationToken) clear() {
@@ -168,7 +167,7 @@ func exchange(ctx context.Context, config AppConfig, client *http.Client, now fu
 		payload.ExpiresAt.After(current.Add(65*time.Minute)) {
 		return installationToken{}, fmt.Errorf("%w: invalid token bounds", ErrToken)
 	}
-	return installationToken{value: payload.Token, expiresAt: payload.ExpiresAt}, nil
+	return installationToken{value: payload.Token}, nil
 }
 
 func validToken(token string) bool {
@@ -283,9 +282,8 @@ func validSHA(sha string) bool {
 func runGH(ctx context.Context, argv []string, token string) (CommandResult, error) {
 	command := exec.CommandContext(ctx, ghBinary, argv[1:]...)
 	command.Env = childEnvironment(token)
-	var stderr bytes.Buffer
 	command.Stdout = io.Discard
-	command.Stderr = &limitedWriter{writer: &stderr, remaining: 4096}
+	command.Stderr = io.Discard
 	err := command.Run()
 	if err == nil {
 		return CommandResult{ExitCode: 0}, nil
@@ -304,25 +302,4 @@ func childEnvironment(token string) []string {
 		"HOME=/tmp",
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 	}
-}
-
-type limitedWriter struct {
-	writer    io.Writer
-	remaining int64
-}
-
-func (writer *limitedWriter) Write(data []byte) (int, error) {
-	original := len(data)
-	if writer.remaining <= 0 {
-		return original, nil
-	}
-	if int64(len(data)) > writer.remaining {
-		data = data[:writer.remaining]
-	}
-	n, err := writer.writer.Write(data)
-	writer.remaining -= int64(n)
-	if err != nil {
-		return n, err
-	}
-	return original, nil
 }
