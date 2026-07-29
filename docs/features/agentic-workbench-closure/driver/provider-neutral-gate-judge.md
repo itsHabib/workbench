@@ -1,4 +1,4 @@
-**Status:** draft
+**Status:** shipped in PR #159; closed-provider hardening follow-up
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** Dossier task `provider-neutral-gate-judge` (`tsk_01KYMQGTQ9J7SJ2S64YWMATPSA`)
@@ -30,20 +30,23 @@ submission path.
   escalation/question, and the presented grant ceiling.
 - Validate completely before appending to Gate's hash-chained state.
 - Keep operator manual judgment available.
-- `judge -auto` may run only an explicitly configured provider command that
-  implements the same contract; without one it refuses with a typed actionable
-  error. There is no implicit Claude fallback.
+- `judge -auto` may run only Gate's built-in `claude` or `codex` local CLI
+  projection. The caller selects the provider name and cannot supply executable
+  code or arguments. Without a supported provider it refuses with a typed
+  actionable error. There is no implicit Claude fallback.
 - Preserve exit codes, reducer policy, grant authority, and exact-head merge
   command behavior.
 
 ## Acceptance
 
-- Production Gate code neither names nor shells Claude.
+- Production Gate has no implicit Claude dependency. Its explicit
+  `-provider claude` projection is one closed, caller-selected option beside
+  `-provider codex`.
 - A valid Codex-produced exact-run/head artifact is accepted.
 - Malformed, wrong-run, stale-head, tier-exceeding, and duplicate inputs refuse
   without state mutation.
-- Documentation gives the Codex-only invocation and explicit configured-command
-  invocation.
+- Documentation gives both closed provider invocations and the submitted
+  artifact path.
 
 ## Test plan
 
@@ -54,4 +57,5 @@ submission path.
 
 ## Non-goals
 
-Grant minting changes, branch protection, a model SDK, or provider policy.
+Grant minting changes, branch protection, a model SDK, or arbitrary
+caller-configured provider executables.

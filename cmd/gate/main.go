@@ -142,7 +142,7 @@ func usage() {
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
@@ -870,7 +870,7 @@ func outcomeSubjectMatches(byID map[string]state.Artifact, a state.Artifact, sub
 }
 
 // validateJudgeFlags enforces one judgment source: operator flags, a submitted
-// artifact, or an explicitly configured provider command.
+// artifact, or one built-in local CLI provider.
 func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 	if run == "" || grantID == "" {
 		return errors.New("judge: -run and -grant required")
@@ -889,13 +889,10 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
 	}
 	if opts.Auto {
-		if opts.ProviderCommand == "" {
-			return errors.New("judge_provider_unconfigured: -auto requires -provider-command <executable>")
-		}
-		return nil
+		return verify.ValidateJudgeProvider(opts.Provider)
 	}
-	if opts.ProviderCommand != "" {
-		return errors.New("judge: -provider-command requires -auto")
+	if opts.Provider != "" {
+		return errors.New("judge: -provider requires -auto")
 	}
 	if opts.ArtifactPath != "" {
 		return nil
@@ -910,12 +907,12 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 }
 
 type judgmentOptions struct {
-	Decision        string
-	Why             string
-	Auto            bool
-	ArtifactPath    string
-	ProviderCommand string
-	beforeAppend    func()
+	Decision     string
+	Why          string
+	Auto         bool
+	ArtifactPath string
+	Provider     string
+	beforeAppend func()
 }
 
 func cmdJudge(args []string) error {
@@ -926,8 +923,8 @@ func cmdJudge(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the judgment's reasoning")
 	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
-	auto := fs.Bool("auto", false, "run an explicitly configured provider command over the versioned request")
-	providerCommand := fs.String("provider-command", "", "provider executable for -auto; request on stdin, judgment artifact on stdout")
+	auto := fs.Bool("auto", false, "run a built-in local CLI provider over the versioned request")
+	provider := fs.String("provider", "", "built-in local CLI provider for -auto: claude or codex")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -937,11 +934,11 @@ func cmdJudge(args []string) error {
 		return nil
 	}
 	opts := judgmentOptions{
-		Decision:        *decision,
-		Why:             *why,
-		Auto:            *auto,
-		ArtifactPath:    *artifactPath,
-		ProviderCommand: *providerCommand,
+		Decision:     *decision,
+		Why:          *why,
+		Auto:         *auto,
+		ArtifactPath: *artifactPath,
+		Provider:     *provider,
 	}
 	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
@@ -1112,7 +1109,7 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 		return verify.Verdict{}, err
 	}
 	if opts.Auto {
-		return verify.AutoJudge(opts.ProviderCommand, request)
+		return verify.AutoJudge(opts.Provider, request)
 	}
 	artifact, err := readJudgmentArtifact(opts.ArtifactPath)
 	if err != nil {

@@ -37,7 +37,8 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe next -json                                        # the same projection as a machine feed
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
-./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
+./gate.exe judge -run run_... -grant grt_... -auto -provider codex
+./gate.exe judge -run run_... -grant grt_... -auto -provider claude
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176
@@ -68,12 +69,20 @@ run. They are off unless a path is given and touch nothing on the decision path.
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on
 PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
-`-provider-command` names an executable implementing the contract below.
+`-provider` is exactly `claude` or `codex`.
 
 ### Provider-neutral judgment
 
-Gate sends an explicitly configured `-provider-command` one
-`gate-judgment-v1` request as JSON on stdin and accepts one strict
+Gate has two built-in local CLI projections:
+
+```text
+claude -> claude -p
+codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check -
+```
+
+The caller selects the provider name, never an executable or argument vector.
+Gate runs that fixed command from a fresh temporary working directory, sends
+one `gate-judgment-v1` request as JSON on stdin, and accepts one strict
 `gate-judgment-v1` artifact on stdout. The request contains only recorded
 state: run and escalation ids, the exact PR subject/head, the presented grant
 id and tier ceiling, the recorded question, and the artifact context. The
@@ -113,14 +122,17 @@ the immutable judgment retains its original grant parent and the outcome names
 the replacement grant. Retry flags cannot change the persisted decision, and a
 resolution stamp records the resumed verdict rather than the caller's repeated
 flag.
-Gate rechecks the live grant after a configured provider returns and
+Gate rechecks the live grant after a built-in provider returns and
 immediately before appending its judgment, so a grant that expires during a
 long provider call authorizes no state mutation.
 A later `capability_refused` action remains audit history but does not complete
 the persisted judgment chain; a replacement live grant may still append the
 single authorized outcome.
-The configured executable path is the provider policy; Gate neither selects
-nor names a model vendor.
+The selected CLI provider is prefixed into the stored producer provenance.
+The model implementation remains provider-reported. This local path is
+advisory automation under the same operating-system identity as Gate; it is
+not an independently custodied security authority. Enforcement-grade judgment
+requires a separately controlled executor identity.
 
 ## How it decides
 

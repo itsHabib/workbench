@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -146,6 +149,158 @@ func TestAutoJudgeRequiresExplicitProvider(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "judge_provider_unconfigured") {
 		t.Fatalf("error = %v, want actionable unconfigured-provider refusal", err)
 	}
+}
+
+func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
+	cases := []struct {
+		provider string
+		name     string
+		args     []string
+	}{
+		{
+			provider: JudgeProviderClaude,
+			name:     "claude",
+			args:     []string{"-p"},
+		},
+		{
+			provider: JudgeProviderCodex,
+			name:     "codex",
+			args: []string{
+				"exec",
+				"--ephemeral",
+				"--sandbox", "read-only",
+				"--skip-git-repo-check",
+				"-",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			got, err := providerInvocation(tc.provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.name != tc.name || !slices.Equal(got.args, tc.args) {
+				t.Fatalf("invocation = %s %v, want %s %v", got.name, got.args, tc.name, tc.args)
+			}
+		})
+	}
+}
+
+func TestProviderInvocationRefusesCallerSelectedExecutable(t *testing.T) {
+	for _, provider := range []string{
+		`C:\tmp\judge.exe`,
+		"/tmp/judge",
+		"codex --dangerously-bypass-approvals-and-sandbox",
+		"other",
+	} {
+		if _, err := providerInvocation(provider); err == nil || !strings.Contains(err.Error(), "judge_provider_unsupported") {
+			t.Fatalf("provider %q error = %v, want unsupported refusal", provider, err)
+		}
+	}
+}
+
+func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
+	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
+		t.Run(provider, func(t *testing.T) {
+			request, _ := judgmentFixture()
+			var gotName string
+			var gotArgs []string
+			factory := judgeHelperFactory(t, "", &gotName, &gotArgs)
+			got, err := autoJudge(provider, request, t.TempDir(), factory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := providerInvocation(provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotName != want.name || !slices.Equal(gotArgs, want.args) {
+				t.Fatalf("executed %s %v, want %s %v", gotName, gotArgs, want.name, want.args)
+			}
+			if got.Source != "auto-judgment" || got.Producer.Impl != provider+"-cli:fixture-model" {
+				t.Fatalf("provider provenance = source %q impl %q", got.Source, got.Producer.Impl)
+			}
+		})
+	}
+}
+
+func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
+	request, _ := judgmentFixture()
+	factory := judgeHelperFactory(t, "malformed", nil, nil)
+	_, err := autoJudge(JudgeProviderCodex, request, t.TempDir(), factory)
+	if err == nil || !strings.Contains(err.Error(), "judgment_malformed") {
+		t.Fatalf("error = %v, want malformed-artifact refusal", err)
+	}
+}
+
+func TestAutoJudgeReportsProviderFailure(t *testing.T) {
+	request, _ := judgmentFixture()
+	factory := judgeHelperFactory(t, "failed", nil, nil)
+	_, err := autoJudge(JudgeProviderCodex, request, t.TempDir(), factory)
+	if err == nil || !strings.Contains(err.Error(), "judge_provider_failed: helper failed") {
+		t.Fatalf("error = %v, want provider failure", err)
+	}
+}
+
+func judgeHelperFactory(t *testing.T, mode string, gotName *string, gotArgs *[]string) judgeCommandFactory {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(name string, args ...string) *exec.Cmd {
+		if gotName != nil {
+			*gotName = name
+		}
+		if gotArgs != nil {
+			*gotArgs = append((*gotArgs)[:0], args...)
+		}
+		cmd := exec.Command(executable, "-test.run=^TestJudgeProviderHelper$")
+		cmd.Env = append(
+			os.Environ(),
+			"GATE_JUDGE_HELPER=1",
+			"GATE_JUDGE_HELPER_MODE="+mode,
+		)
+		return cmd
+	}
+}
+
+func TestJudgeProviderHelper(_ *testing.T) {
+	if os.Getenv("GATE_JUDGE_HELPER") != "1" {
+		return
+	}
+	switch os.Getenv("GATE_JUDGE_HELPER_MODE") {
+	case "malformed":
+		fmt.Fprint(os.Stdout, `{"version":`)
+		os.Exit(0)
+	case "failed":
+		fmt.Fprint(os.Stderr, "helper failed")
+		os.Exit(23)
+	}
+	var request JudgmentRequestV1
+	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(24)
+	}
+	artifact := JudgmentArtifactV1{
+		Version:      JudgmentV1,
+		Run:          request.Run,
+		EscalationID: request.EscalationID,
+		Subject:      request.Subject,
+		Grant:        request.Grant,
+		Question:     request.Question,
+		Producer:     "fixture-model",
+		Decision:     DecisionPass,
+		Tier:         "T0",
+		Confidence:   0.9,
+		Why:          "the recorded exact-head evidence is safe",
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(artifact); err != nil {
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(25)
+	}
+	os.Exit(0)
 }
 
 func TestNewJudgmentRequestUsesExactRecordedEscalation(t *testing.T) {

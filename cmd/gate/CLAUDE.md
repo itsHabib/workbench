@@ -54,6 +54,11 @@ Constraints that are design decisions, not omissions:
   `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path
   conventions.
+- **Local auto-judgment has a closed provider set.** `judge -auto` accepts only
+  `-provider claude|codex` and runs Gate's fixed `claude -p` or read-only,
+  ephemeral `codex exec` argv from a fresh temporary working directory. A
+  caller never supplies an executable path or arguments. This is advisory
+  same-user automation; independent execution authority stays outside it.
 - **The ladder law lives in code.** Local producers can never block, judgment
   cannot override a code block, tiers compose monotone-max, unknown values
   fail closed. These are reducer errors and pinned tests, not conventions.

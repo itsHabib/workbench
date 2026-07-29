@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -40,6 +41,13 @@ const (
 
 // JudgmentV1 is the provider-neutral judgment contract version.
 const JudgmentV1 = "gate-judgment-v1"
+
+const (
+	// JudgeProviderClaude selects the locally installed Claude CLI.
+	JudgeProviderClaude = "claude"
+	// JudgeProviderCodex selects the locally installed Codex CLI.
+	JudgeProviderCodex = "codex"
+)
 
 // JudgmentGrantV1 binds a judgment to the presented capability. The signature
 // stays in gate state; providers receive only the id and ceiling they must echo.
@@ -193,17 +201,76 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	}, nil
 }
 
-// AutoJudge runs only the explicitly supplied provider executable. The request
-// rides stdin and the artifact rides stdout, avoiding command-line size limits.
-func AutoJudge(command string, request JudgmentRequestV1) (Verdict, error) {
-	if strings.TrimSpace(command) == "" {
-		return Verdict{}, fmt.Errorf("judge_provider_unconfigured: pass -provider-command <executable>")
+type judgeProviderInvocation struct {
+	name string
+	args []string
+}
+
+type judgeCommandFactory func(name string, args ...string) *exec.Cmd
+
+// ValidateJudgeProvider restricts the advisory auto-judge to Gate's built-in
+// local CLI projections. Callers select a provider, never an executable.
+func ValidateJudgeProvider(provider string) error {
+	switch strings.TrimSpace(provider) {
+	case "":
+		return fmt.Errorf("judge_provider_unconfigured: pass -provider %s|%s", JudgeProviderClaude, JudgeProviderCodex)
+	case JudgeProviderClaude, JudgeProviderCodex:
+		return nil
+	default:
+		return fmt.Errorf("judge_provider_unsupported: %q (want %s or %s)", provider, JudgeProviderClaude, JudgeProviderCodex)
+	}
+}
+
+func providerInvocation(provider string) (judgeProviderInvocation, error) {
+	if err := ValidateJudgeProvider(provider); err != nil {
+		return judgeProviderInvocation{}, err
+	}
+	switch strings.TrimSpace(provider) {
+	case JudgeProviderClaude:
+		return judgeProviderInvocation{name: "claude", args: []string{"-p"}}, nil
+	case JudgeProviderCodex:
+		return judgeProviderInvocation{
+			name: "codex",
+			args: []string{
+				"exec",
+				"--ephemeral",
+				"--sandbox", "read-only",
+				"--skip-git-repo-check",
+				"-",
+			},
+		}, nil
+	}
+	return judgeProviderInvocation{}, fmt.Errorf("judge_provider_unsupported: %q", provider)
+}
+
+// AutoJudge runs one built-in local CLI provider in a fresh working directory.
+// The versioned request rides stdin and the artifact rides stdout, avoiding
+// command-line size limits and keeping the repository out of the provider's
+// ambient working directory. This is advisory local automation, not an
+// independently custodied security identity.
+func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
+	if err := ValidateJudgeProvider(provider); err != nil {
+		return Verdict{}, err
+	}
+	workDir, err := os.MkdirTemp("", "gate-judge-*")
+	if err != nil {
+		return Verdict{}, fmt.Errorf("judge_provider_failed: create isolated working directory: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+	return autoJudge(provider, request, workDir, exec.Command)
+}
+
+func autoJudge(provider string, request JudgmentRequestV1, workDir string, command judgeCommandFactory) (Verdict, error) {
+	invocation, err := providerInvocation(provider)
+	if err != nil {
+		return Verdict{}, err
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("verify: marshal judgment request: %w", err)
 	}
-	cmd := exec.Command(command)
+	cmd := command(invocation.name, invocation.args...)
+	cmd.Dir = workDir
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
@@ -216,7 +283,13 @@ func AutoJudge(command string, request JudgmentRequestV1) (Verdict, error) {
 	if err != nil {
 		return Verdict{}, err
 	}
-	return ValidateJudgment(artifact, request)
+	verdict, err := ValidateJudgment(artifact, request)
+	if err != nil {
+		return Verdict{}, err
+	}
+	verdict.Source = "auto-judgment"
+	verdict.Producer.Impl = strings.TrimSpace(provider) + "-cli:" + verdict.Producer.Impl
+	return verdict, nil
 }
 
 func escalationQuestion(arts []state.Artifact, escalationID string) (string, error) {

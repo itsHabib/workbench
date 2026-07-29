@@ -23,9 +23,14 @@ are stale:
 Still open:
 
 - a fresh Codex task had no producer for Ship's landed artifact;
-- `gate judge -auto` still shells the Claude CLI;
 - Gate B's two real Codex/Claude closure runs, closure receipts, later
   `panel.missing` Gate behavior, and catalog integrity gate remain unproven.
+
+Gate's hard-coded Claude dependency was removed in PR #159. A later hardening
+replaced its arbitrary executable seam with the closed
+`judge -auto -provider claude|codex` local CLI projections. Both consume the
+same exact-head `gate-judgment-v1` contract. These local providers are advisory
+same-user automation, not independently custodied execution authority.
 
 The smallest end-to-end gap is therefore production, not consumption:
 Codex needs to turn exact-head GitHub inline findings into Ship's already
@@ -100,5 +105,4 @@ This slice does not claim Gate B. It leaves:
 2. run one real Codex address cycle and one independent Claude cycle;
 3. add complete closure receipts and prove `panel.missing` cannot become a
    later clean Gate verdict;
-4. decouple `gate judge -auto` from the Claude CLI;
-5. complete the catalog integrity and later enforcement/reliability gates.
+4. complete the catalog integrity and later enforcement/reliability gates.
