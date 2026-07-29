@@ -224,14 +224,14 @@ jobs:
           grep -F '  contents: read' "$workflow"
           grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
           grep -F '          persist-credentials: false' "$workflow"
-          grep -F './gate executor claim' "$workflow"
-          grep -F './gate executor verify' "$workflow"
           grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
+          grep -F 'Claim, refetch, merge, and record in one custodied process' "$workflow"
           grep -F 'ENTRYPOINT ["/usr/local/bin/gate"]' "$dockerfile"
           grep -F -- '--match-head-commit' cmd/gate/internal/executor/executor.go
+          grep -F 'PublishGateState' cmd/gate/executor.go
           grep -Fx '    - executor' "$action"
-          grep -Fx '    - execute' "$action"
-          grep -F 'push origin "HEAD:refs/heads/${STATE_BRANCH}"' "$workflow"
+          grep -Fx '    - run' "$action"
+          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 1
           if grep -Eq '^  (pull_request|pull_request_target|repository_dispatch):' "$workflow"; then
             echo "gate executor must be workflow_dispatch-only" >&2
             exit 1
@@ -240,12 +240,12 @@ jobs:
             echo "gate executor must never check out PR code" >&2
             exit 1
           fi
-          if grep -Fq "if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" "$workflow"; then
-            echo "gate executor must remain hard-disabled during the state-writer security hold" >&2
+          if grep -Eq 'executor (claim|verify|execute)|push origin .*gate-state' "$workflow"; then
+            echo "claim, state CAS, and merge must stay inside the Gate action" >&2
             exit 1
           fi
           if grep -Eq '(statuses: write|--admin|--force)' "$workflow" "$action"; then
             echo "gate executor must not publish status authority, use admin, or force refs" >&2
             exit 1
           fi
-          echo "gate executor is hard-disabled pending the state-writer security decision ✓"
+          echo "gate executor is process-custodied and source-disabled pending operator bootstrap ✓"

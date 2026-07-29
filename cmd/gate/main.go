@@ -160,9 +160,7 @@ func usage() {
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
-  executor claim   -request path -workflow-run-id N -workflow-actor-id N -out path
-  executor verify  -claim gxc_x
-  executor execute -claim gxc_x -app-id N -installation-id N
+  executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
@@ -175,6 +173,7 @@ type env struct {
 	st       *state.Store
 	stateDir string
 	keyPath  string
+	anchor   string
 	floorBin string
 	now      func() time.Time
 }
@@ -198,8 +197,6 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	// an actor who can write log.jsonl must not thereby be able to read or
 	// forge the key that signs grants and anchors the chain. Same reason the
 	// anchor record itself lives here, not beside the log it pins.
-	keyPath := filepath.Join(keyDir, "grant.key")
-	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	// The anchor record is per-state-dir: a shared key dir must not alias one
 	// anchor across independent logs, or appending to one would falsely fail
 	// the other's audit. The key stays shared (a secret can't be forged
@@ -215,6 +212,12 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 		}
 		anchorPath = hostedAnchor
 	}
+	return newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath)
+}
+
+func newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath string) (env, error) {
+	keyPath := filepath.Join(keyDir, "grant.key")
+	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	st, err := state.OpenAnchored(stateDir, time.Now, anchorPath, anchorKeyPath)
 	if err != nil {
 		return env{}, err
@@ -222,7 +225,10 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	if floorBin == "" {
 		floorBin = defaultFloorBin()
 	}
-	return env{st: st, stateDir: stateDir, keyPath: keyPath, floorBin: floorBin, now: time.Now}, nil
+	return env{
+		st: st, stateDir: stateDir, keyPath: keyPath, anchor: anchorPath,
+		floorBin: floorBin, now: time.Now,
+	}, nil
 }
 
 // stateDirTag is a stable, filesystem-safe tag for a state dir, so its anchor

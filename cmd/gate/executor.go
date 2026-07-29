@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,9 +21,10 @@ import (
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
-// executorRefusal marks an expected policy/contract refusal. The top-level
-// command maps it to Gate's stable exit 3; transport, storage, credential, and
-// process failures remain hard errors (exit 4).
+var errMergeConfirmation = errors.New("executor merge confirmation missing")
+
+// executorRefusal maps expected policy failures to Gate's stable exit 3.
+// Transport, storage, credential, and process failures remain exit 4.
 type executorRefusal struct {
 	err error
 }
@@ -43,17 +45,13 @@ func refuseExecutor(err error) error {
 
 func cmdExecutor(args []string) error {
 	if len(args) == 0 {
-		return errors.New("executor: request, claim, verify, or execute required")
+		return errors.New("executor: request or run required")
 	}
 	switch args[0] {
 	case "request":
 		return cmdExecutorRequest(args[1:])
-	case "claim":
-		return cmdExecutorClaim(args[1:])
-	case "verify":
-		return cmdExecutorVerify(args[1:])
-	case "execute":
-		return cmdExecutorExecute(args[1:])
+	case "run":
+		return cmdExecutorRun(args[1:])
 	default:
 		return fmt.Errorf("executor: unknown verb %q", args[0])
 	}
@@ -104,8 +102,10 @@ func cmdExecutorRequest(args []string) error {
 	request, err := authorization.BuildRequest(audit, authorization.RequestInput{
 		ActionID:         *actionID,
 		Subject:          subject,
-		JudgmentQuestion: *question, ReplayID: *replayID,
-		IssuedAt: now, ExpiresAt: now.Add(20 * time.Minute),
+		JudgmentQuestion: *question,
+		ReplayID:         *replayID,
+		IssuedAt:         now,
+		ExpiresAt:        now.Add(20 * time.Minute),
 	})
 	if err != nil {
 		return refuseExecutor(err)
@@ -116,7 +116,8 @@ func cmdExecutorRequest(args []string) error {
 	}
 	artifact := gateauthorization.RequestArtifact{
 		SchemaVersion:   gateauthorization.SchemaVersion,
-		AuthorizationID: id, Request: request,
+		AuthorizationID: id,
+		Request:         request,
 	}
 	if err := gateauthorization.ValidateRequestArtifact(artifact); err != nil {
 		return refuseExecutor(err)
@@ -132,137 +133,14 @@ func cmdExecutorRequest(args []string) error {
 	return nil
 }
 
-func cmdExecutorClaim(args []string) error {
-	fs := flag.NewFlagSet("executor claim", flag.ContinueOnError)
+func cmdExecutorRun(args []string) error {
+	fs := flag.NewFlagSet("executor run", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	requestPath := fs.String("request", "", "GateAuthorizationRequestV1 path")
+	stateTip := fs.String("state-tip", "", "exact gate-state checkout commit")
 	workflowRunID := fs.Int64("workflow-run-id", 0, "current protected workflow run ID")
-	workflowActorID := fs.Int64("workflow-actor-id", 0, "dispatching/re-running actor ID")
+	workflowActorID := fs.Int64("workflow-actor-id", 0, "dispatching actor ID")
 	triggeringActor := fs.String("workflow-triggering-actor", "", "GitHub login that triggered this attempt")
-	out := fs.String("out", "", "GateExecutionClaimV1 path")
-	help, err := parseFlags(fs, args)
-	if err != nil || help {
-		return err
-	}
-	if *requestPath == "" || *workflowRunID < 1 || *workflowActorID < 1 ||
-		*triggeringActor == "" || *out == "" {
-		return errors.New("executor claim: -request -workflow-run-id -workflow-actor-id -workflow-triggering-actor -out required")
-	}
-	requestData, err := os.ReadFile(*requestPath)
-	if err != nil {
-		return fmt.Errorf("executor claim: read request: %w", err)
-	}
-	requestArtifact, err := gateauthorization.DecodeRequest(requestData)
-	if err != nil {
-		return refuseExecutor(err)
-	}
-	reviews, err := readRunApprovals(requestArtifact.Request.Subject.Repo, *workflowRunID)
-	if err != nil {
-		return err
-	}
-	validatedWorkflowActorID, triggeringActorID, err := readWorkflowActors(
-		requestArtifact.Request.Subject.Repo, *workflowRunID,
-		*workflowActorID, *triggeringActor,
-	)
-	if err != nil {
-		return err
-	}
-	approved, err := authorization.Authorize(requestArtifact.Request, authorization.ApprovalFacts{
-		WorkflowRunID: *workflowRunID, WorkflowActorID: validatedWorkflowActorID,
-		TriggeringActorID: triggeringActorID, ObservedAt: time.Now().UTC(),
-		Reviews: reviews,
-	})
-	if err != nil {
-		return refuseExecutor(err)
-	}
-	live, err := readExecutorPull(
-		approved.Request.Subject.Repo, approved.Request.Subject.Number,
-		approved.Request.Subject.HeadSHA,
-	)
-	if err != nil {
-		return classifyExecutorLiveRead(err)
-	}
-	e, err := newEnv(*stateDir, *floorBin, *keyDir)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	ttl := approved.Request.ExpiresAt.Sub(now)
-	if ttl <= 0 {
-		return refuseExecutor(authorization.ErrExpired)
-	}
-	grant, err := capability.MintBound(
-		e.st, e.keyPath, approved.Request.Subject.Repo, "merge", "T3", 1,
-		fmt.Sprintf("gh:%s via environment:%d", approved.Receipt.ActorLogin, approved.Receipt.WorkflowRunID),
-		ttl, approved.Request.Subject.HeadSHA, approved.Request.Subject.Number,
-		approved.AuthorizationID, time.Now,
-	)
-	if err != nil {
-		return classifyExecutorAuthorizationError(err)
-	}
-	_, claim, err := authorization.Claim(
-		e.st, e.keyPath, approved, live, grant.ID, now,
-	)
-	if err != nil {
-		return classifyExecutorAuthorizationError(err)
-	}
-	if err := writeExecutorArtifact(*out, claim); err != nil {
-		return err
-	}
-	printJSON(map[string]any{
-		"claim_id": claim.ClaimID, "execution_id": claim.ExecutionID,
-		"authorization_id": claim.AuthorizationID, "grant_id": claim.ExecutionGrantID,
-		"path": *out,
-	})
-	return nil
-}
-
-func cmdExecutorVerify(args []string) error {
-	fs := flag.NewFlagSet("executor verify", flag.ContinueOnError)
-	stateDir, floorBin, keyDir := commonFlags(fs)
-	claimID := fs.String("claim", "", "gxc_<64 lowercase hex>")
-	help, err := parseFlags(fs, args)
-	if err != nil || help {
-		return err
-	}
-	if *claimID == "" {
-		return errors.New("executor verify: -claim required")
-	}
-	e, err := newEnv(*stateDir, *floorBin, *keyDir)
-	if err != nil {
-		return err
-	}
-	audit, err := e.st.Audit()
-	if err != nil {
-		return err
-	}
-	_, provisional, err := claimFromAudit(audit, *claimID)
-	if err != nil {
-		return refuseExecutor(err)
-	}
-	live, err := readExecutorPull(
-		provisional.Subject.Repo, provisional.Subject.Number,
-		provisional.Subject.HeadSHA,
-	)
-	if err != nil {
-		return classifyExecutorLiveRead(err)
-	}
-	_, claim, err := authorization.VerifyDurableClaim(audit, *claimID, live, time.Now().UTC())
-	if err != nil {
-		return refuseExecutor(err)
-	}
-	printJSON(map[string]any{
-		"claim_id": claim.ClaimID, "execution_id": claim.ExecutionID,
-		"repo": claim.Subject.Repo, "pr": claim.Subject.Number,
-		"head_sha": claim.Subject.HeadSHA, "durable": true,
-	})
-	return nil
-}
-
-func cmdExecutorExecute(args []string) error {
-	fs := flag.NewFlagSet("executor execute", flag.ContinueOnError)
-	stateDir, floorBin, keyDir := commonFlags(fs)
-	claimID := fs.String("claim", "", "durable GateExecutionClaimV1 ID")
 	appID := fs.Int64("app-id", 0, "dedicated Gate App ID")
 	installationID := fs.Int64("installation-id", 0, "repository installation ID")
 	apiURL := fs.String("api-url", "", "GitHub API URL")
@@ -270,65 +148,346 @@ func cmdExecutorExecute(args []string) error {
 	if err != nil || help {
 		return err
 	}
-	if *claimID == "" || *appID < 1 || *installationID < 1 {
-		return errors.New("executor execute: -claim -app-id -installation-id required")
+	if *requestPath == "" || *stateTip == "" || *workflowRunID < 1 ||
+		*workflowActorID < 1 || *triggeringActor == "" || *appID < 1 ||
+		*installationID < 1 || *keyDir == "" {
+		return errors.New("executor run: -request -state-tip -workflow-run-id -workflow-actor-id -workflow-triggering-actor -app-id -installation-id -key required")
 	}
-	readToken, err := readExecutorReadToken()
+	if !validExecutorSHA(*stateTip) {
+		return refuseExecutor(errors.New("executor run: malformed state tip"))
+	}
+	request, err := readExecutorRequest(*requestPath)
 	if err != nil {
 		return err
 	}
-	if err := os.Setenv("GH_TOKEN", readToken); err != nil {
-		return err
-	}
-	defer os.Unsetenv("GH_TOKEN")
-	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	approved, live, e, err := executorPreflight(
+		request, *workflowRunID, *workflowActorID, *triggeringActor,
+		*stateTip, *stateDir, *floorBin, *keyDir,
+	)
 	if err != nil {
 		return err
+	}
+	config, err := readExecutorAppConfig(
+		*appID, *installationID, *apiURL, approved.Request.Subject.Repo,
+	)
+	if err != nil {
+		return err
+	}
+	defer wipeBytes(config.PrivateKeyPEM)
+	return runCustodiedExecution(
+		context.Background(), e, *keyDir, approved, live, *stateTip, config,
+	)
+}
+
+func readExecutorRequest(path string) (gateauthorization.RequestArtifact, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return gateauthorization.RequestArtifact{}, fmt.Errorf("executor run: read request: %w", err)
+	}
+	request, err := gateauthorization.DecodeRequest(data)
+	if err != nil {
+		return gateauthorization.RequestArtifact{}, refuseExecutor(err)
+	}
+	return request, nil
+}
+
+func executorPreflight(
+	request gateauthorization.RequestArtifact,
+	workflowRunID, workflowActorID int64,
+	triggeringActor, stateTip, stateDir, floorBin, keyDir string,
+) (gateauthorization.Artifact, authorization.LivePullRequest, env, error) {
+	reviews, err := readRunApprovals(request.Request.Subject.Repo, workflowRunID)
+	if err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{}, err
+	}
+	actorID, triggeringActorID, err := readWorkflowActors(
+		request.Request.Subject.Repo, workflowRunID, workflowActorID, triggeringActor,
+	)
+	if err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{}, err
+	}
+	approved, err := authorization.Authorize(request.Request, authorization.ApprovalFacts{
+		WorkflowRunID:     workflowRunID,
+		WorkflowActorID:   actorID,
+		TriggeringActorID: triggeringActorID,
+		ObservedAt:        time.Now().UTC(),
+		Reviews:           reviews,
+	})
+	if err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{},
+			refuseExecutor(err)
+	}
+	live, err := readExecutorPull(
+		approved.Request.Subject.Repo,
+		approved.Request.Subject.Number,
+		approved.Request.Subject.HeadSHA,
+	)
+	if err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{},
+			classifyExecutorLiveRead(err)
+	}
+	e, err := newEnv(stateDir, floorBin, keyDir)
+	if err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{}, err
 	}
 	audit, err := e.st.Audit()
 	if err != nil {
-		return err
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{}, err
 	}
-	_, provisional, err := claimFromAudit(audit, *claimID)
+	if err := authorization.PreflightClaim(audit, approved, live, time.Now().UTC()); err != nil {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{},
+			classifyExecutorAuthorizationError(err)
+	}
+	remoteTip, err := readExecutorStateTip(approved.Request.Subject.Repo)
 	if err != nil {
-		return refuseExecutor(err)
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{}, err
+	}
+	if remoteTip != stateTip {
+		return gateauthorization.Artifact{}, authorization.LivePullRequest{}, env{},
+			refuseExecutor(gateexecutor.ErrStateCAS)
+	}
+	return approved, live, e, nil
+}
+
+func runCustodiedExecution(
+	ctx context.Context,
+	e env,
+	keyDir string,
+	approved gateauthorization.Artifact,
+	live authorization.LivePullRequest,
+	stateTip string,
+	config gateexecutor.AppConfig,
+) error {
+	return gateexecutor.WithSession(ctx, config, func(session *gateexecutor.Session) error {
+		claimed, err := publishDurableClaim(
+			ctx, session, e, keyDir, approved, live, stateTip,
+		)
+		if err != nil {
+			return err
+		}
+		defer claimed.cleanup()
+		return finishCustodiedExecution(ctx, session, claimed)
+	})
+}
+
+type durableClaim struct {
+	e        env
+	artifact state.Artifact
+	claim    gateauthorization.ExecutionClaim
+	tip      string
+	cleanup  func()
+}
+
+func publishDurableClaim(
+	ctx context.Context,
+	session *gateexecutor.Session,
+	e env,
+	keyDir string,
+	approved gateauthorization.Artifact,
+	live authorization.LivePullRequest,
+	stateTip string,
+) (durableClaim, error) {
+	now := time.Now().UTC()
+	ttl := approved.Request.ExpiresAt.Sub(now)
+	if ttl <= 0 {
+		return durableClaim{}, refuseExecutor(authorization.ErrExpired)
+	}
+	grant, err := capability.MintBound(
+		e.st, e.keyPath, approved.Request.Subject.Repo, "merge", "T3", 1,
+		fmt.Sprintf(
+			"gh:%s via environment:%d",
+			approved.Receipt.ActorLogin,
+			approved.Receipt.WorkflowRunID,
+		),
+		ttl, approved.Request.Subject.HeadSHA, approved.Request.Subject.Number,
+		approved.AuthorizationID, time.Now,
+	)
+	if err != nil {
+		return durableClaim{}, classifyExecutorAuthorizationError(err)
+	}
+	_, claim, err := authorization.Claim(
+		e.st, e.keyPath, approved, live, grant.ID, now,
+	)
+	if err != nil {
+		return durableClaim{}, classifyExecutorAuthorizationError(err)
+	}
+	files, err := readExecutorStateFiles(e)
+	if err != nil {
+		return durableClaim{}, err
+	}
+	snapshot, err := session.PublishGateState(
+		ctx, stateTip, "gate: claim "+claim.ClaimID, files,
+	)
+	if err != nil {
+		return durableClaim{}, err
+	}
+	durable, cleanup, err := openExecutorSnapshot(snapshot.Files, keyDir)
+	if err != nil {
+		return durableClaim{}, err
+	}
+	claimed, err := verifyDurableClaim(ctx, session, durable, claim, snapshot.Tip)
+	if err != nil {
+		cleanup()
+		return durableClaim{}, err
+	}
+	claimed.cleanup = cleanup
+	return claimed, nil
+}
+
+func verifyDurableClaim(
+	ctx context.Context,
+	session *gateexecutor.Session,
+	durable env,
+	claim gateauthorization.ExecutionClaim,
+	tip string,
+) (durableClaim, error) {
+	audit, err := durable.st.Audit()
+	if err != nil {
+		return durableClaim{}, err
+	}
+	if _, err := session.FetchGateState(ctx, tip); err != nil {
+		return durableClaim{}, err
 	}
 	live, err := readExecutorPull(
-		provisional.Subject.Repo, provisional.Subject.Number,
-		provisional.Subject.HeadSHA,
+		claim.Subject.Repo, claim.Subject.Number, claim.Subject.HeadSHA,
 	)
 	if err != nil {
-		return classifyExecutorLiveRead(err)
+		return durableClaim{}, classifyExecutorLiveRead(err)
 	}
-	claimArtifact, claim, err := authorization.VerifyDurableClaim(
-		audit, *claimID, live, time.Now().UTC(),
+	artifact, claim, err := authorization.VerifyDurableClaim(
+		audit, claim.ClaimID, live, time.Now().UTC(),
 	)
 	if err != nil {
-		return refuseExecutor(err)
+		return durableClaim{}, classifyExecutorAuthorizationError(err)
 	}
-	appConfig, err := readExecutorAppConfig(*appID, *installationID, *apiURL)
+	return durableClaim{e: durable, artifact: artifact, claim: claim, tip: tip}, nil
+}
+
+func finishCustodiedExecution(
+	ctx context.Context,
+	session *gateexecutor.Session,
+	claimed durableClaim,
+) error {
+	command, executeErr := session.Merge(ctx, claimed.claim.MergeArgv)
+	mergeCommit, merged, err := readMergedCommit(
+		claimed.claim.Subject.Repo, claimed.claim.Subject.Number,
+	)
 	if err != nil {
 		return err
 	}
-	defer wipeBytes(appConfig.PrivateKeyPEM)
-	result, executeErr := gateexecutor.Execute(context.Background(), appConfig, claim.MergeArgv)
-	mergeCommit, confirmErr := readMergedCommit(claim.Subject.Repo, claim.Subject.Number)
-	record, executeErr := executorResult(claim, result, executeErr, mergeCommit, confirmErr, time.Now().UTC())
-	if _, err := authorization.RecordResult(e.st, claimArtifact, claim, record); err != nil {
+	record, terminalErr := executorResult(
+		claimed.claim, command, executeErr, mergeCommit, merged, time.Now().UTC(),
+	)
+	if errors.Is(terminalErr, errMergeConfirmation) {
+		return terminalErr
+	}
+	if _, err := authorization.RecordResult(
+		claimed.e.st, claimed.artifact, claimed.claim, record,
+	); err != nil {
 		if errors.Is(err, authorization.ErrResultDuplicate) {
 			return refuseExecutor(err)
 		}
 		return err
 	}
-	if executeErr != nil {
-		return executeErr
+	files, err := readExecutorStateFiles(claimed.e)
+	if err != nil {
+		return err
 	}
-	printJSON(map[string]any{
-		"claim_id": claim.ClaimID, "execution_id": claim.ExecutionID,
-		"outcome": record.Outcome, "merge_commit": record.MergeCommit,
-		"argv": claim.MergeArgv,
-	})
+	if _, err := session.PublishGateState(
+		ctx, claimed.tip, "gate: result "+claimed.claim.ExecutionID, files,
+	); err != nil {
+		return err
+	}
+	if terminalErr != nil {
+		return terminalErr
+	}
+	printExecutorResult(claimed.claim, record)
 	return nil
+}
+
+func printExecutorResult(
+	claim gateauthorization.ExecutionClaim,
+	result gateauthorization.ExecutionResult,
+) {
+	printJSON(map[string]any{
+		"claim_id":     claim.ClaimID,
+		"execution_id": claim.ExecutionID,
+		"outcome":      result.Outcome,
+		"merge_commit": result.MergeCommit,
+		"argv":         claim.MergeArgv,
+	})
+}
+
+func readExecutorStateFiles(e env) (gateexecutor.StateFiles, error) {
+	log, err := os.ReadFile(filepath.Join(e.stateDir, "log.jsonl"))
+	if err != nil {
+		return gateexecutor.StateFiles{}, fmt.Errorf("executor state: read log: %w", err)
+	}
+	anchor, err := os.ReadFile(e.anchor)
+	if err != nil {
+		return gateexecutor.StateFiles{}, fmt.Errorf("executor state: read anchor: %w", err)
+	}
+	return gateexecutor.StateFiles{Log: log, Anchor: anchor}, nil
+}
+
+func openExecutorSnapshot(files gateexecutor.StateFiles, keyDir string) (env, func(), error) {
+	root, err := os.MkdirTemp("", "gate-executor-state-*")
+	if err != nil {
+		return env{}, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(root) }
+	stateDir := filepath.Join(root, "state")
+	if err := os.Mkdir(stateDir, 0o700); err != nil {
+		cleanup()
+		return env{}, func() {}, err
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "log.jsonl"), files.Log, 0o600); err != nil {
+		cleanup()
+		return env{}, func() {}, err
+	}
+	anchor := filepath.Join(root, "anchor.json")
+	if err := os.WriteFile(anchor, files.Anchor, 0o600); err != nil {
+		cleanup()
+		return env{}, func() {}, err
+	}
+	e, err := newEnvWithAnchor(stateDir, "", keyDir, anchor)
+	if err != nil {
+		cleanup()
+		return env{}, func() {}, err
+	}
+	return e, cleanup, nil
+}
+
+func executorResult(
+	claim gateauthorization.ExecutionClaim,
+	command gateexecutor.CommandResult,
+	executeErr error,
+	mergeCommit string,
+	merged bool,
+	completedAt time.Time,
+) (gateauthorization.ExecutionResult, error) {
+	result := gateauthorization.ExecutionResult{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		ExecutionID:   claim.ExecutionID,
+		ClaimID:       claim.ClaimID,
+		Outcome:       gateauthorization.ExecutionFailed,
+		MergeArgv:     append([]string(nil), claim.MergeArgv...),
+		CompletedAt:   completedAt,
+		ErrorCode:     "executor_command_failed",
+	}
+	if merged {
+		result.Outcome = gateauthorization.ExecutionMerged
+		result.MergeCommit = mergeCommit
+		result.ErrorCode = ""
+		return result, nil
+	}
+	if executeErr != nil {
+		return result, executeErr
+	}
+	if command.ExitCode == 0 {
+		return result, errMergeConfirmation
+	}
+	return result, errors.New("executor command failed without an error")
 }
 
 func classifyExecutorAuthorizationError(err error) error {
@@ -355,6 +514,7 @@ func classifyExecutorAuthorizationError(err error) error {
 		capability.ErrSubject,
 		state.ErrAlreadyExists,
 		state.ErrNotFound,
+		gateexecutor.ErrStateCAS,
 	}
 	for _, refusal := range refusals {
 		if errors.Is(err, refusal) {
@@ -372,69 +532,25 @@ func classifyExecutorLiveRead(err error) error {
 	return err
 }
 
-func readExecutorReadToken() (string, error) {
-	readToken := os.Getenv("INPUT_GITHUB_READ_TOKEN")
-	if readToken == "" {
-		return "", errors.New("executor execute: INPUT_GITHUB_READ_TOKEN is required")
-	}
-	_ = os.Unsetenv("INPUT_GITHUB_READ_TOKEN")
-	return readToken, nil
-}
-
-func readExecutorAppConfig(appID, installationID int64, apiURL string) (gateexecutor.AppConfig, error) {
+func readExecutorAppConfig(
+	appID, installationID int64,
+	apiURL, repository string,
+) (gateexecutor.AppConfig, error) {
 	if apiURL != "" && apiURL != "https://api.github.com" {
-		return gateexecutor.AppConfig{}, errors.New("executor execute: only https://api.github.com is supported")
+		return gateexecutor.AppConfig{}, errors.New("executor run: only https://api.github.com is supported")
 	}
 	privateKey := []byte(os.Getenv("INPUT_APP_PRIVATE_KEY"))
 	if len(privateKey) == 0 {
-		return gateexecutor.AppConfig{}, errors.New("executor execute: INPUT_APP_PRIVATE_KEY is required")
+		return gateexecutor.AppConfig{}, errors.New("executor run: INPUT_APP_PRIVATE_KEY is required")
 	}
 	_ = os.Unsetenv("INPUT_APP_PRIVATE_KEY")
 	return gateexecutor.AppConfig{
-		AppID: appID, InstallationID: installationID,
-		PrivateKeyPEM: privateKey, APIURL: apiURL,
+		AppID:          appID,
+		InstallationID: installationID,
+		PrivateKeyPEM:  privateKey,
+		APIURL:         apiURL,
+		Repository:     repository,
 	}, nil
-}
-
-func executorResult(claim gateauthorization.ExecutionClaim, command gateexecutor.CommandResult, executeErr error, mergeCommit string, confirmErr error, completedAt time.Time) (gateauthorization.ExecutionResult, error) {
-	result := gateauthorization.ExecutionResult{
-		SchemaVersion: gateauthorization.SchemaVersion,
-		ExecutionID:   claim.ExecutionID, ClaimID: claim.ClaimID,
-		Outcome:     gateauthorization.ExecutionFailed,
-		MergeArgv:   append([]string(nil), claim.MergeArgv...),
-		CompletedAt: completedAt, ErrorCode: "executor_command_failed",
-	}
-	if confirmErr == nil {
-		result.Outcome = gateauthorization.ExecutionMerged
-		result.MergeCommit = mergeCommit
-		result.ErrorCode = ""
-		return result, nil
-	}
-	if executeErr == nil && command.ExitCode == 0 {
-		result.ErrorCode = "merge_confirmation_failed"
-		return result, confirmErr
-	}
-	return result, executeErr
-}
-
-func claimFromAudit(audit state.AuditResult, claimID string) (state.Artifact, gateauthorization.ExecutionClaim, error) {
-	if !audit.OK {
-		return state.Artifact{}, gateauthorization.ExecutionClaim{},
-			fmt.Errorf("executor state invalid: %s", audit.Reason)
-	}
-	for _, artifact := range audit.All {
-		if artifact.Kind != state.KindExecutionClaim {
-			continue
-		}
-		var claim gateauthorization.ExecutionClaim
-		if err := json.Unmarshal(artifact.Body, &claim); err != nil {
-			return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
-		}
-		if claim.ClaimID == claimID {
-			return artifact, claim, nil
-		}
-	}
-	return state.Artifact{}, gateauthorization.ExecutionClaim{}, errors.New("executor claim not found")
 }
 
 func readRunApprovals(repo string, runID int64) ([]authorization.ApprovalReview, error) {
@@ -461,9 +577,12 @@ func readRunApprovals(repo string, runID int64) ([]authorization.ApprovalReview,
 			environments = append(environments, environment.Name)
 		}
 		out = append(out, authorization.ApprovalReview{
-			WorkflowRunID: runID, ActorLogin: item.User.Login, ActorID: item.User.ID,
-			State: strings.ToLower(item.State), Comment: item.Comment,
-			Environments: environments,
+			WorkflowRunID: runID,
+			ActorLogin:    item.User.Login,
+			ActorID:       item.User.ID,
+			State:         strings.ToLower(item.State),
+			Comment:       item.Comment,
+			Environments:  environments,
 		})
 	}
 	return out, nil
@@ -487,20 +606,31 @@ type workflowRunFacts struct {
 	} `json:"repository"`
 }
 
-func readWorkflowActors(repo string, runID, expectedActorID int64, expectedTriggeringLogin string) (int64, int64, error) {
+func readWorkflowActors(
+	repo string,
+	runID, expectedActorID int64,
+	expectedTriggeringLogin string,
+) (int64, int64, error) {
 	var run workflowRunFacts
 	if err := ghDecodeExecutor(
 		&run, "api", fmt.Sprintf("repos/%s/actions/runs/%d", repo, runID),
 	); err != nil {
 		return 0, 0, err
 	}
-	if err := validateWorkflowRun(run, repo, runID, expectedActorID, expectedTriggeringLogin); err != nil {
+	if err := validateWorkflowRun(
+		run, repo, runID, expectedActorID, expectedTriggeringLogin,
+	); err != nil {
 		return 0, 0, refuseExecutor(err)
 	}
 	return run.Actor.ID, run.TriggeringActor.ID, nil
 }
 
-func validateWorkflowRun(run workflowRunFacts, repo string, runID, expectedActorID int64, expectedTriggeringLogin string) error {
+func validateWorkflowRun(
+	run workflowRunFacts,
+	repo string,
+	runID, expectedActorID int64,
+	expectedTriggeringLogin string,
+) error {
 	path := ".github/workflows/gate-executor.yml"
 	if run.ID != runID || run.Repository.FullName != repo || run.RunAttempt != 1 ||
 		run.Event != "workflow_dispatch" ||
@@ -515,7 +645,11 @@ func validateWorkflowRun(run workflowRunFacts, repo string, runID, expectedActor
 	return nil
 }
 
-func readExecutorPull(repo string, number int, expectedHead string) (authorization.LivePullRequest, error) {
+func readExecutorPull(
+	repo string,
+	number int,
+	expectedHead string,
+) (authorization.LivePullRequest, error) {
 	var repository struct {
 		FullName      string `json:"full_name"`
 		DefaultBranch string `json:"default_branch"`
@@ -534,10 +668,12 @@ func readExecutorPull(repo string, number int, expectedHead string) (authorizati
 			SHA string `json:"sha"`
 		} `json:"base"`
 	}
-	if err := ghDecodeExecutor(&pull, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, number)); err != nil {
+	if err := ghDecodeExecutor(
+		&pull, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, number),
+	); err != nil {
 		return authorization.LivePullRequest{}, err
 	}
-	if repository.FullName != repo || repository.DefaultBranch == "" ||
+	if repository.FullName != repo || repository.DefaultBranch != "main" ||
 		pull.Base.Ref != repository.DefaultBranch {
 		return authorization.LivePullRequest{}, authorization.ErrLiveMismatch
 	}
@@ -577,24 +713,59 @@ func readExecutorPull(repo string, number int, expectedHead string) (authorizati
 		}
 	}
 	return authorization.LivePullRequest{
-		Repository: repo, Number: pull.Number, State: pull.State,
-		HeadSHA: pull.Head.SHA, BaseRef: pull.Base.Ref, BaseSHA: pull.Base.SHA,
-		MergeBaseSHA: comparison.MergeBase.SHA, OpenPRsForHead: open,
+		Repository:     repo,
+		Number:         pull.Number,
+		State:          pull.State,
+		HeadSHA:        pull.Head.SHA,
+		BaseRef:        pull.Base.Ref,
+		BaseSHA:        pull.Base.SHA,
+		MergeBaseSHA:   comparison.MergeBase.SHA,
+		OpenPRsForHead: open,
 	}, nil
 }
 
-func readMergedCommit(repo string, number int) (string, error) {
+func readExecutorStateTip(repo string) (string, error) {
+	var response struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := ghDecodeExecutor(
+		&response, "api", fmt.Sprintf("repos/%s/git/ref/heads/gate-state", repo),
+	); err != nil {
+		return "", err
+	}
+	if !validExecutorSHA(response.Object.SHA) {
+		return "", errors.New("executor state tip malformed")
+	}
+	return strings.ToLower(response.Object.SHA), nil
+}
+
+func readMergedCommit(repo string, number int) (string, bool, error) {
 	var pull struct {
 		Merged         bool   `json:"merged"`
 		MergeCommitSHA string `json:"merge_commit_sha"`
 	}
-	if err := ghDecodeExecutor(&pull, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, number)); err != nil {
-		return "", err
+	if err := ghDecodeExecutor(
+		&pull, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, number),
+	); err != nil {
+		return "", false, err
 	}
-	if !pull.Merged || len(pull.MergeCommitSHA) != 40 {
-		return "", errors.New("executor merge confirmation missing")
+	if !pull.Merged {
+		return "", false, nil
 	}
-	return strings.ToLower(pull.MergeCommitSHA), nil
+	if !validExecutorSHA(pull.MergeCommitSHA) {
+		return "", false, errors.New("executor merge confirmation malformed")
+	}
+	return strings.ToLower(pull.MergeCommitSHA), true, nil
+}
+
+func validExecutorSHA(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func ghDecodeExecutor(value any, args ...string) error {
@@ -603,7 +774,11 @@ func ghDecodeExecutor(value any, args ...string) error {
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("executor github read: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf(
+			"executor github read: %w: %s",
+			err,
+			strings.TrimSpace(stderr.String()),
+		)
 	}
 	if err := json.Unmarshal(stdout.Bytes(), value); err != nil {
 		return fmt.Errorf("executor github decode: %w", err)

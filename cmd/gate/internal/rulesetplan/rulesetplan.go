@@ -12,8 +12,8 @@ import (
 
 // SchemaVersion is the supported staged ruleset-plan major.
 const (
-	SchemaVersion         = 1
-	StatusBlockedSecurity = "blocked_security_decision"
+	SchemaVersion    = 1
+	StatusNotApplied = "authorized_not_applied"
 )
 
 // Plan is an actor-symbolic policy document. Operator-supplied GitHub actor IDs
@@ -74,8 +74,8 @@ func Validate(plan Plan) error {
 	if plan.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("ruleset plan: unsupported schema_version %d", plan.SchemaVersion)
 	}
-	if plan.Repository == "" || plan.Status != StatusBlockedSecurity {
-		return errors.New("ruleset plan: repository and blocked_security_decision status required")
+	if plan.Repository == "" || plan.Status != StatusNotApplied {
+		return errors.New("ruleset plan: repository and authorized_not_applied status required")
 	}
 	byName := make(map[string]Ruleset, len(plan.Rulesets))
 	for _, ruleset := range plan.Rulesets {
@@ -116,8 +116,10 @@ func validateStateUpdates(ruleset Ruleset) error {
 		!ruleset.RestrictUpdates || ruleset.RequirePullRequest ||
 		!ruleset.BlockDeletion || !ruleset.BlockForcePush ||
 		len(ruleset.AllowedWriters) != 0 ||
-		len(ruleset.BypassActors) != 0 {
-		return errors.New("ruleset plan: gate-state must remain writerless until custody is approved")
+		!exactBypass(ruleset.BypassActors, []BypassActor{{
+			ActorRef: "gate_app", Type: "Integration", Mode: "always",
+		}}) {
+		return errors.New("ruleset plan: gate-state must allow only the Gate App")
 	}
 	return nil
 }

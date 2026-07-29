@@ -1,21 +1,27 @@
 # Trusted Gate judgment bridge
 
-Status: authorized design; repository implementation dormant pending review and
-operator bootstrap.
+Status: authorized one-App ordering implemented in dormant repository code;
+reconciliation permission decision, review, and operator bootstrap remain.
 
 **Security hold:** the repository implementation is intentionally non-armable.
-Fresh review proved that granting the coarse `github_actions` Integration
-write access to `gate-state` lets any repository workflow replay an older valid
-state-and-anchor pair. A protected workflow cannot make that shared identity
-exclusive. The ruleset plan therefore leaves `gate-state` writerless and the
-executor job has a hard false guard until the operator authorizes a revised
-custody/order model.
+Fresh review proved that the coarse `github_actions` Integration cannot be an
+exclusive `gate-state` writer. The operator therefore authorized one
+process-custodied Gate App to publish claim/result CAS commits and execute the
+exact merge. The workflow still has a hard false guard. One platform limitation
+remains explicit below: GitHub uses `contents: write` for both ref updates and
+PR merge, so the same App cannot mint a literally state-only reconciliation
+token.
 
 The operator authorized this trust model at design head
 `745d2bc405e07fd202c2379320afdc1745e46cc5`. That authorization covers repository
 code, tests, and documentation only. App registration, secrets, environment
 configuration, ruleset changes, grant minting, state bootstrap, live execution,
 and merge remain operator-only.
+
+The operator separately authorized the one-App process-custodied ordering at
+held PR head `19dae14d5cc71d3859938ffe218230d542f7498f`: post-approval
+token creation, claim CAS/refetch, exact merge, result CAS, and an intended
+no-merge-token expired-claim reconciliation path.
 
 ## Decision
 
@@ -73,8 +79,8 @@ never fabricates an empty findings artifact.
    byte-checks its stored argv, re-reads the live PR, and emits the request plus
    exact approval comment.
 2. The operator dispatches `.github/workflows/gate-executor.yml` from the
-   default branch with those two values. The static protected environment holds
-   the job.
+   default branch with the request. The static protected environment holds the
+   job; its approver supplies the exact emitted comment.
 3. After approval, Gate reads the workflow-run and approval-history APIs. It
    binds the first run attempt to this repository, `workflow_dispatch`, and the
    trusted executor workflow path; takes both initial and triggering actor
@@ -82,26 +88,28 @@ never fabricates an empty findings artifact.
    unambiguous decision for `gate-authorization` to be `approved` by a
    different actor, with the exact canonical comment. Re-runs refuse because
    GitHub's approval history is not attempt-bound.
-4. Only then does the protected job mint a short-lived HMAC grant bound to the
-   authorization ID, PR number, and full head SHA. The agent never invokes this
-   path.
-5. Gate re-reads exact repo/PR/head/base/merge-base facts, re-audits anchored
-   state, requires the action to remain the newest terminal for the PR, and
-   appends one permanent execution claim under the same state lock. Any existing
-   claim for the action or authorization refuses. An open claim also blocks
-   later Gate outcome writes for that PR.
-Steps 6–10 of the authorized design are not approved for activation. The held
-prototype used generic GitHub Actions to publish the claim before the App
-credential existed, then re-fetched the state, let Gate execute the stored
-ten-element argv, and published a terminal result. Review disproved the first
-of those transport assumptions: the coarse Actions identity is not an
-exclusive writer. The workflow and plan preserve the prototype only as
-reviewable source and are structurally non-armable.
+4. Gate re-reads exact repo/PR/head/base/merge-base facts, re-audits anchored
+   state, checks action freshness and duplicate/open claims, and confirms the
+   checked-out `gate-state` tip still equals the remote tip. These are the
+   pre-credential refusals.
+5. Only then does the Gate process exchange the protected App key for one
+   short-lived installation token narrowed to this repository with
+   `contents: write`. The token is neither returned nor exposed to another
+   workflow step.
+6. Inside that process Gate mints the exact-subject HMAC grant and appends one
+   permanent claim. The App creates blobs/tree/commit through GitHub's Git Data
+   API, advances `gate-state` without force from the exact expected parent, and
+   reads the remote claim bytes back.
+7. Gate audits the refetched claim, re-reads the PR/head/base/merge-base, checks
+   the remote state tip again, and runs only the stored ten-element
+   `gh pr merge ... --match-head-commit` argv.
+8. Gate records one terminal result and advances `gate-state` through the same
+   non-force CAS. A transport failure after claim leaves an orphaned claim; it
+   never retries the merge.
 
-Any replacement must continue to build only default-branch source, never check
-out PR/fork code, never gain status-write permission, keep the App token inside
-Gate, execute only the exact stored argv, and publish a reconstructable
-terminal result.
+The workflow builds only default-branch source, never checks out PR/fork code,
+has no status-write permission, and gives generic Actions read-only repository
+permissions.
 
 ## State and branch identities
 
@@ -112,15 +120,16 @@ state tree while both signing keys remain outside it. A fresh runner must have:
 - `gate-state/anchor.json`
 - protected `grant.key` and `anchor.key` restored outside that tree
 
-No state writer is selected. The workflow's built-in token is read-only, and
-the plan deliberately grants no identity write access to `gate-state`.
+The workflow's built-in token is read-only. The Gate App is the only planned
+writer of `gate-state`, and its token is created only inside the executor
+process after approval and preflight.
 
 The staged, non-effectful policy is
 `docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`. Its validator
 pins four layers:
 
 - `main-updates`: Gate App is the sole Integration with PR-only bypass;
-- `gate-state-updates`: writerless while the security decision is blocked;
+- `gate-state-updates`: only the Gate App may update the ref, without force;
 - `other-branches`: repository roles and approved existing integrations, never
   the Gate App; and
 - `main-required-gate`: retain the app-pinned `gate` check, with only the same
@@ -142,40 +151,48 @@ All of these refuse before App token creation:
   outcome, changed method/flags/order, or `--admin`;
 - missing, stale, rejected, self-authored, wrong-run, re-run, ambiguous,
   wrong-environment, or wrong-comment approval;
-- expired/not-yet-valid request or malformed exact-subject grant;
+- expired/not-yet-valid request;
 - closed/moved/shared-head PR, non-default target, base retarget, base movement,
   or merge-base mismatch;
 - a merge target outside `main`; the staged `~ALL` other-branch rule restricts
   updates to explicit normal writers and gives the Gate App no bypass;
 - action absent, hash/run/argv mismatch, older action superseded by any newer
   action/park, duplicate claim, open claim, or durable-state audit failure; and
-- state publish/refetch mismatch.
+- checked-out and remote `gate-state` tip mismatch.
 
-## Open security decision: state writer custody
+After token creation, any grant/claim failure, claim CAS conflict, malformed
+refetch, remote audit failure, changed live PR/base facts, merge-command
+failure, or result CAS conflict fails closed. Once the claim is durable, the
+merge is never retried.
 
-The authorized design put the claim on `gate-state` before creating the Gate
-App installation token, using `github-actions[bot]` as the state writer.
-GitHub rulesets identify that actor only as the repository-wide
-`github_actions` Integration. A PR workflow with `contents: write` can
-therefore append a commit that restores an older, internally valid
-`state/log.jsonl` plus `anchor.json`. Non-force history remains, but the
-current Gate audit does not treat branch ancestry as a monotonic external pin.
+## Open security decision: expired-claim reconciliation
 
-The smallest one-App correction changes the ordering: after exact protected
-approval and all pre-credential refusals pass, Gate creates a narrowly scoped
-installation token inside its process; that process CAS-publishes the claim,
-refetches and verifies the durable claim, executes only the stored exact merge
-argv, and CAS-publishes the terminal result. Rulesets allow the Gate App on
-`main` and `gate-state`, deny it everywhere else, and give generic Actions no
-write authority. A crash-safe, no-merge-token reconciliation path must close
-an orphaned claim or confirm an observed merge.
+GitHub's permission model does not distinguish these two operations:
 
-That ordering differs materially from the authorized claim-before-token model.
-It is a security decision, not an implementation detail, so this PR stops
-before selecting or arming it.
+- updating `gate-state` requires repository `contents: write`; and
+- merging a pull request also requires repository `contents: write`.
 
-Token exchange, command, confirmation, or terminal-state write failure never
-creates reusable success. Once a claim lands it is never retried.
+An installation token can request fewer permissions than its App, but it
+cannot request branch-scoped permissions. Under the one-App ruleset, any token
+capable of closing an orphaned claim on `gate-state` is therefore also
+credential-capable of updating `main`. A reconciler binary that contains no
+merge call is useful process separation, but it is not literally a
+no-merge-capability token.
+
+The remaining honest choices are:
+
+1. accept one App and define "no-merge-token reconciliation" as a separate,
+   default-branch-only Gate code path that never accepts argv or invokes merge,
+   while acknowledging that its `contents: write` token is
+   credential-capable;
+2. use a second state-writer App whose ruleset bypass applies only to
+   `gate-state`, giving reconciliation a credential that cannot update `main`;
+   or
+3. choose an equivalent external monotonic writer/pin.
+
+Repository activation remains stopped until the operator selects that trust
+semantics. No option changes the one-shot rule: token exchange, command,
+confirmation, or terminal-state write failure never creates reusable success.
 
 ## Dormant bootstrap boundary
 

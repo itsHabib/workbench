@@ -56,6 +56,28 @@ func TestAuthorizeClaimVerifyAndRecordResult(t *testing.T) {
 	}
 }
 
+func TestPreflightClaimRefusesWithoutMutatingState(t *testing.T) {
+	fixture := newFixture(t)
+	authorization := authorize(t, fixture.request(t))
+	before := fixture.audit(t)
+	if err := PreflightClaim(
+		before, authorization, fixture.live(), testNow.Add(3*time.Minute),
+	); err != nil {
+		t.Fatal(err)
+	}
+	after := fixture.audit(t)
+	if len(after.All) != len(before.All) {
+		t.Fatal("preflight mutated state")
+	}
+	moved := fixture.live()
+	moved.HeadSHA = strings.Repeat("f", 40)
+	if err := PreflightClaim(
+		after, authorization, moved, testNow.Add(3*time.Minute),
+	); !errors.Is(err, ErrLiveMismatch) {
+		t.Fatalf("moved-head preflight = %v, want live mismatch", err)
+	}
+}
+
 func TestClaimIsPermanentAndAtomic(t *testing.T) {
 	fixture := newFixture(t)
 	authorization := authorize(t, fixture.request(t))

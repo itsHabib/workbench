@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -46,6 +47,7 @@ type AppConfig struct {
 	InstallationID int64
 	PrivateKeyPEM  []byte
 	APIURL         string
+	Repository     string
 }
 
 // CommandResult is deliberately secret-free and output-free.
@@ -65,16 +67,66 @@ func Execute(ctx context.Context, config AppConfig, argv []string) (CommandResul
 	return execute(ctx, config, argv, &client, runGH)
 }
 
-func execute(ctx context.Context, config AppConfig, argv []string, client *http.Client, runner commandRunner) (CommandResult, error) {
-	if err := validateArgv(argv); err != nil {
-		return CommandResult{}, err
+// Session keeps the installation token inside Gate while one approved
+// execution publishes state and runs the exact merge command.
+type Session struct {
+	client *http.Client
+	config AppConfig
+	token  installationToken
+}
+
+// WithSession exchanges App custody once, runs fn, and clears the token before
+// returning. The token is never returned to the caller.
+func WithSession(ctx context.Context, config AppConfig, fn func(*Session) error) error {
+	client := *http.DefaultClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return withSession(ctx, config, &client, fn)
+}
+
+func withSession(ctx context.Context, config AppConfig, client *http.Client, fn func(*Session) error) error {
+	if fn == nil {
+		return errors.New("executor session callback required")
 	}
 	token, err := exchange(ctx, config, client, time.Now)
 	if err != nil {
+		return err
+	}
+	session := &Session{client: client, config: config, token: token}
+	defer session.token.clear()
+	return fn(session)
+}
+
+func execute(
+	ctx context.Context,
+	config AppConfig,
+	argv []string,
+	client *http.Client,
+	runner commandRunner,
+) (CommandResult, error) {
+	if err := validateArgv(argv); err != nil {
 		return CommandResult{}, err
 	}
-	result, err := runner(ctx, append([]string(nil), argv...), token.value)
-	token.clear()
+	var result CommandResult
+	err := withSession(ctx, config, client, func(session *Session) error {
+		var err error
+		result, err = session.merge(ctx, argv, runner)
+		return err
+	})
+	return result, err
+}
+
+// Merge runs the stored argv byte-for-byte with the custodied token.
+func (session *Session) Merge(ctx context.Context, argv []string) (CommandResult, error) {
+	return session.merge(ctx, argv, runGH)
+}
+
+func (session *Session) merge(ctx context.Context, argv []string, runner commandRunner) (CommandResult, error) {
+	if err := validateArgv(argv); err != nil {
+		return CommandResult{}, err
+	}
+	result, err := runner(ctx, append([]string(nil), argv...), session.token.value)
 	if err != nil {
 		return result, fmt.Errorf("%w: exit %d", ErrCommand, result.ExitCode)
 	}
@@ -91,7 +143,8 @@ func (token *installationToken) clear() {
 }
 
 func exchange(ctx context.Context, config AppConfig, client *http.Client, now func() time.Time) (installationToken, error) {
-	if config.AppID < 1 || config.InstallationID < 1 || len(config.PrivateKeyPEM) == 0 {
+	if config.AppID < 1 || config.InstallationID < 1 || len(config.PrivateKeyPEM) == 0 ||
+		!validRepo(config.Repository) {
 		return installationToken{}, ErrCredentials
 	}
 	apiURL := strings.TrimRight(config.APIURL, "/")
@@ -102,7 +155,15 @@ func exchange(ctx context.Context, config AppConfig, client *http.Client, now fu
 	if err != nil {
 		return installationToken{}, fmt.Errorf("%w: %v", ErrCredentials, err)
 	}
-	body := strings.NewReader(`{"permissions":{"contents":"write"}}`)
+	repository := strings.Split(config.Repository, "/")[1]
+	requestData, err := json.Marshal(map[string]any{
+		"repositories": []string{repository},
+		"permissions":  map[string]string{"contents": "write"},
+	})
+	if err != nil {
+		return installationToken{}, fmt.Errorf("%w: encode request", ErrToken)
+	}
+	body := bytes.NewReader(requestData)
 	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", apiURL, config.InstallationID)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
@@ -218,8 +279,26 @@ func validateArgv(argv []string) error {
 
 func validRepo(repo string) bool {
 	parts := strings.Split(repo, "/")
-	return len(parts) == 2 && parts[0] != "" && parts[1] != "" &&
-		!strings.ContainsAny(repo, " \t\r\n")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	if repo != strings.TrimSpace(repo) || strings.IndexFunc(repo, unicode.IsSpace) >= 0 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "." || part == ".." ||
+			strings.HasPrefix(part, "-") || strings.HasSuffix(part, ".git") {
+			return false
+		}
+		for _, r := range part {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) ||
+				strings.ContainsRune("._-", r) {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func validSHA(sha string) bool {

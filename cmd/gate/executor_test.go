@@ -40,7 +40,7 @@ func TestExecutorResultRecordsObservedMergeDespiteCommandError(t *testing.T) {
 	}
 	result, err := executorResult(
 		claim, gateexecutor.CommandResult{ExitCode: 1}, errors.New("branch cleanup failed"),
-		"0123456789012345678901234567890123456789", nil, time.Unix(1000, 0),
+		"0123456789012345678901234567890123456789", true, time.Unix(1000, 0),
 	)
 	if err != nil || result.Outcome != gateauthorization.ExecutionMerged ||
 		result.MergeCommit == "" || result.ErrorCode != "" {
@@ -52,14 +52,13 @@ func TestExecutorResultRefusesUnconfirmedSuccess(t *testing.T) {
 	claim := gateauthorization.ExecutionClaim{
 		ClaimID: "claim", ExecutionID: "execution", MergeArgv: []string{"gh"},
 	}
-	confirmErr := errors.New("not merged")
 	result, err := executorResult(
-		claim, gateexecutor.CommandResult{ExitCode: 0}, nil, "", confirmErr,
+		claim, gateexecutor.CommandResult{ExitCode: 0}, nil, "", false,
 		time.Unix(1000, 0),
 	)
-	if !errors.Is(err, confirmErr) ||
+	if err == nil ||
 		result.Outcome != gateauthorization.ExecutionFailed ||
-		result.ErrorCode != "merge_confirmation_failed" {
+		result.ErrorCode != "executor_command_failed" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
@@ -112,12 +111,15 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 func TestExecutorMalformedArtifactExitsRefused(t *testing.T) {
 	if os.Getenv("GATE_EXECUTOR_ARGV_HELPER") == "1" {
 		os.Args = []string{
-			"gate", "executor", "claim",
+			"gate", "executor", "run",
 			"-request", os.Getenv("GATE_EXECUTOR_BAD_REQUEST"),
+			"-state-tip", "0123456789012345678901234567890123456789",
 			"-workflow-run-id", "42",
 			"-workflow-actor-id", "7",
 			"-workflow-triggering-actor", "dispatcher",
-			"-out", filepath.Join(os.TempDir(), "unused-claim.json"),
+			"-app-id", "1",
+			"-installation-id", "2",
+			"-key", filepath.Join(os.TempDir(), "unused-keys"),
 		}
 		main()
 		return

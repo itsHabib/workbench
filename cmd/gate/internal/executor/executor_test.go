@@ -28,7 +28,7 @@ func TestExecuteKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(data) != `{"permissions":{"contents":"write"}}` {
+		if string(data) != `{"permissions":{"contents":"write"},"repositories":["workbench"]}` {
 			t.Fatalf("permissions = %s", data)
 		}
 		expires := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
@@ -45,7 +45,7 @@ func TestExecuteKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 	var seenToken string
 	result, err := execute(context.Background(), AppConfig{
 		AppID: 33, InstallationID: 44, PrivateKeyPEM: key,
-		APIURL: server.URL,
+		APIURL: server.URL, Repository: "itsHabib/workbench",
 	}, argv, server.Client(), func(_ context.Context, got []string, token string) (CommandResult, error) {
 		seenArgv = got
 		seenToken = token
@@ -80,7 +80,13 @@ func TestExecuteRefusesBeforeTokenExchange(t *testing.T) {
 		},
 	}
 	for _, argv := range tests {
-		if _, err := execute(context.Background(), AppConfig{}, argv, client, nil); err == nil {
+		if _, err := execute(
+			context.Background(),
+			AppConfig{Repository: "o/r"},
+			argv,
+			client,
+			nil,
+		); err == nil {
 			t.Fatal("expected argv refusal")
 		}
 	}
@@ -105,6 +111,7 @@ func TestExchangeRefusesMalformedAndOverlongToken(t *testing.T) {
 			now := func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) }
 			if _, err := exchange(context.Background(), AppConfig{
 				AppID: 1, InstallationID: 2, PrivateKeyPEM: key, APIURL: server.URL,
+				Repository: "o/r",
 			}, server.Client(), now); !errors.Is(err, ErrToken) {
 				t.Fatalf("exchange = %v, want token refusal", err)
 			}

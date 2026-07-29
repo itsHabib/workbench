@@ -198,6 +198,24 @@ func Authorize(request gateauthorization.Request, facts ApprovalFacts) (gateauth
 	return artifact, nil
 }
 
+// PreflightClaim proves every refusal available before App credential
+// creation. Claim repeats these checks while holding the state lock.
+func PreflightClaim(audit state.AuditResult, authorization gateauthorization.Artifact, live LivePullRequest, now time.Time) error {
+	if !audit.OK {
+		return fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+	}
+	if err := gateauthorization.Validate(authorization); err != nil {
+		return fmt.Errorf("authorization_malformed: %w", err)
+	}
+	if err := validateTime(authorization, now); err != nil {
+		return err
+	}
+	if err := validateLive(authorization.Request.Subject, live); err != nil {
+		return err
+	}
+	return checkClaimSnapshot(audit.All, authorization)
+}
+
 // Claim atomically re-audits freshness and permanently consumes one exact
 // action. Live GitHub facts are checked before entering the store critical
 // section and again by the caller immediately before this function.

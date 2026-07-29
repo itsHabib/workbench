@@ -71,12 +71,12 @@ Constraints that are design decisions, not omissions:
   existing structured exception.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
-  hosted executor transport is hard-disabled during the state-writer security
-  hold; generic Actions has no `gate-state` write authority in the symbolic
-  plan. Signing keys remain protected-environment secrets.
+  hosted executor is source-disabled at the operator hold; generic Actions has
+  no `gate-state` write authority. The planned Gate App is the sole state
+  writer. Signing keys remain protected-environment secrets.
 - **Execution authority is a durable PR claim, not status.** The protected
   executor contract verifies run-specific independent approval, exact
   repo/PR/head/base, newest action, and unchanged `--match-head-commit` argv.
-  The workflow cannot run until the operator approves a state-writer
-  custody/order amendment. It never posts reusable green status or adds
-  `--admin`.
+  The one-App custody/order amendment is implemented but non-armable pending
+  reconciliation semantics, exact-head review, and operator bootstrap. It
+  never posts reusable green status or adds `--admin`.

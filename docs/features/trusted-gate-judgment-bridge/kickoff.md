@@ -80,6 +80,13 @@ rejected status-promotion prototype is replaced. App registration, secrets,
 environment configuration, ruleset changes, grant minting, bootstrap, live
 execution, and merge remain stopped at the operator boundary.
 
+The operator additionally authorized the one-App process-custodied ordering at
+PR #169 head `19dae14d5cc71d3859938ffe218230d542f7498f`: post-approval
+token creation, claim CAS/refetch, exact merge, result CAS, plus intended
+no-merge-token expired-claim reconciliation. GitHub's shared `contents: write`
+permission for ref update and PR merge leaves the literal no-merge-token
+semantics as the remaining operator decision; see `design.md`.
+
 ## Ground truth to preserve
 
 Read completely before changing anything:
@@ -277,12 +284,11 @@ Required behavior:
 - Re-audit anchored state and re-read live PR/head immediately before claim.
 - Require the live base ref, base SHA, and merge-base to equal the approved
   values.
-- Claim exactly once before creating any App installation token. Persist the
-  claim with the separate GitHub Actions state-writer identity, whose branch
-  rules permit updates only to `gate-state` and deny `main`.
+- After every pre-credential refusal passes, create one repository-narrowed App
+  installation token inside Gate, then claim exactly once.
+- Persist the claim with the Gate App; generic Actions remains read-only.
 - Use a non-force compare-and-swap ref update, then re-fetch and re-audit the
-  durable `gate-state` tip containing the claim before the executor may receive
-  the App private key.
+  durable `gate-state` tip containing the claim before merge.
 - A claim or transport failure never turns into merge authority.
 - The agent never supplies or handles mint or App credentials.
 
@@ -304,7 +310,8 @@ The workflow must:
 - verify the claimed action is still the newest executable Gate outcome;
 - verify expiry and replay identity;
 - byte-compare the exact merge argv;
-- pass the App private key only to the Gate executor process after the claim;
+- pass the App private key only to the Gate executor process; Gate must not
+  exchange it until approval and all pre-credential refusals pass;
 - exchange the private key for a short-lived installation token internally;
   never return, print, persist, or expose that token to another workflow step;
 - execute only the stored argv, unchanged, including `--match-head-commit`, and
@@ -322,7 +329,7 @@ receives a general installation token is a rejected thin wrapper.
 Layered rules are load-bearing:
 
 - `main` Restrict updates: only the Gate App, PR-only bypass;
-- `gate-state` Restrict updates: only `github-actions[bot]`;
+- `gate-state` Restrict updates: only the Gate App;
 - all other base-repository branches: normal human roles and explicitly
   approved existing integrations, but never the Gate App;
 - `main` required `gate` check: separate rule with the same Gate App as its sole

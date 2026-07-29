@@ -23,17 +23,19 @@ direct-merge bypass on the repo that arms it — see the runbook in
 [docs/enforcement.md](docs/enforcement.md). The workflow first shipped —
 dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
 move it ships here, so the armable canary is itsHabib/workbench. Ordinary
-`gate -live` stays unbuilt. A separate, dormant App executor now exists for one
-durable PR claim. Fresh security review found the generic-Actions
-`gate-state` writer unsafe, so the workflow is hard-disabled and the staged
-plan is writerless. Operator bootstrap alone cannot arm it; the revised
-state-writer custody/order decision in the bridge design must land first.
+`gate -live` stays unbuilt. A separate, dormant App executor now owns one
+durable PR claim. Fresh security review found the generic-Actions `gate-state`
+writer unsafe. The revised repository code instead keeps App token creation,
+claim/result CAS, and exact merge inside one Gate action; the workflow remains
+source-disabled pending reconciliation semantics, review, and operator
+bootstrap.
 
 Provider-neutral exact-head passes can be presented for independent approval
 with `gate executor request`. The dormant default-branch executor verifies its
-own protected-environment approval history and prepares a permanent exact
-claim contract. Its planned App execution path does not promote commit status,
-but remains non-armable during the state-writer security hold. See
+own protected-environment approval history, creates the App token only after
+preflight, CAS-publishes and refetches one permanent claim, executes only the
+stored command, then CAS-publishes one result. It never promotes commit status.
+The path remains non-armable at the operator hold. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
 ## Run it

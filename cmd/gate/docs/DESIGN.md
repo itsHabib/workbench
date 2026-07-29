@@ -229,10 +229,11 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
 
 - **Ordinary `-live` merge execution.** `-live` still records
   `merge_not_implemented`; agents cannot turn their ambient token into Gate's
-  sanctioned merge. The separate `executor execute` verb is reachable only
-  from a durable one-time claim and keeps the App token inside Gate's direct
-  `gh` child. It remains dormant until operator bootstrap and adversarial live
-  canary pass.
+  sanctioned merge. The separate `executor run` verb creates the App token
+  only after protected approval and preflight, then owns claim CAS/refetch,
+  exact merge, and result CAS in one process. It remains source-disabled until
+  reconciliation semantics, operator bootstrap, and an adversarial live canary
+  pass.
 - **Content-addressed evidence blobs.** Evidence bodies are inline JSON.
   Trigger: the first diff over ~100KB.
 - **Any daemon or server.** The substrate is a file contract; at current scale

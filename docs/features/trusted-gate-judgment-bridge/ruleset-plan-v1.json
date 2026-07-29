@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repository": "itsHabib/workbench",
-  "status": "blocked_security_decision",
+  "status": "authorized_not_applied",
   "rulesets": [
     {
       "name": "main-updates",
@@ -30,7 +30,13 @@
       "block_deletion": true,
       "block_force_push": true,
       "required_checks": [],
-      "bypass_actors": [],
+      "bypass_actors": [
+        {
+          "actor_ref": "gate_app",
+          "type": "Integration",
+          "mode": "always"
+        }
+      ],
       "allowed_writers": []
     },
     {

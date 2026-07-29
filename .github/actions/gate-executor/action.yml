@@ -1,15 +1,21 @@
 name: Custodied Gate executor
-description: Run Gate as the Docker entrypoint so the App private key and token stay inside its process boundary.
+description: Keep the App private key and installation token inside one trusted Gate process.
 inputs:
-  claim:
+  request:
+    required: true
+  state-tip:
+    required: true
+  workflow-run-id:
+    required: true
+  workflow-actor-id:
+    required: true
+  workflow-triggering-actor:
     required: true
   app-id:
     required: true
   installation-id:
     required: true
   app-private-key:
-    required: true
-  github-read-token:
     required: true
   state-dir:
     required: true
@@ -22,9 +28,17 @@ runs:
   image: Dockerfile
   args:
     - executor
-    - execute
-    - -claim
-    - ${{ inputs.claim }}
+    - run
+    - -request
+    - ${{ inputs.request }}
+    - -state-tip
+    - ${{ inputs.state-tip }}
+    - -workflow-run-id
+    - ${{ inputs.workflow-run-id }}
+    - -workflow-actor-id
+    - ${{ inputs.workflow-actor-id }}
+    - -workflow-triggering-actor
+    - ${{ inputs.workflow-triggering-actor }}
     - -app-id
     - ${{ inputs.app-id }}
     - -installation-id

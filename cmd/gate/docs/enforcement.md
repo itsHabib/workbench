@@ -354,17 +354,19 @@ The contract verifies the exact PR/head/base/action/evidence request and defines
 a permanent one-time claim plus exact
 `gh pr merge ... --match-head-commit ...` argv. The original transport used
 generic Actions to append the claim before App token creation; review proved
-that identity can replay older valid state and anchor pairs. The workflow is
-therefore hard-disabled and the symbolic `gate-state` rule has no writer.
-It posts no reusable success status, never adds `--admin`, and permanently
-consumes failures.
+that identity can replay older valid state and anchor pairs. The authorized
+replacement creates the App token only after protected approval and preflight,
+then keeps claim CAS/refetch, exact merge, and result CAS inside one Gate
+action. Generic Actions is read-only and the symbolic plan makes the Gate App
+the sole `gate-state` writer. It posts no reusable success status and never
+adds `--admin`.
 
-This path is repository code only and is not armable. The open security
-decision—whether one process-custodied Gate App may CAS-publish the claim before
-merging, or an equivalent independent state writer/external monotonic pin—is
-documented in `docs/features/trusted-gate-judgment-bridge/design.md`. Do not
-perform the operator actions in the runbook until that amendment is approved
-and implemented.
+This path is repository code only and is not armable. GitHub uses the same
+`contents: write` permission for both state-ref updates and PR merge, so the
+literal no-merge-token reconciliation requirement still needs the operator's
+choice documented in
+`docs/features/trusted-gate-judgment-bridge/design.md`. Do not perform the
+operator actions in the runbook until that choice is implemented and reviewed.
 
 Three CI-context choices worth naming, since they shape what the check does and
 does not assert:
