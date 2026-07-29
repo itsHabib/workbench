@@ -34,6 +34,8 @@ evidence, and completes the native exact-head review artifact seam.
   branch, and exercise stale, malformed, duplicate, exhausted, and unsourced
   refusal paths before dispatch.
 - Record every intervention and secret-safe artifact reference.
+- Use the existing GitHub connector or `gh`/git authentication for PR reads and
+  pushes; the forbidden credential is a model-provider SDK/API key.
 
 ## Acceptance
 
@@ -49,5 +51,5 @@ review, and Gate only with an operator-minted grant.
 
 ## Non-goals
 
-No cloud run, Cursor API key, Claude invocation, grant minting, `--admin`, or
-weakening checks.
+No Ship cloud/provider run, Cursor or other model-provider API key, Claude
+invocation, grant minting, `--admin`, or weakening checks.
