@@ -90,23 +90,18 @@ never fabricates an empty findings artifact.
    appends one permanent execution claim under the same state lock. Any existing
    claim for the action or authorization refuses. An open claim also blocks
    later Gate outcome writes for that PR.
-6. GitHub Actions commits the claim and keyed anchor record to `gate-state` and
-   uses a normal non-force push. The expected remote tip must match before the
-   push and the published tip must match after it.
-7. A fresh `gate-state` checkout re-audits the keyed chain and live PR facts.
-   Only a durable, unconsumed, unexpired, still-newest claim proceeds.
-8. A local Docker action starts Gate as its entrypoint. The App private key is
-   an action input; Gate internally creates the App JWT, requests a
-   contents-write installation token, and passes that token only to the direct
-   `gh` child. The workflow never receives the installation token.
-9. Gate executes the stored ten-element argv unchanged. It requires
-   `gh pr merge`, squash, delete-branch, and the exact
-   `--match-head-commit`; `--admin` is structurally rejected.
-10. Gate appends one secret-free terminal result. Failure consumes the claim
-    permanently; recovery requires a fresh Gate action and approval.
+Steps 6–10 of the authorized design are not approved for activation. The held
+prototype used generic GitHub Actions to publish the claim before the App
+credential existed, then re-fetched the state, let Gate execute the stored
+ten-element argv, and published a terminal result. Review disproved the first
+of those transport assumptions: the coarse Actions identity is not an
+exclusive writer. The workflow and plan preserve the prototype only as
+reviewable source and are structurally non-armable.
 
-The workflow builds and runs only default-branch source. It never checks out PR
-or fork code and has no status-write permission.
+Any replacement must continue to build only default-branch source, never check
+out PR/fork code, never gain status-write permission, keep the App token inside
+Gate, execute only the exact stored argv, and publish a reconstructable
+terminal result.
 
 ## State and branch identities
 
@@ -117,16 +112,15 @@ state tree while both signing keys remain outside it. A fresh runner must have:
 - `gate-state/anchor.json`
 - protected `grant.key` and `anchor.key` restored outside that tree
 
-The workflow's built-in token is the state writer. It has no status permission
-or branch bypass. Its coarse `contents:write` permission is constrained by the
-staged rules so it can update `gate-state`, not `main`.
+No state writer is selected. The workflow's built-in token is read-only, and
+the plan deliberately grants no identity write access to `gate-state`.
 
 The staged, non-effectful policy is
 `docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`. Its validator
 pins four layers:
 
 - `main-updates`: Gate App is the sole Integration with PR-only bypass;
-- `gate-state-updates`: `github-actions[bot]` is the sole non-force writer;
+- `gate-state-updates`: writerless while the security decision is blocked;
 - `other-branches`: repository roles and approved existing integrations, never
   the Gate App; and
 - `main-required-gate`: retain the app-pinned `gate` check, with only the same
