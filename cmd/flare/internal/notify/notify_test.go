@@ -203,6 +203,12 @@ func TestSlackShipParkIsNotAHumanPolicyDecision(t *testing.T) {
 	if strings.Contains(s, "Your call") {
 		t.Fatalf("a Ship mechanism park must not render a policy-decision headline:\n%s", s)
 	}
+	if !strings.Contains(s, "Run parked") {
+		t.Fatalf("a Ship mechanism park must describe the actual parked state:\n%s", s)
+	}
+	if strings.Contains(s, "Run failed") {
+		t.Fatalf("a Ship mechanism park must not be mislabeled as failed:\n%s", s)
+	}
 	approveID := fmt.Sprintf(`"action_id":%q`, escalation.ActionApprove)
 	blockID := fmt.Sprintf(`"action_id":%q`, escalation.ActionBlock)
 	if strings.Contains(s, approveID) || strings.Contains(s, blockID) {
