@@ -219,7 +219,7 @@ type judgeExecutableResolver func(name string) (judgeExecutable, error)
 // ValidateJudgeProvider restricts the advisory auto-judge to Gate's built-in
 // local CLI projections. Callers select a provider, never an executable.
 func ValidateJudgeProvider(provider string) error {
-	switch strings.TrimSpace(provider) {
+	switch provider {
 	case "":
 		return fmt.Errorf("judge_provider_unconfigured: pass -provider %s|%s", JudgeProviderClaude, JudgeProviderCodex)
 	case JudgeProviderClaude, JudgeProviderCodex:
@@ -233,12 +233,13 @@ func providerInvocation(provider string) (judgeProviderInvocation, error) {
 	if err := ValidateJudgeProvider(provider); err != nil {
 		return judgeProviderInvocation{}, err
 	}
-	switch strings.TrimSpace(provider) {
+	switch provider {
 	case JudgeProviderClaude:
 		return judgeProviderInvocation{
 			name: "claude",
 			args: []string{
 				"-p",
+				"--safe-mode",
 				"--tools", "",
 			},
 		}, nil
@@ -253,7 +254,7 @@ func providerInvocation(provider string) (judgeProviderInvocation, error) {
 				"--ignore-user-config",
 				"--ignore-rules",
 				"--disable", "shell_tool",
-				"-c", "agents.enabled=false",
+				"--disable", "multi_agent",
 				"-c", `web_search="disabled"`,
 				"-",
 			},
@@ -281,7 +282,7 @@ func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
 		provider,
 		request,
 		workDir,
-		sanitizedJudgeEnvironment(os.Environ(), provider),
+		sanitizedJudgeEnvironment(os.Environ()),
 		resolveJudgeExecutable,
 		exec.Command,
 	)
@@ -329,7 +330,7 @@ func autoJudge(
 	verdict.Source = "auto-judgment"
 	verdict.Producer.Impl = fmt.Sprintf(
 		"%s-cli[%s@sha256:%s]:%s",
-		strings.TrimSpace(provider),
+		provider,
 		filepath.Base(executable.path),
 		executable.digest,
 		verdict.Producer.Impl,
@@ -406,7 +407,7 @@ var judgeEnvironmentAllowlist = map[string]struct{}{
 // sanitizedJudgeEnvironment deliberately omits Gate custody, provider API
 // keys, GitHub credentials, and arbitrary caller variables. The CLI may use its
 // normal saved-login store through the retained home/config paths.
-func sanitizedJudgeEnvironment(source []string, provider string) []string {
+func sanitizedJudgeEnvironment(source []string) []string {
 	result := make([]string, 0, len(judgeEnvironmentAllowlist)+1)
 	for _, entry := range source {
 		key, _, ok := strings.Cut(entry, "=")
@@ -417,9 +418,6 @@ func sanitizedJudgeEnvironment(source []string, provider string) []string {
 			continue
 		}
 		result = append(result, entry)
-	}
-	if provider == JudgeProviderClaude {
-		result = append(result, "CLAUDE_CODE_SIMPLE=1")
 	}
 	return result
 }

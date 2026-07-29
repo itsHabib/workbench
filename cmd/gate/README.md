@@ -76,11 +76,10 @@ PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
 Gate has two built-in local CLI projections:
 
 ```text
-claude -> claude -p --tools ""
-          with CLAUDE_CODE_SIMPLE=1
+claude -> claude -p --safe-mode --tools ""
 codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
           --ignore-user-config --ignore-rules --disable shell_tool
-          -c agents.enabled=false -c web_search="disabled" -
+          --disable multi_agent -c web_search="disabled" -
 ```
 
 The caller selects the provider name, never an executable or argument vector.

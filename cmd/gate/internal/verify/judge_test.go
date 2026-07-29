@@ -164,6 +164,7 @@ func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
 			name:     "claude",
 			args: []string{
 				"-p",
+				"--safe-mode",
 				"--tools", "",
 			},
 		},
@@ -178,7 +179,7 @@ func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
 				"--ignore-user-config",
 				"--ignore-rules",
 				"--disable", "shell_tool",
-				"-c", "agents.enabled=false",
+				"--disable", "multi_agent",
 				"-c", `web_search="disabled"`,
 				"-",
 			},
@@ -203,6 +204,7 @@ func TestProviderInvocationRefusesCallerSelectedExecutable(t *testing.T) {
 		"/tmp/judge",
 		"codex --dangerously-bypass-approvals-and-sandbox",
 		"other",
+		" codex ",
 	} {
 		if _, err := providerInvocation(provider); err == nil || !strings.Contains(err.Error(), "judge_provider_unsupported") {
 			t.Fatalf("provider %q error = %v, want unsupported refusal", provider, err)
@@ -221,7 +223,7 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 				provider,
 				request,
 				t.TempDir(),
-				judgeHelperEnvironment(provider, ""),
+				judgeHelperEnvironment(""),
 				fakeJudgeResolver,
 				factory,
 			)
@@ -251,7 +253,7 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 		JudgeProviderCodex,
 		request,
 		t.TempDir(),
-		judgeHelperEnvironment(JudgeProviderCodex, "malformed"),
+		judgeHelperEnvironment("malformed"),
 		fakeJudgeResolver,
 		factory,
 	)
@@ -267,7 +269,7 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 		JudgeProviderCodex,
 		request,
 		t.TempDir(),
-		judgeHelperEnvironment(JudgeProviderCodex, "failed"),
+		judgeHelperEnvironment("failed"),
 		fakeJudgeResolver,
 		factory,
 	)
@@ -308,7 +310,7 @@ func TestSanitizedJudgeEnvironmentDropsAuthorityAndProviderSecrets(t *testing.T)
 	}
 	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
 		t.Run(provider, func(t *testing.T) {
-			got := sanitizedJudgeEnvironment(source, provider)
+			got := sanitizedJudgeEnvironment(source)
 			joined := strings.Join(got, "\n")
 			if !strings.Contains(joined, "PATH=/bin") || !strings.Contains(joined, "HOME=/home/operator") {
 				t.Fatalf("runtime paths were removed: %v", got)
@@ -318,9 +320,8 @@ func TestSanitizedJudgeEnvironmentDropsAuthorityAndProviderSecrets(t *testing.T)
 					t.Fatalf("secret or ambient variable %q survived: %v", secret, got)
 				}
 			}
-			hasSimple := strings.Contains(joined, "CLAUDE_CODE_SIMPLE=1")
-			if hasSimple != (provider == JudgeProviderClaude) {
-				t.Fatalf("CLAUDE_CODE_SIMPLE presence = %v for %s", hasSimple, provider)
+			if strings.Contains(joined, "CLAUDE_CODE_SIMPLE") {
+				t.Fatalf("simple mode would disable saved-login auth: %v", got)
 			}
 		})
 	}
@@ -333,9 +334,9 @@ func fakeJudgeResolver(name string) (judgeExecutable, error) {
 	}, nil
 }
 
-func judgeHelperEnvironment(provider, mode string) []string {
+func judgeHelperEnvironment(mode string) []string {
 	return append(
-		sanitizedJudgeEnvironment(os.Environ(), provider),
+		sanitizedJudgeEnvironment(os.Environ()),
 		"GATE_JUDGE_HELPER=1",
 		"GATE_JUDGE_HELPER_MODE="+mode,
 	)
