@@ -39,7 +39,8 @@ I am needed."**
 | 0:00–1:30 | Problem: one agent process is usually worker, judge, root, database, and narrator |
 | 1:30–3:00 | Five-plane model and the artifact boundary |
 | 3:00–3:45 | Work Driver proof: PR #162, normal engine, 94-step healthy trace, merged commit `3bde397` |
-| 3:45–8:45 | Live park-to-resolution path |
+| 3:45–4:30 | Risk-sized review: exact-head panel, finding artifact, and Work Driver address loop |
+| 4:30–8:45 | Live park-to-resolution path |
 | 8:45–10:15 | Custody/Jira: the same capability idea applied to credentials |
 | 10:15–11:30 | What is proven versus still a POC |
 | 11:30–12:00 | Close: authority is minted, never inferred |
@@ -95,7 +96,43 @@ trace remained reconstructable."**
 Fallback: show the GitHub PR page and the saved driver/workflow/commit identifiers
 above. Never claim the driver is being rerun live.
 
-### 2. Show the park in authoritative State
+### 2. Show review as evidence, not ceremony
+
+Open the demo PR at its exact head. Describe the review panel in three buckets:
+`requested`, `completed`, and `missing`. A skipped, neutral, timed-out, or
+quota-limited reviewer is missing—not a clean review.
+
+For PR #165, the rehearsed evidence was:
+
+```text
+head_sha: 90404da81d1c353d3bc8b5ea4fda7570de202dea
+completed: Codex
+missing/degraded: Claude skipped; Cursor neutral/usage-limited
+finding: preserve the truthful “parked” headline while withholding Gate actions
+```
+
+When an exact-head inline finding exists, the intended path is:
+
+```powershell
+reviewfindings github --repo itsHabib/workbench --pr 165 --head <exact-head> `
+  --requested <configured-panel> --completed <finished-reviewers> `
+  --catalog-revision <canonical-full-sha> --out <artifact-path>
+ship driver address <driver-run> --stream <stream> --findings <artifact-path>
+```
+
+The coordinator must bind the canonical review catalog and Ship must validate
+the stream, PR head, cycle capacity, and duplicate consumption. If provenance
+or linkage is uncertain, show the refusal and stop; never hand-write the JSON.
+If the completed panel is clean, no artifact is produced by design.
+
+Narration: **“Review depth follows risk, but review evidence is always pinned
+to the code it judged. Findings re-enter Execution as a typed artifact; the
+review bot does not edit, approve, or merge.”**
+
+Fallback: show the exact-head GitHub review and state which reviewer coverage
+was missing. Do not describe a degraded panel as unanimous.
+
+### 3. Show the park in authoritative State
 
 Use a real, already-parked content escalation for the demo PR:
 
@@ -114,7 +151,7 @@ offline seed in `EVIDENCE-escalate-e2e-phase3.md` is a rehearsal-only fallback
 that creates its own one-hour demo grant; the operator must explicitly choose
 to run it. The talk agent must not run it or mint authority.
 
-### 3. Start the signed ingress
+### 4. Start the signed ingress
 
 The operator provides these values in the process environment. Do not paste
 them into the repository, shell history, slides, or screen share:
@@ -134,7 +171,7 @@ escalate serve: listening on 127.0.0.1:8099 (..., 1 authorized user(s))
 Safety property worth saying aloud: the process refuses to start without both
 callback authentication and an immutable-user-id allowlist.
 
-### 4. Start the tunnel
+### 5. Start the tunnel
 
 In Terminal B, after the operator has authenticated ngrok:
 
@@ -148,7 +185,7 @@ this before the talk if the URL is stable for the session.
 Expected screen: ngrok online, forwarding HTTPS to
 `http://localhost:8099`, with no request errors.
 
-### 5. Route the Gate park through Flare
+### 6. Route the Gate park through Flare
 
 The demo Slack channel in Flare's routes file must contain:
 
@@ -178,7 +215,7 @@ If the Slack card is already present, show it and skip the sweep to avoid
 dedupe theater. If delivery fails, show the local rendered-card test and the
 captured evidence; do not weaken Flare's delivery checks.
 
-### 6. Tap Approve or Block
+### 7. Tap Approve or Block
 
 Tap one button from the allowlisted Slack account.
 
@@ -193,7 +230,7 @@ The callback is HMAC-verified with a five-minute replay window. `who` comes from
 the verified Slack identity, not a client-settable field. A repeated or
 concurrent tap resolves at most once.
 
-### 7. Prove Gate, not Slack, resolved the park
+### 8. Prove Gate, not Slack, resolved the park
 
 ```powershell
 gate next -state $gateState
@@ -269,6 +306,10 @@ Run this once the day before and again 30 minutes before the talk:
 - [ ] Flare demo channel has `"resolve_actions": true`.
 - [ ] ngrok config is valid; tunnel is online; Slack Request URL matches it.
 - [ ] A real, unresolved, unexpired content park exists under the live grant.
+- [ ] Review evidence is pinned to the current PR head; requested, completed,
+      and missing reviewers are written down.
+- [ ] Any findings artifact was produced by `reviewfindings` from a canonical
+      catalog revision and accepted by the matching Ship stream.
 - [ ] `gate next` shows exactly the park intended for the screen.
 - [ ] Slack channel contains no employer or unrelated personal history.
 - [ ] Approve and Block are visible only on the resolvable Gate park.
