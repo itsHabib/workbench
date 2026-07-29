@@ -1,6 +1,6 @@
 # Goal kickoff — trusted Gate judgment bridge, Codex auto-mode, and live dogfood
 
-**Status:** security redesign required after exact-head adversarial review
+**Status:** revised executor model authorized; repository implementation in progress
 **Owner:** operator + Codex session seat
 **Date:** 2026-07-29
 **Primary repository:** `itsHabib/workbench`
@@ -74,9 +74,11 @@ The replacement decision must choose a genuinely PR-specific enforcement seam:
   intended autonomous delivery loop.
 
 The recommended App path is a material trust-model and branch-rule decision.
-It requires explicit operator authorization. Until then, PR #169 remains draft
-and Phase A is stopped; no bootstrap exception, check weakening, or merge is
-permitted.
+The operator authorized repository implementation of that model at
+`745d2bc405e07fd202c2379320afdc1745e46cc5`. PR #169 remains draft while the
+rejected status-promotion prototype is replaced. App registration, secrets,
+environment configuration, ruleset changes, grant minting, bootstrap, live
+execution, and merge remain stopped at the operator boundary.
 
 ## Ground truth to preserve
 

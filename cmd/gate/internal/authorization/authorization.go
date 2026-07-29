@@ -1,21 +1,41 @@
-// Package authorization exports and validates the promotion of exact-head Gate
-// decisions. GitHub transport remains in cmd/gate; this package contains only
-// Gate-owned policy over typed state and GitHub facts.
+// Package authorization owns Gate's policy for protected approvals, exact
+// action freshness, permanent execution claims, and terminal result records.
+// GitHub transport and App credential custody live in neighboring mechanisms.
 package authorization
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"sort"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
-const validity = 30 * time.Minute
+// Coded refusal classes are stable enough for workflows and tests to branch
+// on without parsing explanatory prose.
+var (
+	ErrApprovalMissing     = errors.New("authorization_approval_missing")
+	ErrApprovalDependent   = errors.New("authorization_approval_not_independent")
+	ErrApprovalMismatch    = errors.New("authorization_approval_mismatch")
+	ErrExpired             = errors.New("authorization_expired")
+	ErrNotYetValid         = errors.New("authorization_not_yet_valid")
+	ErrLiveMismatch        = errors.New("authorization_live_pr_mismatch")
+	ErrHeadAmbiguous       = errors.New("authorization_head_ambiguous")
+	ErrActionMissing       = errors.New("authorization_action_missing")
+	ErrActionMismatch      = errors.New("authorization_action_mismatch")
+	ErrSuperseded          = errors.New("authorization_superseded")
+	ErrAlreadyClaimed      = errors.New("authorization_already_claimed")
+	ErrSubjectClaimPending = errors.New("authorization_subject_claim_pending")
+	ErrResultDuplicate     = errors.New("authorization_result_duplicate")
+)
 
 type actionBody struct {
 	Outcome string   `json:"outcome"`
@@ -25,114 +45,530 @@ type actionBody struct {
 	Argv    []string `json:"argv"`
 }
 
-type runFacts struct {
-	subject contracts.Subject
-	seen    bool
+// LivePullRequest is the trusted live projection checked both before claim and
+// immediately before execution.
+type LivePullRequest struct {
+	Repository     string
+	Number         int
+	State          string
+	HeadSHA        string
+	BaseRef        string
+	BaseSHA        string
+	MergeBaseSHA   string
+	OpenPRsForHead []int
 }
 
-type terminal struct {
-	artifact state.Artifact
-	order    int
+// RequestInput supplies the live base identity and human-readable judgment
+// question that are not encoded in Gate's existing action body.
+type RequestInput struct {
+	ActionID         string
+	Subject          gateauthorization.Subject
+	JudgmentQuestion string
+	ReplayID         string
+	IssuedAt         time.Time
+	ExpiresAt        time.Time
 }
 
-// Export derives an immutable authorization from an audited Gate snapshot.
-func Export(audit state.AuditResult, run string) (gateauthorization.Artifact, error) {
+// ApprovalReview is the relevant projection of GitHub's workflow-run approval
+// history. Environments may contain several names; Gate requires its static one.
+type ApprovalReview struct {
+	WorkflowRunID int64
+	ActorLogin    string
+	ActorID       int64
+	State         string
+	SubmittedAt   time.Time
+	Comment       string
+	Environments  []string
+}
+
+// ApprovalFacts bind verification to this run and reject self-approval by the
+// identity that dispatched or re-ran it.
+type ApprovalFacts struct {
+	WorkflowRunID     int64
+	WorkflowActorID   int64
+	TriggeringActorID int64
+	Reviews           []ApprovalReview
+}
+
+// BuildRequest derives a canonical authorization request from an audited Gate
+// action. It refuses a stale action before anything is presented for approval.
+func BuildRequest(audit state.AuditResult, input RequestInput) (gateauthorization.Request, error) {
 	if !audit.OK {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+		return gateauthorization.Request{}, fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
 	}
-	facts, terminals, err := index(audit.All)
+	index, err := buildIndex(audit.All)
 	if err != nil {
-		return gateauthorization.Artifact{}, err
+		return gateauthorization.Request{}, err
 	}
-	target, ok := terminals[run]
-	if !ok {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_run_not_terminal: %s", run)
+	target, ok := index.byID[input.ActionID]
+	if !ok || target.artifact.Kind != state.KindAction {
+		return gateauthorization.Request{}, fmt.Errorf("%w: %s", ErrActionMissing, input.ActionID)
 	}
-	runFact, ok := facts[run]
-	if !ok || !runFact.seen {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_subject_missing: %s", run)
+	if err := matchSubject(target.subject, input.Subject); err != nil {
+		return gateauthorization.Request{}, err
 	}
-	if superseded(runFact.subject, target, facts, terminals) {
-		return gateauthorization.Artifact{}, errors.New("authorization_superseded: a newer terminal outcome exists for the PR")
+	if err := validateAction(target.artifact, input.Subject); err != nil {
+		return gateauthorization.Request{}, err
 	}
-	if target.artifact.Kind != state.KindAction {
-		return gateauthorization.Artifact{}, errors.New("authorization_not_would_merge: newest terminal is an escalation")
+	if newest := index.newestTerminal(input.Subject.Repo, input.Subject.Number); newest.artifact.ID != target.artifact.ID {
+		return gateauthorization.Request{}, ErrSuperseded
+	}
+	digest, err := EvidenceDigest(audit.All, target.artifact.Run, target.order)
+	if err != nil {
+		return gateauthorization.Request{}, err
 	}
 	var body actionBody
 	if err := json.Unmarshal(target.artifact.Body, &body); err != nil {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_action_malformed: %w", err)
+		return gateauthorization.Request{}, fmt.Errorf("%w: malformed action: %v", ErrActionMismatch, err)
 	}
-	if body.Outcome != gateauthorization.OutcomeWouldMerge {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_not_would_merge: outcome is %q", body.Outcome)
-	}
-	if len(target.artifact.Parents) < 2 || body.Verdict != target.artifact.Parents[0] ||
-		body.Grant != target.artifact.Parents[1] {
-		return gateauthorization.Artifact{}, errors.New("authorization_action_lineage_mismatch")
-	}
-	subject := gateauthorization.Subject{
-		Repo: runFact.subject.Repo, Number: runFact.subject.Number,
-		HeadSHA: runFact.subject.HeadSHA,
-	}
-	want := gateauthorization.ExpectedMergeArgv(subject)
-	if !equal(body.Argv, want) || body.Command != strings.Join(body.Argv, " ") {
-		return gateauthorization.Artifact{}, errors.New("authorization_action_argv_mismatch")
-	}
-	artifact := gateauthorization.Artifact{
-		SchemaVersion:   gateauthorization.SchemaVersion,
-		AuthorizationID: "gau_" + target.artifact.Hash,
-		Subject:         subject,
+	request := gateauthorization.Request{
+		Subject: input.Subject,
 		Gate: gateauthorization.Decision{
-			RunID: run, ActionID: target.artifact.ID, ActionHash: target.artifact.Hash,
+			RunID: target.artifact.Run, ActionID: target.artifact.ID,
+			ActionHash: target.artifact.Hash,
 		},
-		Outcome:   body.Outcome,
-		MergeArgv: append([]string(nil), body.Argv...),
-		IssuedAt:  target.artifact.Time.UTC(),
-		ExpiresAt: target.artifact.Time.UTC().Add(validity),
+		Outcome: body.Outcome, MergeArgv: append([]string(nil), body.Argv...),
+		EvidenceDigest: digest, JudgmentQuestion: input.JudgmentQuestion,
+		IssuedAt: input.IssuedAt.UTC(), ExpiresAt: input.ExpiresAt.UTC(),
+		ReplayID: input.ReplayID,
 		TrustRoot: gateauthorization.TrustRoot{
 			Kind:        gateauthorization.TrustGitHubEnvironment,
 			Environment: gateauthorization.DefaultEnvironment,
 		},
 	}
+	if err := gateauthorization.ValidateRequest(request); err != nil {
+		return gateauthorization.Request{}, fmt.Errorf("authorization_request_invalid: %w", err)
+	}
+	return request, nil
+}
+
+// Authorize selects the newest approval decision for Gate's static
+// environment and proves that it came from a different immutable actor ID.
+func Authorize(request gateauthorization.Request, facts ApprovalFacts) (gateauthorization.Artifact, error) {
+	if err := gateauthorization.ValidateRequest(request); err != nil {
+		return gateauthorization.Artifact{}, fmt.Errorf("authorization_request_invalid: %w", err)
+	}
+	if facts.WorkflowRunID < 1 || facts.WorkflowActorID < 1 || facts.TriggeringActorID < 1 {
+		return gateauthorization.Artifact{}, ErrApprovalMissing
+	}
+	id, err := gateauthorization.AuthorizationID(request)
+	if err != nil {
+		return gateauthorization.Artifact{}, err
+	}
+	reviews := matchingReviews(facts)
+	if len(reviews) == 0 {
+		return gateauthorization.Artifact{}, ErrApprovalMissing
+	}
+	latest := reviews[len(reviews)-1]
+	if latest.ActorID == facts.WorkflowActorID ||
+		latest.ActorID == facts.TriggeringActorID {
+		return gateauthorization.Artifact{}, ErrApprovalDependent
+	}
+	if latest.State != gateauthorization.ApprovalStateApproved ||
+		latest.Comment != gateauthorization.ExpectedApprovalComment(id, request) {
+		return gateauthorization.Artifact{}, ErrApprovalMismatch
+	}
+	receipt := gateauthorization.ApprovalReceipt{
+		WorkflowRunID: facts.WorkflowRunID, ActorLogin: latest.ActorLogin,
+		ActorID: latest.ActorID, State: latest.State,
+		SubmittedAt: latest.SubmittedAt.UTC(), Comment: latest.Comment,
+	}
+	receipt.ReceiptDigest, err = gateauthorization.ReceiptDigest(id, receipt)
+	if err != nil {
+		return gateauthorization.Artifact{}, err
+	}
+	artifact := gateauthorization.Artifact{
+		SchemaVersion:   gateauthorization.SchemaVersion,
+		AuthorizationID: id, Request: request, Receipt: receipt,
+	}
 	if err := gateauthorization.Validate(artifact); err != nil {
-		return gateauthorization.Artifact{}, fmt.Errorf("authorization_contract_invalid: %w", err)
+		return gateauthorization.Artifact{}, fmt.Errorf("authorization_receipt_invalid: %w", err)
 	}
 	return artifact, nil
 }
 
-func index(artifacts []state.Artifact) (map[string]runFacts, map[string]terminal, error) {
-	facts := make(map[string]runFacts)
-	terminals := make(map[string]terminal)
+// Claim atomically re-audits freshness and permanently consumes one exact
+// action. Live GitHub facts are checked before entering the store critical
+// section and again by the caller immediately before this function.
+func Claim(st *state.Store, keyPath string, authorization gateauthorization.Artifact, live LivePullRequest, grantID string, now time.Time) (state.Artifact, gateauthorization.ExecutionClaim, error) {
+	if err := gateauthorization.Validate(authorization); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, fmt.Errorf("authorization_malformed: %w", err)
+	}
+	if err := validateTime(authorization, now); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	if err := validateLive(authorization.Request.Subject, live); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	if _, err := capability.CheckBound(
+		st, keyPath, grantID, authorization.Request.Subject.Repo, "merge",
+		authorization.Request.Subject.HeadSHA, authorization.Request.Subject.Number,
+		authorization.AuthorizationID, func() time.Time { return now },
+	); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{},
+			fmt.Errorf("authorization_execution_grant_invalid: %w", err)
+	}
+	claimID, err := gateauthorization.ClaimID(authorization)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	claim := gateauthorization.ExecutionClaim{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		ClaimID:       claimID, ExecutionID: gateauthorization.ExecutionID(authorization.AuthorizationID),
+		AuthorizationID: authorization.AuthorizationID, Authorization: authorization,
+		ExecutionGrantID: grantID,
+		Subject:          authorization.Request.Subject, Gate: authorization.Request.Gate,
+		MergeArgv:             append([]string(nil), authorization.Request.MergeArgv...),
+		ApprovalReceiptDigest: authorization.Receipt.ReceiptDigest,
+		ClaimedAt:             now.UTC(), ExpiresAt: authorization.Request.ExpiresAt,
+	}
+	if err := gateauthorization.ValidateClaim(claim, authorization); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	artifact, err := st.AppendAfterAudit(
+		state.KindExecutionClaim, authorization.Request.Gate.RunID,
+		[]string{authorization.Request.Gate.ActionID, grantID}, claim,
+		func(audit state.AuditResult) error {
+			return checkClaimSnapshot(audit.All, authorization)
+		},
+	)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	return artifact, claim, nil
+}
+
+// VerifyDurableClaim replays a freshly fetched anchored state snapshot and
+// returns the exact claim that may enter the credential boundary.
+func VerifyDurableClaim(audit state.AuditResult, claimID string, live LivePullRequest, now time.Time) (state.Artifact, gateauthorization.ExecutionClaim, error) {
+	if !audit.OK {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{},
+			fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+	}
+	var target state.Artifact
+	var claim gateauthorization.ExecutionClaim
+	results := make(map[string]struct{})
+	for _, artifact := range audit.All {
+		if artifact.Kind == state.KindExecutionResult {
+			for _, parent := range artifact.Parents {
+				results[parent] = struct{}{}
+			}
+		}
+		if artifact.Kind != state.KindExecutionClaim {
+			continue
+		}
+		var candidate gateauthorization.ExecutionClaim
+		if err := json.Unmarshal(artifact.Body, &candidate); err != nil {
+			return state.Artifact{}, gateauthorization.ExecutionClaim{},
+				fmt.Errorf("authorization_claim_malformed: %w", err)
+		}
+		if candidate.ClaimID == claimID {
+			target, claim = artifact, candidate
+		}
+	}
+	if target.ID == "" {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrActionMissing
+	}
+	if _, consumed := results[target.ID]; consumed {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrAlreadyClaimed
+	}
+	if err := gateauthorization.ValidateClaim(claim, claim.Authorization); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, fmt.Errorf("authorization_claim_malformed: %w", err)
+	}
+	if !now.Before(claim.ExpiresAt) {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrExpired
+	}
+	if err := validateLive(claim.Subject, live); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	index, err := buildIndex(audit.All)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	newest := index.newestTerminal(claim.Subject.Repo, claim.Subject.Number)
+	if newest.artifact.ID != claim.Gate.ActionID ||
+		newest.artifact.Hash != claim.Gate.ActionHash {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrSuperseded
+	}
+	return target, claim, nil
+}
+
+// RecordResult atomically writes the one terminal result for a claim.
+func RecordResult(st *state.Store, claimArtifact state.Artifact, claim gateauthorization.ExecutionClaim, result gateauthorization.ExecutionResult) (state.Artifact, error) {
+	if err := gateauthorization.ValidateResult(result, claim); err != nil {
+		return state.Artifact{}, err
+	}
+	return st.AppendAfterAudit(
+		state.KindExecutionResult, claim.Gate.RunID,
+		[]string{claimArtifact.ID}, result,
+		func(audit state.AuditResult) error {
+			found := false
+			for _, artifact := range audit.All {
+				if artifact.ID == claimArtifact.ID && artifact.Kind == state.KindExecutionClaim {
+					found = true
+				}
+				if artifact.Kind == state.KindExecutionResult && hasParent(artifact.Parents, claimArtifact.ID) {
+					return ErrResultDuplicate
+				}
+			}
+			if !found {
+				return ErrActionMissing
+			}
+			return nil
+		},
+	)
+}
+
+// SubjectHasOpenClaim reports whether Gate must refuse new outcome writes for
+// this PR until the executor records a terminal result.
+func SubjectHasOpenClaim(audit state.AuditResult, subject contracts.Subject) (bool, error) {
+	if !audit.OK {
+		return false, fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+	}
+	claims := make(map[string]gateauthorization.ExecutionClaim)
+	resolved := make(map[string]struct{})
+	for _, artifact := range audit.All {
+		switch artifact.Kind {
+		case state.KindExecutionClaim:
+			var claim gateauthorization.ExecutionClaim
+			if err := json.Unmarshal(artifact.Body, &claim); err != nil {
+				return false, fmt.Errorf("authorization_claim_malformed: %w", err)
+			}
+			claims[artifact.ID] = claim
+		case state.KindExecutionResult:
+			for _, parent := range artifact.Parents {
+				resolved[parent] = struct{}{}
+			}
+		}
+	}
+	for id, claim := range claims {
+		if claim.Subject.Repo == subject.Repo && claim.Subject.Number == subject.Number {
+			if _, ok := resolved[id]; !ok {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// EvidenceDigest hashes the exact evidence/verdict/judgment bodies consumed by
+// one action, preserving their audited order but excluding random artifact IDs,
+// wall-clock metadata, grants, and outcome records.
+func EvidenceDigest(artifacts []state.Artifact, run string, through int) (string, error) {
+	hash := sha256.New()
+	count := 0
+	for order, artifact := range artifacts {
+		if order > through {
+			break
+		}
+		if artifact.Run != run || !evidenceKind(artifact.Kind) {
+			continue
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, artifact.Body); err != nil {
+			return "", fmt.Errorf("authorization_evidence_malformed: %w", err)
+		}
+		fmt.Fprintf(hash, "%s\x00%d\x00", artifact.Kind, compact.Len())
+		hash.Write(compact.Bytes())
+		hash.Write([]byte{0})
+		count++
+	}
+	if count == 0 {
+		return "", errors.New("authorization_evidence_missing")
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+type indexedArtifact struct {
+	artifact state.Artifact
+	subject  contracts.Subject
+	order    int
+}
+
+type artifactIndex struct {
+	byID      map[string]indexedArtifact
+	terminals []indexedArtifact
+}
+
+func buildIndex(artifacts []state.Artifact) (artifactIndex, error) {
+	subjects := make(map[string]contracts.Subject)
+	index := artifactIndex{byID: make(map[string]indexedArtifact)}
 	for order, artifact := range artifacts {
 		if artifact.Kind == state.KindVerdict {
 			var verdict contracts.Verdict
 			if err := json.Unmarshal(artifact.Body, &verdict); err != nil {
-				return nil, nil, fmt.Errorf("authorization_verdict_malformed: %w", err)
+				return artifactIndex{}, fmt.Errorf("authorization_verdict_malformed: %w", err)
 			}
 			if verdict.Subject.Repo != "" && verdict.Subject.Number > 0 && verdict.Subject.HeadSHA != "" {
-				facts[artifact.Run] = runFacts{subject: verdict.Subject, seen: true}
+				subjects[artifact.Run] = verdict.Subject
 			}
 		}
+		item := indexedArtifact{artifact: artifact, subject: subjects[artifact.Run], order: order}
+		index.byID[artifact.ID] = item
 		if artifact.Kind == state.KindAction || artifact.Kind == state.KindEscalation {
-			terminals[artifact.Run] = terminal{artifact: artifact, order: order}
+			item.subject = subjects[artifact.Run]
+			index.byID[artifact.ID] = item
+			index.terminals = append(index.terminals, item)
 		}
 	}
-	return facts, terminals, nil
+	return index, nil
 }
 
-func superseded(subject contracts.Subject, target terminal, facts map[string]runFacts, terminals map[string]terminal) bool {
-	for run, candidate := range terminals {
-		if candidate.order <= target.order {
+func (index artifactIndex) newestTerminal(repo string, number int) indexedArtifact {
+	var newest indexedArtifact
+	for _, item := range index.terminals {
+		if item.subject.Repo == repo && item.subject.Number == number {
+			newest = item
+		}
+	}
+	return newest
+}
+
+func checkClaimSnapshot(artifacts []state.Artifact, authorization gateauthorization.Artifact) error {
+	index, err := buildIndex(artifacts)
+	if err != nil {
+		return err
+	}
+	target, ok := index.byID[authorization.Request.Gate.ActionID]
+	if !ok {
+		return ErrActionMissing
+	}
+	if target.artifact.Hash != authorization.Request.Gate.ActionHash ||
+		target.artifact.Run != authorization.Request.Gate.RunID {
+		return ErrActionMismatch
+	}
+	if err := validateAction(target.artifact, authorization.Request.Subject); err != nil {
+		return err
+	}
+	newest := index.newestTerminal(
+		authorization.Request.Subject.Repo,
+		authorization.Request.Subject.Number,
+	)
+	if newest.artifact.ID != target.artifact.ID {
+		return ErrSuperseded
+	}
+	for _, artifact := range artifacts {
+		if artifact.Kind != state.KindExecutionClaim {
 			continue
 		}
-		fact, ok := facts[run]
-		if !ok {
+		var existing gateauthorization.ExecutionClaim
+		if err := json.Unmarshal(artifact.Body, &existing); err != nil {
+			return fmt.Errorf("authorization_claim_malformed: %w", err)
+		}
+		if existing.Gate.ActionID == target.artifact.ID ||
+			existing.AuthorizationID == authorization.AuthorizationID {
+			return ErrAlreadyClaimed
+		}
+		if existing.Subject.Repo != authorization.Request.Subject.Repo ||
+			existing.Subject.Number != authorization.Request.Subject.Number {
 			continue
 		}
-		if fact.subject.Repo == subject.Repo && fact.subject.Number == subject.Number {
+		if !hasTerminalResult(artifacts, artifact.ID) {
+			return ErrSubjectClaimPending
+		}
+	}
+	return nil
+}
+
+func validateAction(artifact state.Artifact, subject gateauthorization.Subject) error {
+	if artifact.Kind != state.KindAction {
+		return ErrActionMismatch
+	}
+	var body actionBody
+	if err := json.Unmarshal(artifact.Body, &body); err != nil {
+		return fmt.Errorf("%w: malformed action: %v", ErrActionMismatch, err)
+	}
+	want := gateauthorization.ExpectedMergeArgv(subject)
+	switch {
+	case body.Outcome != gateauthorization.OutcomeWouldMerge:
+		return ErrActionMismatch
+	case !equal(body.Argv, want):
+		return ErrActionMismatch
+	case body.Command != join(body.Argv):
+		return ErrActionMismatch
+	case len(artifact.Parents) < 2:
+		return ErrActionMismatch
+	case body.Verdict != artifact.Parents[0] || body.Grant != artifact.Parents[1]:
+		return ErrActionMismatch
+	}
+	return nil
+}
+
+func matchSubject(subject contracts.Subject, want gateauthorization.Subject) error {
+	if subject.Repo != want.Repo || subject.Number != want.Number ||
+		subject.HeadSHA != want.HeadSHA {
+		return ErrActionMismatch
+	}
+	return nil
+}
+
+func validateTime(authorization gateauthorization.Artifact, now time.Time) error {
+	now = now.UTC()
+	if now.Before(authorization.Request.IssuedAt.Add(-time.Minute)) {
+		return ErrNotYetValid
+	}
+	if !now.Before(authorization.Request.ExpiresAt) {
+		return ErrExpired
+	}
+	return nil
+}
+
+func validateLive(subject gateauthorization.Subject, live LivePullRequest) error {
+	if live.Repository != subject.Repo || live.Number != subject.Number ||
+		live.State != "open" || live.HeadSHA != subject.HeadSHA ||
+		live.BaseRef != subject.BaseRef || live.BaseSHA != subject.BaseSHA ||
+		live.MergeBaseSHA != subject.MergeBaseSHA {
+		return ErrLiveMismatch
+	}
+	if len(live.OpenPRsForHead) != 1 || live.OpenPRsForHead[0] != subject.Number {
+		return ErrHeadAmbiguous
+	}
+	return nil
+}
+
+func matchingReviews(facts ApprovalFacts) []ApprovalReview {
+	var reviews []ApprovalReview
+	for _, review := range facts.Reviews {
+		if review.WorkflowRunID != facts.WorkflowRunID ||
+			!contains(review.Environments, gateauthorization.DefaultEnvironment) {
+			continue
+		}
+		reviews = append(reviews, review)
+	}
+	sort.SliceStable(reviews, func(i, j int) bool {
+		return reviews[i].SubmittedAt.Before(reviews[j].SubmittedAt)
+	})
+	return reviews
+}
+
+func hasTerminalResult(artifacts []state.Artifact, claimID string) bool {
+	for _, artifact := range artifacts {
+		if artifact.Kind == state.KindExecutionResult && hasParent(artifact.Parents, claimID) {
 			return true
 		}
 	}
 	return false
+}
+
+func evidenceKind(kind string) bool {
+	switch kind {
+	case state.KindEvidence, state.KindVerdict, state.KindJudgment:
+		return true
+	}
+	return false
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasParent(parents []string, want string) bool {
+	return contains(parents, want)
 }
 
 func equal(left, right []string) bool {
@@ -147,112 +583,13 @@ func equal(left, right []string) bool {
 	return true
 }
 
-// PromotionFacts are the trusted workflow and live GitHub facts checked before
-// the required status may be written.
-type PromotionFacts struct {
-	Now            time.Time
-	Repository     string
-	DefaultBranch  string
-	WorkflowRef    string
-	WorkflowEvent  string
-	GitHubActions  bool
-	Environment    Environment
-	PullRequest    PullRequest
-	OpenPRsForHead []int
-	Statuses       []Status
-}
-
-// Actor is the GitHub identity attached to a commit status.
-type Actor struct {
-	Login string
-	Type  string
-}
-
-// Environment is the security projection of GitHub environment settings.
-type Environment struct {
-	Name                  string
-	AdminBypassKnown      bool
-	CanAdminsBypass       bool
-	ProtectedBranchesOnly bool
-	RequiredReviewers     int
-	PreventSelfReview     bool
-}
-
-// PullRequest is the live exact-head GitHub projection.
-type PullRequest struct {
-	Number  int
-	State   string
-	HeadSHA string
-}
-
-// Status is the replay-relevant projection of a commit status.
-type Status struct {
-	Context string
-	State   string
-	Body    string
-	Creator Actor
-}
-
-// Promotion is the status effect CheckPromotion authorized.
-type Promotion struct {
-	Duplicate   bool
-	Description string
-}
-
-// CheckPromotion refuses every input except a fresh, unambiguous exact-head
-// authorization running behind the configured protected environment.
-func CheckPromotion(artifact gateauthorization.Artifact, facts PromotionFacts) (Promotion, error) {
-	if err := gateauthorization.Validate(artifact); err != nil {
-		return Promotion{}, fmt.Errorf("authorization_malformed: %w", err)
-	}
-	environmentErr := errEnvironment(facts.Environment)
-	switch {
-	case facts.Now.Before(artifact.IssuedAt.Add(-time.Minute)):
-		return Promotion{}, errors.New("authorization_not_yet_valid")
-	case !facts.Now.Before(artifact.ExpiresAt):
-		return Promotion{}, errors.New("authorization_expired")
-	case !facts.GitHubActions || facts.WorkflowEvent != "workflow_dispatch":
-		return Promotion{}, errors.New("authorization_untrusted_runtime")
-	case facts.Repository != artifact.Subject.Repo:
-		return Promotion{}, errors.New("authorization_repo_mismatch")
-	case facts.WorkflowRef != "refs/heads/"+facts.DefaultBranch:
-		return Promotion{}, errors.New("authorization_untrusted_ref")
-	case environmentErr != nil:
-		return Promotion{}, environmentErr
-	case facts.PullRequest.Number != artifact.Subject.Number:
-		return Promotion{}, errors.New("authorization_pr_mismatch")
-	case facts.PullRequest.State != "open":
-		return Promotion{}, errors.New("authorization_pr_not_open")
-	case facts.PullRequest.HeadSHA != artifact.Subject.HeadSHA:
-		return Promotion{}, errors.New("authorization_head_mismatch")
-	case len(facts.OpenPRsForHead) != 1 || facts.OpenPRsForHead[0] != artifact.Subject.Number:
-		return Promotion{}, errors.New("authorization_head_ambiguous")
-	}
-	description := "authorized " + artifact.AuthorizationID + " run=" + artifact.Gate.RunID
-	for _, status := range facts.Statuses {
-		if status.Context == "gate" && status.State == "success" && status.Body == description &&
-			status.Creator.Login == "github-actions[bot]" && status.Creator.Type == "Bot" {
-			return Promotion{Duplicate: true, Description: description}, nil
+func join(argv []string) string {
+	var out bytes.Buffer
+	for i, arg := range argv {
+		if i > 0 {
+			out.WriteByte(' ')
 		}
+		out.WriteString(arg)
 	}
-	return Promotion{Description: description}, nil
-}
-
-func errEnvironment(environment Environment) error {
-	switch {
-	case environment.Name != gateauthorization.DefaultEnvironment:
-		return errors.New("authorization_environment_missing")
-	case !environment.AdminBypassKnown:
-		return errors.New("authorization_environment_admin_bypass_unknown")
-	case environment.CanAdminsBypass:
-		return errors.New("authorization_environment_admin_bypass_enabled")
-	case !environment.ProtectedBranchesOnly:
-		return errors.New("authorization_environment_branch_policy_weak")
-	case environment.RequiredReviewers < 1:
-		return errors.New("authorization_environment_review_missing")
-	case !environment.PreventSelfReview:
-		return errors.New("authorization_environment_self_review_enabled")
-	default:
-		return nil
-	}
+	return out.String()
 }

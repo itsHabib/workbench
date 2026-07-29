@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/gate/internal/authorization"
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
@@ -116,8 +117,8 @@ func main() {
 		err = cmdJudge(os.Args[2:])
 	case "resolve":
 		err = cmdResolve(os.Args[2:])
-	case "authorization":
-		err = cmdAuthorization(os.Args[2:])
+	case "executor":
+		err = cmdExecutor(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
 	case "next":
@@ -140,15 +141,17 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|authorization|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
-  authorization export -run run_x -out path          (export newest exact-head would_merge)
-  authorization promote -artifact path -run-url URL  (trusted workflow only; posts required gate status)
+  executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
+  executor claim   -request path -workflow-run-id N -workflow-actor-id N -out path
+  executor verify  -claim gxc_x
+  executor execute -claim gxc_x -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
@@ -191,6 +194,16 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	// the other's audit. The key stays shared (a secret can't be forged
 	// regardless); only the record is namespaced by which log it pins.
 	anchorPath := filepath.Join(keyDir, "anchor-"+stateDirTag(stateDir)+".json")
+	if hostedAnchor := os.Getenv("GATE_ANCHOR_RECORD"); hostedAnchor != "" {
+		within, err := dirWithin(hostedAnchor, stateDir)
+		if err != nil {
+			return env{}, err
+		}
+		if within {
+			return env{}, fmt.Errorf("gate: hosted anchor record %q must be outside state dir %q", hostedAnchor, stateDir)
+		}
+		anchorPath = hostedAnchor
+	}
 	st, err := state.OpenAnchored(stateDir, time.Now, anchorPath, anchorKeyPath)
 	if err != nil {
 		return env{}, err
@@ -585,6 +598,22 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// this exact commit, so it travels with the result — a caller posting an
 	// out-of-band status binds to it, never to a head captured before the run.
 	res.HeadSHA = reduced.Subject.HeadSHA
+	audit, err := e.st.Audit()
+	if err != nil {
+		return res, codeError, err
+	}
+	if !audit.OK {
+		return res, codeError, fmt.Errorf("%w: %s", errLogTampered, audit.Reason)
+	}
+	pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+	if err != nil {
+		return res, codeError, err
+	}
+	if pending {
+		res.Outcome = "capability_refused"
+		res.Why = authorization.ErrSubjectClaimPending.Error()
+		return res, codeRefused, nil
+	}
 
 	// actionHash captures the hash of the last artifact record appended, so the
 	// pass path can surface the deciding action artifact's chain hash onto the

@@ -324,36 +324,40 @@ holds even for an administrator. The named bypass above is shut on this one repo
 What it does **not** close — stated plainly, because implying otherwise is the
 failure this document exists to correct:
 
-- **Token custody stays open.** Every local agent still shares one
+- **Token custody is not yet armed.** Every local agent still shares one
   merge-capable `gh` credential; there is still no distinct merge-only CI
-  identity, and no scoping that stops a governed agent from *attempting* a
+  identity in live GitHub configuration, and no scoping that stops a governed agent from *attempting* a
   direct merge. Branch protection with admin bypass disallowed still *rejects*
   such a merge for lacking the green `gate` check — so the perimeter holds on
-  the canary — but the custody separation the intended model calls for is not
-  built. It remains a `-live` precondition.
-- **Mint authentication stays open.** `gate grant` is unauthenticated and
+  the canary. The dormant executor code adds process custody, but it is not a
+  real boundary until the operator completes App/ruleset bootstrap and canary.
+- **Mint authentication is not yet armed.** Local `gate grant` is unauthenticated and
   `MintedBy` is a free-form, unverified label (see above). The CI check mints
   its own throwaway grant, so this does not weaken the check — but it does not
-  add mint authentication either.
+  add mint authentication either. The protected executor's exact-subject mint
+  path remains dormant.
 - **`-live` merge execution stays open.** The gate's sanctioned merge is still
   a dry run: `-live` records `merge_not_implemented`, unchanged by this work.
-  The check evaluates `would_merge`, not an executed merge.
+  The separate App executor is the only planned live seam and is not armed.
 
-### Provider-neutral judgment promotion
+### Provider-neutral judgment executor (dormant)
 
-The hosted evaluator still cannot consume a local provider-neutral judgment
-directly. The trusted bridge in
-`docs/features/trusted-gate-judgment-bridge/design.md` closes that seam with a
-versioned `GateAuthorizationV1` artifact and a separate default-branch workflow.
-That workflow posts the same app-pinned `gate` context only after an independent
-required reviewer approves the protected `gate-authorization` environment.
+The commit-status promotion prototype was rejected: commit status is SHA-scoped
+and cannot safely carry Gate's PR-specific authority. The replacement in
+`docs/features/trusted-gate-judgment-bridge/design.md` is a dedicated Gate App
+executor behind a run-specific independent environment approval.
 
-The environment approval—not the unsigned JSON—is the trust root. The workflow
-fails closed unless environment self-review and admin bypass are disabled,
-deployments are restricted to protected branches, the posted status resolves
-to `github-actions[bot]`, and the PR is still the artifact's sole open
-exact-head subject. The merge command remains local Gate's exact stored argv
-and is never executed by the promotion workflow.
+The boundary verifies the exact PR/head/base/action/evidence request, appends a
+permanent one-time claim to anchored hosted state, re-fetches and audits that
+claim, then lets Gate itself exchange the App key for a short-lived token and
+execute only the stored `gh pr merge ... --match-head-commit ...` argv.
+It posts no reusable success status, never adds `--admin`, and permanently
+consumes failures.
+
+This path is repository code only and is not armed. App registration, protected
+environment/secrets, `gate-state`, layered rulesets, bootstrap, and live canary
+are operator actions documented in
+`docs/features/trusted-gate-judgment-bridge/operator-runbook.md`.
 
 Three CI-context choices worth naming, since they shape what the check does and
 does not assert:

@@ -22,14 +22,15 @@ protection makes a merge to `main` require the green check, closing the
 direct-merge bypass on the repo that arms it — see the runbook in
 [docs/enforcement.md](docs/enforcement.md). The workflow first shipped —
 dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
-move it ships here, so the armable canary is itsHabib/workbench. The merge
-itself stays dry-run advisory (`-live` is unbuilt) and token custody stays
-open.
+move it ships here, so the armable canary is itsHabib/workbench. Ordinary
+`gate -live` stays unbuilt. A separate, dormant App executor now exists for one
+durable PR claim; custody remains unarmed until operator bootstrap and canary.
 
-Provider-neutral exact-head passes can be exported with
-`gate authorization export -run run_... -out gate-authorization.json`. The
-trusted default-branch promotion workflow consumes that versioned artifact
-behind the protected `gate-authorization` environment; see
+Provider-neutral exact-head passes can be presented for independent approval
+with `gate executor request`. The dormant default-branch executor verifies its
+own protected-environment approval history, permanently claims one exact action,
+and lets a dedicated GitHub App execute only Gate's stored
+`--match-head-commit` argv. It does not promote commit status. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
 ## Run it
@@ -44,6 +45,7 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
+./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176

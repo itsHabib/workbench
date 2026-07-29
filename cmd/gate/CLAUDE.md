@@ -69,6 +69,12 @@ Constraints that are design decisions, not omissions:
   artifact the reviewer remains incomplete and Gate parks for provider-neutral
   judgment. The narrow authenticated Codex reviewed-commit sentinel is the
   existing structured exception.
-- **State and keys live outside the repo.** The migration was code-only: a
-  running gate's `-state` and `-key` dirs are operational data on the
-  operator's machine, never files in this tree.
+- **State and keys live outside the source tree.** A running gate's `-state`
+  and `-key` dirs are operational data, never files in this source tree. The
+  dormant hosted executor transports only state plus its keyed anchor record
+  on `gate-state`; signing keys remain protected-environment secrets.
+- **Execution authority is a durable PR claim, not status.** The protected
+  executor verifies run-specific independent approval, exact
+  repo/PR/head/base, newest action, and unchanged `--match-head-commit` argv,
+  then appends one permanent claim before App credential release. It never
+  posts reusable green status or adds `--admin`.

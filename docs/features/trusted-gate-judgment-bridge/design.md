@@ -1,223 +1,169 @@
 # Trusted Gate judgment bridge
 
-Status: blocked — exact-head adversarial review rejected the status authority
+Status: authorized design; repository implementation dormant pending review and
+operator bootstrap.
 
-## Exact-head adversarial verdict
+The operator authorized this trust model at design head
+`745d2bc405e07fd202c2379320afdc1745e46cc5`. That authorization covers repository
+code, tests, and documentation only. App registration, secrets, environment
+configuration, ruleset changes, grant minting, state bootstrap, live execution,
+and merge remain operator-only.
 
-PR #169 reached green CI at
-`16179ef0c31c2de548fb7657e0bd47519313d690`, but the required fresh review
-blocked the design on three P1 findings:
+## Decision
 
-- current environment settings do not prove this run received an independent
-  approval;
-- export-time newest-terminal validation does not revoke an artifact after a
-  newer local Gate block or park; and
-- a GitHub commit status is SHA-scoped and can transfer to another PR sharing
-  that SHA, while Gate's decision and merge argv are PR-scoped.
+Gate uses a PR-specific custodied executor, not commit-status promotion.
+Provider-neutral judgment may authorize exactly one Gate action for exactly one
+pull request. It does not create reusable green status.
 
-The first two findings need a run-bound approval receipt and a trusted
-consumption-time freshness mechanism. They are insufficient on their own:
-the third finding means the commit status cannot honestly be the final carrier
-of PR-specific authority. The implementation below is retained for review
-evidence but must not be merged or armed.
+The trust root is the conjunction of:
 
-## Required replacement decision
+1. one run-specific approval from a protected `gate-authorization` GitHub
+   Environment, made by an immutable actor ID different from the workflow
+   dispatcher/re-run actor; and
+2. one repository-only Gate GitHub App whose private key is released only to
+   the custodied executor action after a permanent claim is durable.
 
-The recommended replacement joins the unfinished Gate App-mint track with a
-narrow PR-specific execute boundary:
+Neither side is sufficient alone. An unsigned request, login allowlist, ambient
+operator token, inherited commit status, App token without a claim, or claim
+without a protected approval authorizes nothing.
 
-1. A protected workflow running trusted default-branch code verifies its own
-   GitHub approval history and an independent approving actor. The approval
-   comment binds the repository, PR, head, protected base ref, evaluated base
-   SHA/merge-base, canonical Gate evidence digest, and exact judgment question.
-2. The approved job mints a short-lived, head-bound Gate grant under the
-   authenticated App-mint contract, then re-evaluates the exact PR/head with
-   Gate at consumption time. Clean/pass, escalate, and block use the existing
-   `contracts.Verdict` and `ReviewPanelV1` evidence; `ReviewFindingsV1` remains
-   address-work-only and is never fabricated for a clean review. A Gate-owned
-   judge adapter binds the canonical evidence digest to the verified approval
-   receipt; workflow prose never fabricates a verdict.
-3. Gate appends the judgment and action to its anchored hosted state. Under the
-   same per-repository serialization boundary it re-audits, requires the action
-   to remain the newest terminal for the PR, and atomically appends a one-time
-   `GateExecutionClaimV1`. Claimed actions can never be retried; failure requires
-   a fresh Gate run. This append uses the workflow's separate state-writer
-   token before any Gate App credential exists; a branch ruleset permits
-   `github-actions[bot]` to update only `gate-state`, never `main`. A
-   non-force compare-and-swap ref update must succeed, then a fresh fetch and
-   anchored audit must prove the durable claim before credential release.
-4. Only the claimed `would_merge` reaches the custodied executor process. That
-   process alone receives the App private key, exchanges it internally for a
-   short-lived installation token, and never returns, prints, persists, or
-   exports the token to the workflow.
-5. The executor executes the exact argv stored by the claimed action, including
-   `--match-head-commit`; it never reconstructs flags, broadens the command,
-   adds `--admin`, or mints an operator grant.
-6. Layered branch rules make the identities mutually exclusive:
-   - `main`: Restrict updates; the Gate App is the sole `Integration` with
-     `bypass_mode=pull_request`;
-   - `gate-state`: Restrict updates; `github-actions[bot]` is the sole writer;
-   - every other base-repository branch: repository human roles and explicitly
-     approved existing integrations may update, but the Gate App may not; and
-   - a separate `main` ruleset retains the app-pinned required `gate` check and
-     grants the same Gate App—and no other actor—PR-only bypass.
-   A second PR may inherit a commit status, but ordinary users cannot update
-   `main` and the Gate App accepts only its one claimed PR. Retargeting the
-   claimed PR away from `main` also fails structurally because the Gate App has
-   no update authority on any other branch.
-7. The run appends the approval receipt, decision, claim, token identity,
-   unchanged command, and GitHub merge result to the auditable Gate state
-   channel.
+## Versioned artifacts
 
-This makes the App useful policy-bearing custody rather than a thin wrapper:
-the invariant is one approved Gate action to one exact PR merge, with no
-reusable commit-scoped green acting as sufficient authority. Repository-wide
-executor serialization plus sole-App `main` updates keep the approved base SHA
-stable from claim through merge; any unexpected base movement or retarget
-refuses. Before arming, a disposable canary must prove the exact Gate argv
-succeeds under the App installation token without `--admin`, ambient-user merge
-fails even with green checks, the state writer cannot update `main`, and the
-Gate App cannot update a non-`main` branch. The canary must also start with
-`gate` red to prove the App's PR-only exception closes the provider-neutral
-deadlock while ordinary actors remain blocked. Otherwise this architecture is
-rejected. It is a material security and branch-rule choice, so implementation
-waits for explicit operator authority.
+Shared vocabulary lives in `contracts/gateauthorization`:
 
-## Rejected status-promotion prototype
+- `GateAuthorizationRequestV1` — exact repository, PR, head, protected base
+  ref, evaluated base SHA, merge-base SHA, Gate run/action ID and hash,
+  `would_merge`, exact argv, canonical evidence digest, judgment question,
+  issue/expiry bounds, replay ID, and trust-root name.
+- `GateAuthorizationV1` — the request plus the verified workflow-run approval
+  receipt. The receipt records immutable actor login/ID, approval state/time,
+  exact comment, run ID, and semantic digest.
+- `GateExecutionClaimV1` — the complete authorization plus action, exact argv,
+  exact-subject grant ID, approval digest, claim/expiry times, and stable
+  one-time execution identity.
+- `GateExecutionResultV1` — one terminal `merged` or `failed` record with no
+  credential or command output.
 
-The remaining sections describe the implementation rejected by the adversarial
-review. They are retained only as evidence of what was tried and why it must not
-be armed.
+Schemas:
 
-### Decision
+- `contracts/gateauthorization/schema/gate-authorization-request-v1.json`
+- `contracts/gateauthorization/schema/gate-authorization-v1.json`
+- `contracts/gateauthorization/schema/gate-execution-claim-v1.json`
+- `contracts/gateauthorization/schema/gate-execution-result-v1.json`
 
-The bridge uses a protected GitHub Environment named `gate-authorization` as
-its trust root. `GateAuthorizationV1` is intentionally unsigned: the
-environment's independent deployment approval authenticates the promotion.
-Calling the JSON "signed" would be false because every local agent on this box
-can read ordinary user files.
+Authorization, claim, and execution IDs are hashes of canonical semantic
+content. Retrying a delivery cannot mint a new identity.
 
-The environment is acceptable only with all of these settings:
+`contracts.Verdict` and `ReviewPanelV1` remain the clean/pass, escalation, and
+block evidence. `ReviewFindingsV1` remains address-work-only; a clean review
+never fabricates an empty findings artifact.
 
-- at least one required reviewer whose identity is not available through the
-  governed task's ambient GitHub credential;
-- prevent self-review enabled;
-- administrator bypass disabled;
-- deployment restricted to protected branches.
+## Flow
 
-The trusted job verifies those settings through GitHub's environment API before
-it writes a status. It also requires a GitHub Actions token identity, the
-default-branch workflow ref, a live open PR at the artifact's exact head, and
-exactly one open PR backed by that head. If the only possible approver is the
-same `itsHabib` identity available to the task, this design is not armed and
-must not be represented as secure.
+1. `gate executor request` audits an existing newest `would_merge` action,
+   byte-checks its stored argv, re-reads the live PR, and emits the request plus
+   exact approval comment.
+2. The operator dispatches `.github/workflows/gate-executor.yml` from the
+   default branch with those two values. The static protected environment holds
+   the job.
+3. After approval, Gate reads the workflow-run and approval-history APIs. It
+   binds the run to this repository, `workflow_dispatch`, and the trusted
+   executor workflow path; takes both initial and re-run actor identities from
+   their immutable API IDs; and requires the newest decision for
+   `gate-authorization` to be `approved` by a different actor, with the exact
+   canonical comment.
+4. Only then does the protected job mint a short-lived HMAC grant bound to the
+   authorization ID, PR number, and full head SHA. The agent never invokes this
+   path.
+5. Gate re-reads exact repo/PR/head/base/merge-base facts, re-audits anchored
+   state, requires the action to remain the newest terminal for the PR, and
+   appends one permanent execution claim under the same state lock. Any existing
+   claim for the action or authorization refuses. An open claim also blocks
+   later Gate outcome writes for that PR.
+6. GitHub Actions commits the claim and keyed anchor record to `gate-state` and
+   uses a normal non-force push. The expected remote tip must match before the
+   push and the published tip must match after it.
+7. A fresh `gate-state` checkout re-audits the keyed chain and live PR facts.
+   Only a durable, unconsumed, unexpired, still-newest claim proceeds.
+8. A local Docker action starts Gate as its entrypoint. The App private key is
+   an action input; Gate internally creates the App JWT, requests a
+   contents-write installation token, and passes that token only to the direct
+   `gh` child. The workflow never receives the installation token.
+9. Gate executes the stored ten-element argv unchanged. It requires
+   `gh pr merge`, squash, delete-branch, and the exact
+   `--match-head-commit`; `--admin` is structurally rejected.
+10. Gate appends one secret-free terminal result. Failure consumes the claim
+    permanently; recovery requires a fresh Gate action and approval.
 
-This was the smallest attempted bridge. The exact-head review demonstrated that
-it is not an honest final enforcement boundary. The unfinished GitHub App mint
-design in PR #143 must be revised if the operator chooses the replacement above;
-its existing non-goal for execution is no longer tenable.
+The workflow builds and runs only default-branch source. It never checks out PR
+or fork code and has no status-write permission.
 
-### No-split argument
+## State and branch identities
 
-This change exceeds the normal 700 weighted-LOC target because the contract,
-Gate exporter, trusted consumer, workflow shape, and adversarial refusal tests
-form one authority boundary. Splitting before the consumer leaves an
-unconsumed artifact; splitting before the producer leaves a workflow accepting
-hand-authored input without the local newest-terminal proof. Either split also
-creates a second PR trapped behind the same bootstrap deadlock. The added bulk
-is schema/DTO plumbing and negative tests rather than another capability or
-framework, so one focused T3 review is the smaller risk.
+`GATE_ANCHOR_RECORD` allows the keyed anchor record to live beside the hosted
+state tree while both signing keys remain outside it. A fresh runner must have:
 
-### Artifact
+- `gate-state/state/log.jsonl`
+- `gate-state/anchor.json`
+- protected `grant.key` and `anchor.key` restored outside that tree
 
-The shared leaf contract is:
+The workflow's built-in token is the state writer. It has no status permission
+or branch bypass. Its coarse `contents:write` permission is constrained by the
+staged rules so it can update `gate-state`, not `main`.
 
-- Go: `contracts/gateauthorization`
-- schema: `contracts/gateauthorization/schema/gate-authorization-v1.json`
-- schema major: `1`
+The staged, non-effectful policy is
+`docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`. Its validator
+pins four layers:
 
-It binds repository, PR, 40-character lowercase head SHA, Gate run, deciding
-action ID and hash, `would_merge`, Gate's exact stored merge argv, issuance,
-expiry, natural replay ID, and the protected-environment trust-root name.
-`authorization_id` is `gau_<action-hash>`, so repeated export of one Gate
-decision has one identity.
+- `main-updates`: Gate App is the sole Integration with PR-only bypass;
+- `gate-state-updates`: `github-actions[bot]` is the sole non-force writer;
+- `other-branches`: repository roles and approved existing integrations, never
+  the Gate App; and
+- `main-required-gate`: retain the app-pinned `gate` check, with only the same
+  Gate App receiving PR-only bypass.
 
-Gate's action body now stores both its display command and the original argv
-array. Export copies that array from the audited state snapshot and refuses if
-it differs from the action's command or the exact commit-pinned squash shape.
-It never reconstructs a different command for execution, never mints a grant,
-and never merges.
+Consequences:
 
-### Flow
+- a second PR sharing the head cannot inherit execution authority;
+- ambient users and Actions cannot update `main`, even if a status is green;
+- the Gate App cannot merge a retargeted PR to a non-`main` branch; and
+- the Gate App can close the existing red-check deadlock only for its exact
+  claimed PR.
 
-After a fresh exact-head Gate pass:
+## Refusal semantics
 
-```powershell
-gate authorization export `
-  -run run_... `
-  -state "$HOME/pers/gate/state" `
-  -out gate-authorization.json
+All of these refuse before App token creation:
 
-gh workflow run gate-authorization.yml `
-  -R itsHabib/workbench `
-  --ref main `
-  -F authorization=@gate-authorization.json
-```
+- malformed/unknown major, noncanonical repo, bad IDs/SHA/times, unsupported
+  outcome, changed method/flags/order, or `--admin`;
+- missing, stale, rejected, self-authored, wrong-run, wrong-environment, or
+  wrong-comment approval;
+- expired/not-yet-valid request or malformed exact-subject grant;
+- closed/moved/shared-head PR, non-default target, base retarget, base movement,
+  or merge-base mismatch;
+- action absent, hash/run/argv mismatch, older action superseded by any newer
+  action/park, duplicate claim, open claim, or durable-state audit failure; and
+- state publish/refetch mismatch.
 
-The dispatch creates a deployment waiting on the `gate-authorization`
-environment. An independent required reviewer inspects the run parameters and
-approves or rejects it. After approval, the workflow builds Gate from `main`,
-passes the artifact to `gate authorization promote`, and posts the existing
-required `gate` context only when every check passes. The merge remains the
-exact command emitted by the original Gate run; the workflow never executes it.
+Token exchange, command, confirmation, or terminal-state write failure never
+creates reusable success. Once a claim lands it is never retried.
 
-### Refusal matrix
+## Dormant bootstrap boundary
 
-| Condition | Result |
-|---|---|
-| Valid, current, approved exact-head artifact | one app-authored `gate=success` |
-| Unknown major, malformed JSON, bad IDs/times/trust root | fail job; post nothing |
-| Expired or not-yet-valid artifact | fail job; post nothing |
-| Closed PR, moved head, wrong repo/PR | fail job; post nothing |
-| Zero or multiple open PRs on the head | fail job; post nothing |
-| Superseded local Gate terminal at export | refuse export |
-| Missing/weak environment protection | fail job; post nothing |
-| Status not created by `github-actions[bot]` | fail job; branch protection's app pin rejects it |
-| Changed flags, method, ordering, or head argv | refuse; post nothing |
-| Same authorization already consumed | `authorization_duplicate`; post nothing |
-| GitHub read/write or transport failure | fail job; post nothing |
+Repository presence is intentionally insufficient to run this path. The
+workflow references App/environment/key values that do not exist until the
+operator follows `operator-runbook.md`. The implementation does not register an
+App, create or populate secrets, configure the environment, apply rulesets,
+initialize `gate-state`, mint a grant, bootstrap itself, or merge.
 
-Invalid deliveries deliberately do not overwrite an existing valid status.
-They cannot create authority, and allowing arbitrary dispatchers to turn a
-valid head red would add an unnecessary denial-of-service rail. A new PR head
-has no inherited exact-head success; normal CI/Gate re-evaluation also
-invalidates prior status as documented in `cmd/gate/docs/enforcement.md`.
+The required live canary begins with `gate` red and must prove:
 
-### Trusted workflow shape
+- exact stored argv succeeds as the Gate App without `--admin`;
+- ambient-user and Actions updates to `main` refuse;
+- Gate App update to a non-`main` branch refuses;
+- shared-head, retarget, stale, malformed, duplicate, and replay cases create no
+  App token or merge; and
+- claim/result, GitHub actor, argv, PR head/base, and merge commit agree.
 
-`.github/workflows/gate-authorization.yml`:
-
-- has only `workflow_dispatch`;
-- binds the job to the static `gate-authorization` environment;
-- runs only when the workflow ref is the repository default branch;
-- restricts environment deployments to protected branches;
-- checks out the default branch explicitly with persisted credentials disabled;
-- never checks out or executes PR/fork code;
-- grants only `actions: read`, `contents: read`, `pull-requests: read`, and
-  `statuses: write`;
-- serializes all promotions for the repository, so untrusted fields cannot
-  select a separate replay-concurrency group.
-
-### Bootstrap and rollback
-
-The bridge cannot authorize its own first merge: the trusted workflow is not on
-`main`, while branch protection already requires the app-pinned `gate` context.
-The implementation PR therefore stops after local/full CI, exact-head review,
-and provider-neutral T3 Gate judgment. The operator must choose a one-time
-bootstrap path; the agent does not use `--admin`, alter branch protection, or
-invoke a prohibited reviewer.
-
-After the PR is on `main`, configure the environment before dispatching an
-artifact. Rollback is to reject/cancel pending deployments and revert the
-bridge through a normal gated PR. The required `gate` context, admin
-enforcement, and direct-push protection remain unchanged.
+Until that proof passes, this is reviewed dormant code, not an armed security
+boundary.

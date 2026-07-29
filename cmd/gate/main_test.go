@@ -177,7 +177,9 @@ func TestActPersistsExactMergeArgv(t *testing.T) {
 	if err := json.Unmarshal(artifacts[len(artifacts)-1].Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	want := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject(subject))
+	want := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject{
+		Repo: subject.Repo, Number: subject.Number, HeadSHA: subject.HeadSHA,
+	})
 	if strings.Join(body.Argv, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv=%q want=%q", body.Argv, want)
 	}
@@ -679,6 +681,29 @@ func TestStateDirTagDistinguishesDirs(t *testing.T) {
 	}
 	if a == "" || b == "" {
 		t.Fatal("empty anchor tag")
+	}
+}
+
+func TestHostedAnchorRecordIsPortableAndOutsideState(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "gate-state", "state")
+	keyDir := filepath.Join(root, "keys")
+	anchorPath := filepath.Join(root, "gate-state", "anchor.json")
+	t.Setenv("GATE_ANCHOR_RECORD", anchorPath)
+	e, err := newEnv(stateDir, "triage-floor", keyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Append(state.KindEvidence, "run_test", nil, map[string]string{"evidence": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(anchorPath); err != nil {
+		t.Fatalf("hosted anchor was not written at stable path: %v", err)
+	}
+
+	t.Setenv("GATE_ANCHOR_RECORD", filepath.Join(stateDir, "anchor.json"))
+	if _, err := newEnv(stateDir, "triage-floor", keyDir); err == nil {
+		t.Fatal("anchor record inside state dir must refuse")
 	}
 }
 

@@ -212,23 +212,35 @@ jobs:
             exit 1
           fi
           echo "gate review retriggers are base-workflow bot events ✓"
-      - name: gate authorization promotion stays environment-protected
+      - name: gate executor stays protected, exact, and process-custodied
         run: |
-          workflow=.github/workflows/gate-authorization.yml
+          workflow=.github/workflows/gate-executor.yml
+          action=.github/actions/gate-executor/action.yml
+          dockerfile=.github/actions/gate-executor/Dockerfile
           grep -F '  workflow_dispatch:' "$workflow"
           grep -F '    environment: gate-authorization' "$workflow"
-          grep -F '    if: github.ref_name == github.event.repository.default_branch' "$workflow"
-          grep -F '      group: gate-authorization-' "$workflow"
-          grep -F '      statuses: write' "$workflow" || grep -F '  statuses: write' "$workflow"
+          grep -F "    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" "$workflow"
+          grep -F '  group: gate-executor-' "$workflow"
+          grep -F '  contents: write' "$workflow"
           grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
           grep -F '          persist-credentials: false' "$workflow"
-          grep -F './gate authorization promote' "$workflow"
+          grep -F './gate executor claim' "$workflow"
+          grep -F './gate executor verify' "$workflow"
+          grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
+          grep -F 'ENTRYPOINT ["/usr/local/bin/gate"]' "$dockerfile"
+          grep -F -- '--match-head-commit' cmd/gate/internal/executor/executor.go
+          grep -F 'executor execute' "$action"
+          grep -F 'push origin "HEAD:refs/heads/${STATE_BRANCH}"' "$workflow"
           if grep -Eq '^  (pull_request|pull_request_target|repository_dispatch):' "$workflow"; then
-            echo "authorization promotion must be workflow_dispatch-only" >&2
+            echo "gate executor must be workflow_dispatch-only" >&2
             exit 1
           fi
           if grep -Fq 'github.event.pull_request.head' "$workflow"; then
-            echo "authorization promotion must never check out PR code" >&2
+            echo "gate executor must never check out PR code" >&2
             exit 1
           fi
-          echo "gate authorization promotion is trusted-base and environment-protected ✓"
+          if grep -Eq '(statuses: write|--admin|--force)' "$workflow" "$action"; then
+            echo "gate executor must not publish status authority, use admin, or force refs" >&2
+            exit 1
+          fi
+          echo "gate executor is trusted-base, environment-protected, and process-custodied ✓"

@@ -3,53 +3,27 @@
   "$id": "https://github.com/itsHabib/workbench/contracts/gateauthorization/schema/gate-authorization-v1.json",
   "title": "GateAuthorizationV1",
   "type": "object",
-  "required": [
-    "schema_version",
-    "authorization_id",
-    "subject",
-    "gate",
-    "outcome",
-    "merge_argv",
-    "issued_at",
-    "expires_at",
-    "trust_root"
-  ],
+  "required": ["schema_version", "authorization_id", "request", "receipt"],
   "properties": {
     "schema_version": { "const": 1 },
     "authorization_id": { "type": "string", "pattern": "^gau_[0-9a-f]{64}$" },
-    "subject": {
-      "type": "object",
-      "required": ["repo", "number", "head_sha"],
-      "properties": {
-        "repo": { "type": "string", "minLength": 3 },
-        "number": { "type": "integer", "minimum": 1 },
-        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
-      }
+    "request": {
+      "$ref": "gate-authorization-request-v1.json#/$defs/request"
     },
-    "gate": {
+    "receipt": {
       "type": "object",
-      "required": ["run_id", "action_id", "action_hash"],
+      "required": [
+        "workflow_run_id", "actor_login", "actor_id", "state", "submitted_at",
+        "comment", "receipt_digest"
+      ],
       "properties": {
-        "run_id": { "type": "string", "pattern": "^run_[0-9a-f]{16}$" },
-        "action_id": { "type": "string", "pattern": "^act_[0-9a-f]{16}$" },
-        "action_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
-      }
-    },
-    "outcome": { "const": "would_merge" },
-    "merge_argv": {
-      "type": "array",
-      "minItems": 10,
-      "maxItems": 10,
-      "items": { "type": "string" }
-    },
-    "issued_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": "string", "format": "date-time" },
-    "trust_root": {
-      "type": "object",
-      "required": ["kind", "environment"],
-      "properties": {
-        "kind": { "const": "github_environment" },
-        "environment": { "const": "gate-authorization" }
+        "workflow_run_id": { "type": "integer", "minimum": 1 },
+        "actor_login": { "type": "string", "minLength": 1, "maxLength": 39 },
+        "actor_id": { "type": "integer", "minimum": 1 },
+        "state": { "const": "approved" },
+        "submitted_at": { "type": "string", "format": "date-time" },
+        "comment": { "type": "string", "minLength": 1 },
+        "receipt_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
       }
     }
   }

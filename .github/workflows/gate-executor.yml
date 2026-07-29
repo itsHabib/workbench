@@ -1,0 +1,192 @@
+name: gate executor
+
+# Dormant until the operator registers the dedicated App, creates the protected
+# environment and secrets, initializes gate-state, and applies the reviewed
+# layered rulesets. This workflow never checks out or executes PR/fork code.
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Complete GateAuthorizationRequestV1 JSON from gate executor request
+        required: true
+        type: string
+      approval_comment:
+        description: Exact comment the independent environment approver must submit
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  # This token is the gate-state writer. The staged branch rules deny this
+  # identity updates to main; it has no status permission and no bypass.
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: gate-executor-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: gate-authorization
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUEST_DOCUMENT: ${{ inputs.request }}
+      EXPECTED_APPROVAL_COMMENT: ${{ inputs.approval_comment }}
+      STATE_BRANCH: gate-state
+      STATE_DIR: hosted-state/state
+      ANCHOR_RECORD: hosted-state/anchor.json
+      KEY_DIR: .gate-executor-keys
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Checkout hosted Gate state
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: gate-state
+          path: hosted-state
+          token: ${{ github.token }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build trusted Gate
+        run: go build -trimpath -o gate ./cmd/gate
+
+      - name: Provision anchored-state keys
+        env:
+          GRANT_KEY_B64: ${{ secrets.GATE_GRANT_KEY_B64 }}
+          ANCHOR_KEY_B64: ${{ secrets.GATE_ANCHOR_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${KEY_DIR}"
+          printf '%s' "${GRANT_KEY_B64}" | base64 --decode >"${KEY_DIR}/grant.key"
+          printf '%s' "${ANCHOR_KEY_B64}" | base64 --decode >"${KEY_DIR}/anchor.key"
+          test "$(wc -c <"${KEY_DIR}/grant.key")" -ge 32
+          test "$(wc -c <"${KEY_DIR}/anchor.key")" -ge 32
+          chmod 600 "${KEY_DIR}/grant.key" "${KEY_DIR}/anchor.key"
+
+      - name: Verify approval, mint exact grant, and claim action
+        id: claim
+        env:
+          GATE_ANCHOR_RECORD: ${{ github.workspace }}/hosted-state/anchor.json
+        run: |
+          set -euo pipefail
+          request="${RUNNER_TEMP}/gate-authorization-request.json"
+          claim="${RUNNER_TEMP}/gate-execution-claim.json"
+          printf '%s' "${REQUEST_DOCUMENT}" >"${request}"
+          authorization_id="$(jq -r '.authorization_id' "${request}")"
+          evidence_digest="$(jq -r '.request.evidence_digest' "${request}")"
+          question_digest="$(jq -j '.request.judgment_question' "${request}" | sha256sum | cut -d' ' -f1)"
+          canonical_comment="gate approve ${authorization_id} evidence=${evidence_digest} question=sha256:${question_digest}"
+          test "${EXPECTED_APPROVAL_COMMENT}" = "${canonical_comment}"
+          ./gate executor claim \
+            -request "${request}" \
+            -workflow-run-id "${GITHUB_RUN_ID}" \
+            -workflow-actor-id "${{ github.actor_id }}" \
+            -workflow-triggering-actor "${{ github.triggering_actor }}" \
+            -state "${STATE_DIR}" \
+            -key "${KEY_DIR}" \
+            -out "${claim}" | tee "${RUNNER_TEMP}/claim-result.json"
+          echo "claim_id=$(jq -r '.claim_id' "${RUNNER_TEMP}/claim-result.json")" >>"${GITHUB_OUTPUT}"
+          echo "execution_id=$(jq -r '.execution_id' "${RUNNER_TEMP}/claim-result.json")" >>"${GITHUB_OUTPUT}"
+
+      - name: Publish claim to gate-state with non-force CAS
+        env:
+          STATE_TOKEN: ${{ github.token }}
+        working-directory: hosted-state
+        run: |
+          set -euo pipefail
+          expected_tip="$(git rev-parse HEAD)"
+          remote_tip="$(git ls-remote origin "refs/heads/${STATE_BRANCH}" | cut -f1)"
+          test "${remote_tip}" = "${expected_tip}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state anchor.json
+          git commit -m "gate: claim ${{ steps.claim.outputs.claim_id }}"
+          claimed_tip="$(git rev-parse HEAD)"
+          auth="$(printf 'x-access-token:%s' "${STATE_TOKEN}" | base64 -w0)"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:refs/heads/${STATE_BRANCH}"
+          published="$(git ls-remote origin "refs/heads/${STATE_BRANCH}" | cut -f1)"
+          test "${published}" = "${claimed_tip}"
+
+      - name: Fresh fetch durable claimed state
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: gate-state
+          path: durable-state
+          token: ${{ github.token }}
+          persist-credentials: false
+
+      - name: Re-audit durable claim before App custody
+        env:
+          GATE_ANCHOR_RECORD: ${{ github.workspace }}/durable-state/anchor.json
+        run: |
+          set -euo pipefail
+          ./gate executor verify \
+            -claim "${{ steps.claim.outputs.claim_id }}" \
+            -state durable-state/state \
+            -key "${KEY_DIR}" | tee "${RUNNER_TEMP}/durable-claim.json"
+
+      - name: Build custodied executor action
+        run: |
+          set -euo pipefail
+          cp ./gate .github/actions/gate-executor/gate
+
+      - name: Execute only the claimed Gate argv
+        uses: ./.github/actions/gate-executor
+        env:
+          GATE_ANCHOR_RECORD: /github/workspace/durable-state/anchor.json
+        with:
+          claim: ${{ steps.claim.outputs.claim_id }}
+          app-id: ${{ vars.GATE_APP_ID }}
+          installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
+          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+          github-read-token: ${{ github.token }}
+          state-dir: durable-state/state
+          key-dir: .gate-executor-keys
+          api-url: ${{ github.api_url }}
+
+      - name: Publish terminal execution result
+        if: always()
+        env:
+          STATE_TOKEN: ${{ github.token }}
+        working-directory: durable-state
+        run: |
+          set -euo pipefail
+          expected_tip="$(git rev-parse HEAD)"
+          remote_tip="$(git ls-remote origin "refs/heads/${STATE_BRANCH}" | cut -f1)"
+          test "${remote_tip}" = "${expected_tip}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state anchor.json
+          git diff --cached --quiet && exit 0
+          git commit -m "gate: result ${{ steps.claim.outputs.execution_id }}"
+          result_tip="$(git rev-parse HEAD)"
+          auth="$(printf 'x-access-token:%s' "${STATE_TOKEN}" | base64 -w0)"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:refs/heads/${STATE_BRANCH}"
+          published="$(git ls-remote origin "refs/heads/${STATE_BRANCH}" | cut -f1)"
+          test "${published}" = "${result_tip}"
+
+      - name: Execution summary
+        if: always()
+        run: |
+          {
+            echo "## Gate executor"
+            echo "- claim: \`${{ steps.claim.outputs.claim_id }}\`"
+            echo "- execution: \`${{ steps.claim.outputs.execution_id }}\`"
+            echo "- state branch: \`${STATE_BRANCH}\`"
+            echo "- App token was process-custodied and was not emitted."
+          } >>"${GITHUB_STEP_SUMMARY}"
