@@ -59,8 +59,8 @@ narrow PR-specific execute boundary:
    - `gate-state`: Restrict updates; `github-actions[bot]` is the sole writer;
    - every other base-repository branch: repository human roles and explicitly
      approved existing integrations may update, but the Gate App may not; and
-   - a separate no-bypass `main` ruleset retains the app-pinned required
-     `gate` check.
+   - a separate `main` ruleset retains the app-pinned required `gate` check and
+     grants the same Gate App—and no other actor—PR-only bypass.
    A second PR may inherit a commit status, but ordinary users cannot update
    `main` and the Gate App accepts only its one claimed PR. Retargeting the
    claimed PR away from `main` also fails structurally because the Gate App has
@@ -77,7 +77,9 @@ stable from claim through merge; any unexpected base movement or retarget
 refuses. Before arming, a disposable canary must prove the exact Gate argv
 succeeds under the App installation token without `--admin`, ambient-user merge
 fails even with green checks, the state writer cannot update `main`, and the
-Gate App cannot update a non-`main` branch. Otherwise this architecture is
+Gate App cannot update a non-`main` branch. The canary must also start with
+`gate` red to prove the App's PR-only exception closes the provider-neutral
+deadlock while ordinary actors remain blocked. Otherwise this architecture is
 rejected. It is a material security and branch-rule choice, so implementation
 waits for explicit operator authority.
 

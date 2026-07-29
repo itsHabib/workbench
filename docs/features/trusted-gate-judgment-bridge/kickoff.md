@@ -323,7 +323,8 @@ Layered rules are load-bearing:
 - `gate-state` Restrict updates: only `github-actions[bot]`;
 - all other base-repository branches: normal human roles and explicitly
   approved existing integrations, but never the Gate App;
-- `main` required `gate` check: separate rule with no bypass actor.
+- `main` required `gate` check: separate rule with the same Gate App as its sole
+  PR-only bypass actor.
 
 Thus green commit status alone is insufficient, Actions cannot update `main`,
 the Gate App cannot update a retargeted non-`main` base, and only the claimed PR
@@ -389,11 +390,12 @@ provider-neutral Gate judgment, stop with:
 - an equivalent-or-stronger staged ruleset set that preserves every existing
   human protection and introduces no unprotected interval: sole-App PR-only
   updates to `main`, sole-Actions updates to `gate-state`, ordinary roles but
-  not Gate App on other branches, and the required `gate` check in a separate
-  no-bypass main rule;
+  not Gate App on other branches, and the required `gate` check with only the
+  same Gate App receiving PR-only bypass;
 - a disposable canary proving Gate's exact argv succeeds with the App
-  installation token and without `--admin`, while ambient-user main update,
-  Actions main update, and Gate-App non-main update all refuse;
+  installation token against an intentionally red `gate` check and without
+  `--admin`, while ambient-user main update, Actions main update, and Gate-App
+  non-main update all refuse;
 - the smallest operator-only App/environment/ruleset/bootstrap actions;
 - rollback steps;
 - a statement of which permanent protections remain unchanged.
