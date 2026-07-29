@@ -151,10 +151,13 @@ and why each choice is the safe one:
   every open PR. The trusted `push` job snapshots all open PR heads, completes
   a first pass that posts `gate=pending` to every head, and only then dispatches
   this workflow from the default branch for each PR. Both passes keep trying
-  later entries after an individual failure. It grants `actions: write` only to
-  the fan-out job, performs no checkout there, and never runs for a PR-head
-  policy edit. A failed dispatch deliberately leaves every snapshotted exact
-  head pending (fail closed) instead of preserving stale green.
+  later entries after an individual failure, and dispatch still runs after an
+  invalidation failure so that PR has another path to overwrite a stale success.
+  The job reports either pass's aggregate failure only after both complete. It
+  grants `actions: write` only to the fan-out job, performs no checkout there,
+  and never runs for a PR-head policy edit. A failed dispatch after successful
+  invalidation deliberately leaves that exact head pending (fail closed) instead
+  of preserving stale green.
 - It checks out the **default branch (base), never the PR/fork head** — the
   checkout pins `ref: ${{ github.event.repository.default_branch }}` explicitly
   because the review-signal run may name a PR merge ref. gate is therefore built

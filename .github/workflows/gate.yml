@@ -481,12 +481,10 @@ jobs:
               invalidate_failed=1
             fi
           done <"$prs"
-          if [ "$invalidate_failed" -ne 0 ]; then
-            exit 1
-          fi
 
-          # Every snapshotted head is now non-green. Continue attempting later
-          # dispatches after a failure; pending remains fail-closed either way.
+          # Dispatch every snapshotted PR after the full invalidation pass.
+          # If an invalidation failed, its dispatch is also the recovery path
+          # that can overwrite a stale success.
           dispatch_failed=0
           while IFS=$'\t' read -r pr head; do
             test -n "$pr"
@@ -496,4 +494,11 @@ jobs:
               dispatch_failed=1
             fi
           done <"$prs"
-          exit "$dispatch_failed"
+
+          # Report either pass as failed only after every head and PR has been
+          # attempted in both passes.
+          fanout_failed=0
+          if [ "$invalidate_failed" -ne 0 ] || [ "$dispatch_failed" -ne 0 ]; then
+            fanout_failed=1
+          fi
+          exit "$fanout_failed"
