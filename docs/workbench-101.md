@@ -534,7 +534,10 @@ machinery for that now exists in this repo (`verified`,
 right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
 signal feeds late panel evidence back through that same writable trusted-base
 rail, including for fork PRs. The signal keys on GitHub's bot identity rather
-than a fixed reviewer catalog. When the default branch changes `.ship.json`,
+than a fixed reviewer catalog. Exact-actor Codex and Claude issue comments also
+retrigger the check; Claude's clean result is bound to the exact head through
+its successful same-repository Actions run, never through prose alone. When the
+default branch changes `.ship.json`,
 the trusted workflow first invalidates every open PR's old `gate` success, then
 re-evaluates each exact current head under the new declared panel. Gate builds
 from the *base* checkout so a PR cannot edit gate's own code to neuter the check

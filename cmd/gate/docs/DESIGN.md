@@ -60,7 +60,11 @@ log entry. Consequences the code enforces:
   extraction, so one clean reviewer cannot stand in for silent peers. A clean
   Codex issue comment counts only from the exact connector actor with its
   structured `Reviewed commit` sentinel bound to the current head; arbitrary
-  prose and stale or malformed sentinels remain incomplete.
+  prose and stale or malformed sentinels remain incomplete. A clean Claude
+  issue comment similarly counts only from `claude[bot]` when its unambiguous
+  Actions-run link resolves to a successful same-repository `issue_comment`
+  run on the exact head and the response carries the narrow clean verdict
+  shape without a structured finding.
 
 ### Concurrency
 

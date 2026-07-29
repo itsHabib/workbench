@@ -64,7 +64,10 @@ Constraints that are design decisions, not omissions:
 - **Panel completeness is exact-head evidence.** `ReviewPanelV1` records the
   repository-owned expected set and completed/pending/missing/unknown state.
   Its code verifier parks every incomplete state; findings remain a separate
-  review-consolidation verdict.
+  review-consolidation verdict. Issue-level clean completion is accepted only
+  through authenticated, head-bound producer shapes: Codex's reviewed-commit
+  sentinel or Claude's successful same-repository `issue_comment` Actions run
+  plus an explicit clean verdict.
 - **State and keys live outside the repo.** The migration was code-only: a
   running gate's `-state` and `-key` dirs are operational data on the
   operator's machine, never files in this tree.

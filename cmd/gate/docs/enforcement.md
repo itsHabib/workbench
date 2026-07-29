@@ -143,10 +143,13 @@ and why each choice is the safe one:
   bridge matters for fork PRs, whose direct review-event token cannot post a
   status. The signal accepts GitHub's `Bot` actor type rather than a hard-coded
   reviewer list, so any repository-declared bot can wake re-evaluation without
-  receiving privilege. Exact-actor Codex `issue_comment` events (created,
-  edited, or deleted) are the second retrigger. Late and withdrawn evidence
-  therefore both refresh the required status. Gate itself does not use
-  `pull_request` or `pull_request_target`.
+  receiving privilege. Exact-actor Codex and Claude `issue_comment` events
+  (created, edited, or deleted) are the second retrigger. Claude's issue-level
+  clean result is head-bound through the successful same-repository
+  `issue_comment` Actions run linked by `claude[bot]`; ambiguous links,
+  actionable bodies, and stale or malformed evidence remain incomplete. Late
+  and withdrawn evidence therefore both refresh the required status. Gate
+  itself does not use `pull_request` or `pull_request_target`.
 - A **default-branch `.ship.json` policy change** fans out a re-evaluation for
   every open PR. The trusted `push` job reads each PR's live head, posts
   `gate=pending` to invalidate any success under the old policy, then dispatches
@@ -239,8 +242,8 @@ and why each choice is the safe one:
   uncertainty (a genuinely clean bot review often extracts at low confidence). The
   CI run is ephemeral and has **no judge** to resolve that park, so gating on it
   would freeze a clean PR with no auto-green path. Inferring approval from
-  arbitrary comment prose remains **unsound**; the only comment completion is
-  the authenticated Codex connector's structured exact-head sentinel. Review
+  arbitrary comment prose remains **unsound**; comment completion is limited to
+  authenticated, head-bound Codex and Claude clean-result shapes. Review
   *judgment* stays
   in the **operator/driver flow**, where a human consolidates the bot panel — which
   is where it belongs. The enforced check shuts the un-gated-merge bypass and holds
