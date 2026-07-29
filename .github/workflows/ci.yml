@@ -229,7 +229,8 @@ jobs:
           grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
           grep -F 'ENTRYPOINT ["/usr/local/bin/gate"]' "$dockerfile"
           grep -F -- '--match-head-commit' cmd/gate/internal/executor/executor.go
-          grep -F 'executor execute' "$action"
+          grep -Fx '    - executor' "$action"
+          grep -Fx '    - execute' "$action"
           grep -F 'push origin "HEAD:refs/heads/${STATE_BRANCH}"' "$workflow"
           if grep -Eq '^  (pull_request|pull_request_target|repository_dispatch):' "$workflow"; then
             echo "gate executor must be workflow_dispatch-only" >&2
