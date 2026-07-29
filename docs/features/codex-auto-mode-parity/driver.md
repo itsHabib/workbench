@@ -9,7 +9,20 @@ repo: workbench
 repo_url: https://github.com/itsHabib/workbench
 branch_prefix: codex/auto-mode-
 default_runtime: local
+default_provider: codex
+default_fallback: []
 done_boundary: merged
+ping_gates:
+  - reviewer: claude
+    action: omit
+    authority: operator
+    reason: no Claude invocation
+  - reviewer: cursor
+    action: omit
+    authority: operator
+    reason: no model-provider run or API key
+runtime_notes:
+  - done_boundary is consumed by the session orchestrator and persisted in the Workbench run_imported event; Ship's provider manifest parser reports this session-only field as an advisory warning
 batches:
   - id: 1
     label: independent shared foundations
@@ -21,8 +34,8 @@ batches:
         spec_path: docs/features/codex-auto-mode-parity/auto-decision-v1-contract.md
         branch_name: codex/auto-decision-v1-contract
         runtime: local
-        model: gpt-5.6-sol
-        effort: high
+        model_id: gpt-5.6-sol
+        effort: max
         touches: [contracts/automode]
         status: pending
       - task_id: tsk_01KYP81VP40DX668F3G6JCCKGR
@@ -30,12 +43,12 @@ batches:
         spec_path: docs/features/codex-auto-mode-parity/session-reviewfindings-address-boundary.md
         branch_name: codex/session-reviewfindings-address
         runtime: local
-        model: gpt-5.6-sol
-        effort: max
-        touches: [contracts/reviewfindings, contracts/driverstate, cmd/reviewfindings, cmd/driverstate, docs/features/session-orchestrator]
+        model_id: gpt-5.6-sol
+        effort: ultracode
+        touches: [contracts/reviewfindings, contracts/reviewfindings/testdata/address-v1, contracts/driverstate, driverstate, cmd/reviewfindings, cmd/driverstate, docs/features/session-orchestrator]
         status: pending
   - id: 2
-    label: policy owner and cross-repo conformance
+    label: deterministic policy owner
     depends_on: [1]
     status: pending
     streams:
@@ -44,20 +57,9 @@ batches:
         spec_path: docs/features/codex-auto-mode-parity/codexguard-policy-engine.md
         branch_name: codex/codexguard-policy-engine
         runtime: local
-        model: gpt-5.6-sol
-        effort: max
+        model_id: gpt-5.6-sol
+        effort: ultracode
         touches: [cmd/codexguard]
-        status: pending
-      - task_id: tsk_01KYPYX4EQTVC8S3Z1HAQXSZXK
-        task_slug: reviewfindings-shared-conformance-corpus
-        repo: ship
-        repo_url: https://github.com/itsHabib/ship
-        spec_path: docs/features/codex-auto-mode-parity/ship-reviewfindings-conformance.md
-        branch_name: codex/reviewfindings-conformance
-        runtime: local
-        model: gpt-5.6-sol
-        effort: high
-        touches: [packages/driver/testdata/reviewfindings-address-v1, packages/driver/src/review-findings.test.ts, packages/driver/src/engine.test.ts, packages/store/src/review-artifacts.test.ts]
         status: pending
   - id: 3
     label: native hook adapter
@@ -69,8 +71,8 @@ batches:
         spec_path: docs/features/codex-auto-mode-parity/codexguard-hook-adapter.md
         branch_name: codex/codexguard-hook-adapter
         runtime: local
-        model: gpt-5.6-sol
-        effort: high
+        model_id: gpt-5.6-sol
+        effort: max
         touches: [cmd/codexguard/internal/hook, cmd/codexguard/testdata/hooks, cmd/codexguard/assets/hooks.json]
         status: pending
   - id: 4
@@ -83,23 +85,9 @@ batches:
         spec_path: docs/features/codex-auto-mode-parity/codexguard-policy-projection.md
         branch_name: codex/codexguard-policy-projection
         runtime: local
-        model: gpt-5.6-terra
-        effort: high
-        touches: [cmd/codexguard/internal/projection, cmd/codexguard/assets/rules, cmd/codexguard/docs/install.md]
-        status: pending
-  - id: 5
-    label: fresh-task live proof
-    depends_on: [2, 4]
-    status: pending
-    streams:
-      - task_id: tsk_01KYP78SSC77DRNABJB8F3VAVF
-        task_slug: codexguard-fresh-task-dogfood
-        spec_path: docs/features/codex-auto-mode-parity/codexguard-fresh-task-dogfood.md
-        branch_name: codex/codexguard-fresh-task-dogfood
-        runtime: local
-        model: gpt-5.6-sol
+        model_id: gpt-5.6-terra
         effort: max
-        touches: [cmd/codexguard/testdata/e2e, docs/features/codex-auto-mode-parity/evidence.md, docs/features/codex-auto-mode-parity/refusal-matrix.md]
+        touches: [cmd/codexguard/internal/projection, cmd/codexguard/assets/rules, cmd/codexguard/docs/install.md]
         status: pending
 conflict_notes:
   - kind: dep_signal
@@ -117,27 +105,12 @@ conflict_notes:
     from: codexguard-policy-projection
     to: codexguard-hook-adapter
     reason: projection ships the reviewed native hook assets
-  - kind: dep_signal
-    from: codexguard-fresh-task-dogfood
-    to: codexguard-policy-projection
-    reason: a fresh task can test only installed reviewed policy
-  - kind: dep_signal
-    from: codexguard-fresh-task-dogfood
-    to: session-reviewfindings-address-boundary
-    reason: live exact-head acceptance must use the session-native boundary
-  - kind: dep_signal
-    from: reviewfindings-shared-conformance-corpus
-    to: session-reviewfindings-address-boundary
-    reason: Ship vendors and executes the canonical address-v1 corpus
-  - kind: dep_signal
-    from: codexguard-fresh-task-dogfood
-    to: reviewfindings-shared-conformance-corpus
-    reason: live proof begins only after both lifecycle consumers pass the corpus
 ---
 
 # Codex auto-mode parity driver
 
-Generated by `/work-driver-prep` on 2026-07-29. Consume with:
+Generated by `/work-driver-prep` on 2026-07-29 and corrected after strict
+manifest-schema review. Consume first with:
 
 ```text
 /work-driver docs/features/codex-auto-mode-parity/driver.md --engine session
@@ -146,11 +119,23 @@ Generated by `/work-driver-prep` on 2026-07-29. Consume with:
 ## Batches
 
 1. Versioned leaf decision contract and session-native review address boundary.
-2. Deterministic policy-owning `codexguard` binary and paired Ship conformance.
+2. Deterministic policy-owning `codexguard` binary.
 3. Native Codex lifecycle adapters.
 4. Collision-safe `.rules` and hook projection.
-5. Fresh-task refusal, Gate-shaped merge, and live session review-artifact dogfood.
 
-This seven-stream cross-repository manifest is local/session-only. It must not
-be imported into Ship's cloud driver. No stream may use a model-provider API key
-or invoke Claude.
+This is a five-stream, Workbench-only manifest because the canonical driver
+schema has one repository per parent run. After it merges, run
+`ship-driver.md`; after that merges, run `dogfood-driver.md`.
+
+All three runs are local/session-only. The operator explicitly required no
+Claude invocation and no model-provider run/API key. For these runs that
+instruction is an operator-authorized degraded-panel policy: do not post the
+configured Claude or Cursor triggers; use fresh session-native Codex reviewers,
+record the omitted configured members and the operator constraint in each
+review cycle, and let Gate park or judge the visible degradation. This changes
+neither repository panel configuration nor Gate policy.
+
+At import, the session parent passes `done_boundary: merged` to Workbench's
+`run_imported` transition. Ship's provider manifest parser accepts these
+manifests with one known advisory warning because it does not own the session
+done-boundary field; no provider engine consumes the run.

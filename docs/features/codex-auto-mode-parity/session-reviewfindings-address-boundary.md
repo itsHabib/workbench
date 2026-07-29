@@ -9,9 +9,9 @@
 
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---:|---:|
-| Production | review-findings contracts/commands plus `driverstate/` | ~320 | 320 |
-| Tests | generated refusal/dedupe/state sequences | ~500 | 250 |
-| **Total** | | | **~570** |
+| Production | review-findings contracts/commands plus `driverstate/` | ~360 | 360 |
+| Tests/fixtures | refusal, crash, and shared conformance scenarios | ~600 | 300 |
+| **Total** | | | **~660** |
 
 Band: **ideal**.
 
@@ -28,17 +28,29 @@ address work item for a fresh isolated Codex child.
 - Validate supported major, exact live PR head, non-empty sourced address
   findings, source/panel consistency, remaining engine-owned cycle capacity,
   and unused artifact id/digest.
-- Add driver-state v0.2 events:
+- Add these event kinds under the existing driver-state v0.1 envelope:
   `review_address_prepared` (atomic consumption/outbox),
   `review_address_claimed` (address child-run link),
   `review_address_started` (Codex task/thread id), and
   `review_address_completed` (new PR head).
+- Release the reader/reducer before any writer emits the new kinds. Existing
+  v0.1 ledgers remain readable and the hash-chain law is unchanged; an old
+  binary encountering a new kind refuses without mutation. Ship neither emits
+  nor reads these session-only event kinds, so no Ship driver-state migration
+  is implied.
 - `driverstate.PrepareReviewAddress` appends under the authoritative child
   lease after policy validation. Its body contains scalar refs/digests only;
   `contracts/driverstate` never imports `contracts/reviewfindings`.
 - Put `AddressWorkV1` in `contracts/reviewfindings`; the ledger stores its
   path/ref and digest. Its deterministic work id is derived from child
   run+stream+artifact digest+cycle.
+- Persist the bounded work item before the ledger append at a deterministic,
+  state-root-confined path. Write a same-directory temporary file, sync it,
+  atomically rename it into place, and sync the directory where supported.
+  Retry verifies identical bytes/digest before reuse and refuses a collision.
+  A crash before the ledger append leaves an inert deterministic orphan that a
+  retry adopts; a crash after append is reconstructable from the stored
+  ref/digest. Cleanup never guesses or silently deletes an orphan.
 - Before external spawn, import the address child with a deterministic import
   key and append `review_address_claimed`. After task creation returns, append
   `review_address_started`.
@@ -51,20 +63,27 @@ address work item for a fresh isolated Codex child.
   automatically spawning a second child. If the original worktree still owns
   the PR branch, adopt/handoff it or park instead of creating a conflicting
   checkout.
+- Define the canonical cross-consumer scenarios at
+  `contracts/reviewfindings/testdata/address-v1/`. Each case carries artifact
+  bytes, live head/cycle/consumed-id state, ordered accept/resume calls, expected
+  refusal code, common state projection, and provider-dispatch count. A
+  manifest pins every case digest and the corpus digest.
 
 ## Acceptance
 
 One exact-head artifact is consumed once and creates one address work item.
 Reducer state exposes pending/claimed/started/completed. Crash tests cover each
-event boundary; ambiguity parks and never auto-duplicates. A fresh Codex child
-updates the existing PR using normal GitHub connector or `gh`/git
-authentication, without Ship cloud dispatch or a model-provider SDK/API key.
+file-write/rename/event boundary and each subsequent event boundary; ambiguity
+parks and never auto-duplicates. Workbench executes every canonical scenario
+before Ship vendors it. A fresh Codex child updates the existing PR using
+normal GitHub connector or `gh`/git authentication, without Ship cloud dispatch
+or a model-provider SDK/API key.
 
 ## Test plan
 
-Generated valid/invalid artifacts, bounded repeated-consumption sequences,
-lease/reducer/crash transition tests, a real GitHub-head fixture, full
-Workbench checks, and hygiene.
+Generated valid/invalid artifacts, the canonical ordered conformance corpus,
+bounded repeated-consumption sequences, lease/reducer/file-crash transition
+tests, a real GitHub-head fixture, full Workbench checks, and hygiene.
 
 ## Non-goals
 

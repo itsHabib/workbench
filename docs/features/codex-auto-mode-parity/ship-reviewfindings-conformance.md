@@ -25,6 +25,9 @@ stack.
 - Canonical fixtures live at
   `workbench/contracts/reviewfindings/testdata/address-v1/` with a manifest and
   content digest.
+- Each scenario includes artifact bytes, live head/cycle/consumed-id setup,
+  ordered accept/resume calls, expected refusal code, common state projection,
+  and expected provider-dispatch count.
 - Vendor the exact corpus under
   `ship/packages/driver/testdata/reviewfindings-address-v1/`, preserving the
   source manifest/digest.
@@ -37,9 +40,10 @@ stack.
 
 ## Acceptance
 
-Ship produces every expected accept/refuse code and state projection; vendored
-bytes match the recorded upstream digest; bounded duplicate sequences dispatch
-at most once; drift is visible as a source-digest change.
+Ship produces every expected accept/refuse code, common state projection, and
+provider-call count; vendored bytes match the recorded upstream digest; bounded
+duplicate sequences dispatch at most once; drift is visible as a source-digest
+change.
 
 ## Test plan
 
