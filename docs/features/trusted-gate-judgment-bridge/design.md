@@ -28,8 +28,8 @@ narrow PR-specific execute boundary:
 
 1. A protected workflow running trusted default-branch code verifies its own
    GitHub approval history and an independent approving actor. The approval
-   comment binds the repository, PR, head, canonical Gate evidence digest, and
-   exact judgment question.
+   comment binds the repository, PR, head, protected base ref, evaluated base
+   SHA/merge-base, canonical Gate evidence digest, and exact judgment question.
 2. The approved job mints a short-lived, head-bound Gate grant under the
    authenticated App-mint contract, then re-evaluates the exact PR/head with
    Gate at consumption time. Clean/pass, escalate, and block use the existing
@@ -41,7 +41,11 @@ narrow PR-specific execute boundary:
    same per-repository serialization boundary it re-audits, requires the action
    to remain the newest terminal for the PR, and atomically appends a one-time
    `GateExecutionClaimV1`. Claimed actions can never be retried; failure requires
-   a fresh Gate run.
+   a fresh Gate run. This append uses the workflow's separate state-writer
+   token before any Gate App credential exists; a branch ruleset permits
+   `github-actions[bot]` to update only `gate-state`, never `main`. A
+   non-force compare-and-swap ref update must succeed, then a fresh fetch and
+   anchored audit must prove the durable claim before credential release.
 4. Only the claimed `would_merge` reaches the custodied executor process. That
    process alone receives the App private key, exchanges it internally for a
    short-lived installation token, and never returns, prints, persists, or
@@ -49,21 +53,33 @@ narrow PR-specific execute boundary:
 5. The executor executes the exact argv stored by the claimed action, including
    `--match-head-commit`; it never reconstructs flags, broadens the command,
    adds `--admin`, or mints an operator grant.
-6. Branch-rule authority is scoped to that App as the sole `Integration` with
-   `bypass_mode=pull_request`. Ordinary users, ambient agent credentials, and
-   GitHub Actions remain unable to bypass the rule. Migration from the current
-   legacy `gate` requirement must stage an equivalent-or-stronger active
-   ruleset before removing the legacy rule, leaving no weaker interval.
+6. Layered branch rules make the identities mutually exclusive:
+   - `main`: Restrict updates; the Gate App is the sole `Integration` with
+     `bypass_mode=pull_request`;
+   - `gate-state`: Restrict updates; `github-actions[bot]` is the sole writer;
+   - every other base-repository branch: repository human roles and explicitly
+     approved existing integrations may update, but the Gate App may not; and
+   - a separate no-bypass `main` ruleset retains the app-pinned required
+     `gate` check.
+   A second PR may inherit a commit status, but ordinary users cannot update
+   `main` and the Gate App accepts only its one claimed PR. Retargeting the
+   claimed PR away from `main` also fails structurally because the Gate App has
+   no update authority on any other branch.
 7. The run appends the approval receipt, decision, claim, token identity,
    unchanged command, and GitHub merge result to the auditable Gate state
    channel.
 
 This makes the App useful policy-bearing custody rather than a thin wrapper:
 the invariant is one approved Gate action to one exact PR merge, with no
-reusable commit-scoped green in between. Before arming, a disposable canary must
-prove the exact Gate argv succeeds under the App installation token without
-`--admin`; otherwise this architecture is rejected. It is a material security
-and branch-rule choice, so implementation waits for explicit operator authority.
+reusable commit-scoped green acting as sufficient authority. Repository-wide
+executor serialization plus sole-App `main` updates keep the approved base SHA
+stable from claim through merge; any unexpected base movement or retarget
+refuses. Before arming, a disposable canary must prove the exact Gate argv
+succeeds under the App installation token without `--admin`, ambient-user merge
+fails even with green checks, the state writer cannot update `main`, and the
+Gate App cannot update a non-`main` branch. Otherwise this architecture is
+rejected. It is a material security and branch-rule choice, so implementation
+waits for explicit operator authority.
 
 ## Rejected status-promotion prototype
 

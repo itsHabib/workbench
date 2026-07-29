@@ -219,6 +219,7 @@ The canonical signed/approved content must bind at least:
 - repository
 - PR number
 - exact 40-character head SHA
+- protected base ref, evaluated base SHA, and merge-base SHA
 - Gate run ID
 - deciding action artifact hash
 - outcome (`would_merge` only)
@@ -234,10 +235,11 @@ Optional additive fields may be preserved only according to the repository's
 existing versioning law.
 
 Add a versioned `GateExecutionClaimV1` (final naming follows repository
-conventions) that binds the action ID/hash, PR/head, approval receipt digest,
-claim time, and one-time execution identity. Claiming must be an atomic append
-against audited anchored state. A claimed action is permanently consumed:
-failure requires a fresh Gate run/action, never replay.
+conventions) that binds the action ID/hash, PR/head, protected base ref/base
+SHA/merge-base, approval receipt digest, claim time, and one-time execution
+identity. Claiming must be an atomic append against audited anchored state. A
+claimed action is permanently consumed: failure requires a fresh Gate
+run/action, never replay.
 
 Use existing `contracts.Verdict` and `ReviewPanelV1` for clean/pass,
 escalate/address, and block evidence. `ReviewFindingsV1` remains the actionable
@@ -271,7 +273,14 @@ Required behavior:
   claimed, later Gate writes for that PR must refuse until execution records a
   terminal result.
 - Re-audit anchored state and re-read live PR/head immediately before claim.
-- Claim exactly once before creating any App installation token.
+- Require the live base ref, base SHA, and merge-base to equal the approved
+  values.
+- Claim exactly once before creating any App installation token. Persist the
+  claim with the separate GitHub Actions state-writer identity, whose branch
+  rules permit updates only to `gate-state` and deny `main`.
+- Use a non-force compare-and-swap ref update, then re-fetch and re-audit the
+  durable `gate-state` tip containing the claim before the executor may receive
+  the App private key.
 - A claim or transport failure never turns into merge authority.
 - The agent never supplies or handles mint or App credentials.
 
@@ -298,6 +307,8 @@ The workflow must:
   never return, print, persist, or expose that token to another workflow step;
 - execute only the stored argv, unchanged, including `--match-head-commit`, and
   never add `--admin`;
+- serialize all executor runs for the repository so only the Gate App could
+  move the approved base, then re-check base/head immediately before execution;
 - append the execution result to anchored Gate state and refuse every replay;
 - produce an auditable run summary without secrets;
 - fail closed before merge on malformed, stale, ambiguous, unapproved,
@@ -305,6 +316,18 @@ The workflow must:
 
 The App is the policy-custodied exact-command executor. A workflow step that
 receives a general installation token is a rejected thin wrapper.
+
+Layered rules are load-bearing:
+
+- `main` Restrict updates: only the Gate App, PR-only bypass;
+- `gate-state` Restrict updates: only `github-actions[bot]`;
+- all other base-repository branches: normal human roles and explicitly
+  approved existing integrations, but never the Gate App;
+- `main` required `gate` check: separate rule with no bypass actor.
+
+Thus green commit status alone is insufficient, Actions cannot update `main`,
+the Gate App cannot update a retargeted non-`main` base, and only the claimed PR
+can be selected by the custodied executor.
 
 ### A4. Tests and adversarial pass
 
@@ -325,8 +348,14 @@ At minimum, pin:
 - absent or ambiguous GitHub read;
 - fork-controlled workflow/code attempt;
 - shared-head/second-PR case cannot inherit authority;
+- base retarget before and after claim;
+- base SHA movement and merge-base mismatch;
 - workflow permission and trusted-checkout shape;
 - App key/token never crosses the executor process boundary;
+- state writer can update `gate-state` but cannot update `main`;
+- Gate App can update `main` through the claimed PR but cannot update any other
+  base-repository branch;
+- ambient user cannot update `main`, even when every status is green;
 - exact stored argv succeeds under the App without `--admin`;
 - token, merge, audit-write, and transport failures cannot create a second
   attempt or reusable success;
@@ -357,11 +386,14 @@ provider-neutral Gate judgment, stop with:
 - the exact bridge PR and head;
 - the exact Gate run/action hash;
 - proof of the current legacy required-check deadlock;
-- an equivalent-or-stronger staged ruleset that preserves every existing human
-  protection, names only the dedicated App as `Integration` with
-  `bypass_mode=pull_request`, and introduces no unprotected interval;
+- an equivalent-or-stronger staged ruleset set that preserves every existing
+  human protection and introduces no unprotected interval: sole-App PR-only
+  updates to `main`, sole-Actions updates to `gate-state`, ordinary roles but
+  not Gate App on other branches, and the required `gate` check in a separate
+  no-bypass main rule;
 - a disposable canary proving Gate's exact argv succeeds with the App
-  installation token and without `--admin`;
+  installation token and without `--admin`, while ambient-user main update,
+  Actions main update, and Gate-App non-main update all refuse;
 - the smallest operator-only App/environment/ruleset/bootstrap actions;
 - rollback steps;
 - a statement of which permanent protections remain unchanged.
