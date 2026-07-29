@@ -534,9 +534,11 @@ machinery for that now exists in this repo (`verified`,
 right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
 signal feeds late panel evidence back through that same writable trusted-base
 rail, including for fork PRs. The signal keys on GitHub's bot identity rather
-than a fixed reviewer catalog. Gate builds from the *base* checkout so a PR
-cannot edit
-gate's own code to neuter the check that governs it; it mints an ephemeral grant
+than a fixed reviewer catalog. When the default branch changes `.ship.json`,
+the trusted workflow first invalidates every open PR's old `gate` success, then
+re-evaluates each exact current head under the new declared panel. Gate builds
+from the *base* checkout so a PR cannot edit gate's own code to neuter the check
+that governs it; it mints an ephemeral grant
 into a throwaway temp dir so no signing secret ever touches CI; and it binds the
 posted status to the exact judged SHA so a force-push cannot get a green stamped
 onto a different commit. It ships **dormant** - armed only by the repo variable

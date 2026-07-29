@@ -147,6 +147,13 @@ and why each choice is the safe one:
   edited, or deleted) are the second retrigger. Late and withdrawn evidence
   therefore both refresh the required status. Gate itself does not use
   `pull_request` or `pull_request_target`.
+- A **default-branch `.ship.json` policy change** fans out a re-evaluation for
+  every open PR. The trusted `push` job reads each PR's live head, posts
+  `gate=pending` to invalidate any success under the old policy, then dispatches
+  this workflow from the default branch with that PR number. It grants
+  `actions: write` only to the fan-out job, performs no checkout there, and
+  never runs for a PR-head policy edit. A failed dispatch deliberately leaves
+  the exact head pending (fail closed) instead of preserving stale green.
 - It checks out the **default branch (base), never the PR/fork head** — the
   checkout pins `ref: ${{ github.event.repository.default_branch }}` explicitly
   because the review-signal run may name a PR merge ref. gate is therefore built
