@@ -35,7 +35,9 @@ The trust root is the conjunction of:
    Environment, made by an immutable actor ID different from the workflow
    dispatcher/re-run actor; and
 2. one repository-only Gate GitHub App whose private key is released only to
-   the custodied executor action after a permanent claim is durable.
+   the custodied executor job after protected approval. Gate creates its token
+   only after all pre-credential refusals and before the permanent claim,
+   because that same App must publish the claim.
 
 Neither side is sufficient alone. An unsigned request, login allowlist, ambient
 operator token, inherited commit status, App token without a claim, or claim
@@ -78,16 +80,18 @@ never fabricates an empty findings artifact.
 1. `gate executor request` audits an existing newest `would_merge` action,
    byte-checks its stored argv, re-reads the live PR, and emits the request plus
    exact approval comment.
-2. The operator dispatches `.github/workflows/gate-executor.yml` from the
-   default branch with the request. The static protected environment holds the
-   job; its approver supplies the exact emitted comment.
+2. The operator dispatches `.github/workflows/gate-executor.yml` from `main`
+   with the request. The static protected environment accepts deployments only
+   from the selected protected `main` branch, with administrator bypass
+   disabled. The environment holds the job; its approver supplies the exact
+   emitted comment.
 3. After approval, Gate reads the workflow-run and approval-history APIs. It
-   binds the first run attempt to this repository, `workflow_dispatch`, and the
-   trusted executor workflow path; takes both initial and triggering actor
-   identities from their immutable API IDs; and requires exactly one
-   unambiguous decision for `gate-authorization` to be `approved` by a
-   different actor, with the exact canonical comment. Re-runs refuse because
-   GitHub's approval history is not attempt-bound.
+   binds the first run attempt to this repository, `workflow_dispatch`, the
+   exact `main` workflow path, and the current `main` commit; takes both initial
+   and triggering actor identities from their immutable API IDs; and requires
+   exactly one unambiguous decision for `gate-authorization` to be `approved`
+   by a different actor, with the exact canonical comment. Re-runs refuse
+   because GitHub's approval history is not attempt-bound.
 4. Gate re-reads exact repo/PR/head/base/merge-base facts, re-audits anchored
    state, checks action freshness and duplicate/open claims, and confirms the
    checked-out `gate-state` tip still equals the remote tip. These are the
@@ -107,9 +111,9 @@ never fabricates an empty findings artifact.
    non-force CAS. A transport failure after claim leaves an orphaned claim; it
    never retries the merge.
 
-The workflow builds only default-branch source, never checks out PR/fork code,
-has no status-write permission, and gives generic Actions read-only repository
-permissions.
+The workflow builds the exact dispatched `main` commit, never checks out
+PR/fork code, has no status-write permission, and gives generic Actions
+read-only repository permissions.
 
 ## State and branch identities
 
@@ -125,11 +129,13 @@ writer of `gate-state`, and its token is created only inside the executor
 process after approval and preflight.
 
 The staged, non-effectful policy is
-`docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`. Its validator
-pins four layers:
+`docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`. A focused
+test pins its complete bytes. The plan has five layers:
 
 - `main-updates`: Gate App is the sole Integration with PR-only bypass;
-- `gate-state-updates`: only the Gate App may update the ref, without force;
+- `gate-state-updates`: only the Gate App may update the ref;
+- `gate-state-integrity`: no actor, including the Gate App, may force-push or
+  delete the ref;
 - `other-branches`: repository roles and approved existing integrations, never
   the Gate App; and
 - `main-required-gate`: retain the app-pinned `gate` check, with only the same
@@ -150,7 +156,8 @@ All of these refuse before App token creation:
 - malformed/unknown major, noncanonical repo, bad IDs/SHA/times, unsupported
   outcome, changed method/flags/order, or `--admin`;
 - missing, stale, rejected, self-authored, wrong-run, re-run, ambiguous,
-  wrong-environment, or wrong-comment approval;
+  wrong-environment, wrong-comment, non-`main` dispatch, stale workflow commit,
+  or noncanonical workflow path approval;
 - expired/not-yet-valid request;
 - closed/moved/shared-head PR, non-default target, base retarget, base movement,
   or merge-base mismatch;

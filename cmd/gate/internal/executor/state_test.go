@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,28 @@ import (
 	"testing"
 	"time"
 )
+
+func TestFetchBlobAcceptsMaximumStateFile(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	data := bytes.Repeat([]byte("x"), maxStateFile)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writeBlob(writer, sha, data)
+	}))
+	defer server.Close()
+
+	session := Session{
+		client: server.Client(),
+		config: AppConfig{APIURL: server.URL, Repository: "o/r"},
+		token:  installationToken{value: "secret"},
+	}
+	got, err := session.readBlob(context.Background(), sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("blob length = %d, want %d", len(got), len(data))
+	}
+}
 
 func TestPublishGateStateCASAndRefetch(t *testing.T) {
 	fixture := newStateAPIFixture(t)

@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	gateStateBranch = "gate-state"
-	maxStateFile    = 32 * 1024 * 1024
+	gateStateBranch  = "gate-state"
+	maxStateFile     = 32 * 1024 * 1024
+	maxStateResponse = 48 * 1024 * 1024
 )
 
 var (
@@ -293,7 +294,7 @@ func (session *Session) api(ctx context.Context, method, path string, input, out
 	if output == nil {
 		return nil
 	}
-	reader := io.LimitReader(response.Body, maxStateFile+1)
+	reader := io.LimitReader(response.Body, maxStateResponse)
 	if err := json.NewDecoder(reader).Decode(output); err != nil {
 		return fmt.Errorf("%w: decode response", ErrState)
 	}

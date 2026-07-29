@@ -57,16 +57,6 @@ type CommandResult struct {
 
 type commandRunner func(context.Context, []string, string) (CommandResult, error)
 
-// Execute exchanges App custody for one short-lived installation token and
-// runs argv byte-for-byte. It never returns or logs the token.
-func Execute(ctx context.Context, config AppConfig, argv []string) (CommandResult, error) {
-	client := *http.DefaultClient
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	return execute(ctx, config, argv, &client, runGH)
-}
-
 // Session keeps the installation token inside Gate while one approved
 // execution publishes state and runs the exact merge command.
 type Session struct {
@@ -96,25 +86,6 @@ func withSession(ctx context.Context, config AppConfig, client *http.Client, fn 
 	session := &Session{client: client, config: config, token: token}
 	defer session.token.clear()
 	return fn(session)
-}
-
-func execute(
-	ctx context.Context,
-	config AppConfig,
-	argv []string,
-	client *http.Client,
-	runner commandRunner,
-) (CommandResult, error) {
-	if err := validateArgv(argv); err != nil {
-		return CommandResult{}, err
-	}
-	var result CommandResult
-	err := withSession(ctx, config, client, func(session *Session) error {
-		var err error
-		result, err = session.merge(ctx, argv, runner)
-		return err
-	})
-	return result, err
 }
 
 // Merge runs the stored argv byte-for-byte with the custodied token.

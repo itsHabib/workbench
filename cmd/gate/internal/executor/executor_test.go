@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func TestExecuteKeepsTokenInsideExactCommandBoundary(t *testing.T) {
+func TestSessionKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 	key := privateKey(t)
 	var authorization string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -43,13 +43,22 @@ func TestExecuteKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 	}
 	var seenArgv []string
 	var seenToken string
-	result, err := execute(context.Background(), AppConfig{
+	var result CommandResult
+	err := withSession(context.Background(), AppConfig{
 		AppID: 33, InstallationID: 44, PrivateKeyPEM: key,
 		APIURL: server.URL, Repository: "itsHabib/workbench",
-	}, argv, server.Client(), func(_ context.Context, got []string, token string) (CommandResult, error) {
-		seenArgv = got
-		seenToken = token
-		return CommandResult{ExitCode: 0}, nil
+	}, server.Client(), func(session *Session) error {
+		var err error
+		result, err = session.merge(
+			context.Background(),
+			argv,
+			func(_ context.Context, got []string, token string) (CommandResult, error) {
+				seenArgv = got
+				seenToken = token
+				return CommandResult{ExitCode: 0}, nil
+			},
+		)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,12 +75,8 @@ func TestExecuteKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 	}
 }
 
-func TestExecuteRefusesBeforeTokenExchange(t *testing.T) {
-	called := false
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		called = true
-		return nil, errors.New("unexpected")
-	})}
+func TestSessionRefusesInvalidMergeCommand(t *testing.T) {
+	session := &Session{}
 	tests := [][]string{
 		{"gh", "pr", "merge"},
 		{
@@ -80,18 +85,9 @@ func TestExecuteRefusesBeforeTokenExchange(t *testing.T) {
 		},
 	}
 	for _, argv := range tests {
-		if _, err := execute(
-			context.Background(),
-			AppConfig{Repository: "o/r"},
-			argv,
-			client,
-			nil,
-		); err == nil {
+		if _, err := session.merge(context.Background(), argv, nil); err == nil {
 			t.Fatal("expected argv refusal")
 		}
-	}
-	if called {
-		t.Fatal("invalid argv reached token exchange")
 	}
 }
 
@@ -141,10 +137,4 @@ func privateKey(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{
 		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return fn(request)
 }

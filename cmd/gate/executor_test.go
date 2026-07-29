@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,17 +70,33 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 	run.RunAttempt = 1
 	run.Event = "workflow_dispatch"
 	run.Path = ".github/workflows/gate-executor.yml@main"
+	run.HeadBranch = "main"
+	run.HeadSHA = strings.Repeat("a", 40)
 	run.Repository.FullName = "o/r"
 	run.Actor.ID = 7
 	run.Actor.Login = "dispatcher"
 	run.TriggeringActor.ID = 8
 	run.TriggeringActor.Login = "rerunner"
-	if err := validateWorkflowRun(run, "o/r", 42, 7, "rerunner"); err != nil {
+	if err := validateWorkflowRun(
+		run, "o/r", 42, 7, "rerunner", strings.Repeat("a", 40),
+	); err != nil {
 		t.Fatal(err)
 	}
 	tests := map[string]func(*workflowRunFacts){
 		"other workflow": func(value *workflowRunFacts) {
 			value.Path = ".github/workflows/other.yml@main"
+		},
+		"other workflow ref": func(value *workflowRunFacts) {
+			value.HeadBranch = "feature"
+		},
+		"tag dispatch": func(value *workflowRunFacts) {
+			value.HeadBranch = "v1.0.0"
+		},
+		"stale default head": func(value *workflowRunFacts) {
+			value.HeadSHA = strings.Repeat("b", 40)
+		},
+		"noncanonical workflow path": func(value *workflowRunFacts) {
+			value.Path = ".github/workflows/gate-executor.yml@refs/heads/main"
 		},
 		"rerun attempt": func(value *workflowRunFacts) {
 			value.RunAttempt = 2
@@ -101,7 +118,9 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			candidate := run
 			mutate(&candidate)
-			if err := validateWorkflowRun(candidate, "o/r", 42, 7, "rerunner"); err == nil {
+			if err := validateWorkflowRun(
+				candidate, "o/r", 42, 7, "rerunner", strings.Repeat("a", 40),
+			); err == nil {
 				t.Fatal("expected workflow run refusal")
 			}
 		})
@@ -153,5 +172,19 @@ func TestExecutorExitClassificationKeepsOperationalFailuresHard(t *testing.T) {
 	}
 	if got := commandErrorCode("gate", refuseExecutor(errors.New("scoped marker"))); got != codeError {
 		t.Fatalf("non-executor error exit = %d, want %d", got, codeError)
+	}
+}
+
+func TestExecutorReadEnvironmentExcludesAppCustody(t *testing.T) {
+	t.Setenv("GH_TOKEN", "read-token")
+	t.Setenv("INPUT_APP_PRIVATE_KEY", "private-key")
+	got := executorReadEnvironment()
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "GH_TOKEN=read-token") {
+		t.Fatal("read token missing from gh environment")
+	}
+	if strings.Contains(joined, "private-key") ||
+		strings.Contains(joined, "INPUT_APP_PRIVATE_KEY") {
+		t.Fatal("App private key crossed into read-only gh child")
 	}
 }

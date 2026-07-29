@@ -593,6 +593,8 @@ type workflowRunFacts struct {
 	RunAttempt int    `json:"run_attempt"`
 	Event      string `json:"event"`
 	Path       string `json:"path"`
+	HeadBranch string `json:"head_branch"`
+	HeadSHA    string `json:"head_sha"`
 	Actor      struct {
 		Login string `json:"login"`
 		ID    int64  `json:"id"`
@@ -617,8 +619,19 @@ func readWorkflowActors(
 	); err != nil {
 		return 0, 0, err
 	}
+	var mainRef struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := ghDecodeExecutor(
+		&mainRef, "api", fmt.Sprintf("repos/%s/git/ref/heads/main", repo),
+	); err != nil {
+		return 0, 0, err
+	}
 	if err := validateWorkflowRun(
 		run, repo, runID, expectedActorID, expectedTriggeringLogin,
+		mainRef.Object.SHA,
 	); err != nil {
 		return 0, 0, refuseExecutor(err)
 	}
@@ -630,11 +643,13 @@ func validateWorkflowRun(
 	repo string,
 	runID, expectedActorID int64,
 	expectedTriggeringLogin string,
+	expectedHead string,
 ) error {
-	path := ".github/workflows/gate-executor.yml"
+	path := ".github/workflows/gate-executor.yml@main"
 	if run.ID != runID || run.Repository.FullName != repo || run.RunAttempt != 1 ||
-		run.Event != "workflow_dispatch" ||
-		(run.Path != path && !strings.HasPrefix(run.Path, path+"@")) {
+		run.Event != "workflow_dispatch" || run.HeadBranch != "main" ||
+		run.Path != path || !validExecutorSHA(run.HeadSHA) ||
+		run.HeadSHA != expectedHead {
 		return errors.New("executor workflow run identity mismatch")
 	}
 	if run.Actor.ID < 1 || run.TriggeringActor.ID < 1 ||
@@ -770,6 +785,7 @@ func validExecutorSHA(value string) bool {
 
 func ghDecodeExecutor(value any, args ...string) error {
 	command := exec.Command("gh", args...)
+	command.Env = executorReadEnvironment()
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -784,6 +800,21 @@ func ghDecodeExecutor(value any, args ...string) error {
 		return fmt.Errorf("executor github decode: %w", err)
 	}
 	return nil
+}
+
+func executorReadEnvironment() []string {
+	keys := []string{
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR",
+		"HOME", "USERPROFILE", "PATH", "SystemRoot", "TMP", "TEMP",
+		"SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+	}
+	environment := []string{"GH_PROMPT_DISABLED=1"}
+	for _, key := range keys {
+		if value, ok := os.LookupEnv(key); ok {
+			environment = append(environment, key+"="+value)
+		}
+	}
+	return environment
 }
 
 func writeExecutorArtifact(path string, value any) error {

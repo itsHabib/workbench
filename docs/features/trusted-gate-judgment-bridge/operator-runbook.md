@@ -24,6 +24,11 @@ Confirm the implementation PR/head and inspect:
 
 Do not register or configure anything if the reviewed head differs.
 
+The protected `gate-authorization` environment must accept deployments only
+from the selected protected `main` branch, with administrator protection-rule
+bypass disabled. This platform rule is load-bearing: `workflow_dispatch`
+accepts another ref, so a workflow guard alone cannot protect the App key.
+
 ## 2. Reconciliation permission decision required
 
 GitHub requires `contents: write` both to update `gate-state` and to merge a
@@ -53,8 +58,11 @@ reviewed, replace this hold with exact instructions for:
 
 - App registration and minimum permissions;
 - protected-environment reviewers and secrets;
+- selected protected `main` as the environment's only deployment branch, with
+  administrator protection-rule bypass disabled;
 - `gate-state` initialization;
-- staged ruleset application with no unprotected interval;
+- staged five-layer ruleset application with no unprotected interval,
+  including the independent no-bypass `gate-state-integrity` layer;
 - positive and negative canaries;
 - bootstrap, recovery, and rollback.
 
