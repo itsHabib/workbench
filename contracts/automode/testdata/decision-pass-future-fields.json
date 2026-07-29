@@ -1,0 +1,27 @@
+{
+  "schema_version": "auto-decision.v1",
+  "outcome": "pass",
+  "rule_fired": "merge.exact-gate-action",
+  "rulebook_version": "sha256:0123456789abcdef",
+  "remedy": "",
+  "harness": "codex",
+  "inputs": {
+    "action": {
+      "envelope": "shell",
+      "operation": "github.pr.merge",
+      "parameters": [
+        { "name": "repo", "value": "itsHabib/workbench", "redacted": false, "source": "argv" },
+        { "name": "pr", "value": "168", "redacted": false },
+        { "name": "grant", "value": "[REDACTED]", "redacted": true }
+      ],
+      "parser_revision": "future"
+    },
+    "observables": [
+      { "name": "head_sha", "value": "bce1322d926a541b23f68b9adf94823d55d5d699", "redacted": false },
+      { "name": "gate_outcome", "value": "ready_to_merge", "redacted": false }
+    ],
+    "future_projection_metadata": { "source": "connector" }
+  },
+  "action_digest": "sha256:6e9f551802f1364ce1c7b4592373e8c873404fbe49072cedd716c32d76ddac50",
+  "future_artifact_metadata": { "trace_id": "trace_1" }
+}

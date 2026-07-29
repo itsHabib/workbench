@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/automode/schema/auto-audit-event-v1.json",
+  "title": "AutoModeAuditEventV1",
+  "x-version": "auto-decision.v1",
+  "type": "object",
+  "required": ["schema_version", "event_id", "invocation_id", "recorded_at", "kind", "decision"],
+  "properties": {
+    "schema_version": { "const": "auto-decision.v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "invocation_id": { "type": "string", "minLength": 1 },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "kind": { "type": "string", "enum": ["decision", "completion"] },
+    "decision": {
+      "$ref": "auto-decision-v1.json#/$defs/decision"
+    },
+    "completion": {
+      "type": "object",
+      "required": ["status", "observables"],
+      "properties": {
+        "status": { "type": "string", "enum": ["succeeded", "failed"] },
+        "observables": {
+          "$ref": "auto-decision-v1.json#/$defs/values"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
