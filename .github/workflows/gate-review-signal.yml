@@ -1,0 +1,34 @@
+name: gate-review-signal
+
+# An unprivileged bridge from fork-safe review events to gate's trusted
+# workflow_run rail. pull_request_review receives a read-only token on fork
+# PRs, so it must never try to post the gate status itself. Its completion is
+# the signal; gate.yml performs the writable re-evaluation from base code.
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    # Any repository-declared reviewer may be added without editing a static
+    # workflow allowlist. GitHub's actor type is the security boundary here:
+    # human reviews do not wake the privileged downstream rail.
+    if: github.event.review.user.type == 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build review signal
+        env:
+          REVIEWER: ${{ github.event.review.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          jq -n --arg reviewer "$REVIEWER" --argjson pr "$PR" \
+            '{actor_type:"Bot", reviewer:$reviewer, pr:$pr}' > gate-review-signal.json
+      - name: Upload review signal
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-review-signal
+          path: gate-review-signal.json
+          retention-days: 1

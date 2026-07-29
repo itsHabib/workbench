@@ -136,18 +136,22 @@ The `.github/workflows/gate.yml` workflow turns the verdict above into a
 and why each choice is the safe one:
 
 - Its initial evaluation triggers on **`workflow_run`** completed for `CI`.
-  A parked panel is re-evaluated on narrow bot-only `pull_request_review`
-  events (submitted or dismissed) and exact-actor Codex `issue_comment`
-  events (created, edited, or deleted), so late evidence and withdrawn evidence
-  both refresh the required status. It does not use `pull_request` or
-  `pull_request_target`. Every trigger loads the workflow from the trusted
-  default branch and the job's actor allowlist rejects arbitrary comments
-  before any privileged step runs.
+  A separate `gate-review-signal` workflow receives bot
+  `pull_request_review` events (submitted or dismissed) with read-only
+  permissions and no checkout; Gate consumes that workflow's completion
+  through the same writable, trusted-base `workflow_run` rail. This two-step
+  bridge matters for fork PRs, whose direct review-event token cannot post a
+  status. The signal accepts GitHub's `Bot` actor type rather than a hard-coded
+  reviewer list, so any repository-declared bot can wake re-evaluation without
+  receiving privilege. Exact-actor Codex `issue_comment` events (created,
+  edited, or deleted) are the second retrigger. Late and withdrawn evidence
+  therefore both refresh the required status. Gate itself does not use
+  `pull_request` or `pull_request_target`.
 - It checks out the **default branch (base), never the PR/fork head** — the
   checkout pins `ref: ${{ github.event.repository.default_branch }}` explicitly
-  because a review event's event SHA may name a PR merge ref. gate is therefore
-  built from base, so a PR cannot edit gate's own source to neuter the check
-  that governs it.
+  because the review-signal run may name a PR merge ref. gate is therefore built
+  from base, so a PR cannot edit gate's own source to neuter the check that
+  governs it.
 - Before running gate it **waits (bounded) for every non-`gate` check to
   settle**. gate reads the PR's status rollup and treats any non-green check —
   pending, queued, in-progress — as a block (fail closed); reading mid-flight

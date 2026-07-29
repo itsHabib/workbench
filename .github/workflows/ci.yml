@@ -165,12 +165,20 @@ jobs:
       - name: gate review retriggers stay trusted and bot-only
         run: |
           workflow=.github/workflows/gate.yml
-          grep -F '  pull_request_review:' "$workflow"
+          signal=.github/workflows/gate-review-signal.yml
+          grep -F 'workflows: ["CI", "gate-review-signal"]' "$workflow"
           grep -F '  issue_comment:' "$workflow"
           grep -F '    types: [created, edited, deleted]' "$workflow"
           grep -F "github.event.comment.user.login == 'chatgpt-codex-connector[bot]'" "$workflow"
-          grep -F "github.event.review.user.login == 'coderabbitai[bot]'" "$workflow"
           grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
+          grep -F '  pull_request_review:' "$signal"
+          grep -F "if: github.event.review.user.type == 'Bot'" "$signal"
+          grep -F 'uses: actions/upload-artifact@v4' "$signal"
+          grep -F 'gh run download "${UPSTREAM_RUN_ID}"' "$workflow"
+          if grep -Fq 'actions/checkout' "$signal"; then
+            echo "review signal must never check out PR code" >&2
+            exit 1
+          fi
           if grep -Eq '^  (pull_request|pull_request_target):' "$workflow"; then
             echo "gate workflow must not run privileged work from a PR-head trigger" >&2
             exit 1
