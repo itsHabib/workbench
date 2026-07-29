@@ -27,32 +27,51 @@ The recommended replacement joins the unfinished Gate App-mint track with a
 narrow PR-specific execute boundary:
 
 1. A protected workflow running trusted default-branch code verifies its own
-   GitHub approval history and an independent approving actor.
+   GitHub approval history and an independent approving actor. The approval
+   comment binds the repository, PR, head, canonical Gate evidence digest, and
+   exact judgment question.
 2. The approved job mints a short-lived, head-bound Gate grant under the
    authenticated App-mint contract, then re-evaluates the exact PR/head with
-   Gate at consumption time using the exact-head `ReviewFindingsV1` evidence.
-   If Gate parks for the missing provider panel, a Gate-owned judge adapter
-   binds that evidence to the verified environment approval receipt as the
-   provider-neutral judgment authority; workflow prose never fabricates a
-   verdict.
-3. Gate appends the judgment and action to its anchored state. Only a resulting
-   `would_merge` action can release a short-lived installation token for a
-   dedicated, repository-scoped Gate GitHub App.
-4. The App executes the exact argv stored by that action, including
-   `--match-head-commit`; it never reconstructs flags, broadens the command, or
-   mints an operator grant.
-5. Branch-rule authority is scoped to that App as the Gate executor. Ordinary
-   users, ambient agent credentials, and GitHub Actions remain unable to bypass
-   the rule.
-6. The run appends the decision, approval receipt, token identity, command, and
-   GitHub merge result to the auditable Gate state channel.
+   Gate at consumption time. Clean/pass, escalate, and block use the existing
+   `contracts.Verdict` and `ReviewPanelV1` evidence; `ReviewFindingsV1` remains
+   address-work-only and is never fabricated for a clean review. A Gate-owned
+   judge adapter binds the canonical evidence digest to the verified approval
+   receipt; workflow prose never fabricates a verdict.
+3. Gate appends the judgment and action to its anchored hosted state. Under the
+   same per-repository serialization boundary it re-audits, requires the action
+   to remain the newest terminal for the PR, and atomically appends a one-time
+   `GateExecutionClaimV1`. Claimed actions can never be retried; failure requires
+   a fresh Gate run.
+4. Only the claimed `would_merge` reaches the custodied executor process. That
+   process alone receives the App private key, exchanges it internally for a
+   short-lived installation token, and never returns, prints, persists, or
+   exports the token to the workflow.
+5. The executor executes the exact argv stored by the claimed action, including
+   `--match-head-commit`; it never reconstructs flags, broadens the command,
+   adds `--admin`, or mints an operator grant.
+6. Branch-rule authority is scoped to that App as the sole `Integration` with
+   `bypass_mode=pull_request`. Ordinary users, ambient agent credentials, and
+   GitHub Actions remain unable to bypass the rule. Migration from the current
+   legacy `gate` requirement must stage an equivalent-or-stronger active
+   ruleset before removing the legacy rule, leaving no weaker interval.
+7. The run appends the approval receipt, decision, claim, token identity,
+   unchanged command, and GitHub merge result to the auditable Gate state
+   channel.
 
 This makes the App useful policy-bearing custody rather than a thin wrapper:
 the invariant is one approved Gate action to one exact PR merge, with no
-reusable commit-scoped green in between. It is also a material security and
-branch-rule choice, so implementation waits for explicit operator authority.
+reusable commit-scoped green in between. Before arming, a disposable canary must
+prove the exact Gate argv succeeds under the App installation token without
+`--admin`; otherwise this architecture is rejected. It is a material security
+and branch-rule choice, so implementation waits for explicit operator authority.
 
-## Decision
+## Rejected status-promotion prototype
+
+The remaining sections describe the implementation rejected by the adversarial
+review. They are retained only as evidence of what was tried and why it must not
+be armed.
+
+### Decision
 
 The bridge uses a protected GitHub Environment named `gate-authorization` as
 its trust root. `GateAuthorizationV1` is intentionally unsigned: the
@@ -91,7 +110,7 @@ creates a second PR trapped behind the same bootstrap deadlock. The added bulk
 is schema/DTO plumbing and negative tests rather than another capability or
 framework, so one focused T3 review is the smaller risk.
 
-## Artifact
+### Artifact
 
 The shared leaf contract is:
 
@@ -111,7 +130,7 @@ it differs from the action's command or the exact commit-pinned squash shape.
 It never reconstructs a different command for execution, never mints a grant,
 and never merges.
 
-## Flow
+### Flow
 
 After a fresh exact-head Gate pass:
 
@@ -134,7 +153,7 @@ passes the artifact to `gate authorization promote`, and posts the existing
 required `gate` context only when every check passes. The merge remains the
 exact command emitted by the original Gate run; the workflow never executes it.
 
-## Refusal matrix
+### Refusal matrix
 
 | Condition | Result |
 |---|---|
@@ -156,7 +175,7 @@ valid head red would add an unnecessary denial-of-service rail. A new PR head
 has no inherited exact-head success; normal CI/Gate re-evaluation also
 invalidates prior status as documented in `cmd/gate/docs/enforcement.md`.
 
-## Trusted workflow shape
+### Trusted workflow shape
 
 `.github/workflows/gate-authorization.yml`:
 
@@ -171,7 +190,7 @@ invalidates prior status as documented in `cmd/gate/docs/enforcement.md`.
 - serializes all promotions for the repository, so untrusted fields cannot
   select a separate replay-concurrency group.
 
-## Bootstrap and rollback
+### Bootstrap and rollback
 
 The bridge cannot authorize its own first merge: the trusted workflow is not on
 `main`, while branch protection already requires the app-pinned `gate` context.

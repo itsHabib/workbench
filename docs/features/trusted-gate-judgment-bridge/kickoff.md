@@ -127,7 +127,9 @@ Re-read live PR state before acting. Git and GitHub are truth.
 
 ## Non-negotiable boundaries
 
-- Never mint a grant. The operator alone provides grants.
+- The agent never mints a grant. The operator may provide one, or an
+  authenticated App-mint workflow may mint one only after a verified,
+  run-bound independent approval under the approved design.
 - Never use `--admin`, dismiss findings, weaken required checks, or disable
   branch protection to make a merge pass.
 - Never merge without Gate's exact emitted
@@ -138,7 +140,7 @@ Re-read live PR state before acting. Git and GitHub are truth.
 - Never invoke or depend on Claude.
 - No Ship cloud run, Cursor SDK/API key, Anthropic/OpenAI provider key, or other
   model-provider cloud execution.
-- Ordinary GitHub Actions CI and the trusted status workflow are in scope; they
+- Ordinary GitHub Actions CI and the protected Gate executor are in scope; they
   are repository enforcement, not agent/model cloud execution.
 - Use `--engine session` for every implementation driver run.
 - Use GitHub connector or existing `gh`/git authentication for repository I/O.
@@ -153,13 +155,13 @@ Re-read live PR state before acting. Git and GitHub are truth.
 
 ```text
 trusted judgment bridge
-  -> operator-approved one-time bootstrap
-  -> merge #165 and #168 through app-pinned gate
+  -> operator-approved Gate App + equivalent-or-stronger ruleset bootstrap
+  -> merge #165 and #168 through the PR-specific Gate executor
   -> Workbench five-stream session run
   -> Ship one-stream conformance run
   -> Workbench one-stream fresh-task dogfood
   -> close auto-mode umbrella
-  -> full GitHub App credential authority later
+  -> physical/passkey custody hardening later
 ```
 
 ## Phase A — trusted Gate judgment bridge
@@ -170,40 +172,42 @@ Create or reconcile one Dossier task:
 project: workbench
 phase: codex-auto-mode-parity
 slug: trusted-gate-judgment-bridge
-title: Bridge provider-neutral Gate judgments into the required app-pinned status
+title: Bridge provider-neutral Gate judgments into a PR-specific Gate executor
 ```
 
 Do not create a duplicate if an equivalent live task already exists.
 
-Target one tightly coupled T3 implementation PR so only one bootstrap exception
-is required. If the weighted scope cannot honestly stay reviewable, stop and
-present the smallest split plus its bootstrap consequences before coding.
+PR #169 is the rejected status-promotion prototype and security record. Keep it
+draft. After the operator approves the replacement trust model, supersede its
+implementation with the smallest reviewable App-mint/executor sequence. Keep
+the branch-rule migration and live credential bootstrap operator-only.
 
 ### A0. Audit and design decision
 
 Audit the current Gate action artifact, provider-neutral judgment contract,
-state/audit chain, stamp mechanism, hosted workflow, branch protection, and
-GitHub status creator identities.
+state/audit chain, stamp mechanism, hosted workflow, legacy branch protection,
+repository ruleset, and GitHub App identities.
 
-Choose and document the smallest trust root that the hosted workflow can
-actually verify. Acceptable designs include:
+The replacement trust root is a conjunction, not either/or:
 
-- a canonical, signed, exact-head authorization artifact whose verification key
-  is pinned for the trusted workflow; or
-- an operator-approved protected GitHub environment that makes the promotion
-  itself an authenticated operator action.
+- a protected GitHub Environment whose **run-specific approval history** proves
+  an independent approver authorized the canonical PR/head/evidence digest and
+  judgment question; and
+- a dedicated, repository-only Gate GitHub App whose private key is available
+  only to the protected executor step and whose installation token never leaves
+  the Gate process.
 
 An opaque `repository_dispatch` payload, a user-authored commit status, a login
 allowlist that agents can impersonate with the ambient operator token, or a
 description containing an unverifiable hash is not sufficient.
 
-If the proposed signing key is readable by the same untrusted agent identity it
-is supposed to constrain, state that honestly and stop for a security decision.
-Do not call convention-based custody cryptographic enforcement.
+If either the approval identity or App private key is available to the governed
+agent identity, state that honestly and stop. Do not call convention-based
+custody cryptographic enforcement.
 
 Record the decision in a focused design section or ADR in the bridge PR.
 
-### A1. Versioned authorization artifact
+### A1. Versioned authorization and execution artifacts
 
 Use or implement a versioned shared contract, tentatively
 `GateAuthorizationV1`, under a leaf `contracts` package. Final naming should
@@ -229,13 +233,28 @@ bad SHA, missing action hash, changed argv, or unsupported outcome must refuse.
 Optional additive fields may be preserved only according to the repository's
 existing versioning law.
 
-The contract contains vocabulary and validation only. Gate owns authorization
-policy; the workflow owns transport and app-pinned status publication.
+Add a versioned `GateExecutionClaimV1` (final naming follows repository
+conventions) that binds the action ID/hash, PR/head, approval receipt digest,
+claim time, and one-time execution identity. Claiming must be an atomic append
+against audited anchored state. A claimed action is permanently consumed:
+failure requires a fresh Gate run/action, never replay.
 
-### A2. Gate producer/publish seam
+Use existing `contracts.Verdict` and `ReviewPanelV1` for clean/pass,
+escalate/address, and block evidence. `ReviewFindingsV1` remains the actionable
+address-work contract and must never be stretched into a clean-pass artifact.
+The approval receipt binds the canonical digest of the Gate evidence bundle and
+the exact judgment question.
 
-Add the smallest Gate CLI seam that exports or publishes the authorization only
-after an existing exact-head run is the newest terminal `would_merge` action.
+Contracts contain vocabulary and validation only. Gate owns authorization,
+claim, and execution policy; the workflow is trusted transport and secret
+release only.
+
+### A2. Merge-time Gate decision and one-time claim
+
+Add the smallest Gate CLI seam that, inside the protected run, mints a
+short-lived head-bound grant from the verified approval receipt, evaluates the
+live exact PR/head, resolves any provider-neutral judgment through Gate-owned
+policy, and atomically claims only the newest terminal `would_merge` action.
 
 Required behavior:
 
@@ -246,40 +265,52 @@ Required behavior:
 - Never reconstruct the merge command.
 - Never turn a parked, blocked, refused, malformed, or ambiguous run into an
   authorization.
-- Publishing is idempotent by the artifact's natural identity.
-- A publish/transport failure never rewrites the Gate decision.
-- No grant minting or merge execution occurs here.
+- Refuse an approval receipt that does not bind the exact evidence digest,
+  judgment question, PR, and head.
+- Serialize the authoritative hosted state per repository; once an action is
+  claimed, later Gate writes for that PR must refuse until execution records a
+  terminal result.
+- Re-audit anchored state and re-read live PR/head immediately before claim.
+- Claim exactly once before creating any App installation token.
+- A claim or transport failure never turns into merge authority.
+- The agent never supplies or handles mint or App credentials.
 
-### A3. Trusted GitHub Actions consumer
+### A3. Custodied Gate App executor
 
-Add a default-branch-only trusted workflow that consumes the artifact and posts
-the existing required `gate` context as `github-actions[bot]`.
+Add a default-branch-only protected workflow that invokes a Gate-owned executor.
+The executor consumes one audited claim and merges exactly the named PR; it does
+not publish reusable success as a commit status.
 
 The workflow must:
 
 - run only trusted base-branch code;
 - never check out or execute PR/fork code;
-- request least privilege (`statuses: write` plus only required read scopes);
-- verify the selected trust root before any status write;
+- request read-only workflow permissions; the default `GITHUB_TOKEN` has no
+  merge or status authority;
+- verify the run's approval-history receipt and immutable approving actor before
+  any mint or App secret is used;
 - verify exact repo, PR, open state, and current head;
-- verify the newest Gate outcome represented by the artifact;
+- verify the claimed action is still the newest executable Gate outcome;
 - verify expiry and replay identity;
 - byte-compare the exact merge argv;
-- post success only for a valid current `would_merge`;
-- post failure/error or nothing in every ambiguous/malformed/stale case,
-  according to a documented fail-closed matrix;
-- serialize per repo/PR/head as needed;
+- pass the App private key only to the Gate executor process after the claim;
+- exchange the private key for a short-lived installation token internally;
+  never return, print, persist, or expose that token to another workflow step;
+- execute only the stored argv, unchanged, including `--match-head-commit`, and
+  never add `--admin`;
+- append the execution result to anchored Gate state and refuse every replay;
 - produce an auditable run summary without secrets;
-- leave branch protection requiring the existing app-pinned `gate` context.
+- fail closed before merge on malformed, stale, ambiguous, unapproved,
+  superseded, already-claimed, or transport-error input.
 
-Do not introduce an alternate required context or an OR-by-convention between
-`gate` and `gate/authorized`.
+The App is the policy-custodied exact-command executor. A workflow step that
+receives a general installation token is a rejected thin wrapper.
 
 ### A4. Tests and adversarial pass
 
 At minimum, pin:
 
-- valid exact-head authorization -> one `gate=success`;
+- valid exact-head approval + newest action -> one claim and one exact PR merge;
 - stale head;
 - closed/merged PR;
 - wrong repo or PR;
@@ -287,16 +318,19 @@ At minimum, pin:
 - bad signature or missing protected approval;
 - expired authorization;
 - replay/duplicate delivery;
-- older `would_merge` superseded by block/park/newer run;
+- older `would_merge` superseded before claim by block/park/newer run;
+- newer run or duplicate execution after claim;
 - forged full-SHA merge argv;
 - changed merge method/flags/order;
 - absent or ambiguous GitHub read;
 - fork-controlled workflow/code attempt;
-- shared-head/ambiguous-PR case;
+- shared-head/second-PR case cannot inherit authority;
 - workflow permission and trusted-checkout shape;
-- status creator is GitHub Actions, not the ambient user;
-- transport failure cannot create success;
-- no grant mint and no merge side effect.
+- App key/token never crosses the executor process boundary;
+- exact stored argv succeeds under the App without `--admin`;
+- token, merge, audit-write, and transport failures cannot create a second
+  attempt or reusable success;
+- no agent grant mint and no ambient-user merge side effect.
 
 Run the scoped Gate checks and full repository checks:
 
@@ -313,36 +347,43 @@ semantics. Address every actionable P1/P2 finding and re-review the exact head.
 
 ### A5. Bootstrap boundary
 
-The bridge cannot authorize its own first merge because the trusted consumer is
-not on `main` yet. Do not disguise this circular dependency.
+The executor cannot authorize its own first merge because its trusted code,
+App, environment, and branch-rule authority are not armed yet. Do not disguise
+this circular dependency.
 
 After local green, CI, fresh exact-head Codex reviews, and a T3
 provider-neutral Gate judgment, stop with:
 
 - the exact bridge PR and head;
 - the exact Gate run/action hash;
-- proof of the current required-check deadlock;
-- the smallest operator-only bootstrap action;
+- proof of the current legacy required-check deadlock;
+- an equivalent-or-stronger staged ruleset that preserves every existing human
+  protection, names only the dedicated App as `Integration` with
+  `bypass_mode=pull_request`, and introduces no unprotected interval;
+- a disposable canary proving Gate's exact argv succeeds with the App
+  installation token and without `--admin`;
+- the smallest operator-only App/environment/ruleset/bootstrap actions;
 - rollback steps;
 - a statement of which permanent protections remain unchanged.
 
-The operator chooses the bootstrap. The agent never uses `--admin`, alters
-branch protection, or invokes missing Claude/Cursor reviewers without explicit
-new authority.
+The operator chooses and performs the App registration, environment approval,
+ruleset migration, and bootstrap. The agent never uses `--admin`, edits those
+protections, or invokes missing Claude/Cursor reviewers without explicit new
+authority.
 
 ### A6. Live proof and existing PR recovery
 
-After the bridge is on `main`:
+After the executor is on `main` and operator-armed:
 
-1. Publish one disposable valid exact-head authorization and prove the trusted
-   workflow posts required `gate=success`.
-2. Prove stale, malformed, forged, expired, and replay cases cannot post
-   success.
+1. Run one disposable valid exact-head approval/action through the App executor
+   and prove exactly one PR merges with Gate's unchanged argv.
+2. Prove stale, malformed, forged, expired, superseded, already-claimed, and
+   replay cases cannot mint an App token or merge.
 3. Re-read PRs #165 and #168.
 4. Re-run Gate if either head or newest terminal decision changed.
-5. Publish their valid authorizations through the bridge.
-6. Confirm the required app-pinned `gate` status is green.
-7. Execute only each Gate-emitted commit-pinned merge command.
+5. Run each through the protected PR-specific executor.
+6. Verify App identity, exact argv, claim/result artifacts, and GitHub merge
+   facts agree.
 
 Do not proceed to the auto-mode implementation until PR #168 is actually merged
 and its merge fact is readable from GitHub.
@@ -463,31 +504,27 @@ When all implementation and dogfood PRs are merged:
   - remaining limitations;
   - any manual intervention still required.
 
-## Later track — full Gate GitHub App credential authority
+## Later track — physical/passkey custody
 
-Do not absorb this into the merge-unblocker.
+The exact-command Gate App executor is now part of Phase A; PR #143's App-mint
+TDD must be superseded or revised before implementation because its original
+non-goal excluded execution and assumed commit-status enforcement was enough.
 
-After the bridge and auto-mode program close, resume or supersede PR #143's
-App-mint TDD with an explicit decision. That later project may:
-
-- install a dedicated Gate GitHub App;
-- authenticate head-bound grant minting;
-- mint short-lived installation tokens after Gate authorization;
-- execute merges as the scoped App identity;
-- remove merge authority from the standing user credential;
-- converge with physical/passkey custody.
-
-Re-audit PR #143 before implementation because it predates provider-neutral
-judgment, exact-head panel completeness, and this bridge.
+After the bridge and auto-mode program close, harden the independent approval
+root with the physical-custody tap/passkey design. That later project may remove
+the temporary second-account approval friction, shorten credential exposure,
+and strengthen revocation without changing Gate's artifact or exact-command
+contracts.
 
 ## Definition of done
 
 The goal is complete only when:
 
-1. Provider-neutral Gate authorization can safely produce the required
-   app-pinned `gate` status without Claude or a model-provider run.
-2. Forged, stale, malformed, expired, replayed, or superseded authorizations
-   cannot produce success.
+1. Provider-neutral Gate authorization can safely drive one PR-specific,
+   exact-command merge through the dedicated Gate App without Claude or a
+   model-provider run.
+2. Forged, stale, malformed, expired, replayed, superseded, or already-claimed
+   authorizations cannot mint an App token or merge.
 3. PRs #165 and #168 are merged through Gate's exact emitted commands.
 4. All five Workbench auto-mode implementation streams are merged.
 5. Ship passes the shared ReviewFindings conformance corpus and merges.
@@ -496,8 +533,9 @@ The goal is complete only when:
    lifecycle boundary.
 7. Driver ledgers, Gate runs, PR heads, merge commits, and closure receipts are
    mutually reconstructable.
-8. No grant was agent-minted; no `--admin`, check weakening, hidden cloud model
-   run, Claude dependency, or private material entered the public repository.
+8. No grant was agent-minted; the App key/token never left the custodied
+   executor; no `--admin`, check weakening, hidden cloud model run, Claude
+   dependency, or private material entered the public repository.
 
 If a security choice, grant, protected-environment approval, App registration,
 or bootstrap merge requires operator authority, stop with the exact request.
