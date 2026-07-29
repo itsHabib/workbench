@@ -1,0 +1,21 @@
+{
+  "schema_version": "auto-decision.v1",
+  "event_id": "evt_1",
+  "invocation_id": "inv_1",
+  "recorded_at": "2026-07-29T00:00:00Z",
+  "kind": "completion",
+  "decision": {
+    "schema_version": "auto-decision.v1",
+    "outcome": "refuse",
+    "rule_fired": "authority.unknown",
+    "rulebook_version": "revision",
+    "remedy": "inspect the action",
+    "harness": "codex",
+    "inputs": {
+      "action": { "envelope": "shell", "operation": "git.status", "parameters": [] },
+      "observables": []
+    },
+    "action_digest": "sha256:63bdf3c92d039f6725daabb0d3da9205b2b3ec2f424bc8427b9baa18728f68ef"
+  },
+  "completion": { "status": "failed", "observables": [] }
+}

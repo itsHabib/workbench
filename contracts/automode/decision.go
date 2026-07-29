@@ -152,7 +152,8 @@ func Digest(inputs InputProjection) (string, error) {
 }
 
 func sortedValues(values []NamedValue) []NamedValue {
-	out := append([]NamedValue(nil), values...)
+	out := make([]NamedValue, len(values))
+	copy(out, values)
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})

@@ -26,5 +26,31 @@
       "additionalProperties": true
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "kind": { "const": "decision" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": { "required": ["completion"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "completion" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["completion"],
+        "properties": {
+          "decision": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "pass" } }
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": true
 }

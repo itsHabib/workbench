@@ -30,11 +30,16 @@ func TestDecisionFixturesRefuseMalformedContracts(t *testing.T) {
 	}{
 		{"invalid-decision-unknown-version.json", ErrUnknownSchemaVersion},
 		{"invalid-decision-missing-rulebook.json", ErrMissingField},
+		{"invalid-decision-redacted-raw.json", nil},
+		{"invalid-decision-nonpass-empty-remedy.json", ErrMissingField},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := DecodeDecision(readFixture(t, test.name))
-			if !errors.Is(err, test.want) {
+			if test.want == nil && err == nil {
+				t.Fatal("DecodeDecision() error = nil")
+			}
+			if test.want != nil && !errors.Is(err, test.want) {
 				t.Fatalf("DecodeDecision() error = %v, want %v", err, test.want)
 			}
 		})
@@ -59,11 +64,30 @@ func TestDigestIgnoresNamedValueOrder(t *testing.T) {
 	}
 }
 
+func TestDigestEmptyCollectionsGolden(t *testing.T) {
+	inputs := InputProjection{
+		Action:      Action{Envelope: "shell", Operation: "git.status", Parameters: []NamedValue{}},
+		Observables: []NamedValue{},
+	}
+	got, err := Digest(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "sha256:63bdf3c92d039f6725daabb0d3da9205b2b3ec2f424bc8427b9baa18728f68ef"
+	if got != want {
+		t.Fatalf("Digest(empty arrays) = %q, want %q", got, want)
+	}
+}
+
 func TestValidationKeepsSecretsOutOfProjection(t *testing.T) {
 	inputs := validInputs()
 	inputs.Action.Parameters[0] = NamedValue{Name: "grant", Value: "super-secret-token", Redacted: true}
 	if _, err := Digest(inputs); err == nil {
 		t.Fatal("Digest() accepted a redacted raw value")
+	}
+	inputs.Action.Parameters[0] = NamedValue{Name: "grant", Value: RedactionMarker}
+	if _, err := Digest(inputs); err == nil {
+		t.Fatal("Digest() accepted an unflagged redaction marker")
 	}
 
 	for _, name := range []string{"decision-pass.json", "decision-pass-future-fields.json"} {
@@ -97,6 +121,12 @@ func TestValidateAuditEvent(t *testing.T) {
 		t.Fatalf("completion event: %v", err)
 	}
 
+	missingCompletion := base
+	missingCompletion.Kind = EventCompletion
+	if err := ValidateAuditEvent(missingCompletion); err == nil {
+		t.Fatal("completion event accepted no completion body")
+	}
+
 	refused := base
 	refused.Decision.Outcome = OutcomeRefuse
 	refused.Decision.Remedy = "run gate again"
@@ -105,6 +135,15 @@ func TestValidateAuditEvent(t *testing.T) {
 	refused.Completion = completed.Completion
 	if err := ValidateAuditEvent(refused); err == nil {
 		t.Fatal("completion event accepted a refused decision")
+	}
+
+	for _, name := range []string{
+		"invalid-audit-decision-with-completion.json",
+		"invalid-audit-completion-nonpass.json",
+	} {
+		if _, err := DecodeAuditEvent(readFixture(t, name)); err == nil {
+			t.Fatalf("%s: DecodeAuditEvent() error = nil", name)
+		}
 	}
 }
 
@@ -140,18 +179,85 @@ func TestSchemasCarryVersionAndEnums(t *testing.T) {
 	assertObjectConforms(t, reflect.TypeOf(Completion{}), auditSchema.Properties["completion"])
 }
 
+func TestDecisionSchemaPinsRemedyLaw(t *testing.T) {
+	decisionSchema := loadSchema(t, DecisionSchema)
+	decision := decisionSchema.Defs["decision"]
+	if len(decision.AllOf) != 1 {
+		t.Fatalf("decision allOf rules = %d, want 1", len(decision.AllOf))
+	}
+	remedy := decision.AllOf[0]
+	if remedy.If == nil || remedy.Else == nil ||
+		remedy.If.Properties["outcome"].Const != OutcomePass ||
+		remedy.Else.Properties["remedy"].MinLength != 1 {
+		t.Fatal("decision schema does not require a non-empty non-pass remedy")
+	}
+}
+
+func TestDecisionSchemaPinsRedactionLaw(t *testing.T) {
+	decisionSchema := loadSchema(t, DecisionSchema)
+	value := decisionSchema.Defs["value"]
+	if len(value.AllOf) != 1 {
+		t.Fatalf("value allOf rules = %d, want 1", len(value.AllOf))
+	}
+	redaction := value.AllOf[0]
+	if redaction.If == nil || redaction.Then == nil || redaction.Else == nil ||
+		redaction.If.Properties["redacted"].Const != true ||
+		redaction.Then.Properties["value"].Const != RedactionMarker ||
+		redaction.Else.Properties["value"].Not == nil ||
+		redaction.Else.Properties["value"].Not.Const != RedactionMarker {
+		t.Fatal("decision schema does not enforce redacted iff [REDACTED]")
+	}
+}
+
+func TestAuditSchemaPinsEventLaws(t *testing.T) {
+	auditSchema := loadSchema(t, AuditSchema)
+	if len(auditSchema.AllOf) != 2 {
+		t.Fatalf("audit allOf rules = %d, want 2", len(auditSchema.AllOf))
+	}
+	decisionEvent := auditSchema.AllOf[0]
+	completionEvent := auditSchema.AllOf[1]
+	if decisionEvent.If == nil || decisionEvent.Then == nil ||
+		decisionEvent.If.Properties["kind"].Const != EventDecision ||
+		decisionEvent.Then.Not == nil ||
+		!reflect.DeepEqual(decisionEvent.Then.Not.Required, []string{"completion"}) {
+		t.Fatal("audit schema does not forbid completion on decision events")
+	}
+	if completionEvent.If == nil || completionEvent.Then == nil ||
+		completionEvent.If.Properties["kind"].Const != EventCompletion ||
+		!reflect.DeepEqual(completionEvent.Then.Required, []string{"completion"}) ||
+		completionEvent.Then.Properties["decision"].Properties["outcome"].Const != OutcomePass {
+		t.Fatal("audit schema does not require a pass decision and completion body")
+	}
+}
+
+func loadSchema(t *testing.T, data []byte) schemaDocument {
+	t.Helper()
+	var schema schemaDocument
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
 type schemaDocument struct {
 	XVersion   string                `json:"x-version"`
 	Required   []string              `json:"required"`
 	Properties map[string]schemaNode `json:"properties"`
 	Defs       map[string]schemaNode `json:"$defs"`
+	AllOf      []schemaNode          `json:"allOf"`
 }
 
 type schemaNode struct {
 	Required   []string              `json:"required"`
 	Properties map[string]schemaNode `json:"properties"`
-	Const      string                `json:"const"`
+	Const      any                   `json:"const"`
 	Enum       []string              `json:"enum"`
+	MinLength  int                   `json:"minLength"`
+	AllOf      []schemaNode          `json:"allOf"`
+	If         *schemaNode           `json:"if"`
+	Then       *schemaNode           `json:"then"`
+	Else       *schemaNode           `json:"else"`
+	Not        *schemaNode           `json:"not"`
 }
 
 func assertObjectConforms(t *testing.T, typ reflect.Type, schema schemaNode) {

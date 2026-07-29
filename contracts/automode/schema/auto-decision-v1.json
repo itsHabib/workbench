@@ -18,6 +18,17 @@
         "inputs": { "$ref": "#/$defs/inputs" },
         "action_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "pass" } },
+            "required": ["outcome"]
+          },
+          "else": {
+            "properties": { "remedy": { "minLength": 1 } }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "inputs": {
@@ -52,6 +63,20 @@
         "value": { "type": "string" },
         "redacted": { "type": "boolean" }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "redacted": { "const": true } },
+            "required": ["redacted"]
+          },
+          "then": {
+            "properties": { "value": { "const": "[REDACTED]" } }
+          },
+          "else": {
+            "properties": { "value": { "not": { "const": "[REDACTED]" } } }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "name": {
