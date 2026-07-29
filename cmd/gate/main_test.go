@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
+	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
 // testEnv builds an env over throwaway state and key dirs (the key dir a
@@ -30,6 +32,39 @@ func testEnv(t *testing.T) env {
 		t.Fatal(err)
 	}
 	return e
+}
+
+func TestReviewsOptionalStillRunsPanelCompleteness(t *testing.T) {
+	e := testEnv(t)
+	subject := verify.Subject{Repo: "o/r", Number: 1, HeadSHA: "head"}
+	panel := reviewpanel.Evidence{
+		SchemaVersion: 1,
+		Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: "head"},
+		Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"codex"}},
+		Missing:       []string{"codex"},
+	}
+	artifact, err := e.st.Append(state.KindEvidence, "run_t", nil, panel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := reviewVerdictIDs(e, "run_t", evidence.Bundle{Panel: artifact.ID}, subject, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("reviews-optional verdict count = %d, want deterministic panel only", len(ids))
+	}
+	verdictArtifact, err := e.st.Get(ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := verify.Load(verdictArtifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Source != "review-panel-completeness" || verdict.Decision != verify.DecisionEscalate {
+		t.Fatalf("reviews-optional skipped incomplete panel: %+v", verdict)
+	}
 }
 
 // recordReduced appends a reduced verdict artifact so act has the parent its

@@ -53,6 +53,17 @@ log entry. Consequences the code enforces:
   composed verdict, and the escalation artifact embeds the full question.
   Parking with a pointer back into prose is the leak this design exists to
   prevent.
+- **A clean panel is evidence, not an empty findings list.** `ReviewPanelV1`
+  records `.ship.json`'s required set and the exact-head disposition of each
+  reviewer. The panel-completeness code rung escalates missing, pending,
+  unknown, and stale-head state separately from the local model's finding
+  extraction, so one clean reviewer cannot stand in for silent peers. A clean
+  Codex issue comment counts only from the exact connector actor with its
+  structured `Reviewed commit` sentinel bound to the current head; arbitrary
+  prose and stale or malformed sentinels remain incomplete. Other provider
+  issue comments, including Claude lifecycle/sticky comments, are not authority:
+  absent a formal exact-head review or future shared head-bound artifact they
+  remain incomplete and the provider-neutral judgment path resolves the park.
 
 ### Concurrency
 

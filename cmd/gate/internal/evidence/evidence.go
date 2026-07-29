@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
 // PRRef names the subject under the gate.
@@ -25,6 +26,7 @@ type Bundle struct {
 	View     string // gh pr view JSON (checks, draft, mergeable, review decision)
 	Diff     string // unified diff
 	Comments string // bot review comments (inline + issue-level)
+	Panel    string // ReviewPanelV1 declaration + exact-head completion evidence
 }
 
 type viewBody struct {
@@ -45,6 +47,7 @@ type diffBody struct {
 
 // Comment is one review comment as verifiers will consume it.
 type Comment struct {
+	ID     int64  `json:"id,omitempty"`
 	Author string `json:"author"`
 	IsBot  bool   `json:"is_bot"`
 	Path   string `json:"path,omitempty"`
@@ -65,6 +68,12 @@ type commentsBody struct {
 	Comments []Comment `json:"comments"`
 }
 
+type reviewFetchers struct {
+	reviews  func(PRRef) ([]rawComment, error)
+	comments func(PRRef, []rawComment) ([]Comment, error)
+	panel    func(PRRef, string, []rawComment, []Comment) reviewpanel.Evidence
+}
+
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	var b Bundle
@@ -78,6 +87,12 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.View = a.ID
+	var viewed struct {
+		HeadRefOid string `json:"headRefOid"`
+	}
+	if err := json.Unmarshal(view, &viewed); err != nil {
+		return b, fmt.Errorf("evidence: parse PR head: %w", err)
+	}
 
 	// method "api" records only that GitHub served the diff — not head/merge_base:
 	// gh pr diff reads by PR number and doesn't report which head it rendered, so
@@ -102,7 +117,9 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.Diff = a.ID
 
-	comments, err := fetchComments(pr)
+	comments, panel, err := fetchReviewEvidence(pr, viewed.HeadRefOid, reviewFetchers{
+		reviews: fetchReviews, comments: fetchComments, panel: fetchPanel,
+	})
 	if err != nil {
 		return b, err
 	}
@@ -111,7 +128,31 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.Comments = a.ID
+	if err := reviewpanel.Validate(panel); err != nil {
+		return b, err
+	}
+	a, err = st.Append(state.KindEvidence, run, nil, panel)
+	if err != nil {
+		return b, err
+	}
+	b.Panel = a.ID
 	return b, nil
+}
+
+// fetchReviewEvidence takes the review-submission snapshot first. Both panel
+// completion and findings then derive from that same set; comments are fetched
+// afterward so an actionable inline finding belonging to a credited review
+// cannot be absent merely because it appeared between two review snapshots.
+func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]Comment, reviewpanel.Evidence, error) {
+	reviews, err := fetchers.reviews(pr)
+	if err != nil {
+		return nil, reviewpanel.Evidence{}, err
+	}
+	comments, err := fetchers.comments(pr, reviews)
+	if err != nil {
+		return nil, reviewpanel.Evidence{}, err
+	}
+	return comments, fetchers.panel(pr, headSHA, reviews, comments), nil
 }
 
 type rawComment struct {
@@ -141,7 +182,7 @@ const commentsPerPage = 100
 // the two endpoints where the bot panel's findings land. Both are paged to
 // exhaustion: the consolidator treats this artifact as the complete panel,
 // so a truncated fetch would silently drop findings.
-func fetchComments(pr PRRef) ([]Comment, error) {
+func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	resolved, err := fetchResolvedIDs(pr)
 	if err != nil {
 		return nil, err
@@ -154,19 +195,10 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Review SUBMISSION bodies (pulls/.../reviews), not just comments. A bot can
-	// put an actionable finding in its top-level review body rather than an inline
-	// comment; that body is invisible in the two comment endpoints above, so a
-	// verifier judging only comments could pass a head whose review body objected.
-	// A review submission carries the commit_id it reviewed, so it is anchored —
-	// staleComment drops one from an earlier head, keeping the panel head-current.
-	reviews, err := pagedComments(fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number))
-	if err != nil {
-		return nil, err
-	}
 	var out []Comment
 	for _, rc := range inline {
 		out = append(out, Comment{
+			ID:       rc.ID,
 			Author:   rc.User.Login,
 			IsBot:    rc.User.Type == "Bot",
 			Path:     rc.Path,
@@ -178,6 +210,7 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 	}
 	for _, rc := range issue {
 		out = append(out, Comment{
+			ID:     rc.ID,
 			Author: rc.User.Login,
 			IsBot:  rc.User.Type == "Bot",
 			Body:   rc.Body,
@@ -185,6 +218,10 @@ func fetchComments(pr PRRef) ([]Comment, error) {
 	}
 	out = append(out, reviewBodies(reviews)...)
 	return out, nil
+}
+
+func fetchReviews(pr PRRef) ([]rawComment, error) {
+	return pagedComments(fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number))
 }
 
 // reviewBodies reduces a PR's review submissions (oldest-first) to the review
@@ -217,6 +254,7 @@ func reviewBodies(reviews []rawComment) []Comment {
 			continue
 		}
 		out = append(out, Comment{
+			ID:       rv.ID,
 			Author:   rv.User.Login,
 			IsBot:    rv.User.Type == "Bot",
 			Body:     rv.Body,

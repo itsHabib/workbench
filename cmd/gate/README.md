@@ -132,13 +132,17 @@ One `gate` invocation is a single pass:
    error before any evidence is gathered. This bounds the gate's *own*
    sanctioned merge path; it does not bound a merge performed directly with a
    `gh` token (see [docs/enforcement.md](docs/enforcement.md)).
-2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, both comment
-   endpoints), each recorded as an artifact.
-3. **Verification ladder** — three rungs, each a verdict artifact:
+2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, review submissions,
+   requested reviewers, both comment endpoints, and the default branch's
+   `.ship.json` declaration), each recorded as an artifact.
+3. **Verification ladder** — four rungs, each a verdict artifact:
    - *readiness* (code): draft state, CI rollup, mergeability. Its blocks are
      final — no judgment can talk a red check green.
    - *floor* (code): the deterministic risk floor over the diff. Never blocks;
      it assigns the tier the grant ceiling is checked against.
+   - *panel completeness* (code): the repository-required reviewer set against
+     exact-head review submissions. Missing, pending, unknown, or stale-head
+     evidence escalates; absence is never green.
    - *review consolidation* (local model): per-comment extract-don't-judge over
      the bot panel's findings. May pass or escalate, never block.
 4. **Reduction** — monotone composition: worst decision wins, max tier wins,

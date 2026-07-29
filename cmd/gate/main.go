@@ -375,7 +375,7 @@ func cmdGate(args []string) error {
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
-	reviewsOptional := fs.Bool("reviews-optional", false, "reviews advisory: readiness does not escalate on an absent GitHub review decision, and the model-based review-consolidation rung is SKIPPED (it would not gate, so its paid model calls are pure cost) — for the enforced CI check, which has no judge to resolve a review park. Review judgment stays in the operator/driver flow. A GitHub CHANGES_REQUESTED still blocks via readiness")
+	reviewsOptional := fs.Bool("reviews-optional", false, "review judgment advisory: readiness accepts an absent GitHub review decision and paid review-consolidation is skipped, but deterministic exact-head panel completeness still runs. A GitHub CHANGES_REQUESTED still blocks via readiness")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -429,7 +429,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return res, codeError, err
 	}
 
-	// The verifier ladder: three rungs, each a verdict artifact.
+	// The verifier ladder records one verdict artifact per rung.
 	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, subject, reviewsOptional)
 	if err != nil {
 		return res, codeError, err
@@ -438,22 +438,16 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	if err != nil {
 		return res, codeError, err
 	}
-	// The model-based review-consolidation rung is SKIPPED when reviews are advisory
-	// (reviewsOptional — the enforced CI check). It escalates on uncertainty, and an
-	// ephemeral CI run has no judge to resolve the park, so gating on it would
-	// freeze a clean PR; and since it would not gate, running it is pure paid model
-	// calls per PR for no decision. Review judgment stays in the operator/driver
-	// flow, which DOES run and gate the rung. The enforced check gates on the
-	// DETERMINISTIC rungs — readiness, floor (+ ci-classify on red CI). A
-	// GitHub-reported CHANGES_REQUESTED still blocks via readiness (code-class).
+	// The paid model-based review-consolidation rung is SKIPPED when reviews are
+	// advisory (reviewsOptional — the enforced CI check). The deterministic panel
+	// completeness rung still runs: optional judgment must not turn missing exact-
+	// head evidence green.
 	verdictIDs := []string{readinessArt.ID, floorArt.ID}
-	if !reviewsOptional {
-		reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
-		if err != nil {
-			return res, codeError, err
-		}
-		verdictIDs = append(verdictIDs, reviewsArt.ID)
+	reviewIDs, err := reviewVerdictIDs(e, run, bundle, subject, model, reviewsOptional)
+	if err != nil {
+		return res, codeError, err
 	}
+	verdictIDs = append(verdictIDs, reviewIDs...)
 	ciID, err := ciClassifyIfRed(e, run, bundle.View, repo, pr, subject, model)
 	if err != nil {
 		return res, codeError, err
@@ -480,6 +474,22 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+func reviewVerdictIDs(e env, run string, bundle evidence.Bundle, subject verify.Subject, model verify.Model, reviewsOptional bool) ([]string, error) {
+	panelArt, err := verify.PanelCompleteness(e.st, run, bundle.Panel, subject)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{panelArt.ID}
+	if reviewsOptional {
+		return ids, nil
+	}
+	reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
+	if err != nil {
+		return nil, err
+	}
+	return append(ids, reviewsArt.ID), nil
 }
 
 // recordGrantNeeded persists the top-level capability refusal as a durable,
