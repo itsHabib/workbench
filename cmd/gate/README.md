@@ -76,13 +76,21 @@ PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
 Gate has two built-in local CLI projections:
 
 ```text
-claude -> claude -p
-codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check -
+claude -> claude -p --tools ""
+          with CLAUDE_CODE_SIMPLE=1
+codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
+          --ignore-user-config --ignore-rules --disable shell_tool
+          -c agents.enabled=false -c web_search="disabled" -
 ```
 
 The caller selects the provider name, never an executable or argument vector.
-Gate runs that fixed command from a fresh temporary working directory, sends
-one `gate-judgment-v1` request as JSON on stdin, and accepts one strict
+Gate resolves that fixed CLI name to an absolute path, hashes the resolved file
+into producer provenance, and runs it from a fresh temporary working directory.
+It disables the agent's tools and customizations and gives the process a
+small allowlist of runtime variables; Gate custody, GitHub credentials,
+provider API keys, and arbitrary caller variables are not inherited. The CLI
+uses its normal saved-login store. Gate sends one `gate-judgment-v1` request as
+JSON on stdin and accepts one strict
 `gate-judgment-v1` artifact on stdout. The request contains only recorded
 state: run and escalation ids, the exact PR subject/head, the presented grant
 id and tier ceiling, the recorded question, and the artifact context. The
@@ -128,11 +136,13 @@ long provider call authorizes no state mutation.
 A later `capability_refused` action remains audit history but does not complete
 the persisted judgment chain; a replacement live grant may still append the
 single authorized outcome.
-The selected CLI provider is prefixed into the stored producer provenance.
-The model implementation remains provider-reported. This local path is
-advisory automation under the same operating-system identity as Gate; it is
-not an independently custodied security authority. Enforcement-grade judgment
-requires a separately controlled executor identity.
+The selected CLI provider, resolved wrapper filename, and SHA-256 digest are
+prefixed into the stored producer provenance. The model implementation remains
+provider-reported. PATH and the saved-login/config locations remain same-user
+dependencies, so this local path is advisory automation under the same
+operating-system identity as Gate—not independently custodied security
+authority. Enforcement-grade judgment requires a separately controlled
+executor identity.
 
 ## How it decides
 

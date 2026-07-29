@@ -201,15 +201,18 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
   outside, no engine surgery.
 - **Judgment is provider-neutral at the artifact boundary.** `judge -auto`
   accepts only the built-in `claude` and `codex` local CLI projections. Gate
-  owns their fixed argument vectors; the caller cannot nominate executable
-  code. Gate writes a versioned `gate-judgment-v1` request to stdin and reads
-  the same versioned response from stdout. `judge -judgment` accepts the
-  response as a file for a native Codex-produced artifact path. Both bind the
-  decision to the parked run, escalation and question, exact PR head, and
-  presented grant ceiling before any state append. The local CLI path is
-  advisory same-user automation, not independently custodied authority. If a
-  good judgment needs more than the recorded context carries, that is a
-  contract bug in the artifacts, not a reason to widen the artifact channel.
+  owns their fixed argument vectors, disables tools and customizations, strips
+  authority-bearing environment variables, and records the resolved wrapper's
+  digest. The caller cannot nominate a path or arguments, though PATH, saved
+  login, and the process identity remain same-user dependencies. Gate writes a
+  versioned `gate-judgment-v1` request to stdin and reads the same versioned
+  response from stdout. `judge -judgment` accepts the response as a file for a
+  native Codex-produced artifact path. Both bind the decision to the parked
+  run, escalation and question, exact PR head, and presented grant ceiling
+  before any state append. The local CLI path is advisory same-user automation,
+  not independently custodied authority. If a good judgment needs more than the
+  recorded context carries, that is a contract bug in the artifacts, not a
+  reason to widen the artifact channel.
 
 ## Deliberately out of v0, with triggers
 

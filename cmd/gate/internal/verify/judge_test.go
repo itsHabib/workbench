@@ -2,10 +2,12 @@ package verify
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -160,7 +162,10 @@ func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
 		{
 			provider: JudgeProviderClaude,
 			name:     "claude",
-			args:     []string{"-p"},
+			args: []string{
+				"-p",
+				"--tools", "",
+			},
 		},
 		{
 			provider: JudgeProviderCodex,
@@ -170,6 +175,11 @@ func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
 				"--ephemeral",
 				"--sandbox", "read-only",
 				"--skip-git-repo-check",
+				"--ignore-user-config",
+				"--ignore-rules",
+				"--disable", "shell_tool",
+				"-c", "agents.enabled=false",
+				"-c", `web_search="disabled"`,
 				"-",
 			},
 		},
@@ -206,8 +216,15 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 			request, _ := judgmentFixture()
 			var gotName string
 			var gotArgs []string
-			factory := judgeHelperFactory(t, "", &gotName, &gotArgs)
-			got, err := autoJudge(provider, request, t.TempDir(), factory)
+			factory := judgeHelperFactory(t, &gotName, &gotArgs)
+			got, err := autoJudge(
+				provider,
+				request,
+				t.TempDir(),
+				judgeHelperEnvironment(provider, ""),
+				fakeJudgeResolver,
+				factory,
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -215,10 +232,12 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if gotName != want.name || !slices.Equal(gotArgs, want.args) {
-				t.Fatalf("executed %s %v, want %s %v", gotName, gotArgs, want.name, want.args)
+			wantPath := filepath.Join(string(filepath.Separator), "trusted", want.name)
+			if gotName != wantPath || !slices.Equal(gotArgs, want.args) {
+				t.Fatalf("executed %s %v, want %s %v", gotName, gotArgs, wantPath, want.args)
 			}
-			if got.Source != "auto-judgment" || got.Producer.Impl != provider+"-cli:fixture-model" {
+			wantProducer := provider + "-cli[" + want.name + "@sha256:" + strings.Repeat("a", 64) + "]:fixture-model"
+			if got.Source != "auto-judgment" || got.Producer.Impl != wantProducer {
 				t.Fatalf("provider provenance = source %q impl %q", got.Source, got.Producer.Impl)
 			}
 		})
@@ -227,8 +246,15 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 
 func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 	request, _ := judgmentFixture()
-	factory := judgeHelperFactory(t, "malformed", nil, nil)
-	_, err := autoJudge(JudgeProviderCodex, request, t.TempDir(), factory)
+	factory := judgeHelperFactory(t, nil, nil)
+	_, err := autoJudge(
+		JudgeProviderCodex,
+		request,
+		t.TempDir(),
+		judgeHelperEnvironment(JudgeProviderCodex, "malformed"),
+		fakeJudgeResolver,
+		factory,
+	)
 	if err == nil || !strings.Contains(err.Error(), "judgment_malformed") {
 		t.Fatalf("error = %v, want malformed-artifact refusal", err)
 	}
@@ -236,14 +262,86 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 
 func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 	request, _ := judgmentFixture()
-	factory := judgeHelperFactory(t, "failed", nil, nil)
-	_, err := autoJudge(JudgeProviderCodex, request, t.TempDir(), factory)
+	factory := judgeHelperFactory(t, nil, nil)
+	_, err := autoJudge(
+		JudgeProviderCodex,
+		request,
+		t.TempDir(),
+		judgeHelperEnvironment(JudgeProviderCodex, "failed"),
+		fakeJudgeResolver,
+		factory,
+	)
 	if err == nil || !strings.Contains(err.Error(), "judge_provider_failed: helper failed") {
 		t.Fatalf("error = %v, want provider failure", err)
 	}
 }
 
-func judgeHelperFactory(t *testing.T, mode string, gotName *string, gotArgs *[]string) judgeCommandFactory {
+func TestResolveJudgeExecutableRecordsAbsolutePathAndDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "judge")
+	if os.PathSeparator == '\\' {
+		path += ".cmd"
+	}
+	contents := []byte("fixed provider wrapper")
+	if err := os.WriteFile(path, contents, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveJudgeExecutable(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256(contents))
+	if !filepath.IsAbs(got.path) || got.digest != wantDigest {
+		t.Fatalf("resolved executable = %+v, want absolute path and digest %s", got, wantDigest)
+	}
+}
+
+func TestSanitizedJudgeEnvironmentDropsAuthorityAndProviderSecrets(t *testing.T) {
+	source := []string{
+		"PATH=/bin",
+		"HOME=/home/operator",
+		"GATE_KEY=gate-secret",
+		"GATE_STATE=/gate/state",
+		"OPENAI_API_KEY=openai-secret",
+		"ANTHROPIC_API_KEY=anthropic-secret",
+		"GH_TOKEN=github-secret",
+		"UNRELATED=value",
+	}
+	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
+		t.Run(provider, func(t *testing.T) {
+			got := sanitizedJudgeEnvironment(source, provider)
+			joined := strings.Join(got, "\n")
+			if !strings.Contains(joined, "PATH=/bin") || !strings.Contains(joined, "HOME=/home/operator") {
+				t.Fatalf("runtime paths were removed: %v", got)
+			}
+			for _, secret := range []string{"gate-secret", "openai-secret", "anthropic-secret", "github-secret", "UNRELATED"} {
+				if strings.Contains(joined, secret) {
+					t.Fatalf("secret or ambient variable %q survived: %v", secret, got)
+				}
+			}
+			hasSimple := strings.Contains(joined, "CLAUDE_CODE_SIMPLE=1")
+			if hasSimple != (provider == JudgeProviderClaude) {
+				t.Fatalf("CLAUDE_CODE_SIMPLE presence = %v for %s", hasSimple, provider)
+			}
+		})
+	}
+}
+
+func fakeJudgeResolver(name string) (judgeExecutable, error) {
+	return judgeExecutable{
+		path:   filepath.Join(string(filepath.Separator), "trusted", name),
+		digest: strings.Repeat("a", 64),
+	}, nil
+}
+
+func judgeHelperEnvironment(provider, mode string) []string {
+	return append(
+		sanitizedJudgeEnvironment(os.Environ(), provider),
+		"GATE_JUDGE_HELPER=1",
+		"GATE_JUDGE_HELPER_MODE="+mode,
+	)
+}
+
+func judgeHelperFactory(t *testing.T, gotName *string, gotArgs *[]string) judgeCommandFactory {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
@@ -256,13 +354,7 @@ func judgeHelperFactory(t *testing.T, mode string, gotName *string, gotArgs *[]s
 		if gotArgs != nil {
 			*gotArgs = append((*gotArgs)[:0], args...)
 		}
-		cmd := exec.Command(executable, "-test.run=^TestJudgeProviderHelper$")
-		cmd.Env = append(
-			os.Environ(),
-			"GATE_JUDGE_HELPER=1",
-			"GATE_JUDGE_HELPER_MODE="+mode,
-		)
-		return cmd
+		return exec.Command(executable, "-test.run=^TestJudgeProviderHelper$")
 	}
 }
 
