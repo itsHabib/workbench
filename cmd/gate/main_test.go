@@ -19,6 +19,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/gateauthorization"
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
@@ -146,6 +147,42 @@ func TestExitCodesAreStable(t *testing.T) {
 	}
 	if code != codeRefused || res.Outcome != "capability_refused" {
 		t.Errorf("expired grant: got code %d outcome %q, want %d %q", code, res.Outcome, codeRefused, "capability_refused")
+	}
+}
+
+func TestActPersistsExactMergeArgv(t *testing.T) {
+	e := testEnv(t)
+	grant, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{
+		Repo: "o/r", Number: 7,
+		HeadSHA: strings.Repeat("a", 40),
+	}
+	verdict := reducedVerdict(subject, verify.DecisionPass, "T0")
+	verdictID := recordReduced(t, e, run, verdict)
+	if _, code, err := act(e, run, grant.ID, verdict, verdictID, gateResult{}, false, nil); err != nil || code != codeMerge {
+		t.Fatalf("act code=%d err=%v", code, err)
+	}
+	artifacts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Command string   `json:"command"`
+		Argv    []string `json:"argv"`
+	}
+	if err := json.Unmarshal(artifacts[len(artifacts)-1].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	want := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject(subject))
+	if strings.Join(body.Argv, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv=%q want=%q", body.Argv, want)
+	}
+	if body.Command != strings.Join(want, " ") {
+		t.Fatalf("command=%q want=%q", body.Command, strings.Join(want, " "))
 	}
 }
 

@@ -47,9 +47,11 @@ Read completely before changing anything:
 6. `cmd/gate/docs/DESIGN.md`
 7. `cmd/gate/docs/enforcement.md`
 8. `docs/features/gate-authorized-stamp/kickoff.md`
-9. `docs/features/gate-enforcement-arming/kickoff.md`
-10. `docs/features/agentic-workbench-closure/spec.md`
-11. the scoped `CLAUDE.md`/`AGENTS.md` for every additional tool touched
+9. `docs/features/agentic-workbench-closure/spec.md`
+10. the scoped `CLAUDE.md`/`AGENTS.md` for every additional tool touched
+
+The historical `gate-enforcement-arming` kickoff is not present on current
+`main`; `cmd/gate/docs/enforcement.md` is the authoritative shipped record.
 
 Also inspect, but do not duplicate, the unfinished App-mint design:
 

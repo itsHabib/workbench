@@ -38,6 +38,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
 // The exit-code contract — the one surface the driver branches on. gate owns
@@ -115,6 +116,8 @@ func main() {
 		err = cmdJudge(os.Args[2:])
 	case "resolve":
 		err = cmdResolve(os.Args[2:])
+	case "authorization":
+		err = cmdAuthorization(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
 	case "next":
@@ -137,13 +140,15 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|authorization|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  authorization export -run run_x -out path          (export newest exact-head would_merge)
+  authorization promote -artifact path -run-url URL  (trusted workflow only; posts required gate status)
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
@@ -694,8 +699,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// --match-head-commit pins the merge to the exact SHA the evidence was
 	// gathered against: a push after verification makes the merge refuse
 	// instead of landing unverified code.
-	mergeCmd := fmt.Sprintf("gh pr merge %d -R %s --squash --delete-branch --match-head-commit %s",
-		subjectNumber(reduced), reduced.Subject.Repo, reduced.Subject.HeadSHA)
+	mergeArgv := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject{
+		Repo: reduced.Subject.Repo, Number: subjectNumber(reduced),
+		HeadSHA: reduced.Subject.HeadSHA,
+	})
+	mergeCmd := strings.Join(mergeArgv, " ")
 	res.Action = mergeCmd
 	// The pass path records first, then surfaces the action artifact's chain
 	// hash onto the result: record() runs as a side effect during return-arg
@@ -703,12 +711,16 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// explicitly here instead. This is the one path a downstream stamp reads.
 	if !live {
 		res.Outcome = "would_merge"
-		err := record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+		err := record(state.KindAction, "would_merge", map[string]any{
+			"command": mergeCmd, "argv": mergeArgv, "dry_run": true,
+		})
 		res.Hash = actionHash
 		return res, codeMerge, err
 	}
 	res.Outcome = "merge_not_implemented"
-	err = record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+	err = record(state.KindAction, "merge_not_implemented", map[string]any{
+		"command": mergeCmd, "argv": mergeArgv,
+	})
 	res.Hash = actionHash
 	return res, codeMerge, err
 }

@@ -26,6 +26,12 @@ move it ships here, so the armable canary is itsHabib/workbench. The merge
 itself stays dry-run advisory (`-live` is unbuilt) and token custody stays
 open.
 
+Provider-neutral exact-head passes can be exported with
+`gate authorization export -run run_... -out gate-authorization.json`. The
+trusted default-branch promotion workflow consumes that versioned artifact
+behind the protected `gate-authorization` environment; see
+[`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
+
 ## Run it
 
 ```

@@ -339,6 +339,22 @@ failure this document exists to correct:
   a dry run: `-live` records `merge_not_implemented`, unchanged by this work.
   The check evaluates `would_merge`, not an executed merge.
 
+### Provider-neutral judgment promotion
+
+The hosted evaluator still cannot consume a local provider-neutral judgment
+directly. The trusted bridge in
+`docs/features/trusted-gate-judgment-bridge/design.md` closes that seam with a
+versioned `GateAuthorizationV1` artifact and a separate default-branch workflow.
+That workflow posts the same app-pinned `gate` context only after an independent
+required reviewer approves the protected `gate-authorization` environment.
+
+The environment approval—not the unsigned JSON—is the trust root. The workflow
+fails closed unless environment self-review and admin bypass are disabled,
+deployments are restricted to protected branches, the posted status resolves
+to `github-actions[bot]`, and the PR is still the artifact's sole open
+exact-head subject. The merge command remains local Gate's exact stored argv
+and is never executed by the promotion workflow.
+
 Three CI-context choices worth naming, since they shape what the check does and
 does not assert:
 
