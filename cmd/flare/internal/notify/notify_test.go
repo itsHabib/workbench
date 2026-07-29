@@ -2,6 +2,7 @@ package notify
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -181,6 +182,31 @@ func TestSlackEscalationHasNoButton(t *testing.T) {
 	}
 	if !strings.Contains(s, "Your call") {
 		t.Fatalf("escalation header must lead on the action:\n%s", s)
+	}
+}
+
+func TestSlackShipParkIsNotAHumanPolicyDecision(t *testing.T) {
+	msg := renderSlackMessage("C1", true, event.Event{
+		Source:   "ship",
+		Kind:     "receipt",
+		Severity: event.SevFailed,
+		Time:     time.Date(2026, 7, 28, 22, 20, 0, 0, time.UTC),
+		Title:    "ship: demo parked",
+		Body:     "run demo paused after a failure or dispatch ambiguity",
+		Fields:   map[string]string{"outcome": "parked", "repo": "itsHabib/workbench", "number": "164"},
+	})
+	blob, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	if strings.Contains(s, "Your call") {
+		t.Fatalf("a Ship mechanism park must not render a policy-decision headline:\n%s", s)
+	}
+	approveID := fmt.Sprintf(`"action_id":%q`, escalation.ActionApprove)
+	blockID := fmt.Sprintf(`"action_id":%q`, escalation.ActionBlock)
+	if strings.Contains(s, approveID) || strings.Contains(s, blockID) {
+		t.Fatalf("a Ship mechanism park must not render Gate resolve actions:\n%s", s)
 	}
 }
 
