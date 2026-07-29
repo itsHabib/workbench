@@ -664,6 +664,31 @@ func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
 	}
 }
 
+func TestServeHTTPLogsAcceptedAndResolvedWithoutUserIdentity(t *testing.T) {
+	var calls int
+	cr := &captured{out: []byte(`{"outcome":"would_merge"}`), code: codeMerge}
+	s, _ := newServer(cr, fixedGrant("grt_log", &calls))
+	var logs bytes.Buffer
+	s.log = log.New(&logs, "", 0)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_0123456789abcdef", "private-user"))
+	req := signedRequest(testSecret, fixedNow, body)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	s.Wait()
+
+	got := logs.String()
+	if !strings.Contains(got, "accepted escalation=esc_0123456789abcdef decision=pass") {
+		t.Fatalf("accepted callback log missing:\n%s", got)
+	}
+	if !strings.Contains(got, "resolved escalation=esc_0123456789abcdef gate_exit=0 slack_updated=true") {
+		t.Fatalf("successful resolution log missing:\n%s", got)
+	}
+	if strings.Contains(got, "private-user") {
+		t.Fatalf("success logs must not expose Slack identity:\n%s", got)
+	}
+}
+
 // TestAllowUsers pins the allowlist predicate: listed ids pass, unlisted and the
 // empty id fail, and an EMPTY allowlist admits no one (fail-closed).
 func TestAllowUsers(t *testing.T) {

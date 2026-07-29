@@ -254,6 +254,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// repeated while the resolve is in flight. Count the work in before spawning so
 	// a graceful shutdown drains it (Wait) rather than dropping the acked decision.
 	s.inflight.Add(1)
+	s.log.Printf("escalate serve: accepted escalation=%s decision=%s", cb.decision.Escalation, cb.decision.Verdict)
 	writeAck(w, cb)
 	go s.process(cb)
 }
@@ -293,7 +294,10 @@ func (s *Server) process(cb callback) {
 
 	dctx, dcancel := context.WithTimeout(context.Background(), deliverTimeout)
 	defer dcancel()
-	s.deliver(dctx, cb, code, err)
+	slackUpdated := s.deliver(dctx, cb, code, err)
+	if err == nil {
+		s.log.Printf("escalate serve: resolved escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+	}
 }
 
 // resolve reads the grant from the parked escalation and drives the ingest
@@ -316,19 +320,21 @@ func (s *Server) resolve(ctx context.Context, d ingest.Decision) (int, error) {
 // ☑️ already resolved" state. A missing response_url (a CLI-shaped or malformed
 // callback) or a post failure is logged, not fatal — the decision already landed
 // in gate; only the card update is best-effort.
-func (s *Server) deliver(ctx context.Context, cb callback, code int, err error) {
+func (s *Server) deliver(ctx context.Context, cb callback, code int, err error) bool {
 	if cb.responseURL == "" {
 		s.log.Printf("escalate serve: resolve %s: no response_url, outcome not delivered to Slack", cb.decision.Escalation)
-		return
+		return false
 	}
 	card, merr := outcomeCard(cb, code, err)
 	if merr != nil {
 		s.log.Printf("escalate serve: render outcome for %s: %v", cb.decision.Escalation, merr)
-		return
+		return false
 	}
 	if perr := s.post(ctx, cb.responseURL, card); perr != nil {
 		s.log.Printf("escalate serve: deliver outcome for %s: %v", cb.decision.Escalation, perr)
+		return false
 	}
+	return true
 }
 
 // verify is the authentication gate. It rejects a request that is missing
