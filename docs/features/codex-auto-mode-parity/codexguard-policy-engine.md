@@ -23,6 +23,8 @@ shapes. It emits `AutoDecisionV1`; it is not a pass-through wrapper.
 ## Behavior / fix
 
 - Normalize supported Bash, PowerShell, local-function, and MCP envelopes.
+- Maintain an explicit supported-envelope registry. Treat opaque
+  authority-capable wrappers as park/refuse rather than guessing.
 - Classify safe reads/tests, grant minting, Gate/custody mutation, force push,
   repository deletion, visibility changes, `--admin`, and PR merges.
 - Permit only a fully validated Gate-shaped merge carrying a full
@@ -33,9 +35,12 @@ shapes. It emits `AutoDecisionV1`; it is not a pass-through wrapper.
 
 ## Acceptance
 
-Equivalent shell/tool representations produce the same decision. A bare merge,
-mint, state mutation, force push, deletion, visibility change, or `--admin`
-cannot bypass the deterministic floor.
+Equivalent shell/tool representations produce the same decision. Fixtures cover
+`bash|sh -c/-lc`, compound commands and opaque substitutions; PowerShell
+`-Command`/`-EncodedCommand`, call operator, aliases, `Start-Process`, and
+`Invoke-Expression`; `cmd /c`; and nested code-mode MCP/local calls. A bare
+merge, mint, state mutation, force push, deletion, visibility change, or
+`--admin` cannot bypass the deterministic floor.
 
 ## Test plan
 

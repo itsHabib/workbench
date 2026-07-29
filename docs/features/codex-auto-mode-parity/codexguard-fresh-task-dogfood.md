@@ -25,18 +25,22 @@ evidence, and completes the native exact-head review artifact seam.
 - Install through the reviewed projection path, first into a temporary profile.
 - Run Bash, PowerShell, local-function, and MCP refusal/bypass fixtures.
 - Prove a bare merge is blocked with the exact Gate remedy.
-- Prove the full-SHA Gate-emitted merge shape is allowed without executing an
-  unauthorized merge.
+- Prove a full-SHA Gate-shaped merge is allowed by policy. Separately capture
+  Gate stdout and byte-compare the tested argv before claiming that sample was
+  Gate-emitted; do not execute it without authorization.
 - Use the first useful phase PR as `/review-coordinator` input, emit
-  `ReviewFindingsV1`, and exercise stale, malformed, duplicate, exhausted, and
-  unsourced refusal paths at the shared boundary.
+  `ReviewFindingsV1`, consume it through the session-native address boundary,
+  delegate the resulting work item to a fresh Codex child on the existing PR
+  branch, and exercise stale, malformed, duplicate, exhausted, and unsourced
+  refusal paths before dispatch.
 - Record every intervention and secret-safe artifact reference.
 
 ## Acceptance
 
 A fresh task discovers/trusts the policy; required refusals occur before
-execution; the native exact-head artifact is accepted exactly once; the final
-evidence is replayable and contains no secrets.
+execution where Codex has a valid hook/rules decision, with every unsupported
+hook-failure row recorded honestly; the native exact-head artifact is accepted
+exactly once; the final evidence is replayable and contains no secrets.
 
 ## Test plan
 
