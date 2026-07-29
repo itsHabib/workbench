@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repository": "itsHabib/workbench",
-  "status": "staged_operator_only",
+  "status": "blocked_security_decision",
   "rulesets": [
     {
       "name": "main-updates",
@@ -31,13 +31,13 @@
       "block_force_push": true,
       "required_checks": [],
       "bypass_actors": [],
-      "allowed_writers": ["github_actions"]
+      "allowed_writers": []
     },
     {
       "name": "other-branches",
-      "includes": ["refs/heads/*"],
+      "includes": ["~ALL"],
       "excludes": ["refs/heads/main", "refs/heads/gate-state"],
-      "restrict_updates": false,
+      "restrict_updates": true,
       "require_pull_request": false,
       "block_deletion": false,
       "block_force_push": false,

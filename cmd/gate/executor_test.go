@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -66,6 +67,7 @@ func TestExecutorResultRefusesUnconfirmedSuccess(t *testing.T) {
 func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T) {
 	var run workflowRunFacts
 	run.ID = 42
+	run.RunAttempt = 1
 	run.Event = "workflow_dispatch"
 	run.Path = ".github/workflows/gate-executor.yml@main"
 	run.Repository.FullName = "o/r"
@@ -79,6 +81,9 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 	tests := map[string]func(*workflowRunFacts){
 		"other workflow": func(value *workflowRunFacts) {
 			value.Path = ".github/workflows/other.yml@main"
+		},
+		"rerun attempt": func(value *workflowRunFacts) {
+			value.RunAttempt = 2
 		},
 		"other repository": func(value *workflowRunFacts) {
 			value.Repository.FullName = "other/r"
@@ -101,5 +106,50 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 				t.Fatal("expected workflow run refusal")
 			}
 		})
+	}
+}
+
+func TestExecutorMalformedArtifactExitsRefused(t *testing.T) {
+	if os.Getenv("GATE_EXECUTOR_ARGV_HELPER") == "1" {
+		os.Args = []string{
+			"gate", "executor", "claim",
+			"-request", os.Getenv("GATE_EXECUTOR_BAD_REQUEST"),
+			"-workflow-run-id", "42",
+			"-workflow-actor-id", "7",
+			"-workflow-triggering-actor", "dispatcher",
+			"-out", filepath.Join(os.TempDir(), "unused-claim.json"),
+		}
+		main()
+		return
+	}
+	request := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(request, []byte(`{"schema_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=TestExecutorMalformedArtifactExitsRefused")
+	command.Env = append(
+		os.Environ(),
+		"GATE_EXECUTOR_ARGV_HELPER=1",
+		"GATE_EXECUTOR_BAD_REQUEST="+request,
+	)
+	err := command.Run()
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) {
+		t.Fatalf("want executor refusal exit, got %v", err)
+	}
+	if exitError.ExitCode() != codeRefused {
+		t.Fatalf("malformed executor artifact exited %d, want %d", exitError.ExitCode(), codeRefused)
+	}
+}
+
+func TestExecutorExitClassificationKeepsOperationalFailuresHard(t *testing.T) {
+	if got := commandErrorCode("executor", refuseExecutor(errors.New("stale authorization"))); got != codeRefused {
+		t.Fatalf("executor refusal exit = %d, want %d", got, codeRefused)
+	}
+	if got := commandErrorCode("executor", errors.New("github transport failed")); got != codeError {
+		t.Fatalf("executor transport exit = %d, want %d", got, codeError)
+	}
+	if got := commandErrorCode("gate", refuseExecutor(errors.New("scoped marker"))); got != codeError {
+		t.Fatalf("non-executor error exit = %d, want %d", got, codeError)
 	}
 }

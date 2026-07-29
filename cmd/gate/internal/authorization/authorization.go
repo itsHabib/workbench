@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
@@ -76,7 +75,6 @@ type ApprovalReview struct {
 	ActorLogin    string
 	ActorID       int64
 	State         string
-	SubmittedAt   time.Time
 	Comment       string
 	Environments  []string
 }
@@ -87,7 +85,14 @@ type ApprovalFacts struct {
 	WorkflowRunID     int64
 	WorkflowActorID   int64
 	TriggeringActorID int64
+	ObservedAt        time.Time
 	Reviews           []ApprovalReview
+}
+
+// ValidateLive refuses a moved, closed, or shared-head pull request before an
+// authorization request is presented for protected approval.
+func ValidateLive(subject gateauthorization.Subject, live LivePullRequest) error {
+	return validateLive(subject, live)
 }
 
 // BuildRequest derives a canonical authorization request from an audited Gate
@@ -159,19 +164,25 @@ func Authorize(request gateauthorization.Request, facts ApprovalFacts) (gateauth
 	if len(reviews) == 0 {
 		return gateauthorization.Artifact{}, ErrApprovalMissing
 	}
-	latest := reviews[len(reviews)-1]
-	if latest.ActorID == facts.WorkflowActorID ||
-		latest.ActorID == facts.TriggeringActorID {
+	// The API does not expose approval timestamps or run-attempt identity.
+	// Require one unambiguous decision for this static environment; workflow
+	// run validation separately refuses re-runs.
+	if len(reviews) != 1 {
+		return gateauthorization.Artifact{}, ErrApprovalMismatch
+	}
+	review := reviews[0]
+	if review.ActorID == facts.WorkflowActorID ||
+		review.ActorID == facts.TriggeringActorID {
 		return gateauthorization.Artifact{}, ErrApprovalDependent
 	}
-	if latest.State != gateauthorization.ApprovalStateApproved ||
-		latest.Comment != gateauthorization.ExpectedApprovalComment(id, request) {
+	if review.State != gateauthorization.ApprovalStateApproved ||
+		review.Comment != gateauthorization.ExpectedApprovalComment(id, request) {
 		return gateauthorization.Artifact{}, ErrApprovalMismatch
 	}
 	receipt := gateauthorization.ApprovalReceipt{
-		WorkflowRunID: facts.WorkflowRunID, ActorLogin: latest.ActorLogin,
-		ActorID: latest.ActorID, State: latest.State,
-		SubmittedAt: latest.SubmittedAt.UTC(), Comment: latest.Comment,
+		WorkflowRunID: facts.WorkflowRunID, ActorLogin: review.ActorLogin,
+		ActorID: review.ActorID, State: review.State,
+		ObservedAt: facts.ObservedAt.UTC(), Comment: review.Comment,
 	}
 	receipt.ReceiptDigest, err = gateauthorization.ReceiptDigest(id, receipt)
 	if err != nil {
@@ -535,9 +546,6 @@ func matchingReviews(facts ApprovalFacts) []ApprovalReview {
 		}
 		reviews = append(reviews, review)
 	}
-	sort.SliceStable(reviews, func(i, j int) bool {
-		return reviews[i].SubmittedAt.Before(reviews[j].SubmittedAt)
-	})
 	return reviews
 }
 

@@ -17,9 +17,9 @@ on:
 
 permissions:
   actions: read
-  # This token is the gate-state writer. The staged branch rules deny this
-  # identity updates to main; it has no status permission and no bypass.
-  contents: write
+  # Generic Actions is intentionally not a state writer while custody is on
+  # security hold. The dormant implementation remains readable and testable.
+  contents: read
   pull-requests: read
 
 concurrency:
@@ -28,7 +28,10 @@ concurrency:
 
 jobs:
   execute:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    # Fail closed while the state-writer trust decision remains unresolved.
+    # Removing this guard is an operator-reviewed repository change after the
+    # custody model is approved; configuration alone cannot arm the executor.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: gate-authorization

@@ -3,6 +3,14 @@
 Status: authorized design; repository implementation dormant pending review and
 operator bootstrap.
 
+**Security hold:** the repository implementation is intentionally non-armable.
+Fresh review proved that granting the coarse `github_actions` Integration
+write access to `gate-state` lets any repository workflow replay an older valid
+state-and-anchor pair. A protected workflow cannot make that shared identity
+exclusive. The ruleset plan therefore leaves `gate-state` writerless and the
+executor job has a hard false guard until the operator authorizes a revised
+custody/order model.
+
 The operator authorized this trust model at design head
 `745d2bc405e07fd202c2379320afdc1745e46cc5`. That authorization covers repository
 code, tests, and documentation only. App registration, secrets, environment
@@ -36,8 +44,9 @@ Shared vocabulary lives in `contracts/gateauthorization`:
   `would_merge`, exact argv, canonical evidence digest, judgment question,
   issue/expiry bounds, replay ID, and trust-root name.
 - `GateAuthorizationV1` — the request plus the verified workflow-run approval
-  receipt. The receipt records immutable actor login/ID, approval state/time,
-  exact comment, run ID, and semantic digest.
+  receipt. The receipt records immutable actor login/ID, approval state,
+  protected-job observation time, exact comment, run ID, and semantic digest.
+  GitHub does not expose an approval submission timestamp.
 - `GateExecutionClaimV1` — the complete authorization plus action, exact argv,
   exact-subject grant ID, approval digest, claim/expiry times, and stable
   one-time execution identity.
@@ -67,11 +76,12 @@ never fabricates an empty findings artifact.
    default branch with those two values. The static protected environment holds
    the job.
 3. After approval, Gate reads the workflow-run and approval-history APIs. It
-   binds the run to this repository, `workflow_dispatch`, and the trusted
-   executor workflow path; takes both initial and re-run actor identities from
-   their immutable API IDs; and requires the newest decision for
-   `gate-authorization` to be `approved` by a different actor, with the exact
-   canonical comment.
+   binds the first run attempt to this repository, `workflow_dispatch`, and the
+   trusted executor workflow path; takes both initial and triggering actor
+   identities from their immutable API IDs; and requires exactly one
+   unambiguous decision for `gate-authorization` to be `approved` by a
+   different actor, with the exact canonical comment. Re-runs refuse because
+   GitHub's approval history is not attempt-bound.
 4. Only then does the protected job mint a short-lived HMAC grant bound to the
    authorization ID, PR number, and full head SHA. The agent never invokes this
    path.
@@ -136,14 +146,39 @@ All of these refuse before App token creation:
 
 - malformed/unknown major, noncanonical repo, bad IDs/SHA/times, unsupported
   outcome, changed method/flags/order, or `--admin`;
-- missing, stale, rejected, self-authored, wrong-run, wrong-environment, or
-  wrong-comment approval;
+- missing, stale, rejected, self-authored, wrong-run, re-run, ambiguous,
+  wrong-environment, or wrong-comment approval;
 - expired/not-yet-valid request or malformed exact-subject grant;
 - closed/moved/shared-head PR, non-default target, base retarget, base movement,
   or merge-base mismatch;
+- a merge target outside `main`; the staged `~ALL` other-branch rule restricts
+  updates to explicit normal writers and gives the Gate App no bypass;
 - action absent, hash/run/argv mismatch, older action superseded by any newer
   action/park, duplicate claim, open claim, or durable-state audit failure; and
 - state publish/refetch mismatch.
+
+## Open security decision: state writer custody
+
+The authorized design put the claim on `gate-state` before creating the Gate
+App installation token, using `github-actions[bot]` as the state writer.
+GitHub rulesets identify that actor only as the repository-wide
+`github_actions` Integration. A PR workflow with `contents: write` can
+therefore append a commit that restores an older, internally valid
+`state/log.jsonl` plus `anchor.json`. Non-force history remains, but the
+current Gate audit does not treat branch ancestry as a monotonic external pin.
+
+The smallest one-App correction changes the ordering: after exact protected
+approval and all pre-credential refusals pass, Gate creates a narrowly scoped
+installation token inside its process; that process CAS-publishes the claim,
+refetches and verifies the durable claim, executes only the stored exact merge
+argv, and CAS-publishes the terminal result. Rulesets allow the Gate App on
+`main` and `gate-state`, deny it everywhere else, and give generic Actions no
+write authority. A crash-safe, no-merge-token reconciliation path must close
+an orphaned claim or confirm an observed merge.
+
+That ordering differs materially from the authorized claim-before-token model.
+It is a security decision, not an implementation detail, so this PR stops
+before selecting or arming it.
 
 Token exchange, command, confirmation, or terminal-state write failure never
 creates reusable success. Once a claim lands it is never retried.

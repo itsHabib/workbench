@@ -20,6 +20,27 @@ import (
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
+// executorRefusal marks an expected policy/contract refusal. The top-level
+// command maps it to Gate's stable exit 3; transport, storage, credential, and
+// process failures remain hard errors (exit 4).
+type executorRefusal struct {
+	err error
+}
+
+func (e executorRefusal) Error() string { return e.err.Error() }
+func (e executorRefusal) Unwrap() error { return e.err }
+
+func refuseExecutor(err error) error {
+	if err == nil {
+		return nil
+	}
+	var refusal executorRefusal
+	if errors.As(err, &refusal) {
+		return err
+	}
+	return executorRefusal{err: err}
+}
+
 func cmdExecutor(args []string) error {
 	if len(args) == 0 {
 		return errors.New("executor: request, claim, verify, or execute required")
@@ -62,36 +83,43 @@ func cmdExecutorRequest(args []string) error {
 	}
 	live, err := readExecutorPull(*repo, *pr, *head)
 	if err != nil {
-		return err
+		return classifyExecutorLiveRead(err)
+	}
+	subject := gateauthorization.Subject{
+		Repo: live.Repository, Number: live.Number, HeadSHA: live.HeadSHA,
+		BaseRef: live.BaseRef, BaseSHA: live.BaseSHA,
+		MergeBaseSHA: live.MergeBaseSHA,
+	}
+	if err := authorization.ValidateLive(subject, live); err != nil {
+		return refuseExecutor(err)
 	}
 	audit, err := e.st.Audit()
 	if err != nil {
 		return err
 	}
+	if !audit.OK {
+		return fmt.Errorf("executor state invalid: %s", audit.Reason)
+	}
 	now := time.Now().UTC()
 	request, err := authorization.BuildRequest(audit, authorization.RequestInput{
-		ActionID: *actionID,
-		Subject: gateauthorization.Subject{
-			Repo: live.Repository, Number: live.Number, HeadSHA: live.HeadSHA,
-			BaseRef: live.BaseRef, BaseSHA: live.BaseSHA,
-			MergeBaseSHA: live.MergeBaseSHA,
-		},
+		ActionID:         *actionID,
+		Subject:          subject,
 		JudgmentQuestion: *question, ReplayID: *replayID,
 		IssuedAt: now, ExpiresAt: now.Add(20 * time.Minute),
 	})
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	id, err := gateauthorization.AuthorizationID(request)
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	artifact := gateauthorization.RequestArtifact{
 		SchemaVersion:   gateauthorization.SchemaVersion,
 		AuthorizationID: id, Request: request,
 	}
 	if err := gateauthorization.ValidateRequestArtifact(artifact); err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	if err := writeExecutorArtifact(*out, artifact); err != nil {
 		return err
@@ -126,7 +154,7 @@ func cmdExecutorClaim(args []string) error {
 	}
 	requestArtifact, err := gateauthorization.DecodeRequest(requestData)
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	reviews, err := readRunApprovals(requestArtifact.Request.Subject.Repo, *workflowRunID)
 	if err != nil {
@@ -141,17 +169,18 @@ func cmdExecutorClaim(args []string) error {
 	}
 	approved, err := authorization.Authorize(requestArtifact.Request, authorization.ApprovalFacts{
 		WorkflowRunID: *workflowRunID, WorkflowActorID: validatedWorkflowActorID,
-		TriggeringActorID: triggeringActorID, Reviews: reviews,
+		TriggeringActorID: triggeringActorID, ObservedAt: time.Now().UTC(),
+		Reviews: reviews,
 	})
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	live, err := readExecutorPull(
 		approved.Request.Subject.Repo, approved.Request.Subject.Number,
 		approved.Request.Subject.HeadSHA,
 	)
 	if err != nil {
-		return err
+		return classifyExecutorLiveRead(err)
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
@@ -160,7 +189,7 @@ func cmdExecutorClaim(args []string) error {
 	now := time.Now().UTC()
 	ttl := approved.Request.ExpiresAt.Sub(now)
 	if ttl <= 0 {
-		return authorization.ErrExpired
+		return refuseExecutor(authorization.ErrExpired)
 	}
 	grant, err := capability.MintBound(
 		e.st, e.keyPath, approved.Request.Subject.Repo, "merge", "T3", 1,
@@ -169,13 +198,13 @@ func cmdExecutorClaim(args []string) error {
 		approved.AuthorizationID, time.Now,
 	)
 	if err != nil {
-		return err
+		return classifyExecutorAuthorizationError(err)
 	}
 	_, claim, err := authorization.Claim(
 		e.st, e.keyPath, approved, live, grant.ID, now,
 	)
 	if err != nil {
-		return err
+		return classifyExecutorAuthorizationError(err)
 	}
 	if err := writeExecutorArtifact(*out, claim); err != nil {
 		return err
@@ -209,18 +238,18 @@ func cmdExecutorVerify(args []string) error {
 	}
 	_, provisional, err := claimFromAudit(audit, *claimID)
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	live, err := readExecutorPull(
 		provisional.Subject.Repo, provisional.Subject.Number,
 		provisional.Subject.HeadSHA,
 	)
 	if err != nil {
-		return err
+		return classifyExecutorLiveRead(err)
 	}
 	_, claim, err := authorization.VerifyDurableClaim(audit, *claimID, live, time.Now().UTC())
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	printJSON(map[string]any{
 		"claim_id": claim.ClaimID, "execution_id": claim.ExecutionID,
@@ -244,11 +273,10 @@ func cmdExecutorExecute(args []string) error {
 	if *claimID == "" || *appID < 1 || *installationID < 1 {
 		return errors.New("executor execute: -claim -app-id -installation-id required")
 	}
-	appConfig, readToken, err := readExecutorCredentials(*appID, *installationID, *apiURL)
+	readToken, err := readExecutorReadToken()
 	if err != nil {
 		return err
 	}
-	defer wipeBytes(appConfig.PrivateKeyPEM)
 	if err := os.Setenv("GH_TOKEN", readToken); err != nil {
 		return err
 	}
@@ -263,25 +291,33 @@ func cmdExecutorExecute(args []string) error {
 	}
 	_, provisional, err := claimFromAudit(audit, *claimID)
 	if err != nil {
-		return err
+		return refuseExecutor(err)
 	}
 	live, err := readExecutorPull(
 		provisional.Subject.Repo, provisional.Subject.Number,
 		provisional.Subject.HeadSHA,
 	)
 	if err != nil {
-		return err
+		return classifyExecutorLiveRead(err)
 	}
 	claimArtifact, claim, err := authorization.VerifyDurableClaim(
 		audit, *claimID, live, time.Now().UTC(),
 	)
 	if err != nil {
+		return refuseExecutor(err)
+	}
+	appConfig, err := readExecutorAppConfig(*appID, *installationID, *apiURL)
+	if err != nil {
 		return err
 	}
+	defer wipeBytes(appConfig.PrivateKeyPEM)
 	result, executeErr := gateexecutor.Execute(context.Background(), appConfig, claim.MergeArgv)
 	mergeCommit, confirmErr := readMergedCommit(claim.Subject.Repo, claim.Subject.Number)
 	record, executeErr := executorResult(claim, result, executeErr, mergeCommit, confirmErr, time.Now().UTC())
 	if _, err := authorization.RecordResult(e.st, claimArtifact, claim, record); err != nil {
+		if errors.Is(err, authorization.ErrResultDuplicate) {
+			return refuseExecutor(err)
+		}
 		return err
 	}
 	if executeErr != nil {
@@ -295,25 +331,69 @@ func cmdExecutorExecute(args []string) error {
 	return nil
 }
 
-func readExecutorCredentials(appID, installationID int64, apiURL string) (gateexecutor.AppConfig, string, error) {
+func classifyExecutorAuthorizationError(err error) error {
+	refusals := []error{
+		authorization.ErrApprovalMissing,
+		authorization.ErrApprovalDependent,
+		authorization.ErrApprovalMismatch,
+		authorization.ErrExpired,
+		authorization.ErrNotYetValid,
+		authorization.ErrLiveMismatch,
+		authorization.ErrHeadAmbiguous,
+		authorization.ErrActionMissing,
+		authorization.ErrActionMismatch,
+		authorization.ErrSuperseded,
+		authorization.ErrAlreadyClaimed,
+		authorization.ErrSubjectClaimPending,
+		authorization.ErrResultDuplicate,
+		capability.ErrExpired,
+		capability.ErrScope,
+		capability.ErrSignature,
+		capability.ErrBadHead,
+		capability.ErrHeadMismatch,
+		capability.ErrBadSubject,
+		capability.ErrSubject,
+		state.ErrAlreadyExists,
+		state.ErrNotFound,
+	}
+	for _, refusal := range refusals {
+		if errors.Is(err, refusal) {
+			return refuseExecutor(err)
+		}
+	}
+	return err
+}
+
+func classifyExecutorLiveRead(err error) error {
+	if errors.Is(err, authorization.ErrLiveMismatch) ||
+		errors.Is(err, authorization.ErrHeadAmbiguous) {
+		return refuseExecutor(err)
+	}
+	return err
+}
+
+func readExecutorReadToken() (string, error) {
+	readToken := os.Getenv("INPUT_GITHUB_READ_TOKEN")
+	if readToken == "" {
+		return "", errors.New("executor execute: INPUT_GITHUB_READ_TOKEN is required")
+	}
+	_ = os.Unsetenv("INPUT_GITHUB_READ_TOKEN")
+	return readToken, nil
+}
+
+func readExecutorAppConfig(appID, installationID int64, apiURL string) (gateexecutor.AppConfig, error) {
 	if apiURL != "" && apiURL != "https://api.github.com" {
-		return gateexecutor.AppConfig{}, "", errors.New("executor execute: only https://api.github.com is supported")
+		return gateexecutor.AppConfig{}, errors.New("executor execute: only https://api.github.com is supported")
 	}
 	privateKey := []byte(os.Getenv("INPUT_APP_PRIVATE_KEY"))
 	if len(privateKey) == 0 {
-		return gateexecutor.AppConfig{}, "", errors.New("executor execute: INPUT_APP_PRIVATE_KEY is required")
+		return gateexecutor.AppConfig{}, errors.New("executor execute: INPUT_APP_PRIVATE_KEY is required")
 	}
 	_ = os.Unsetenv("INPUT_APP_PRIVATE_KEY")
-	readToken := os.Getenv("INPUT_GITHUB_READ_TOKEN")
-	if readToken == "" {
-		wipeBytes(privateKey)
-		return gateexecutor.AppConfig{}, "", errors.New("executor execute: INPUT_GITHUB_READ_TOKEN is required")
-	}
-	_ = os.Unsetenv("INPUT_GITHUB_READ_TOKEN")
 	return gateexecutor.AppConfig{
 		AppID: appID, InstallationID: installationID,
 		PrivateKeyPEM: privateKey, APIURL: apiURL,
-	}, readToken, nil
+	}, nil
 }
 
 func executorResult(claim gateauthorization.ExecutionClaim, command gateexecutor.CommandResult, executeErr error, mergeCommit string, confirmErr error, completedAt time.Time) (gateauthorization.ExecutionResult, error) {
@@ -366,9 +446,8 @@ func readRunApprovals(repo string, runID int64) ([]authorization.ApprovalReview,
 			Login string `json:"login"`
 			ID    int64  `json:"id"`
 		} `json:"user"`
-		State       string    `json:"state"`
-		Comment     string    `json:"comment"`
-		SubmittedAt time.Time `json:"submitted_at"`
+		State   string `json:"state"`
+		Comment string `json:"comment"`
 	}
 	if err := ghDecodeExecutor(
 		&response, "api", fmt.Sprintf("repos/%s/actions/runs/%d/approvals", repo, runID),
@@ -383,18 +462,19 @@ func readRunApprovals(repo string, runID int64) ([]authorization.ApprovalReview,
 		}
 		out = append(out, authorization.ApprovalReview{
 			WorkflowRunID: runID, ActorLogin: item.User.Login, ActorID: item.User.ID,
-			State: strings.ToLower(item.State), SubmittedAt: item.SubmittedAt,
-			Comment: item.Comment, Environments: environments,
+			State: strings.ToLower(item.State), Comment: item.Comment,
+			Environments: environments,
 		})
 	}
 	return out, nil
 }
 
 type workflowRunFacts struct {
-	ID    int64  `json:"id"`
-	Event string `json:"event"`
-	Path  string `json:"path"`
-	Actor struct {
+	ID         int64  `json:"id"`
+	RunAttempt int    `json:"run_attempt"`
+	Event      string `json:"event"`
+	Path       string `json:"path"`
+	Actor      struct {
 		Login string `json:"login"`
 		ID    int64  `json:"id"`
 	} `json:"actor"`
@@ -415,14 +495,14 @@ func readWorkflowActors(repo string, runID, expectedActorID int64, expectedTrigg
 		return 0, 0, err
 	}
 	if err := validateWorkflowRun(run, repo, runID, expectedActorID, expectedTriggeringLogin); err != nil {
-		return 0, 0, err
+		return 0, 0, refuseExecutor(err)
 	}
 	return run.Actor.ID, run.TriggeringActor.ID, nil
 }
 
 func validateWorkflowRun(run workflowRunFacts, repo string, runID, expectedActorID int64, expectedTriggeringLogin string) error {
 	path := ".github/workflows/gate-executor.yml"
-	if run.ID != runID || run.Repository.FullName != repo ||
+	if run.ID != runID || run.Repository.FullName != repo || run.RunAttempt != 1 ||
 		run.Event != "workflow_dispatch" ||
 		(run.Path != path && !strings.HasPrefix(run.Path, path+"@")) {
 		return errors.New("executor workflow run identity mismatch")

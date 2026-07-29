@@ -96,13 +96,16 @@ type TrustRoot struct {
 }
 
 // ApprovalReceipt is the immutable projection of one run-specific GitHub
-// environment approval. ReceiptDigest covers all fields plus AuthorizationID.
+// environment approval. GitHub's approval-history API does not expose a
+// submission timestamp, so ObservedAt records when Gate fetched the approved
+// history inside the protected job. ReceiptDigest covers all fields plus
+// AuthorizationID.
 type ApprovalReceipt struct {
 	WorkflowRunID int64     `json:"workflow_run_id"`
 	ActorLogin    string    `json:"actor_login"`
 	ActorID       int64     `json:"actor_id"`
 	State         string    `json:"state"`
-	SubmittedAt   time.Time `json:"submitted_at"`
+	ObservedAt    time.Time `json:"observed_at"`
 	Comment       string    `json:"comment"`
 	ReceiptDigest string    `json:"receipt_digest"`
 }
@@ -246,12 +249,12 @@ func ValidateReceipt(authorizationID string, request Request, receipt ApprovalRe
 		return errors.New("approval actor_id must be positive")
 	case receipt.State != ApprovalStateApproved:
 		return fmt.Errorf("unsupported approval state %q", receipt.State)
-	case receipt.SubmittedAt.IsZero():
-		return errors.New("approval submitted_at is required")
-	case receipt.SubmittedAt.Before(request.IssuedAt):
-		return errors.New("approval predates authorization request")
-	case receipt.SubmittedAt.After(request.ExpiresAt):
-		return errors.New("approval is outside authorization validity")
+	case receipt.ObservedAt.IsZero():
+		return errors.New("approval observed_at is required")
+	case receipt.ObservedAt.Before(request.IssuedAt):
+		return errors.New("approval observation predates authorization request")
+	case receipt.ObservedAt.After(request.ExpiresAt):
+		return errors.New("approval observation is outside authorization validity")
 	case receipt.Comment != ExpectedApprovalComment(authorizationID, request):
 		return errors.New("approval comment does not bind the exact authorization")
 	}
@@ -291,8 +294,8 @@ func ValidateClaim(claim ExecutionClaim, authorization Artifact) error {
 		return errors.New("claim merge_argv mismatch")
 	case claim.ApprovalReceiptDigest != authorization.Receipt.ReceiptDigest:
 		return errors.New("claim approval_receipt_digest mismatch")
-	case claim.ClaimedAt.Before(authorization.Receipt.SubmittedAt):
-		return errors.New("claim predates approval")
+	case claim.ClaimedAt.Before(authorization.Receipt.ObservedAt):
+		return errors.New("claim predates approval observation")
 	case claim.ExpiresAt != authorization.Request.ExpiresAt:
 		return errors.New("claim expiry mismatch")
 	}
@@ -356,12 +359,12 @@ func ReceiptDigest(authorizationID string, receipt ApprovalReceipt) (string, err
 		ActorLogin      string    `json:"actor_login"`
 		ActorID         int64     `json:"actor_id"`
 		State           string    `json:"state"`
-		SubmittedAt     time.Time `json:"submitted_at"`
+		ObservedAt      time.Time `json:"observed_at"`
 		Comment         string    `json:"comment"`
 	}{
 		AuthorizationID: authorizationID, WorkflowRunID: receipt.WorkflowRunID,
 		ActorLogin: receipt.ActorLogin, ActorID: receipt.ActorID,
-		State: receipt.State, SubmittedAt: receipt.SubmittedAt.UTC(),
+		State: receipt.State, ObservedAt: receipt.ObservedAt.UTC(),
 		Comment: receipt.Comment,
 	}
 	data, err := canonicalJSON(projection)

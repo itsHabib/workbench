@@ -11,7 +11,10 @@ import (
 )
 
 // SchemaVersion is the supported staged ruleset-plan major.
-const SchemaVersion = 1
+const (
+	SchemaVersion         = 1
+	StatusBlockedSecurity = "blocked_security_decision"
+)
 
 // Plan is an actor-symbolic policy document. Operator-supplied GitHub actor IDs
 // are deliberately absent until registration/bootstrap.
@@ -71,8 +74,8 @@ func Validate(plan Plan) error {
 	if plan.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("ruleset plan: unsupported schema_version %d", plan.SchemaVersion)
 	}
-	if plan.Repository == "" || plan.Status != "staged_operator_only" {
-		return errors.New("ruleset plan: repository and staged_operator_only status required")
+	if plan.Repository == "" || plan.Status != StatusBlockedSecurity {
+		return errors.New("ruleset plan: repository and blocked_security_decision status required")
 	}
 	byName := make(map[string]Ruleset, len(plan.Rulesets))
 	for _, ruleset := range plan.Rulesets {
@@ -112,18 +115,21 @@ func validateStateUpdates(ruleset Ruleset) error {
 	if !exact(ruleset.Includes, []string{"refs/heads/gate-state"}) ||
 		!ruleset.RestrictUpdates || ruleset.RequirePullRequest ||
 		!ruleset.BlockDeletion || !ruleset.BlockForcePush ||
-		!exact(ruleset.AllowedWriters, []string{"github_actions"}) ||
+		len(ruleset.AllowedWriters) != 0 ||
 		len(ruleset.BypassActors) != 0 {
-		return errors.New("ruleset plan: gate-state must be non-force Actions-only")
+		return errors.New("ruleset plan: gate-state must remain writerless until custody is approved")
 	}
 	return nil
 }
 
 func validateOtherBranches(ruleset Ruleset) error {
-	if !exact(ruleset.Includes, []string{"refs/heads/*"}) ||
+	if !exact(ruleset.Includes, []string{"~ALL"}) ||
 		!exact(ruleset.Excludes, []string{"refs/heads/main", "refs/heads/gate-state"}) ||
-		contains(ruleset.AllowedWriters, "gate_app") || len(ruleset.BypassActors) != 0 {
-		return errors.New("ruleset plan: Gate App must have no other-branch authority")
+		!ruleset.RestrictUpdates ||
+		!exact(ruleset.AllowedWriters, []string{"repository_roles", "approved_existing_integrations"}) ||
+		contains(ruleset.AllowedWriters, "gate_app") ||
+		len(ruleset.BypassActors) != 0 {
+		return errors.New("ruleset plan: all other branches must restrict updates to non-Gate writers")
 	}
 	return nil
 }

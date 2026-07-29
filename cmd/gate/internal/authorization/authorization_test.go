@@ -123,8 +123,7 @@ func TestAuthorizeRequiresRunBoundIndependentLatestApproval(t *testing.T) {
 	comment := gateauthorization.ExpectedApprovalComment(id, request)
 	valid := ApprovalReview{
 		WorkflowRunID: 1234, ActorLogin: "gate-approver", ActorID: 77,
-		State:       gateauthorization.ApprovalStateApproved,
-		SubmittedAt: testNow.Add(2 * time.Minute), Comment: comment,
+		State: gateauthorization.ApprovalStateApproved, Comment: comment,
 		Environments: []string{gateauthorization.DefaultEnvironment},
 	}
 	tests := map[string]struct {
@@ -132,33 +131,33 @@ func TestAuthorizeRequiresRunBoundIndependentLatestApproval(t *testing.T) {
 		want  error
 	}{
 		"missing": {
-			facts: ApprovalFacts{WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13},
+			facts: ApprovalFacts{WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13, ObservedAt: testNow.Add(2 * time.Minute)},
 			want:  ErrApprovalMissing,
 		},
 		"wrong run": {
 			facts: ApprovalFacts{
-				WorkflowRunID: 9999, WorkflowActorID: 12, TriggeringActorID: 13,
+				WorkflowRunID: 9999, WorkflowActorID: 12, TriggeringActorID: 13, ObservedAt: testNow.Add(2 * time.Minute),
 				Reviews: []ApprovalReview{valid},
 			},
 			want: ErrApprovalMissing,
 		},
 		"self approval": {
 			facts: ApprovalFacts{
-				WorkflowRunID: 1234, WorkflowActorID: 77, TriggeringActorID: 13,
+				WorkflowRunID: 1234, WorkflowActorID: 77, TriggeringActorID: 13, ObservedAt: testNow.Add(2 * time.Minute),
 				Reviews: []ApprovalReview{valid},
 			},
 			want: ErrApprovalDependent,
 		},
 		"rerun actor approval": {
 			facts: ApprovalFacts{
-				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 77,
+				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 77, ObservedAt: testNow.Add(2 * time.Minute),
 				Reviews: []ApprovalReview{valid},
 			},
 			want: ErrApprovalDependent,
 		},
 		"wrong comment": {
 			facts: ApprovalFacts{
-				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13,
+				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13, ObservedAt: testNow.Add(2 * time.Minute),
 				Reviews: []ApprovalReview{func() ApprovalReview {
 					review := valid
 					review.Comment = "approve"
@@ -169,13 +168,12 @@ func TestAuthorizeRequiresRunBoundIndependentLatestApproval(t *testing.T) {
 		},
 		"later rejection": {
 			facts: ApprovalFacts{
-				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13,
+				WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13, ObservedAt: testNow.Add(2 * time.Minute),
 				Reviews: []ApprovalReview{
 					valid,
 					{
 						WorkflowRunID: 1234, ActorLogin: "gate-approver", ActorID: 77,
-						State: "rejected", SubmittedAt: testNow.Add(3 * time.Minute),
-						Comment:      "changed my mind",
+						State: "rejected", Comment: "changed my mind",
 						Environments: []string{gateauthorization.DefaultEnvironment},
 					},
 				},
@@ -398,10 +396,10 @@ func authorize(t *testing.T, request gateauthorization.Request) gateauthorizatio
 	}
 	artifact, err := Authorize(request, ApprovalFacts{
 		WorkflowRunID: 1234, WorkflowActorID: 12, TriggeringActorID: 13,
+		ObservedAt: testNow.Add(2 * time.Minute),
 		Reviews: []ApprovalReview{{
 			WorkflowRunID: 1234, ActorLogin: "gate-approver", ActorID: 77,
 			State:        gateauthorization.ApprovalStateApproved,
-			SubmittedAt:  testNow.Add(2 * time.Minute),
 			Comment:      gateauthorization.ExpectedApprovalComment(id, request),
 			Environments: []string{gateauthorization.DefaultEnvironment},
 		}},

@@ -13,7 +13,7 @@
     "receipt": {
       "type": "object",
       "required": [
-        "workflow_run_id", "actor_login", "actor_id", "state", "submitted_at",
+        "workflow_run_id", "actor_login", "actor_id", "state", "observed_at",
         "comment", "receipt_digest"
       ],
       "properties": {
@@ -21,7 +21,7 @@
         "actor_login": { "type": "string", "minLength": 1, "maxLength": 39 },
         "actor_id": { "type": "integer", "minimum": 1 },
         "state": { "const": "approved" },
-        "submitted_at": { "type": "string", "format": "date-time" },
+        "observed_at": { "type": "string", "format": "date-time" },
         "comment": { "type": "string", "minLength": 1 },
         "receipt_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
       }

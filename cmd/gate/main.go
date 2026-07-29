@@ -137,7 +137,18 @@ func main() {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "gate:", err)
-	os.Exit(codeError)
+	os.Exit(commandErrorCode(os.Args[1], err))
+}
+
+func commandErrorCode(command string, err error) int {
+	if command != "executor" {
+		return codeError
+	}
+	var refusal executorRefusal
+	if errors.As(err, &refusal) {
+		return codeRefused
+	}
+	return codeError
 }
 
 func usage() {
@@ -614,6 +625,16 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		res.Why = authorization.ErrSubjectClaimPending.Error()
 		return res, codeRefused, nil
 	}
+	checkNoOpenClaim := func(audit state.AuditResult) error {
+		pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return authorization.ErrSubjectClaimPending
+		}
+		return nil
+	}
 
 	// actionHash captures the hash of the last artifact record appended, so the
 	// pass path can surface the deciding action artifact's chain hash onto the
@@ -627,7 +648,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		art, err := e.st.AppendIfAbsentParentWhere(kind, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
+		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			kind, []string{state.KindAction, state.KindEscalation}, run,
+			reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		actionHash = art.Hash
 		return err
 	}
@@ -654,7 +679,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.AppendIfAbsentParentWhere(state.KindEscalation, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
+		_, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			state.KindEscalation, []string{state.KindAction, state.KindEscalation},
+			run, reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		return err
 	}
 

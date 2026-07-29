@@ -2,6 +2,12 @@
 
 Status: prepared only. None of these actions were performed by Codex.
 
+**Do not activate this runbook.** The executor workflow is hard-disabled and
+the symbolic plan leaves `gate-state` writerless while the operator decides
+the state-writer custody/order amendment described in `design.md`. Do not
+register the App, create secrets/environment, apply rulesets, initialize
+state, mint a grant, remove the workflow guard, bootstrap, or run a canary.
+
 This runbook begins after the repository implementation PR is locally green,
 CI-green, and exact-head adversarial review is clean. It intentionally separates
 operator authority from repository implementation.
@@ -57,6 +63,10 @@ short decoded keys are refused before approval consumption or state mutation.
 
 The independent reviewer must compare the request fields and submit the exact
 comment printed by `gate executor request`.
+
+Do not re-run an executor workflow attempt. GitHub's approval-history API does
+not bind decisions to attempts, so Gate accepts only attempt 1; dispatch a new
+run and obtain a fresh approval instead.
 
 ## 4. Initialize hosted state
 

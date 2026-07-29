@@ -126,6 +126,50 @@ func TestDecodeToleratesUnknownOptionalFields(t *testing.T) {
 	}
 }
 
+func TestExecutionResultSchemaPinsOutcomeSpecificFields(t *testing.T) {
+	var schema struct {
+		AllOf []struct {
+			If struct {
+				Properties map[string]struct {
+					Const string `json:"const"`
+				} `json:"properties"`
+			} `json:"if"`
+			Then struct {
+				Required []string `json:"required"`
+				Not      struct {
+					Required []string `json:"required"`
+				} `json:"not"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(ExecutionResultSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	requirements := make(map[string][2]string)
+	for _, conditional := range schema.AllOf {
+		outcome := conditional.If.Properties["outcome"].Const
+		if len(conditional.Then.Required) != 1 || len(conditional.Then.Not.Required) != 1 {
+			t.Fatalf("outcome %q has malformed then clause: %+v", outcome, conditional.Then)
+		}
+		requirements[outcome] = [2]string{
+			conditional.Then.Required[0],
+			conditional.Then.Not.Required[0],
+		}
+	}
+	want := map[string][2]string{
+		ExecutionMerged: {"merge_commit", "error_code"},
+		ExecutionFailed: {"error_code", "merge_commit"},
+	}
+	if len(requirements) != len(want) {
+		t.Fatalf("schema outcome constraints = %v, want %v", requirements, want)
+	}
+	for outcome, fields := range want {
+		if requirements[outcome] != fields {
+			t.Fatalf("schema constraint %q = %v, want %v", outcome, requirements[outcome], fields)
+		}
+	}
+}
+
 func validArtifact(t *testing.T) Artifact {
 	t.Helper()
 	request := Request{
@@ -154,7 +198,7 @@ func validArtifact(t *testing.T) Artifact {
 	}
 	receipt := ApprovalReceipt{
 		WorkflowRunID: 1234, ActorLogin: "gate-approver", ActorID: 77,
-		State: ApprovalStateApproved, SubmittedAt: request.IssuedAt.Add(time.Minute),
+		State: ApprovalStateApproved, ObservedAt: request.IssuedAt.Add(time.Minute),
 		Comment: ExpectedApprovalComment(id, request),
 	}
 	receipt.ReceiptDigest, err = ReceiptDigest(id, receipt)
@@ -182,7 +226,7 @@ func validClaim(t *testing.T, artifact Artifact) ExecutionClaim {
 		Subject:          artifact.Request.Subject, Gate: artifact.Request.Gate,
 		MergeArgv:             append([]string(nil), artifact.Request.MergeArgv...),
 		ApprovalReceiptDigest: artifact.Receipt.ReceiptDigest,
-		ClaimedAt:             artifact.Receipt.SubmittedAt.Add(time.Minute),
+		ClaimedAt:             artifact.Receipt.ObservedAt.Add(time.Minute),
 		ExpiresAt:             artifact.Request.ExpiresAt,
 	}
 }

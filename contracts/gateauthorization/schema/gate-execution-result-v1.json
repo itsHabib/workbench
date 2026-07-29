@@ -18,5 +18,27 @@
     "completed_at": { "type": "string", "format": "date-time" },
     "merge_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "error_code": { "type": "string", "minLength": 1 }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "outcome": { "const": "merged" } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "required": ["merge_commit"],
+        "not": { "required": ["error_code"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "outcome": { "const": "failed" } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "required": ["error_code"],
+        "not": { "required": ["merge_commit"] }
+      }
+    }
+  ]
 }

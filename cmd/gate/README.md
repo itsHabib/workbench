@@ -24,13 +24,16 @@ direct-merge bypass on the repo that arms it — see the runbook in
 dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
 move it ships here, so the armable canary is itsHabib/workbench. Ordinary
 `gate -live` stays unbuilt. A separate, dormant App executor now exists for one
-durable PR claim; custody remains unarmed until operator bootstrap and canary.
+durable PR claim. Fresh security review found the generic-Actions
+`gate-state` writer unsafe, so the workflow is hard-disabled and the staged
+plan is writerless. Operator bootstrap alone cannot arm it; the revised
+state-writer custody/order decision in the bridge design must land first.
 
 Provider-neutral exact-head passes can be presented for independent approval
 with `gate executor request`. The dormant default-branch executor verifies its
-own protected-environment approval history, permanently claims one exact action,
-and lets a dedicated GitHub App execute only Gate's stored
-`--match-head-commit` argv. It does not promote commit status. See
+own protected-environment approval history and prepares a permanent exact
+claim contract. Its planned App execution path does not promote commit status,
+but remains non-armable during the state-writer security hold. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
 ## Run it

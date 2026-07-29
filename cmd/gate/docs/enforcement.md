@@ -329,8 +329,11 @@ failure this document exists to correct:
   identity in live GitHub configuration, and no scoping that stops a governed agent from *attempting* a
   direct merge. Branch protection with admin bypass disallowed still *rejects*
   such a merge for lacking the green `gate` check — so the perimeter holds on
-  the canary. The dormant executor code adds process custody, but it is not a
-  real boundary until the operator completes App/ruleset bootstrap and canary.
+  the canary. The dormant executor code is now source-disabled: security review
+  proved that the repository-wide `github_actions` Integration cannot be an
+  exclusive `gate-state` writer. App/ruleset bootstrap and canary are
+  insufficient until the operator approves and the repository implements the
+  revised state-writer custody/order model.
 - **Mint authentication is not yet armed.** Local `gate grant` is unauthenticated and
   `MintedBy` is a free-form, unverified label (see above). The CI check mints
   its own throwaway grant, so this does not weaken the check — but it does not
@@ -347,17 +350,21 @@ and cannot safely carry Gate's PR-specific authority. The replacement in
 `docs/features/trusted-gate-judgment-bridge/design.md` is a dedicated Gate App
 executor behind a run-specific independent environment approval.
 
-The boundary verifies the exact PR/head/base/action/evidence request, appends a
-permanent one-time claim to anchored hosted state, re-fetches and audits that
-claim, then lets Gate itself exchange the App key for a short-lived token and
-execute only the stored `gh pr merge ... --match-head-commit ...` argv.
+The contract verifies the exact PR/head/base/action/evidence request and defines
+a permanent one-time claim plus exact
+`gh pr merge ... --match-head-commit ...` argv. The original transport used
+generic Actions to append the claim before App token creation; review proved
+that identity can replay older valid state and anchor pairs. The workflow is
+therefore hard-disabled and the symbolic `gate-state` rule has no writer.
 It posts no reusable success status, never adds `--admin`, and permanently
 consumes failures.
 
-This path is repository code only and is not armed. App registration, protected
-environment/secrets, `gate-state`, layered rulesets, bootstrap, and live canary
-are operator actions documented in
-`docs/features/trusted-gate-judgment-bridge/operator-runbook.md`.
+This path is repository code only and is not armable. The open security
+decision—whether one process-custodied Gate App may CAS-publish the claim before
+merging, or an equivalent independent state writer/external monotonic pin—is
+documented in `docs/features/trusted-gate-judgment-bridge/design.md`. Do not
+perform the operator actions in the runbook until that amendment is approved
+and implemented.
 
 Three CI-context choices worth naming, since they shape what the check does and
 does not assert:

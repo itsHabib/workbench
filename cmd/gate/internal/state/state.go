@@ -168,6 +168,16 @@ func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run
 // uniqueness check holds the store lock. A nil predicate treats every matching
 // kind/parent as a conflict.
 func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool) (Artifact, error) {
+	return s.AppendIfAbsentParentWhereAfterAudit(
+		kind, uniqueKinds, run, uniqueParent, parents, body, conflicts, nil,
+	)
+}
+
+// AppendIfAbsentParentWhereAfterAudit composes anchored audit, caller policy,
+// uniqueness, and append under one store lock. It is the terminal-outcome
+// counterpart to AppendAfterAudit: no claim can land between an open-claim
+// predicate and the outcome write.
+func (s *Store) AppendIfAbsentParentWhereAfterAudit(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool, check func(AuditResult) error) (Artifact, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
@@ -177,14 +187,26 @@ func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run
 		return Artifact{}, err
 	}
 	defer unlock()
-	existing, err := s.scan(func(a Artifact) bool {
-		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
-			return false
-		}
-		return conflicts == nil || conflicts(a)
-	})
+	audit, err := s.auditLocked()
 	if err != nil {
 		return Artifact{}, err
+	}
+	if !audit.OK {
+		return Artifact{}, fmt.Errorf("state: audit refused append: %s", audit.Reason)
+	}
+	if check != nil {
+		if err := check(audit); err != nil {
+			return Artifact{}, err
+		}
+	}
+	var existing []Artifact
+	for _, a := range audit.All {
+		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
+			continue
+		}
+		if conflicts == nil || conflicts(a) {
+			existing = append(existing, a)
+		}
 	}
 	if len(existing) > 0 {
 		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
