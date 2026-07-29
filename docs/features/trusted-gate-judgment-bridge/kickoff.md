@@ -1,6 +1,6 @@
 # Goal kickoff — trusted Gate judgment bridge, Codex auto-mode, and live dogfood
 
-**Status:** ready for goal-mode execution
+**Status:** security redesign required after exact-head adversarial review
 **Owner:** operator + Codex session seat
 **Date:** 2026-07-29
 **Primary repository:** `itsHabib/workbench`
@@ -32,8 +32,51 @@ The immediate defect is structural:
 - Therefore GitHub refuses Gate's exact `--match-head-commit` merge command.
 
 Build the smallest trusted bridge that lets a provider-neutral, exact-head Gate
-authorization become the required app-pinned `gate` status without making a
-user-posted status authoritative.
+authorization control one exact PR merge without making a user-posted status
+authoritative.
+
+## Security-review amendment — 2026-07-29
+
+The first implementation attempt promoted `GateAuthorizationV1` through a
+protected GitHub Environment into the existing app-pinned `gate` commit status.
+It reached green CI at Workbench PR #169, head
+`16179ef0c31c2de548fb7657e0bd47519313d690`, then failed the required fresh
+adversarial review on three P1 authority defects:
+
+1. Reading the environment's current configuration does not prove that the
+   particular workflow run received an independent approval. A consumer must
+   verify the run's approval history and approving actor.
+2. A local `would_merge` exported before a newer block/park remains promotable
+   unless consumption has a trusted freshness or revocation channel.
+3. GitHub commit statuses are attached to a SHA, not a PR. Gate authorizes a PR
+   number and exact head, so another PR backed by the same SHA can inherit
+   `gate=success`. A read-before-write uniqueness check cannot prevent a PR
+   created after the read or after success.
+
+The third defect disproves the original assumption that the existing required
+status can carry PR-specific merge authority by itself. Do not merge or arm the
+status-promotion implementation, even after fixing the first two defects.
+
+The replacement decision must choose a genuinely PR-specific enforcement seam:
+
+- **Recommended:** extend the dedicated Gate GitHub App track so a
+  protected, run-approved trusted-base workflow re-evaluates Gate at
+  consumption time and the App executes only Gate's stored exact
+  `gh pr merge ... --match-head-commit ...` argv for the artifact's PR. The App
+  is the narrowly custodied Gate executor, not a prose wrapper. It must not
+  publish reusable merge authority as a commit status.
+- **Alternative:** move the repository to an organization and require GitHub's
+  merge queue, then authorize the PR-specific temporary `merge_group` SHA.
+  Merge queues are not available to this personal public repository.
+- **Fallback with recurring human friction:** require an independent,
+  PR-specific approval in branch protection in addition to the commit status.
+  This gives every second PR a fresh human boundary but does not preserve the
+  intended autonomous delivery loop.
+
+The recommended App path is a material trust-model and branch-rule decision.
+It requires explicit operator authorization. Until then, PR #169 remains draft
+and Phase A is stopped; no bootstrap exception, check weakening, or merge is
+permitted.
 
 ## Ground truth to preserve
 
@@ -60,9 +103,11 @@ Also inspect, but do not duplicate, the unfinished App-mint design:
 - `docs/features/gate-app-mint/spec.md`
 
 That TDD addresses authenticated, head-bound **grant minting** and later
-credential authority. It explicitly does not make the App the enforcement
-check. The judgment bridge in this goal is the smaller prerequisite that
-unblocks merges now. Keep the two efforts separate and cross-linked.
+credential authority. Its original non-goal excluded execution and treated the
+commit status as sufficient enforcement. The amendment above invalidates that
+separation: any revised App design must be reviewed as the PR-specific
+consumption and execution boundary, while continuing to reuse Gate's contracts
+and exact command rather than absorbing Gate policy into workflow prose.
 
 Already shipped:
 

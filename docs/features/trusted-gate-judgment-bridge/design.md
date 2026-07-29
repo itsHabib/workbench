@@ -1,6 +1,56 @@
 # Trusted Gate judgment bridge
 
-Status: implementation
+Status: blocked — exact-head adversarial review rejected the status authority
+
+## Exact-head adversarial verdict
+
+PR #169 reached green CI at
+`16179ef0c31c2de548fb7657e0bd47519313d690`, but the required fresh review
+blocked the design on three P1 findings:
+
+- current environment settings do not prove this run received an independent
+  approval;
+- export-time newest-terminal validation does not revoke an artifact after a
+  newer local Gate block or park; and
+- a GitHub commit status is SHA-scoped and can transfer to another PR sharing
+  that SHA, while Gate's decision and merge argv are PR-scoped.
+
+The first two findings need a run-bound approval receipt and a trusted
+consumption-time freshness mechanism. They are insufficient on their own:
+the third finding means the commit status cannot honestly be the final carrier
+of PR-specific authority. The implementation below is retained for review
+evidence but must not be merged or armed.
+
+## Required replacement decision
+
+The recommended replacement joins the unfinished Gate App-mint track with a
+narrow PR-specific execute boundary:
+
+1. A protected workflow running trusted default-branch code verifies its own
+   GitHub approval history and an independent approving actor.
+2. The approved job mints a short-lived, head-bound Gate grant under the
+   authenticated App-mint contract, then re-evaluates the exact PR/head with
+   Gate at consumption time using the exact-head `ReviewFindingsV1` evidence.
+   If Gate parks for the missing provider panel, a Gate-owned judge adapter
+   binds that evidence to the verified environment approval receipt as the
+   provider-neutral judgment authority; workflow prose never fabricates a
+   verdict.
+3. Gate appends the judgment and action to its anchored state. Only a resulting
+   `would_merge` action can release a short-lived installation token for a
+   dedicated, repository-scoped Gate GitHub App.
+4. The App executes the exact argv stored by that action, including
+   `--match-head-commit`; it never reconstructs flags, broadens the command, or
+   mints an operator grant.
+5. Branch-rule authority is scoped to that App as the Gate executor. Ordinary
+   users, ambient agent credentials, and GitHub Actions remain unable to bypass
+   the rule.
+6. The run appends the decision, approval receipt, token identity, command, and
+   GitHub merge result to the auditable Gate state channel.
+
+This makes the App useful policy-bearing custody rather than a thin wrapper:
+the invariant is one approved Gate action to one exact PR merge, with no
+reusable commit-scoped green in between. It is also a material security and
+branch-rule choice, so implementation waits for explicit operator authority.
 
 ## Decision
 
@@ -25,9 +75,10 @@ exactly one open PR backed by that head. If the only possible approver is the
 same `itsHabib` identity available to the task, this design is not armed and
 must not be represented as secure.
 
-This is the smallest honest bridge. The unfinished GitHub App mint design in
-PR #143 remains the later authenticated grant/credential-authority track; it
-does not replace this judgment promotion boundary.
+This was the smallest attempted bridge. The exact-head review demonstrated that
+it is not an honest final enforcement boundary. The unfinished GitHub App mint
+design in PR #143 must be revised if the operator chooses the replacement above;
+its existing non-goal for execution is no longer tenable.
 
 ### No-split argument
 
