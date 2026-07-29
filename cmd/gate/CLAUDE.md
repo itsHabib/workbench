@@ -77,6 +77,8 @@ Constraints that are design decisions, not omissions:
 - **Execution authority is a durable PR claim, not status.** The protected
   executor contract verifies run-specific independent approval, exact
   repo/PR/head/base, newest action, and unchanged `--match-head-commit` argv.
-  The one-App custody/order amendment is implemented but non-armable pending
-  reconciliation semantics, exact-head review, and operator bootstrap. It
-  never posts reusable green status or adds `--admin`.
+  The one-App custody/order amendment and claim-only expired reconciliation
+  path are implemented but non-armable pending exact-head review and operator
+  bootstrap. The reconciler has no merge operation, although its one-App
+  `contents: write` token remains technically merge-capable. Neither path
+  posts reusable green status or adds `--admin`.

@@ -100,6 +100,69 @@ func TestClaimIsPermanentAndAtomic(t *testing.T) {
 	}
 }
 
+func TestVerifyExpiredClaimClosesOnlyOneExpiredOpenClaim(t *testing.T) {
+	fixture := newFixture(t)
+	authorization := authorize(t, fixture.request(t))
+	claimArtifact, claim, err := fixture.claim(
+		t, authorization, fixture.live(), testNow.Add(3*time.Minute),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := VerifyExpiredClaim(
+		fixture.audit(t), claim.ClaimID, testNow.Add(19*time.Minute),
+	); !errors.Is(err, ErrClaimNotExpired) {
+		t.Fatalf("active claim = %v, want not expired", err)
+	}
+	gotArtifact, gotClaim, err := VerifyExpiredClaim(
+		fixture.audit(t), claim.ClaimID, claim.ExpiresAt,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotArtifact.ID != claimArtifact.ID || gotClaim.ClaimID != claim.ClaimID {
+		t.Fatalf("expired claim mismatch: %+v %+v", gotArtifact, gotClaim)
+	}
+	result := gateauthorization.ExecutionResult{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		ExecutionID:   claim.ExecutionID,
+		ClaimID:       claim.ClaimID,
+		Outcome:       gateauthorization.ExecutionFailed,
+		MergeArgv:     append([]string(nil), claim.MergeArgv...),
+		CompletedAt:   claim.ExpiresAt,
+		ErrorCode:     "executor_claim_expired",
+	}
+	if _, err := RecordResult(fixture.store, claimArtifact, claim, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := VerifyExpiredClaim(
+		fixture.audit(t), claim.ClaimID, claim.ExpiresAt,
+	); !errors.Is(err, ErrAlreadyClaimed) {
+		t.Fatalf("resolved claim = %v, want already claimed", err)
+	}
+}
+
+func TestVerifyExpiredClaimRefusesMissingAndMalformedClaims(t *testing.T) {
+	fixture := newFixture(t)
+	claimID := "gxc_" + strings.Repeat("0", 64)
+	if _, _, err := VerifyExpiredClaim(
+		fixture.audit(t), claimID, testNow,
+	); !errors.Is(err, ErrActionMissing) {
+		t.Fatalf("missing claim = %v, want action missing", err)
+	}
+	if _, err := fixture.store.Append(
+		state.KindExecutionClaim, fixture.action.Run,
+		[]string{fixture.action.ID}, map[string]string{"claim_id": claimID},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := VerifyExpiredClaim(
+		fixture.audit(t), claimID, testNow,
+	); err == nil || !strings.Contains(err.Error(), "authorization_claim_malformed") {
+		t.Fatalf("malformed claim = %v", err)
+	}
+}
+
 func TestConcurrentClaimHasExactlyOneWinner(t *testing.T) {
 	fixture := newFixture(t)
 	authorization := authorize(t, fixture.request(t))

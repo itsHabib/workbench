@@ -45,13 +45,15 @@ func refuseExecutor(err error) error {
 
 func cmdExecutor(args []string) error {
 	if len(args) == 0 {
-		return errors.New("executor: request or run required")
+		return errors.New("executor: request, run, or reconcile required")
 	}
 	switch args[0] {
 	case "request":
 		return cmdExecutorRequest(args[1:])
 	case "run":
 		return cmdExecutorRun(args[1:])
+	case "reconcile":
+		return cmdExecutorReconcile(args[1:])
 	default:
 		return fmt.Errorf("executor: unknown verb %q", args[0])
 	}
@@ -177,6 +179,129 @@ func cmdExecutorRun(args []string) error {
 	return runCustodiedExecution(
 		context.Background(), e, *keyDir, approved, live, *stateTip, config,
 	)
+}
+
+func cmdExecutorReconcile(args []string) error {
+	fs := flag.NewFlagSet("executor reconcile", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	claimID := fs.String("claim", "", "expired durable claim ID")
+	stateTip := fs.String("state-tip", "", "exact gate-state checkout commit")
+	appID := fs.Int64("app-id", 0, "dedicated Gate App ID")
+	installationID := fs.Int64("installation-id", 0, "repository installation ID")
+	apiURL := fs.String("api-url", "", "GitHub API URL")
+	help, err := parseFlags(fs, args)
+	if err != nil || help {
+		return err
+	}
+	if !validExecutorClaimID(*claimID) || !validExecutorSHA(*stateTip) ||
+		*appID < 1 || *installationID < 1 || *keyDir == "" {
+		return refuseExecutor(errors.New("executor reconcile: valid -claim -state-tip -app-id -installation-id -key required"))
+	}
+	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	if err != nil {
+		return err
+	}
+	audit, err := e.st.Audit()
+	if err != nil {
+		return err
+	}
+	_, claim, err := authorization.VerifyExpiredClaim(
+		audit, *claimID, time.Now().UTC(),
+	)
+	if err != nil {
+		return classifyExecutorAuthorizationError(err)
+	}
+	config, err := readExecutorAppConfig(
+		*appID, *installationID, *apiURL, claim.Subject.Repo,
+	)
+	if err != nil {
+		return err
+	}
+	defer wipeBytes(config.PrivateKeyPEM)
+	return reconcileExpiredClaim(
+		context.Background(), *claimID, *stateTip, *keyDir, config,
+	)
+}
+
+func reconcileExpiredClaim(
+	ctx context.Context,
+	claimID, stateTip, keyDir string,
+	config gateexecutor.AppConfig,
+) error {
+	return gateexecutor.WithSession(ctx, config, func(session *gateexecutor.Session) error {
+		snapshot, err := session.FetchGateState(ctx, stateTip)
+		if err != nil {
+			return err
+		}
+		durable, cleanup, err := openExecutorSnapshot(snapshot.Files, keyDir)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		audit, err := durable.st.Audit()
+		if err != nil {
+			return err
+		}
+		artifact, claim, err := authorization.VerifyExpiredClaim(
+			audit, claimID, time.Now().UTC(),
+		)
+		if err != nil {
+			return classifyExecutorAuthorizationError(err)
+		}
+		pull, err := session.ReadPullState(ctx, claim.Subject.Number)
+		if err != nil {
+			return err
+		}
+		result := expiredClaimResult(claim, pull, time.Now().UTC())
+		if _, err := authorization.RecordResult(
+			durable.st, artifact, claim, result,
+		); err != nil {
+			return classifyExecutorAuthorizationError(err)
+		}
+		files, err := readExecutorStateFiles(durable)
+		if err != nil {
+			return err
+		}
+		if _, err := session.PublishGateState(
+			ctx, snapshot.Tip, "gate: reconcile "+claim.ExecutionID, files,
+		); err != nil {
+			return err
+		}
+		printJSON(map[string]any{
+			"claim_id": claim.ClaimID,
+			"outcome":  result.Outcome,
+			"reason":   result.ErrorCode,
+		})
+		return nil
+	})
+}
+
+func expiredClaimResult(
+	claim gateauthorization.ExecutionClaim,
+	pull gateexecutor.PullState,
+	completedAt time.Time,
+) gateauthorization.ExecutionResult {
+	result := gateauthorization.ExecutionResult{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		ExecutionID:   claim.ExecutionID,
+		ClaimID:       claim.ClaimID,
+		Outcome:       gateauthorization.ExecutionFailed,
+		MergeArgv:     append([]string(nil), claim.MergeArgv...),
+		CompletedAt:   completedAt,
+		ErrorCode:     "executor_claim_expired_unmerged",
+	}
+	if pull.HeadSHA != claim.Subject.HeadSHA ||
+		pull.BaseRef != claim.Subject.BaseRef {
+		result.ErrorCode = "executor_claim_subject_changed"
+		return result
+	}
+	if !pull.Merged {
+		return result
+	}
+	result.Outcome = gateauthorization.ExecutionMerged
+	result.MergeCommit = pull.MergeCommit
+	result.ErrorCode = ""
+	return result
 }
 
 func readExecutorRequest(path string) (gateauthorization.RequestArtifact, error) {
@@ -505,6 +630,7 @@ func classifyExecutorAuthorizationError(err error) error {
 		authorization.ErrAlreadyClaimed,
 		authorization.ErrSubjectClaimPending,
 		authorization.ErrResultDuplicate,
+		authorization.ErrClaimNotExpired,
 		capability.ErrExpired,
 		capability.ErrScope,
 		capability.ErrSignature,
@@ -780,6 +906,19 @@ func validExecutorSHA(value string) bool {
 		return false
 	}
 	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validExecutorClaimID(value string) bool {
+	const prefix = "gxc_"
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	digest := strings.TrimPrefix(value, prefix)
+	if len(digest) != 64 || digest != strings.ToLower(digest) {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
 	return err == nil
 }
 

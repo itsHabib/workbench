@@ -10,8 +10,9 @@ canary.
 The operator authorized the one-App execution ordering. Repository code now
 keeps approval verification, App token creation, claim CAS/refetch, exact
 merge, and result CAS inside one Gate action. Generic Actions remains read-only.
-The implementation still requires local/CI validation and fresh exact-head
-adversarial review.
+Expired claims use a separate reconciler action: claim ID in, result CAS out.
+It accepts no request document or merge argv and its image contains no GitHub
+CLI. Local validation is green; CI and fresh exact-head review remain.
 
 ## 1. Review the dormant artifacts
 
@@ -19,6 +20,7 @@ Confirm the implementation PR/head and inspect:
 
 - `.github/workflows/gate-executor.yml`
 - `.github/actions/gate-executor/action.yml`
+- `.github/actions/gate-reconciler/action.yml`
 - `docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`
 - the four schemas under `contracts/gateauthorization/schema/`
 
@@ -29,27 +31,32 @@ from the selected protected `main` branch, with administrator protection-rule
 bypass disabled. This platform rule is load-bearing: `workflow_dispatch`
 accepts another ref, so a workflow guard alone cannot protect the App key.
 
-## 2. Reconciliation permission decision required
+## 2. Reconciliation trust boundary
 
 GitHub requires `contents: write` both to update `gate-state` and to merge a
 pull request. An installation token may narrow an App's permissions and
 repository set, but it cannot narrow `contents: write` to one branch.
 
-The operator must choose one honest recovery model:
+The operator chose one-App code-path separation. Dispatch operation
+`reconcile` with exactly one expired `gxc_` claim ID. The reconciler re-fetches
+and audits that claim, observes the PR, and writes one terminal result through
+the same non-force state CAS. It has no merge input or merge call.
 
-1. **One App, code-path separation.** A separate reconciler accepts only an
-   expired claim ID, never accepts merge argv, and never invokes merge. Its
-   token remains technically merge-capable because it needs `contents: write`
-   to append the result.
-2. **Two Apps, credential separation.** A state-writer App has bypass only on
-   `gate-state`; the executor App has PR-only bypass only on `main`. The
-   reconciler then receives a credential that cannot update `main`.
-3. **Equivalent external monotonic writer/pin.** Supply an independently
-   reviewed mechanism with the same rollback and branch-authority properties.
+This does **not** create a cryptographically state-only credential. Its
+installation token still has `contents: write` and is technically
+merge-capable. The safety claim is deliberately narrower: protected release,
+one process, a claim-only API, no GitHub CLI in the image, no merge operation,
+and branch rules that remain operator-owned.
 
-The first choice preserves the authorized one-App model but weakens the literal
-"no-merge-token" claim to "no merge operation." The second is stronger but is
-not a one-App model.
+After operator activation only, the recovery dispatch shape is:
+
+```powershell
+gh workflow run gate-executor.yml -R itsHabib/workbench --ref main `
+  -f operation=reconcile -f claim=gxc_<64-lowercase-hex>
+```
+
+The workflow remains hard-disabled today, so this command cannot release the
+App credential or change state.
 
 ## 3. Activation remains operator-only
 

@@ -216,7 +216,9 @@ jobs:
         run: |
           workflow=.github/workflows/gate-executor.yml
           action=.github/actions/gate-executor/action.yml
+          reconciler=.github/actions/gate-reconciler/action.yml
           dockerfile=.github/actions/gate-executor/Dockerfile
+          reconciler_dockerfile=.github/actions/gate-reconciler/Dockerfile
           grep -F '  workflow_dispatch:' "$workflow"
           grep -F '    environment: gate-authorization' "$workflow"
           grep -F '    if:' "$workflow" | grep -F 'false'
@@ -226,14 +228,27 @@ jobs:
           grep -F '          ref:' "$workflow" | grep -F 'github.sha'
           grep -F '          persist-credentials: false' "$workflow"
           grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
+          grep -F 'uses: ./.github/actions/gate-reconciler' "$workflow"
           grep -F 'Claim, refetch, merge, and record in one custodied process' "$workflow"
+          grep -F 'Reconcile one expired claim without a merge operation' "$workflow"
           grep -F '          CGO_ENABLED: 0' "$workflow"
           grep -F 'ENTRYPOINT ["/usr/local/bin/gate"]' "$dockerfile"
           grep -F -- '--match-head-commit' cmd/gate/internal/executor/executor.go
           grep -F 'PublishGateState' cmd/gate/executor.go
           grep -Fx '    - executor' "$action"
           grep -Fx '    - run' "$action"
-          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 1
+          grep -Fx '    - executor' "$reconciler"
+          grep -Fx '    - reconcile' "$reconciler"
+          grep -Fx '    - -claim' "$reconciler"
+          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 2
+          if grep -Eq '^[[:space:]]+- (run|request|execute)|--admin|^[[:space:]]+- -request' "$reconciler" "$reconciler_dockerfile"; then
+            echo "expired-claim reconciler must contain no merge operation or request input" >&2
+            exit 1
+          fi
+          if grep -Fq '/gh ' "$reconciler_dockerfile"; then
+            echo "expired-claim reconciler image must not contain GitHub CLI" >&2
+            exit 1
+          fi
           if grep -Eq '^  (pull_request|pull_request_target|repository_dispatch):' "$workflow"; then
             echo "gate executor must be workflow_dispatch-only" >&2
             exit 1

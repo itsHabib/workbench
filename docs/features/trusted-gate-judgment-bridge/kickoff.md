@@ -84,8 +84,10 @@ The operator additionally authorized the one-App process-custodied ordering at
 PR #169 head `19dae14d5cc71d3859938ffe218230d542f7498f`: post-approval
 token creation, claim CAS/refetch, exact merge, result CAS, plus intended
 no-merge-token expired-claim reconciliation. GitHub's shared `contents: write`
-permission for ref update and PR merge leaves the literal no-merge-token
-semantics as the remaining operator decision; see `design.md`.
+permission for ref update and PR merge prevents literal credential separation.
+The operator subsequently chose one-App code-path separation: claim-only
+reconciliation with no merge input or operation, while honestly retaining a
+technically merge-capable installation token; see `design.md`.
 
 ## Ground truth to preserve
 

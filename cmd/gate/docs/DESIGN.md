@@ -231,8 +231,10 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
   sanctioned merge. The separate `executor run` verb creates the App token
   only after protected approval and preflight, then owns claim CAS/refetch,
   exact merge, and result CAS in one process. It remains source-disabled until
-  reconciliation semantics, operator bootstrap, and an adversarial live canary
-  pass.
+  operator bootstrap and an adversarial live canary pass. Expired claims are
+  closed by `executor reconcile`, a claim-only code path with no merge
+  operation; its one-App token remains technically merge-capable because
+  GitHub also requires `contents: write` for the result-state CAS.
 - **Content-addressed evidence blobs.** Evidence bodies are inline JSON.
   Trigger: the first diff over ~100KB.
 - **Any daemon or server.** The substrate is a file contract; at current scale

@@ -6,9 +6,20 @@ name: gate executor
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Execute an approved request or close one expired claim
+        required: true
+        type: choice
+        options:
+          - execute
+          - reconcile
       request:
         description: Complete GateAuthorizationRequestV1 JSON
-        required: true
+        required: false
+        type: string
+      claim:
+        description: Expired gxc_ claim identity (reconcile only)
+        required: false
         type: string
 
 permissions:
@@ -55,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           go build -trimpath -o .github/actions/gate-executor/gate ./cmd/gate
+          cp .github/actions/gate-executor/gate .github/actions/gate-reconciler/gate
 
       - name: Provision anchored-state keys
         env:
@@ -69,8 +81,12 @@ jobs:
           test "$(wc -c <"${KEY_DIR}/anchor.key")" -ge 32
           chmod 600 "${KEY_DIR}/grant.key" "${KEY_DIR}/anchor.key"
 
+      - name: Read hosted state tip
+        id: state
+        run: echo "tip=$(git -C hosted-state rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+
       - name: Materialize approved request
-        id: input
+        if: ${{ inputs.operation == 'execute' }}
         env:
           REQUEST_DOCUMENT: ${{ inputs.request }}
         run: |
@@ -78,19 +94,34 @@ jobs:
           mkdir -p executor-input
           printf '%s' "${REQUEST_DOCUMENT}" >executor-input/request.json
           chmod 600 executor-input/request.json
-          echo "state_tip=$(git -C hosted-state rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
 
       - name: Claim, refetch, merge, and record in one custodied process
+        if: ${{ inputs.operation == 'execute' }}
         uses: ./.github/actions/gate-executor
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
         with:
           request: executor-input/request.json
-          state-tip: ${{ steps.input.outputs.state_tip }}
+          state-tip: ${{ steps.state.outputs.tip }}
           workflow-run-id: ${{ github.run_id }}
           workflow-actor-id: ${{ github.actor_id }}
           workflow-triggering-actor: ${{ github.triggering_actor }}
+          app-id: ${{ vars.GATE_APP_ID }}
+          installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
+          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+          state-dir: ${{ env.STATE_DIR }}
+          key-dir: ${{ env.KEY_DIR }}
+          api-url: ${{ github.api_url }}
+
+      - name: Reconcile one expired claim without a merge operation
+        if: ${{ inputs.operation == 'reconcile' }}
+        uses: ./.github/actions/gate-reconciler
+        env:
+          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+        with:
+          claim: ${{ inputs.claim }}
+          state-tip: ${{ steps.state.outputs.tip }}
           app-id: ${{ vars.GATE_APP_ID }}
           installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
           app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
@@ -105,5 +136,6 @@ jobs:
             echo "## Gate executor"
             echo "- workflow run: \`${GITHUB_RUN_ID}\`"
             echo "- state branch: \`gate-state\`"
+            echo "- operation: \`${{ inputs.operation }}\`"
             echo "- the App token remained inside the Gate action"
           } >>"${GITHUB_STEP_SUMMARY}"

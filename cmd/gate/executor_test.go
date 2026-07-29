@@ -64,6 +64,90 @@ func TestExecutorResultRefusesUnconfirmedSuccess(t *testing.T) {
 	}
 }
 
+func TestExpiredClaimResultRecordsObservedExactHeadMerge(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	merge := strings.Repeat("b", 40)
+	claim := gateauthorization.ExecutionClaim{
+		ClaimID: "claim", ExecutionID: "execution", MergeArgv: []string{"stored"},
+		Subject: gateauthorization.Subject{HeadSHA: head, BaseRef: "main"},
+	}
+	result := expiredClaimResult(
+		claim,
+		gateexecutor.PullState{
+			HeadSHA: head, BaseRef: "main", Merged: true, MergeCommit: merge,
+		},
+		time.Unix(1000, 0),
+	)
+	if result.Outcome != gateauthorization.ExecutionMerged ||
+		result.MergeCommit != merge || result.ErrorCode != "" ||
+		len(result.MergeArgv) != 1 || result.MergeArgv[0] != "stored" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestExpiredClaimResultClosesUnmergedAndChangedSubjects(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	claim := gateauthorization.ExecutionClaim{
+		ClaimID: "claim", ExecutionID: "execution", MergeArgv: []string{"stored"},
+		Subject: gateauthorization.Subject{HeadSHA: head, BaseRef: "main"},
+	}
+	unmerged := expiredClaimResult(
+		claim, gateexecutor.PullState{HeadSHA: head, BaseRef: "main"},
+		time.Unix(1000, 0),
+	)
+	if unmerged.Outcome != gateauthorization.ExecutionFailed ||
+		unmerged.ErrorCode != "executor_claim_expired_unmerged" {
+		t.Fatalf("unmerged result = %+v", unmerged)
+	}
+	changed := expiredClaimResult(
+		claim,
+		gateexecutor.PullState{
+			HeadSHA: strings.Repeat("b", 40), BaseRef: "main", Merged: true,
+			MergeCommit: strings.Repeat("c", 40),
+		},
+		time.Unix(1000, 0),
+	)
+	if changed.Outcome != gateauthorization.ExecutionFailed ||
+		changed.MergeCommit != "" ||
+		changed.ErrorCode != "executor_claim_subject_changed" {
+		t.Fatalf("changed result = %+v", changed)
+	}
+}
+
+func TestValidExecutorClaimID(t *testing.T) {
+	valid := "gxc_" + strings.Repeat("a", 64)
+	if !validExecutorClaimID(valid) {
+		t.Fatal("valid claim ID refused")
+	}
+	for _, invalid := range []string{
+		"", strings.Repeat("a", 64), "gxc_" + strings.Repeat("A", 64),
+		"gxc_" + strings.Repeat("g", 64), "gxc_" + strings.Repeat("a", 63),
+	} {
+		if validExecutorClaimID(invalid) {
+			t.Fatalf("invalid claim ID accepted: %q", invalid)
+		}
+	}
+}
+
+func TestExecutorReconcileRefusesMalformedIdentityBeforeCredentials(t *testing.T) {
+	t.Setenv("INPUT_APP_PRIVATE_KEY", "must-not-be-read")
+	err := cmdExecutor([]string{
+		"reconcile",
+		"-claim", "not-a-claim",
+		"-state-tip", strings.Repeat("a", 40),
+		"-app-id", "1",
+		"-installation-id", "2",
+		"-key", t.TempDir(),
+	})
+	var refusal executorRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("reconcile = %v, want refusal", err)
+	}
+	if os.Getenv("INPUT_APP_PRIVATE_KEY") != "must-not-be-read" {
+		t.Fatal("malformed claim reached App credential custody")
+	}
+}
+
 func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T) {
 	var run workflowRunFacts
 	run.ID = 42

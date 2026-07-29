@@ -34,6 +34,7 @@ var (
 	ErrAlreadyClaimed      = errors.New("authorization_already_claimed")
 	ErrSubjectClaimPending = errors.New("authorization_subject_claim_pending")
 	ErrResultDuplicate     = errors.New("authorization_result_duplicate")
+	ErrClaimNotExpired     = errors.New("authorization_claim_not_expired")
 )
 
 type actionBody struct {
@@ -270,6 +271,42 @@ func Claim(st *state.Store, keyPath string, authorization gateauthorization.Arti
 // VerifyDurableClaim replays a freshly fetched anchored state snapshot and
 // returns the exact claim that may enter the credential boundary.
 func VerifyDurableClaim(audit state.AuditResult, claimID string, live LivePullRequest, now time.Time) (state.Artifact, gateauthorization.ExecutionClaim, error) {
+	target, claim, err := findOpenClaim(audit, claimID)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	if !now.Before(claim.ExpiresAt) {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrExpired
+	}
+	if err := validateLive(claim.Subject, live); err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	index, err := buildIndex(audit.All)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	newest := index.newestTerminal(claim.Subject.Repo, claim.Subject.Number)
+	if newest.artifact.ID != claim.Gate.ActionID ||
+		newest.artifact.Hash != claim.Gate.ActionHash {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrSuperseded
+	}
+	return target, claim, nil
+}
+
+// VerifyExpiredClaim returns one unresolved claim only after its authority
+// window has closed. Reconciliation never makes the claim executable again.
+func VerifyExpiredClaim(audit state.AuditResult, claimID string, now time.Time) (state.Artifact, gateauthorization.ExecutionClaim, error) {
+	target, claim, err := findOpenClaim(audit, claimID)
+	if err != nil {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
+	}
+	if now.Before(claim.ExpiresAt) {
+		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrClaimNotExpired
+	}
+	return target, claim, nil
+}
+
+func findOpenClaim(audit state.AuditResult, claimID string) (state.Artifact, gateauthorization.ExecutionClaim, error) {
 	if !audit.OK {
 		return state.Artifact{}, gateauthorization.ExecutionClaim{},
 			fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
@@ -303,21 +340,6 @@ func VerifyDurableClaim(audit state.AuditResult, claimID string, live LivePullRe
 	}
 	if err := gateauthorization.ValidateClaim(claim, claim.Authorization); err != nil {
 		return state.Artifact{}, gateauthorization.ExecutionClaim{}, fmt.Errorf("authorization_claim_malformed: %w", err)
-	}
-	if !now.Before(claim.ExpiresAt) {
-		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrExpired
-	}
-	if err := validateLive(claim.Subject, live); err != nil {
-		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
-	}
-	index, err := buildIndex(audit.All)
-	if err != nil {
-		return state.Artifact{}, gateauthorization.ExecutionClaim{}, err
-	}
-	newest := index.newestTerminal(claim.Subject.Repo, claim.Subject.Number)
-	if newest.artifact.ID != claim.Gate.ActionID ||
-		newest.artifact.Hash != claim.Gate.ActionHash {
-		return state.Artifact{}, gateauthorization.ExecutionClaim{}, ErrSuperseded
 	}
 	return target, claim, nil
 }

@@ -37,6 +37,51 @@ type StateSnapshot struct {
 	Files StateFiles
 }
 
+// PullState is the minimum GitHub fact set needed to reconcile an expired
+// claim. It carries no command or execution input.
+type PullState struct {
+	Number      int
+	HeadSHA     string
+	BaseRef     string
+	Merged      bool
+	MergeCommit string
+}
+
+// ReadPullState observes the claimed pull request without executing it.
+func (session *Session) ReadPullState(ctx context.Context, number int) (PullState, error) {
+	if number < 1 {
+		return PullState{}, ErrState
+	}
+	var response struct {
+		Number int  `json:"number"`
+		Merged bool `json:"merged"`
+		Head   struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		MergeCommitSHA string `json:"merge_commit_sha"`
+	}
+	if err := session.api(
+		ctx, http.MethodGet, session.repoPath(fmt.Sprintf("/pulls/%d", number)),
+		nil, &response,
+	); err != nil {
+		return PullState{}, err
+	}
+	if response.Number != number || !validSHA(response.Head.SHA) ||
+		response.Base.Ref == "" {
+		return PullState{}, ErrState
+	}
+	if response.Merged && !validSHA(response.MergeCommitSHA) {
+		return PullState{}, ErrState
+	}
+	return PullState{
+		Number: number, HeadSHA: response.Head.SHA, BaseRef: response.Base.Ref,
+		Merged: response.Merged, MergeCommit: response.MergeCommitSHA,
+	}, nil
+}
+
 // PublishGateState creates one commit from expectedTip, advances gate-state
 // without force, and reads the committed bytes back before returning.
 func (session *Session) PublishGateState(ctx context.Context, expectedTip, message string, files StateFiles) (StateSnapshot, error) {

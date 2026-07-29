@@ -1,7 +1,7 @@
 # Trusted Gate judgment bridge
 
-Status: authorized one-App ordering implemented in dormant repository code;
-reconciliation permission decision, review, and operator bootstrap remain.
+Status: authorized one-App ordering and reconciliation implemented in dormant
+repository code; review and operator bootstrap remain.
 
 **Security hold:** the repository implementation is intentionally non-armable.
 Fresh review proved that the coarse `github_actions` Integration cannot be an
@@ -172,7 +172,7 @@ refetch, remote audit failure, changed live PR/base facts, merge-command
 failure, or result CAS conflict fails closed. Once the claim is durable, the
 merge is never retried.
 
-## Open security decision: expired-claim reconciliation
+## Expired-claim reconciliation
 
 GitHub's permission model does not distinguish these two operations:
 
@@ -186,20 +186,19 @@ credential-capable of updating `main`. A reconciler binary that contains no
 merge call is useful process separation, but it is not literally a
 no-merge-capability token.
 
-The remaining honest choices are:
+The operator selected one-App code-path separation. `gate executor reconcile`
+accepts one expired `gxc_` claim identity and no request path or merge argv.
+It re-audits the exact fetched `gate-state` snapshot, observes the claimed PR,
+records `merged` only for the exact claimed head/base with a valid merge
+commit, otherwise records a terminal failed result, and advances `gate-state`
+with a non-force compare-and-swap. A moved state tip, active/malformed/missing
+claim, or existing result refuses; the operation is never retried.
 
-1. accept one App and define "no-merge-token reconciliation" as a separate,
-   default-branch-only Gate code path that never accepts argv or invokes merge,
-   while acknowledging that its `contents: write` token is
-   credential-capable;
-2. use a second state-writer App whose ruleset bypass applies only to
-   `gate-state`, giving reconciliation a credential that cannot update `main`;
-   or
-3. choose an equivalent external monotonic writer/pin.
-
-Repository activation remains stopped until the operator selects that trust
-semantics. No option changes the one-shot rule: token exchange, command,
-confirmation, or terminal-state write failure never creates reusable success.
+The dormant reconciler action has no `gh` executable and never calls the
+executor's merge method. This is process/code-path separation, not credential
+separation: GitHub requires `contents: write` to update `gate-state`, so the
+installation token remains technically capable of merging under the one-App
+ruleset.
 
 ## Dormant bootstrap boundary
 

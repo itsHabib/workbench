@@ -36,6 +36,58 @@ func TestFetchBlobAcceptsMaximumStateFile(t *testing.T) {
 	}
 }
 
+func TestReadPullStateObservesWithoutMutation(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	merge := strings.Repeat("b", 40)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls++
+		if request.Method != http.MethodGet ||
+			request.URL.Path != "/repos/o/r/pulls/17" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		fmt.Fprintf(
+			writer,
+			`{"number":17,"merged":true,"head":{"sha":%q},"base":{"ref":"main"},"merge_commit_sha":%q}`,
+			head, merge,
+		)
+	}))
+	defer server.Close()
+	session := Session{
+		client: server.Client(),
+		config: AppConfig{APIURL: server.URL, Repository: "o/r"},
+		token:  installationToken{value: "secret"},
+	}
+	got, err := session.ReadPullState(context.Background(), 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || got.HeadSHA != head || got.BaseRef != "main" ||
+		!got.Merged || got.MergeCommit != merge {
+		t.Fatalf("pull state = %+v, calls = %d", got, calls)
+	}
+}
+
+func TestReadPullStateRefusesMalformedMergeConfirmation(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(
+			writer,
+			`{"number":17,"merged":true,"head":{"sha":%q},"base":{"ref":"main"},"merge_commit_sha":"short"}`,
+			head,
+		)
+	}))
+	defer server.Close()
+	session := Session{
+		client: server.Client(),
+		config: AppConfig{APIURL: server.URL, Repository: "o/r"},
+		token:  installationToken{value: "secret"},
+	}
+	if _, err := session.ReadPullState(context.Background(), 17); !errors.Is(err, ErrState) {
+		t.Fatalf("read pull = %v, want malformed-state refusal", err)
+	}
+}
+
 func TestPublishGateStateCASAndRefetch(t *testing.T) {
 	fixture := newStateAPIFixture(t)
 	defer fixture.server.Close()
