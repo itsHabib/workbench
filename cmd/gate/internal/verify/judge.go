@@ -255,6 +255,7 @@ func providerInvocation(provider string) (judgeProviderInvocation, error) {
 				"--ignore-rules",
 				"--disable", "shell_tool",
 				"--disable", "multi_agent",
+				"-c", `forced_login_method="chatgpt"`,
 				"-c", `service_tier="flex"`,
 				"-c", `web_search="disabled"`,
 				"-",

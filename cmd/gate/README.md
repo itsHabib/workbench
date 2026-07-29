@@ -79,7 +79,8 @@ Gate has two built-in local CLI projections:
 claude -> claude -p --safe-mode --tools ""
 codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
           --ignore-user-config --ignore-rules --disable shell_tool
-          --disable multi_agent -c service_tier="flex"
+          --disable multi_agent -c forced_login_method="chatgpt"
+          -c service_tier="flex"
           -c web_search="disabled" -
 ```
 
@@ -96,11 +97,14 @@ state: run and escalation ids, the exact PR subject/head, the presented grant
 id and tier ceiling, the recorded question, and the artifact context. The
 provider echoes every binding and adds:
 
-The fixed Codex projection overrides `service_tier` before startup because
-Codex validates the merged base configuration before applying
-`--ignore-user-config`; `flex` keeps an obsolete user-config value from
-preventing the isolated invocation from starting. It does not select a model,
-credential, or paid API route.
+Codex 0.122 validates the merged base configuration before applying
+`--ignore-user-config`. The fixed projection therefore overrides obsolete
+`service_tier` values before startup. `flex` is an intentional
+cost-conservative tier, not a neutral parser value: it may be slower or fail
+when Flex capacity is unavailable. Gate treats that as
+`judge_provider_failed` and does not append a judgment; it never falls back to
+the higher-credit `fast` tier. `forced_login_method="chatgpt"` plus the
+sanitized environment prevents this path from using API-key authentication.
 
 ```json
 {
