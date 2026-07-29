@@ -180,6 +180,7 @@ func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
 				"--ignore-rules",
 				"--disable", "shell_tool",
 				"--disable", "multi_agent",
+				"-c", `service_tier="flex"`,
 				"-c", `web_search="disabled"`,
 				"-",
 			},

@@ -79,7 +79,8 @@ Gate has two built-in local CLI projections:
 claude -> claude -p --safe-mode --tools ""
 codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
           --ignore-user-config --ignore-rules --disable shell_tool
-          --disable multi_agent -c web_search="disabled" -
+          --disable multi_agent -c service_tier="flex"
+          -c web_search="disabled" -
 ```
 
 The caller selects the provider name, never an executable or argument vector.
@@ -94,6 +95,12 @@ JSON on stdin and accepts one strict
 state: run and escalation ids, the exact PR subject/head, the presented grant
 id and tier ceiling, the recorded question, and the artifact context. The
 provider echoes every binding and adds:
+
+The fixed Codex projection overrides `service_tier` before startup because
+Codex validates the merged base configuration before applying
+`--ignore-user-config`; `flex` keeps an obsolete user-config value from
+preventing the isolated invocation from starting. It does not select a model,
+credential, or paid API route.
 
 ```json
 {
