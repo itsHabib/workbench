@@ -295,9 +295,14 @@ func (s *Server) process(cb callback) {
 	dctx, dcancel := context.WithTimeout(context.Background(), deliverTimeout)
 	defer dcancel()
 	slackUpdated := s.deliver(dctx, cb, code, err)
-	if err == nil {
-		s.log.Printf("escalate serve: resolved escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+	if err != nil {
+		return
 	}
+	if code >= codeMerge && code <= codeRefused {
+		s.log.Printf("escalate serve: resolved escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+		return
+	}
+	s.log.Printf("escalate serve: failed escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
 }
 
 // resolve reads the grant from the parked escalation and drives the ingest

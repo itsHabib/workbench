@@ -689,6 +689,27 @@ func TestServeHTTPLogsAcceptedAndResolvedWithoutUserIdentity(t *testing.T) {
 	}
 }
 
+func TestServeHTTPLogsGateHardErrorAsFailed(t *testing.T) {
+	var calls int
+	cr := &captured{out: []byte(`{"outcome":"error"}`), code: 4}
+	s, _ := newServer(cr, fixedGrant("grt_log", &calls))
+	var logs bytes.Buffer
+	s.log = log.New(&logs, "", 0)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_0123456789abcdef", "private-user"))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
+	s.Wait()
+
+	got := logs.String()
+	if !strings.Contains(got, "failed escalation=esc_0123456789abcdef gate_exit=4 slack_updated=true") {
+		t.Fatalf("gate hard-error log missing:\n%s", got)
+	}
+	if strings.Contains(got, "resolved escalation=") {
+		t.Fatalf("gate hard error must not be labeled resolved:\n%s", got)
+	}
+}
+
 // TestAllowUsers pins the allowlist predicate: listed ids pass, unlisted and the
 // empty id fail, and an EMPTY allowlist admits no one (fail-closed).
 func TestAllowUsers(t *testing.T) {
