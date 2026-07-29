@@ -180,7 +180,7 @@ jobs:
           grep -F '      EVENT_PR:' "$workflow" | grep -F 'needs.identity.outputs.pr'
           grep -F 'repos/${REPO}/commits/${HEAD_SHA}/pulls' "$workflow"
           grep -F 'head=${HEAD_OWNER}:${HEAD_BRANCH}' "$workflow"
-          grep -F '          ref: ${{ github.sha }}' "$workflow"
+          grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
           grep -F "github.ref_name == github.event.repository.default_branch" "$workflow"
           grep -F '          prs="$(mktemp)"' "$workflow"
           grep -F '          invalidate_failed=0' "$workflow"
@@ -223,7 +223,7 @@ jobs:
           grep -F "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" "$workflow"
           grep -F '  group: gate-executor-' "$workflow"
           grep -F '  contents: read' "$workflow"
-          grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
+          grep -F '          ref: ${{ github.sha }}' "$workflow"
           grep -F '          persist-credentials: false' "$workflow"
           grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
           grep -F 'Claim, refetch, merge, and record in one custodied process' "$workflow"
