@@ -26,8 +26,10 @@ stack.
   `workbench/contracts/reviewfindings/testdata/address-v1/` with a manifest and
   content digest.
 - Each scenario includes artifact bytes, live head/cycle/consumed-id setup,
-  ordered accept/resume calls, expected refusal code, common state projection,
-  and expected provider-dispatch count.
+  ordered accept/resume calls, expected refusal code, and a common
+  accept/consumption/at-most-once projection. Consumer-specific expectations
+  are separate: Workbench address-work/claim state and Ship provider-call
+  count.
 - Vendor the exact corpus under
   `ship/packages/driver/testdata/reviewfindings-address-v1/`, preserving the
   source manifest/digest.
@@ -40,10 +42,10 @@ stack.
 
 ## Acceptance
 
-Ship produces every expected accept/refuse code, common state projection, and
-provider-call count; vendored bytes match the recorded upstream digest; bounded
-duplicate sequences dispatch at most once; drift is visible as a source-digest
-change.
+Ship produces every expected accept/refuse code, common consumption projection,
+and Ship-specific provider-call count; vendored bytes match the recorded
+upstream digest; bounded duplicate sequences satisfy the common at-most-once
+law; drift is visible as a source-digest change.
 
 ## Test plan
 

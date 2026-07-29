@@ -9,9 +9,9 @@
 
 | Bucket | Files | Est. LOC | Weighted |
 |---|---|---:|---:|
-| Production | `cmd/codexguard/` | ~320 | 320 |
-| Tests | `cmd/codexguard/` | ~500 | 250 |
-| **Total** | | | **~570** |
+| Production | `cmd/codexguard/` | ~380 | 380 |
+| Tests | `cmd/codexguard/` | ~560 | 280 |
+| **Total** | | | **~660** |
 
 Band: **ideal**.
 
@@ -27,11 +27,20 @@ shapes. It emits `AutoDecisionV1`; it is not a pass-through wrapper.
   authority-capable wrappers as park/refuse rather than guessing.
 - Classify safe reads/tests, grant minting, Gate/custody mutation, force push,
   repository deletion, visibility changes, `--admin`, and PR merges.
-- Permit only a fully validated Gate-shaped merge carrying a full
+- Treat shape as necessary but never sufficient for a merge. Resolve Gate
+  provenance only through Gate's read-only CLI/artifact seam: the candidate
+  argv must byte-match the `merge_command` on the current
+  `ready_to_merge` row from `gate next -json`, including repo, PR, and full
   `--match-head-commit` SHA.
+- Independently fetch the live PR and require OPEN plus the same exact head.
+  Missing state configuration, no unique ready row, a newer terminal Gate
+  outcome, GitHub ambiguity, stale head, or any argv difference refuses with
+  the exact re-run-Gate remedy.
 - Emit pass, park, block, or refuse with the exact rule and remedy.
 - Fail closed on malformed, ambiguous, or unknown authority-bearing inputs.
-- Keep merge policy in Gate; this component enforces invocation shape only.
+- Keep merge policy in Gate: `codexguard` imports no Gate decision code and
+  never reconstructs a merge command; it verifies the proposed invocation
+  against Gate's persisted newest terminal action.
 
 ## Acceptance
 
@@ -40,7 +49,10 @@ Equivalent shell/tool representations produce the same decision. Fixtures cover
 `-Command`/`-EncodedCommand`, call operator, aliases, `Start-Process`, and
 `Invoke-Expression`; `cmd /c`; and nested code-mode MCP/local calls. A bare
 merge, mint, state mutation, force push, deletion, visibility change, or
-`--admin` cannot bypass the deterministic floor.
+`--admin` cannot bypass the deterministic floor. A forged full-SHA command, an
+older superseded `would_merge`, a moved head, and an ambiguous GitHub read all
+refuse; only the exact current Gate-recorded command for the exact live head
+passes.
 
 ## Test plan
 
@@ -49,4 +61,5 @@ and hygiene.
 
 ## Non-goals
 
-No hooks, installation, branch protection, grant minting, or model approval.
+No hooks, installation, branch protection, grant minting, Gate policy
+duplication, or model approval.

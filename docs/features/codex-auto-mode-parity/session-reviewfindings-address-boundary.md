@@ -28,16 +28,19 @@ address work item for a fresh isolated Codex child.
 - Validate supported major, exact live PR head, non-empty sourced address
   findings, source/panel consistency, remaining engine-owned cycle capacity,
   and unused artifact id/digest.
-- Add these event kinds under the existing driver-state v0.1 envelope:
+- Introduce driver-state v0.2 for these authority-bearing event kinds:
   `review_address_prepared` (atomic consumption/outbox),
   `review_address_claimed` (address child-run link),
   `review_address_started` (Codex task/thread id), and
   `review_address_completed` (new PR head).
-- Release the reader/reducer before any writer emits the new kinds. Existing
-  v0.1 ledgers remain readable and the hash-chain law is unchanged; an old
-  binary encountering a new kind refuses without mutation. Ship neither emits
-  nor reads these session-only event kinds, so no Ship driver-state migration
-  is implied.
+- The new reader accepts v0.1 and v0.2 events in one unchanged hash chain and
+  reduces both; it never rewrites historical lines. The first address event is
+  v0.2, so every already-installed v0.1 writer hits its existing
+  unknown-version gate while reading the ledger and refuses before append.
+  Tests pin this old-writer exclusion boundary.
+- Ship neither emits nor reads these session-only ledgers. Its v0.1 emitter is
+  unchanged; any future Ship writer for a session ledger must add v0.2 support
+  first rather than relying on unknown-kind tolerance.
 - `driverstate.PrepareReviewAddress` appends under the authoritative child
   lease after policy validation. Its body contains scalar refs/digests only;
   `contracts/driverstate` never imports `contracts/reviewfindings`.
@@ -66,8 +69,10 @@ address work item for a fresh isolated Codex child.
 - Define the canonical cross-consumer scenarios at
   `contracts/reviewfindings/testdata/address-v1/`. Each case carries artifact
   bytes, live head/cycle/consumed-id state, ordered accept/resume calls, expected
-  refusal code, common state projection, and provider-dispatch count. A
-  manifest pins every case digest and the corpus digest.
+  refusal code, and a common accept/consumption/at-most-once projection. It then
+  carries consumer-specific effects: Workbench address-work/claim state and
+  Ship provider-call count. A manifest pins every case digest and the corpus
+  digest.
 
 ## Acceptance
 
