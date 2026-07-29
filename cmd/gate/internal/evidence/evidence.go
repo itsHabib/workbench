@@ -54,10 +54,9 @@ type Comment struct {
 	Line   int    `json:"line,omitempty"`
 	Body   string `json:"body"`
 	// CommitID is the commit the comment currently targets (GitHub re-anchors
-	// live comments as the head moves). It is normally empty for issue-level
-	// comments; authenticated Claude clean completions are enriched from their
-	// successful same-repository Actions run. Verifiers use it to tell a
-	// finding about the judged head from one layered onto an earlier cycle.
+	// live comments as the head moves). Empty for issue-level comments, which
+	// have no commit anchor. Verifiers use it to tell a finding about the
+	// judged head from one layered onto an earlier cycle.
 	CommitID string `json:"commit_id,omitempty"`
 	// Resolved reports whether the comment's review thread has been resolved
 	// on GitHub. Always false for issue-level comments (no threads there).
@@ -170,8 +169,6 @@ type rawComment struct {
 	// it as the PR head moves while the comment still applies. original_commit_id
 	// is deliberately not used: it stays pinned to the head the comment was first
 	// posted against, so a live comment on the judged head could read as stale.
-	// Issue comments arrive empty; the narrow Claude clean-completion path may
-	// enrich the latest one after authenticating its linked Actions run.
 	CommitID string `json:"commit_id"`
 	// State is set only on review submissions (pulls/.../reviews): COMMENTED,
 	// APPROVED, CHANGES_REQUESTED, DISMISSED. Empty for comments. A DISMISSED
@@ -196,9 +193,6 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	}
 	issue, err := pagedComments(fmt.Sprintf("repos/%s/issues/%d/comments", pr.Repo, pr.Number))
 	if err != nil {
-		return nil, err
-	}
-	if err := bindClaudeIssueHeads(pr.Repo, issue, fetchWorkflowRun); err != nil {
 		return nil, err
 	}
 	var out []Comment

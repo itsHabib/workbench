@@ -64,8 +64,7 @@ jobs:
           ))
         || (github.event_name == 'issue_comment'
           && github.event.issue.pull_request
-          && (github.event.comment.user.login == 'chatgpt-codex-connector[bot]'
-            || github.event.comment.user.login == 'claude[bot]'))
+          && github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
         || (github.event_name == 'workflow_dispatch'
           && inputs.pr != '')
       )
@@ -464,17 +463,37 @@ jobs:
       - name: Invalidate and re-evaluate every open PR
         run: |
           set -euo pipefail
+          prs="$(mktemp)"
+          trap 'rm -f "$prs"' EXIT
           gh api --paginate "repos/${REPO}/pulls?state=open&per_page=100" \
-            --jq '.[] | [.number, .head.sha] | @tsv' |
+            --jq '.[] | [.number, .head.sha] | @tsv' >"$prs"
+
+          # Complete invalidation for the entire snapshot before dispatching
+          # anything. One API failure must not leave later heads stale-green.
+          invalidate_failed=0
           while IFS=$'\t' read -r pr head; do
             test -n "$pr"
             test -n "$head"
-            # Invalidate first. If dispatch fails, pending remains fail-closed
-            # instead of preserving a success under the old policy.
-            gh api -X POST "repos/${REPO}/statuses/${head}" \
+            if ! gh api -X POST "repos/${REPO}/statuses/${head}" \
               -f state=pending -f context=gate \
               -f description="gate: policy changed; re-evaluating" \
-              -f target_url="${RUN_URL}" >/dev/null
-            gh workflow run gate.yml -R "${REPO}" --ref "${DEFAULT_BRANCH}" \
-              -f "pr=${pr}"
-          done
+              -f target_url="${RUN_URL}" >/dev/null; then
+              invalidate_failed=1
+            fi
+          done <"$prs"
+          if [ "$invalidate_failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          # Every snapshotted head is now non-green. Continue attempting later
+          # dispatches after a failure; pending remains fail-closed either way.
+          dispatch_failed=0
+          while IFS=$'\t' read -r pr head; do
+            test -n "$pr"
+            test -n "$head"
+            if ! gh workflow run gate.yml -R "${REPO}" --ref "${DEFAULT_BRANCH}" \
+              -f "pr=${pr}"; then
+              dispatch_failed=1
+            fi
+          done <"$prs"
+          exit "$dispatch_failed"

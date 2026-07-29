@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
@@ -120,10 +119,10 @@ func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested [
 			})
 			continue
 		}
-		if comment, ok := cleanIssueCompletion(expected, panel.Subject.HeadSHA, comments); ok {
+		if comment, ok := codexCleanCompletion(expected, panel.Subject.HeadSHA, comments); ok {
 			panel.Completed = append(panel.Completed, reviewpanel.Reviewer{
 				Name: expected, Actor: comment.Author, State: "CLEAN",
-				HeadSHA: commentHead(comment, panel.Subject.HeadSHA), ReviewID: comment.ID,
+				HeadSHA: panel.Subject.HeadSHA, ReviewID: comment.ID,
 			})
 			continue
 		}
@@ -137,21 +136,11 @@ func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested [
 }
 
 var codexReviewedCommit = regexp.MustCompile("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`\\r?$")
-var claudeReviewHeading = regexp.MustCompile(`(?m)^### (?:Code|PR) Review(?:[ (].*)?\r?$`)
-var claudeCleanVerdict = regexp.MustCompile(`(?m)^(?:LGTM\. Ready to merge\.|No (?:new )?(?:issues|findings)(?: found)?\. Ready to merge\.)\r?$`)
-var claudeActionable = regexp.MustCompile(`(?mi)(?:^\s*#{1,6}\s+(?:finding|issue|bug)\b|\[Fix this(?: →)?\])`)
 
-func cleanIssueCompletion(expected, headSHA string, comments []Comment) (Comment, bool) {
-	switch expected {
-	case "codex":
-		return codexCleanCompletion(headSHA, comments)
-	case "claude":
-		return claudeCleanCompletion(headSHA, comments)
+func codexCleanCompletion(expected, headSHA string, comments []Comment) (Comment, bool) {
+	if expected != "codex" {
+		return Comment{}, false
 	}
-	return Comment{}, false
-}
-
-func codexCleanCompletion(headSHA string, comments []Comment) (Comment, bool) {
 	for i := len(comments) - 1; i >= 0; i-- {
 		comment := comments[i]
 		if comment.Author != "chatgpt-codex-connector[bot]" || !comment.IsBot ||
@@ -165,106 +154,6 @@ func codexCleanCompletion(headSHA string, comments []Comment) (Comment, bool) {
 		}
 	}
 	return Comment{}, false
-}
-
-func claudeCleanCompletion(headSHA string, comments []Comment) (Comment, bool) {
-	for i := len(comments) - 1; i >= 0; i-- {
-		comment := comments[i]
-		if comment.Author != "claude[bot]" || !comment.IsBot ||
-			comment.Path != "" || comment.CommitID != headSHA ||
-			!strings.HasPrefix(comment.Body, "**Claude finished ") ||
-			!claudeReviewHeading.MatchString(comment.Body) ||
-			claudeActionable.MatchString(comment.Body) ||
-			!claudeCleanVerdict.MatchString(comment.Body) {
-			continue
-		}
-		return comment, true
-	}
-	return Comment{}, false
-}
-
-func commentHead(comment Comment, fallback string) string {
-	if comment.CommitID != "" {
-		return comment.CommitID
-	}
-	return fallback
-}
-
-type workflowRunResponse struct {
-	ID             int64  `json:"id"`
-	HeadSHA        string `json:"head_sha"`
-	Event          string `json:"event"`
-	Conclusion     string `json:"conclusion"`
-	HeadRepository struct {
-		FullName string `json:"full_name"`
-	} `json:"head_repository"`
-}
-
-type workflowRunFetcher func(string, int64) (workflowRunResponse, error)
-
-func bindClaudeIssueHeads(repo string, comments []rawComment, fetch workflowRunFetcher) error {
-	for i := len(comments) - 1; i >= 0; i-- {
-		comment := &comments[i]
-		if comment.User.Login != "claude[bot]" || comment.User.Type != "Bot" ||
-			comment.Path != "" || comment.CommitID != "" ||
-			!strings.HasPrefix(comment.Body, "**Claude finished ") {
-			continue
-		}
-		// The latest Claude response is its current stance. Never fall back to
-		// an older clean result when the latest is actionable or malformed.
-		if !claudeReviewHeading.MatchString(comment.Body) ||
-			claudeActionable.MatchString(comment.Body) ||
-			!claudeCleanVerdict.MatchString(comment.Body) {
-			return nil
-		}
-		runID, ok := claudeRunID(repo, comment.Body)
-		if !ok {
-			return nil
-		}
-		run, err := fetch(repo, runID)
-		if err != nil {
-			return err
-		}
-		if run.ID != runID || run.Event != "issue_comment" ||
-			run.Conclusion != "success" ||
-			run.HeadRepository.FullName != repo ||
-			run.HeadSHA == "" {
-			return nil
-		}
-		comment.CommitID = run.HeadSHA
-		return nil
-	}
-	return nil
-}
-
-func claudeRunID(repo, body string) (int64, bool) {
-	pattern := regexp.MustCompile(`https://github\.com/` + regexp.QuoteMeta(repo) + `/actions/runs/([0-9]+)`)
-	matches := pattern.FindAllStringSubmatch(body, -1)
-	if len(matches) == 0 {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(matches[0][1], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	for _, match := range matches[1:] {
-		if match[1] != matches[0][1] {
-			return 0, false
-		}
-	}
-	return id, true
-}
-
-func fetchWorkflowRun(repo string, runID int64) (workflowRunResponse, error) {
-	raw, err := gh("api", fmt.Sprintf("repos/%s/actions/runs/%d", repo, runID))
-	if err != nil {
-		return workflowRunResponse{}, err
-	}
-	var run workflowRunResponse
-	if err := json.Unmarshal(raw, &run); err != nil {
-		return workflowRunResponse{}, fmt.Errorf("evidence: parse Claude workflow run: %w", err)
-	}
-	return run, nil
 }
 
 func latestExactHeadReview(expected, headSHA string, reviews []rawComment) (rawComment, bool) {
