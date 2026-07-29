@@ -39,7 +39,7 @@ I am needed."**
 | 0:00–1:30 | Problem: one agent process is usually worker, judge, root, database, and narrator |
 | 1:30–3:00 | Five-plane model and the artifact boundary |
 | 3:00–3:45 | Work Driver proof: PR #162, normal engine, 94-step healthy trace, merged commit `3bde397` |
-| 3:45–4:30 | Risk-sized review: exact-head panel, finding artifact, and Work Driver address loop |
+| 3:45–4:30 | Exact-head review: configured panel, finding artifact, and Work Driver address loop |
 | 4:30–8:45 | Live park-to-resolution path |
 | 8:45–10:15 | Custody/Jira: the same capability idea applied to credentials |
 | 10:15–11:30 | What is proven versus still a POC |
@@ -125,9 +125,17 @@ the stream, PR head, cycle capacity, and duplicate consumption. If provenance
 or linkage is uncertain, show the refusal and stop; never hand-write the JSON.
 If the completed panel is clean, no artifact is produced by design.
 
-Narration: **“Review depth follows risk, but review evidence is always pinned
-to the code it judged. Findings re-enter Execution as a typed artifact; the
-review bot does not edit, approve, or merge.”**
+Narration: **“Review evidence is pinned to the code it judged. Findings
+re-enter Execution as a typed artifact; the review bot does not edit, approve,
+or merge.”**
+
+Do not claim that reviewer spend is currently routed by risk. The configured
+panel is the official path exercised here. Risk-tiered reviewer sets are a
+proposal in `docs/review-credit-strategy.md`; its Phase 1 is explicitly parked
+until the spend log, cost threshold, path guardrails, and holdout decision
+satisfy the documented unpark conditions. It is safe to mention this as the
+next optimization: **measure review cost and escaped defects first, then let
+risk choose the panel only if the evidence supports the cut.**
 
 Fallback: show the exact-head GitHub review and state which reviewer coverage
 was missing. Do not describe a degraded panel as unanimous.
@@ -349,6 +357,8 @@ Run this once the day before and again 30 minutes before the talk:
 
 ### Not yet safe to say
 
+- Reviewer spend is currently routed by risk tier. The tier-aware strategy is
+  proposed and data-gated, not official policy.
 - The complete Slack → ngrok → real Gate path has been exercised in this
   rehearsal, until the operator supplies the live values and performs a tap.
 - Every Ship `parked` receipt is a human decision. Some are mechanism failures.
