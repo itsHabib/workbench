@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "keys": {
+    "jira-microscope": {
+      "secret": "wincred:custody-talk-fake",
+      "upstream": "https://echo.free.beeceptor.com",
+      "inject": [
+        {
+          "kind": "header",
+          "name": "Authorization",
+          "template": "Bearer {secret}"
+        }
+      ],
+      "actions": {
+        "read": {
+          "rules": [
+            {
+              "methods": ["GET"],
+              "path": "/rest/api/2/**",
+              "allowExtraParams": true
+            }
+          ]
+        }
+      },
+      "note": "Talk microscope: fake credential only. Read-only Jira-shaped traffic; writes and other API versions fail closed."
+    }
+  }
+}
