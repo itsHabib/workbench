@@ -278,6 +278,61 @@ func Authorize(request gateauthorization.Request, facts ApprovalFacts) (gateauth
 	return artifact, nil
 }
 
+// AuthorizePreparation binds one protected environment approval to the exact
+// pre-merge preparation request. It shares executor's actor and single-review
+// rules but cannot produce a merge authorization.
+func AuthorizePreparation(
+	request gateauthorization.PreparationRequest,
+	facts ApprovalFacts,
+) (gateauthorization.PreparationApproval, error) {
+	if err := gateauthorization.ValidatePreparationRequest(request); err != nil {
+		return gateauthorization.PreparationApproval{},
+			fmt.Errorf("preparation_request_invalid: %w", err)
+	}
+	if facts.WorkflowRunID < 1 || facts.WorkflowActorID < 1 ||
+		facts.TriggeringActorID < 1 {
+		return gateauthorization.PreparationApproval{}, ErrApprovalMissing
+	}
+	id, err := gateauthorization.PreparationID(request)
+	if err != nil {
+		return gateauthorization.PreparationApproval{}, err
+	}
+	reviews := matchingReviews(facts)
+	if len(reviews) == 0 {
+		return gateauthorization.PreparationApproval{}, ErrApprovalMissing
+	}
+	if len(reviews) != 1 {
+		return gateauthorization.PreparationApproval{}, ErrApprovalMismatch
+	}
+	review := reviews[0]
+	if review.ActorID == facts.WorkflowActorID ||
+		review.ActorID == facts.TriggeringActorID {
+		return gateauthorization.PreparationApproval{}, ErrApprovalDependent
+	}
+	if review.State != gateauthorization.ApprovalStateApproved ||
+		review.Comment != gateauthorization.ExpectedPreparationApprovalComment(id, request) {
+		return gateauthorization.PreparationApproval{}, ErrApprovalMismatch
+	}
+	receipt := gateauthorization.ApprovalReceipt{
+		WorkflowRunID: facts.WorkflowRunID, ActorLogin: review.ActorLogin,
+		ActorID: review.ActorID, State: review.State,
+		ObservedAt: facts.ObservedAt.UTC(), Comment: review.Comment,
+	}
+	receipt.ReceiptDigest, err = gateauthorization.ReceiptDigest(id, receipt)
+	if err != nil {
+		return gateauthorization.PreparationApproval{}, err
+	}
+	approval := gateauthorization.PreparationApproval{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		PreparationID: id, Request: request, Receipt: receipt,
+	}
+	if err := gateauthorization.ValidatePreparationApproval(approval); err != nil {
+		return gateauthorization.PreparationApproval{},
+			fmt.Errorf("preparation_approval_invalid: %w", err)
+	}
+	return approval, nil
+}
+
 // PreflightClaim proves every refusal available before App credential
 // creation. Claim repeats these checks while holding the state lock.
 func PreflightClaim(audit state.AuditResult, authorization gateauthorization.Artifact, live LivePullRequest, now time.Time) error {

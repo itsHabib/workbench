@@ -55,6 +55,9 @@ const (
 	KindExecutionClaim = "execution_claim"
 	// KindExecutionResult records the terminal outcome of one claimed execution.
 	KindExecutionResult = "execution_result"
+	// KindGatePreparation permanently consumes one protected preparation
+	// request before its decision artifacts are published to hosted state.
+	KindGatePreparation = "gate_preparation"
 )
 
 var kindPrefix = map[string]string{
@@ -68,6 +71,7 @@ var kindPrefix = map[string]string{
 	KindGrantNeeded:     "gnd",
 	KindExecutionClaim:  "gxc",
 	KindExecutionResult: "gxr",
+	KindGatePreparation: "gpp",
 }
 
 // ErrAlreadyExists is returned by AppendIfAbsentParent when the run already

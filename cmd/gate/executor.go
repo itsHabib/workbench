@@ -45,9 +45,13 @@ func refuseExecutor(err error) error {
 
 func cmdExecutor(args []string) error {
 	if len(args) == 0 {
-		return errors.New("executor: request, bootstrap, run, or reconcile required")
+		return errors.New("executor: prepare-request, prepare, request, bootstrap, run, or reconcile required")
 	}
 	switch args[0] {
+	case "prepare-request":
+		return cmdExecutorPrepareRequest(args[1:])
+	case "prepare":
+		return cmdExecutorPrepare(args[1:])
 	case "request":
 		return cmdExecutorRequest(args[1:])
 	case "bootstrap":
@@ -59,6 +63,379 @@ func cmdExecutor(args []string) error {
 	default:
 		return fmt.Errorf("executor: unknown verb %q", args[0])
 	}
+}
+
+func cmdExecutorPrepareRequest(args []string) error {
+	fs := flag.NewFlagSet("executor prepare-request", flag.ContinueOnError)
+	repo := fs.String("repo", "", "owner/repo")
+	pr := fs.Int("pr", 0, "pull request number")
+	head := fs.String("head", "", "expected exact head SHA")
+	grantID := fs.String("grant", "", "operator-minted hosted grant")
+	decision := fs.String("decision", "", "pass or block")
+	why := fs.String("why", "", "operator judgment reasoning")
+	replayID := fs.String("replay", "", "evt_<32 lowercase hex> delivery identity")
+	out := fs.String("out", "", "GatePreparationRequestV1 path")
+	help, err := parseFlags(fs, args)
+	if err != nil || help {
+		return err
+	}
+	if *repo == "" || *pr < 1 || *head == "" || *grantID == "" ||
+		*decision == "" || *why == "" || *replayID == "" || *out == "" {
+		return errors.New("executor prepare-request: -repo -pr -head -grant -decision -why -replay -out required")
+	}
+	live, err := readExecutorPull(*repo, *pr, *head)
+	if err != nil {
+		return classifyExecutorLiveRead(err)
+	}
+	subject := gateauthorization.Subject{
+		Repo: live.Repository, Number: live.Number, HeadSHA: live.HeadSHA,
+		BaseRef: live.BaseRef, BaseSHA: live.BaseSHA,
+		MergeBaseSHA: live.MergeBaseSHA,
+	}
+	if err := authorization.ValidateLive(subject, live); err != nil {
+		return refuseExecutor(err)
+	}
+	now := time.Now().UTC()
+	request := gateauthorization.PreparationRequest{
+		Subject: subject, GrantID: *grantID, Decision: *decision, Why: *why,
+		IssuedAt: now, ExpiresAt: now.Add(20 * time.Minute), ReplayID: *replayID,
+		TrustRoot: gateauthorization.TrustRoot{
+			Kind:        gateauthorization.TrustGitHubEnvironment,
+			Environment: gateauthorization.DefaultEnvironment,
+		},
+	}
+	id, err := gateauthorization.PreparationID(request)
+	if err != nil {
+		return refuseExecutor(err)
+	}
+	artifact := gateauthorization.PreparationRequestArtifact{
+		SchemaVersion: gateauthorization.SchemaVersion,
+		PreparationID: id, Request: request,
+	}
+	if err := writeExecutorArtifact(*out, artifact); err != nil {
+		return err
+	}
+	printJSON(map[string]any{
+		"preparation_id":   id,
+		"approval_comment": gateauthorization.ExpectedPreparationApprovalComment(id, request),
+		"path":             *out,
+	})
+	return nil
+}
+
+type executorPrepareFlags struct {
+	stateDir        string
+	floorBin        string
+	keyDir          string
+	requestPath     string
+	stateTip        string
+	workflowRunID   int64
+	workflowActorID int64
+	triggeringActor string
+	appID           int64
+	installationID  int64
+	apiURL          string
+}
+
+type preparedGateState struct {
+	result   gateResult
+	actionID string
+	files    gateexecutor.StateFiles
+}
+
+func cmdExecutorPrepare(args []string) error {
+	flags, help, err := parseExecutorPrepareFlags(args)
+	if err != nil || help {
+		return err
+	}
+	document, approval, e, err := preflightExecutorPreparation(flags)
+	if err != nil {
+		return err
+	}
+	prepared, err := evaluateHostedPreparation(e, document, approval)
+	if err != nil {
+		return err
+	}
+	snapshot, err := publishHostedPreparation(flags, document, prepared.files)
+	if err != nil {
+		return err
+	}
+	printJSON(map[string]any{
+		"preparation_id": document.PreparationID,
+		"run":            prepared.result.Run,
+		"outcome":        prepared.result.Outcome,
+		"action_id":      prepared.actionID,
+		"head":           prepared.result.HeadSHA,
+		"tip":            snapshot.Tip,
+	})
+	return nil
+}
+
+func parseExecutorPrepareFlags(args []string) (executorPrepareFlags, bool, error) {
+	fs := flag.NewFlagSet("executor prepare", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	requestPath := fs.String("request", "", "GatePreparationRequestV1 path")
+	stateTip := fs.String("state-tip", "", "exact gate-state checkout commit")
+	workflowRunID := fs.Int64("workflow-run-id", 0, "current protected workflow run ID")
+	workflowActorID := fs.Int64("workflow-actor-id", 0, "dispatching actor ID")
+	triggeringActor := fs.String("workflow-triggering-actor", "", "GitHub login that triggered this attempt")
+	appID := fs.Int64("app-id", 0, "dedicated Gate App ID")
+	installationID := fs.Int64("installation-id", 0, "repository installation ID")
+	apiURL := fs.String("api-url", "", "GitHub API URL")
+	help, err := parseFlags(fs, args)
+	if err != nil || help {
+		return executorPrepareFlags{}, help, err
+	}
+	if *requestPath == "" || !validExecutorSHA(*stateTip) ||
+		*workflowRunID < 1 || *workflowActorID < 1 ||
+		*triggeringActor == "" || *appID < 1 || *installationID < 1 ||
+		*keyDir == "" {
+		return executorPrepareFlags{}, false, errors.New("executor prepare: valid -request -state-tip -workflow-run-id -workflow-actor-id -workflow-triggering-actor -app-id -installation-id -key required")
+	}
+	return executorPrepareFlags{
+		stateDir: *stateDir, floorBin: *floorBin, keyDir: *keyDir,
+		requestPath: *requestPath, stateTip: *stateTip,
+		workflowRunID: *workflowRunID, workflowActorID: *workflowActorID,
+		triggeringActor: *triggeringActor, appID: *appID,
+		installationID: *installationID, apiURL: *apiURL,
+	}, false, nil
+}
+
+func preflightExecutorPreparation(
+	flags executorPrepareFlags,
+) (
+	gateauthorization.PreparationRequestArtifact,
+	gateauthorization.PreparationApproval,
+	env,
+	error,
+) {
+	data, err := os.ReadFile(flags.requestPath)
+	if err != nil {
+		return gateauthorization.PreparationRequestArtifact{},
+			gateauthorization.PreparationApproval{}, env{},
+			fmt.Errorf("executor prepare: read request: %w", err)
+	}
+	document, err := gateauthorization.DecodePreparationRequest(data)
+	if err != nil {
+		return document, gateauthorization.PreparationApproval{}, env{},
+			refuseExecutor(err)
+	}
+	reviews, err := readRunApprovals(
+		document.Request.Subject.Repo, flags.workflowRunID,
+	)
+	if err != nil {
+		return document, gateauthorization.PreparationApproval{}, env{}, err
+	}
+	actorID, triggeringActorID, err := readWorkflowActors(
+		document.Request.Subject.Repo, flags.workflowRunID,
+		flags.workflowActorID, flags.triggeringActor,
+	)
+	if err != nil {
+		return document, gateauthorization.PreparationApproval{}, env{}, err
+	}
+	approval, err := authorization.AuthorizePreparation(
+		document.Request,
+		authorization.ApprovalFacts{
+			WorkflowRunID: flags.workflowRunID, WorkflowActorID: actorID,
+			TriggeringActorID: triggeringActorID, ObservedAt: time.Now().UTC(),
+			Reviews: reviews,
+		},
+	)
+	if err != nil {
+		return document, approval, env{}, refuseExecutor(err)
+	}
+	live, err := readExecutorPull(
+		document.Request.Subject.Repo, document.Request.Subject.Number,
+		document.Request.Subject.HeadSHA,
+	)
+	if err != nil {
+		return document, approval, env{}, classifyExecutorLiveRead(err)
+	}
+	if err := authorization.ValidateLive(document.Request.Subject, live); err != nil {
+		return document, approval, env{}, refuseExecutor(err)
+	}
+	e, err := newEnv(flags.stateDir, flags.floorBin, flags.keyDir)
+	if err != nil {
+		return document, approval, env{}, err
+	}
+	audit, err := e.st.Audit()
+	if err != nil {
+		return document, approval, env{}, err
+	}
+	if err := authorization.ValidateRepositoryScope(
+		audit, document.Request.Subject.Repo,
+	); err != nil {
+		return document, approval, env{}, refuseExecutor(err)
+	}
+	if preparationConsumed(audit, document.PreparationID) {
+		return document, approval, env{},
+			refuseExecutor(errors.New("executor prepare: preparation already consumed"))
+	}
+	remoteTip, err := readExecutorStateTip(document.Request.Subject.Repo)
+	if err != nil {
+		return document, approval, env{}, err
+	}
+	if remoteTip != flags.stateTip {
+		return document, approval, env{}, refuseExecutor(gateexecutor.ErrStateCAS)
+	}
+	return document, approval, e, nil
+}
+
+func evaluateHostedPreparation(
+	e env,
+	document gateauthorization.PreparationRequestArtifact,
+	approval gateauthorization.PreparationApproval,
+) (preparedGateState, error) {
+	preparationRun := state.NewRunID()
+	if _, err := e.st.Append(
+		state.KindGatePreparation, preparationRun,
+		[]string{document.Request.GrantID}, approval,
+	); err != nil {
+		return preparedGateState{}, err
+	}
+	result, code, err := runGateWithSynthesis(
+		e, document.Request.Subject.Repo, document.Request.Subject.Number,
+		document.Request.GrantID, false, "local", true, false,
+	)
+	if err != nil {
+		return preparedGateState{}, err
+	}
+	if code == codeParked {
+		result, code, err = applyPreparationJudgment(e, document, result)
+	}
+	if err != nil {
+		return preparedGateState{}, err
+	}
+	if code != codeMerge && code != codeBlocked {
+		return preparedGateState{},
+			refuseExecutor(fmt.Errorf("executor prepare: gate outcome %s", result.Outcome))
+	}
+	if result.HeadSHA != document.Request.Subject.HeadSHA {
+		return preparedGateState{}, refuseExecutor(authorization.ErrLiveMismatch)
+	}
+	candidateAudit, err := e.st.Audit()
+	if err != nil {
+		return preparedGateState{}, err
+	}
+	actionID := ""
+	if code == codeMerge {
+		actionID, err = preparedActionID(
+			candidateAudit, result.Run, result.Hash, document.Request,
+		)
+		if err != nil {
+			return preparedGateState{}, refuseExecutor(err)
+		}
+	}
+	files, err := readExecutorStateFiles(e)
+	if err != nil {
+		return preparedGateState{}, err
+	}
+	return preparedGateState{
+		result: result, actionID: actionID, files: files,
+	}, nil
+}
+
+func applyPreparationJudgment(
+	e env,
+	document gateauthorization.PreparationRequestArtifact,
+	result gateResult,
+) (gateResult, int, error) {
+	arts, err := e.st.Run(result.Run)
+	if err != nil {
+		return gateResult{}, 0, err
+	}
+	_, escalationID, _, err := runVerdicts(arts)
+	if err != nil {
+		return gateResult{}, 0, err
+	}
+	judged, code, _, err := applyJudgment(
+		e, result.Run, escalationID, document.Request.GrantID,
+		judgmentOptions{
+			Decision: document.Request.Decision,
+			Why:      document.Request.Why,
+		},
+	)
+	return judged, code, err
+}
+
+func publishHostedPreparation(
+	flags executorPrepareFlags,
+	document gateauthorization.PreparationRequestArtifact,
+	files gateexecutor.StateFiles,
+) (gateexecutor.StateSnapshot, error) {
+	config, err := readExecutorAppConfig(
+		flags.appID, flags.installationID, flags.apiURL,
+		document.Request.Subject.Repo,
+	)
+	if err != nil {
+		return gateexecutor.StateSnapshot{}, err
+	}
+	defer wipeBytes(config.PrivateKeyPEM)
+	var snapshot gateexecutor.StateSnapshot
+	err = gateexecutor.WithSession(
+		context.Background(), config,
+		func(session *gateexecutor.Session) error {
+			remote, fetchErr := session.FetchGateState(
+				context.Background(), flags.stateTip,
+			)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			if !bytes.HasPrefix(files.Log, remote.Files.Log) ||
+				len(files.Log) == len(remote.Files.Log) {
+				return refuseExecutor(errors.New("executor prepare: candidate state is not an append-only promotion"))
+			}
+			snapshot, fetchErr = session.PublishGateState(
+				context.Background(), remote.Tip,
+				"gate: prepare "+document.PreparationID, files,
+			)
+			return fetchErr
+		},
+	)
+	if err != nil {
+		return gateexecutor.StateSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func preparationConsumed(audit state.AuditResult, preparationID string) bool {
+	for _, artifact := range audit.All {
+		if artifact.Kind != state.KindGatePreparation {
+			continue
+		}
+		var approval gateauthorization.PreparationApproval
+		if json.Unmarshal(artifact.Body, &approval) == nil &&
+			approval.PreparationID == preparationID {
+			return true
+		}
+	}
+	return false
+}
+
+func preparedActionID(
+	audit state.AuditResult,
+	run, hash string,
+	request gateauthorization.PreparationRequest,
+) (string, error) {
+	for _, artifact := range audit.All {
+		if artifact.Kind != state.KindAction || artifact.Run != run ||
+			artifact.Hash != hash {
+			continue
+		}
+		_, err := authorization.BuildRequest(
+			audit,
+			authorization.RequestInput{
+				ActionID: artifact.ID, Subject: request.Subject,
+				JudgmentQuestion: request.Why, ReplayID: request.ReplayID,
+				IssuedAt: request.IssuedAt, ExpiresAt: request.ExpiresAt,
+			},
+		)
+		if err != nil {
+			return "", err
+		}
+		return artifact.ID, nil
+	}
+	return "", errors.New("executor prepare: passing action not found")
 }
 
 type executorBootstrapFlags struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	gateexecutor "github.com/itsHabib/workbench/cmd/gate/internal/executor"
+	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
@@ -32,6 +34,28 @@ func TestWriteExecutorArtifactIsIdempotentButRefusesReplacement(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("artifact permissions too broad: %o", info.Mode().Perm())
+	}
+}
+
+func TestPreparationConsumed(t *testing.T) {
+	approval := gateauthorization.PreparationApproval{
+		PreparationID: "gpr_" + strings.Repeat("a", 64),
+	}
+	body, err := json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := state.AuditResult{
+		OK: true,
+		All: []state.Artifact{{
+			Kind: state.KindGatePreparation, Body: body,
+		}},
+	}
+	if !preparationConsumed(audit, approval.PreparationID) {
+		t.Fatal("existing preparation was not consumed")
+	}
+	if preparationConsumed(audit, "gpr_"+strings.Repeat("b", 64)) {
+		t.Fatal("different preparation reported consumed")
 	}
 }
 

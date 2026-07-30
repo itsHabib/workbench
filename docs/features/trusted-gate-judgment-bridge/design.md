@@ -1,7 +1,8 @@
 # Trusted Gate judgment bridge
 
-Status: one-App ordering, reconciliation, and a one-time exact-action bootstrap
-are implemented; exact-head review, bootstrap, and live canaries remain.
+Status: one-App ordering, reconciliation, one-time exact-action bootstrap, and
+the protected post-bootstrap preparation seam are implemented; live
+preparation/execution canaries remain.
 
 Fresh review proved that the coarse `github_actions` Integration cannot be an
 exclusive `gate-state` writer. The operator therefore authorized one
@@ -120,6 +121,30 @@ never fabricates an empty findings artifact.
 The workflow builds the exact dispatched `main` commit, never checks out
 PR/fork code, has no status-write permission, and gives generic Actions
 read-only repository permissions.
+
+## Post-bootstrap preparation
+
+Bootstrap is not a continuing state-ingestion mechanism. Each later Gate
+action must first exist in the protected hosted ledger that the executor
+audits. `GatePreparationRequestV1` closes that seam without merge authority:
+
+1. The request binds one repository, PR, head, base, merge-base,
+   operator-minted hosted grant, judgment, replay identity, and 20-minute
+   validity window.
+2. The independent `gate-authorization` reviewer approves its canonical
+   `gpr_...` comment. Self-approval, reruns, ambiguous history, stale heads,
+   malformed requests, and consumed preparation identities refuse.
+3. Trusted `main` evaluates Gate against the checked-out hosted ledger. No
+   provider-cloud model is invoked; deterministic panel incompleteness parks
+   and the approved judgment remains bounded by the operator-minted grant.
+4. Only then does the publish-only process create the App token. It requires
+   the candidate log to be a strict byte-prefix extension of the freshly
+   fetched remote log and advances `gate-state` by non-force CAS.
+5. Preparation contains no merge call. Existing exact-action execution remains
+   a second, separately approved operation.
+
+V1 requires the named grant to already exist in hosted state. It never mints
+or imports grants; grant minting remains operator-only.
 
 ## State and branch identities
 
