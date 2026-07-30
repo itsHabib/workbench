@@ -210,8 +210,10 @@ func deterministicEventID(e driverstate.Event) (string, error) {
 // naturalKey is the per-kind identity a retry reproduces. run_imported keys on
 // its (repo, source, generated_at) import key — independent of the run id, which
 // may not exist yet — matching Append's own import dedupe. stream_attempt and
-// review_cycle add their seq/cycle so repeated rounds are distinct; every other
-// stream kind is one-per-stream; run_finished is one-per-run.
+// review_cycle add their seq/cycle so repeated rounds are distinct.
+// closure_facts and intervention key on canonical JSON content because both are
+// repeatable and have no sequence field. Every other stream kind is
+// one-per-stream; run_finished is one-per-run.
 func naturalKey(e driverstate.Event) (string, error) {
 	switch e.Kind {
 	case dsc.KindRunImported:
@@ -238,6 +240,8 @@ func naturalKey(e driverstate.Event) (string, error) {
 			return "", fmt.Errorf("driver_transition: review_cycle facts: %w", err)
 		}
 		return e.Run + "|" + e.Stream + "|cycle|" + strconv.Itoa(b.Cycle), nil
+	case dsc.KindClosureFacts, dsc.KindIntervention:
+		return repeatableBodyKey(e)
 	case dsc.KindStreamDispatched:
 		// stream_dispatched is REPEATABLE — the state machine allows
 		// failed → dispatched, so a re-dispatch to a NEW child must not collide
@@ -255,6 +259,18 @@ func naturalKey(e driverstate.Event) (string, error) {
 	default:
 		return e.Run + "|" + e.Stream + "|" + string(e.Kind), nil
 	}
+}
+
+func repeatableBodyKey(e driverstate.Event) (string, error) {
+	var body any
+	if err := json.Unmarshal(e.Body, &body); err != nil {
+		return "", fmt.Errorf("driver_transition: %s facts: %w", e.Kind, err)
+	}
+	canonical, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("driver_transition: %s facts: canonicalize: %w", e.Kind, err)
+	}
+	return e.Run + "|" + e.Stream + "|" + string(e.Kind) + "|" + string(canonical), nil
 }
 
 // evictLease drops a run's cached lease so the next record re-Claims. It does

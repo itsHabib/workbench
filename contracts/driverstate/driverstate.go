@@ -69,6 +69,8 @@ const (
 	KindStreamDispatched Kind = "stream_dispatched"
 	KindStreamAttempt    Kind = "stream_attempt"
 	KindReviewCycle      Kind = "review_cycle"
+	KindClosureFacts     Kind = "closure_facts"
+	KindIntervention     Kind = "intervention"
 	KindStreamPROpened   Kind = "stream_pr_opened"
 	KindStreamLanded     Kind = "stream_landed"
 	KindStreamFailed     Kind = "stream_failed"
@@ -85,6 +87,8 @@ func AllKinds() []Kind {
 		KindStreamDispatched,
 		KindStreamAttempt,
 		KindReviewCycle,
+		KindClosureFacts,
+		KindIntervention,
 		KindStreamPROpened,
 		KindStreamLanded,
 		KindStreamFailed,
@@ -214,6 +218,9 @@ type StreamMergedBody struct {
 	PR          int    `json:"pr"`
 	MergeCommit string `json:"merge_commit"`
 	MergedAt    string `json:"merged_at"`
+	// HeadSHA is the exact PR head GitHub merged. Legacy events may omit it,
+	// but a closure receipt cannot complete without the final-head join.
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 // ReviewCycleBody records one review cycle on an open PR — first-class from
@@ -222,6 +229,79 @@ type ReviewCycleBody struct {
 	Cycle        int  `json:"cycle"`
 	PanelSettled bool `json:"panel_settled"`
 	Findings     int  `json:"findings"`
+}
+
+// ClosureFactsBody carries only the facts that the existing lifecycle events
+// cannot reconstruct. Writers may append several partial, consistent fact
+// records as the address, Gate, and land stages learn them.
+type ClosureFactsBody struct {
+	TaskRef              string `json:"task_ref,omitempty"`
+	Seat                 string `json:"seat,omitempty"`
+	Harness              string `json:"harness,omitempty"`
+	Model                string `json:"model,omitempty"`
+	Provider             string `json:"provider,omitempty"`
+	Effort               string `json:"effort,omitempty"`
+	ReviewProducer       string `json:"review_producer,omitempty"`
+	CatalogRevision      string `json:"catalog_revision,omitempty"`
+	ReviewArtifactID     string `json:"review_artifact_id,omitempty"`
+	ReviewArtifactDigest string `json:"review_artifact_digest,omitempty"`
+	ReviewHeadSHA        string `json:"review_head_sha,omitempty"`
+	FinalReviewedHeadSHA string `json:"final_reviewed_head_sha,omitempty"`
+	GateHeadSHA          string `json:"gate_head_sha,omitempty"`
+	ShipRunRef           string `json:"ship_run_ref,omitempty"`
+	GateRunRef           string `json:"gate_run_ref,omitempty"`
+}
+
+const (
+	// InterventionGenuineJudgment identifies an explicit ambiguity escalated
+	// for judgment; it requires a question reference.
+	InterventionGenuineJudgment = "genuine-judgment"
+	// InterventionMechanismRepair identifies manual repair of absent or broken
+	// automation.
+	InterventionMechanismRepair = "mechanism-repair"
+)
+
+// InterventionBody records an operator or agent action that interrupted the
+// automated closure path. Genuine judgment must point to the recorded question
+// that requested it; unclassifiable values are invalid contract input.
+type InterventionBody struct {
+	Time        string `json:"time"`
+	Kind        string `json:"kind"`
+	ReasonCode  string `json:"reason_code"`
+	Actor       string `json:"actor"`
+	QuestionRef string `json:"question_ref,omitempty"`
+}
+
+// ClosureReceipt is the reconstructable projection over one stream's existing
+// lifecycle plus closure_facts and intervention events. Incomplete and
+// contradictory projections remain visible and never report Complete.
+type ClosureReceipt struct {
+	WorkflowRef          string             `json:"workflow_ref"`
+	TaskRef              string             `json:"task_ref,omitempty"`
+	OpeningPRRef         string             `json:"opening_pr_ref,omitempty"`
+	PRRef                string             `json:"pr_ref,omitempty"`
+	ShipRunRef           string             `json:"ship_run_ref,omitempty"`
+	GateRunRef           string             `json:"gate_run_ref,omitempty"`
+	Seat                 string             `json:"seat,omitempty"`
+	Harness              string             `json:"harness,omitempty"`
+	Model                string             `json:"model,omitempty"`
+	Effort               string             `json:"effort,omitempty"`
+	Provider             string             `json:"provider,omitempty"`
+	ReviewProducer       string             `json:"review_producer,omitempty"`
+	CatalogRevision      string             `json:"catalog_revision,omitempty"`
+	ReviewArtifactID     string             `json:"review_artifact_id,omitempty"`
+	ReviewArtifactDigest string             `json:"review_artifact_digest,omitempty"`
+	ReviewHeadSHA        string             `json:"review_head_sha,omitempty"`
+	FinalReviewedHeadSHA string             `json:"final_reviewed_head_sha,omitempty"`
+	GateHeadSHA          string             `json:"gate_head_sha,omitempty"`
+	MergeHeadSHA         string             `json:"merge_head_sha,omitempty"`
+	ReviewCycles         int                `json:"review_cycles"`
+	Interventions        []InterventionBody `json:"interventions,omitempty"`
+	MergeCommit          string             `json:"merge_commit,omitempty"`
+	Outcome              string             `json:"outcome,omitempty"`
+	Complete             bool               `json:"complete"`
+	Missing              []string           `json:"missing,omitempty"`
+	Contradictions       []string           `json:"contradictions,omitempty"`
 }
 
 // RunState is the reducer's output view of a run: the run record plus every
@@ -266,6 +346,9 @@ type StreamRecord struct {
 	ReviewCycles int `json:"review_cycles,omitempty"`
 	// WorktreeConflict is folded from stream_dispatched.worktree_conflict.
 	WorktreeConflict bool `json:"worktree_conflict,omitempty"`
+	// Closure is present once any closure-specific fact is recorded or the
+	// stream reaches a PR. It is always rendered, including when incomplete.
+	Closure *ClosureReceipt `json:"closure,omitempty"`
 }
 
 // AttemptRecord is one folded attempt in a StreamRecord.

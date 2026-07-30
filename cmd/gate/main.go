@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/gate/internal/authorization"
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
@@ -38,6 +39,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
 // The exit-code contract — the one surface the driver branches on. gate owns
@@ -115,6 +117,8 @@ func main() {
 		err = cmdJudge(os.Args[2:])
 	case "resolve":
 		err = cmdResolve(os.Args[2:])
+	case "executor":
+		err = cmdExecutor(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
 	case "next":
@@ -133,17 +137,34 @@ func main() {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "gate:", err)
-	os.Exit(codeError)
+	os.Exit(commandErrorCode(os.Args[1], err))
+}
+
+func commandErrorCode(command string, err error) int {
+	if command != "executor" {
+		return codeError
+	}
+	var refusal executorRefusal
+	if errors.As(err, &refusal) {
+		return codeRefused
+	}
+	return codeError
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -auto)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
+  executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
+  executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
+  executor bootstrap -state DIR -key DIR -state-tip SHA -action act_x -repo R -pr N -head SHA -app-id N -installation-id N
+  executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
+  executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
@@ -156,7 +177,9 @@ type env struct {
 	st       *state.Store
 	stateDir string
 	keyPath  string
+	anchor   string
 	floorBin string
+	now      func() time.Time
 }
 
 func newEnv(stateDir, floorBin, keyDir string) (env, error) {
@@ -178,13 +201,27 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	// an actor who can write log.jsonl must not thereby be able to read or
 	// forge the key that signs grants and anchors the chain. Same reason the
 	// anchor record itself lives here, not beside the log it pins.
-	keyPath := filepath.Join(keyDir, "grant.key")
-	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	// The anchor record is per-state-dir: a shared key dir must not alias one
 	// anchor across independent logs, or appending to one would falsely fail
 	// the other's audit. The key stays shared (a secret can't be forged
 	// regardless); only the record is namespaced by which log it pins.
 	anchorPath := filepath.Join(keyDir, "anchor-"+stateDirTag(stateDir)+".json")
+	if hostedAnchor := os.Getenv("GATE_ANCHOR_RECORD"); hostedAnchor != "" {
+		within, err := dirWithin(hostedAnchor, stateDir)
+		if err != nil {
+			return env{}, err
+		}
+		if within {
+			return env{}, fmt.Errorf("gate: hosted anchor record %q must be outside state dir %q", hostedAnchor, stateDir)
+		}
+		anchorPath = hostedAnchor
+	}
+	return newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath)
+}
+
+func newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath string) (env, error) {
+	keyPath := filepath.Join(keyDir, "grant.key")
+	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	st, err := state.OpenAnchored(stateDir, time.Now, anchorPath, anchorKeyPath)
 	if err != nil {
 		return env{}, err
@@ -192,7 +229,10 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	if floorBin == "" {
 		floorBin = defaultFloorBin()
 	}
-	return env{st: st, stateDir: stateDir, keyPath: keyPath, floorBin: floorBin}, nil
+	return env{
+		st: st, stateDir: stateDir, keyPath: keyPath, anchor: anchorPath,
+		floorBin: floorBin, now: time.Now,
+	}, nil
 }
 
 // stateDirTag is a stable, filesystem-safe tag for a state dir, so its anchor
@@ -374,7 +414,7 @@ func cmdGate(args []string) error {
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
-	reviewsOptional := fs.Bool("reviews-optional", false, "reviews advisory: readiness does not escalate on an absent GitHub review decision, and the model-based review-consolidation rung is SKIPPED (it would not gate, so its paid model calls are pure cost) — for the enforced CI check, which has no judge to resolve a review park. Review judgment stays in the operator/driver flow. A GitHub CHANGES_REQUESTED still blocks via readiness")
+	reviewsOptional := fs.Bool("reviews-optional", false, "review judgment advisory: readiness accepts an absent GitHub review decision and paid review-consolidation is skipped, but deterministic exact-head panel completeness still runs. A GitHub CHANGES_REQUESTED still blocks via readiness")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -402,6 +442,21 @@ func cmdGate(args []string) error {
 // runGate is one thin vertical pass: capability, evidence, verification,
 // reduction, outcome.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
+	return runGateWithSynthesis(
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true,
+	)
+}
+
+func runGateWithSynthesis(
+	e env,
+	repo string,
+	pr int,
+	grantID string,
+	live bool,
+	modelBackend string,
+	reviewsOptional bool,
+	synthesize bool,
+) (gateResult, int, error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
 	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
@@ -428,7 +483,7 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 		return res, codeError, err
 	}
 
-	// The verifier ladder: three rungs, each a verdict artifact.
+	// The verifier ladder records one verdict artifact per rung.
 	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, subject, reviewsOptional)
 	if err != nil {
 		return res, codeError, err
@@ -437,22 +492,16 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	if err != nil {
 		return res, codeError, err
 	}
-	// The model-based review-consolidation rung is SKIPPED when reviews are advisory
-	// (reviewsOptional — the enforced CI check). It escalates on uncertainty, and an
-	// ephemeral CI run has no judge to resolve the park, so gating on it would
-	// freeze a clean PR; and since it would not gate, running it is pure paid model
-	// calls per PR for no decision. Review judgment stays in the operator/driver
-	// flow, which DOES run and gate the rung. The enforced check gates on the
-	// DETERMINISTIC rungs — readiness, floor (+ ci-classify on red CI). A
-	// GitHub-reported CHANGES_REQUESTED still blocks via readiness (code-class).
+	// The paid model-based review-consolidation rung is SKIPPED when reviews are
+	// advisory (reviewsOptional — the enforced CI check). The deterministic panel
+	// completeness rung still runs: optional judgment must not turn missing exact-
+	// head evidence green.
 	verdictIDs := []string{readinessArt.ID, floorArt.ID}
-	if !reviewsOptional {
-		reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
-		if err != nil {
-			return res, codeError, err
-		}
-		verdictIDs = append(verdictIDs, reviewsArt.ID)
+	reviewIDs, err := reviewVerdictIDs(e, run, bundle, subject, model, reviewsOptional)
+	if err != nil {
+		return res, codeError, err
 	}
+	verdictIDs = append(verdictIDs, reviewIDs...)
 	ciID, err := ciClassifyIfRed(e, run, bundle.View, repo, pr, subject, model)
 	if err != nil {
 		return res, codeError, err
@@ -475,10 +524,29 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 
 	// A content escalation carries a synthesized brief; lazy — the model call fires only if the run actually parks, and only over what it already recorded.
 	title := verify.PRTitle(e.st, bundle.View)
-	synth := func(question string) (verify.Brief, error) {
-		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+	var synth briefFn
+	if synthesize {
+		synth = func(question string) (verify.Brief, error) {
+			return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+func reviewVerdictIDs(e env, run string, bundle evidence.Bundle, subject verify.Subject, model verify.Model, reviewsOptional bool) ([]string, error) {
+	panelArt, err := verify.PanelCompleteness(e.st, run, bundle.Panel, subject)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{panelArt.ID}
+	if reviewsOptional {
+		return ids, nil
+	}
+	reviewsArt, err := verify.Reviews(e.st, run, bundle.Comments, subject, model)
+	if err != nil {
+		return nil, err
+	}
+	return append(ids, reviewsArt.ID), nil
 }
 
 // recordGrantNeeded persists the top-level capability refusal as a durable,
@@ -569,6 +637,32 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// this exact commit, so it travels with the result — a caller posting an
 	// out-of-band status binds to it, never to a head captured before the run.
 	res.HeadSHA = reduced.Subject.HeadSHA
+	audit, err := e.st.Audit()
+	if err != nil {
+		return res, codeError, err
+	}
+	if !audit.OK {
+		return res, codeError, fmt.Errorf("%w: %s", errLogTampered, audit.Reason)
+	}
+	pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+	if err != nil {
+		return res, codeError, err
+	}
+	if pending {
+		res.Outcome = "capability_refused"
+		res.Why = authorization.ErrSubjectClaimPending.Error()
+		return res, codeRefused, nil
+	}
+	checkNoOpenClaim := func(audit state.AuditResult) error {
+		pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return authorization.ErrSubjectClaimPending
+		}
+		return nil
+	}
 
 	// actionHash captures the hash of the last artifact record appended, so the
 	// pass path can surface the deciding action artifact's chain hash onto the
@@ -582,7 +676,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		art, err := e.st.Append(kind, run, []string{reducedID, grantID}, body)
+		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			kind, []string{state.KindAction, state.KindEscalation}, run,
+			reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		actionHash = art.Hash
 		return err
 	}
@@ -609,7 +707,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.Append(state.KindEscalation, run, []string{reducedID, grantID}, body)
+		_, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			state.KindEscalation, []string{state.KindAction, state.KindEscalation},
+			run, reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		return err
 	}
 
@@ -683,8 +785,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// --match-head-commit pins the merge to the exact SHA the evidence was
 	// gathered against: a push after verification makes the merge refuse
 	// instead of landing unverified code.
-	mergeCmd := fmt.Sprintf("gh pr merge %d -R %s --squash --delete-branch --match-head-commit %s",
-		subjectNumber(reduced), reduced.Subject.Repo, reduced.Subject.HeadSHA)
+	mergeArgv := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject{
+		Repo: reduced.Subject.Repo, Number: subjectNumber(reduced),
+		HeadSHA: reduced.Subject.HeadSHA,
+	})
+	mergeCmd := strings.Join(mergeArgv, " ")
 	res.Action = mergeCmd
 	// The pass path records first, then surfaces the action artifact's chain
 	// hash onto the result: record() runs as a side effect during return-arg
@@ -692,12 +797,16 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// explicitly here instead. This is the one path a downstream stamp reads.
 	if !live {
 		res.Outcome = "would_merge"
-		err := record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+		err := record(state.KindAction, "would_merge", map[string]any{
+			"command": mergeCmd, "argv": mergeArgv, "dry_run": true,
+		})
 		res.Hash = actionHash
 		return res, codeMerge, err
 	}
 	res.Outcome = "merge_not_implemented"
-	err = record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+	err = record(state.KindAction, "merge_not_implemented", map[string]any{
+		"command": mergeCmd, "argv": mergeArgv,
+	})
 	res.Hash = actionHash
 	return res, codeMerge, err
 }
@@ -858,23 +967,53 @@ func outcomeSubjectMatches(byID map[string]state.Artifact, a state.Artifact, sub
 	return v.Subject.Repo == subject.Repo && v.Subject.Number == subject.Number, nil
 }
 
-// validateJudgeFlags enforces the judge subcommand's flag contract: a run and
-// grant are always required; a manual decision needs both a -why and a
-// pass/block -decision, while -auto supplies both from the artifacts.
-func validateJudgeFlags(run, grantID, decision, why string, auto bool) error {
+// validateJudgeFlags enforces one judgment source: operator flags, a submitted
+// artifact, or an explicitly configured provider command.
+func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 	if run == "" || grantID == "" {
 		return errors.New("judge: -run and -grant required")
 	}
-	if auto {
+	modes := 0
+	if opts.Auto {
+		modes++
+	}
+	if opts.ArtifactPath != "" {
+		modes++
+	}
+	if opts.Decision != "" || opts.Why != "" {
+		modes++
+	}
+	if modes != 1 {
+		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
+	}
+	if opts.Auto {
+		if opts.ProviderCommand == "" {
+			return errors.New("judge_provider_unconfigured: -auto requires -provider-command <executable>")
+		}
 		return nil
 	}
-	if why == "" {
-		return errors.New("judge: -why required (or -auto)")
+	if opts.ProviderCommand != "" {
+		return errors.New("judge: -provider-command requires -auto")
 	}
-	if decision != verify.DecisionPass && decision != verify.DecisionBlock {
-		return errors.New("judge: -decision must be pass or block (or use -auto)")
+	if opts.ArtifactPath != "" {
+		return nil
+	}
+	if opts.Why == "" {
+		return errors.New("judge: -why required")
+	}
+	if opts.Decision != verify.DecisionPass && opts.Decision != verify.DecisionBlock {
+		return errors.New("judge: -decision must be pass or block")
 	}
 	return nil
+}
+
+type judgmentOptions struct {
+	Decision        string
+	Why             string
+	Auto            bool
+	ArtifactPath    string
+	ProviderCommand string
+	beforeAppend    func()
 }
 
 func cmdJudge(args []string) error {
@@ -884,7 +1023,9 @@ func cmdJudge(args []string) error {
 	grantID := fs.String("grant", "", "grant artifact id")
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the judgment's reasoning")
-	auto := fs.Bool("auto", false, "let a frontier model judge from the artifacts alone")
+	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
+	auto := fs.Bool("auto", false, "run an explicitly configured provider command over the versioned request")
+	providerCommand := fs.String("provider-command", "", "provider executable for -auto; request on stdin, judgment artifact on stdout")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -893,7 +1034,14 @@ func cmdJudge(args []string) error {
 	if help {
 		return nil
 	}
-	if err := validateJudgeFlags(*run, *grantID, *decision, *why, *auto); err != nil {
+	opts := judgmentOptions{
+		Decision:        *decision,
+		Why:             *why,
+		Auto:            *auto,
+		ArtifactPath:    *artifactPath,
+		ProviderCommand: *providerCommand,
+	}
+	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
@@ -912,7 +1060,7 @@ func cmdJudge(args []string) error {
 	if escalationID == "" {
 		return fmt.Errorf("judge: run %s has no escalation to resolve", *run)
 	}
-	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, *decision, *why, *auto)
+	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, opts)
 	if err != nil {
 		return err
 	}
@@ -931,7 +1079,7 @@ func cmdJudge(args []string) error {
 // can stamp the resolution before it exits. The returned judgment id is empty
 // only when capability refused before any judgment was appended, so a caller
 // stamps a resolution exactly when a decision was actually recorded.
-func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto bool) (gateResult, int, string, error) {
+func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOptions) (gateResult, int, string, error) {
 	arts, err := e.st.Run(run)
 	if err != nil {
 		return gateResult{}, 0, "", err
@@ -941,41 +1089,190 @@ func applyJudgment(e env, run, escalationID, grantID, decision, why string, auto
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", time.Now); err != nil {
+	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now)
+	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
-	judgment := verify.Verdict{
-		Subject:    subject,
-		Source:     "operator-judgment",
-		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
-		Decision:   decision,
-		Tier:       "T0",
-		Confidence: 1.0,
-		Why:        why,
-	}
-	if auto {
-		judgment, err = verify.AutoJudge(arts, subject)
-		if err != nil {
+	if persisted, ok := artifactForParent(arts, state.KindJudgment, escalationID); ok {
+		if _, err := persistedJudgmentGrant(e, persisted, escalationID, subject); err != nil {
 			return gateResult{}, 0, "", err
 		}
+		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted, opts)
 	}
-	jArt, err := e.st.Append(state.KindJudgment, run, []string{escalationID}, judgment)
+	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {
 		return gateResult{}, 0, "", err
+	}
+	if opts.beforeAppend != nil {
+		opts.beforeAppend()
+	}
+	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now); err != nil {
+		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
+	}
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID, grantID}, judgment)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
+	}
+	if err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
+}
+
+func resumeJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact, opts judgmentOptions) (gateResult, int, string, error) {
+	judgment, err := verify.Load(jArt)
+	if err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	if err := validateJudgmentRetry(judgment, opts); err != nil {
+		return gateResult{}, 0, jArt.ID, err
+	}
+	return finishJudgment(e, run, grantID, subject, verdicts, arts, jArt, judgment)
+}
+
+func persistedJudgmentGrant(e env, judgment state.Artifact, escalationID string, subject verify.Subject) (string, error) {
+	for _, parentID := range judgment.Parents {
+		if parentID == escalationID {
+			continue
+		}
+		artifact, err := e.st.Get(parentID)
+		if err != nil {
+			return "", fmt.Errorf("judgment_missing_grant_lineage: %w", err)
+		}
+		if artifact.Kind == state.KindGrant {
+			atJudgment := func() time.Time { return judgment.Time }
+			if _, err := capability.Check(e.st, e.keyPath, parentID, subject.Repo, "merge", atJudgment); err != nil {
+				return "", fmt.Errorf("judgment_invalid_grant_lineage: %w", err)
+			}
+			return parentID, nil
+		}
+	}
+	return "", errors.New("judgment_missing_grant_lineage: persisted judgment has no grant parent")
+}
+
+func validateJudgmentRetry(judgment verify.Verdict, opts judgmentOptions) error {
+	if opts.Decision != "" && opts.Decision != judgment.Decision {
+		return fmt.Errorf("judgment_retry_conflict: persisted decision is %s, retry requested %s", judgment.Decision, opts.Decision)
+	}
+	return nil
+}
+
+func finishJudgment(e env, run, grantID string, subject verify.Subject, verdicts []verify.Verdict, arts []state.Artifact, jArt state.Artifact, judgment verify.Verdict) (gateResult, int, string, error) {
+	if reducedArt, ok := artifactForParent(arts, state.KindVerdict, jArt.ID); ok {
+		if hasOutcomeFor(arts, reducedArt.ID) {
+			return gateResult{}, 0, jArt.ID, errors.New("judgment_duplicate: escalation judgment already produced an outcome")
+		}
+		reduced, err := verify.Load(reducedArt)
+		if err != nil {
+			return gateResult{}, 0, jArt.ID, err
+		}
+		return actAfterJudgment(e, run, grantID, subject, jArt.ID, reducedArt.ID, reduced)
 	}
 	reduced, err := verify.Reduce(subject, append(verdicts, judgment))
 	if err != nil {
 		return gateResult{}, 0, jArt.ID, err
 	}
-	reducedArt, err := verify.Record(e.st, run, []string{jArt.ID}, reduced)
+	reducedArt, err := e.st.AppendIfAbsentParent(state.KindVerdict, run, jArt.ID, []string{jArt.ID}, reduced)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, jArt.ID, errors.New("judgment_resume_in_progress: reduced verdict already recorded")
+	}
 	if err != nil {
 		return gateResult{}, 0, jArt.ID, err
 	}
+	return actAfterJudgment(e, run, grantID, subject, jArt.ID, reducedArt.ID, reduced)
+}
+
+func actAfterJudgment(e env, run, grantID string, subject verify.Subject, judgmentID, reducedID string, reduced verify.Verdict) (gateResult, int, string, error) {
 	// No brief on the judge path: the operator is already in the loop here, and a
 	// re-park after judgment is procedural (a ceiling), not a fresh zero-context
 	// page.
-	res, code, err := act(e, run, grantID, reduced, reducedArt.ID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
-	return res, code, jArt.ID, err
+	res, code, err := act(e, run, grantID, reduced, reducedID, gateResult{Run: run, PR: fmt.Sprintf("%s#%d", subject.Repo, subject.Number)}, false, nil)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		return gateResult{}, 0, judgmentID, errors.New("judgment_duplicate: escalation judgment already produced an outcome")
+	}
+	return res, code, judgmentID, err
+}
+
+func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subject verify.Subject, grantID, maxTier string, opts judgmentOptions) (verify.Verdict, error) {
+	if !opts.Auto && opts.ArtifactPath == "" {
+		return verify.Verdict{
+			Subject:    subject,
+			Source:     "operator-judgment",
+			Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+			Decision:   opts.Decision,
+			Tier:       "T0",
+			Confidence: 1.0,
+			Why:        opts.Why,
+		}, nil
+	}
+	request, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, maxTier)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	if opts.Auto {
+		return verify.AutoJudge(opts.ProviderCommand, request)
+	}
+	artifact, err := readJudgmentArtifact(opts.ArtifactPath)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	return verify.ValidateJudgment(artifact, request)
+}
+
+func artifactForParent(arts []state.Artifact, kind, parentID string) (state.Artifact, bool) {
+	for _, artifact := range arts {
+		if artifact.Kind == kind && stateArtifactHasParent(artifact, parentID) {
+			return artifact, true
+		}
+	}
+	return state.Artifact{}, false
+}
+
+func hasOutcomeFor(arts []state.Artifact, reducedID string) bool {
+	for _, artifact := range arts {
+		if artifact.Kind != state.KindAction && artifact.Kind != state.KindEscalation {
+			continue
+		}
+		if stateArtifactHasParent(artifact, reducedID) && completedJudgmentOutcome(artifact) {
+			return true
+		}
+	}
+	return false
+}
+
+func completedJudgmentOutcome(artifact state.Artifact) bool {
+	if artifact.Kind == state.KindEscalation {
+		return true
+	}
+	if artifact.Kind != state.KindAction {
+		return false
+	}
+	var body outcomeBody
+	if err := json.Unmarshal(artifact.Body, &body); err != nil {
+		return true
+	}
+	return body.Outcome != "capability_refused"
+}
+
+func stateArtifactHasParent(artifact state.Artifact, parentID string) bool {
+	for _, parent := range artifact.Parents {
+		if parent == parentID {
+			return true
+		}
+	}
+	return false
+}
+
+func readJudgmentArtifact(path string) (verify.JudgmentArtifactV1, error) {
+	if path == "-" {
+		return verify.DecodeJudgmentArtifact(os.Stdin)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return verify.JudgmentArtifactV1{}, fmt.Errorf("judge: open judgment artifact: %w", err)
+	}
+	defer f.Close()
+	return verify.DecodeJudgmentArtifact(f)
 }
 
 func validateResolveFlags(escID, grantID, decision, why, who string) error {
@@ -1048,7 +1345,7 @@ func cmdResolve(args []string) error {
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
 	}
-	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, *decision, *why, false)
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why})
 	if err != nil {
 		return err
 	}
@@ -1056,7 +1353,7 @@ func cmdResolve(args []string) error {
 	// capability refusal appends none): the stamp claims the loop closed, so it
 	// must never outrun the judgment it links.
 	if judgmentID != "" {
-		if err := stampResolution(e, run, *escID, judgmentID, *decision, *who); err != nil {
+		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who); err != nil {
 			return err
 		}
 	}

@@ -20,6 +20,8 @@
         "stream_dispatched",
         "stream_attempt",
         "review_cycle",
+        "closure_facts",
+        "intervention",
         "stream_pr_opened",
         "stream_landed",
         "stream_failed",
@@ -42,7 +44,9 @@
     { "if": { "properties": { "kind": { "const": "stream_attempt" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_attempt_body" } } } },
     { "if": { "properties": { "kind": { "const": "stream_pr_opened" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_pr_opened_body" } } } },
     { "if": { "properties": { "kind": { "const": "stream_merged" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/stream_merged_body" } } } },
-    { "if": { "properties": { "kind": { "const": "review_cycle" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/review_cycle_body" } } } }
+    { "if": { "properties": { "kind": { "const": "review_cycle" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/review_cycle_body" } } } },
+    { "if": { "properties": { "kind": { "const": "closure_facts" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/closure_facts_body" } } } },
+    { "if": { "properties": { "kind": { "const": "intervention" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/intervention_body" } } } }
   ],
   "$defs": {
     "run_imported_body": {
@@ -56,7 +60,7 @@
         "generated_at": { "type": "string" },
         "manifest": { "type": "object", "description": "The driver.md frontmatter, verbatim." },
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream_spec" } },
-        "ship_run_ref": { "type": "string" },
+        "ship_run_ref": { "type": "string", "pattern": "^drv_" },
         "parent": { "type": "string", "description": "The parent run id (dsr_…) for a child sub-run; empty on a parent or standalone run (session-orchestrator spec §4 D1)." },
         "parent_stream": { "type": "string", "description": "The parent stream (dss_…) this child sub-run implements; empty on a parent or standalone run." },
         "done_boundary": { "type": "string", "description": "The per-run done policy: green | pr-open | merged. Empty reads as merged. Governs the drive only — no new event or state-machine transition (spec §4 D7)." }
@@ -115,7 +119,8 @@
       "properties": {
         "pr": { "type": "integer", "minimum": 1 },
         "merge_commit": { "type": "string" },
-        "merged_at": { "type": "string" }
+        "merged_at": { "type": "string" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
       }
     },
     "review_cycle_body": {
@@ -128,6 +133,48 @@
         "panel_settled": { "type": "boolean" },
         "findings": { "type": "integer" }
       }
+    },
+    "closure_facts_body": {
+      "type": "object",
+      "description": "Additive facts the existing lifecycle cannot reconstruct. Several consistent partial records may be appended before merge.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "task_ref": { "type": "string", "pattern": "^tsk_" },
+        "seat": { "type": "string", "minLength": 1 },
+        "harness": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 },
+        "review_producer": { "type": "string", "minLength": 1 },
+        "catalog_revision": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})$" },
+        "review_artifact_id": { "type": "string", "minLength": 1 },
+        "review_artifact_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "review_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "final_reviewed_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "gate_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "ship_run_ref": { "type": "string", "pattern": "^drv_" },
+        "gate_run_ref": { "type": "string", "pattern": "^run_[0-9a-f]+$" }
+      }
+    },
+    "intervention_body": {
+      "type": "object",
+      "description": "A typed interruption of the automated closure path. Genuine judgment names the recorded question that requested it.",
+      "required": ["time", "kind", "reason_code", "actor"],
+      "additionalProperties": false,
+      "properties": {
+        "time": { "type": "string", "format": "date-time" },
+        "kind": { "enum": ["genuine-judgment", "mechanism-repair"] },
+        "reason_code": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "actor": { "type": "string", "minLength": 1 },
+        "question_ref": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "genuine-judgment" } }, "required": ["kind"] },
+          "then": { "required": ["question_ref"] }
+        }
+      ]
     }
   }
 }

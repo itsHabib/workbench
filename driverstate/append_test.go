@@ -101,6 +101,37 @@ func TestHappyLifecycleChain(t *testing.T) {
 	}
 }
 
+func TestClosureEventsAreLegalOnlyWhilePROpen(t *testing.T) {
+	dir := t.TempDir()
+	run, stream := "dsr_closure", "dss_a"
+	lease, err := Claim(dir, run, "ship:drv_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustAppend(t, dir, lease, ev("evt_1", dsc.KindRunImported, "", "ship:drv_1", baseTime, dsc.RunImportedBody{
+		Repo: "itsHabib/ship", Source: "driver.md", Manifest: json.RawMessage(`{}`),
+		Streams: []dsc.StreamSpec{{Stream: stream, DocPath: "spec.md"}},
+	}))
+	facts := dsc.ClosureFactsBody{TaskRef: "tsk_1"}
+	if _, err := Append(dir, lease, ev("evt_early", dsc.KindClosureFacts, stream, "ship:drv_1", baseTime.Add(time.Second), facts)); err == nil {
+		t.Fatal("closure_facts before pr_open must refuse")
+	}
+	mustAppend(t, dir, lease, ev("evt_2", dsc.KindStreamDispatched, stream, "ship:drv_1", baseTime.Add(2*time.Second), nil))
+	mustAppend(t, dir, lease, ev("evt_3", dsc.KindStreamAttempt, stream, "ship:drv_1", baseTime.Add(3*time.Second), dsc.StreamAttemptBody{Seq: 1, DocPath: "spec.md", Terminal: true}))
+	mustAppend(t, dir, lease, ev("evt_4", dsc.KindStreamPROpened, stream, "ship:drv_1", baseTime.Add(4*time.Second), dsc.StreamPROpenedBody{PR: 1, URL: "https://x/1", HeadSHA: strings.Repeat("a", 40)}))
+	mustAppend(t, dir, lease, ev("evt_5", dsc.KindClosureFacts, stream, "ship:drv_1", baseTime.Add(5*time.Second), facts))
+	mustAppend(t, dir, lease, ev("evt_6", dsc.KindIntervention, stream, "ship:drv_1", baseTime.Add(6*time.Second), dsc.InterventionBody{
+		Time: "2026-07-16T12:00:06Z", Kind: dsc.InterventionMechanismRepair,
+		ReasonCode: "credential-refresh", Actor: "human:michael",
+	}))
+	mustAppend(t, dir, lease, ev("evt_7", dsc.KindStreamMerged, stream, "ship:drv_1", baseTime.Add(7*time.Second), dsc.StreamMergedBody{
+		PR: 1, MergeCommit: "abc", MergedAt: "2026-07-16T12:00:07Z",
+	}))
+	if _, err := Append(dir, lease, ev("evt_late", dsc.KindClosureFacts, stream, "ship:drv_1", baseTime.Add(8*time.Second), facts)); err == nil {
+		t.Fatal("closure_facts after merge must refuse")
+	}
+}
+
 func TestReferenceVector(t *testing.T) {
 	// The pinned P1 canonical-encoding reference vector: appending the exact
 	// vector event must reproduce its pinned hash byte-for-byte.
