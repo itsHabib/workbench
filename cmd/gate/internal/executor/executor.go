@@ -28,7 +28,7 @@ import (
 
 const (
 	defaultAPIURL = "https://api.github.com"
-	ghBinary      = "/usr/local/bin/gh"
+	ghBinary      = "gh"
 	maxResponse   = 64 * 1024
 )
 

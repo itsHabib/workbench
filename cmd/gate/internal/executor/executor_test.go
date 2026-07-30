@@ -128,6 +128,12 @@ func TestChildEnvironmentIsAllowlisted(t *testing.T) {
 	}
 }
 
+func TestGHBinaryResolvesFromPATH(t *testing.T) {
+	if ghBinary != "gh" {
+		t.Fatalf("gh binary = %q, want PATH lookup", ghBinary)
+	}
+}
+
 func privateKey(t *testing.T) []byte {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
