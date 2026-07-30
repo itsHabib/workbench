@@ -566,7 +566,7 @@ func wouldMerge(command string) map[string]any {
 // would_merge action surfaces exactly one ready row carrying the subject facts
 // and the action body's own merge command.
 func TestReadyToMergeBase(t *testing.T) {
-	cmd := "gh pr merge 142 -R o/widget --squash --delete-branch --match-head-commit deadbeef"
+	cmd := "gh pr merge 142 -R o/widget --squash --match-head-commit deadbeef"
 	arts := []state.Artifact{
 		subjectVerdict("run_a", "vrd_a", inboxBase, "o/widget", 142, "fix the docket", "deadbeef"),
 		art(state.KindAction, "run_a", "act_a", inboxBase.Add(time.Minute), wouldMerge(cmd)),

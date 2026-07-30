@@ -305,7 +305,7 @@ call and can never ship a bad result. Either property sends the work down; neith
 keeps it up. And never trust self-reported confidence (section 1's confident-garbage
 story is why).
 
-**The verifier ladder** is the same law inside gate, with three rungs by producer
+**The verifier ladder** is the same law inside gate, with three producer
 *class*:
 
 1. **Deterministic floor** (class `code`) - always runs, can never be lowered.
@@ -503,11 +503,14 @@ naive state layer lost data three runs out of three under a six-process concurre
 stress; the retry-all lock posture exists because Windows returns ACCESS_DENIED
 (delete-pending), not EEXIST, on a racing create.
 
-**Judgment.** `gate judge -auto` hands the frontier model only what state holds -
-the escalation question, the verifier verdicts, the recorded diff (`verified`,
-`cmd/gate/internal/verify/judge.go`, which also wraps the material in
-untrusted-data markers and fails closed on an unparseable reply). If a good judgment
-would need more than the artifacts carry, that is a contract bug in the artifacts.
+**Judgment.** `gate judge -auto` hands an explicitly configured provider command
+only what state holds - the escalation question, the verifier verdicts, the
+recorded diff (`verified`, `cmd/gate/internal/verify/judge.go`, which also wraps
+the material in untrusted-data markers and fails closed on an unparseable reply).
+The provider-neutral `gate-judgment-v1` request/response binds run, escalation,
+exact PR head, question, and grant ceiling; there is no implicit CLI fallback.
+If a good judgment would need more than the artifacts carry, that is a contract
+bug in the artifacts.
 Backtesting agreed with real merge history 3 for 3, including reasoning out a
 fork-PR trust boundary from the recorded diff alone.
 
@@ -528,9 +531,20 @@ capability plane is discipline plus an audit trail, not prevention."* Gate becom
 *enforcing* only when a repo's branch protection requires the gate status check. The
 machinery for that now exists in this repo (`verified`,
 `.github/workflows/gate.yml`) and is worth reading as a security artifact in its own
-right: it triggers on `workflow_run` so it runs in the trusted base-repo context
-even for fork PRs; it builds gate from the *base* checkout so a PR cannot edit
-gate's own code to neuter the check that governs it; it mints an ephemeral grant
+right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
+signal feeds late panel evidence back through that same writable trusted-base
+rail, including for fork PRs. The signal keys on GitHub's bot identity rather
+than a fixed reviewer catalog. An identity job resolves every trigger
+to one PR number before the success-capable Gate job enters per-PR concurrency,
+including `workflow_run` events whose PR association is temporarily empty.
+Provider prose and sticky issue comments are not
+authority; without a formal exact-head review or shared head-bound artifact,
+the reviewer remains incomplete and the provider-neutral judgment path handles
+the park. When the default branch changes `.ship.json`,
+the trusted workflow first invalidates every open PR's old `gate` success, then
+re-evaluates each exact current head under the new declared panel. Gate builds
+from the *base* checkout so a PR cannot edit gate's own code to neuter the check
+that governs it; it mints an ephemeral grant
 into a throwaway temp dir so no signing secret ever touches CI; and it binds the
 posted status to the exact judged SHA so a force-push cannot get a green stamped
 onto a different commit. It ships **dormant** - armed only by the repo variable
@@ -799,8 +813,10 @@ a fresh Claude seat each close one real actionable-review loop through the same 
 artifact boundary, with zero mechanism-repair interventions - and the intervention
 taxonomy is itself typed, so an unclassifiable event counts as mechanism repair;
 absence never reads as clean. The key artifact at the review-address seam,
-`ReviewFindingsV1`, is still `intent` - it appears in no code anywhere
-(`verified` by search). Meanwhile the parts that have landed are real: the
+`ReviewFindingsV1`, has landed at Ship's exact-head, at-most-once address
+boundary; Workbench now publishes the shared Go/schema vocabulary and a
+Codex/GitHub producer (`contracts/reviewfindings`, `cmd/reviewfindings`).
+Meanwhile the parts that have landed are real: the
 driver-state validation gate passed 2026-07-17
 (`docs/features/driver-state/spec.md` §11), the thin-orchestrator session engine
 landed with parent/child rollups, and the invariant-dense core (hash chain,
@@ -809,8 +825,8 @@ asserting the laws over the whole input space rather than hand-picked examples -
 including the property that distinct import keys mint distinct runs, the exact
 class of a real bug.
 
-Still open, and worth saying plainly: live merge, the multiple-judgment reject, and
-`ReviewFindingsV1` are intentions, not results.
+Still open, and worth saying plainly: live merge, the reducer's general
+multiple-judgment reject, and the two-harness Gate B dogfood.
 
 ## 10. Self-test
 
@@ -930,7 +946,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
 | Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
-| `ReviewFindingsV1` | In no code anywhere - pure intent (closure Phase 1) |
+| `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
 | `.github/workflows/gate.yml` | Built and merged but dormant: posts nothing until `GATE_ENFORCE=true` and a model-capable runner exist |

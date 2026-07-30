@@ -162,3 +162,108 @@ jobs:
           done
           if [ "$fail" -eq 0 ]; then echo "no cross-tool imports ✓"; fi
           exit $fail
+      - name: gate review retriggers stay trusted and bot-only
+        run: |
+          workflow=.github/workflows/gate.yml
+          signal=.github/workflows/gate-review-signal.yml
+          grep -F 'workflows: ["CI", "gate-review-signal"]' "$workflow"
+          grep -F '  issue_comment:' "$workflow"
+          grep -F '    types: [created, edited, deleted]' "$workflow"
+          grep -F '  workflow_dispatch:' "$workflow"
+          grep -F '    paths: [".ship.json"]' "$workflow"
+          grep -F "github.event.comment.user.login == 'chatgpt-codex-connector[bot]'" "$workflow"
+          grep -F '  identity:' "$workflow"
+          grep -F '    needs: identity' "$workflow"
+          grep -F '      group: gate-' "$workflow" | grep -F 'needs.identity.outputs.pr'
+          grep -F 'needs.identity.result' "$workflow"
+          grep -F 'github.event.issue.number || inputs.pr' "$workflow"
+          grep -F '      EVENT_PR:' "$workflow" | grep -F 'needs.identity.outputs.pr'
+          grep -F 'repos/${REPO}/commits/${HEAD_SHA}/pulls' "$workflow"
+          grep -F 'head=${HEAD_OWNER}:${HEAD_BRANCH}' "$workflow"
+          grep -F '          ref:' "$workflow" | grep -F 'github.event.repository.default_branch'
+          grep -F "github.ref_name == github.event.repository.default_branch" "$workflow"
+          grep -F '          prs="$(mktemp)"' "$workflow"
+          grep -F '          invalidate_failed=0' "$workflow"
+          grep -F '          dispatch_failed=0' "$workflow"
+          grep -F '          fanout_failed=0' "$workflow"
+          grep -F '          if [ "$invalidate_failed" -ne 0 ] || [ "$dispatch_failed" -ne 0 ]; then' "$workflow"
+          grep -F '          exit "$fanout_failed"' "$workflow"
+          grep -F 'gh workflow run gate.yml' "$workflow"
+          grep -F 'description="gate: policy changed; re-evaluating"' "$workflow"
+          invalidate_line="$(grep -n -F '          invalidate_failed=0' "$workflow" | cut -d: -f1)"
+          dispatch_line="$(grep -n -F '          dispatch_failed=0' "$workflow" | cut -d: -f1)"
+          fanout_line="$(grep -n -F '          fanout_failed=0' "$workflow" | cut -d: -f1)"
+          test "$invalidate_line" -lt "$dispatch_line"
+          test "$dispatch_line" -lt "$fanout_line"
+          grep -F '  pull_request_review:' "$signal"
+          grep -F "if: github.event.review.user.type == 'Bot'" "$signal"
+          grep -F 'uses: actions/upload-artifact@v4' "$signal"
+          grep -F 'gh run download "${UPSTREAM_RUN_ID}"' "$workflow"
+          if grep -Fq 'actions/checkout' "$signal"; then
+            echo "review signal must never check out PR code" >&2
+            exit 1
+          fi
+          if grep -Eq '^  (pull_request|pull_request_target):' "$workflow"; then
+            echo "gate workflow must not run privileged work from a PR-head trigger" >&2
+            exit 1
+          fi
+          if grep -F 'group:' "$workflow" | grep -Fq 'head_branch'; then
+            echo "gate concurrency must use the resolved PR, never a trigger-specific branch fallback" >&2
+            exit 1
+          fi
+          echo "gate review retriggers are base-workflow bot events ✓"
+      - name: gate executor stays fail-closed, exact, and process-custodied
+        run: |
+          workflow=.github/workflows/gate-executor.yml
+          action=.github/actions/gate-executor/action.yml
+          reconciler=.github/actions/gate-reconciler/action.yml
+          dockerfile=.github/actions/gate-executor/Dockerfile
+          reconciler_dockerfile=.github/actions/gate-reconciler/Dockerfile
+          grep -F '  workflow_dispatch:' "$workflow"
+          grep -F '    environment: gate-authorization' "$workflow"
+          grep -F "vars.GATE_EXECUTOR_ARMED == 'true'" "$workflow"
+          grep -F "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" "$workflow"
+          grep -F '  group: gate-executor-' "$workflow"
+          grep -F '  contents: read' "$workflow"
+          grep -F '          ref:' "$workflow" | grep -F 'github.sha'
+          grep -F '          persist-credentials: false' "$workflow"
+          grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
+          grep -F 'uses: ./.github/actions/gate-reconciler' "$workflow"
+          grep -F 'Evaluate and publish hosted Gate action without merging' "$workflow"
+          grep -F 'Claim, refetch, merge, and record in one custodied process' "$workflow"
+          grep -F 'Reconcile one expired claim without a merge operation' "$workflow"
+          grep -F '          CGO_ENABLED: 0' "$workflow"
+          grep -F 'ENTRYPOINT ["/usr/local/bin/gate"]' "$dockerfile"
+          grep -F -- '--match-head-commit' cmd/gate/internal/executor/executor.go
+          grep -F 'PublishGateState' cmd/gate/executor.go
+          grep -Fx '    - executor' "$action"
+          grep -Fx '    - run' "$action"
+          grep -Fx '    - executor' "$reconciler"
+          grep -Fx '    - reconcile' "$reconciler"
+          grep -Fx '    - -claim' "$reconciler"
+          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 3
+          if grep -Eq '^[[:space:]]+- (run|request|execute)|--admin|^[[:space:]]+- -request' "$reconciler" "$reconciler_dockerfile"; then
+            echo "expired-claim reconciler must contain no merge operation or request input" >&2
+            exit 1
+          fi
+          if grep -Fq '/gh ' "$reconciler_dockerfile"; then
+            echo "expired-claim reconciler image must not contain GitHub CLI" >&2
+            exit 1
+          fi
+          if grep -Eq '^  (pull_request|pull_request_target|repository_dispatch):' "$workflow"; then
+            echo "gate executor must be workflow_dispatch-only" >&2
+            exit 1
+          fi
+          if grep -Fq 'github.event.pull_request.head' "$workflow"; then
+            echo "gate executor must never check out PR code" >&2
+            exit 1
+          fi
+          if grep -Eq 'executor (claim|verify|execute)|push origin .*gate-state' "$workflow"; then
+            echo "claim, state CAS, and merge must stay inside the Gate action" >&2
+            exit 1
+          fi
+          if grep -Eq '(statuses: write|--admin|--force)' "$workflow" "$action"; then
+            echo "gate executor must not publish status authority, use admin, or force refs" >&2
+            exit 1
+          fi
+          echo "gate executor is process-custodied and operator-armed after bootstrap ✓"

@@ -361,6 +361,96 @@ func TestTransitionReDispatchToNewChildGetsDistinctID(t *testing.T) {
 	}
 }
 
+func TestTransitionRepeatableClosureEventsUseContentIdentity(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	imp := callTransition(t, s, transitionParams{
+		Kind: string(dsc.KindRunImported), Actor: "ship:drv_1",
+		Facts: factsOf(dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "driver.md", GeneratedAt: "2026-07-28T00:00:00Z",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: "dss_a", DocPath: "docs/x.md"}},
+		}),
+	})
+	run := mustRun(t, imp)
+	recordTransition(t, s, transitionParams{
+		Run: run, Kind: string(dsc.KindStreamDispatched), Stream: "dss_a",
+		Actor: "ship:drv_1", Facts: factsOf(dsc.StreamDispatchedBody{}),
+	})
+	recordTransition(t, s, transitionParams{
+		Run: run, Kind: string(dsc.KindStreamAttempt), Stream: "dss_a",
+		Actor: "ship:drv_1", Facts: factsOf(dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/x.md", Terminal: true}),
+	})
+	recordTransition(t, s, transitionParams{
+		Run: run, Kind: string(dsc.KindStreamPROpened), Stream: "dss_a",
+		Actor: "ship:drv_1", Facts: factsOf(dsc.StreamPROpenedBody{PR: 1, URL: "https://x/1", HeadSHA: strings.Repeat("a", 40)}),
+	})
+
+	factsA := transitionParams{
+		Run: run, Kind: string(dsc.KindClosureFacts), Stream: "dss_a",
+		Actor: "ship:drv_1", Facts: factsOf(dsc.ClosureFactsBody{TaskRef: "tsk_1"}),
+	}
+	factsB := factsA
+	factsB.Facts = factsOf(dsc.ClosureFactsBody{Seat: "codex"})
+	firstFact := recordTransition(t, s, factsA)
+	retriedFact := recordTransition(t, s, factsA)
+	secondFact := recordTransition(t, s, factsB)
+	assertRetryAndDistinct(t, firstFact, retriedFact, secondFact, "closure_facts")
+
+	interventionA := transitionParams{
+		Run: run, Kind: string(dsc.KindIntervention), Stream: "dss_a",
+		Actor: "ship:drv_1", Facts: factsOf(dsc.InterventionBody{
+			Time: "2026-07-28T00:00:00Z", Kind: dsc.InterventionMechanismRepair,
+			ReasonCode: "auth-refresh", Actor: "human:michael",
+		}),
+	}
+	interventionB := interventionA
+	interventionB.Facts = factsOf(dsc.InterventionBody{
+		Time: "2026-07-28T00:01:00Z", Kind: dsc.InterventionGenuineJudgment,
+		ReasonCode: "reviewer-disagreement", Actor: "human:michael", QuestionRef: "esc_1",
+	})
+	firstIntervention := recordTransition(t, s, interventionA)
+	retriedIntervention := recordTransition(t, s, interventionA)
+	secondIntervention := recordTransition(t, s, interventionB)
+	assertRetryAndDistinct(t, firstIntervention, retriedIntervention, secondIntervention, "intervention")
+
+	events, err := driverstate.Events(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[dsc.Kind]int{}
+	for _, event := range events {
+		counts[event.Kind]++
+	}
+	if counts[dsc.KindClosureFacts] != 2 || counts[dsc.KindIntervention] != 2 {
+		t.Fatalf("repeatable event counts = closure_facts:%d intervention:%d, want 2/2",
+			counts[dsc.KindClosureFacts], counts[dsc.KindIntervention])
+	}
+}
+
+func recordTransition(t *testing.T, s *Server, params transitionParams) driverstate.Event {
+	t.Helper()
+	result := callTransition(t, s, params)
+	if result.IsError {
+		t.Fatalf("%s transition errored: %s", params.Kind, resultText(t, result))
+	}
+	var event driverstate.Event
+	if err := json.Unmarshal([]byte(resultText(t, result)), &event); err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
+func assertRetryAndDistinct(t *testing.T, first, retry, distinct driverstate.Event, kind string) {
+	t.Helper()
+	if first.ID != retry.ID || first.Hash != retry.Hash {
+		t.Fatalf("%s exact retry changed identity: first=%s/%s retry=%s/%s",
+			kind, first.ID, first.Hash, retry.ID, retry.Hash)
+	}
+	if first.ID == distinct.ID {
+		t.Fatalf("%s distinct records collided at %s", kind, first.ID)
+	}
+}
+
 // TestRollupAndParentFilterThroughVerbs builds a parent + one delegated child
 // through driver_transition and asserts driver_rollup joins them and
 // driver_runs{parent} lists the child.

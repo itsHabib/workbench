@@ -24,6 +24,11 @@ driverstate verify --run <id> [--json]
 - `--json` emits the reduced contract types verbatim, so CLI and MCP outputs
   carry the same shape and fields — the CLI indents for humans, the MCP server
   emits compact JSON, so they are not byte-for-byte identical.
+- `closure_facts` and `intervention` are additive `pr_open` events.
+  `state --json` reconstructs their closure receipt with the existing PR,
+  review-cycle, and merge facts; `render` makes missing or contradictory joins
+  visible. See
+  `docs/features/agentic-workbench-closure/closure-receipts.md`.
 
 ## State root
 

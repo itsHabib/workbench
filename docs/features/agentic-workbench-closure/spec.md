@@ -6,6 +6,13 @@
 **Revision:** v1 — adds the cross-cutting property/model/fuzz testing strategy and names the authorization invariants each contract must preserve.
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md), [`FOLLOWUPS.md`](../../../FOLLOWUPS.md), `pers/docs/kickoff-post-c10-gpt56-2026-07-10.md`, `pers/workbench-redesign/DESIGN.md`, `pers/workbench-redesign/VERDICT.md`, `pers/workbench-redesign/RED-TEAM.md`, `pers/writer/drafts/embrace-the-slop.md`, `pers/writer/drafts/rebuilding-the-workbench.md`, `pers/ship/docs/features/qe-sdet/phases/03-property-based-state-machine.md`, `pers/dossier/docs/features/advanced-testing/spec.md`.
 
+> **Implementation note (2026-07-27):** Ship's exact-head
+> `ReviewFindingsV1` validation and at-most-once address consumption have
+> landed. Workbench's smallest Codex producer slice and the current-main audit
+> are recorded in [`codex-review-findings.md`](codex-review-findings.md).
+> Phase and Gate B descriptions below remain program acceptance criteria, not
+> current implementation status.
+
 > **Reviewers — amendment focus:** (1) whether D13's properties describe authorization semantics rather than accidental output formatting, (2) whether the Gate reducer's multiple-judgment ambiguity must be resolved before permutation invariance is enforced, and (3) whether the phase-local property gates in §9/§11 are strong enough without creating a testing big-bang.
 
 ---

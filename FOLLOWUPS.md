@@ -2,6 +2,24 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## AI gateway egress
+
+- **Construction-time credential read.** Gate reads `ANTHROPIC_API_KEY` once
+  when it constructs the cloud model. That matches gate's short-lived CLI shape,
+  but a future long-running consumer would keep a stale gateway token until
+  restart. If that consumer appears, replace the stored key with an injected
+  `KeySource` function; do not put a token-minting subprocess in gate's request
+  path.
+- **Cursor runtime has no gateway route.** The Rooms `agent-cursor` profile
+  carries `CURSOR_API_KEY`, but Cursor's runtime exposes no base-URL override.
+  In an environment where the AI gateway is the only sanctioned egress, that
+  runtime is unavailable rather than misconfigured. Retirement is a separate,
+  lifecycle-compatible change; do not deepen the dependency meanwhile.
+- **Local escalation target.** `local.Ask` already accepts an injected
+  `Escalate` function, but no caller wires gate's cloud path into it. Consider
+  that composition only when a real caller needs routine low-confidence
+  escalation; keep `local/` on Ollama and preserve its leaf-package boundary.
+
 ## `local` CLI name shadows the bash/zsh builtin
 
 At a top-level bash/zsh prompt, `local` resolves to the shell builtin before

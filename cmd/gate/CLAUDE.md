@@ -30,9 +30,28 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, golangci-lint, `go test
 Known local quirk: `observe.TestExplainGolden` fails on a Windows checkout
 (CRLF golden, no `.gitattributes`); it passes on Linux CI.
 
+## Cloud model egress
+
+`-model-backend cloud` uses the Anthropic-native Messages protocol. It honors
+the standard provider variables and needs no gateway-specific configuration:
+
+```bash
+export ANTHROPIC_API_KEY=<provider-or-gateway-token>
+export ANTHROPIC_BASE_URL=<gateway-origin-and-provider-prefix> # optional
+export GATE_CLOUD_MODEL=<served-model-id>                       # required with a base URL
+```
+
+With `ANTHROPIC_BASE_URL` unset, gate uses the direct provider endpoint and its
+existing default model. With it set, gate preserves the URL's path prefix,
+appends `/v1/messages`, and requires `GATE_CLOUD_MODEL`; the gateway's served
+catalogue may not contain the direct-provider default. Token acquisition is an
+operator action. Gate reads all three values once at process construction and
+never records the token or resolved endpoint in verdict artifacts or errors.
+
 Constraints that are design decisions, not omissions:
 
-- **State is the only channel.** Verifiers, the judge, `explain`, and `audit`
+- **State is the only channel.** Verifiers, the provider-neutral judge,
+  `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path
   conventions.
 - **The ladder law lives in code.** Local producers can never block, judgment
@@ -42,6 +61,28 @@ Constraints that are design decisions, not omissions:
   Verdict/Producer/Subject/Finding are aliases of the shared contract types;
   the reducer, the ladder law, and all tier logic stay here — decisions never
   live in the contract.
-- **State and keys live outside the repo.** The migration was code-only: a
-  running gate's `-state` and `-key` dirs are operational data on the
-  operator's machine, never files in this tree.
+- **Panel completeness is exact-head evidence.** `ReviewPanelV1` records the
+  repository-owned expected set and completed/pending/missing/unknown state.
+  Its code verifier parks every incomplete state; findings remain a separate
+  review-consolidation verdict. Provider prose and sticky issue comments are
+  never authority: without a formal exact-head review or shared head-bound
+  artifact the reviewer remains incomplete and Gate parks for provider-neutral
+  judgment. The narrow authenticated Codex reviewed-commit sentinel is the
+  existing structured exception.
+- **State and keys live outside the source tree.** A running gate's `-state`
+  and `-key` dirs are operational data, never files in this source tree. The
+  hosted executor uses a fresh Workbench-only ledger, never the machine-global
+  Gate ledger. Generic Actions has no `gate-state` write authority; the Gate
+  App is the sole state writer. Signing keys remain protected-environment
+  secrets, and the operator-owned `GATE_EXECUTOR_ARMED` variable is the final
+  release switch.
+- **Execution authority is a durable PR claim, not status.** The protected
+  executor contract verifies run-specific independent approval, exact
+  repo/PR/head/base, newest action, and the canonical commit-pinned merge
+  intent before Gate performs the exact-head GitHub API call.
+  The one-App custody/order amendment, one-time exact-action bootstrap, and
+  claim-only expired reconciliation path are implemented pending exact-head
+  review, operator bootstrap, and live canaries. The reconciler has no merge
+  operation, although its one-App
+  `contents: write` token remains technically merge-capable. Neither path
+  posts reusable green status or adds `--admin`.

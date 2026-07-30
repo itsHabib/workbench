@@ -73,6 +73,47 @@ func writeStreamBlock(w io.Writer, stream string, rec dsc.StreamRecord) {
 	if rec.MergeCommit != "" {
 		fmt.Fprintf(w, "    merge %s\n", shortCommit(rec.MergeCommit))
 	}
+	if rec.Closure != nil {
+		writeClosureBlock(w, *rec.Closure)
+	}
+}
+
+func writeClosureBlock(w io.Writer, receipt dsc.ClosureReceipt) {
+	status := "incomplete"
+	if receipt.Complete {
+		status = "complete"
+	}
+	fmt.Fprintf(w, "    closure %s: %s\n", status, receipt.WorkflowRef)
+	if receipt.TaskRef != "" {
+		fmt.Fprintf(w, "      task %s\n", receipt.TaskRef)
+	}
+	if receipt.OpeningPRRef != "" {
+		fmt.Fprintf(w, "      opened %s\n", receipt.OpeningPRRef)
+	}
+	if receipt.PRRef != "" {
+		fmt.Fprintf(w, "      pr %s\n", receipt.PRRef)
+	}
+	if receipt.ShipRunRef != "" {
+		fmt.Fprintf(w, "      ship %s\n", receipt.ShipRunRef)
+	}
+	if receipt.ReviewArtifactID != "" {
+		fmt.Fprintf(w, "      review %s @ %s\n", receipt.ReviewArtifactID, shortCommit(receipt.ReviewHeadSHA))
+	}
+	if receipt.FinalReviewedHeadSHA != "" {
+		fmt.Fprintf(w, "      final review @ %s\n", shortCommit(receipt.FinalReviewedHeadSHA))
+	}
+	if receipt.GateRunRef != "" {
+		fmt.Fprintf(w, "      gate %s @ %s\n", receipt.GateRunRef, shortCommit(receipt.GateHeadSHA))
+	}
+	if receipt.MergeHeadSHA != "" {
+		fmt.Fprintf(w, "      merge head %s\n", shortCommit(receipt.MergeHeadSHA))
+	}
+	if len(receipt.Missing) > 0 {
+		fmt.Fprintf(w, "      missing: %s\n", strings.Join(receipt.Missing, ", "))
+	}
+	if len(receipt.Contradictions) > 0 {
+		fmt.Fprintf(w, "      contradictions: %s\n", strings.Join(receipt.Contradictions, ", "))
+	}
 }
 
 // formatAttemptLine renders one attempt's facts after a single "attempt N:"
@@ -129,9 +170,21 @@ func eventFact(e driverstate.Event) string {
 		return formatMergeFact(e.Body)
 	case dsc.KindReviewCycle:
 		return formatReviewCycleFact(e.Body)
+	case dsc.KindClosureFacts:
+		return "closure facts"
+	case dsc.KindIntervention:
+		return formatInterventionFact(e.Body)
 	default:
 		return ""
 	}
+}
+
+func formatInterventionFact(body json.RawMessage) string {
+	var intervention dsc.InterventionBody
+	if err := json.Unmarshal(body, &intervention); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("kind=%s reason=%s", intervention.Kind, intervention.ReasonCode)
 }
 
 func formatAttemptFact(body json.RawMessage) string {

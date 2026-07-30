@@ -1,0 +1,177 @@
+name: gate executor
+
+# Repository variable GATE_EXECUTOR_ARMED is the final operator-owned release
+# switch. The protected environment supplies Workbench-only signing keys and
+# the repository-scoped App key. This workflow never checks out or executes
+# PR/fork code.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Execute an approved request or close one expired claim
+        required: true
+        type: choice
+        options:
+          - prepare
+          - execute
+          - reconcile
+      preparation:
+        description: Complete GatePreparationRequestV1 JSON
+        required: false
+        type: string
+      request:
+        description: Complete GateAuthorizationRequestV1 JSON
+        required: false
+        type: string
+      claim:
+        description: Expired gxc_ claim identity (reconcile only)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: gate-executor-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    if: ${{ vars.GATE_EXECUTOR_ARMED == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: gate-authorization
+    env:
+      KEY_DIR: .gate-executor-keys
+      STATE_DIR: hosted-state/state
+    steps:
+      - name: Checkout dispatched trusted commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Checkout hosted Gate state
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: gate-state
+          path: hosted-state
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build trusted Gate action
+        env:
+          CGO_ENABLED: 0
+        run: |
+          set -euo pipefail
+          go build -trimpath -o .github/actions/gate-executor/gate ./cmd/gate
+          go build -trimpath -o .github/actions/gate-executor/triage-floor ./cmd/triage/triage-floor
+          cp .github/actions/gate-executor/gate .github/actions/gate-reconciler/gate
+
+      - name: Provision anchored-state keys
+        env:
+          GRANT_KEY_B64: ${{ secrets.GATE_GRANT_KEY_B64 }}
+          ANCHOR_KEY_B64: ${{ secrets.GATE_ANCHOR_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${KEY_DIR}"
+          printf '%s' "${GRANT_KEY_B64}" | base64 --decode >"${KEY_DIR}/grant.key"
+          printf '%s' "${ANCHOR_KEY_B64}" | base64 --decode >"${KEY_DIR}/anchor.key"
+          test "$(wc -c <"${KEY_DIR}/grant.key")" -ge 32
+          test "$(wc -c <"${KEY_DIR}/anchor.key")" -ge 32
+          chmod 600 "${KEY_DIR}/grant.key" "${KEY_DIR}/anchor.key"
+
+      - name: Read hosted state tip
+        id: state
+        run: echo "tip=$(git -C hosted-state rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+
+      - name: Materialize approved request
+        if: ${{ inputs.operation == 'execute' }}
+        env:
+          REQUEST_DOCUMENT: ${{ inputs.request }}
+        run: |
+          set -euo pipefail
+          mkdir -p executor-input
+          printf '%s' "${REQUEST_DOCUMENT}" >executor-input/request.json
+          chmod 600 executor-input/request.json
+
+      - name: Materialize approved preparation
+        if: ${{ inputs.operation == 'prepare' }}
+        env:
+          PREPARATION_DOCUMENT: ${{ inputs.preparation }}
+        run: |
+          set -euo pipefail
+          mkdir -p executor-input
+          printf '%s' "${PREPARATION_DOCUMENT}" >executor-input/preparation.json
+          chmod 600 executor-input/preparation.json
+
+      - name: Evaluate and publish hosted Gate action without merging
+        if: ${{ inputs.operation == 'prepare' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+          INPUT_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          .github/actions/gate-executor/gate executor prepare \
+            -request executor-input/preparation.json \
+            -state-tip "${{ steps.state.outputs.tip }}" \
+            -workflow-run-id "${{ github.run_id }}" \
+            -workflow-actor-id "${{ github.actor_id }}" \
+            -workflow-triggering-actor "${{ github.triggering_actor }}" \
+            -app-id "${{ vars.GATE_APP_ID }}" \
+            -installation-id "${{ vars.GATE_APP_INSTALLATION_ID }}" \
+            -state "${STATE_DIR}" -key "${KEY_DIR}" \
+            -floor .github/actions/gate-executor/triage-floor \
+            -api-url "${{ github.api_url }}"
+
+      - name: Claim, refetch, merge, and record in one custodied process
+        if: ${{ inputs.operation == 'execute' }}
+        uses: ./.github/actions/gate-executor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+        with:
+          request: executor-input/request.json
+          state-tip: ${{ steps.state.outputs.tip }}
+          workflow-run-id: ${{ github.run_id }}
+          workflow-actor-id: ${{ github.actor_id }}
+          workflow-triggering-actor: ${{ github.triggering_actor }}
+          app-id: ${{ vars.GATE_APP_ID }}
+          installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
+          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+          state-dir: ${{ env.STATE_DIR }}
+          key-dir: ${{ env.KEY_DIR }}
+          api-url: ${{ github.api_url }}
+
+      - name: Reconcile one expired claim without a merge operation
+        if: ${{ inputs.operation == 'reconcile' }}
+        uses: ./.github/actions/gate-reconciler
+        env:
+          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+        with:
+          claim: ${{ inputs.claim }}
+          state-tip: ${{ steps.state.outputs.tip }}
+          app-id: ${{ vars.GATE_APP_ID }}
+          installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
+          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+          state-dir: ${{ env.STATE_DIR }}
+          key-dir: ${{ env.KEY_DIR }}
+          api-url: ${{ github.api_url }}
+
+      - name: Execution summary
+        if: always()
+        run: |
+          {
+            echo "## Gate executor"
+            echo "- workflow run: \`${GITHUB_RUN_ID}\`"
+            echo "- state branch: \`gate-state\`"
+            echo "- operation: \`${{ inputs.operation }}\`"
+            echo "- the App token remained inside the Gate action"
+          } >>"${GITHUB_STEP_SUMMARY}"

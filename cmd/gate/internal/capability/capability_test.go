@@ -1,10 +1,15 @@
 package capability
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +57,43 @@ func TestGrantScope(t *testing.T) {
 	}
 }
 
+func TestBoundGrantRequiresExactAuthorizationSubject(t *testing.T) {
+	st, key := setup(t)
+	now := fixedClock(time.Unix(1000, 0))
+	head := strings.Repeat("a", 40)
+	authorizationID := "gau_" + strings.Repeat("b", 64)
+	a, err := MintBound(
+		st, key, "o/r", "merge", "T1", 1, "gh:approver via environment:1234",
+		20*time.Minute, head, 42, authorizationID, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CheckBound(st, key, a.ID, "o/r", "merge", head, 42, authorizationID, now); err != nil {
+		t.Fatalf("exact subject refused: %v", err)
+	}
+	if _, err := Check(st, key, a.ID, "o/r", "merge", now); !errors.Is(err, ErrHeadMismatch) {
+		t.Fatalf("unscoped check = %v, want head mismatch", err)
+	}
+	if _, err := CheckBound(st, key, a.ID, "o/r", "merge", strings.Repeat("c", 40), 42, authorizationID, now); !errors.Is(err, ErrHeadMismatch) {
+		t.Fatalf("wrong head = %v, want head mismatch", err)
+	}
+	if _, err := CheckBound(st, key, a.ID, "o/r", "merge", head, 43, authorizationID, now); !errors.Is(err, ErrSubject) {
+		t.Fatalf("wrong PR = %v, want subject mismatch", err)
+	}
+}
+
+func TestMintBoundRejectsMalformedSubject(t *testing.T) {
+	st, key := setup(t)
+	now := fixedClock(time.Unix(1000, 0))
+	if _, err := MintBound(st, key, "o/r", "merge", "T1", 1, "test", time.Minute, "short", 1, "gau_"+strings.Repeat("b", 64), now); !errors.Is(err, ErrBadHead) {
+		t.Fatalf("bad head = %v, want ErrBadHead", err)
+	}
+	if _, err := MintBound(st, key, "o/r", "merge", "T1", 1, "test", time.Minute, strings.Repeat("a", 40), 0, "gau_"+strings.Repeat("b", 64), now); !errors.Is(err, ErrBadSubject) {
+		t.Fatalf("bad PR = %v, want ErrBadSubject", err)
+	}
+}
+
 func TestCheckRefusesToMintKey(t *testing.T) {
 	st, key := setup(t)
 	now := fixedClock(time.Unix(1000, 0))
@@ -68,6 +110,20 @@ func TestCheckRefusesToMintKey(t *testing.T) {
 	}
 	if _, statErr := os.Stat(key); !os.IsNotExist(statErr) {
 		t.Fatal("Check silently recreated the signing key")
+	}
+}
+
+func TestConfiguredEmptyKeyRefusesMinting(t *testing.T) {
+	st, key := setup(t)
+	if err := os.WriteFile(key, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Mint(
+		st, key, "o/r", "merge", "T1", 1, "test", time.Hour,
+		fixedClock(time.Unix(1000, 0)),
+	)
+	if !errors.Is(err, ErrKeyInvalid) {
+		t.Fatalf("want ErrKeyInvalid, got %v", err)
 	}
 }
 
@@ -98,7 +154,7 @@ func TestMintRejectsUnknownCeiling(t *testing.T) {
 // HMAC pre-image: flipping it after signing must change the signature, or the
 // cap would be silently widenable by anyone who can write state.
 func TestSignatureCoversMaxCycles(t *testing.T) {
-	key := []byte("test-key")
+	key := []byte(strings.Repeat("k", 32))
 	g := Grant{Repo: "o/r", Action: "merge", MaxTier: "T1", MaxCycles: 3,
 		ExpiresAt: time.Unix(2000, 0), MintedBy: "test"}
 	sig := sign(key, g)
@@ -106,6 +162,47 @@ func TestSignatureCoversMaxCycles(t *testing.T) {
 	if sign(key, g) == sig {
 		t.Fatal("widening MaxCycles did not change the signature — the ceiling is forgeable")
 	}
+}
+
+func TestUnboundGrantSignatureRemainsBackwardCompatible(t *testing.T) {
+	key := []byte("test-key")
+	g := Grant{Repo: "o/r", Action: "merge", MaxTier: "T1", MaxCycles: 3,
+		ExpiresAt: time.Unix(2000, 0), MintedBy: "test"}
+	if got, want := sign(key, g), legacySign(key, g); got != want {
+		t.Fatalf("unbound signature changed: got %s want %s", got, want)
+	}
+}
+
+func TestCheckBoundRefusesPartialBinding(t *testing.T) {
+	st, keyPath := setup(t)
+	key := []byte(strings.Repeat("k", 32))
+	if err := os.WriteFile(keyPath, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := Grant{
+		Repo: "o/r", Action: "merge", MaxTier: "T3", MaxCycles: 1,
+		ExpiresAt: time.Unix(2000, 0), BoundHead: strings.Repeat("a", 40),
+		MintedBy: "test",
+	}
+	g.Sig = sign(key, g)
+	artifact, err := st.Append(state.KindGrant, "run_mint", nil, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = CheckBound(
+		st, keyPath, artifact.ID, "o/r", "merge", g.BoundHead, 1,
+		"gau_"+strings.Repeat("b", 64), fixedClock(time.Unix(1000, 0)),
+	)
+	if !errors.Is(err, ErrBadSubject) {
+		t.Fatalf("want ErrBadSubject, got %v", err)
+	}
+}
+
+func legacySign(key []byte, g Grant) string {
+	mac := hmac.New(sha256.New, key)
+	fmt.Fprint(mac, g.Repo, "|", g.Action, "|", g.MaxTier, "|", g.MaxCycles,
+		"|", g.ExpiresAt.Format(time.RFC3339Nano), "|", g.MintedBy)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // TestCheckRefusesForgedCycleCeiling is the end-to-end form: a grant body with
