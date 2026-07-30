@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/gateauthorization/schema/gate-execution-claim-v1.json",
+  "title": "GateExecutionClaimV1",
+  "type": "object",
+  "required": [
+    "schema_version", "claim_id", "execution_id", "authorization_id",
+    "authorization", "execution_grant_id", "subject", "gate", "merge_argv",
+    "approval_receipt_digest", "claimed_at", "expires_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "claim_id": { "type": "string", "pattern": "^gxc_[0-9a-f]{64}$" },
+    "execution_id": { "type": "string", "pattern": "^gxe_[0-9a-f]{64}$" },
+    "authorization_id": { "type": "string", "pattern": "^gau_[0-9a-f]{64}$" },
+    "authorization": { "$ref": "gate-authorization-v1.json" },
+    "execution_grant_id": { "type": "string", "pattern": "^grt_[0-9a-f]{16}$" },
+    "subject": {
+      "$ref": "gate-authorization-request-v1.json#/$defs/subject"
+    },
+    "gate": {
+      "$ref": "gate-authorization-request-v1.json#/$defs/gate"
+    },
+    "merge_argv": {
+      "$ref": "gate-authorization-request-v1.json#/$defs/merge_argv"
+    },
+    "approval_receipt_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "claimed_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" }
+  }
+}

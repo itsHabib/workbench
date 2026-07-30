@@ -217,8 +217,9 @@ and the operator, via the grant, owns that call.
 
 **D3 — (`-live`) gate's merge uses `--match-head-commit`, never `--admin`.** Ship's
 `land` merges with `gh pr merge --squash --delete-branch [--admin]` and **no SHA
-pin**; `gate`'s sanctioned command is `--squash --delete-branch
---match-head-commit <verified SHA>` and **no `--admin`**. These encode opposite
+pin**; `gate`'s sanctioned intent is `--squash
+--match-head-commit <verified SHA>` and **no `--admin`**. Branch cleanup is a
+separate ordinary-maintenance action. These encode opposite
 philosophies, and gate's is the one going live:
 
 - `--match-head-commit` lands *only the exact code gate verified*; a push after
@@ -381,7 +382,8 @@ replacing the skill's `gh pr merge --admin`, then `driver land --record-only`
      carries `state` and `mergedAt`; if the PR is already `MERGED`, gate records
      `already_merged` and exits 0 **without** calling `gh pr merge` (idempotent
      re-invocation),
-   - else runs `gh pr merge N -R R --squash --delete-branch --match-head-commit <verified SHA>`,
+   - else executes the canonical
+     `gh pr merge N -R R --squash --match-head-commit <verified SHA>` intent,
      reads back the squash-merge commit SHA, records a `merged` action artifact
      (parents: the reducer verdict + the grant), and **emits that SHA** in its
      JSON result. Exits 0.
