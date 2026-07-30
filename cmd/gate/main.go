@@ -159,6 +159,8 @@ func usage() {
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
+  executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
   executor bootstrap -state DIR -key DIR -state-tip SHA -action act_x -repo R -pr N -head SHA -app-id N -installation-id N
   executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
@@ -440,6 +442,21 @@ func cmdGate(args []string) error {
 // runGate is one thin vertical pass: capability, evidence, verification,
 // reduction, outcome.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
+	return runGateWithSynthesis(
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true,
+	)
+}
+
+func runGateWithSynthesis(
+	e env,
+	repo string,
+	pr int,
+	grantID string,
+	live bool,
+	modelBackend string,
+	reviewsOptional bool,
+	synthesize bool,
+) (gateResult, int, error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
 	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
@@ -507,8 +524,11 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 
 	// A content escalation carries a synthesized brief; lazy — the model call fires only if the run actually parks, and only over what it already recorded.
 	title := verify.PRTitle(e.st, bundle.View)
-	synth := func(question string) (verify.Brief, error) {
-		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+	var synth briefFn
+	if synthesize {
+		synth = func(question string) (verify.Brief, error) {
+			return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
 }

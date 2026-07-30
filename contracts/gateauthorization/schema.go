@@ -12,6 +12,11 @@ var AuthorizationSchema []byte
 //go:embed schema/gate-authorization-request-v1.json
 var AuthorizationRequestSchema []byte
 
+// PreparationRequestSchema is the protected hosted Gate preparation request.
+//
+//go:embed schema/gate-preparation-request-v1.json
+var PreparationRequestSchema []byte
+
 // ExecutionClaimSchema is the portable GateExecutionClaimV1 JSON Schema.
 //
 //go:embed schema/gate-execution-claim-v1.json

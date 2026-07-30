@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	gateexecutor "github.com/itsHabib/workbench/cmd/gate/internal/executor"
+	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
@@ -32,6 +34,89 @@ func TestWriteExecutorArtifactIsIdempotentButRefusesReplacement(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("artifact permissions too broad: %o", info.Mode().Perm())
+	}
+}
+
+func TestPreparationConsumed(t *testing.T) {
+	approval := gateauthorization.PreparationApproval{
+		PreparationID: "gpr_" + strings.Repeat("a", 64),
+	}
+	body, err := json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := state.AuditResult{
+		OK: true,
+		All: []state.Artifact{{
+			Kind: state.KindGatePreparation, Body: body,
+		}},
+	}
+	if !preparationConsumed(audit, approval.PreparationID) {
+		t.Fatal("existing preparation was not consumed")
+	}
+	if preparationConsumed(audit, "gpr_"+strings.Repeat("b", 64)) {
+		t.Fatal("different preparation reported consumed")
+	}
+}
+
+func TestValidatePreparedOutcome(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision string
+		code     int
+		wantErr  bool
+	}{
+		{name: "pass action", decision: "pass", code: codeMerge},
+		{name: "deterministic block wins", decision: "pass", code: codeBlocked},
+		{name: "approved block", decision: "block", code: codeBlocked},
+		{name: "block cannot emit action", decision: "block", code: codeMerge, wantErr: true},
+		{name: "park cannot publish", decision: "pass", code: codeParked, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validatePreparedOutcome(test.decision, test.code, "outcome")
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateAppendOnlyPromotion(t *testing.T) {
+	remote := gateexecutor.StateFiles{Log: []byte("one\n"), Anchor: []byte("old")}
+	tests := []struct {
+		name      string
+		candidate gateexecutor.StateFiles
+		wantErr   bool
+	}{
+		{
+			name: "strict extension",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("one\ntwo\n"), Anchor: []byte("new"),
+			},
+		},
+		{
+			name: "same log",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("one\n"), Anchor: []byte("new"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "replacement",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("two\n"), Anchor: []byte("new"),
+			},
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateAppendOnlyPromotion(test.candidate, remote)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
 	}
 }
 

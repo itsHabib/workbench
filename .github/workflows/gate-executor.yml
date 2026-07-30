@@ -12,8 +12,13 @@ on:
         required: true
         type: choice
         options:
+          - prepare
           - execute
           - reconcile
+      preparation:
+        description: Complete GatePreparationRequestV1 JSON
+        required: false
+        type: string
       request:
         description: Complete GateAuthorizationRequestV1 JSON
         required: false
@@ -66,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           go build -trimpath -o .github/actions/gate-executor/gate ./cmd/gate
+          go build -trimpath -o .github/actions/gate-executor/triage-floor ./cmd/triage/triage-floor
           cp .github/actions/gate-executor/gate .github/actions/gate-reconciler/gate
 
       - name: Provision anchored-state keys
@@ -94,6 +100,36 @@ jobs:
           mkdir -p executor-input
           printf '%s' "${REQUEST_DOCUMENT}" >executor-input/request.json
           chmod 600 executor-input/request.json
+
+      - name: Materialize approved preparation
+        if: ${{ inputs.operation == 'prepare' }}
+        env:
+          PREPARATION_DOCUMENT: ${{ inputs.preparation }}
+        run: |
+          set -euo pipefail
+          mkdir -p executor-input
+          printf '%s' "${PREPARATION_DOCUMENT}" >executor-input/preparation.json
+          chmod 600 executor-input/preparation.json
+
+      - name: Evaluate and publish hosted Gate action without merging
+        if: ${{ inputs.operation == 'prepare' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+          INPUT_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          .github/actions/gate-executor/gate executor prepare \
+            -request executor-input/preparation.json \
+            -state-tip "${{ steps.state.outputs.tip }}" \
+            -workflow-run-id "${{ github.run_id }}" \
+            -workflow-actor-id "${{ github.actor_id }}" \
+            -workflow-triggering-actor "${{ github.triggering_actor }}" \
+            -app-id "${{ vars.GATE_APP_ID }}" \
+            -installation-id "${{ vars.GATE_APP_INSTALLATION_ID }}" \
+            -state "${STATE_DIR}" -key "${KEY_DIR}" \
+            -floor .github/actions/gate-executor/triage-floor \
+            -api-url "${{ github.api_url }}"
 
       - name: Claim, refetch, merge, and record in one custodied process
         if: ${{ inputs.operation == 'execute' }}

@@ -30,8 +30,11 @@ exact merge inside one Gate action. It uses a fresh Workbench-only ledger and
 remains unarmed until exact-head review, operator bootstrap, live canaries, and
 the operator-owned `GATE_EXECUTOR_ARMED` release switch.
 
-Provider-neutral exact-head passes can be presented for independent approval
-with `gate executor request`. The default-branch executor verifies its
+Post-bootstrap decisions first use `gate executor prepare-request`. The
+protected preparation job evaluates the exact head against the hosted ledger
+and lets the App CAS-publish the audited action without calling the merge
+endpoint. Exact-head passes can then be presented for a separate independent
+approval with `gate executor request`. The default-branch executor verifies its
 own protected-environment approval history, creates the App token only after
 preflight, CAS-publishes and refetches one permanent claim, executes only the
 stored command, then CAS-publishes one result. It never promotes commit status.
@@ -50,6 +53,7 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
+./gate.exe executor prepare-request -repo owner/repo -pr 181 -head <sha> -grant grt_... -decision pass -why "..." -replay evt_... -out preparation.json
 ./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
 ./gate.exe executor bootstrap -state DIR -key DIR -state-tip <sha> -action act_... -repo owner/repo -pr 181 -head <sha> -app-id N -installation-id N
 ./gate.exe explain -run run_...                              # decision chain from state alone

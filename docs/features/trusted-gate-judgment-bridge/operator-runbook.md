@@ -1,9 +1,9 @@
 # Gate executor operator runbook
 
 Status: repository activation in progress. The App, protected environment,
-layered rulesets, and `gate-state` ref exist. The executor remains unarmed:
-the Workbench-only signing secrets are absent and the repository variable
-`GATE_EXECUTOR_ARMED` is not `true`.
+layered rulesets, `gate-state` ref, replacement App key, and Workbench-only
+signing secrets exist. The executor is deliberately disarmed while the
+post-bootstrap preparation seam is reviewed and canaried.
 
 This runbook deliberately uses a fresh Workbench-only Gate ledger. It never
 copies, uploads, rewrites, or re-anchors the operator's machine-global Gate
@@ -176,6 +176,37 @@ gh variable set GATE_EXECUTOR_ARMED -R itsHabib/workbench --body true
 Set it only after the bootstrap head is on `main`, the replacement App key and
 dedicated signing secrets are present, and all ruleset/environment checks in
 section 2 still pass.
+
+### Prepare every post-bootstrap action
+
+Never reuse bootstrap. Generate an exact preparation request using an
+operator-minted grant already present in hosted state:
+
+```powershell
+$replay = "evt_" + [Convert]::ToHexString(
+  [Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
+).ToLowerInvariant()
+$preparation = Join-Path $env:TEMP "gate-preparation.json"
+
+gate executor prepare-request `
+  -repo itsHabib/workbench -pr <PR> -head <EXACT_HEAD_SHA> `
+  -grant <GRANT> -decision pass -why "<EXACT_JUDGMENT>" `
+  -replay $replay -out $preparation
+
+@{
+  operation = "prepare"
+  preparation = Get-Content -Raw $preparation
+} | ConvertTo-Json -Compress |
+  gh workflow run gate-executor.yml -R itsHabib/workbench --ref main --json
+```
+
+The command prints the exact approval comment. The independent reviewer pastes
+that complete comment into the protected Environment approval. A successful
+preparation publishes the resulting action but cannot merge.
+
+Then generate `gate executor request` from the published action and dispatch
+`operation=execute`. This is a second protected approval: preparation authority
+and merge authority are deliberately separate.
 
 The first live canary must begin with a red required `gate` check and prove:
 
