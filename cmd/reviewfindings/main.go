@@ -25,6 +25,7 @@ import (
 
 const (
 	exitOK      = 0
+	exitParked  = 2
 	exitRefused = 3
 	exitError   = 4
 )
@@ -101,8 +102,11 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, runner commandRunner, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "address" {
+		return runAddress(ctx, args[1:], runner, stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "github" {
-		fmt.Fprintln(stderr, "usage: reviewfindings github -repo owner/repo -pr N -head SHA -requested bots -completed bots -catalog-revision REV -out path")
+		fmt.Fprintln(stderr, "usage: reviewfindings github ... | reviewfindings address accept|claim|started|completed|resume ...")
 		return exitError
 	}
 	opts, err := parseOptions(args[1:])

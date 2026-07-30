@@ -65,23 +65,26 @@ type Kind string
 // The v0 event kinds. run_imported and run_finished are run-scoped (Stream
 // empty); every other kind is stream-scoped.
 const (
-	KindRunImported      Kind = "run_imported"
-	KindStreamDispatched Kind = "stream_dispatched"
-	KindStreamAttempt    Kind = "stream_attempt"
-	KindReviewCycle      Kind = "review_cycle"
-	KindClosureFacts     Kind = "closure_facts"
-	KindIntervention     Kind = "intervention"
-	KindStreamPROpened   Kind = "stream_pr_opened"
-	KindStreamLanded     Kind = "stream_landed"
-	KindStreamFailed     Kind = "stream_failed"
-	KindStreamSkipped    Kind = "stream_skipped"
-	KindStreamMerged     Kind = "stream_merged"
-	KindRunFinished      Kind = "run_finished"
+	KindRunImported            Kind = "run_imported"
+	KindStreamDispatched       Kind = "stream_dispatched"
+	KindStreamAttempt          Kind = "stream_attempt"
+	KindReviewCycle            Kind = "review_cycle"
+	KindReviewAddressPrepared  Kind = "review_address_prepared"
+	KindReviewAddressClaimed   Kind = "review_address_claimed"
+	KindReviewAddressStarted   Kind = "review_address_started"
+	KindReviewAddressCompleted Kind = "review_address_completed"
+	KindClosureFacts           Kind = "closure_facts"
+	KindIntervention           Kind = "intervention"
+	KindStreamPROpened         Kind = "stream_pr_opened"
+	KindStreamLanded           Kind = "stream_landed"
+	KindStreamFailed           Kind = "stream_failed"
+	KindStreamSkipped          Kind = "stream_skipped"
+	KindStreamMerged           Kind = "stream_merged"
+	KindRunFinished            Kind = "run_finished"
 )
 
-// AllKinds is the known-v0 kind set, in schema-enum order. Enum↔const parity is
-// conformance-tested against the embedded schema.
-func AllKinds() []Kind {
+// LegacyKinds is the v0.1 kind set, in schema-enum order.
+func LegacyKinds() []Kind {
 	return []Kind{
 		KindRunImported,
 		KindStreamDispatched,
@@ -98,16 +101,33 @@ func AllKinds() []Kind {
 	}
 }
 
+// AddressKinds is the v0.2-only authority-bearing address lifecycle.
+func AddressKinds() []Kind {
+	return []Kind{
+		KindReviewAddressPrepared,
+		KindReviewAddressClaimed,
+		KindReviewAddressStarted,
+		KindReviewAddressCompleted,
+	}
+}
+
+// AllKinds is every kind the mixed v0.1/v0.2 reader knows.
+func AllKinds() []Kind {
+	kinds := append([]Kind(nil), LegacyKinds()...)
+	return append(kinds, AddressKinds()...)
+}
+
 var knownKinds = func() map[Kind]bool {
-	m := make(map[Kind]bool, len(AllKinds()))
-	for _, k := range AllKinds() {
-		m[k] = true
+	kinds := AllKinds()
+	m := make(map[Kind]bool, len(kinds))
+	for _, kind := range kinds {
+		m[kind] = true
 	}
 	return m
 }()
 
-// Known reports whether k is a kind this contract version defines. A reader
-// uses it to skip unknown future kinds tolerantly.
+// Known reports whether k is a kind this mixed-version contract defines. A
+// reader uses it to skip unknown future kinds tolerantly.
 func (k Kind) Known() bool { return knownKinds[k] }
 
 // Derived stream statuses (spec §6). Status is always a reducer OUTPUT, never
@@ -231,6 +251,51 @@ type ReviewCycleBody struct {
 	Findings     int  `json:"findings"`
 }
 
+// ReviewAddressPreparedBody atomically consumes one ReviewFindings artifact
+// and records the already-durable outbox work item that represents it.
+type ReviewAddressPreparedBody struct {
+	WorkID         string `json:"work_id"`
+	WorkRef        string `json:"work_ref"`
+	WorkDigest     string `json:"work_digest"`
+	ArtifactID     string `json:"artifact_id"`
+	ArtifactDigest string `json:"artifact_digest"`
+	HeadSHA        string `json:"head_sha"`
+	Cycle          int    `json:"cycle"`
+}
+
+// ReviewAddressClaimedBody links prepared work to its deterministic child run.
+type ReviewAddressClaimedBody struct {
+	WorkID   string `json:"work_id"`
+	ChildRun string `json:"child_run"`
+}
+
+// ReviewAddressStartedBody records the external Codex task/thread identity.
+type ReviewAddressStartedBody struct {
+	WorkID string `json:"work_id"`
+	TaskID string `json:"task_id"`
+}
+
+// ReviewAddressCompletedBody records the exact head produced by the address child.
+type ReviewAddressCompletedBody struct {
+	WorkID  string `json:"work_id"`
+	HeadSHA string `json:"head_sha"`
+}
+
+// ReviewAddressRecord is the reducer projection for one address cycle.
+type ReviewAddressRecord struct {
+	WorkID         string `json:"work_id"`
+	WorkRef        string `json:"work_ref"`
+	WorkDigest     string `json:"work_digest"`
+	ArtifactID     string `json:"artifact_id"`
+	ArtifactDigest string `json:"artifact_digest"`
+	SourceHeadSHA  string `json:"source_head_sha"`
+	Cycle          int    `json:"cycle"`
+	Status         string `json:"status"`
+	ChildRun       string `json:"child_run,omitempty"`
+	TaskID         string `json:"task_id,omitempty"`
+	ResultHeadSHA  string `json:"result_head_sha,omitempty"`
+}
+
 // ClosureFactsBody carries only the facts that the existing lifecycle events
 // cannot reconstruct. Writers may append several partial, consistent fact
 // records as the address, Gate, and land stages learn them.
@@ -332,6 +397,7 @@ type StreamRecord struct {
 	Attempts    []AttemptRecord `json:"attempts,omitempty"`
 	PR          int             `json:"pr,omitempty"`
 	URL         string          `json:"url,omitempty"`
+	HeadSHA     string          `json:"head_sha,omitempty"`
 	MergeCommit string          `json:"merge_commit,omitempty"`
 	// Branch is folded from stream_dispatched — the dispatch branch locator.
 	Branch string `json:"branch,omitempty"`
@@ -346,6 +412,9 @@ type StreamRecord struct {
 	ReviewCycles int `json:"review_cycles,omitempty"`
 	// WorktreeConflict is folded from stream_dispatched.worktree_conflict.
 	WorktreeConflict bool `json:"worktree_conflict,omitempty"`
+	// ReviewAddresses is the ordered, authoritative address lifecycle on the
+	// original implementation child ledger.
+	ReviewAddresses []ReviewAddressRecord `json:"review_addresses,omitempty"`
 	// Closure is present once any closure-specific fact is recorded or the
 	// stream reaches a PR. It is always rendered, including when incomplete.
 	Closure *ClosureReceipt `json:"closure,omitempty"`
@@ -369,10 +438,15 @@ func DecodeEvent(data []byte) (Event, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return Event{}, fmt.Errorf("driverstate: decode event: %w", err)
 	}
-	if e.V != Version {
-		return Event{}, fmt.Errorf("driverstate: %w: got %q, this reader accepts %q", ErrUnknownVersion, e.V, Version)
+	if !KnownVersion(e.V) {
+		return Event{}, fmt.Errorf("driverstate: %w: got %q, this reader accepts %q and %q", ErrUnknownVersion, e.V, Version, AddressVersion)
 	}
 	return e, nil
+}
+
+// KnownVersion reports the two versions the mixed ledger reader understands.
+func KnownVersion(version string) bool {
+	return version == Version || version == AddressVersion
 }
 
 // ReadLedger decodes a run's JSONL event stream tolerantly: known-kind events
@@ -394,8 +468,8 @@ func ReadLedger(data []byte) ([]Event, []string, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("driverstate: read ledger: %w", err)
 		}
-		if e.V != Version {
-			return nil, nil, fmt.Errorf("driverstate: read ledger: %w: got %q at event %q, this reader accepts %q", ErrUnknownVersion, e.V, e.ID, Version)
+		if !KnownVersion(e.V) {
+			return nil, nil, fmt.Errorf("driverstate: read ledger: %w: got %q at event %q, this reader accepts %q and %q", ErrUnknownVersion, e.V, e.ID, Version, AddressVersion)
 		}
 		if !e.Kind.Known() {
 			warnings = append(warnings, fmt.Sprintf("skipped unknown kind %q at event %q", e.Kind, e.ID))
