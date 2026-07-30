@@ -33,6 +33,12 @@ one semantic operation. `command.go` and `policy.go` own policy. `exec.go` is
 dumb process plumbing behind two small interfaces, so tests supply exact
 fixtures without touching real Gate state or GitHub.
 
+`internal/hook` is a lifecycle mechanism over that policy owner. It translates
+only the three native Codex tool events, persists the shared audit envelope,
+and projects stable routing fields into native responses. It contains no
+command rule. Pre-execution persistence precedes response; post-execution
+evidence cannot feed authority backward.
+
 ## Boundary law
 
 The package imports `contracts/automode`, which is vocabulary. It does not
@@ -80,7 +86,10 @@ slice instead of receiving a blanket pass.
 
 ## Honest enforcement boundary
 
-This slice is a policy engine. Codex lifecycle hooks and restrictive rule
-projection are separate consumers. Until they are installed and trusted,
-codexguard's classifications are callable and replayable but do not themselves
-prevent a harness from executing a command.
+The native lifecycle adapter and its reviewed hook asset exist, but profile
+projection, trust, and restrictive rule installation remain separate. A valid
+invoked deny stops a supported call. Missing, crashed, timed-out, malformed, or
+changed-untrusted hooks may be skipped or allow Codex to continue, and some
+specialized tool paths opt out. `docs/hooks.md` pins that matrix; restrictive
+shell rules are the backstop and unsupported local/MCP coverage parks. Until
+projection lands, codexguard does not claim profile-wide enforcement.

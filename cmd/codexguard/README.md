@@ -69,6 +69,14 @@ Any missing, stale, ambiguous, or differing fact refuses with a remedy to run
 Gate again. codexguard never reconstructs a merge command and never imports Gate
 decision logic.
 
-Hook binding and projection into `~/.codex` are separate later slices. Until
-those land, this binary proves the policy and artifact seam; it is not an
-installed enforcement claim.
+## Native hook adapter
+
+`codexguard hook` binds the same policy owner to Codex's native `PreToolUse`,
+`PermissionRequest`, and `PostToolUse` envelopes. Pre-execution decisions are
+synced to the AutoMode audit before a response is returned; permission requests
+can never widen a non-pass; post-tool evidence can never grant authority.
+
+See [`docs/hooks.md`](docs/hooks.md) for the response table, audit path, direct
+offline fixtures, and honest hook-failure matrix. The reviewed
+[`assets/hooks.json`](assets/hooks.json) is not installed by this slice, so this
+is not yet a profile-wide enforcement claim.

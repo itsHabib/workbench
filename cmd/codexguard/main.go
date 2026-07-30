@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/codexguard/internal/hook"
 	"github.com/itsHabib/workbench/cmd/codexguard/internal/policy"
 	"github.com/itsHabib/workbench/contracts/automode"
 )
@@ -29,10 +30,21 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) != 1 || args[0] != "decide" {
-		fmt.Fprintln(stderr, "usage: codexguard decide < request.json")
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: codexguard <decide|hook> < request.json")
 		return codeError
 	}
+	switch args[0] {
+	case "decide":
+		return runDecide(stdin, stdout, stderr)
+	case "hook":
+		return runHook(stdin, stdout, stderr)
+	}
+	fmt.Fprintln(stderr, "usage: codexguard <decide|hook> < request.json")
+	return codeError
+}
+
+func runDecide(stdin io.Reader, stdout, stderr io.Writer) int {
 	var request policy.Request
 	decoder := json.NewDecoder(stdin)
 	decoder.DisallowUnknownFields()
@@ -63,6 +75,43 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return codeError
 	}
 	return outcomeCode(decision.Outcome)
+}
+
+func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
+	const maxHookInput = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(stdin, maxHookInput+1))
+	if err != nil {
+		fmt.Fprintf(stderr, "codexguard: read hook input: %v\n", err)
+		return codeError
+	}
+	if len(data) > maxHookInput {
+		fmt.Fprintln(stderr, "codexguard: hook input exceeds 8 MiB")
+		return codeError
+	}
+	path, err := hook.DefaultAuditPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "codexguard: resolve hook audit: %v\n", err)
+		return codeError
+	}
+	evaluator := policy.New(policy.ExecGateReader{}, policy.ExecPullRequestReader{})
+	adapter := hook.New(evaluator, hook.NewFileAudit(path), os.Getenv("GATE_STATE"), "")
+	ctx, cancel := context.WithTimeout(context.Background(), evidenceTimeout)
+	defer cancel()
+	response, err := adapter.Handle(ctx, data)
+	if err != nil {
+		fmt.Fprintf(stderr, "codexguard: hook: %v\n", err)
+		return codeError
+	}
+	if response == nil {
+		return codePass
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(response); err != nil {
+		fmt.Fprintf(stderr, "codexguard: encode hook response: %v\n", err)
+		return codeError
+	}
+	return codePass
 }
 
 func outcomeCode(outcome string) int {

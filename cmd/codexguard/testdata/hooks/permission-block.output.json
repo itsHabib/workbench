@@ -1,0 +1,9 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PermissionRequest",
+    "decision": {
+      "behavior": "deny",
+      "message": "codexguard block (authority.mint): ask the operator to perform this authority-bearing action outside the governed Codex task"
+    }
+  }
+}

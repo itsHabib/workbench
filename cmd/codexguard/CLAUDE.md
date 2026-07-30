@@ -8,6 +8,7 @@ candidate action.
 
 ```text
 codexguard decide < request.json
+codexguard hook < native-codex-hook.json
 ```
 
 Exit codes mirror the decision: `0` pass, `1` block, `2` park, `3` refuse,
@@ -15,10 +16,20 @@ Exit codes mirror the decision: `0` pass, `1` block, `2` park, `3` refuse,
 including parks, blocks, and refusals. Malformed request JSON exits `3` without
 an artifact because no replayable input exists.
 
+The `hook` verb always exits `0` after a successfully handled native lifecycle
+event; deny/refuse is expressed in Codex's JSON response, not the process exit
+code. Adapter, persistence, or input failure exits `4` with no fabricated deny.
+Codex may continue after such hook failures, so `docs/hooks.md` is the
+load-bearing honest failure matrix.
+
 ## Invariants
 
 - Policy lives only in `internal/policy`. Lifecycle hooks and installers may
   call it; they must not copy its rules.
+- `PreToolUse` and `PermissionRequest` sync their decision events before
+  returning. Permission `allow` requires a policy `pass`.
+- `PostToolUse` records best-effort completion for a prior pass; it never
+  creates authority.
 - The tool imports shared contracts, never another tool's decision code.
 - `gate` and `gh` are fixed executable names. Callers cannot select an
   executable.

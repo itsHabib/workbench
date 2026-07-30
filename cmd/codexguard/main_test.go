@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,5 +88,42 @@ func TestOutcomeCodePinsPublicSeam(t *testing.T) {
 		if got := outcomeCode(outcome); got != want {
 			t.Errorf("%s = %d, want %d", outcome, got, want)
 		}
+	}
+}
+
+func TestRunHookPersistsBeforeNativeDeny(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv("CODEXGUARD_AUDIT", auditPath)
+	input, err := os.ReadFile(filepath.Join("testdata", "hooks", "pre-bash-block.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hook"}, bytes.NewReader(input), &stdout, &stderr)
+	if code != codePass {
+		t.Fatalf("code = %d, stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"permissionDecision":"deny"`) {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	audit, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event automode.AuditEvent
+	if err := json.Unmarshal(audit, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Kind != automode.EventDecision || event.Decision.Outcome != automode.OutcomeBlock {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestRunHookMalformedInputIsOperationalFailure(t *testing.T) {
+	t.Setenv("CODEXGUARD_AUDIT", filepath.Join(t.TempDir(), "audit.jsonl"))
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hook"}, strings.NewReader(`{"hook_event_name":"PreToolUse"}`), &stdout, &stderr)
+	if code != codeError || stdout.Len() != 0 || !strings.Contains(stderr.String(), "required field missing") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

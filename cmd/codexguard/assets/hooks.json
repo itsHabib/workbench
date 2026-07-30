@@ -1,0 +1,47 @@
+{
+  "description": "Native Codex lifecycle adapter for codexguard policy.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codexguard hook",
+            "commandWindows": "codexguard.exe hook",
+            "timeout": 20,
+            "statusMessage": "Checking deterministic policy"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codexguard hook",
+            "commandWindows": "codexguard.exe hook",
+            "timeout": 20,
+            "statusMessage": "Checking deterministic permission"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codexguard hook",
+            "commandWindows": "codexguard.exe hook",
+            "timeout": 20,
+            "statusMessage": "Recording completion evidence"
+          }
+        ]
+      }
+    ]
+  }
+}
