@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"github.com/itsHabib/workbench/contracts/automode"
@@ -15,36 +17,48 @@ func classifyCommand(command string) (normalized, error) {
 		return normalized{}, errUnsupported
 	}
 	lower := lowerWords(words)
+	out := classifyKnownCommand(command, words, lower)
+	if out.parameters == nil {
+		out.parameters = []automode.NamedValue{}
+	}
+	out.parameters = append(out.parameters, automode.NamedValue{Name: "command_digest", Value: textDigest(command)})
+	return out, nil
+}
+
+func classifyKnownCommand(command string, words, lower []string) normalized {
 	if merge := parseMerge(command, words, lower); merge.operation != "" {
-		return merge, nil
+		return merge
 	}
 	if isForcePush(lower) {
-		return normalized{operation: "git.force_push", parameters: []automode.NamedValue{}}, nil
+		return normalized{operation: "git.force_push"}
 	}
 	if hasPrefix(lower, "gh", "repo", "delete") {
-		return normalized{operation: "github.repo.delete", parameters: []automode.NamedValue{}}, nil
+		return normalized{operation: "github.repo.delete"}
 	}
 	if hasPrefix(lower, "gh", "repo", "edit") && contains(lower, "--visibility") {
-		return normalized{operation: "github.repo.visibility", parameters: []automode.NamedValue{}}, nil
+		return normalized{operation: "github.repo.visibility"}
 	}
 	if isMint(lower) {
-		return normalized{operation: "authority.mint", parameters: []automode.NamedValue{}}, nil
+		return normalized{operation: "authority.mint"}
 	}
 	if isAuthorityMutation(lower) {
-		return normalized{operation: "authority.state_mutation", parameters: []automode.NamedValue{}}, nil
+		return normalized{operation: "authority.state_mutation"}
 	}
 	if isTest(lower) {
-		return normalized{operation: "test", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}, nil
+		return normalized{operation: "test", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}
 	}
 	if isRead(lower) {
-		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}, nil
+		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}
 	}
-	return normalized{operation: "unknown", parameters: []automode.NamedValue{}}, nil
+	return normalized{operation: "unknown"}
 }
 
 func opaqueCommand(command string) bool {
 	lower := strings.ToLower(command)
-	for _, marker := range []string{"$(", "`", "&&", "||", ";", "|", "\r", "\n"} {
+	for _, marker := range []string{
+		"`", "&", ";", "|", "<", ">", "(", ")", "%", "!", "^",
+		"$", "@", "*", "?", "[", "]", "{", "}", "\r", "\n",
+	} {
 		if strings.Contains(lower, marker) {
 			return true
 		}
@@ -72,12 +86,25 @@ func parseMerge(command string, words, lower []string) normalized {
 	out.number = number
 	out.repo = flagValue(words, lower, "-r", "--repo")
 	out.headSHA = flagValue(words, lower, "--match-head-commit")
-	out.parameters = []automode.NamedValue{
-		{Name: "head_sha", Value: out.headSHA},
-		{Name: "pr", Value: words[3]},
-		{Name: "repo", Value: out.repo},
+	out.parameters = []automode.NamedValue{{Name: "pr", Value: words[3]}}
+	if !validRepo(out.repo) {
+		out.repo = ""
+	}
+	if out.repo != "" {
+		out.parameters = append(out.parameters, automode.NamedValue{Name: "repo", Value: out.repo})
+	}
+	if !fullSHA.MatchString(out.headSHA) {
+		out.headSHA = ""
+	}
+	if out.headSHA != "" {
+		out.parameters = append(out.parameters, automode.NamedValue{Name: "head_sha", Value: out.headSHA})
 	}
 	return out
+}
+
+func textDigest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func flagValue(words, lower []string, names ...string) string {
@@ -130,9 +157,17 @@ func isAuthorityMutation(words []string) bool {
 }
 
 func isTest(words []string) bool {
-	return hasPrefix(words, "go", "test") ||
-		hasPrefix(words, "go", "vet") ||
-		hasPrefix(words, "golangci-lint", "run")
+	if hasPrefix(words, "go", "test") {
+		return !hasUnsafeFlag(words[2:], "-exec", "--exec", "-toolexec", "--toolexec")
+	}
+	if hasPrefix(words, "go", "vet") {
+		return !hasUnsafeFlag(words[2:], "-vettool", "--vettool", "-toolexec", "--toolexec", "-fix", "--fix")
+	}
+	if hasPrefix(words, "golangci-lint", "run") {
+		return !hasUnsafeFlag(words[2:], "--fix", "--cpu-profile-path", "--mem-profile-path", "--trace-path") &&
+			!hasUnsafePrefix(words[2:], "--output.")
+	}
+	return false
 }
 
 func isRead(words []string) bool {
@@ -140,16 +175,56 @@ func isRead(words []string) bool {
 		return false
 	}
 	switch words[0] {
-	case "rg", "grep", "get-content", "select-string", "type":
+	case "rg":
+		return readOnlyRipgrep(words)
+	case "grep", "get-content", "select-string", "type":
 		return true
 	case "git":
-		return len(words) > 1 && contains([]string{"status", "diff", "log", "show", "rev-parse", "branch"}, words[1])
+		return readOnlyGit(words)
 	case "gh":
-		return len(words) > 2 && readOnlyGH(words[1], words[2])
+		return len(words) > 2 && readOnlyGH(words[1], words[2]) && !hasUnsafeFlag(words[3:], "-w", "--web")
 	case "gate":
-		return len(words) > 1 && contains([]string{"next", "explain", "audit"}, words[1])
+		return readOnlyGate(words)
 	}
 	return false
+}
+
+func readOnlyGate(words []string) bool {
+	if len(words) < 2 || !contains([]string{"next", "explain", "audit"}, words[1]) {
+		return false
+	}
+	if hasUnsafeFlag(words[2:], "-cpuprofile", "--cpuprofile", "-blockprofile", "--blockprofile", "-trace", "--trace") {
+		return false
+	}
+	if words[1] == "explain" && hasUnsafeFlag(words[2:], "-html", "--html", "-out", "--out") {
+		return false
+	}
+	return true
+}
+
+func readOnlyGit(words []string) bool {
+	if len(words) < 2 {
+		return false
+	}
+	if words[1] == "branch" {
+		return len(words) == 2 || (len(words) == 3 && words[2] == "--show-current")
+	}
+	if !contains([]string{"status", "diff", "log", "show", "rev-parse"}, words[1]) {
+		return false
+	}
+	return !hasUnsafeFlag(words[2:], "--ext-diff", "--textconv", "--output")
+}
+
+func readOnlyRipgrep(words []string) bool {
+	for _, word := range words[1:] {
+		shortZip := strings.HasPrefix(word, "-") && !strings.HasPrefix(word, "--") && strings.Contains(word[1:], "z")
+		if shortZip || word == "--search-zip" || word == "--pre" || word == "--hostname-bin" ||
+			strings.HasPrefix(word, "--pre=") ||
+			strings.HasPrefix(word, "--hostname-bin=") {
+			return false
+		}
+	}
+	return true
 }
 
 func readOnlyGH(noun, verb string) bool {
@@ -198,6 +273,28 @@ func matches(value string, wants []string) bool {
 	for _, want := range wants {
 		if value == want {
 			return true
+		}
+	}
+	return false
+}
+
+func hasUnsafeFlag(words []string, flags ...string) bool {
+	for _, word := range words {
+		for _, flag := range flags {
+			if word == flag || strings.HasPrefix(word, flag+"=") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasUnsafePrefix(words []string, prefixes ...string) bool {
+	for _, word := range words {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(word, prefix) {
+				return true
+			}
 		}
 	}
 	return false

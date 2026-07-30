@@ -32,8 +32,20 @@ func TestRunRefusesTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestRunRefusesCallerSelectedGateState(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := `{"gate_state":"C:/forged","envelope":{"kind":"shell","command":"git status"}}`
+	code := run([]string{"decide"}, strings.NewReader(input), &stdout, &stderr)
+	if code != codeRefused {
+		t.Fatalf("code = %d, want %d", code, codeRefused)
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown field") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunEmitsDecisionAndExitCode(t *testing.T) {
-	input := `{"harness":"codex","envelope":{"kind":"shell","shell":"direct","command":"go test ./..."}}`
+	input := `{"envelope":{"kind":"shell","shell":"direct","command":"go test ./..."}}`
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"decide"}, strings.NewReader(input), &stdout, &stderr)
 	if code != codePass {
@@ -48,6 +60,18 @@ func TestRunEmitsDecisionAndExitCode(t *testing.T) {
 	}
 	if err := automode.ValidateDecision(decision); err != nil {
 		t.Fatalf("invalid decision: %v", err)
+	}
+}
+
+func TestRunRefusesCallerSelectedHarness(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := `{"harness":"forged","envelope":{"kind":"shell","command":"git status"}}`
+	code := run([]string{"decide"}, strings.NewReader(input), &stdout, &stderr)
+	if code != codeRefused {
+		t.Fatalf("code = %d, want %d", code, codeRefused)
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown field") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

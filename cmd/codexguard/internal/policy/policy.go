@@ -18,6 +18,7 @@ import (
 )
 
 var fullSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 const (
 	// RulebookVersion identifies this exact deterministic rule set.
@@ -29,8 +30,7 @@ const (
 
 // Request is the policy input supplied by a lifecycle adapter.
 type Request struct {
-	Harness   string   `json:"harness"`
-	GateState string   `json:"gate_state,omitempty"`
+	GateState string   `json:"-"`
 	Envelope  Envelope `json:"envelope"`
 }
 
@@ -84,7 +84,7 @@ func New(gate GateReader, prs PullRequestReader) Evaluator {
 func (e Evaluator) Evaluate(ctx context.Context, request Request) (automode.Decision, error) {
 	action, err := normalize(request.Envelope)
 	if err != nil {
-		return decision(request, normalized{
+		return decision(normalized{
 			envelope:  "unknown",
 			operation: "unknown",
 		}, automode.OutcomePark, "envelope.unsupported", remedyUnknown, nil)
@@ -92,10 +92,10 @@ func (e Evaluator) Evaluate(ctx context.Context, request Request) (automode.Deci
 
 	outcome, rule, remedy := classify(action)
 	if action.operation != "github.pr.merge" {
-		return decision(request, action, outcome, rule, remedy, nil)
+		return decision(action, outcome, rule, remedy, nil)
 	}
 	if outcome == automode.OutcomeBlock {
-		return decision(request, action, outcome, rule, remedy, nil)
+		return decision(action, outcome, rule, remedy, nil)
 	}
 	return e.authorizeMerge(ctx, request, action)
 }
@@ -113,6 +113,8 @@ func classify(action normalized) (string, string, string) {
 		return automode.OutcomeBlock, "authority.mint", remedyDenied
 	case "authority.state_mutation":
 		return automode.OutcomeBlock, "authority.state_mutation", remedyDenied
+	case "authority.elevation":
+		return automode.OutcomeBlock, "authority.elevation", remedyDenied
 	case "git.force_push":
 		return automode.OutcomeBlock, "authority.force_push", remedyDenied
 	case "github.repo.delete":
@@ -126,46 +128,46 @@ func classify(action normalized) (string, string, string) {
 func (e Evaluator) authorizeMerge(ctx context.Context, request Request, action normalized) (automode.Decision, error) {
 	remedy := mergeRemedy(action)
 	if action.repo == "" || action.number == 0 || !fullSHA.MatchString(action.headSHA) {
-		return decision(request, action, automode.OutcomeRefuse, "merge.command_malformed", remedy, nil)
+		return decision(action, automode.OutcomeRefuse, "merge.command_malformed", remedy, nil)
 	}
 	if request.GateState == "" {
-		return decision(request, action, automode.OutcomeRefuse, "merge.gate_state_missing", remedy, nil)
+		return decision(action, automode.OutcomeRefuse, "merge.gate_state_missing", remedy, nil)
 	}
 	if e.gate == nil || e.prs == nil {
-		return decision(request, action, automode.OutcomeRefuse, "merge.evidence_unavailable", remedy, nil)
+		return decision(action, automode.OutcomeRefuse, "merge.evidence_unavailable", remedy, nil)
 	}
 	rows, err := e.gate.Ready(ctx, request.GateState)
 	if err != nil {
-		return decision(request, action, automode.OutcomeRefuse, "merge.gate_read_failed", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.gate_read_failed", remedy,
 			[]automode.NamedValue{{Name: "gate_read", Value: "failed"}})
 	}
 	row, ok := uniqueReady(rows, action.repo, action.number)
 	if !ok {
-		return decision(request, action, automode.OutcomeRefuse, "merge.ready_row_not_unique", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.ready_row_not_unique", remedy,
 			[]automode.NamedValue{{Name: "ready_rows", Value: strconv.Itoa(countReady(rows, action.repo, action.number))}})
 	}
 	if row.MergeCommand != action.candidate {
-		return decision(request, action, automode.OutcomeRefuse, "merge.command_mismatch", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.command_mismatch", remedy,
 			mergeObservables(row, "command_mismatch"))
 	}
 	if row.HeadSHA == "" || row.HeadSHA != action.headSHA {
-		return decision(request, action, automode.OutcomeRefuse, "merge.gate_head_mismatch", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.gate_head_mismatch", remedy,
 			mergeObservables(row, "head_mismatch"))
 	}
 	pr, err := e.prs.Get(ctx, action.repo, action.number)
 	if err != nil {
-		return decision(request, action, automode.OutcomeRefuse, "merge.github_read_failed", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.github_read_failed", remedy,
 			mergeObservables(row, "github_read_failed"))
 	}
 	if pr.State != "OPEN" {
-		return decision(request, action, automode.OutcomeRefuse, "merge.pr_not_open", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.pr_not_open", remedy,
 			mergeLiveObservables(row, pr))
 	}
 	if pr.HeadSHA == "" || pr.HeadSHA != row.HeadSHA {
-		return decision(request, action, automode.OutcomeRefuse, "merge.live_head_mismatch", remedy,
+		return decision(action, automode.OutcomeRefuse, "merge.live_head_mismatch", remedy,
 			mergeLiveObservables(row, pr))
 	}
-	return decision(request, action, automode.OutcomePass, "merge.exact_gate_command_live_head", "",
+	return decision(action, automode.OutcomePass, "merge.exact_gate_command_live_head", "",
 		mergeLiveObservables(row, pr))
 }
 
@@ -194,6 +196,7 @@ func countReady(rows []ReadyMerge, repo string, number int) int {
 
 func mergeObservables(row ReadyMerge, status string) []automode.NamedValue {
 	return []automode.NamedValue{
+		{Name: "gate_command_digest", Value: textDigest(row.MergeCommand)},
 		{Name: "gate_head_sha", Value: row.HeadSHA},
 		{Name: "gate_run", Value: row.Run},
 		{Name: "gate_status", Value: status},
@@ -202,6 +205,7 @@ func mergeObservables(row ReadyMerge, status string) []automode.NamedValue {
 
 func mergeLiveObservables(row ReadyMerge, pr PullRequest) []automode.NamedValue {
 	return []automode.NamedValue{
+		{Name: "gate_command_digest", Value: textDigest(row.MergeCommand)},
 		{Name: "gate_head_sha", Value: row.HeadSHA},
 		{Name: "gate_run", Value: row.Run},
 		{Name: "gate_status", Value: "ready_to_merge"},
@@ -210,7 +214,7 @@ func mergeLiveObservables(row ReadyMerge, pr PullRequest) []automode.NamedValue 
 	}
 }
 
-func decision(request Request, action normalized, outcome, rule, remedy string, observables []automode.NamedValue) (automode.Decision, error) {
+func decision(action normalized, outcome, rule, remedy string, observables []automode.NamedValue) (automode.Decision, error) {
 	envelope := action.envelope
 	if envelope == "" {
 		envelope = "unknown"
@@ -240,7 +244,7 @@ func decision(request Request, action normalized, outcome, rule, remedy string, 
 		RuleFired:       rule,
 		RulebookVersion: RulebookVersion,
 		Remedy:          remedy,
-		Harness:         harnessName(request.Harness),
+		Harness:         "codex",
 		Inputs:          inputs,
 		ActionDigest:    digest,
 	}
@@ -250,11 +254,8 @@ func decision(request Request, action normalized, outcome, rule, remedy string, 
 	return d, nil
 }
 
-func harnessName(name string) string {
-	if name == "" {
-		return "codex"
-	}
-	return name
+func validRepo(repo string) bool {
+	return len(repo) <= 200 && repoName.MatchString(repo)
 }
 
 func mergeRemedy(action normalized) string {

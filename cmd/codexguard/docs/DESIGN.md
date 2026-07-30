@@ -47,7 +47,9 @@ authorized it. Therefore parsing is only the first filter. The pass condition
 compares the exact inner command bytes with Gate's current recorded command.
 Whitespace, merge strategy, repo, PR, head, and every option stay bound to the
 reviewed artifact. GitHub then supplies an independent live-state check so an
-old artifact cannot authorize a moved head.
+old artifact cannot authorize a moved head. Candidate and recorded-command
+digests preserve the comparison in AutoDecisionV1 without persisting raw shell
+text.
 
 ## Failure semantics
 
@@ -62,6 +64,19 @@ old artifact cannot authorize a moved head.
 Gate/GitHub read failures are refusals, not errors, because authority is absent
 when the necessary evidence cannot be established. Every non-pass artifact
 names the fired rule and a remedy.
+
+## Process trust boundary
+
+The read/test allowlist rejects shell control syntax and known caller-selected
+executable/output flags. It is not an OS sandbox: `go test`, `go vet`,
+`golangci-lint`, Git attributes/config, and programs resolved from `PATH` still
+execute repository- or machine-configured code. Credential custody and external
+Gate enforcement remain the authority boundary behind these useful development
+commands. A shell read pass is replayable through its command/workdir digests,
+but it is not sufficient authority for an enforcing adapter to permit an
+out-of-workspace or secret-path read; workspace/OS confinement remains
+mandatory. Generic local `read_file`/`view_image` calls therefore park in this
+slice instead of receiving a blanket pass.
 
 ## Honest enforcement boundary
 

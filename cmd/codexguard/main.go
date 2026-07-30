@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/codexguard/internal/policy"
 	"github.com/itsHabib/workbench/contracts/automode"
 )
+
+const evidenceTimeout = 15 * time.Second
 
 const (
 	codePass    = 0
@@ -42,14 +45,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "codexguard: decode request: expected exactly one JSON object")
 		return codeRefused
 	}
-	if request.Harness == "" {
-		request.Harness = "codex"
-	}
 	if request.GateState == "" {
 		request.GateState = os.Getenv("GATE_STATE")
 	}
 	evaluator := policy.New(policy.ExecGateReader{}, policy.ExecPullRequestReader{})
-	decision, err := evaluator.Evaluate(context.Background(), request)
+	ctx, cancel := context.WithTimeout(context.Background(), evidenceTimeout)
+	defer cancel()
+	decision, err := evaluator.Evaluate(ctx, request)
 	if err != nil {
 		fmt.Fprintf(stderr, "codexguard: evaluate: %v\n", err)
 		return codeError

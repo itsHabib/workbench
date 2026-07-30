@@ -11,7 +11,6 @@ It does not execute the call.
 ```powershell
 @'
 {
-  "harness": "codex",
   "envelope": {
     "kind": "shell",
     "shell": "powershell",
@@ -27,7 +26,6 @@ returns a non-zero exit plus a decision artifact:
 ```powershell
 @'
 {
-  "harness": "codex",
   "envelope": {
     "kind": "shell",
     "shell": "direct",
@@ -39,13 +37,15 @@ returns a non-zero exit plus a decision artifact:
 
 ## Request
 
-`harness` defaults to `codex`. `gate_state` may be omitted when `GATE_STATE` is
-set. `envelope.kind` selects the explicit registry:
+The emitted harness is always `codex`; request JSON cannot override it. Merge
+evaluation reads the authoritative Gate state only from the process's
+`GATE_STATE`; request JSON cannot select a state directory. `envelope.kind`
+selects the explicit registry:
 
 | Kind | Fields | Supported shape |
 |---|---|---|
 | `shell` | `shell`, `command` | direct, Bash/sh `-c`/`-lc`, PowerShell `-Command`/`-EncodedCommand`, `cmd /c` |
-| `local` | `tool`, `arguments` | `shell_command`, `read_file`, `view_image` |
+| `local` | `tool`, `arguments` | strict `shell_command` arguments |
 | `mcp` | `tool`, `arguments` | the read-only registry plus the local shell seam |
 | `code` | `code` | one static `tools.<name>(<JSON object>)` call |
 

@@ -47,6 +47,13 @@ type fakePRs struct {
 	num   int
 }
 
+type contextGate struct{}
+
+func (contextGate) Ready(ctx context.Context, _ string) ([]ReadyMerge, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func (f *fakePRs) Get(_ context.Context, repo string, number int) (PullRequest, error) {
 	f.calls++
 	f.repo = repo
@@ -62,6 +69,7 @@ func TestSafeReadsAndTestsPassAcrossEnvelopes(t *testing.T) {
 		operation string
 	}{
 		{"direct read", Envelope{Kind: "shell", Shell: "direct", Command: "git status"}, "read"},
+		{"branch read", Envelope{Kind: "shell", Shell: "direct", Command: "git branch --show-current"}, "read"},
 		{"bash wrapper", Envelope{Kind: "shell", Shell: "bash", Command: `bash -lc "go test ./..."`}, "test"},
 		{"sh script", Envelope{Kind: "shell", Shell: "sh", Command: "go vet ./..."}, "test"},
 		{"powershell command", Envelope{Kind: "shell", Shell: "powershell", Command: `pwsh -Command "gh pr view 172 -R itsHabib/workbench"`}, "read"},
@@ -122,11 +130,41 @@ func TestAuthorityMutationsNeverPass(t *testing.T) {
 func TestOpaqueAndUnknownInputsPark(t *testing.T) {
 	tests := []Envelope{
 		{Kind: "shell", Shell: "bash", Command: "git status && gh pr merge 172"},
+		{Kind: "shell", Shell: "bash", Command: `bash -lc "go test ./... & gh pr merge 172 -R itsHabib/workbench --admin"`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "go test ./... & gh pr merge 172 -R itsHabib/workbench --admin"`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "git status %CODEXGUARD_DEMO%"`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "git status !CODEXGUARD_DEMO!"`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "go test -ex^ec gate ./..."`},
+		{Kind: "shell", Shell: "powershell", Command: "go test ./... & gh pr merge 172 -R itsHabib/workbench --admin"},
+		{Kind: "shell", Shell: "powershell", Command: "git status @(gh pr merge 172 -R itsHabib/workbench --admin)"},
+		{Kind: "shell", Shell: "powershell", Command: "git status (gh pr merge 172 -R itsHabib/workbench --admin)"},
+		{Kind: "shell", Shell: "powershell", Command: "go test @unsafeArgs"},
+		{Kind: "shell", Shell: "bash", Command: "go test $UNSAFE_ARGS"},
 		{Kind: "shell", Shell: "bash", Command: "echo $(gate grant -repo o/r)"},
+		{Kind: "shell", Shell: "bash", Command: "git status > C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "git status > C:/pers/gate/state/log.jsonl"`},
+		{Kind: "shell", Shell: "powershell", Command: "git status > C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "git branch -D codex/work"},
+		{Kind: "shell", Shell: "direct", Command: "rg --pre=gate evil ."},
+		{Kind: "shell", Shell: "direct", Command: "rg --hostname-bin=gate evil ."},
+		{Kind: "shell", Shell: "direct", Command: "rg --search-zip evil ."},
+		{Kind: "shell", Shell: "direct", Command: "git diff --ext-diff"},
+		{Kind: "shell", Shell: "direct", Command: "git show --textconv HEAD"},
+		{Kind: "shell", Shell: "direct", Command: "git diff --output=C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "go test -exec=gate ./..."},
+		{Kind: "shell", Shell: "direct", Command: "go vet -vettool=gate ./..."},
+		{Kind: "shell", Shell: "direct", Command: "go vet --toolexec=gate ./..."},
+		{Kind: "shell", Shell: "direct", Command: "golangci-lint run --fix"},
+		{Kind: "shell", Shell: "direct", Command: "golangci-lint run --trace-path C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "golangci-lint run --output.json.path C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "gate explain -run run_1 -html -out C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "gate next -cpuprofile C:/pers/gate/state/log.jsonl"},
+		{Kind: "shell", Shell: "direct", Command: "gh pr view 174 -R itsHabib/workbench --web"},
 		{Kind: "shell", Shell: "powershell", Command: `Invoke-Expression "gh pr merge 172"`},
 		{Kind: "shell", Shell: "powershell", Command: `iex "gate grant -repo o/r"`},
 		{Kind: "shell", Shell: "powershell", Command: `Start-Process gh -ArgumentList "pr merge 172"`},
 		{Kind: "mcp", Tool: "mcp__unknown__mutate", Arguments: json.RawMessage(`{}`)},
+		{Kind: "local", Tool: "functions.read_file", Arguments: json.RawMessage(`{"path":"C:/pers/gate/keys"}`)},
 		{Kind: "code", Code: `const x = 1; await tools.shell_command({"command":"git status"})`},
 		{Kind: "future!"},
 	}
@@ -219,7 +257,18 @@ func TestMergeRefusalMatrix(t *testing.T) {
 	}
 }
 
+func TestCanceledEvidenceReadRefuses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := New(contextGate{}, livePRs()).Evaluate(ctx, shellRequestWithState(testMerge))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDecision(t, got, automode.OutcomeRefuse, "merge.gate_read_failed")
+}
+
 func TestOppositeMutationsOfAuthorizedCommandRefuse(t *testing.T) {
+	authorized := evaluate(t, New(&fakeGate{rows: []ReadyMerge{readyRow()}}, livePRs()), shellRequestWithState(testMerge))
 	mutations := []string{
 		strings.Replace(testMerge, testHead, strings.Repeat("f", 40), 1),
 		strings.Replace(testMerge, testRepo, "itsHabib/other", 1),
@@ -233,6 +282,9 @@ func TestOppositeMutationsOfAuthorizedCommandRefuse(t *testing.T) {
 			got := evaluate(t, New(&fakeGate{rows: []ReadyMerge{readyRow()}}, livePRs()), shellRequestWithState(command))
 			if got.Outcome == automode.OutcomePass {
 				t.Fatalf("opposite mutation passed: %q", command)
+			}
+			if got.ActionDigest == authorized.ActionDigest {
+				t.Fatalf("opposite mutation kept authorized action identity: %q", command)
 			}
 		})
 	}
@@ -256,6 +308,63 @@ func TestActionDigestContainsNoRawCommandOrGateState(t *testing.T) {
 	}
 	if strings.Contains(string(data), testMerge) || strings.Contains(string(data), "C:/gate/state") {
 		t.Fatalf("decision leaked raw command or state path: %s", data)
+	}
+}
+
+func TestShellActionDigestBindsInnerCommandAndContext(t *testing.T) {
+	base := evaluate(t, New(&fakeGate{}, &fakePRs{}), shellRequest("go test ./cmd/gate/..."))
+	otherCommand := evaluate(t, New(&fakeGate{}, &fakePRs{}), shellRequest("go test ./cmd/custody/..."))
+	if base.ActionDigest == otherCommand.ActionDigest {
+		t.Fatal("different test commands share an action digest")
+	}
+
+	first := Request{Envelope: Envelope{
+		Kind: "local", Tool: "functions.shell_command",
+		Arguments: json.RawMessage(`{"command":"go test ./...","workdir":"C:/repo-one","login":false}`),
+	}}
+	second := first
+	second.Envelope.Arguments = json.RawMessage(`{"command":"go test ./...","workdir":"C:/repo-two","login":true}`)
+	firstDecision := evaluate(t, New(&fakeGate{}, &fakePRs{}), first)
+	secondDecision := evaluate(t, New(&fakeGate{}, &fakePRs{}), second)
+	if firstDecision.ActionDigest == secondDecision.ActionDigest {
+		t.Fatal("different workdir/login contexts share an action digest")
+	}
+	data, err := json.Marshal(firstDecision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "C:/repo-one") {
+		t.Fatalf("decision leaked raw workdir: %s", data)
+	}
+}
+
+func TestLocalShellElevationBlocksAndUnknownContextParks(t *testing.T) {
+	elevated := Request{Envelope: Envelope{
+		Kind: "local", Tool: "functions.shell_command",
+		Arguments: json.RawMessage(`{"command":"git status","sandbox_permissions":"require_escalated","justification":"fixture"}`),
+	}}
+	got := evaluate(t, New(&fakeGate{}, &fakePRs{}), elevated)
+	assertDecision(t, got, automode.OutcomeBlock, "authority.elevation")
+
+	unknown := elevated
+	unknown.Envelope.Arguments = json.RawMessage(`{"command":"git status","future_authority":true}`)
+	got = evaluate(t, New(&fakeGate{}, &fakePRs{}), unknown)
+	assertDecision(t, got, automode.OutcomePark, "envelope.unsupported")
+}
+
+func TestMalformedMergeAndHarnessDoNotLeakCanaries(t *testing.T) {
+	request := shellRequestWithState(
+		"gh pr merge 1 -R super-secret-token --match-head-commit another-secret",
+	)
+	got := evaluate(t, New(&fakeGate{}, &fakePRs{}), request)
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, canary := range []string{"super-secret-token", "another-secret"} {
+		if strings.Contains(string(data), canary) {
+			t.Fatalf("decision leaked %q: %s", canary, data)
+		}
 	}
 }
 

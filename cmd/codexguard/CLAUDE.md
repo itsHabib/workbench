@@ -22,6 +22,8 @@ an artifact because no replayable input exists.
 - The tool imports shared contracts, never another tool's decision code.
 - `gate` and `gh` are fixed executable names. Callers cannot select an
   executable.
+- Request JSON cannot select Gate state. The CLI accepts only its trusted
+  `GATE_STATE` process configuration.
 - Gate is consulted only as `gate next -state <dir> -json`; GitHub is consulted
   only as `gh pr view ... --json state,headRefOid`.
 - A merge passes only when its inner argv string byte-matches the unique current
@@ -30,6 +32,7 @@ an artifact because no replayable input exists.
 - Unknown or dynamically constructed calls never pass. Every non-pass decision
   carries an exact remedy.
 - Raw command text and the Gate state path are not persisted in AutoDecisionV1.
+  Exact command digests preserve replay identity without retaining those bytes.
 
 ## Checks
 

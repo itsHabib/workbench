@@ -1,9 +1,11 @@
 package policy
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -79,21 +81,74 @@ func normalizeLocal(envelope Envelope) (normalized, error) {
 	tool := strings.TrimPrefix(envelope.Tool, "functions.")
 	switch tool {
 	case "shell_command":
-		var args struct {
-			Command string `json:"command"`
-			Shell   string `json:"shell"`
+		var args shellCommandArgs
+		if err := decodeStrict(envelope.Arguments, &args); err != nil || args.Command == "" {
+			return normalized{}, errUnsupported
 		}
-		if err := json.Unmarshal(envelope.Arguments, &args); err != nil || args.Command == "" {
+		if args.SandboxPermissions == "require_escalated" {
+			return normalized{
+				operation:  "authority.elevation",
+				parameters: []automode.NamedValue{{Name: "sandbox_permissions", Value: args.SandboxPermissions}},
+			}, nil
+		}
+		if args.SandboxPermissions != "" && args.SandboxPermissions != "use_default" {
+			return normalized{}, errUnsupported
+		}
+		if len(args.PrefixRule) > 0 || args.Justification != "" {
 			return normalized{}, errUnsupported
 		}
 		if args.Shell == "" {
 			args.Shell = "direct"
 		}
-		return normalizeShell(Envelope{Kind: "shell", Shell: args.Shell, Command: args.Command})
-	case "read_file", "view_image":
-		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "tool", Value: tool}}}, nil
+		out, err := normalizeShell(Envelope{Kind: "shell", Shell: args.Shell, Command: args.Command})
+		if err != nil {
+			return normalized{}, err
+		}
+		out.parameters = append(out.parameters, shellContext(args)...)
+		return out, nil
 	}
 	return normalized{}, errUnsupported
+}
+
+type shellCommandArgs struct {
+	Command            string   `json:"command"`
+	Shell              string   `json:"shell,omitempty"`
+	Workdir            string   `json:"workdir,omitempty"`
+	TimeoutMS          *int     `json:"timeout_ms,omitempty"`
+	Login              *bool    `json:"login,omitempty"`
+	SandboxPermissions string   `json:"sandbox_permissions,omitempty"`
+	Justification      string   `json:"justification,omitempty"`
+	PrefixRule         []string `json:"prefix_rule,omitempty"`
+}
+
+func shellContext(args shellCommandArgs) []automode.NamedValue {
+	var values []automode.NamedValue
+	if args.Workdir != "" {
+		values = append(values, automode.NamedValue{Name: "workdir_digest", Value: textDigest(args.Workdir)})
+	}
+	if args.TimeoutMS != nil {
+		values = append(values, automode.NamedValue{Name: "timeout_ms", Value: strconv.Itoa(*args.TimeoutMS)})
+	}
+	if args.Login != nil {
+		values = append(values, automode.NamedValue{Name: "login", Value: strconv.FormatBool(*args.Login)})
+	}
+	if args.SandboxPermissions != "" {
+		values = append(values, automode.NamedValue{Name: "sandbox_permissions", Value: args.SandboxPermissions})
+	}
+	return values
+}
+
+func decodeStrict(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errUnsupported
+	}
+	return nil
 }
 
 var readOnlyMCPTools = map[string]struct{}{
@@ -123,7 +178,7 @@ func normalizeCode(envelope Envelope) (normalized, error) {
 	}
 	kind := "mcp"
 	localTool := strings.TrimPrefix(tool, "functions.")
-	if localTool == "shell_command" || localTool == "read_file" || localTool == "view_image" {
+	if localTool == "shell_command" {
 		kind = "local"
 	}
 	return normalize(Envelope{Kind: kind, Tool: tool, Arguments: args})
