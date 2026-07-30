@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -61,41 +62,45 @@ func TestPrepareReviewAddressConsumesExactHeadOnce(t *testing.T) {
 }
 
 func TestAddressLifecycleRejectsCrossRootBeforeMutation(t *testing.T) {
+	_, foreignLease, _ := addressFixture(t, 1)
 	dir, lease, artifact := addressFixture(t, 1)
-	other := t.TempDir()
 	input := PrepareAddressInput{
 		Stream: addressTestStream, LiveHead: artifact.Subject.HeadSHA,
 		MaxCycles: 3, Artifact: artifact,
 	}
-	if _, _, err := PrepareReviewAddress(other, lease, input); err == nil {
+	before := snapshotTree(t, dir)
+	if _, _, err := PrepareReviewAddress(dir, foreignLease, input); err == nil {
 		t.Fatal("cross-root prepare must reject")
 	}
-	assertDirEmpty(t, other)
+	assertTreeUnchanged(t, dir, before)
 
 	work, _, err := PrepareReviewAddress(dir, lease, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ClaimReviewAddress(other, lease, addressTestStream, work.WorkID, "session:address"); err == nil {
+	before = snapshotTree(t, dir)
+	if _, _, err := ClaimReviewAddress(dir, foreignLease, addressTestStream, work.WorkID, "session:address"); err == nil {
 		t.Fatal("cross-root claim must reject")
 	}
-	assertDirEmpty(t, other)
+	assertTreeUnchanged(t, dir, before)
 
 	if _, _, err := ClaimReviewAddress(dir, lease, addressTestStream, work.WorkID, "session:address"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StartReviewAddress(other, lease, addressTestStream, work.WorkID, "task_1"); err == nil {
+	before = snapshotTree(t, dir)
+	if _, err := StartReviewAddress(dir, foreignLease, addressTestStream, work.WorkID, "task_1"); err == nil {
 		t.Fatal("cross-root start must reject")
 	}
-	assertDirEmpty(t, other)
+	assertTreeUnchanged(t, dir, before)
 
 	if _, err := StartReviewAddress(dir, lease, addressTestStream, work.WorkID, "task_1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompleteReviewAddress(other, lease, addressTestStream, work.WorkID, strings.Repeat("b", 40)); err == nil {
+	before = snapshotTree(t, dir)
+	if _, err := CompleteReviewAddress(dir, foreignLease, addressTestStream, work.WorkID, strings.Repeat("b", 40)); err == nil {
 		t.Fatal("cross-root complete must reject")
 	}
-	assertDirEmpty(t, other)
+	assertTreeUnchanged(t, dir, before)
 }
 
 func TestPrepareReviewAddressRequiresLiveLeaseBeforeWorkWrite(t *testing.T) {
@@ -115,14 +120,59 @@ func TestPrepareReviewAddressRequiresLiveLeaseBeforeWorkWrite(t *testing.T) {
 	}
 }
 
-func assertDirEmpty(t *testing.T, dir string) {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
+func TestClaimReviewAddressRequiresLiveLeaseBeforeChildWrite(t *testing.T) {
+	dir, lease, artifact := addressFixture(t, 1)
+	work, _, err := PrepareReviewAddress(dir, lease, PrepareAddressInput{
+		Stream: addressTestStream, LiveHead: artifact.Subject.HeadSHA,
+		MaxCycles: 3, Artifact: artifact,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("cross-root operation mutated %s: %v", dir, entries)
+	if err := ExpireLeaseForTest(dir, addressTestRun); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotTree(t, dir)
+	_, _, err = ClaimReviewAddress(dir, lease, addressTestStream, work.WorkID, "session:address")
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("expired lease error = %v", err)
+	}
+	assertTreeUnchanged(t, dir, before)
+}
+
+func snapshotTree(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	snapshot := make(map[string][]byte)
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			snapshot[filepath.ToSlash(relative)+"/"] = nil
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		snapshot[filepath.ToSlash(relative)] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func assertTreeUnchanged(t *testing.T, dir string, before map[string][]byte) {
+	t.Helper()
+	after := snapshotTree(t, dir)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("cross-root operation mutated %s:\nbefore=%v\nafter=%v", dir, before, after)
 	}
 }
 
