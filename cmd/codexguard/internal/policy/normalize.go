@@ -76,7 +76,8 @@ func normalizeShell(envelope Envelope) (normalized, error) {
 }
 
 func normalizeLocal(envelope Envelope) (normalized, error) {
-	switch envelope.Tool {
+	tool := strings.TrimPrefix(envelope.Tool, "functions.")
+	switch tool {
 	case "shell_command":
 		var args struct {
 			Command string `json:"command"`
@@ -90,7 +91,7 @@ func normalizeLocal(envelope Envelope) (normalized, error) {
 		}
 		return normalizeShell(Envelope{Kind: "shell", Shell: args.Shell, Command: args.Command})
 	case "read_file", "view_image":
-		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "tool", Value: envelope.Tool}}}, nil
+		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "tool", Value: tool}}}, nil
 	}
 	return normalized{}, errUnsupported
 }
@@ -121,7 +122,8 @@ func normalizeCode(envelope Envelope) (normalized, error) {
 		return normalized{}, errUnsupported
 	}
 	kind := "mcp"
-	if tool == "shell_command" || tool == "read_file" || tool == "view_image" {
+	localTool := strings.TrimPrefix(tool, "functions.")
+	if localTool == "shell_command" || localTool == "read_file" || localTool == "view_image" {
 		kind = "local"
 	}
 	return normalize(Envelope{Kind: kind, Tool: tool, Arguments: args})

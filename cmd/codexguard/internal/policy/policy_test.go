@@ -68,8 +68,10 @@ func TestSafeReadsAndTestsPassAcrossEnvelopes(t *testing.T) {
 		{"powershell encoded", Envelope{Kind: "shell", Shell: "powershell", Command: "pwsh -EncodedCommand " + encoded}, "test"},
 		{"cmd wrapper", Envelope{Kind: "shell", Shell: "cmd", Command: `cmd /c "golangci-lint run ./..."`}, "test"},
 		{"local shell", Envelope{Kind: "local", Tool: "shell_command", Arguments: json.RawMessage(`{"command":"git diff"}`)}, "read"},
+		{"local function shell", Envelope{Kind: "local", Tool: "functions.shell_command", Arguments: json.RawMessage(`{"command":"go test ./..."}`)}, "test"},
 		{"mcp read", Envelope{Kind: "mcp", Tool: "mcp__workbench__driver_verify", Arguments: json.RawMessage(`{"run":"dsr_1"}`)}, "read"},
 		{"code local", Envelope{Kind: "code", Code: `await tools.shell_command({"command":"go test ./..."})`}, "test"},
+		{"code local function", Envelope{Kind: "code", Code: `await tools.functions.shell_command({"command":"git status"})`}, "read"},
 		{"code mcp", Envelope{Kind: "code", Code: `return await tools.mcp__dossier__overview({"project":"workbench"});`}, "read"},
 	}
 	for _, test := range tests {
