@@ -21,6 +21,7 @@ type addressOptions struct {
 	stream    string
 	work      string
 	artifact  string
+	decision  string
 	actor     string
 	task      string
 	head      string
@@ -71,6 +72,13 @@ func addressAccept(ctx context.Context, dir string, args []string, runner comman
 	if err != nil {
 		return writeAddressError(driverstate.AddressRefusal{Code: "malformed-artifact", Message: err.Error()}, stderr)
 	}
+	decision, err := readAddressDecision(opts.decision)
+	if err != nil {
+		return writeAddressError(driverstate.AddressRefusal{Code: "malformed-decision", Message: err.Error()}, stderr)
+	}
+	if err := validateAddressDecision(decision, artifact); err != nil {
+		return writeAddressError(err, stderr)
+	}
 	liveHead, state, err := fetchAddressPR(ctx, runner, artifact.Subject.Repo, artifact.Subject.Number)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -87,7 +95,7 @@ func addressAccept(ctx context.Context, dir string, args []string, runner comman
 	defer lease.Release()
 	work, event, err := driverstate.PrepareReviewAddress(dir, lease, driverstate.PrepareAddressInput{
 		Stream: opts.stream, LiveHead: strings.ToLower(liveHead),
-		MaxCycles: opts.maxCycles, Artifact: artifact,
+		MaxCycles: opts.maxCycles, ExpectedCycle: decision.Cycle, Artifact: artifact,
 	})
 	if err != nil {
 		return writeAddressError(err, stderr)
@@ -224,6 +232,7 @@ func parseAddressOptions(command string, args []string) (addressOptions, error) 
 	flags.StringVar(&opts.stream, "stream", "", "implementation stream")
 	flags.StringVar(&opts.work, "work", "", "address work id")
 	flags.StringVar(&opts.artifact, "artifact", "", "ReviewFindingsV1 path")
+	flags.StringVar(&opts.decision, "decision", "", "ReviewDecisionV1 path authorizing accepted findings")
 	flags.StringVar(&opts.actor, "actor", "session:codex", "ledger actor")
 	flags.StringVar(&opts.task, "task", "", "Codex task/thread id")
 	flags.StringVar(&opts.head, "head", "", "exact completed PR head")
@@ -240,6 +249,8 @@ func parseAddressOptions(command string, args []string) (addressOptions, error) 
 		return addressOptions{}, errors.New("-actor is required")
 	case command == "accept" && opts.artifact == "":
 		return addressOptions{}, errors.New("-artifact is required")
+	case command == "accept" && opts.decision == "":
+		return addressOptions{}, errors.New("-decision is required")
 	case command == "accept" && opts.maxCycles < 1:
 		return addressOptions{}, errors.New("-max-cycles must be positive")
 	case command != "accept" && opts.work == "":

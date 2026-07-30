@@ -90,6 +90,18 @@ func TestPrepareReviewAddressRefusalMatrix(t *testing.T) {
 	}
 }
 
+func TestPrepareReviewAddressJoinsDecisionCycle(t *testing.T) {
+	dir, lease, artifact := addressFixture(t, 2)
+	_, _, err := PrepareReviewAddress(dir, lease, PrepareAddressInput{
+		Stream: addressTestStream, LiveHead: artifact.Subject.HeadSHA,
+		MaxCycles: 3, ExpectedCycle: 1, Artifact: artifact,
+	})
+	var refusal AddressRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "decision-cycle-mismatch" {
+		t.Fatalf("error = %v, want decision-cycle-mismatch", err)
+	}
+}
+
 func TestPrepareReviewAddressCrashAdoptsOrphan(t *testing.T) {
 	crash := errors.New("crash")
 	for _, test := range []struct {

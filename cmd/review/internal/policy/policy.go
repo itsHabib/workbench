@@ -138,6 +138,11 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 			reasons = append(reasons, "deterministic_proof_substitution")
 		}
 	}
+	if acceptedFindings(input.Findings) {
+		action = reviewroute.ActionAddress
+		reasons = append(reasons, "accepted_findings_require_address")
+		next = append(next, acceptedReviewers(input.Findings)...)
+	}
 	if raisedTier(plan, input.CurrentTier) {
 		action = reviewroute.ActionEscalate
 		reasons = append(reasons, "tier_increased")
@@ -180,6 +185,26 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		return reviewroute.Decision{}, err
 	}
 	return decision, nil
+}
+
+func acceptedFindings(findings []reviewroute.FindingState) bool {
+	for _, finding := range findings {
+		if finding.Disposition == "fixed" && !finding.Changed {
+			return true
+		}
+	}
+	return false
+}
+
+func acceptedReviewers(findings []reviewroute.FindingState) []string {
+	var reviewers []string
+	for _, finding := range findings {
+		if finding.Disposition != "fixed" || finding.Changed {
+			continue
+		}
+		reviewers = append(reviewers, finding.Reviewers...)
+	}
+	return reviewroute.SortedUnique(reviewers)
 }
 
 func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []string) {

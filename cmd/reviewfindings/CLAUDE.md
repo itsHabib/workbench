@@ -13,18 +13,20 @@ session-engine run, `reviewfindings address` consumes the same artifact on the
 original implementation child ledger without invoking Ship:
 
 ```
-reviewfindings address accept    -run <child-run> -stream <stream> -artifact findings.json -max-cycles 3
+reviewfindings address accept    -run <child-run> -stream <stream> -artifact findings.json -decision decision.json -max-cycles 3
 reviewfindings address claim     -run <child-run> -stream <stream> -work <raw_id>
 reviewfindings address started   -run <child-run> -stream <stream> -work <raw_id> -task <codex-task-id>
 reviewfindings address completed -run <child-run> -stream <stream> -work <raw_id> -head <new-live-head>
 reviewfindings address resume    -run <child-run> -stream <stream> -work <raw_id>
 ```
 
-`accept` and `completed` read the live PR head through `gh`. The boundary
-persists `AddressWorkV1` before consuming it in driver-state v0.2. A duplicate
-accept refuses with the existing work ref. A claimed item without a recorded
-task id parks on resume because a crash may have happened after task creation.
-The CLI creates no task and invokes no model/provider API.
+`accept` requires an exact-head `ReviewDecisionV1` action of `address`. Its
+accepted finding IDs and cycle must match the findings artifact and
+authoritative ledger. `accept` and `completed` read the live PR head through
+`gh`. The boundary persists `AddressWorkV1` before consuming it in driver-state
+v0.2. A duplicate accept refuses with the existing work ref. A claimed item
+without a recorded task id parks on resume because a crash may have happened
+after task creation. The CLI creates no task and invokes no model/provider API.
 
 ## Develop
 

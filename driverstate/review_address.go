@@ -48,7 +48,10 @@ type PrepareAddressInput struct {
 	Stream    string
 	LiveHead  string
 	MaxCycles int
-	Artifact  reviewfindings.Artifact
+	// ExpectedCycle joins ReviewDecisionV1 to the authoritative ledger. Zero
+	// remains valid for legacy callers that predate the decision artifact.
+	ExpectedCycle int
+	Artifact      reviewfindings.Artifact
 }
 
 // AddressResume is the reconstructable work plus its reduced lifecycle.
@@ -169,6 +172,8 @@ func addressContext(dir, run string, in PrepareAddressInput) (dsc.RunState, []Ev
 		return dsc.RunState{}, nil, 0, refuse("missing-review-cycle", "no review cycle is recorded for the stream", "")
 	case cycle > in.MaxCycles:
 		return dsc.RunState{}, nil, 0, refuse("cycle-exhausted", fmt.Sprintf("review cycle %d exceeds engine maximum %d", cycle, in.MaxCycles), "")
+	case in.ExpectedCycle > 0 && cycle != in.ExpectedCycle:
+		return dsc.RunState{}, nil, 0, refuse("decision-cycle-mismatch", fmt.Sprintf("review decision cycle %d does not match ledger cycle %d", in.ExpectedCycle, cycle), "")
 	case !settled:
 		return dsc.RunState{}, nil, 0, refuse("panel-incomplete", "latest review cycle is not panel-settled", "")
 	case findings != len(in.Artifact.Findings):

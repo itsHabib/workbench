@@ -22,6 +22,7 @@ reviewfindings address accept `
   -run dsr_IMPLEMENTATION_CHILD `
   -stream dss_IMPLEMENTATION `
   -artifact C:\absolute\review-findings.json `
+  -decision C:\absolute\review-decision.json `
   -max-cycles 3
 
 reviewfindings address claim `
@@ -30,10 +31,12 @@ reviewfindings address claim `
   -work raw_WORK_ID
 ```
 
-`accept` verifies the live head through the signed-in `gh` session and prints
-the durable `AddressWorkV1`. `claim` deterministically imports the address child
-and links it from the authoritative ledger. Give the fresh isolated Codex task
-the emitted work file:
+`accept` verifies that the engine-neutral decision says `address`, that its
+accepted finding IDs and cycle match the findings artifact and authoritative
+ledger, and that the live head still matches through the signed-in `gh`
+session. It then prints the durable `AddressWorkV1`. `claim` deterministically
+imports the address child and links it from the authoritative ledger. Give the
+fresh isolated Codex task the emitted work file:
 
 ```text
 Address the sourced findings in <state>\dsr_IMPLEMENTATION_CHILD\

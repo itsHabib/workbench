@@ -110,6 +110,29 @@ func TestDecideTargetsOnlyFindingAuthorsStillInPlay(t *testing.T) {
 	}
 }
 
+func TestDecideAddressesOnlyAcceptedUnchangedFindings(t *testing.T) {
+	plan := routedPlan(t, "T2")
+	input := cleanInput(plan, 1)
+	input.Findings = []reviewroute.FindingState{
+		{
+			ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+			Disposition: "fixed",
+		},
+		{
+			ID: "cursor-2", Severity: "low", Reviewers: []string{"cursor"},
+			Disposition: "deferred", DeferReason: "outside scope",
+		},
+	}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionAddress ||
+		!equal(decision.NextReviewers, []string{"codex"}) {
+		t.Fatalf("decision = %s next %v reasons %v", decision.Action, decision.NextReviewers, decision.ReasonCodes)
+	}
+}
+
 func TestProofSubstitutionClosesNoncriticalT0ToT2(t *testing.T) {
 	for _, tier := range []string{"T0", "T1", "T2"} {
 		t.Run(tier, func(t *testing.T) {

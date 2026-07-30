@@ -328,10 +328,15 @@ All artifacts are schema-versioned and exact-head bound.
 - cycle number and continuation weight;
 - exact head, plan ID, and cycle-input content digest;
 - every finding's disposition and proof/follow-up references;
-- `stop`, `continue`, `escalate`, or `park`;
+- `stop`, `continue`, `address`, `escalate`, or `park`;
 - targeted next-reviewer set;
 - deterministic reason codes;
 - local advisory result/confidence when used.
+
+`address` is the only decision that authorizes an execution adapter. The
+findings artifact passed to that adapter must contain exactly the decision's
+accepted, not-yet-changed finding IDs. Both Ship and session adapters reject a
+different action, head, cycle, or finding set.
 
 Artifacts for head A cannot authorize, close, or request review for head B.
 Every push invalidates the plan, request receipt, panel, findings, proofs, and

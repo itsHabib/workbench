@@ -14,6 +14,7 @@ import (
 
 	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 	"github.com/itsHabib/workbench/contracts/reviewfindings"
+	"github.com/itsHabib/workbench/contracts/reviewroute"
 	"github.com/itsHabib/workbench/driverstate"
 )
 
@@ -119,7 +120,31 @@ func TestAddressAcceptCLIConsumesOnce(t *testing.T) {
 	if err := os.WriteFile(artifactPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"address", "accept", "-run", runID, "-stream", stream, "-artifact", artifactPath, "-max-cycles", "3"}
+	decisionPath := filepath.Join(t.TempDir(), "decision.json")
+	decision := reviewroute.Decision{
+		SchemaVersion: reviewroute.SchemaVersion, GeneratedAt: now,
+		Subject: reviewroute.Subject{Repo: "itsHabib/workbench", Number: 1, HeadSHA: head},
+		PlanID:  "rp_11111111111111111111111111111111", Cycle: 1,
+		ContinuationWeight: 1, CumulativeWeight: 1,
+		Action:        reviewroute.ActionAddress,
+		ReasonCodes:   []string{"accepted_findings_require_address"},
+		NextReviewers: []string{"codex"},
+		Findings: []reviewroute.FindingState{{
+			ID: "f1", Severity: "P1", Reviewers: []string{"codex"},
+			Disposition: "fixed",
+		}},
+	}
+	decisionData, err := json.Marshal(decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decisionPath, decisionData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{
+		"address", "accept", "-run", runID, "-stream", stream,
+		"-artifact", artifactPath, "-decision", decisionPath, "-max-cycles", "3",
+	}
 	runner := fakeRunner{pr: pullRequest{HeadRefOID: head, State: "OPEN"}}
 	var stdout, stderr bytes.Buffer
 	if code := run(context.Background(), args, runner, &stdout, &stderr); code != exitOK {
