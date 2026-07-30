@@ -56,6 +56,15 @@ func loadSchema(t *testing.T) objSchema {
 	return s
 }
 
+func loadAddressSchema(t *testing.T) objSchema {
+	t.Helper()
+	var schema objSchema
+	if err := json.Unmarshal(AddressSchema, &schema); err != nil {
+		t.Fatalf("parse embedded address schema: %v", err)
+	}
+	return schema
+}
+
 func (o objSchema) child(t *testing.T, prop string) objSchema {
 	t.Helper()
 	c, ok := o.Properties[prop]
@@ -162,12 +171,12 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 }
 
 // TestEnumsMatchConstants is acceptance-2: the schema kind enum ties to the Kind
-// constants (AllKinds), so adding a kind to one without the other fails. The v
+// constants (LegacyKinds), so adding a v0.1 kind to one without the other fails. The v
 // const is pinned to Version the same way.
 func TestEnumsMatchConstants(t *testing.T) {
 	root := loadSchema(t)
-	want := make([]string, 0, len(AllKinds()))
-	for _, k := range AllKinds() {
+	want := make([]string, 0, len(LegacyKinds()))
+	for _, k := range LegacyKinds() {
 		want = append(want, string(k))
 	}
 	// Order-sensitive on purpose: AllKinds documents schema-enum order, so a
@@ -184,6 +193,33 @@ func TestEnumsMatchConstants(t *testing.T) {
 func TestSchemaVersion(t *testing.T) {
 	if v := loadSchema(t).XVersion; v != SchemaVersion {
 		t.Errorf("schema x-version = %q, want %q", v, SchemaVersion)
+	}
+}
+
+func TestAddressSchemaMatchesGoTypes(t *testing.T) {
+	root := loadAddressSchema(t)
+	if root.XVersion != AddressSchemaVersion || root.child(t, "v").Const != AddressVersion {
+		t.Fatalf("address schema version drift: x=%q v=%q", root.XVersion, root.child(t, "v").Const)
+	}
+	want := make([]string, 0, len(AddressKinds()))
+	for _, kind := range AddressKinds() {
+		want = append(want, string(kind))
+	}
+	if !reflect.DeepEqual(root.child(t, "kind").Enum, want) {
+		t.Fatalf("address kind enum = %v, want %v", root.child(t, "kind").Enum, want)
+	}
+	cases := []struct {
+		name string
+		typ  reflect.Type
+		def  string
+	}{
+		{"ReviewAddressPreparedBody", reflect.TypeOf(ReviewAddressPreparedBody{}), "review_address_prepared_body"},
+		{"ReviewAddressClaimedBody", reflect.TypeOf(ReviewAddressClaimedBody{}), "review_address_claimed_body"},
+		{"ReviewAddressStartedBody", reflect.TypeOf(ReviewAddressStartedBody{}), "review_address_started_body"},
+		{"ReviewAddressCompletedBody", reflect.TypeOf(ReviewAddressCompletedBody{}), "review_address_completed_body"},
+	}
+	for _, test := range cases {
+		assertObjectConforms(t, test.name, test.typ, root.def(t, test.def))
 	}
 }
 
@@ -312,6 +348,11 @@ func TestPayloadValidationPerKind(t *testing.T) {
 		{"stream_dispatched malformed body rejected", KindStreamDispatched, `{"branch":5}`, true},
 		{"stream_dispatched child_run + conflict ok", KindStreamDispatched, `{"branch":"feat/x","child_run":"dsr_child","worktree_conflict":true}`, false},
 		{"run_imported child sub-run ok", KindRunImported, `{"repo":"r","source":"s","manifest":{},"streams":[{"stream":"dss_1","doc_path":"d"}],"parent":"dsr_p","parent_stream":"dss_1","done_boundary":"pr-open"}`, false},
+		{"address prepared ok", KindReviewAddressPrepared, `{"work_id":"raw_11111111111111111111111111111111","work_ref":"review-address/raw_11111111111111111111111111111111.json","work_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact_id":"rf_1","artifact_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head_sha":"cccccccccccccccccccccccccccccccccccccccc","cycle":1}`, false},
+		{"address prepared traversal", KindReviewAddressPrepared, `{"work_id":"raw_11111111111111111111111111111111","work_ref":"../raw_1.json","work_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact_id":"rf_1","artifact_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head_sha":"cccccccccccccccccccccccccccccccccccccccc","cycle":1}`, true},
+		{"address claimed ok", KindReviewAddressClaimed, `{"work_id":"raw_11111111111111111111111111111111","child_run":"dsr_1"}`, false},
+		{"address started missing task", KindReviewAddressStarted, `{"work_id":"raw_11111111111111111111111111111111","task_id":""}`, true},
+		{"address completed bad head", KindReviewAddressCompleted, `{"work_id":"raw_11111111111111111111111111111111","head_sha":"abc"}`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -348,6 +389,21 @@ func TestValidateEventScope(t *testing.T) {
 		{"empty id rejects", func(e *Event) { e.Kind = KindRunFinished; e.ID = "" }, true},
 		{"wrong version rejects", func(e *Event) { e.Kind = KindRunFinished; e.V = "driver-state-v9.9.9" }, true},
 		{"unknown kind tolerated", func(e *Event) { e.Kind = "stream_teleported"; e.Stream = "dss_1" }, false},
+		{"address v0.2 ok", func(e *Event) {
+			e.V = AddressVersion
+			e.Kind = KindReviewAddressClaimed
+			e.Stream = "dss_1"
+			e.Body = json.RawMessage(`{"work_id":"raw_11111111111111111111111111111111","child_run":"dsr_1"}`)
+		}, false},
+		{"address on v0.1 rejects", func(e *Event) {
+			e.Kind = KindReviewAddressClaimed
+			e.Stream = "dss_1"
+			e.Body = json.RawMessage(`{"work_id":"raw_11111111111111111111111111111111","child_run":"dsr_1"}`)
+		}, true},
+		{"legacy kind on v0.2 rejects", func(e *Event) {
+			e.V = AddressVersion
+			e.Kind = KindRunFinished
+		}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -550,15 +606,18 @@ func TestAbsentNewFieldsTolerated(t *testing.T) {
 	}
 }
 
-// TestDecodeEventVersionGate is the loud half of tolerance: the reader accepts
-// exactly the version this contract ships and rejects anything else via
-// ErrUnknownVersion.
+// TestDecodeEventVersionGate pins the mixed v0.1/v0.2 reader. Address v0.2 may
+// coexist with historical v0.1 lines; anything else still rejects loudly.
 func TestDecodeEventVersionGate(t *testing.T) {
 	good := `{"id":"e","run":"r","v":"driver-state-v0.1.0","kind":"run_finished","time":"2026-07-16T12:00:00Z","actor":"a","body":null,"prev":"","hash":"h"}`
 	if _, err := DecodeEvent([]byte(good)); err != nil {
 		t.Fatalf("current version must decode: %v", err)
 	}
-	bad := `{"id":"e","run":"r","v":"driver-state-v0.2.0","kind":"run_finished","time":"2026-07-16T12:00:00Z","actor":"a","body":null,"prev":"","hash":"h"}`
+	address := `{"id":"e","run":"r","v":"driver-state-v0.2.0","kind":"review_address_claimed","stream":"s","time":"2026-07-16T12:00:00Z","actor":"a","body":{"work_id":"raw_11111111111111111111111111111111","child_run":"dsr_1"},"prev":"","hash":"h"}`
+	if _, err := DecodeEvent([]byte(address)); err != nil {
+		t.Fatalf("address version must decode: %v", err)
+	}
+	bad := `{"id":"e","run":"r","v":"driver-state-v0.3.0","kind":"run_finished","time":"2026-07-16T12:00:00Z","actor":"a","body":null,"prev":"","hash":"h"}`
 	if _, err := DecodeEvent([]byte(bad)); !errors.Is(err, ErrUnknownVersion) {
 		t.Fatalf("a future version must reject via the version gate, got %v", err)
 	}
