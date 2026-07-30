@@ -94,3 +94,12 @@ tests, a real GitHub-head fixture, full Workbench checks, and hygiene.
 
 No Ship/provider dispatch, coordinator logic, Gate policy, Claude invocation,
 API key, or generic cross-engine workflow framework.
+
+## Implementation
+
+The Workbench side is implemented by `driverstate.PrepareReviewAddress` and the
+`reviewfindings address` verbs. Operator/session invocation and recovery are in
+[`review-address-runbook.md`](review-address-runbook.md). The boundary stops
+after deterministic child import/claim; Codex task creation remains the session
+orchestrator's native capability, and its returned task id is recorded with
+`address started`.

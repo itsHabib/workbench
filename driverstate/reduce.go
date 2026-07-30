@@ -92,6 +92,14 @@ func applyEventToState(state *dsc.RunState, finished *bool, e Event) {
 		applyStreamPROpened(state, e)
 	case dsc.KindReviewCycle:
 		applyReviewCycle(state, e)
+	case dsc.KindReviewAddressPrepared:
+		applyReviewAddressPrepared(state, e)
+	case dsc.KindReviewAddressClaimed:
+		applyReviewAddressClaimed(state, e)
+	case dsc.KindReviewAddressStarted:
+		applyReviewAddressStarted(state, e)
+	case dsc.KindReviewAddressCompleted:
+		applyReviewAddressCompleted(state, e)
 	case dsc.KindStreamLanded:
 		setStreamStatus(state, e.Stream, dsc.StatusLanded)
 	case dsc.KindStreamFailed:
@@ -186,7 +194,69 @@ func applyStreamPROpened(state *dsc.RunState, e Event) {
 	rec.Status = dsc.StatusPROpen
 	rec.PR = b.PR
 	rec.URL = b.URL
+	rec.HeadSHA = b.HeadSHA
 	state.Streams[e.Stream] = rec
+}
+
+func applyReviewAddressPrepared(state *dsc.RunState, e Event) {
+	var body dsc.ReviewAddressPreparedBody
+	if json.Unmarshal(e.Body, &body) != nil {
+		return
+	}
+	rec := state.Streams[e.Stream]
+	rec.ReviewAddresses = append(rec.ReviewAddresses, dsc.ReviewAddressRecord{
+		WorkID: body.WorkID, WorkRef: body.WorkRef, WorkDigest: body.WorkDigest,
+		ArtifactID: body.ArtifactID, ArtifactDigest: body.ArtifactDigest,
+		SourceHeadSHA: body.HeadSHA, Cycle: body.Cycle, Status: "pending",
+	})
+	state.Streams[e.Stream] = rec
+}
+
+func applyReviewAddressClaimed(state *dsc.RunState, e Event) {
+	var body dsc.ReviewAddressClaimedBody
+	if json.Unmarshal(e.Body, &body) != nil {
+		return
+	}
+	updateReviewAddress(state, e.Stream, body.WorkID, func(record *dsc.ReviewAddressRecord) {
+		record.Status = "claimed"
+		record.ChildRun = body.ChildRun
+	})
+}
+
+func applyReviewAddressStarted(state *dsc.RunState, e Event) {
+	var body dsc.ReviewAddressStartedBody
+	if json.Unmarshal(e.Body, &body) != nil {
+		return
+	}
+	updateReviewAddress(state, e.Stream, body.WorkID, func(record *dsc.ReviewAddressRecord) {
+		record.Status = "started"
+		record.TaskID = body.TaskID
+	})
+}
+
+func applyReviewAddressCompleted(state *dsc.RunState, e Event) {
+	var body dsc.ReviewAddressCompletedBody
+	if json.Unmarshal(e.Body, &body) != nil {
+		return
+	}
+	updateReviewAddress(state, e.Stream, body.WorkID, func(record *dsc.ReviewAddressRecord) {
+		record.Status = "completed"
+		record.ResultHeadSHA = body.HeadSHA
+	})
+	rec := state.Streams[e.Stream]
+	rec.HeadSHA = body.HeadSHA
+	state.Streams[e.Stream] = rec
+}
+
+func updateReviewAddress(state *dsc.RunState, stream, workID string, update func(*dsc.ReviewAddressRecord)) {
+	rec := state.Streams[stream]
+	for i := range rec.ReviewAddresses {
+		if rec.ReviewAddresses[i].WorkID == workID {
+			update(&rec.ReviewAddresses[i])
+			break
+		}
+	}
+	state.Streams[stream] = rec
 }
 
 // applyStreamMerged records the merge commit and PR number and advances the

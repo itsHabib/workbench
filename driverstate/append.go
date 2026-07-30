@@ -307,6 +307,9 @@ func checkTransition(events []Event, e Event) error {
 	if _, err := applyStream(cur, e); err != nil {
 		return err
 	}
+	if err := checkAddressTransition(events, e); err != nil {
+		return err
+	}
 	if e.Kind == dsc.KindStreamAttempt {
 		return checkSeq(events, e)
 	}
@@ -441,7 +444,72 @@ func applyStream(cur string, e Event) (string, error) {
 }
 
 func passivePROpenKind(kind dsc.Kind) bool {
-	return kind == dsc.KindReviewCycle || kind == dsc.KindClosureFacts || kind == dsc.KindIntervention
+	switch kind {
+	case dsc.KindReviewCycle, dsc.KindClosureFacts, dsc.KindIntervention,
+		dsc.KindReviewAddressPrepared, dsc.KindReviewAddressClaimed,
+		dsc.KindReviewAddressStarted, dsc.KindReviewAddressCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func checkAddressTransition(events []Event, event Event) error {
+	switch event.Kind {
+	case dsc.KindReviewAddressPrepared:
+		return checkAddressPrepared(events, event)
+	case dsc.KindReviewAddressClaimed:
+		return requireAddressStatus(events, event, "pending")
+	case dsc.KindReviewAddressStarted:
+		return requireAddressStatus(events, event, "claimed")
+	case dsc.KindReviewAddressCompleted:
+		return requireAddressStatus(events, event, "started")
+	default:
+		return nil
+	}
+}
+
+func checkAddressPrepared(events []Event, event Event) error {
+	var body dsc.ReviewAddressPreparedBody
+	if err := json.Unmarshal(event.Body, &body); err != nil {
+		return err
+	}
+	state := FoldEvents(events)
+	for _, record := range state.Streams[event.Stream].ReviewAddresses {
+		if record.WorkID == body.WorkID || record.ArtifactID == body.ArtifactID ||
+			record.ArtifactDigest == body.ArtifactDigest || record.Cycle == body.Cycle {
+			return ErrIllegalTransition{From: record.Status, Event: string(event.Kind)}
+		}
+	}
+	return nil
+}
+
+func requireAddressStatus(events []Event, event Event, want string) error {
+	workID, err := addressEventWorkID(event)
+	if err != nil {
+		return err
+	}
+	state := FoldEvents(events)
+	for _, record := range state.Streams[event.Stream].ReviewAddresses {
+		if record.WorkID != workID {
+			continue
+		}
+		if record.Status == want {
+			return nil
+		}
+		return ErrIllegalTransition{From: record.Status, Event: string(event.Kind)}
+	}
+	return ErrIllegalTransition{From: "address_absent", Event: string(event.Kind)}
+}
+
+func addressEventWorkID(event Event) (string, error) {
+	var body struct {
+		WorkID string `json:"work_id"`
+	}
+	if err := json.Unmarshal(event.Body, &body); err != nil {
+		return "", err
+	}
+	return body.WorkID, nil
 }
 
 // checkSeq enforces append-only monotone stream_attempt seq per stream: a new

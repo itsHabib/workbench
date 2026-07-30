@@ -1,5 +1,5 @@
-// Package reviewfindings defines the ReviewFindingsV1 artifact exchanged by
-// harness-native review producers and Ship's driver address boundary.
+// Package reviewfindings defines ReviewFindingsV1 and the deterministic
+// AddressWorkV1 handoff consumed by Ship or the session-native address boundary.
 package reviewfindings
 
 import (
@@ -25,6 +25,11 @@ const (
 	SubjectPullRequest = "pull_request"
 	// MaxArtifactBytes bounds input before JSON decoding.
 	MaxArtifactBytes = 1024 * 1024
+	// AddressWorkVersion identifies the bounded handoff consumed by a fresh
+	// session-native address child.
+	AddressWorkVersion = "review-address-work-v1"
+	// MaxAddressWorkBytes bounds persisted work before decoding.
+	MaxAddressWorkBytes = 2 * 1024 * 1024
 )
 
 // Artifact is one immutable exact-head review result.
@@ -77,6 +82,113 @@ type Source struct {
 	URL       string `json:"url"`
 	File      string `json:"file,omitempty"`
 	Line      int    `json:"line,omitempty"`
+}
+
+// AddressWorkV1 is the durable, reconstructable input for one address child.
+// It embeds the validated source artifact so a resumed child needs no provider
+// transcript or Ship state.
+type AddressWorkV1 struct {
+	Version        string   `json:"version"`
+	WorkID         string   `json:"work_id"`
+	Run            string   `json:"run"`
+	Stream         string   `json:"stream"`
+	Cycle          int      `json:"cycle"`
+	ArtifactID     string   `json:"artifact_id"`
+	ArtifactDigest string   `json:"artifact_digest"`
+	SourceHeadSHA  string   `json:"source_head_sha"`
+	Artifact       Artifact `json:"artifact"`
+}
+
+// NewAddressWork builds and validates the deterministic address handoff.
+func NewAddressWork(run, stream string, cycle int, artifact Artifact) (AddressWorkV1, error) {
+	digest, err := CanonicalSHA256(artifact)
+	if err != nil {
+		return AddressWorkV1{}, err
+	}
+	work := AddressWorkV1{
+		Version:        AddressWorkVersion,
+		WorkID:         AddressWorkID(run, stream, digest, cycle),
+		Run:            run,
+		Stream:         stream,
+		Cycle:          cycle,
+		ArtifactID:     artifact.ArtifactID,
+		ArtifactDigest: digest,
+		SourceHeadSHA:  strings.ToLower(artifact.Subject.HeadSHA),
+		Artifact:       artifact,
+	}
+	if err := ValidateAddressWork(work); err != nil {
+		return AddressWorkV1{}, err
+	}
+	return work, nil
+}
+
+// AddressWorkID derives the stable identity used for retry adoption.
+func AddressWorkID(run, stream, artifactDigest string, cycle int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d", run, stream, artifactDigest, cycle)))
+	return "raw_" + hex.EncodeToString(sum[:16])
+}
+
+// EncodeAddressWork returns deterministic compact JSON with a trailing newline.
+func EncodeAddressWork(work AddressWorkV1) ([]byte, error) {
+	if err := ValidateAddressWork(work); err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(work)
+	if err != nil {
+		return nil, fmt.Errorf("encode address work: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+// DecodeAddressWork parses one bounded persisted address handoff.
+func DecodeAddressWork(data []byte) (AddressWorkV1, error) {
+	if len(data) > MaxAddressWorkBytes {
+		return AddressWorkV1{}, errors.New("address work exceeds 2 MiB")
+	}
+	var work AddressWorkV1
+	if err := json.Unmarshal(data, &work); err != nil {
+		return AddressWorkV1{}, fmt.Errorf("address work is not valid JSON: %w", err)
+	}
+	if err := ValidateAddressWork(work); err != nil {
+		return AddressWorkV1{}, err
+	}
+	return work, nil
+}
+
+// ValidateAddressWork enforces the cross-consumer handoff invariants.
+func ValidateAddressWork(work AddressWorkV1) error {
+	switch {
+	case work.Version != AddressWorkVersion:
+		return fmt.Errorf("unsupported address work version %q", work.Version)
+	case strings.TrimSpace(work.Run) == "":
+		return errors.New("address work run is required")
+	case strings.TrimSpace(work.Stream) == "":
+		return errors.New("address work stream is required")
+	case work.Cycle < 1:
+		return errors.New("address work cycle must be positive")
+	case !validLowerHex(work.ArtifactDigest, 64):
+		return errors.New("address work artifact_digest must be 64 lowercase hexadecimal characters")
+	case !validSHA(work.SourceHeadSHA):
+		return errors.New("address work source_head_sha must be 40 hexadecimal characters")
+	}
+	if err := Validate(work.Artifact); err != nil {
+		return fmt.Errorf("address work artifact: %w", err)
+	}
+	digest, err := CanonicalSHA256(work.Artifact)
+	if err != nil {
+		return err
+	}
+	switch {
+	case work.ArtifactID != work.Artifact.ArtifactID:
+		return errors.New("address work artifact_id does not match embedded artifact")
+	case work.ArtifactDigest != digest:
+		return errors.New("address work artifact_digest does not match embedded artifact")
+	case !strings.EqualFold(work.SourceHeadSHA, work.Artifact.Subject.HeadSHA):
+		return errors.New("address work source_head_sha does not match embedded artifact")
+	case work.WorkID != AddressWorkID(work.Run, work.Stream, digest, work.Cycle):
+		return errors.New("address work work_id is not deterministic for its inputs")
+	}
+	return nil
 }
 
 // Decode parses and validates one bounded ReviewFindingsV1 document.

@@ -73,6 +73,16 @@ func writeStreamBlock(w io.Writer, stream string, rec dsc.StreamRecord) {
 	if rec.MergeCommit != "" {
 		fmt.Fprintf(w, "    merge %s\n", shortCommit(rec.MergeCommit))
 	}
+	for _, address := range rec.ReviewAddresses {
+		fmt.Fprintf(w, "    address %s: %s (cycle %d, work %s)\n",
+			address.WorkID, address.Status, address.Cycle, address.WorkRef)
+		if address.ChildRun != "" {
+			fmt.Fprintf(w, "      child %s\n", address.ChildRun)
+		}
+		if address.TaskID != "" {
+			fmt.Fprintf(w, "      task %s\n", address.TaskID)
+		}
+	}
 	if rec.Closure != nil {
 		writeClosureBlock(w, *rec.Closure)
 	}
@@ -170,6 +180,14 @@ func eventFact(e driverstate.Event) string {
 		return formatMergeFact(e.Body)
 	case dsc.KindReviewCycle:
 		return formatReviewCycleFact(e.Body)
+	case dsc.KindReviewAddressPrepared:
+		return formatAddressFact(e.Body, "prepared")
+	case dsc.KindReviewAddressClaimed:
+		return formatAddressFact(e.Body, "claimed")
+	case dsc.KindReviewAddressStarted:
+		return formatAddressFact(e.Body, "started")
+	case dsc.KindReviewAddressCompleted:
+		return formatAddressFact(e.Body, "completed")
 	case dsc.KindClosureFacts:
 		return "closure facts"
 	case dsc.KindIntervention:
@@ -177,6 +195,16 @@ func eventFact(e driverstate.Event) string {
 	default:
 		return ""
 	}
+}
+
+func formatAddressFact(body json.RawMessage, status string) string {
+	var value struct {
+		WorkID string `json:"work_id"`
+	}
+	if json.Unmarshal(body, &value) != nil || value.WorkID == "" {
+		return ""
+	}
+	return "address=" + value.WorkID + " status=" + status
 }
 
 func formatInterventionFact(body json.RawMessage) string {
