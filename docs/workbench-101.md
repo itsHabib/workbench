@@ -4,9 +4,12 @@ A teaching doc for someone new to this repo. Read it top to bottom; by the end y
 should understand why the workbench exists, how one unit of work flows through it,
 the one law that holds the family together, and where it is going.
 
-Two status markers appear throughout, and the difference matters:
+Three status markers appear throughout, and the difference matters:
 
-- `verified` - confirmed against the code on `main` as of 2026-07-23.
+- `verified` - confirmed against the code at this document's head as of
+  2026-07-29.
+- `live` - confirmed against the current `itsHabib/workbench` GitHub
+  configuration; unlike code, this can drift without a commit.
 - `intent` - designed and written down, but not yet code.
 
 Every claim cites the file that backs it. The paths are part of the teaching: when a
@@ -42,12 +45,16 @@ and 6 (gate) hold the load-bearing detail.
   escalate above, never lower) and operator-minted grants, all recorded in a
   hash-chained audit log. A local model may escalate but never block; premium
   judgment resolves escalations but cannot override a code block (sections 5-6).
-- **Honest status.** Enforcement today is discipline plus an audit trail, not
-  prevention; live merge is a dry-run; the GitHub-boundary enforcement check is
-  built but dormant. The `verified`/`intent` markers and the section 12 drift log
-  keep the doc from overclaiming.
-- **The north star.** Fully autonomous cloud runs - the loop executing end to end
-  with the operator reading the audit trail after, not gating it during (section 9).
+- **Honest status.** The Workbench canary's GitHub perimeter is live: layered
+  rulesets require the App-pinned `gate` check and reject ambient direct merges.
+  Ordinary `gate -live` is still a dry-run. The separate exact-action Gate App
+  executor is implemented but unarmed pending review, dedicated state bootstrap,
+  and live canaries. Those are three different claims; section 6 keeps them
+  separate.
+- **The north star.** Engine-neutral autonomous runs - `--engine session` is the
+  current dogfood/default path, while provider-backed engines remain optional.
+  The operator reads the audit trail after a clean run and intervenes only at a
+  typed park or refusal (section 9).
 
 ---
 
@@ -201,10 +208,11 @@ The layout, top level down:
   hash-chained, crash-safe appends (`driverstate/doc.go`). It imports only
   `contracts/driverstate`. (Its doc comment says CI leaf-checks it; CI does not yet
   - see the drift log.)
-- **`cmd/<tool>/`** - one binary per **tenant** (a tool living in the module with
-  its guts private). `verified` tenant list, twelve today: `console`, `custody`,
-  `dispatch`, `driverstate`, `eval`, `flare`, `gate`, `local`, `runway`,
-  `tracelens`, `triage`, `workbench-mcp`.
+- **`cmd/<tool>/`** - one private implementation boundary per **tenant** (a tool
+  living in the module; a tenant may expose more than one CLI entry point).
+  `verified` tenant list, fourteen today: `console`, `custody`,
+  `dispatch`, `driverstate`, `escalate`, `eval`, `flare`, `gate`, `local`,
+  `reviewfindings`, `runway`, `tracelens`, `triage`, `workbench-mcp`.
 
 The family assembled by *lazy migration*, not big-bang: tools graduated in when next
 touched. flare was the founding tenant (rewiring it to `contracts` deleted the third
@@ -249,7 +257,7 @@ Who actually implements each plane today:
 | Plane | Incumbents today |
 |---|---|
 | State | gate's hash-chained artifact log; the driver-state ledger (`driverstate/`); dossier (work items); ship's SQLite (runs) |
-| Execution | ship's driver engine (cloud, N parallel); the session engine (thin orchestrator); runway (foreground run controller, now with a Rooms microVM backend) |
+| Execution | ship's driver engine (`session` is the current dogfood/default; provider engines are optional); runway (foreground run controller, now with a Rooms microVM backend) |
 | Verification | gate's `verify` (reducer + ladder); triage (floor + advisory); tracelens detectors; the `local` mechanism |
 | Capability | gate grants (HMAC, scope/TTL/tier/cycles); custody grants for vendor credentials (in flight - section 9); the pretool-guard hook (the harness's tier-3 floor) |
 | Observability | gate `explain`/`audit`/`next`; console (read-only web); flare; tracelens reports |
@@ -423,7 +431,8 @@ sections describe in the abstract is concrete here, which is why it gets the dee
 dive.
 
 **Surface.** `verified` verbs in `cmd/gate/main.go`: `grant`, `gate`, `judge`,
-`explain`, `next`, `audit`, `backtest`, `stress`. `verified` exit codes:
+`resolve`, `executor`, `explain`, `next`, `audit`, `backtest`, `stress`;
+`executor` owns `request`, `bootstrap`, `run`, and `reconcile`. `verified` exit codes:
 `codeMerge=0 / codeBlocked=1 / codeParked=2 / codeRefused=3 / codeError=4` - a
 load-bearing **seam** (a stable boundary callers branch on). A nice detail showing
 the seam is taken seriously: flagsets use `ContinueOnError` because `ExitOnError`
@@ -433,8 +442,9 @@ Packages point strictly downward: `state` (append-only hash-chained log) →
 rungs, reducer, auto-judge) → `observe` (explain/audit/next, read-only).
 
 **The artifact contract.** Every step is a typed `Artifact` (`evidence`, `verdict`,
-`grant`, `action`, `escalation`, `judgment`), grouped by run id, linked by a
-`Parents` field, hash-chained. Three properties fall out:
+`grant`, `action`, `escalation`, `judgment`, plus the newer `resolution`,
+`grant_needed`, `execution_claim`, and `execution_result` families), grouped by
+run id, linked by a `Parents` field, hash-chained. Three properties fall out:
 
 - **No outcome exists without its lineage** - every action's parents must name the
   reducer verdict it acted on and a live grant; no gate code path records an outcome
@@ -487,6 +497,16 @@ but the refusal. Newest hardening (`verified`, PR #74): minting into a state dir
 with no existing log refuses unless `-init` is passed - so a typo'd `-state` path
 cannot silently start a parallel ledger.
 
+There are deliberately two operational lanes. The operator's ordinary local
+ledger remains machine-global. The protected Workbench executor starts a fresh,
+Workbench-only ledger under dedicated keys and publishes only `state/log.jsonl`
+plus `anchor.json` to the protected `gate-state` branch. Its one-time
+`executor bootstrap` refuses implicit state/key defaults, cross-repository
+structured identities, oversized state, stale PR heads, moved state tips, and
+malformed or superseded merge actions before creating an App token
+(`verified`, `cmd/gate/executor.go`,
+`cmd/gate/internal/authorization/authorization.go`).
+
 **The tamper model, stated honestly.** The hash chain is tamper-*evidence*, not
 access control. Naive replay catches body edits, broken links, and reordering - but
 not tail truncation, whole-log deletion, or a wholesale rewrite-with-rehash. Those
@@ -526,11 +546,11 @@ ledger, each with paste-ready commands. `GATE_STATE` / `GATE_KEY` environment
 defaults mean the operator stops retyping `-state`/`-key` flags. And **console**
 (section 7) renders the same inbox in a browser.
 
-**Enforcement, in one honest line** (`cmd/gate/docs/enforcement.md`): *"today the
-capability plane is discipline plus an audit trail, not prevention."* Gate becomes
-*enforcing* only when a repo's branch protection requires the gate status check. The
-machinery for that now exists in this repo (`verified`,
-`.github/workflows/gate.yml`) and is worth reading as a security artifact in its own
+**Enforcement, in one honest line:** a Gate decision, a required status, and
+credential custody are separate layers. The Workbench canary now has the first
+two at GitHub's boundary (`live`): layered rulesets require the App-pinned `gate`
+status and reject ambient updates to `main`. The machinery lives in
+`.github/workflows/gate.yml` (`verified`) and is worth reading as a security artifact in its own
 right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
 signal feeds late panel evidence back through that same writable trusted-base
 rail, including for fork PRs. The signal keys on GitHub's bot identity rather
@@ -547,27 +567,36 @@ from the *base* checkout so a PR cannot edit gate's own code to neuter the check
 that governs it; it mints an ephemeral grant
 into a throwaway temp dir so no signing secret ever touches CI; and it binds the
 posted status to the exact judged SHA so a force-push cannot get a green stamped
-onto a different commit. It ships **dormant** - armed only by the repo variable
-`GATE_ENFORCE=true`, and still off because gate's model rungs need a runtime a
-stock GitHub runner does not have. Until it is armed and branch protection requires
-the `gate` context, enforcement remains discipline plus an audit trail. `intent`
-beyond arming: full enforcement means the required check *plus* no bypass credential
-for governed agents (section 9).
+onto a different commit. `GATE_ENFORCE=true` is live on Workbench; a draft,
+incomplete review panel, red deterministic check, or unavailable judgment path
+therefore remains red rather than silently passing.
 
-**Live merge: not implemented.** `verified`: `act()`'s live path records
-`merge_not_implemented`; only the exact `gh pr merge --match-head-commit` command
-string is composed. Say "dry-run plus printed command," not "it merges."
+Credential custody is the remaining activation boundary. The dedicated Gate App
+and protected `gate-authorization` Environment are installed (`live`), while the
+repository variable `GATE_EXECUTOR_ARMED` and Workbench-only signing secrets remain
+unset. The executor workflow is consequently unarmable even though its repository
+code is present. After independent approval it creates the App token inside Gate,
+CAS-publishes a permanent exact-PR claim, refetches it, runs only the stored
+`gh pr merge ... --match-head-commit ...` command, and CAS-publishes one result.
+It never promotes reusable commit status.
+
+**Live merge has two answers.** Ordinary `gate -live` remains unimplemented:
+`act()` records `merge_not_implemented` and composes the exact command. The separate
+App executor is the reviewed live seam, but it has not yet completed bootstrap or a
+positive canary. Until that proof exists, say "local dry-run plus an installed,
+unarmed exact-action executor," not "Gate has merged a PR."
 
 **See it.** `gate explain -run <id> -html` writes a self-contained decision-trail
 page - no server, no network. The embedded demo fixture
 (`cmd/gate/docs/demo/README.md`) is exactly the earmarked story: judgment passes,
 but the grant ceiling (max tier T1) refuses the reduced T2 verdict and parks the run
-- layered authority, visible. Operational state and keys live at `~/pers/gate`,
-outside the repo.
+- layered authority, visible. Ordinary operational state and keys live outside the
+repo; the hosted executor's state branch and dedicated protected keys are a
+separate lane.
 
 ## 7. Tenant tour
 
-Twelve tenants, each one binary, each private below `cmd/<tool>/`. The repeated
+Fourteen tenant directories, each private below `cmd/<tool>/`. The repeated
 shape to watch for: **policy over mechanism, joined by artifacts** - one side
 decides, the other executes, and they meet at a JSON seam, never an import.
 
@@ -633,6 +662,16 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   click-target. It is the Amendment 3 tenant: it keeps cursors and dedupe state at
   `~/.flare/`, never decisions - best-effort push over authoritative pull
   (`cmd/flare/README.md`).
+- **escalate** - the opposite arrow from flare: the resolution-ingest seam.
+  `resolve` validates a human decision and shells `gate resolve`; `serve` verifies
+  a signed Slack interaction, derives the actor from the verified identity, and
+  drives that same mechanism. Flare remains read-only; only gate writes the
+  authoritative judgment/result (`cmd/escalate/CLAUDE.md`).
+- **reviewfindings** - the Codex-native producer at Ship's review-address seam.
+  `reviewfindings github` reads exact-head inline review comments through `gh` and
+  emits the shared `ReviewFindingsV1` contract. It refuses stale heads, closed PRs,
+  and empty exact-head findings and never dispatches or merges
+  (`cmd/reviewfindings/CLAUDE.md`).
 - **tracelens** - agent trace diagnostics, consumed via its CLI exit-code seam
   (0 pass/escalate, 1 block, 2 error), never imported.
 - **local / eval** - the clerk-work CLI over the `local/` mechanism, and the
@@ -731,11 +770,12 @@ substrate, scoped by domain - which is exactly the custody story next).
 ## 9. Where it's going
 
 Four threads, all honestly marked. Each one removes a reason a run still needs a
-human in the loop, so the direction they share is a fully autonomous cloud run - the
-loop in section 2 executing end to end with the operator reading the audit trail
-after, not gating it during. The pattern underneath: the center of gravity keeps
-moving toward versioned artifacts and engine guarantees, with harness-specific
-skills as thin projections.
+human in the loop, so the direction they share is an engine-neutral autonomous run:
+the loop in section 2 executes end to end with `session` as the current default,
+and the operator reads the audit trail after rather than gating it during.
+Provider-backed engines are optional execution placements, not the architecture.
+The pattern underneath: the center of gravity keeps moving toward versioned
+artifacts and engine guarantees, with harness-specific skills as thin projections.
 
 ### Grant-materialized rooms (gmr): the current center of gravity
 
@@ -795,12 +835,13 @@ outstanding work is the evidence-driven drain, not the broker.
 ### Enforcement moves to GitHub's boundary
 
 Gate's verdicts become *prevention* when GitHub refuses the merge without them. The
-workflow already on `main` (section 6's `gate.yml`) is the first half: a required
-`gate` status check, computed fork-safely from base-built code, dormant until
-armed. The second half is the closure TDD's D7: real capability enforcement lives at
-*GitHub's* boundary - the required check plus credential custody, meaning governed
-agents simply hold no credential that can bypass the check. Local HMACs are not the
-security claim; the branch-protection rule is. `intent` beyond the canary repo.
+workflow already on `main` (section 6's `gate.yml`) and the five-layer Workbench
+ruleset are the first half (`live`): a required `gate` status computed fork-safely
+from base-built code, with ambient direct updates rejected. The second half is
+credential custody: governed agents should hold no identity that can bypass the
+check, while one protected Gate App may execute only an independently approved
+exact action. Local HMACs are not the security claim; GitHub's rules plus custody
+are. Bootstrap and canaries remain open.
 
 ### Cross-harness closure
 
@@ -825,8 +866,10 @@ asserting the laws over the whole input space rather than hand-picked examples -
 including the property that distinct import keys mint distinct runs, the exact
 class of a real bug.
 
-Still open, and worth saying plainly: live merge, the reducer's general
-multiple-judgment reject, and the two-harness Gate B dogfood.
+Still open, and worth saying plainly: the App executor's first confirmed live
+merge, the reducer's general multiple-judgment reject, and the remaining
+cross-harness Gate B proof. The current Codex dogfood uses `--engine session`; a
+provider-cloud run is not required to prove the shared artifact/CLI boundary.
 
 ## 10. Self-test
 
@@ -849,9 +892,9 @@ Answers in parentheses; every one is derivable from the sections above.
    a floor emits tier-with-pass, CI emits decision-with-no-tier.)*
 7. What made `markMerged` the motivating bug? *(a State write that dodged
    Verification - hence Amendment 2.)*
-8. Has gate performed a live merge? *(No - `merge_not_implemented` dry-run
-   printing the exact `--match-head-commit` command; enforcement today is
-   "discipline plus an audit trail," with the GitHub check built but dormant.)*
+8. Has Gate performed a live merge? *(Not through ordinary `gate -live`, and the
+   separate App executor has not yet passed its positive canary. The Workbench
+   GitHub perimeter is live, but executor custody remains unarmed.)*
 9. What's the known reducer wart? *(last-judgment-wins on multiple judgments; held
    deliberately, fail-closed reject is the planned fix.)*
 10. Workbench vs platform? *(independent binaries composing through artifacts and
@@ -930,7 +973,7 @@ A backstop, not a prerequisite - every term here is also defined at first use ab
 - **fail closed** - unknown or absent input becomes park/refuse, never a silent
   pass; "absence never reads as green."
 
-## 12. Drift log - where docs and code disagree (verified 2026-07-23)
+## 12. Drift log - where docs and code disagree (verified 2026-07-29)
 
 The discipline: this repo prefers an honest list of disagreements over docs that
 quietly overclaim. Two directions of drift exist - docs behind code (stale) and
@@ -942,17 +985,17 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `cmd/workbench-mcp/main.go` package comment: "the four driver-state verbs" | Behind code: the server registers six (`driver_transition`, `driver_rollup` added) |
 | `cmd/driverstate/CLAUDE.md` verb list | Behind code: omits `render` and `rollup` |
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
-| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; twelve tenants live under `cmd/` |
+| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fourteen tenants live under `cmd/` |
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
-| Live merge | Still `merge_not_implemented` dry-run; the `already_merged` short-circuit is design-only |
+| Live merge | Ordinary `gate -live` still records `merge_not_implemented`; the separate one-App executor is implemented but unarmed pending bootstrap and canaries |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
-| `.github/workflows/gate.yml` | Built and merged but dormant: posts nothing until `GATE_ENFORCE=true` and a model-capable runner exist |
+| `.github/workflows/gate.yml` | `GATE_ENFORCE=true` and Workbench's required App-pinned `gate` context are live; executor custody is a separate, still-unarmed boundary |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
 
-Confirmed-in-code anchors, for contrast (all re-checked 2026-07-23): the exit
+Confirmed-in-code anchors, for contrast (all re-checked 2026-07-29): the exit
 codes, verbs, ladder law, monotone reduce, and fail-closed unknowns; the eight
 grant refusal codes and the `-init` mint guard; the keyed anchor pinning head and
 count; the post-judgment ceiling re-check; the triage-floor exec seam; the hygiene
