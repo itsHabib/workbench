@@ -23,19 +23,19 @@ direct-merge bypass on the repo that arms it — see the runbook in
 [docs/enforcement.md](docs/enforcement.md). The workflow first shipped —
 dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
 move it ships here, so the armable canary is itsHabib/workbench. Ordinary
-`gate -live` stays unbuilt. A separate, dormant App executor now owns one
-durable PR claim. Fresh security review found the generic-Actions `gate-state`
-writer unsafe. The revised repository code instead keeps App token creation,
-claim/result CAS, and exact merge inside one Gate action; the workflow remains
-source-disabled pending reconciliation semantics, review, and operator
-bootstrap.
+`gate -live` stays unbuilt. A separate App executor owns one durable PR claim.
+Fresh security review found the generic-Actions `gate-state` writer unsafe. The
+revised repository code instead keeps App token creation, claim/result CAS, and
+exact merge inside one Gate action. It uses a fresh Workbench-only ledger and
+remains unarmed until exact-head review, operator bootstrap, live canaries, and
+the operator-owned `GATE_EXECUTOR_ARMED` release switch.
 
 Provider-neutral exact-head passes can be presented for independent approval
-with `gate executor request`. The dormant default-branch executor verifies its
+with `gate executor request`. The default-branch executor verifies its
 own protected-environment approval history, creates the App token only after
 preflight, CAS-publishes and refetches one permanent claim, executes only the
 stored command, then CAS-publishes one result. It never promotes commit status.
-The path remains non-armable at the operator hold. See
+The path is installed but unarmed until the operator completes the runbook. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
 ## Run it
@@ -51,6 +51,7 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
 ./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
+./gate.exe executor bootstrap -state DIR -key DIR -state-tip <sha> -action act_... -repo owner/repo -pr 181 -head <sha> -app-id N -installation-id N
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176

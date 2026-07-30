@@ -1,8 +1,9 @@
 name: gate executor
 
-# Dormant until the operator registers the dedicated App, creates the protected
-# environment and secrets, initializes gate-state, and applies the reviewed
-# layered rulesets. This workflow never checks out or executes PR/fork code.
+# Repository variable GATE_EXECUTOR_ARMED is the final operator-owned release
+# switch. The protected environment supplies Workbench-only signing keys and
+# the repository-scoped App key. This workflow never checks out or executes
+# PR/fork code.
 on:
   workflow_dispatch:
     inputs:
@@ -33,8 +34,7 @@ concurrency:
 
 jobs:
   execute:
-    # Source-disabled until the operator performs the reviewed bootstrap.
-    if: ${{ false && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    if: ${{ vars.GATE_EXECUTOR_ARMED == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: gate-authorization

@@ -114,7 +114,7 @@ func (token *installationToken) clear() {
 
 func exchange(ctx context.Context, config AppConfig, client *http.Client, now func() time.Time) (installationToken, error) {
 	if config.AppID < 1 || config.InstallationID < 1 || len(config.PrivateKeyPEM) == 0 ||
-		!validRepo(config.Repository) {
+		!ValidRepository(config.Repository) {
 		return installationToken{}, ErrCredentials
 	}
 	apiURL := strings.TrimRight(config.APIURL, "/")
@@ -236,7 +236,7 @@ func validateArgv(argv []string) error {
 		return errors.New("executor_argv_invalid")
 	}
 	number, err := strconv.Atoi(argv[3])
-	if err != nil || number < 1 || !validRepo(argv[5]) || !validSHA(argv[9]) {
+	if err != nil || number < 1 || !ValidRepository(argv[5]) || !validSHA(argv[9]) {
 		return errors.New("executor_argv_invalid")
 	}
 	for _, arg := range argv {
@@ -247,7 +247,8 @@ func validateArgv(argv []string) error {
 	return nil
 }
 
-func validRepo(repo string) bool {
+// ValidRepository reports whether repo is a canonical owner/name identity.
+func ValidRepository(repo string) bool {
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return false

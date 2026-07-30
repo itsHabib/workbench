@@ -71,14 +71,17 @@ Constraints that are design decisions, not omissions:
   existing structured exception.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
-  hosted executor is source-disabled at the operator hold; generic Actions has
-  no `gate-state` write authority. The planned Gate App is the sole state
-  writer. Signing keys remain protected-environment secrets.
+  hosted executor uses a fresh Workbench-only ledger, never the machine-global
+  Gate ledger. Generic Actions has no `gate-state` write authority; the Gate
+  App is the sole state writer. Signing keys remain protected-environment
+  secrets, and the operator-owned `GATE_EXECUTOR_ARMED` variable is the final
+  release switch.
 - **Execution authority is a durable PR claim, not status.** The protected
   executor contract verifies run-specific independent approval, exact
   repo/PR/head/base, newest action, and unchanged `--match-head-commit` argv.
-  The one-App custody/order amendment and claim-only expired reconciliation
-  path are implemented but non-armable pending exact-head review and operator
-  bootstrap. The reconciler has no merge operation, although its one-App
+  The one-App custody/order amendment, one-time exact-action bootstrap, and
+  claim-only expired reconciliation path are implemented pending exact-head
+  review, operator bootstrap, and live canaries. The reconciler has no merge
+  operation, although its one-App
   `contents: write` token remains technically merge-capable. Neither path
   posts reusable green status or adds `--admin`.

@@ -1,76 +1,212 @@
 # Gate executor operator runbook
 
-Status: prepared only. None of these actions were performed by Codex.
+Status: repository activation in progress. The App, protected environment,
+layered rulesets, and `gate-state` ref exist. The executor remains unarmed:
+the Workbench-only signing secrets are absent and the repository variable
+`GATE_EXECUTOR_ARMED` is not `true`.
 
-**Do not activate this runbook.** The executor workflow is source-disabled.
-Do not register the App, create secrets or an environment, apply rulesets,
-initialize state, mint a grant, remove the workflow guard, bootstrap, or run a
-canary.
+This runbook deliberately uses a fresh Workbench-only Gate ledger. It never
+copies, uploads, rewrites, or re-anchors the operator's machine-global Gate
+state.
 
-The operator authorized the one-App execution ordering. Repository code now
-keeps approval verification, App token creation, claim CAS/refetch, exact
-merge, and result CAS inside one Gate action. Generic Actions remains read-only.
-Expired claims use a separate reconciler action: claim ID in, result CAS out.
-It accepts no request document or merge argv and its image contains no GitHub
-CLI. Local validation is green; CI and fresh exact-head review remain.
+## 1. Know what is hosted
 
-## 1. Review the dormant artifacts
+There is no hosted server or mounted disk. The durable hosted store is the
+protected Git branch named `gate-state`:
 
-Confirm the implementation PR/head and inspect:
+- `gate-state:state/log.jsonl`
+- `gate-state:anchor.json`
 
-- `.github/workflows/gate-executor.yml`
-- `.github/actions/gate-executor/action.yml`
-- `.github/actions/gate-reconciler/action.yml`
-- `docs/features/trusted-gate-judgment-bridge/ruleset-plan-v1.json`
-- the four schemas under `contracts/gateauthorization/schema/`
+The two signing keys are not committed to that branch. After bootstrap they
+live only as protected `gate-authorization` Environment secrets. A temporary
+local copy is created under a dedicated Workbench path so the operator can
+mint the first grant and produce the exact bootstrap action:
 
-Do not register or configure anything if the reviewed head differs.
+```powershell
+$hostedRoot = Join-Path $env:USERPROFILE ".workbench\gate-hosted\workbench"
+$hostedState = Join-Path $hostedRoot "state"
+$hostedKeys = Join-Path $hostedRoot "keys"
+```
 
-The protected `gate-authorization` environment must accept deployments only
-from the selected protected `main` branch, with administrator protection-rule
-bypass disabled. This platform rule is load-bearing: `workflow_dispatch`
-accepts another ref, so a workflow guard alone cannot protect the App key.
+Do not substitute `%APPDATA%\gate`, `~/pers/gate`, `$env:GATE_STATE`, or
+`$env:GATE_KEY`. `gate executor bootstrap` requires explicit `-state` and
+`-key` flags so ambient defaults cannot select the ordinary local ledger by
+accident.
 
-## 2. Reconciliation trust boundary
+## 2. Re-verify the exact activation head
 
-GitHub requires `contents: write` both to update `gate-state` and to merge a
-pull request. An installation token may narrow an App's permissions and
-repository set, but it cannot narrow `contents: write` to one branch.
+Before any key or grant work:
 
-The operator chose one-App code-path separation. Dispatch operation
-`reconcile` with exactly one expired `gxc_` claim ID. The reconciler re-fetches
-and audits that claim, observes the PR, and writes one terminal result through
-the same non-force state CAS. It has no merge input or merge call.
+1. Confirm the implementation PR is open, ready, CI-green, and formally
+   reviewed at its exact current head.
+2. Build Gate from that exact head, not from an older checkout or an
+   unreviewed branch.
+3. Confirm the App installation remains repository-only with only
+   `contents: write` plus mandatory metadata access.
+4. Confirm `gate-authorization` accepts only `main`, requires the independent
+   reviewer, prevents self-review, and disables administrator bypass.
+5. Confirm all five reviewed ruleset layers remain active.
 
-This does **not** create a cryptographically state-only credential. Its
-installation token still has `contents: write` and is technically
-merge-capable. The safety claim is deliberately narrower: protected release,
-one process, a claim-only API, no GitHub CLI in the image, no merge operation,
-and branch rules that remain operator-owned.
+If any identity, head, permission, reviewer, environment, or ruleset differs,
+stop. Never compensate with `--admin`, a dismissed check, a force-push, or a
+weaker rule.
 
-After operator activation only, the recovery dispatch shape is:
+## 3. Operator-only fresh ledger and grant
+
+Grant minting remains operator authority. The agent must stop and give the
+operator this exact request:
+
+```powershell
+$hostedRoot = Join-Path $env:USERPROFILE ".workbench\gate-hosted\workbench"
+$hostedState = Join-Path $hostedRoot "state"
+$hostedKeys = Join-Path $hostedRoot "keys"
+
+gate grant -repo itsHabib/workbench -max-tier T3 -ttl 24h -init `
+  -state $hostedState -key $hostedKeys
+```
+
+The operator returns the `grt_...` value. The agent may then run Gate against
+the same explicit paths:
+
+```powershell
+gate gate -repo itsHabib/workbench -pr <PR> -grant <GRANT> `
+  -state $hostedState -key $hostedKeys
+```
+
+If Gate parks, resolve the recorded escalation through the normal judge
+contract. No provider is implicit; a submitted exact-head judgment or an
+operator decision is required. Re-run Gate after a pass. Do not reconstruct a
+merge command.
+
+The passing run records one newest `would_merge` action. Read its `act_...`
+identity and exact command from:
+
+```powershell
+gate next -json -state $hostedState -key $hostedKeys
+```
+
+## 4. One-time bootstrap
+
+Bootstrap has one narrow job: publish that fresh dedicated ledger to the
+current `gate-state` tip, then execute the exact stored
+`gh pr merge ... --match-head-commit ...` action as the Gate App. It does not
+invent an approval receipt for a workflow that is not yet present on `main`.
+
+Capture the exact current state tip and load the existing bootstrap App key
+without printing it:
+
+```powershell
+$stateTip = gh api repos/itsHabib/workbench/git/ref/heads/gate-state --jq .object.sha
+$env:INPUT_APP_PRIVATE_KEY = Get-Content -Raw `
+  "C:\Users\MichaelHabib\Downloads\itshabib-workbench-gate-executor.2026-07-29.private-key.pem"
+```
+
+Run the exact reviewed binary:
+
+```powershell
+gate executor bootstrap `
+  -state $hostedState -key $hostedKeys `
+  -state-tip $stateTip -action <ACT_ID> `
+  -repo itsHabib/workbench -pr <PR> -head <EXACT_HEAD_SHA> `
+  -app-id 4431951 -installation-id 149997077
+```
+
+Then remove the process copy:
+
+```powershell
+Remove-Item Env:\INPUT_APP_PRIVATE_KEY
+```
+
+Bootstrap refuses before App-token creation when the state/key flags are
+implicit, the local ledger is empty or invalid, either state file exceeds the
+transport limit, the ledger contains a structured repository identity other
+than `itsHabib/workbench`, the remote state tip moved, the PR subject changed,
+the action is malformed or superseded, or its stored command is not the exact
+ten-element commit-pinned merge command. State publication is a non-force
+compare-and-swap. The exact merge still fails closed if the PR head moves after
+preflight.
+
+If bootstrap publishes state but does not confirm the merge, stop and inspect
+the returned error and remote PR/state facts. Do not force the ref or execute a
+hand-built merge command.
+
+## 5. Retire the bootstrap App key
+
+After the bootstrap merge is confirmed:
+
+1. Create a replacement private key for the same GitHub App.
+2. Replace the protected Environment secret `GATE_APP_PRIVATE_KEY` with the
+   replacement key.
+3. Delete the bootstrap key from the App settings.
+4. Securely delete the downloaded bootstrap PEM.
+
+This leaves no reusable App key in the local task after activation. Never put a
+PEM in a command argument, log, issue, PR, repository file, or artifact.
+
+## 6. Install the dedicated signing keys
+
+Upload only the fresh Workbench key pair, through standard input:
+
+```powershell
+[Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes((Join-Path $hostedKeys "grant.key"))
+) | gh secret set GATE_GRANT_KEY_B64 -R itsHabib/workbench `
+  --env gate-authorization
+
+[Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes((Join-Path $hostedKeys "anchor.key"))
+) | gh secret set GATE_ANCHOR_KEY_B64 -R itsHabib/workbench `
+  --env gate-authorization
+```
+
+Do not display either base64 value. Keep the local dedicated state and keys
+until positive and negative canaries finish; then move the keys to the
+operator's approved recovery custody or remove them.
+
+## 7. Arm and canary
+
+The final release switch is operator-owned:
+
+```powershell
+gh variable set GATE_EXECUTOR_ARMED -R itsHabib/workbench --body true
+```
+
+Set it only after the bootstrap head is on `main`, the replacement App key and
+dedicated signing secrets are present, and all ruleset/environment checks in
+section 2 still pass.
+
+The first live canary must begin with a red required `gate` check and prove:
+
+- one independently approved, exact-head request creates a durable claim,
+  refetches it, runs the stored commit-pinned command, records one result, and
+  merges;
+- stale head, retarget, malformed artifact, duplicate request, replay, wrong
+  approver, and self-approval refuse without merging;
+- ambient user and generic Actions updates to `main` and `gate-state` refuse;
+- the Gate App cannot update an ordinary branch; and
+- claim/result, approver actor ID, argv, PR head/base, and merge commit agree.
+
+Recovery accepts only one expired claim identity:
 
 ```powershell
 gh workflow run gate-executor.yml -R itsHabib/workbench --ref main `
   -f operation=reconcile -f claim=gxc_<64-lowercase-hex>
 ```
 
-The workflow remains hard-disabled today, so this command cannot release the
-App credential or change state.
+The reconciler has no merge input or merge call. Its one-App token remains
+technically merge-capable because GitHub uses the same `contents: write`
+permission for state-ref updates and PR merge; the safety boundary is the
+reviewed claim-only process plus branch rules, not a fictional branch-scoped
+token.
 
-## 3. Activation remains operator-only
+## 8. Rollback
 
-After that decision is implemented, locally green, CI-green, and freshly
-reviewed, replace this hold with exact instructions for:
+First disarm new executions:
 
-- App registration and minimum permissions;
-- protected-environment reviewers and secrets;
-- selected protected `main` as the environment's only deployment branch, with
-  administrator protection-rule bypass disabled;
-- `gate-state` initialization;
-- staged five-layer ruleset application with no unprotected interval,
-  including the independent no-bypass `gate-state-integrity` layer;
-- positive and negative canaries;
-- bootstrap, recovery, and rollback.
+```powershell
+gh variable set GATE_EXECUTOR_ARMED -R itsHabib/workbench --body false
+```
 
-Until then every operational step is **stop**.
+Do not weaken rulesets or force/reset `gate-state`. Preserve the ledger, close
+any expired claim through the reviewed reconciler, rotate the App key if
+custody is in doubt, and fix forward through a reviewed PR.

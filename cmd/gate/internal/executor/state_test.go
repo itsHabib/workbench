@@ -36,6 +36,26 @@ func TestFetchBlobAcceptsMaximumStateFile(t *testing.T) {
 	}
 }
 
+func TestValidateStateFiles(t *testing.T) {
+	valid := StateFiles{Log: []byte("log\n"), Anchor: []byte("anchor\n")}
+	if err := ValidateStateFiles(valid); err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]StateFiles{
+		"empty log":        {Anchor: valid.Anchor},
+		"empty anchor":     {Log: valid.Log},
+		"oversized log":    {Log: make([]byte, maxStateFile+1), Anchor: valid.Anchor},
+		"oversized anchor": {Log: valid.Log, Anchor: make([]byte, maxStateFile+1)},
+	}
+	for name, files := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateStateFiles(files); !errors.Is(err, ErrState) {
+				t.Fatalf("validate = %v, want ErrState", err)
+			}
+		})
+	}
+}
+
 func TestReadPullStateObservesWithoutMutation(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	merge := strings.Repeat("b", 40)

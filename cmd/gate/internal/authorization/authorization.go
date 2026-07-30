@@ -28,6 +28,7 @@ var (
 	ErrNotYetValid         = errors.New("authorization_not_yet_valid")
 	ErrLiveMismatch        = errors.New("authorization_live_pr_mismatch")
 	ErrHeadAmbiguous       = errors.New("authorization_head_ambiguous")
+	ErrRepositoryScope     = errors.New("authorization_repository_scope_mismatch")
 	ErrActionMissing       = errors.New("authorization_action_missing")
 	ErrActionMismatch      = errors.New("authorization_action_mismatch")
 	ErrSuperseded          = errors.New("authorization_superseded")
@@ -96,6 +97,48 @@ func ValidateLive(subject gateauthorization.Subject, live LivePullRequest) error
 	return validateLive(subject, live)
 }
 
+// ValidateRepositoryScope refuses a hosted ledger containing structured
+// repository identities outside repo. Opaque evidence strings are not parsed.
+func ValidateRepositoryScope(audit state.AuditResult, repo string) error {
+	if !audit.OK {
+		return fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+	}
+	for _, artifact := range audit.All {
+		var body any
+		if err := json.Unmarshal(artifact.Body, &body); err != nil {
+			return fmt.Errorf("authorization_artifact_malformed: %w", err)
+		}
+		if err := validateRepositoryValue(body, repo); err != nil {
+			return fmt.Errorf("%w: artifact %s", err, artifact.ID)
+		}
+	}
+	return nil
+}
+
+func validateRepositoryValue(value any, repo string) error {
+	switch item := value.(type) {
+	case []any:
+		for _, child := range item {
+			if err := validateRepositoryValue(child, repo); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for key, child := range item {
+			if key == "repo" {
+				identity, ok := child.(string)
+				if !ok || identity != repo {
+					return ErrRepositoryScope
+				}
+			}
+			if err := validateRepositoryValue(child, repo); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // BuildRequest derives a canonical authorization request from an audited Gate
 // action. It refuses a stale action before anything is presented for approval.
 func BuildRequest(audit state.AuditResult, input RequestInput) (gateauthorization.Request, error) {
@@ -146,6 +189,42 @@ func BuildRequest(audit state.AuditResult, input RequestInput) (gateauthorizatio
 		return gateauthorization.Request{}, fmt.Errorf("authorization_request_invalid: %w", err)
 	}
 	return request, nil
+}
+
+// BootstrapMergeArgv returns one exact stored merge command for the one-time
+// executor bootstrap. It applies the same audited action, subject, and newest
+// terminal checks as BuildRequest, but does not fabricate a protected approval
+// receipt before the protected workflow exists on main.
+func BootstrapMergeArgv(
+	audit state.AuditResult,
+	actionID string,
+	subject gateauthorization.Subject,
+) ([]string, error) {
+	if !audit.OK {
+		return nil, fmt.Errorf("authorization_state_invalid: %s", audit.Reason)
+	}
+	index, err := buildIndex(audit.All)
+	if err != nil {
+		return nil, err
+	}
+	target, ok := index.byID[actionID]
+	if !ok || target.artifact.Kind != state.KindAction {
+		return nil, fmt.Errorf("%w: %s", ErrActionMissing, actionID)
+	}
+	if err := matchSubject(target.subject, subject); err != nil {
+		return nil, err
+	}
+	if err := validateAction(target.artifact, subject); err != nil {
+		return nil, err
+	}
+	if newest := index.newestTerminal(subject.Repo, subject.Number); newest.artifact.ID != target.artifact.ID {
+		return nil, ErrSuperseded
+	}
+	var body actionBody
+	if err := json.Unmarshal(target.artifact.Body, &body); err != nil {
+		return nil, fmt.Errorf("%w: malformed action: %v", ErrActionMismatch, err)
+	}
+	return append([]string(nil), body.Argv...), nil
 }
 
 // Authorize selects the newest approval decision for Gate's static

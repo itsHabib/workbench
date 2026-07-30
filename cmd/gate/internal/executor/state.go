@@ -85,8 +85,11 @@ func (session *Session) ReadPullState(ctx context.Context, number int) (PullStat
 // PublishGateState creates one commit from expectedTip, advances gate-state
 // without force, and reads the committed bytes back before returning.
 func (session *Session) PublishGateState(ctx context.Context, expectedTip, message string, files StateFiles) (StateSnapshot, error) {
-	if !validSHA(expectedTip) || !validMessage(message) || !validStateFiles(files) {
+	if !validSHA(expectedTip) || !validMessage(message) {
 		return StateSnapshot{}, ErrState
+	}
+	if err := ValidateStateFiles(files); err != nil {
+		return StateSnapshot{}, err
 	}
 	current, err := session.readRef(ctx)
 	if err != nil {
@@ -155,8 +158,8 @@ func (session *Session) FetchGateState(ctx context.Context, expected string) (St
 		return StateSnapshot{}, err
 	}
 	files := StateFiles{Log: logData, Anchor: anchorData}
-	if !validStateFiles(files) {
-		return StateSnapshot{}, ErrState
+	if err := ValidateStateFiles(files); err != nil {
+		return StateSnapshot{}, err
 	}
 	return StateSnapshot{Tip: current, Files: files}, nil
 }
@@ -378,9 +381,14 @@ func stateBlobSHAs(tree gitTree) (string, string, error) {
 	return logSHA, anchorSHA, nil
 }
 
-func validStateFiles(files StateFiles) bool {
-	return len(files.Log) > 0 && len(files.Log) <= maxStateFile &&
-		len(files.Anchor) > 0 && len(files.Anchor) <= maxStateFile
+// ValidateStateFiles checks the complete hosted state payload before App
+// credential creation. The transport repeats the check before every write.
+func ValidateStateFiles(files StateFiles) error {
+	if len(files.Log) == 0 || len(files.Log) > maxStateFile ||
+		len(files.Anchor) == 0 || len(files.Anchor) > maxStateFile {
+		return ErrState
+	}
+	return nil
 }
 
 func validMessage(message string) bool {

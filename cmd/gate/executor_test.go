@@ -148,6 +148,41 @@ func TestExecutorReconcileRefusesMalformedIdentityBeforeCredentials(t *testing.T
 	}
 }
 
+func TestExecutorBootstrapRequiresExplicitDedicatedStateBeforeCredentials(t *testing.T) {
+	t.Setenv("GATE_STATE", t.TempDir())
+	t.Setenv("GATE_KEY", t.TempDir())
+	t.Setenv("INPUT_APP_PRIVATE_KEY", "must-not-be-read")
+	err := cmdExecutor([]string{
+		"bootstrap",
+		"-state-tip", strings.Repeat("a", 40),
+		"-action", "act_exact",
+		"-repo", "o/r",
+		"-pr", "17",
+		"-head", strings.Repeat("b", 40),
+		"-app-id", "1",
+		"-installation-id", "2",
+	})
+	var refusal executorRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("bootstrap = %v, want refusal", err)
+	}
+	if os.Getenv("INPUT_APP_PRIVATE_KEY") != "must-not-be-read" {
+		t.Fatal("implicit state paths reached App credential custody")
+	}
+}
+
+func TestExecutorFlagPresent(t *testing.T) {
+	if !executorFlagPresent([]string{"-state", "x"}, "-state") {
+		t.Fatal("separate flag not found")
+	}
+	if !executorFlagPresent([]string{"-state=x"}, "-state") {
+		t.Fatal("equals flag not found")
+	}
+	if executorFlagPresent([]string{"-stateful", "x"}, "-state") {
+		t.Fatal("prefix-only argument accepted")
+	}
+}
+
 func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T) {
 	var run workflowRunFacts
 	run.ID = 42

@@ -160,6 +160,7 @@ func usage() {
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
+  executor bootstrap -state DIR -key DIR -state-tip SHA -action act_x -repo R -pr N -head SHA -app-id N -installation-id N
   executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]

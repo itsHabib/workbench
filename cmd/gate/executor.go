@@ -45,11 +45,13 @@ func refuseExecutor(err error) error {
 
 func cmdExecutor(args []string) error {
 	if len(args) == 0 {
-		return errors.New("executor: request, run, or reconcile required")
+		return errors.New("executor: request, bootstrap, run, or reconcile required")
 	}
 	switch args[0] {
 	case "request":
 		return cmdExecutorRequest(args[1:])
+	case "bootstrap":
+		return cmdExecutorBootstrap(args[1:])
 	case "run":
 		return cmdExecutorRun(args[1:])
 	case "reconcile":
@@ -57,6 +59,166 @@ func cmdExecutor(args []string) error {
 	default:
 		return fmt.Errorf("executor: unknown verb %q", args[0])
 	}
+}
+
+type executorBootstrapFlags struct {
+	explicitState  bool
+	explicitKey    bool
+	stateTip       string
+	actionID       string
+	repo           string
+	pr             int
+	head           string
+	appID          int64
+	installationID int64
+	keyDir         string
+}
+
+type executorBootstrapPlan struct {
+	expectedTip string
+	files       gateexecutor.StateFiles
+	argv        []string
+	subject     gateauthorization.Subject
+	pr          int
+	entries     int
+	auditHead   string
+}
+
+func (flags executorBootstrapFlags) valid() bool {
+	return flags.explicitState && flags.explicitKey &&
+		validExecutorSHA(flags.stateTip) && flags.actionID != "" &&
+		gateexecutor.ValidRepository(flags.repo) && flags.pr > 0 &&
+		validExecutorSHA(flags.head) && flags.appID > 0 &&
+		flags.installationID > 0 && flags.keyDir != ""
+}
+
+func cmdExecutorBootstrap(args []string) error {
+	explicitState := executorFlagPresent(args, "-state")
+	explicitKey := executorFlagPresent(args, "-key")
+	fs := flag.NewFlagSet("executor bootstrap", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	stateTip := fs.String("state-tip", "", "exact current gate-state commit")
+	actionID := fs.String("action", "", "exact would_merge bootstrap action")
+	repo := fs.String("repo", "", "owner/repo")
+	pr := fs.Int("pr", 0, "pull request number")
+	head := fs.String("head", "", "expected exact head SHA")
+	appID := fs.Int64("app-id", 0, "dedicated Gate App ID")
+	installationID := fs.Int64("installation-id", 0, "repository installation ID")
+	apiURL := fs.String("api-url", "", "GitHub API URL")
+	help, err := parseFlags(fs, args)
+	if err != nil || help {
+		return err
+	}
+	flags := executorBootstrapFlags{
+		explicitState: explicitState, explicitKey: explicitKey,
+		stateTip: *stateTip, actionID: *actionID, repo: *repo, pr: *pr,
+		head: *head, appID: *appID, installationID: *installationID,
+		keyDir: *keyDir,
+	}
+	if !flags.valid() {
+		return refuseExecutor(errors.New(
+			"executor bootstrap: explicit -state -key and valid -state-tip -action -repo -pr -head -app-id -installation-id required",
+		))
+	}
+	live, err := readExecutorPull(*repo, *pr, *head)
+	if err != nil {
+		return classifyExecutorLiveRead(err)
+	}
+	subject := gateauthorization.Subject{
+		Repo: live.Repository, Number: live.Number, HeadSHA: live.HeadSHA,
+		BaseRef: live.BaseRef, BaseSHA: live.BaseSHA,
+		MergeBaseSHA: live.MergeBaseSHA,
+	}
+	if err := authorization.ValidateLive(subject, live); err != nil {
+		return refuseExecutor(err)
+	}
+	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	if err != nil {
+		return err
+	}
+	audit, err := e.st.Audit()
+	if err != nil {
+		return err
+	}
+	if !audit.OK || len(audit.All) == 0 {
+		return refuseExecutor(errors.New("executor bootstrap: audited non-empty state required"))
+	}
+	if err := authorization.ValidateRepositoryScope(audit, *repo); err != nil {
+		return classifyExecutorAuthorizationError(err)
+	}
+	argv, err := authorization.BootstrapMergeArgv(audit, *actionID, subject)
+	if err != nil {
+		return classifyExecutorAuthorizationError(err)
+	}
+	files, err := readExecutorStateFiles(e)
+	if err != nil {
+		return err
+	}
+	if err := gateexecutor.ValidateStateFiles(files); err != nil {
+		return refuseExecutor(fmt.Errorf("executor bootstrap: state payload invalid: %w", err))
+	}
+	remoteTip, err := readExecutorStateTip(*repo)
+	if err != nil {
+		return err
+	}
+	if remoteTip != *stateTip {
+		return refuseExecutor(gateexecutor.ErrStateCAS)
+	}
+	config, err := readExecutorAppConfig(
+		*appID, *installationID, *apiURL, *repo,
+	)
+	if err != nil {
+		return err
+	}
+	defer wipeBytes(config.PrivateKeyPEM)
+	return gateexecutor.WithSession(
+		context.Background(), config, func(session *gateexecutor.Session) error {
+			plan := executorBootstrapPlan{
+				expectedTip: *stateTip, files: files, argv: argv,
+				subject: subject, pr: *pr, entries: len(audit.All),
+				auditHead: audit.All[len(audit.All)-1].Hash,
+			}
+			return executeExecutorBootstrap(context.Background(), session, plan)
+		},
+	)
+}
+
+func executeExecutorBootstrap(
+	ctx context.Context,
+	session *gateexecutor.Session,
+	plan executorBootstrapPlan,
+) error {
+	snapshot, err := session.PublishGateState(
+		ctx, plan.expectedTip, "gate: bootstrap dedicated hosted state", plan.files,
+	)
+	if err != nil {
+		return err
+	}
+	command, mergeErr := session.Merge(ctx, plan.argv)
+	pull, err := session.ReadPullState(ctx, plan.pr)
+	if err != nil {
+		return err
+	}
+	if pull.HeadSHA != plan.subject.HeadSHA || pull.BaseRef != plan.subject.BaseRef {
+		return refuseExecutor(authorization.ErrLiveMismatch)
+	}
+	if !pull.Merged {
+		if mergeErr != nil {
+			return mergeErr
+		}
+		if command.ExitCode == 0 {
+			return errMergeConfirmation
+		}
+		return errors.New("executor bootstrap merge failed without an error")
+	}
+	printJSON(map[string]any{
+		"argv":         plan.argv,
+		"entries":      plan.entries,
+		"head":         plan.auditHead,
+		"merge_commit": pull.MergeCommit,
+		"tip":          snapshot.Tip,
+	})
+	return nil
 }
 
 func cmdExecutorRequest(args []string) error {
@@ -133,6 +295,15 @@ func cmdExecutorRequest(args []string) error {
 		"path":             *out,
 	})
 	return nil
+}
+
+func executorFlagPresent(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdExecutorRun(args []string) error {
@@ -624,6 +795,7 @@ func classifyExecutorAuthorizationError(err error) error {
 		authorization.ErrNotYetValid,
 		authorization.ErrLiveMismatch,
 		authorization.ErrHeadAmbiguous,
+		authorization.ErrRepositoryScope,
 		authorization.ErrActionMissing,
 		authorization.ErrActionMismatch,
 		authorization.ErrSuperseded,

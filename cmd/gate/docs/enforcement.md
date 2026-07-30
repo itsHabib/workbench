@@ -324,26 +324,26 @@ holds even for an administrator. The named bypass above is shut on this one repo
 What it does **not** close — stated plainly, because implying otherwise is the
 failure this document exists to correct:
 
-- **Token custody is not yet armed.** Every local agent still shares one
+- **Token custody is installed but not yet armed.** Every local agent still shares one
   merge-capable `gh` credential; there is still no distinct merge-only CI
   identity in live GitHub configuration, and no scoping that stops a governed agent from *attempting* a
   direct merge. Branch protection with admin bypass disallowed still *rejects*
   such a merge for lacking the green `gate` check — so the perimeter holds on
-  the canary. The dormant executor code is now source-disabled: security review
-  proved that the repository-wide `github_actions` Integration cannot be an
-  exclusive `gate-state` writer. App/ruleset bootstrap and canary are
-  insufficient until the operator approves and the repository implements the
-  revised state-writer custody/order model.
+  the canary. Security review proved that the repository-wide `github_actions`
+  Integration cannot be an exclusive `gate-state` writer. The revised one-App
+  process-custodied executor and layered rulesets are installed, but the
+  Workbench-only signing secrets and operator-owned release switch remain
+  unset pending bootstrap and canaries.
 - **Mint authentication is not yet armed.** Local `gate grant` is unauthenticated and
   `MintedBy` is a free-form, unverified label (see above). The CI check mints
   its own throwaway grant, so this does not weaken the check — but it does not
   add mint authentication either. The protected executor's exact-subject mint
-  path remains dormant.
+  path remains unarmed.
 - **`-live` merge execution stays open.** The gate's sanctioned merge is still
   a dry run: `-live` records `merge_not_implemented`, unchanged by this work.
   The separate App executor is the only planned live seam and is not armed.
 
-### Provider-neutral judgment executor (dormant)
+### Provider-neutral judgment executor (installed, unarmed)
 
 The commit-status promotion prototype was rejected: commit status is SHA-scoped
 and cannot safely carry Gate's PR-specific authority. The replacement in
@@ -361,12 +361,13 @@ action. Generic Actions is read-only and the symbolic plan makes the Gate App
 the sole `gate-state` writer. It posts no reusable success status and never
 adds `--admin`.
 
-This path is repository code only and is not armable. GitHub uses the same
-`contents: write` permission for both state-ref updates and PR merge, so the
-literal no-merge-token reconciliation requirement still needs the operator's
-choice documented in
-`docs/features/trusted-gate-judgment-bridge/design.md`. Do not perform the
-operator actions in the runbook until that choice is implemented and reviewed.
+The one-App code-path separation is the authorized compromise. GitHub uses the
+same `contents: write` permission for both state-ref updates and PR merge, so a
+literal state-only reconciliation token does not exist. The workflow remains
+unarmed until the dedicated ledger is bootstrapped, protected signing secrets
+are installed, live canaries pass, and the operator sets the release variable
+documented in
+`docs/features/trusted-gate-judgment-bridge/operator-runbook.md`.
 
 Three CI-context choices worth naming, since they shape what the check does and
 does not assert:

@@ -230,8 +230,10 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
   `merge_not_implemented`; agents cannot turn their ambient token into Gate's
   sanctioned merge. The separate `executor run` verb creates the App token
   only after protected approval and preflight, then owns claim CAS/refetch,
-  exact merge, and result CAS in one process. It remains source-disabled until
-  operator bootstrap and an adversarial live canary pass. Expired claims are
+  exact merge, and result CAS in one process. A one-time bootstrap publishes a
+  fresh Workbench-only ledger and executes only the newest exact stored
+  action. The executor remains unarmed until operator bootstrap and an
+  adversarial live canary pass. Expired claims are
   closed by `executor reconcile`, a claim-only code path with no merge
   operation; its one-App token remains technically merge-capable because
   GitHub also requires `contents: write` for the result-state CAS.

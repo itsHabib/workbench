@@ -1,22 +1,24 @@
 # Trusted Gate judgment bridge
 
-Status: authorized one-App ordering and reconciliation implemented in dormant
-repository code; review and operator bootstrap remain.
+Status: one-App ordering, reconciliation, and a one-time exact-action bootstrap
+are implemented; exact-head review, bootstrap, and live canaries remain.
 
-**Security hold:** the repository implementation is intentionally non-armable.
 Fresh review proved that the coarse `github_actions` Integration cannot be an
 exclusive `gate-state` writer. The operator therefore authorized one
 process-custodied Gate App to publish claim/result CAS commits and execute the
-exact merge. The workflow still has a hard false guard. One platform limitation
-remains explicit below: GitHub uses `contents: write` for both ref updates and
-PR merge, so the same App cannot mint a literally state-only reconciliation
+exact merge. The workflow is controlled by the operator-owned
+`GATE_EXECUTOR_ARMED` repository variable and remains unarmable while its
+Workbench-only signing secrets are absent. One platform limitation remains
+explicit below: GitHub uses `contents: write` for both ref updates and PR
+merge, so the same App cannot mint a literally state-only reconciliation
 token.
 
-The operator authorized this trust model at design head
+The operator authorized the initial trust model at design head
 `745d2bc405e07fd202c2379320afdc1745e46cc5`. That authorization covers repository
-code, tests, and documentation only. App registration, secrets, environment
-configuration, ruleset changes, grant minting, state bootstrap, live execution,
-and merge remain operator-only.
+code, tests, and documentation only. The operator later authorized App
+registration, protected-environment configuration, staged rulesets, bootstrap,
+and canaries. Grant minting remains operator-only; exact-head review and a
+fresh authorization are required when implementation changes the held head.
 
 The operator separately authorized the one-App process-custodied ordering at
 held PR head `19dae14d5cc71d3859938ffe218230d542f7498f`: post-approval
@@ -200,13 +202,21 @@ separation: GitHub requires `contents: write` to update `gate-state`, so the
 installation token remains technically capable of merging under the one-App
 ruleset.
 
-## Dormant bootstrap boundary
+## Bootstrap and release boundary
 
-Repository presence is intentionally insufficient to run this path. The
-workflow references App/environment/key values that do not exist until the
-operator follows `operator-runbook.md`. The implementation does not register an
-App, create or populate secrets, configure the environment, apply rulesets,
-initialize `gate-state`, mint a grant, bootstrap itself, or merge.
+Repository presence is insufficient to run this path. The workflow requires an
+operator-owned `GATE_EXECUTOR_ARMED=true` repository variable plus protected
+App and Workbench-only signing secrets. `gate executor bootstrap` is the
+one-time bridge that publishes a fresh dedicated ledger and executes only its
+newest exact stored `would_merge` action. It requires explicit state/key paths,
+an exact current `gate-state` tip, and the exact live PR head; it validates all
+of those before App-token creation.
+
+The bootstrap ledger is separate from the operator's machine-global Gate
+ledger. There is no re-anchoring or schema conversion: the protected
+`gate-state` branch simply begins with a fresh Workbench-only log and anchor.
+The App/environment/ruleset setup and bootstrap remain operator-controlled,
+and grant minting remains an authority the agent never exercises.
 
 The required live canary begins with `gate` red and must prove:
 
@@ -217,5 +227,4 @@ The required live canary begins with `gate` red and must prove:
   App token or merge; and
 - claim/result, GitHub actor, argv, PR head/base, and merge commit agree.
 
-Until that proof passes, this is reviewed dormant code, not an armed security
-boundary.
+Until that proof passes, this is an installed but unarmed security boundary.

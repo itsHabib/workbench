@@ -78,6 +78,66 @@ func TestPreflightClaimRefusesWithoutMutatingState(t *testing.T) {
 	}
 }
 
+func TestBootstrapMergeArgvUsesNewestExactAction(t *testing.T) {
+	fixture := newFixture(t)
+	got, err := BootstrapMergeArgv(
+		fixture.audit(t), fixture.action.ID, fixture.subject,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := gateauthorization.ExpectedMergeArgv(fixture.subject)
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+	got[0] = "changed"
+	again, err := BootstrapMergeArgv(
+		fixture.audit(t), fixture.action.ID, fixture.subject,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again[0] != "gh" {
+		t.Fatal("returned argv aliases stored action")
+	}
+	if _, err := fixture.store.Append(
+		state.KindEscalation, fixture.action.Run, nil, map[string]string{"reason": "newer"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BootstrapMergeArgv(
+		fixture.audit(t), fixture.action.ID, fixture.subject,
+	); err == nil {
+		t.Fatal("superseded bootstrap action accepted")
+	}
+}
+
+func TestValidateRepositoryScope(t *testing.T) {
+	audit := state.AuditResult{
+		OK: true,
+		All: []state.Artifact{
+			{
+				ID:   "grt_one",
+				Body: json.RawMessage(`{"repo":"o/r"}`),
+			},
+			{
+				ID:   "vrd_one",
+				Body: json.RawMessage(`{"subject":{"repo":"o/r"},"data":"{\"repo\":\"other/r\"}"}`),
+			},
+		},
+	}
+	if err := ValidateRepositoryScope(audit, "o/r"); err != nil {
+		t.Fatal(err)
+	}
+	audit.All = append(audit.All, state.Artifact{
+		ID:   "grt_other",
+		Body: json.RawMessage(`{"repo":"other/r"}`),
+	})
+	if err := ValidateRepositoryScope(audit, "o/r"); !errors.Is(err, ErrRepositoryScope) {
+		t.Fatalf("cross-repository ledger = %v, want scope refusal", err)
+	}
+}
+
 func TestClaimIsPermanentAndAtomic(t *testing.T) {
 	fixture := newFixture(t)
 	authorization := authorize(t, fixture.request(t))
