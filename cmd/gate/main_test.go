@@ -908,7 +908,7 @@ func TestExplainJSONFlag(t *testing.T) {
 	root := t.TempDir()
 	fixtureSrc := observeFixtureDir(t)
 	fixtureDst := filepath.Join(root, "state")
-	if err := copyDir(fixtureSrc, fixtureDst); err != nil {
+	if err := copyObserveFixture(fixtureSrc, fixtureDst); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
@@ -943,24 +943,15 @@ func TestExplainJSONFlag(t *testing.T) {
 	}
 }
 
-func copyDir(src, dst string) error {
+func copyObserveFixture(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(src)
+	data, err := os.ReadFile(filepath.Join(src, "log.jsonl"))
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
+	return os.WriteFile(filepath.Join(dst, "log.jsonl"), data, 0o644)
 }
 
 func observeFixtureDir(t *testing.T) string {
@@ -1026,7 +1017,7 @@ func TestExplainHTMLFlag(t *testing.T) {
 	root := t.TempDir()
 	fixtureSrc := observeFixtureDir(t)
 	fixtureDst := filepath.Join(root, "state")
-	if err := copyDir(fixtureSrc, fixtureDst); err != nil {
+	if err := copyObserveFixture(fixtureSrc, fixtureDst); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(root, "trace.html")
