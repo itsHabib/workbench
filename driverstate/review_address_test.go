@@ -60,6 +60,72 @@ func TestPrepareReviewAddressConsumesExactHeadOnce(t *testing.T) {
 	}
 }
 
+func TestAddressLifecycleRejectsCrossRootBeforeMutation(t *testing.T) {
+	dir, lease, artifact := addressFixture(t, 1)
+	other := t.TempDir()
+	input := PrepareAddressInput{
+		Stream: addressTestStream, LiveHead: artifact.Subject.HeadSHA,
+		MaxCycles: 3, Artifact: artifact,
+	}
+	if _, _, err := PrepareReviewAddress(other, lease, input); err == nil {
+		t.Fatal("cross-root prepare must reject")
+	}
+	assertDirEmpty(t, other)
+
+	work, _, err := PrepareReviewAddress(dir, lease, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ClaimReviewAddress(other, lease, addressTestStream, work.WorkID, "session:address"); err == nil {
+		t.Fatal("cross-root claim must reject")
+	}
+	assertDirEmpty(t, other)
+
+	if _, _, err := ClaimReviewAddress(dir, lease, addressTestStream, work.WorkID, "session:address"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartReviewAddress(other, lease, addressTestStream, work.WorkID, "task_1"); err == nil {
+		t.Fatal("cross-root start must reject")
+	}
+	assertDirEmpty(t, other)
+
+	if _, err := StartReviewAddress(dir, lease, addressTestStream, work.WorkID, "task_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompleteReviewAddress(other, lease, addressTestStream, work.WorkID, strings.Repeat("b", 40)); err == nil {
+		t.Fatal("cross-root complete must reject")
+	}
+	assertDirEmpty(t, other)
+}
+
+func TestPrepareReviewAddressRequiresLiveLeaseBeforeWorkWrite(t *testing.T) {
+	dir, lease, artifact := addressFixture(t, 1)
+	if err := ExpireLeaseForTest(dir, addressTestRun); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := PrepareReviewAddress(dir, lease, PrepareAddressInput{
+		Stream: addressTestStream, LiveHead: artifact.Subject.HeadSHA,
+		MaxCycles: 3, Artifact: artifact,
+	})
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("expired lease error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, addressTestRun, "review-address")); !os.IsNotExist(err) {
+		t.Fatalf("expired lease wrote address work: %v", err)
+	}
+}
+
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("cross-root operation mutated %s: %v", dir, entries)
+	}
+}
+
 func TestPrepareReviewAddressRefusalMatrix(t *testing.T) {
 	tests := []struct {
 		name      string
