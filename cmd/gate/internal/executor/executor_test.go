@@ -58,7 +58,7 @@ func TestSessionKeepsTokenInsideExactMergeBoundary(t *testing.T) {
 
 	argv := []string{
 		"gh", "pr", "merge", "169", "-R", "itsHabib/workbench",
-		"--squash", "--delete-branch", "--match-head-commit", strings.Repeat("a", 40),
+		"--squash", "--match-head-commit", strings.Repeat("a", 40),
 	}
 	var result CommandResult
 	err := withSession(context.Background(), AppConfig{
@@ -87,7 +87,7 @@ func TestSessionRefusesInvalidMergeCommand(t *testing.T) {
 		{"gh", "pr", "merge"},
 		{
 			"gh", "pr", "merge", "1", "-R", "o/r", "--squash",
-			"--delete-branch", "--match-head-commit", strings.Repeat("a", 40), "--admin",
+			"--match-head-commit", strings.Repeat("a", 40), "--admin",
 		},
 	}
 	for _, argv := range tests {

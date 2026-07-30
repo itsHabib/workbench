@@ -230,13 +230,13 @@ func parsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
 }
 
 func parseMergeArgv(argv []string) (mergeRequest, error) {
-	if len(argv) != 10 || argv[0] != "gh" || argv[1] != "pr" ||
+	if len(argv) != 9 || argv[0] != "gh" || argv[1] != "pr" ||
 		argv[2] != "merge" || argv[4] != "-R" || argv[6] != "--squash" ||
-		argv[7] != "--delete-branch" || argv[8] != "--match-head-commit" {
+		argv[7] != "--match-head-commit" {
 		return mergeRequest{}, errors.New("executor_argv_invalid")
 	}
 	number, err := strconv.Atoi(argv[3])
-	if err != nil || number < 1 || !ValidRepository(argv[5]) || !validSHA(argv[9]) {
+	if err != nil || number < 1 || !ValidRepository(argv[5]) || !validSHA(argv[8]) {
 		return mergeRequest{}, errors.New("executor_argv_invalid")
 	}
 	for _, arg := range argv {
@@ -247,7 +247,7 @@ func parseMergeArgv(argv []string) (mergeRequest, error) {
 	return mergeRequest{
 		Repository: argv[5],
 		Number:     number,
-		HeadSHA:    argv[9],
+		HeadSHA:    argv[8],
 	}, nil
 }
 

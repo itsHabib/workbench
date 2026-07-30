@@ -99,9 +99,11 @@ still forge grants (and the anchor).
 
 **An agent with `gh pr merge` rights bypasses the gate entirely.**
 
-The gate's own sanctioned merge path is a `gh pr merge ... --squash
---delete-branch --match-head-commit <sha>` command (dry-run prints it; `-live`
-today records `merge_not_implemented`). But that same `gh pr merge` verb is
+The gate's own sanctioned merge intent is `gh pr merge ... --squash
+--match-head-commit <sha>` (dry-run prints it; `-live` today records
+`merge_not_implemented`). Branch cleanup is separate because the Gate App is
+intentionally forbidden from updating ordinary branches. But that same
+`gh pr merge` verb is
 available to anyone holding a merge-capable `gh` token, run directly against
 the PR, with no grant, no verdict, and no artifact. On the current single box,
 where every agent shares one merge-capable `gh` credential, this bypass is

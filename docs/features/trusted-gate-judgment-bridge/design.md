@@ -107,7 +107,7 @@ never fabricates an empty findings artifact.
    API, advances `gate-state` without force from the exact expected parent, and
    reads the remote claim bytes back.
 7. Gate audits the refetched claim, re-reads the PR/head/base/merge-base, checks
-   the remote state tip again, byte-validates the stored ten-element
+   the remote state tip again, byte-validates the stored nine-element
    `gh pr merge ... --match-head-commit` intent, and performs the same
    commit-pinned squash through GitHub's merge API. The installation token
    never enters a child process. This native call is required because
@@ -230,5 +230,9 @@ The required live canary begins with `gate` red and must prove:
 - shared-head, retarget, stale, malformed, duplicate, and replay cases create no
   App token or merge; and
 - claim/result, GitHub actor, argv, PR head/base, and merge commit agree.
+
+Branch deletion is not part of the authorization. The Gate App is deliberately
+absent from the ordinary-branch bypass list, so cleanup belongs to a separate
+ordinary maintenance path after the merge fact is durable.
 
 Until that proof passes, this is an installed but unarmed security boundary.

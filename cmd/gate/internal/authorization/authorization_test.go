@@ -408,7 +408,7 @@ func TestBuildRequestAndClaimRefuseSupersededAction(t *testing.T) {
 func TestBuildRequestRefusesForgedArgv(t *testing.T) {
 	fixture := newFixtureWithArgv(t, []string{
 		"gh", "pr", "merge", "168", "-R", "itsHabib/workbench",
-		"--squash", "--delete-branch", "--match-head-commit", strings.Repeat("f", 40),
+		"--squash", "--match-head-commit", strings.Repeat("f", 40),
 	})
 	if _, err := BuildRequest(fixture.audit(t), fixture.requestInput()); !errors.Is(err, ErrActionMismatch) {
 		t.Fatalf("BuildRequest() = %v, want action mismatch", err)

@@ -124,7 +124,7 @@ implicit, the local ledger is empty or invalid, either state file exceeds the
 transport limit, the ledger contains a structured repository identity other
 than `itsHabib/workbench`, the remote state tip moved, the PR subject changed,
 the action is malformed or superseded, or its stored command is not the exact
-ten-element commit-pinned merge command. State publication is a non-force
+nine-element commit-pinned merge intent. State publication is a non-force
 compare-and-swap. The exact merge still fails closed if the PR head moves after
 preflight.
 

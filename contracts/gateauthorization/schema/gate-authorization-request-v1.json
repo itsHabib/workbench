@@ -33,8 +33,8 @@
     },
     "merge_argv": {
       "type": "array",
-      "minItems": 10,
-      "maxItems": 10,
+      "minItems": 9,
+      "maxItems": 9,
       "prefixItems": [
         { "const": "gh" },
         { "const": "pr" },
@@ -43,7 +43,6 @@
         { "const": "-R" },
         { "type": "string" },
         { "const": "--squash" },
-        { "const": "--delete-branch" },
         { "const": "--match-head-commit" },
         { "type": "string", "pattern": "^[0-9a-f]{40}$" }
       ]

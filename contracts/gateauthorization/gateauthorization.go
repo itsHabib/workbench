@@ -398,19 +398,19 @@ func ExpectedApprovalComment(authorizationID string, request Request) string {
 		authorizationID, request.EvidenceDigest, hex.EncodeToString(question[:]))
 }
 
-// ExpectedMergeArgv returns the only executable command shape.
+// ExpectedMergeArgv returns the only canonical merge intent.
 func ExpectedMergeArgv(subject Subject) []string {
 	return []string{
 		"gh", "pr", "merge", strconv.Itoa(subject.Number),
-		"-R", subject.Repo, "--squash", "--delete-branch",
-		"--match-head-commit", subject.HeadSHA,
+		"-R", subject.Repo, "--squash", "--match-head-commit",
+		subject.HeadSHA,
 	}
 }
 
 func validateMergeArgv(subject Subject, argv []string) error {
 	want := ExpectedMergeArgv(subject)
 	if !equal(argv, want) {
-		return errors.New("merge_argv is not Gate's exact commit-pinned squash command")
+		return errors.New("merge_argv is not Gate's exact commit-pinned squash intent")
 	}
 	for _, arg := range argv {
 		if arg == "--admin" {

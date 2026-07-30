@@ -56,7 +56,7 @@ func TestValidateRefusesChangedAuthorization(t *testing.T) {
 			a.Request.ExpiresAt = a.Request.IssuedAt.Add(MaxValidity + time.Second)
 		},
 		"wrong trust": func(a *Artifact) { a.Request.TrustRoot.Environment = "production" },
-		"forged sha":  func(a *Artifact) { a.Request.MergeArgv[9] = strings.Repeat("f", 40) },
+		"forged sha":  func(a *Artifact) { a.Request.MergeArgv[8] = strings.Repeat("f", 40) },
 		"changed method": func(a *Artifact) {
 			a.Request.MergeArgv[6] = "--merge"
 		},
