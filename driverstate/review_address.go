@@ -72,6 +72,9 @@ type prepareHooks struct {
 // Work is persisted before the v0.2 prepared event, forming an atomic
 // consumption/outbox boundary that is safe to retry after every file boundary.
 func PrepareReviewAddress(dir string, lease Lease, in PrepareAddressInput) (reviewfindings.AddressWorkV1, Event, error) {
+	if err := guardAddressLease(dir, lease); err != nil {
+		return reviewfindings.AddressWorkV1{}, Event{}, err
+	}
 	return prepareReviewAddress(dir, lease, in, prepareHooks{})
 }
 
@@ -274,6 +277,9 @@ func syncAddressDir(dir string) error {
 // ClaimReviewAddress imports the deterministic address child before linking it
 // from the authoritative ledger. A retry adopts the same child and event.
 func ClaimReviewAddress(dir string, lease Lease, stream, workID, actor string) (string, Event, error) {
+	if err := guardAddressLease(dir, lease); err != nil {
+		return "", Event{}, err
+	}
 	record, err := findAddressRecord(dir, lease.Run(), stream, workID)
 	if err != nil {
 		return "", Event{}, err
@@ -309,6 +315,9 @@ func ClaimReviewAddress(dir string, lease Lease, stream, workID, actor string) (
 
 // StartReviewAddress records the external Codex task id returned after spawn.
 func StartReviewAddress(dir string, lease Lease, stream, workID, taskID string) (Event, error) {
+	if err := guardAddressLease(dir, lease); err != nil {
+		return Event{}, err
+	}
 	record, err := findAddressRecord(dir, lease.Run(), stream, workID)
 	if err != nil {
 		return Event{}, err
@@ -323,6 +332,9 @@ func StartReviewAddress(dir string, lease Lease, stream, workID, taskID string) 
 
 // CompleteReviewAddress records the exact new PR head produced by the child.
 func CompleteReviewAddress(dir string, lease Lease, stream, workID, head string) (Event, error) {
+	if err := guardAddressLease(dir, lease); err != nil {
+		return Event{}, err
+	}
 	if !validAddressHex(head, 40) {
 		return Event{}, refuse("malformed", "completed head must be 40 lowercase hexadecimal characters", "")
 	}
@@ -446,6 +458,13 @@ func addressChildRun(workID string) string {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func guardAddressLease(dir string, lease Lease) error {
+	if err := bindDir(dir, lease); err != nil {
+		return err
+	}
+	return requireLease(lease)
 }
 
 func validAddressHex(value string, size int) bool {
