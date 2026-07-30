@@ -22,7 +22,7 @@ const (
 )
 
 var testMerge = fmt.Sprintf(
-	"gh pr merge %d -R %s --squash --delete-branch --match-head-commit %s",
+	"gh pr merge %d -R %s --squash --match-head-commit %s",
 	testPR, testRepo, testHead,
 )
 
@@ -274,6 +274,7 @@ func TestOppositeMutationsOfAuthorizedCommandRefuse(t *testing.T) {
 		strings.Replace(testMerge, testRepo, "itsHabib/other", 1),
 		strings.Replace(testMerge, fmt.Sprint(testPR), "173", 1),
 		strings.Replace(testMerge, "--squash", "--merge", 1),
+		strings.Replace(testMerge, "--squash", "--squash --delete-branch", 1),
 		testMerge + " ",
 		" " + testMerge,
 	}
