@@ -19,6 +19,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/gateauthorization"
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
@@ -146,6 +147,44 @@ func TestExitCodesAreStable(t *testing.T) {
 	}
 	if code != codeRefused || res.Outcome != "capability_refused" {
 		t.Errorf("expired grant: got code %d outcome %q, want %d %q", code, res.Outcome, codeRefused, "capability_refused")
+	}
+}
+
+func TestActPersistsExactMergeArgv(t *testing.T) {
+	e := testEnv(t)
+	grant, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{
+		Repo: "o/r", Number: 7,
+		HeadSHA: strings.Repeat("a", 40),
+	}
+	verdict := reducedVerdict(subject, verify.DecisionPass, "T0")
+	verdictID := recordReduced(t, e, run, verdict)
+	if _, code, err := act(e, run, grant.ID, verdict, verdictID, gateResult{}, false, nil); err != nil || code != codeMerge {
+		t.Fatalf("act code=%d err=%v", code, err)
+	}
+	artifacts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Command string   `json:"command"`
+		Argv    []string `json:"argv"`
+	}
+	if err := json.Unmarshal(artifacts[len(artifacts)-1].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	want := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject{
+		Repo: subject.Repo, Number: subject.Number, HeadSHA: subject.HeadSHA,
+	})
+	if strings.Join(body.Argv, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv=%q want=%q", body.Argv, want)
+	}
+	if body.Command != strings.Join(want, " ") {
+		t.Fatalf("command=%q want=%q", body.Command, strings.Join(want, " "))
 	}
 }
 
@@ -645,6 +684,29 @@ func TestStateDirTagDistinguishesDirs(t *testing.T) {
 	}
 }
 
+func TestHostedAnchorRecordIsPortableAndOutsideState(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "gate-state", "state")
+	keyDir := filepath.Join(root, "keys")
+	anchorPath := filepath.Join(root, "gate-state", "anchor.json")
+	t.Setenv("GATE_ANCHOR_RECORD", anchorPath)
+	e, err := newEnv(stateDir, "triage-floor", keyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Append(state.KindEvidence, "run_test", nil, map[string]string{"evidence": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(anchorPath); err != nil {
+		t.Fatalf("hosted anchor was not written at stable path: %v", err)
+	}
+
+	t.Setenv("GATE_ANCHOR_RECORD", filepath.Join(stateDir, "anchor.json"))
+	if _, err := newEnv(stateDir, "triage-floor", keyDir); err == nil {
+		t.Fatal("anchor record inside state dir must refuse")
+	}
+}
+
 // TestStateDirTagStableAcrossSpellings pins that two spellings of the same dir
 // resolve to one anchor, so a relative and absolute path to the same log don't
 // fork the anchor.
@@ -846,7 +908,7 @@ func TestExplainJSONFlag(t *testing.T) {
 	root := t.TempDir()
 	fixtureSrc := observeFixtureDir(t)
 	fixtureDst := filepath.Join(root, "state")
-	if err := copyDir(fixtureSrc, fixtureDst); err != nil {
+	if err := copyObserveFixture(fixtureSrc, fixtureDst); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
@@ -881,24 +943,15 @@ func TestExplainJSONFlag(t *testing.T) {
 	}
 }
 
-func copyDir(src, dst string) error {
+func copyObserveFixture(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(src)
+	data, err := os.ReadFile(filepath.Join(src, "log.jsonl"))
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
+	return os.WriteFile(filepath.Join(dst, "log.jsonl"), data, 0o644)
 }
 
 func observeFixtureDir(t *testing.T) string {
@@ -964,7 +1017,7 @@ func TestExplainHTMLFlag(t *testing.T) {
 	root := t.TempDir()
 	fixtureSrc := observeFixtureDir(t)
 	fixtureDst := filepath.Join(root, "state")
-	if err := copyDir(fixtureSrc, fixtureDst); err != nil {
+	if err := copyObserveFixture(fixtureSrc, fixtureDst); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(root, "trace.html")

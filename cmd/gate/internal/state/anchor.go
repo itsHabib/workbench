@@ -49,6 +49,11 @@ type anchorRecord struct {
 // capability's loud-missing-key discipline: a verify path never mints a key.
 var ErrAnchorKeyMissing = errors.New("anchor_key_missing")
 
+// ErrAnchorKeyInvalid fires when configured key material is too short to be a
+// cryptographic HMAC secret. An empty decoded workflow secret is invalid, not
+// a usable anchor key.
+var ErrAnchorKeyInvalid = errors.New("anchor_key_invalid")
+
 // ErrAnchorMissing fires when the log holds entries but no anchor is present.
 // A verify path treats a missing anchor as suspicious (the anchor could have
 // been deleted alongside a rewrite), never as "nothing to check".
@@ -205,7 +210,7 @@ func anchorMAC(key []byte, head string, count int) string {
 func loadAnchorKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if err == nil {
-		return key, nil
+		return validateAnchorKey(key)
 	}
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: %s", ErrAnchorKeyMissing, path)
@@ -218,7 +223,7 @@ func loadAnchorKey(path string) ([]byte, error) {
 func loadOrCreateAnchorKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if err == nil {
-		return key, nil
+		return validateAnchorKey(key)
 	}
 	if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("state: read anchor key: %w", err)
@@ -235,6 +240,13 @@ func loadOrCreateAnchorKey(path string) ([]byte, error) {
 	}
 	if err := os.WriteFile(path, key, 0o600); err != nil {
 		return nil, fmt.Errorf("state: write anchor key: %w", err)
+	}
+	return key, nil
+}
+
+func validateAnchorKey(key []byte) ([]byte, error) {
+	if len(key) < 32 {
+		return nil, fmt.Errorf("%w: need at least 32 bytes", ErrAnchorKeyInvalid)
 	}
 	return key, nil
 }
