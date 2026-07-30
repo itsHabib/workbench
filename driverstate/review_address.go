@@ -286,6 +286,7 @@ func ClaimReviewAddress(dir string, lease Lease, stream, workID, actor string) (
 	if err != nil {
 		return "", Event{}, err
 	}
+	defer childLease.Release()
 	repo, err := recordRepo(dir, lease.Run())
 	if err != nil {
 		return "", Event{}, err
@@ -297,7 +298,6 @@ func ClaimReviewAddress(dir string, lease Lease, stream, workID, actor string) (
 		Parent:  lease.Run(), ParentStream: stream, DoneBoundary: dsc.DoneBoundaryGreen,
 	}
 	_, importErr := appendLegacyEvent(dir, childLease, "", dsc.KindRunImported, actor, importBody)
-	_ = childLease.Release()
 	if importErr != nil {
 		return "", Event{}, importErr
 	}
