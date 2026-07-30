@@ -51,17 +51,27 @@ const (
 	// cycle or contaminates a decision chain. The projection folds it into the
 	// inbox's needs_grant[] surface.
 	KindGrantNeeded = "grant_needed"
+	// KindExecutionClaim permanently consumes one Gate action for one execution.
+	KindExecutionClaim = "execution_claim"
+	// KindExecutionResult records the terminal outcome of one claimed execution.
+	KindExecutionResult = "execution_result"
+	// KindGatePreparation permanently consumes one protected preparation
+	// request before its decision artifacts are published to hosted state.
+	KindGatePreparation = "gate_preparation"
 )
 
 var kindPrefix = map[string]string{
-	KindEvidence:    "evd",
-	KindVerdict:     "vrd",
-	KindGrant:       "grt",
-	KindAction:      "act",
-	KindEscalation:  "esc",
-	KindJudgment:    "jdg",
-	KindResolution:  "res",
-	KindGrantNeeded: "gnd",
+	KindEvidence:        "evd",
+	KindVerdict:         "vrd",
+	KindGrant:           "grt",
+	KindAction:          "act",
+	KindEscalation:      "esc",
+	KindJudgment:        "jdg",
+	KindResolution:      "res",
+	KindGrantNeeded:     "gnd",
+	KindExecutionClaim:  "gxc",
+	KindExecutionResult: "gxr",
+	KindGatePreparation: "gpp",
 }
 
 // ErrAlreadyExists is returned by AppendIfAbsentParent when the run already
@@ -162,6 +172,16 @@ func (s *Store) AppendIfAbsentParentKinds(kind string, uniqueKinds []string, run
 // uniqueness check holds the store lock. A nil predicate treats every matching
 // kind/parent as a conflict.
 func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool) (Artifact, error) {
+	return s.AppendIfAbsentParentWhereAfterAudit(
+		kind, uniqueKinds, run, uniqueParent, parents, body, conflicts, nil,
+	)
+}
+
+// AppendIfAbsentParentWhereAfterAudit composes anchored audit, caller policy,
+// uniqueness, and append under one store lock. It is the terminal-outcome
+// counterpart to AppendAfterAudit: no claim can land between an open-claim
+// predicate and the outcome write.
+func (s *Store) AppendIfAbsentParentWhereAfterAudit(kind string, uniqueKinds []string, run, uniqueParent string, parents []string, body any, conflicts func(Artifact) bool, check func(AuditResult) error) (Artifact, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
@@ -171,14 +191,26 @@ func (s *Store) AppendIfAbsentParentWhere(kind string, uniqueKinds []string, run
 		return Artifact{}, err
 	}
 	defer unlock()
-	existing, err := s.scan(func(a Artifact) bool {
-		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
-			return false
-		}
-		return conflicts == nil || conflicts(a)
-	})
+	audit, err := s.auditLocked()
 	if err != nil {
 		return Artifact{}, err
+	}
+	if !audit.OK {
+		return Artifact{}, fmt.Errorf("state: audit refused append: %s", audit.Reason)
+	}
+	if check != nil {
+		if err := check(audit); err != nil {
+			return Artifact{}, err
+		}
+	}
+	var existing []Artifact
+	for _, a := range audit.All {
+		if a.Run != run || !contains(uniqueKinds, a.Kind) || !hasParent(a.Parents, uniqueParent) {
+			continue
+		}
+		if conflicts == nil || conflicts(a) {
+			existing = append(existing, a)
+		}
 	}
 	if len(existing) > 0 {
 		return Artifact{}, fmt.Errorf("%w: run %s kind %s", ErrAlreadyExists, run, kind)
@@ -493,6 +525,42 @@ func (s *Store) Audit() (AuditResult, error) {
 		return AuditResult{}, err
 	}
 	defer unlock()
+	return s.auditLocked()
+}
+
+// AppendAfterAudit verifies one anchored snapshot, lets the caller apply
+// policy to exactly that snapshot, then appends while the same store lock is
+// still held. The callback must be pure and quick: state supplies atomic
+// mechanism but deliberately knows nothing about the policy it evaluates.
+//
+// This closes the check/append race for one-time effects. A competing append
+// cannot land between "newest executable action" policy and its claim.
+func (s *Store) AppendAfterAudit(kind, run string, parents []string, body any, check func(AuditResult) error) (Artifact, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("state: marshal body: %w", err)
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer unlock()
+	audit, err := s.auditLocked()
+	if err != nil {
+		return Artifact{}, err
+	}
+	if !audit.OK {
+		return Artifact{}, fmt.Errorf("state: audit refused append: %s", audit.Reason)
+	}
+	if check != nil {
+		if err := check(audit); err != nil {
+			return Artifact{}, err
+		}
+	}
+	return s.appendLocked(kind, run, parents, raw)
+}
+
+func (s *Store) auditLocked() (AuditResult, error) {
 	all, err := s.scan(nil)
 	if err != nil {
 		return AuditResult{}, err

@@ -235,6 +235,17 @@ func TestAuditLoudWhenAnchorKeyMissing(t *testing.T) {
 	}
 }
 
+func TestConfiguredEmptyAnchorKeyRefusesBinding(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "anchor.key")
+	if err := os.WriteFile(keyPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOrCreateAnchorKey(keyPath); !errors.Is(err, ErrAnchorKeyInvalid) {
+		t.Fatalf("want ErrAnchorKeyInvalid, got %v", err)
+	}
+}
+
 func TestAuditDetectsMissingAnchorWithLog(t *testing.T) {
 	st := openAnchored(t)
 	appendN(t, st, 3)
