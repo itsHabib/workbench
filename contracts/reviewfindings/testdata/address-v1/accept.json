@@ -9,5 +9,5 @@
   "expected_refusal": "",
   "projection": {"accepted": true, "consumed": true, "at_most_once": true},
   "workbench": {"work_status": "pending", "claim_count": 0},
-  "ship": {"provider_call_count": 0}
+  "ship": {"provider_call_count": 1}
 }

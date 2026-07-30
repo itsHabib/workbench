@@ -281,15 +281,16 @@ func TestMixedLedgerExcludesOldWriterAfterAddressEvent(t *testing.T) {
 }
 
 type addressCorpusCase struct {
-	Name            string   `json:"name"`
-	ArtifactJSON    string   `json:"artifact_json"`
-	LiveHead        string   `json:"live_head"`
-	Cycle           int      `json:"cycle"`
-	MaxCycles       int      `json:"max_cycles"`
-	ConsumedIDs     []string `json:"consumed_ids"`
-	Calls           []string `json:"calls"`
-	ExpectedRefusal string   `json:"expected_refusal"`
-	Projection      struct {
+	Name                  string   `json:"name"`
+	ArtifactJSON          string   `json:"artifact_json"`
+	LiveHead              string   `json:"live_head"`
+	Cycle                 int      `json:"cycle"`
+	MaxCycles             int      `json:"max_cycles"`
+	ConsumedIDs           []string `json:"consumed_ids"`
+	ConsumedArtifactJSONs []string `json:"consumed_artifact_jsons"`
+	Calls                 []string `json:"calls"`
+	ExpectedRefusal       string   `json:"expected_refusal"`
+	Projection            struct {
 		Accepted   bool `json:"accepted"`
 		Consumed   bool `json:"consumed"`
 		AtMostOnce bool `json:"at_most_once"`
@@ -329,9 +330,11 @@ func TestWorkbenchExecutesAddressV1Corpus(t *testing.T) {
 func runAddressCorpusCase(t *testing.T, scenario addressCorpusCase) {
 	t.Helper()
 	dir, lease, _ := addressFixture(t, scenario.Cycle)
+	seedConsumedArtifacts(t, dir, lease, scenario)
 	artifact, decodeErr := reviewfindings.Decode([]byte(scenario.ArtifactJSON))
 	var work reviewfindings.AddressWorkV1
 	accepted := false
+	providerCalls := 0
 	refusalCode := ""
 	for _, call := range scenario.Calls {
 		switch call {
@@ -347,6 +350,7 @@ func runAddressCorpusCase(t *testing.T, scenario addressCorpusCase) {
 			if err == nil {
 				work = next
 				accepted = true
+				providerCalls++
 				continue
 			}
 			var refusal AddressRefusal
@@ -382,8 +386,33 @@ func runAddressCorpusCase(t *testing.T, scenario addressCorpusCase) {
 	if len(records) == 1 && records[0].Status != scenario.Workbench.WorkStatus {
 		t.Fatalf("work status = %q, want %q", records[0].Status, scenario.Workbench.WorkStatus)
 	}
-	if scenario.Workbench.ClaimCount != 0 || scenario.Ship.ProviderCallCount != 0 {
-		t.Fatalf("corpus case unexpectedly requests dispatch: workbench=%d ship=%d", scenario.Workbench.ClaimCount, scenario.Ship.ProviderCallCount)
+	if scenario.Workbench.ClaimCount != 0 {
+		t.Fatalf("workbench claim count = %d, want 0", scenario.Workbench.ClaimCount)
+	}
+	if providerCalls != scenario.Ship.ProviderCallCount {
+		t.Fatalf("ship provider calls = %d, want %d", providerCalls, scenario.Ship.ProviderCallCount)
+	}
+}
+
+func seedConsumedArtifacts(t *testing.T, dir string, lease Lease, scenario addressCorpusCase) {
+	t.Helper()
+	if len(scenario.ConsumedIDs) != len(scenario.ConsumedArtifactJSONs) {
+		t.Fatalf("consumed ids=%d artifacts=%d", len(scenario.ConsumedIDs), len(scenario.ConsumedArtifactJSONs))
+	}
+	for index, raw := range scenario.ConsumedArtifactJSONs {
+		artifact, err := reviewfindings.Decode([]byte(raw))
+		if err != nil {
+			t.Fatalf("decode consumed artifact %d: %v", index, err)
+		}
+		if artifact.ArtifactID != scenario.ConsumedIDs[index] {
+			t.Fatalf("consumed artifact id = %q, want %q", artifact.ArtifactID, scenario.ConsumedIDs[index])
+		}
+		if _, _, err := PrepareReviewAddress(dir, lease, PrepareAddressInput{
+			Stream: addressTestStream, LiveHead: scenario.LiveHead,
+			MaxCycles: scenario.MaxCycles, Artifact: artifact,
+		}); err != nil {
+			t.Fatalf("seed consumed artifact %s: %v", artifact.ArtifactID, err)
+		}
 	}
 }
 
