@@ -1347,7 +1347,7 @@ func validateWorkflowRun(
 	expectedTriggeringLogin string,
 	expectedHead string,
 ) error {
-	path := ".github/workflows/gate-executor.yml@main"
+	path := ".github/workflows/gate-executor.yml"
 	if run.ID != runID || run.Repository.FullName != repo || run.RunAttempt != 1 ||
 		run.Event != "workflow_dispatch" || run.HeadBranch != "main" ||
 		run.Path != path || !validExecutorSHA(run.HeadSHA) ||
