@@ -254,7 +254,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// repeated while the resolve is in flight. Count the work in before spawning so
 	// a graceful shutdown drains it (Wait) rather than dropping the acked decision.
 	s.inflight.Add(1)
-	s.log.Printf("escalate serve: accepted escalation=%s decision=%s", cb.decision.Escalation, cb.decision.Verdict)
 	writeAck(w, cb)
 	go s.process(cb)
 }
