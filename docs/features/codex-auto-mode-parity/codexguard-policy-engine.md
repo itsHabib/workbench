@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: implementation complete on `codex/codexguard-policy-engine`; merge pending
 **Owner**: @codex:michael
 **Date**: 2026-07-29
 **Related**: dossier task `codexguard-policy-engine` (`tsk_01KYP78S45H49XBVAS8WWQPB1R`)
@@ -63,3 +63,14 @@ and hygiene.
 
 No hooks, installation, branch protection, grant minting, Gate policy
 duplication, or model approval.
+
+## Implemented surface
+
+`cmd/codexguard` owns the deterministic rulebook and emits
+`contracts/automode.Decision`. Its fakeable read-only seams invoke only the
+fixed `gate next -json` and `gh pr view` commands. The test suite covers the
+envelope matrix, opposite mutations of an authorized merge, stale/ambiguous
+evidence, and the rule that no raw command or state path enters the artifact.
+
+This status describes repository code only. Hook binding and policy projection
+remain separate dependent slices, so no installed-enforcement claim is made.
