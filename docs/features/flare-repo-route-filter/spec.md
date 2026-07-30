@@ -39,6 +39,8 @@ disabling Flare globally or splitting a shared producer log.
   semantics.
 - A route fixture proves one repository is dropped while another reaches the
   configured catch-all channel.
+- `cmd/flare/docs/DESIGN.md` documents the `repo` predicate in the authoritative
+  route-table contract.
 - Flare operations documentation includes a sanitized per-repository disable
   example.
 - No real work repository names, Slack identifiers, credentials, or rehearsal

@@ -8,7 +8,7 @@ source:
 repo: workbench
 repo_url: https://github.com/itsHabib/workbench
 branch_prefix: codex/flare-repo-route-
-default_runtime: cloud
+default_runtime: session
 
 batches:
   - id: 1
@@ -19,12 +19,13 @@ batches:
       - task_id: tsk_01KYP59QGHDCVN33DMV79CXA4E
         task_slug: flare-repo-route-filter
         spec_path: docs/features/flare-repo-route-filter/spec.md
-        runtime: cloud
+        runtime: session
         touches:
           - cmd/flare/internal/config/config.go
           - cmd/flare/internal/config/config_test.go
           - cmd/flare/internal/route/route.go
           - cmd/flare/internal/route/route_test.go
+          - cmd/flare/docs/DESIGN.md
           - cmd/flare/docs/OPERATIONS.md
         status: pending
 
