@@ -13,3 +13,5 @@ secrets/
 .claude/
 .huddle/
 .playwright-mcp/
+.gate-executor-keys/
+.github/actions/gate-executor/gate
