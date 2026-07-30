@@ -87,6 +87,10 @@ func TestSessionRefusesInvalidMergeCommand(t *testing.T) {
 		{"gh", "pr", "merge"},
 		{
 			"gh", "pr", "merge", "1", "-R", "o/r", "--squash",
+			"--delete-branch", "--match-head-commit", strings.Repeat("a", 40),
+		},
+		{
+			"gh", "pr", "merge", "1", "-R", "o/r", "--squash",
 			"--match-head-commit", strings.Repeat("a", 40), "--admin",
 		},
 	}

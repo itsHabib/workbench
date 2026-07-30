@@ -64,7 +64,12 @@ func TestValidateRefusesChangedAuthorization(t *testing.T) {
 			a.Request.MergeArgv[6], a.Request.MergeArgv[7] =
 				a.Request.MergeArgv[7], a.Request.MergeArgv[6]
 		},
-		"admin": func(a *Artifact) { a.Request.MergeArgv = append(a.Request.MergeArgv, "--admin") },
+		"branch cleanup": func(a *Artifact) {
+			a.Request.MergeArgv = append(a.Request.MergeArgv, "--delete-branch")
+		},
+		"admin": func(a *Artifact) {
+			a.Request.MergeArgv = append(a.Request.MergeArgv, "--admin")
+		},
 		"wrong run": func(a *Artifact) {
 			a.Receipt.WorkflowRunID++
 		},
