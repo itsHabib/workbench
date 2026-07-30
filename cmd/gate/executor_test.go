@@ -59,6 +59,29 @@ func TestPreparationConsumed(t *testing.T) {
 	}
 }
 
+func TestValidatePreparedOutcome(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision string
+		code     int
+		wantErr  bool
+	}{
+		{name: "pass action", decision: "pass", code: codeMerge},
+		{name: "deterministic block wins", decision: "pass", code: codeBlocked},
+		{name: "approved block", decision: "block", code: codeBlocked},
+		{name: "block cannot emit action", decision: "block", code: codeMerge, wantErr: true},
+		{name: "park cannot publish", decision: "pass", code: codeParked, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validatePreparedOutcome(test.decision, test.code, "outcome")
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestExecutorResultRecordsObservedMergeDespiteCommandError(t *testing.T) {
 	claim := gateauthorization.ExecutionClaim{
 		ClaimID: "claim", ExecutionID: "execution", MergeArgv: []string{"gh"},

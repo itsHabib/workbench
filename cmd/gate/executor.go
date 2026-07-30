@@ -18,6 +18,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	gateexecutor "github.com/itsHabib/workbench/cmd/gate/internal/executor"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
@@ -306,9 +307,8 @@ func evaluateHostedPreparation(
 	if err != nil {
 		return preparedGateState{}, err
 	}
-	if code != codeMerge && code != codeBlocked {
-		return preparedGateState{},
-			refuseExecutor(fmt.Errorf("executor prepare: gate outcome %s", result.Outcome))
+	if err := validatePreparedOutcome(document.Request.Decision, code, result.Outcome); err != nil {
+		return preparedGateState{}, refuseExecutor(err)
 	}
 	if result.HeadSHA != document.Request.Subject.HeadSHA {
 		return preparedGateState{}, refuseExecutor(authorization.ErrLiveMismatch)
@@ -333,6 +333,16 @@ func evaluateHostedPreparation(
 	return preparedGateState{
 		result: result, actionID: actionID, files: files,
 	}, nil
+}
+
+func validatePreparedOutcome(decision string, code int, outcome string) error {
+	if decision == verify.DecisionBlock && code == codeMerge {
+		return errors.New("executor prepare: approved block cannot publish a merge action")
+	}
+	if code != codeMerge && code != codeBlocked {
+		return fmt.Errorf("executor prepare: gate outcome %s", outcome)
+	}
+	return nil
 }
 
 func applyPreparationJudgment(
