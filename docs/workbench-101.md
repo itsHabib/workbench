@@ -7,7 +7,7 @@ the one law that holds the family together, and where it is going.
 Three status markers appear throughout, and the difference matters:
 
 - `verified` - confirmed against the code at this document's head as of
-  2026-07-29.
+  2026-07-30.
 - `live` - confirmed against the current `itsHabib/workbench` GitHub
   configuration; unlike code, this can drift without a commit.
 - `intent` - designed and written down, but not yet code.
@@ -48,9 +48,10 @@ and 6 (gate) hold the load-bearing detail.
 - **Honest status.** The Workbench canary's GitHub perimeter is live: layered
   rulesets require the App-pinned `gate` check and reject ambient direct merges.
   Ordinary `gate -live` is still a dry-run. The separate exact-action Gate App
-  executor is implemented but unarmed pending review, dedicated state bootstrap,
-  and live canaries. Those are three different claims; section 6 keeps them
-  separate.
+  executor is implemented and activation is in progress: App/environment/rules
+  are live and dedicated state has been published, while the first confirmed
+  merge and negative canaries remain open. Those are three different claims;
+  section 6 keeps them separate.
 - **The north star.** Engine-neutral autonomous runs - `--engine session` is the
   current dogfood/default path, while provider-backed engines remain optional.
   The operator reads the audit trail after a clean run and intervenes only at a
@@ -576,9 +577,12 @@ and protected `gate-authorization` Environment are installed (`live`), while the
 repository variable `GATE_EXECUTOR_ARMED` and Workbench-only signing secrets remain
 unset. The executor workflow is consequently unarmable even though its repository
 code is present. After independent approval it creates the App token inside Gate,
-CAS-publishes a permanent exact-PR claim, refetches it, runs only the stored
-`gh pr merge ... --match-head-commit ...` command, and CAS-publishes one result.
-It never promotes reusable commit status.
+CAS-publishes a permanent exact-PR claim, refetches it, byte-validates Gate's
+nine-element commit-pinned intent, performs the exact-head squash through
+GitHub's merge API, and CAS-publishes one result. The token never enters a child
+process. Branch cleanup is separate because the Gate App is intentionally
+forbidden from updating ordinary branches. It never promotes reusable commit
+status.
 
 **Live merge has two answers.** Ordinary `gate -live` remains unimplemented:
 `act()` records `merge_not_implemented` and composes the exact command. The separate
@@ -973,7 +977,7 @@ A backstop, not a prerequisite - every term here is also defined at first use ab
 - **fail closed** - unknown or absent input becomes park/refuse, never a silent
   pass; "absence never reads as green."
 
-## 12. Drift log - where docs and code disagree (verified 2026-07-29)
+## 12. Drift log - where docs and code disagree (verified 2026-07-30)
 
 The discipline: this repo prefers an honest list of disagreements over docs that
 quietly overclaim. Two directions of drift exist - docs behind code (stale) and
@@ -987,7 +991,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
 | `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fourteen tenants live under `cmd/` |
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
-| Live merge | Ordinary `gate -live` still records `merge_not_implemented`; the separate one-App executor is implemented but unarmed pending bootstrap and canaries |
+| Live merge | Ordinary `gate -live` still records `merge_not_implemented`; the separate one-App executor is implemented and dedicated state is published, but activation and canaries remain open |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
@@ -995,7 +999,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `.github/workflows/gate.yml` | `GATE_ENFORCE=true` and Workbench's required App-pinned `gate` context are live; executor custody is a separate, still-unarmed boundary |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
 
-Confirmed-in-code anchors, for contrast (all re-checked 2026-07-29): the exit
+Confirmed-in-code anchors, for contrast (all re-checked 2026-07-30): the exit
 codes, verbs, ladder law, monotone reduce, and fail-closed unknowns; the eight
 grant refusal codes and the `-init` mint guard; the keyed anchor pinning head and
 count; the post-judgment ceiling re-check; the triage-floor exec seam; the hygiene
