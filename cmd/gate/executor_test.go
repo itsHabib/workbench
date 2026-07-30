@@ -273,7 +273,9 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 	run.ID = 42
 	run.RunAttempt = 1
 	run.Event = "workflow_dispatch"
-	run.Path = ".github/workflows/gate-executor.yml@main"
+	// GitHub's Actions run API reports the workflow path without a ref.
+	// HeadBranch and HeadSHA carry the independently verified main binding.
+	run.Path = ".github/workflows/gate-executor.yml"
 	run.HeadBranch = "main"
 	run.HeadSHA = strings.Repeat("a", 40)
 	run.Repository.FullName = "o/r"
@@ -288,7 +290,7 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 	}
 	tests := map[string]func(*workflowRunFacts){
 		"other workflow": func(value *workflowRunFacts) {
-			value.Path = ".github/workflows/other.yml@main"
+			value.Path = ".github/workflows/other.yml"
 		},
 		"other workflow ref": func(value *workflowRunFacts) {
 			value.HeadBranch = "feature"
@@ -300,7 +302,7 @@ func TestValidateWorkflowRunBindsTrustedWorkflowAndImmutableActors(t *testing.T)
 			value.HeadSHA = strings.Repeat("b", 40)
 		},
 		"noncanonical workflow path": func(value *workflowRunFacts) {
-			value.Path = ".github/workflows/gate-executor.yml@refs/heads/main"
+			value.Path = ".github/workflows/gate-executor.yml@main"
 		},
 		"rerun attempt": func(value *workflowRunFacts) {
 			value.RunAttempt = 2
