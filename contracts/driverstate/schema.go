@@ -7,6 +7,11 @@ import _ "embed"
 const (
 	SchemaVersion = "0.1.0"
 	Version       = "driver-state-v0.1.0"
+	// AddressSchemaVersion is the additive authority-bearing address contract.
+	AddressSchemaVersion = "0.2.0"
+	// AddressVersion is written only for review_address_* events. Readers accept
+	// it in the same chain as Version; an installed v0.1 writer refuses it.
+	AddressVersion = "driver-state-v0.2.0"
 )
 
 // Schema is the JSON Schema (draft 2020-12) for a driver-state Event and its
@@ -17,3 +22,8 @@ const (
 //
 //go:embed schema/driver-state-v0.1.0.json
 var Schema []byte
+
+// AddressSchema is the v0.2 schema for authority-bearing address events.
+//
+//go:embed schema/driver-state-v0.2.0.json
+var AddressSchema []byte

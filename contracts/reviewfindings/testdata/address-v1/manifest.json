@@ -1,0 +1,12 @@
+{
+  "version": "reviewfindings-address-conformance-v1",
+  "digest_rule": "sha256(sorted file + ':' + sha256(file) + '\\n')",
+  "cases": [
+    {"file": "accept.json", "sha256": "5ee7bdff681ed6aa914276d809a7eb8f0948bd16e553ba4a1ceb507dcbc74892"},
+    {"file": "cycle-exhausted.json", "sha256": "d9cb1a6774eacf79d243b0627d7693d7f356f1ff333f8faab806ab136d4f6362"},
+    {"file": "duplicate.json", "sha256": "cf24b1997ca745406db57b656899a599b350b4c029797b228ef592a72376ec26"},
+    {"file": "malformed.json", "sha256": "9cb428c2a41601ad2158a89d25355c241fa5cc60ed05c7b432b32f6320a80b04"},
+    {"file": "stale-head.json", "sha256": "b853dfd9a50ba49fff89d03f9e088e3b3ca6ee4dea3666395f69862853a564b1"}
+  ],
+  "corpus_sha256": "59aaff202bceced46abbaa4ce06a77a26b347612afd9dee6972f349636eed414"
+}

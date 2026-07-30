@@ -90,6 +90,7 @@ func TestCLIStateJSONGolden(t *testing.T) {
       ],
       "pr": 12,
       "url": "http://pr/12",
+      "head_sha": "abc",
       "merge_commit": "def456"
     }
   }

@@ -29,6 +29,12 @@ driverstate verify --run <id> [--json]
   review-cycle, and merge facts; `render` makes missing or contradictory joins
   visible. See
   `docs/features/agentic-workbench-closure/closure-receipts.md`.
+- Session-native address authority is also visible through `state --json` and
+  `render`: the original implementation child ledger folds
+  `review_address_prepared|claimed|started|completed` into
+  `StreamRecord.review_addresses`. These authority-bearing events are v0.2;
+  the reader accepts historical v0.1 and v0.2 lines in one unchanged chain.
+  Address mutation belongs to `reviewfindings address`, not this low-level CLI.
 
 ## State root
 

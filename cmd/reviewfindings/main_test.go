@@ -12,7 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	dsc "github.com/itsHabib/workbench/contracts/driverstate"
 	"github.com/itsHabib/workbench/contracts/reviewfindings"
+	"github.com/itsHabib/workbench/driverstate"
 )
 
 type fakeRunner struct {
@@ -54,6 +56,96 @@ func TestProduceExactHeadArtifact(t *testing.T) {
 	if err := reviewfindings.Validate(artifact); err != nil {
 		t.Fatalf("artifact rejected by shared contract: %v", err)
 	}
+}
+
+func TestAddressAcceptCLIConsumesOnce(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(driverstate.StateDirEnv, dir)
+	head := strings.Repeat("a", 40)
+	runID := "dsr_impl"
+	stream := "dss_impl"
+	lease, err := driverstate.Claim(dir, runID, "session:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lease.Release() })
+	now := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	appendAddressFixtureEvent(t, dir, lease, driverstate.Event{
+		ID: "evt_import", V: dsc.Version, Kind: dsc.KindRunImported, Time: now, Actor: "session:test",
+		Body: mustJSON(t, dsc.RunImportedBody{
+			Repo: "itsHabib/workbench", Source: "docs/task.md", GeneratedAt: "g",
+			Manifest: json.RawMessage(`{}`), Streams: []dsc.StreamSpec{{Stream: stream, DocPath: "docs/task.md"}},
+			Parent: "dsr_parent", ParentStream: "dss_parent",
+		}),
+	})
+	appendAddressFixtureEvent(t, dir, lease, driverstate.Event{
+		ID: "evt_dispatch", V: dsc.Version, Kind: dsc.KindStreamDispatched, Stream: stream,
+		Time: now.Add(time.Second), Actor: "session:test",
+	})
+	appendAddressFixtureEvent(t, dir, lease, driverstate.Event{
+		ID: "evt_attempt", V: dsc.Version, Kind: dsc.KindStreamAttempt, Stream: stream,
+		Time: now.Add(2 * time.Second), Actor: "session:test",
+		Body: mustJSON(t, dsc.StreamAttemptBody{Seq: 1, DocPath: "docs/task.md", Terminal: true}),
+	})
+	appendAddressFixtureEvent(t, dir, lease, driverstate.Event{
+		ID: "evt_pr", V: dsc.Version, Kind: dsc.KindStreamPROpened, Stream: stream,
+		Time: now.Add(3 * time.Second), Actor: "session:test",
+		Body: mustJSON(t, dsc.StreamPROpenedBody{PR: 1, URL: "https://github.com/itsHabib/workbench/pull/1", HeadSHA: head}),
+	})
+	appendAddressFixtureEvent(t, dir, lease, driverstate.Event{
+		ID: "evt_cycle", V: dsc.Version, Kind: dsc.KindReviewCycle, Stream: stream,
+		Time: now.Add(4 * time.Second), Actor: "session:test",
+		Body: mustJSON(t, dsc.ReviewCycleBody{Cycle: 1, PanelSettled: true, Findings: 1}),
+	})
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	artifact := reviewfindings.Artifact{
+		SchemaVersion: 1, ArtifactID: "rf_cli", Decision: reviewfindings.DecisionAddress,
+		Subject:  reviewfindings.Subject{Type: reviewfindings.SubjectPullRequest, Repo: "itsHabib/workbench", Number: 1, HeadSHA: head},
+		Producer: reviewfindings.Producer{ID: "codex:test", Harness: "codex", GeneratedAt: now},
+		Panel:    reviewfindings.Panel{Requested: []string{"codex"}, Completed: []string{"codex"}, Missing: []string{}},
+		Findings: []reviewfindings.Finding{{
+			ID: "f1", Severity: "P1", Summary: "fix", Evidence: "evidence",
+			Sources: []reviewfindings.Source{{Reviewer: "codex", CommentID: "1", URL: "https://github.com/itsHabib/workbench/pull/1#discussion_r1"}},
+		}},
+	}
+	artifactPath := filepath.Join(t.TempDir(), "findings.json")
+	data, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifactPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"address", "accept", "-run", runID, "-stream", stream, "-artifact", artifactPath, "-max-cycles", "3"}
+	runner := fakeRunner{pr: pullRequest{HeadRefOID: head, State: "OPEN"}}
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), args, runner, &stdout, &stderr); code != exitOK {
+		t.Fatalf("accept code=%d stderr=%s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(context.Background(), args, runner, &stdout, &stderr); code != exitRefused || !strings.Contains(stderr.String(), "[duplicate]") {
+		t.Fatalf("duplicate code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func appendAddressFixtureEvent(t *testing.T, dir string, lease driverstate.Lease, event driverstate.Event) {
+	t.Helper()
+	if _, err := driverstate.Append(dir, lease, event); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestProduceRefusesMalformedCatalogRevision(t *testing.T) {
