@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/gate/internal/authorization"
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
@@ -38,6 +39,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/gateauthorization"
 )
 
 // The exit-code contract — the one surface the driver branches on. gate owns
@@ -115,6 +117,8 @@ func main() {
 		err = cmdJudge(os.Args[2:])
 	case "resolve":
 		err = cmdResolve(os.Args[2:])
+	case "executor":
+		err = cmdExecutor(os.Args[2:])
 	case "explain":
 		err = cmdExplain(os.Args[2:])
 	case "next":
@@ -133,17 +137,34 @@ func main() {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "gate:", err)
-	os.Exit(codeError)
+	os.Exit(commandErrorCode(os.Args[1], err))
+}
+
+func commandErrorCode(command string, err error) int {
+	if command != "executor" {
+		return codeError
+	}
+	var refusal executorRefusal
+	if errors.As(err, &refusal) {
+		return codeRefused
+	}
+	return codeError
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
+  executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
+  executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
+  executor bootstrap -state DIR -key DIR -state-tip SHA -action act_x -repo R -pr N -head SHA -app-id N -installation-id N
+  executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
+  executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
@@ -156,6 +177,7 @@ type env struct {
 	st       *state.Store
 	stateDir string
 	keyPath  string
+	anchor   string
 	floorBin string
 	now      func() time.Time
 }
@@ -179,13 +201,27 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	// an actor who can write log.jsonl must not thereby be able to read or
 	// forge the key that signs grants and anchors the chain. Same reason the
 	// anchor record itself lives here, not beside the log it pins.
-	keyPath := filepath.Join(keyDir, "grant.key")
-	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	// The anchor record is per-state-dir: a shared key dir must not alias one
 	// anchor across independent logs, or appending to one would falsely fail
 	// the other's audit. The key stays shared (a secret can't be forged
 	// regardless); only the record is namespaced by which log it pins.
 	anchorPath := filepath.Join(keyDir, "anchor-"+stateDirTag(stateDir)+".json")
+	if hostedAnchor := os.Getenv("GATE_ANCHOR_RECORD"); hostedAnchor != "" {
+		within, err := dirWithin(hostedAnchor, stateDir)
+		if err != nil {
+			return env{}, err
+		}
+		if within {
+			return env{}, fmt.Errorf("gate: hosted anchor record %q must be outside state dir %q", hostedAnchor, stateDir)
+		}
+		anchorPath = hostedAnchor
+	}
+	return newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath)
+}
+
+func newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath string) (env, error) {
+	keyPath := filepath.Join(keyDir, "grant.key")
+	anchorKeyPath := filepath.Join(keyDir, "anchor.key")
 	st, err := state.OpenAnchored(stateDir, time.Now, anchorPath, anchorKeyPath)
 	if err != nil {
 		return env{}, err
@@ -193,7 +229,10 @@ func newEnv(stateDir, floorBin, keyDir string) (env, error) {
 	if floorBin == "" {
 		floorBin = defaultFloorBin()
 	}
-	return env{st: st, stateDir: stateDir, keyPath: keyPath, floorBin: floorBin, now: time.Now}, nil
+	return env{
+		st: st, stateDir: stateDir, keyPath: keyPath, anchor: anchorPath,
+		floorBin: floorBin, now: time.Now,
+	}, nil
 }
 
 // stateDirTag is a stable, filesystem-safe tag for a state dir, so its anchor
@@ -403,6 +442,21 @@ func cmdGate(args []string) error {
 // runGate is one thin vertical pass: capability, evidence, verification,
 // reduction, outcome.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
+	return runGateWithSynthesis(
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true,
+	)
+}
+
+func runGateWithSynthesis(
+	e env,
+	repo string,
+	pr int,
+	grantID string,
+	live bool,
+	modelBackend string,
+	reviewsOptional bool,
+	synthesize bool,
+) (gateResult, int, error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
 	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
@@ -470,8 +524,11 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 
 	// A content escalation carries a synthesized brief; lazy — the model call fires only if the run actually parks, and only over what it already recorded.
 	title := verify.PRTitle(e.st, bundle.View)
-	synth := func(question string) (verify.Brief, error) {
-		return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+	var synth briefFn
+	if synthesize {
+		synth = func(question string) (verify.Brief, error) {
+			return verify.SynthesizeBrief(context.Background(), model, reduced.Subject, title, question, verdicts)
+		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
 }
@@ -580,6 +637,32 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// this exact commit, so it travels with the result — a caller posting an
 	// out-of-band status binds to it, never to a head captured before the run.
 	res.HeadSHA = reduced.Subject.HeadSHA
+	audit, err := e.st.Audit()
+	if err != nil {
+		return res, codeError, err
+	}
+	if !audit.OK {
+		return res, codeError, fmt.Errorf("%w: %s", errLogTampered, audit.Reason)
+	}
+	pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+	if err != nil {
+		return res, codeError, err
+	}
+	if pending {
+		res.Outcome = "capability_refused"
+		res.Why = authorization.ErrSubjectClaimPending.Error()
+		return res, codeRefused, nil
+	}
+	checkNoOpenClaim := func(audit state.AuditResult) error {
+		pending, err := authorization.SubjectHasOpenClaim(audit, reduced.Subject)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return authorization.ErrSubjectClaimPending
+		}
+		return nil
+	}
 
 	// actionHash captures the hash of the last artifact record appended, so the
 	// pass path can surface the deciding action artifact's chain hash onto the
@@ -593,7 +676,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		art, err := e.st.AppendIfAbsentParentWhere(kind, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
+		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			kind, []string{state.KindAction, state.KindEscalation}, run,
+			reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		actionHash = art.Hash
 		return err
 	}
@@ -620,7 +707,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		}
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
-		_, err := e.st.AppendIfAbsentParentWhere(state.KindEscalation, []string{state.KindAction, state.KindEscalation}, run, reducedID, []string{reducedID, grantID}, body, completedJudgmentOutcome)
+		_, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+			state.KindEscalation, []string{state.KindAction, state.KindEscalation},
+			run, reducedID, []string{reducedID, grantID}, body,
+			completedJudgmentOutcome, checkNoOpenClaim,
+		)
 		return err
 	}
 
@@ -694,8 +785,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// --match-head-commit pins the merge to the exact SHA the evidence was
 	// gathered against: a push after verification makes the merge refuse
 	// instead of landing unverified code.
-	mergeCmd := fmt.Sprintf("gh pr merge %d -R %s --squash --delete-branch --match-head-commit %s",
-		subjectNumber(reduced), reduced.Subject.Repo, reduced.Subject.HeadSHA)
+	mergeArgv := gateauthorization.ExpectedMergeArgv(gateauthorization.Subject{
+		Repo: reduced.Subject.Repo, Number: subjectNumber(reduced),
+		HeadSHA: reduced.Subject.HeadSHA,
+	})
+	mergeCmd := strings.Join(mergeArgv, " ")
 	res.Action = mergeCmd
 	// The pass path records first, then surfaces the action artifact's chain
 	// hash onto the result: record() runs as a side effect during return-arg
@@ -703,12 +797,16 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// explicitly here instead. This is the one path a downstream stamp reads.
 	if !live {
 		res.Outcome = "would_merge"
-		err := record(state.KindAction, "would_merge", map[string]any{"command": mergeCmd, "dry_run": true})
+		err := record(state.KindAction, "would_merge", map[string]any{
+			"command": mergeCmd, "argv": mergeArgv, "dry_run": true,
+		})
 		res.Hash = actionHash
 		return res, codeMerge, err
 	}
 	res.Outcome = "merge_not_implemented"
-	err = record(state.KindAction, "merge_not_implemented", map[string]any{"command": mergeCmd})
+	err = record(state.KindAction, "merge_not_implemented", map[string]any{
+		"command": mergeCmd, "argv": mergeArgv,
+	})
 	res.Hash = actionHash
 	return res, codeMerge, err
 }

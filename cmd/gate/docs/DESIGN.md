@@ -19,7 +19,7 @@ or own project memory — those stay in the existing tools it composes with.
 
 ## Shape
 
-One Go binary. Verbs: `grant`, `gate`, `judge`, `explain`,
+One Go binary. Verbs: `grant`, `gate`, `judge`, `executor`, `explain`,
 `audit`, `backtest`, `stress`. Callers integrate via exit codes and JSON on
 stdout, never prose. Packages, dependencies pointing strictly downward:
 
@@ -27,6 +27,8 @@ stdout, never prose. Packages, dependencies pointing strictly downward:
 |---|---|
 | `internal/state` | append-only, hash-chained, fs-locked artifact log — the substrate everything writes through |
 | `internal/capability` | HMAC-signed grants: scoped, timed, tier-capped |
+| `internal/authorization` | run-specific approval, exact-action freshness, atomic one-time claims and results |
+| `internal/executor` | GitHub App JWT/token custody and exact-head GitHub API execution |
 | `internal/evidence` | real GitHub reads via `gh`, recorded as evidence artifacts |
 | `internal/verify` | the verdict schema, the verifier rungs, the monotone reducer, the provider-neutral judgment contract |
 | `internal/observe` | `explain`/`audit` — read-only, storeless, state-fed |
@@ -35,7 +37,8 @@ stdout, never prose. Packages, dependencies pointing strictly downward:
 ## The artifact contract
 
 Every step of a gate run is an `Artifact`: typed (`evidence`, `verdict`,
-`grant`, `action`, `escalation`, `judgment`), grouped by run id, with explicit
+`grant`, `action`, `escalation`, `judgment`, `execution_claim`,
+`execution_result`), grouped by run id, with explicit
 provenance (`Parents` — a verdict names the evidence it judged; an action
 names the verdict and grant that authorized it), hash-chained to the previous
 log entry. Consequences the code enforces:
@@ -64,6 +67,9 @@ log entry. Consequences the code enforces:
   issue comments, including Claude lifecycle/sticky comments, are not authority:
   absent a formal exact-head review or future shared head-bound artifact they
   remain incomplete and the provider-neutral judgment path resolves the park.
+- **An execution claim is permanent.** The exact action must still be the PR's
+  newest terminal inside the same anchored-state lock that appends its claim.
+  A command/token/transport failure never makes the action claimable again.
 
 ### Concurrency
 
@@ -107,10 +113,12 @@ chain is tamper-*evidence*, not access control or non-repudiation.
   cannot brick audit permanently. The anchor key
   is *loaded, never minted* on the verify path (a missing key is a loud
   `anchor_key_missing`, mirroring the grant key); minting is a first-append
-  concern only. The anchor *record* is per-state-dir (its filename carries a
+  concern only. The anchor *record* is per-state-dir by default (its filename carries a
   hash of the absolute state dir), so several logs can share one key dir without
   one log's appends invalidating another's audit; the key itself is shared,
   since a secret cannot be forged regardless of how many logs it anchors.
+  Hosted state may set `GATE_ANCHOR_RECORD` to a stable record beside (but never
+  inside) the transported state directory; the keys remain outside that tree.
 
 - **Trust boundary.** Every agent on this box has shell access, so file-write to
   the state dir is in-scope for the realistic adversary — which here is drift
@@ -175,6 +183,13 @@ are coded errors (`grant_expired`, `grant_scope_mismatch`,
 used to live in skill prose (cycle caps, coordinator thresholds) becomes grant
 fields and reducer configuration as the integration matures.
 
+The protected executor has a separate mint path after verified independent
+approval. `MintBound` signs the authorization ID, PR number, and full head SHA
+in addition to ordinary repo/action/tier/cycle/expiry scope. An ordinary
+unscoped `capability.Check` cannot consume that grant. Repository code does not
+make the workflow trusted: App/environment/ruleset/state bootstrap and the live
+canary remain operator-owned.
+
 The top-level refusal — a run stopped before evidence for want of a live grant
 — also leaves a durable trace: a `grant_needed` artifact carrying the repo, the
 reason (`grant_expired` vs `grant_absent`), and a timestamp. It is deliberately
@@ -216,10 +231,17 @@ key) are misconfigurations, not grant-materialization facts, and record nothing.
 
 ## Deliberately out of v0, with triggers
 
-- **Live merge execution.** `-live` is wired but records
-  `merge_not_implemented`; the dry-run prints the exact merge command. It
-  activates only alongside the driver-integration step, after an adversarial
-  break-the-gate exercise passes against a real repo.
+- **Ordinary `-live` merge execution.** `-live` still records
+  `merge_not_implemented`; agents cannot turn their ambient token into Gate's
+  sanctioned merge. The separate `executor run` verb creates the App token
+  only after protected approval and preflight, then owns claim CAS/refetch,
+  exact merge, and result CAS in one process. A one-time bootstrap publishes a
+  fresh Workbench-only ledger and executes only the newest exact stored
+  action. The executor remains unarmed until operator bootstrap and an
+  adversarial live canary pass. Expired claims are
+  closed by `executor reconcile`, a claim-only code path with no merge
+  operation; its one-App token remains technically merge-capable because
+  GitHub also requires `contents: write` for the result-state CAS.
 - **Content-addressed evidence blobs.** Evidence bodies are inline JSON.
   Trigger: the first diff over ~100KB.
 - **Any daemon or server.** The substrate is a file contract; at current scale
