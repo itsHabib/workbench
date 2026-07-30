@@ -107,8 +107,12 @@ never fabricates an empty findings artifact.
    API, advances `gate-state` without force from the exact expected parent, and
    reads the remote claim bytes back.
 7. Gate audits the refetched claim, re-reads the PR/head/base/merge-base, checks
-   the remote state tip again, and runs only the stored ten-element
-   `gh pr merge ... --match-head-commit` argv.
+   the remote state tip again, byte-validates the stored ten-element
+   `gh pr merge ... --match-head-commit` intent, and performs the same
+   commit-pinned squash through GitHub's merge API. The installation token
+   never enters a child process. This native call is required because
+   `gh pr merge` rejects a `BLOCKED` merge state locally before GitHub can
+   apply the Gate App's PR-only ruleset bypass.
 8. Gate records one terminal result and advances `gate-state` through the same
    non-force CAS. A transport failure after claim leaves an orphaned claim; it
    never retries the merge.
@@ -220,7 +224,7 @@ and grant minting remains an authority the agent never exercises.
 
 The required live canary begins with `gate` red and must prove:
 
-- exact stored argv succeeds as the Gate App without `--admin`;
+- the exact stored intent succeeds as the Gate App without `--admin`;
 - ambient-user and Actions updates to `main` refuse;
 - Gate App update to a non-`main` branch refuses;
 - shared-head, retarget, stale, malformed, duplicate, and replay cases create no

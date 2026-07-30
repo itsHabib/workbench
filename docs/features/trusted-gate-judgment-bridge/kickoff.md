@@ -61,10 +61,11 @@ The replacement decision must choose a genuinely PR-specific enforcement seam:
 
 - **Recommended:** extend the dedicated Gate GitHub App track so a
   protected, run-approved trusted-base workflow re-evaluates Gate at
-  consumption time and the App executes only Gate's stored exact
-  `gh pr merge ... --match-head-commit ...` argv for the artifact's PR. The App
-  is the narrowly custodied Gate executor, not a prose wrapper. It must not
-  publish reusable merge authority as a commit status.
+  consumption time and the App byte-validates Gate's stored exact
+  `gh pr merge ... --match-head-commit ...` intent for the artifact's PR, then
+  performs that exact-head squash through GitHub's merge API. The App is the
+  narrowly custodied Gate executor, not a prose wrapper. It must not publish
+  reusable merge authority as a commit status.
 - **Alternative:** move the repository to an organization and require GitHub's
   merge queue, then authorize the PR-specific temporary `merge_group` SHA.
   Merge queues are not available to this personal public repository.
@@ -143,8 +144,8 @@ Re-read live PR state before acting. Git and GitHub are truth.
   run-bound independent approval under the approved design.
 - Never use `--admin`, dismiss findings, weaken required checks, or disable
   branch protection to make a merge pass.
-- Never merge without Gate's exact emitted
-  `gh pr merge ... --match-head-commit <full-sha>` command.
+- Never merge outside Gate's exact emitted
+  `gh pr merge ... --match-head-commit <full-sha>` intent.
 - Never reconstruct, loosen, or append flags to Gate's merge command.
 - Never make the ambient user-posted `gate/authorized` status satisfy branch
   protection directly.
@@ -316,8 +317,9 @@ The workflow must:
   exchange it until approval and all pre-credential refusals pass;
 - exchange the private key for a short-lived installation token internally;
   never return, print, persist, or expose that token to another workflow step;
-- execute only the stored argv, unchanged, including `--match-head-commit`, and
-  never add `--admin`;
+- byte-validate only the stored canonical argv, including
+  `--match-head-commit`, execute its exact PR/head/squash semantics through
+  GitHub's merge API, and never add `--admin`;
 - serialize all executor runs for the repository so only the Gate App could
   move the approved base, then re-check base/head immediately before execution;
 - append the execution result to anchored Gate state and refuse every replay;
@@ -368,7 +370,7 @@ At minimum, pin:
 - Gate App can update `main` through the claimed PR but cannot update any other
   base-repository branch;
 - ambient user cannot update `main`, even when every status is green;
-- exact stored argv succeeds under the App without `--admin`;
+- exact stored intent succeeds under the App without `--admin`;
 - token, merge, audit-write, and transport failures cannot create a second
   attempt or reusable success;
 - no agent grant mint and no ambient-user merge side effect.
@@ -403,7 +405,7 @@ provider-neutral Gate judgment, stop with:
   updates to `main`, sole-Actions updates to `gate-state`, ordinary roles but
   not Gate App on other branches, and the required `gate` check with only the
   same Gate App receiving PR-only bypass;
-- a disposable canary proving Gate's exact argv succeeds with the App
+- a disposable canary proving Gate's exact intent succeeds with the App
   installation token against an intentionally red `gate` check and without
   `--admin`, while ambient-user main update, Actions main update, and Gate-App
   non-main update all refuse;
@@ -421,7 +423,7 @@ authority.
 After the executor is on `main` and operator-armed:
 
 1. Run one disposable valid exact-head approval/action through the App executor
-   and prove exactly one PR merges with Gate's unchanged argv.
+   and prove exactly one PR merges from Gate's unchanged canonical intent.
 2. Prove stale, malformed, forged, expired, superseded, already-claimed, and
    replay cases cannot mint an App token or merge.
 3. Re-read PRs #165 and #168.

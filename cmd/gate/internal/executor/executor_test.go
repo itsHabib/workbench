@@ -10,30 +10,49 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestSessionKeepsTokenInsideExactCommandBoundary(t *testing.T) {
+func TestSessionKeepsTokenInsideExactMergeBoundary(t *testing.T) {
 	key := privateKey(t)
 	var authorization string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		authorization = request.Header.Get("Authorization")
-		if request.URL.Path != "/app/installations/44/access_tokens" {
+		switch request.URL.Path {
+		case "/app/installations/44/access_tokens":
+			authorization = request.Header.Get("Authorization")
+			data, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != `{"permissions":{"contents":"write"},"repositories":["workbench"]}` {
+				t.Fatalf("permissions = %s", data)
+			}
+			expires := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
+			writer.WriteHeader(http.StatusCreated)
+			_, _ = writer.Write([]byte(`{"token":"installation-secret","expires_at":"` + expires + `"}`))
+		case "/repos/itsHabib/workbench/pulls/169/merge":
+			if request.Method != http.MethodPut {
+				t.Fatalf("method = %s", request.Method)
+			}
+			if request.Header.Get("Authorization") != "Bearer installation-secret" {
+				t.Fatal("merge did not use the custodied installation token")
+			}
+			data, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `{"merge_method":"squash","sha":"` + strings.Repeat("a", 40) + `"}`
+			if string(data) != want {
+				t.Fatalf("merge request = %s, want %s", data, want)
+			}
+			_, _ = writer.Write([]byte(
+				`{"sha":"` + strings.Repeat("b", 40) + `","merged":true}`,
+			))
+		default:
 			t.Fatalf("path = %s", request.URL.Path)
 		}
-		data, err := io.ReadAll(request.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(data) != `{"permissions":{"contents":"write"},"repositories":["workbench"]}` {
-			t.Fatalf("permissions = %s", data)
-		}
-		expires := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
-		writer.WriteHeader(http.StatusCreated)
-		_, _ = writer.Write([]byte(`{"token":"installation-secret","expires_at":"` + expires + `"}`))
 	}))
 	defer server.Close()
 
@@ -41,33 +60,20 @@ func TestSessionKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 		"gh", "pr", "merge", "169", "-R", "itsHabib/workbench",
 		"--squash", "--delete-branch", "--match-head-commit", strings.Repeat("a", 40),
 	}
-	var seenArgv []string
-	var seenToken string
 	var result CommandResult
 	err := withSession(context.Background(), AppConfig{
 		AppID: 33, InstallationID: 44, PrivateKeyPEM: key,
 		APIURL: server.URL, Repository: "itsHabib/workbench",
 	}, server.Client(), func(session *Session) error {
 		var err error
-		result, err = session.merge(
-			context.Background(),
-			argv,
-			func(_ context.Context, got []string, token string) (CommandResult, error) {
-				seenArgv = got
-				seenToken = token
-				return CommandResult{ExitCode: 0}, nil
-			},
-		)
+		result, err = session.Merge(context.Background(), argv)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ExitCode != 0 || !reflect.DeepEqual(seenArgv, argv) {
-		t.Fatalf("execution changed: result=%+v argv=%v", result, seenArgv)
-	}
-	if seenToken != "installation-secret" {
-		t.Fatal("runner did not receive installation token internally")
+	if result.ExitCode != 0 {
+		t.Fatalf("execution failed: result=%+v", result)
 	}
 	if !strings.HasPrefix(authorization, "Bearer ") ||
 		strings.Contains(authorization, "installation-secret") {
@@ -76,7 +82,7 @@ func TestSessionKeepsTokenInsideExactCommandBoundary(t *testing.T) {
 }
 
 func TestSessionRefusesInvalidMergeCommand(t *testing.T) {
-	session := &Session{}
+	session := &Session{config: AppConfig{Repository: "o/r"}}
 	tests := [][]string{
 		{"gh", "pr", "merge"},
 		{
@@ -85,7 +91,7 @@ func TestSessionRefusesInvalidMergeCommand(t *testing.T) {
 		},
 	}
 	for _, argv := range tests {
-		if _, err := session.merge(context.Background(), argv, nil); err == nil {
+		if _, err := session.Merge(context.Background(), argv); err == nil {
 			t.Fatal("expected argv refusal")
 		}
 	}
@@ -112,25 +118,6 @@ func TestExchangeRefusesMalformedAndOverlongToken(t *testing.T) {
 				t.Fatalf("exchange = %v, want token refusal", err)
 			}
 		})
-	}
-}
-
-func TestChildEnvironmentIsAllowlisted(t *testing.T) {
-	got := childEnvironment("installation-secret")
-	want := []string{
-		"GH_TOKEN=installation-secret",
-		"GH_PROMPT_DISABLED=1",
-		"HOME=/tmp",
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("child environment = %v", got)
-	}
-}
-
-func TestGHBinaryResolvesFromPATH(t *testing.T) {
-	if ghBinary != "gh" {
-		t.Fatalf("gh binary = %q, want PATH lookup", ghBinary)
 	}
 }
 

@@ -28,7 +28,7 @@ stdout, never prose. Packages, dependencies pointing strictly downward:
 | `internal/state` | append-only, hash-chained, fs-locked artifact log — the substrate everything writes through |
 | `internal/capability` | HMAC-signed grants: scoped, timed, tier-capped |
 | `internal/authorization` | run-specific approval, exact-action freshness, atomic one-time claims and results |
-| `internal/executor` | GitHub App JWT/token custody and unchanged `gh` argv execution |
+| `internal/executor` | GitHub App JWT/token custody and exact-head GitHub API execution |
 | `internal/evidence` | real GitHub reads via `gh`, recorded as evidence artifacts |
 | `internal/verify` | the verdict schema, the verifier rungs, the monotone reducer, the provider-neutral judgment contract |
 | `internal/observe` | `explain`/`audit` — read-only, storeless, state-fed |

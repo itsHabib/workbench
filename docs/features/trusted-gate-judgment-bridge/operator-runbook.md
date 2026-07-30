@@ -88,9 +88,11 @@ gate next -json -state $hostedState -key $hostedKeys
 ## 4. One-time bootstrap
 
 Bootstrap has one narrow job: publish that fresh dedicated ledger to the
-current `gate-state` tip, then execute the exact stored
-`gh pr merge ... --match-head-commit ...` action as the Gate App. It does not
-invent an approval receipt for a workflow that is not yet present on `main`.
+current `gate-state` tip, then byte-validate the exact stored
+`gh pr merge ... --match-head-commit ...` intent and perform its commit-pinned
+squash through GitHub's merge API as the Gate App. It does not invent an
+approval receipt for a workflow that is not yet present on `main`, invoke
+`gh pr merge`, or use `--admin`.
 
 Capture the exact current state tip and load the existing bootstrap App key
 without printing it:
@@ -178,8 +180,8 @@ section 2 still pass.
 The first live canary must begin with a red required `gate` check and prove:
 
 - one independently approved, exact-head request creates a durable claim,
-  refetches it, runs the stored commit-pinned command, records one result, and
-  merges;
+  refetches it, validates the stored commit-pinned intent, records one result,
+  and merges that exact head;
 - stale head, retarget, malformed artifact, duplicate request, replay, wrong
   approver, and self-approval refuse without merging;
 - ambient user and generic Actions updates to `main` and `gate-state` refuse;

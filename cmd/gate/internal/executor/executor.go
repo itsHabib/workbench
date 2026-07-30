@@ -1,6 +1,5 @@
-// Package executor owns GitHub App credential custody and exact-command
-// execution. The App private key enters this process; the installation token
-// exists only in memory here and in the direct gh child process.
+// Package executor owns GitHub App credential custody and exact-head merge
+// execution. The App private key and installation token stay in this process.
 package executor
 
 import (
@@ -19,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +26,6 @@ import (
 
 const (
 	defaultAPIURL = "https://api.github.com"
-	ghBinary      = "gh"
 	maxResponse   = 64 * 1024
 )
 
@@ -55,10 +52,8 @@ type CommandResult struct {
 	ExitCode int
 }
 
-type commandRunner func(context.Context, []string, string) (CommandResult, error)
-
 // Session keeps the installation token inside Gate while one approved
-// execution publishes state and runs the exact merge command.
+// execution publishes state and runs the exact-head merge.
 type Session struct {
 	client *http.Client
 	config AppConfig
@@ -88,20 +83,25 @@ func withSession(ctx context.Context, config AppConfig, client *http.Client, fn 
 	return fn(session)
 }
 
-// Merge runs the stored argv byte-for-byte with the custodied token.
+// Merge validates Gate's stored argv and executes its exact PR, head, and
+// squash semantics through GitHub's API. GitHub CLI refuses BLOCKED pull
+// requests before its App bypass can reach GitHub, so it is not an execution
+// boundary here.
 func (session *Session) Merge(ctx context.Context, argv []string) (CommandResult, error) {
-	return session.merge(ctx, argv, runGH)
-}
-
-func (session *Session) merge(ctx context.Context, argv []string, runner commandRunner) (CommandResult, error) {
-	if err := validateArgv(argv); err != nil {
+	request, err := parseMergeArgv(argv)
+	if err != nil {
 		return CommandResult{}, err
 	}
-	result, err := runner(ctx, append([]string(nil), argv...), session.token.value)
-	if err != nil {
-		return result, fmt.Errorf("%w: exit %d", ErrCommand, result.ExitCode)
+	if request.Repository != session.config.Repository {
+		return CommandResult{}, errors.New("executor_argv_invalid")
 	}
-	return result, nil
+	return session.mergePullRequest(ctx, request)
+}
+
+type mergeRequest struct {
+	Repository string
+	Number     int
+	HeadSHA    string
 }
 
 type installationToken struct {
@@ -229,22 +229,26 @@ func parsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-func validateArgv(argv []string) error {
+func parseMergeArgv(argv []string) (mergeRequest, error) {
 	if len(argv) != 10 || argv[0] != "gh" || argv[1] != "pr" ||
 		argv[2] != "merge" || argv[4] != "-R" || argv[6] != "--squash" ||
 		argv[7] != "--delete-branch" || argv[8] != "--match-head-commit" {
-		return errors.New("executor_argv_invalid")
+		return mergeRequest{}, errors.New("executor_argv_invalid")
 	}
 	number, err := strconv.Atoi(argv[3])
 	if err != nil || number < 1 || !ValidRepository(argv[5]) || !validSHA(argv[9]) {
-		return errors.New("executor_argv_invalid")
+		return mergeRequest{}, errors.New("executor_argv_invalid")
 	}
 	for _, arg := range argv {
 		if arg == "--admin" {
-			return errors.New("executor_admin_forbidden")
+			return mergeRequest{}, errors.New("executor_admin_forbidden")
 		}
 	}
-	return nil
+	return mergeRequest{
+		Repository: argv[5],
+		Number:     number,
+		HeadSHA:    argv[9],
+	}, nil
 }
 
 // ValidRepository reports whether repo is a canonical owner/name identity.
@@ -280,27 +284,47 @@ func validSHA(sha string) bool {
 	return err == nil
 }
 
-func runGH(ctx context.Context, argv []string, token string) (CommandResult, error) {
-	command := exec.CommandContext(ctx, ghBinary, argv[1:]...)
-	command.Env = childEnvironment(token)
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	err := command.Run()
-	if err == nil {
-		return CommandResult{ExitCode: 0}, nil
+func (session *Session) mergePullRequest(
+	ctx context.Context,
+	input mergeRequest,
+) (CommandResult, error) {
+	requestData, err := json.Marshal(map[string]string{
+		"merge_method": "squash",
+		"sha":          input.HeadSHA,
+	})
+	if err != nil {
+		return CommandResult{ExitCode: -1}, fmt.Errorf("%w: encode request", ErrCommand)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return CommandResult{ExitCode: exitErr.ExitCode()}, ErrCommand
+	path := session.repoPath(fmt.Sprintf("/pulls/%d/merge", input.Number))
+	request, err := http.NewRequestWithContext(
+		ctx, http.MethodPut, session.apiURL()+path, bytes.NewReader(requestData),
+	)
+	if err != nil {
+		return CommandResult{ExitCode: -1}, fmt.Errorf("%w: build request", ErrCommand)
 	}
-	return CommandResult{ExitCode: -1}, ErrCommand
-}
-
-func childEnvironment(token string) []string {
-	return []string{
-		"GH_TOKEN=" + token,
-		"GH_PROMPT_DISABLED=1",
-		"HOME=/tmp",
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("Authorization", "Bearer "+session.token.value)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	response, err := session.client.Do(request)
+	if err != nil {
+		return CommandResult{ExitCode: -1}, fmt.Errorf("%w: request", ErrCommand)
 	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return CommandResult{ExitCode: 1},
+			fmt.Errorf("%w: HTTP %d", ErrCommand, response.StatusCode)
+	}
+	var payload struct {
+		SHA    string `json:"sha"`
+		Merged bool   `json:"merged"`
+	}
+	reader := io.LimitReader(response.Body, maxResponse)
+	if err := json.NewDecoder(reader).Decode(&payload); err != nil {
+		return CommandResult{ExitCode: 1}, fmt.Errorf("%w: malformed response", ErrCommand)
+	}
+	if !payload.Merged || !validSHA(payload.SHA) {
+		return CommandResult{ExitCode: 1}, fmt.Errorf("%w: merge not confirmed", ErrCommand)
+	}
+	return CommandResult{ExitCode: 0}, nil
 }

@@ -78,7 +78,8 @@ Constraints that are design decisions, not omissions:
   release switch.
 - **Execution authority is a durable PR claim, not status.** The protected
   executor contract verifies run-specific independent approval, exact
-  repo/PR/head/base, newest action, and unchanged `--match-head-commit` argv.
+  repo/PR/head/base, newest action, and the canonical commit-pinned merge
+  intent before Gate performs the exact-head GitHub API call.
   The one-App custody/order amendment, one-time exact-action bootstrap, and
   claim-only expired reconciliation path are implemented pending exact-head
   review, operator bootstrap, and live canaries. The reconciler has no merge
