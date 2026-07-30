@@ -6,10 +6,13 @@
   "model": "fixture-model",
   "turn_id": "turn_fixture",
   "permission_mode": "default",
-  "tool_name": "Bash",
-  "tool_use_id": "call_git_status",
+  "tool_name": "mcp__fixture__status",
+  "tool_use_id": "call_mcp_status",
   "tool_input": {
-    "command": "git status"
+    "target": "fixture"
   },
-  "tool_response": "Exit code: 1\nfixture failure"
+  "tool_response": {
+    "success": true,
+    "result": "fixture"
+  }
 }

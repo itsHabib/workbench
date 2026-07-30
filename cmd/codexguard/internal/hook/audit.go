@@ -38,17 +38,8 @@ func (a FileAudit) Append(event automode.AuditEvent) error {
 		return errors.New("hook audit: event exceeds 1 MiB")
 	}
 	return a.withFile(func(file *os.File) error {
-		if _, err := file.Seek(0, io.SeekEnd); err != nil {
-			return fmt.Errorf("hook audit: seek end: %w", err)
-		}
 		data = append(data, '\n')
-		if _, err := file.Write(data); err != nil {
-			return fmt.Errorf("hook audit: append: %w", err)
-		}
-		if err := file.Sync(); err != nil {
-			return fmt.Errorf("hook audit: sync: %w", err)
-		}
-		return nil
+		return appendLine(file, data)
 	})
 }
 
@@ -102,6 +93,45 @@ func (a FileAudit) withFile(action func(*os.File) error) error {
 		return fmt.Errorf("hook audit: lock: %w", err)
 	}
 	return action(file)
+}
+
+type appendFile interface {
+	Seek(int64, int) (int64, error)
+	Write([]byte) (int, error)
+	Truncate(int64) error
+	Sync() error
+}
+
+func appendLine(file appendFile, data []byte) error {
+	start, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("hook audit: seek end: %w", err)
+	}
+	written := 0
+	for written < len(data) {
+		n, writeErr := file.Write(data[written:])
+		written += n
+		if writeErr != nil {
+			return rollbackAppend(file, start, fmt.Errorf("hook audit: append: %w", writeErr))
+		}
+		if n == 0 {
+			return rollbackAppend(file, start, errors.New("hook audit: append: short write"))
+		}
+	}
+	if err := file.Sync(); err != nil {
+		return rollbackAppend(file, start, fmt.Errorf("hook audit: sync: %w", err))
+	}
+	return nil
+}
+
+func rollbackAppend(file appendFile, start int64, cause error) error {
+	if err := file.Truncate(start); err != nil {
+		return errors.Join(cause, fmt.Errorf("hook audit: rollback truncate: %w", err))
+	}
+	if err := file.Sync(); err != nil {
+		return errors.Join(cause, fmt.Errorf("hook audit: rollback sync: %w", err))
+	}
+	return cause
 }
 
 // DefaultAuditPath resolves process-owned configuration without consulting

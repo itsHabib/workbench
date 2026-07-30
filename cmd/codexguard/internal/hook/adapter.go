@@ -86,11 +86,12 @@ func (a Adapter) preToolUse(ctx context.Context, input Input) (*Response, error)
 	if input.ToolUseID == "" {
 		return nil, errors.New("hook: PreToolUse requires tool_use_id")
 	}
+	invocationID := toolInvocationID(input)
 	decision, err := a.evaluate(ctx, input, false)
 	if err != nil {
 		return nil, err
 	}
-	if err := a.appendDecision(input.ToolUseID, decision); err != nil {
+	if err := a.appendDecision(invocationID, decision); err != nil {
 		return nil, err
 	}
 	if decision.Outcome == automode.OutcomePass {
@@ -110,7 +111,10 @@ func (a Adapter) permissionRequest(ctx context.Context, input Input) (*Response,
 	}
 	switch decision.Outcome {
 	case automode.OutcomePass:
-		return permissionAllow(), nil
+		// The native payload does not identify the capability that caused the
+		// approval request. A policy pass for the command is therefore not
+		// sufficient evidence to suppress Codex's normal prompt.
+		return nil, nil
 	case automode.OutcomeBlock, automode.OutcomeRefuse:
 		return permissionDeny(decision), nil
 	case automode.OutcomePark:
@@ -123,7 +127,8 @@ func (a Adapter) postToolUse(input Input) (*Response, error) {
 	if input.ToolUseID == "" {
 		return nil, errors.New("hook: PostToolUse requires tool_use_id")
 	}
-	decision, ok, err := a.audit.Decision(input.ToolUseID)
+	invocationID := toolInvocationID(input)
+	decision, ok, err := a.audit.Decision(invocationID)
 	if err != nil {
 		return nil, fmt.Errorf("hook: read prior decision: %w", err)
 	}
@@ -137,8 +142,8 @@ func (a Adapter) postToolUse(input Input) (*Response, error) {
 	recordedAt := a.now().UTC()
 	event := automode.AuditEvent{
 		SchemaVersion: automode.SchemaVersion,
-		EventID:       eventID(input.ToolUseID, automode.EventCompletion, decision.ActionDigest, recordedAt),
-		InvocationID:  input.ToolUseID,
+		EventID:       eventID(invocationID, automode.EventCompletion, decision.ActionDigest, recordedAt),
+		InvocationID:  invocationID,
 		RecordedAt:    recordedAt,
 		Kind:          automode.EventCompletion,
 		Decision:      decision,
@@ -341,13 +346,6 @@ func preToolDeny(decision automode.Decision) *Response {
 	}}
 }
 
-func permissionAllow() *Response {
-	return &Response{HookSpecificOutput: SpecificOutput{
-		HookEventName: eventPermissionRequest,
-		Decision:      &PermissionDecision{Behavior: "allow"},
-	}}
-}
-
 func permissionDeny(decision automode.Decision) *Response {
 	return &Response{HookSpecificOutput: SpecificOutput{
 		HookEventName: eventPermissionRequest,
@@ -360,6 +358,15 @@ func permissionDeny(decision automode.Decision) *Response {
 
 func decisionMessage(decision automode.Decision) string {
 	return fmt.Sprintf("codexguard %s (%s): %s", decision.Outcome, decision.RuleFired, decision.Remedy)
+}
+
+func toolInvocationID(input Input) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		input.SessionID,
+		input.ToolUseID,
+		input.ToolName,
+	}, "\x00")))
+	return "inv_tool_" + hex.EncodeToString(sum[:16])
 }
 
 func permissionInvocationID(input Input, actionDigest string) string {
@@ -397,21 +404,10 @@ func completionFrom(data []byte) (automode.Completion, bool) {
 
 func completionStatus(data []byte) (string, string, bool) {
 	var object map[string]json.RawMessage
-	if json.Unmarshal(data, &object) == nil {
-		if status, signal, ok := objectCompletionStatus(object); ok {
-			return status, signal, true
-		}
-	}
-	var text string
-	if json.Unmarshal(data, &text) != nil {
+	if json.Unmarshal(data, &object) != nil {
 		return "", "", false
 	}
-	line, _, _ := strings.Cut(text, "\n")
-	var code int
-	if _, err := fmt.Sscanf(strings.TrimSpace(line), "Exit code: %d", &code); err != nil {
-		return "", "", false
-	}
-	return statusFromFailure(code != 0), "exit_code:" + strconv.Itoa(code), true
+	return objectCompletionStatus(object)
 }
 
 func objectCompletionStatus(object map[string]json.RawMessage) (string, string, bool) {

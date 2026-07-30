@@ -20,22 +20,29 @@ hook failure.
 |---|---|---|
 | `PreToolUse` | `pass` | no response; normal Codex permissions still apply |
 | `PreToolUse` | `park`, `block`, `refuse` | `permissionDecision: deny` with rule and remedy |
-| `PermissionRequest` | `pass` | `behavior: allow` |
+| `PermissionRequest` | `pass`, `park` | no decision; normal approval flow remains |
 | `PermissionRequest` | `block`, `refuse` | `behavior: deny` with rule and remedy |
-| `PermissionRequest` | `park` | no decision; normal approval flow remains |
 | `PostToolUse` | prior persisted `pass` plus an unambiguous result signal | append and sync completion evidence |
 | `PostToolUse` | no prior pass or ambiguous result | no authority and no completion event |
 
-Permission handling cannot widen policy: `allow` is representable only for a
-validated policy `pass`. `PostToolUse` is evidence after the fact. It cannot
-grant, deny retroactively, or undo a side effect.
+Permission handling cannot widen policy. The native request does not identify
+the capability that caused the approval prompt, so even a validated command
+`pass` defers to Codex's normal approval flow rather than emitting `allow`.
+`PostToolUse` is evidence after the fact. It cannot grant, deny retroactively,
+or undo a side effect.
+
+Current native Bash/PowerShell responses contain truncated command output but
+no exit status. They are therefore status-unknown and do not produce completion
+events. Structured local/MCP responses with an explicit `is_error`, `success`,
+or exit-code field may produce best-effort completion evidence.
 
 The adapter stores JSONL at
 `$CODEX_HOME/state/codexguard/audit.jsonl` (or
 `~/.codex/state/codexguard/audit.jsonl`). Trusted process configuration may set
 `CODEXGUARD_AUDIT` to another path. Writes use an OS lock and file sync. Raw
 commands, working directories, model names, transcripts, and tool responses are
-not stored; the policy artifact and completion carry digests.
+not stored; the policy artifact and completion carry digests. A failed or short
+append is truncated back to its prior offset before the adapter returns failure.
 
 ## Honest failure matrix
 

@@ -11,8 +11,5 @@
   "tool_input": {
     "command": "git status"
   },
-  "tool_response": {
-    "exit_code": 0,
-    "output": "working tree clean"
-  }
+  "tool_response": "working tree clean"
 }

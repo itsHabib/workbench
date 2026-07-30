@@ -104,7 +104,7 @@ func TestGoldenPermissionRequestFixtures(t *testing.T) {
 		behavior string
 		output   string
 	}{
-		{"permission-powershell-pass.json", "powershell", automode.OutcomePass, "allow", "permission-powershell-pass.output.json"},
+		{"permission-powershell-pass.json", "powershell", automode.OutcomePass, "", ""},
 		{"permission-block.json", "bash", automode.OutcomeBlock, "deny", "permission-block.output.json"},
 		{"permission-local-park.json", "bash", automode.OutcomePark, "", ""},
 	}
@@ -121,7 +121,7 @@ func TestGoldenPermissionRequestFixtures(t *testing.T) {
 			}
 			if test.behavior == "" {
 				if response != nil {
-					t.Fatalf("park response = %+v, want nil", response)
+					t.Fatalf("%s response = %+v, want nil", test.outcome, response)
 				}
 				return
 			}
@@ -136,8 +136,13 @@ func TestGoldenPermissionRequestFixtures(t *testing.T) {
 	}
 }
 
-func TestPermissionRequestNeverWidensNonPass(t *testing.T) {
-	for _, outcome := range []string{automode.OutcomePark, automode.OutcomeBlock, automode.OutcomeRefuse} {
+func TestPermissionRequestNeverWidensPolicy(t *testing.T) {
+	for _, outcome := range []string{
+		automode.OutcomePass,
+		automode.OutcomePark,
+		automode.OutcomeBlock,
+		automode.OutcomeRefuse,
+	} {
 		t.Run(outcome, func(t *testing.T) {
 			base := testDecision(t, "git status")
 			base.Outcome = outcome
@@ -160,36 +165,70 @@ func TestPermissionRequestNeverWidensNonPass(t *testing.T) {
 	}
 }
 
-func TestPostToolUseAddsOnlyUnambiguousPassCompletion(t *testing.T) {
-	tests := []struct {
-		name   string
-		status string
-	}{
-		{"post-bash-success.json", automode.StatusSucceeded},
-		{"post-bash-failed.json", automode.StatusFailed},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+func TestPostToolUseSkipsNativeShellStatusUnknown(t *testing.T) {
+	for _, name := range []string{"post-bash-success.json", "post-bash-failed.json"} {
+		t.Run(name, func(t *testing.T) {
 			audit := &memoryAudit{}
 			adapter := testAdapter(audit, "powershell")
 			if _, err := adapter.Handle(context.Background(), fixture(t, "pre-powershell-pass.json")); err != nil {
 				t.Fatal(err)
 			}
-			response, err := adapter.Handle(context.Background(), fixture(t, test.name))
+			response, err := adapter.Handle(context.Background(), fixture(t, name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if response != nil {
 				t.Fatalf("PostToolUse response = %+v, want nil", response)
 			}
-			if len(audit.events) != 2 {
-				t.Fatalf("events = %d, want 2", len(audit.events))
-			}
-			completion := audit.events[1]
-			if completion.Kind != automode.EventCompletion || completion.Completion.Status != test.status {
-				t.Fatalf("completion = %+v, want %s", completion.Completion, test.status)
+			if len(audit.events) != 1 {
+				t.Fatalf("status-unknown shell gained completion: %+v", audit.events)
 			}
 		})
+	}
+}
+
+func TestPostToolUseAddsStructuredPassCompletion(t *testing.T) {
+	decision := testDecision(t, "git status")
+	evaluator := policyFunc(func(context.Context, policy.Request) (automode.Decision, error) {
+		return decision, nil
+	})
+	audit := &memoryAudit{}
+	adapter := New(evaluator, audit, "", "bash")
+	adapter.now = func() time.Time { return fixtureTime }
+	if _, err := adapter.Handle(context.Background(), fixture(t, "pre-mcp-pass.json")); err != nil {
+		t.Fatal(err)
+	}
+	response, err := adapter.Handle(context.Background(), fixture(t, "post-mcp-success.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response != nil {
+		t.Fatalf("PostToolUse response = %+v, want nil", response)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("events = %d, want 2", len(audit.events))
+	}
+	completion := audit.events[1]
+	if completion.Kind != automode.EventCompletion || completion.Completion.Status != automode.StatusSucceeded {
+		t.Fatalf("completion = %+v, want succeeded", completion.Completion)
+	}
+	if completion.InvocationID != audit.events[0].InvocationID {
+		t.Fatalf("completion invocation = %q, decision = %q", completion.InvocationID, audit.events[0].InvocationID)
+	}
+}
+
+func TestPostToolUseDecisionLookupIsSessionBound(t *testing.T) {
+	audit := &memoryAudit{}
+	adapter := testAdapter(audit, "powershell")
+	if _, err := adapter.Handle(context.Background(), fixture(t, "pre-powershell-pass.json")); err != nil {
+		t.Fatal(err)
+	}
+	post := strings.Replace(string(fixture(t, "post-bash-success.json")), "thr_fixture", "thr_other", 1)
+	if _, err := adapter.Handle(context.Background(), []byte(post)); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("cross-session post matched prior decision: %+v", audit.events)
 	}
 }
 
@@ -288,6 +327,58 @@ func TestFileAuditConcurrentAppendAndRead(t *testing.T) {
 		if _, err := automode.DecodeAuditEvent([]byte(line)); err != nil {
 			t.Fatalf("corrupt line: %v", err)
 		}
+	}
+}
+
+type failOnceFile struct {
+	*os.File
+	limit  int
+	failed bool
+}
+
+func (f *failOnceFile) Write(data []byte) (int, error) {
+	if f.failed {
+		return f.File.Write(data)
+	}
+	f.failed = true
+	n, err := f.File.Write(data[:min(f.limit, len(data))])
+	if err != nil {
+		return n, err
+	}
+	return n, errors.New("disk full")
+}
+
+func TestAuditAppendRollsBackPartialWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	prefix := []byte("{\"existing\":true}\n")
+	if _, err := file.Write(prefix); err != nil {
+		t.Fatal(err)
+	}
+	fault := &failOnceFile{File: file, limit: 7}
+	if err := appendLine(fault, []byte("{\"partial\":true}\n")); err == nil {
+		t.Fatal("append succeeded, want injected failure")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(data, prefix) {
+		t.Fatalf("audit after rollback = %q, want %q", data, prefix)
+	}
+	if err := appendLine(file, []byte("{\"next\":true}\n")); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(prefix)+`{"next":true}`+"\n" {
+		t.Fatalf("audit after retry = %q", data)
 	}
 }
 
