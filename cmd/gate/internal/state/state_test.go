@@ -2,8 +2,10 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -158,5 +160,110 @@ func TestProvenanceRoundTrip(t *testing.T) {
 	}
 	if body["d"] != "pass" {
 		t.Fatalf("body lost: %v", body)
+	}
+}
+
+func TestAppendIfAbsentParentWhereAfterAuditChecksAndAppendsUnderOneLock(t *testing.T) {
+	st := open(t)
+	run := NewRunID()
+	parent, err := st.Append(KindVerdict, run, nil, map[string]string{"decision": "pass"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("policy refused append")
+	checked := false
+	_, err = st.AppendIfAbsentParentWhereAfterAudit(
+		KindAction,
+		[]string{KindAction, KindEscalation},
+		run,
+		parent.ID,
+		[]string{parent.ID},
+		map[string]string{"outcome": "would_merge"},
+		nil,
+		func(audit AuditResult) error {
+			checked = true
+			if !audit.OK || len(audit.All) != 1 || audit.All[0].ID != parent.ID {
+				t.Fatalf("policy received unexpected audited snapshot: %+v", audit)
+			}
+			return refused
+		},
+	)
+	if !errors.Is(err, refused) || !checked {
+		t.Fatalf("append policy result = %v checked=%v", err, checked)
+	}
+	audit, err := st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.OK || len(audit.All) != 1 {
+		t.Fatalf("refused append mutated state: %+v", audit)
+	}
+}
+
+func TestClaimAndOutcomePoliciesHaveExactlyOneWinner(t *testing.T) {
+	for iteration := range 20 {
+		st := open(t)
+		run := NewRunID()
+		parent, err := st.Append(KindVerdict, run, nil, map[string]string{"decision": "pass"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, err := st.AppendAfterAudit(
+				KindExecutionClaim,
+				run,
+				[]string{parent.ID},
+				map[string]int{"iteration": iteration},
+				func(audit AuditResult) error {
+					for _, artifact := range audit.All {
+						if artifact.Kind == KindAction {
+							return errors.New("outcome already won")
+						}
+					}
+					return nil
+				},
+			)
+			results <- err
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			_, err := st.AppendIfAbsentParentWhereAfterAudit(
+				KindAction,
+				[]string{KindAction, KindEscalation},
+				run,
+				parent.ID,
+				[]string{parent.ID},
+				map[string]int{"iteration": iteration},
+				nil,
+				func(audit AuditResult) error {
+					for _, artifact := range audit.All {
+						if artifact.Kind == KindExecutionClaim {
+							return errors.New("claim already won")
+						}
+					}
+					return nil
+				},
+			)
+			results <- err
+		}()
+		close(start)
+		wait.Wait()
+		close(results)
+		successes := 0
+		for err := range results {
+			if err == nil {
+				successes++
+			}
+		}
+		if successes != 1 {
+			t.Fatalf("iteration %d successes = %d, want exactly one", iteration, successes)
+		}
 	}
 }

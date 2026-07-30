@@ -61,6 +61,28 @@ Constraints that are design decisions, not omissions:
   Verdict/Producer/Subject/Finding are aliases of the shared contract types;
   the reducer, the ladder law, and all tier logic stay here — decisions never
   live in the contract.
-- **State and keys live outside the repo.** The migration was code-only: a
-  running gate's `-state` and `-key` dirs are operational data on the
-  operator's machine, never files in this tree.
+- **Panel completeness is exact-head evidence.** `ReviewPanelV1` records the
+  repository-owned expected set and completed/pending/missing/unknown state.
+  Its code verifier parks every incomplete state; findings remain a separate
+  review-consolidation verdict. Provider prose and sticky issue comments are
+  never authority: without a formal exact-head review or shared head-bound
+  artifact the reviewer remains incomplete and Gate parks for provider-neutral
+  judgment. The narrow authenticated Codex reviewed-commit sentinel is the
+  existing structured exception.
+- **State and keys live outside the source tree.** A running gate's `-state`
+  and `-key` dirs are operational data, never files in this source tree. The
+  hosted executor uses a fresh Workbench-only ledger, never the machine-global
+  Gate ledger. Generic Actions has no `gate-state` write authority; the Gate
+  App is the sole state writer. Signing keys remain protected-environment
+  secrets, and the operator-owned `GATE_EXECUTOR_ARMED` variable is the final
+  release switch.
+- **Execution authority is a durable PR claim, not status.** The protected
+  executor contract verifies run-specific independent approval, exact
+  repo/PR/head/base, newest action, and the canonical commit-pinned merge
+  intent before Gate performs the exact-head GitHub API call.
+  The one-App custody/order amendment, one-time exact-action bootstrap, and
+  claim-only expired reconciliation path are implemented pending exact-head
+  review, operator bootstrap, and live canaries. The reconciler has no merge
+  operation, although its one-App
+  `contents: write` token remains technically merge-capable. Neither path
+  posts reusable green status or adds `--admin`.

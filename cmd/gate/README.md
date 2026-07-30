@@ -22,9 +22,24 @@ protection makes a merge to `main` require the green check, closing the
 direct-merge bypass on the repo that arms it — see the runbook in
 [docs/enforcement.md](docs/enforcement.md). The workflow first shipped —
 dormant, never armed — on the standalone itsHabib/gate repo; since the tenant
-move it ships here, so the armable canary is itsHabib/workbench. The merge
-itself stays dry-run advisory (`-live` is unbuilt) and token custody stays
-open.
+move it ships here, so the armable canary is itsHabib/workbench. Ordinary
+`gate -live` stays unbuilt. A separate App executor owns one durable PR claim.
+Fresh security review found the generic-Actions `gate-state` writer unsafe. The
+revised repository code instead keeps App token creation, claim/result CAS, and
+exact merge inside one Gate action. It uses a fresh Workbench-only ledger and
+remains unarmed until exact-head review, operator bootstrap, live canaries, and
+the operator-owned `GATE_EXECUTOR_ARMED` release switch.
+
+Post-bootstrap decisions first use `gate executor prepare-request`. The
+protected preparation job evaluates the exact head against the hosted ledger
+and lets the App CAS-publish the audited action without calling the merge
+endpoint. Exact-head passes can then be presented for a separate independent
+approval with `gate executor request`. The default-branch executor verifies its
+own protected-environment approval history, creates the App token only after
+preflight, CAS-publishes and refetches one permanent claim, executes only the
+stored command, then CAS-publishes one result. It never promotes commit status.
+The path is installed but unarmed until the operator completes the runbook. See
+[`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
 ## Run it
 
@@ -38,6 +53,9 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
+./gate.exe executor prepare-request -repo owner/repo -pr 181 -head <sha> -grant grt_... -decision pass -why "..." -replay evt_... -out preparation.json
+./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
+./gate.exe executor bootstrap -state DIR -key DIR -state-tip <sha> -action act_... -repo owner/repo -pr 181 -head <sha> -app-id N -installation-id N
 ./gate.exe explain -run run_...                              # decision chain from state alone
 ./gate.exe audit                                             # replay the hash chain
 ./gate.exe backtest -repo owner/repo -prs 174,175,176
@@ -132,13 +150,17 @@ One `gate` invocation is a single pass:
    error before any evidence is gathered. This bounds the gate's *own*
    sanctioned merge path; it does not bound a merge performed directly with a
    `gh` token (see [docs/enforcement.md](docs/enforcement.md)).
-2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, both comment
-   endpoints), each recorded as an artifact.
-3. **Verification ladder** — three rungs, each a verdict artifact:
+2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, review submissions,
+   requested reviewers, both comment endpoints, and the default branch's
+   `.ship.json` declaration), each recorded as an artifact.
+3. **Verification ladder** — four rungs, each a verdict artifact:
    - *readiness* (code): draft state, CI rollup, mergeability. Its blocks are
      final — no judgment can talk a red check green.
    - *floor* (code): the deterministic risk floor over the diff. Never blocks;
      it assigns the tier the grant ceiling is checked against.
+   - *panel completeness* (code): the repository-required reviewer set against
+     exact-head review submissions. Missing, pending, unknown, or stale-head
+     evidence escalates; absence is never green.
    - *review consolidation* (local model): per-comment extract-don't-judge over
      the bot panel's findings. May pass or escalate, never block.
 4. **Reduction** — monotone composition: worst decision wins, max tier wins,

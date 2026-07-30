@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "repository": "itsHabib/workbench",
+  "status": "authorized_not_applied",
+  "rulesets": [
+    {
+      "name": "main-updates",
+      "includes": ["refs/heads/main"],
+      "excludes": [],
+      "restrict_updates": true,
+      "require_pull_request": true,
+      "block_deletion": true,
+      "block_force_push": true,
+      "required_checks": [],
+      "bypass_actors": [
+        {
+          "actor_ref": "gate_app",
+          "type": "Integration",
+          "mode": "pull_request"
+        }
+      ],
+      "allowed_writers": []
+    },
+    {
+      "name": "gate-state-updates",
+      "includes": ["refs/heads/gate-state"],
+      "excludes": [],
+      "restrict_updates": true,
+      "require_pull_request": false,
+      "block_deletion": false,
+      "block_force_push": false,
+      "required_checks": [],
+      "bypass_actors": [
+        {
+          "actor_ref": "gate_app",
+          "type": "Integration",
+          "mode": "always"
+        }
+      ],
+      "allowed_writers": []
+    },
+    {
+      "name": "gate-state-integrity",
+      "includes": ["refs/heads/gate-state"],
+      "excludes": [],
+      "restrict_updates": false,
+      "require_pull_request": false,
+      "block_deletion": true,
+      "block_force_push": true,
+      "required_checks": [],
+      "bypass_actors": [],
+      "allowed_writers": []
+    },
+    {
+      "name": "other-branches",
+      "includes": ["~ALL"],
+      "excludes": ["refs/heads/main", "refs/heads/gate-state"],
+      "restrict_updates": true,
+      "require_pull_request": false,
+      "block_deletion": false,
+      "block_force_push": false,
+      "required_checks": [],
+      "bypass_actors": [],
+      "allowed_writers": ["repository_roles", "approved_existing_integrations"]
+    },
+    {
+      "name": "main-required-gate",
+      "includes": ["refs/heads/main"],
+      "excludes": [],
+      "restrict_updates": false,
+      "require_pull_request": false,
+      "block_deletion": false,
+      "block_force_push": false,
+      "required_checks": [
+        {
+          "context": "gate",
+          "integration_ref": "github_actions"
+        }
+      ],
+      "bypass_actors": [
+        {
+          "actor_ref": "gate_app",
+          "type": "Integration",
+          "mode": "pull_request"
+        }
+      ],
+      "allowed_writers": []
+    }
+  ]
+}

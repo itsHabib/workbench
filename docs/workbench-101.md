@@ -305,7 +305,7 @@ call and can never ship a bad result. Either property sends the work down; neith
 keeps it up. And never trust self-reported confidence (section 1's confident-garbage
 story is why).
 
-**The verifier ladder** is the same law inside gate, with three rungs by producer
+**The verifier ladder** is the same law inside gate, with three producer
 *class*:
 
 1. **Deterministic floor** (class `code`) - always runs, can never be lowered.
@@ -531,9 +531,20 @@ capability plane is discipline plus an audit trail, not prevention."* Gate becom
 *enforcing* only when a repo's branch protection requires the gate status check. The
 machinery for that now exists in this repo (`verified`,
 `.github/workflows/gate.yml`) and is worth reading as a security artifact in its own
-right: it triggers on `workflow_run` so it runs in the trusted base-repo context
-even for fork PRs; it builds gate from the *base* checkout so a PR cannot edit
-gate's own code to neuter the check that governs it; it mints an ephemeral grant
+right: it starts on `workflow_run`; an unprivileged, no-checkout bot-review
+signal feeds late panel evidence back through that same writable trusted-base
+rail, including for fork PRs. The signal keys on GitHub's bot identity rather
+than a fixed reviewer catalog. An identity job resolves every trigger
+to one PR number before the success-capable Gate job enters per-PR concurrency,
+including `workflow_run` events whose PR association is temporarily empty.
+Provider prose and sticky issue comments are not
+authority; without a formal exact-head review or shared head-bound artifact,
+the reviewer remains incomplete and the provider-neutral judgment path handles
+the park. When the default branch changes `.ship.json`,
+the trusted workflow first invalidates every open PR's old `gate` success, then
+re-evaluates each exact current head under the new declared panel. Gate builds
+from the *base* checkout so a PR cannot edit gate's own code to neuter the check
+that governs it; it mints an ephemeral grant
 into a throwaway temp dir so no signing secret ever touches CI; and it binds the
 posted status to the exact judged SHA so a force-push cannot get a green stamped
 onto a different commit. It ships **dormant** - armed only by the repo variable
