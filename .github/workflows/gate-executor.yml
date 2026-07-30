@@ -115,7 +115,7 @@ jobs:
         if: ${{ inputs.operation == 'prepare' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+          GATE_ANCHOR_RECORD: ${{ github.workspace }}/hosted-state/anchor.json
           INPUT_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail

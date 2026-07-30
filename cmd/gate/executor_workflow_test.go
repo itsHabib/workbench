@@ -23,12 +23,22 @@ func TestExecutorWorkflowKeepsPreparationAndMergeSeparate(t *testing.T) {
 	if !strings.Contains(preparation, "gate executor prepare") {
 		t.Fatal("preparation does not invoke the publish-only command")
 	}
+	if !strings.Contains(preparation, "GATE_ANCHOR_RECORD: ${{ github.workspace }}/hosted-state/anchor.json") {
+		t.Fatal("host preparation does not use the runner workspace anchor path")
+	}
+	if strings.Contains(preparation, "GATE_ANCHOR_RECORD: /github/workspace/") {
+		t.Fatal("host preparation uses the container workspace anchor path")
+	}
 	for _, forbidden := range []string{"gate executor run", "gh pr merge", "operation == 'execute'"} {
 		if strings.Contains(preparation, forbidden) {
 			t.Fatalf("preparation contains merge-path token %q", forbidden)
 		}
 	}
-	if !strings.Contains(workflow[end:], "uses: ./.github/actions/gate-executor") {
+	execution := workflow[end:]
+	if !strings.Contains(execution, "uses: ./.github/actions/gate-executor") {
 		t.Fatal("exact-action execution step is missing")
+	}
+	if !strings.Contains(execution, "GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json") {
+		t.Fatal("container execution does not use the container workspace anchor path")
 	}
 }
