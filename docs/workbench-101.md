@@ -50,8 +50,10 @@ and 6 (gate) hold the load-bearing detail.
   Ordinary `gate -live` is still a dry-run. The separate exact-action Gate App
   [`itshabib-workbench-gate-executor`](https://github.com/apps/itshabib-workbench-gate-executor)
   has completed its one-time bootstrap and merged exact heads for PRs #169 and
-  #179. The hosted two-approval preparation/execution path is armed; its first
-  ordinary positive canary and the remaining negative canaries are still open.
+  #179. The hosted two-approval preparation/execution path is armed. Its first
+  ordinary preparation attempt passed custody approval and then refused safely
+  on a live wire mismatch; PR #180 fixes that mismatch. A successful ordinary
+  rerun and the remaining negative canaries are still open.
   Those are separate claims; section 6 keeps them separate.
 - **The north star.** Engine-neutral autonomous runs - `--engine session` is the
   current dogfood/default path, while provider-backed engines remain optional.
@@ -590,22 +592,96 @@ trusted workflow on `main` and each requiring an independent Environment approva
    head, byte-validates Gate's commit-pinned intent, performs the exact-head squash
    through GitHub's merge API, then CAS-publishes one result.
 
+### What “approve this run” actually means
+
+The word **run** is overloaded, which makes this sound harder than it is. Keep
+these records separate:
+
+| Thing | Example shape | Plain-English meaning | What it does **not** mean |
+|---|---|---|---|
+| PR review | GitHub review on commit `abc123…` | “I reviewed this exact code head.” | Permission to run protected infrastructure or merge |
+| Preparation request | `gpr_…` | A short-lived, digest-bound request naming one repo, PR, exact head, grant, decision, rationale, and replay id | A Gate pass or a merge |
+| GitHub Actions workflow run | numeric id such as `30576746298` | One auditable execution of `.github/workflows/gate-executor.yml` | The approval itself, or Gate's durable decision case |
+| Environment approval | GitHub deployment review by the independent account | “Allow this exact waiting job to start with the protected Environment.” | “Merge the PR” |
+| Gate run | `run_…` in the ledger | The durable evidence → verdict → judgment → action case | A GitHub Actions invocation |
+| Prepared action / execution claim | `act_…` / `gxc_…` | The exact merge intent, then its single-consumer custody record | A reusable permission for another head or PR |
+
+So when GitHub shows **Review deployments** or **Approve and deploy**, it is
+asking about the protected job, not the pull request. Before that click, the job
+is `waiting`: its executor steps have not run and Environment-protected secrets
+are unavailable to it. The independent reviewer checks the run and pastes the
+exact generated approval comment, for example:
+
+```text
+approve gate preparation gpr_… for owner/repo#123@<exact-40-character-head>
+```
+
+GitHub records who approved which workflow run. After the click, the job starts
+and Gate independently verifies the request digest, expiry, workflow identity,
+approver identity, exact comment, hosted-ledger tip, grant, PR head, and current
+trusted `main`. Approval is therefore **necessary but not sufficient**: any
+failed check still refuses. An approval is permission to *attempt the selected
+operation under the reviewed code*, not a promise that it will pass.
+
+The whole path is:
+
+```text
+exact-head PR review
+  → dispatch PREPARE run
+  → GitHub waits for independent Environment approval
+  → Gate rechecks live state and publishes one exact action (NO MERGE)
+  → dispatch a new EXECUTE run for that action
+  → GitHub waits for a second independent Environment approval
+  → App creates a short-lived token inside the process
+  → claim → refetch → exact-head merge → durable result
+```
+
+The workflow file contains branches for prepare, execute, and reconcile, so the
+GitHub UI may display all their step names. Only the selected operation runs;
+the others appear as skipped. This is why seeing a step named “merge” in a
+preparation run does not mean that preparation can reach the merge endpoint.
+
+The first ordinary canary made the distinction concrete. Mints approved
+preparation workflow run `30576746298`, so GitHub correctly started the job.
+Gate then refused with exit 3 because GitHub's live API returned the workflow
+path without the `@main` suffix the validator expected. No prepared action,
+installation token, claim, or merge was produced. PR #180 carries the one-line
+wire-contract correction and regression test. That is a successful
+**fail-closed** result and a failed **positive canary**: custody worked, while
+the happy path still needs the reviewed fix and a rerun.
+
+Why not let an agent read “approved” in Slack and continue? Because that is an
+observation in prose, not control of the authority boundary. A signed Slack
+interaction can be useful evidence or feed a typed resolution ingest, but it
+does not make GitHub release Environment secrets, identify the approver in the
+deployment record, or constrain the App to one waiting job. The GitHub approval
+is useful precisely because the platform that holds the merge credential also
+enforces the pause.
+
 Only the App process creates the short-lived installation token, after approval;
 the agent and child processes never receive it. A stale head, expired grant,
 malformed request, duplicate consumption, moved ledger tip, or changed action
 refuses rather than being repaired implicitly. Branch cleanup is separate because
 the App is intentionally forbidden from updating ordinary branches. It never
-promotes reusable commit status. The first ordinary prepare/execute canary is
-still pending, so “armed and bootstrap-proven” is more accurate than “fully
+promotes reusable commit status. The first ordinary preparation attempt failed
+closed before token creation; a successful prepare/execute rerun is still
+pending, so “armed and bootstrap-proven” is more accurate than “fully
 autonomous.”
+
+“Hosted state” is not a mystery server or permanent runner disk. Each Actions
+runner starts with an ephemeral checkout. The durable, non-secret ledger is the
+protected `gate-state` Git branch: JSONL history plus its keyed anchor record.
+Signing keys and the GitHub App private key live in the protected Environment's
+secret store, never in that branch or source history. The job materializes both
+temporarily, validates and CAS-updates the ledger, then the runner disappears.
 
 **Live merge has two answers.** Ordinary `gate -live` remains unimplemented:
 `act()` records `merge_not_implemented` and composes the exact command. The
 separate App executor is the reviewed live seam and has two confirmed bootstrap
 crossings, including the PR #179 head that installed the ordinary hosted path.
 Say "ordinary Gate is dry-run; the App executor is armed and bootstrap-proven,
-with its first ordinary canary pending," not either blanket "Gate does not merge"
-or "Gate is fully autonomous."
+with its first ordinary attempt safely refused and its successful canary still
+pending," not either blanket "Gate does not merge" or "Gate is fully autonomous."
 
 **See it.** `gate explain -run <id> -html` writes a self-contained decision-trail
 page - no server, no network. The embedded demo fixture
@@ -888,10 +964,10 @@ asserting the laws over the whole input space rather than hand-picked examples -
 including the property that distinct import keys mint distinct runs, the exact
 class of a real bug.
 
-Still open, and worth saying plainly: the hosted executor's first ordinary
-prepare/execute canary and negative canaries, the reducer's general
-multiple-judgment reject, and the remaining cross-harness Gate B proof. The
-current Codex dogfood uses `--engine session`; a provider-cloud run is not
+Still open, and worth saying plainly: the hosted executor's successful ordinary
+prepare/execute rerun after PR #180 and its negative canaries, the reducer's
+general multiple-judgment reject, and the remaining cross-harness Gate B proof.
+The current Codex dogfood uses `--engine session`; a provider-cloud run is not
 required to prove the shared artifact/CLI boundary.
 
 ## 10. Self-test
@@ -917,8 +993,8 @@ Answers in parentheses; every one is derivable from the sections above.
    Verification - hence Amendment 2.)*
 8. Has Gate performed a live merge? *(Ordinary `gate -live` is still dry-run;
    the separate App executor performed the bounded bootstrap crossings for PRs
-   #169 and #179. The hosted path is armed, with its first ordinary canary
-   pending.)*
+   #169 and #179. The hosted path is armed; its first ordinary attempt refused
+   safely, and a successful rerun after PR #180 remains pending.)*
 9. What's the known reducer wart? *(last-judgment-wins on multiple judgments; held
    deliberately, fail-closed reject is the planned fix.)*
 10. Workbench vs platform? *(independent binaries composing through artifacts and
@@ -1011,12 +1087,12 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
 | `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fourteen tenants live under `cmd/` |
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
-| Live merge | Ordinary `gate -live` still records `merge_not_implemented`; the separate one-App executor completed the bounded PR #169/#179 bootstrap crossings and is armed, while its first ordinary prepare/execute canary remains open |
+| Live merge | Ordinary `gate -live` still records `merge_not_implemented`; the separate one-App executor completed the bounded PR #169/#179 bootstrap crossings and is armed; its first ordinary preparation refused safely on the workflow-path mismatch fixed by PR #180, so a successful rerun remains open |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
-| `.github/workflows/gate.yml` | `GATE_ENFORCE=true` and Workbench's required App-pinned `gate` context are live; the separately approved Gate App executor is also armed, with ordinary canary evidence still open |
+| `.github/workflows/gate.yml` | `GATE_ENFORCE=true` and Workbench's required App-pinned `gate` context are live; the separately approved Gate App executor is also armed, with successful ordinary canary evidence still open after the fail-closed first attempt |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
 
 Confirmed-in-code anchors, for contrast (all re-checked 2026-07-30): the exit
