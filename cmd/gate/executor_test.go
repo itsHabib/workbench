@@ -82,6 +82,44 @@ func TestValidatePreparedOutcome(t *testing.T) {
 	}
 }
 
+func TestValidateAppendOnlyPromotion(t *testing.T) {
+	remote := gateexecutor.StateFiles{Log: []byte("one\n"), Anchor: []byte("old")}
+	tests := []struct {
+		name      string
+		candidate gateexecutor.StateFiles
+		wantErr   bool
+	}{
+		{
+			name: "strict extension",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("one\ntwo\n"), Anchor: []byte("new"),
+			},
+		},
+		{
+			name: "same log",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("one\n"), Anchor: []byte("new"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "replacement",
+			candidate: gateexecutor.StateFiles{
+				Log: []byte("two\n"), Anchor: []byte("new"),
+			},
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateAppendOnlyPromotion(test.candidate, remote)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestExecutorResultRecordsObservedMergeDespiteCommandError(t *testing.T) {
 	claim := gateauthorization.ExecutionClaim{
 		ClaimID: "claim", ExecutionID: "execution", MergeArgv: []string{"gh"},

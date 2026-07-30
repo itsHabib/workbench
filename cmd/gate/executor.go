@@ -391,9 +391,8 @@ func publishHostedPreparation(
 			if fetchErr != nil {
 				return fetchErr
 			}
-			if !bytes.HasPrefix(files.Log, remote.Files.Log) ||
-				len(files.Log) == len(remote.Files.Log) {
-				return refuseExecutor(errors.New("executor prepare: candidate state is not an append-only promotion"))
+			if err := validateAppendOnlyPromotion(files, remote.Files); err != nil {
+				return refuseExecutor(fmt.Errorf("executor prepare: %w", err))
 			}
 			snapshot, fetchErr = session.PublishGateState(
 				context.Background(), remote.Tip,
@@ -575,6 +574,13 @@ func executeExecutorBootstrap(
 	session *gateexecutor.Session,
 	plan executorBootstrapPlan,
 ) error {
+	remote, err := session.FetchGateState(ctx, plan.expectedTip)
+	if err != nil {
+		return err
+	}
+	if err := validateAppendOnlyPromotion(plan.files, remote.Files); err != nil {
+		return refuseExecutor(fmt.Errorf("executor bootstrap: %w", err))
+	}
 	snapshot, err := session.PublishGateState(
 		ctx, plan.expectedTip, "gate: bootstrap dedicated hosted state", plan.files,
 	)
@@ -605,6 +611,17 @@ func executeExecutorBootstrap(
 		"merge_commit": pull.MergeCommit,
 		"tip":          snapshot.Tip,
 	})
+	return nil
+}
+
+func validateAppendOnlyPromotion(
+	candidate gateexecutor.StateFiles,
+	remote gateexecutor.StateFiles,
+) error {
+	if !bytes.HasPrefix(candidate.Log, remote.Log) ||
+		len(candidate.Log) == len(remote.Log) {
+		return errors.New("candidate state is not an append-only promotion")
+	}
 	return nil
 }
 
