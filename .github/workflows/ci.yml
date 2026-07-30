@@ -229,6 +229,7 @@ jobs:
           grep -F '          persist-credentials: false' "$workflow"
           grep -F 'uses: ./.github/actions/gate-executor' "$workflow"
           grep -F 'uses: ./.github/actions/gate-reconciler' "$workflow"
+          grep -F 'Evaluate and publish hosted Gate action without merging' "$workflow"
           grep -F 'Claim, refetch, merge, and record in one custodied process' "$workflow"
           grep -F 'Reconcile one expired claim without a merge operation' "$workflow"
           grep -F '          CGO_ENABLED: 0' "$workflow"
@@ -240,7 +241,7 @@ jobs:
           grep -Fx '    - executor' "$reconciler"
           grep -Fx '    - reconcile' "$reconciler"
           grep -Fx '    - -claim' "$reconciler"
-          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 2
+          test "$(grep -Fc 'secrets.GATE_APP_PRIVATE_KEY' "$workflow")" -eq 3
           if grep -Eq '^[[:space:]]+- (run|request|execute)|--admin|^[[:space:]]+- -request' "$reconciler" "$reconciler_dockerfile"; then
             echo "expired-claim reconciler must contain no merge operation or request input" >&2
             exit 1
