@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.local/schemas/gate-preparation-request-v1.json",
+  "title": "GatePreparationRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "preparation_id", "request"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "preparation_id": { "type": "string", "pattern": "^gpr_[0-9a-f]{64}$" },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "grant_id", "decision", "why", "issued_at", "expires_at", "replay_id", "trust_root"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo", "number", "head_sha", "base_ref", "base_sha", "merge_base_sha"],
+          "properties": {
+            "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+            "number": { "type": "integer", "minimum": 1 },
+            "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "base_ref": { "const": "main" },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "merge_base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+          }
+        },
+        "grant_id": { "type": "string", "pattern": "^grt_[0-9a-f]{16}$" },
+        "decision": { "enum": ["pass", "block"] },
+        "why": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "issued_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "replay_id": { "type": "string", "pattern": "^evt_[0-9a-f]{32}$" },
+        "trust_root": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "environment"],
+          "properties": {
+            "kind": { "const": "github-environment" },
+            "environment": { "const": "gate-authorization" }
+          }
+        }
+      }
+    }
+  }
+}

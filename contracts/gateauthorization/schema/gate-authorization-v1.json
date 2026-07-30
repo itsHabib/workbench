@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/gateauthorization/schema/gate-authorization-v1.json",
+  "title": "GateAuthorizationV1",
+  "type": "object",
+  "required": ["schema_version", "authorization_id", "request", "receipt"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "authorization_id": { "type": "string", "pattern": "^gau_[0-9a-f]{64}$" },
+    "request": {
+      "$ref": "gate-authorization-request-v1.json#/$defs/request"
+    },
+    "receipt": {
+      "type": "object",
+      "required": [
+        "workflow_run_id", "actor_login", "actor_id", "state", "observed_at",
+        "comment", "receipt_digest"
+      ],
+      "properties": {
+        "workflow_run_id": { "type": "integer", "minimum": 1 },
+        "actor_login": { "type": "string", "minLength": 1, "maxLength": 39 },
+        "actor_id": { "type": "integer", "minimum": 1 },
+        "state": { "const": "approved" },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "comment": { "type": "string", "minLength": 1 },
+        "receipt_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/gateauthorization/schema/gate-authorization-request-v1.json",
+  "title": "GateAuthorizationRequestV1",
+  "type": "object",
+  "required": ["schema_version", "authorization_id", "request"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "authorization_id": { "type": "string", "pattern": "^gau_[0-9a-f]{64}$" },
+    "request": { "$ref": "#/$defs/request" }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "required": ["repo", "number", "head_sha", "base_ref", "base_sha", "merge_base_sha"],
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "number": { "type": "integer", "minimum": 1 },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "base_ref": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "merge_base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": ["run_id", "action_id", "action_hash"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^run_[0-9a-f]{16}$" },
+        "action_id": { "type": "string", "pattern": "^act_[0-9a-f]{16}$" },
+        "action_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "merge_argv": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "prefixItems": [
+        { "const": "gh" },
+        { "const": "pr" },
+        { "const": "merge" },
+        { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        { "const": "-R" },
+        { "type": "string" },
+        { "const": "--squash" },
+        { "const": "--match-head-commit" },
+        { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "subject", "gate", "outcome", "merge_argv", "evidence_digest",
+        "judgment_question", "issued_at", "expires_at", "replay_id", "trust_root"
+      ],
+      "properties": {
+        "subject": { "$ref": "#/$defs/subject" },
+        "gate": { "$ref": "#/$defs/gate" },
+        "outcome": { "const": "would_merge" },
+        "merge_argv": { "$ref": "#/$defs/merge_argv" },
+        "evidence_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "judgment_question": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "issued_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "replay_id": { "type": "string", "pattern": "^evt_[0-9a-f]{32}$" },
+        "trust_root": {
+          "type": "object",
+          "required": ["kind", "environment"],
+          "properties": {
+            "kind": { "const": "github_environment" },
+            "environment": { "const": "gate-authorization" }
+          }
+        }
+      }
+    }
+  }
+}
