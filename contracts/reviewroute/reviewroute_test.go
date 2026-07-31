@@ -2,6 +2,8 @@ package reviewroute
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,6 +19,38 @@ func TestEmbeddedSchemasAreJSON(t *testing.T) {
 			var value any
 			if err := json.Unmarshal(schema, &value); err != nil {
 				t.Fatalf("invalid schema JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestRouteDispositionSchemaMatchesContract(t *testing.T) {
+	want := []string{
+		"deliberately_overridden",
+		"full_panel_fallback",
+		"parked_unverified",
+		"tier_routed",
+	}
+	for name, schema := range map[string][]byte{
+		"plan": PlanSchema, "decision": DecisionSchema,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var document struct {
+				Properties map[string]struct {
+					Enum []string `json:"enum"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(schema, &document); err != nil {
+				t.Fatal(err)
+			}
+			property := "disposition"
+			if name == "decision" {
+				property = "route_disposition"
+			}
+			got := document.Properties[property].Enum
+			slices.Sort(got)
+			if !slices.Equal(got, want) {
+				t.Fatalf("%s enum = %v, want %v", property, got, want)
 			}
 		})
 	}
@@ -48,13 +82,31 @@ func TestPolicyRejectsUnknownReviewerAndBadCycleCap(t *testing.T) {
 	}
 }
 
+func TestPolicyDigestDetectsContentMutation(t *testing.T) {
+	policy := validPolicy()
+	before, err := PolicyDigest(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier := policy.Tiers["T1"]
+	tier.MaxCycles = 2
+	policy.Tiers["T1"] = tier
+	after, err := PolicyDigest(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("policy mutation retained the same digest")
+	}
+}
+
 func TestPlanIdentityDetectsMutation(t *testing.T) {
 	plan := Plan{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
 		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
 		Disposition:   "tier_routed",
-		Policy:        &PolicyRef{ID: "canary", Revision: 1},
+		Policy:        &PolicyRef{ID: "canary", Digest: "sha256:" + strings.Repeat("a", 64)},
 		Classification: &Classification{
 			Tier: "T1", Reasons: []string{},
 		},
@@ -101,6 +153,80 @@ func TestDeferredDebtRequiresReasonAndFollowUp(t *testing.T) {
 	}
 }
 
+func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
+	input := CycleInput{
+		SchemaVersion: SchemaVersion,
+		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Cycle:         1,
+		CurrentTier:   "T1",
+	}
+	before, err := CycleInputDigest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.ChecksPassed = true
+	after, err := CycleInputDigest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("cycle evidence mutation retained the same digest")
+	}
+}
+
+func TestRequestReceiptCannotClaimSuccessOnAnotherHead(t *testing.T) {
+	receipt := RequestReceipt{
+		SchemaVersion: SchemaVersion,
+		GeneratedAt:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		HeadBefore:    strings.Repeat("b", 40),
+		HeadAfter:     strings.Repeat("b", 40),
+		Status:        "requested",
+		Requests:      []Request{},
+	}
+	if err := ValidateRequestReceipt(receipt); err == nil {
+		t.Fatal("cross-head successful request unexpectedly valid")
+	}
+	receipt.Status = "stale"
+	receipt.Reason = "head changed"
+	if err := ValidateRequestReceipt(receipt); err != nil {
+		t.Fatalf("stale receipt rejected: %v", err)
+	}
+}
+
+func TestDecisionRejectsDuplicateFindingIDs(t *testing.T) {
+	decision := validDecision()
+	decision.Findings = append(decision.Findings, decision.Findings[0])
+	if err := ValidateDecision(decision); err == nil {
+		t.Fatal("duplicate decision finding id unexpectedly valid")
+	}
+}
+
+func validDecision() Decision {
+	return Decision{
+		SchemaVersion:      SchemaVersion,
+		GeneratedAt:        time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+		Subject:            Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:             "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		InputDigest:        "sha256:" + strings.Repeat("b", 64),
+		Policy:             &PolicyRef{ID: "canary", Digest: "sha256:" + strings.Repeat("c", 64)},
+		RouteDisposition:   "tier_routed",
+		Tier:               "T1",
+		Cycle:              1,
+		ContinuationWeight: 1,
+		CumulativeWeight:   1,
+		Action:             ActionContinue,
+		ReasonCodes:        []string{"finding_unresolved"},
+		NextReviewers:      []string{"codex"},
+		Findings: []FindingState{{
+			ID: "f1", Severity: "low", Reviewers: []string{"codex"},
+			Disposition: "unresolved",
+		}},
+	}
+}
+
 func validPolicy() Policy {
 	panel := []Reviewer{
 		{Name: "codex", Trigger: "mention"},
@@ -115,7 +241,7 @@ func validPolicy() Policy {
 		}
 	}
 	return Policy{
-		SchemaVersion: SchemaVersion, ID: "canary", Revision: 1,
+		SchemaVersion: SchemaVersion, ID: "canary",
 		EnabledRepositories: []string{"itsHabib/ship"}, FullPanel: panel,
 		Tiers: map[string]TierPolicy{
 			"T0": tier(nil, nil, 1),

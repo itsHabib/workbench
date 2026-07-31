@@ -130,6 +130,25 @@ func TestProofSubstitutionClosesNoncriticalT0ToT2(t *testing.T) {
 	}
 }
 
+func TestProofSubstitutionCanReplaceLaterBotAndCoordinatorRereview(t *testing.T) {
+	plan := routedPlan(t, "T2")
+	input := cleanInput(plan, 2)
+	input.PanelComplete = false
+	input.CoordinatorComplete = false
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+		Disposition: "fixed", Changed: true, ProofRef: "test:exact-head-regression",
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionStop ||
+		!contains(decision.ReasonCodes, "deterministic_proof_substitution") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
 func TestCriticalFindingCannotBeDeferredOrProofSubstituted(t *testing.T) {
 	for _, disposition := range []string{"deferred", "fixed"} {
 		t.Run(disposition, func(t *testing.T) {
@@ -185,6 +204,38 @@ func TestT0UncertaintyEscalatesInsteadOfTakingSecondCycle(t *testing.T) {
 	}
 }
 
+func TestT0RequiresLocalAdversarialPass(t *testing.T) {
+	plan := routedPlan(t, "T0")
+	input := cleanInput(plan, 1)
+	input.AdversarialComplete = false
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionEscalate ||
+		!contains(decision.ReasonCodes, "local_adversarial_incomplete") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
+func TestOnFindingsCoordinatorRequired(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.CoordinatorComplete = false
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "low", Reviewers: []string{"codex"},
+		Disposition: "deferred", DeferReason: "outside this PR",
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionContinue ||
+		!contains(decision.ReasonCodes, "coordinator_incomplete") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
 func TestCycleCapParksWithoutTurningFailureIntoSuccess(t *testing.T) {
 	plan := routedPlan(t, "T1")
 	input := cleanInput(plan, 3)
@@ -226,6 +277,28 @@ func TestLateCyclesRequireT3AndRationale(t *testing.T) {
 				t.Fatalf("weights = %d/%d", decision.ContinuationWeight, decision.CumulativeWeight)
 			}
 		})
+	}
+}
+
+func TestContinuationWeightsAreExponential(t *testing.T) {
+	plan := routedPlan(t, "T3")
+	for cycle := 1; cycle <= 8; cycle++ {
+		input := cleanInput(plan, cycle)
+		if cycle > 3 {
+			input.ContinuationRationale = "weight trace"
+		}
+		decision, err := Decide(plan, input, testNow)
+		if err != nil {
+			t.Fatalf("cycle %d: %v", cycle, err)
+		}
+		wantWeight := 1 << (cycle - 1)
+		wantCumulative := 1<<cycle - 1
+		if decision.ContinuationWeight != wantWeight ||
+			decision.CumulativeWeight != wantCumulative {
+			t.Fatalf("cycle %d weights = %d/%d, want %d/%d",
+				cycle, decision.ContinuationWeight, decision.CumulativeWeight,
+				wantWeight, wantCumulative)
+		}
 	}
 }
 
@@ -291,7 +364,6 @@ func testPolicy() reviewroute.Policy {
 	return reviewroute.Policy{
 		SchemaVersion:       reviewroute.SchemaVersion,
 		ID:                  "tier-aware-canary",
-		Revision:            1,
 		EnabledRepositories: []string{"itsHabib/ship"},
 		FullPanel:           panel,
 		Tiers: map[string]reviewroute.TierPolicy{

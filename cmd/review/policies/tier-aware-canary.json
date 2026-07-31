@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
   "id": "tier-aware-canary",
-  "revision": 1,
   "enabled_repositories": ["itsHabib/ship"],
   "full_panel": [
     { "name": "codex", "trigger": "mention" },

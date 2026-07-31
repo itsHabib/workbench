@@ -198,8 +198,8 @@ func buildPanel(
 		Unknown:   []string{},
 	}
 	if plan.Policy != nil {
-		evidence.Declaration.Revision = fmt.Sprintf("%s@%d",
-			plan.Policy.ID, plan.Policy.Revision)
+		evidence.Declaration.Revision = fmt.Sprintf("%s@%s",
+			plan.Policy.ID, plan.Policy.Digest)
 	}
 	for _, reviewer := range expected {
 		if completed, ok := latestReview(reviewer, plan.Subject.HeadSHA, reviews); ok {

@@ -1,6 +1,6 @@
 # Opt-in tier-aware review canary — delivery plan
 
-**Status:** Implementation in progress
+**Status:** Implementation locally green; PR review and live canary pending
 **Date:** 2026-07-30
 **Primary owner:** Workbench `cmd/review`
 **Repositories:** `itsHabib/workbench`, `itsHabib/ship`, `itsHabib/cc-skills`
@@ -16,7 +16,7 @@
 Build and prove an opt-in, engine-neutral review strategy that:
 
 - classifies every pull request at its exact live head;
-- selects proportionate initial reviewers from a versioned policy;
+- selects proportionate initial reviewers from a validated, swappable policy;
 - continues only when deterministic evidence says another cycle is useful;
 - targets later cycles at the reviewers whose findings remain in play;
 - permits explicit deferment of noncritical findings;
@@ -73,7 +73,7 @@ repo + PR + live head
   triage-floor artifact
           |
           v
-  cmd/review plan  <--- versioned policy + explicit repo opt-in
+  cmd/review plan  <--- checked-in policy + explicit repo opt-in
           |
           v
   cmd/review request ----> exact-head request receipt
@@ -115,15 +115,20 @@ Workbench tools continue to share contracts, not decision call stacks.
 `cmd/review` consumes triage output as an artifact rather than importing
 triage's internal policy.
 
-## 5. Versioned policy and opt-in
+## 5. Content-addressed policy and opt-in
 
-The tier mapping is a validated versioned policy consumed by `cmd/review`, not
-prose or scattered conditionals. The reduced route has no implicit default.
+The tier mapping is validated, swappable configuration consumed by
+`cmd/review`, not prose or scattered conditionals. Its schema is versioned and
+each plan records the digest of the exact validated policy content it used.
+The checked-in canary policy is the command's default policy definition, but
+reduced routing has no implicit enablement: both repository opt-ins must agree.
 
 For the first canary:
 
-- Workbench ships the named policy definition and its schema.
-- The caller must select the policy ID/version explicitly.
+- Workbench ships one named canary policy definition and its schema.
+- The integration selects that checked-in policy; `cmd/review` records its ID
+  and content digest automatically. Callers do not select or increment a
+  separate policy revision.
 - The target repository must explicitly opt in.
 - Existing `.ship.json` may carry only the temporary enablement/policy
   selection needed by the current work-driver integration; it does not contain
@@ -244,7 +249,7 @@ Frontier agents may defer noncritical findings. A deferment must record:
 - finding ID, source reviewer, severity, and exact head;
 - concise rationale;
 - whether it is genuine debt or intentionally out of scope;
-- an issue/task reference and owner when it is genuine debt;
+- an issue/task reference when it is genuine debt;
 - any evidence supporting safety of deferral.
 
 A deferred finding does not automatically trigger another review cycle.
@@ -275,11 +280,10 @@ They differ only after a finding has been accepted:
 - Ship applies work through the existing `driver address` boundary.
 - Session applies work through a Workbench ledger/subagent adapter.
 
-Reduced session review is not enabled until that adapter can prove the same
-exact-head input/output contract in integration tests. Before parity is proven,
-session execution falls back to the full safe panel. That is a temporary
-fail-closed rollout state, not a separate permanent `unsupported_unverified`
-policy route.
+The session adapter now proves the same exact-head decision, finding-set,
+cycle, and live-head contract in integration tests. Both engines therefore
+consume the same route. An absent or unproven adapter parks or falls back to the
+full safe panel; engine identity never weakens T2/T3.
 
 ## 11. Engine-neutral artifacts
 
@@ -287,7 +291,7 @@ All artifacts are schema-versioned and exact-head bound.
 
 ### `ReviewPolicyV1`
 
-- policy ID and version;
+- policy ID; its schema version is part of the content covered by the digest;
 - allowed tiers and initial reviewer sets;
 - hard cycle caps;
 - coordinator/adversarial requirements;
@@ -300,7 +304,7 @@ All artifacts are schema-versioned and exact-head bound.
 
 - repository, PR, and exact head;
 - classifier artifact digest, tier, and reasons;
-- policy ID/version;
+- policy ID and validated content digest;
 - initial reviewers and requirements;
 - hard cap;
 - route disposition and fallback reason.
@@ -320,8 +324,9 @@ All artifacts are schema-versioned and exact-head bound.
 
 ### `ReviewDecisionV1`
 
+- policy ID/digest, route disposition/reason, and classified tier/reasons;
 - cycle number and continuation weight;
-- exact head and input artifact digests;
+- exact head, plan ID, and cycle-input content digest;
 - every finding's disposition and proof/follow-up references;
 - `stop`, `continue`, `escalate`, or `park`;
 - targeted next-reviewer set;
@@ -447,7 +452,7 @@ Keep PR 4 separate only if the evidence does not fit cleanly in PR 1 or PR 3.
 
 ### Telemetry
 
-- repository, PR, head, tier/reasons, policy/version;
+- repository, PR, head, tier/reasons, policy ID/digest;
 - initial/requested/completed and targeted reviewers;
 - cycle number, per-cycle and cumulative continuation weight;
 - findings and dispositions by severity/verdict;

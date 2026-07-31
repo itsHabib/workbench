@@ -3,11 +3,10 @@
   "$id": "https://github.com/itsHabib/workbench/contracts/reviewroute/schema/review-policy-v1.json",
   "title": "ReviewPolicyV1",
   "type": "object",
-  "required": ["schema_version", "id", "revision", "enabled_repositories", "full_panel", "tiers"],
+  "required": ["schema_version", "id", "enabled_repositories", "full_panel", "tiers"],
   "properties": {
     "schema_version": { "const": 1 },
     "id": { "type": "string", "minLength": 1 },
-    "revision": { "type": "integer", "minimum": 1 },
     "enabled_repositories": {
       "type": "array",
       "uniqueItems": true,

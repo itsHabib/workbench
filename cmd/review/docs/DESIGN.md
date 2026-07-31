@@ -21,6 +21,7 @@ Both Ship and session-ledger execution consume the same `ReviewDecisionV1`.
 Their only difference is the post-decision adapter used to apply accepted
 findings.
 
-The first policy revision is an explicit personal-repository canary. Its
-continuation weights are shadow telemetry, while exact-head joins, hard caps,
-and deterministic stop conditions are enforced.
+The first checked-in policy is an explicit personal-repository canary. Plans
+record its validated content digest automatically; callers do not manage a
+separate policy revision. Continuation weights are shadow telemetry, while
+exact-head joins, hard caps, and deterministic stop conditions are enforced.

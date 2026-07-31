@@ -69,6 +69,25 @@ func TestPlanRoutesCurrentExactHead(t *testing.T) {
 	}
 }
 
+func TestPlanUsesCheckedInPolicyWithoutCallerVersionSelection(t *testing.T) {
+	temp := t.TempDir()
+	out := filepath.Join(temp, "plan.json")
+	code := run(context.Background(), []string{
+		"plan", "-repo", "itsHabib/ship", "-pr", "7", "-head", testHeadA, "-out", out,
+	}, planningRunner(testHeadA, testHeadA, `{
+		"floor":"T1","signals":[],"files":1,"added":1,"removed":0
+	}`), io.Discard, io.Discard)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	var plan reviewroute.Plan
+	readJSON(t, out, &plan)
+	if plan.Policy == nil || plan.Policy.ID != "tier-aware-canary" ||
+		!strings.HasPrefix(plan.Policy.Digest, "sha256:") {
+		t.Fatalf("policy = %#v", plan.Policy)
+	}
+}
+
 func TestMalformedClassifierFallsBackToFullPanel(t *testing.T) {
 	temp := t.TempDir()
 	out := filepath.Join(temp, "plan.json")
@@ -86,6 +105,38 @@ func TestMalformedClassifierFallsBackToFullPanel(t *testing.T) {
 		t.Fatalf("plan = %s reviewers %d", plan.Disposition, len(plan.Reviewers))
 	}
 	if !strings.Contains(plan.Reason, "triage-floor") {
+		t.Fatalf("reason = %q", plan.Reason)
+	}
+}
+
+func TestMissingClassifierFallsBackToFullPanel(t *testing.T) {
+	temp := t.TempDir()
+	out := filepath.Join(temp, "plan.json")
+	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
+		if name == "gh" && slices.Contains(args, "view") {
+			return []byte(`{"headRefOid":"` + testHeadA + `","state":"OPEN"}`), nil
+		}
+		if name == "gh" && slices.Contains(args, "diff") {
+			return []byte("diff --git a/a b/a"), nil
+		}
+		if name == "missing-triage-floor" {
+			return nil, errors.New("executable file not found")
+		}
+		return nil, errors.New("unexpected command")
+	}}
+	code := run(context.Background(), []string{
+		"plan", "-repo", "itsHabib/ship", "-pr", "7", "-head", testHeadA,
+		"-triage-bin", "missing-triage-floor", "-out", out,
+	}, runner, io.Discard, io.Discard)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	var plan reviewroute.Plan
+	readJSON(t, out, &plan)
+	if plan.Disposition != "full_panel_fallback" || len(plan.Reviewers) != 4 {
+		t.Fatalf("plan = %s reviewers %d", plan.Disposition, len(plan.Reviewers))
+	}
+	if !strings.Contains(plan.Reason, "triage-floor failed") {
 		t.Fatalf("reason = %q", plan.Reason)
 	}
 }
@@ -185,6 +236,86 @@ func TestStalePlanRefusesBeforeRequestWrites(t *testing.T) {
 	}
 }
 
+func TestRequestStopsBeforeNextWriteWhenHeadChanges(t *testing.T) {
+	temp := t.TempDir()
+	planPath := filepath.Join(temp, "plan.json")
+	writeJSON(t, planPath, testPlan(t, "T2"))
+	out := filepath.Join(temp, "request.json")
+	headCalls := 0
+	var writes []string
+	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
+		if name == "gh" && slices.Contains(args, "view") {
+			head := testHeadA
+			if headCalls >= 2 {
+				head = testHeadB
+			}
+			headCalls++
+			return []byte(`{"headRefOid":"` + head + `","state":"OPEN"}`), nil
+		}
+		if name == "gh" && slices.Contains(args, "comment") {
+			writes = append(writes, args[len(args)-1])
+			return []byte("https://example/comment/1"), nil
+		}
+		return nil, errors.New("unexpected command")
+	}}
+	code := run(context.Background(), []string{
+		"request", "-plan", planPath, "-out", out,
+	}, runner, io.Discard, io.Discard)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if !slices.Equal(writes, []string{"@codex review"}) {
+		t.Fatalf("writes = %v", writes)
+	}
+	var receipt reviewroute.RequestReceipt
+	readJSON(t, out, &receipt)
+	if receipt.Status != "stale" || receipt.HeadAfter != testHeadB {
+		t.Fatalf("receipt = %s head %s", receipt.Status, receipt.HeadAfter)
+	}
+}
+
+func TestDecideRefusesWhenLiveHeadChanges(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		before string
+		after  string
+	}{
+		{name: "stale before decision", before: testHeadB, after: testHeadB},
+		{name: "changed during decision", before: testHeadA, after: testHeadB},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			temp := t.TempDir()
+			plan := testPlan(t, "T1")
+			planPath := filepath.Join(temp, "plan.json")
+			inputPath := filepath.Join(temp, "input.json")
+			out := filepath.Join(temp, "decision.json")
+			writeJSON(t, planPath, plan)
+			writeJSON(t, inputPath, reviewroute.CycleInput{
+				SchemaVersion:       reviewroute.SchemaVersion,
+				Subject:             plan.Subject,
+				PlanID:              plan.PlanID,
+				Cycle:               1,
+				CurrentTier:         "T1",
+				ChecksPassed:        true,
+				PanelComplete:       true,
+				CoordinatorComplete: true,
+				AdversarialComplete: true,
+				Findings:            []reviewroute.FindingState{},
+			})
+			runner := planningRunner(tt.before, tt.after, "")
+			code := run(context.Background(), []string{
+				"decide", "-plan", planPath, "-input", inputPath, "-out", out,
+			}, runner, io.Discard, io.Discard)
+			if code != exitRefused {
+				t.Fatalf("exit = %d", code)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("decision output exists or stat failed: %v", err)
+			}
+		})
+	}
+}
+
 func TestAdvisoryVerifierRejectsUnknownRecommendation(t *testing.T) {
 	if validAdvisory(json.RawMessage(`{
 		"recommendation":"ignore","rationale":"no","confidence":1
@@ -258,8 +389,8 @@ func testPolicyValue() reviewroute.Policy {
 		}
 	}
 	return reviewroute.Policy{
-		SchemaVersion: reviewroute.SchemaVersion,
-		ID:            "tier-aware-canary", Revision: 1,
+		SchemaVersion:       reviewroute.SchemaVersion,
+		ID:                  "tier-aware-canary",
 		EnabledRepositories: []string{"itsHabib/ship"}, FullPanel: panel,
 		Tiers: map[string]reviewroute.TierPolicy{
 			"T0": tier(nil, nil, 1, "none"),

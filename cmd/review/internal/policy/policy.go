@@ -29,8 +29,13 @@ func Route(
 	if err := reviewroute.ValidatePolicy(config); err != nil {
 		return reviewroute.Plan{}, err
 	}
+	digest, err := reviewroute.PolicyDigest(config)
+	if err != nil {
+		return reviewroute.Plan{}, err
+	}
 	if !enabled(config.EnabledRepositories, subject.Repo) {
-		return fallback(config.FullPanel, subject, &classification, now,
+		return fallback(config.FullPanel, subject, &classification,
+			&reviewroute.PolicyRef{ID: config.ID, Digest: digest}, now,
 			"full_panel_fallback", "repository is not explicitly enabled")
 	}
 	classification.Reasons = append([]string{}, classification.Reasons...)
@@ -44,7 +49,7 @@ func Route(
 		GeneratedAt:    now.UTC(),
 		Subject:        subject,
 		Disposition:    "tier_routed",
-		Policy:         &reviewroute.PolicyRef{ID: config.ID, Revision: config.Revision},
+		Policy:         &reviewroute.PolicyRef{ID: config.ID, Digest: digest},
 		Classification: &classification,
 		Reviewers:      reviewers,
 		Required:       append([]string{}, tier.Required...),
@@ -62,13 +67,14 @@ func Fallback(
 	now time.Time,
 	disposition, reason string,
 ) (reviewroute.Plan, error) {
-	return fallback(safePanel, subject, classification, now, disposition, reason)
+	return fallback(safePanel, subject, classification, nil, now, disposition, reason)
 }
 
 func fallback(
 	panel []reviewroute.Reviewer,
 	subject reviewroute.Subject,
 	classification *reviewroute.Classification,
+	policyRef *reviewroute.PolicyRef,
 	now time.Time,
 	disposition, reason string,
 ) (reviewroute.Plan, error) {
@@ -83,6 +89,7 @@ func fallback(
 		Subject:        subject,
 		Disposition:    disposition,
 		Reason:         reason,
+		Policy:         policyRef,
 		Classification: classification,
 		Reviewers:      append([]reviewroute.Reviewer(nil), panel...),
 		Required:       reviewerNames(panel),
@@ -117,12 +124,19 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 	if plan.PlanID != input.PlanID || plan.Subject != input.Subject {
 		return reviewroute.Decision{}, errors.New("review artifacts do not join at the exact plan and head")
 	}
+	inputDigest, err := reviewroute.CycleInputDigest(input)
+	if err != nil {
+		return reviewroute.Decision{}, err
+	}
 
 	reasons, next := blockers(plan, input)
 	action := reviewroute.ActionContinue
 	if len(reasons) == 0 {
 		action = reviewroute.ActionStop
 		reasons = []string{"stop_conditions_satisfied"}
+		if proofSubstitutesPanel(plan, input) {
+			reasons = append(reasons, "deterministic_proof_substitution")
+		}
 	}
 	if raisedTier(plan, input.CurrentTier) {
 		action = reviewroute.ActionEscalate
@@ -146,6 +160,11 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		GeneratedAt:        now.UTC(),
 		Subject:            input.Subject,
 		PlanID:             input.PlanID,
+		InputDigest:        inputDigest,
+		Policy:             plan.Policy,
+		RouteDisposition:   plan.Disposition,
+		RouteReason:        plan.Reason,
+		Tier:               input.CurrentTier,
 		Cycle:              input.Cycle,
 		ContinuationWeight: 1 << (input.Cycle - 1),
 		CumulativeWeight:   1<<input.Cycle - 1,
@@ -153,6 +172,9 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		ReasonCodes:        reviewroute.SortedUnique(reasons),
 		NextReviewers:      reviewroute.SortedUnique(next),
 		Findings:           append([]reviewroute.FindingState{}, input.Findings...),
+	}
+	if plan.Classification != nil {
+		decision.TierReasons = append([]string{}, plan.Classification.Reasons...)
 	}
 	if err := reviewroute.ValidateDecision(decision); err != nil {
 		return reviewroute.Decision{}, err
@@ -163,15 +185,19 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []string) {
 	var reasons []string
 	var reviewers []string
+	proofOnly := proofSubstitutesPanel(plan, input)
 	if !input.ChecksPassed {
 		reasons = append(reasons, "checks_failed")
 	}
-	if !input.PanelComplete {
+	if !input.PanelComplete && !proofOnly {
 		reasons = append(reasons, "panel_incomplete")
 		reviewers = append(reviewers, plan.Required...)
 	}
-	if plan.Requirements.Coordinator == "required" && !input.CoordinatorComplete {
+	if coordinatorRequired(plan, input) && !input.CoordinatorComplete && !proofOnly {
 		reasons = append(reasons, "coordinator_incomplete")
+	}
+	if plan.Requirements.LocalAdversarial && !input.AdversarialComplete {
+		reasons = append(reasons, "local_adversarial_incomplete")
 	}
 	if plan.Requirements.AdversarialVerification && !input.AdversarialComplete {
 		reasons = append(reasons, "adversarial_incomplete")
@@ -184,6 +210,31 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 		}
 	}
 	return reviewroute.SortedUnique(reasons), reviewroute.SortedUnique(reviewers)
+}
+
+func coordinatorRequired(plan reviewroute.Plan, input reviewroute.CycleInput) bool {
+	if plan.Requirements.Coordinator == "required" {
+		return true
+	}
+	return plan.Requirements.Coordinator == "on-findings" && len(input.Findings) > 0
+}
+
+func proofSubstitutesPanel(plan reviewroute.Plan, input reviewroute.CycleInput) bool {
+	if input.Cycle < 2 || !plan.Requirements.AllowProofSubstitution || len(input.Findings) == 0 {
+		return false
+	}
+	for _, finding := range input.Findings {
+		if finding.Disposition == "unresolved" {
+			return false
+		}
+		if finding.Disposition == "deferred" || finding.ReviewerClosed {
+			continue
+		}
+		if !proofCloses(plan, input.CurrentTier, criticalSeverity(finding.Severity), finding.ProofRef) {
+			return false
+		}
+	}
+	return true
 }
 
 func findingBlockers(

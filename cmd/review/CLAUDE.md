@@ -7,7 +7,7 @@ and session engines consume its artifacts; they do not reinterpret its policy.
 ## Commands
 
 ```text
-review plan    -repo owner/repo -pr N -head SHA -policy policy.json -out plan.json
+review plan    -repo owner/repo -pr N -head SHA [-policy override.json] -out plan.json
 review request -plan plan.json [-reviewers codex,cursor] -out request.json
 review observe -plan plan.json -out panel.json
 review decide  -plan plan.json -input cycle-input.json -out decision.json
@@ -15,6 +15,9 @@ review advise  -input finding-evidence.json -out advisory.json
 ```
 
 `plan` shells `gh` and `triage-floor`; it never imports triage decision code.
+Without `-policy`, it uses the single checked-in canary policy and records that
+validated content's digest. `-policy` is an explicit swappable override, not a
+caller-managed policy version.
 `request` is the sole GitHub reviewer-triggering write boundary. `observe`
 emits `ReviewPanelV1`; use the existing `reviewfindings` command for sourced
 nonempty `ReviewFindingsV1` evidence. `decide` is deterministic. `advise` is an

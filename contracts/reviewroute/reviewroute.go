@@ -56,20 +56,20 @@ type TierPolicy struct {
 	Requirements Requirements `json:"requirements"`
 }
 
-// Policy is a named revision of the canary's complete routing configuration.
+// Policy is one named, validated routing configuration.
 type Policy struct {
 	SchemaVersion       int                   `json:"schema_version"`
 	ID                  string                `json:"id"`
-	Revision            int                   `json:"revision"`
 	EnabledRepositories []string              `json:"enabled_repositories"`
 	FullPanel           []Reviewer            `json:"full_panel"`
 	Tiers               map[string]TierPolicy `json:"tiers"`
 }
 
-// PolicyRef records the exact named policy revision used for a plan.
+// PolicyRef records the named policy and the digest of its validated content.
+// Callers never select or increment a separate policy revision.
 type PolicyRef struct {
-	ID       string `json:"id"`
-	Revision int    `json:"revision"`
+	ID     string `json:"id"`
+	Digest string `json:"digest"`
 }
 
 // Classification records triage-floor output without importing its policy.
@@ -152,6 +152,12 @@ type Decision struct {
 	GeneratedAt        time.Time      `json:"generated_at"`
 	Subject            Subject        `json:"subject"`
 	PlanID             string         `json:"plan_id"`
+	InputDigest        string         `json:"input_digest"`
+	Policy             *PolicyRef     `json:"policy,omitempty"`
+	RouteDisposition   string         `json:"route_disposition"`
+	RouteReason        string         `json:"route_reason,omitempty"`
+	Tier               string         `json:"tier,omitempty"`
+	TierReasons        []string       `json:"tier_reasons,omitempty"`
 	Cycle              int            `json:"cycle"`
 	ContinuationWeight int            `json:"continuation_weight"`
 	CumulativeWeight   int            `json:"cumulative_weight"`
@@ -166,8 +172,8 @@ func ValidatePolicy(policy Policy) error {
 	if policy.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("reviewroute: unsupported policy schema_version %d", policy.SchemaVersion)
 	}
-	if strings.TrimSpace(policy.ID) == "" || policy.Revision < 1 {
-		return errors.New("reviewroute: policy id and positive revision are required")
+	if strings.TrimSpace(policy.ID) == "" {
+		return errors.New("reviewroute: policy id is required")
 	}
 	if err := validateUnique("enabled repository", policy.EnabledRepositories); err != nil {
 		return err
@@ -204,6 +210,19 @@ func ValidatePolicy(policy Policy) error {
 		}
 	}
 	return nil
+}
+
+// PolicyDigest returns the immutable identity of validated policy content.
+func PolicyDigest(policy Policy) (string, error) {
+	if err := ValidatePolicy(policy); err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(policy)
+	if err != nil {
+		return "", fmt.Errorf("reviewroute: marshal policy identity: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func validateTierPolicy(tier string, policy TierPolicy, panel map[string]Reviewer) error {
@@ -249,21 +268,11 @@ func ValidatePlan(plan Plan) error {
 	if plan.MaxCycles < 1 || plan.MaxCycles > 8 {
 		return errors.New("reviewroute: plan max_cycles must be 1..8")
 	}
-	if !validDisposition(plan.Disposition) {
-		return errors.New("reviewroute: plan disposition is invalid")
-	}
-	if plan.Disposition != "tier_routed" && strings.TrimSpace(plan.Reason) == "" {
-		return errors.New("reviewroute: non-routed plan requires a reason")
-	}
-	if plan.Disposition == "tier_routed" &&
-		(plan.Policy == nil || plan.Classification == nil) {
-		return errors.New("reviewroute: routed plan requires policy and classification")
+	if err := validatePlanRoute(plan); err != nil {
+		return err
 	}
 	if err := validatePlanReviewers(plan.Reviewers, plan.Required); err != nil {
 		return err
-	}
-	if plan.Classification != nil && !validTier(plan.Classification.Tier) {
-		return errors.New("reviewroute: plan classification tier is invalid")
 	}
 	if plan.PlanID == "" {
 		return errors.New("reviewroute: plan_id is required")
@@ -274,6 +283,28 @@ func ValidatePlan(plan Plan) error {
 	}
 	if plan.PlanID != id {
 		return errors.New("reviewroute: plan_id does not match plan content")
+	}
+	return nil
+}
+
+func validatePlanRoute(plan Plan) error {
+	if !validDisposition(plan.Disposition) {
+		return errors.New("reviewroute: plan disposition is invalid")
+	}
+	if plan.Disposition != "tier_routed" && strings.TrimSpace(plan.Reason) == "" {
+		return errors.New("reviewroute: non-routed plan requires a reason")
+	}
+	if plan.Disposition == "tier_routed" &&
+		(plan.Policy == nil || plan.Classification == nil) {
+		return errors.New("reviewroute: routed plan requires policy and classification")
+	}
+	if plan.Policy != nil {
+		if strings.TrimSpace(plan.Policy.ID) == "" || !validDigest(plan.Policy.Digest) {
+			return errors.New("reviewroute: plan policy requires id and sha256 digest")
+		}
+	}
+	if plan.Classification != nil && !validTier(plan.Classification.Tier) {
+		return errors.New("reviewroute: plan classification tier is invalid")
 	}
 	return nil
 }
@@ -357,6 +388,11 @@ func ValidateRequestReceipt(receipt RequestReceipt) error {
 	default:
 		return errors.New("reviewroute: request status is invalid")
 	}
+	if receipt.Status != "stale" &&
+		(!strings.EqualFold(receipt.HeadBefore, receipt.Subject.HeadSHA) ||
+			!strings.EqualFold(receipt.HeadAfter, receipt.Subject.HeadSHA)) {
+		return errors.New("reviewroute: non-stale request heads must match the subject")
+	}
 	if receipt.Status != "requested" && strings.TrimSpace(receipt.Reason) == "" {
 		return errors.New("reviewroute: non-successful request requires a reason")
 	}
@@ -407,12 +443,67 @@ func ValidateDecision(decision Decision) error {
 	if decision.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("reviewroute: unsupported decision schema_version %d", decision.SchemaVersion)
 	}
+	if err := validateDecisionIdentity(decision); err != nil {
+		return err
+	}
+	if err := validateDecisionRoute(decision); err != nil {
+		return err
+	}
+	if err := validateDecisionCycle(decision); err != nil {
+		return err
+	}
+	if err := validateDecisionOutcome(decision); err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(decision.Findings))
+	for _, finding := range decision.Findings {
+		ids = append(ids, finding.ID)
+		if err := validateFindingState(finding); err != nil {
+			return err
+		}
+	}
+	return validateUnique("decision finding id", ids)
+}
+
+func validateDecisionIdentity(decision Decision) error {
 	if err := validateSubject(decision.Subject); err != nil {
 		return err
 	}
 	if decision.GeneratedAt.IsZero() || decision.PlanID == "" {
 		return errors.New("reviewroute: decision generated_at and plan_id are required")
 	}
+	if !validDigest(decision.InputDigest) {
+		return errors.New("reviewroute: decision input_digest must be sha256 content identity")
+	}
+	return nil
+}
+
+func validateDecisionRoute(decision Decision) error {
+	if !validDisposition(decision.RouteDisposition) {
+		return errors.New("reviewroute: decision route_disposition is invalid")
+	}
+	if decision.RouteDisposition != "tier_routed" && strings.TrimSpace(decision.RouteReason) == "" {
+		return errors.New("reviewroute: non-routed decision requires a route reason")
+	}
+	if decision.Policy != nil {
+		if strings.TrimSpace(decision.Policy.ID) == "" || !validDigest(decision.Policy.Digest) {
+			return errors.New("reviewroute: decision policy requires id and sha256 digest")
+		}
+	}
+	if decision.Tier != "" && !validTier(decision.Tier) {
+		return errors.New("reviewroute: decision tier is invalid")
+	}
+	if decision.RouteDisposition == "tier_routed" &&
+		(decision.Policy == nil || decision.Tier == "") {
+		return errors.New("reviewroute: routed decision requires policy and tier")
+	}
+	if err := validateUnique("decision tier reason", decision.TierReasons); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDecisionCycle(decision Decision) error {
 	if decision.Cycle < 1 || decision.Cycle > 8 {
 		return errors.New("reviewroute: decision cycle must be 1..8")
 	}
@@ -420,6 +511,10 @@ func ValidateDecision(decision Decision) error {
 		decision.CumulativeWeight != 1<<decision.Cycle-1 {
 		return errors.New("reviewroute: decision continuation weights are inconsistent")
 	}
+	return nil
+}
+
+func validateDecisionOutcome(decision Decision) error {
 	switch decision.Action {
 	case ActionStop, ActionContinue, ActionEscalate, ActionPark:
 	default:
@@ -434,12 +529,20 @@ func ValidateDecision(decision Decision) error {
 	if err := validateUnique("next reviewer", decision.NextReviewers); err != nil {
 		return err
 	}
-	for _, finding := range decision.Findings {
-		if err := validateFindingState(finding); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+// CycleInputDigest returns the immutable identity of validated cycle evidence.
+func CycleInputDigest(input CycleInput) (string, error) {
+	if err := ValidateCycleInput(input); err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("reviewroute: marshal cycle input identity: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func validateSubject(subject Subject) error {
@@ -462,6 +565,29 @@ func validSHA(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func validDigest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	return validHex(value[len("sha256:"):], 64)
+}
+
+func validHex(value string, length int) bool {
+	if len(value) != length {
+		return false
+	}
+	for _, char := range value {
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char >= 'a' && char <= 'f' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateReviewer(reviewer Reviewer) error {

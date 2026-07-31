@@ -88,7 +88,7 @@ func run(
 	case "observe":
 		err = runObserve(ctx, args[1:], runner, stdout)
 	case "decide":
-		err = runDecide(args[1:], stdout)
+		err = runDecide(ctx, args[1:], runner, stdout)
 	case "advise":
 		err = runAdvise(ctx, args[1:], stdout)
 	default:
@@ -181,7 +181,7 @@ func parsePlanOptions(args []string) (planOptions, error) {
 	flags.StringVar(&opts.repo, "repo", "", "owner/repo")
 	flags.IntVar(&opts.pr, "pr", 0, "pull request number")
 	flags.StringVar(&opts.head, "head", "", "expected exact head SHA")
-	flags.StringVar(&opts.policy, "policy", "", "ReviewPolicyV1 path")
+	flags.StringVar(&opts.policy, "policy", "", "optional ReviewPolicyV1 override path")
 	flags.StringVar(&opts.out, "out", "", "output ReviewPlanV1 path")
 	flags.StringVar(&opts.triageBin, "triage-bin", "triage-floor", "triage-floor binary")
 	if err := flags.Parse(args); err != nil {
@@ -194,8 +194,6 @@ func parsePlanOptions(args []string) (planOptions, error) {
 		return planOptions{}, errors.New("-pr must be positive")
 	case opts.head == "":
 		return planOptions{}, errors.New("-head is required")
-	case opts.policy == "":
-		return planOptions{}, errors.New("-policy is required")
 	case opts.out == "":
 		return planOptions{}, errors.New("-out is required")
 	}
@@ -274,9 +272,13 @@ func classify(
 }
 
 func readPolicy(path string) (reviewroute.Policy, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return reviewroute.Policy{}, err
+	data := defaultPolicyBytes
+	if path != "" {
+		var err error
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return reviewroute.Policy{}, err
+		}
 	}
 	var result reviewroute.Policy
 	if err := strictJSON(data, &result); err != nil {
@@ -328,25 +330,43 @@ func runRequest(
 		Subject:       plan.Subject,
 		PlanID:        plan.PlanID,
 		HeadBefore:    strings.ToLower(before.HeadRefOID),
+		HeadAfter:     strings.ToLower(before.HeadRefOID),
 		Status:        "requested",
 		Requests:      make([]reviewroute.Request, 0, len(selected)),
 	}
-	for _, reviewer := range selected {
+	for index, reviewer := range selected {
+		if index > 0 {
+			current, currentErr := fetchPullRequest(
+				ctx, runner, plan.Subject.Repo, plan.Subject.Number,
+			)
+			if currentErr != nil {
+				return currentErr
+			}
+			receipt.HeadAfter = strings.ToLower(current.HeadRefOID)
+		}
+		if !strings.EqualFold(receipt.HeadAfter, plan.Subject.HeadSHA) {
+			receipt.Status = "stale"
+			receipt.Reason = "pull request head changed before reviewer request"
+			break
+		}
 		request := triggerReviewer(ctx, runner, plan.Subject, reviewer)
 		receipt.Requests = append(receipt.Requests, request)
 		if request.Status == "failed" {
 			receipt.Status = "failed"
 			receipt.Reason = "one or more reviewer requests failed"
 		}
-	}
-	after, err := fetchPullRequest(ctx, runner, plan.Subject.Repo, plan.Subject.Number)
-	if err != nil {
-		return err
-	}
-	receipt.HeadAfter = strings.ToLower(after.HeadRefOID)
-	if !strings.EqualFold(receipt.HeadBefore, receipt.HeadAfter) {
-		receipt.Status = "stale"
-		receipt.Reason = "pull request head changed during reviewer requests"
+		after, afterErr := fetchPullRequest(
+			ctx, runner, plan.Subject.Repo, plan.Subject.Number,
+		)
+		if afterErr != nil {
+			return afterErr
+		}
+		receipt.HeadAfter = strings.ToLower(after.HeadRefOID)
+		if !strings.EqualFold(receipt.HeadAfter, plan.Subject.HeadSHA) {
+			receipt.Status = "stale"
+			receipt.Reason = "pull request head changed during reviewer request"
+			break
+		}
 	}
 	if err := reviewroute.ValidateRequestReceipt(receipt); err != nil {
 		return refusalError{err}
@@ -468,7 +488,12 @@ type decideOptions struct {
 	out   string
 }
 
-func runDecide(args []string, stdout io.Writer) error {
+func runDecide(
+	ctx context.Context,
+	args []string,
+	runner commandRunner,
+	stdout io.Writer,
+) error {
 	opts, err := parseDecideOptions(args)
 	if err != nil {
 		return err
@@ -481,9 +506,26 @@ func runDecide(args []string, stdout io.Writer) error {
 	if err := readArtifact(opts.input, &input); err != nil {
 		return err
 	}
+	before, err := fetchPullRequest(ctx, runner, plan.Subject.Repo, plan.Subject.Number)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(before.HeadRefOID, plan.Subject.HeadSHA) {
+		return refusalError{errors.New("review plan is stale before decision")}
+	}
+	if !strings.EqualFold(before.State, "OPEN") {
+		return refusalError{fmt.Errorf("pull request is %s", before.State)}
+	}
 	decision, err := policy.Decide(plan, input, time.Now().UTC())
 	if err != nil {
 		return refusalError{err}
+	}
+	after, err := fetchPullRequest(ctx, runner, plan.Subject.Repo, plan.Subject.Number)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(before.HeadRefOID, after.HeadRefOID) {
+		return refusalError{errors.New("pull request head changed during decision")}
 	}
 	return writeArtifact(opts.out, decision, nil, stdout)
 }
