@@ -15,7 +15,7 @@
       "action": { "envelope": "shell", "operation": "git.status", "parameters": [] },
       "observables": []
     },
-    "action_digest": "sha256:63bdf3c92d039f6725daabb0d3da9205b2b3ec2f424bc8427b9baa18728f68ef"
+    "action_digest": "sha256:cf5c3e8fe15a079f962b4256f0d4a0aa0391172a47a6c8793ac2e1674ba97579"
   },
   "completion": { "status": "failed", "observables": [] }
 }

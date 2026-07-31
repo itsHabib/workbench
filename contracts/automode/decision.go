@@ -3,8 +3,8 @@
 package automode
 
 import (
-	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -132,23 +132,41 @@ func (d Decision) Routing() RoutingProjection {
 }
 
 // Digest returns the canonical SHA-256 identity of a normalized input
-// projection. Ordering of named values does not affect the result.
+// projection. It hashes the language-neutral framed representation documented
+// in README.md; ordering of named values does not affect the result.
 func Digest(inputs InputProjection) (string, error) {
 	if err := validateInputs(inputs); err != nil {
 		return "", err
 	}
-	canonical := inputs
-	canonical.Action.Parameters = sortedValues(inputs.Action.Parameters)
-	canonical.Observables = sortedValues(inputs.Observables)
-
-	var data bytes.Buffer
-	encoder := json.NewEncoder(&data)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(canonical); err != nil {
-		return "", fmt.Errorf("automode: encode digest projection: %w", err)
-	}
-	sum := sha256.Sum256(bytes.TrimSuffix(data.Bytes(), []byte{'\n'}))
+	sum := sha256.Sum256(canonicalInputs(inputs))
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func canonicalInputs(inputs InputProjection) []byte {
+	out := []byte("workbench.automode.inputs.v1")
+	out = appendString(out, inputs.Action.Envelope)
+	out = appendString(out, inputs.Action.Operation)
+	out = appendValues(out, sortedValues(inputs.Action.Parameters))
+	return appendValues(out, sortedValues(inputs.Observables))
+}
+
+func appendValues(out []byte, values []NamedValue) []byte {
+	out = binary.AppendUvarint(out, uint64(len(values)))
+	for _, value := range values {
+		out = appendString(out, value.Name)
+		if value.Redacted {
+			out = append(out, 1)
+		} else {
+			out = append(out, 0)
+		}
+		out = appendString(out, value.Value)
+	}
+	return out
+}
+
+func appendString(out []byte, value string) []byte {
+	out = binary.AppendUvarint(out, uint64(len(value)))
+	return append(out, value...)
 }
 
 func sortedValues(values []NamedValue) []NamedValue {
