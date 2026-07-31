@@ -9,8 +9,6 @@ inputs:
     required: true
   installation-id:
     required: true
-  app-private-key:
-    required: true
   state-dir:
     required: true
   key-dir:
