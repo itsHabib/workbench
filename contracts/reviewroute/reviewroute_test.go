@@ -104,6 +104,53 @@ func TestRouteDispositionSchemaMatchesContract(t *testing.T) {
 	}
 }
 
+func TestDecisionActionSchemaMatchesContract(t *testing.T) {
+	var document struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(DecisionSchema, &document); err != nil {
+		t.Fatal(err)
+	}
+	got := document.Properties["action"].Enum
+	slices.Sort(got)
+	want := []string{ActionAddress, ActionContinue, ActionEscalate, ActionPark, ActionStop}
+	if !slices.Equal(got, want) {
+		t.Fatalf("action schema = %v, want %v", got, want)
+	}
+}
+
+func TestDecisionSchemaRequiresNextReviewerForAddress(t *testing.T) {
+	var schema struct {
+		AllOf []struct {
+			If struct {
+				Properties map[string]struct {
+					Const string `json:"const"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			} `json:"if"`
+			Then struct {
+				Properties map[string]struct {
+					MinItems int `json:"minItems"`
+				} `json:"properties"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(DecisionSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.AllOf) != 1 {
+		t.Fatalf("decision schema constraints = %d, want 1", len(schema.AllOf))
+	}
+	conditional := schema.AllOf[0]
+	if conditional.If.Properties["action"].Const != ActionAddress ||
+		!slices.Equal(conditional.If.Required, []string{"action"}) ||
+		conditional.Then.Properties["next_reviewers"].MinItems != 1 {
+		t.Fatalf("malformed address reviewer requirement: %+v", conditional)
+	}
+}
+
 func TestPolicyRequiresCompleteTierMap(t *testing.T) {
 	policy := validPolicy()
 	delete(policy.Tiers, "T3")
@@ -334,6 +381,28 @@ func TestDecisionRejectsDuplicateFindingIDs(t *testing.T) {
 	decision.Findings = append(decision.Findings, decision.Findings[0])
 	if err := ValidateDecision(decision); err == nil {
 		t.Fatal("duplicate decision finding id unexpectedly valid")
+	}
+}
+
+func TestDecisionAcceptsAddressAction(t *testing.T) {
+	decision := validDecision()
+	decision.Action = ActionAddress
+	decision.ReasonCodes = []string{"accepted_findings_require_address"}
+	decision.Findings = []FindingState{{
+		ID: "f1", Severity: "low", Reviewers: []string{"codex"},
+		Disposition: "fixed",
+	}}
+	if err := ValidateDecision(decision); err != nil {
+		t.Fatalf("address decision rejected: %v", err)
+	}
+}
+
+func TestDecisionRejectsAddressWithoutNextReviewer(t *testing.T) {
+	decision := validDecision()
+	decision.Action = ActionAddress
+	decision.NextReviewers = nil
+	if err := ValidateDecision(decision); err == nil {
+		t.Fatal("address decision without next reviewer unexpectedly valid")
 	}
 }
 

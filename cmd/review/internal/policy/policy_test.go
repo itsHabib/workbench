@@ -111,6 +111,82 @@ func TestDecideTargetsOnlyFindingAuthorsStillInPlay(t *testing.T) {
 	}
 }
 
+func TestDecideAddressesAcceptedUnchangedFinding(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+		Disposition: "fixed", Changed: false, ReviewerClosed: false,
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionAddress ||
+		!contains(decision.ReasonCodes, "accepted_findings_require_address") ||
+		!equal(decision.NextReviewers, []string{"codex"}) {
+		t.Fatalf("decision = %s next %v reasons %v", decision.Action, decision.NextReviewers, decision.ReasonCodes)
+	}
+}
+
+func TestDecideDoesNotAddressAroundIncompletePanel(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.PanelComplete = false
+	input.CompletedReviewers = nil
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+		Disposition: "fixed", Changed: false, ReviewerClosed: false,
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionContinue ||
+		!contains(decision.ReasonCodes, "panel_incomplete") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
+func TestDecideDoesNotAddressFromClosedUnchangedFinding(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.Findings = []reviewroute.FindingState{
+		{
+			ID: "closed", Severity: "low", Reviewers: []string{"codex"},
+			Disposition: "fixed", Changed: false, ReviewerClosed: true,
+		},
+		{
+			ID: "changed", Severity: "medium", Reviewers: []string{"codex"},
+			Disposition: "fixed", Changed: true, ReviewerClosed: false,
+		},
+	}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionContinue {
+		t.Fatalf("action = %s, reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
+func TestDecideParksAcceptedFindingAtCycleCap(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, plan.MaxCycles)
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+		Disposition: "fixed", Changed: false, ReviewerClosed: false,
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionPark ||
+		!contains(decision.ReasonCodes, "cycle_cap_reached") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
 func TestProofSubstitutionClosesNoncriticalT0ToT2(t *testing.T) {
 	for _, tier := range []string{"T0", "T1", "T2"} {
 		t.Run(tier, func(t *testing.T) {
