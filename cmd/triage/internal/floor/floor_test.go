@@ -488,6 +488,16 @@ func TestFloor(t *testing.T) {
 	}
 }
 
+func TestSessionPathDoesNotDuplicateAuthSignal(t *testing.T) {
+	result := classifyDiff(t, "diff --git a/internal/auth/session.go b/internal/auth/session.go\n+++ b/internal/auth/session.go\n@@\n+func check(){}\n")
+	if len(result.Signals) != 1 {
+		t.Fatalf("signals = %+v, want one auth signal", result.Signals)
+	}
+	if result.Signals[0].Name != "auth-crypto-secrets" || result.Signals[0].Tier != T3 {
+		t.Fatalf("signal = %+v, want auth-crypto-secrets T3", result.Signals[0])
+	}
+}
+
 // bigGenerated builds a 2000-line generated-client diff — huge but T0.
 func bigGenerated() string {
 	var b strings.Builder

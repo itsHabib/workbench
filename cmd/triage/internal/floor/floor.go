@@ -336,7 +336,7 @@ func ClassifyRepo(d Diff, repo string) Result {
 				matchedPath = true
 			}
 		}
-		if sessionPathSensitive(f) {
+		if !matchedPath && sessionPathSensitive(f) {
 			add("auth-crypto-secrets", T3, "auth/crypto/secret surface: "+f.Path)
 			matchedPath = true
 		}
