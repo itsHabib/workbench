@@ -11,14 +11,13 @@ implemented by `ValidateDecision` and `ValidateAuditEvent`.
 
 1. the ASCII domain separator `workbench.automode.inputs.v1`;
 2. the action envelope and operation as framed strings;
-3. the parameter count followed by parameters sorted by `name`;
-4. the observable count followed by observables sorted by `name`.
+3. the parameter count followed by parameter object entries sorted by key;
+4. the observable count followed by observable object entries sorted by key.
 
 A framed string is its UTF-8 byte length encoded as an unsigned LEB128 integer,
-followed by its UTF-8 bytes. Each named value is its framed name, one byte for
+followed by its UTF-8 bytes. Each value entry is its framed key, one byte for
 `redacted` (`0x00` false, `0x01` true), and its framed value. Counts use the
-same unsigned LEB128 encoding. Duplicate names are invalid, so sorting has no
-tie case.
+same unsigned LEB128 encoding. JSON object keys make names structurally unique.
 
 This framing is deliberately independent of JSON object-member order,
 whitespace, escaping, and any language's serializer. Golden byte and digest
@@ -30,7 +29,5 @@ Both embedded schemas are self-contained. The audit schema carries a tested
 copy of the decision definitions it references, so a Draft 2020-12 validator
 does not need network access or a separately registered schema.
 
-JSON Schema cannot express uniqueness of one property across array elements.
-The `values` definition therefore carries the descriptive
-`x-unique-by: "name"` extension and `uniqueItems: true`, while semantic
-validators enforce the complete no-duplicate-name law.
+Named values are JSON objects keyed by normalized names, so ordinary Draft
+2020-12 validators enforce both name syntax and uniqueness without an extension.

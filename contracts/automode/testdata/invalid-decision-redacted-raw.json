@@ -9,11 +9,11 @@
     "action": {
       "envelope": "shell",
       "operation": "git.status",
-      "parameters": [
-        { "name": "credential", "value": "fixture-secret", "redacted": true }
-      ]
+      "parameters": {
+        "credential": { "value": "fixture-secret", "redacted": true }
+      }
     },
-    "observables": []
+    "observables": {}
   },
   "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 }

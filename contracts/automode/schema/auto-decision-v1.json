@@ -56,16 +56,14 @@
       "additionalProperties": true
     },
     "values": {
-      "type": "array",
-      "uniqueItems": true,
-      "x-unique-by": "name",
-      "items": { "$ref": "#/$defs/value" }
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/value" }
     },
     "value": {
       "type": "object",
-      "required": ["name", "value", "redacted"],
+      "required": ["value", "redacted"],
       "properties": {
-        "name": { "$ref": "#/$defs/name" },
         "value": { "type": "string" },
         "redacted": { "type": "boolean" }
       },

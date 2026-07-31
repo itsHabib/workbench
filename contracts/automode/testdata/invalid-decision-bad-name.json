@@ -9,12 +9,11 @@
     "action": {
       "envelope": "shell",
       "operation": "git.status",
-      "parameters": [
-        { "name": "path", "value": "one", "redacted": false },
-        { "name": "path", "value": "two", "redacted": false }
-      ]
+      "parameters": {
+        "Bad Name": { "value": "one", "redacted": false }
+      }
     },
-    "observables": []
+    "observables": {}
   },
   "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 }
