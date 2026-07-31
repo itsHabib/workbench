@@ -223,14 +223,24 @@ func TestEquivalentMergeEnvelopesUseSamePolicy(t *testing.T) {
 	}
 }
 
-func TestPowerShellAndCMDWrappersPreserveBackslashes(t *testing.T) {
+func TestPowerShellAndCMDMergeWrappersRejectBackslashes(t *testing.T) {
 	for _, envelope := range []Envelope{
 		{Kind: "shell", Shell: "powershell", Command: `pwsh -Command "g\h pr merge 172 -R itsHabib/workbench --squash --match-head-commit ` + testHead + `"`},
 		{Kind: "shell", Shell: "cmd", Command: `cmd /c "g\h pr merge 172 -R itsHabib/workbench --squash --match-head-commit ` + testHead + `"`},
 	} {
-		gate := &fakeGate{rows: []ReadyMerge{readyRow()}}
-		got := evaluate(t, New(gate, livePRs()), Request{GateState: "C:/gate/state", Envelope: envelope})
-		assertDecision(t, got, automode.OutcomeRefuse, "merge.command_mismatch")
+		got := evaluate(t, New(&fakeGate{}, livePRs()), Request{GateState: "C:/gate/state", Envelope: envelope})
+		assertDecision(t, got, automode.OutcomePark, "envelope.unsupported")
+	}
+}
+
+func TestWindowsShellBackslashCandidatesPark(t *testing.T) {
+	for _, envelope := range []Envelope{
+		{Kind: "shell", Shell: "powershell", Command: `pwsh -Command "g\o test ./..."`},
+		{Kind: "shell", Shell: "powershell", Command: `g\o test ./...`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "g\o test ./..."`},
+	} {
+		got := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: envelope})
+		assertDecision(t, got, automode.OutcomePark, "envelope.unsupported")
 	}
 }
 
@@ -259,7 +269,14 @@ func TestMCPArgumentsBindReplayIdentity(t *testing.T) {
 }
 
 func TestMalformedMCPArgumentsPark(t *testing.T) {
-	for _, arguments := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`[]`), json.RawMessage(`{`)} {
+	for _, arguments := range []json.RawMessage{
+		nil,
+		json.RawMessage(`null`),
+		json.RawMessage(`[]`),
+		json.RawMessage(`{`),
+		json.RawMessage(`{"owner":"one","owner":"two"}`),
+		json.RawMessage(`{"filter":{"state":"open","state":"closed"}}`),
+	} {
 		got := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: Envelope{
 			Kind: "mcp", Tool: "mcp__github__get_pull_request", Arguments: arguments,
 		}})

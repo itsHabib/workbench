@@ -272,7 +272,10 @@ func unwrapPowerShell(command string) (string, error) {
 		return "", errUnsupported
 	}
 	if strings.HasPrefix(trimmed, "& ") {
-		return strings.TrimSpace(trimmed[2:]), nil
+		command = strings.TrimSpace(trimmed[2:])
+	}
+	if strings.Contains(command, `\`) {
+		return "", errUnsupported
 	}
 	return command, nil
 }
@@ -304,12 +307,19 @@ func unwrapCMD(command string) (string, error) {
 		return "", err
 	}
 	if len(words) < 3 || (strings.ToLower(words[0]) != "cmd" && strings.ToLower(words[0]) != "cmd.exe") {
+		if strings.Contains(command, `\`) {
+			return "", errUnsupported
+		}
 		return command, nil
 	}
 	if strings.ToLower(words[1]) != "/c" || len(words) != 3 {
 		return "", errUnsupported
 	}
-	return words[2], nil
+	command = words[2]
+	if strings.Contains(command, `\`) {
+		return "", errUnsupported
+	}
+	return command, nil
 }
 
 func splitWords(command string) ([]string, error) {
@@ -373,6 +383,9 @@ func splitWordsMode(command string, escapeBackslash bool) ([]string, error) {
 }
 
 func objectDigest(data []byte) (string, bool) {
+	if !uniqueJSONKeys(data) {
+		return "", false
+	}
 	var object map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -388,6 +401,67 @@ func objectDigest(data []byte) (string, bool) {
 		return "", false
 	}
 	return textDigest(string(normalized)), true
+}
+
+func uniqueJSONKeys(data []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if !scanUniqueJSONValue(decoder) {
+		return false
+	}
+	var trailing any
+	return errors.Is(decoder.Decode(&trailing), io.EOF)
+}
+
+func scanUniqueJSONValue(decoder *json.Decoder) bool {
+	token, err := decoder.Token()
+	if err != nil {
+		return false
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return true
+	}
+	if delim == '[' {
+		return scanUniqueJSONArray(decoder)
+	}
+	if delim != '{' {
+		return false
+	}
+	return scanUniqueJSONObject(decoder)
+}
+
+func scanUniqueJSONArray(decoder *json.Decoder) bool {
+	for decoder.More() {
+		if !scanUniqueJSONValue(decoder) {
+			return false
+		}
+	}
+	token, err := decoder.Token()
+	return err == nil && token == json.Delim(']')
+}
+
+func scanUniqueJSONObject(decoder *json.Decoder) bool {
+	seen := map[string]struct{}{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		name, ok := token.(string)
+		if !ok {
+			return false
+		}
+		if _, exists := seen[name]; exists {
+			return false
+		}
+		seen[name] = struct{}{}
+		if !scanUniqueJSONValue(decoder) {
+			return false
+		}
+	}
+	token, err := decoder.Token()
+	return err == nil && token == json.Delim('}')
 }
 
 func parseNumber(value string) (int, bool) {
