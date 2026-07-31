@@ -12,7 +12,7 @@ this is the directory's own index.
 | Get the picture with zero jargon | [plain-language-overview.md](plain-language-overview.md) | [glossary.md](glossary.md) |
 | Run work the way this repo's operator does | [workflow-mechanics.md](workflow-mechanics.md) | the [skills repo](https://github.com/itsHabib/skills) |
 | Let agents act unattended, safely | [auto-mode-defaults.md](auto-mode-defaults.md) | [auto-mode-rulebook.md](auto-mode-rulebook.md) — copy-able settings + hooks |
-| Steal the rules without the tools | [lessons.md](lessons.md) | each lesson's "Monday" line |
+| Steal the rules without the tools | [lessons.md](lessons.md) | each lesson's "Monday" bullets |
 | Evaluate the architecture decisions | [DESIGN.md](DESIGN.md) | per-tool `cmd/<tool>/docs/DESIGN.md` |
 | See the wider project family | [projects.md](projects.md) | — |
 
@@ -27,7 +27,8 @@ this is the directory's own index.
   picture with no jargon.
 - [glossary.md](glossary.md) — the vocabulary, one place.
 - [lessons.md](lessons.md) — 28 rules from building this, each with the
-  failure that earned it, where it's enforced, and a Monday action.
+  failure that earned it, where it's enforced, and a Monday block of
+  literal first moves.
 - [workflow-mechanics.md](workflow-mechanics.md) — the daily machinery:
   the instruction stack, entry paths, skill contracts, session mechanics
   (worktrees, chips, continuation), review machinery, prose→code, hooks.

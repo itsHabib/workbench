@@ -3,7 +3,9 @@
 What I'd tell someone starting to put real work through AI agents — in any
 stack, any industry. Each lesson is a portable rule, the experience that
 earned it here, and where it's enforced in this codebase, because a lesson
-that lives nowhere is just an opinion. This doc merged the old portable
+that lives nowhere is just an opinion. The *Monday* block on each lesson
+lists the literal first moves — commands to run, files to edit — not
+themes to reflect on. This doc merged the old portable
 list and its code-grounded twin (`lessons-workbench.md`, retired) into one
 place; the vocabulary is in `docs/glossary.md`, the no-jargon overview is
 `docs/plain-language-overview.md`, the mechanics of the daily loop are
@@ -33,8 +35,15 @@ every piece: was this compensating for a weak model (shrink it), or is it
 what makes a strong model safe to trust longer (invest in it)?
 
 *Where it lives:* `docs/workbench-101.md` §1.
-*Monday:* pick one rule you repeat in prompts and ask what would enforce it
-if the agent never read it.
+*Monday:*
+
+- `grep -inE 'never|always|must not|do not' CLAUDE.md` — those hits are
+  your unenforced rules.
+- Guidance stays prose: CLAUDE.md, skills. Guarantees — merge, spend,
+  credentials — get code.
+- Add a `deny` entry (`"Read(**/.env)"`, `"Bash(gh repo delete:*)"`) or a
+  PreToolUse hook that exits 2. Copy both from `auto-mode-rulebook.md`
+  §§2–3.
 
 ### 2. Never trust a model's confidence. Check its output.
 
@@ -63,8 +72,14 @@ that reconstructs. The producer reports; the checker concludes.
 
 *Where it lives:* `local/local.go` (confidence recorded, routing ignores
 it); `cmd/gate/internal/verify/verify.go` (verdict precedence).
-*Monday:* find one place a model's self-assessment gates an action, and put
-any independent check — even a dumb one — in its path.
+*Monday:*
+
+- `grep -rn confidence` in the pipeline; find the threshold branch
+  (`score >= 0.8` → auto-apply).
+- Delete it — high-confidence output goes through the same verifier as
+  low.
+- No verifier yet? Schema validation plus one known-answer canary,
+  failing loud.
 
 ### 3. Route work by checkability, not difficulty.
 
@@ -81,8 +96,14 @@ judgment is neither mechanically checkable nor cheap to get wrong.
 
 *Where it lives:* `local/README.md` (the eval verdicts and the
 when-to-route-local rule); the `/offload` and `/review-digest` skills.
-*Monday:* list your three most repetitive agent tasks and ask of each:
-schema-checkable, glance-checkable, or judgment? Route the first two down.
+*Monday:*
+
+- Pick your most repetitive agent chore.
+- Define its output as a JSON schema; collect ~20 known-answer cases.
+- Run them through a cheap model (`local -prompt … -schema '{…}'`) and
+  score it.
+- 19/20 or better and glance-checkable → route it down for good.
+  Anything less, or unscoreable → keep the big model.
 
 ### 4. Helpers may raise their hand. They may never veto or approve.
 
@@ -96,8 +117,13 @@ full stop. The inverse rule guards the top: premium judgment resolves
 escalations but cannot override a code block.
 
 *Where it lives:* `cmd/gate/internal/verify/verify.go`.
-*Monday:* audit every model in your pipeline for which of the three powers
-it holds — escalate, approve, block — and strip the last two.
+*Monday:*
+
+- Per model in an automated path, write one line: what can its output
+  *cause*?
+- Anything beyond escalate: make the consumer reject it as an error
+  (gate fails a local-rung "block" outright).
+- Add the test: feed a forbidden verdict, assert the rejection.
 
 ### 5. No AI opinion overrides a hard check.
 
@@ -117,8 +143,13 @@ inputs to the single place that writes, so the unguarded write is
 unrepresentable.
 
 *Where it lives:* `cmd/gate/internal/verify/verify.go`, `cmd/gate/main.go`.
-*Monday:* find your most safety-critical if/else and ask whether the unsafe
-branch could be made unrepresentable instead of merely tested.
+*Monday:*
+
+- In your riskiest decision function, move the deterministic-fail
+  `return` above the model call — the override path becomes unreachable,
+  not just discouraged.
+- Change the state-writer's signature to require the passing verdict as
+  a parameter. The compiler now enforces what a comment used to request.
 
 ### 6. When the system doesn't know, it must stop — not guess.
 
@@ -135,8 +166,12 @@ trustworthy than one that always has an answer.
 
 *Where it lives:* `cmd/gate/internal/verify/verify.go`;
 `cmd/triage/internal/floor/parse.go`.
-*Monday:* feed your classifier something malformed and see whether the
-answer is an error or a default.
+*Monday:*
+
+- Pipe garbage in: empty input, an unknown enum value, truncated JSON.
+- Every default that comes back instead of an error is a fail-open hole —
+  fix it.
+- Keep the garbage cases as permanent test fixtures.
 
 ### 7. A green suite proves only what it observes.
 
@@ -156,8 +191,13 @@ the bug.
 
 *Where it lives:* the candidate/production split in
 `docs/workflow-mechanics.md`; the roxiq observer evidence (external repo).
-*Monday:* write down the three production facts your test suite cannot
-see, and ask what watches them.
+*Monday:*
+
+- List the three production facts CI can't see: data freshness, deployed
+  version, last good run of the job that matters.
+- Give one an observer today: a scheduled check that reads live
+  production state and alerts past a threshold.
+- It reads the running system — it does not re-test the candidate.
 
 ---
 
@@ -179,8 +219,14 @@ widening becomes an explicit, logged decision instead of a silent default.
 *Where it lives:* `cmd/gate/internal/capability` (HMAC-signed, scoped,
 timed, tier-capped grants); `cmd/custody`; `docs/auto-mode-defaults.md`
 default 5.
-*Monday:* find one standing credential an agent can read and put an
-expiry on the path to it.
+*Monday:*
+
+- In an agent session, try reading `~/.ssh/`, `~/.aws/credentials`,
+  `.env`.
+- If any works: copy the deny block from `auto-mode-rulebook.md` §2 into
+  `~/.claude/settings.json` now.
+- Next: put the call behind a broker that injects the secret upstream
+  (custody's shape) — the agent gets the capability, never the key.
 
 ### 9. Review the output and the authority separately.
 
@@ -193,8 +239,12 @@ wrong, not with how impressive the model is.
 
 *Where it lives:* the review roster answers quality;
 `cmd/gate` answers authorization; they meet only through artifacts.
-*Monday:* next time you approve a PR, notice which of the two questions
-you actually answered.
+*Monday:*
+
+- Add one required merge condition that is *not* a code review: a status
+  check asserting "may this ship" — risk label present, migration plan
+  linked, grant on file.
+- The reviewer keeps "is it good"; the new check owns "should it ship."
 
 ### 10. Agents propose capabilities. They never possess powerful identities.
 
@@ -211,8 +261,13 @@ than rounding up.
 
 *Where it lives:* `contracts/gateauthorization`;
 `docs/features/trusted-gate-judgment-bridge/`.
-*Monday:* list every identity your agents can act as. For each, ask: could
-this be a narrower, single-purpose identity instead?
+*Monday:*
+
+- `gh pr list --state merged --limit 20 --json number,mergedBy` — read
+  the actor column.
+- Automation merging under a human's name is this lesson unpaid.
+- Mint a single-purpose bot/App identity for the merge step; move the
+  human token out of the agent's reach (lesson 8).
 
 ### 11. Pin evidence to the exact version it judged.
 
@@ -243,8 +298,12 @@ the failure "reviewed once" can never see.
 
 *Where it lives:* the exact-head panel checks in gate (PR #163);
 `contracts/reviewfindings`; the executor's `--match-head-commit` shape.
-*Monday:* check whether your branch protection re-requests review when the
-head changes. If it doesn't, you have "approved last week."
+*Monday:*
+
+- Branch protection / rulesets: enable "dismiss stale approvals when new
+  commits are pushed" — the platform's native exact-head rule.
+- Pin automated merges: `gh pr merge --match-head-commit <sha>`.
+- Now "what was approved" and "what lands" cannot diverge in the gap.
 
 ### 12. Share contracts, not call stacks — and enforce the boundary mechanically.
 
@@ -261,8 +320,13 @@ instead of a fake is exactly how a hidden coupling becomes a design input.
 
 *Where it lives:* `docs/DESIGN.md`; `contracts/`;
 `.github/workflows/ci.yml` (hygiene job).
-*Monday:* find two tools of yours that parse each other's output
-informally, and write down the schema they're both pretending exists.
+*Monday:*
+
+- Find two tools passing informal output; write the schema they're both
+  pretending exists (`schemas/verdict.json`).
+- Validate both sides against it in CI.
+- Add a CI step that fails when one tool imports another's internals —
+  the `hygiene` job here is a short script, not a framework.
 
 ### 13. Exit codes are load-bearing seams — treat them like APIs.
 
@@ -275,8 +339,13 @@ When a boundary is a seam, even your error handling is part of the
 interface.
 
 *Where it lives:* `cmd/gate/main.go`.
-*Monday:* grep your automation for places a caller branches on an exit
-code, and check what else can produce that number.
+*Monday:*
+
+- `grep -rnE 'exit [0-9]|\$\?' scripts/` — find every code a caller
+  branches on.
+- For each, list what *else* produces that number: Go exits 2 on a bad
+  flag, grep exits 1 on no match.
+- Give real errors their own code; put the table in the README.
 
 ---
 
@@ -299,8 +368,13 @@ real time to after the fact.
 
 *Where it lives:* gate's hash-chained log (`cmd/gate/internal/state`);
 `docs/workbench-101.md` §4 Amendment 3.
-*Monday:* pick yesterday's most consequential automated action and try to
-answer "why did this happen?" from records alone, without asking anyone.
+*Monday:*
+
+- Reconstruct yesterday's most consequential automated action from
+  records alone.
+- Each fact you had to *remember* is a missing receipt.
+- Add the write at that decision point — one JSONL line: inputs, rule
+  fired, verdict. Copy the hook in `auto-mode-rulebook.md` §4.
 
 ### 15. Build the checks before you leave the loop.
 
@@ -316,8 +390,13 @@ verification behind it.
 
 *Where it lives:* the `/drive` skill's stop-at-boundary contract; the
 tier model in `docs/auto-mode-defaults.md`.
-*Monday:* name the one check whose absence currently forces you to watch,
-and build it.
+*Monday:*
+
+- Name the check whose absence makes you watch the transcript. Build it
+  this week.
+- Run one task without watching; inspect only the boundary — the PR, its
+  checks, the folded findings.
+- Every urge to peek mid-run names the next missing check.
 
 ### 16. Automation can only assert what you deliberately made observable.
 
@@ -334,8 +413,13 @@ a smarter model — it's an observable nobody engineered.
 
 *Where it lives:* `docs/auto-mode-defaults.md` default 2 (classify
 observables, not intent); `cmd/triage/internal/floor`.
-*Monday:* take one judgment call you make repeatedly and design the
-convention — a path, a name, a label — that would let a script make it.
+*Monday:*
+
+- Pick one judgment call you repeat.
+- Build its observable: a path that means something (`migrations/` =
+  high tier), a test name that pins the regression, a receipt filename
+  carrying the run ID.
+- Write the one-line floor rule keyed on it.
 
 ### 17. Verify the object, not its label.
 
@@ -352,8 +436,12 @@ effect path before changing state, because discovering a broken rollback
 *Where it lives:* the executor's refetch-and-validate step
 (`docs/features/trusted-gate-judgment-bridge/`); the closure receipt
 contract (`contracts/`).
-*Monday:* find one place your pipeline trusts a name — a tag, a filename,
-a status string — and make it fetch the thing instead.
+*Monday:* replace one trusted label with a fetch —
+
+- `docker manifest inspect <tag>` before rollout, not the SHA-shaped
+  name.
+- Re-fetch the PR head at merge time, not the approval's memory of it.
+- Check the producing job's conclusion, not the artifact's filename.
 
 ### 18. Supervision fails silent unless the watcher itself is watched.
 
@@ -372,8 +460,12 @@ treat a watcher's "nothing happened" as a claim to verify, not a fact.
 
 *Where it lives:* the observer budget design (roxiq, external); the ship
 workbench friction log (watcher entries).
-*Monday:* add up your innermost timeout chain by hand once, and make one
-watcher prove it actually attached to the thing it watches.
+*Monday:*
+
+- Sum the timeout chain by hand: inner verify + evidence upload +
+  reconcile must fit inside the outer watchdog. Fix the inequality.
+- Launch-check every detached process: one beat after launch,
+  `kill -0 $pid && test -s $logfile`, else report dead-on-arrival.
 
 ### 19. State your tamper model honestly — and stress it.
 
@@ -389,8 +481,13 @@ create as "access denied" rather than "already exists" — which quietly
 defeated the obvious retry logic.
 
 *Where it lives:* `cmd/gate/internal/state/anchor.go`.
-*Monday:* write one paragraph on what your audit trail actually defends
-against. If you can't, it defends against nothing in particular.
+*Monday:*
+
+- Write the paragraph into the doc: what the trail catches (edits,
+  reordering), what it doesn't (truncation, rewrite-with-rehash), the
+  realistic adversary (drift).
+- Stress it once: six concurrent writers, three runs. The naive layer
+  here lost data on all three.
 
 ---
 
@@ -424,8 +521,13 @@ verb → tests and receipts → delete the prose the mechanism absorbed.
 
 *Where it lives:* the `/work-driver` skill (policy) vs. ship's driver
 engine (mechanism); `docs/workflow-mechanics.md`.
-*Monday:* find the longest instruction block you keep re-explaining to an
-agent and ask which half is a state machine in disguise.
+*Monday:*
+
+- Split your longest instruction block into two lists: opinions, and
+  loop mechanics — every "wait", "poll", "retry", "check again".
+- Move the loop list into a script or engine the agent *calls*.
+- Delete the absorbed prose in the same commit — left standing, it
+  regrows.
 
 ### 21. Prune instructions on a schedule; staleness beats verbosity as a threat.
 
@@ -441,8 +543,12 @@ compensating for a weak model, or making a strong one safer? Delete the
 first kind.
 
 *Where it lives:* `docs/workbench-101.md` §12; FOLLOWUPS.md.
-*Monday:* delete ten lines of agent instructions you suspect the model
-outgrew, and see if anything breaks.
+*Monday:*
+
+- Delete ten lines of agent instructions the model has outgrown. See
+  what breaks (usually: nothing).
+- Start the drift log: where docs and code currently disagree, both
+  directions, in writing.
 
 ### 22. Name the roles and postmortems get shorter.
 
@@ -457,8 +563,12 @@ impersonating Escalation. Once the planes are shared vocabulary, the fix
 names itself.
 
 *Where it lives:* `docs/workbench-101.md` §4.
-*Monday:* take your last confusing outage and ask which role was doing
-which other role's job.
+*Monday:*
+
+- Write one line per plane for *your* system: who holds state, who
+  executes, who verifies, who grants, who observes.
+- Re-read your last confusing postmortem against the five lines — the
+  finding is usually "X doing Y's job," in a sentence.
 
 ### 23. Independent reinvention is evidence a rule is real.
 
@@ -469,8 +579,12 @@ evidence the shape is load-bearing, and the right response is promotion to
 shared law, not deduplication into a library.
 
 *Where it lives:* `docs/workbench-101.md` §5.
-*Monday:* look for a pattern two of your systems grew independently.
-That's your next standard, already field-tested.
+*Monday:*
+
+- Look for a shape built twice under different pressures: a retry
+  envelope, an escalate-only helper, a receipt format.
+- Promote it: name it, write it down, make new work cite it. Promotion,
+  not deduplication — the second invention already field-tested it.
 
 ### 24. Model and effort are separate dials.
 
@@ -487,8 +601,14 @@ irreducible judgment.
 
 *Where it lives:* seed/prep task metadata (recommended model + effort per
 task); `local/README.md`.
-*Monday:* next time output disappoints, ask which dial is wrong before
-turning either.
+*Monday:*
+
+- Wrong *kind* of reasoning → switch model. Right kind but shallow
+  search → raise effort.
+- They are two independent dials in the harness (`/model`, effort
+  level) — turn one at a time.
+- Cheapest correct move: ask the agent to recommend model + effort for
+  the task before starting it.
 
 ### 25. The substrate fails like the agent — learn to tell them apart.
 
@@ -511,8 +631,14 @@ state with resume — not an anomaly.
 
 *Where it lives:* the ship workbench friction log (the densest category
 in it); the engine's kill/resume semantics.
-*Monday:* next agent failure, ask "would this have failed for a human in
-the same shell?" before reading the transcript.
+*Monday:* four habits, each deleting a class of "the agent failed" —
+
+- Set env inline with the command that needs it (`KEY=x cmd`) — every
+  tool call is a fresh shell; exports don't survive.
+- Ask for `--json` and parse it; never scrape terminal text.
+- Re-run the install after any dependency change, before trusting a
+  test run.
+- Launch-check detached processes (lesson 18).
 
 ### 26. Report the path that actually ran.
 
@@ -528,8 +654,12 @@ fresh isolated worktree and the approved fix, not an unplanned recovery
 project. The objective was the talk.
 
 *Where it lives:* driver-state receipts record their engine; friction log.
-*Monday:* check whether your records distinguish "automation did this"
-from "a human did this and logged it as automation."
+*Monday:*
+
+- Add a required `actor` field to your receipts: which engine, which
+  path, or `manual`.
+- Enforce the rule behind it: hand-done work gets logged as manual or
+  not at all — never dressed as automation.
 
 ### 27. Land the honest conclusion; hold warts openly.
 
@@ -543,8 +673,12 @@ admits as much as what it enforces.
 
 *Where it lives:* `docs/features/escalation-plane/spec.md`;
 `docs/workbench-101.md` §5.
-*Monday:* write down your system's ugliest known wart where users can see
-it, and watch what that does to how much they trust the rest.
+*Monday:*
+
+- Add a "known warts" section to the README of the system you most want
+  trusted.
+- Write the ugliest entry first: what's broken, why it's held open.
+- Watch what that does to how much people trust the rest.
 
 ### 28. Start with one consequential action. Someone still owns the result.
 
@@ -558,4 +692,10 @@ still owns the result — for my work, that's me.
 
 *Where it lives:* everywhere above; this is the lesson the rest exist to
 make survivable.
-*Monday:* pick the action. Just one.
+*Monday:*
+
+- Pick the action: merge, deploy, or spend. One.
+- Write four lines about it: what's observable, who mints authority, who
+  answers the stop-and-ask, which numbers ratchet autonomy (false
+  blocks, escapes, resolution time, recovery time).
+- Build the deterministic floor for that one action first.

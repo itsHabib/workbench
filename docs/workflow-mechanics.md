@@ -192,49 +192,73 @@ project dump.
 
 ## 7. Session mechanics — what runs all day
 
-The delivery loop is seed/prep/drive; the hour-to-hour texture is worktrees,
-chips, and continuation briefs. These are the highest-frequency commands in
-the whole workflow.
+The delivery loop is seed/prep/drive; the hour-to-hour texture is
+worktrees, chips, continuation briefs, and the two clocks. These are the
+highest-frequency commands in the whole workflow.
 
-**Worktrees, constantly.** Every piece of implementation work gets its own
-worktree under `.claude/worktrees/` — `/worktree-add <branch>` to create,
-`/worktree-where` when a session needs to know what it's standing in,
-`/worktree-list` and `/worktree-remove` for the lifecycle, and
-`/worktree-transfer` to hand in-progress work between sessions. The law
-behind the habit comes from the drive contract: an agent never competes
-with the operator in the dirty root checkout, so isolation is the *first*
-step of any change, not an option. [tower](https://github.com/itsHabib/tower)
-is the TUI over the same worktrees and their PRs when the count grows.
+**Worktrees, constantly.** The law comes from the drive contract: an
+agent never competes with the operator in the dirty root checkout, so
+isolation is the *first* step of any change, not an option.
 
-**`/chip` — fork the tangent instead of chasing it.** Mid-conversation,
-anything worth doing but not worth derailing the current thread gets
-chipped into its own session: a title, a self-contained prompt (paths,
-line numbers, decisions already made, acceptance criteria), and the main
-thread resumes in the same breath. The skill's own bar for what *not* to
-chip is half its value: vague observations, trivial fixes faster done
-inline, anything that needs this conversation's context to even
-understand, and low-confidence hunches. Chips are how one operator runs
-many threads without any of them blocking the others.
+- `/worktree-add <branch>` — new worktree under `.claude/worktrees/`.
+- `/worktree-where` — which checkout is this session standing in.
+- `/worktree-list`, `/worktree-remove` — the lifecycle.
+- [tower](https://github.com/itsHabib/tower) — the TUI over the same
+  worktrees and their PRs when the count grows.
 
-**`/continue` — context management as a first-class move.** When a
-session's context fills, the skill emits one paste-ready brief for a
-fresh session: Goal, State (done as concrete outcomes — paths, SHAs,
-PR numbers, no process narration), Next (concrete enough to start cold),
-Key facts this session added (decisions with the one-phrase why, dead
-ends already tried), and Pointers (the file worth opening first, the
-command that verifies). The framing rule does the work: the fresh session
-already has CLAUDE.md, memory, and skills — the brief carries *only what
-this session added*. Long-running work survives context limits because
-continuation is cheap, rehearsed, and lossless where it matters.
+**`/worktree-transfer` — drain a worktree back into root.** Git allows
+one checkout per branch, so "keep working on this in root" is a protocol,
+not a checkout:
 
-**`/recover` — after the crash.** Reboot, terminal loss, a session that
-died mid-flight: recover scans recent session transcripts, classifies
-each (task, cwd, last action, done vs. interrupted), and resumes the
-interrupted one deliberately instead of re-deriving it from memory.
+- Resolve the input to a (worktree, branch) pair from `git worktree list`.
+- Dirty worktree? Stop and choose: commit as WIP, stash tagged
+  `pre-transfer:<branch>` (repo-wide, so it survives removal), or discard
+  with explicit confirmation.
+- `git worktree remove <path>`, check the branch out in root, re-apply
+  the tagged stash — falling back to per-file extraction from the stash's
+  untracked tree when paths collide.
+
+**`/chip` — fork the tangent instead of chasing it.** Anything worth
+doing but not worth derailing the current thread becomes its own session:
+a title, a self-contained prompt (paths, line numbers, decisions already
+made, acceptance criteria), and the main thread resumes in the same
+breath. The not-to-chip bar is half the value: vague observations,
+trivial fixes faster done inline, anything that needs this conversation's
+context, low-confidence hunches.
+
+**`/continue` — outlive the context window.** One paste-ready brief for a
+fresh session, five fixed parts:
+
+- Goal — one line.
+- State — concrete outcomes only: paths, SHAs, PR numbers.
+- Next — startable cold.
+- Key facts *this session added* — decisions with the one-phrase why,
+  dead ends already tried.
+- Pointers — the first file to open, the command that verifies.
+
+The framing rule does the work: the fresh session already has CLAUDE.md,
+memory, and skills — the brief carries only the delta.
+
+**`/status` and `/shipped` — the two clocks** (§6 names them; these are
+the contracts):
+
+- `/status` — the in-flight ping. Four fixed headers: What happened /
+  What's next / What I recommend / What I need from you. Hard cap 1–3
+  sentences each, skip empty sections, results not process narration.
+- `/shipped` — the retrospective after work lands. Ground truth from the
+  work-driver manifest when one exists (never recomputed from `gh` if the
+  manifest already knows), git/gh fallback otherwise; weighted LOC per PR
+  against the 500/700/1000 bands; task closures; "what changed about
+  main" as runnable commands, not adjectives; at most three next moves.
+
+**`/recover` — after the crash.** Scans recent session transcripts,
+classifies each (task, cwd, last action, done vs. interrupted), and
+resumes the interrupted one deliberately instead of re-deriving it from
+memory.
 
 The common thread: sessions are cattle, work is durable. Worktrees keep
 the work isolated, dossier and the ledgers keep it resumable, and chips,
-continuation briefs, and recovery make the *session* the disposable part.
+briefs, the clocks, and recovery make the *session* the disposable part.
 
 ## 8. Prose → code
 

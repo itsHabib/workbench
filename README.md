@@ -53,7 +53,8 @@ Full navigator, including feature design docs and reading orders:
   the teaching doc: the loop, the five planes, gate as the flagship.
 - **Same picture, no jargon:** [`docs/plain-language-overview.md`](docs/plain-language-overview.md).
 - **What did building it teach?** [`docs/lessons.md`](docs/lessons.md) — 28 rules,
-  each with the failure that earned it, where it's enforced, and a Monday action.
+  each with the failure that earned it, where it's enforced, and Monday
+  bullets you can run as-is.
 - **How does the daily work actually run?** [`docs/workflow-mechanics.md`](docs/workflow-mechanics.md) —
   the instruction stack, `/drive` vs the work-driver chain, review machinery,
   prose→code, hooks.
