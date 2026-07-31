@@ -121,7 +121,13 @@ func addressClaim(dir string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeAddressError(err, stderr)
 	}
-	return writeAddressJSON(stdout, map[string]any{"work_id": opts.work, "child_run": child, "event": event.ID})
+	response := map[string]any{"work_id": opts.work, "child_run": child}
+	// An idempotent retry returns the already-linked child and no new event.
+	// Omit event rather than publishing an empty identifier.
+	if event.ID != "" {
+		response["event"] = event.ID
+	}
+	return writeAddressJSON(stdout, response)
 }
 
 func addressStarted(dir string, args []string, stdout, stderr io.Writer) int {

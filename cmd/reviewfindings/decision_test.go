@@ -42,6 +42,10 @@ func TestValidateAddressDecisionRejectsFindingSetMismatch(t *testing.T) {
 	decision.Findings[0].Disposition = "deferred"
 	decision.Findings[0].DeferReason = "later"
 	assertAddressRefusal(t, validateAddressDecision(decision, artifact), "decision-empty")
+
+	decision = addressDecision()
+	decision.Findings[0].Changed = true
+	assertAddressRefusal(t, validateAddressDecision(decision, artifact), "decision-empty")
 }
 
 func assertAddressRefusal(t *testing.T, err error, code string) {

@@ -189,7 +189,7 @@ func latestReviewCycle(events []Event, stream string) (int, bool, int) {
 			continue
 		}
 		var body dsc.ReviewCycleBody
-		if json.Unmarshal(event.Body, &body) == nil && body.Cycle >= latest.Cycle {
+		if json.Unmarshal(event.Body, &body) == nil && body.Cycle > latest.Cycle {
 			latest = body
 		}
 	}
