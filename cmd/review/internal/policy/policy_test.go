@@ -339,6 +339,26 @@ func TestTierIncreaseEscalates(t *testing.T) {
 	}
 }
 
+func TestTierIncreaseClearsAcceptedFindingReviewers(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.CurrentTier = "T2"
+	input.Findings = []reviewroute.FindingState{{
+		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
+		Disposition: "fixed",
+	}}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionEscalate ||
+		!contains(decision.ReasonCodes, "tier_increased") ||
+		len(decision.NextReviewers) != 0 {
+		t.Fatalf("decision = %s next %v reasons %v",
+			decision.Action, decision.NextReviewers, decision.ReasonCodes)
+	}
+}
+
 func TestExactHeadArtifactsCannotReplay(t *testing.T) {
 	plan := routedPlan(t, "T1")
 	input := cleanInput(plan, 1)

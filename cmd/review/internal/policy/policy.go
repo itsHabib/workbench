@@ -146,6 +146,8 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 	if raisedTier(plan, input.CurrentTier) {
 		action = reviewroute.ActionEscalate
 		reasons = append(reasons, "tier_increased")
+		// The new higher-tier plan determines its reviewer set.
+		next = nil
 	}
 	// A late cycle without its T3 rationale parks before any further action,
 	// including a raised-tier escalation; the tier reason remains recorded.
