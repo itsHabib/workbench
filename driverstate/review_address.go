@@ -297,6 +297,7 @@ func ClaimReviewAddress(dir string, lease Lease, stream, workID, actor string) (
 	}
 	importBody := dsc.RunImportedBody{
 		Repo: repo, Source: record.WorkRef,
+		// workID keeps dedupeImport's repo/source/generated_at key stable across claim retries.
 		GeneratedAt: workID, Manifest: json.RawMessage(`{"address_work":"` + workID + `"}`),
 		Streams: []dsc.StreamSpec{{Stream: addressStream, DocPath: record.WorkRef}},
 		Parent:  lease.Run(), ParentStream: stream, DoneBoundary: dsc.DoneBoundaryGreen,
