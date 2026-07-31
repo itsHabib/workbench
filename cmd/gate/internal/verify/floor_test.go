@@ -39,3 +39,43 @@ func TestParseFloorOutputRefusesUnknownTier(t *testing.T) {
 		t.Fatalf("wrong error: %v", err)
 	}
 }
+
+func TestFloorWhyNamesMaxTierDriver(t *testing.T) {
+	res, err := parseFloorOutput([]byte(`{
+		"floor":"T3",
+		"files":35,
+		"added":2729,
+		"removed":45,
+		"signals":[
+			{"signal":"docs","tier":"T0","why":"docs/copy: README.md"},
+			{"signal":"internal-change","tier":"T1","why":"code change: internal/thing.go"},
+			{"signal":"auth-crypto-secrets","tier":"T3","why":"auth/crypto/secret surface: internal/auth/session.go"}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := floorWhy(res)
+	want := "deterministic T3 floor: auth-crypto-secrets: auth/crypto/secret surface: internal/auth/session.go (35 files, +2729/-45)"
+	if got != want {
+		t.Fatalf("floorWhy() = %q, want %q", got, want)
+	}
+}
+
+func TestOrderFloorSignalsShowsMaxTierFirst(t *testing.T) {
+	res, err := parseFloorOutput([]byte(`{
+		"floor":"T3",
+		"signals":[
+			{"signal":"docs","tier":"T0","why":"docs/copy: README.md"},
+			{"signal":"internal-change","tier":"T1","why":"code change: internal/thing.go"},
+			{"signal":"auth-crypto-secrets","tier":"T3","why":"auth/crypto/secret surface: internal/auth/session.go"}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := orderFloorSignals(res.Signals)
+	if got[0].Tier != "T3" || got[1].Tier != "T1" || got[2].Tier != "T0" {
+		t.Fatalf("signals not ordered high-to-low: %+v", got)
+	}
+}

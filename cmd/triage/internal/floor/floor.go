@@ -126,7 +126,9 @@ var pathRules = []pathRule{
 	// §5.4 control-plane — highest priority, exempt from docs→T0
 	mustRule(`(^|/)RUBRIC\.md$|/skills/pr-risk/|(^|/)labels/|mismatches\.jsonl$|(^|/)CODEOWNERS$`, T3, "control-plane", "edits the classifier or its evidence"),
 	// §5.1 T3 surfaces (migrations are graded by content — see classifyMigration)
-	mustRule(`(^|/)(auth|authz|authn|session|oauth|jwt|crypto|secret|secrets|token|credential|password)([/._-]|$)`, T3, "auth-crypto-secrets", "auth/crypto/secret surface"),
+	// "session" is overloaded in agent tooling. Match it only as a dedicated path
+	// component or exact filename; compound names still need an unambiguous auth token.
+	mustRule(`(^|/)(auth|authz|authn|oauth|jwt|crypto|secret|secrets|token|credential|password)([/._-]|$)|(^|/)session([/.]|$)`, T3, "auth-crypto-secrets", "auth/crypto/secret surface"),
 	mustRule(`(^|/)(billing|payment|payments|invoice|ledger|payout|charge|stripe)([/._-]|$)`, T3, "money", "money/billing/ledger path"),
 	// §5.3 registry/source override (path-based; content-based handled separately)
 	mustRule(`(^|/)\.npmrc$|(^|/)go\.work$`, T3, "dep-override", "registry/source override file"),

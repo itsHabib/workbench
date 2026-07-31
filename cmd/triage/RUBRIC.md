@@ -44,6 +44,12 @@ Any diff touching the risk system's own control plane floors at **T3** and is **
 | internal (non-exported) behavior change | T1 |
 | pure refactor / comments / tests-only / generated / copy / **non-policy** docs | T0 |
 
+`session` is overloaded in agent infrastructure. The T3 path signal applies to
+a dedicated `session/` component or an exact `session.*` filename, not a
+compound name such as `session-reviewfindings-...`; compound authentication
+surfaces remain T3 when another sensitive token (`auth`, `oauth`, `token`, and
+so on) appears in the path.
+
 ## §5.2 Content signals (diff-text, path-independent)
 
 Fire on line content regardless of filename — closes the "danger in an unnamed file" hole:
