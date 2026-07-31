@@ -153,6 +153,32 @@ func TestDeferredDebtRequiresReasonAndFollowUp(t *testing.T) {
 	}
 }
 
+func TestProvedSafeRequiresClosureOrProof(t *testing.T) {
+	input := CycleInput{
+		SchemaVersion: SchemaVersion,
+		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Cycle:         1,
+		CurrentTier:   "T1",
+		Findings: []FindingState{{
+			ID: "f1", Severity: "low", Reviewers: []string{"codex"},
+			Disposition: "proved_safe",
+		}},
+	}
+	if err := ValidateCycleInput(input); err == nil {
+		t.Fatal("unproved proved_safe finding unexpectedly valid")
+	}
+	input.Findings[0].ProofRef = "test:regression"
+	if err := ValidateCycleInput(input); err != nil {
+		t.Fatal(err)
+	}
+	input.Findings[0].ProofRef = ""
+	input.Findings[0].ReviewerClosed = true
+	if err := ValidateCycleInput(input); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion: SchemaVersion,

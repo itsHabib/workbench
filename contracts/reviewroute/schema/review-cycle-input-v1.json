@@ -46,6 +46,26 @@
           "debt": { "type": "boolean" },
           "follow_up_ref": { "type": "string" }
         },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "disposition": { "const": "proved_safe" } },
+              "required": ["disposition"]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "properties": { "reviewer_closed": { "const": true } },
+                  "required": ["reviewer_closed"]
+                },
+                {
+                  "properties": { "proof_ref": { "type": "string", "minLength": 1 } },
+                  "required": ["proof_ref"]
+                }
+              ]
+            }
+          }
+        ],
         "additionalProperties": false
       }
     }

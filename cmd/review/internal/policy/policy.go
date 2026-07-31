@@ -167,10 +167,10 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		Tier:               input.CurrentTier,
 		Cycle:              input.Cycle,
 		ContinuationWeight: 1 << (input.Cycle - 1),
-		CumulativeWeight:   1<<input.Cycle - 1,
+		CumulativeWeight:   (1 << input.Cycle) - 1,
 		Action:             action,
-		ReasonCodes:        reviewroute.SortedUnique(reasons),
-		NextReviewers:      reviewroute.SortedUnique(next),
+		ReasonCodes:        sortedUnique(reasons),
+		NextReviewers:      sortedUnique(next),
 		Findings:           append([]reviewroute.FindingState{}, input.Findings...),
 	}
 	if plan.Classification != nil {
@@ -209,7 +209,7 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 			reviewers = append(reviewers, finding.Reviewers...)
 		}
 	}
-	return reviewroute.SortedUnique(reasons), reviewroute.SortedUnique(reviewers)
+	return sortedUnique(reasons), sortedUnique(reviewers)
 }
 
 func coordinatorRequired(plan reviewroute.Plan, input reviewroute.CycleInput) bool {
@@ -220,6 +220,8 @@ func coordinatorRequired(plan reviewroute.Plan, input reviewroute.CycleInput) bo
 }
 
 func proofSubstitutesPanel(plan reviewroute.Plan, input reviewroute.CycleInput) bool {
+	// Proof substitution closes a rereview only after an earlier reviewer cycle
+	// established the finding; it cannot replace the initial review baseline.
 	if input.Cycle < 2 || !plan.Requirements.AllowProofSubstitution || len(input.Findings) == 0 {
 		return false
 	}
@@ -334,5 +336,18 @@ func reviewerNames(reviewers []reviewroute.Reviewer) []string {
 	for _, reviewer := range reviewers {
 		names = append(names, reviewer.Name)
 	}
-	return reviewroute.SortedUnique(names)
+	return sortedUnique(names)
+}
+
+func sortedUnique(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

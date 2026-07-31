@@ -371,6 +371,28 @@ func TestDecideRefusesWhenLiveHeadChanges(t *testing.T) {
 	}
 }
 
+func TestDecideRefusesInvalidPlanBeforeNetwork(t *testing.T) {
+	temp := t.TempDir()
+	plan := testPlan(t, "T1")
+	plan.MaxCycles++
+	planPath := filepath.Join(temp, "plan.json")
+	inputPath := filepath.Join(temp, "input.json")
+	writeJSON(t, planPath, plan)
+	writeJSON(t, inputPath, reviewroute.CycleInput{})
+	calls := 0
+	runner := fakeRunner{run: func(_ []byte, _ string, _ ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("network should not be called")
+	}}
+	code := run(context.Background(), []string{
+		"decide", "-plan", planPath, "-input", inputPath,
+		"-out", filepath.Join(temp, "decision.json"),
+	}, runner, io.Discard, io.Discard)
+	if code != exitRefused || calls != 0 {
+		t.Fatalf("exit = %d calls = %d", code, calls)
+	}
+}
+
 func TestAdvisoryVerifierRejectsUnknownRecommendation(t *testing.T) {
 	if validAdvisory(json.RawMessage(`{
 		"recommendation":"ignore","rationale":"no","confidence":1

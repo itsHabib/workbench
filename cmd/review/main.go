@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -267,7 +268,7 @@ func classify(
 		reasons = append(reasons, signal.Why)
 	}
 	return &reviewroute.Classification{
-		Tier: result.Floor, Reasons: reviewroute.SortedUnique(reasons),
+		Tier: result.Floor, Reasons: sortedUnique(reasons),
 	}, nil
 }
 
@@ -345,6 +346,8 @@ func runRequest(
 			receipt.HeadAfter = strings.ToLower(current.HeadRefOID)
 		}
 		if !strings.EqualFold(receipt.HeadAfter, plan.Subject.HeadSHA) {
+			// Staleness supersedes any partial request failure because none of
+			// the receipt remains admissible after the subject head changes.
 			receipt.Status = "stale"
 			receipt.Reason = "pull request head changed before reviewer request"
 			break
@@ -544,6 +547,12 @@ func runDecide(
 	if err := readArtifact(opts.input, &input); err != nil {
 		return err
 	}
+	if err := reviewroute.ValidatePlan(plan); err != nil {
+		return refusalError{err}
+	}
+	if err := reviewroute.ValidateCycleInput(input); err != nil {
+		return refusalError{err}
+	}
 	before, err := fetchPullRequest(ctx, runner, plan.Subject.Repo, plan.Subject.Number)
 	if err != nil {
 		return err
@@ -720,4 +729,17 @@ func validTier(tier string) bool {
 		return true
 	}
 	return false
+}
+
+func sortedUnique(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

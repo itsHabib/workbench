@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -432,6 +431,13 @@ func validateFindingState(finding FindingState) error {
 	if finding.Disposition == "deferred" && strings.TrimSpace(finding.DeferReason) == "" {
 		return fmt.Errorf("reviewroute: deferred finding %s requires a reason", finding.ID)
 	}
+	if finding.Disposition == "proved_safe" && !finding.ReviewerClosed &&
+		strings.TrimSpace(finding.ProofRef) == "" {
+		return fmt.Errorf(
+			"reviewroute: proved_safe finding %s requires reviewer_closed or proof_ref",
+			finding.ID,
+		)
+	}
 	if finding.Debt && strings.TrimSpace(finding.FollowUpRef) == "" {
 		return fmt.Errorf("reviewroute: debt finding %s requires a follow-up reference", finding.ID)
 	}
@@ -508,7 +514,7 @@ func validateDecisionCycle(decision Decision) error {
 		return errors.New("reviewroute: decision cycle must be 1..8")
 	}
 	if decision.ContinuationWeight != 1<<(decision.Cycle-1) ||
-		decision.CumulativeWeight != 1<<decision.Cycle-1 {
+		decision.CumulativeWeight != (1<<decision.Cycle)-1 {
 		return errors.New("reviewroute: decision continuation weights are inconsistent")
 	}
 	return nil
@@ -571,10 +577,10 @@ func validDigest(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") {
 		return false
 	}
-	return validHex(value[len("sha256:"):], 64)
+	return validLowerHex(value[len("sha256:"):], 64)
 }
 
-func validHex(value string, length int) bool {
+func validLowerHex(value string, length int) bool {
 	if len(value) != length {
 		return false
 	}
@@ -636,16 +642,5 @@ func stringSet(values []string) map[string]struct{} {
 	for _, value := range values {
 		out[value] = struct{}{}
 	}
-	return out
-}
-
-// SortedUnique returns a stable set for artifact producers.
-func SortedUnique(values []string) []string {
-	set := stringSet(values)
-	out := make([]string, 0, len(set))
-	for value := range set {
-		out = append(out, value)
-	}
-	sort.Strings(out)
 	return out
 }
