@@ -139,12 +139,12 @@ func (e Evaluator) authorizeMerge(ctx context.Context, request Request, action n
 	rows, err := e.gate.Ready(ctx, request.GateState)
 	if err != nil {
 		return decision(action, automode.OutcomeRefuse, "merge.gate_read_failed", remedy,
-			[]automode.NamedValue{{Name: "gate_read", Value: "failed"}})
+			automode.Values{"gate_read": {Value: "failed"}})
 	}
 	row, ok := uniqueReady(rows, action.repo, action.number)
 	if !ok {
 		return decision(action, automode.OutcomeRefuse, "merge.ready_row_not_unique", remedy,
-			[]automode.NamedValue{{Name: "ready_rows", Value: strconv.Itoa(countReady(rows, action.repo, action.number))}})
+			automode.Values{"ready_rows": {Value: strconv.Itoa(countReady(rows, action.repo, action.number))}})
 	}
 	if row.MergeCommand != action.candidate {
 		return decision(action, automode.OutcomeRefuse, "merge.command_mismatch", remedy,
@@ -194,37 +194,37 @@ func countReady(rows []ReadyMerge, repo string, number int) int {
 	return count
 }
 
-func mergeObservables(row ReadyMerge, status string) []automode.NamedValue {
-	return []automode.NamedValue{
-		{Name: "gate_command_digest", Value: textDigest(row.MergeCommand)},
-		{Name: "gate_head_sha", Value: row.HeadSHA},
-		{Name: "gate_run", Value: row.Run},
-		{Name: "gate_status", Value: status},
+func mergeObservables(row ReadyMerge, status string) automode.Values {
+	return automode.Values{
+		"gate_command_digest": {Value: textDigest(row.MergeCommand)},
+		"gate_head_sha":       {Value: row.HeadSHA},
+		"gate_run":            {Value: row.Run},
+		"gate_status":         {Value: status},
 	}
 }
 
-func mergeLiveObservables(row ReadyMerge, pr PullRequest) []automode.NamedValue {
-	return []automode.NamedValue{
-		{Name: "gate_command_digest", Value: textDigest(row.MergeCommand)},
-		{Name: "gate_head_sha", Value: row.HeadSHA},
-		{Name: "gate_run", Value: row.Run},
-		{Name: "gate_status", Value: "ready_to_merge"},
-		{Name: "live_head_sha", Value: pr.HeadSHA},
-		{Name: "live_pr_state", Value: pr.State},
+func mergeLiveObservables(row ReadyMerge, pr PullRequest) automode.Values {
+	return automode.Values{
+		"gate_command_digest": {Value: textDigest(row.MergeCommand)},
+		"gate_head_sha":       {Value: row.HeadSHA},
+		"gate_run":            {Value: row.Run},
+		"gate_status":         {Value: "ready_to_merge"},
+		"live_head_sha":       {Value: pr.HeadSHA},
+		"live_pr_state":       {Value: pr.State},
 	}
 }
 
-func decision(action normalized, outcome, rule, remedy string, observables []automode.NamedValue) (automode.Decision, error) {
+func decision(action normalized, outcome, rule, remedy string, observables automode.Values) (automode.Decision, error) {
 	envelope := action.envelope
 	if envelope == "" {
 		envelope = "unknown"
 	}
 	parameters := action.parameters
 	if parameters == nil {
-		parameters = []automode.NamedValue{}
+		parameters = automode.Values{}
 	}
 	if observables == nil {
-		observables = []automode.NamedValue{}
+		observables = automode.Values{}
 	}
 	inputs := automode.InputProjection{
 		Action: automode.Action{
@@ -268,7 +268,7 @@ func mergeRemedy(action normalized) string {
 type normalized struct {
 	envelope   string
 	operation  string
-	parameters []automode.NamedValue
+	parameters automode.Values
 	candidate  string
 	repo       string
 	number     int

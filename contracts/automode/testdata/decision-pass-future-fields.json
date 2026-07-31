@@ -9,19 +9,19 @@
     "action": {
       "envelope": "shell",
       "operation": "github.pr.merge",
-      "parameters": [
-        { "name": "repo", "value": "itsHabib/workbench", "redacted": false, "source": "argv" },
-        { "name": "pr", "value": "168", "redacted": false },
-        { "name": "grant", "value": "[REDACTED]", "redacted": true }
-      ],
+      "parameters": {
+        "repo": { "value": "itsHabib/workbench", "redacted": false, "source": "argv" },
+        "pr": { "value": "168", "redacted": false },
+        "grant": { "value": "[REDACTED]", "redacted": true }
+      },
       "parser_revision": "future"
     },
-    "observables": [
-      { "name": "head_sha", "value": "bce1322d926a541b23f68b9adf94823d55d5d699", "redacted": false },
-      { "name": "gate_outcome", "value": "ready_to_merge", "redacted": false }
-    ],
+    "observables": {
+      "head_sha": { "value": "bce1322d926a541b23f68b9adf94823d55d5d699", "redacted": false },
+      "gate_outcome": { "value": "ready_to_merge", "redacted": false }
+    },
     "future_projection_metadata": { "source": "connector" }
   },
-  "action_digest": "sha256:6e9f551802f1364ce1c7b4592373e8c873404fbe49072cedd716c32d76ddac50",
+  "action_digest": "sha256:a99c947c34f57b5a95b3b6f0f5fa531ea54c152d345e09c4a6abf4365557aa0d",
   "future_artifact_metadata": { "trace_id": "trace_1" }
 }

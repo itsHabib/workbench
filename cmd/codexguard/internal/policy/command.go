@@ -19,9 +19,9 @@ func classifyCommand(command string) (normalized, error) {
 	lower := lowerWords(words)
 	out := classifyKnownCommand(command, words, lower)
 	if out.parameters == nil {
-		out.parameters = []automode.NamedValue{}
+		out.parameters = automode.Values{}
 	}
-	out.parameters = append(out.parameters, automode.NamedValue{Name: "command_digest", Value: textDigest(command)})
+	out.parameters["command_digest"] = automode.Value{Value: textDigest(command)}
 	return out, nil
 }
 
@@ -45,10 +45,10 @@ func classifyKnownCommand(command string, words, lower []string) normalized {
 		return normalized{operation: "authority.state_mutation"}
 	}
 	if isTest(lower) {
-		return normalized{operation: "test", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}
+		return normalized{operation: "test", parameters: automode.Values{"program": {Value: lower[0]}}}
 	}
 	if isRead(lower) {
-		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "program", Value: lower[0]}}}
+		return normalized{operation: "read", parameters: automode.Values{"program": {Value: lower[0]}}}
 	}
 	return normalized{operation: "unknown"}
 }
@@ -74,7 +74,7 @@ func parseMerge(command string, words, lower []string) normalized {
 		operation:  "github.pr.merge",
 		candidate:  command,
 		admin:      contains(lower, "--admin"),
-		parameters: []automode.NamedValue{},
+		parameters: automode.Values{},
 	}
 	if len(words) < 4 {
 		return out
@@ -86,18 +86,18 @@ func parseMerge(command string, words, lower []string) normalized {
 	out.number = number
 	out.repo = flagValue(words, lower, "-r", "--repo")
 	out.headSHA = flagValue(words, lower, "--match-head-commit")
-	out.parameters = []automode.NamedValue{{Name: "pr", Value: words[3]}}
+	out.parameters = automode.Values{"pr": {Value: words[3]}}
 	if !validRepo(out.repo) {
 		out.repo = ""
 	}
 	if out.repo != "" {
-		out.parameters = append(out.parameters, automode.NamedValue{Name: "repo", Value: out.repo})
+		out.parameters["repo"] = automode.Value{Value: out.repo}
 	}
 	if !fullSHA.MatchString(out.headSHA) {
 		out.headSHA = ""
 	}
 	if out.headSHA != "" {
-		out.parameters = append(out.parameters, automode.NamedValue{Name: "head_sha", Value: out.headSHA})
+		out.parameters["head_sha"] = automode.Value{Value: out.headSHA}
 	}
 	return out
 }

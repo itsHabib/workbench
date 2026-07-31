@@ -3,8 +3,8 @@
 package automode
 
 import (
-	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -53,21 +53,23 @@ type Decision struct {
 
 // InputProjection is the secret-safe evidence a policy decision can replay.
 type InputProjection struct {
-	Action      Action       `json:"action"`
-	Observables []NamedValue `json:"observables"`
+	Action      Action `json:"action"`
+	Observables Values `json:"observables"`
 }
 
 // Action is a parsed semantic operation, never opaque command text.
 type Action struct {
-	Envelope   string       `json:"envelope"`
-	Operation  string       `json:"operation"`
-	Parameters []NamedValue `json:"parameters"`
+	Envelope   string `json:"envelope"`
+	Operation  string `json:"operation"`
+	Parameters Values `json:"parameters"`
 }
 
-// NamedValue is one normalized input. Redacted values must contain only
+// Values is a set of normalized inputs keyed by their unique semantic names.
+type Values map[string]Value
+
+// Value is one normalized input. Redacted values must contain only
 // RedactionMarker.
-type NamedValue struct {
-	Name     string `json:"name"`
+type Value struct {
 	Value    string `json:"value"`
 	Redacted bool   `json:"redacted"`
 }
@@ -93,8 +95,8 @@ type AuditEvent struct {
 
 // Completion records the observable result of an allowed call.
 type Completion struct {
-	Status      string       `json:"status"`
-	Observables []NamedValue `json:"observables"`
+	Status      string `json:"status"`
+	Observables Values `json:"observables"`
 }
 
 // DecodeDecision tolerantly decodes additive v1 fields, then applies contract
@@ -132,30 +134,52 @@ func (d Decision) Routing() RoutingProjection {
 }
 
 // Digest returns the canonical SHA-256 identity of a normalized input
-// projection. Ordering of named values does not affect the result.
+// projection. It hashes the language-neutral framed representation documented
+// in README.md; ordering of named values does not affect the result.
 func Digest(inputs InputProjection) (string, error) {
 	if err := validateInputs(inputs); err != nil {
 		return "", err
 	}
-	canonical := inputs
-	canonical.Action.Parameters = sortedValues(inputs.Action.Parameters)
-	canonical.Observables = sortedValues(inputs.Observables)
-
-	var data bytes.Buffer
-	encoder := json.NewEncoder(&data)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(canonical); err != nil {
-		return "", fmt.Errorf("automode: encode digest projection: %w", err)
-	}
-	sum := sha256.Sum256(bytes.TrimSuffix(data.Bytes(), []byte{'\n'}))
+	sum := sha256.Sum256(canonicalInputs(inputs))
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-func sortedValues(values []NamedValue) []NamedValue {
-	out := make([]NamedValue, len(values))
-	copy(out, values)
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Name < out[j].Name
-	})
+func canonicalInputs(inputs InputProjection) []byte {
+	out := []byte("workbench.automode.inputs.v1")
+	out = appendString(out, inputs.Action.Envelope)
+	out = appendString(out, inputs.Action.Operation)
+	out = appendValues(out, inputs.Action.Parameters)
+	return appendValues(out, inputs.Observables)
+}
+
+func appendValues(out []byte, values Values) []byte {
+	out = binary.AppendUvarint(out, uint64(len(values)))
+	for _, name := range sortedNames(values) {
+		value := values[name]
+		out = appendString(out, name)
+		out = append(out, boolByte(value.Redacted))
+		out = appendString(out, value.Value)
+	}
 	return out
+}
+
+func appendString(out []byte, value string) []byte {
+	out = binary.AppendUvarint(out, uint64(len(value)))
+	return append(out, value...)
+}
+
+func sortedNames(values Values) []string {
+	out := make([]string, 0, len(values))
+	for name := range values {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func boolByte(value bool) byte {
+	if value {
+		return 1
+	}
+	return 0
 }

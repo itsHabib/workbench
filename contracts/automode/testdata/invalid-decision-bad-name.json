@@ -10,7 +10,7 @@
       "envelope": "shell",
       "operation": "git.status",
       "parameters": {
-        "credential": { "value": "fixture-secret", "redacted": true }
+        "Bad Name": { "value": "one", "redacted": false }
       }
     },
     "observables": {}

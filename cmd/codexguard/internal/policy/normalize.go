@@ -88,7 +88,7 @@ func normalizeLocal(envelope Envelope) (normalized, error) {
 		if args.SandboxPermissions == "require_escalated" {
 			return normalized{
 				operation:  "authority.elevation",
-				parameters: []automode.NamedValue{{Name: "sandbox_permissions", Value: args.SandboxPermissions}},
+				parameters: automode.Values{"sandbox_permissions": {Value: args.SandboxPermissions}},
 			}, nil
 		}
 		if args.SandboxPermissions != "" && args.SandboxPermissions != "use_default" {
@@ -104,7 +104,9 @@ func normalizeLocal(envelope Envelope) (normalized, error) {
 		if err != nil {
 			return normalized{}, err
 		}
-		out.parameters = append(out.parameters, shellContext(args)...)
+		for name, value := range shellContext(args) {
+			out.parameters[name] = value
+		}
 		return out, nil
 	}
 	return normalized{}, errUnsupported
@@ -121,19 +123,19 @@ type shellCommandArgs struct {
 	PrefixRule         []string `json:"prefix_rule,omitempty"`
 }
 
-func shellContext(args shellCommandArgs) []automode.NamedValue {
-	var values []automode.NamedValue
+func shellContext(args shellCommandArgs) automode.Values {
+	values := automode.Values{}
 	if args.Workdir != "" {
-		values = append(values, automode.NamedValue{Name: "workdir_digest", Value: textDigest(args.Workdir)})
+		values["workdir_digest"] = automode.Value{Value: textDigest(args.Workdir)}
 	}
 	if args.TimeoutMS != nil {
-		values = append(values, automode.NamedValue{Name: "timeout_ms", Value: strconv.Itoa(*args.TimeoutMS)})
+		values["timeout_ms"] = automode.Value{Value: strconv.Itoa(*args.TimeoutMS)}
 	}
 	if args.Login != nil {
-		values = append(values, automode.NamedValue{Name: "login", Value: strconv.FormatBool(*args.Login)})
+		values["login"] = automode.Value{Value: strconv.FormatBool(*args.Login)}
 	}
 	if args.SandboxPermissions != "" {
-		values = append(values, automode.NamedValue{Name: "sandbox_permissions", Value: args.SandboxPermissions})
+		values["sandbox_permissions"] = automode.Value{Value: args.SandboxPermissions}
 	}
 	return values
 }
@@ -163,7 +165,17 @@ var readOnlyMCPTools = map[string]struct{}{
 
 func normalizeMCP(envelope Envelope) (normalized, error) {
 	if _, ok := readOnlyMCPTools[envelope.Tool]; ok {
-		return normalized{operation: "read", parameters: []automode.NamedValue{{Name: "tool", Value: envelope.Tool}}}, nil
+		digest, ok := objectDigest(envelope.Arguments)
+		if !ok {
+			return normalized{}, errUnsupported
+		}
+		return normalized{
+			operation: "read",
+			parameters: automode.Values{
+				"arguments_digest": {Value: digest},
+				"tool":             {Value: envelope.Tool},
+			},
+		}, nil
 	}
 	if envelope.Tool == "shell_command" || envelope.Tool == "mcp__local__shell_command" {
 		return normalizeLocal(Envelope{Kind: "local", Tool: "shell_command", Arguments: envelope.Arguments})
@@ -230,7 +242,7 @@ func unwrapPOSIX(command string) (string, error) {
 }
 
 func unwrapPowerShell(command string) (string, error) {
-	words, err := splitWords(command)
+	words, err := splitLiteralWords(command)
 	if err != nil {
 		return "", err
 	}
@@ -287,7 +299,7 @@ func decodePowerShell(value string) (string, error) {
 }
 
 func unwrapCMD(command string) (string, error) {
-	words, err := splitWords(command)
+	words, err := splitLiteralWords(command)
 	if err != nil {
 		return "", err
 	}
@@ -301,6 +313,14 @@ func unwrapCMD(command string) (string, error) {
 }
 
 func splitWords(command string) ([]string, error) {
+	return splitWordsMode(command, true)
+}
+
+func splitLiteralWords(command string) ([]string, error) {
+	return splitWordsMode(command, false)
+}
+
+func splitWordsMode(command string, escapeBackslash bool) ([]string, error) {
 	var words []string
 	var word strings.Builder
 	var quote rune
@@ -320,7 +340,7 @@ func splitWords(command string) ([]string, error) {
 			escaped = false
 			continue
 		}
-		if r == '\\' && quote != '\'' {
+		if escapeBackslash && r == '\\' && quote != '\'' {
 			escaped = true
 			continue
 		}
@@ -350,6 +370,24 @@ func splitWords(command string) ([]string, error) {
 	}
 	flush()
 	return words, nil
+}
+
+func objectDigest(data []byte) (string, bool) {
+	var object map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if len(data) == 0 || decoder.Decode(&object) != nil || object == nil {
+		return "", false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return "", false
+	}
+	normalized, err := json.Marshal(object)
+	if err != nil {
+		return "", false
+	}
+	return textDigest(string(normalized)), true
 }
 
 func parseNumber(value string) (int, bool) {

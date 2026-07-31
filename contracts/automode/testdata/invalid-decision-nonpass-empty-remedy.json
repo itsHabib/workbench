@@ -9,9 +9,9 @@
     "action": {
       "envelope": "shell",
       "operation": "opaque",
-      "parameters": []
+      "parameters": {}
     },
-    "observables": []
+    "observables": {}
   },
   "action_digest": "sha256:ff74003a565415d0a621f0cdbd62210e0e5807842f8fa7af89f68269b1cad6b3"
 }
