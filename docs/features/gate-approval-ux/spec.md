@@ -126,6 +126,16 @@ for the same PR and operation infeasible at this system's scale. The full
 256-bit digest still rides in the request JSON, authorization, and claim,
 unchanged. **Reviewers: challenge this paragraph.**
 
+To be explicit about layering (v2, from review): the phrase check and the
+full-document verification are **parallel defenses in the same
+pre-credential block, not sequential**. A phrase-only match authorizes
+nothing — gate independently re-verifies every field of the request
+document (repo, PR, head, base, merge-base, action hash, argv, expiry,
+replay ID) against live GitHub and hosted state, so even an (infeasible)
+phrase collision cannot carry a wrong document past verification. The
+phrase is the attention gate; the document verification is the correctness
+gate.
+
 ### 4.2 The agent performs the dispatch
 
 **Choice:** new `submit` verb; the agent's ordinary token (`actions:
@@ -138,6 +148,26 @@ dispatcher is now always the agent identity, so the approver is structurally
 never the dispatcher. **Alternative:** operator keeps dispatching —
 preserves nothing (the dispatch was never an authority act) and costs the
 entire laptop-and-JSON step.
+
+Two residuals named (v2, from review):
+
+- **`actions: write` blast radius.** The permission can dispatch *any*
+  `workflow_dispatch` workflow in the repository, not just
+  `gate-executor.yml`. A compromised agent token still cannot make
+  `gate-executor.yml` do anything (I3 re-verifies everything
+  pre-credential), but it could trigger unrelated workflows. That is a
+  property of GitHub's permission granularity, not of this design; it is
+  the same exposure the agent's push-and-open-PR token already carries and
+  is accepted with the same eyes-open posture as enforcement.md's named
+  residuals.
+- **Document transport.** The request JSON travels as a
+  `workflow_dispatch` input — exactly as it does today when pasted by
+  hand; `submit` changes who types, not the channel. The documents are
+  bounded by construction (IDs, SHAs, argv, and digests — the evidence
+  digest, never the evidence or diff bodies), so GitHub's ~64 KB dispatch
+  payload bound is not a practical constraint; `submit` still checks the
+  encoded size and refuses locally with a clear error rather than letting
+  the API reject it.
 
 ### 4.3 Unprivileged `describe` job, not a gate on approval
 
@@ -208,11 +238,21 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
 func ApprovalPhrase(digest [32]byte, op string, pr int) (string, error)
 ```
 
-Comment verification normalizes the received comment — trim, collapse
-internal whitespace runs to one space, lowercase ASCII — then requires
-exact equality with `ApprovalPhrase(...)` recomputed from the verified
-document. Normalization exists for phone keyboards (trailing space,
-auto-capitalize); word identity, order, operation, and PR stay exact.
+Comment verification normalizes the received comment, then requires exact
+equality with `ApprovalPhrase(...)` recomputed from the verified document.
+Normalization (resolved from §10.2, v2 — phone keyboards specifically
+attack hyphens with smart-punctuation substitution):
+
+1. map the Unicode hyphen family (U+2010–U+2014, U+2212, U+FE58, U+FE63,
+   U+FF0D) to ASCII `-`;
+2. accept `-` or a single space as the separator between the four words
+   (`mango harbor violet inlet` and `mango-harbor-violet-inlet` both
+   pass);
+3. trim, collapse internal whitespace runs to one space;
+4. lowercase ASCII.
+
+Word identity, word order, operation, and PR number stay exact — the
+normalization widens only the typeable surface, never the binding.
 
 ### 6.2 `gate executor submit`
 
@@ -275,16 +315,22 @@ hash, `submit`s, operator gets the second push (*"Gate recorded
 ### 7.3 Expired request
 
 Approval lands after the window (or dispatch sat idle). Gate refuses
-pre-token; run summary explains; Slack card → ⌛ *"expired 14:32 — ask the
-agent to regenerate."* Windows are never extended; regeneration (fresh
-replay ID, fresh approval) is the only path.
+pre-token; the job exits non-zero, so the run — and the approved
+deployment it carries — ends in a terminal **failure** state, never a
+lingering pending one (v2, from review: the audit surface shows a closed
+refusal, not an open question). Run summary explains; Slack card → ⌛
+*"expired 14:32 — ask the agent to regenerate."* Windows are never
+extended; regeneration (fresh replay ID, fresh approval) is the only path.
 
 ### 7.4 Head moved
 
 PR gets a new commit while a card is pending. The agent (already watching
 PR events) voids the card proactively: *"PR #182 moved to `a1b2c3d` — this
-request is void."* If approved anyway, gate refuses naming expected vs
-live head. Regeneration re-enters the full loop including panel
+request is void."* **The void is UX only and safety is non-contingent on
+it** (v2, from review): gate refuses on head mismatch during its own
+pre-credential re-read whether or not the agent was alive to void the
+card — implementers must not build the security check into the
+event-watching path. Regeneration re-enters the full loop including panel
 re-coverage of the new head — that round-trip is the security model
 working, and the card says so rather than apologizing.
 
@@ -292,7 +338,12 @@ working, and the card says so rather than apologizing.
 
 Duplicate execute dispatch → refusal on open/duplicate claim → card ⏸
 *"already in flight — claim `gxc_…`"* linking the run (in-progress state,
-not an error). Action already consumed → refusal names the terminal result
+not an error). The CAS guarantee this leans on is the existing one
+(design.md §Flow 6–8): the claim is appended by advancing `gate-state`
+**without force from the exact expected parent**, so of two
+milliseconds-apart executors, exactly one commit lands and the loser's
+CAS conflict fails closed — no new mechanics here, just a pointer for
+reviewers (v2). Action already consumed → refusal names the terminal result
 → card ✅ receipt (merge commit + result record). Orphaned expired claims
 keep the separate, deliberately boring `reconcile` path.
 
@@ -306,9 +357,16 @@ keep the separate, deliberately boring `reconcile` path.
 - **Execution idempotency:** unchanged — the one-time claim CAS; a durable
   claim's merge is never retried.
 - **`submit` dispatch/poll gap:** dispatch is fire-and-forget by API
-  design; the poll is bounded and a miss is loud (§6.2). Two concurrent
-  submits for the same PR produce two runs; the executor's own duplicate/
-  open-claim and newest-action refusals arbitrate, as today.
+  design; the poll is bounded and a miss is loud (§6.2). A retry after a
+  crashed-post-dispatch `submit`, or two concurrent submits for the same
+  request, produce two runs: the first approved `prepare` publishes the
+  action and the second refuses on duplicate-action/newest-action grounds;
+  for `execute` the claim CAS arbitrates (§7.5). When two submits are both
+  polling, run-name matching alone is ambiguous — the tie-breaker is the
+  **newest-created run at or after this submit's dispatch time** (v2, from
+  review). A wrong pick is harmless (both runs carry the same document and
+  the loser refuses); the tie-breaker exists so the printed URL points at
+  the surviving run.
 - **`describe` failure:** independent of approval by construction (§4.3);
   worst case is a run without a pretty card, which degrades to today's UX.
 - **Slack outage:** notifications degrade to GitHub Mobile push alone;
@@ -340,10 +398,11 @@ config.
    `contracts/gateauthorization` (if another tool ever needs to *render*
    phrases). Leaning internal until a second consumer exists — lazy
    migration per repo charter.
-2. **Normalization scope:** ASCII lowercase + whitespace collapse only, or
-   also strip smart-quote/dash substitutions phone keyboards make? Leaning
-   minimal; hyphens between words are the risk point (accept spaces as
-   separators too?). Needs one decision before P1 goldens.
+2. **Normalization scope — RESOLVED (v2, review round 1):** expanded
+   normalization adopted into §6.1 — Unicode hyphen family → ASCII
+   hyphen, spaces accepted as word separators, whitespace collapse, ASCII
+   lowercase. Binding unchanged; only the typeable surface widened. P1
+   goldens encode this table.
 3. **Expiry in `run-name`:** legible but goes stale as a label; the card
    carries the live value. Leaning omit.
 4. **Slack card ownership:** agent layer composing from `submit -json`
@@ -358,4 +417,8 @@ no laptop, no paste, each decision ≤60 s from buzz to done.** Alongside it:
 the full existing executor refusal suite passes with no semantic diffs
 beyond the comment encoding and the added display-mismatch refusal, and
 one deliberate wrong-phrase and one stale-head attempt both refuse with the
-card states in §7.
+card states in §7. The phone canary also exercises the normalization table
+against a real keyboard (v2, from review): confirm autocorrect/smart
+punctuation does not silently substitute near-neighbor wordlist words or
+non-ASCII hyphens that survive normalization — a failed match here is an
+operability bug to fix in the table, never a security event.
