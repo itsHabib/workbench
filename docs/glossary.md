@@ -132,6 +132,12 @@ instead, then come back for the precise terms.
 - **judgment** — a frontier model resolving a parked escalation, fed *only*
   recorded artifacts. If a good judgment would need more than the artifacts
   carry, that is a contract bug in the artifacts.
+- **escalation** — the agent→human→agent loop for decisions the system will
+  not make alone: gate parks with the full question packaged, flare routes
+  the notification, a human decides, and `escalate` ingests that decision and
+  drives `gate resolve` to close the loop. Deliberately a **contract + seam,
+  not (yet) a sixth plane** — the work that set out to build one concluded
+  the five planes stand (`docs/features/escalation-plane/spec.md`).
 - **run / lineage** — artifacts group by run id and link by a `Parents` field;
   no outcome exists without naming the verdict it acted on and a live grant.
 - **hash chain / keyed anchor** — the tamper-*evidence* model: each append is
