@@ -474,6 +474,7 @@ func requestGitHubReviewer(
 		}
 	}
 	var failures []string
+	var observeAfter time.Time
 	for _, login := range logins {
 		attemptedAt := time.Now().UTC()
 		output, err := runner.Run(ctx, "gh", "api", "-X", "POST", endpoint,
@@ -490,19 +491,19 @@ func requestGitHubReviewer(
 		if recorded {
 			return login, nil
 		}
-		if name == "copilot" {
-			ref, observed, observeErr := observeCopilotRequest(
-				ctx, runner, subject, attemptedAt,
-			)
-			if observeErr != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", login, observeErr))
-				continue
-			}
-			if observed {
-				return ref, nil
-			}
-		}
 		failures = append(failures, login+": GitHub did not record the request")
+		if name == "copilot" && observeAfter.IsZero() {
+			observeAfter = attemptedAt
+		}
+	}
+	if !observeAfter.IsZero() {
+		ref, observed, err := observeCopilotRequest(ctx, runner, subject, observeAfter)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("Copilot observation: %v", err))
+		}
+		if err == nil && observed {
+			return ref, nil
+		}
 	}
 	return "", errors.New(strings.Join(failures, "; "))
 }

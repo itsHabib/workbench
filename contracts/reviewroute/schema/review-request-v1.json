@@ -13,13 +13,13 @@
       "properties": {
         "repo": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
         "number": { "type": "integer", "minimum": 1 },
-        "head_sha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" }
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
       },
       "additionalProperties": false
     },
     "plan_id": { "type": "string", "pattern": "^rp_[0-9a-f]{32}$" },
-    "head_before": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-    "head_after": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+    "head_before": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "head_after": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "status": { "enum": ["requested", "stale", "failed"] },
     "reason": { "type": "string", "minLength": 1 },
     "requests": {

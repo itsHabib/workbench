@@ -570,11 +570,7 @@ func validateSubject(subject Subject) error {
 }
 
 func validSHA(value string) bool {
-	if len(value) != 40 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
+	return validLowerHex(value, 40)
 }
 
 func validDigest(value string) bool {
