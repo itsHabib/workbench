@@ -117,7 +117,7 @@ correction rather than silently trusted.
 whole point: **the engine owns the loop** — import → dispatch → poll →
 judgment → land → record, as durable state in ship — **and the skill owns
 the policy**: review-cycle caps, strategy selection, the merge call. That
-split is the worked example of prose-to-code (§7): the loop used to be
+split is the worked example of prose-to-code (§8): the loop used to be
 skill prose the model re-derived every run; now it's engine code, and the
 skill shrank to opinions.
 
@@ -190,7 +190,53 @@ LOC, task closures, friction deltas, what became newly usable. Keeping
 the clocks separate is what stops every update from becoming an unbounded
 project dump.
 
-## 7. Prose → code
+## 7. Session mechanics — what runs all day
+
+The delivery loop is seed/prep/drive; the hour-to-hour texture is worktrees,
+chips, and continuation briefs. These are the highest-frequency commands in
+the whole workflow.
+
+**Worktrees, constantly.** Every piece of implementation work gets its own
+worktree under `.claude/worktrees/` — `/worktree-add <branch>` to create,
+`/worktree-where` when a session needs to know what it's standing in,
+`/worktree-list` and `/worktree-remove` for the lifecycle, and
+`/worktree-transfer` to hand in-progress work between sessions. The law
+behind the habit comes from the drive contract: an agent never competes
+with the operator in the dirty root checkout, so isolation is the *first*
+step of any change, not an option. [tower](https://github.com/itsHabib/tower)
+is the TUI over the same worktrees and their PRs when the count grows.
+
+**`/chip` — fork the tangent instead of chasing it.** Mid-conversation,
+anything worth doing but not worth derailing the current thread gets
+chipped into its own session: a title, a self-contained prompt (paths,
+line numbers, decisions already made, acceptance criteria), and the main
+thread resumes in the same breath. The skill's own bar for what *not* to
+chip is half its value: vague observations, trivial fixes faster done
+inline, anything that needs this conversation's context to even
+understand, and low-confidence hunches. Chips are how one operator runs
+many threads without any of them blocking the others.
+
+**`/continue` — context management as a first-class move.** When a
+session's context fills, the skill emits one paste-ready brief for a
+fresh session: Goal, State (done as concrete outcomes — paths, SHAs,
+PR numbers, no process narration), Next (concrete enough to start cold),
+Key facts this session added (decisions with the one-phrase why, dead
+ends already tried), and Pointers (the file worth opening first, the
+command that verifies). The framing rule does the work: the fresh session
+already has CLAUDE.md, memory, and skills — the brief carries *only what
+this session added*. Long-running work survives context limits because
+continuation is cheap, rehearsed, and lossless where it matters.
+
+**`/recover` — after the crash.** Reboot, terminal loss, a session that
+died mid-flight: recover scans recent session transcripts, classifies
+each (task, cwd, last action, done vs. interrupted), and resumes the
+interrupted one deliberately instead of re-deriving it from memory.
+
+The common thread: sessions are cattle, work is durable. Worktrees keep
+the work isolated, dossier and the ledgers keep it resumable, and chips,
+continuation briefs, and recovery make the *session* the disposable part.
+
+## 8. Prose → code
 
 The maturation loop that everything above feeds:
 
@@ -222,7 +268,7 @@ watcher budget fixes, exact-head re-review discipline. A correction should
 not remain advice for one chat; it becomes part of the instruction layer
 or, eventually, part of an engine.
 
-## 8. Hooks: reflexes, not workflows
+## 9. Hooks: reflexes, not workflows
 
 Two pre-tool hooks and five post-tool hooks currently run (the exact
 rules are machine-local and stay private; the shapes are what matter):
@@ -242,7 +288,7 @@ The design rule: hooks capture reliable local facts; choreography and
 cross-tool judgment stay in skills and engines. A hook that starts making
 decisions is a plane doing another plane's job.
 
-## 9. Instruction hygiene
+## 10. Instruction hygiene
 
 Instruction surfaces are code-like assets: they need ownership,
 precedence, drift detection, and deletion. The working model — private

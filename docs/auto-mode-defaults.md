@@ -2,6 +2,8 @@
 
 **Status:** v1 (2026-07-31) — refreshed the merge-boundary paragraph after the executor
 App's bootstrap merge landed, and added custody to the rulebooks.
+**The executable half** — literal settings, the guard script, hook registrations,
+install + verify — is [`auto-mode-rulebook.md`](auto-mode-rulebook.md).
 **Scope:** the auto-classifiers in the portfolio — the merge gate, triage, ship dispatch
 policy, and the Claude Code harness config (permissions + hooks). One set of defaults,
 many rulebooks.

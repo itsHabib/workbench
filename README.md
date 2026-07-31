@@ -46,6 +46,9 @@ see the layout below.
 
 ## Where to read, by question
 
+Full navigator, including feature design docs and reading orders:
+[`docs/README.md`](docs/README.md). The short version:
+
 - **What is this whole system?** [`docs/workbench-101.md`](docs/workbench-101.md) —
   the teaching doc: the loop, the five planes, gate as the flagship.
 - **Same picture, no jargon:** [`docs/plain-language-overview.md`](docs/plain-language-overview.md).
@@ -55,7 +58,8 @@ see the layout below.
   the instruction stack, `/drive` vs the work-driver chain, review machinery,
   prose→code, hooks.
 - **How far may an agent act unattended?** [`docs/auto-mode-defaults.md`](docs/auto-mode-defaults.md) —
-  the decision contract, the six defaults, the rulebooks.
+  the doctrine — and [`docs/auto-mode-rulebook.md`](docs/auto-mode-rulebook.md), the
+  copy-able settings + hooks that implement it.
 - **What do the words mean?** [`docs/glossary.md`](docs/glossary.md).
 - **Why one module, and what's out of scope?** [`docs/DESIGN.md`](docs/DESIGN.md) — the charter.
 - **What else exists around this repo?** [`docs/projects.md`](docs/projects.md) —
