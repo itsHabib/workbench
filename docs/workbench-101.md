@@ -213,9 +213,9 @@ The layout, top level down:
   - see the drift log.)
 - **`cmd/<tool>/`** - one private implementation boundary per **tenant** (a tool
   living in the module; a tenant may expose more than one CLI entry point).
-  `verified` tenant list, fourteen today: `console`, `custody`,
+  `verified` tenant list, fifteen today: `console`, `custody`,
   `dispatch`, `driverstate`, `escalate`, `eval`, `flare`, `gate`, `local`,
-  `reviewfindings`, `runway`, `tracelens`, `triage`, `workbench-mcp`.
+  `review`, `reviewfindings`, `runway`, `tracelens`, `triage`, `workbench-mcp`.
 
 The family assembled by *lazy migration*, not big-bang: tools graduated in when next
 touched. flare was the founding tenant (rewiring it to `contracts` deleted the third
@@ -693,7 +693,7 @@ separate lane.
 
 ## 7. Tenant tour
 
-Fourteen tenant directories, each private below `cmd/<tool>/`. The repeated
+Fifteen tenant directories, each private below `cmd/<tool>/`. The repeated
 shape to watch for: **policy over mechanism, joined by artifacts** - one side
 decides, the other executes, and they meet at a JSON seam, never an import.
 
@@ -764,6 +764,13 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   a signed Slack interaction, derives the actor from the verified identity, and
   drives that same mechanism. Flare remains read-only; only gate writes the
   authoritative judgment/result (`cmd/escalate/CLAUDE.md`).
+- **review** - the engine-neutral review-policy tenant: decides which reviewers
+  an exact PR head needs and whether another cycle is warranted
+  (`plan`/`request`/`observe`/`decide`/`advise`). `plan` shells `gh` and
+  `triage-floor` - never imports triage decision code - and every artifact joins
+  on repo + PR + exact head + content-derived plan ID; a head change invalidates
+  the lot, and a policy/classifier failure falls back to the complete safe panel
+  (`cmd/review/CLAUDE.md`).
 - **reviewfindings** - the Codex-native producer at Ship's review-address seam.
   `reviewfindings github` reads exact-head inline review comments through `gh` and
   emits the shared `ReviewFindingsV1` contract. It refuses stale heads, closed PRs,
@@ -1084,7 +1091,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `cmd/workbench-mcp/main.go` package comment: "the four driver-state verbs" | Behind code: the server registers six (`driver_transition`, `driver_rollup` added) |
 | `cmd/driverstate/CLAUDE.md` verb list | Behind code: omits `render` and `rollup` |
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
-| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fourteen tenants live under `cmd/` |
+| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fifteen tenants live under `cmd/` |
 | Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
 | Live merge | Ordinary `gate -live` still records `merge_not_implemented`. The separate one-App executor completed bounded bootstrap and fail-closed canaries, but is currently suspended pending a reliability and operator-UX review. |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
