@@ -82,7 +82,10 @@ if ($isolatedBody.headers.Authorization -notlike 'Bearer *') {
 }
 Write-Host 'PASS  caller identity was dropped; custody injected its configured credential' -ForegroundColor Green
 
-Write-Beat '3. SCOPE — the same grant passes reads and denies effects/broader paths'
+Write-Beat '3. SCOPE — the same grant admits one project and denies broader authority'
+$otherProject = Invoke-Custody -Method GET -Path '/jira-microscope/rest/api/2/issue/OTHER-1?fields=id,status' -Headers $grantHeaders
+Assert-Status -Label 'another Jira project is denied at custody' -Actual $otherProject.StatusCode -Expected 403
+
 $post = Invoke-Custody -Method POST -Path '/jira-microscope/rest/api/2/issue/DEMO-1' -Headers $grantHeaders
 Assert-Status -Label 'write is denied at custody' -Actual $post.StatusCode -Expected 403
 

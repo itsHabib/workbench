@@ -16,13 +16,17 @@
           "rules": [
             {
               "methods": ["GET"],
-              "path": "/rest/api/2/**",
+              "path": "/rest/api/2/myself"
+            },
+            {
+              "methods": ["GET"],
+              "path": "/rest/api/2/issue/DEMO-*",
               "allowExtraParams": true
             }
           ]
         }
       },
-      "note": "Talk microscope: fake credential only. Read-only Jira-shaped traffic; writes and other API versions fail closed."
+      "note": "Talk microscope: fake credential only. Identity and DEMO-* Jira v2 reads are allowed; other projects, writes, and API versions fail closed."
     }
   }
 }
