@@ -1,0 +1,18 @@
+{
+  "session_id": "thr_fixture",
+  "transcript_path": null,
+  "cwd": "/workspace",
+  "hook_event_name": "PostToolUse",
+  "model": "fixture-model",
+  "turn_id": "turn_fixture",
+  "permission_mode": "default",
+  "tool_name": "mcp__fixture__status",
+  "tool_use_id": "call_mcp_status",
+  "tool_input": {
+    "target": "fixture"
+  },
+  "tool_response": {
+    "success": true,
+    "result": "fixture"
+  }
+}

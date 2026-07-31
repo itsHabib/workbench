@@ -1,0 +1,21 @@
+{
+  "schema_version": "auto-decision.v1",
+  "event_id": "evt_1",
+  "invocation_id": "inv_1",
+  "recorded_at": "2026-07-29T00:00:00Z",
+  "kind": "decision",
+  "decision": {
+    "schema_version": "auto-decision.v1",
+    "outcome": "pass",
+    "rule_fired": "read.safe",
+    "rulebook_version": "revision",
+    "remedy": "",
+    "harness": "codex",
+    "inputs": {
+      "action": { "envelope": "shell", "operation": "git.status", "parameters": {} },
+      "observables": {}
+    },
+    "action_digest": "sha256:cf5c3e8fe15a079f962b4256f0d4a0aa0391172a47a6c8793ac2e1674ba97579"
+  },
+  "completion": { "status": "succeeded", "observables": {} }
+}

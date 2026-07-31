@@ -1,0 +1,7 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "codexguard block (authority.force_push): ask the operator to perform this authority-bearing action outside the governed Codex task"
+  }
+}

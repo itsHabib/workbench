@@ -1,0 +1,14 @@
+{
+  "session_id": "thr_fixture",
+  "transcript_path": null,
+  "cwd": "/workspace",
+  "hook_event_name": "PreToolUse",
+  "model": "fixture-model",
+  "turn_id": "turn_fixture",
+  "permission_mode": "default",
+  "tool_name": "mcp__unknown__mutate",
+  "tool_use_id": "call_unknown_mcp",
+  "tool_input": {
+    "value": "fixture"
+  }
+}

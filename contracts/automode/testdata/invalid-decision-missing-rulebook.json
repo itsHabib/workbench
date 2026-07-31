@@ -1,0 +1,12 @@
+{
+  "schema_version": "auto-decision.v1",
+  "outcome": "pass",
+  "rule_fired": "read.safe",
+  "remedy": "",
+  "harness": "codex",
+  "inputs": {
+    "action": { "envelope": "shell", "operation": "git.status", "parameters": {} },
+    "observables": {}
+  },
+  "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}
