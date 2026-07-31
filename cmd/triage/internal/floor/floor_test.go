@@ -85,11 +85,21 @@ func TestFloor(t *testing.T) {
 			diff: "diff --git a/internal/session/store.go b/internal/session/store.go\n+++ b/internal/session/store.go\n@@\n+func rotate(){}\n",
 		},
 		{
+			name: "compound session code filename -> T3",
+			want: T3,
+			diff: "diff --git a/internal/session-cookie.go b/internal/session-cookie.go\n+++ b/internal/session-cookie.go\n@@\n+func rotate(){}\n",
+		},
+		{
 			// "session" is overloaded in agent infrastructure. A compound docs filename
 			// is not an auth-session surface merely because its first token is session.
 			name: "agent session design doc -> T0",
 			want: T0,
 			diff: "diff --git a/docs/features/review/session-reviewfindings-address-boundary.md b/docs/features/review/session-reviewfindings-address-boundary.md\n+++ b/docs/features/review/session-reviewfindings-address-boundary.md\n@@\n+The session engine consumes an exact-head review artifact.\n",
+		},
+		{
+			name: "compound session test filename -> T0",
+			want: T0,
+			diff: "diff --git a/tests/session-cookie_test.go b/tests/session-cookie_test.go\n+++ b/tests/session-cookie_test.go\n@@\n+func TestCookie(t *testing.T){}\n",
 		},
 		{
 			name: "removed authz call in a non-auth path -> T3 (content signal)",
