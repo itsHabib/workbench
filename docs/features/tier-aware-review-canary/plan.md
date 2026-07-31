@@ -373,11 +373,30 @@ Depends on: nothing.
 - implement exact-head joins, targeted continuation, proof substitution,
   deferment validation, caps, and shadow continuation weight;
 - add provider interfaces with a GitHub implementation;
-- add both engine-neutral decision tests and session-adapter parity tests.
+- add engine-neutral decision and exact-head boundary tests.
 
-### PR 2 — Ship compatibility and execution adapter
+This is larger than the normal weighted-LOC target because the portable
+schemas, validators, deterministic policy, CLI boundaries, and conformance
+tests form one contract chain; splitting them would create an intermediate PR
+whose public artifacts cannot be produced or verified end to end.
 
-Depends on: PR 1 contracts.
+### PR 2 — Workbench session execution adapter
+
+Depends on: PR 1.
+
+- consume only an exact `address` decision and matching findings set;
+- persist a resumable address work item in the session ledger;
+- reject stale heads, wrong cycles, duplicate consumption, and ambiguous
+  crash recovery before dispatch;
+- prove parity through the shared corpus and state-machine tests.
+
+This is also above the normal weighted-LOC target because the schema revision,
+ledger reducer, durable lifecycle, crash recovery, corpus, and state-machine
+tests are one coupled transition-system change.
+
+### PR 3 — Ship compatibility and execution adapter
+
+Depends on: PR 1.
 
 - repair `triage-floor` JSON decoding and `-repo owner/name` propagation;
 - remove/reject any Ship-owned review router from the abandoned partial work;
@@ -385,9 +404,9 @@ Depends on: PR 1 contracts.
 - apply accepted findings through `driver address`;
 - extend terminal telemetry to join Workbench review evidence.
 
-### PR 3 — canonical `cc-skills` work-driver orchestration
+### PR 4 — canonical `cc-skills` work-driver orchestration
 
-Depends on: PRs 1 and 2.
+Depends on: PRs 1–3.
 
 - update `cc-skills/skills/work-driver/SKILL.md`;
 - invoke `cmd/review` for both Ship and session engines;
@@ -396,16 +415,16 @@ Depends on: PRs 1 and 2.
 - preserve the existing full-panel path without explicit opt-in;
 - update `catalog.yaml` only as required and verify Claude/Codex projections.
 
-### PR 4 — canary evidence/status
+### PR 5 — canary evidence/status
 
-Depends on: PRs 1–3.
+Depends on: PRs 1–4.
 
 - record all four live canary cases and raw exact-head evidence;
 - update the previously parked strategy status;
 - record rollback and expansion criteria;
 - add the `.workbench.json` migration as separate follow-up work.
 
-Keep PR 4 separate only if the evidence does not fit cleanly in PR 1 or PR 3.
+Keep PR 5 separate only if the evidence does not fit cleanly in PR 1 or PR 4.
 
 ## 14. Test matrix
 
