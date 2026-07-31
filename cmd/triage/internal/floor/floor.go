@@ -126,7 +126,7 @@ var pathRules = []pathRule{
 	// §5.4 control-plane — highest priority, exempt from docs→T0
 	mustRule(`(^|/)RUBRIC\.md$|/skills/pr-risk/|(^|/)labels/|mismatches\.jsonl$|(^|/)CODEOWNERS$`, T3, "control-plane", "edits the classifier or its evidence"),
 	// §5.1 T3 surfaces (migrations are graded by content — see classifyMigration)
-	mustRule(`(^|/)(auth|authz|authn|session|oauth|jwt|crypto|secret|secrets|token|credential|password)([/._-]|$)`, T3, "auth-crypto-secrets", "auth/crypto/secret surface"),
+	mustRule(`(^|/)(auth|authz|authn|oauth|jwt|crypto|secret|secrets|token|credential|password)([/._-]|$)`, T3, "auth-crypto-secrets", "auth/crypto/secret surface"),
 	mustRule(`(^|/)(billing|payment|payments|invoice|ledger|payout|charge|stripe)([/._-]|$)`, T3, "money", "money/billing/ledger path"),
 	// §5.3 registry/source override (path-based; content-based handled separately)
 	mustRule(`(^|/)\.npmrc$|(^|/)go\.work$`, T3, "dep-override", "registry/source override file"),
@@ -226,6 +226,28 @@ var (
 // mention, not the risk itself. reContentSkipFile matches files whose content is never a signal.
 var reContentSkipFile = regexp.MustCompile(`(?i)_test\.go$|\.test\.[jt]s$|(^|/)tests?/|_spec\.|\.spec\.[jt]s$|proptest|\.md$|(^|/)docs?/|(^|/)README|\.txt$`)
 
+var (
+	reSessionPath          = regexp.MustCompile(`(^|/)session([/._-]|$)`)
+	reDedicatedSessionPath = regexp.MustCompile(`(^|/)session([/.]|$)`)
+)
+
+// sessionPathSensitive keeps real session code/config at T3 while avoiding the
+// overloaded agent-session token in compound docs/tests names. A dedicated
+// session directory or exact session.* filename remains sensitive regardless
+// of file type; renames inspect both paths so moving code into docs cannot shed
+// the original signal.
+func sessionPathSensitive(f FileChange) bool {
+	for _, path := range f.paths() {
+		if !reSessionPath.MatchString(path) {
+			continue
+		}
+		if reDedicatedSessionPath.MatchString(path) || !reContentSkipFile.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
 // isCodePath reports whether a path is source code (so it gets the T1 default).
 var reCodePath = regexp.MustCompile(`(?i)\.(go|rs|ts|tsx|js|jsx|py|rb|java|kt|ex|exs|c|cc|cpp|h|hpp|sh|sql)$`)
 
@@ -304,6 +326,7 @@ func ClassifyRepo(d Diff, repo string) Result {
 		// can't shed them; the T0 docs/tests/generated rules match the new path only
 		// (a rename FROM docs into code must not stay T0).
 		matchedPath := false
+		matchedAuthPath := false
 		for _, r := range pathRules {
 			hit := r.re.MatchString(f.Path)
 			if r.tier >= T2 {
@@ -312,7 +335,12 @@ func ClassifyRepo(d Diff, repo string) Result {
 			if hit {
 				add(r.name, r.tier, r.why+": "+f.Path)
 				matchedPath = true
+				matchedAuthPath = matchedAuthPath || r.name == "auth-crypto-secrets"
 			}
+		}
+		if !matchedAuthPath && sessionPathSensitive(f) {
+			add("auth-crypto-secrets", T3, "auth/crypto/secret surface: "+f.Path)
+			matchedPath = true
 		}
 
 		// per-repo path overrides — HELDOUT-01's gate-machinery blind spot made a
