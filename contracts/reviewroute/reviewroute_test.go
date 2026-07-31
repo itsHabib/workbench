@@ -104,6 +104,21 @@ func TestRouteDispositionSchemaMatchesContract(t *testing.T) {
 	}
 }
 
+func TestDecisionActionSchemaMatchesContract(t *testing.T) {
+	var document struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(DecisionSchema, &document); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{ActionStop, ActionContinue, ActionAddress, ActionEscalate, ActionPark}
+	if !slices.Equal(document.Properties["action"].Enum, want) {
+		t.Fatalf("action schema = %v, want %v", document.Properties["action"].Enum, want)
+	}
+}
+
 func TestPolicyRequiresCompleteTierMap(t *testing.T) {
 	policy := validPolicy()
 	delete(policy.Tiers, "T3")
@@ -334,6 +349,19 @@ func TestDecisionRejectsDuplicateFindingIDs(t *testing.T) {
 	decision.Findings = append(decision.Findings, decision.Findings[0])
 	if err := ValidateDecision(decision); err == nil {
 		t.Fatal("duplicate decision finding id unexpectedly valid")
+	}
+}
+
+func TestDecisionAcceptsAddressAction(t *testing.T) {
+	decision := validDecision()
+	decision.Action = ActionAddress
+	decision.ReasonCodes = []string{"accepted_findings_require_address"}
+	decision.Findings = []FindingState{{
+		ID: "f1", Severity: "low", Reviewers: []string{"codex"},
+		Disposition: "fixed",
+	}}
+	if err := ValidateDecision(decision); err != nil {
+		t.Fatalf("address decision rejected: %v", err)
 	}
 }
 

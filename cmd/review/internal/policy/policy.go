@@ -159,6 +159,7 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		action = reviewroute.ActionPark
 		reasons = append(reasons, "cycle_cap_reached")
 	}
+	action, reasons = addressAction(action, input.Findings, reasons)
 
 	decision := reviewroute.Decision{
 		SchemaVersion:       reviewroute.SchemaVersion,
@@ -324,6 +325,42 @@ func findingBlockers(
 		return []string{"critical_reviewer_closure_missing"}, true
 	}
 	return []string{"reviewer_closure_missing"}, true
+}
+
+func needsAddress(findings []reviewroute.FindingState, reasons []string) bool {
+	if !onlyClosureBlockers(reasons) {
+		return false
+	}
+	for _, finding := range findings {
+		if finding.Disposition == "fixed" && !finding.Changed {
+			return true
+		}
+	}
+	return false
+}
+
+func addressAction(
+	action string,
+	findings []reviewroute.FindingState,
+	reasons []string,
+) (string, []string) {
+	if action != reviewroute.ActionContinue || !needsAddress(findings, reasons) {
+		return action, reasons
+	}
+	return reviewroute.ActionAddress, append(reasons, "accepted_findings_require_address")
+}
+
+func onlyClosureBlockers(reasons []string) bool {
+	if len(reasons) == 0 {
+		return false
+	}
+	for _, reason := range reasons {
+		if reason == "reviewer_closure_missing" || reason == "critical_reviewer_closure_missing" {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func proofCloses(plan reviewroute.Plan, tier string, critical bool, proofRef string) bool {

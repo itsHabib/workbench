@@ -23,6 +23,9 @@ const (
 	ActionStop = "stop"
 	// ActionContinue declares that targeted review work remains below the cap.
 	ActionContinue = "continue"
+	// ActionAddress declares that accepted findings need an execution adapter to
+	// change the current head before the named reviewers can close them.
+	ActionAddress = "address"
 	// ActionEscalate declares that a new plan or higher tier is required.
 	ActionEscalate = "escalate"
 	// ActionPark declares that deterministic policy cannot continue unattended.
@@ -554,7 +557,7 @@ func validateDecisionCycle(decision Decision) error {
 
 func validateDecisionOutcome(decision Decision) error {
 	switch decision.Action {
-	case ActionStop, ActionContinue, ActionEscalate, ActionPark:
+	case ActionStop, ActionContinue, ActionAddress, ActionEscalate, ActionPark:
 	default:
 		return errors.New("reviewroute: decision action is invalid")
 	}
