@@ -248,13 +248,16 @@ func completedReviewState(state string) bool {
 }
 
 var codexReviewedCommit = regexp.MustCompile(
-	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-fA-F]{7,40})`\\r?$",
+	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-fA-F]{40})`\\r?$",
 )
 
 func cleanComment(
 	expected, head string,
 	comments []issueComment,
 ) (reviewpanel.Reviewer, bool) {
+	// Comment-based completion is Codex-specific: Codex emits a structured
+	// clean-review message with a full reviewed commit. Extend this boundary
+	// explicitly if another reviewer gains an equivalent exact-head signal.
 	if expected != "codex" {
 		return reviewpanel.Reviewer{}, false
 	}
@@ -265,7 +268,7 @@ func cleanComment(
 			continue
 		}
 		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
-		if len(match) != 2 || !strings.HasPrefix(strings.ToLower(head), strings.ToLower(match[1])) {
+		if len(match) != 2 || !strings.EqualFold(head, match[1]) {
 			continue
 		}
 		return reviewpanel.Reviewer{
@@ -293,7 +296,7 @@ func actorMatches(expected, actor string) bool {
 		"codex":   {"codex", "chatgpt-codex-connector"},
 		"cursor":  {"cursor"},
 		"claude":  {"claude"},
-		"copilot": {"copilot-pull-request-reviewer", "github-copilot"},
+		"copilot": {"copilot", "copilot-pull-request-reviewer", "github-copilot"},
 	}
 	values := aliases[expected]
 	if len(values) == 0 {
