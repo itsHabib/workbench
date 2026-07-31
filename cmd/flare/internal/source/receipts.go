@@ -11,14 +11,15 @@ import (
 )
 
 type receipt struct {
-	Key        string `json:"key"`
-	Source     string `json:"source"`
-	Outcome    string `json:"outcome"`
-	Project    string `json:"project"`
-	Repo       string `json:"repo"`
-	TaskSlug   string `json:"task_slug"`
-	PRNumber   int    `json:"pr_number"`
-	TerminalAt string `json:"terminal_at"`
+	Key         string `json:"key"`
+	Source      string `json:"source"`
+	Outcome     string `json:"outcome"`
+	Project     string `json:"project"`
+	Repo        string `json:"repo"`
+	TaskSlug    string `json:"task_slug"`
+	PRNumber    int    `json:"pr_number"`
+	GeneratedAt string `json:"generated_at"`
+	TerminalAt  string `json:"terminal_at"`
 }
 
 // parseReceipts lifts failed, cancelled, and parked ship receipts. A receipt's key
@@ -31,7 +32,10 @@ func parseReceipts(src config.Source, lines []string) ([]event.Event, string, er
 		if err := json.Unmarshal([]byte(l), &r); err != nil {
 			return nil, "", fmt.Errorf("source %s: bad receipt line: %w", src.Name, err)
 		}
-		ev, ok := receiptEvent(src, r)
+		ev, ok, err := receiptEvent(src, r)
+		if err != nil {
+			return nil, "", err
+		}
 		if !ok {
 			continue
 		}
@@ -40,17 +44,23 @@ func parseReceipts(src config.Source, lines []string) ([]event.Event, string, er
 	return events, "", nil
 }
 
-func receiptEvent(src config.Source, r receipt) (event.Event, bool) {
+func receiptEvent(src config.Source, r receipt) (event.Event, bool, error) {
 	sev, ok := receiptSeverity(r.Outcome)
 	if !ok {
-		return event.Event{}, false
+		return event.Event{}, false, nil
 	}
-	when, _ := time.Parse(time.RFC3339, r.TerminalAt)
+	when, err := receiptTime(r)
+	if err != nil {
+		return event.Event{}, false, fmt.Errorf("source %s: receipt %q: %w", src.Name, r.Key, err)
+	}
 	what := r.TaskSlug
 	if what == "" {
 		what = r.Key
 	}
 	body := fmt.Sprintf("run %s %s", what, r.Outcome)
+	if r.Outcome == "parked" {
+		body = fmt.Sprintf("run %s paused after a failure or dispatch ambiguity; inspect Ship to retry, skip, abort, or adopt", what)
+	}
 	if r.Repo != "" {
 		body = fmt.Sprintf("%s: %s", r.Repo, body)
 	}
@@ -63,7 +73,24 @@ func receiptEvent(src config.Source, r receipt) (event.Event, bool) {
 		Title:    fmt.Sprintf("%s: %s %s", src.Name, what, r.Outcome),
 		Body:     body,
 		Fields:   receiptFields(r),
-	}, true
+	}, true, nil
+}
+
+func receiptTime(r receipt) (time.Time, error) {
+	raw := r.GeneratedAt
+	field := "generated_at"
+	if raw == "" {
+		raw = r.TerminalAt
+		field = "terminal_at"
+	}
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("missing generated_at (and historical terminal_at fallback)")
+	}
+	when, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("bad %s: %w", field, err)
+	}
+	return when, nil
 }
 
 // receiptFields carries the receipt's structured facts so notify can render
@@ -89,10 +116,10 @@ func receiptSeverity(outcome string) (event.Severity, bool) {
 	case "cancelled":
 		return event.SevCancelled, true
 	case "parked":
-		// A driver run parked at awaiting_judgment — the ship-side analogue of a
-		// gate escalation ("a producer parked for judgment"): page-worthy, above
-		// failed. Emitted by ship's receipts writer as outcome "parked".
-		return event.SevEscalate, true
+		// Ship emits park receipts for failure triage and dispatch ambiguity.
+		// Those need attention in Ship, but they are not a Gate policy park that
+		// can be approved or blocked through escalate serve.
+		return event.SevFailed, true
 	}
 	return 0, false
 }

@@ -18,6 +18,7 @@ func TestRequireLoopback(t *testing.T) {
 			t.Errorf("requireLoopback(%q) = nil, want refusal", a)
 		}
 	}
+	t.Log("refuse: non-loopback bind addresses rejected before listen")
 }
 
 func TestKeysUsageAndBadSubcommand(t *testing.T) {

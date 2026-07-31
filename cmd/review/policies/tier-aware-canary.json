@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "tier-aware-canary",
+  "enabled_repositories": ["itsHabib/ship"],
+  "full_panel": [
+    { "name": "codex", "trigger": "mention" },
+    { "name": "claude", "trigger": "mention" },
+    { "name": "cursor", "trigger": "mention" },
+    { "name": "copilot", "trigger": "reviewer-request" }
+  ],
+  "tiers": {
+    "T0": {
+      "reviewers": [],
+      "required": [],
+      "max_cycles": 1,
+      "requirements": {
+        "coordinator": "none",
+        "local_adversarial": true,
+        "adversarial_verification": false,
+        "allow_proof_substitution": true
+      }
+    },
+    "T1": {
+      "reviewers": ["codex"],
+      "required": ["codex"],
+      "max_cycles": 3,
+      "requirements": {
+        "coordinator": "on-findings",
+        "local_adversarial": false,
+        "adversarial_verification": false,
+        "allow_proof_substitution": true
+      }
+    },
+    "T2": {
+      "reviewers": ["codex", "cursor", "copilot"],
+      "required": ["codex", "cursor"],
+      "max_cycles": 3,
+      "requirements": {
+        "coordinator": "required",
+        "local_adversarial": false,
+        "adversarial_verification": false,
+        "allow_proof_substitution": true
+      }
+    },
+    "T3": {
+      "reviewers": ["codex", "claude", "cursor", "copilot"],
+      "required": ["codex", "claude", "cursor"],
+      "max_cycles": 8,
+      "requirements": {
+        "coordinator": "required",
+        "local_adversarial": false,
+        "adversarial_verification": true,
+        "allow_proof_substitution": false
+      }
+    }
+  }
+}

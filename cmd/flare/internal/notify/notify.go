@@ -232,6 +232,9 @@ func headline(ev event.Event) string {
 	case event.SevEscalate:
 		return escalateHeadline(ev)
 	case event.SevFailed:
+		if ev.Fields["outcome"] == "parked" {
+			return runHeadline(ev, "parked", "⏸️")
+		}
 		return runHeadline(ev, "failed", "❌")
 	case event.SevCancelled:
 		return runHeadline(ev, "cancelled", "⚪")

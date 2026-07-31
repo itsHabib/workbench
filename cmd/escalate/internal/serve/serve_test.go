@@ -664,6 +664,96 @@ func TestServeHTTPAuthorizesVerifiedUser(t *testing.T) {
 	}
 }
 
+func TestServeHTTPLogsResolvedWithoutUserIdentity(t *testing.T) {
+	var calls int
+	cr := &captured{out: []byte(`{"outcome":"would_merge"}`), code: codeMerge}
+	s, _ := newServer(cr, fixedGrant("grt_log", &calls))
+	var logs bytes.Buffer
+	s.log = log.New(&logs, "", 0)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_0123456789abcdef", "private-user"))
+	req := signedRequest(testSecret, fixedNow, body)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	s.Wait()
+
+	got := logs.String()
+	if !strings.Contains(got, "resolved escalation=esc_0123456789abcdef gate_exit=0 slack_updated=true") {
+		t.Fatalf("successful resolution log missing:\n%s", got)
+	}
+	if strings.Contains(got, "private-user") {
+		t.Fatalf("success logs must not expose Slack identity:\n%s", got)
+	}
+}
+
+type blockingLogWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingLogWriter) Write(p []byte) (int, error) {
+	close(w.entered)
+	<-w.release
+	return len(p), nil
+}
+
+func TestServeHTTPAcknowledgesBeforeLogging(t *testing.T) {
+	var calls int
+	cr := &captured{out: []byte(`{"outcome":"would_merge"}`), code: codeMerge}
+	s, _ := newServer(cr, fixedGrant("grt_log", &calls))
+	writer := &blockingLogWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	s.log = log.New(writer, "", 0)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_0123456789abcdef", "private-user"))
+	rec := httptest.NewRecorder()
+	returned := make(chan struct{})
+	go func() {
+		s.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("ack path blocked on logging")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, want 200", rec.Code)
+	}
+
+	select {
+	case <-writer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("terminal resolution log was not attempted")
+	}
+	close(writer.release)
+	s.Wait()
+}
+
+func TestServeHTTPLogsGateHardErrorAsFailed(t *testing.T) {
+	var calls int
+	cr := &captured{out: []byte(`{"outcome":"error"}`), code: 4}
+	s, _ := newServer(cr, fixedGrant("grt_log", &calls))
+	var logs bytes.Buffer
+	s.log = log.New(&logs, "", 0)
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_0123456789abcdef", "private-user"))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, signedRequest(testSecret, fixedNow, body))
+	s.Wait()
+
+	got := logs.String()
+	if !strings.Contains(got, "failed escalation=esc_0123456789abcdef gate_exit=4 slack_updated=true") {
+		t.Fatalf("gate hard-error log missing:\n%s", got)
+	}
+	if strings.Contains(got, "resolved escalation=") {
+		t.Fatalf("gate hard error must not be labeled resolved:\n%s", got)
+	}
+}
+
 // TestAllowUsers pins the allowlist predicate: listed ids pass, unlisted and the
 // empty id fail, and an EMPTY allowlist admits no one (fail-closed).
 func TestAllowUsers(t *testing.T) {

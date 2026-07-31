@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -29,15 +30,60 @@ func parseFloorOutput(out []byte) (floorResult, error) {
 
 // floorResult mirrors the triage floor binary's JSON output.
 type floorResult struct {
-	Floor   string `json:"floor"`
-	Signals []struct {
-		Signal string `json:"signal"`
-		Tier   string `json:"tier"`
-		Why    string `json:"why"`
-	} `json:"signals"`
-	Files   int `json:"files"`
-	Added   int `json:"added"`
-	Removed int `json:"removed"`
+	Floor   string        `json:"floor"`
+	Signals []floorSignal `json:"signals"`
+	Files   int           `json:"files"`
+	Added   int           `json:"added"`
+	Removed int           `json:"removed"`
+}
+
+type floorSignal struct {
+	Signal string `json:"signal"`
+	Tier   string `json:"tier"`
+	Why    string `json:"why"`
+}
+
+const maxFloorDriversInSummary = 3
+
+func floorWhy(res floorResult) string {
+	var drivers []string
+	seen := make(map[string]struct{})
+	for _, signal := range res.Signals {
+		if signal.Tier != res.Floor {
+			continue
+		}
+		driver := signal.Signal + ": " + signal.Why
+		if _, ok := seen[driver]; ok {
+			continue
+		}
+		seen[driver] = struct{}{}
+		drivers = append(drivers, driver)
+	}
+	if len(drivers) == 0 {
+		return fmt.Sprintf("deterministic %s floor over %d files (+%d/-%d)", res.Floor, res.Files, res.Added, res.Removed)
+	}
+
+	remaining := len(drivers) - maxFloorDriversInSummary
+	if remaining > 0 {
+		drivers = drivers[:maxFloorDriversInSummary]
+		drivers = append(drivers, fmt.Sprintf("+%d more max-tier drivers", remaining))
+	}
+	return fmt.Sprintf(
+		"deterministic %s floor: %s (%d files, +%d/-%d)",
+		res.Floor,
+		strings.Join(drivers, "; "),
+		res.Files,
+		res.Added,
+		res.Removed,
+	)
+}
+
+func orderFloorSignals(signals []floorSignal) []floorSignal {
+	ordered := append([]floorSignal(nil), signals...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return tier.Rank(ordered[i].Tier) > tier.Rank(ordered[j].Tier)
+	})
+	return ordered
 }
 
 // Floor runs the deterministic risk floor over recorded diff evidence.
@@ -77,9 +123,9 @@ func Floor(st *state.Store, run, diffEvidenceID, floorBin string, subject Subjec
 		Decision:   DecisionPass,
 		Tier:       res.Floor,
 		Confidence: 1.0,
-		Why:        fmt.Sprintf("deterministic floor over %d files (+%d/-%d)", res.Files, res.Added, res.Removed),
+		Why:        floorWhy(res),
 	}
-	for _, s := range res.Signals {
+	for _, s := range orderFloorSignals(res.Signals) {
 		v.Findings = append(v.Findings, Finding{Title: s.Signal + ": " + s.Why, Severity: s.Tier})
 	}
 	return Record(st, run, []string{diffEvidenceID}, v)

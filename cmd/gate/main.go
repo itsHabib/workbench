@@ -157,7 +157,7 @@ func usage() {
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N -grant grt_x [-live]
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider-command <executable>)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
   executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
@@ -968,7 +968,7 @@ func outcomeSubjectMatches(byID map[string]state.Artifact, a state.Artifact, sub
 }
 
 // validateJudgeFlags enforces one judgment source: operator flags, a submitted
-// artifact, or an explicitly configured provider command.
+// artifact, or one built-in local CLI provider.
 func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 	if run == "" || grantID == "" {
 		return errors.New("judge: -run and -grant required")
@@ -987,13 +987,10 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
 	}
 	if opts.Auto {
-		if opts.ProviderCommand == "" {
-			return errors.New("judge_provider_unconfigured: -auto requires -provider-command <executable>")
-		}
-		return nil
+		return verify.ValidateJudgeProvider(opts.Provider)
 	}
-	if opts.ProviderCommand != "" {
-		return errors.New("judge: -provider-command requires -auto")
+	if opts.Provider != "" {
+		return errors.New("judge: -provider requires -auto")
 	}
 	if opts.ArtifactPath != "" {
 		return nil
@@ -1008,12 +1005,12 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 }
 
 type judgmentOptions struct {
-	Decision        string
-	Why             string
-	Auto            bool
-	ArtifactPath    string
-	ProviderCommand string
-	beforeAppend    func()
+	Decision     string
+	Why          string
+	Auto         bool
+	ArtifactPath string
+	Provider     string
+	beforeAppend func()
 }
 
 func cmdJudge(args []string) error {
@@ -1024,8 +1021,8 @@ func cmdJudge(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the judgment's reasoning")
 	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
-	auto := fs.Bool("auto", false, "run an explicitly configured provider command over the versioned request")
-	providerCommand := fs.String("provider-command", "", "provider executable for -auto; request on stdin, judgment artifact on stdout")
+	auto := fs.Bool("auto", false, "run a built-in local CLI provider over the versioned request")
+	provider := fs.String("provider", "", "built-in local CLI provider for -auto: claude or codex")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -1035,11 +1032,11 @@ func cmdJudge(args []string) error {
 		return nil
 	}
 	opts := judgmentOptions{
-		Decision:        *decision,
-		Why:             *why,
-		Auto:            *auto,
-		ArtifactPath:    *artifactPath,
-		ProviderCommand: *providerCommand,
+		Decision:     *decision,
+		Why:          *why,
+		Auto:         *auto,
+		ArtifactPath: *artifactPath,
+		Provider:     *provider,
 	}
 	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
@@ -1210,7 +1207,7 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 		return verify.Verdict{}, err
 	}
 	if opts.Auto {
-		return verify.AutoJudge(opts.ProviderCommand, request)
+		return verify.AutoJudge(opts.Provider, request)
 	}
 	artifact, err := readJudgmentArtifact(opts.ArtifactPath)
 	if err != nil {
@@ -1561,12 +1558,21 @@ func cmdNext(args []string) error {
 // best-effort at the call site (observe degrades a repo whose fetch errors), so
 // a repo gh can't reach never fails the whole projection.
 func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
+	const timeout = 3 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return lookupOpenPRsContext(ctx, repo, runGHPRList)
+}
+
+type ghPRListRunner func(context.Context, string) ([]byte, []byte, error)
+
+func runGHPRList(ctx context.Context, repo string) ([]byte, []byte, error) {
 	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
 	// silently cap at 30 and undercount. It may still truncate a repo with >1000
 	// open PRs — any still-open PR outside the page would then be absent from the
 	// map and reconciled as "not open" (dropped) — so the boundary is surfaced
 	// below rather than paginated away.
-	cmd := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
 	// Capture stdout and stderr separately: gh can write progress/deprecation/
 	// rate-limit banners to stderr even on a zero exit, and interleaving them
 	// into the JSON buffer would turn a clean read into a confusing decode error.
@@ -1574,7 +1580,18 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
+		return stdout.Bytes(), stderr.Bytes(), err
+	}
+	return stdout.Bytes(), stderr.Bytes(), nil
+}
+
+func lookupOpenPRsContext(ctx context.Context, repo string, run ghPRListRunner) (map[int]observe.LivePR, error) {
+	stdout, stderr, err := run(ctx, repo)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("list PRs %s: %w", repo, ctx.Err())
+		}
+		detail := strings.TrimSpace(string(stderr))
 		if detail != "" {
 			return nil, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
 		}
@@ -1586,7 +1603,7 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 		HeadRefOID string `json:"headRefOid"`
 		URL        string `json:"url"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
+	if err := json.Unmarshal(stdout, &prs); err != nil {
 		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
 	}
 	if len(prs) == 1000 {

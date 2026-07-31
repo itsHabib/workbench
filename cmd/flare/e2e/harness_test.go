@@ -199,24 +199,24 @@ func seal(prev string, env contracts.Envelope) string {
 // lives here, local to the harness, so the e2e stays a black-box exercise of the
 // flare binary rather than importing ship's writer.
 type receiptLine struct {
-	Key        string `json:"key"`
-	Source     string `json:"source"`
-	Outcome    string `json:"outcome"`
-	Repo       string `json:"repo"`
-	TaskSlug   string `json:"task_slug"`
-	PRNumber   int    `json:"pr_number"`
-	TerminalAt string `json:"terminal_at"`
+	Key         string `json:"key"`
+	Source      string `json:"source"`
+	Outcome     string `json:"outcome"`
+	Repo        string `json:"repo"`
+	TaskSlug    string `json:"task_slug"`
+	PRNumber    int    `json:"pr_number"`
+	GeneratedAt string `json:"generated_at"`
 }
 
-// seedReceipts writes a ship receipts.jsonl with a parked receipt (page-worthy —
-// the ship-side analogue of a gate escalation) and a merged receipt that is not
-// page-worthy, so the harness proves selectivity on the ship side too.
+// seedReceipts writes a ship receipts.jsonl with a parked mechanism receipt that
+// needs attention without masquerading as a Gate policy decision, plus a merged
+// receipt that is not page-worthy.
 func seedReceipts(t *testing.T, dir string) string {
 	t.Helper()
 	when := "2026-07-15T09:05:00Z"
 	receipts := []receiptLine{
-		{Key: "run-7", Source: "ship", Outcome: "parked", Repo: "itsHabib/ship", TaskSlug: "e2e-harness", PRNumber: 181, TerminalAt: when},
-		{Key: "run-8", Source: "ship", Outcome: "merged", Repo: "itsHabib/ship", TaskSlug: "docs-tweak", PRNumber: 170, TerminalAt: when},
+		{Key: "run-7", Source: "driver", Outcome: "parked", Repo: "itsHabib/ship", TaskSlug: "e2e-harness", PRNumber: 181, GeneratedAt: when},
+		{Key: "run-8", Source: "driver", Outcome: "merged", Repo: "itsHabib/ship", TaskSlug: "docs-tweak", PRNumber: 170, GeneratedAt: when},
 	}
 	lines := make([]string, len(receipts))
 	for i, r := range receipts {
