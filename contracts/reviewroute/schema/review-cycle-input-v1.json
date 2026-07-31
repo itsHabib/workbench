@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/reviewroute/schema/review-cycle-input-v1.json",
+  "title": "ReviewCycleInputV1",
+  "type": "object",
+  "required": ["schema_version", "subject", "plan_id", "cycle", "current_tier", "checks_passed", "panel_complete", "completed_reviewers", "coordinator_complete", "adversarial_complete", "adversarial_evidence", "findings"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "subject": {
+      "type": "object",
+      "required": ["repo", "number", "head_sha"],
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[a-z0-9._-]+/[a-z0-9._-]+$" },
+        "number": { "type": "integer", "minimum": 1 },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      },
+      "additionalProperties": false
+    },
+    "plan_id": { "type": "string", "pattern": "^rp_[0-9a-f]{32}$" },
+    "cycle": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "current_tier": { "enum": ["T0", "T1", "T2", "T3"] },
+    "checks_passed": { "type": "boolean" },
+    "panel_complete": { "type": "boolean" },
+    "completed_reviewers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "coordinator_complete": { "type": "boolean" },
+    "adversarial_complete": { "type": "boolean" },
+    "adversarial_evidence": {
+      "type": ["object", "null"],
+      "required": ["subject", "source", "result", "confidence", "artifact_digest"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "required": ["repo", "number", "head_sha"],
+          "properties": {
+            "repo": { "type": "string", "pattern": "^[a-z0-9._-]+/[a-z0-9._-]+$" },
+            "number": { "type": "integer", "minimum": 1 },
+            "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+          },
+          "additionalProperties": false
+        },
+        "source": { "type": "string", "minLength": 1 },
+        "result": { "enum": ["pass", "escalate"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "continuation_rationale": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "reviewers", "disposition", "changed", "reviewer_closed", "debt"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "minLength": 1 },
+          "reviewers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "disposition": { "enum": ["fixed", "proved_safe", "deferred", "unresolved"] },
+          "changed": { "type": "boolean" },
+          "reviewer_closed": { "type": "boolean" },
+          "proof_ref": { "type": "string" },
+          "defer_reason": { "type": "string" },
+          "debt": { "type": "boolean" },
+          "follow_up_ref": { "type": "string" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "disposition": { "const": "proved_safe" } },
+              "required": ["disposition"]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "properties": { "reviewer_closed": { "const": true } },
+                  "required": ["reviewer_closed"]
+                },
+                {
+                  "properties": { "proof_ref": { "type": "string", "minLength": 1 } },
+                  "required": ["proof_ref"]
+                }
+              ]
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "adversarial_complete": { "const": true }
+        },
+        "required": ["adversarial_complete"]
+      },
+      "then": {
+        "properties": {
+          "adversarial_evidence": {
+            "type": "object",
+            "properties": {
+              "result": { "const": "pass" }
+            },
+            "required": ["result"]
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

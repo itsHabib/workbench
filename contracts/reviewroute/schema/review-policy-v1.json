@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/reviewroute/schema/review-policy-v1.json",
+  "title": "ReviewPolicyV1",
+  "type": "object",
+  "required": ["schema_version", "id", "enabled_repositories", "full_panel", "tiers"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "enabled_repositories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[^/]+/[^/]+$" }
+    },
+    "full_panel": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/reviewer" }
+    },
+    "tiers": {
+      "type": "object",
+      "required": ["T0", "T1", "T2", "T3"],
+      "properties": {
+        "T0": { "$ref": "#/$defs/tier" },
+        "T1": { "$ref": "#/$defs/tier" },
+        "T2": { "$ref": "#/$defs/tier" },
+        "T3": { "$ref": "#/$defs/tier" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "reviewer": {
+      "type": "object",
+      "required": ["name", "trigger"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "trigger": { "enum": ["mention", "reviewer-request", "auto"] }
+      },
+      "additionalProperties": false
+    },
+    "names": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "tier": {
+      "type": "object",
+      "required": ["reviewers", "required", "max_cycles", "requirements"],
+      "properties": {
+        "reviewers": { "$ref": "#/$defs/names" },
+        "required": { "$ref": "#/$defs/names" },
+        "max_cycles": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "requirements": {
+          "type": "object",
+          "required": ["coordinator", "local_adversarial", "adversarial_verification", "allow_proof_substitution"],
+          "properties": {
+            "coordinator": { "enum": ["none", "on-findings", "required"] },
+            "local_adversarial": { "type": "boolean" },
+            "adversarial_verification": { "type": "boolean" },
+            "allow_proof_substitution": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
