@@ -1,6 +1,6 @@
 # Approval UX — calm, phone-friendly operator decisions
 
-Status: proposed
+Status: proposed — Phase 0 (designs 1–3) specified in `approval-ux-phase0.md`
 Date: 2026-07-31
 
 `design.md` owns the security contract: run-specific independent environment
