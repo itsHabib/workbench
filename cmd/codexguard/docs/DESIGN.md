@@ -90,8 +90,9 @@ bytes are not persisted.
 
 ## Honest enforcement boundary
 
-The native lifecycle adapter and its reviewed hook asset exist, but profile
-projection, trust, and restrictive rule installation remain separate. A valid
+The native lifecycle adapter exists, but the absolute-path hook definition,
+profile projection, trust, and restrictive rule installation remain separate.
+A valid
 invoked deny stops a supported call. Missing, crashed, timed-out, malformed, or
 changed-untrusted hooks may be skipped or allow Codex to continue, and some
 specialized tool paths opt out. `docs/hooks.md` pins that matrix; restrictive

@@ -165,6 +165,53 @@ func TestPermissionRequestNeverWidensPolicy(t *testing.T) {
 	}
 }
 
+func TestNativeCWDBindsShellReplayIdentity(t *testing.T) {
+	firstAudit := &memoryAudit{}
+	if _, err := testAdapter(firstAudit, "powershell").Handle(
+		context.Background(), fixture(t, "pre-powershell-pass.json"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	secondAudit := &memoryAudit{}
+	second := strings.Replace(
+		string(fixture(t, "pre-powershell-pass.json")),
+		`"cwd": "C:\\workspace"`,
+		`"cwd": "D:\\different-workspace"`,
+		1,
+	)
+	if _, err := testAdapter(secondAudit, "powershell").Handle(
+		context.Background(), []byte(second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if firstAudit.events[0].Decision.ActionDigest == secondAudit.events[0].Decision.ActionDigest {
+		t.Fatal("different native cwd values produced the same action digest")
+	}
+}
+
+func TestToolWorkdirOverridesNativeCWD(t *testing.T) {
+	got, err := shellArguments(
+		[]byte(`{"command":"git status","workdir":"D:/tool-workdir"}`),
+		"powershell",
+		"C:/native-cwd",
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(got, &values); err != nil {
+		t.Fatal(err)
+	}
+	var workdir string
+	if err := json.Unmarshal(values["workdir"], &workdir); err != nil {
+		t.Fatal(err)
+	}
+	if workdir != "D:/tool-workdir" {
+		t.Fatalf("workdir = %q, want tool-specific value", workdir)
+	}
+}
+
 func TestPostToolUseSkipsNativeShellStatusUnknown(t *testing.T) {
 	for _, name := range []string{"post-bash-success.json", "post-bash-failed.json"} {
 		t.Run(name, func(t *testing.T) {
@@ -214,6 +261,26 @@ func TestPostToolUseAddsStructuredPassCompletion(t *testing.T) {
 	}
 	if completion.InvocationID != audit.events[0].InvocationID {
 		t.Fatalf("completion invocation = %q, decision = %q", completion.InvocationID, audit.events[0].InvocationID)
+	}
+}
+
+func TestCompletionStatusRejectsContradictorySignals(t *testing.T) {
+	tests := []string{
+		`{"is_error":false,"success":false}`,
+		`{"success":true,"exit_code":1}`,
+		`{"isError":true,"exitCode":0}`,
+		`{"is_error":"false","success":true}`,
+	}
+	for _, data := range tests {
+		if status, signal, ok := completionStatus([]byte(data)); ok {
+			t.Fatalf("%s produced status=%q signal=%q", data, status, signal)
+		}
+	}
+
+	status, signal, ok := completionStatus([]byte(`{"is_error":false,"success":true,"exit_code":0}`))
+	if !ok || status != automode.StatusSucceeded ||
+		signal != "is_error,success,exit_code:0" {
+		t.Fatalf("consistent signals = %q %q %t", status, signal, ok)
 	}
 }
 

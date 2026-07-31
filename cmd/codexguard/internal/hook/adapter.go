@@ -287,7 +287,7 @@ func validNullableString(data []byte) bool {
 
 func policyEnvelope(input Input, shell string, permission bool) (policy.Envelope, error) {
 	if input.ToolName == "Bash" {
-		arguments, err := shellArguments(input.ToolInput, shell, permission)
+		arguments, err := shellArguments(input.ToolInput, shell, input.CWD, permission)
 		if err != nil {
 			return policy.Envelope{}, err
 		}
@@ -299,7 +299,7 @@ func policyEnvelope(input Input, shell string, permission bool) (policy.Envelope
 	return policy.Envelope{Kind: "local", Tool: input.ToolName, Arguments: input.ToolInput}, nil
 }
 
-func shellArguments(data []byte, shell string, permission bool) ([]byte, error) {
+func shellArguments(data []byte, shell, cwd string, permission bool) ([]byte, error) {
 	var values map[string]json.RawMessage
 	if err := json.Unmarshal(data, &values); err != nil {
 		return nil, errors.New("hook: Bash tool_input must be an object")
@@ -312,6 +312,13 @@ func shellArguments(data []byte, shell string, permission bool) ([]byte, error) 
 		return nil, err
 	}
 	values["shell"] = shellJSON
+	if _, ok := values["workdir"]; !ok {
+		workdirJSON, err := json.Marshal(cwd)
+		if err != nil {
+			return nil, err
+		}
+		values["workdir"] = workdirJSON
+	}
 	out, err := json.Marshal(values)
 	if err != nil {
 		return nil, fmt.Errorf("hook: encode Bash policy input: %w", err)
@@ -395,9 +402,9 @@ func completionFrom(data []byte) (automode.Completion, bool) {
 		return automode.Completion{}, false
 	}
 	sum := sha256.Sum256(data)
-	observables := []automode.NamedValue{
-		{Name: "response_digest", Value: "sha256:" + hex.EncodeToString(sum[:])},
-		{Name: "result_signal", Value: signal},
+	observables := automode.Values{
+		"response_digest": {Value: "sha256:" + hex.EncodeToString(sum[:])},
+		"result_signal":   {Value: signal},
 	}
 	return automode.Completion{Status: status, Observables: observables}, true
 }
@@ -411,25 +418,60 @@ func completionStatus(data []byte) (string, string, bool) {
 }
 
 func objectCompletionStatus(object map[string]json.RawMessage) (string, string, bool) {
-	for _, name := range []string{"is_error", "isError"} {
-		var failed bool
-		if raw, ok := object[name]; ok && json.Unmarshal(raw, &failed) == nil {
-			return statusFromFailure(failed), name, true
+	signals, ok := completionSignals(object)
+	if !ok || len(signals) == 0 {
+		return "", "", false
+	}
+	failed := signals[0].failed
+	labels := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		if signal.failed != failed {
+			return "", "", false
 		}
+		labels = append(labels, signal.label)
+	}
+	return statusFromFailure(failed), strings.Join(labels, ","), true
+}
+
+type completionSignal struct {
+	label  string
+	failed bool
+}
+
+func completionSignals(object map[string]json.RawMessage) ([]completionSignal, bool) {
+	var signals []completionSignal
+	for _, name := range []string{"is_error", "isError"} {
+		raw, exists := object[name]
+		if !exists {
+			continue
+		}
+		var failed bool
+		if json.Unmarshal(raw, &failed) != nil {
+			return nil, false
+		}
+		signals = append(signals, completionSignal{label: name, failed: failed})
 	}
 	if raw, ok := object["success"]; ok {
 		var success bool
-		if json.Unmarshal(raw, &success) == nil {
-			return statusFromFailure(!success), "success", true
+		if json.Unmarshal(raw, &success) != nil {
+			return nil, false
 		}
+		signals = append(signals, completionSignal{label: "success", failed: !success})
 	}
 	for _, name := range []string{"exit_code", "exitCode"} {
-		var code int
-		if raw, ok := object[name]; ok && json.Unmarshal(raw, &code) == nil {
-			return statusFromFailure(code != 0), name + ":" + strconv.Itoa(code), true
+		raw, exists := object[name]
+		if !exists {
+			continue
 		}
+		var code int
+		if json.Unmarshal(raw, &code) != nil {
+			return nil, false
+		}
+		signals = append(signals, completionSignal{
+			label: name + ":" + strconv.Itoa(code), failed: code != 0,
+		})
 	}
-	return "", "", false
+	return signals, true
 }
 
 func statusFromFailure(failed bool) string {

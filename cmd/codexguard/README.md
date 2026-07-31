@@ -77,6 +77,7 @@ synced to the AutoMode audit before a response is returned; permission requests
 can never widen a non-pass; post-tool evidence can never grant authority.
 
 See [`docs/hooks.md`](docs/hooks.md) for the response table, audit path, direct
-offline fixtures, and honest hook-failure matrix. The reviewed
-[`assets/hooks.json`](assets/hooks.json) is not installed by this slice, so this
-is not yet a profile-wide enforcement claim.
+offline fixtures, and honest hook-failure matrix. This slice deliberately ships
+no installable hook definition: the projection layer must bind the command to
+an absolute reviewed executable path, so a repository-local `codexguard`
+binary can never replace the adapter.

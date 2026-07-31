@@ -5,9 +5,10 @@
 current Codex envelope from stdin and delegates every policy decision to
 `internal/policy`.
 
-The reviewed but uninstalled hook source is
-[`../assets/hooks.json`](../assets/hooks.json). Installation and trust are a
-separate projection step. This slice does not edit a Codex profile.
+This slice intentionally contains no installable hook source. The separate
+projection step must render an absolute path to the reviewed executable;
+resolving a bare `codexguard` name from a repository working directory is not a
+trusted boundary. This slice does not edit a Codex profile.
 
 ## Ordering and responses
 
@@ -43,6 +44,11 @@ The adapter stores JSONL at
 commands, working directories, model names, transcripts, and tool responses are
 not stored; the policy artifact and completion carry digests. A failed or short
 append is truncated back to its prior offset before the adapter returns failure.
+
+For shell events, a tool-specific `workdir` is authoritative when present.
+Otherwise the adapter injects the native envelope's required `cwd`, so the
+policy and audit identity always bind the actual execution context without
+persisting its raw path.
 
 ## Honest failure matrix
 
