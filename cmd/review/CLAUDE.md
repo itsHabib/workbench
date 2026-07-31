@@ -37,6 +37,9 @@ full-panel fallback plan when the live PR head can still be proven.
 - Critical findings cannot be deferred or proof-substituted.
 - Later cycles target only missing required reviewers and finding authors still
   in play.
+- An adversarial completion is valid only with pass evidence whose raw-artifact
+  digest, exact-head subject, source, result, and confidence are bound into the
+  cycle and decision; T0 additionally requires the source to be local.
 - T0 uncertainty escalates; cycles 4–8 require T3 and a rationale.
 - Local advice is advisory and escalates on low confidence/verifier failure.
 

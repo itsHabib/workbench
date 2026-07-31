@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -209,6 +210,37 @@ func TestT0RequiresLocalAdversarialPass(t *testing.T) {
 	plan := routedPlan(t, "T0")
 	input := cleanInput(plan, 1)
 	input.AdversarialComplete = false
+	input.AdversarialEvidence = nil
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionEscalate ||
+		!contains(decision.ReasonCodes, "local_adversarial_incomplete") {
+		t.Fatalf("decision = %s reasons %v", decision.Action, decision.ReasonCodes)
+	}
+}
+
+func TestT0DecisionBindsLocalAdversarialEvidence(t *testing.T) {
+	plan := routedPlan(t, "T0")
+	input := cleanInput(plan, 1)
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.AdversarialEvidence == nil ||
+		decision.AdversarialEvidence.Source != "local" ||
+		decision.AdversarialEvidence.Result != "pass" ||
+		decision.AdversarialEvidence.Confidence != 1 ||
+		decision.AdversarialEvidence.ArtifactDigest != input.AdversarialEvidence.ArtifactDigest {
+		t.Fatalf("adversarial evidence = %#v", decision.AdversarialEvidence)
+	}
+}
+
+func TestT0RejectsNonlocalAdversarialPass(t *testing.T) {
+	plan := routedPlan(t, "T0")
+	input := cleanInput(plan, 1)
+	input.AdversarialEvidence.Source = "adversarial-workflow"
 	decision, err := Decide(plan, input, testNow)
 	if err != nil {
 		t.Fatal(err)
@@ -375,7 +407,7 @@ func routedPlan(t *testing.T, tier string) reviewroute.Plan {
 }
 
 func cleanInput(plan reviewroute.Plan, cycle int) reviewroute.CycleInput {
-	return reviewroute.CycleInput{
+	input := reviewroute.CycleInput{
 		SchemaVersion:       reviewroute.SchemaVersion,
 		Subject:             plan.Subject,
 		PlanID:              plan.PlanID,
@@ -385,8 +417,29 @@ func cleanInput(plan reviewroute.Plan, cycle int) reviewroute.CycleInput {
 		PanelComplete:       true,
 		CompletedReviewers:  append([]string{}, plan.Required...),
 		CoordinatorComplete: true,
-		AdversarialComplete: true,
 		Findings:            []reviewroute.FindingState{},
+	}
+	if plan.Requirements.LocalAdversarial {
+		input.AdversarialComplete = true
+		input.AdversarialEvidence = adversarialEvidence(plan.Subject, "local")
+	}
+	if plan.Requirements.AdversarialVerification {
+		input.AdversarialComplete = true
+		input.AdversarialEvidence = adversarialEvidence(plan.Subject, "adversarial-workflow")
+	}
+	return input
+}
+
+func adversarialEvidence(
+	subject reviewroute.Subject,
+	source string,
+) *reviewroute.AdversarialEvidence {
+	return &reviewroute.AdversarialEvidence{
+		Subject:        subject,
+		Source:         source,
+		Result:         "pass",
+		Confidence:     1,
+		ArtifactDigest: "sha256:" + strings.Repeat("d", 64),
 	}
 }
 

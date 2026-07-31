@@ -3,7 +3,7 @@
   "$id": "https://github.com/itsHabib/workbench/contracts/reviewroute/schema/review-cycle-input-v1.json",
   "title": "ReviewCycleInputV1",
   "type": "object",
-  "required": ["schema_version", "subject", "plan_id", "cycle", "current_tier", "checks_passed", "panel_complete", "completed_reviewers", "coordinator_complete", "adversarial_complete", "findings"],
+  "required": ["schema_version", "subject", "plan_id", "cycle", "current_tier", "checks_passed", "panel_complete", "completed_reviewers", "coordinator_complete", "adversarial_complete", "adversarial_evidence", "findings"],
   "properties": {
     "schema_version": { "const": 1 },
     "subject": {
@@ -28,6 +28,27 @@
     },
     "coordinator_complete": { "type": "boolean" },
     "adversarial_complete": { "type": "boolean" },
+    "adversarial_evidence": {
+      "type": ["object", "null"],
+      "required": ["subject", "source", "result", "confidence", "artifact_digest"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "required": ["repo", "number", "head_sha"],
+          "properties": {
+            "repo": { "type": "string", "pattern": "^[a-z0-9._-]+/[a-z0-9._-]+$" },
+            "number": { "type": "integer", "minimum": 1 },
+            "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+          },
+          "additionalProperties": false
+        },
+        "source": { "type": "string", "minLength": 1 },
+        "result": { "enum": ["pass", "escalate"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
     "continuation_rationale": { "type": "string" },
     "findings": {
       "type": "array",

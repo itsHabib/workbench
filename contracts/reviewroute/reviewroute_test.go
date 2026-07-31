@@ -210,6 +210,51 @@ func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
 	}
 }
 
+func TestAdversarialCompleteRequiresBoundPassEvidence(t *testing.T) {
+	input := CycleInput{
+		SchemaVersion:       SchemaVersion,
+		Subject:             Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:              "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Cycle:               1,
+		CurrentTier:         "T0",
+		AdversarialComplete: true,
+	}
+	if err := ValidateCycleInput(input); err == nil {
+		t.Fatal("unbound adversarial completion unexpectedly valid")
+	}
+	input.AdversarialEvidence = &AdversarialEvidence{
+		Subject:        input.Subject,
+		Source:         "local",
+		Result:         "pass",
+		Confidence:     1,
+		ArtifactDigest: "sha256:" + strings.Repeat("d", 64),
+	}
+	if err := ValidateCycleInput(input); err != nil {
+		t.Fatal(err)
+	}
+	before, err := CycleInputDigest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.AdversarialEvidence.Confidence = 0.9
+	after, err := CycleInputDigest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("adversarial evidence mutation retained the same digest")
+	}
+	input.AdversarialEvidence.Result = "escalate"
+	if err := ValidateCycleInput(input); err == nil {
+		t.Fatal("escalated adversarial result claimed completion")
+	}
+	input.AdversarialComplete = false
+	input.Subject.HeadSHA = strings.Repeat("b", 40)
+	if err := ValidateCycleInput(input); err == nil {
+		t.Fatal("cross-head adversarial evidence unexpectedly valid")
+	}
+}
+
 func TestCycleInputRejectsDuplicateCompletedReviewers(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion:      SchemaVersion,

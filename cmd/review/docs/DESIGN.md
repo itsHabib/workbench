@@ -25,3 +25,7 @@ The first checked-in policy is an explicit personal-repository canary. Plans
 record its validated content digest automatically; callers do not manage a
 separate policy revision. Continuation weights are shadow telemetry, while
 exact-head joins, hard caps, and deterministic stop conditions are enforced.
+Adversarial completion is not a free-standing boolean: the cycle input and
+decision also carry the selected raw artifact's digest, exact-head subject,
+source, result, and confidence. T0 accepts that completion only from the local
+source.

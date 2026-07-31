@@ -331,6 +331,8 @@ All artifacts are schema-versioned and exact-head bound.
 - `stop`, `continue`, `escalate`, or `park`;
 - targeted next-reviewer set;
 - deterministic reason codes;
+- adversarial exact-head subject, source/result/confidence, and raw-artifact
+  digest when used;
 - local advisory result/confidence when used.
 
 Artifacts for head A cannot authorize, close, or request review for head B.
