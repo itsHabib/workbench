@@ -1,152 +1,128 @@
-# Lessons
+# Lessons from building with coding agents
 
-What building the workbench taught, stated as rules with the failures that
-earned them. Companion to `docs/workbench-101.md` (the system top to bottom)
-and `docs/glossary.md` (the vocabulary). Every lesson cites where it lives in
-code or docs; a lesson that lives nowhere is just an opinion.
+What I'd tell someone starting to put real work through AI agents — in any
+stack, any industry. Each lesson is a portable rule plus the experience that
+earned it here. The vocabulary is defined in `docs/glossary.md`; the
+no-jargon version of the whole picture is `docs/plain-language-overview.md`.
 
 ---
 
-## 1. Prose shrinks, guarantees grow
+## 1. Instructions are advice. Enforcement is law.
 
-A sentence in a CLAUDE.md is advice a model can skip, misread, or deprioritize
-under a long context. A rule that gates something real is only as strong as its
-enforcement. So the two curves run opposite ways: as models get stronger,
-how-to prose becomes obsolete and gets deleted; as agents run longer
-unattended, every *unenforced* invariant becomes more dangerous and gets
-promoted into code. The test applied to every piece: was this compensating for
-a weak model (shrink it), or is it what makes a strong model safe to trust
-longer (invest in it)? (`docs/workbench-101.md` §1.)
+A rule written in an instruction file is something the agent can misread,
+deprioritize, or skip — and the longer it runs unattended, the more likely
+that becomes. Sort every rule into two bins: guidance (fine as prose) and
+guarantees (what may merge, spend, or touch credentials — these must be
+enforced by something the agent cannot route around). My experience is that
+the prose bin keeps shrinking as models improve, and the guarantee bin keeps
+growing as I trust agents with longer leashes.
 
-## 2. Never trust self-reported confidence; route by verifiability, never difficulty
+## 2. Never trust a model's confidence. Check its output.
 
-The formative failure: a local model labeled real bugs as false positives *at
-confidence 1.0* — confident garbage. The rule baked in everywhere since: work
-goes to the cheap rung only when its output is *verifiable or escalate-safe* —
-a deterministic check can confirm it, or a wrong answer only costs an extra
-cloud call. Difficulty is never the flag; confidence is recorded, never
-trusted. When signals disagree: verifier failures beat model disagreement,
-which beats self-reported confidence. (`local/local.go`; §1, §5.)
+The failure that shaped everything else I built: a model labeling real bugs
+as false alarms *at 100% self-reported confidence*. Confidence is a number a
+model attaches to its answer, not a property of the answer. Trust comes from
+verification — tests, mechanical checks, a second independent reviewer —
+never from asking the model how sure it is.
 
-## 3. A small model may escalate, never block
+## 3. Route work by checkability, not difficulty.
 
-Small models confabulate on dense content, so escalation is their only safe
-failure mode. This is not a guideline — it is an error:
-`ladder_violation_local_block` in `cmd/gate/internal/verify/verify.go`. The
-inverse rule guards the top: premium judgment resolves escalations but cannot
-override a code block. Between them, the deterministic floor always runs and
-can never be lowered.
+The right question for "can a cheap, fast model do this?" is not "is it
+easy?" but "can I verify the output mechanically, or is a wrong answer
+harmless?" If either holds, send it down and accept occasional slop — a
+wrong answer costs a retry. If neither holds, no amount of "it's a simple
+task" makes the cheap model safe.
 
-## 4. The strongest enforcement can be statement order in one function
+## 4. Helpers may raise their hand. They may never veto or approve.
 
-"Judgment cannot override a code block" is implemented as `Reduce` handling
-the block case and returning *before* it ever consults the judgment. No
-policy engine, no configuration — the forbidden path is unreachable. The same
-move closed the `markMerged` bug: recording any outcome requires a live grant
-and a supporting verdict as arguments to the one closure that writes, so the
-unguarded write is unrepresentable rather than discouraged.
-(`cmd/gate/internal/verify/verify.go`, `cmd/gate/main.go`.)
+When a model sits in a safety path, give it one power: escalate. It may say
+"a human should look at this"; it may never lower an alarm, approve an
+action, or block one on its own authority. A wrong escalation costs a few
+minutes of attention. A wrong approval costs an incident.
 
-## 5. Share contracts, not call stacks — and enforce the boundary mechanically
+## 5. No AI opinion overrides a hard check.
 
-Before the shared `contracts` package, four tools had each hand-rolled their
-own "is this OK?" parser, so nobody owned what a verdict even meant. The fix
-was a shared *vocabulary* (types + schemas), never shared *decision logic* —
-and a CI `hygiene` job that fails the build on a violation, because a boundary
-kept by convention is one refactor away from gone. Tools compose through
-artifacts on disk; the one forbidden import is another tool's decision path.
-(`docs/DESIGN.md`; `.github/workflows/ci.yml`.)
+The non-negotiable checks form a floor that always runs, and nothing
+smarter sits *instead* of it — only above it. Even the best model,
+resolving a genuinely hard judgment call, cannot turn a failed deterministic
+check into a pass. Red stays red. The moment judgment can launder a failure,
+every failure eventually gets laundered.
 
-## 6. Name the roles and postmortems get shorter
+## 6. When the system doesn't know, it must stop — not guess.
 
-The five-plane decomposition (State, Execution, Verification, Capability,
-Observability) earned its keep as a diagnostic, not an architecture diagram:
-every recurring failure turns out to be one plane doing another plane's job.
-`markMerged` was Execution writing State without Verification. A merge policy
-in a skill's prose was Composition carrying what Capability should enforce —
-it moved into a grant. Once the planes are shared vocabulary, the fix names
-itself. (`docs/workbench-101.md` §4.)
+Unknown input, missing evidence, an unrecognized case: the safe behaviors
+are "stop" and "ask," never "assume the common case." Absence never reads
+as green. And make "stop and ask a human" a first-class outcome with the
+whole question packaged — a system that can say "I can't decide this
+safely" is more trustworthy than one that always has an answer.
 
-## 7. Views must never become sources
+## 7. Hand out authority like a valet key.
 
-Observability is read-only and owns no authoritative state — a dashboard that
-can *cause* a decision destroys the ability to reconstruct what happened. The
-honest carve-out, because purity that forces bad engineering isn't worth it: a
-notification sink may keep derived operational state (a read cursor, a dedupe
-set), never an authoritative decision. The log stays the truth; flare only
-tails it. (§4, Amendment 3.)
+Standing broad access plus an agent is one bad context away from a mess.
+Authority works better as a signed, scoped, expiring object: this action,
+this project, this risk ceiling, this deadline — checked at the moment of
+action, not just at the start. Same for credentials: a broker holds the
+real token, the agent gets the capability, never the key.
 
-## 8. Exit codes are load-bearing seams — treat them like APIs
+## 8. Review the output and the authority separately.
 
-Callers branch on 0 pass / 1 blocked / 2 parked / 3 refused / 4 error, so the
-codes are a contract. Taken seriously down to flag parsing: gate uses
-`ContinueOnError` because `ExitOnError` would `os.Exit(2)` — making a typo'd
-flag indistinguishable from a parked run. When a boundary is a seam, even
-your error handling is part of the interface. (`cmd/gate/main.go`.)
+"Is this code good?" and "should this ship?" are different questions with
+different owners. Reviewers and AI panels answer the first. The second is an
+authorization decision — evidence, risk tier, who signed off — and it
+deserves its own explicit mechanism rather than riding along on an
+approving nod. Scale the human involvement with the consequence of being
+wrong, not with how impressive the model is.
 
-## 9. Fail closed on the unknown, everywhere
+## 9. Demand receipts for everything.
 
-Unknown tiers rank highest. Unknown producer classes and unknown decisions are
-rejected outright. An unknown path means T1, never T0. Empty or malformed
-input fails rather than classifies; an error is never a tier; a missing floor
-escalates rather than passes. The umbrella phrase: absence never reads as
-green. Fail-open defaults are how automation quietly eats a safety margin.
-(`cmd/gate/internal/verify/verify.go`; `cmd/triage/internal/floor/parse.go`.)
+Every piece of evidence, every verdict, every authority used, recorded and
+linked — so "why did this ship?" is answerable later from the record alone.
+Two corollaries learned the hard way: nothing gets written as fact without
+the evidence that produced it, and read-only views must never quietly
+become the place decisions come from. Receipts are also what let you *stop
+watching*: supervision shifts from real time to after the fact.
 
-## 10. A handoff must carry the whole question
+## 10. Build the checks before you leave the loop.
 
-A parked escalation packages everything the eventual judge needs — the
-question, the verdicts, the recorded diff — because parking with a pointer
-back into prose is exactly the leak the design exists to prevent. The
-discipline cuts both ways: if a good judgment would need more than the
-artifacts carry, that is a contract bug in the artifacts, not a reason to let
-the judge go fishing. (`cmd/gate/internal/verify/judge.go`.)
+Autonomy is earned in one direction: first the harness rules, the strong
+test suites, the reviewer agents, the boundaries around secrets and
+production — then the stepping away. Green checks alone are not enough;
+they say the build is sound, not that the system still does its job in
+production. Live evidence is a different check, and it's the one that
+matters most once nobody is watching.
 
-## 11. State your tamper model honestly — and stress it
+## 11. Pin evidence to the exact version it judged.
 
-The hash chain is tamper-*evidence*, not access control: naive replay catches
-edits and reordering but not truncation or rewrite-with-rehash, so a keyed
-anchor (HMAC over chain head + entry count, key held outside the state dir)
-closes those — while the docs say plainly this is not non-repudiation and the
-realistic adversary is drift, not a funded attacker. And mechanisms earn
-trust by surviving hostility: the naive state layer lost data three runs out
-of three under a six-process stress; the current lock posture exists because
-Windows returns ACCESS_DENIED, not EEXIST, on a racing create.
-(`cmd/gate/internal/state/anchor.go`.)
+An approval, a test run, a review — each is evidence about one precise
+state of the code. Any new change invalidates it, and the evidence must
+re-attach. This feels pedantic until the first time "approved last week"
+almost authorizes this week's different code.
 
-## 12. Independent reinvention is evidence a rule is real
+## 12. Experiment in instructions; promote what stabilizes into code.
 
-Floor-in-code plus escalate-only-model was invented separately twice — triage,
-then tracelens — before being promoted to plane law. When two tools converge
-on the same shape under different pressures, that is decent evidence the
-shape is load-bearing, and the right response is promotion to shared law, not
-deduplication into a library. (§5.)
+Skills — named, reusable instruction files — are the cheap laboratory:
+agents follow them closely, and they cost minutes to change. Run the
+routine, keep a friction log, watch what stays stable across runs. Once a
+part needs a *guarantee*, move it into deterministic code. The biggest
+instruction-file shrink I ever got wasn't editing — it was an engine
+absorbing the prose. And it regrows unless the mechanism owns the behavior.
 
-## 13. Engines absorb prose
+## 13. Prune instructions on a schedule; staleness beats verbosity as a threat.
 
-The biggest instruction-file reduction ever achieved here was not editing —
-it was moving a state machine into code. When the driver engine took over
-dispatch/poll/judgment/land, hundreds of lines of skill prose died ("no
-sleep-polls — those are the engine's job now, not prose for the LLM to
-re-derive"), and what remained was policy. The corollary, proven within
-weeks: prose regrows unless the mechanism owns the behavior, so a diet
-without a mechanism is temporary.
+Agent guidance rots two ways: scaffolding written for last year's weaker
+models (wasteful but survivable) and facts that are simply no longer true
+(actively misleading, because agents follow instructions literally).
+Inventories, tool lists, and how-tos fall behind within weeks of active
+work. Make updating them part of shipping, keep an honest list of known
+doc-vs-reality gaps, and periodically re-ask of every instruction: is this
+compensating for a weak model, or making a strong one safer? Delete the
+first kind.
 
-## 14. Docs rot by staleness before verbosity — keep a drift log
+## 14. Start with one consequential action. Someone still owns the result.
 
-Verbosity costs tokens; staleness actively misleads. Inventories (tool maps,
-verb lists, feature status) fall behind within weeks of active development
-unless updating them is part of the merge ritual. Two disciplines keep docs
-honest: `verified` / `intent` markers on every claim, and a drift log — an
-explicit list of where docs and code currently disagree, in both directions —
-preferred over docs that quietly overclaim. (`docs/workbench-101.md` §12.)
-
-## 15. Land the honest conclusion; hold warts openly
-
-The escalation work set out to build a sixth plane and concluded it had built
-a contract plus a seam — and the docs say exactly that, because a symmetric
-architecture diagram is worth less than a true one. Same posture inside the
-code: multiple judgments are last-one-wins today, a known wart held
-deliberately until join semantics are designed, tracked in writing rather
-than papered over. Trust the system builds comes from what it admits as much
-as what it enforces. (`docs/features/escalation-plane/spec.md`; §5.)
+Inside an organization, don't boil the ocean — pick one action that
+matters (the merge, the deploy, the spend), define what the system can
+observe about it, decide who can grant authority and who answers when it
+stops and asks. Autonomy grows from that seed. And no matter how much the
+agents carry: accountability doesn't transfer to them. Someone still owns
+the result — for my work, that's me.
