@@ -33,20 +33,23 @@ which beats self-reported confidence. (`local/local.go`; §1, §5.)
 ## 3. A small model may escalate, never block
 
 Small models confabulate on dense content, so escalation is their only safe
-failure mode. This is not a guideline — it is an error:
-`ladder_violation_local_block` in `cmd/gate/internal/verify/verify.go`. The
-inverse rule guards the top: premium judgment resolves escalations but cannot
-override a code block. Between them, the deterministic floor always runs and
-can never be lowered.
+failure mode. This is not a guideline — it is a named violation the verdict
+code refuses outright: a "block" from the local rung is rejected as a ladder
+violation, full stop. The inverse rule guards the top: premium judgment
+resolves escalations but cannot override a code block. Between them, the
+deterministic floor always runs and can never be lowered.
+(`cmd/gate/internal/verify/verify.go`.)
 
-## 4. The strongest enforcement can be statement order in one function
+## 4. The strongest enforcement can be the order of statements in one function
 
-"Judgment cannot override a code block" is implemented as `Reduce` handling
-the block case and returning *before* it ever consults the judgment. No
-policy engine, no configuration — the forbidden path is unreachable. The same
-move closed the `markMerged` bug: recording any outcome requires a live grant
-and a supporting verdict as arguments to the one closure that writes, so the
-unguarded write is unrepresentable rather than discouraged.
+"Judgment cannot override a hard block" is not a policy engine or a config
+flag. It is the shape of the one function that combines verdicts: the block
+case returns before the judgment is ever looked at, so the forbidden path is
+simply unreachable. The same move closed an early bug — a function literally
+named `markMerged` that wrote "this PR merged" into state without any check
+that it had. Now recording any outcome requires the supporting verdict and a
+live grant as inputs to the single place that writes, so the unguarded write
+is unrepresentable rather than discouraged.
 (`cmd/gate/internal/verify/verify.go`, `cmd/gate/main.go`.)
 
 ## 5. Share contracts, not call stacks — and enforce the boundary mechanically
@@ -81,10 +84,11 @@ tails it. (§4, Amendment 3.)
 ## 8. Exit codes are load-bearing seams — treat them like APIs
 
 Callers branch on 0 pass / 1 blocked / 2 parked / 3 refused / 4 error, so the
-codes are a contract. Taken seriously down to flag parsing: gate uses
-`ContinueOnError` because `ExitOnError` would `os.Exit(2)` — making a typo'd
-flag indistinguishable from a parked run. When a boundary is a seam, even
-your error handling is part of the interface. (`cmd/gate/main.go`.)
+codes are a contract. Taken seriously down to flag parsing: Go's default
+behavior on a bad command-line flag is to exit with code 2 — the same number
+as "parked" — so gate configures parsing to never do that. Otherwise a typo'd
+flag would be indistinguishable from a deliberate stop. When a boundary is a
+seam, even your error handling is part of the interface. (`cmd/gate/main.go`.)
 
 ## 9. Fail closed on the unknown, everywhere
 
@@ -112,8 +116,9 @@ anchor (HMAC over chain head + entry count, key held outside the state dir)
 closes those — while the docs say plainly this is not non-repudiation and the
 realistic adversary is drift, not a funded attacker. And mechanisms earn
 trust by surviving hostility: the naive state layer lost data three runs out
-of three under a six-process stress; the current lock posture exists because
-Windows returns ACCESS_DENIED, not EEXIST, on a racing create.
+of three under a six-process stress, and the current locking exists because
+Windows reports a racing file create as "access denied" rather than "already
+exists" — which quietly defeated the obvious retry logic.
 (`cmd/gate/internal/state/anchor.go`.)
 
 ## 12. Independent reinvention is evidence a rule is real
