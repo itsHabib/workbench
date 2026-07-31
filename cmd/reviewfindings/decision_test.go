@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -49,6 +52,22 @@ func assertAddressRefusal(t *testing.T, err error, code string) {
 	}
 }
 
+func TestReadAddressDecisionRejectsTrailingJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "decision.json")
+	decision := addressDecision()
+	data, err := json.Marshal(decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, []byte("\n{}")...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readAddressDecision(path); err == nil {
+		t.Fatal("trailing JSON unexpectedly accepted")
+	}
+}
+
 func addressDecision() reviewroute.Decision {
 	return reviewroute.Decision{
 		SchemaVersion: reviewroute.SchemaVersion,
@@ -57,7 +76,13 @@ func addressDecision() reviewroute.Decision {
 			Repo: "itsHabib/workbench", Number: 1,
 			HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
-		PlanID: "rp_11111111111111111111111111111111", Cycle: 1,
+		PlanID:      "rp_11111111111111111111111111111111",
+		InputDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Policy: &reviewroute.PolicyRef{
+			ID:     "tier-aware-canary",
+			Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		RouteDisposition: "tier_routed", Tier: "T1", Cycle: 1,
 		ContinuationWeight: 1, CumulativeWeight: 1,
 		Action:        reviewroute.ActionAddress,
 		ReasonCodes:   []string{"accepted_findings_require_address"},

@@ -123,8 +123,13 @@ func TestAddressAcceptCLIConsumesOnce(t *testing.T) {
 	decisionPath := filepath.Join(t.TempDir(), "decision.json")
 	decision := reviewroute.Decision{
 		SchemaVersion: reviewroute.SchemaVersion, GeneratedAt: now,
-		Subject: reviewroute.Subject{Repo: "itsHabib/workbench", Number: 1, HeadSHA: head},
-		PlanID:  "rp_11111111111111111111111111111111", Cycle: 1,
+		Subject:     reviewroute.Subject{Repo: "itsHabib/workbench", Number: 1, HeadSHA: head},
+		PlanID:      "rp_11111111111111111111111111111111",
+		InputDigest: "sha256:" + strings.Repeat("b", 64),
+		Policy: &reviewroute.PolicyRef{
+			ID: "tier-aware-canary", Digest: "sha256:" + strings.Repeat("a", 64),
+		},
+		RouteDisposition: "tier_routed", Tier: "T1", Cycle: 1,
 		ContinuationWeight: 1, CumulativeWeight: 1,
 		Action:        reviewroute.ActionAddress,
 		ReasonCodes:   []string{"accepted_findings_require_address"},

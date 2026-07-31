@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -22,6 +23,9 @@ func readAddressDecision(path string) (reviewroute.Decision, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decision); err != nil {
 		return reviewroute.Decision{}, err
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return reviewroute.Decision{}, fmt.Errorf("review decision contains multiple JSON values")
 	}
 	if err := reviewroute.ValidateDecision(decision); err != nil {
 		return reviewroute.Decision{}, err
