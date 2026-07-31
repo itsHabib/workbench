@@ -1,4 +1,4 @@
-**Status**: draft
+**Status**: implemented
 **Owner**: @codex:michael
 **Date**: 2026-07-29
 **Related**: dossier task `codexguard-policy-projection` (`tsk_01KYP78SKH7AF7EE2J2Y9NTZA6`)

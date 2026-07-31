@@ -1,0 +1,62 @@
+# Workbench's deterministic policy remains in codexguard. These rules are only
+# the restrictive shell backstop when the native hook is unavailable.
+
+prefix_rule(
+    pattern = ["gate", "grant"],
+    decision = "forbidden",
+    justification = "Only the operator may mint Gate grants.",
+)
+
+prefix_rule(
+    pattern = ["custody", "grant"],
+    decision = "forbidden",
+    justification = "Only the operator may mint custody grants.",
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", "delete"],
+    decision = "forbidden",
+    justification = "Repository deletion requires an explicit operator-run command.",
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", "merge"],
+    decision = "prompt",
+    justification = "Merge only with the exact commit-pinned command emitted by Gate.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Do not force-push; publish a new commit instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Do not force-push; publish a new commit instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Do not force-push; publish a new commit instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Use a non-destructive worktree or an explicit operator-run recovery.",
+)
+
+prefix_rule(
+    pattern = ["git", "branch", "-D"],
+    decision = "forbidden",
+    justification = "Use normal branch deletion after checking the exact target.",
+)
+
+# Keep this backstop intentionally narrow. Execpolicy prefix rules cannot
+# inspect arbitrary later arguments or opaque PowerShell/cmd strings. The
+# native hook owns those semantic decisions; hooks.md records that hook failure
+# is not fail-closed. Broad executable prompts would make healthy Codex tasks
+# permanently approval-heavy because hooks cannot cancel a rules decision.

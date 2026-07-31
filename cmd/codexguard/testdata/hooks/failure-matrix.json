@@ -1,0 +1,32 @@
+[
+  {
+    "failure": "missing_executable",
+    "codex_behavior": "report_failure_and_continue",
+    "covered_shell": "restrictive_rules_backstop",
+    "unsupported_local_or_mcp": "park"
+  },
+  {
+    "failure": "crash",
+    "codex_behavior": "report_failure_and_continue",
+    "covered_shell": "restrictive_rules_backstop",
+    "unsupported_local_or_mcp": "park"
+  },
+  {
+    "failure": "timeout",
+    "codex_behavior": "report_failure_and_continue",
+    "covered_shell": "restrictive_rules_backstop",
+    "unsupported_local_or_mcp": "park"
+  },
+  {
+    "failure": "malformed_stdout",
+    "codex_behavior": "report_failure_and_continue",
+    "covered_shell": "restrictive_rules_backstop",
+    "unsupported_local_or_mcp": "park"
+  },
+  {
+    "failure": "changed_untrusted_hash",
+    "codex_behavior": "skip_until_trusted",
+    "covered_shell": "restrictive_rules_backstop",
+    "unsupported_local_or_mcp": "park"
+  }
+]
