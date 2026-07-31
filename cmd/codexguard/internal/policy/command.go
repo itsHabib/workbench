@@ -56,7 +56,7 @@ func classifyKnownCommand(command string, words, lower []string) normalized {
 func opaqueCommand(command string) bool {
 	lower := strings.ToLower(command)
 	for _, marker := range []string{
-		"`", "&", ";", "|", "<", ">", "(", ")", "%", "!", "^",
+		"`", "\\", "&", ";", "|", "<", ">", "(", ")", "%", "!", "^",
 		"$", "@", "*", "?", "[", "]", "{", "}", "\r", "\n",
 	} {
 		if strings.Contains(lower, marker) {

@@ -238,6 +238,7 @@ func TestWindowsShellBackslashCandidatesPark(t *testing.T) {
 		{Kind: "shell", Shell: "powershell", Command: `pwsh -Command "g\o test ./..."`},
 		{Kind: "shell", Shell: "powershell", Command: `g\o test ./...`},
 		{Kind: "shell", Shell: "cmd", Command: `cmd /c "g\o test ./..."`},
+		{Kind: "local", Tool: "functions.shell_command", Arguments: json.RawMessage(`{"command":"g\\o test ./..."}`)},
 	} {
 		got := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: envelope})
 		assertDecision(t, got, automode.OutcomePark, "envelope.unsupported")
