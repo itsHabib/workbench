@@ -44,6 +44,25 @@ see the layout below.
   what's in and out, the boundary law, the lazy-migration policy, and the
   triggers that would later split `contracts` into its own module.
 
+## Where to read, by question
+
+- **What is this whole system?** [`docs/workbench-101.md`](docs/workbench-101.md) —
+  the teaching doc: the loop, the five planes, gate as the flagship.
+- **Same picture, no jargon:** [`docs/plain-language-overview.md`](docs/plain-language-overview.md).
+- **What did building it teach?** [`docs/lessons.md`](docs/lessons.md) — 28 rules,
+  each with the failure that earned it, where it's enforced, and a Monday action.
+- **How does the daily work actually run?** [`docs/workflow-mechanics.md`](docs/workflow-mechanics.md) —
+  the instruction stack, `/drive` vs the work-driver chain, review machinery,
+  prose→code, hooks.
+- **How far may an agent act unattended?** [`docs/auto-mode-defaults.md`](docs/auto-mode-defaults.md) —
+  the decision contract, the six defaults, the rulebooks.
+- **What do the words mean?** [`docs/glossary.md`](docs/glossary.md).
+- **Why one module, and what's out of scope?** [`docs/DESIGN.md`](docs/DESIGN.md) — the charter.
+- **What else exists around this repo?** [`docs/projects.md`](docs/projects.md) —
+  the public project family (ship, dossier, rooms, tower, …).
+- **The skills that drive the workflow:** [github.com/itsHabib/skills](https://github.com/itsHabib/skills) —
+  public, installable; this repo is what they compose against.
+
 ## The one rule
 
 A tool may share **types and schemas** through `contracts`. A tool may **not**
