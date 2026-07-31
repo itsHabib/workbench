@@ -3,7 +3,9 @@
 What I'd tell someone starting to put real work through AI agents — in any
 stack, any industry. Each lesson is a portable rule plus the experience that
 earned it here. The vocabulary is defined in `docs/glossary.md`; the
-no-jargon version of the whole picture is `docs/plain-language-overview.md`.
+no-jargon version of the whole picture is `docs/plain-language-overview.md`;
+and each rule has a code-grounded twin in `docs/lessons-workbench.md`, where
+the same ideas cite the exact enforcement and the war stories behind them.
 
 ---
 
