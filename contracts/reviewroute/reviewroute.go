@@ -564,6 +564,9 @@ func validateSubject(subject Subject) error {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return errors.New("reviewroute: subject repo must be owner/repo")
 	}
+	if subject.Repo != strings.ToLower(subject.Repo) {
+		return errors.New("reviewroute: subject repo must be lowercase")
+	}
 	if subject.Number < 1 {
 		return errors.New("reviewroute: subject number must be positive")
 	}
