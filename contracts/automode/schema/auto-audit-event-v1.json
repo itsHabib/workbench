@@ -12,7 +12,7 @@
     "recorded_at": { "type": "string", "format": "date-time" },
     "kind": { "type": "string", "enum": ["decision", "completion"] },
     "decision": {
-      "$ref": "auto-decision-v1.json#/$defs/decision"
+      "$ref": "#/$defs/decision"
     },
     "completion": {
       "type": "object",
@@ -20,7 +20,7 @@
       "properties": {
         "status": { "type": "string", "enum": ["succeeded", "failed"] },
         "observables": {
-          "$ref": "auto-decision-v1.json#/$defs/values"
+          "$ref": "#/$defs/values"
         }
       },
       "additionalProperties": true
@@ -52,5 +52,91 @@
       }
     }
   ],
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "required": ["schema_version", "outcome", "rule_fired", "rulebook_version", "remedy", "harness", "inputs", "action_digest"],
+      "properties": {
+        "schema_version": { "const": "auto-decision.v1" },
+        "outcome": { "type": "string", "enum": ["pass", "park", "block", "refuse"] },
+        "rule_fired": { "type": "string", "minLength": 1 },
+        "rulebook_version": { "type": "string", "minLength": 1 },
+        "remedy": { "type": "string" },
+        "harness": { "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "action_digest": {
+          "type": "string",
+          "description": "SHA-256 over the language-neutral framed input projection defined in contracts/automode/README.md.",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "pass" } },
+            "required": ["outcome"]
+          },
+          "else": {
+            "properties": { "remedy": { "minLength": 1 } }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["action", "observables"],
+      "properties": {
+        "action": { "$ref": "#/$defs/action" },
+        "observables": { "$ref": "#/$defs/values" }
+      },
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "description": "A parsed semantic operation; opaque command text is not persisted.",
+      "required": ["envelope", "operation", "parameters"],
+      "properties": {
+        "envelope": { "$ref": "#/$defs/name" },
+        "operation": { "$ref": "#/$defs/name" },
+        "parameters": { "$ref": "#/$defs/values" }
+      },
+      "additionalProperties": true
+    },
+    "values": {
+      "type": "array",
+      "uniqueItems": true,
+      "x-unique-by": "name",
+      "items": { "$ref": "#/$defs/value" }
+    },
+    "value": {
+      "type": "object",
+      "required": ["name", "value", "redacted"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "value": { "type": "string" },
+        "redacted": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "redacted": { "const": true } },
+            "required": ["redacted"]
+          },
+          "then": {
+            "properties": { "value": { "const": "[REDACTED]" } }
+          },
+          "else": {
+            "properties": { "value": { "not": { "const": "[REDACTED]" } } }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    }
+  },
   "additionalProperties": true
 }

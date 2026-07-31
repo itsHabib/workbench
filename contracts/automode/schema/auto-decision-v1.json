@@ -16,7 +16,11 @@
         "remedy": { "type": "string" },
         "harness": { "type": "string", "minLength": 1 },
         "inputs": { "$ref": "#/$defs/inputs" },
-        "action_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        "action_digest": {
+          "type": "string",
+          "description": "SHA-256 over the language-neutral framed input projection defined in contracts/automode/README.md.",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
       },
       "allOf": [
         {
@@ -53,6 +57,8 @@
     },
     "values": {
       "type": "array",
+      "uniqueItems": true,
+      "x-unique-by": "name",
       "items": { "$ref": "#/$defs/value" }
     },
     "value": {

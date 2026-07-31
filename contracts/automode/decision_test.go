@@ -1,6 +1,7 @@
 package automode
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -31,6 +32,7 @@ func TestDecisionFixturesRefuseMalformedContracts(t *testing.T) {
 		{"invalid-decision-unknown-version.json", ErrUnknownSchemaVersion},
 		{"invalid-decision-missing-rulebook.json", ErrMissingField},
 		{"invalid-decision-redacted-raw.json", nil},
+		{"invalid-decision-duplicate-name.json", nil},
 		{"invalid-decision-nonpass-empty-remedy.json", ErrMissingField},
 	}
 	for _, test := range tests {
@@ -73,9 +75,17 @@ func TestDigestEmptyCollectionsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "sha256:63bdf3c92d039f6725daabb0d3da9205b2b3ec2f424bc8427b9baa18728f68ef"
+	const want = "sha256:cf5c3e8fe15a079f962b4256f0d4a0aa0391172a47a6c8793ac2e1674ba97579"
 	if got != want {
 		t.Fatalf("Digest(empty arrays) = %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalInputsGolden(t *testing.T) {
+	got := hex.EncodeToString(canonicalInputs(validInputs()))
+	const want = "776f726b62656e63682e6175746f6d6f64652e696e707574732e7631057368656c6c0f6769746875622e70722e6d6572676503056772616e74010a5b52454441435445445d0270720003313638047265706f001269747348616269622f776f726b62656e6368020c676174655f6f7574636f6d65000e72656164795f746f5f6d6572676508686561645f736861002862636531333232643932366135343162323366363862396164663934383233643535643564363939"
+	if got != want {
+		t.Fatalf("canonicalInputs() = %q, want %q", got, want)
 	}
 }
 
@@ -168,6 +178,7 @@ func TestSchemasCarryVersionAndEnums(t *testing.T) {
 	if auditSchema.XVersion != SchemaVersion {
 		t.Fatalf("audit schema version = %q, want %q", auditSchema.XVersion, SchemaVersion)
 	}
+	assertAuditSchemaBundlesDecisionDefs(t)
 
 	assertObjectConforms(t, reflect.TypeOf(Decision{}), decisionSchema.Defs["decision"])
 	assertObjectConforms(t, reflect.TypeOf(InputProjection{}), decisionSchema.Defs["inputs"])
@@ -177,6 +188,29 @@ func TestSchemasCarryVersionAndEnums(t *testing.T) {
 		Required: auditSchema.Required, Properties: auditSchema.Properties,
 	})
 	assertObjectConforms(t, reflect.TypeOf(Completion{}), auditSchema.Properties["completion"])
+}
+
+func TestDecisionSchemaDescribesNamedValueUniqueness(t *testing.T) {
+	decisionSchema := loadSchema(t, DecisionSchema)
+	values := decisionSchema.Defs["values"]
+	if !values.UniqueItems || values.XUniqueBy != "name" {
+		t.Fatal("decision schema does not describe the no-duplicate-name law")
+	}
+}
+
+func TestSchemasResolveWithoutExternalResources(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"decision": DecisionSchema,
+		"audit":    AuditSchema,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var document any
+			if err := json.Unmarshal(data, &document); err != nil {
+				t.Fatal(err)
+			}
+			assertLocalRefsResolve(t, document, document)
+		})
+	}
 }
 
 func TestDecisionSchemaPinsRemedyLaw(t *testing.T) {
@@ -248,16 +282,61 @@ type schemaDocument struct {
 }
 
 type schemaNode struct {
-	Required   []string              `json:"required"`
-	Properties map[string]schemaNode `json:"properties"`
-	Const      any                   `json:"const"`
-	Enum       []string              `json:"enum"`
-	MinLength  int                   `json:"minLength"`
-	AllOf      []schemaNode          `json:"allOf"`
-	If         *schemaNode           `json:"if"`
-	Then       *schemaNode           `json:"then"`
-	Else       *schemaNode           `json:"else"`
-	Not        *schemaNode           `json:"not"`
+	Required    []string              `json:"required"`
+	Properties  map[string]schemaNode `json:"properties"`
+	Const       any                   `json:"const"`
+	Enum        []string              `json:"enum"`
+	MinLength   int                   `json:"minLength"`
+	AllOf       []schemaNode          `json:"allOf"`
+	If          *schemaNode           `json:"if"`
+	Then        *schemaNode           `json:"then"`
+	Else        *schemaNode           `json:"else"`
+	Not         *schemaNode           `json:"not"`
+	UniqueItems bool                  `json:"uniqueItems"`
+	XUniqueBy   string                `json:"x-unique-by"`
+}
+
+func assertAuditSchemaBundlesDecisionDefs(t *testing.T) {
+	t.Helper()
+	type rawSchema struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	var decision, audit rawSchema
+	if err := json.Unmarshal(DecisionSchema, &decision); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(AuditSchema, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decision.Defs, audit.Defs) {
+		t.Fatal("audit schema's bundled decision definitions drifted")
+	}
+}
+
+func assertLocalRefsResolve(t *testing.T, root, node any) {
+	t.Helper()
+	switch value := node.(type) {
+	case []any:
+		for _, item := range value {
+			assertLocalRefsResolve(t, root, item)
+		}
+	case map[string]any:
+		for key, item := range value {
+			if key != "$ref" {
+				assertLocalRefsResolve(t, root, item)
+				continue
+			}
+			ref, ok := item.(string)
+			if !ok || !strings.HasPrefix(ref, "#/$defs/") {
+				t.Fatalf("schema contains non-local reference %v", item)
+			}
+			name := strings.TrimPrefix(ref, "#/$defs/")
+			defs := root.(map[string]any)["$defs"].(map[string]any)
+			if _, ok := defs[name]; !ok {
+				t.Fatalf("schema reference %q does not resolve", ref)
+			}
+		}
+	}
 }
 
 func assertObjectConforms(t *testing.T, typ reflect.Type, schema schemaNode) {
