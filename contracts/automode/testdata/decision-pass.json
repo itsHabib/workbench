@@ -9,16 +9,16 @@
     "action": {
       "envelope": "shell",
       "operation": "github.pr.merge",
-      "parameters": [
-        { "name": "repo", "value": "itsHabib/workbench", "redacted": false },
-        { "name": "pr", "value": "168", "redacted": false },
-        { "name": "grant", "value": "[REDACTED]", "redacted": true }
-      ]
+      "parameters": {
+        "repo": { "value": "itsHabib/workbench", "redacted": false },
+        "pr": { "value": "168", "redacted": false },
+        "grant": { "value": "[REDACTED]", "redacted": true }
+      }
     },
-    "observables": [
-      { "name": "head_sha", "value": "bce1322d926a541b23f68b9adf94823d55d5d699", "redacted": false },
-      { "name": "gate_outcome", "value": "ready_to_merge", "redacted": false }
-    ]
+    "observables": {
+      "head_sha": { "value": "bce1322d926a541b23f68b9adf94823d55d5d699", "redacted": false },
+      "gate_outcome": { "value": "ready_to_merge", "redacted": false }
+    }
   },
   "action_digest": "sha256:a99c947c34f57b5a95b3b6f0f5fa531ea54c152d345e09c4a6abf4365557aa0d"
 }

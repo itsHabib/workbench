@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"unicode/utf8"
 )
 
 var (
@@ -32,6 +33,9 @@ func ValidateDecision(decision Decision) error {
 	}
 	if !validOutcome(decision.Outcome) {
 		return fmt.Errorf("automode: unsupported outcome %q", decision.Outcome)
+	}
+	if !utf8.ValidString(decision.Remedy) {
+		return errors.New("automode: remedy must be valid UTF-8")
 	}
 	if decision.Outcome != OutcomePass && decision.Remedy == "" {
 		return fmt.Errorf("automode: %w: remedy", ErrMissingField)
@@ -93,6 +97,9 @@ func require(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("automode: %w: %s", ErrMissingField, name)
 	}
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("automode: %s must be valid UTF-8", name)
+	}
 	return nil
 }
 
@@ -105,6 +112,9 @@ func validOutcome(outcome string) bool {
 }
 
 func validateInputs(inputs InputProjection) error {
+	if !utf8.ValidString(inputs.Action.Envelope) || !utf8.ValidString(inputs.Action.Operation) {
+		return errors.New("automode: action names must be valid UTF-8")
+	}
 	if !namePattern.MatchString(inputs.Action.Envelope) {
 		return errors.New("automode: action envelope must be a normalized name")
 	}
@@ -123,19 +133,17 @@ func validateInputs(inputs InputProjection) error {
 	return validateValues("inputs.observables", inputs.Observables)
 }
 
-func validateValues(field string, values []NamedValue) error {
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		if !namePattern.MatchString(value.Name) {
-			return fmt.Errorf("automode: %s name %q is not normalized", field, value.Name)
+func validateValues(field string, values Values) error {
+	for name, value := range values {
+		if !utf8.ValidString(name) || !namePattern.MatchString(name) {
+			return fmt.Errorf("automode: %s name %q is not normalized", field, name)
+		}
+		if !utf8.ValidString(value.Value) {
+			return fmt.Errorf("automode: %s %q value must be valid UTF-8", field, name)
 		}
 		if value.Redacted != (value.Value == RedactionMarker) {
-			return fmt.Errorf("automode: %s %q has inconsistent redaction", field, value.Name)
+			return fmt.Errorf("automode: %s %q has inconsistent redaction", field, name)
 		}
-		if _, ok := seen[value.Name]; ok {
-			return fmt.Errorf("automode: %s contains duplicate %q", field, value.Name)
-		}
-		seen[value.Name] = struct{}{}
 	}
 	return nil
 }

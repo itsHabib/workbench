@@ -32,7 +32,7 @@ func TestDecisionFixturesRefuseMalformedContracts(t *testing.T) {
 		{"invalid-decision-unknown-version.json", ErrUnknownSchemaVersion},
 		{"invalid-decision-missing-rulebook.json", ErrMissingField},
 		{"invalid-decision-redacted-raw.json", nil},
-		{"invalid-decision-duplicate-name.json", nil},
+		{"invalid-decision-bad-name.json", nil},
 		{"invalid-decision-nonpass-empty-remedy.json", ErrMissingField},
 	}
 	for _, test := range tests {
@@ -48,15 +48,22 @@ func TestDecisionFixturesRefuseMalformedContracts(t *testing.T) {
 	}
 }
 
-func TestDigestIgnoresNamedValueOrder(t *testing.T) {
+func TestDigestIgnoresValueInsertionOrder(t *testing.T) {
 	inputs := validInputs()
 	want, err := Digest(inputs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reordered := inputs
-	reordered.Action.Parameters = reverse(inputs.Action.Parameters)
-	reordered.Observables = reverse(inputs.Observables)
+	reordered.Action.Parameters = Values{
+		"repo":  {Value: "itsHabib/workbench"},
+		"pr":    {Value: "168"},
+		"grant": {Value: RedactionMarker, Redacted: true},
+	}
+	reordered.Observables = Values{
+		"gate_outcome": {Value: "ready_to_merge"},
+		"head_sha":     {Value: "bce1322d926a541b23f68b9adf94823d55d5d699"},
+	}
 	got, err := Digest(reordered)
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +75,8 @@ func TestDigestIgnoresNamedValueOrder(t *testing.T) {
 
 func TestDigestEmptyCollectionsGolden(t *testing.T) {
 	inputs := InputProjection{
-		Action:      Action{Envelope: "shell", Operation: "git.status", Parameters: []NamedValue{}},
-		Observables: []NamedValue{},
+		Action:      Action{Envelope: "shell", Operation: "git.status", Parameters: Values{}},
+		Observables: Values{},
 	}
 	got, err := Digest(inputs)
 	if err != nil {
@@ -91,11 +98,11 @@ func TestCanonicalInputsGolden(t *testing.T) {
 
 func TestValidationKeepsSecretsOutOfProjection(t *testing.T) {
 	inputs := validInputs()
-	inputs.Action.Parameters[0] = NamedValue{Name: "grant", Value: "super-secret-token", Redacted: true}
+	inputs.Action.Parameters["grant"] = Value{Value: "super-secret-token", Redacted: true}
 	if _, err := Digest(inputs); err == nil {
 		t.Fatal("Digest() accepted a redacted raw value")
 	}
-	inputs.Action.Parameters[0] = NamedValue{Name: "grant", Value: RedactionMarker}
+	inputs.Action.Parameters["grant"] = Value{Value: RedactionMarker}
 	if _, err := Digest(inputs); err == nil {
 		t.Fatal("Digest() accepted an unflagged redaction marker")
 	}
@@ -125,7 +132,7 @@ func TestValidateAuditEvent(t *testing.T) {
 	completed.Kind = EventCompletion
 	completed.Completion = &Completion{
 		Status:      StatusSucceeded,
-		Observables: []NamedValue{{Name: "exit_code", Value: "0"}},
+		Observables: Values{"exit_code": {Value: "0"}},
 	}
 	if err := ValidateAuditEvent(completed); err != nil {
 		t.Fatalf("completion event: %v", err)
@@ -183,18 +190,39 @@ func TestSchemasCarryVersionAndEnums(t *testing.T) {
 	assertObjectConforms(t, reflect.TypeOf(Decision{}), decisionSchema.Defs["decision"])
 	assertObjectConforms(t, reflect.TypeOf(InputProjection{}), decisionSchema.Defs["inputs"])
 	assertObjectConforms(t, reflect.TypeOf(Action{}), decisionSchema.Defs["action"])
-	assertObjectConforms(t, reflect.TypeOf(NamedValue{}), decisionSchema.Defs["value"])
+	assertObjectConforms(t, reflect.TypeOf(Value{}), decisionSchema.Defs["value"])
 	assertObjectConforms(t, reflect.TypeOf(AuditEvent{}), schemaNode{
 		Required: auditSchema.Required, Properties: auditSchema.Properties,
 	})
 	assertObjectConforms(t, reflect.TypeOf(Completion{}), auditSchema.Properties["completion"])
 }
 
-func TestDecisionSchemaDescribesNamedValueUniqueness(t *testing.T) {
+func TestDecisionSchemaUsesNamesAsObjectKeys(t *testing.T) {
 	decisionSchema := loadSchema(t, DecisionSchema)
 	values := decisionSchema.Defs["values"]
-	if !values.UniqueItems || values.XUniqueBy != "name" {
-		t.Fatal("decision schema does not describe the no-duplicate-name law")
+	var additional schemaNode
+	if err := json.Unmarshal(values.AdditionalProperties, &additional); err != nil {
+		t.Fatal(err)
+	}
+	if values.Type != "object" || values.PropertyNames == nil ||
+		values.PropertyNames.Ref != "#/$defs/name" ||
+		additional.Ref != "#/$defs/value" {
+		t.Fatal("decision schema does not structurally key values by name")
+	}
+}
+
+func TestDecisionRejectsInvalidUTF8BeforePersistence(t *testing.T) {
+	inputs := validInputs()
+	inputs.Action.Parameters["path"] = Value{Value: string([]byte{0xff})}
+	digest, err := Digest(inputs)
+	if err == nil || digest != "" {
+		t.Fatal("Digest() accepted invalid UTF-8")
+	}
+
+	decision := readDecisionFixture(t, "decision-pass.json")
+	decision.Remedy = string([]byte{0xff})
+	if err := ValidateDecision(decision); err == nil {
+		t.Fatal("ValidateDecision() accepted invalid UTF-8 remedy")
 	}
 }
 
@@ -282,18 +310,20 @@ type schemaDocument struct {
 }
 
 type schemaNode struct {
-	Required    []string              `json:"required"`
-	Properties  map[string]schemaNode `json:"properties"`
-	Const       any                   `json:"const"`
-	Enum        []string              `json:"enum"`
-	MinLength   int                   `json:"minLength"`
-	AllOf       []schemaNode          `json:"allOf"`
-	If          *schemaNode           `json:"if"`
-	Then        *schemaNode           `json:"then"`
-	Else        *schemaNode           `json:"else"`
-	Not         *schemaNode           `json:"not"`
-	UniqueItems bool                  `json:"uniqueItems"`
-	XUniqueBy   string                `json:"x-unique-by"`
+	Type                 string                `json:"type"`
+	Ref                  string                `json:"$ref"`
+	Required             []string              `json:"required"`
+	Properties           map[string]schemaNode `json:"properties"`
+	Const                any                   `json:"const"`
+	Enum                 []string              `json:"enum"`
+	MinLength            int                   `json:"minLength"`
+	AllOf                []schemaNode          `json:"allOf"`
+	If                   *schemaNode           `json:"if"`
+	Then                 *schemaNode           `json:"then"`
+	Else                 *schemaNode           `json:"else"`
+	Not                  *schemaNode           `json:"not"`
+	PropertyNames        *schemaNode           `json:"propertyNames"`
+	AdditionalProperties json.RawMessage       `json:"additionalProperties"`
 }
 
 func assertAuditSchemaBundlesDecisionDefs(t *testing.T) {
@@ -394,23 +424,15 @@ func validInputs() InputProjection {
 		Action: Action{
 			Envelope:  "shell",
 			Operation: "github.pr.merge",
-			Parameters: []NamedValue{
-				{Name: "grant", Value: RedactionMarker, Redacted: true},
-				{Name: "repo", Value: "itsHabib/workbench"},
-				{Name: "pr", Value: "168"},
+			Parameters: Values{
+				"grant": {Value: RedactionMarker, Redacted: true},
+				"repo":  {Value: "itsHabib/workbench"},
+				"pr":    {Value: "168"},
 			},
 		},
-		Observables: []NamedValue{
-			{Name: "head_sha", Value: "bce1322d926a541b23f68b9adf94823d55d5d699"},
-			{Name: "gate_outcome", Value: "ready_to_merge"},
+		Observables: Values{
+			"head_sha":     {Value: "bce1322d926a541b23f68b9adf94823d55d5d699"},
+			"gate_outcome": {Value: "ready_to_merge"},
 		},
 	}
-}
-
-func reverse[T any](values []T) []T {
-	out := append([]T(nil), values...)
-	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
-		out[left], out[right] = out[right], out[left]
-	}
-	return out
 }
