@@ -14,13 +14,13 @@ import (
 
 // TestSmokeFirstKeyEndToEnd wires the full custody chain the way `custody serve`
 // runs it — manifest + real grant store + credential store + engine over an
-// httptest upstream — and drives the three outcomes an operator wiring their
-// first real key must see: a granted request PASSES with the credential
-// injected, an over-scope request is DENIED with a remedy that names the grant
-// command, and an EXPIRED grant is refused. The mint key is bootstrapped through
-// the exact -init-guarded path the grant verb now uses (RequireMintKey(true)
-// then Mint), so the smoke reflects the real first-run flow rather than a
-// pre-seeded key.
+// httptest upstream — and drives the outcomes an operator wiring their first
+// real key must see: a granted request PASSES with the credential
+// injected, requests without authority never reach upstream, and the artifact
+// log contains neither credential nor grant token. The mint key is bootstrapped
+// through the exact -init-guarded path the grant verb now uses
+// (RequireMintKey(true) then Mint), so the smoke reflects the real first-run
+// flow rather than a pre-seeded key.
 func TestSmokeFirstKeyEndToEnd(t *testing.T) {
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	cp := &capture{}
@@ -40,15 +40,34 @@ func TestSmokeFirstKeyEndToEnd(t *testing.T) {
 	if got := cp.last.Header.Get("Authorization"); got != "Bearer "+testSecret {
 		t.Fatalf("upstream Authorization = %q, want the injected bearer credential", got)
 	}
+	if responseContains(pass, testSecret) {
+		t.Fatal("client response exposed the credential")
+	}
 	if v := lastLog(t, log).Verdict; v != verdictPass {
 		t.Fatalf("granted request verdict = %q, want pass", v)
 	}
+	t.Log("pass: fake upstream received the injected credential; client response did not")
 
-	// (b) Over-scope request DENIED: a POST comment under a read-only grant is a
+	// (b) Missing grant REFUSED: no grant means no credential lookup and no
+	// upstream request.
+	callsBefore := cp.calls
+	missing := do(engine, "GET", "/tracker/rest/api/2/issue/PROJ-1", nil, nil)
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("request without grant status = %d, want 401", missing.Code)
+	}
+	if body := decodeErr(t, missing); body.Code != "refused_no_grant" {
+		t.Fatalf("request without grant code = %q, want refused_no_grant", body.Code)
+	}
+	if cp.calls != callsBefore {
+		t.Fatal("a request without a grant must never reach upstream")
+	}
+	t.Log("refuse: request without a grant never reached fake upstream")
+
+	// (c) Over-scope request DENIED: a POST comment under a read-only grant is a
 	// 403 with a {code,reason,remedy,request_id} body whose remedy names the
 	// grant command for the action that WOULD cover it, and never reaches
 	// upstream.
-	callsBefore := cp.calls
+	callsBefore = cp.calls
 	denied := do(engine, "POST", "/tracker/rest/api/2/issue/PROJ-1/comment", hdr, strings.NewReader("{}"))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("over-scope request status = %d, want 403", denied.Code)
@@ -63,8 +82,9 @@ func TestSmokeFirstKeyEndToEnd(t *testing.T) {
 	if cp.calls != callsBefore {
 		t.Fatal("a denied request must never reach upstream")
 	}
+	t.Log("deny: valid read-only grant could not authorize a write")
 
-	// (c) EXPIRED grant refused: advance the engine clock past the TTL and the
+	// (d) EXPIRED grant refused: advance the engine clock past the TTL and the
 	// same granted read is now a 401 refused_expired with a grant-command remedy.
 	engine.now = func() time.Time { return now.Add(2 * time.Hour) }
 	expired := do(engine, "GET", "/tracker/rest/api/2/issue/PROJ-1", hdr, nil)
@@ -78,6 +98,28 @@ func TestSmokeFirstKeyEndToEnd(t *testing.T) {
 	if !strings.Contains(exp.Remedy, "grant") {
 		t.Fatalf("expired remedy should name the grant command: %q", exp.Remedy)
 	}
+
+	// The log may carry a grant ID and one-way digest for correlation, but never
+	// the bearer token or injected credential.
+	if strings.Contains(log.String(), testSecret) {
+		t.Fatal("artifact log exposed the credential")
+	}
+	if strings.Contains(log.String(), token) {
+		t.Fatal("artifact log exposed the grant token")
+	}
+	t.Log("sanitize: response and JSONL log contain neither credential nor grant token")
+}
+
+func responseContains(response *httptest.ResponseRecorder, value string) bool {
+	if strings.Contains(response.Body.String(), value) {
+		return true
+	}
+	for name, values := range response.Header() {
+		if strings.Contains(name, value) || strings.Contains(strings.Join(values, "\n"), value) {
+			return true
+		}
+	}
+	return false
 }
 
 // smokeEngine builds the chain custody serves at runtime and bootstraps the mint

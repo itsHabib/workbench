@@ -184,6 +184,27 @@ the `remedy` names the exact command to unstick the work. Three you will meet:
 Nothing is forwarded upstream on any refusal, and no secret or grant token
 appears in the log.
 
+## Run the local security demo
+
+The demo uses a synthetic secret, an in-memory credential store, and a
+process-local TLS test server. It does not read the OS credential store, contact
+an external service, or leave grant/state files behind:
+
+```powershell
+go test ./cmd/custody/... -run 'TestSmokeFirstKeyEndToEnd|TestRequireLoopback' -v
+```
+
+The passing output reports the boundary observations:
+
+- the fake upstream receives the injected credential while the client does not;
+- a request without a grant and a write under a read-only grant never reach the
+  upstream;
+- the JSONL log contains neither the credential nor grant token; and
+- non-loopback listener addresses are refused before listen.
+
+The log deliberately retains a grant ID and SHA-256 grant digest for
+correlation. Those are not the bearer grant token.
+
 ## Flag reference
 
 | Flag | Verbs | Meaning |
