@@ -21,7 +21,7 @@ func TestBuildPanelUsesOnlyExactHeadCompletion(t *testing.T) {
 	}
 	comments := []issueComment{
 		comment("chatgpt-codex-connector[bot]",
-			"Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `aaaaaaaaaa`", 3),
+			"Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `"+testHeadA+"`", 3),
 	}
 	evidence := buildPanel(plan, reviews, comments, []string{"Copilot"})
 	if err := reviewpanel.Validate(evidence); err != nil {
@@ -32,6 +32,36 @@ func TestBuildPanelUsesOnlyExactHeadCompletion(t *testing.T) {
 	}
 	if len(evidence.Pending) != 0 || len(evidence.Missing) != 0 {
 		t.Fatalf("pending %v missing %v", evidence.Pending, evidence.Missing)
+	}
+}
+
+func TestCleanCommentRequiresFullExactHead(t *testing.T) {
+	comments := []issueComment{
+		comment("chatgpt-codex-connector[bot]",
+			"Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `"+testHeadA[:10]+"`", 3),
+	}
+	if _, ok := cleanComment("codex", testHeadA, comments); ok {
+		t.Fatal("abbreviated reviewed commit accepted")
+	}
+	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + testHeadA + "`"
+	if _, ok := cleanComment("codex", testHeadA, comments); !ok {
+		t.Fatal("full exact reviewed commit rejected")
+	}
+}
+
+func TestActorMatchesConfiguredReviewerAliases(t *testing.T) {
+	tests := map[string][]string{
+		"codex":   {"codex", "chatgpt-codex-connector[bot]"},
+		"claude":  {"claude", "claude[bot]"},
+		"cursor":  {"cursor", "cursor[bot]"},
+		"copilot": {"Copilot", "copilot-pull-request-reviewer[bot]", "github-copilot"},
+	}
+	for reviewer, aliases := range tests {
+		for _, alias := range aliases {
+			if !actorMatches(reviewer, alias) {
+				t.Errorf("actorMatches(%q, %q) = false", reviewer, alias)
+			}
+		}
 	}
 }
 
