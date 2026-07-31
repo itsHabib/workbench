@@ -107,6 +107,7 @@ func normalizeLocal(envelope Envelope) (normalized, error) {
 		for name, value := range shellContext(args) {
 			out.parameters[name] = value
 		}
+		out.workdirUnknown = args.WorkdirUnknown
 		return out, nil
 	}
 	return normalized{}, errUnsupported
@@ -116,6 +117,7 @@ type shellCommandArgs struct {
 	Command            string   `json:"command"`
 	Shell              string   `json:"shell,omitempty"`
 	Workdir            string   `json:"workdir,omitempty"`
+	WorkdirUnknown     bool     `json:"workdir_unknown,omitempty"`
 	TimeoutMS          *int     `json:"timeout_ms,omitempty"`
 	Login              *bool    `json:"login,omitempty"`
 	SandboxPermissions string   `json:"sandbox_permissions,omitempty"`
@@ -125,6 +127,9 @@ type shellCommandArgs struct {
 
 func shellContext(args shellCommandArgs) automode.Values {
 	values := automode.Values{}
+	if args.WorkdirUnknown {
+		values["workdir"] = automode.Value{Value: "unknown"}
+	}
 	if args.Workdir != "" {
 		values["workdir_digest"] = automode.Value{Value: textDigest(args.Workdir)}
 	}

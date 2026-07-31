@@ -46,9 +46,15 @@ not stored; the policy artifact and completion carry digests. A failed or short
 append is truncated back to its prior offset before the adapter returns failure.
 
 For shell events, a tool-specific `workdir` is authoritative when present.
-Otherwise the adapter injects the native envelope's required `cwd`, so the
-policy and audit identity always bind the actual execution context without
-persisting its raw path.
+Current native Bash hook input exposes only `command`; the envelope's `cwd` is
+the session directory, not proof of a per-call execution directory. Such calls
+therefore park instead of claiming a replayable execution context. If a future
+native envelope supplies `workdir`, the policy binds its digest without
+persisting the raw path.
+
+Pre/Post correlation also binds the exact tool-input bytes. If another
+concurrent hook rewrites the call after codexguard evaluates it, the completion
+cannot attach to the earlier decision.
 
 ## Honest failure matrix
 

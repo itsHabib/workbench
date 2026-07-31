@@ -91,6 +91,10 @@ func (e Evaluator) Evaluate(ctx context.Context, request Request) (automode.Deci
 	}
 
 	outcome, rule, remedy := classify(action)
+	if action.workdirUnknown && outcome == automode.OutcomePass {
+		return decision(action, automode.OutcomePark, "shell.workdir_unknown",
+			"retry when the native hook exposes the command execution directory", nil)
+	}
 	if action.operation != "github.pr.merge" {
 		return decision(action, outcome, rule, remedy, nil)
 	}
@@ -266,14 +270,15 @@ func mergeRemedy(action normalized) string {
 }
 
 type normalized struct {
-	envelope   string
-	operation  string
-	parameters automode.Values
-	candidate  string
-	repo       string
-	number     int
-	headSHA    string
-	admin      bool
+	envelope       string
+	operation      string
+	parameters     automode.Values
+	candidate      string
+	repo           string
+	number         int
+	headSHA        string
+	admin          bool
+	workdirUnknown bool
 }
 
 var errUnsupported = errors.New("unsupported envelope")

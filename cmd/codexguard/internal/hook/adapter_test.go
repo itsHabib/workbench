@@ -63,7 +63,7 @@ func TestGoldenPreToolUseFixtures(t *testing.T) {
 		output  string
 	}{
 		{"pre-bash-block.json", "bash", automode.OutcomeBlock, "pre-bash-block.output.json"},
-		{"pre-powershell-pass.json", "powershell", automode.OutcomePass, ""},
+		{"pre-powershell-pass.json", "powershell", automode.OutcomePark, ""},
 		{"pre-mcp-park.json", "bash", automode.OutcomePark, ""},
 	}
 	for _, test := range tests {
@@ -104,7 +104,7 @@ func TestGoldenPermissionRequestFixtures(t *testing.T) {
 		behavior string
 		output   string
 	}{
-		{"permission-powershell-pass.json", "powershell", automode.OutcomePass, "", ""},
+		{"permission-powershell-pass.json", "powershell", automode.OutcomePark, "", ""},
 		{"permission-block.json", "bash", automode.OutcomeBlock, "deny", "permission-block.output.json"},
 		{"permission-local-park.json", "bash", automode.OutcomePark, "", ""},
 	}
@@ -165,27 +165,19 @@ func TestPermissionRequestNeverWidensPolicy(t *testing.T) {
 	}
 }
 
-func TestNativeCWDBindsShellReplayIdentity(t *testing.T) {
-	firstAudit := &memoryAudit{}
-	if _, err := testAdapter(firstAudit, "powershell").Handle(
+func TestNativeShellWithoutExecutionDirectoryParks(t *testing.T) {
+	audit := &memoryAudit{}
+	response, err := testAdapter(audit, "powershell").Handle(
 		context.Background(), fixture(t, "pre-powershell-pass.json"),
-	); err != nil {
-		t.Fatal(err)
-	}
-	secondAudit := &memoryAudit{}
-	second := strings.Replace(
-		string(fixture(t, "pre-powershell-pass.json")),
-		`"cwd": "C:\\workspace"`,
-		`"cwd": "D:\\different-workspace"`,
-		1,
 	)
-	if _, err := testAdapter(secondAudit, "powershell").Handle(
-		context.Background(), []byte(second),
-	); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if firstAudit.events[0].Decision.ActionDigest == secondAudit.events[0].Decision.ActionDigest {
-		t.Fatal("different native cwd values produced the same action digest")
+	if audit.events[0].Decision.Outcome != automode.OutcomePark {
+		t.Fatalf("outcome = %q, want park", audit.events[0].Decision.Outcome)
+	}
+	if response == nil || response.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Fatalf("response = %+v, want deny", response)
 	}
 }
 
@@ -193,7 +185,6 @@ func TestToolWorkdirOverridesNativeCWD(t *testing.T) {
 	got, err := shellArguments(
 		[]byte(`{"command":"git status","workdir":"D:/tool-workdir"}`),
 		"powershell",
-		"C:/native-cwd",
 		false,
 	)
 	if err != nil {
@@ -261,6 +252,26 @@ func TestPostToolUseAddsStructuredPassCompletion(t *testing.T) {
 	}
 	if completion.InvocationID != audit.events[0].InvocationID {
 		t.Fatalf("completion invocation = %q, decision = %q", completion.InvocationID, audit.events[0].InvocationID)
+	}
+}
+
+func TestPostToolUseRejectsRewrittenInput(t *testing.T) {
+	audit := &memoryAudit{}
+	adapter := testAdapter(audit, "bash")
+	if _, err := adapter.Handle(context.Background(), fixture(t, "pre-mcp-pass.json")); err != nil {
+		t.Fatal(err)
+	}
+	post := strings.Replace(
+		string(fixture(t, "post-mcp-success.json")),
+		`"number": 175`,
+		`"number": 176`,
+		1,
+	)
+	if _, err := adapter.Handle(context.Background(), []byte(post)); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("rewritten input gained completion: %+v", audit.events)
 	}
 }
 

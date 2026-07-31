@@ -287,7 +287,7 @@ func validNullableString(data []byte) bool {
 
 func policyEnvelope(input Input, shell string, permission bool) (policy.Envelope, error) {
 	if input.ToolName == "Bash" {
-		arguments, err := shellArguments(input.ToolInput, shell, input.CWD, permission)
+		arguments, err := shellArguments(input.ToolInput, shell, permission)
 		if err != nil {
 			return policy.Envelope{}, err
 		}
@@ -299,7 +299,7 @@ func policyEnvelope(input Input, shell string, permission bool) (policy.Envelope
 	return policy.Envelope{Kind: "local", Tool: input.ToolName, Arguments: input.ToolInput}, nil
 }
 
-func shellArguments(data []byte, shell, cwd string, permission bool) ([]byte, error) {
+func shellArguments(data []byte, shell string, permission bool) ([]byte, error) {
 	var values map[string]json.RawMessage
 	if err := json.Unmarshal(data, &values); err != nil {
 		return nil, errors.New("hook: Bash tool_input must be an object")
@@ -313,11 +313,7 @@ func shellArguments(data []byte, shell, cwd string, permission bool) ([]byte, er
 	}
 	values["shell"] = shellJSON
 	if _, ok := values["workdir"]; !ok {
-		workdirJSON, err := json.Marshal(cwd)
-		if err != nil {
-			return nil, err
-		}
-		values["workdir"] = workdirJSON
+		values["workdir_unknown"] = json.RawMessage("true")
 	}
 	out, err := json.Marshal(values)
 	if err != nil {
@@ -368,10 +364,12 @@ func decisionMessage(decision automode.Decision) string {
 }
 
 func toolInvocationID(input Input) string {
+	inputSum := sha256.Sum256(input.ToolInput)
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		input.SessionID,
 		input.ToolUseID,
 		input.ToolName,
+		hex.EncodeToString(inputSum[:]),
 	}, "\x00")))
 	return "inv_tool_" + hex.EncodeToString(sum[:16])
 }
