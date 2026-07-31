@@ -498,6 +498,13 @@ func TestSessionPathDoesNotDuplicateAuthSignal(t *testing.T) {
 	}
 }
 
+func TestDedicatedSessionPathRemainsSensitiveAfterDocsMatch(t *testing.T) {
+	result := classifyDiff(t, "diff --git a/docs/session/notes.md b/docs/session/notes.md\n+++ b/docs/session/notes.md\n@@\n+Session component notes.\n")
+	if result.Floor != T3 {
+		t.Fatalf("floor = %s, want T3; signals = %+v", result.Floor, result.Signals)
+	}
+}
+
 // bigGenerated builds a 2000-line generated-client diff — huge but T0.
 func bigGenerated() string {
 	var b strings.Builder

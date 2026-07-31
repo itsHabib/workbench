@@ -326,6 +326,7 @@ func ClassifyRepo(d Diff, repo string) Result {
 		// can't shed them; the T0 docs/tests/generated rules match the new path only
 		// (a rename FROM docs into code must not stay T0).
 		matchedPath := false
+		matchedAuthPath := false
 		for _, r := range pathRules {
 			hit := r.re.MatchString(f.Path)
 			if r.tier >= T2 {
@@ -334,9 +335,10 @@ func ClassifyRepo(d Diff, repo string) Result {
 			if hit {
 				add(r.name, r.tier, r.why+": "+f.Path)
 				matchedPath = true
+				matchedAuthPath = matchedAuthPath || r.name == "auth-crypto-secrets"
 			}
 		}
-		if !matchedPath && sessionPathSensitive(f) {
+		if !matchedAuthPath && sessionPathSensitive(f) {
 			add("auth-crypto-secrets", T3, "auth/crypto/secret surface: "+f.Path)
 			matchedPath = true
 		}
