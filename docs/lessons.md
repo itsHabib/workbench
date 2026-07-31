@@ -235,7 +235,11 @@ head SHA, findings bind to the head they judged, gate evaluates the exact
 head, and the executor refuses to merge anything but the exact commit the
 authorization names. A fix commit invalidates earlier completeness until
 the policy is satisfied again — by design, every time, because the one
-time it matters you won't know in advance.
+time it matters you won't know in advance. The friction log holds a
+second instance from a different repo: a review cycle's own fix
+introduced a contradiction that the *next* cycle's panel caught as a
+High finding — the re-review catching the fix's wake, which is exactly
+the failure "reviewed once" can never see.
 
 *Where it lives:* the exact-head panel checks in gate (PR #163);
 `contracts/reviewfindings`; the executor's `--match-head-commit` shape.
@@ -351,19 +355,25 @@ contract (`contracts/`).
 *Monday:* find one place your pipeline trusts a name — a tag, a filename,
 a status string — and make it fetch the thing instead.
 
-### 18. Timeouts compose.
+### 18. Supervision fails silent unless the watcher itself is watched.
 
-An outer observer's timeout must exceed the inner verification budget plus
-the time to upload evidence and reconcile state. Get this wrong and the
-monitoring layer erases its own failure signal — the watcher here once
-timed out before its watched job could report, which meant the failure it
-existed to catch was the one thing it could never see. Whenever one
-process supervises another, the budgets are a contract: inner work, plus
-evidence handling, plus margin, or the supervision is decorative.
+Two distinct ways a monitoring layer erases its own failure signal, both
+paid for here. First, budgets compose: an outer observer's timeout must
+exceed the inner verification budget plus the time to upload evidence and
+reconcile state — the roxiq observer's budgets exist because getting that
+arithmetic wrong means the failure the watcher exists to catch is the one
+thing it can never see. Second, watchers die silently: the friction log
+records a CI watcher whose output parsing never matched, so it reported
+`CI_TIMEOUT` while CI was in fact green, and a detached engine launch
+killed by a quiet shell guard, which cost a 25-minute watch on a run that
+was never running. The discipline that came out of it: launch-check every
+detached process (a beat later — is it alive, is its log non-empty), and
+treat a watcher's "nothing happened" as a claim to verify, not a fact.
 
-*Where it lives:* friction log, promoted into the watcher budgets.
-*Monday:* add up your innermost timeout chain by hand once. The arithmetic
-is always worse than you assumed.
+*Where it lives:* the observer budget design (roxiq, external); the ship
+workbench friction log (watcher entries).
+*Monday:* add up your innermost timeout chain by hand once, and make one
+watcher prove it actually attached to the thing it watches.
 
 ### 19. State your tamper model honestly — and stress it.
 
@@ -480,7 +490,31 @@ task); `local/README.md`.
 *Monday:* next time output disappoints, ask which dial is wrong before
 turning either.
 
-### 25. Report the path that actually ran.
+### 25. The substrate fails like the agent — learn to tell them apart.
+
+A whole recurring category in the friction log has nothing to do with
+models and everything to do with the floor they stand on: shells, package
+managers, SDK transports. A background dispatch fails because each
+tool-call shell is a *fresh* shell that inherits no env, so the key that
+worked a minute ago is gone. A sed anchored on column one misses an
+indented config entry and a well-meaning guard silently kills the launch.
+A workspace dependency reads as "file not found" when the real cause is a
+stale symlink an install would fix. A cloud agent's SDK stream dies
+mid-edit on long tool calls — a confirmed pattern across models — with
+the work complete but uncommitted. Every one of these masquerades as "the
+agent failed," and blaming the agent buys nothing. The rules that came
+out: set env inline in the same command as the thing that needs it,
+launch-check detached processes, prefer structured output (`--json`) over
+parsing terminal text, run the install after any dep-graph change before
+trusting a test run, and let engines treat transport death as a normal
+state with resume — not an anomaly.
+
+*Where it lives:* the ship workbench friction log (the densest category
+in it); the engine's kill/resume semantics.
+*Monday:* next agent failure, ask "would this have failed for a human in
+the same shell?" before reading the transcript.
+
+### 26. Report the path that actually ran.
 
 Never fabricate a driver receipt, a review artifact, or a gauntlet result
 for work performed manually. Manual `/drive`, the ship driver, the session
@@ -497,7 +531,7 @@ project. The objective was the talk.
 *Monday:* check whether your records distinguish "automation did this"
 from "a human did this and logged it as automation."
 
-### 26. Land the honest conclusion; hold warts openly.
+### 27. Land the honest conclusion; hold warts openly.
 
 The escalation work set out to build a sixth plane and concluded it had
 built a contract plus a seam — and the docs say exactly that, because a
@@ -512,7 +546,7 @@ admits as much as what it enforces.
 *Monday:* write down your system's ugliest known wart where users can see
 it, and watch what that does to how much they trust the rest.
 
-### 27. Start with one consequential action. Someone still owns the result.
+### 28. Start with one consequential action. Someone still owns the result.
 
 Inside an organization, don't boil the ocean — pick one action that
 matters (the merge, the deploy, the spend), define what the system can

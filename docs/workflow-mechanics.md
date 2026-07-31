@@ -121,6 +121,12 @@ split is the worked example of prose-to-code (§7): the loop used to be
 skill prose the model re-derived every run; now it's engine code, and the
 skill shrank to opinions.
 
+The engine owning recovery is not hypothetical caution: the friction log
+records a confirmed pattern (three runs, more than one model) of cloud-SDK
+streams dying mid-edit during long tool calls with the work complete but
+uncommitted. Transport death is a normal state a durable engine resumes
+from, not an anomaly a skill can prose its way around.
+
 **`--engine session`** relocates execution without changing the artifact
 boundaries: the current chat becomes a thin state-machine driver,
 delegated subagents implement each task in isolated worktrees, and a
