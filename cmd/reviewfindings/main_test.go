@@ -162,6 +162,25 @@ func TestAddressAcceptCLIConsumesOnce(t *testing.T) {
 	}
 }
 
+func TestValidateCompletedHeadDistinguishesClosedPR(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	err := validateCompletedHead("CLOSED", head, head)
+	assertAddressRefusal(t, err, "pr-not-open")
+	if !strings.Contains(err.Error(), "pull request is CLOSED") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateResumeHeadRejectsStartedDivergence(t *testing.T) {
+	resume := driverstate.AddressResume{
+		State: dsc.ReviewAddressRecord{
+			Status: "started", WorkRef: "address/work.json",
+		},
+	}
+	err := validateResumeHead(resume, "OPEN", "diverged")
+	assertAddressRefusal(t, err, "stale-head")
+}
+
 func appendAddressFixtureEvent(t *testing.T, dir string, lease driverstate.Lease, event driverstate.Event) {
 	t.Helper()
 	if _, err := driverstate.Append(dir, lease, event); err != nil {

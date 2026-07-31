@@ -204,7 +204,7 @@ func acceptedReviewers(findings []reviewroute.FindingState) []string {
 		}
 		reviewers = append(reviewers, finding.Reviewers...)
 	}
-	return reviewroute.SortedUnique(reviewers)
+	return sortedUnique(reviewers)
 }
 
 func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []string) {

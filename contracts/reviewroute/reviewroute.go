@@ -118,6 +118,8 @@ type RequestReceipt struct {
 
 // FindingState is the frontier agent's explicit disposition of one sourced
 // finding. Reviewers contains only finding authors whose closure may be needed.
+// Changed records whether the accepted fix has already changed the exact head;
+// fixed + false still requires the address execution boundary.
 type FindingState struct {
 	ID             string   `json:"id"`
 	Severity       string   `json:"severity"`

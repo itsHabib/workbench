@@ -20,6 +20,9 @@ func readAddressDecision(path string) (reviewroute.Decision, error) {
 	}
 	var decision reviewroute.Decision
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	// ReviewDecisionV1 is a closed schema. Producers must bump schema_version
+	// before adding fields so older consumers fail closed instead of silently
+	// ignoring authorization data they do not understand.
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decision); err != nil {
 		return reviewroute.Decision{}, err
@@ -53,6 +56,8 @@ func validateAddressDecision(
 	}
 	accepted := make(map[string]struct{})
 	for _, finding := range decision.Findings {
+		// fixed + !changed means the fix was accepted but has not yet been
+		// executed on this exact head; address is the execution boundary.
 		if finding.Disposition == "fixed" && !finding.Changed {
 			accepted[finding.ID] = struct{}{}
 		}
