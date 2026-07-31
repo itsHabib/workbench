@@ -432,6 +432,7 @@ func TestDecideRefusesWhenLiveHeadChanges(t *testing.T) {
 				CurrentTier:         "T1",
 				ChecksPassed:        true,
 				PanelComplete:       true,
+				CompletedReviewers:  append([]string{}, plan.Required...),
 				CoordinatorComplete: true,
 				AdversarialComplete: true,
 				Findings:            []reviewroute.FindingState{},

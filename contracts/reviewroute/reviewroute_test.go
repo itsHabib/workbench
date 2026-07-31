@@ -210,6 +210,20 @@ func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
 	}
 }
 
+func TestCycleInputRejectsDuplicateCompletedReviewers(t *testing.T) {
+	input := CycleInput{
+		SchemaVersion:      SchemaVersion,
+		Subject:            Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		PlanID:             "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Cycle:              1,
+		CurrentTier:        "T1",
+		CompletedReviewers: []string{"codex", "codex"},
+	}
+	if err := ValidateCycleInput(input); err == nil {
+		t.Fatal("duplicate completed reviewer unexpectedly valid")
+	}
+}
+
 func TestRequestReceiptCannotClaimSuccessOnAnotherHead(t *testing.T) {
 	receipt := RequestReceipt{
 		SchemaVersion: SchemaVersion,
