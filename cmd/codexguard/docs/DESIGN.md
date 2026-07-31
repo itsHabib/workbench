@@ -78,6 +78,10 @@ out-of-workspace or secret-path read; workspace/OS confinement remains
 mandatory. Generic local `read_file`/`view_image` calls therefore park in this
 slice instead of receiving a blanket pass.
 
+Read-only MCP calls bind a digest of their normalized JSON object arguments
+into the action identity. Malformed or non-object arguments park; raw argument
+bytes are not persisted.
+
 ## Honest enforcement boundary
 
 This slice is a policy engine. Codex lifecycle hooks and restrictive rule

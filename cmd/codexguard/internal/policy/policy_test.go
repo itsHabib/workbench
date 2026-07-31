@@ -223,6 +223,50 @@ func TestEquivalentMergeEnvelopesUseSamePolicy(t *testing.T) {
 	}
 }
 
+func TestPowerShellAndCMDWrappersPreserveBackslashes(t *testing.T) {
+	for _, envelope := range []Envelope{
+		{Kind: "shell", Shell: "powershell", Command: `pwsh -Command "g\h pr merge 172 -R itsHabib/workbench --squash --match-head-commit ` + testHead + `"`},
+		{Kind: "shell", Shell: "cmd", Command: `cmd /c "g\h pr merge 172 -R itsHabib/workbench --squash --match-head-commit ` + testHead + `"`},
+	} {
+		gate := &fakeGate{rows: []ReadyMerge{readyRow()}}
+		got := evaluate(t, New(gate, livePRs()), Request{GateState: "C:/gate/state", Envelope: envelope})
+		assertDecision(t, got, automode.OutcomeRefuse, "merge.command_mismatch")
+	}
+}
+
+func TestMCPArgumentsBindReplayIdentity(t *testing.T) {
+	first := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: Envelope{
+		Kind: "mcp", Tool: "mcp__github__get_pull_request",
+		Arguments: json.RawMessage(`{"owner":"one","repo":"workbench","number":1}`),
+	}})
+	second := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: Envelope{
+		Kind: "mcp", Tool: "mcp__github__get_pull_request",
+		Arguments: json.RawMessage(`{"owner":"two","repo":"workbench","number":2}`),
+	}})
+	if first.ActionDigest == second.ActionDigest {
+		t.Fatal("different MCP arguments produced the same action digest")
+	}
+	if first.Inputs.Action.Parameters["arguments_digest"].Value == "" {
+		t.Fatal("MCP action has no arguments_digest")
+	}
+	reordered := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: Envelope{
+		Kind: "mcp", Tool: "mcp__github__get_pull_request",
+		Arguments: json.RawMessage(`{"number":1,"repo":"workbench","owner":"one"}`),
+	}})
+	if first.ActionDigest != reordered.ActionDigest {
+		t.Fatal("equivalent reordered MCP arguments changed the action digest")
+	}
+}
+
+func TestMalformedMCPArgumentsPark(t *testing.T) {
+	for _, arguments := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`[]`), json.RawMessage(`{`)} {
+		got := evaluate(t, New(&fakeGate{}, &fakePRs{}), Request{Envelope: Envelope{
+			Kind: "mcp", Tool: "mcp__github__get_pull_request", Arguments: arguments,
+		}})
+		assertDecision(t, got, automode.OutcomePark, "envelope.unsupported")
+	}
+}
+
 func TestMergeRefusalMatrix(t *testing.T) {
 	tests := []struct {
 		name string
