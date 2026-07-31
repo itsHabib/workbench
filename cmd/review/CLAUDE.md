@@ -31,6 +31,9 @@ full-panel fallback plan when the live PR head can still be proven.
 
 - Every artifact joins on repository, PR, exact head, and content-derived plan
   ID.
+- Review*V1 is introduced by this dependency chain; fields folded in before the
+  chain first lands on main remain V1. Newly required fields after that release
+  require a schema-major bump.
 - A head change invalidates planning, requests, observation, and decisions.
 - Missing/invalid policy or classification selects the complete safe panel.
 - Reaching a cap never turns incomplete evidence into success.

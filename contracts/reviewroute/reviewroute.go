@@ -14,6 +14,9 @@ import (
 
 const (
 	// SchemaVersion is the supported major version for all reviewroute artifacts.
+	// V1 is first released when this introducing PR chain lands on main; fields
+	// folded into that still-unreleased chain remain V1. After that release, an
+	// incompatible or newly required field needs a new major.
 	SchemaVersion = 1
 
 	// ActionStop declares that the exact head has satisfied review.
