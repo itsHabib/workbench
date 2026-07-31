@@ -460,26 +460,64 @@ func requestGitHubReviewer(
 	subject reviewroute.Subject,
 	name string,
 ) (string, error) {
-	login := name
-	if name == "copilot" {
-		login = "Copilot"
-	}
 	endpoint := fmt.Sprintf("repos/%s/pulls/%d/requested_reviewers",
 		subject.Repo, subject.Number)
-	_, err := runner.Run(ctx, "gh", "api", "-X", "POST", endpoint,
-		"-f", "reviewers[]="+login)
-	if err == nil {
-		return login, nil
+	logins := []string{name}
+	if name == "copilot" {
+		logins = []string{
+			"Copilot",
+			"copilot-pull-request-reviewer",
+			"copilot-pull-request-reviewer[bot]",
+		}
 	}
-	if name != "copilot" {
-		return "", err
+	var failures []string
+	for _, login := range logins {
+		output, err := runner.Run(ctx, "gh", "api", "-X", "POST", endpoint,
+			"-f", "reviewers[]="+login)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", login, err))
+			continue
+		}
+		recorded, decodeErr := responseRecordsReviewer(output, login)
+		if decodeErr != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", login, decodeErr))
+			continue
+		}
+		if recorded {
+			return login, nil
+		}
+		failures = append(failures, login+": GitHub did not record the request")
 	}
-	fallback := "copilot-pull-request-reviewer"
-	if _, fallbackErr := runner.Run(ctx, "gh", "api", "-X", "POST", endpoint,
-		"-f", "reviewers[]="+fallback); fallbackErr != nil {
-		return "", fmt.Errorf("Copilot and fallback reviewer requests failed: %w", fallbackErr)
+	return "", errors.New(strings.Join(failures, "; "))
+}
+
+func responseRecordsReviewer(data []byte, login string) (bool, error) {
+	var response struct {
+		RequestedReviewers []struct {
+			Login string `json:"login"`
+		} `json:"requested_reviewers"`
 	}
-	return fallback, nil
+	if err := json.Unmarshal(data, &response); err != nil {
+		return false, fmt.Errorf("decode reviewer request response: %w", err)
+	}
+	for _, reviewer := range response.RequestedReviewers {
+		if strings.EqualFold(reviewer.Login, login) {
+			return true, nil
+		}
+		if isCopilotLogin(login) && isCopilotLogin(reviewer.Login) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isCopilotLogin(login string) bool {
+	switch strings.ToLower(login) {
+	case "copilot", "copilot-pull-request-reviewer",
+		"copilot-pull-request-reviewer[bot]":
+		return true
+	}
+	return false
 }
 
 type decideOptions struct {
