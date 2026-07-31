@@ -227,9 +227,13 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 		if name == "gh" && slices.Contains(args, "view") {
 			return []byte(`{"headRefOid":"` + testHeadA + `","state":"OPEN"}`), nil
 		}
-		if name == "gh" && slices.Contains(args, "api") {
+		if name == "gh" && slices.Contains(args, "api") &&
+			slices.Contains(args, "POST") {
 			attempted = append(attempted, args[len(args)-1])
 			return []byte(`{"requested_reviewers":[]}`), nil
+		}
+		if name == "gh" && slices.Contains(args, "api") {
+			return []byte(`[]`), nil
 		}
 		return nil, errors.New("unexpected command")
 	}}
@@ -255,6 +259,40 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 	if receipt.Requests[0].Status != "failed" ||
 		!strings.Contains(receipt.Requests[0].Ref, "did not record") {
 		t.Fatalf("request = %#v", receipt.Requests[0])
+	}
+}
+
+func TestRequestAcceptsFreshCopilotTimelineEvidence(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
+		if name != "gh" || !slices.Contains(args, "api") {
+			return nil, errors.New("unexpected command")
+		}
+		if slices.Contains(args, "POST") {
+			return []byte(`{"requested_reviewers":[]}`), nil
+		}
+		if strings.Contains(args[len(args)-1], "/timeline?") {
+			return []byte(`[{
+				"event":"copilot_work_started",
+				"created_at":"` + now + `",
+				"actor":{"login":"Copilot"}
+			}]`), nil
+		}
+		return []byte(`[]`), nil
+	}}
+	ref, err := requestGitHubReviewer(
+		context.Background(),
+		runner,
+		reviewroute.Subject{
+			Repo: "itsHabib/ship", Number: 7, HeadSHA: testHeadA,
+		},
+		"copilot",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != "timeline:copilot_work_started" {
+		t.Fatalf("ref = %q", ref)
 	}
 }
 

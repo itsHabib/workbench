@@ -475,6 +475,7 @@ func requestGitHubReviewer(
 	}
 	var failures []string
 	for _, login := range logins {
+		attemptedAt := time.Now().UTC()
 		output, err := runner.Run(ctx, "gh", "api", "-X", "POST", endpoint,
 			"-f", "reviewers[]="+login)
 		if err != nil {
@@ -489,9 +490,93 @@ func requestGitHubReviewer(
 		if recorded {
 			return login, nil
 		}
+		if name == "copilot" {
+			ref, observed, observeErr := observeCopilotRequest(
+				ctx, runner, subject, attemptedAt,
+			)
+			if observeErr != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", login, observeErr))
+				continue
+			}
+			if observed {
+				return ref, nil
+			}
+		}
 		failures = append(failures, login+": GitHub did not record the request")
 	}
 	return "", errors.New(strings.Join(failures, "; "))
+}
+
+func observeCopilotRequest(
+	ctx context.Context,
+	runner commandRunner,
+	subject reviewroute.Subject,
+	attemptedAt time.Time,
+) (string, bool, error) {
+	timelineEndpoint := fmt.Sprintf(
+		"repos/%s/issues/%d/timeline?per_page=100",
+		subject.Repo,
+		subject.Number,
+	)
+	timelineData, timelineErr := runner.Run(ctx, "gh", "api", timelineEndpoint)
+	if timelineErr == nil {
+		var events []struct {
+			Event             string    `json:"event"`
+			CreatedAt         time.Time `json:"created_at"`
+			RequestedReviewer struct {
+				Login string `json:"login"`
+			} `json:"requested_reviewer"`
+			Actor struct {
+				Login string `json:"login"`
+			} `json:"actor"`
+		}
+		if err := json.Unmarshal(timelineData, &events); err != nil {
+			timelineErr = fmt.Errorf("decode review timeline: %w", err)
+		}
+		for _, event := range events {
+			fresh := !event.CreatedAt.Before(attemptedAt.Add(-2 * time.Second))
+			requested := event.Event == "review_requested" &&
+				isCopilotLogin(event.RequestedReviewer.Login)
+			started := event.Event == "copilot_work_started" &&
+				isCopilotLogin(event.Actor.Login)
+			if fresh && (requested || started) {
+				return "timeline:" + event.Event, true, nil
+			}
+		}
+	}
+
+	reviewsEndpoint := fmt.Sprintf(
+		"repos/%s/pulls/%d/reviews?per_page=100",
+		subject.Repo,
+		subject.Number,
+	)
+	reviewData, reviewErr := runner.Run(ctx, "gh", "api", reviewsEndpoint)
+	if reviewErr == nil {
+		var reviews []struct {
+			ID       int64  `json:"id"`
+			CommitID string `json:"commit_id"`
+			User     struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if err := json.Unmarshal(reviewData, &reviews); err != nil {
+			reviewErr = fmt.Errorf("decode pull request reviews: %w", err)
+		}
+		for _, review := range reviews {
+			if isCopilotLogin(review.User.Login) &&
+				strings.EqualFold(review.CommitID, subject.HeadSHA) {
+				return fmt.Sprintf("review:%d", review.ID), true, nil
+			}
+		}
+	}
+	if timelineErr != nil || reviewErr != nil {
+		return "", false, fmt.Errorf(
+			"verify Copilot request (timeline: %v; reviews: %v)",
+			timelineErr,
+			reviewErr,
+		)
+	}
+	return "", false, nil
 }
 
 func responseRecordsReviewer(data []byte, login string) (bool, error) {
