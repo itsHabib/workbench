@@ -44,7 +44,7 @@ logs remain the source of truth; flare only shrinks time-to-notice.**
 
 | source kind | path (example; set in config) | what flare lifts |
 |---|---|---|
-| `gate-log` | `pers/gate/state/log.jsonl` | envelope `{id, kind, run, time, parents, body, prev, hash}`; events: `kind=escalation` (body `{question, code?, outcome?}` — the notification body, ready-made) and `kind=verdict` with `decision ∈ {block, escalate}` |
+| `gate-log` | `~/dev/gate/state/log.jsonl` | envelope `{id, kind, run, time, parents, body, prev, hash}`; events: `kind=escalation` (body `{question, code?, outcome?}` — the notification body, ready-made) and `kind=verdict` with `decision ∈ {block, escalate}` |
 | `ship-receipts` | `%APPDATA%/ship/receipts.jsonl` (Roaming, absolute) | receipts with `outcome ∈ {failed, cancelled, parked}`; key = `key` + `outcome`; canonical time = `generated_at` (`terminal_at` accepted for historical rows). A Ship park is failure/dispatch triage, not a Gate policy decision, so it routes at failed severity and never renders a `Your call` headline or Gate resolve actions. |
 
 ci-classify needs no third source: its verdicts record into gate state (gate PR #10), so the
@@ -146,7 +146,7 @@ needs delivery facts to reconstruct a decision.
   "version": 1,
   "poll_seconds": 60,
   "sources": [
-    {"name": "gate", "kind": "gate-log", "path": "C:/Users/<you>/pers/gate/state/log.jsonl"},
+    {"name": "gate", "kind": "gate-log", "path": "C:/Users/<you>/dev/gate/state/log.jsonl"},
     {"name": "ship", "kind": "ship-receipts", "path": "C:/Users/<you>/AppData/Roaming/ship/receipts.jsonl"}
   ],
   "channels": {

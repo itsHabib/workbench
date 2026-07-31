@@ -1,6 +1,9 @@
 # Auto-mode defaults — making autonomy deterministic
 
-**Status:** v0 (2026-07-18)
+**Status:** v1 (2026-07-31) — refreshed the merge-boundary paragraph after the executor
+App's bootstrap merge landed, and added custody to the rulebooks.
+**The executable half** — literal settings, the guard script, hook registrations,
+install + verify — is [`auto-mode-rulebook.md`](auto-mode-rulebook.md).
 **Scope:** the auto-classifiers in the portfolio — the merge gate, triage, ship dispatch
 policy, and the Claude Code harness config (permissions + hooks). One set of defaults,
 many rulebooks.
@@ -122,7 +125,7 @@ allowlist candidates.
 
 ## The rulebooks today
 
-**Portfolio actions** (merges): gate + triage, state in `~/pers/gate` (the operator's
+**Portfolio actions** (merges): gate + triage, state in `~/dev/gate` (the operator's
 machine — gate state deliberately lives outside any repo), grants minted by the operator,
 decisions in the hash-chained audit log.
 
@@ -131,6 +134,14 @@ versioned, content-hashed policy file first-match-scanned against a task descrip
 fail-closed everywhere (an unmatched descriptor is an error, never a default placement),
 deterministic by law, with append-only receipts. It decides *placement* only; ship
 executes. New dispatch-policy work grows this rulebook rather than starting another.
+
+**Vendor/API reach** (`cmd/custody`): the same contract pointed at third-party HTTP
+credentials — operator-minted, HMAC-signed, TTL-bounded grants; per-key manifest rules
+matched on method, path, and query; deny-by-default on anything unlisted (including query
+params — widening scope is an explicit, logged operator decision); the real credential
+injected upstream by the broker so the caller never holds it; one receipt line per
+request, pass or refuse. Proven in a single-operator run against a real corporate Jira:
+reads passed, writes and unlisted API versions refused before forwarding.
 
 **Harness tool calls** (what a session may do): three settings layers with distinct jobs —
 
@@ -143,21 +154,24 @@ executes. New dispatch-policy work grows this rulebook rather than starting anot
    holes fail open (a `PowerShell(gh *)` entry silently undoes per-verb curation done in
    Bash rules; dual-shell platforms need every rule in both shells plus a deny backstop).
 
-The pretool guard (`pers/hooks/scripts/pretool-guard.sh`, on the operator's machine — not
+The pretool guard (`~/dev/hooks/scripts/pretool-guard.sh`, on the operator's machine — not
 in this repo) is the harness's tier-3 floor: a PreToolUse hook that regex-matches command
 shapes with no sanctioned use today (force push, repo delete, visibility flips, credential
 and gate-state touches) and refuses them with a remedy, in every permission mode.
 
 **Merge, specifically:** merge *policy* belongs to gate, and the guard does not duplicate
-it. But while gate is advisory (no `-live` wiring, no branch protection requiring its
-check), a bare `gh pr merge` from any governed session is a direct-merge bypass with no
-grant, verdict, or artifact. The guard therefore enforces *shape*, not policy: it passes
-merge commands that carry `--match-head-commit` (the form gate emits) and refuses bare
-merges with the remedy pointing at gate. This raises the bar rather than closing the hole —
-an agent could add the flag by hand — so the honest boundary is: discipline + the harness
-self-merge classifier carry merge authority today; the hole closes structurally when gate's
-check is required by branch protection or merge credentials move behind a broker. Revisit
-this paragraph when either lands.
+it. The guard enforces *shape*, not policy: it passes merge commands that carry
+`--match-head-commit` (the form gate emits) and refuses bare merges with the remedy
+pointing at gate. The structural close this paragraph used to wait on has started landing:
+merge credentials are moving behind the dedicated GitHub App executor
+(`docs/features/trusted-gate-judgment-bridge/`), which performed one real exact-head
+bootstrap merge (workbench PR #169, merged by the App identity, five-layer rulesets
+installed). Hosted execution remains unarmed pending activation and adversarial canaries,
+so the honest boundary today is: shape-guard + discipline + the harness self-merge
+classifier carry merge authority, with the executor path proven once but not yet armed.
+Revisit this paragraph when `GATE_EXECUTOR_ARMED` lands and the canaries pass — at that
+point the bare-merge hole closes structurally and the guard's merge rule becomes
+defense-in-depth rather than the boundary.
 
 ## Not now, and why
 

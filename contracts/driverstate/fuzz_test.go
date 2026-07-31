@@ -37,8 +37,9 @@ func FuzzDecodeEvent(f *testing.F) {
 // FuzzReadLedger asserts the multi-line tolerant reader never panics on
 // arbitrary bytes: it returns events + skip-warnings + error, and a partial or
 // malformed stream fails loudly (an error), never a crash. When it succeeds,
-// every returned event carries a kind the version accepts (unknown kinds are
-// skipped into warnings, not returned).
+// every returned event carries a known kind (unknown kinds are skipped into
+// warnings, not returned) and a version KnownVersion accepts — the mixed
+// v0.1/v0.2 chain law, not strict equality with Version.
 func FuzzReadLedger(f *testing.F) {
 	seedFromCorpus(f)
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -50,7 +51,7 @@ func FuzzReadLedger(f *testing.F) {
 			if !e.Kind.Known() {
 				t.Fatalf("ReadLedger returned an unknown kind %q; unknown kinds must be skipped, not returned", e.Kind)
 			}
-			if e.V != Version {
+			if !KnownVersion(e.V) {
 				t.Fatalf("ReadLedger returned a foreign version %q", e.V)
 			}
 		}
@@ -74,6 +75,9 @@ func seedFromCorpus(f *testing.F) {
 	// skip-warning paths.
 	f.Add(bytes.Join(valid, []byte("\n")))
 	f.Add([]byte(`{"id":"evt_x","run":"dsr_1","v":"driver-state-v0.1.0","kind":"stream_teleported","stream":"dss_1","time":"2026-07-16T12:00:00Z","actor":"a","body":null,"prev":"","hash":"h"}`))
+	// A v0.2 address line — KnownVersion accepts both versions in one chain, so
+	// the reader must return it, not reject it.
+	f.Add([]byte(`{"id":"evt_a","run":"dsr_1","v":"driver-state-v0.2.0","kind":"review_address_claimed","stream":"dss_1","time":"2026-07-16T12:00:03Z","actor":"session:a","body":{"work_id":"raw_11111111111111111111111111111111","child_run":"dsr_2"},"prev":"h3","hash":"h4"}`))
 	// Reject-path seeds: truncated JSON, wrong version, and empty.
 	f.Add([]byte(`{"id":"evt_1","v":`))
 	f.Add([]byte(`{"id":"e","v":"driver-state-v9.9.9","kind":"run_finished","time":"2026-07-16T12:00:00Z","actor":"a","body":null,"prev":"","hash":"h"}`))

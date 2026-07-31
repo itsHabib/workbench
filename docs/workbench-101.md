@@ -170,7 +170,7 @@ the skills are the swappable rungs.
 
 ## 3. The repo and the boundary law
 
-`pers/workbench` is the home for the Go agentic-infra family: **one repo, one Go
+`~/dev/workbench` is the home for the Go agentic-infra family: **one repo, one Go
 module** (`github.com/itsHabib/workbench` - see `go.mod`), deliberately *not*
 multi-module. Every boundary that matters is directory-based (each tool's guts live
 under `cmd/<tool>/internal/`), and nothing outside the module needs to pin a Go
@@ -848,14 +848,14 @@ The key line: an allowlist entry is safe in proportion to the gates *behind* it 
    rate.
 
 **The rulebooks in operation today:** portfolio actions (gate + triage, state at
-`~/pers/gate`, hash-chained log) and harness tool calls - three settings layers with
+`~/dev/gate`, hash-chained log) and harness tool calls - three settings layers with
 distinct jobs: global personal defaults (the tier-1 read-only floor, the tier-3 deny
 list, the guard hook), the checked-in project rulebook (reviewed by PR, so *the
 rulebook governs itself*), and a local scratch file drained on a cadence. The named
 fail-open hole: wildcards accreted in local scratch silently undoing per-verb
 curation - dual-shell platforms need every rule in both shells plus a deny backstop.
 
-The pretool guard (`~/pers/hooks/scripts/pretool-guard.sh`, `verified` - it lives in
+The pretool guard (`~/dev/hooks/scripts/pretool-guard.sh`, `verified` - it lives in
 the hooks repo, not this one) is the harness's tier-3 floor: it regex-refuses
 command shapes with no sanctioned use (force push, repo delete, visibility flips,
 credential and gate-state touches - and already custody's mint/keys verbs inside
