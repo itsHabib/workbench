@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -14,6 +16,26 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
+
+func TestLookupOpenPRsContextCancelsStalledGH(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	_, err := lookupOpenPRsContext(ctx, "o/r", func(ctx context.Context, _ string) ([]byte, []byte, error) {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled gh lookup was not cancelled promptly: %v", elapsed)
+	}
+	if !strings.Contains(err.Error(), "list PRs o/r") {
+		t.Fatalf("timeout must identify the failed repo: %v", err)
+	}
+}
 
 // TestCommonFlagsEnvDefaults pins step 1: -state and -key default to
 // $GATE_STATE / $GATE_KEY when set, and an explicit flag still wins.

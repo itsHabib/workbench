@@ -1561,12 +1561,21 @@ func cmdNext(args []string) error {
 // best-effort at the call site (observe degrades a repo whose fetch errors), so
 // a repo gh can't reach never fails the whole projection.
 func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
+	const timeout = 3 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return lookupOpenPRsContext(ctx, repo, runGHPRList)
+}
+
+type ghPRListRunner func(context.Context, string) ([]byte, []byte, error)
+
+func runGHPRList(ctx context.Context, repo string) ([]byte, []byte, error) {
 	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
 	// silently cap at 30 and undercount. It may still truncate a repo with >1000
 	// open PRs — any still-open PR outside the page would then be absent from the
 	// map and reconciled as "not open" (dropped) — so the boundary is surfaced
 	// below rather than paginated away.
-	cmd := exec.Command("gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
 	// Capture stdout and stderr separately: gh can write progress/deprecation/
 	// rate-limit banners to stderr even on a zero exit, and interleaving them
 	// into the JSON buffer would turn a clean read into a confusing decode error.
@@ -1574,7 +1583,18 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
+		return stdout.Bytes(), stderr.Bytes(), err
+	}
+	return stdout.Bytes(), stderr.Bytes(), nil
+}
+
+func lookupOpenPRsContext(ctx context.Context, repo string, run ghPRListRunner) (map[int]observe.LivePR, error) {
+	stdout, stderr, err := run(ctx, repo)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("list PRs %s: %w", repo, ctx.Err())
+		}
+		detail := strings.TrimSpace(string(stderr))
 		if detail != "" {
 			return nil, fmt.Errorf("list PRs %s: %w: %s", repo, err, detail)
 		}
@@ -1586,7 +1606,7 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 		HeadRefOID string `json:"headRefOid"`
 		URL        string `json:"url"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
+	if err := json.Unmarshal(stdout, &prs); err != nil {
 		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
 	}
 	if len(prs) == 1000 {
