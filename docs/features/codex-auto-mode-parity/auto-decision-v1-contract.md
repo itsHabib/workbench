@@ -36,9 +36,10 @@ redacted inputs, and a secret-safe stable action digest.
 
 ## Acceptance
 
-Valid fixtures replay to the same verdict and rule. Unknown major and malformed
-required fields refuse. The rulebook version and normalized/redacted inputs are
-always present; leaf-package hygiene passes.
+Valid fixtures replay to the same verdict and rule. Unknown major, malformed
+required fields, and invalid UTF-8 in a digest input refuse. The rulebook
+version and normalized/redacted inputs are always present; leaf-package hygiene
+passes.
 
 ## Test plan
 
