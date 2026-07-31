@@ -123,7 +123,7 @@ func TestAddressAcceptCLIConsumesOnce(t *testing.T) {
 	decisionPath := filepath.Join(t.TempDir(), "decision.json")
 	decision := reviewroute.Decision{
 		SchemaVersion: reviewroute.SchemaVersion, GeneratedAt: now,
-		Subject:     reviewroute.Subject{Repo: "itsHabib/workbench", Number: 1, HeadSHA: head},
+		Subject:     reviewroute.Subject{Repo: "itshabib/workbench", Number: 1, HeadSHA: head},
 		PlanID:      "rp_11111111111111111111111111111111",
 		InputDigest: "sha256:" + strings.Repeat("b", 64),
 		Policy: &reviewroute.PolicyRef{

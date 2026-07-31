@@ -393,13 +393,13 @@ type RunRecord struct {
 // StreamRecord is a stream's derived summary: current status plus the facts
 // folded from its events.
 type StreamRecord struct {
-	Status      string          `json:"status"`
-	Attempts    []AttemptRecord `json:"attempts,omitempty"`
-	PR          int             `json:"pr,omitempty"`
-	URL         string          `json:"url,omitempty"`
+	Status   string          `json:"status"`
+	Attempts []AttemptRecord `json:"attempts,omitempty"`
+	PR       int             `json:"pr,omitempty"`
+	URL      string          `json:"url,omitempty"`
 	// HeadSHA advances from the PR opening head to the post-address commit head.
-	HeadSHA     string          `json:"head_sha,omitempty"`
-	MergeCommit string          `json:"merge_commit,omitempty"`
+	HeadSHA     string `json:"head_sha,omitempty"`
+	MergeCommit string `json:"merge_commit,omitempty"`
 	// Branch is folded from stream_dispatched — the dispatch branch locator.
 	Branch string `json:"branch,omitempty"`
 	// Worktree is folded from stream_dispatched — the dispatch worktree locator.

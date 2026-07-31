@@ -77,7 +77,7 @@ func addressDecision() reviewroute.Decision {
 		SchemaVersion: reviewroute.SchemaVersion,
 		GeneratedAt:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
 		Subject: reviewroute.Subject{
-			Repo: "itsHabib/workbench", Number: 1,
+			Repo: "itshabib/workbench", Number: 1,
 			HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		PlanID:      "rp_11111111111111111111111111111111",
