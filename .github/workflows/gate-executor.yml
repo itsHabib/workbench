@@ -137,6 +137,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+          INPUT_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
         with:
           request: executor-input/request.json
           state-tip: ${{ steps.state.outputs.tip }}
@@ -145,7 +146,6 @@ jobs:
           workflow-triggering-actor: ${{ github.triggering_actor }}
           app-id: ${{ vars.GATE_APP_ID }}
           installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
-          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
           state-dir: ${{ env.STATE_DIR }}
           key-dir: ${{ env.KEY_DIR }}
           api-url: ${{ github.api_url }}
@@ -155,12 +155,12 @@ jobs:
         uses: ./.github/actions/gate-reconciler
         env:
           GATE_ANCHOR_RECORD: /github/workspace/hosted-state/anchor.json
+          INPUT_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
         with:
           claim: ${{ inputs.claim }}
           state-tip: ${{ steps.state.outputs.tip }}
           app-id: ${{ vars.GATE_APP_ID }}
           installation-id: ${{ vars.GATE_APP_INSTALLATION_ID }}
-          app-private-key: ${{ secrets.GATE_APP_PRIVATE_KEY }}
           state-dir: ${{ env.STATE_DIR }}
           key-dir: ${{ env.KEY_DIR }}
           api-url: ${{ github.api_url }}
