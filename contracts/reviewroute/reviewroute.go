@@ -570,6 +570,9 @@ func validateDecisionOutcome(decision Decision) error {
 	if err := validateUnique("next reviewer", decision.NextReviewers); err != nil {
 		return err
 	}
+	if decision.Action == ActionAddress && len(decision.NextReviewers) == 0 {
+		return errors.New("reviewroute: address decision requires at least one next reviewer")
+	}
 	return nil
 }
 

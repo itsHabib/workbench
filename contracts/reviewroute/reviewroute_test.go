@@ -113,9 +113,41 @@ func TestDecisionActionSchemaMatchesContract(t *testing.T) {
 	if err := json.Unmarshal(DecisionSchema, &document); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{ActionStop, ActionContinue, ActionAddress, ActionEscalate, ActionPark}
-	if !slices.Equal(document.Properties["action"].Enum, want) {
-		t.Fatalf("action schema = %v, want %v", document.Properties["action"].Enum, want)
+	got := document.Properties["action"].Enum
+	slices.Sort(got)
+	want := []string{ActionAddress, ActionContinue, ActionEscalate, ActionPark, ActionStop}
+	if !slices.Equal(got, want) {
+		t.Fatalf("action schema = %v, want %v", got, want)
+	}
+}
+
+func TestDecisionSchemaRequiresNextReviewerForAddress(t *testing.T) {
+	var schema struct {
+		AllOf []struct {
+			If struct {
+				Properties map[string]struct {
+					Const string `json:"const"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			} `json:"if"`
+			Then struct {
+				Properties map[string]struct {
+					MinItems int `json:"minItems"`
+				} `json:"properties"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(DecisionSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.AllOf) != 1 {
+		t.Fatalf("decision schema constraints = %d, want 1", len(schema.AllOf))
+	}
+	conditional := schema.AllOf[0]
+	if conditional.If.Properties["action"].Const != ActionAddress ||
+		!slices.Equal(conditional.If.Required, []string{"action"}) ||
+		conditional.Then.Properties["next_reviewers"].MinItems != 1 {
+		t.Fatalf("malformed address reviewer requirement: %+v", conditional)
 	}
 }
 
@@ -362,6 +394,15 @@ func TestDecisionAcceptsAddressAction(t *testing.T) {
 	}}
 	if err := ValidateDecision(decision); err != nil {
 		t.Fatalf("address decision rejected: %v", err)
+	}
+}
+
+func TestDecisionRejectsAddressWithoutNextReviewer(t *testing.T) {
+	decision := validDecision()
+	decision.Action = ActionAddress
+	decision.NextReviewers = nil
+	if err := ValidateDecision(decision); err == nil {
+		t.Fatal("address decision without next reviewer unexpectedly valid")
 	}
 }
 

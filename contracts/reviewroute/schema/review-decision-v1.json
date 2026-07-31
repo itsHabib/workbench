@@ -118,5 +118,16 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "action": { "const": "address" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": { "next_reviewers": { "minItems": 1 } }
+      }
+    }
+  ],
   "additionalProperties": false
 }

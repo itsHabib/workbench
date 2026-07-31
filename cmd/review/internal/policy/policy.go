@@ -332,7 +332,7 @@ func needsAddress(findings []reviewroute.FindingState, reasons []string) bool {
 		return false
 	}
 	for _, finding := range findings {
-		if finding.Disposition == "fixed" && !finding.Changed {
+		if finding.Disposition == "fixed" && !finding.Changed && !finding.ReviewerClosed {
 			return true
 		}
 	}
