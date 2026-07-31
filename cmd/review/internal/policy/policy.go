@@ -142,6 +142,8 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 		action = reviewroute.ActionEscalate
 		reasons = append(reasons, "tier_increased")
 	}
+	// A late cycle without its T3 rationale parks before any further action,
+	// including a raised-tier escalation; the tier reason remains recorded.
 	if input.Cycle > 3 && (input.CurrentTier != "T3" || strings.TrimSpace(input.ContinuationRationale) == "") {
 		action = reviewroute.ActionPark
 		reasons = append(reasons, "late_cycle_requires_t3_rationale")
@@ -273,6 +275,8 @@ func proofCloses(plan reviewroute.Plan, tier string, critical bool, proofRef str
 	if critical || !plan.Requirements.AllowProofSubstitution || strings.TrimSpace(proofRef) == "" {
 		return false
 	}
+	// T3 always requires reviewer closure, even if a custom policy mistakenly
+	// enables proof substitution for the tier.
 	return tier == "T0" || tier == "T1" || tier == "T2"
 }
 
