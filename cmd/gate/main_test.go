@@ -408,6 +408,54 @@ func TestHelpRequestExitsZero(t *testing.T) {
 	}
 }
 
+func TestValidateJudgeFlagsUsesClosedProviderSet(t *testing.T) {
+	for _, provider := range []string{verify.JudgeProviderClaude, verify.JudgeProviderCodex} {
+		t.Run(provider, func(t *testing.T) {
+			err := validateJudgeFlags("run_123", "grt_123", judgmentOptions{
+				Auto:     true,
+				Provider: provider,
+			})
+			if err != nil {
+				t.Fatalf("built-in provider refused: %v", err)
+			}
+		})
+	}
+
+	cases := []struct {
+		name string
+		opts judgmentOptions
+		code string
+	}{
+		{
+			name: "missing provider",
+			opts: judgmentOptions{Auto: true},
+			code: "judge_provider_unconfigured",
+		},
+		{
+			name: "caller selected executable",
+			opts: judgmentOptions{Auto: true, Provider: `C:\tmp\judge.exe`},
+			code: "judge_provider_unsupported",
+		},
+		{
+			name: "provider without auto",
+			opts: judgmentOptions{
+				Decision: verify.DecisionPass,
+				Why:      "safe",
+				Provider: verify.JudgeProviderCodex,
+			},
+			code: "-provider requires -auto",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateJudgeFlags("run_123", "grt_123", tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.code) {
+				t.Fatalf("error = %v, want %s", err, tc.code)
+			}
+		})
+	}
+}
+
 // TestCycleCountRefusesTamperedLog pins the mf1 tamper-resistance claim at the
 // enforcement point: if the log is rewritten to under-count cycles, deriving
 // the count must fail closed (codeError), never emit a would_merge from a
