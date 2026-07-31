@@ -134,6 +134,7 @@ func TestProofSubstitutionCanReplaceLaterBotAndCoordinatorRereview(t *testing.T)
 	plan := routedPlan(t, "T2")
 	input := cleanInput(plan, 2)
 	input.PanelComplete = false
+	input.CompletedReviewers = nil
 	input.CoordinatorComplete = false
 	input.Findings = []reviewroute.FindingState{{
 		ID: "codex-1", Severity: "medium", Reviewers: []string{"codex"},
@@ -316,12 +317,50 @@ func TestTierIncreaseEscalates(t *testing.T) {
 	}
 }
 
+func TestIncompletePanelTargetsOnlyMissingRequiredReviewers(t *testing.T) {
+	plan := routedPlan(t, "T2")
+	input := cleanInput(plan, 1)
+	input.PanelComplete = false
+	input.CompletedReviewers = []string{"codex"}
+	decision, err := Decide(plan, input, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != reviewroute.ActionContinue ||
+		!equal(decision.NextReviewers, []string{"cursor"}) {
+		t.Fatalf("decision = %s next %v reasons %v",
+			decision.Action, decision.NextReviewers, decision.ReasonCodes)
+	}
+}
+
+func TestPanelCompletionMustMatchRequiredReviewers(t *testing.T) {
+	plan := routedPlan(t, "T2")
+	input := cleanInput(plan, 1)
+	input.CompletedReviewers = []string{"codex"}
+	if _, err := Decide(plan, input, testNow); err == nil {
+		t.Fatal("complete panel with a missing required reviewer unexpectedly accepted")
+	}
+	input.CompletedReviewers = []string{"codex", "cursor", "unknown"}
+	if _, err := Decide(plan, input, testNow); err == nil {
+		t.Fatal("unknown completed reviewer unexpectedly accepted")
+	}
+}
+
 func TestExactHeadArtifactsCannotReplay(t *testing.T) {
 	plan := routedPlan(t, "T1")
 	input := cleanInput(plan, 1)
 	input.Subject.HeadSHA = headB
 	if _, err := Decide(plan, input, testNow); err == nil {
 		t.Fatal("replayed evidence unexpectedly joined")
+	}
+}
+
+func TestDecideRejectsRepoCaseMismatch(t *testing.T) {
+	plan := routedPlan(t, "T1")
+	input := cleanInput(plan, 1)
+	input.Subject.Repo = "ITSHABIB/SHIP"
+	if _, err := Decide(plan, input, testNow); err == nil {
+		t.Fatal("case-mismatched repository unexpectedly joined")
 	}
 }
 
@@ -344,6 +383,7 @@ func cleanInput(plan reviewroute.Plan, cycle int) reviewroute.CycleInput {
 		CurrentTier:         plan.Classification.Tier,
 		ChecksPassed:        true,
 		PanelComplete:       true,
+		CompletedReviewers:  append([]string{}, plan.Required...),
 		CoordinatorComplete: true,
 		AdversarialComplete: true,
 		Findings:            []reviewroute.FindingState{},

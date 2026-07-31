@@ -3,7 +3,7 @@
   "$id": "https://github.com/itsHabib/workbench/contracts/reviewroute/schema/review-cycle-input-v1.json",
   "title": "ReviewCycleInputV1",
   "type": "object",
-  "required": ["schema_version", "subject", "plan_id", "cycle", "current_tier", "checks_passed", "panel_complete", "coordinator_complete", "adversarial_complete", "findings"],
+  "required": ["schema_version", "subject", "plan_id", "cycle", "current_tier", "checks_passed", "panel_complete", "completed_reviewers", "coordinator_complete", "adversarial_complete", "findings"],
   "properties": {
     "schema_version": { "const": 1 },
     "subject": {
@@ -21,6 +21,11 @@
     "current_tier": { "enum": ["T0", "T1", "T2", "T3"] },
     "checks_passed": { "type": "boolean" },
     "panel_complete": { "type": "boolean" },
+    "completed_reviewers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "coordinator_complete": { "type": "boolean" },
     "adversarial_complete": { "type": "boolean" },
     "continuation_rationale": { "type": "string" },

@@ -124,6 +124,9 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 	if plan.PlanID != input.PlanID || plan.Subject != input.Subject {
 		return reviewroute.Decision{}, errors.New("review artifacts do not join at the exact plan and head")
 	}
+	if err := validatePanelCompletion(plan, input); err != nil {
+		return reviewroute.Decision{}, err
+	}
 	inputDigest, err := reviewroute.CycleInputDigest(input)
 	if err != nil {
 		return reviewroute.Decision{}, err
@@ -193,7 +196,7 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 	}
 	if !input.PanelComplete && !proofOnly {
 		reasons = append(reasons, "panel_incomplete")
-		reviewers = append(reviewers, plan.Required...)
+		reviewers = append(reviewers, missingRequiredReviewers(plan, input)...)
 	}
 	if coordinatorRequired(plan, input) && !input.CoordinatorComplete && !proofOnly {
 		reasons = append(reasons, "coordinator_incomplete")
@@ -212,6 +215,41 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 		}
 	}
 	return sortedUnique(reasons), sortedUnique(reviewers)
+}
+
+func validatePanelCompletion(plan reviewroute.Plan, input reviewroute.CycleInput) error {
+	allowed := make(map[string]struct{}, len(plan.Reviewers))
+	for _, reviewer := range plan.Reviewers {
+		allowed[reviewer.Name] = struct{}{}
+	}
+	for _, reviewer := range input.CompletedReviewers {
+		if _, ok := allowed[reviewer]; !ok {
+			return fmt.Errorf("completed reviewer %s is not in the review plan", reviewer)
+		}
+	}
+	missing := missingRequiredReviewers(plan, input)
+	if input.PanelComplete && len(missing) > 0 {
+		return errors.New("panel_complete is true with required reviewers missing")
+	}
+	if !input.PanelComplete && len(missing) == 0 {
+		return errors.New("panel_complete is false with no required reviewers missing")
+	}
+	return nil
+}
+
+func missingRequiredReviewers(plan reviewroute.Plan, input reviewroute.CycleInput) []string {
+	completed := make(map[string]struct{}, len(input.CompletedReviewers))
+	for _, reviewer := range input.CompletedReviewers {
+		completed[reviewer] = struct{}{}
+	}
+	var missing []string
+	for _, reviewer := range plan.Required {
+		if _, ok := completed[reviewer]; ok {
+			continue
+		}
+		missing = append(missing, reviewer)
+	}
+	return missing
 }
 
 func coordinatorRequired(plan reviewroute.Plan, input reviewroute.CycleInput) bool {

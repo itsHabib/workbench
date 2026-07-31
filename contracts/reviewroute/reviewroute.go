@@ -139,6 +139,7 @@ type CycleInput struct {
 	CurrentTier           string         `json:"current_tier"`
 	ChecksPassed          bool           `json:"checks_passed"`
 	PanelComplete         bool           `json:"panel_complete"`
+	CompletedReviewers    []string       `json:"completed_reviewers"`
 	CoordinatorComplete   bool           `json:"coordinator_complete"`
 	AdversarialComplete   bool           `json:"adversarial_complete"`
 	ContinuationRationale string         `json:"continuation_rationale,omitempty"`
@@ -356,6 +357,9 @@ func ValidateCycleInput(input CycleInput) error {
 	}
 	if !validTier(input.CurrentTier) {
 		return errors.New("reviewroute: cycle input current_tier is invalid")
+	}
+	if err := validateUnique("completed reviewer", input.CompletedReviewers); err != nil {
+		return err
 	}
 	ids := make([]string, 0, len(input.Findings))
 	for _, finding := range input.Findings {
