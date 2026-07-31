@@ -46,8 +46,8 @@ see the layout below.
 
 ## Where to read, by question
 
-Full navigator, including feature design docs and reading orders:
-[`docs/README.md`](docs/README.md). The short version:
+The full table of contents: [`docs/README.md`](docs/README.md). The short
+version:
 
 - **What is this whole system?** [`docs/workbench-101.md`](docs/workbench-101.md) —
   the teaching doc: the loop, the five planes, gate as the flagship.
