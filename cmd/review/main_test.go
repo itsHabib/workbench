@@ -233,7 +233,7 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 			return []byte(`{"requested_reviewers":[]}`), nil
 		}
 		if name == "gh" && slices.Contains(args, "api") {
-			return []byte(`[]`), nil
+			return []byte(`[[]]`), nil
 		}
 		return nil, errors.New("unexpected command")
 	}}
@@ -271,14 +271,17 @@ func TestRequestAcceptsFreshCopilotTimelineEvidence(t *testing.T) {
 		if slices.Contains(args, "POST") {
 			return []byte(`{"requested_reviewers":[]}`), nil
 		}
+		if !slices.Contains(args, "--paginate") || !slices.Contains(args, "--slurp") {
+			return nil, errors.New("Copilot evidence lookup must paginate")
+		}
 		if strings.Contains(args[len(args)-1], "/timeline?") {
-			return []byte(`[{
+			return []byte(`[[],[{
 				"event":"copilot_work_started",
 				"created_at":"` + now + `",
 				"actor":{"login":"Copilot"}
-			}]`), nil
+			}]]`), nil
 		}
-		return []byte(`[]`), nil
+		return []byte(`[[]]`), nil
 	}}
 	ref, err := requestGitHubReviewer(
 		context.Background(),
@@ -296,16 +299,49 @@ func TestRequestAcceptsFreshCopilotTimelineEvidence(t *testing.T) {
 	}
 }
 
-func TestRequestAcceptsRecordedCopilotReviewer(t *testing.T) {
-	recorded, err := responseRecordsReviewer(
-		[]byte(`{"requested_reviewers":[{"login":"Copilot"}]}`),
-		"copilot-pull-request-reviewer[bot]",
+func TestObserveCopilotRequestAcceptsExactHeadReviewOnLaterPage(t *testing.T) {
+	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
+		if name != "gh" || !slices.Contains(args, "api") ||
+			!slices.Contains(args, "--paginate") || !slices.Contains(args, "--slurp") {
+			return nil, errors.New("unexpected command")
+		}
+		if strings.Contains(args[len(args)-1], "/timeline?") {
+			return []byte(`[[]]`), nil
+		}
+		return []byte(`[[],[{
+			"id":42,
+			"commit_id":"` + testHeadA + `",
+			"user":{"login":"github-copilot"}
+		}]]`), nil
+	}}
+	ref, observed, err := observeCopilotRequest(
+		context.Background(),
+		runner,
+		reviewroute.Subject{
+			Repo: "itsHabib/ship", Number: 7, HeadSHA: testHeadA,
+		},
+		time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !recorded {
-		t.Fatal("Copilot reviewer was not recognized")
+	if !observed || ref != "review:42" {
+		t.Fatalf("observed = %t ref = %q", observed, ref)
+	}
+}
+
+func TestRequestAcceptsRecordedCopilotReviewer(t *testing.T) {
+	for _, actor := range []string{"Copilot", "github-copilot", "github-copilot[bot]"} {
+		recorded, err := responseRecordsReviewer(
+			[]byte(`{"requested_reviewers":[{"login":"`+actor+`"}]}`),
+			"copilot-pull-request-reviewer[bot]",
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !recorded {
+			t.Fatalf("Copilot reviewer %q was not recognized", actor)
+		}
 	}
 }
 

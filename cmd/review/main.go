@@ -507,6 +507,25 @@ func requestGitHubReviewer(
 	return "", errors.New(strings.Join(failures, "; "))
 }
 
+type copilotTimelineEvent struct {
+	Event             string    `json:"event"`
+	CreatedAt         time.Time `json:"created_at"`
+	RequestedReviewer struct {
+		Login string `json:"login"`
+	} `json:"requested_reviewer"`
+	Actor struct {
+		Login string `json:"login"`
+	} `json:"actor"`
+}
+
+type copilotReview struct {
+	ID       int64  `json:"id"`
+	CommitID string `json:"commit_id"`
+	User     struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
 func observeCopilotRequest(
 	ctx context.Context,
 	runner commandRunner,
@@ -518,30 +537,16 @@ func observeCopilotRequest(
 		subject.Repo,
 		subject.Number,
 	)
-	timelineData, timelineErr := runner.Run(ctx, "gh", "api", timelineEndpoint)
+	timelineData, timelineErr := runner.Run(
+		ctx, "gh", "api", "--paginate", "--slurp", timelineEndpoint,
+	)
 	if timelineErr == nil {
-		var events []struct {
-			Event             string    `json:"event"`
-			CreatedAt         time.Time `json:"created_at"`
-			RequestedReviewer struct {
-				Login string `json:"login"`
-			} `json:"requested_reviewer"`
-			Actor struct {
-				Login string `json:"login"`
-			} `json:"actor"`
-		}
-		if err := json.Unmarshal(timelineData, &events); err != nil {
+		var pages [][]copilotTimelineEvent
+		if err := json.Unmarshal(timelineData, &pages); err != nil {
 			timelineErr = fmt.Errorf("decode review timeline: %w", err)
 		}
-		for _, event := range events {
-			fresh := !event.CreatedAt.Before(attemptedAt.Add(-2 * time.Second))
-			requested := event.Event == "review_requested" &&
-				isCopilotLogin(event.RequestedReviewer.Login)
-			started := event.Event == "copilot_work_started" &&
-				isCopilotLogin(event.Actor.Login)
-			if fresh && (requested || started) {
-				return "timeline:" + event.Event, true, nil
-			}
+		if ref, observed := freshCopilotTimelineEvent(pages, attemptedAt); observed {
+			return ref, true, nil
 		}
 	}
 
@@ -550,23 +555,16 @@ func observeCopilotRequest(
 		subject.Repo,
 		subject.Number,
 	)
-	reviewData, reviewErr := runner.Run(ctx, "gh", "api", reviewsEndpoint)
+	reviewData, reviewErr := runner.Run(
+		ctx, "gh", "api", "--paginate", "--slurp", reviewsEndpoint,
+	)
 	if reviewErr == nil {
-		var reviews []struct {
-			ID       int64  `json:"id"`
-			CommitID string `json:"commit_id"`
-			User     struct {
-				Login string `json:"login"`
-			} `json:"user"`
-		}
-		if err := json.Unmarshal(reviewData, &reviews); err != nil {
+		var pages [][]copilotReview
+		if err := json.Unmarshal(reviewData, &pages); err != nil {
 			reviewErr = fmt.Errorf("decode pull request reviews: %w", err)
 		}
-		for _, review := range reviews {
-			if isCopilotLogin(review.User.Login) &&
-				strings.EqualFold(review.CommitID, subject.HeadSHA) {
-				return fmt.Sprintf("review:%d", review.ID), true, nil
-			}
+		if ref, observed := exactHeadCopilotReview(pages, subject.HeadSHA); observed {
+			return ref, true, nil
 		}
 	}
 	if timelineErr != nil || reviewErr != nil {
@@ -577,6 +575,37 @@ func observeCopilotRequest(
 		)
 	}
 	return "", false, nil
+}
+
+func freshCopilotTimelineEvent(
+	pages [][]copilotTimelineEvent,
+	attemptedAt time.Time,
+) (string, bool) {
+	for _, events := range pages {
+		for _, event := range events {
+			fresh := !event.CreatedAt.Before(attemptedAt.Add(-2 * time.Second))
+			requested := event.Event == "review_requested" &&
+				isCopilotLogin(event.RequestedReviewer.Login)
+			started := event.Event == "copilot_work_started" &&
+				isCopilotLogin(event.Actor.Login)
+			if fresh && (requested || started) {
+				return "timeline:" + event.Event, true
+			}
+		}
+	}
+	return "", false
+}
+
+func exactHeadCopilotReview(pages [][]copilotReview, head string) (string, bool) {
+	for _, reviews := range pages {
+		for _, review := range reviews {
+			if isCopilotLogin(review.User.Login) &&
+				strings.EqualFold(review.CommitID, head) {
+				return fmt.Sprintf("review:%d", review.ID), true
+			}
+		}
+	}
+	return "", false
 }
 
 func responseRecordsReviewer(data []byte, login string) (bool, error) {
@@ -600,9 +629,9 @@ func responseRecordsReviewer(data []byte, login string) (bool, error) {
 }
 
 func isCopilotLogin(login string) bool {
-	switch strings.ToLower(login) {
-	case "copilot", "copilot-pull-request-reviewer",
-		"copilot-pull-request-reviewer[bot]":
+	login = strings.ToLower(strings.TrimSuffix(login, "[bot]"))
+	switch login {
+	case "copilot", "copilot-pull-request-reviewer", "github-copilot":
 		return true
 	}
 	return false
