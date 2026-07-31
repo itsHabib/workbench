@@ -216,6 +216,61 @@ func TestRequestTargetsOnlyNamedReviewer(t *testing.T) {
 	}
 }
 
+func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
+	temp := t.TempDir()
+	plan := testPlan(t, "T2")
+	planPath := filepath.Join(temp, "plan.json")
+	writeJSON(t, planPath, plan)
+	out := filepath.Join(temp, "request.json")
+	var attempted []string
+	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
+		if name == "gh" && slices.Contains(args, "view") {
+			return []byte(`{"headRefOid":"` + testHeadA + `","state":"OPEN"}`), nil
+		}
+		if name == "gh" && slices.Contains(args, "api") {
+			attempted = append(attempted, args[len(args)-1])
+			return []byte(`{"requested_reviewers":[]}`), nil
+		}
+		return nil, errors.New("unexpected command")
+	}}
+	code := run(context.Background(), []string{
+		"request", "-plan", planPath, "-reviewers", "copilot", "-out", out,
+	}, runner, io.Discard, io.Discard)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	wantAttempts := []string{
+		"reviewers[]=Copilot",
+		"reviewers[]=copilot-pull-request-reviewer",
+		"reviewers[]=copilot-pull-request-reviewer[bot]",
+	}
+	if !slices.Equal(attempted, wantAttempts) {
+		t.Fatalf("attempted = %v", attempted)
+	}
+	var receipt reviewroute.RequestReceipt
+	readJSON(t, out, &receipt)
+	if receipt.Status != "failed" || len(receipt.Requests) != 1 {
+		t.Fatalf("receipt = %s requests %d", receipt.Status, len(receipt.Requests))
+	}
+	if receipt.Requests[0].Status != "failed" ||
+		!strings.Contains(receipt.Requests[0].Ref, "did not record") {
+		t.Fatalf("request = %#v", receipt.Requests[0])
+	}
+}
+
+func TestRequestAcceptsRecordedCopilotReviewer(t *testing.T) {
+	recorded, err := responseRecordsReviewer(
+		[]byte(`{"requested_reviewers":[{"login":"Copilot"}]}`),
+		"copilot-pull-request-reviewer[bot]",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recorded {
+		t.Fatal("Copilot reviewer was not recognized")
+	}
+}
+
 func TestStalePlanRefusesBeforeRequestWrites(t *testing.T) {
 	temp := t.TempDir()
 	planPath := filepath.Join(temp, "plan.json")
