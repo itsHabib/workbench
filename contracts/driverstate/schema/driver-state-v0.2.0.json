@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/driver-state/v0.2.0",
+  "title": "AddressEvent",
+  "x-version": "0.2.0",
+  "description": "Authority-bearing review address lifecycle events. These events may follow v0.1 events in one unchanged hash chain.",
+  "type": "object",
+  "required": ["id", "run", "v", "kind", "stream", "time", "actor", "body", "prev", "hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^evt_" },
+    "run": { "type": "string", "pattern": "^dsr_" },
+    "v": { "type": "string", "const": "driver-state-v0.2.0" },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "review_address_prepared",
+        "review_address_claimed",
+        "review_address_started",
+        "review_address_completed"
+      ]
+    },
+    "stream": { "type": "string", "minLength": 1 },
+    "time": { "type": "string", "format": "date-time" },
+    "actor": { "type": "string", "minLength": 1 },
+    "ext_ref": { "type": "string" },
+    "body": {},
+    "prev": { "type": "string" },
+    "hash": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "review_address_prepared" } }, "required": ["kind"] },
+      "then": { "properties": { "body": { "$ref": "#/$defs/review_address_prepared_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "review_address_claimed" } }, "required": ["kind"] },
+      "then": { "properties": { "body": { "$ref": "#/$defs/review_address_claimed_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "review_address_started" } }, "required": ["kind"] },
+      "then": { "properties": { "body": { "$ref": "#/$defs/review_address_started_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "review_address_completed" } }, "required": ["kind"] },
+      "then": { "properties": { "body": { "$ref": "#/$defs/review_address_completed_body" } } }
+    }
+  ],
+  "$defs": {
+    "review_address_prepared_body": {
+      "type": "object",
+      "required": ["work_id", "work_ref", "work_digest", "artifact_id", "artifact_digest", "head_sha", "cycle"],
+      "additionalProperties": false,
+      "properties": {
+        "work_id": { "type": "string", "pattern": "^raw_[0-9a-f]{32}$" },
+        "work_ref": { "type": "string", "pattern": "^[^/\\\\.][^\\\\]*$" },
+        "work_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "cycle": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "review_address_claimed_body": {
+      "type": "object",
+      "required": ["work_id", "child_run"],
+      "additionalProperties": false,
+      "properties": {
+        "work_id": { "type": "string", "pattern": "^raw_[0-9a-f]{32}$" },
+        "child_run": { "type": "string", "pattern": "^dsr_" }
+      }
+    },
+    "review_address_started_body": {
+      "type": "object",
+      "required": ["work_id", "task_id"],
+      "additionalProperties": false,
+      "properties": {
+        "work_id": { "type": "string", "pattern": "^raw_[0-9a-f]{32}$" },
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "review_address_completed_body": {
+      "type": "object",
+      "required": ["work_id", "head_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "work_id": { "type": "string", "pattern": "^raw_[0-9a-f]{32}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    }
+  }
+}

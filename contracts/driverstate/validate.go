@@ -27,8 +27,15 @@ var runScoped = map[Kind]bool{
 // state machine). An unknown Kind is tolerated: presence rules still apply, but
 // its body is not second-guessed.
 func ValidateEvent(e Event) error {
-	if e.V != Version {
-		return fmt.Errorf("driverstate: %w: got %q, this reader accepts %q", ErrUnknownVersion, e.V, Version)
+	if !KnownVersion(e.V) {
+		return fmt.Errorf("driverstate: %w: got %q, this reader accepts %q and %q", ErrUnknownVersion, e.V, Version, AddressVersion)
+	}
+	addressKind := isAddressKind(e.Kind)
+	if addressKind && e.V != AddressVersion {
+		return fmt.Errorf("driverstate: kind %q requires version %q", e.Kind, AddressVersion)
+	}
+	if !addressKind && e.V == AddressVersion {
+		return fmt.Errorf("driverstate: version %q is reserved for review_address_* kinds", AddressVersion)
 	}
 	if e.ID == "" {
 		return fmt.Errorf("driverstate: id is empty; a client-minted idempotency key is required")
@@ -79,6 +86,14 @@ func ValidateBody(kind Kind, body json.RawMessage) error {
 		return validateStreamMerged(body)
 	case KindReviewCycle:
 		return validateReviewCycle(body)
+	case KindReviewAddressPrepared:
+		return validateReviewAddressPrepared(body)
+	case KindReviewAddressClaimed:
+		return validateReviewAddressClaimed(body)
+	case KindReviewAddressStarted:
+		return validateReviewAddressStarted(body)
+	case KindReviewAddressCompleted:
+		return validateReviewAddressCompleted(body)
 	case KindClosureFacts:
 		return validateClosureFacts(body)
 	case KindIntervention:
@@ -86,6 +101,97 @@ func ValidateBody(kind Kind, body json.RawMessage) error {
 	default:
 		return nil
 	}
+}
+
+func isAddressKind(kind Kind) bool {
+	for _, candidate := range AddressKinds() {
+		if kind == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func validateReviewAddressPrepared(body json.RawMessage) error {
+	var b ReviewAddressPreparedBody
+	if err := unmarshalBody(KindReviewAddressPrepared, body, &b); err != nil {
+		return err
+	}
+	switch {
+	case !validAddressID(b.WorkID):
+		return errors.New("driverstate: review_address_prepared body: work_id must start with raw_")
+	case !validWorkRef(b.WorkRef):
+		return errors.New("driverstate: review_address_prepared body: work_ref must be a confined relative path")
+	case !validDigest(b.WorkDigest):
+		return errors.New("driverstate: review_address_prepared body: work_digest must be 64 lowercase hexadecimal characters")
+	case strings.TrimSpace(b.ArtifactID) == "":
+		return errors.New("driverstate: review_address_prepared body: artifact_id is required")
+	case !validDigest(b.ArtifactDigest):
+		return errors.New("driverstate: review_address_prepared body: artifact_digest must be 64 lowercase hexadecimal characters")
+	case !validHex(b.HeadSHA, 40):
+		return errors.New("driverstate: review_address_prepared body: head_sha must be 40 lowercase hexadecimal characters")
+	case b.Cycle < 1:
+		return errors.New("driverstate: review_address_prepared body: cycle must be positive")
+	}
+	return nil
+}
+
+func validateReviewAddressClaimed(body json.RawMessage) error {
+	var b ReviewAddressClaimedBody
+	if err := unmarshalBody(KindReviewAddressClaimed, body, &b); err != nil {
+		return err
+	}
+	if !validAddressID(b.WorkID) {
+		return errors.New("driverstate: review_address_claimed body: work_id must start with raw_")
+	}
+	if !strings.HasPrefix(b.ChildRun, "dsr_") {
+		return errors.New("driverstate: review_address_claimed body: child_run must start with dsr_")
+	}
+	return nil
+}
+
+func validateReviewAddressStarted(body json.RawMessage) error {
+	var b ReviewAddressStartedBody
+	if err := unmarshalBody(KindReviewAddressStarted, body, &b); err != nil {
+		return err
+	}
+	if !validAddressID(b.WorkID) {
+		return errors.New("driverstate: review_address_started body: work_id must start with raw_")
+	}
+	if strings.TrimSpace(b.TaskID) == "" || len(b.TaskID) > 256 {
+		return errors.New("driverstate: review_address_started body: task_id is required")
+	}
+	return nil
+}
+
+func validateReviewAddressCompleted(body json.RawMessage) error {
+	var b ReviewAddressCompletedBody
+	if err := unmarshalBody(KindReviewAddressCompleted, body, &b); err != nil {
+		return err
+	}
+	if !validAddressID(b.WorkID) {
+		return errors.New("driverstate: review_address_completed body: work_id must start with raw_")
+	}
+	if !validHex(b.HeadSHA, 40) {
+		return errors.New("driverstate: review_address_completed body: head_sha must be 40 lowercase hexadecimal characters")
+	}
+	return nil
+}
+
+func validAddressID(value string) bool {
+	return strings.HasPrefix(value, "raw_") && validHex(value[len("raw_"):], 32)
+}
+
+func validWorkRef(value string) bool {
+	if value == "" || strings.Contains(value, `\`) || strings.HasPrefix(value, "/") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func validateClosureFacts(body json.RawMessage) error {
@@ -398,6 +504,8 @@ func validateReviewCycle(body json.RawMessage) error {
 	if b.Cycle < 1 {
 		return fmt.Errorf("driverstate: review_cycle body: cycle %d must be at least 1", b.Cycle)
 	}
+	// Zero is a settled review with nothing to address. ReviewFindingsV1
+	// remains non-empty because no address artifact is produced for that cycle.
 	if b.Findings < 0 {
 		return fmt.Errorf("driverstate: review_cycle body: findings %d must not be negative", b.Findings)
 	}

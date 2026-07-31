@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/reviewfindings/schema/review-address-work-v1.json",
+  "title": "AddressWorkV1",
+  "description": "Deterministic bounded handoff from one exact-head ReviewFindingsV1 artifact to a fresh session-native address child.",
+  "type": "object",
+  "required": [
+    "version",
+    "work_id",
+    "run",
+    "stream",
+    "cycle",
+    "artifact_id",
+    "artifact_digest",
+    "source_head_sha",
+    "artifact"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "review-address-work-v1" },
+    "work_id": { "type": "string", "pattern": "^raw_[0-9a-f]{32}$" },
+    "run": { "type": "string", "minLength": 1 },
+    "stream": { "type": "string", "minLength": 1 },
+    "cycle": { "type": "integer", "minimum": 1 },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "artifact_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "artifact": { "$ref": "review-findings-v1.json" }
+  }
+}

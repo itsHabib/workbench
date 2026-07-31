@@ -3,6 +3,7 @@ package reviewfindings
 import (
 	"encoding/json"
 	"math/rand"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +138,55 @@ func TestPanelPartitionProperty(t *testing.T) {
 		artifact.Findings[0].Sources[0].Reviewer = artifact.Panel.Completed[0]
 		if err := Validate(artifact); err != nil {
 			t.Fatalf("seed=%d case=%d valid partition refused: %v", seed, caseIndex, err)
+		}
+	}
+}
+
+func TestAddressWorkRoundTripAndTamperRefusal(t *testing.T) {
+	work, err := NewAddressWork("dsr_child", "dss_impl", 2, validArtifact())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := EncodeAddressWork(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeAddressWork(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.WorkID != AddressWorkID("dsr_child", "dss_impl", work.ArtifactDigest, 2) {
+		t.Fatalf("work id = %q", decoded.WorkID)
+	}
+	decoded.Artifact.Findings[0].Summary = "tampered"
+	if err := ValidateAddressWork(decoded); err == nil || !strings.Contains(err.Error(), "artifact_digest") {
+		t.Fatalf("tampered work error = %v", err)
+	}
+}
+
+func TestAddressWorkSchemaMatchesType(t *testing.T) {
+	var schema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(AddressWorkSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	required := make(map[string]bool, len(schema.Required))
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	typ := reflect.TypeOf(AddressWorkV1{})
+	if len(schema.Properties) != typ.NumField() {
+		t.Fatalf("schema properties=%d fields=%d", len(schema.Properties), typ.NumField())
+	}
+	for i := 0; i < typ.NumField(); i++ {
+		name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("schema missing %q", name)
+		}
+		if !required[name] {
+			t.Fatalf("address work field %q must be required", name)
 		}
 	}
 }
