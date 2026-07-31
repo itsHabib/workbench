@@ -397,6 +397,7 @@ type StreamRecord struct {
 	Attempts    []AttemptRecord `json:"attempts,omitempty"`
 	PR          int             `json:"pr,omitempty"`
 	URL         string          `json:"url,omitempty"`
+	// HeadSHA advances from the PR opening head to the post-address commit head.
 	HeadSHA     string          `json:"head_sha,omitempty"`
 	MergeCommit string          `json:"merge_commit,omitempty"`
 	// Branch is folded from stream_dispatched — the dispatch branch locator.
