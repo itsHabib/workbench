@@ -24,6 +24,15 @@ func TestEmbeddedSchemasAreJSON(t *testing.T) {
 	}
 }
 
+func TestValidSHARequiresLowercase(t *testing.T) {
+	if !validSHA(strings.Repeat("a", 40)) {
+		t.Fatal("lowercase SHA unexpectedly invalid")
+	}
+	if validSHA(strings.Repeat("A", 40)) {
+		t.Fatal("uppercase SHA unexpectedly valid")
+	}
+}
+
 func TestRouteDispositionSchemaMatchesContract(t *testing.T) {
 	want := []string{
 		"deliberately_overridden",

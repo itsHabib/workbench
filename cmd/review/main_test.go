@@ -223,6 +223,7 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 	writeJSON(t, planPath, plan)
 	out := filepath.Join(temp, "request.json")
 	var attempted []string
+	observations := 0
 	runner := fakeRunner{run: func(_ []byte, name string, args ...string) ([]byte, error) {
 		if name == "gh" && slices.Contains(args, "view") {
 			return []byte(`{"headRefOid":"` + testHeadA + `","state":"OPEN"}`), nil
@@ -233,6 +234,7 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 			return []byte(`{"requested_reviewers":[]}`), nil
 		}
 		if name == "gh" && slices.Contains(args, "api") {
+			observations++
 			return []byte(`[[]]`), nil
 		}
 		return nil, errors.New("unexpected command")
@@ -250,6 +252,9 @@ func TestRequestFailsWhenGitHubDoesNotRecordReviewer(t *testing.T) {
 	}
 	if !slices.Equal(attempted, wantAttempts) {
 		t.Fatalf("attempted = %v", attempted)
+	}
+	if observations != 2 {
+		t.Fatalf("observation API calls = %d, want 2", observations)
 	}
 	var receipt reviewroute.RequestReceipt
 	readJSON(t, out, &receipt)
