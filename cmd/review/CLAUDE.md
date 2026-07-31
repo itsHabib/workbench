@@ -35,7 +35,8 @@ full-panel fallback plan when the live PR head can still be proven.
 - Missing/invalid policy or classification selects the complete safe panel.
 - Reaching a cap never turns incomplete evidence into success.
 - Critical findings cannot be deferred or proof-substituted.
-- Later cycles target only finding authors still in play.
+- Later cycles target only missing required reviewers and finding authors still
+  in play.
 - T0 uncertainty escalates; cycles 4–8 require T3 and a rationale.
 - Local advice is advisory and escalates on low confidence/verifier failure.
 

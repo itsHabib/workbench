@@ -391,7 +391,7 @@ func cleanInput(plan reviewroute.Plan, cycle int) reviewroute.CycleInput {
 }
 
 func subject(head string) reviewroute.Subject {
-	return reviewroute.Subject{Repo: "itsHabib/ship", Number: 7, HeadSHA: head}
+	return reviewroute.Subject{Repo: "itshabib/ship", Number: 7, HeadSHA: head}
 }
 
 func testPolicy() reviewroute.Policy {

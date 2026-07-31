@@ -113,7 +113,7 @@ func TestPlanIdentityDetectsMutation(t *testing.T) {
 	plan := Plan{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
-		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:       Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		Disposition:   "tier_routed",
 		Policy:        &PolicyRef{ID: "canary", Digest: "sha256:" + strings.Repeat("a", 64)},
 		Classification: &Classification{
@@ -143,7 +143,7 @@ func TestPlanIdentityDetectsMutation(t *testing.T) {
 func TestDeferredDebtRequiresReasonAndFollowUp(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion: SchemaVersion,
-		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:       Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Cycle:         1,
 		CurrentTier:   "T1",
@@ -165,7 +165,7 @@ func TestDeferredDebtRequiresReasonAndFollowUp(t *testing.T) {
 func TestProvedSafeRequiresClosureOrProof(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion: SchemaVersion,
-		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:       Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Cycle:         1,
 		CurrentTier:   "T1",
@@ -191,7 +191,7 @@ func TestProvedSafeRequiresClosureOrProof(t *testing.T) {
 func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion: SchemaVersion,
-		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:       Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Cycle:         1,
 		CurrentTier:   "T1",
@@ -213,7 +213,7 @@ func TestCycleInputDigestDetectsEvidenceMutation(t *testing.T) {
 func TestCycleInputRejectsDuplicateCompletedReviewers(t *testing.T) {
 	input := CycleInput{
 		SchemaVersion:      SchemaVersion,
-		Subject:            Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:            Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:             "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Cycle:              1,
 		CurrentTier:        "T1",
@@ -228,7 +228,7 @@ func TestRequestReceiptCannotClaimSuccessOnAnotherHead(t *testing.T) {
 	receipt := RequestReceipt{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
-		Subject:       Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:       Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:        "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		HeadBefore:    strings.Repeat("b", 40),
 		HeadAfter:     strings.Repeat("b", 40),
@@ -257,7 +257,7 @@ func validDecision() Decision {
 	return Decision{
 		SchemaVersion:      SchemaVersion,
 		GeneratedAt:        time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
-		Subject:            Subject{Repo: "itsHabib/ship", Number: 1, HeadSHA: testHead},
+		Subject:            Subject{Repo: "itshabib/ship", Number: 1, HeadSHA: testHead},
 		PlanID:             "rp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		InputDigest:        "sha256:" + strings.Repeat("b", 64),
 		Policy:             &PolicyRef{ID: "canary", Digest: "sha256:" + strings.Repeat("c", 64)},
