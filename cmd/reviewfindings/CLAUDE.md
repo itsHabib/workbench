@@ -28,6 +28,10 @@ v0.2. A duplicate accept refuses with the existing work ref. A claimed item
 without a recorded task id parks on resume because a crash may have happened
 after task creation. The CLI creates no task and invokes no model/provider API.
 
+`ReviewDecisionV1` is a closed authorization schema. Adding any field requires
+a schema-version bump; older consumers must fail loud instead of ignoring
+authority-bearing data they do not understand.
+
 ## Develop
 
 ```

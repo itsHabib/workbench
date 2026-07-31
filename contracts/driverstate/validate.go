@@ -504,6 +504,8 @@ func validateReviewCycle(body json.RawMessage) error {
 	if b.Cycle < 1 {
 		return fmt.Errorf("driverstate: review_cycle body: cycle %d must be at least 1", b.Cycle)
 	}
+	// Zero is a settled review with nothing to address. ReviewFindingsV1
+	// remains non-empty because no address artifact is produced for that cycle.
 	if b.Findings < 0 {
 		return fmt.Errorf("driverstate: review_cycle body: findings %d must not be negative", b.Findings)
 	}
