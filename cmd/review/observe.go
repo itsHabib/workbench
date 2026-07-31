@@ -287,6 +287,8 @@ func actorPresent(expected string, actors []string) bool {
 
 func actorMatches(expected, actor string) bool {
 	actor = strings.ToLower(strings.TrimSuffix(actor, "[bot]"))
+	// Keep aliases aligned with the reviewer names accepted by ReviewPolicyV1.
+	// Unknown policy reviewers deliberately fall back to exact actor matching.
 	aliases := map[string][]string{
 		"codex":   {"codex", "chatgpt-codex-connector"},
 		"cursor":  {"cursor"},
