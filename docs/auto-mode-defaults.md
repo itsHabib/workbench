@@ -125,7 +125,7 @@ allowlist candidates.
 
 ## The rulebooks today
 
-**Portfolio actions** (merges): gate + triage, state in `~/pers/gate` (the operator's
+**Portfolio actions** (merges): gate + triage, state in `~/dev/gate` (the operator's
 machine — gate state deliberately lives outside any repo), grants minted by the operator,
 decisions in the hash-chained audit log.
 
@@ -154,7 +154,7 @@ reads passed, writes and unlisted API versions refused before forwarding.
    holes fail open (a `PowerShell(gh *)` entry silently undoes per-verb curation done in
    Bash rules; dual-shell platforms need every rule in both shells plus a deny backstop).
 
-The pretool guard (`pers/hooks/scripts/pretool-guard.sh`, on the operator's machine — not
+The pretool guard (`~/dev/hooks/scripts/pretool-guard.sh`, on the operator's machine — not
 in this repo) is the harness's tier-3 floor: a PreToolUse hook that regex-matches command
 shapes with no sanctioned use today (force push, repo delete, visibility flips, credential
 and gate-state touches) and refuses them with a remedy, in every permission mode.

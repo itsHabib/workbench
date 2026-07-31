@@ -45,7 +45,7 @@ The path is installed but unarmed until the operator completes the runbook. See
 
 ```
 go build -o gate.exe ./cmd/gate
-export GATE_STATE=~/pers/gate/state                          # -state/-key default to $GATE_STATE/$GATE_KEY
+export GATE_STATE=~/dev/gate/state                           # -state/-key default to $GATE_STATE/$GATE_KEY
 ./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
 ./gate.exe next                                              # what needs you: parked runs + grant ledger

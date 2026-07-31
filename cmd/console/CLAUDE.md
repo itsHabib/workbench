@@ -23,7 +23,7 @@ go test ./cmd/console/...
 Run it against a gate state dir:
 
 ```
-export GATE_STATE=~/pers/gate/state GATE_KEY=~/.config/gate   # gate reads these
+export GATE_STATE=~/dev/gate/state GATE_KEY=~/.config/gate    # gate reads these
 console serve                                                 # http://127.0.0.1:7788
 ```
 

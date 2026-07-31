@@ -58,8 +58,8 @@ cadence; a long list of historical approvals is not a security model.
       "Read(**/id_rsa*)",
       "Read(**/.env)",
       "Read(**/.env.*)",
-      "Read(~/pers/gate/**)",
-      "Read(~/pers/.keys/**)",
+      "Read(~/dev/gate/**)",
+      "Read(~/dev/.keys/**)",
       "Bash(gh repo delete:*)",
       "Bash(gh auth token:*)"
     ]
@@ -119,7 +119,7 @@ if echo "$cmd" | grep -qE 'gh repo (delete|edit[^|;]*--visibility)'; then
 fi
 
 # credential, key, and gate-state touches (read or write, any verb)
-if echo "$cmd" | grep -qE '(\.ssh/|\.aws/|\.pem|id_rsa|/pers/gate/|/pers/\.keys/|\.env( |$))'; then
+if echo "$cmd" | grep -qE '(\.ssh/|\.aws/|\.pem|id_rsa|/dev/gate/|/dev/\.keys/|\.env( |$))'; then
   deny "credential or authority-state path refused. Use custody or ask the operator."
 fi
 
@@ -163,7 +163,7 @@ echo "$cmd" | grep -q 'gh pr create' || exit 0
 url="$(jq -r '.tool_response // ""' <<<"$in" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -1)"
 [ -z "$url" ] && exit 0
 printf '{"event":"pr_created","url":"%s","ts":"%s"}\n' "$url" "$(date -u +%FT%TZ)" \
-  >> "$HOME/pers/artifacts/pr-events.ndjson"
+  >> "$HOME/dev/artifacts/pr-events.ndjson"
 exit 0
 ```
 
