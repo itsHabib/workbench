@@ -113,7 +113,13 @@ func addressClaim(dir string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeAddressError(err, stderr)
 	}
-	return writeAddressJSON(stdout, map[string]any{"work_id": opts.work, "child_run": child, "event": event.ID})
+	response := map[string]any{"work_id": opts.work, "child_run": child}
+	// An idempotent retry returns the already-linked child and no new event.
+	// Omit event rather than publishing an empty identifier.
+	if event.ID != "" {
+		response["event"] = event.ID
+	}
+	return writeAddressJSON(stdout, response)
 }
 
 func addressStarted(dir string, args []string, stdout, stderr io.Writer) int {
@@ -150,10 +156,8 @@ func addressCompleted(ctx context.Context, dir string, args []string, runner com
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	if !strings.EqualFold(state, "OPEN") || !strings.EqualFold(liveHead, opts.head) {
-		return writeAddressError(driverstate.AddressRefusal{
-			Code: "stale-head", Message: fmt.Sprintf("requested completed head %s is not the live open PR head %s", opts.head, liveHead),
-		}, stderr)
+	if err := validateCompletedHead(state, liveHead, opts.head); err != nil {
+		return writeAddressError(err, stderr)
 	}
 	lease, err := driverstate.Claim(dir, opts.run, opts.actor)
 	if err != nil {
@@ -200,20 +204,56 @@ func addressResume(ctx context.Context, dir string, args []string, runner comman
 	if err != nil {
 		return writeAddressError(err, stderr)
 	}
-	if !strings.EqualFold(state, "OPEN") {
-		return writeAddressError(driverstate.AddressRefusal{Code: "pr-not-open", Message: "pull request is " + state}, stderr)
-	}
-	if resume.State.Status == "pending" && reconciliation != "source-head" {
-		return writeAddressError(driverstate.AddressRefusal{
-			Code: "stale-head", Message: "pending work no longer matches the live PR head", WorkRef: resume.State.WorkRef,
-		}, stderr)
-	}
-	if resume.State.Status == "completed" && reconciliation != "result-head" {
-		return writeAddressError(driverstate.AddressRefusal{
-			Code: "stale-head", Message: "completed work no longer matches the recorded result head", WorkRef: resume.State.WorkRef,
-		}, stderr)
+	if err := validateResumeHead(resume, state, reconciliation); err != nil {
+		return writeAddressError(err, stderr)
 	}
 	return exitOK
+}
+
+func validateCompletedHead(state, liveHead, requestedHead string) error {
+	if !strings.EqualFold(state, "OPEN") {
+		return driverstate.AddressRefusal{
+			Code: "pr-not-open", Message: "pull request is " + state,
+		}
+	}
+	if !strings.EqualFold(liveHead, requestedHead) {
+		return driverstate.AddressRefusal{
+			Code: "stale-head",
+			Message: fmt.Sprintf(
+				"requested completed head %s is not the live open PR head %s",
+				requestedHead,
+				liveHead,
+			),
+		}
+	}
+	return nil
+}
+
+func validateResumeHead(
+	resume driverstate.AddressResume,
+	state, reconciliation string,
+) error {
+	if !strings.EqualFold(state, "OPEN") {
+		return driverstate.AddressRefusal{
+			Code: "pr-not-open", Message: "pull request is " + state,
+		}
+	}
+	if resume.State.Status == "pending" && reconciliation != "source-head" {
+		return driverstate.AddressRefusal{
+			Code: "stale-head", Message: "pending work no longer matches the live PR head", WorkRef: resume.State.WorkRef,
+		}
+	}
+	if resume.State.Status == "started" && reconciliation != "source-head" {
+		return driverstate.AddressRefusal{
+			Code: "stale-head", Message: "started work no longer matches the live PR head", WorkRef: resume.State.WorkRef,
+		}
+	}
+	if resume.State.Status == "completed" && reconciliation != "result-head" {
+		return driverstate.AddressRefusal{
+			Code: "stale-head", Message: "completed work no longer matches the recorded result head", WorkRef: resume.State.WorkRef,
+		}
+	}
+	return nil
 }
 
 func parseAddressOptions(command string, args []string) (addressOptions, error) {
