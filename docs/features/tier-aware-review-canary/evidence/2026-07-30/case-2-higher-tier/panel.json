@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 244,
+    "head_sha": "0dbdf43f3d41d66122524037b500b19e5ff9e499"
+  },
+  "declaration": {
+    "path": "ReviewPlanV1:rp_c3479e64c581127b83c7ea94f2685b07",
+    "revision": "tier-aware-canary@sha256:914b78444c4d19a2c2d0c7019bacfddc873d272a33cc7d3257abe6dd63ba15ee",
+    "expected": [
+      "codex",
+      "cursor"
+    ]
+  },
+  "completed": [],
+  "pending": [],
+  "missing": [
+    "codex",
+    "cursor"
+  ],
+  "unknown": []
+}

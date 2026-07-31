@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T02:13:03.4838245Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 244,
+    "head_sha": "0dbdf43f3d41d66122524037b500b19e5ff9e499"
+  },
+  "plan_id": "rp_c3479e64c581127b83c7ea94f2685b07",
+  "head_before": "0dbdf43f3d41d66122524037b500b19e5ff9e499",
+  "head_after": "0dbdf43f3d41d66122524037b500b19e5ff9e499",
+  "status": "requested",
+  "requests": [
+    {
+      "reviewer": "codex",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/244#issuecomment-5138470086"
+    },
+    {
+      "reviewer": "cursor",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/244#issuecomment-5138470284"
+    }
+  ]
+}

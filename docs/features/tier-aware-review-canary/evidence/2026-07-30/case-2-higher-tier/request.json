@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T01:48:20.387852Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 244,
+    "head_sha": "0dbdf43f3d41d66122524037b500b19e5ff9e499"
+  },
+  "plan_id": "rp_c3479e64c581127b83c7ea94f2685b07",
+  "head_before": "0dbdf43f3d41d66122524037b500b19e5ff9e499",
+  "head_after": "0dbdf43f3d41d66122524037b500b19e5ff9e499",
+  "status": "failed",
+  "reason": "one or more reviewer requests failed",
+  "requests": [
+    {
+      "reviewer": "codex",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/244#issuecomment-5138289021"
+    },
+    {
+      "reviewer": "copilot",
+      "trigger": "reviewer-request",
+      "status": "failed",
+      "ref": "Copilot: GitHub did not record the request; copilot-pull-request-reviewer: gh: Reviews may only be requested from collaborators. One or more of the users or teams you specified is not a collaborator of the itsHabib/ship repository. (HTTP 422); copilot-pull-request-reviewer[bot]: GitHub did not record the request"
+    },
+    {
+      "reviewer": "cursor",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/244#issuecomment-5138290087"
+    }
+  ]
+}

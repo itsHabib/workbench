@@ -1,0 +1,28 @@
+{
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+  },
+  "attempts": [
+    {
+      "source": "local",
+      "result": {
+        "verdict": "pass",
+        "findings": [],
+        "confidence": 100
+      },
+      "accepted": false,
+      "reason": "confidence violates the requested 0..1 schema"
+    },
+    {
+      "source": "local",
+      "result": {
+        "verdict": "pass",
+        "findings": [],
+        "confidence": 1.0
+      },
+      "accepted": true
+    }
+  ]
+}

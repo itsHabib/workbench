@@ -2,6 +2,22 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## Move repository integration from `.ship.json` to `.workbench.json`
+
+The first tier-aware review canary temporarily reads the repository-side
+enablement through `.ship.json` because work-driver already has that integration
+surface. Migrate Workbench-owned review configuration to `.workbench.json` in a
+separate compatibility change:
+
+- introduce `.workbench.json` as the authoritative Workbench policy opt-in;
+- support a bounded read-old/write-new transition for personal repositories;
+- keep `.ship.json` fallback fail-closed and remove it only after all canonical
+  work-driver projections consume the new file;
+- do not add reviewer-routing logic to either repository file.
+
+This rename is explicitly outside the canary implementation and does not block
+rollback, which remains removal of the current opt-in.
+
 ## AI gateway egress
 
 - **Construction-time credential read.** Gate reads `ANTHROPIC_API_KEY` once

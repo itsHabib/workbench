@@ -1,0 +1,20 @@
+{
+  "pr": "https://github.com/itsHabib/ship/pull/245",
+  "old_head": "49d31433615c82b258d0ec3ebe09509c6844b311",
+  "live_head": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d",
+  "old_plan_id": "rp_26f7dd4978d32a4d0ba53cadef37b10d",
+  "probes": {
+    "request": {
+      "exit_code": 3,
+      "artifact_published": false
+    },
+    "observe": {
+      "exit_code": 3,
+      "artifact_published": false
+    },
+    "decide": {
+      "exit_code": 3,
+      "artifact_published": false
+    }
+  }
+}

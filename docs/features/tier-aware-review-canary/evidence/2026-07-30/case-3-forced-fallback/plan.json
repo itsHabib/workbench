@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "plan_id": "rp_0ddb3e0820b61176edd9c8c1620e16f7",
+  "generated_at": "2026-07-31T02:10:10.8392241Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "49d31433615c82b258d0ec3ebe09509c6844b311"
+  },
+  "disposition": "full_panel_fallback",
+  "reason": "triage-floor failed: exec: \"definitely-missing-triage-floor\": executable file not found in %PATH%",
+  "reviewers": [
+    {
+      "name": "codex",
+      "trigger": "mention"
+    },
+    {
+      "name": "claude",
+      "trigger": "mention"
+    },
+    {
+      "name": "cursor",
+      "trigger": "mention"
+    },
+    {
+      "name": "copilot",
+      "trigger": "reviewer-request"
+    }
+  ],
+  "required": [
+    "claude",
+    "codex",
+    "copilot",
+    "cursor"
+  ],
+  "max_cycles": 3,
+  "requirements": {
+    "coordinator": "required",
+    "local_adversarial": false,
+    "adversarial_verification": false,
+    "allow_proof_substitution": false
+  }
+}

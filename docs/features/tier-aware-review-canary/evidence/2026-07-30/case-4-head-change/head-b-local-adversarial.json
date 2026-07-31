@@ -1,0 +1,14 @@
+{
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+  },
+  "source": "local",
+  "result": {
+    "verdict": "pass",
+    "findings": [],
+    "confidence": 1.0
+  },
+  "accepted": true
+}

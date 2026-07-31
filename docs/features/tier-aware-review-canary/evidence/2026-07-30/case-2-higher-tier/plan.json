@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "plan_id": "rp_c3479e64c581127b83c7ea94f2685b07",
+  "generated_at": "2026-07-31T01:47:32.7222797Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 244,
+    "head_sha": "0dbdf43f3d41d66122524037b500b19e5ff9e499"
+  },
+  "disposition": "tier_routed",
+  "policy": {
+    "id": "tier-aware-canary",
+    "digest": "sha256:914b78444c4d19a2c2d0c7019bacfddc873d272a33cc7d3257abe6dd63ba15ee"
+  },
+  "classification": {
+    "tier": "T2",
+    "reasons": [
+      "code change: packages/cli/src/commands/driver.ts",
+      "docs/copy: docs/features/ccp-loop-closure/phases/driver-address.md",
+      "docs/copy: docs/features/cloud-control-plane/spec.md",
+      "driver machinery: packages/driver/src/engine.test.ts",
+      "driver machinery: packages/driver/src/engine.ts",
+      "driver machinery: packages/driver/src/errors.ts",
+      "driver machinery: packages/driver/src/index.ts",
+      "driver machinery: packages/driver/src/review-decision.test.ts",
+      "driver machinery: packages/driver/src/review-decision.ts",
+      "driver machinery: packages/driver/src/spend-log.ts",
+      "driver machinery: packages/driver/src/triage.test.ts",
+      "driver machinery: packages/driver/src/triage.ts",
+      "driver machinery: packages/driver/src/types.ts",
+      "test code: packages/cli/test/driver-command.test.ts",
+      "test code: packages/driver/src/engine.test.ts",
+      "test code: packages/driver/src/review-decision.test.ts",
+      "test code: packages/driver/src/triage.test.ts",
+      "unclassified path: .ship.json"
+    ]
+  },
+  "reviewers": [
+    {
+      "name": "codex",
+      "trigger": "mention"
+    },
+    {
+      "name": "copilot",
+      "trigger": "reviewer-request"
+    },
+    {
+      "name": "cursor",
+      "trigger": "mention"
+    }
+  ],
+  "required": [
+    "codex",
+    "cursor"
+  ],
+  "max_cycles": 3,
+  "requirements": {
+    "coordinator": "required",
+    "local_adversarial": false,
+    "adversarial_verification": false,
+    "allow_proof_substitution": true
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T02:10:12.5121823Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "49d31433615c82b258d0ec3ebe09509c6844b311"
+  },
+  "plan_id": "rp_0ddb3e0820b61176edd9c8c1620e16f7",
+  "head_before": "49d31433615c82b258d0ec3ebe09509c6844b311",
+  "head_after": "49d31433615c82b258d0ec3ebe09509c6844b311",
+  "status": "failed",
+  "reason": "one or more reviewer requests failed",
+  "requests": [
+    {
+      "reviewer": "codex",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/245#issuecomment-5138452233"
+    },
+    {
+      "reviewer": "claude",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/245#issuecomment-5138452484"
+    },
+    {
+      "reviewer": "cursor",
+      "trigger": "mention",
+      "status": "requested",
+      "ref": "https://github.com/itsHabib/ship/pull/245#issuecomment-5138452687"
+    },
+    {
+      "reviewer": "copilot",
+      "trigger": "reviewer-request",
+      "status": "failed",
+      "ref": "Copilot: GitHub did not record the request; copilot-pull-request-reviewer: gh: Reviews may only be requested from collaborators. One or more of the users or teams you specified is not a collaborator of the itsHabib/ship repository. (HTTP 422); copilot-pull-request-reviewer[bot]: GitHub did not record the request"
+    }
+  ]
+}

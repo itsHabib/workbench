@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 244,
+    "head_sha": "0dbdf43f3d41d66122524037b500b19e5ff9e499"
+  },
+  "plan_id": "rp_c3479e64c581127b83c7ea94f2685b07",
+  "cycle": 1,
+  "current_tier": "T2",
+  "checks_passed": true,
+  "panel_complete": false,
+  "completed_reviewers": [],
+  "coordinator_complete": false,
+  "adversarial_complete": false,
+  "adversarial_evidence": null,
+  "findings": []
+}

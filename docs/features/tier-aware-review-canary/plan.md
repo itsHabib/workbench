@@ -1,6 +1,6 @@
 # Opt-in tier-aware review canary — delivery plan
 
-**Status:** Implementation locally green; PR review and live canary pending
+**Status:** Policy merged; adapter/evidence PRs open; three live cases proven, T2 panel completion pending
 **Date:** 2026-07-30
 **Primary owner:** Workbench `cmd/review`
 **Repositories:** `itsHabib/workbench`, `itsHabib/ship`, `itsHabib/cc-skills`

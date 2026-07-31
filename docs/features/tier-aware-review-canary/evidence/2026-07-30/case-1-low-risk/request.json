@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T03:43:46.6173096Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+  },
+  "plan_id": "rp_471d0bd1e8e7d6f4b1d053a683408b13",
+  "head_before": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d",
+  "head_after": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d",
+  "status": "requested",
+  "requests": []
+}

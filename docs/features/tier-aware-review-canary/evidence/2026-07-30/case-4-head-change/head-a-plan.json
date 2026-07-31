@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "plan_id": "rp_26f7dd4978d32a4d0ba53cadef37b10d",
+  "generated_at": "2026-07-31T01:52:16.5269197Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "49d31433615c82b258d0ec3ebe09509c6844b311"
+  },
+  "disposition": "tier_routed",
+  "policy": {
+    "id": "tier-aware-canary",
+    "digest": "sha256:914b78444c4d19a2c2d0c7019bacfddc873d272a33cc7d3257abe6dd63ba15ee"
+  },
+  "classification": {
+    "tier": "T0",
+    "reasons": [
+      "docs/copy: docs/features/tier-aware-review-canary/fixture.md"
+    ]
+  },
+  "reviewers": [],
+  "required": [],
+  "max_cycles": 1,
+  "requirements": {
+    "coordinator": "none",
+    "local_adversarial": true,
+    "adversarial_verification": false,
+    "allow_proof_substitution": true
+  }
+}

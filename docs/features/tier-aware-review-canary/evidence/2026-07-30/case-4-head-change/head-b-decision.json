@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T03:44:25.3973249Z",
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+  },
+  "plan_id": "rp_cfd71b06c7476f83567f01be33e472a0",
+  "input_digest": "sha256:a6e9797c539226553213a62fb834fafc664539e6def9ae7b4a72f5ebb9854106",
+  "policy": {
+    "id": "tier-aware-canary",
+    "digest": "sha256:914b78444c4d19a2c2d0c7019bacfddc873d272a33cc7d3257abe6dd63ba15ee"
+  },
+  "route_disposition": "tier_routed",
+  "tier": "T0",
+  "tier_reasons": [
+    "docs/copy: docs/features/tier-aware-review-canary/fixture.md"
+  ],
+  "cycle": 1,
+  "continuation_weight": 1,
+  "cumulative_weight": 1,
+  "action": "stop",
+  "reason_codes": [
+    "stop_conditions_satisfied"
+  ],
+  "next_reviewers": [],
+  "adversarial_evidence": {
+    "subject": {
+      "repo": "itshabib/ship",
+      "number": 245,
+      "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+    },
+    "source": "local",
+    "result": "pass",
+    "confidence": 1,
+    "artifact_digest": "sha256:e603ec87312b736d2a5325582884c5821ff99d130c4ec831838bf922e2e91971"
+  },
+  "findings": []
+}

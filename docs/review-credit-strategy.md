@@ -1,11 +1,13 @@
-# Review-credit strategy — measure first, cut second (v2, 2026-07-22)
+# Review-credit strategy — measured opt-in canary (v3, 2026-07-30)
 
-Status: proposal v2 — restructured after design review (PR #90). The v1 draft
-routed reviewer sets by tier immediately; review found the cut was aimed by
-event counts, not cost, and removed the compensating control for the floor's
-known blind spot. v2 splits the work: **Phase 0 builds the measurement and the
-deterministic guardrail now (no-regret); Phase 1 — the actual reviewer cut —
-is parked behind that data.**
+Status: implementation canary. Phase 0 measurement remains, but the earlier
+30-day prerequisite for any routing is superseded by the explicitly enabled
+personal-repository canary in
+[`features/tier-aware-review-canary/`](features/tier-aware-review-canary/plan.md).
+Repositories without that opt-in—including employer/work repositories—retain
+the full safe panel. Wider expansion remains gated on the live evidence and
+rollback criteria in the
+[`canary report`](features/tier-aware-review-canary/canary-report.md).
 
 ## Problem
 
@@ -182,39 +184,38 @@ closes the floor's known blind spot so Phase 1 has a safe signal to route on.
   T0/T1, that tier's reviewer set gets *stronger*, not weaker, until the
   holdout says otherwise.
 
-## Phase 1 — tier-routed reviewer sets (PARKED, data-gated)
+## Phase 1 — tier-routed reviewer sets (PERSONAL CANARY; expansion gated)
 
-The v1 mapping, kept for when the data clears it (dossier tasks
-`review-recipe-tiered` + `work-driver-skill-tier-policy` are seeded and
-blocked on this gate):
+The first implemented canary mapping is configurable and content-addressed,
+not permanent truth:
 
-- **T0:** no cloud bots — contingent on promoting the local
-  `/review-digest`-class pass to *count as the review* (else it collides
-  with the no-self-merge rule), and on RUBRIC's narrow T0 slice, not the
-  floor's broader one.
-- **T1:** one cloud reviewer, 1 cycle — default **codex**; escalate on any
-  critical finding.
-- **T2:** panel minus @claude + coordinator quorum; @claude summoned on
-  murky verdicts.
-- **T3:** full 4-bot panel + 3 cycles + adversarial pass
-  (feedback_adversarial_workflow_for_gates). Spend is fine here.
+- **T0:** one local adversarial pass, no cloud bots, cap 1. Uncertainty
+  reclassifies upward instead of granting another T0 cycle.
+- **T1:** Codex, cap 3.
+- **T2:** configured panel excluding Claude, coordinator required, cap 3.
+- **T3:** full four-bot panel plus adversarial verification, cap 8. Cycles
+  4–8 require a finding/proof-specific rationale.
+- **Later cycles:** request only missing required reviewers and authors whose
+  findings remain in play. Caps are ceilings, not quotas.
+- **Closure:** deterministic proof may replace noncritical T0–T2 rereview;
+  noncritical findings may be explicitly deferred. Critical findings, failed
+  proofs, and missing required evidence cannot be deferred.
 - **Cursor mention-only follow-through:** if Bugbot flips to mention-only
   (operator dashboard act), the T2/T3 recipes must add the `@cursor review`
   mention explicitly or the "full panel" quietly becomes 3 bots.
-- **Cycles:** cap 1 by default; 3 becomes T2+/on-findings only.
 
-**Unpark conditions (all of them):** 30 days of `review-spend.jsonl`; cost
-proxy shows reviews are a material pool fraction (else retarget); the
-gate-machinery path overrides are live; and either a shadow holdout (full
-panel on a random 10–15% of T0/T1 for the first month, compared against the
-routed set) is funded, or every "zero loss" claim stays dead and the cut is
-sold as "loss unknown, instrumented".
+**Expansion conditions:** all four live canary cases are complete at their
+exact heads; implementation PR CI and configured reviews are green; Ship and
+session adapters remain equivalent; stale-head replay stays impossible; and
+targeted-cycle/deferment evidence is operator-reviewed. The exponential
+`1,2,4,8,...` continuation weight remains shadow telemetry until evidence
+supports an enforcement threshold.
 
 ## Open operator calls (not agent decisions)
 
-1. **Fund the shadow holdout?** It spends review credit on purpose to price
-   the cut's risk. Without it the re-eval can only see what the remaining
-   bots found.
+1. **Fund a shadow holdout before wider expansion?** It spends review credit
+   on purpose to price the cut's risk. Without it the re-eval can only see what
+   the remaining bots found.
 2. **Cursor Bugbot mention-only toggle** — account-level dashboard setting,
    and its timing relative to Phase 1.
 
@@ -225,11 +226,9 @@ sold as "loss unknown, instrumented".
    no separate TDD (it would restate this context and drift), not a triage
    sub-spec (the spend log and holdout are panel policy, out of triage's
    scope; only the path-override table lands in triage).
-3. Dossier realigned to v2: `driver-triage-tier`, `review-spend-log` (token
-   proxy + fixes_pr folded in), `triage-path-overrides` are the Phase 0
-   batch; `review-recipe-tiered` + `work-driver-skill-tier-policy` blocked
-   behind the unpark conditions.
-4. `/work-driver-prep project:ship:phase:review-credit-tiering` → `/work-driver`
-   for the Phase 0 batch.
-5. ~30 days after the spend log lands: re-evaluate against the triggers
-   above; operator calls on holdout + cursor toggle decide Phase 1.
+3. Land the Workbench policy/session adapters, Ship adapter, and canonical
+   work-driver orchestration only after exact-head review and Gate.
+4. Complete the personal canary evidence, then evaluate the expansion
+   conditions above.
+5. Operator calls on holdout funding and the Cursor toggle decide any rollout
+   beyond the personal canary.

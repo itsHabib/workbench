@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "subject": {
+    "repo": "itshabib/ship",
+    "number": 245,
+    "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+  },
+  "plan_id": "rp_cfd71b06c7476f83567f01be33e472a0",
+  "cycle": 1,
+  "current_tier": "T0",
+  "checks_passed": true,
+  "panel_complete": true,
+  "completed_reviewers": [],
+  "coordinator_complete": true,
+  "adversarial_complete": true,
+  "adversarial_evidence": {
+    "subject": {
+      "repo": "itshabib/ship",
+      "number": 245,
+      "head_sha": "6f72de30fd860e40f897c8a11afedeac0b1b3a6d"
+    },
+    "source": "local",
+    "result": "pass",
+    "confidence": 1.0,
+    "artifact_digest": "sha256:e603ec87312b736d2a5325582884c5821ff99d130c4ec831838bf922e2e91971"
+  },
+  "findings": []
+}
