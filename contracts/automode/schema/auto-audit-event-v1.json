@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/automode/schema/auto-audit-event-v1.json",
+  "title": "AutoModeAuditEventV1",
+  "x-version": "auto-decision.v1",
+  "type": "object",
+  "required": ["schema_version", "event_id", "invocation_id", "recorded_at", "kind", "decision"],
+  "properties": {
+    "schema_version": { "const": "auto-decision.v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "invocation_id": { "type": "string", "minLength": 1 },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "kind": { "type": "string", "enum": ["decision", "completion"] },
+    "decision": {
+      "$ref": "#/$defs/decision"
+    },
+    "completion": {
+      "type": "object",
+      "required": ["status", "observables"],
+      "properties": {
+        "status": { "type": "string", "enum": ["succeeded", "failed"] },
+        "observables": {
+          "$ref": "#/$defs/values"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "kind": { "const": "decision" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": { "required": ["completion"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "completion" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["completion"],
+        "properties": {
+          "decision": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "pass" } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "required": ["schema_version", "outcome", "rule_fired", "rulebook_version", "remedy", "harness", "inputs", "action_digest"],
+      "properties": {
+        "schema_version": { "const": "auto-decision.v1" },
+        "outcome": { "type": "string", "enum": ["pass", "park", "block", "refuse"] },
+        "rule_fired": { "type": "string", "minLength": 1 },
+        "rulebook_version": { "type": "string", "minLength": 1 },
+        "remedy": { "type": "string" },
+        "harness": { "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "action_digest": {
+          "type": "string",
+          "description": "SHA-256 over the language-neutral framed input projection defined in contracts/automode/README.md.",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "pass" } },
+            "required": ["outcome"]
+          },
+          "else": {
+            "properties": { "remedy": { "minLength": 1 } }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["action", "observables"],
+      "properties": {
+        "action": { "$ref": "#/$defs/action" },
+        "observables": { "$ref": "#/$defs/values" }
+      },
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "description": "A parsed semantic operation; opaque command text is not persisted.",
+      "required": ["envelope", "operation", "parameters"],
+      "properties": {
+        "envelope": { "$ref": "#/$defs/name" },
+        "operation": { "$ref": "#/$defs/name" },
+        "parameters": { "$ref": "#/$defs/values" }
+      },
+      "additionalProperties": true
+    },
+    "values": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    },
+    "value": {
+      "type": "object",
+      "required": ["value", "redacted"],
+      "properties": {
+        "value": { "type": "string" },
+        "redacted": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "redacted": { "const": true } },
+            "required": ["redacted"]
+          },
+          "then": {
+            "properties": { "value": { "const": "[REDACTED]" } }
+          },
+          "else": {
+            "properties": { "value": { "not": { "const": "[REDACTED]" } } }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    }
+  },
+  "additionalProperties": true
+}
