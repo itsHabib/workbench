@@ -248,7 +248,7 @@ func completedReviewState(state string) bool {
 }
 
 var codexReviewedCommit = regexp.MustCompile(
-	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-fA-F]{40})`\\r?$",
+	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\r?$",
 )
 
 func cleanComment(

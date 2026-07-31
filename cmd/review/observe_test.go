@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
@@ -42,6 +43,11 @@ func TestCleanCommentRequiresFullExactHead(t *testing.T) {
 	}
 	if _, ok := cleanComment("codex", testHeadA, comments); ok {
 		t.Fatal("abbreviated reviewed commit accepted")
+	}
+	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" +
+		strings.ToUpper(testHeadA) + "`"
+	if _, ok := cleanComment("codex", testHeadA, comments); ok {
+		t.Fatal("uppercase reviewed commit accepted")
 	}
 	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + testHeadA + "`"
 	if _, ok := cleanComment("codex", testHeadA, comments); !ok {
