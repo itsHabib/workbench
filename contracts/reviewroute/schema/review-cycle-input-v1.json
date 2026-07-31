@@ -96,5 +96,26 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "adversarial_complete": { "const": true }
+        },
+        "required": ["adversarial_complete"]
+      },
+      "then": {
+        "properties": {
+          "adversarial_evidence": {
+            "type": "object",
+            "properties": {
+              "result": { "const": "pass" }
+            },
+            "required": ["result"]
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

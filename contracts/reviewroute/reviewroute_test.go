@@ -24,6 +24,45 @@ func TestEmbeddedSchemasAreJSON(t *testing.T) {
 	}
 }
 
+func TestCycleInputSchemaRequiresPassEvidenceForAdversarialCompletion(t *testing.T) {
+	var schema struct {
+		AllOf []struct {
+			If struct {
+				Properties map[string]struct {
+					Const bool `json:"const"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			} `json:"if"`
+			Then struct {
+				Properties map[string]struct {
+					Type       string `json:"type"`
+					Properties map[string]struct {
+						Const string `json:"const"`
+					} `json:"properties"`
+					Required []string `json:"required"`
+				} `json:"properties"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(CycleInputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.AllOf) != 1 {
+		t.Fatalf("cycle input schema constraints = %d, want 1", len(schema.AllOf))
+	}
+	conditional := schema.AllOf[0]
+	if !conditional.If.Properties["adversarial_complete"].Const ||
+		!slices.Equal(conditional.If.Required, []string{"adversarial_complete"}) {
+		t.Fatalf("malformed adversarial completion condition: %+v", conditional.If)
+	}
+	evidence := conditional.Then.Properties["adversarial_evidence"]
+	if evidence.Type != "object" ||
+		evidence.Properties["result"].Const != "pass" ||
+		!slices.Equal(evidence.Required, []string{"result"}) {
+		t.Fatalf("malformed adversarial evidence requirement: %+v", evidence)
+	}
+}
+
 func TestValidSHARequiresLowercase(t *testing.T) {
 	if !validSHA(strings.Repeat("a", 40)) {
 		t.Fatal("lowercase SHA unexpectedly invalid")
