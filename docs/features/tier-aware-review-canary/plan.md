@@ -331,6 +331,8 @@ All artifacts are schema-versioned and exact-head bound.
 - `stop`, `continue`, `address`, `escalate`, or `park`;
 - targeted next-reviewer set;
 - deterministic reason codes;
+- adversarial exact-head subject, source/result/confidence, and raw-artifact
+  digest when used;
 - local advisory result/confidence when used.
 
 `address` is the only decision that authorizes an execution adapter. The

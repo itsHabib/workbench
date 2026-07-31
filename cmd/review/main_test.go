@@ -434,7 +434,6 @@ func TestDecideRefusesWhenLiveHeadChanges(t *testing.T) {
 				PanelComplete:       true,
 				CompletedReviewers:  append([]string{}, plan.Required...),
 				CoordinatorComplete: true,
-				AdversarialComplete: true,
 				Findings:            []reviewroute.FindingState{},
 			})
 			runner := planningRunner(tt.before, tt.after, "")

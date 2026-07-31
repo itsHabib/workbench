@@ -168,22 +168,23 @@ func Decide(plan reviewroute.Plan, input reviewroute.CycleInput, now time.Time) 
 	}
 
 	decision := reviewroute.Decision{
-		SchemaVersion:      reviewroute.SchemaVersion,
-		GeneratedAt:        now.UTC(),
-		Subject:            input.Subject,
-		PlanID:             input.PlanID,
-		InputDigest:        inputDigest,
-		Policy:             plan.Policy,
-		RouteDisposition:   plan.Disposition,
-		RouteReason:        plan.Reason,
-		Tier:               input.CurrentTier,
-		Cycle:              input.Cycle,
-		ContinuationWeight: 1 << (input.Cycle - 1),
-		CumulativeWeight:   (1 << input.Cycle) - 1,
-		Action:             action,
-		ReasonCodes:        sortedUnique(reasons),
-		NextReviewers:      sortedUnique(next),
-		Findings:           append([]reviewroute.FindingState{}, input.Findings...),
+		SchemaVersion:       reviewroute.SchemaVersion,
+		GeneratedAt:         now.UTC(),
+		Subject:             input.Subject,
+		PlanID:              input.PlanID,
+		InputDigest:         inputDigest,
+		Policy:              plan.Policy,
+		RouteDisposition:    plan.Disposition,
+		RouteReason:         plan.Reason,
+		Tier:                input.CurrentTier,
+		Cycle:               input.Cycle,
+		ContinuationWeight:  1 << (input.Cycle - 1),
+		CumulativeWeight:    (1 << input.Cycle) - 1,
+		Action:              action,
+		ReasonCodes:         sortedUnique(reasons),
+		NextReviewers:       sortedUnique(next),
+		AdversarialEvidence: cloneAdversarialEvidence(input.AdversarialEvidence),
+		Findings:            append([]reviewroute.FindingState{}, input.Findings...),
 	}
 	if plan.Classification != nil {
 		decision.TierReasons = append([]string{}, plan.Classification.Reasons...)
@@ -228,7 +229,7 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 	if coordinatorRequired(plan, input) && !input.CoordinatorComplete && !proofOnly {
 		reasons = append(reasons, "coordinator_incomplete")
 	}
-	if plan.Requirements.LocalAdversarial && !input.AdversarialComplete {
+	if plan.Requirements.LocalAdversarial && !localAdversarialComplete(input) {
 		reasons = append(reasons, "local_adversarial_incomplete")
 	}
 	if plan.Requirements.AdversarialVerification && !input.AdversarialComplete {
@@ -242,6 +243,22 @@ func blockers(plan reviewroute.Plan, input reviewroute.CycleInput) ([]string, []
 		}
 	}
 	return sortedUnique(reasons), sortedUnique(reviewers)
+}
+
+func localAdversarialComplete(input reviewroute.CycleInput) bool {
+	return input.AdversarialComplete &&
+		input.AdversarialEvidence != nil &&
+		input.AdversarialEvidence.Source == "local"
+}
+
+func cloneAdversarialEvidence(
+	evidence *reviewroute.AdversarialEvidence,
+) *reviewroute.AdversarialEvidence {
+	if evidence == nil {
+		return nil
+	}
+	cloned := *evidence
+	return &cloned
 }
 
 func validatePanelCompletion(plan reviewroute.Plan, input reviewroute.CycleInput) error {

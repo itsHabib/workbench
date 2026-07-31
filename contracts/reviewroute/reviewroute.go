@@ -133,42 +133,56 @@ type FindingState struct {
 	FollowUpRef    string   `json:"follow_up_ref,omitempty"`
 }
 
+// AdversarialEvidence binds the selected adversarial result into the cycle
+// input and decision. ArtifactDigest identifies the exact raw capture; Result
+// and Confidence keep the security-relevant outcome visible without requiring
+// a consumer to dereference that capture.
+type AdversarialEvidence struct {
+	Subject        Subject `json:"subject"`
+	Source         string  `json:"source"`
+	Result         string  `json:"result"`
+	Confidence     float64 `json:"confidence"`
+	ArtifactDigest string  `json:"artifact_digest"`
+}
+
 // CycleInput is the complete deterministic evidence presented to the decision
 // policy for one cycle.
 type CycleInput struct {
-	SchemaVersion         int            `json:"schema_version"`
-	Subject               Subject        `json:"subject"`
-	PlanID                string         `json:"plan_id"`
-	Cycle                 int            `json:"cycle"`
-	CurrentTier           string         `json:"current_tier"`
-	ChecksPassed          bool           `json:"checks_passed"`
-	PanelComplete         bool           `json:"panel_complete"`
-	CompletedReviewers    []string       `json:"completed_reviewers"`
-	CoordinatorComplete   bool           `json:"coordinator_complete"`
-	AdversarialComplete   bool           `json:"adversarial_complete"`
-	ContinuationRationale string         `json:"continuation_rationale,omitempty"`
-	Findings              []FindingState `json:"findings"`
+	SchemaVersion         int                  `json:"schema_version"`
+	Subject               Subject              `json:"subject"`
+	PlanID                string               `json:"plan_id"`
+	Cycle                 int                  `json:"cycle"`
+	CurrentTier           string               `json:"current_tier"`
+	ChecksPassed          bool                 `json:"checks_passed"`
+	PanelComplete         bool                 `json:"panel_complete"`
+	CompletedReviewers    []string             `json:"completed_reviewers"`
+	CoordinatorComplete   bool                 `json:"coordinator_complete"`
+	AdversarialComplete   bool                 `json:"adversarial_complete"`
+	AdversarialEvidence   *AdversarialEvidence `json:"adversarial_evidence"`
+	ContinuationRationale string               `json:"continuation_rationale,omitempty"`
+	Findings              []FindingState       `json:"findings"`
 }
 
 // Decision is the engine-neutral result consumed by either execution adapter.
 type Decision struct {
-	SchemaVersion      int            `json:"schema_version"`
-	GeneratedAt        time.Time      `json:"generated_at"`
-	Subject            Subject        `json:"subject"`
-	PlanID             string         `json:"plan_id"`
-	InputDigest        string         `json:"input_digest"`
-	Policy             *PolicyRef     `json:"policy,omitempty"`
-	RouteDisposition   string         `json:"route_disposition"`
-	RouteReason        string         `json:"route_reason,omitempty"`
-	Tier               string         `json:"tier,omitempty"`
-	TierReasons        []string       `json:"tier_reasons,omitempty"`
-	Cycle              int            `json:"cycle"`
-	ContinuationWeight int            `json:"continuation_weight"`
-	CumulativeWeight   int            `json:"cumulative_weight"`
-	Action             string         `json:"action"`
-	ReasonCodes        []string       `json:"reason_codes"`
-	NextReviewers      []string       `json:"next_reviewers"`
-	Findings           []FindingState `json:"findings"`
+	SchemaVersion       int                  `json:"schema_version"`
+	GeneratedAt         time.Time            `json:"generated_at"`
+	Subject             Subject              `json:"subject"`
+	PlanID              string               `json:"plan_id"`
+	InputDigest         string               `json:"input_digest"`
+	Policy              *PolicyRef           `json:"policy,omitempty"`
+	RouteDisposition    string               `json:"route_disposition"`
+	RouteReason         string               `json:"route_reason,omitempty"`
+	Tier                string               `json:"tier,omitempty"`
+	TierReasons         []string             `json:"tier_reasons,omitempty"`
+	Cycle               int                  `json:"cycle"`
+	ContinuationWeight  int                  `json:"continuation_weight"`
+	CumulativeWeight    int                  `json:"cumulative_weight"`
+	Action              string               `json:"action"`
+	ReasonCodes         []string             `json:"reason_codes"`
+	NextReviewers       []string             `json:"next_reviewers"`
+	AdversarialEvidence *AdversarialEvidence `json:"adversarial_evidence"`
+	Findings            []FindingState       `json:"findings"`
 }
 
 // ValidatePolicy enforces the complete reviewer roster and tier-map contract.
@@ -365,6 +379,14 @@ func ValidateCycleInput(input CycleInput) error {
 	if err := validateUnique("completed reviewer", input.CompletedReviewers); err != nil {
 		return err
 	}
+	if err := validateAdversarialEvidence(input.AdversarialEvidence, input.Subject); err != nil {
+		return err
+	}
+	evidenceComplete := input.AdversarialEvidence != nil &&
+		input.AdversarialEvidence.Result == "pass"
+	if input.AdversarialComplete != evidenceComplete {
+		return errors.New("reviewroute: adversarial_complete must match pass evidence")
+	}
 	ids := make([]string, 0, len(input.Findings))
 	for _, finding := range input.Findings {
 		ids = append(ids, finding.ID)
@@ -467,6 +489,9 @@ func ValidateDecision(decision Decision) error {
 		return err
 	}
 	if err := validateDecisionOutcome(decision); err != nil {
+		return err
+	}
+	if err := validateAdversarialEvidence(decision.AdversarialEvidence, decision.Subject); err != nil {
 		return err
 	}
 	ids := make([]string, 0, len(decision.Findings))
@@ -585,6 +610,33 @@ func validDigest(value string) bool {
 		return false
 	}
 	return validLowerHex(value[len("sha256:"):], 64)
+}
+
+func validateAdversarialEvidence(evidence *AdversarialEvidence, subject Subject) error {
+	if evidence == nil {
+		return nil
+	}
+	if err := validateSubject(evidence.Subject); err != nil {
+		return fmt.Errorf("reviewroute: adversarial evidence subject: %w", err)
+	}
+	if evidence.Subject != subject {
+		return errors.New("reviewroute: adversarial evidence subject must match the enclosing subject")
+	}
+	if strings.TrimSpace(evidence.Source) == "" {
+		return errors.New("reviewroute: adversarial evidence source is required")
+	}
+	switch evidence.Result {
+	case "pass", "escalate":
+	default:
+		return errors.New("reviewroute: adversarial evidence result is invalid")
+	}
+	if evidence.Confidence < 0 || evidence.Confidence > 1 {
+		return errors.New("reviewroute: adversarial evidence confidence must be 0..1")
+	}
+	if !validDigest(evidence.ArtifactDigest) {
+		return errors.New("reviewroute: adversarial evidence artifact_digest must be sha256 content identity")
+	}
+	return nil
 }
 
 func validLowerHex(value string, length int) bool {
