@@ -80,6 +80,28 @@ func TestFloor(t *testing.T) {
 			diff: "diff --git a/internal/auth/session.go b/internal/auth/session.go\n+++ b/internal/auth/session.go\n@@\n+func check(){}\n",
 		},
 		{
+			name: "dedicated session directory -> T3",
+			want: T3,
+			diff: "diff --git a/internal/session/store.go b/internal/session/store.go\n+++ b/internal/session/store.go\n@@\n+func rotate(){}\n",
+		},
+		{
+			name: "compound session code filename -> T3",
+			want: T3,
+			diff: "diff --git a/internal/session-cookie.go b/internal/session-cookie.go\n+++ b/internal/session-cookie.go\n@@\n+func rotate(){}\n",
+		},
+		{
+			// "session" is overloaded in agent infrastructure. A compound docs filename
+			// is not an auth-session surface merely because its first token is session.
+			name: "agent session design doc -> T0",
+			want: T0,
+			diff: "diff --git a/docs/features/review/session-reviewfindings-address-boundary.md b/docs/features/review/session-reviewfindings-address-boundary.md\n+++ b/docs/features/review/session-reviewfindings-address-boundary.md\n@@\n+The session engine consumes an exact-head review artifact.\n",
+		},
+		{
+			name: "compound session test filename -> T0",
+			want: T0,
+			diff: "diff --git a/tests/session-cookie_test.go b/tests/session-cookie_test.go\n+++ b/tests/session-cookie_test.go\n@@\n+func TestCookie(t *testing.T){}\n",
+		},
+		{
 			name: "removed authz call in a non-auth path -> T3 (content signal)",
 			want: T3,
 			diff: "diff --git a/handlers/user.go b/handlers/user.go\n+++ b/handlers/user.go\n@@\n-	if err := authorize(ctx, user); err != nil { return err }\n+	// fast path\n",
@@ -463,6 +485,23 @@ func TestFloor(t *testing.T) {
 				t.Fatalf("floor = %s, want %s", got, c.want)
 			}
 		})
+	}
+}
+
+func TestSessionPathDoesNotDuplicateAuthSignal(t *testing.T) {
+	result := classifyDiff(t, "diff --git a/internal/auth/session.go b/internal/auth/session.go\n+++ b/internal/auth/session.go\n@@\n+func check(){}\n")
+	if len(result.Signals) != 1 {
+		t.Fatalf("signals = %+v, want one auth signal", result.Signals)
+	}
+	if result.Signals[0].Name != "auth-crypto-secrets" || result.Signals[0].Tier != T3 {
+		t.Fatalf("signal = %+v, want auth-crypto-secrets T3", result.Signals[0])
+	}
+}
+
+func TestDedicatedSessionPathRemainsSensitiveAfterDocsMatch(t *testing.T) {
+	result := classifyDiff(t, "diff --git a/docs/session/notes.md b/docs/session/notes.md\n+++ b/docs/session/notes.md\n@@\n+Session component notes.\n")
+	if result.Floor != T3 {
+		t.Fatalf("floor = %s, want T3; signals = %+v", result.Floor, result.Signals)
 	}
 }
 

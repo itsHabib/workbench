@@ -52,7 +52,8 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe next -json                                        # the same projection as a machine feed
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
-./gate.exe judge -run run_... -grant grt_... -auto -provider-command codex-gate-judge
+./gate.exe judge -run run_... -grant grt_... -auto -provider codex
+./gate.exe judge -run run_... -grant grt_... -auto -provider claude
 ./gate.exe executor prepare-request -repo owner/repo -pr 181 -head <sha> -grant grt_... -decision pass -why "..." -replay evt_... -out preparation.json
 ./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
 ./gate.exe executor bootstrap -state DIR -key DIR -state-tip <sha> -action act_... -repo owner/repo -pr 181 -head <sha> -app-id N -installation-id N
@@ -86,16 +87,42 @@ run. They are off unless a path is given and touch nothing on the decision path.
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on
 PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
-`-provider-command` names an executable implementing the contract below.
+`-provider` is exactly `claude` or `codex`.
 
 ### Provider-neutral judgment
 
-Gate sends an explicitly configured `-provider-command` one
-`gate-judgment-v1` request as JSON on stdin and accepts one strict
+Gate has two built-in local CLI projections:
+
+```text
+claude -> claude -p --safe-mode --tools ""
+codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
+          --ignore-user-config --ignore-rules --disable shell_tool
+          --disable multi_agent -c forced_login_method="chatgpt"
+          -c service_tier="flex"
+          -c web_search="disabled" -
+```
+
+The caller selects the provider name, never an executable or argument vector.
+Gate resolves that fixed CLI name to an absolute path, hashes the resolved file
+into producer provenance, and runs it from a fresh temporary working directory.
+It disables the agent's tools and customizations and gives the process a
+small allowlist of runtime variables; Gate custody, GitHub credentials,
+provider API keys, and arbitrary caller variables are not inherited. The CLI
+uses its normal saved-login store. Gate sends one `gate-judgment-v1` request as
+JSON on stdin and accepts one strict
 `gate-judgment-v1` artifact on stdout. The request contains only recorded
 state: run and escalation ids, the exact PR subject/head, the presented grant
 id and tier ceiling, the recorded question, and the artifact context. The
 provider echoes every binding and adds:
+
+Codex 0.122 validates the merged base configuration before applying
+`--ignore-user-config`. The fixed projection therefore overrides obsolete
+`service_tier` values before startup. `flex` is an intentional
+cost-conservative tier, not a neutral parser value: it may be slower or fail
+when Flex capacity is unavailable. Gate treats that as
+`judge_provider_failed` and does not append a judgment; it never falls back to
+the higher-credit `fast` tier. `forced_login_method="chatgpt"` plus the
+sanitized environment prevents this path from using API-key authentication.
 
 ```json
 {
@@ -131,14 +158,19 @@ the immutable judgment retains its original grant parent and the outcome names
 the replacement grant. Retry flags cannot change the persisted decision, and a
 resolution stamp records the resumed verdict rather than the caller's repeated
 flag.
-Gate rechecks the live grant after a configured provider returns and
+Gate rechecks the live grant after a built-in provider returns and
 immediately before appending its judgment, so a grant that expires during a
 long provider call authorizes no state mutation.
 A later `capability_refused` action remains audit history but does not complete
 the persisted judgment chain; a replacement live grant may still append the
 single authorized outcome.
-The configured executable path is the provider policy; Gate neither selects
-nor names a model vendor.
+The selected CLI provider, resolved wrapper filename, and SHA-256 digest are
+prefixed into the stored producer provenance. The model implementation remains
+provider-reported. PATH and the saved-login/config locations remain same-user
+dependencies, so this local path is advisory automation under the same
+operating-system identity as Gate—not independently custodied security
+authority. Enforcement-grade judgment requires a separately controlled
+executor identity.
 
 ## How it decides
 

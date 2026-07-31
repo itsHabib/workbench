@@ -8,9 +8,9 @@
 `cmd/gate/docs/features/ci-classify/eval/cloud-eval-results.md`
 
 > **Reviewers — focus areas:** URL joining without losing a gateway path prefix
-> (§4.7), separation between `GATE_CLOUD_MODEL` and the premium judge's
-> `GATE_JUDGE_MODEL` (§4.4), endpoint redaction on transport errors (§4.6), and
-> whether the live eval gate in §11 is sufficient before rollout.
+> (§4.7), the gateway-only ownership of `GATE_CLOUD_MODEL` (§4.4), endpoint
+> redaction on transport errors (§4.6), and whether the live eval gate in §11
+> is sufficient before rollout.
 
 **Scope:** let workbench's cloud LLM
 egress point at an AI gateway instead of a hardcoded `api.anthropic.com`, by
@@ -93,7 +93,7 @@ environment standard:
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Credential sent as `x-api-key` on the Anthropic-native path. Holds a gateway-issued token when a gateway is configured; a provider key otherwise. | for the Anthropic path |
 | `ANTHROPIC_BASE_URL` | Base URL override. **Unset = direct to the provider** (today's behavior, unchanged). Set = route through that origin. | no |
-| `GATE_CLOUD_MODEL` | Model ID for gate's structured-output cloud backend. Deliberately separate from `GATE_JUDGE_MODEL`, which configures the premium Claude CLI judge. | when `ANTHROPIC_BASE_URL` is set |
+| `GATE_CLOUD_MODEL` | Model ID for gate's structured-output cloud backend. It does not configure the separate local CLI judgment path. | when `ANTHROPIC_BASE_URL` is set |
 | `OPENAI_API_KEY` | Same role, OpenAI-compatible path. | for the OpenAI path |
 | `OPENAI_BASE_URL` | Same role, OpenAI-compatible path. | no |
 
@@ -324,13 +324,12 @@ fix.
 When the base URL is unset, `cloudModelDefault` still applies. Same rule as §4.3:
 direct behavior does not change.
 
-Do **not** reuse `GATE_JUDGE_MODEL`. That variable configures the separate
-`claude -p` premium judge in `judge.go`; the gateway seam configures the
-Anthropic-native `cloudModel` used by advisory rungs and the eval harness. Sharing
-one variable would couple two transports with different supported catalogues and
-could silently change merge-judgment behavior while tuning an advisory. The new
-name is `GATE_CLOUD_MODEL`, following the existing `GATE_*` convention while
-making the narrower ownership explicit.
+`GATE_CLOUD_MODEL` configures only the Anthropic-native `cloudModel` used by
+advisory rungs and the eval harness. The separate local CLI judgment path owns
+its provider invocation and does not read a `GATE_JUDGE_MODEL` variable. This
+keeps transports with different supported catalogues from silently changing
+one another. The name follows the existing `GATE_*` convention while making
+the narrower ownership explicit.
 
 This has a real consequence for the eval: the Phase-0 bars (coverage ≥ 60%,
 on-handled ≥ 90%, against a 92.2% / 95.7% reference) were set against one

@@ -2,10 +2,13 @@ package verify
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -40,6 +43,13 @@ const (
 
 // JudgmentV1 is the provider-neutral judgment contract version.
 const JudgmentV1 = "gate-judgment-v1"
+
+const (
+	// JudgeProviderClaude selects the locally installed Claude CLI.
+	JudgeProviderClaude = "claude"
+	// JudgeProviderCodex selects the locally installed Codex CLI.
+	JudgeProviderCodex = "codex"
+)
 
 // JudgmentGrantV1 binds a judgment to the presented capability. The signature
 // stays in gate state; providers receive only the id and ceiling they must echo.
@@ -193,17 +203,116 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	}, nil
 }
 
-// AutoJudge runs only the explicitly supplied provider executable. The request
-// rides stdin and the artifact rides stdout, avoiding command-line size limits.
-func AutoJudge(command string, request JudgmentRequestV1) (Verdict, error) {
-	if strings.TrimSpace(command) == "" {
-		return Verdict{}, fmt.Errorf("judge_provider_unconfigured: pass -provider-command <executable>")
+type judgeProviderInvocation struct {
+	name string
+	args []string
+}
+
+type judgeExecutable struct {
+	path   string
+	digest string
+}
+
+type judgeCommandFactory func(name string, args ...string) *exec.Cmd
+type judgeExecutableResolver func(name string) (judgeExecutable, error)
+
+// ValidateJudgeProvider restricts the advisory auto-judge to Gate's built-in
+// local CLI projections. Callers select a provider, never an executable.
+func ValidateJudgeProvider(provider string) error {
+	switch provider {
+	case "":
+		return fmt.Errorf("judge_provider_unconfigured: pass -provider %s|%s", JudgeProviderClaude, JudgeProviderCodex)
+	case JudgeProviderClaude, JudgeProviderCodex:
+		return nil
+	default:
+		return fmt.Errorf("judge_provider_unsupported: %q (want %s or %s)", provider, JudgeProviderClaude, JudgeProviderCodex)
+	}
+}
+
+func providerInvocation(provider string) (judgeProviderInvocation, error) {
+	if err := ValidateJudgeProvider(provider); err != nil {
+		return judgeProviderInvocation{}, err
+	}
+	switch provider {
+	case JudgeProviderClaude:
+		return judgeProviderInvocation{
+			name: "claude",
+			args: []string{
+				"-p",
+				"--safe-mode",
+				"--tools", "",
+			},
+		}, nil
+	case JudgeProviderCodex:
+		return judgeProviderInvocation{
+			name: "codex",
+			args: []string{
+				"exec",
+				"--ephemeral",
+				"--sandbox", "read-only",
+				"--skip-git-repo-check",
+				"--ignore-user-config",
+				"--ignore-rules",
+				"--disable", "shell_tool",
+				"--disable", "multi_agent",
+				"-c", `forced_login_method="chatgpt"`,
+				"-c", `service_tier="flex"`,
+				"-c", `web_search="disabled"`,
+				"-",
+			},
+		}, nil
+	}
+	return judgeProviderInvocation{}, fmt.Errorf("judge_provider_unsupported: %q", provider)
+}
+
+// AutoJudge runs one built-in local CLI provider in a fresh working directory.
+// The versioned request rides stdin and the artifact rides stdout, avoiding
+// command-line size limits and keeping the repository out of the provider's
+// working directory. Built-in tools and customizations are disabled, and only
+// a small runtime allowlist is inherited from Gate's environment. This is
+// still advisory same-user automation, not an independently custodied identity.
+func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
+	if err := ValidateJudgeProvider(provider); err != nil {
+		return Verdict{}, err
+	}
+	workDir, err := os.MkdirTemp("", "gate-judge-*")
+	if err != nil {
+		return Verdict{}, fmt.Errorf("judge_provider_failed: create isolated working directory: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+	return autoJudge(
+		provider,
+		request,
+		workDir,
+		sanitizedJudgeEnvironment(os.Environ()),
+		resolveJudgeExecutable,
+		exec.Command,
+	)
+}
+
+func autoJudge(
+	provider string,
+	request JudgmentRequestV1,
+	workDir string,
+	environment []string,
+	resolve judgeExecutableResolver,
+	command judgeCommandFactory,
+) (Verdict, error) {
+	invocation, err := providerInvocation(provider)
+	if err != nil {
+		return Verdict{}, err
+	}
+	executable, err := resolve(invocation.name)
+	if err != nil {
+		return Verdict{}, err
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("verify: marshal judgment request: %w", err)
 	}
-	cmd := exec.Command(command)
+	cmd := command(executable.path, invocation.args...)
+	cmd.Dir = workDir
+	cmd.Env = environment
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
@@ -216,7 +325,103 @@ func AutoJudge(command string, request JudgmentRequestV1) (Verdict, error) {
 	if err != nil {
 		return Verdict{}, err
 	}
-	return ValidateJudgment(artifact, request)
+	verdict, err := ValidateJudgment(artifact, request)
+	if err != nil {
+		return Verdict{}, err
+	}
+	verdict.Source = "auto-judgment"
+	verdict.Producer.Impl = fmt.Sprintf(
+		"%s-cli[%s@sha256:%s]:%s",
+		provider,
+		filepath.Base(executable.path),
+		executable.digest,
+		verdict.Producer.Impl,
+	)
+	return verdict, nil
+}
+
+func resolveJudgeExecutable(name string) (judgeExecutable, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: resolve %s: %w", name, err)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: resolve %s absolute path: %w", name, err)
+	}
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: resolve %s symlinks: %w", name, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: stat %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: %s resolved to a non-regular file", name)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: open %s: %w", name, err)
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return judgeExecutable{}, fmt.Errorf("judge_provider_failed: hash %s: %w", name, err)
+	}
+	return judgeExecutable{
+		path:   path,
+		digest: fmt.Sprintf("%x", hash.Sum(nil)),
+	}, nil
+}
+
+var judgeEnvironmentAllowlist = map[string]struct{}{
+	"ALL_PROXY":           {},
+	"APPDATA":             {},
+	"CODEX_HOME":          {},
+	"COMSPEC":             {},
+	"HOME":                {},
+	"HOMEDRIVE":           {},
+	"HOMEPATH":            {},
+	"HTTP_PROXY":          {},
+	"HTTPS_PROXY":         {},
+	"LANG":                {},
+	"LC_ALL":              {},
+	"LOCALAPPDATA":        {},
+	"NODE_EXTRA_CA_CERTS": {},
+	"NO_PROXY":            {},
+	"PATH":                {},
+	"PATHEXT":             {},
+	"SSL_CERT_DIR":        {},
+	"SSL_CERT_FILE":       {},
+	"SYSTEMROOT":          {},
+	"TEMP":                {},
+	"TERM":                {},
+	"TMP":                 {},
+	"TMPDIR":              {},
+	"USERPROFILE":         {},
+	"WINDIR":              {},
+	"XDG_CACHE_HOME":      {},
+	"XDG_CONFIG_HOME":     {},
+	"XDG_DATA_HOME":       {},
+}
+
+// sanitizedJudgeEnvironment deliberately omits Gate custody, provider API
+// keys, GitHub credentials, and arbitrary caller variables. The CLI may use its
+// normal saved-login store through the retained home/config paths.
+func sanitizedJudgeEnvironment(source []string) []string {
+	result := make([]string, 0, len(judgeEnvironmentAllowlist)+1)
+	for _, entry := range source {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, ok := judgeEnvironmentAllowlist[strings.ToUpper(key)]; !ok {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func escalationQuestion(arts []state.Artifact, escalationID string) (string, error) {
