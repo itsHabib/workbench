@@ -230,9 +230,10 @@ flare never appears in the resolution flow — that is the point.
 ## 7. Out of scope (POC boundaries)
 
 - **No flare inbound.** flare does not gain a resolution route; Amendment 3 holds.
-- **No live notification transport.** The ingest is a CLI verb; wiring a Slack
-  interactive-action callback or an HTTP endpoint onto `ingest.Decision` is the
-  obvious next step, deliberately not built.
+- **~~No live notification transport.~~** *(shipped — see §8 step 3.)* This was the
+  POC boundary; wiring a Slack interactive-action callback onto `ingest.Decision`
+  is now `escalate serve`, the second transport over the same ingest mechanism.
+  `escalate-serve.md` is its authoritative doc.
 - **No projection of the embedded `resolution` field.** The resolution is recorded
   as a `KindResolution` artifact with full provenance; teaching `gate next` /
   `console` to render `V1.Resolution` inline is additive and deferred.
@@ -292,7 +293,7 @@ event's internal id, unrendered. A minimal path to a real day-to-day loop:
 2. **Authenticate `who`** (§7a) — the remaining prerequisite for a retrying
    transport (the replay/idempotence guard already landed in review). When a
    transport exists, derive `who` from its verified identity, not the payload.
-3. **`escalate serve` — the live transport.** A small HTTP listener *in
+3. **✓ `escalate serve` — the live transport (built).** A small HTTP listener *in
    cmd/escalate* taking Slack interactive-action callbacks: flare renders
    Approve/Block buttons (rendering only; the callback URL points at escalate,
    never flare), escalate verifies the Slack signature, maps the ack to
@@ -300,7 +301,13 @@ event's internal id, unrendered. A minimal path to a real day-to-day loop:
    resolve`. This is the real remote-approval unlock. Constraint: resolve still
    needs a live grant at resolve time, so remote approval only works inside an
    unexpired grant window (coherent — a resolution can't outrun delegation — but
-   mint before stepping away).
+   mint before stepping away). Shipped across three phases — the signed ingress,
+   flare's resolve buttons, and the 3-second ack with an async resolve delivered
+   to the interaction's `response_url` — plus two guards beyond the sketch above:
+   the grant is read server-side from the parked escalation (never carried in the
+   button value, so a client can't name its own grant), and a verified caller must
+   also pass an allowlist (`ESCALATE_ALLOWED_SLACK_USERS`) — authentication is not
+   authorization. The authoritative doc is `escalate-serve.md`.
 4. **Project the resolution.** `gate next -json` + console join `KindResolution`
    to show "resolved by X at T" on recently-cleared parks — after the judge/resolve
    asymmetry (§7a) is resolved, so the projection isn't lying about judge-path
