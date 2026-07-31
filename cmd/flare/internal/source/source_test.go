@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
@@ -18,7 +19,7 @@ const (
 )
 
 func receiptLine(key, outcome string) string {
-	return fmt.Sprintf(`{"key":"%s","source":"ship-run","outcome":"%s"}`, key, outcome)
+	return fmt.Sprintf(`{"key":"%s","source":"ship-run","outcome":"%s","generated_at":"2026-07-28T22:20:00Z"}`, key, outcome)
 }
 
 func shipFile(t *testing.T, content string) config.Source {
@@ -161,7 +162,7 @@ func TestTruncationAlertsAndResweeps(t *testing.T) {
 func TestReceiptsLiftFailedCancelledAndParked(t *testing.T) {
 	lines := ""
 	for _, o := range []string{"succeeded", "failed", "cancelled", "merged", "pending", "parked"} {
-		lines += fmt.Sprintf(`{"key":"wf_%s","source":"ship-run","outcome":"%s"}`+"\n", o, o)
+		lines += fmt.Sprintf(`{"key":"wf_%s","source":"ship-run","outcome":"%s","generated_at":"2026-07-28T22:20:00Z"}`+"\n", o, o)
 	}
 	p := filepath.Join(t.TempDir(), "receipts.jsonl")
 	if err := os.WriteFile(p, []byte(lines), 0o600); err != nil {
@@ -198,8 +199,47 @@ func TestReceiptsLiftFailedCancelledAndParked(t *testing.T) {
 	if !ok {
 		t.Fatalf("park receipt must lift with dedupe ID key+outcome; got %+v", events)
 	}
-	if parked.Severity != event.SevEscalate {
-		t.Fatalf("a park is page-worthy (SevEscalate), got %v", parked.Severity)
+	if parked.Severity != event.SevFailed {
+		t.Fatalf("a Ship mechanism park must not masquerade as a policy escalation, got %v", parked.Severity)
+	}
+}
+
+func TestReceiptUsesCanonicalGeneratedAt(t *testing.T) {
+	src := shipFile(t, `{"key":"wf_time","source":"driver","outcome":"parked","generated_at":"2026-07-28T22:20:00Z","terminal_at":"2000-01-01T00:00:00Z"}`+"\n")
+	events, _, err := Read(src, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want one event, got %+v", events)
+	}
+	if got := events[0].Time.Format(time.RFC3339); got != "2026-07-28T22:20:00Z" {
+		t.Fatalf("event time = %q, want canonical generated_at", got)
+	}
+}
+
+func TestReceiptAcceptsHistoricalTerminalAt(t *testing.T) {
+	src := shipFile(t, `{"key":"wf_old","source":"ship-run","outcome":"failed","terminal_at":"2026-07-27T12:00:00Z"}`+"\n")
+	events, _, err := Read(src, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Time.IsZero() {
+		t.Fatalf("historical terminal_at must remain readable, got %+v", events)
+	}
+}
+
+func TestReceiptMissingOrMalformedTimeFailsLoudly(t *testing.T) {
+	for name, line := range map[string]string{
+		"missing":   `{"key":"wf_missing","source":"driver","outcome":"parked"}`,
+		"malformed": `{"key":"wf_bad","source":"driver","outcome":"parked","generated_at":"not-a-time"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := shipFile(t, line+"\n")
+			if _, _, err := Read(src, Cursor{}); err == nil {
+				t.Fatal("bad receipt time must fail the read, not render Jan 1")
+			}
+		})
 	}
 }
 
