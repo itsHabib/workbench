@@ -84,8 +84,10 @@ The adapter consumes Rooms lifecycle NDJSON in four boundaries: `Start`
 through `workload_started`, `Wait` through `workload_exited`, `Collect` through
 collection completion, and `Cleanup` through verified teardown. Structured
 `pool_full {cap}` becomes `placement_unavailable` (exit 4) without a hidden
-retry. The result receipt records the image digest, fixed resource/network
-constraints, slot details, and `terminal_replay` stream delivery.
+retry. The result receipt records the image digest, the fixed CPU/memory
+constraints, the honest network posture (`egress` when a custody ref installs
+the enforced allowlist, otherwise `observe` under `--witness` or `open`), slot
+details, and `terminal_replay` stream delivery.
 
 Unit tests use a hermetic CLI double and need no Rooms installation. The live
 smoke is opt-in behind `-tags rooms_host` and `RUNWAY_ROOMS_HOST_TEST=1`; Gate C

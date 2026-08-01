@@ -7,7 +7,7 @@ Agent: Codex. Started: 2026-07-18 (America/Los_Angeles).
 - **Repo orientation.** Read `docs/DESIGN.md`, the parent `CLAUDE.md`, and the
   repo `CLAUDE.md`. The single-module boundary law and canonical checks were
   present and unambiguous.
-- **Rooms prerequisite checkout.** The checkout at `~/pers/rooms` existed and
+- **Rooms prerequisite checkout.** The checkout at `~/dev/rooms` existed and
   contained the released `rooms run --lifecycle` implementation, its lifecycle
   spec, and host-gated tests. The event vocabulary in the kickoff matches the
   implementation.
@@ -39,13 +39,13 @@ Agent: Codex. Started: 2026-07-18 (America/Los_Angeles).
 - **What happened:** neither CLAUDE file names the dossier corpus, the
   `DOSSIER_CORPUS` environment variable is unset, and the one-shot CLI exposes
   list/update/complete but not claim. A filesystem search found
-  `~/pers/dossier-state/.dossier`; source/docs then showed that `task.claim` is
+  `~/dev/dossier-state/.dossier`; source/docs then showed that `task.claim` is
   available only through the MCP server. Sending the standard MCP initialize +
-  `tools/call` exchange to `dossier serve --corpus ~/pers/dossier-state`
+  `tools/call` exchange to `dossier serve --corpus ~/dev/dossier-state`
   succeeded.
 - **Class:** `discoverability`.
 - **Smallest fix:** document the canonical corpus path and a client-neutral MCP
-  invocation in `~/pers/CLAUDE.md`, or add a `dossier task_claim` one-shot
+  invocation in `~/dev/CLAUDE.md`, or add a `dossier task_claim` one-shot
   command alongside `task_update` and `task_complete`.
 
 ### The locked TDD does not define the `agent-cursor` profile resolution
@@ -156,7 +156,7 @@ false alarm.
   and resolved.
 - Consulted Gate without creating or supplying a grant:
   `gate gate -repo itsHabib/workbench -pr 68 -state
-  C:\Users\MichaelHabib\pers\gate\state`. It refused with exit code 4 and
+  C:\Users\<you>\dev\gate\state`. It refused with exit code 4 and
   `gate: gate: -repo, -pr, -grant required`, as required by the kickoff's
   no-grant boundary.
 - No grant was minted, no merge was attempted, and nothing was pushed to
