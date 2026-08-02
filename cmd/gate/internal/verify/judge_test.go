@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
@@ -163,13 +164,19 @@ func TestDecodeJudgmentArtifactAcceptsContractShapedProducer(t *testing.T) {
 	}
 }
 
-// The pre-contract string form is gone; it must fail as malformed rather than
-// decode into some half-populated producer.
-func TestDecodeJudgmentArtifactRefusesStringProducer(t *testing.T) {
+// The pre-contract string form is refused, not silently accepted alongside the
+// contract shape — but an operator holding a judgment saved in that form gets
+// told what to change, not a raw unmarshal error.
+func TestDecodeJudgmentArtifactRefusesStringProducerWithMigrationGuidance(t *testing.T) {
 	raw := `{"version":"gate-judgment-v1","producer":"codex:gpt-5","confidence":0.9}`
 	_, err := DecodeJudgmentArtifact(strings.NewReader(raw))
-	if err == nil || !strings.Contains(err.Error(), "judgment_malformed") {
-		t.Fatalf("error = %v, want malformed-artifact refusal", err)
+	if err == nil {
+		t.Fatal("the pre-contract string producer was accepted")
+	}
+	for _, want := range []string{"judgment_malformed", "pre-contract string form", `{"class":"judgment","impl":"..."}`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want it to name %q", err, want)
+		}
 	}
 }
 
@@ -349,10 +356,20 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 	}
 }
 
-func TestProviderDetailTruncatesLongProviderOutput(t *testing.T) {
+// The cap is the ceiling on the whole quote, marker included, and a cut that
+// lands mid-rune must not leave mangled UTF-8 in the error.
+func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
 	got := providerDetail([]byte(strings.Repeat("x", providerDetailCap+64)))
-	if len(got) <= providerDetailCap || !strings.HasSuffix(got, "[... truncated ...]") {
-		t.Fatalf("detail length = %d, want a capped and marked quote", len(got))
+	if len(got) != providerDetailCap || !strings.HasSuffix(got, providerTruncateMark) {
+		t.Fatalf("detail length = %d, want exactly %d ending in the marker", len(got), providerDetailCap)
+	}
+	multibyte := providerDetail([]byte(strings.Repeat("é", providerDetailCap)))
+	if len(multibyte) > providerDetailCap || !utf8.ValidString(multibyte) {
+		t.Fatalf("multibyte detail length = %d, valid = %v", len(multibyte), utf8.ValidString(multibyte))
+	}
+	short := providerDetail([]byte("  boom  "))
+	if short != "boom" {
+		t.Fatalf("short detail = %q, want the trimmed quote unchanged", short)
 	}
 }
 

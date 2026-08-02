@@ -170,7 +170,11 @@ and `producer.impl` provenance is trimmed and must remain non-empty.
 carries, not a bare string. Its `class` is the ladder rung, which a provider
 does not get to assert: omit it and Gate stamps `judgment`, or echo `judgment`
 exactly. Any other class is refused as `judgment_bad_producer_class` rather
-than quietly rewritten.
+than quietly rewritten. A judgment saved while Gate's decoder disagreed with
+the contract and carried `producer` as a bare string is refused, not decoded
+alongside the contract shape — a forgiving parser at an authority boundary is
+how two shapes become permanent. The refusal names the fix: re-emit the
+judgment, or wrap the old string as `impl`.
 Judgment application is resumable across process interruption: if the
 hash-chained judgment or its reduced verdict reached disk before the caller saw
 success, the same run/escalation/grant retry reuses that artifact and appends

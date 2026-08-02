@@ -132,7 +132,7 @@ func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 	dec.DisallowUnknownFields()
 	var wire judgmentArtifactWire
 	if err := dec.Decode(&wire); err != nil {
-		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: %w", err)
+		return JudgmentArtifactV1{}, judgmentDecodeError(err)
 	}
 	if err := ensureEOF(dec); err != nil {
 		return JudgmentArtifactV1{}, err
@@ -153,6 +153,23 @@ func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 		Confidence:   *wire.Confidence,
 		Why:          wire.Why,
 	}, nil
+}
+
+// judgmentDecodeError names the one migration an operator can actually hit: a
+// judgment saved while Gate's own decoder disagreed with the contract and
+// carried producer as a bare string. Gate does not decode both encodings —
+// a forgiving parser at an authority boundary is how two shapes become
+// permanent — but the refusal says exactly what to change and why.
+func judgmentDecodeError(err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Field == "producer" && typeErr.Value == "string" {
+		return fmt.Errorf(
+			`judgment_malformed: producer must be the contract object {"class":"judgment","impl":"..."}, `+
+				`not the pre-contract string form; re-emit the judgment or wrap the string as impl: %w`,
+			err,
+		)
+	}
+	return fmt.Errorf("judgment_malformed: %w", err)
 }
 
 func ensureEOF(dec *json.Decoder) error {
@@ -361,9 +378,13 @@ func autoJudge(
 	return verdict, nil
 }
 
-// providerDetailCap bounds how much provider output an error may quote. The
-// point is a diagnosable first line, not the transcript.
-const providerDetailCap = 2 * 1024
+// providerDetailCap is the hard ceiling on how much provider output an error
+// may quote, truncation marker included. The point is a diagnosable first
+// line, not the transcript.
+const (
+	providerDetailCap    = 2 * 1024
+	providerTruncateMark = " [... truncated ...]"
+)
 
 // providerFailure keeps the provider's own diagnostic. A CLI that reports its
 // failure on stdout — or exits non-zero saying nothing at all — used to surface
@@ -390,7 +411,10 @@ func providerDetail(stream []byte) string {
 	if len(detail) <= providerDetailCap {
 		return detail
 	}
-	return detail[:providerDetailCap] + " [... truncated ...]"
+	// The marker is part of the budget, and the cut can land mid-rune —
+	// provider output is arbitrary bytes, not guaranteed UTF-8.
+	kept := strings.ToValidUTF8(detail[:providerDetailCap-len(providerTruncateMark)], "")
+	return kept + providerTruncateMark
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {
