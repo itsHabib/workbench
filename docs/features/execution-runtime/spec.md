@@ -1,6 +1,6 @@
 # Execution Runtime - Technical Design Document
 
-**Status:** draft / proposal - NOT a build commitment. This is the artifact we decide from.
+**Status:** built — `cmd/runway/` (landed 2026-07-12, 21 test files). Design record, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-10
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md), [`agentic-workbench-closure`](../agentic-workbench-closure/spec.md), `pers/rooms/docs/runner-contract.md`, `pers/rooms/docs/experiments/multi-agent-rooms-2026-07-09.md`, `pers/ship/packages/agent-runner/src/runner.ts`, `pers/cortex/docs/compute-spawning/phase-1-foundation/plans/behaviour-architect.md`

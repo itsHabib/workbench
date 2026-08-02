@@ -1,6 +1,6 @@
 # grant-materialized rooms - Technical Design Document
 
-**Status:** draft / proposal - NOT a build commitment. The artifact we decide from.
+**Status:** built — `cmd/runway/internal/backend/rooms/` (landed 2026-07-19, 6 test files). Design record, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-22
 **Related:** [custody TDD](../custody/spec.md), [execution-runtime spec](../execution-runtime/spec.md),

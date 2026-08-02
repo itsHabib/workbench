@@ -1,6 +1,6 @@
 # custody - Technical Design Document
 
-**Status:** draft / proposal - NOT a build commitment. The artifact we decide from.
+**Status:** built — `cmd/custody/` (landed 2026-07-21, 21 test files). Design record, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-20
 **Related:** [auto-mode defaults](../../auto-mode-defaults.md), [gate enforcement model](../../../cmd/gate/docs/enforcement.md), dossier project `workbench`

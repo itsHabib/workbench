@@ -1,4 +1,4 @@
-**Status:** draft
+**Status:** shipped in PR #163 (`feat(gate): enforce exact-head review panels`)
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** Dossier task `exact-head-panel-completeness` (`tsk_01KYMQHPRCJYZ91HYHMVMFCD2T`)

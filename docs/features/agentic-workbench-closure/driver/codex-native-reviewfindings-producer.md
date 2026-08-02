@@ -1,4 +1,4 @@
-**Status:** draft
+**Status:** shipped in PR #156 (`feat(reviewfindings): add Codex exact-head producer`)
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** Dossier task `codex-native-reviewfindings-producer` (`tsk_01KYMQGTM65YSFX1QF3J0RZ5Y0`), Workbench PR #156, Ship PRs #186/#187

@@ -1,6 +1,6 @@
 # Operator console — actionable docket + authority-bearing actions — Technical Design Document
 
-**Status:** draft / proposal — **NOT a build commitment.** Judgment is designed through an executable validation gate; browser-based minting is a no-go under the current threat model.
+**Status:** built — `cmd/console/` (landed 2026-07-20, 3 test files). Design record, not an open proposal. Browser-based minting remains a no-go under the current threat model.
 **Owner:** @itsHabib
 **Date:** 2026-07-21
 **Related:** [workbench charter](../../DESIGN.md), [operator-console brainstorm](brainstorm-2026-07-19.md), [console design](../../../cmd/console/docs/DESIGN.md), [gate README](../../../cmd/gate/README.md), [auto-mode defaults](../../auto-mode-defaults.md)

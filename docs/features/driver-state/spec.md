@@ -1,6 +1,6 @@
 # driver-state — Technical Design Document
 
-**Status:** draft / proposal — NOT a build commitment. The artifact we decide from.
+**Status:** built — `driverstate/` + `contracts/driverstate/` (landed 2026-07-17, 10 test files). Design record, not an open proposal.
 **Owner:** @michael
 **Date:** 2026-07-16
 **Related:** `docs/DESIGN.md` (workbench charter), `contracts/` (verdict-v0.3.0 precedent), gate `docs/DESIGN.md` (artifact-ledger prior art), `pers/workbench-friction.md` 2026-07-15 entries (motivating evidence), dossier project `workbench`
