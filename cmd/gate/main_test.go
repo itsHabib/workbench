@@ -1795,6 +1795,56 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 }
 
+// TestResolveRefusesEscalationSupersededBeforeAppend pins the compare-and-resolve:
+// the open-terminal test belongs to the judgment write, not to a read that
+// happened before it. cmdResolve's escalationIsOpen check is unlocked, so a
+// re-park landing between that check and the append would otherwise let a
+// judgment decide a park that is no longer the run's open one. The uniqueness
+// guard cannot catch this case — it is keyed on this escalation, and there is
+// only ever one judgment for it. beforeAppend stands in for the concurrent
+// re-park an out-of-process resolve would race.
+func TestResolveRefusesEscalationSupersededBeforeAppend(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	opts := judgmentOptions{
+		Decision:              verify.DecisionPass,
+		Why:                   "approved from the phone",
+		requireOpenEscalation: true,
+		beforeAppend: func() {
+			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	_, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts)
+	if !errors.Is(err, errStaleEscalation) {
+		t.Fatalf("superseded resolve error = %v, want errStaleEscalation", err)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 0 {
+		t.Fatalf("a superseded resolve recorded a judgment anyway: %d artifacts", got)
+	}
+}
+
+// TestJudgeDoesNotTakeTheResolveOnlyOpenGuard pins that the guard above is
+// opt-in, and why: judge derives the escalation from the run it is already
+// holding, so it is not exposed to the stale-id window resolve has. Recorded as
+// a test so a later decision to extend the guard reads as a change, not a fix.
+func TestJudgeDoesNotTakeTheResolveOnlyOpenGuard(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	opts := judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "operator judged from the run",
+		beforeAppend: func() {
+			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts); err != nil {
+		t.Fatalf("judge must not inherit the resolve-only open-terminal guard: %v", err)
+	}
+}
+
 // TestRunOfEscalationRejectsWrongKind pins that resolve fails loudly on an id
 // that is not an escalation, so a mistyped or wrong-kind id never resolves the
 // wrong run.

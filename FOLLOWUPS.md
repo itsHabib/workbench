@@ -29,24 +29,30 @@ shows up (users tripping on it past the quick-start), consider a distinct
 binary name — operator's call; renaming a CLI is a breaking change to every
 skill that shells to it.
 
-## gate `resolve` open-check→append is not atomic (cross-process double-apply)
+## ~~gate `resolve` open-check→append is not atomic (cross-process double-apply)~~ (2026-08-02, codex P1 on #137)
 
-`gate resolve` reads `escalationIsOpen` and then appends the judgment, verdict,
-action, and resolution as separate writes; gate locks each append, not the
-check→transition as a whole. So two concurrent resolves of the same escalation
-can both pass the open-check before either records a terminal, then both append
-authoritative outcomes — potentially conflicting pass/block for one park. This
-predates `escalate serve`: two parallel CLI `escalate resolve` invocations race
-identically.
+**Done.** The note called for "a single append that fails if the run's terminal
+moved" — and by the time it was written that primitive already existed:
+`state.AppendIfAbsentParentWhereAfterAudit` evaluates a caller `check` against
+the audit snapshot *while holding the store lock* (it landed with the
+authorization work, and `record`/`recordEscalation` already used it via
+`checkNoOpenClaim`). `applyJudgment` now takes that path with a
+`requireOpenEscalation` option: the check re-derives the run's newest
+action-or-escalation terminal from `audit.All` and refuses with
+`errStaleEscalation` unless it is still this escalation. `cmdResolve` sets the
+option; `judge` does not, because it derives the escalation from the run it is
+already holding.
 
-`escalate serve` mitigates the common case with a process-local per-escalation
-lock (`cmd/escalate/internal/serve` `escLocks`), which fully serializes the
-single-process ingress that is the Phase-1 deployment. It does NOT cover a
-second serve process on the same `-state` or a CLI resolve racing an HTTP
-callback. The durable fix belongs in gate: make resolve an atomic
-compare-and-resolve (a per-run file lock around the open-check→append, or a
-single append that fails if the run's terminal moved). Owner: gate. Surfaced by
-codex review on workbench #137 (`escalate serve` Phase 1).
+The unlocked `escalationIsOpen` pre-check in `cmdResolve` stays, now explicitly
+advisory — it gives a replayed tap a friendly message without a store round-trip,
+and the authoritative test is the one under the lock. This covers what the
+process-local `escLocks` in `cmd/escalate/internal/serve` could not: a second
+serve process on the same `-state`, and a CLI resolve racing an HTTP callback.
+
+Note the uniqueness guard was never sufficient here on its own: it is keyed on
+the escalation id, so it stops a *second judgment for the same park* but not a
+judgment landing against a park a concurrent re-park had already superseded.
+That second case is what this closes.
 
 ## ~~`escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async~~ (2026-07-27, codex P1 on #140)
 

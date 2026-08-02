@@ -1020,6 +1020,12 @@ type judgmentOptions struct {
 	ArtifactPath string
 	Provider     string
 	beforeAppend func()
+	// requireOpenEscalation makes "this escalation is still the run's open
+	// terminal" a condition of the judgment write itself, evaluated under the
+	// store lock. resolve sets it because its caller holds only an id a
+	// notification carried; judge does not, because it derives the escalation
+	// from the run it is already looking at.
+	requireOpenEscalation bool
 }
 
 func cmdJudge(args []string) error {
@@ -1123,7 +1129,28 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now); err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
-	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, escalationID, []string{escalationID, grantID}, judgment)
+	// The open-terminal test rides the append's own lock rather than sitting
+	// ahead of it. cmdResolve's pre-check stays as the fast, friendly error, but
+	// it is advisory: between that unlocked read and this write, a concurrent
+	// re-park can move the run's terminal, and a judgment appended after it would
+	// decide a park that is no longer the open one. The uniqueness guard cannot
+	// catch that — it is keyed on this escalation, and there is only ever one
+	// judgment for it. Recomputing under the lock closes the window for both the
+	// CLI and `escalate serve`.
+	var checkStillOpen func(state.AuditResult) error
+	if opts.requireOpenEscalation {
+		checkStillOpen = func(audit state.AuditResult) error {
+			if newestTerminal(audit.All, run) != escalationID {
+				return errStaleEscalation
+			}
+			return nil
+		}
+	}
+	jArt, err := e.st.AppendIfAbsentParentWhereAfterAudit(
+		state.KindJudgment, []string{state.KindJudgment}, run,
+		escalationID, []string{escalationID, grantID}, judgment,
+		nil, checkStillOpen,
+	)
 	if errors.Is(err, state.ErrAlreadyExists) {
 		return gateResult{}, 0, "", errors.New("judgment_duplicate: escalation already has a judgment")
 	}
@@ -1359,7 +1386,7 @@ func cmdResolve(args []string) error {
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
 	}
-	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why})
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why, requireOpenEscalation: true})
 	if err != nil {
 		return err
 	}
@@ -1407,14 +1434,30 @@ func escalationIsOpen(e env, run, escID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	return newestTerminal(arts, run) == escID, nil
+}
+
+// newestTerminal returns the id of run's newest action-or-escalation artifact in
+// log order — the one that decides whether a park is still open. Empty when the
+// run has no terminal yet. It filters by run so it reads correctly over both a
+// run-scoped slice and a whole-log audit snapshot.
+func newestTerminal(arts []state.Artifact, run string) string {
 	newest := ""
 	for _, a := range arts {
+		if a.Run != run {
+			continue
+		}
 		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
 			newest = a.ID
 		}
 	}
-	return newest == escID, nil
+	return newest
 }
+
+// errStaleEscalation is the authoritative counterpart to the pre-check in
+// cmdResolve: the escalation stopped being the run's open terminal between that
+// unlocked read and the judgment write.
+var errStaleEscalation = errors.New("resolve: escalation is no longer the run's open park — it was resolved or superseded by a re-park while this resolve was in flight")
 
 // stampResolution records the closed-loop provenance the judge path lacks: a
 // resolution artifact naming the decision, who made it, when, and the judgment
