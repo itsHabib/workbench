@@ -173,6 +173,88 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 	}
 }
 
+const attestHead = "2b754f7a73c1d2e3f405162738495a6b7c8d9e0f"
+
+func attestation(reviewer, sha string) Comment {
+	return Comment{
+		ID: 1, Author: "github-actions[bot]", IsBot: true,
+		Body: "<!-- gate:review-attestation -->\n**Reviewer:** " + reviewer +
+			"\n**Reviewed commit:** `" + sha + "`\n",
+	}
+}
+
+func attestPanel() reviewpanel.Evidence {
+	return reviewpanel.Evidence{
+		SchemaVersion: 1,
+		Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: attestHead},
+		Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"claude"}},
+	}
+}
+
+func TestClassifyPanelWorkflowAttestation(t *testing.T) {
+	got := classifyPanel(attestPanel(), nil, nil, []Comment{attestation("claude", attestHead)})
+	if len(got.Completed) != 1 || len(got.Missing) != 0 {
+		t.Fatalf("exact-head attestation not completed: %+v", got)
+	}
+	reviewer := got.Completed[0]
+	if reviewer.Name != "claude" || reviewer.Actor != "github-actions[bot]" ||
+		reviewer.State != "COMMENTED" || reviewer.HeadSHA != attestHead {
+		t.Fatalf("attested reviewer recorded wrong: %+v", reviewer)
+	}
+	if err := reviewpanel.Validate(got); err != nil {
+		t.Fatalf("attested evidence invalid: %v", err)
+	}
+}
+
+func TestClassifyPanelWorkflowAttestationRefusals(t *testing.T) {
+	const other = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	tests := map[string]func(*Comment){
+		// The head moved after the review ran; the attestation names the old one.
+		"stale head": func(c *Comment) { c.Body = strings.Replace(c.Body, attestHead, other, 1) },
+		// Only the repository's own Actions token may attest.
+		"wrong author": func(c *Comment) { c.Author = "claude[bot]" },
+		"human author": func(c *Comment) { c.IsBot = false },
+		// An attestation for one reviewer must not clear another's slot.
+		"other reviewer": func(c *Comment) { c.Body = strings.Replace(c.Body, "claude", "cursor", 1) },
+		// Prose that merely quotes the fields — a review of this very feature.
+		"no marker":        func(c *Comment) { c.Body = strings.TrimPrefix(c.Body, attestationMarker+"\n") },
+		"marker not first": func(c *Comment) { c.Body = "Nice work!\n\n" + c.Body },
+		// The two fields must stay adjacent, so no text can drift between the
+		// reviewer named and the commit claimed.
+		"split fields": func(c *Comment) {
+			c.Body = strings.Replace(c.Body, "\n**Reviewed commit:**", "\n\n**Reviewed commit:**", 1)
+		},
+		// An abbreviated SHA is not an exact head match.
+		"abbreviated sha": func(c *Comment) { c.Body = strings.Replace(c.Body, attestHead, attestHead[:10], 1) },
+		"malformed":       func(c *Comment) { c.Body = strings.Replace(c.Body, "`"+attestHead+"`", attestHead, 1) },
+		// An inline review comment is anchored to a diff line, not a head.
+		"inline comment": func(c *Comment) { c.Path = "cmd/gate/main.go"; c.CommitID = attestHead },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			comment := attestation("claude", attestHead)
+			mutate(&comment)
+			got := classifyPanel(attestPanel(), nil, nil, []Comment{comment})
+			if len(got.Completed) != 0 || len(got.Missing) != 1 {
+				t.Fatalf("invalid attestation satisfied panel: %+v", got)
+			}
+		})
+	}
+}
+
+// A formal exact-head review is the direct evidence and outranks an attestation,
+// which stands in only when the provider never posts one.
+func TestClassifyPanelPrefersFormalReviewOverAttestation(t *testing.T) {
+	review := rawReview("claude[bot]", "Bot", "", attestHead, "CHANGES_REQUESTED")
+	review.ID = 7
+	got := classifyPanel(attestPanel(), []rawComment{review}, nil,
+		[]Comment{attestation("claude", attestHead)})
+	if len(got.Completed) != 1 || got.Completed[0].State != "CHANGES_REQUESTED" ||
+		got.Completed[0].ReviewID != 7 {
+		t.Fatalf("attestation shadowed the formal review: %+v", got)
+	}
+}
+
 func bits(value int) int {
 	count := 0
 	for value > 0 {

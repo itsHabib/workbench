@@ -112,18 +112,8 @@ func fetchRequestedReviewers(pr PRRef) ([]string, error) {
 
 func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested []string, comments []Comment) reviewpanel.Evidence {
 	for _, expected := range panel.Declaration.Expected {
-		if review, ok := latestExactHeadReview(expected, panel.Subject.HeadSHA, reviews); ok {
-			panel.Completed = append(panel.Completed, reviewpanel.Reviewer{
-				Name: expected, Actor: review.User.Login, State: review.State,
-				HeadSHA: review.CommitID, ReviewID: review.ID,
-			})
-			continue
-		}
-		if comment, ok := codexCleanCompletion(expected, panel.Subject.HeadSHA, comments); ok {
-			panel.Completed = append(panel.Completed, reviewpanel.Reviewer{
-				Name: expected, Actor: comment.Author, State: "CLEAN",
-				HeadSHA: panel.Subject.HeadSHA, ReviewID: comment.ID,
-			})
+		if reviewer, ok := panelCompletion(expected, panel.Subject.HeadSHA, reviews, comments); ok {
+			panel.Completed = append(panel.Completed, reviewer)
 			continue
 		}
 		if actorPresent(expected, requested) {
@@ -133,6 +123,33 @@ func classifyPanel(panel reviewpanel.Evidence, reviews []rawComment, requested [
 		panel.Missing = append(panel.Missing, expected)
 	}
 	return panel
+}
+
+// panelCompletion reports the head-bound evidence that satisfies one expected
+// reviewer, in descending order of directness: the reviewer's own formal
+// exact-head review, then the two structured sentinels that stand in for one
+// when a provider only ever posts issue comments. Provider prose is never
+// evidence here — each sentinel is emitted by a harness, not by a model.
+func panelCompletion(expected, headSHA string, reviews []rawComment, comments []Comment) (reviewpanel.Reviewer, bool) {
+	if review, ok := latestExactHeadReview(expected, headSHA, reviews); ok {
+		return reviewpanel.Reviewer{
+			Name: expected, Actor: review.User.Login, State: review.State,
+			HeadSHA: review.CommitID, ReviewID: review.ID,
+		}, true
+	}
+	if comment, ok := codexCleanCompletion(expected, headSHA, comments); ok {
+		return reviewpanel.Reviewer{
+			Name: expected, Actor: comment.Author, State: "CLEAN",
+			HeadSHA: headSHA, ReviewID: comment.ID,
+		}, true
+	}
+	if comment, ok := workflowAttestation(expected, headSHA, comments); ok {
+		return reviewpanel.Reviewer{
+			Name: expected, Actor: comment.Author, State: "COMMENTED",
+			HeadSHA: headSHA, ReviewID: comment.ID,
+		}, true
+	}
+	return reviewpanel.Reviewer{}, false
 }
 
 var codexReviewedCommit = regexp.MustCompile("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`\\r?$")
@@ -150,6 +167,47 @@ func codexCleanCompletion(expected, headSHA string, comments []Comment) (Comment
 		}
 		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
 		if len(match) == 2 && strings.HasPrefix(headSHA, match[1]) {
+			return comment, true
+		}
+	}
+	return Comment{}, false
+}
+
+// attestationAuthor is the only actor whose attestation counts: the repository's
+// own Actions token. A human, a PR author, or any other bot posting the same
+// text is not this login, and the login cannot be spoofed on a comment.
+const attestationAuthor = "github-actions[bot]"
+
+// attestationMarker opens the body of a review attestation. Requiring it as a
+// strict prefix keeps the sentinel out of reach of prose that merely quotes the
+// two fields below — a review discussing this very feature must not clear a panel.
+const attestationMarker = "<!-- gate:review-attestation -->"
+
+// attestationFields pins the reviewer and the reviewed head to two adjacent
+// lines, so no free text can drift between the name and the commit it claims.
+// The commit is the full 40-hex SHA and must equal the judged head exactly.
+var attestationFields = regexp.MustCompile("(?m)^\\*\\*Reviewer:\\*\\* ([a-z0-9-]{1,40})\\r?\\n\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\r?$")
+
+// workflowAttestation reports a repository-workflow attestation that `expected`
+// reviewed exactly headSHA.
+//
+// Some providers — claude[bot] today — publish their review only as an issue
+// comment, which carries no commit anchor, and the body is model prose that Gate
+// refuses as authority on principle. The authority instead belongs to the
+// workflow that produced the review: it checked out a specific head and ran the
+// reviewer against exactly that tree, so it can state the head as fact. This is
+// the same structural role the Codex connector's reviewed-commit line plays —
+// a harness-emitted, head-bound sentinel, not a provider's self-description.
+func workflowAttestation(expected, headSHA string, comments []Comment) (Comment, bool) {
+	for i := len(comments) - 1; i >= 0; i-- {
+		comment := comments[i]
+		if comment.Author != attestationAuthor || !comment.IsBot ||
+			comment.CommitID != "" || comment.Path != "" ||
+			!strings.HasPrefix(comment.Body, attestationMarker) {
+			continue
+		}
+		match := attestationFields.FindStringSubmatch(comment.Body)
+		if len(match) == 3 && match[1] == expected && match[2] == headSHA {
 			return comment, true
 		}
 	}
