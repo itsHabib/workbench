@@ -281,7 +281,7 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 				provider,
 				request,
 				t.TempDir(),
-				judgeHelperEnvironment(""),
+				judgeHelperEnvironment(t, ""),
 				fakeJudgeResolver,
 				factory,
 			)
@@ -311,7 +311,7 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 		JudgeProviderCodex,
 		request,
 		t.TempDir(),
-		judgeHelperEnvironment("malformed"),
+		judgeHelperEnvironment(t, "malformed"),
 		fakeJudgeResolver,
 		factory,
 	)
@@ -340,7 +340,7 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 				JudgeProviderCodex,
 				request,
 				t.TempDir(),
-				judgeHelperEnvironment(tc.mode),
+				judgeHelperEnvironment(t, tc.mode),
 				fakeJudgeResolver,
 				factory,
 			)
@@ -429,11 +429,17 @@ func fakeJudgeResolver(name string) (judgeExecutable, error) {
 	}, nil
 }
 
-func judgeHelperEnvironment(mode string) []string {
+func judgeHelperEnvironment(t *testing.T, mode string) []string {
+	t.Helper()
 	return append(
 		sanitizedJudgeEnvironment(os.Environ()),
 		"GATE_JUDGE_HELPER=1",
 		"GATE_JUDGE_HELPER_MODE="+mode,
+		// The helper is this coverage-instrumented test binary re-executed.
+		// Under `go test -cover` it writes "GOCOVERDIR not set" to stderr on
+		// exit, which is not the provider diagnostic under test — give it a
+		// scratch dir so the stream it uses is the one the mode chose.
+		"GOCOVERDIR="+t.TempDir(),
 	)
 }
 
