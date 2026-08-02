@@ -178,15 +178,21 @@ func codexCleanCompletion(expected, headSHA string, comments []Comment) (Comment
 // text is not this login, and the login cannot be spoofed on a comment.
 const attestationAuthor = "github-actions[bot]"
 
-// attestationMarker opens the body of a review attestation. Requiring it as a
-// strict prefix keeps the sentinel out of reach of prose that merely quotes the
-// two fields below — a review discussing this very feature must not clear a panel.
+// attestationMarker opens the body of a review attestation. It is quoted here
+// for the workflow that emits it; attestationBody is what actually matches.
 const attestationMarker = "<!-- gate:review-attestation -->"
 
-// attestationFields pins the reviewer and the reviewed head to two adjacent
-// lines, so no free text can drift between the name and the commit it claims.
-// The commit is the full 40-hex SHA and must equal the judged head exactly.
-var attestationFields = regexp.MustCompile("(?m)^\\*\\*Reviewer:\\*\\* ([a-z0-9-]{1,40})\\r?\\n\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\r?$")
+// attestationBody matches a whole attestation and nothing else: the marker, the
+// reviewer, and the reviewed head, on three consecutive lines from the first
+// byte of the comment, with only trailing whitespace permitted after. Matching
+// the entire body rather than scanning it for fields is what keeps the sentinel
+// out of reach of prose — a review quoting this very format, at any offset and
+// with any amount of surrounding text, cannot clear a panel. The commit is the
+// full 40-hex SHA and must equal the judged head exactly.
+var attestationBody = regexp.MustCompile(
+	"\\A" + regexp.QuoteMeta(attestationMarker) +
+		"\\r?\\n\\*\\*Reviewer:\\*\\* ([a-z0-9-]{1,40})" +
+		"\\r?\\n\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\s*\\z")
 
 // workflowAttestation reports a repository-workflow attestation that `expected`
 // reviewed exactly headSHA.
@@ -202,11 +208,10 @@ func workflowAttestation(expected, headSHA string, comments []Comment) (Comment,
 	for i := len(comments) - 1; i >= 0; i-- {
 		comment := comments[i]
 		if comment.Author != attestationAuthor || !comment.IsBot ||
-			comment.CommitID != "" || comment.Path != "" ||
-			!strings.HasPrefix(comment.Body, attestationMarker) {
+			comment.CommitID != "" || comment.Path != "" {
 			continue
 		}
-		match := attestationFields.FindStringSubmatch(comment.Body)
+		match := attestationBody.FindStringSubmatch(comment.Body)
 		if len(match) == 3 && match[1] == expected && match[2] == headSHA {
 			return comment, true
 		}

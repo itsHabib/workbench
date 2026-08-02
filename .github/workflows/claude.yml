@@ -124,13 +124,24 @@ jobs:
           && github.event_name == 'issue_comment'
           && github.event.issue.pull_request
           && contains(github.event.comment.body, '@claude')
-          && contains(github.event.comment.body, 'review')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REVIEW_REF: ${{ steps.review_ref.outputs.ref }}
+          # Read as data, never interpolated into the script: the body is
+          # attacker-controlled on a public repo.
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
+          # The trigger must be a review *request*, not any comment containing
+          # the word. `@claude how do I review permissions?` and `@claude the
+          # code-review tool is broken` both run this job and must not attest,
+          # so match the request verb anchored at the start of the comment —
+          # something an Actions `contains()` cannot express.
+          if ! grep -Eqi '^[[:space:]]*@claude[[:space:]]+(please[[:space:]]+)?review\b' <<<"${COMMENT_BODY}"; then
+            echo "not a review request — no attestation"
+            exit 0
+          fi
           # A fork PR keeps the main checkout by design, so HEAD is not the
           # reviewed head and there is nothing truthful to attest.
           if [ "${REVIEW_REF}" != "refs/pull/${PR_NUMBER}/head" ]; then

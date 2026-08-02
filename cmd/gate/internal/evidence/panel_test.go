@@ -226,10 +226,17 @@ func TestClassifyPanelWorkflowAttestationRefusals(t *testing.T) {
 		"wrong author": func(c *Comment) { c.Author = "claude[bot]" },
 		"human author": func(c *Comment) { c.IsBot = false },
 		// An attestation for one reviewer must not clear another's slot.
-		"other reviewer": func(c *Comment) { c.Body = strings.Replace(c.Body, "claude", "cursor", 1) },
-		// Prose that merely quotes the fields — a review of this very feature.
+		"other reviewer": func(c *Comment) {
+			c.Body = strings.Replace(c.Body, "**Reviewer:** claude", "**Reviewer:** cursor", 1)
+		},
+		// Prose that merely quotes the format — a review of this very feature
+		// must never clear a panel, wherever the block sits in the body.
 		"no marker":        func(c *Comment) { c.Body = strings.TrimPrefix(c.Body, attestationMarker+"\n") },
 		"marker not first": func(c *Comment) { c.Body = "Nice work!\n\n" + c.Body },
+		"prose after":      func(c *Comment) { c.Body += "\nand some commentary\n" },
+		"quoted in prose": func(c *Comment) {
+			c.Body = "A review of the attestation format:\n\n" + c.Body + "\n\nLooks right to me.\n"
+		},
 		// The two fields must stay adjacent, so no text can drift between the
 		// reviewer named and the commit claimed.
 		"split fields": func(c *Comment) {
