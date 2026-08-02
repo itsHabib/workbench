@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,12 @@ Return exactly one gate-judgment-v1 JSON object, with no markdown. Echo the
 request's run, escalation_id, subject, grant, and question exactly; identify
 your implementation in producer; set decision to pass or block; set tier no
 higher than the presented grant ceiling; and include confidence and why.
+
+producer is a plain JSON string naming your implementation, for example
+"producer": "codex". The verdicts quoted in the artifacts above carry an
+object-shaped producer; that is the recorded log's own shape, not yours — do
+not copy it. confidence is a number between 0 and 1. Emit no fields beyond
+the ones named here.
 `
 
 const (
@@ -94,11 +101,45 @@ type judgmentArtifactWire struct {
 	Subject      Subject         `json:"subject"`
 	Grant        JudgmentGrantV1 `json:"grant"`
 	Question     string          `json:"question"`
-	Producer     string          `json:"producer"`
+	Producer     judgeProducer   `json:"producer"`
 	Decision     string          `json:"decision"`
 	Tier         string          `json:"tier"`
 	Confidence   *float64        `json:"confidence"`
 	Why          string          `json:"why"`
+}
+
+// judgeProducer accepts producer as either a bare string ("codex") or the
+// artifact envelope's object form ({"class":"model","impl":"codex"}).
+//
+// Providers are shown recorded verdicts inside their prompt, and those carry
+// object-shaped producers — so a provider that mirrors the shape it was shown
+// is behaving reasonably. Producer is self-reported provenance, never an
+// authority binding: ValidateJudgment only requires it to be non-empty before
+// rewrapping it as Producer{Class: ClassJudgment}, while the grant and head-SHA
+// bindings carry the actual authority. Rejecting a sound judgment over the
+// spelling of a provenance label is the wrong trade for a merge gate.
+type judgeProducer struct {
+	value string
+}
+
+func (p *judgeProducer) UnmarshalJSON(data []byte) error {
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		p.value = asString
+		return nil
+	}
+	var asObject struct {
+		Class string `json:"class"`
+		Impl  string `json:"impl"`
+	}
+	if err := json.Unmarshal(data, &asObject); err != nil {
+		return errors.New("producer must be a string or a {class, impl} object")
+	}
+	p.value = asObject.Impl
+	if p.value == "" {
+		p.value = asObject.Class
+	}
+	return nil
 }
 
 // NewJudgmentRequest builds the provider request purely from recorded state.
@@ -143,7 +184,7 @@ func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 		Subject:      wire.Subject,
 		Grant:        wire.Grant,
 		Question:     wire.Question,
-		Producer:     wire.Producer,
+		Producer:     wire.Producer.value,
 		Decision:     wire.Decision,
 		Tier:         wire.Tier,
 		Confidence:   *wire.Confidence,
@@ -227,6 +268,26 @@ func ValidateJudgeProvider(provider string) error {
 	default:
 		return fmt.Errorf("judge_provider_unsupported: %q (want %s or %s)", provider, JudgeProviderClaude, JudgeProviderCodex)
 	}
+}
+
+// providerFailure renders why a judge provider failed, and is never empty.
+// CLIs disagree about where they report: the Claude CLI prints "Not logged in"
+// on stdout and exits non-zero with empty stderr, which previously rendered as
+// a bare "judge_provider_failed:" carrying no reason at all. Prefer stderr,
+// fall back to stdout, and name the exit status when a provider says nothing —
+// an unexplained failure of the merge-authorization judge is never acceptable.
+func providerFailure(err error, stdout []byte) string {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return err.Error()
+	}
+	if detail := strings.TrimSpace(string(exit.Stderr)); detail != "" {
+		return detail
+	}
+	if detail := strings.TrimSpace(string(stdout)); detail != "" {
+		return detail
+	}
+	return fmt.Sprintf("provider exited %d with no diagnostic output", exit.ExitCode())
 }
 
 func providerInvocation(provider string) (judgeProviderInvocation, error) {
@@ -316,10 +377,7 @@ func autoJudge(
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return Verdict{}, fmt.Errorf("judge_provider_failed: %s", strings.TrimSpace(string(ee.Stderr)))
-		}
-		return Verdict{}, fmt.Errorf("judge_provider_failed: %w", err)
+		return Verdict{}, fmt.Errorf("judge_provider_failed: %s", providerFailure(err, out))
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {

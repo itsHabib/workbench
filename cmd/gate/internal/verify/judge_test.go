@@ -280,6 +280,105 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 	}
 }
 
+// A judge provider that fails must always say why. The Claude CLI reports
+// "Not logged in" on stdout and exits non-zero with an empty stderr; reading
+// only stderr rendered that as a bare "judge_provider_failed:" with no reason,
+// which made a broken merge-authorization judge undiagnosable.
+func TestAutoJudgeNeverReportsAnEmptyProviderFailure(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want string
+	}{
+		{mode: "failed", want: "helper failed"},
+		{mode: "stdout-failure", want: "Not logged in"},
+		{mode: "silent-failure", want: "exited 26"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			request, _ := judgmentFixture()
+			_, err := autoJudge(
+				JudgeProviderCodex,
+				request,
+				t.TempDir(),
+				judgeHelperEnvironment(tc.mode),
+				fakeJudgeResolver,
+				judgeHelperFactory(t, nil, nil),
+			)
+			if err == nil {
+				t.Fatal("provider failure was not reported")
+			}
+			reason := strings.TrimSpace(strings.TrimPrefix(err.Error(), "judge_provider_failed:"))
+			if reason == "" {
+				t.Fatalf("empty failure reason: %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to carry %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// Providers see object-shaped producers on the verdicts quoted into their
+// prompt and reasonably mirror that shape. Producer is provenance, not an
+// authority binding, so both spellings must decode rather than sink an
+// otherwise sound judgment as judgment_malformed.
+func TestDecodeJudgmentArtifactAcceptsBothProducerShapes(t *testing.T) {
+	const body = `{"version":"gate-judgment-v1","run":"run_1","escalation_id":"esc_1",` +
+		`"subject":{"repo":"o/r","number":17,"head_sha":"abc"},` +
+		`"grant":{"id":"grt_1","max_tier":"T2"},"question":"q",` +
+		`"producer":%s,"decision":"pass","tier":"T0","confidence":0.9,"why":"w"}`
+	for _, tc := range []struct {
+		name     string
+		producer string
+		want     string
+	}{
+		{name: "string", producer: `"codex"`, want: "codex"},
+		{name: "object", producer: `{"class":"model","impl":"codex"}`, want: "codex"},
+		{name: "object without impl", producer: `{"class":"judgment"}`, want: "judgment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DecodeJudgmentArtifact(strings.NewReader(fmt.Sprintf(body, tc.producer)))
+			if err != nil {
+				t.Fatalf("producer %s was rejected: %v", tc.producer, err)
+			}
+			if got.Producer != tc.want {
+				t.Fatalf("producer = %q, want %q", got.Producer, tc.want)
+			}
+		})
+	}
+}
+
+// The end-to-end path a real Codex run takes: provider emits an object-shaped
+// producer, and the judgment is accepted with its provenance intact.
+func TestAutoJudgeAcceptsObjectShapedProducerFromProvider(t *testing.T) {
+	request, _ := judgmentFixture()
+	got, err := autoJudge(
+		JudgeProviderCodex,
+		request,
+		t.TempDir(),
+		judgeHelperEnvironment("object-producer"),
+		fakeJudgeResolver,
+		judgeHelperFactory(t, nil, nil),
+	)
+	if err != nil {
+		t.Fatalf("object-shaped producer was rejected: %v", err)
+	}
+	if !strings.Contains(got.Producer.Impl, "fixture-model") {
+		t.Fatalf("provenance lost the provider implementation: %q", got.Producer.Impl)
+	}
+}
+
+func TestDecodeJudgmentArtifactRefusesUnusableProducerShapes(t *testing.T) {
+	const body = `{"version":"gate-judgment-v1","run":"run_1","escalation_id":"esc_1",` +
+		`"subject":{"repo":"o/r","number":17,"head_sha":"abc"},` +
+		`"grant":{"id":"grt_1","max_tier":"T2"},"question":"q",` +
+		`"producer":%s,"decision":"pass","tier":"T0","confidence":0.9,"why":"w"}`
+	for _, producer := range []string{`123`, `["codex"]`, `true`} {
+		if _, err := DecodeJudgmentArtifact(strings.NewReader(fmt.Sprintf(body, producer))); err == nil {
+			t.Fatalf("producer %s was accepted", producer)
+		}
+	}
+}
+
 func TestResolveJudgeExecutableRecordsAbsolutePathAndDigest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "judge")
 	if os.PathSeparator == '\\' {
@@ -372,6 +471,34 @@ func TestJudgeProviderHelper(_ *testing.T) {
 	case "failed":
 		fmt.Fprint(os.Stderr, "helper failed")
 		os.Exit(23)
+	case "stdout-failure":
+		// The real Claude CLI shape: the reason goes to stdout, stderr is empty.
+		fmt.Fprint(os.Stdout, "Not logged in · Please run /login")
+		os.Exit(1)
+	case "silent-failure":
+		// A provider that explains itself nowhere at all.
+		os.Exit(26)
+	case "object-producer":
+		// The real Codex shape: producer mirrors the object-shaped producer it
+		// saw on the verdicts quoted into its own prompt.
+		var objectRequest JudgmentRequestV1
+		if err := json.NewDecoder(os.Stdin).Decode(&objectRequest); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(24)
+		}
+		fmt.Fprintf(
+			os.Stdout,
+			`{"version":%q,"run":%q,"escalation_id":%q,`+
+				`"subject":{"repo":%q,"number":%d,"head_sha":%q},`+
+				`"grant":{"id":%q,"max_tier":%q},"question":%q,`+
+				`"producer":{"class":"model","impl":"fixture-model"},`+
+				`"decision":%q,"tier":"T0","confidence":0.9,"why":"object producer"}`,
+			JudgmentV1, objectRequest.Run, objectRequest.EscalationID,
+			objectRequest.Subject.Repo, objectRequest.Subject.Number, objectRequest.Subject.HeadSHA,
+			objectRequest.Grant.ID, objectRequest.Grant.MaxTier, objectRequest.Question,
+			DecisionPass,
+		)
+		os.Exit(0)
 	}
 	var request JudgmentRequestV1
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
