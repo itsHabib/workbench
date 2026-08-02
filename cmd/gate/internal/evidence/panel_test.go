@@ -206,6 +206,17 @@ func TestClassifyPanelWorkflowAttestation(t *testing.T) {
 	}
 }
 
+// The workflow posts LF, but GitHub hands some comment bodies back CRLF, and a
+// reviewer that only matched one line ending would fail on live evidence.
+func TestClassifyPanelWorkflowAttestationLineEndings(t *testing.T) {
+	comment := attestation("claude", attestHead)
+	comment.Body = strings.ReplaceAll(comment.Body, "\n", "\r\n")
+	got := classifyPanel(attestPanel(), nil, nil, []Comment{comment})
+	if len(got.Completed) != 1 || len(got.Missing) != 0 {
+		t.Fatalf("CRLF attestation not completed: %+v", got)
+	}
+}
+
 func TestClassifyPanelWorkflowAttestationRefusals(t *testing.T) {
 	const other = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	tests := map[string]func(*Comment){
