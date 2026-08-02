@@ -17,7 +17,7 @@ func TestReviewedRulesWithInstalledExecpolicy(t *testing.T) {
 	if err != nil {
 		t.Skip("codex CLI is not installed")
 	}
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempCodexHome(t), "codex")
 	assets, err := reviewedProjectionAssets()
 	if err != nil {
 		t.Fatal(err)
