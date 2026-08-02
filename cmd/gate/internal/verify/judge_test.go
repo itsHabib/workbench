@@ -275,7 +275,12 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 		fakeJudgeResolver,
 		factory,
 	)
-	if err == nil || !strings.Contains(err.Error(), "judge_provider_failed: helper failed") {
+	// Asserts the reason survives, not the exact rendering: the message also
+	// carries the exit status, and a coverage build appends its own warning to
+	// the same stream.
+	if err == nil ||
+		!strings.Contains(err.Error(), "judge_provider_failed:") ||
+		!strings.Contains(err.Error(), "helper failed") {
 		t.Fatalf("error = %v, want provider failure", err)
 	}
 }
@@ -289,6 +294,11 @@ func TestAutoJudgeNeverReportsAnEmptyProviderFailure(t *testing.T) {
 		mode string
 		want string
 	}{
+		// Each provider must reach the reason it actually gave, and every case
+		// must name the exit status — a provider that writes unrelated noise to
+		// one stream must never bury the reason sitting on the other. Coverage
+		// builds do exactly that: the helper inherits a GOCOVERDIR warning on
+		// stderr while the real reason is on stdout.
 		{mode: "failed", want: "helper failed"},
 		{mode: "stdout-failure", want: "Not logged in"},
 		{mode: "silent-failure", want: "exited 26"},

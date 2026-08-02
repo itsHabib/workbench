@@ -271,23 +271,30 @@ func ValidateJudgeProvider(provider string) error {
 }
 
 // providerFailure renders why a judge provider failed, and is never empty.
+//
 // CLIs disagree about where they report: the Claude CLI prints "Not logged in"
-// on stdout and exits non-zero with empty stderr, which previously rendered as
-// a bare "judge_provider_failed:" carrying no reason at all. Prefer stderr,
-// fall back to stdout, and name the exit status when a provider says nothing —
-// an unexplained failure of the merge-authorization judge is never acceptable.
+// on stdout and exits non-zero with an empty stderr, which previously rendered
+// as a bare "judge_provider_failed:" carrying no reason at all. Nor is it safe
+// to merely prefer one stream — a provider that writes an unrelated warning to
+// stderr would bury the real reason sitting on stdout.
+//
+// So report the exit status always, and every stream that said anything. An
+// unexplained failure of the merge-authorization judge is never acceptable.
 func providerFailure(err error, stdout []byte) string {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) {
 		return err.Error()
 	}
-	if detail := strings.TrimSpace(string(exit.Stderr)); detail != "" {
-		return detail
+	details := make([]string, 0, 2)
+	for _, stream := range [][]byte{exit.Stderr, stdout} {
+		if detail := strings.TrimSpace(string(stream)); detail != "" {
+			details = append(details, detail)
+		}
 	}
-	if detail := strings.TrimSpace(string(stdout)); detail != "" {
-		return detail
+	if len(details) == 0 {
+		return fmt.Sprintf("provider exited %d with no diagnostic output", exit.ExitCode())
 	}
-	return fmt.Sprintf("provider exited %d with no diagnostic output", exit.ExitCode())
+	return fmt.Sprintf("provider exited %d: %s", exit.ExitCode(), strings.Join(details, "; "))
 }
 
 func providerInvocation(provider string) (judgeProviderInvocation, error) {
