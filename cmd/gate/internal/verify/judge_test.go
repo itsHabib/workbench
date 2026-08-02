@@ -382,7 +382,10 @@ func TestDecodeJudgmentArtifactRefusesUnusableProducerShapes(t *testing.T) {
 		`"subject":{"repo":"o/r","number":17,"head_sha":"abc"},` +
 		`"grant":{"id":"grt_1","max_tier":"T2"},"question":"q",` +
 		`"producer":%s,"decision":"pass","tier":"T0","confidence":0.9,"why":"w"}`
-	for _, producer := range []string{`123`, `["codex"]`, `true`} {
+	// The object cases decode without a JSON error but name nobody, so the
+	// decoder has to reject them itself rather than leaving it to
+	// ValidateJudgment's missing-provenance check.
+	for _, producer := range []string{`123`, `["codex"]`, `true`, `{}`, `{"foo":"bar"}`} {
 		if _, err := DecodeJudgmentArtifact(strings.NewReader(fmt.Sprintf(body, producer))); err == nil {
 			t.Fatalf("producer %s was accepted", producer)
 		}

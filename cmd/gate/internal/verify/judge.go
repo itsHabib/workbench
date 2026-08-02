@@ -139,6 +139,12 @@ func (p *judgeProducer) UnmarshalJSON(data []byte) error {
 	if p.value == "" {
 		p.value = asObject.Class
 	}
+	if p.value == "" {
+		// {} or {"foo":"bar"} decodes without error but names nobody.
+		// Refuse it here rather than letting it reach ValidateJudgment as a
+		// missing-provenance failure, so the diagnosis points at the shape.
+		return errors.New("producer object must carry a non-empty class or impl")
+	}
 	return nil
 }
 
@@ -280,11 +286,10 @@ func ValidateJudgeProvider(provider string) error {
 //
 // So report the exit status always, and every stream that said anything. An
 // unexplained failure of the merge-authorization judge is never acceptable.
-func providerFailure(err error, stdout []byte) string {
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) {
-		return err.Error()
-	}
+//
+// Callers keep %w for errors that are not an ExitError, so the chain stays
+// inspectable; only an exited provider needs its streams rendered.
+func providerFailure(exit *exec.ExitError, stdout []byte) string {
 	details := make([]string, 0, 2)
 	for _, stream := range [][]byte{exit.Stderr, stdout} {
 		if detail := strings.TrimSpace(string(stream)); detail != "" {
@@ -384,7 +389,11 @@ func autoJudge(
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
-		return Verdict{}, fmt.Errorf("judge_provider_failed: %s", providerFailure(err, out))
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return Verdict{}, fmt.Errorf("judge_provider_failed: %w", err)
+		}
+		return Verdict{}, fmt.Errorf("judge_provider_failed: %s", providerFailure(exit, out))
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
