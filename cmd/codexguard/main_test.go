@@ -11,6 +11,19 @@ import (
 	"github.com/itsHabib/workbench/contracts/automode"
 )
 
+// projectionTempDir is t.TempDir() with symlinks resolved, for fixtures that
+// become a projection home. Darwin hands out per-test directories under
+// /var/folders/..., and /var is itself a symlink to private/var — a linked
+// ancestor the projection rightly refuses.
+func projectionTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func TestRunRefusesMalformedInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"decide"}, strings.NewReader(`{"unknown":true}`), &stdout, &stderr)
@@ -129,7 +142,7 @@ func TestRunHookMalformedInputIsOperationalFailure(t *testing.T) {
 }
 
 func TestRunProjectionStatusAndApply(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(projectionTempDir(t), "codex")
 	var statusOut, statusErr bytes.Buffer
 	code := run([]string{"projection", "status", "-home", home}, strings.NewReader(""), &statusOut, &statusErr)
 	if code != codePass {
@@ -189,7 +202,7 @@ func TestRenderedHooksRefuseNonAbsoluteExecutable(t *testing.T) {
 }
 
 func TestRunProjectionRefusesChangedTarget(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(projectionTempDir(t), "codex")
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"projection", "status", "-home", home}, strings.NewReader(""), &stdout, &stderr)
 	if code != codePass {

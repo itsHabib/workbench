@@ -42,5 +42,12 @@ func killGroup(pgid int) error {
 	if err == syscall.ESRCH {
 		return nil
 	}
+	// So does EPERM on Darwin. Cleanup runs killGroup a second time after Wait
+	// already killed the group; by then the members are reaped-but-lingering,
+	// and BSD kill(2) reports EPERM for them where Linux reports ESRCH. Both
+	// mean the same thing here — nothing left to signal.
+	if err == syscall.EPERM {
+		return nil
+	}
 	return err
 }
