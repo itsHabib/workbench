@@ -138,6 +138,14 @@ jobs:
           # code-review tool is broken` both run this job and must not attest,
           # so match the request verb anchored at the start of the comment —
           # something an Actions `contains()` cannot express.
+          #
+          # This is precision over recall on purpose. `@claude could you review`
+          # and `Hey @claude review this` are real review requests that do not
+          # match, and they are supposed to not match: a missed attestation
+          # leaves the panel incomplete and gate parks for judgment, which is
+          # merely today's behaviour, while a false one credits a review that
+          # never happened. Widen this pattern only toward forms that cannot
+          # also match a comment merely discussing reviews.
           if ! grep -Eqi '^[[:space:]]*@claude[[:space:]]+(please[[:space:]]+)?review\b' <<<"${COMMENT_BODY}"; then
             echo "not a review request — no attestation"
             exit 0

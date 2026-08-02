@@ -206,6 +206,26 @@ func TestClassifyPanelWorkflowAttestation(t *testing.T) {
 	}
 }
 
+// Every re-review appends another attestation, so the head that counts is the
+// one attested last — in either arrival order.
+func TestClassifyPanelWorkflowAttestationLatestWins(t *testing.T) {
+	const stale = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	fresh := attestation("claude", attestHead)
+	fresh.ID = 2
+	old := attestation("claude", stale)
+
+	got := classifyPanel(attestPanel(), nil, nil, []Comment{old, fresh})
+	if len(got.Completed) != 1 || got.Completed[0].ReviewID != 2 {
+		t.Fatalf("fresh attestation did not win over an earlier stale one: %+v", got)
+	}
+	// Reversed: the stale attestation arrives last and must not un-complete the
+	// panel — the reviewer did attest this head, just not most recently.
+	got = classifyPanel(attestPanel(), nil, nil, []Comment{fresh, old})
+	if len(got.Completed) != 1 || got.Completed[0].ReviewID != 2 {
+		t.Fatalf("a later stale attestation masked the exact-head one: %+v", got)
+	}
+}
+
 // The workflow posts LF, but GitHub hands some comment bodies back CRLF, and a
 // reviewer that only matched one line ending would fail on live evidence.
 func TestClassifyPanelWorkflowAttestationLineEndings(t *testing.T) {
