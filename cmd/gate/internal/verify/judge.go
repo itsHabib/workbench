@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,9 +32,10 @@ are not yours to override — you only resolve escalations. Be strict about
 correctness risks, lenient about style and doc nits.
 
 Return exactly one gate-judgment-v1 JSON object, with no markdown. Echo the
-request's run, escalation_id, subject, grant, and question exactly; identify
-your implementation in producer; set decision to pass or block; set tier no
-higher than the presented grant ceiling; and include confidence and why.
+request's run, escalation_id, subject, grant, and question exactly; set producer
+to the object {"class":"judgment","impl":"<your model or CLI identifier>"};
+set decision to pass or block; set tier no higher than the presented grant
+ceiling; and include confidence and why.
 `
 
 const (
@@ -72,7 +74,9 @@ type JudgmentRequestV1 struct {
 
 // JudgmentArtifactV1 is the provider-neutral submission accepted by Gate.
 // Every authority-relevant binding is repeated so Gate can validate it before
-// appending anything to the hash-chained log.
+// appending anything to the hash-chained log. Producer is the shared contract
+// struct — the same shape every other artifact in the log carries — so a
+// provider that mirrors the recorded verdicts it was shown is already correct.
 type JudgmentArtifactV1 struct {
 	Version      string          `json:"version"`
 	Run          string          `json:"run"`
@@ -80,7 +84,7 @@ type JudgmentArtifactV1 struct {
 	Subject      Subject         `json:"subject"`
 	Grant        JudgmentGrantV1 `json:"grant"`
 	Question     string          `json:"question"`
-	Producer     string          `json:"producer"`
+	Producer     Producer        `json:"producer"`
 	Decision     string          `json:"decision"`
 	Tier         string          `json:"tier"`
 	Confidence   float64         `json:"confidence"`
@@ -94,7 +98,7 @@ type judgmentArtifactWire struct {
 	Subject      Subject         `json:"subject"`
 	Grant        JudgmentGrantV1 `json:"grant"`
 	Question     string          `json:"question"`
-	Producer     string          `json:"producer"`
+	Producer     Producer        `json:"producer"`
 	Decision     string          `json:"decision"`
 	Tier         string          `json:"tier"`
 	Confidence   *float64        `json:"confidence"`
@@ -185,9 +189,12 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	if !tier.Valid(artifact.Tier) || tier.Rank(artifact.Tier) > tier.Rank(request.Grant.MaxTier) {
 		return Verdict{}, fmt.Errorf("judgment_tier_exceeded: %q exceeds %q", artifact.Tier, request.Grant.MaxTier)
 	}
-	producer := strings.TrimSpace(artifact.Producer)
-	if producer == "" || strings.TrimSpace(artifact.Why) == "" {
-		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer and why are required")
+	impl, err := judgmentProducerImpl(artifact.Producer)
+	if err != nil {
+		return Verdict{}, err
+	}
+	if strings.TrimSpace(artifact.Why) == "" {
+		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer.impl and why are required")
 	}
 	if artifact.Confidence < 0 || artifact.Confidence > 1 {
 		return Verdict{}, fmt.Errorf("judgment_bad_confidence: %v", artifact.Confidence)
@@ -195,12 +202,29 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	return Verdict{
 		Subject:    request.Subject,
 		Source:     "submitted-judgment",
-		Producer:   Producer{Class: ClassJudgment, Impl: producer},
+		Producer:   Producer{Class: ClassJudgment, Impl: impl},
 		Decision:   artifact.Decision,
 		Tier:       artifact.Tier,
 		Confidence: artifact.Confidence,
 		Why:        artifact.Why,
 	}, nil
+}
+
+// judgmentProducerImpl returns the provenance a submission is entitled to
+// carry. Class is the ladder rung, not provenance: a judgment may only claim
+// its own, so a submission naming another class is refused rather than quietly
+// rewritten — that is a provider asserting authority it does not hold. An
+// omitted class is the contract's optional field, and Gate stamps the rung.
+func judgmentProducerImpl(producer Producer) (string, error) {
+	class := strings.TrimSpace(producer.Class)
+	if class != "" && class != ClassJudgment {
+		return "", fmt.Errorf("judgment_bad_producer_class: %q (want %q)", class, ClassJudgment)
+	}
+	impl := strings.TrimSpace(producer.Impl)
+	if impl == "" {
+		return "", fmt.Errorf("judgment_missing_provenance: producer.impl and why are required")
+	}
+	return impl, nil
 }
 
 type judgeProviderInvocation struct {
@@ -316,10 +340,7 @@ func autoJudge(
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return Verdict{}, fmt.Errorf("judge_provider_failed: %s", strings.TrimSpace(string(ee.Stderr)))
-		}
-		return Verdict{}, fmt.Errorf("judge_provider_failed: %w", err)
+		return Verdict{}, providerFailure(provider, out, err)
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
@@ -338,6 +359,38 @@ func autoJudge(
 		verdict.Producer.Impl,
 	)
 	return verdict, nil
+}
+
+// providerDetailCap bounds how much provider output an error may quote. The
+// point is a diagnosable first line, not the transcript.
+const providerDetailCap = 2 * 1024
+
+// providerFailure keeps the provider's own diagnostic. A CLI that reports its
+// failure on stdout — or exits non-zero saying nothing at all — used to surface
+// as a bare "judge_provider_failed:" with an empty body, which is impossible to
+// act on. The provider, its exit status, and whichever stream spoke are always
+// named.
+func providerFailure(provider string, stdout []byte, err error) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return fmt.Errorf("judge_provider_failed: %s: %w", provider, err)
+	}
+	detail := providerDetail(exit.Stderr)
+	if detail == "" {
+		detail = providerDetail(stdout)
+	}
+	if detail == "" {
+		detail = "no diagnostic output on stderr or stdout"
+	}
+	return fmt.Errorf("judge_provider_failed: %s exited %d: %s", provider, exit.ExitCode(), detail)
+}
+
+func providerDetail(stream []byte) string {
+	detail := strings.TrimSpace(string(stream))
+	if len(detail) <= providerDetailCap {
+		return detail
+	}
+	return detail[:providerDetailCap] + " [... truncated ...]"
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {
