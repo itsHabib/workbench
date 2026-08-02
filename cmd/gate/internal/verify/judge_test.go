@@ -141,8 +141,32 @@ func TestValidateJudgmentTrimsProducerAndRefusesWhitespaceOnly(t *testing.T) {
 		t.Fatalf("producer = %q, want trimmed provenance", got.Producer.Impl)
 	}
 	artifact.Producer.Impl = " \t "
-	if _, err := ValidateJudgment(artifact, request); err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance") {
+	if _, err := ValidateJudgment(artifact, request); err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance: producer.impl is required") {
 		t.Fatalf("whitespace-only producer error = %v", err)
+	}
+}
+
+// One code, two sites: the message must name the field actually missing, or an
+// operator cannot tell which one to fix.
+func TestValidateJudgmentNamesTheMissingProvenanceField(t *testing.T) {
+	request, base := judgmentFixture()
+	cases := []struct {
+		name string
+		edit func(*JudgmentArtifactV1)
+		want string
+	}{
+		{"missing impl", func(a *JudgmentArtifactV1) { a.Producer.Impl = "" }, "producer.impl is required"},
+		{"missing why", func(a *JudgmentArtifactV1) { a.Why = "  " }, "why is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			artifact := base
+			tc.edit(&artifact)
+			_, err := ValidateJudgment(artifact, request)
+			if err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance: "+tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

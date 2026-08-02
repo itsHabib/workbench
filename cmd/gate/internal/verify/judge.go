@@ -211,7 +211,7 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 		return Verdict{}, err
 	}
 	if strings.TrimSpace(artifact.Why) == "" {
-		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer.impl and why are required")
+		return Verdict{}, fmt.Errorf("judgment_missing_provenance: why is required")
 	}
 	if artifact.Confidence < 0 || artifact.Confidence > 1 {
 		return Verdict{}, fmt.Errorf("judgment_bad_confidence: %v", artifact.Confidence)
@@ -239,7 +239,7 @@ func judgmentProducerImpl(producer Producer) (string, error) {
 	}
 	impl := strings.TrimSpace(producer.Impl)
 	if impl == "" {
-		return "", fmt.Errorf("judgment_missing_provenance: producer.impl and why are required")
+		return "", fmt.Errorf("judgment_missing_provenance: producer.impl is required")
 	}
 	return impl, nil
 }
