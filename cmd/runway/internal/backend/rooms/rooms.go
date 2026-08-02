@@ -333,6 +333,11 @@ func (b *Backend) Cleanup(ctx context.Context, bh backend.Handle) error {
 		_ = h.join(ctx)
 		return fmt.Errorf("rooms: cleanup failed: %s", record.Error)
 	default:
+		// A boundary violation still ends the room. Tear the group down and
+		// join before reporting, so a rejected cleanup leaves no writer behind
+		// (zero-orphan) — same teardown the nextErr path above performs.
+		_ = killProcessGroup(h.cmd)
+		_ = h.join(ctx)
 		return fmt.Errorf("rooms: unexpected lifecycle event %s during cleanup", record.Event)
 	}
 }
