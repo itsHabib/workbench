@@ -3,15 +3,16 @@
 **Status:** draft / proposal — **NOT a build commitment.** The artifact we decide *from*.
 **Owner:** @itsHabib
 **Date:** 2026-08-02
+**Revision:** v2 — folds in review round 1 (Codex 4×P1 + 1×P2, Claude full pass). Changes: `-reviews-optional` subordinated to the grant (§4.4); Tier 1 extended to pre-result and substrate failures (§4.3, §7.6); `Degradation.Fatal` removed from `contracts` in favour of objective `Role` (§5); timestamp-only staleness fallback **deleted** as a false-pass path (§4.5, §7.3, §8); per-signal provenance + conservative aggregation for readiness (§5, §6.3). Every code claim in the review was verified against source before folding.
 **Evidence base:** `~/dev/friction-log.md` (the portfolio-level cross-cutting log, outside any repo), session 2026-08-02 — 16 entries, one PR-sweep session across workbench / rooms / dossier / ship / orchestra / cc-skills. Every claim in §1 cites an entry; nothing here is speculative UX.
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md) (the boundary law this must not move), [`docs/workbench-101.md`](../../workbench-101.md) (the five planes), [`docs/features/gate-approval-ux/spec.md`](../gate-approval-ux/spec.md) (#186 — the committed slice beneath this doc), `cmd/gate/docs/enforcement.md`.
 
-> **Reviewers — focus areas.** This is a **design review**, not a code review.
-> 1. **§4.4 (D4)** — grant-scoped readiness policy. The only decision here that changes what gate *authorizes*. §4.4 states both readings of "findings ≠ authorization"; pick one.
-> 2. **§4.1–§4.2 (D1/D2)** — the `Observation` envelope and the `unknown` migration window. Is that window a real hole or an acceptable cost?
-> 3. **§4.3 (D3)** — declared self-gating registry vs causal detection. The argument that registry drift is a *degradation and not a hole* rests entirely on Tier-1 being unconditional. Check that.
-> 4. **§7.3 + §8** — the staleness predicate. It uses timestamps as a proxy for "the base moved"; the force-push failure mode is named, not solved.
-> 5. **§9** — sequencing. Is capture-first (P0) worth the delay, and is P5 correctly *after* the gate rather than being it?
+> **Reviewers — focus areas (v2).** This is a **design review**, not a code review. Round 1 is folded in; these are what round 2 should attack.
+> 1. **§4.4 (D4)** — round 1 confirmed reading (a) *and* found the hole: `-reviews-optional` already grants the substitution outside any grant. v2 subordinates the flag to grant-signed policy on a custody-domain argument (CI mints its own grant into its own erased state dir, so its rail survives). **Is that argument sound, and is the resulting behavior change to existing callers acceptable?**
+> 2. **§4.3 + §7.6 (D3)** — Tier 1 now has to cover terminal states that occur *before a result exists* and failures *of the very state substrate the generic escape route depends on*. Does the extended guarantee hold, or is it still narrower than D3 needs?
+> 3. **§5 + §6.3** — per-signal provenance and the conservative aggregation rule. A readiness verdict aggregates N signals with N observation times; is "any member that fails coverage fails the aggregate" worth its false-refusal cost?
+> 4. **§4.5 / §7.3 / §8** — the timestamp fallback is **gone**; an unrecoverable base SHA now parks. Confirm no remaining path lets unverifiable coverage produce a pass.
+> 5. **§4.2 + §9** — the `unknown` window, and the P3→P4 ordering constraint round 1 surfaced: P3 must stamp *every producer gate itself calls*, or P4 refuses gate's own evidence on its first run.
 
 ---
 
@@ -65,9 +66,9 @@ That last row is where the two themes meet. Because readiness can never self-ver
 
 | Property | Target |
 |---|---|
-| Terminal legibility | **0** gate terminal states with an empty or generic reason. The 2026-08-02 `judge_provider_failed:` (empty after the colon) is the regression test. |
+| Terminal legibility | **0** gate terminal states with an empty or generic reason, **including those that exit before a result exists**. The 2026-08-02 `judge_provider_failed:` (empty after the colon) is the regression test. |
 | Provenance coverage | 100% of verdicts gate consumes carry `subject.head_sha` + `observed.at`. Absent ⇒ `unknown` ⇒ refused at the points §4.2 declares — never silently defaulted. |
-| Staleness | A check verdict observed before the PR's merge-base commit time is **never** counted as passing. |
+| Staleness | Coverage requires a head match or an **exact observed base SHA**. An unrecoverable base parks; timestamps never authorize. **0** paths where unverifiable coverage yields a pass. |
 | Degradation visibility | 0 diagnostic lines interleaved before JSON on the happy path. Every fallback appears as a `degradation` artifact in the run. |
 | Capture cost | ≤1 command, ≤1 line, no file choice, no format, <3 s. If it is slower than *not* logging, it loses to flow — which is exactly how the corpus got to 11 entries in one repo across a 17-repo portfolio. |
 | Blast radius | `contracts` stays a leaf (imports nothing in-module, no decision logic). No tool imports another tool's decision code. CI's `hygiene` job unchanged and green. |
@@ -97,8 +98,9 @@ That last row is where the two themes meet. Because readiness can never self-ver
                 ▼
    ┌────────────────────────────────────────────────────────────────────┐
    │  cmd/gate/internal/readiness/  — the POLICY (new pkg)  §6.3         │
-   │    Covers(obs, head, baseAt) → (bool, reason)                       │
-   │    escape-route table + self-gating failure-code registry           │
+   │    Covers / CoversAll(obs, head, mergeBase) → (bool, reason)        │
+   │    Fatal(degradation) → bool          ← policy, NOT a contract field │
+   │    Escape(code, substrateOK) + self-gating failure-code registry     │
    └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,6 +109,8 @@ That last row is where the two themes meet. Because readiness can never self-ver
 **What's new:** one leaf type (`Observation`), one artifact-body contract (`degradation`), and one policy package inside gate.
 
 **The seam this deliberately respects:** the *type* goes in `contracts`; the *predicate that decides what a stale observation licenses* goes in `cmd/gate/internal/readiness`. Provenance is a fact; applicability is a decision. Putting `Covers()` in `contracts` would put decision logic in the leaf and break the one rule — a reviewer should check exactly this boundary.
+
+v1 stated that rule and then broke it one section later with `Degradation.Fatal`, which round 1 caught. v2 keeps the boundary consistently: `contracts` records *what failed and what role it served*; `readiness.Fatal` decides what that licenses. The same test applies to `Observation.Invalidates` (§5) — it records the observation's scope, never the conclusion.
 
 ## 4. Key decisions & trade-offs
 
@@ -134,7 +138,16 @@ The registry is acceptable **only because of the tiering**:
 - **Tier 1 (unconditional).** *Every* terminal state prints the route that does not pass through the component that failed. Near-zero cost, needs no registry, and covers the novel cases — the 2026-08-02 deadlock would have cost minutes instead of a session on Tier 1 alone.
 - **Tier 2 (declared).** A registered code additionally gets `self_gated: true` and "retrying cannot help."
 
-So registry drift **degrades the message, never the decision, and never hides the escape route.** That argument is the whole justification for D3; if Tier 1 is not truly unconditional, D3 collapses. Reviewer focus.
+So registry drift **degrades the message, never the decision, and never hides the escape route.**
+
+**v1 asserted that unconditionality; round 1 showed it was false in two places, and both are now part of the design rather than assumptions.**
+
+1. **Terminal states with no result.** `newEnv` and `runGate` return errors before a `gateResult` exists, so `printJSON(res)` never runs (`cmd/gate/main.go:428-434`). A route attached to the result object is silent for every environment-construction, flag-validation, and early-abort failure. **Fix:** the route is emitted by the *error* path in `main`, not by the result printer. A terminal exit with no result still prints a route.
+2. **Failures of the substrate the route depends on.** The generic route is `console → escalate → gate resolve` — all of which read the gate state dir. When the terminal state *is* a state-open, anchor, or audit-chain failure, that route is advice to use the broken thing. **Fix:** substrate failures get **external repair routes** (verify/restore custody, re-point `-state`, re-anchor) that assume nothing about the store's health. `Escape` is partitioned by whether the state substrate is usable.
+
+Plus the totality detail round 1 caught: the 2026-08-02 failure was literally `judge_provider_failed:` with an **empty suffix**. `Escape` must return a usable route for `""` and for codes it has never seen — an explicit fallback key, pinned by a test that includes `""` and a novel string, not just the known table.
+
+With those three, drift costs precision and never the exit. Without them D3 collapses — which is why §7.6 now carries the flow and §11 carries the replay scenario.
 
 ### 4.4 Readiness substitution is minted into the **grant**, not decided by gate — **D4** *(the load-bearing decision)*
 
@@ -143,17 +156,35 @@ Portfolio repos configure no approvers, so `reviewDecision` is empty forever and
 - **(a)** Readiness and authorization are different questions. Authorization comes from the operator-minted grant; readiness only asks "was this reviewed at all." Crediting the panel for *readiness* leaves the authority untouched.
 - **(b)** Crediting the panel makes it load-bearing for merges. That is the substitution gate exists to prevent, whatever it is called.
 
-**Proposed resolution — make it a capability, not an inference.** `gate grant … -readiness {human|panel}`, default `human`. The operator authorizes the substitution **once, at mint time**, bounded by the grant's existing TTL and tier ceiling and visible in the ledger. Gate never self-selects a policy; a repo with no `-readiness panel` grant still parks. This keeps mint authority with the operator — the property the whole charter is built on — and converts a security question into a capability question, which is the plane the workbench already has for it.
+**Resolution — make it a capability, not an inference.** `gate grant … -readiness {human|panel}`, default `human`. The operator authorizes the substitution **once, at mint time**, bounded by the grant's existing TTL and tier ceiling and visible in the ledger. Gate never self-selects a policy; a repo with no `-readiness panel` grant still parks. This keeps mint authority with the operator — the property the whole charter is built on — and converts a security question into a capability question, which is the plane the workbench already has for it.
 
-**Rejected:** gate detecting repo capability (`no approvers configured`) and self-selecting a policy. It is more convenient and it is gate deciding its own authorization scope.
+Round 1 confirmed reading **(a)**: the violation is gate *inferring* its own authorization scope, which the rejected alternative does and this does not.
 
-**This is the decision that needs the operator's call. It blocks P4.**
+**But round 1 also found the hole, and it is fatal to v1 as written.** The substitution is *already* available outside any grant. `-reviews-optional` is a plain caller-controlled flag (`cmd/gate/main.go:417`, default `false`), threaded straight into `verify.Readiness(…, reviewsOptional)`; and `.github/workflows/gate.yml:365-384` self-mints an ephemeral grant and passes it. Adding a grant field while that flag stands means a caller holding a default-`human` grant can still select panel readiness — the boundary D4 claims to draw would not exist.
+
+**v2: the flag is subordinated to the grant.** `-reviews-optional` becomes a *request*, honored only when the grant it runs under carries `readiness=panel`. Under a `human` grant it is refused, loudly — not ignored.
+
+**Why this does not break the CI rail.** The workflow mints its own grant, into its own `mktemp` state and key dirs, erased by an `EXIT` trap, with `-stamp=false` precisely because that ledger does not survive. CI is a **separate custody domain**, not a caller borrowing the operator's authority. It keeps working by minting `-readiness panel` in the same self-mint it already performs — one flag on a line it already owns. The boundary this restores is in the *operator's* domain, where the flag currently confers authority nobody minted.
+
+**Honest cost:** this is a behavior change for any existing caller that passes `-reviews-optional` under an operator-minted grant. Those calls start refusing until the grant is re-minted. That is the point, but it should be a deliberate choice rather than a surprise — flagged in §10.1.
+
+**Rejected:** gate detecting repo capability (`no approvers configured`) and self-selecting a policy. It is more convenient and it is gate deciding its own authorization scope. **Also rejected:** leaving `-reviews-optional` as an independent switch alongside a grant field — two authorization paths for one decision is worse than either alone.
 
 ### 4.5 Staleness is measured against the **merge-base commit time**, not a TTL — **D5**
 
 A TTL is simpler and wrong in both directions: a 3-day-old green against an unchanged main is fine; a 10-minute-old green against a main that moved 5 minutes ago is not. The correct predicate is *did the base move under this check*.
 
-**Honest limitation:** GitHub does not record the merge-base a check ran against, so the implementation compares the check's `completed_at` against the merge-base commit's `committedDate` — a **proxy**. It fails when the base is force-pushed with rewritten dates. Failure mode named in §8, not solved. When the merge-base SHA *is* recoverable, compare SHAs and use timestamps only as fallback.
+**v1 proposed a timestamp proxy with a named-but-unsolved force-push hole. v2 deletes that path.** Round 1 was right that it contradicts this doc's own fail-closed requirement: under a force-push with rewritten committer dates, a check against the *previous* base reads as fresh and can authorize a merge. A named failure mode that can produce a false pass in the merge-authorization path is not an accepted trade-off, it is a bug with documentation.
+
+**The predicate, in order:**
+
+1. `check.head_sha == pr.head_sha` → **no staleness question arises.** The check ran on the head being evaluated. This is the common case and it costs nothing.
+2. Otherwise, an **exact observed merge-base SHA** is required. Coverage holds only if it equals the PR's current merge-base.
+3. Base SHA unrecoverable → **park.** Never pass.
+
+Round 1 also caught a real imprecision in v1's phrasing: GitHub's Checks API records the **head** SHA a check ran against, not the merge-base, so "compare merge-base SHAs" conflated comparison with an ancestry query. Step 1 is the cheap correct special case; step 2 needs the base recorded *by the producer at observation time* (`Observation.BaseSHA`, §5) rather than reconstructed later.
+
+**Timestamps survive as diagnostics only** — useful in a park's reason string ("checks predate the merge base by 3.9d"), never as an authorizing signal.
 
 ### 4.6 Capture-first sequencing — **D6**
 
@@ -176,6 +207,9 @@ The relationship this doc adds and nothing more: **because every merge parks (§
 | Caching readiness verdicts across runs | Adds a staleness surface to solve a staleness problem. |
 | Putting `Covers()` in `contracts` | Decision logic in the leaf. Breaks the one rule; the `hygiene` job would catch it. |
 | A top-level `degraded[]` field on the envelope | Sits outside `hashArtifact` — unsealed, tamper-able. See §8. |
+| **`Degradation.Fatal` in `contracts`** *(v2 — was in v1)* | Same boundary argument that keeps `Covers()` out, applied inconsistently. `Fatal` lets a producer dictate every consumer's refusal behavior from the leaf. §5 records objective `Role`; gate decides fatality. |
+| **Timestamp-only staleness fallback** *(v2 — was in v1)* | Produces a false pass under force-push with rewritten dates, contradicting this doc's own fail-closed rule. §4.5 now parks instead. |
+| **`-reviews-optional` as an independent switch beside a grant field** | Two authorization paths for one decision is worse than either alone. §4.4 subordinates the flag. |
 
 ## 5. Data model
 
@@ -208,6 +242,16 @@ type Verdict struct {
 
 `Envelope.Time` is when the *line was written*; `Observation.At` is when the *state was true*. They differ whenever a producer reports a GitHub-reported state, which is every readiness signal in §1.
 
+**`Invalidates` records the observation's own scope, never what to do about it.** A producer saying `host_specific` is stating a fact about where it looked. Whether that makes the observation inapplicable to *this* decision is `Covers()`'s call, in gate. Round 1 flagged this as drift-prone; it is pinned here so a future author does not grow policy semantics into the field.
+
+**Provenance is per-signal, not per-verdict (v2).** Round 1 caught that a readiness verdict aggregates many status checks *plus* the review decision, each with its own observation time — and v1 gave the aggregate a single `Observation.At`. Every choice for that one value is wrong: collection time makes an old check look fresh; newest-completion masks older stale members; oldest needlessly invalidates unrelated fresh signals.
+
+So each observed signal carries its own `Observation`, and the aggregate carries a **conservative** coverage rule rather than a timestamp:
+
+> An aggregate verdict covers a head **iff every member signal covers it.** One stale member fails the aggregate.
+
+This can over-refuse — an unrelated stale check parks a merge whose relevant signals are all fresh. That is the correct direction to be wrong in for a merge gate, and the park's reason names the offending member so the fix is obvious. §6.3 gives the function; §10.7 keeps the false-refusal cost open.
+
 **`KindEvidence` gets a body contract.** Today evidence bodies are free-form `map[string]any` — which is why nothing carries provenance. Evidence bodies gain the same `observed` field, same shape.
 
 **`KindDegradation` (new kind).** One artifact per fallback, parented into the run:
@@ -215,12 +259,14 @@ type Verdict struct {
 ```go
 type Degradation struct {
     Component string `json:"component"` // "ollama" | "codex-cli" | …
+    Role      string `json:"role"`      // what it was DOING: "verifier" | "narrator" | "notifier" | …
     Reason    string `json:"reason"`    // never empty — the empty-reason regression is the point
-    Fatal     bool   `json:"fatal"`     // true ⇒ consumer must refuse, not proceed
 }
 ```
 
-`Fatal` is the distinction §10.5 asks about: a degraded *narrator* (ollama's escalation-brief synthesis falling back to the raw question) is harmless; a degraded *verifier* is not. Proposed rule, open question.
+**v1 had a `Fatal bool` here. v2 removes it** — round 1 was right, and it caught me applying my own boundary argument inconsistently. `Fatal` is not provenance: it tells *every* consumer whether it must refuse, which is a producer choosing cross-tool authorization behavior from inside the leaf. That is precisely the reason `Covers()` is kept out of `contracts` (§3), so it cannot be the reason `Fatal` stays in.
+
+The contract records the objective facts — **what failed and what role it was serving.** Gate's readiness policy decides what that licenses, in `cmd/gate/internal/readiness` where every other applicability decision lives. The proposed rule (*a degraded narrator is advisory; a degraded verifier is fatal*) survives intact — it just becomes gate policy instead of a contract field, which also settles the "rule vs per-case" half of the old §10.5.
 
 **Schema:** `contracts/schema/verdict-v0.3.0.json` → `v0.4.0`. The conformance test pins Go fields against the embedded schema, so this bump is enforced, not remembered.
 
@@ -249,28 +295,51 @@ New JSON on the run artifact (all additive, inside `Body`):
 
 `escape.next` is a **runnable command**, and its `-state` is read from the same resolution the rest of the loop uses — the 2026-08-02 guard printed `~/pers/gate/state`, which does not exist on this machine (`GATE_STATE` is pinned to `~/dev/gate/state`).
 
+`escape` is emitted from the **error path in `main`**, not from the result printer — a terminal exit that never produced a `gateResult` still prints one (§4.3, §7.6).
+
 New grant field (D4):
 
 ```sh
 gate grant -repo <owner/repo> -max-tier T2 -ttl 24h -readiness {human|panel} -state ~/dev/gate/state
 ```
 
-Default `human`. Recorded in the grant body, surfaced in the ledger and in `console`.
+Default `human`. Recorded in the grant body — so it needs a `Readiness` field on `contracts/gateauthorization` and a **schema bump with conformance enforcement**, exactly as load-bearing as P3's verdict bump. Surfaced in the ledger and in `console`.
+
+`-reviews-optional` keeps its spelling and loses its authority: it now *requests* a policy the grant must already carry. Under a `readiness=human` grant it refuses with a reason naming the grant, rather than silently proceeding or silently ignoring the flag.
 
 ### 6.3 `cmd/gate/internal/readiness` (new package — policy)
 
 ```go
 // Covers reports whether obs still describes the head under evaluation, and why
 // not when it does not. reason is never empty on false.
-func Covers(obs *contracts.Observation, head string, baseCommittedAt time.Time) (ok bool, reason string)
+//
+// head short-circuits: an observation whose subject head EQUALS head raises no
+// staleness question. Otherwise coverage requires an exact observed base SHA
+// matching mergeBase; an absent or mismatched base is NOT covered (§4.5).
+// Timestamps never authorize — they only enrich reason.
+func Covers(obs *contracts.Observation, head, mergeBase string) (ok bool, reason string)
+
+// CoversAll applies Covers conservatively across an aggregate's member signals:
+// covered iff EVERY member is covered. reason names the first offending member,
+// so a park says which signal is stale rather than that something is (§5).
+func CoversAll(obs []*contracts.Observation, head, mergeBase string) (ok bool, reason string)
 
 // Escape returns the route that does not pass through the component that
-// produced code. Total: every terminal code has an entry (D3 Tier 1).
-func Escape(code string) Route
+// produced code (D3 Tier 1). TOTAL — including "" and codes never seen.
+//
+// substrateOK partitions the answer: when the gate state store is unusable, the
+// generic console -> escalate -> gate resolve route is advice to use the broken
+// thing, so Escape returns an EXTERNAL repair route instead.
+func Escape(code string, substrateOK bool) Route
 
 // SelfGated reports whether code is repairable only by changing the component
 // that emitted it (D3 Tier 2). Drift here degrades the message, never Escape.
 func SelfGated(code string) bool
+
+// Fatal reports whether a degradation blocks the decision. POLICY — this is why
+// contracts records Role and not a Fatal bool (§5). Verifier: fatal.
+// Narrator/notifier: advisory.
+func Fatal(d contracts.Degradation) bool
 ```
 
 ### 6.4 Friction capture (cc-skills)
@@ -306,15 +375,37 @@ friction rollup --since 7d                                  # classifies later, 
 4. pass ⇒ exit 0. The grant, not the panel, remains the authority.
 ```
 
-### 7.3 Stale green — refuse, do not pass *(entry #7)*
+### 7.3 Stale green — refuse, do not pass *(entry #7)* — **rewritten in v2**
 ```
-1. check verdict: subject.head_sha = <PR head>, observed.at = T_check
-2. merge-base commit time = T_base
-3. Covers(): T_check < T_base  ⇒ false, "checks predate the merge base by 3.9d"
-4. gate does NOT count the check. Outcome is parked/blocked with that reason —
-   NEVER pass. `ship#242` promoted on this evidence and had to be reverted.
-5. If the merge-base read itself FAILS: base unknown ⇒ Covers() false ⇒ park.
-   Fail-closed by construction (§8).
+1. check verdict: subject.head_sha = S_check, observed.base_sha = B_check
+2. S_check == pr.head?  ⇒ COVERED. No staleness question — the check ran on the
+                           head under evaluation. Common case, costs nothing.
+3. else B_check present AND == pr.mergeBase?  ⇒ COVERED.
+4. else                                       ⇒ NOT COVERED ⇒ PARK.
+     - B_check absent  → "check ran on <S_check>; no observed base to verify against"
+     - B_check differs → "check ran against base <B_check>, now <mergeBase>"
+     - timestamps appear in the reason ONLY as colour ("predates the base by 3.9d")
+5. gate NEVER counts an uncovered check. `ship#242` was promoted on exactly this
+   evidence and had to be reverted.
+6. Aggregate readiness: CoversAll — one uncovered member parks the whole,
+   naming that member (§5).
+```
+**v1 had a timestamp fallback here.** It let a force-push with rewritten committer dates present a check against the *old* base as fresh — a false pass in the merge-authorization path, contradicting §8's own fail-closed rule. Deleted, not documented.
+
+### 7.6 Terminal state with no result, or a broken substrate — **new in v2**
+```
+1. gate fails BEFORE a gateResult exists (newEnv, flag validation, early abort)
+     ⇒ the error path in main — not printJSON — emits the route.
+       A terminal exit is never silent.        [D3 Tier 1, extended]
+2. gate fails because the STATE SUBSTRATE is broken (state open, anchor, audit chain)
+     ⇒ substrateOK=false ⇒ Escape returns an EXTERNAL repair route:
+         verify/restore custody · re-point -state · re-anchor
+       NOT "console → escalate → gate resolve", all of which read the store
+       that just failed.
+3. unknown or empty terminal code (the 2026-08-02 `judge_provider_failed:` shape)
+     ⇒ explicit fallback key ⇒ still a usable route.
+4. in all three: the artifact may be unwritable. The route is a STDOUT guarantee
+   first and an artifact field only when the store works.
 ```
 
 ### 7.4 Degraded producer — clean stdout *(entry #6)*
@@ -341,9 +432,11 @@ verdict.Observed == nil
 
 **Chain integrity — the constraint that shapes §5.** `hashArtifact` seals `ID|Kind|Run|Time|Prev|Parents|Body`. A field added to the envelope's *top level* would be **outside the hash** — recorded but not tamper-evident, in the one log whose whole purpose is tamper evidence. Therefore: `Observed` goes inside `Verdict` (which is `Body`), and degradation is its own **artifact kind** rather than an envelope field. The envelope struct does not change at all. This is a correctness constraint, not a style preference.
 
-**Fail-closed points.** Merge-base read fails ⇒ base unknown ⇒ `Covers()` false ⇒ park. Provenance absent at a declared refusal point ⇒ refuse. `Degradation.Fatal` ⇒ the consumer refuses rather than proceeding. There is no path where a missing input produces a pass.
+**Fail-closed points.** Observed base SHA absent or mismatched ⇒ `Covers()` false ⇒ park. Any aggregate member uncovered ⇒ `CoversAll` false ⇒ park. Provenance absent at a declared refusal point ⇒ refuse. `readiness.Fatal(d)` on a verifier-role degradation ⇒ refuse rather than proceed. `-reviews-optional` under a `human` grant ⇒ refuse. **There is no path where a missing or unverifiable input produces a pass** — v2 closed the one that existed.
 
-**The staleness proxy's failure mode (D5).** Comparing `completed_at` to the base's `committedDate` is a proxy for "the base moved." It breaks under **force-push to the base with rewritten committer dates**: a rewritten-earlier date makes a genuinely stale check look fresh. Clock skew between GitHub-reported timestamps is negligible in practice; force-push is not. Mitigation where available: compare merge-base **SHAs** and fall back to timestamps only when the SHA is unrecoverable. Residual risk accepted and recorded — a reviewer who disagrees should say so in §10.
+**The force-push case (D5) — closed, not accepted.** v1 compared `completed_at` against the base's `committedDate` and named force-push-with-rewritten-dates as unsolved residual risk. Round 1 was right that this is a false-pass path in the merge-authorization component, which no amount of documentation makes acceptable. v2 requires an exact observed base SHA (or a head match) and parks otherwise; timestamps are diagnostic only. The cost is more parks when producers have not yet stamped `BaseSHA` — the correct direction, and it converges as P3 lands.
+
+**Over-refusal is the accepted cost.** Conservative aggregation (§5) parks a merge when any member signal is uncovered, including ones irrelevant to the change. For a merge gate, refusing a mergeable PR is recoverable in seconds; authorizing an unmergeable one is not. The park names the offending member so the fix is mechanical. Tracked in §10.7.
 
 **Registry drift (D3).** `SelfGated` returning false for a genuinely self-gating code downgrades the message from "retrying cannot help" to a plain terminal state — but `Escape` is total, so the route still prints. Drift costs precision, never the exit.
 
@@ -358,14 +451,18 @@ Multi-repo. Committed phases are P0–P4; everything after the gate is a stub un
 | Phase | Goal | High-level tasks | Depends on | Repo | Gate | ~wLOC | Model/effort |
 |---|---|---|---|---|---|---|---|
 | **P0 — instrument** | The corpus exists before the fixes do | one-line `friction` capture verb (append: repo, ts, session, text; **no class**); `friction rollup --since` classifies in bulk; `chmod +x friction-scan.sh` | — | cc-skills | pre-gate | ≤150 | sonnet/extra |
-| **P1 — the merge path explains itself** | Theme 1's cheap 80% | `readiness.Escape` (total) + `SelfGated` registry; wire `escape`/`self_gated`/`retry_helps` into every non-zero terminal state; pretool-guard inspects only the invoked command, not `--body`/`-m` string args; guard remedy reads the real state path | — | workbench, hooks | pre-gate | ≤250 | **opus/extra** — touches gate's terminal-state surface |
+| **P1 — the merge path explains itself** | Theme 1's cheap 80% | `readiness.Escape` (total over `""` + unseen codes, partitioned on `substrateOK`) + `SelfGated` registry; emit from the **error path in `main`**, not the result printer, so pre-result exits still print; external repair routes for substrate failures; wire `escape`/`self_gated`/`retry_helps` into every non-zero terminal state; pretool-guard inspects only the invoked command, not `--body`/`-m` string args; guard remedy reads the real state path | — | workbench, hooks | pre-gate | ≤300 | **opus/extra** — touches gate's terminal-state surface; D3 rests on this being total |
 | **P2 — local signals stop lying** | "Green" means green *here* | `#[cfg(target_os="linux")]` the two `rooms` rootfs host-shell tests; land `ship#246` (state the env, don't inherit it); `/worktree-add` runs the repo's install step when it sees a lockfile; note the zsh word-splitting difference where shell snippets are kept | — | rooms, ship, cc-skills | pre-gate | ≤120 | sonnet/extra |
 | **P3 — provenance contract** | One vocabulary for evidence | `contracts`: `Observation`, `Degradation`, `KindDegradation`; `Verdict.Observed`; evidence-body contract; schema `v0.3.0`→`v0.4.0` + conformance; producers stamp it | — | workbench | pre-gate — **no-regret leaf** | ≤300 | sonnet/extra — type-enforced, schema-pinned |
-| **P4 — readiness truth in gate** | Theme 2's meat | `readiness.Covers` + merge-base staleness (D5); unverifiable-by-construction vs not-verified; `-readiness {human\|panel}` grant field + ledger/console surfacing (**D4 — blocked on §10.1**); fold ollama degradation into `KindDegradation`; declared refusal points (D2) | P3 | workbench | pre-gate | 400–600 | **opus/max** — changes what gate authorizes |
+| **P4 — readiness truth in gate** | Theme 2's meat | `readiness.Covers` + `CoversAll` (SHA-based, D5); `readiness.Fatal` policy; unverifiable-by-construction vs not-verified; `-readiness {human\|panel}` grant field + `gateauthorization` schema bump + conformance; **subordinate `-reviews-optional` to the grant** (§4.4); ledger/console surfacing; fold ollama degradation into `KindDegradation`; declared refusal points (D2) | P3 | workbench | pre-gate | 400–600 | **opus/max** — changes what gate authorizes |
 | **VG** | **VALIDATION GATE** | §11 | P0–P4 | — | **binary** | — | — |
 | **#186** | *Committed parallel track* — phone-friendly executor approvals | See [`gate-approval-ux/spec.md`](../gate-approval-ux/spec.md) §9. Own phases, own VG. **Not widened by this doc.** | — | workbench | its own | — | per that doc |
 | P5 — review-thread truth *(gated)* | A resolved thread is distinguishable from an ignored one | key threads on `id` + `originalLine`, **never** live `line`; post-push step that surfaces unresolved threads whose finding text overlaps the new commit and offers to answer them | VG | cc-skills, workbench | post-gate | — | opus/extra |
 | P6 — provenance adoption *(gated)* | Close D2's `unknown` window | flare / console / triage / tracelens consume `Observation`; remaining permissive readers become declared refusal points | VG | workbench | post-gate | — | sonnet/extra |
+
+**P0, P1 and P2 have no ordering dependency between them** — the table reads top-to-bottom for presentation only. All three are unblocked and can ship in any order or at once. §4.6's capture-first argument is about not letting P0 sprawl, not about P0 blocking anything.
+
+**P3 must stamp every producer gate itself calls** (round 1). P3 is not just "schema bump + conformance": if gate's own evidence collectors are not stamping `Observation` before P4's refusal points land, P4 refuses gate's own artifacts on its first run. The `wux-producers-stamp-observation` task covers this and is the real gate on P4, more than the type is.
 
 **Why P5 is after the gate, not the gate.** Its core move — deciding whether a commit addresses a thread's concern — is a fuzzy match with no cheap falsifier (§10.4). Everything P0–P4 does is mechanically checkable. Putting the one unfalsifiable heuristic before the gate would let it decide whether the gate passes.
 
@@ -373,12 +470,14 @@ Multi-repo. Committed phases are P0–P4; everything after the gate is a stub un
 
 ## 10. Open questions
 
-1. **D4's reading — operator's call, blocks P4.** Is grant-scoped readiness substitution a legitimate use of the Capability plane (reading **a**), or does *any* non-human readiness signal violate "findings ≠ authorization" (reading **b**)? §4.4 argues (a) and moves mint authority to the operator to make it safe. If the answer is (b), P4 drops the grant field and every merge keeps parking — which makes #186 the entire mitigation.
+1. **~~D4's reading~~ — RESOLVED (v2, round 1).** Reading **(a)**: the violation is gate *inferring* its own scope, which this design does not do. **The residual question is the migration, and it is the operator's call:** subordinating `-reviews-optional` (§4.4) makes every existing call that passes it under an operator-minted grant start refusing until the grant is re-minted with `-readiness panel`. Deliberate break, or does the flag need a deprecation window that keeps the hole open meanwhile?
 2. **Where `Observation` lives.** `contracts` root, or a `contracts/observation` sub-package? The lazy-migration policy says defer until a second consumer exists; there are already ≥3 (gate, triage, tracelens). Leaning root.
 3. **One friction log or many?** Today: per-repo logs plus a cross-cutting one, split by human judgment at write time. A single log with a `repo` field rolls up better and reads worse — and *reading* is what makes the corpus useful. Unresolved; P0 should not hard-code the answer.
 4. **P5's thread-matching falsifier.** How do we test "this commit addresses this thread" without an LLM call on every push? No answer yet. This is why P5 is gated.
-5. **Is `degradation.fatal` a per-case flag or a rule?** §5 proposes the rule *narrator degradations are advisory, verifier degradations are fatal*. That rule needs to hold for producers not yet written, or it will be decided case-by-case and drift.
+5. **~~Is `degradation.fatal` a per-case flag or a rule?~~ — RESOLVED (v2, round 1).** The field is gone from `contracts` entirely (§5); the rule (*narrator advisory, verifier fatal*) lives in `readiness.Fatal` as gate policy. What remains is bookkeeping: the `Role` vocabulary must stay small and closed, or it drifts back into policy by another name.
 6. **Does P1's guard fix belong in this doc at all?** It lives in `~/.claude` hooks, not workbench, and it is the only phase item with no artifact in the chain. Kept because it is the same failure — a blocker explaining itself wrongly — but a reviewer may reasonably route it out.
+7. **What does conservative aggregation cost in practice? (new, v2.)** "Any uncovered member parks the aggregate" (§5) is the safe direction, but nobody has measured how often an irrelevant stale check would park a genuinely mergeable PR. If that rate is high, the answer is probably per-signal *relevance* scoping rather than loosening coverage — but that is a design, not a knob, and it needs data P0's corpus will produce.
+8. **Do substrate-failure escape routes need to be machine-checkable? (new, v2.)** §7.6 promises an external repair route when the state store is unusable. Those routes cannot be integration-tested against a healthy store, and a route that is wrong is worse than none — it is confident, wrong instructions at the exact moment the operator has least ability to verify them.
 
 ## 11. Validation plan
 
@@ -391,8 +490,18 @@ The gate is **binary and baseline-free**, in two parts. Both must pass.
 | 1 | judge provider unavailable | `self_gated: true`, `retry_helps: false`, escape route printed, reason non-empty |
 | 2 | no `reviewDecision`, no `-readiness panel` grant | parks **naming the grant remedy** — not a generic readiness park |
 | 3 | checks green but observed before the merge-base | **refused as stale**, never counted |
-| 4 | ollama down | `KindDegradation` in the run; stdout parses as JSON with zero preceding lines |
+| 4 | ollama down | `KindDegradation` with `role: "narrator"` in the run; `readiness.Fatal` false; stdout parses as JSON with zero preceding lines |
 | 5 | `gh pr create --body "…gh pr merge…"` | guard permits; remedy text (if any) names the real state dir |
+
+Round 1 added four more, each pinning a v2 change against the failure it closes:
+
+| # | Scenario | Required outcome |
+|---|---|---|
+| 6 | terminal exit **before** a `gateResult` exists (`newEnv` failure) | a route still prints on stdout — the exit is never silent |
+| 7 | state-open / anchor / audit-chain failure | the route is an **external** repair path, never `console → escalate → gate resolve` |
+| 8 | `Escape("")` and `Escape("novel_unseen_code")` | both return a usable route via the explicit fallback key |
+| 9 | check ran against a force-pushed base with an **older rewritten** committer date | **parks** — the v1 timestamp path would have passed it |
+| 10 | `-reviews-optional` passed under a `readiness=human` grant | refuses, naming the grant — neither proceeds nor silently ignores the flag |
 
 **2. Live self-direction canary (binary).** One real portfolio PR driven from park to merged where **every command run was named by the previous command's output** — no source reading, no state-dir guessing, no judging whether a green is stale. Checkable from the session transcript after the fact. It happened or it didn't.
 
