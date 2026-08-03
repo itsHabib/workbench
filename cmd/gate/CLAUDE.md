@@ -74,8 +74,12 @@ Constraints that are design decisions, not omissions:
   review-consolidation verdict. Provider prose and sticky issue comments are
   never authority: without a formal exact-head review or shared head-bound
   artifact the reviewer remains incomplete and Gate parks for provider-neutral
-  judgment. The narrow authenticated Codex reviewed-commit sentinel is the
-  existing structured exception.
+  judgment. Two narrow structured exceptions exist, both harness-emitted and
+  exact-head: the authenticated Codex reviewed-commit sentinel, and a review
+  attestation posted by the repository's own Actions token for a provider that
+  publishes reviews only as issue comments (Claude). An attestation's authority
+  is the workflow that checked out the head and ran the reviewer against it —
+  never the review body, which a model writes.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global
