@@ -110,7 +110,7 @@ That last row is where the two themes meet. Because readiness can never self-ver
 
 ## 4. Key decisions & trade-offs
 
-### 4.1 `Observation` is an envelope field in `contracts`, not per-tool provenance — **D1**
+### 4.1 `Observation` is one shared type in `contracts`, not per-tool provenance — **D1**
 
 Each producer could stamp provenance in its own shape. That is zero coordination and reproduces exactly the parser-per-tool debt `contracts` exists to pay off. One shared type costs a schema bump (`verdict-v0.3.0.json` → `v0.4.0`, which the existing conformance test *enforces*) and forces every producer to fill it.
 
