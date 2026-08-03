@@ -374,11 +374,20 @@ func checkGrantStateDir(stateDir string, initState bool) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("grant: check state dir: %w", err)
 	}
-	abs, absErr := filepath.Abs(stateDir)
-	if absErr != nil {
-		abs = stateDir
+	return fmt.Errorf("grant: state dir %q has no existing log.jsonl — refusing to mint into a fresh state tree; point -state at your canonical state dir, or pass -init to create a new one here", absStateDir(stateDir))
+}
+
+// absStateDir renders a state dir for an operator-facing refusal. A refusal
+// whose whole job is naming the dir that was searched must not print the
+// relative path the flag happened to carry — "state" leaves the operator
+// exactly as unsure as no path at all. An unresolvable path falls back to the
+// literal flag value: a diagnostic must never fail its own command.
+func absStateDir(stateDir string) string {
+	abs, err := filepath.Abs(stateDir)
+	if err != nil {
+		return stateDir
 	}
-	return fmt.Errorf("grant: state dir %q has no existing log.jsonl — refusing to mint into a fresh state tree; point -state at your canonical state dir, or pass -init to create a new one here", abs)
+	return abs
 }
 
 type gateResult struct {
@@ -1049,6 +1058,14 @@ func cmdJudge(args []string) error {
 	arts, err := e.st.Run(*run)
 	if err != nil {
 		return err
+	}
+	// An unknown run and a known-but-unparked run are different operator
+	// mistakes with the same shape (no escalation found). Reporting both as
+	// "no escalation to resolve" sends the operator hunting for a missing
+	// artifact when the real cause is usually a -state pointing at the wrong
+	// custody dir, so name the dir that was actually searched.
+	if len(arts) == 0 {
+		return fmt.Errorf("judge: run %s not found in state dir %s", *run, absStateDir(e.stateDir))
 	}
 	_, escalationID, _, err := runVerdicts(arts)
 	if err != nil {
