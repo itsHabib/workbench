@@ -1050,6 +1050,14 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return err
 	}
+	// An unknown run and a known-but-unparked run are different operator
+	// mistakes with the same shape (no escalation found). Reporting both as
+	// "no escalation to resolve" sends the operator hunting for a missing
+	// artifact when the real cause is usually a -state pointing at the wrong
+	// custody dir, so name the dir that was actually searched.
+	if len(arts) == 0 {
+		return fmt.Errorf("judge: run %s not found in state dir %s", *run, e.stateDir)
+	}
 	_, escalationID, _, err := runVerdicts(arts)
 	if err != nil {
 		return err
