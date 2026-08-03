@@ -7,10 +7,14 @@
 contract this must not move), `docs/features/trusted-gate-judgment-bridge/approval-ux.md`
 (the design-space survey this TDD commits a slice of), `cmd/gate/docs/enforcement.md`.
 
-> **Reviewers — focus areas:** §4.1 (word-phrase binding strength — is 44 bits
-> + prefix an acceptable attention proof?), §4.2 (agent-performed dispatch —
-> is "dispatch grants nothing" airtight?), §7.3–§7.5 (refusal flows), §8
-> (races). This is a design review, not a code review.
+> **Reviewers — focus areas (v3):** §4.3 + §9 P0 — the phone-surface
+> assumptions are the largest unvalidated dependency and now block the
+> build; §4.1's revised binding argument (44 bits is grindable and the
+> design is indifferent — is the layering really carrying it?); §4.4's
+> stated limit (coherent lies are not caught by display falsification);
+> §11's adversarial drill. §4.2 and §7–§8 were reviewed in rounds 1–2 and
+> are settled unless something new surfaces. This is a design review, not a
+> code review.
 
 ## 1. Problem & hypothesis
 
@@ -44,6 +48,16 @@ one canonical encoding.
   reintroduces the opaque string this work removes.
 - No changes to grants, claims, artifacts, schemas, rulesets, or the
   refusal sequence beyond what §5–§6 name.
+
+**What this concentrates (v3, from review round 2).** This TDD is one
+committed slice beneath the workbench UX overhaul (#205). If that doc's
+D4 lands — `-readiness {human|panel}` as an operator-minted grant field —
+then the phone approval optimized here becomes the *only* human act in a
+portfolio merge, and the describe card becomes the single human control on
+the path. That concentration is intended (it is the point of the pair), but
+it raises the stakes on §4.3: every reviewer of this document should weight
+the card's reachability accordingly, and it is why P0 blocks rather than
+advises.
 
 ## 2. Functional & non-functional requirements
 
@@ -116,25 +130,41 @@ attention; (b) drop the comment entirely and rely on run-specific approval
 — rejected: loses the only proof the approver engaged with *this* request
 rather than blind-approving a pending run.
 
-**The honest trade-off:** 44 bits is not a cryptographic commitment. It
-does not need to be: the phrase is an attention proof inside a window that
-is already run-specific, replay-identified, 20-minute-bounded, and
-approver-restricted. The threat is "approver approves A believing it is
-B"; the `<operation> <pr-number>` prefix makes the typing act assert both,
-and 44 bits makes engineered collision between concurrently-live requests
-for the same PR and operation infeasible at this system's scale. The full
-256-bit digest still rides in the request JSON, authorization, and claim,
-unchanged. **Reviewers: challenge this paragraph.**
+**The honest trade-off:** 44 bits is not a cryptographic commitment, and
+this design does not ask it to be. Two cases, stated separately because
+conflating them is how this paragraph was wrong in v1 (corrected in v3
+from review round 2):
 
-To be explicit about layering (v2, from review): the phrase check and the
-full-document verification are **parallel defenses in the same
-pre-credential block, not sequential**. A phrase-only match authorizes
-nothing — gate independently re-verifies every field of the request
-document (repo, PR, head, base, merge-base, action hash, argv, expiry,
-replay ID) against live GitHub and hosted state, so even an (infeasible)
-phrase collision cannot carry a wrong document past verification. The
-phrase is the attention gate; the document verification is the correctness
-gate.
+- **Accidental collision** between concurrently-live requests: ~2⁻⁴⁴
+  (5.7×10⁻¹⁴) per pair. Negligible at any plausible request rate.
+- **Engineered collision** — grinding a document whose digest shares a
+  *given* 44-bit prefix — is ~2⁴⁴ hash attempts: **well within reach of
+  commodity GPU hardware (order of an hour), not infeasible.** Any claim
+  otherwise should be treated as an error in this document.
+
+The design is *indifferent* to the second case, and that indifference —
+not the bit count — is the actual argument. A colliding phrase authorizes
+nothing, because the phrase check and the full-document verification are
+parallel, independent gates (below): the substituted document must still
+pass live head/base/merge-base match, panel coverage, newest-action and
+action-hash checks, expiry, and replay identity. An attacker who can
+satisfy all of those does not need a phrase collision, and one who cannot
+is refused regardless of the phrase. The full 256-bit digest still rides
+in the request JSON, authorization, and claim, unchanged.
+
+To be explicit about layering: the phrase check and the full-document
+verification are **parallel defenses in the same pre-credential block, not
+sequential**. A phrase-only match authorizes nothing — gate independently
+re-verifies every field of the request document (repo, PR, head, base,
+merge-base, action hash, argv, expiry, replay ID) against live GitHub and
+hosted state. The phrase is the attention gate; the document verification
+is the correctness gate.
+
+**What the phrase is therefore load-bearing for:** exactly one thing — the
+operator asserting *which* request they engaged with. That makes its
+strength a property of the **surface the attention lands on**, not of the
+bit count (§4.3, §9 P0).
+
 
 ### 4.2 The agent performs the dispatch
 
@@ -159,7 +189,9 @@ Two residuals named (v2, from review):
   property of GitHub's permission granularity, not of this design; it is
   the same exposure the agent's push-and-open-PR token already carries and
   is accepted with the same eyes-open posture as enforcement.md's named
-  residuals.
+  residuals. It is also **not silent**: every dispatch, including misuse of
+  the wider permission, lands in the Actions log with its actor, so the
+  residual is covered by detection even though it is not prevented (v3).
 - **Document transport.** The request JSON travels as a
   `workflow_dispatch` input — exactly as it does today when pasted by
   hand; `submit` changes who types, not the channel. The documents are
@@ -181,6 +213,19 @@ whatever a Slack message claims, the page the operator approves on shows
 the truth. **Alternative:** make approval depend on describe — couples
 authority to a display job, inverting the trust direction. Rejected.
 
+**The anchor must be reachable from the approval surface, or it anchors
+nothing (v3, from review round 2).** This is an *empirical* dependency on
+GitHub Mobile, not a design property, and it is the single largest
+unvalidated assumption in this TDD. If the step-summary card is not
+legible from — or reachable from — the mobile deployment-review screen,
+the operator's only readable surfaces at decision time are the Slack card
+(explicitly untrusted, §4.6) and the run-name (built from agent-supplied
+display inputs, §4.4). The taught habit then degrades into *transcribing
+the phrase from Slack*, and the attention proof proves attention to the
+untrusted surface — the exact failure this design charges against the hex
+paste ("proves clipboard possession, not attention", §4.1). Hence P0 in
+§9: verify before building, not at the validation gate.
+
 ### 4.4 Display inputs are claims that gate falsifies
 
 **Choice:** `run-name` is built from display-only dispatch inputs
@@ -190,6 +235,18 @@ value disagrees with the verified document. A mislabeled run can exist as a
 label but can never authorize anything. **Alternative:** parse the JSON in
 workflow expressions — not expressible in `run-name` context; and trusting
 labels without falsification is how display lies become approvals.
+
+**Scope of what this catches, stated precisely (v3, from review round 2):**
+display falsification catches *incoherent* relabeling — a display value
+that disagrees with the document it ships with. It does **not** catch a
+*coherent lie*: a compromised `submit` that derives its display inputs
+faithfully from a malicious document produces no mismatch anywhere. Against
+that case the defenses are the describe card (which renders the real
+document, so the operator sees the true PR and head) and the full
+pre-credential verification (which refuses the malicious document on its
+own merits). Neither the run-name nor the mismatch refusal is a defense
+against a coherent lie, and this document should not be read as claiming
+otherwise.
 
 ### 4.5 One-commit cutover, no dual acceptance
 
@@ -221,7 +278,11 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
   digest — no new hash, no new canonicalization.
 - **Vendored wordlist**: 2048 words, `go:embed` text file under
   `cmd/gate/internal/`, byte-hash pinned by a golden test (a changed list
-  silently changes every phrase — the test makes that loud).
+  silently changes every phrase — the test makes that loud). The same
+  golden also pins the four-word output for a fixed digest fixture (v3,
+  from review round 2), so an off-by-one in the bit-slicing cannot survive
+  a wordlist that still hashes correctly — the two assertions fail
+  independently and name different bugs.
 - **Workflow display inputs**: exist only in the dispatch payload and
   run-name; never stored, never trusted (§4.4).
 
@@ -263,10 +324,13 @@ gate executor submit -request <emitted-request.json> [-workflow gate-executor.ym
 Validates the document (schema, expiry unexpired), derives display inputs
 and phrase, POSTs the workflow dispatch, then polls the run list (bounded,
 ~60 s) for a post-dispatch run whose run-name matches its display inputs.
-Prints `run_url`, `phrase`, `pr/head/base`, `expires` (text and `-json`).
-Poll miss: non-zero exit that *says the dispatch happened* — degrades to
-the Actions tab, never a silent miss. Holds no keys, touches no
-`gate-state`, mints nothing.
+Prints `run_url`, `phrase`, `pr/head/base`, `expires` (text and `-json`)
+**only once the run is found** (v3, from review round 2): the phrase is the
+string the operator will type, so it must never appear in output that
+points at no discoverable run. Poll miss: non-zero exit that *says the
+dispatch happened*, naming the workflow and time window but **withholding
+the phrase** — degrades to the Actions tab, never a silent miss. Holds no
+keys, touches no `gate-state`, mints nothing.
 
 ### 6.3 `gate executor describe`
 
@@ -290,7 +354,10 @@ says *malformed request* + non-zero exit — visible, not silent.
   environment, no secrets, no `gate-state` checkout, checks out the same
   pinned `github.sha`, builds gate, runs §6.3).
 - Error model: everything is gate's existing refusal vocabulary; the only
-  new reason is the display mismatch.
+  new reason is the display mismatch. Like every post-approval refusal
+  (§7.3), a display mismatch exits non-zero so the run and its approved
+  deployment end in a terminal **failure** state, never a lingering
+  pending one (v3).
 
 ## 7. Key flows
 
@@ -374,15 +441,19 @@ keep the separate, deliberately boring `reconcile` path.
 
 ## 9. Rollout / implementation plan
 
-Weighted scope is small; the value is concentrated in P1–P2.
+Weighted scope is small; the value is concentrated in P1–P2. **P0 is a
+sequencing fix from review round 2:** the phone surface is load-bearing for
+the whole design (§4.3) and was previously validated only at VG — four
+phases after the code that assumes it.
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Model/effort |
 |---|---|---|---|---|---|
-| P1 `phrase` | Word-coded canonical comment, cutover in one commit | encoder + embedded wordlist + goldens; normalization; verification cutover; refusal-position test updates | — | unit gate: goldens + existing refusal suite green | opus/extra (touches verification) |
-| P2 `legible-run` | Run explains itself | `describe` verb + golden card; display inputs/flags + mismatch refusal; workflow job + run-name; pinned-workflow test updates | P1 | workflow assertions green; card renders on a dry dispatch | sonnet/extra |
+| **P0 `phone-spike`** | **Verify the two empirical assumptions before building on them** | one throwaway workflow with a protected environment + a step summary; on the reviewer account's phone confirm (a) the deployment-review dialog accepts a typed comment, and (b) the step-summary card is legible from / reachable from that screen | — | **binary, blocking: both hold, or §4.3 needs a different card carrier before P2 is designed** | ~30 min, operator + phone, no repo code |
+| P1 `phrase` | Word-coded canonical comment, cutover in one commit | encoder + embedded wordlist + goldens; normalization; verification cutover; refusal-position test updates | P0 | unit gate: goldens + existing refusal suite green | opus/extra (touches verification) |
+| P2 `legible-run` | Run explains itself | `describe` verb + golden card; display inputs/flags + mismatch refusal; workflow job + run-name; pinned-workflow test updates | P0, P1 | workflow assertions green; card renders on a dry dispatch **and is reachable on the P0-verified surface** | sonnet/extra |
 | P3 `submit` | Agent-performed dispatch | `submit` verb (validate/dispatch/poll/`-json`); stubbed-API tests | P1 | stub suite green | sonnet/extra |
 | P4 `slack-card` | Push + copyable phrase + edited terminal states | card composer on `escalate`/`flare` seam; edit-in-place on refusal vocabulary | P3 | dry-run refusal edits the card correctly | sonnet/extra |
-| **VG** | **VALIDATION GATE** | one live `prepare` + `execute` canary approved **entirely from the phone**: push → read → type words, ≤60 s each, zero laptop | P1–P4 + §op setup | binary: it happened or it didn't | — |
+| **VG** | **VALIDATION GATE** | one live `prepare` + `execute` canary approved **entirely from the phone**: push → read → type words, ≤60 s each, zero laptop; **plus the adversarial drill** (§11) | P0–P4 + §op setup | binary: it happened or it didn't | — |
 | P5 `escort` *(gated)* | Agent sequences prepare→execute so decision 2 arrives as a follow-up push | agent-side orchestration only | VG | — | sonnet/extra |
 | P6 `inbox` *(gated)* | Reviewer-device PWA (approval-ux.md design 4) | only if friction survives VG; custody rule (reviewer token never on agent box) is a hard precondition | VG | — | opus/extra |
 
@@ -422,3 +493,16 @@ against a real keyboard (v2, from review): confirm autocorrect/smart
 punctuation does not silently substitute near-neighbor wordlist words or
 non-ASCII hyphens that survive normalization — a failed match here is an
 operability bug to fix in the table, never a security event.
+
+**Adversarial drill (v3, from review round 2).** The happy canary proves
+the flow works; it does not prove the *habit* formed. So VG also includes
+one dispatch where the Slack card deliberately misstates the PR title and
+intent while carrying the correct phrase for the real request. Pass
+condition: the operator notices at the describe card and declines —
+**the thing under test is the human flow, not gate.** Gate is not expected
+to catch this and would not: a coherent lie produces no display mismatch
+(§4.4), and if the underlying document is legitimate there is nothing for
+verification to refuse. If the drill fails, the finding is that the card is
+not actually being read at decision time, which invalidates the §4.6
+"Slack can mislead at worst" posture and sends the design back to §4.3's
+carrier question — not a tweak to the wording of the card.
