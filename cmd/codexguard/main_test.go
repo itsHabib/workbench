@@ -11,6 +11,20 @@ import (
 	"github.com/itsHabib/workbench/contracts/automode"
 )
 
+// tempCodexHome returns a temporary Codex home with every symlink resolved.
+// t.TempDir alone is not a usable projection target on macOS, where it sits
+// under /var — itself a symlink to /private/var — which projection refuses as
+// a linked ancestor. Resolving in the fixture keeps that production check
+// exactly as it ships.
+func tempCodexHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
 func TestRunRefusesMalformedInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"decide"}, strings.NewReader(`{"unknown":true}`), &stdout, &stderr)
@@ -129,7 +143,7 @@ func TestRunHookMalformedInputIsOperationalFailure(t *testing.T) {
 }
 
 func TestRunProjectionStatusAndApply(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempCodexHome(t), "codex")
 	var statusOut, statusErr bytes.Buffer
 	code := run([]string{"projection", "status", "-home", home}, strings.NewReader(""), &statusOut, &statusErr)
 	if code != codePass {
@@ -189,7 +203,7 @@ func TestRenderedHooksRefuseNonAbsoluteExecutable(t *testing.T) {
 }
 
 func TestRunProjectionRefusesChangedTarget(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempCodexHome(t), "codex")
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"projection", "status", "-home", home}, strings.NewReader(""), &stdout, &stderr)
 	if code != codePass {

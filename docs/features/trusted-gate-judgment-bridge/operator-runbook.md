@@ -100,7 +100,7 @@ without printing it:
 ```powershell
 $stateTip = gh api repos/itsHabib/workbench/git/ref/heads/gate-state --jq .object.sha
 $env:INPUT_APP_PRIVATE_KEY = Get-Content -Raw `
-  "C:\Users\MichaelHabib\Downloads\itshabib-workbench-gate-executor.2026-07-29.private-key.pem"
+  "C:\Users\<you>\Downloads\<app-slug>.<date>.private-key.pem"
 ```
 
 Run the exact reviewed binary:

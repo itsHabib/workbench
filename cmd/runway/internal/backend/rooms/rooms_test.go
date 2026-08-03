@@ -158,6 +158,17 @@ func TestUnexpectedLifecycleEventsFailTheirBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Wait returns on the workload_exited record, not on process exit,
+			// and unexpected_collection never reaches Cleanup. Without this the
+			// helper is still appending to private/ when t.TempDir removes it.
+			t.Cleanup(func() {
+				stopped, asErr := asHandle(h)
+				if asErr != nil {
+					return
+				}
+				_ = killProcessGroup(stopped.cmd)
+				_ = stopped.join(context.Background())
+			})
 			if _, err := be.Wait(context.Background(), h, emit); err != nil {
 				t.Fatal(err)
 			}

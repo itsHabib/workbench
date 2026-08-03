@@ -45,7 +45,7 @@ The path is installed but unarmed until the operator completes the runbook. See
 
 ```
 go build -o gate.exe ./cmd/gate
-export GATE_STATE=~/pers/gate/state                          # -state/-key default to $GATE_STATE/$GATE_KEY
+export GATE_STATE=~/dev/gate/state                           # -state/-key default to $GATE_STATE/$GATE_KEY
 ./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
@@ -54,6 +54,7 @@ export GATE_STATE=~/pers/gate/state                          # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider codex
 ./gate.exe judge -run run_... -grant grt_... -auto -provider claude
+./gate.exe resolve -escalation esc_... -grant grt_... -decision pass -why "..." -who NAME
 ./gate.exe executor prepare-request -repo owner/repo -pr 181 -head <sha> -grant grt_... -decision pass -why "..." -replay evt_... -out preparation.json
 ./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
 ./gate.exe executor bootstrap -state DIR -key DIR -state-tip <sha> -action act_... -repo owner/repo -pr 181 -head <sha> -app-id N -installation-id N
@@ -83,6 +84,24 @@ For profiling that live reconcile, `next` accepts three debug/experimental
 flags — `-cpuprofile <path>`, `-blockprofile <path>`, `-trace <path>` — each
 writing the corresponding `runtime/pprof` (or `runtime/trace`) artifact for the
 run. They are off unless a path is given and touch nothing on the decision path.
+
+`resolve` closes a park by its escalation id and stamps who resolved it. It is
+the verb [`cmd/escalate`](../escalate) drives when a human's decision arrives
+from the back-channel; escalate shells this binary and never imports it.
+
+**Gate's one GitHub write.** On a pass, gate posts a `gate/authorized` commit
+status carrying the deciding run id and the action artifact's chain hash, so
+the PR page shows a verifiable pointer back into the audit chain. It is on by
+default (`-stamp`, default true), fires only on exit 0, and is best-effort: a
+failed post is a stderr warning, never a change to the decision. Every other
+verb reads.
+
+Two deliberate limits. The stamp is a commit *status*, never a review
+approval — an approval would manufacture the review-decision signal gate reads
+to judge readiness, which is the gate gaming itself. And it is forgeable by
+anyone holding the same `gh` token, so it is a legible pointer to the
+authorization, never the authorization: that stays the exit code plus the
+hash-chained log.
 
 Requires: `gh` authenticated; Ollama at `localhost:11434` with `qwen2.5:7b`
 for the review-consolidation rung; the triage floor binary (`triage-floor` on
@@ -185,7 +204,9 @@ One `gate` invocation is a single pass:
 2. **Evidence** — real reads (`gh pr view`, `gh pr diff`, review submissions,
    requested reviewers, both comment endpoints, and the default branch's
    `.ship.json` declaration), each recorded as an artifact.
-3. **Verification ladder** — four rungs, each a verdict artifact:
+3. **Verification ladder** — four rungs on a green run, each a verdict
+   artifact (a fifth, CI-failure classification over the failed runs' logs,
+   is recorded only when the checks are red):
    - *readiness* (code): draft state, CI rollup, mergeability. Its blocks are
      final — no judgment can talk a red check green.
    - *floor* (code): the deterministic risk floor over the diff. Never blocks;

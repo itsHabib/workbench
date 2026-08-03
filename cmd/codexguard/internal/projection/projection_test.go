@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+// tempHome returns a temporary directory with every symlink resolved.
+// t.TempDir alone is not a usable projection home on macOS, where it sits
+// under /var — itself a symlink to /private/var — so checkParents refuses the
+// target before a test reaches its subject. Resolving in the fixture keeps the
+// production linked-ancestor check exactly as it ships.
+func tempHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
 func testAssets() []Asset {
 	return []Asset{
 		{Path: "hooks.json", Data: []byte("{\"hooks\":{}}\n")},
@@ -16,7 +30,7 @@ func testAssets() []Asset {
 }
 
 func TestInspectIsNonMutatingAndStable(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "missing")
+	home := filepath.Join(tempHome(t), "missing")
 	first, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +53,7 @@ func TestInspectIsNonMutatingAndStable(t *testing.T) {
 }
 
 func TestApplyIsHashBoundAndIdempotent(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempHome(t), "codex")
 	plan, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +77,7 @@ func TestApplyIsHashBoundAndIdempotent(t *testing.T) {
 }
 
 func TestApplyRefusesStalePlan(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempHome(t), "codex")
 	plan, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +101,7 @@ func TestApplyRefusesStalePlan(t *testing.T) {
 }
 
 func TestApplyRefusesDivergentTarget(t *testing.T) {
-	home := t.TempDir()
+	home := tempHome(t)
 	target := filepath.Join(home, "rules", "workbench-codexguard.rules")
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		t.Fatal(err)
@@ -108,7 +122,7 @@ func TestApplyRefusesDivergentTarget(t *testing.T) {
 }
 
 func TestApplyRefusesCollisionAfterStageAndRollsBack(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempHome(t), "codex")
 	plan, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +157,7 @@ func TestApplyRefusesCollisionAfterStageAndRollsBack(t *testing.T) {
 }
 
 func TestApplyRefusesCurrentFileChangedDuringApply(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempHome(t), "codex")
 	plan, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +179,7 @@ func TestApplyRefusesCurrentFileChangedDuringApply(t *testing.T) {
 }
 
 func TestApplyRefusesParentSwap(t *testing.T) {
-	base := t.TempDir()
+	base := tempHome(t)
 	home := filepath.Join(base, "codex")
 	outside := filepath.Join(base, "outside")
 	if err := os.MkdirAll(outside, 0o700); err != nil {
@@ -207,7 +221,7 @@ func TestApplyRefusesParentSwap(t *testing.T) {
 }
 
 func TestRollbackPreservesConcurrentReplacement(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
+	home := filepath.Join(tempHome(t), "codex")
 	plan, err := Inspect(home, testAssets())
 	if err != nil {
 		t.Fatal(err)
@@ -251,14 +265,14 @@ func TestInspectRejectsEscapingAndDuplicatePaths(t *testing.T) {
 		{{Path: "rules/a", Data: []byte("x")}, {Path: "rules/../rules/a", Data: []byte("y")}},
 	}
 	for _, assets := range cases {
-		if _, err := Inspect(t.TempDir(), assets); err == nil {
+		if _, err := Inspect(tempHome(t), assets); err == nil {
 			t.Fatalf("Inspect accepted %#v", assets)
 		}
 	}
 }
 
 func TestInspectRejectsSymlinkedParent(t *testing.T) {
-	base := t.TempDir()
+	base := tempHome(t)
 	home := filepath.Join(base, "codex")
 	outside := filepath.Join(base, "outside")
 	if err := os.MkdirAll(home, 0o700); err != nil {
@@ -276,7 +290,7 @@ func TestInspectRejectsSymlinkedParent(t *testing.T) {
 }
 
 func TestInspectRejectsLinkedAncestorAboveHome(t *testing.T) {
-	base := t.TempDir()
+	base := tempHome(t)
 	realParent := filepath.Join(base, "real")
 	linkedParent := filepath.Join(base, "linked")
 	if err := os.MkdirAll(realParent, 0o700); err != nil {

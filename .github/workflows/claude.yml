@@ -77,7 +77,28 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # Gate counts a reviewer only when it finds a formal GitHub review
+          # pinned to the exact judged head: classifyPanel in
+          # cmd/gate/internal/evidence/panel.go requires User.Type=Bot, a
+          # COMMENTED/APPROVED/CHANGES_REQUESTED state, and commit_id == head.
+          # An issue comment satisfies none of that, so every PR parked on
+          # `missing=[claude]` while a thorough review sat right there in the
+          # thread — and readiness escalated alongside it for want of any
+          # review decision. codex only escapes this through a bespoke
+          # comment-regex exemption; claude has no such carve-out.
+          #
+          # claude[bot] already satisfies the bot-identity and name matching,
+          # so publishing the review AS a review is the whole fix. Appended to
+          # the system prompt rather than set as `prompt`, so `@claude <any
+          # other request>` keeps behaving exactly as before.
+          claude_args: >-
+            --allowed-tools "Bash(gh pr review:*)"
+            --append-system-prompt
+            "When you are asked to review a pull request, publish the review as
+            a formal GitHub review pinned to the head commit you actually
+            reviewed: gh pr review <number> --repo <owner/repo> --comment
+            --body <your review>. Publish it as a review, not as an issue
+            comment, and state the head SHA you reviewed in the body. Use
+            --request-changes rather than --comment only when you found a
+            blocking defect; never approve. If the review command fails, say so
+            plainly instead of silently falling back to a comment."
