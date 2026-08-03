@@ -357,6 +357,34 @@ func TestDecodeJudgmentArtifactAcceptsBothProducerShapes(t *testing.T) {
 	}
 }
 
+// Accepting two known spellings of a producer is not the same as accepting an
+// unattributable one. A misspelled `impl` decodes cleanly under a tolerant
+// Unmarshal, leaves Impl empty, and falls through to Class — recording the
+// producer as its rung ("model") instead of the implementation that actually
+// ruled, with no error raised anywhere. Provenance downgraded in silence is
+// worse than a refused judgment, so the object decode rejects unknown fields.
+func TestDecodeJudgmentArtifactRefusesUnattributableProducerObjects(t *testing.T) {
+	const body = `{"version":"gate-judgment-v1","run":"run_1","escalation_id":"esc_1",` +
+		`"subject":{"repo":"o/r","number":17,"head_sha":"abc"},` +
+		`"grant":{"id":"grt_1","max_tier":"T2"},"question":"q",` +
+		`"producer":%s,"decision":"pass","tier":"T0","confidence":0.9,"why":"w"}`
+	for _, tc := range []struct {
+		name     string
+		producer string
+	}{
+		{name: "misspelled impl", producer: `{"class":"model","implementation":"codex"}`},
+		{name: "unknown field alongside a good impl", producer: `{"class":"model","impl":"codex","authority":"root"}`},
+		{name: "names nobody", producer: `{}`},
+		{name: "unknown field only", producer: `{"foo":"bar"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := DecodeJudgmentArtifact(strings.NewReader(fmt.Sprintf(body, tc.producer))); err == nil {
+				t.Fatalf("unattributable producer %s was accepted", tc.producer)
+			}
+		})
+	}
+}
+
 // The end-to-end path a real Codex run takes: provider emits an object-shaped
 // producer, and the judgment is accepted with its provenance intact.
 func TestAutoJudgeAcceptsObjectShapedProducerFromProvider(t *testing.T) {

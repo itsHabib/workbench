@@ -132,8 +132,19 @@ func (p *judgeProducer) UnmarshalJSON(data []byte) error {
 		Class string `json:"class"`
 		Impl  string `json:"impl"`
 	}
-	if err := json.Unmarshal(data, &asObject); err != nil {
-		return errors.New("producer must be a string or a {class, impl} object")
+	// Reject unknown fields. `json.Unmarshal` ignores them, so a misspelled
+	// impl — `{"class":"model","implementation":"codex"}` — would decode
+	// cleanly, leave Impl empty, fall through to Class, and record the producer
+	// as "model": provenance silently downgraded from the implementation that
+	// actually ruled to the rung it sat on, with no error anywhere. Tolerating
+	// the two *shapes* this type exists to accept is not the same as tolerating
+	// a misspelling inside one of them; the first is a known spelling of a known
+	// thing, the second is output nobody can attribute. The outer decoder sets
+	// DisallowUnknownFields, but that does not reach a nested Unmarshal.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&asObject); err != nil {
+		return fmt.Errorf("producer must be a string or a {class, impl} object: %w", err)
 	}
 	p.value = asObject.Impl
 	if p.value == "" {
