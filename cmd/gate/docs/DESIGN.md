@@ -63,10 +63,16 @@ log entry. Consequences the code enforces:
   extraction, so one clean reviewer cannot stand in for silent peers. A clean
   Codex issue comment counts only from the exact connector actor with its
   structured `Reviewed commit` sentinel bound to the current head; arbitrary
-  prose and stale or malformed sentinels remain incomplete. Other provider
-  issue comments, including Claude lifecycle/sticky comments, are not authority:
-  absent a formal exact-head review or future shared head-bound artifact they
-  remain incomplete and the provider-neutral judgment path resolves the park.
+  prose and stale or malformed sentinels remain incomplete. A provider that
+  publishes only issue comments — Claude today — is credited from the second
+  structured shape: a *review attestation* posted by the repository's own
+  Actions token, naming the reviewer and the full head SHA on two adjacent
+  lines under a fixed marker. Its authority is the workflow that checked out
+  that head and ran the reviewer against it, not the review's text; a model's
+  own prose about which commit it read is never evidence. Both sentinels are
+  harness-emitted, exact-head, and yield to a formal review when one exists.
+  Anything else remains incomplete and the provider-neutral judgment path
+  resolves the park.
 - **An execution claim is permanent.** The exact action must still be the PR's
   newest terminal inside the same anchored-state lock that appends its claim.
   A command/token/transport failure never makes the action claimable again.
