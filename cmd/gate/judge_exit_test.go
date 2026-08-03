@@ -76,6 +76,32 @@ func TestJudgeUnknownRunIsNotReportedAsUnparked(t *testing.T) {
 	}
 }
 
+// TestJudgeUnknownRunNamesAnAbsoluteStateDir keeps the refusal diagnostic under
+// the condition it exists for. -state routinely carries a relative path, and a
+// refusal whose whole job is naming the dir that was searched leaves the
+// operator no better off if it echoes "state" back at them.
+func TestJudgeUnknownRunNamesAnAbsoluteStateDir(t *testing.T) {
+	f := newParkedFixture(t)
+	parent, dir := filepath.Split(strings.TrimSuffix(f.stateDir, string(filepath.Separator)))
+	t.Chdir(parent)
+
+	err := cmdJudge([]string{
+		"-run", "run_absent",
+		"-grant", f.grant,
+		"-decision", "pass",
+		"-why", "because",
+		"-state", dir,
+		"-key", f.keyDir,
+	})
+	if err == nil {
+		t.Fatal("judging an absent run must fail")
+	}
+	named := strings.TrimSpace(strings.TrimPrefix(err.Error(), "judge: run run_absent not found in state dir "))
+	if !filepath.IsAbs(named) {
+		t.Fatalf("the refusal must resolve a relative -state to an absolute path, got: %v", err)
+	}
+}
+
 // TestJudgeKnownRunWithoutEscalationStillReportsUnparked keeps the other half
 // of the split honest: a run that really is present and really has no
 // escalation must still say so.
