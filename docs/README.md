@@ -16,6 +16,7 @@ New here: [plain-language-overview.md](plain-language-overview.md) →
 | [auto-mode-defaults.md](auto-mode-defaults.md) | The autonomy doctrine: decision contract, six defaults, tier model, rulebooks. |
 | [auto-mode-rulebook.md](auto-mode-rulebook.md) | The doctrine's executable half: settings.json, the pretool guard, install + verify. |
 | [review-credit-strategy.md](review-credit-strategy.md) | Reviewer-spend measurement; tier-routed review (data-gated, not yet default). |
+| [bounded-approval-example.md](bounded-approval-example.md) | Why the approval button names a recorded action instead of carrying merge authority. |
 | [DESIGN.md](DESIGN.md) | The repo charter: one module and why, the boundary law, split triggers. |
 | [projects.md](projects.md) | The public project family around this repo. |
 | [mutation-audit-2026-07-20.md](mutation-audit-2026-07-20.md) | Dated audit record. Evidence, not guidance. |
