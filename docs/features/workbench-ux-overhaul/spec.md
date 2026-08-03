@@ -3,16 +3,18 @@
 **Status:** draft / proposal — **NOT a build commitment.** The artifact we decide *from*.
 **Owner:** @itsHabib
 **Date:** 2026-08-02
-**Revision:** v2 — folds in review round 1 (Codex 4×P1 + 1×P2, Claude full pass). Changes: `-reviews-optional` subordinated to the grant (§4.4); Tier 1 extended to pre-result and substrate failures (§4.3, §7.6); `Degradation.Fatal` removed from `contracts` in favour of objective `Role` (§5); timestamp-only staleness fallback **deleted** as a false-pass path (§4.5, §7.3, §8); per-signal provenance + conservative aggregation for readiness (§5, §6.3). Every code claim in the review was verified against source before folding.
+**Revision:** v3 — folds in review round 2 (Codex 4×P1, Claude/Fable 1×P1 + 1×P2; both found the headline independently). **The v2 head-match short-circuit passed `ship#242` — this doc's own motivating example — so coverage is now a conjunction of both coordinates with no short-circuit (§4.5, §7.3).** Also: `Signal` member type so `CoversAll` has something to consume (§5); `Role` closed and unknown-fails-closed (§5, §6.3); `park` vs `refused` vocabulary pinned after §11 contradicted §8 (§2, §8); `gate.yml` named as an operator-domain surface (§4.4); `Observation.At` pinned per surface (§5); print-time preconditions on substrate routes (§7.6).
+**v2** folded round 1: `-reviews-optional` subordinated to the grant (§4.4); Tier 1 extended to pre-result and substrate failures (§4.3, §7.6); `Degradation.Fatal` removed from `contracts` (§5); the v1 timestamp fallback deleted (§4.5).
+Every code claim in both rounds was verified against source before folding.
 **Evidence base:** `~/dev/friction-log.md` (the portfolio-level cross-cutting log, outside any repo), session 2026-08-02 — 16 entries, one PR-sweep session across workbench / rooms / dossier / ship / orchestra / cc-skills. Every claim in §1 cites an entry; nothing here is speculative UX.
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md) (the boundary law this must not move), [`docs/workbench-101.md`](../../workbench-101.md) (the five planes), [`docs/features/gate-approval-ux/spec.md`](../gate-approval-ux/spec.md) (#186 — the committed slice beneath this doc), `cmd/gate/docs/enforcement.md`.
 
-> **Reviewers — focus areas (v2).** This is a **design review**, not a code review. Round 1 is folded in; these are what round 2 should attack.
-> 1. **§4.4 (D4)** — round 1 confirmed reading (a) *and* found the hole: `-reviews-optional` already grants the substitution outside any grant. v2 subordinates the flag to grant-signed policy on a custody-domain argument (CI mints its own grant into its own erased state dir, so its rail survives). **Is that argument sound, and is the resulting behavior change to existing callers acceptable?**
-> 2. **§4.3 + §7.6 (D3)** — Tier 1 now has to cover terminal states that occur *before a result exists* and failures *of the very state substrate the generic escape route depends on*. Does the extended guarantee hold, or is it still narrower than D3 needs?
-> 3. **§5 + §6.3** — per-signal provenance and the conservative aggregation rule. A readiness verdict aggregates N signals with N observation times; is "any member that fails coverage fails the aggregate" worth its false-refusal cost?
-> 4. **§4.5 / §7.3 / §8** — the timestamp fallback is **gone**; an unrecoverable base SHA now parks. Confirm no remaining path lets unverifiable coverage produce a pass.
-> 5. **§4.2 + §9** — the `unknown` window, and the P3→P4 ordering constraint round 1 surfaced: P3 must stamp *every producer gate itself calls*, or P4 refuses gate's own evidence on its first run.
+> **Reviewers — focus areas (v3).** This is a **design review**, not a code review. Rounds 1 and 2 are folded in; these are what round 3 should attack.
+> 1. **§4.5 + §7.3 — the coverage predicate, twice wrong now.** v1 passed a stale base under force-push; v2 passed `ship#242` itself. v3 requires *both* coordinates with no short-circuit. **Is the conjunction actually complete, or is there a third coordinate neither round found?** Reviewers have caught a false-pass here in both prior rounds — assume one is still there.
+> 2. **§4.4's named residual** — the custody-domain argument holds in the operator domain, but under branch protection an agent-authored PR touching `gate.yml` can flip the CI domain's readiness policy. The proposed posture (workflow files as operator-domain surfaces) is stated, not designed. Is that enough for now?
+> 3. **§5 `Signal` + §6.3 `CoversAll`** — v2 stated an aggregation rule with no shape to consume; v3 declares one. Does `Signal` actually cover what gate's `viewBody` holds, and does per-member remedy routing work for a mixed stale-head/stale-base aggregate?
+> 4. **§5 `Role` closed-set + §6.3 `Fatal`** — unknown roles are now fatal. Confirm no path treats an unrecognized role as advisory, including a build that predates a role another producer starts emitting.
+> 5. **§2 vocabulary + §8 table** — park (exit 2) vs refused (exit 3) was genuinely contradictory in v2. Check the normalization is complete and that no consumer branches wrongly on the corrected states.
 
 ---
 
@@ -56,11 +58,13 @@ That last row is where the two themes meet. Because readiness can never self-ver
 
 1. Every non-zero gate terminal state names its cause, says whether retrying can help, and prints **one runnable next command**.
 2. A terminal state whose cause is a change to the failing component itself is marked as such, and the route printed does not pass through that component.
-3. Every verdict gate consumes carries the head it was observed against and when. A verdict that cannot be shown to cover the head under evaluation is **refused, never counted**.
+3. Every verdict gate consumes carries the head it was observed against and when. A verdict that cannot be shown to cover the head under evaluation is **never counted**, and the run **parks**.
 4. A repo that *cannot* produce a human review decision is distinguishable from a PR that merely lacks one — and the substitution policy is minted by the operator into the grant, never chosen by gate (§4.4).
 5. A producer that falls back records the degradation as a chain-sealed artifact; happy-path stdout stays parse-clean.
 6. Recording friction costs **one command, one line**, at the moment of pain — classification deferred to a rollup.
 7. A documented local check passes on the machine it is documented for, or declares the platform it requires.
+
+> **Vocabulary — pinned in v3.** Round 2 caught this doc using "refuse" for two different things, in a doc about legible terminal states. From here on: **"not counted"** means gate discards a signal as evidence; **"park" (exit 2)** is the terminal state that follows when discarding it leaves readiness unestablished; **"refused" (exit 3)** is reserved for gate's existing `capability_refused` — the grant does not authorize this. *Uncovered evidence and unknown provenance park. They do not refuse.* The one genuine exit-3 in this doc is `-reviews-optional` under a `human` grant, which is a capability refusal by definition.
 
 **Non-functional**
 
@@ -68,7 +72,7 @@ That last row is where the two themes meet. Because readiness can never self-ver
 |---|---|
 | Terminal legibility | **0** gate terminal states with an empty or generic reason, **including those that exit before a result exists**. The 2026-08-02 `judge_provider_failed:` (empty after the colon) is the regression test. |
 | Provenance coverage | 100% of verdicts gate consumes carry `subject.head_sha` + `observed.at`. Absent ⇒ `unknown` ⇒ refused at the points §4.2 declares — never silently defaulted. |
-| Staleness | Coverage requires a head match or an **exact observed base SHA**. An unrecoverable base parks; timestamps never authorize. **0** paths where unverifiable coverage yields a pass. |
+| Staleness | Coverage requires a head match **and** an exact observed base SHA — a conjunction, no short-circuit. An absent or mismatched base parks; timestamps never authorize. **0** paths where unverifiable coverage yields a pass. |
 | Degradation visibility | 0 diagnostic lines interleaved before JSON on the happy path. Every fallback appears as a `degradation` artifact in the run. |
 | Capture cost | ≤1 command, ≤1 line, no file choice, no format, <3 s. If it is slower than *not* logging, it loses to flow — which is exactly how the corpus got to 11 entries in one repo across a 17-repo portfolio. |
 | Blast radius | `contracts` stays a leaf (imports nothing in-module, no decision logic). No tool imports another tool's decision code. CI's `hygiene` job unchanged and green. |
@@ -168,23 +172,39 @@ Round 1 confirmed reading **(a)**: the violation is gate *inferring* its own aut
 
 **Honest cost:** this is a behavior change for any existing caller that passes `-reviews-optional` under an operator-minted grant. Those calls start refusing until the grant is re-minted. That is the point, but it should be a deliberate choice rather than a surprise — flagged in §10.1.
 
+**Named residual — the same pattern one level up (v3, round 2).** The custody-domain argument holds in the operator's domain, but it does not make CI's self-mint harmless everywhere. Per the auto-mode defaults, gate is advisory **unless branch protection requires the `gate` status check**; in a repo armed that way, the workflow's self-minted `-readiness panel` grant *does* confer merge authority. And that mint decision lives in `.github/workflows/gate.yml` — so an agent-authored PR touching that file can flip the CI domain's readiness policy and turn the gate check green on its own say-so. That is precisely the "authority nobody minted" shape D4 just closed, relocated.
+
+**Mitigation posture:** treat `.github/workflows/gate.yml` and the executor workflow as **operator-domain surfaces** — a PR touching either takes the `human` readiness path regardless of what any grant says, and is pinned for hand review. Not fatal, not yet designed in detail; recorded so it is a decision rather than an oversight.
+
 **Rejected:** gate detecting repo capability (`no approvers configured`) and self-selecting a policy. It is more convenient and it is gate deciding its own authorization scope. **Also rejected:** leaving `-reviews-optional` as an independent switch alongside a grant field — two authorization paths for one decision is worse than either alone.
 
-### 4.5 Staleness is measured against the **merge-base commit time**, not a TTL — **D5**
+### 4.5 Coverage is **two coordinates, both required** — **D5**
 
-A TTL is simpler and wrong in both directions: a 3-day-old green against an unchanged main is fine; a 10-minute-old green against a main that moved 5 minutes ago is not. The correct predicate is *did the base move under this check*.
+An observation is stale if **either** the code moved **or** the world moved. Those are independent, and v1 and v2 each got one of them wrong.
 
-**v1 proposed a timestamp proxy with a named-but-unsolved force-push hole. v2 deletes that path.** Round 1 was right that it contradicts this doc's own fail-closed requirement: under a force-push with rewritten committer dates, a check against the *previous* base reads as fresh and can authorize a merge. A named failure mode that can produce a false pass in the merge-authorization path is not an accepted trade-off, it is a bug with documentation.
+- **v1** used a timestamp proxy (`completed_at` vs the base's `committedDate`) with a named-but-unsolved force-push hole. Round 1 was right: under force-push with rewritten committer dates, a check against the *previous* base reads as fresh and authorizes a merge.
+- **v2** deleted the timestamps (correct) and replaced them with a head-match short-circuit: `check.head_sha == pr.head_sha ⇒ covered`. **Round 2 showed that is worse in the common case, and both reviewers found it independently.**
 
-**The predicate, in order:**
+Walk `ship#242` — this doc's own Theme-2 row, the entry D5 exists to close — through the v2 predicate. Its head never changed; CI ran on that head; then main moved and `AddressOpts` gained a required field. `S_check == pr.head` → covered → **gate counts the stale green.** v1's timestamp comparison would at least have flagged the 3.9-day gap. v2 passed it outright.
 
-1. `check.head_sha == pr.head_sha` → **no staleness question arises.** The check ran on the head being evaluated. This is the common case and it costs nothing.
-2. Otherwise, an **exact observed merge-base SHA** is required. Coverage holds only if it equals the PR's current merge-base.
-3. Base SHA unrecoverable → **park.** Never pass.
+The confusion was in v2's own round-1 note. GitHub records the **head** a check ran against, and PR checks build the **merge ref** — so head-under-evaluation and base-assumed are two independent coordinates. Head match answers *"was this the code."* It says nothing about *"was this the world."*
 
-Round 1 also caught a real imprecision in v1's phrasing: GitHub's Checks API records the **head** SHA a check ran against, not the merge-base, so "compare merge-base SHAs" conflated comparison with an ancestry query. Step 1 is the cheap correct special case; step 2 needs the base recorded *by the producer at observation time* (`Observation.BaseSHA`, §5) rather than reconstructed later.
+**The predicate — a conjunction, no short-circuit:**
 
-**Timestamps survive as diagnostics only** — useful in a park's reason string ("checks predate the merge base by 3.9d"), never as an authorizing signal.
+```
+covered  ⇔  obs.subject.head_sha == pr.head        (the code)
+       AND  obs.base_sha != "" AND == pr.mergeBase  (the world)
+```
+
+1. Head differs → **park** ("check ran on `<S_check>`; head is now `<pr.head>`" — remedy: re-run).
+2. Base differs → **park** ("check ran against base `<B_check>`, now `<mergeBase>`" — remedy: update branch).
+3. Base absent → **park** ("check ran on `<S_check>`; no observed base to verify against"). Same fail-closed argument §8 already makes for force-push; converges as P3's producers stamp `BaseSHA`.
+
+**No cheap short-circuit — v3 drops it entirely.** Round 2 offered a narrower one: a short-circuit could apply to observations that *declare* base-independence (a lint that checks out the bare head). That is sound in principle and it is deferred, because base-independence is an `Invalidates`-style scope fact a producer **states**, never something inferable from head equality — and inferring it from head equality is exactly the bug being fixed here. If a real base-independent surface appears, it declares itself; until then the conjunction holds with no exceptions. Tracked as §10.9.
+
+`BaseSHA` must be recorded **by the producer at observation time** (§5); it cannot be reconstructed later.
+
+**Timestamps survive as diagnostics only** — useful in a park's reason ("checks predate the merge base by 3.9d"), never as an authorizing signal.
 
 ### 4.6 Capture-first sequencing — **D6**
 
@@ -198,6 +218,8 @@ The instrument (P0) ships before the fixes. This looks like process for its own 
 
 The relationship this doc adds and nothing more: **because every merge parks (§1), the human decision path is on the critical path of every merge, not an exception.** #186 makes that path cheap; D4 makes it *rarer*. They are complements attacking the same structural fact from opposite ends, and they are independently shippable — neither blocks the other.
 
+**One consequence worth stating (v3, round 2).** The pair does not only reduce how much human attention a merge needs; it **concentrates** what remains. Today a park is one of many touchpoints in a laborious flow, with plenty of incidental opportunity to notice something wrong. After D4 and #186, the surviving human role in a portfolio merge is close to a single 60-second phone interaction — which raises the stakes on that interaction's legibility, particularly #186's describe-card. This doc does not widen #186; it notes that #186's card carries more weight *because* of D4, and that is a fact its reviewers should have.
+
 ### 4.8 Considered and rejected (recorded so absence reads as decided)
 
 | Rejected | Why |
@@ -210,6 +232,9 @@ The relationship this doc adds and nothing more: **because every merge parks (§
 | **`Degradation.Fatal` in `contracts`** *(v2 — was in v1)* | Same boundary argument that keeps `Covers()` out, applied inconsistently. `Fatal` lets a producer dictate every consumer's refusal behavior from the leaf. §5 records objective `Role`; gate decides fatality. |
 | **Timestamp-only staleness fallback** *(v2 — was in v1)* | Produces a false pass under force-push with rewritten dates, contradicting this doc's own fail-closed rule. §4.5 now parks instead. |
 | **`-reviews-optional` as an independent switch beside a grant field** | Two authorization paths for one decision is worse than either alone. §4.4 subordinates the flag. |
+| **Head-match short-circuit on coverage** *(v3 — was in v2)* | Passed `ship#242` itself: head unchanged, base moved 3.9 days, covered without examining the base. Head answers "was this the code," not "was this the world." §4.5 requires the conjunction. |
+| **Open `Role` vocabulary** *(v3 — was in v2)* | An unrecognized verifier-like role reads as advisory, so gate authorizes after a verifier degraded. Closed set, unknown fails closed. |
+| **Inferring base-independence from head equality** | The bug above, generalized. Base-independence is a scope fact a producer *declares*, never one a consumer infers. Deferred to §10.9. |
 
 ## 5. Data model
 
@@ -250,7 +275,28 @@ So each observed signal carries its own `Observation`, and the aggregate carries
 
 > An aggregate verdict covers a head **iff every member signal covers it.** One stale member fails the aggregate.
 
-This can over-refuse — an unrelated stale check parks a merge whose relevant signals are all fresh. That is the correct direction to be wrong in for a merge gate, and the park's reason names the offending member so the fix is obvious. §6.3 gives the function; §10.7 keeps the false-refusal cost open.
+**v2 stated that rule without giving it a shape to consume — round 2 caught that it was unimplementable.** Gate's `viewBody` stores `reviewDecision` and the whole `statusCheckRollup` together, so a single `observed` per evidence body leaves `CoversAll` nothing per-member to read; a producer would have to collapse again or invent an undocumented shape. v3 declares the member type:
+
+```go
+// Signal is one observed readiness input with its own provenance. A readiness
+// evidence body carries a LIST of these, never a collapsed whole.
+type Signal struct {
+    Kind     string      `json:"kind"`     // "check" | "review_decision" | "review_thread"
+    Name     string      `json:"name"`     // check-run name, or the decision's identity
+    Observed Observation `json:"observed"` // per-member — NOT one for the aggregate
+}
+```
+
+This can over-refuse — an unrelated stale check parks a merge whose relevant signals are all fresh. That is the correct direction to be wrong in for a merge gate, and the park names the offending member *and its remedy* (§6.3). §10.7 keeps the false-refusal cost open.
+
+**`Observation.At` is pinned per surface (v3).** "When the state was true" is underdefined for a check that queued, started, and completed at three different times. Left to each producer, D1's whole argument (one vocabulary, not a parser per tool) fails at the semantic level even while the shape matches:
+
+| Surface | `At` is |
+|---|---|
+| `github:checks` | the check run's `completed_at` |
+| `github:reviewdecision` | the read time |
+| `github:reviewthreads` | the thread's `updatedAt` |
+| `local:make-check` | the command's completion time |
 
 **`KindEvidence` gets a body contract.** Today evidence bodies are free-form `map[string]any` — which is why nothing carries provenance. Evidence bodies gain the same `observed` field, same shape.
 
@@ -259,10 +305,21 @@ This can over-refuse — an unrelated stale check parks a merge whose relevant s
 ```go
 type Degradation struct {
     Component string `json:"component"` // "ollama" | "codex-cli" | …
-    Role      string `json:"role"`      // what it was DOING: "verifier" | "narrator" | "notifier" | …
+    Role      Role   `json:"role"`      // what it was DOING — CLOSED vocabulary, validated
     Reason    string `json:"reason"`    // never empty — the empty-reason regression is the point
 }
+
+// Role is a closed set. An unrecognized value is REJECTED at construction and
+// treated as fatal by any consumer that sees one anyway (§6.3).
+type Role string
+const (
+    RoleVerifier Role = "verifier" // produces or checks evidence a decision rests on
+    RoleNarrator Role = "narrator" // explains; nothing depends on its output
+    RoleNotifier Role = "notifier" // delivers; nothing depends on delivery
+)
 ```
+
+**The vocabulary is closed, and unknown fails closed (v3).** Round 2 caught a fail-open: with `Role` as an open string, a misspelled or newly-invented verifier-like role gives `readiness.Fatal` no defined behavior, and the obvious implementation (`role == "verifier"`) reads it as advisory — so gate continues authorizing after a *verifier* degraded. In the authorization path, "I don't recognize this" must mean stop, not proceed. Two guards, both required: reject unknown roles at construction, and default `Fatal` to **true** for anything not explicitly advisory.
 
 **v1 had a `Fatal bool` here. v2 removes it** — round 1 was right, and it caught me applying my own boundary argument inconsistently. `Fatal` is not provenance: it tells *every* consumer whether it must refuse, which is a producer choosing cross-tool authorization behavior from inside the leaf. That is precisely the reason `Covers()` is kept out of `contracts` (§3), so it cannot be the reason `Fatal` stays in.
 
@@ -313,16 +370,19 @@ Default `human`. Recorded in the grant body — so it needs a `Readiness` field 
 // Covers reports whether obs still describes the head under evaluation, and why
 // not when it does not. reason is never empty on false.
 //
-// head short-circuits: an observation whose subject head EQUALS head raises no
-// staleness question. Otherwise coverage requires an exact observed base SHA
-// matching mergeBase; an absent or mismatched base is NOT covered (§4.5).
-// Timestamps never authorize — they only enrich reason.
+// BOTH coordinates are required — there is no head short-circuit (§4.5):
+//   the code:  obs.Subject.HeadSHA == head
+//   the world: obs.BaseSHA != "" && obs.BaseSHA == mergeBase
+// An absent base is NOT covered. Timestamps never authorize; they only enrich
+// reason.
 func Covers(obs *contracts.Observation, head, mergeBase string) (ok bool, reason string)
 
 // CoversAll applies Covers conservatively across an aggregate's member signals:
-// covered iff EVERY member is covered. reason names the first offending member,
-// so a park says which signal is stale rather than that something is (§5).
-func CoversAll(obs []*contracts.Observation, head, mergeBase string) (ok bool, reason string)
+// covered iff EVERY member is covered. reason names the offending member and
+// carries its per-member remedy, so the printed next command is right for the
+// actual cause: a stale BASE means update the branch, a stale HEAD means re-run
+// the checks. "Something is stale" is not an acceptable reason (§5).
+func CoversAll(sigs []contracts.Signal, head, mergeBase string) (ok bool, reason string)
 
 // Escape returns the route that does not pass through the component that
 // produced code (D3 Tier 1). TOTAL — including "" and codes never seen.
@@ -337,8 +397,11 @@ func Escape(code string, substrateOK bool) Route
 func SelfGated(code string) bool
 
 // Fatal reports whether a degradation blocks the decision. POLICY — this is why
-// contracts records Role and not a Fatal bool (§5). Verifier: fatal.
-// Narrator/notifier: advisory.
+// contracts records Role and not a Fatal bool (§5).
+//
+// Advisory ONLY for roles explicitly known to be advisory (narrator, notifier).
+// Everything else — verifier, and any role this build does not recognize —
+// is FATAL. Unknown must never read as safe in the authorization path.
 func Fatal(d contracts.Degradation) bool
 ```
 
@@ -371,49 +434,36 @@ friction rollup --since 7d                                  # classifies later, 
      no  → PARK, reason "readiness: no review decision; grant does not authorize substitution"
            escape: "mint with -readiness panel, or resolve by hand: <cmd>"
      yes → evaluate the declared policy: panel fully resolved AND required checks green
-3. every input to that policy must Cover() the head (7.3). A stale input REFUSES.
+3. every input to that policy must Cover() the head (7.3). A stale input is NOT
+   COUNTED, and readiness parks — it never silently drops to a smaller quorum.
 4. pass ⇒ exit 0. The grant, not the panel, remains the authority.
 ```
 
-### 7.3 Stale green — refuse, do not pass *(entry #7)* — **rewritten in v2**
+### 7.3 Stale green — park, do not pass *(entry #7)* — **rewritten again in v3**
 ```
 1. check verdict: subject.head_sha = S_check, observed.base_sha = B_check
-2. S_check == pr.head?  ⇒ COVERED. No staleness question — the check ran on the
-                           head under evaluation. Common case, costs nothing.
-3. else B_check present AND == pr.mergeBase?  ⇒ COVERED.
-4. else                                       ⇒ NOT COVERED ⇒ PARK.
-     - B_check absent  → "check ran on <S_check>; no observed base to verify against"
-     - B_check differs → "check ran against base <B_check>, now <mergeBase>"
+2. COVERED requires BOTH coordinates — no short-circuit:
+      S_check == pr.head          (the code)
+  AND B_check != "" AND == mergeBase   (the world)
+3. any conjunct fails ⇒ NOT COVERED ⇒ PARK (exit 2), with the remedy that matches:
+     - head differs  → "check ran on <S_check>; head is now <pr.head>"     → re-run checks
+     - base differs  → "check ran against base <B_check>, now <mergeBase>" → update branch
+     - base absent   → "check ran on <S_check>; no observed base to verify against"
      - timestamps appear in the reason ONLY as colour ("predates the base by 3.9d")
-5. gate NEVER counts an uncovered check. `ship#242` was promoted on exactly this
-   evidence and had to be reverted.
-6. Aggregate readiness: CoversAll — one uncovered member parks the whole,
-   naming that member (§5).
+4. gate NEVER counts an uncovered check.
+5. Aggregate readiness: CoversAll — one uncovered member parks the whole, naming
+   that member AND its per-member remedy (§6.3).
 ```
-**v1 had a timestamp fallback here.** It let a force-push with rewritten committer dates present a check against the *old* base as fresh — a false pass in the merge-authorization path, contradicting §8's own fail-closed rule. Deleted, not documented.
-
-### 7.6 Terminal state with no result, or a broken substrate — **new in v2**
-```
-1. gate fails BEFORE a gateResult exists (newEnv, flag validation, early abort)
-     ⇒ the error path in main — not printJSON — emits the route.
-       A terminal exit is never silent.        [D3 Tier 1, extended]
-2. gate fails because the STATE SUBSTRATE is broken (state open, anchor, audit chain)
-     ⇒ substrateOK=false ⇒ Escape returns an EXTERNAL repair route:
-         verify/restore custody · re-point -state · re-anchor
-       NOT "console → escalate → gate resolve", all of which read the store
-       that just failed.
-3. unknown or empty terminal code (the 2026-08-02 `judge_provider_failed:` shape)
-     ⇒ explicit fallback key ⇒ still a usable route.
-4. in all three: the artifact may be unwritable. The route is a STDOUT guarantee
-   first and an artifact field only when the store works.
-```
+**Both earlier drafts had a false-pass path here, in opposite directions.** v1's timestamp fallback passed a check against an old base under force-push. v2's head-match short-circuit passed `ship#242` itself — head unchanged, base moved 3.9 days, `covered` without ever looking at the base. v3 requires the conjunction, so neither survives.
 
 ### 7.4 Degraded producer — clean stdout *(entry #6)*
 ```
 1. ollama refuses the connection during escalation-brief synthesis
-2. producer appends KindDegradation{component:"ollama", reason:"connect: connection refused",
-   fatal:false} parented into the run
-3. falls back to the raw question — behavior unchanged
+2. producer appends KindDegradation{component:"ollama", role:"narrator",
+   reason:"connect: connection refused"} parented into the run
+3. readiness.Fatal(d) → false (narrator) ⇒ falls back to the raw question,
+   behavior unchanged. A "verifier" role, or ANY UNRECOGNIZED role, would be
+   fatal — the vocabulary is closed and unknown fails closed (§5).
 4. stdout emits JSON and nothing else. The 2026-08-02 form — a diagnostic line
    printed BEFORE the JSON on every single call, making a clean result read as an
    error — is a regression test.
@@ -428,11 +478,43 @@ verdict.Observed == nil
   → flare:                notify unchanged                    (a sink never gates)
 ```
 
+### 7.6 Terminal state with no result, or a broken substrate — **new in v2**
+```
+1. gate fails BEFORE a gateResult exists (newEnv, flag validation, early abort)
+     ⇒ the error path in main — not printJSON — emits the route.
+       A terminal exit is never silent.        [D3 Tier 1, extended]
+2. gate fails because the STATE SUBSTRATE is broken (state open, anchor, audit chain)
+     ⇒ substrateOK=false ⇒ Escape returns an EXTERNAL repair route:
+         verify/restore custody · re-point -state · re-anchor
+       NOT "console → escalate → gate resolve", all of which read the store
+       that just failed.
+3. unknown or empty terminal code (the 2026-08-02 `judge_provider_failed:` shape)
+     ⇒ explicit fallback key ⇒ still a usable route.
+4. PRINT-TIME PRECONDITIONS (v3). A substrate route is only printed if its own
+   preconditions hold — don't say "re-anchor" unless the anchor path exists.
+   When nothing checks out, degrade to the one always-true route (a runbook
+   pointer) rather than confident specifics. Substrate-failure time is the worst
+   possible moment for confident wrongness, and the operator has the least
+   ability to falsify it — which is this doc's own thesis turned on itself.
+5. in all four: the artifact may be unwritable. The route is a STDOUT guarantee
+   first and an artifact field only when the store works.
+```
+
 ## 8. Concurrency / consistency / failure model
 
 **Chain integrity — the constraint that shapes §5.** `hashArtifact` seals `ID|Kind|Run|Time|Prev|Parents|Body`. A field added to the envelope's *top level* would be **outside the hash** — recorded but not tamper-evident, in the one log whose whole purpose is tamper evidence. Therefore: `Observed` goes inside `Verdict` (which is `Body`), and degradation is its own **artifact kind** rather than an envelope field. The envelope struct does not change at all. This is a correctness constraint, not a style preference.
 
-**Fail-closed points.** Observed base SHA absent or mismatched ⇒ `Covers()` false ⇒ park. Any aggregate member uncovered ⇒ `CoversAll` false ⇒ park. Provenance absent at a declared refusal point ⇒ refuse. `readiness.Fatal(d)` on a verifier-role degradation ⇒ refuse rather than proceed. `-reviews-optional` under a `human` grant ⇒ refuse. **There is no path where a missing or unverifiable input produces a pass** — v2 closed the one that existed.
+**Fail-closed points** (using §2's pinned vocabulary — park is exit 2, refused is exit 3):
+
+| Condition | Not counted | Terminal state |
+|---|---|---|
+| head differs, base differs, or base absent ⇒ `Covers()` false | yes | **park** |
+| any aggregate member uncovered ⇒ `CoversAll` false | yes | **park** |
+| provenance absent at a declared point (D2) | yes | **park** |
+| `readiness.Fatal(d)` — verifier **or unrecognized** role | yes | **park** |
+| `-reviews-optional` under a `human` grant | n/a | **refused** (exit 3 — the grant does not authorize it) |
+
+**There is no path where a missing or unverifiable input produces a pass.** v1 had one (timestamp fallback under force-push), v2 had a different one (head-match short-circuit on `ship#242`'s shape). Both are closed.
 
 **The force-push case (D5) — closed, not accepted.** v1 compared `completed_at` against the base's `committedDate` and named force-push-with-rewritten-dates as unsolved residual risk. Round 1 was right that this is a false-pass path in the merge-authorization component, which no amount of documentation makes acceptable. v2 requires an exact observed base SHA (or a head match) and parks otherwise; timestamps are diagnostic only. The cost is more parks when producers have not yet stamped `BaseSHA` — the correct direction, and it converges as P3 lands.
 
@@ -453,7 +535,7 @@ Multi-repo. Committed phases are P0–P4; everything after the gate is a stub un
 | **P0 — instrument** | The corpus exists before the fixes do | one-line `friction` capture verb (append: repo, ts, session, text; **no class**); `friction rollup --since` classifies in bulk; `chmod +x friction-scan.sh` | — | cc-skills | pre-gate | ≤150 | sonnet/extra |
 | **P1 — the merge path explains itself** | Theme 1's cheap 80% | `readiness.Escape` (total over `""` + unseen codes, partitioned on `substrateOK`) + `SelfGated` registry; emit from the **error path in `main`**, not the result printer, so pre-result exits still print; external repair routes for substrate failures; wire `escape`/`self_gated`/`retry_helps` into every non-zero terminal state; pretool-guard inspects only the invoked command, not `--body`/`-m` string args; guard remedy reads the real state path | — | workbench, hooks | pre-gate | ≤300 | **opus/extra** — touches gate's terminal-state surface; D3 rests on this being total |
 | **P2 — local signals stop lying** | "Green" means green *here* | `#[cfg(target_os="linux")]` the two `rooms` rootfs host-shell tests; land `ship#246` (state the env, don't inherit it); `/worktree-add` runs the repo's install step when it sees a lockfile; note the zsh word-splitting difference where shell snippets are kept | — | rooms, ship, cc-skills | pre-gate | ≤120 | sonnet/extra |
-| **P3 — provenance contract** | One vocabulary for evidence | `contracts`: `Observation`, `Degradation`, `KindDegradation`; `Verdict.Observed`; evidence-body contract; schema `v0.3.0`→`v0.4.0` + conformance; producers stamp it | — | workbench | pre-gate — **no-regret leaf** | ≤300 | sonnet/extra — type-enforced, schema-pinned |
+| **P3 — provenance contract** | One vocabulary for evidence | `contracts`: `Observation` (+ `At` pinned per surface), `Signal` member type, `Degradation` with **closed** `Role`, `KindDegradation`; `Verdict.Observed`; evidence-body contract carrying a `Signal` **list**; schema `v0.3.0`→`v0.4.0` + conformance; **producers stamp `BaseSHA`, not just `At`** — v3's conjunction parks everything without it | — | workbench | pre-gate — **no-regret leaf** | ≤350 | sonnet/extra — type-enforced, schema-pinned |
 | **P4 — readiness truth in gate** | Theme 2's meat | `readiness.Covers` + `CoversAll` (SHA-based, D5); `readiness.Fatal` policy; unverifiable-by-construction vs not-verified; `-readiness {human\|panel}` grant field + `gateauthorization` schema bump + conformance; **subordinate `-reviews-optional` to the grant** (§4.4); ledger/console surfacing; fold ollama degradation into `KindDegradation`; declared refusal points (D2) | P3 | workbench | pre-gate | 400–600 | **opus/max** — changes what gate authorizes |
 | **VG** | **VALIDATION GATE** | §11 | P0–P4 | — | **binary** | — | — |
 | **#186** | *Committed parallel track* — phone-friendly executor approvals | See [`gate-approval-ux/spec.md`](../gate-approval-ux/spec.md) §9. Own phases, own VG. **Not widened by this doc.** | — | workbench | its own | — | per that doc |
@@ -474,10 +556,11 @@ Multi-repo. Committed phases are P0–P4; everything after the gate is a stub un
 2. **Where `Observation` lives.** `contracts` root, or a `contracts/observation` sub-package? The lazy-migration policy says defer until a second consumer exists; there are already ≥3 (gate, triage, tracelens). Leaning root.
 3. **One friction log or many?** Today: per-repo logs plus a cross-cutting one, split by human judgment at write time. A single log with a `repo` field rolls up better and reads worse — and *reading* is what makes the corpus useful. Unresolved; P0 should not hard-code the answer.
 4. **P5's thread-matching falsifier.** How do we test "this commit addresses this thread" without an LLM call on every push? No answer yet. This is why P5 is gated.
-5. **~~Is `degradation.fatal` a per-case flag or a rule?~~ — RESOLVED (v2, round 1).** The field is gone from `contracts` entirely (§5); the rule (*narrator advisory, verifier fatal*) lives in `readiness.Fatal` as gate policy. What remains is bookkeeping: the `Role` vocabulary must stay small and closed, or it drifts back into policy by another name.
+5. **~~Is `degradation.fatal` a per-case flag or a rule?~~ — RESOLVED (v2/v3).** The field is gone from `contracts` (§5); the rule lives in `readiness.Fatal` as gate policy; and v3 closed the fail-open round 2 found — the `Role` vocabulary is a validated closed set and unknown roles are fatal, not advisory.
 6. **Does P1's guard fix belong in this doc at all?** It lives in `~/.claude` hooks, not workbench, and it is the only phase item with no artifact in the chain. Kept because it is the same failure — a blocker explaining itself wrongly — but a reviewer may reasonably route it out.
 7. **What does conservative aggregation cost in practice? (new, v2.)** "Any uncovered member parks the aggregate" (§5) is the safe direction, but nobody has measured how often an irrelevant stale check would park a genuinely mergeable PR. If that rate is high, the answer is probably per-signal *relevance* scoping rather than loosening coverage — but that is a design, not a knob, and it needs data P0's corpus will produce.
-8. **Do substrate-failure escape routes need to be machine-checkable? (new, v2.)** §7.6 promises an external repair route when the state store is unusable. Those routes cannot be integration-tested against a healthy store, and a route that is wrong is worse than none — it is confident, wrong instructions at the exact moment the operator has least ability to verify them.
+8. **Do substrate-failure escape routes need to be machine-checkable? (v2; partly answered in v3.)** §7.6 promises an external repair route when the state store is unusable, and those routes cannot be integration-tested against a healthy store. v3 adds **print-time preconditions** — a route is printed only if its own preconditions hold, degrading to a runbook pointer when nothing checks out. That converts "confidently wrong" into "vaguer but true," which is the right trade at that moment. Whether it is *sufficient* is still open.
+9. **When does a base-independence declaration earn its keep? (new, v3.)** §4.5 drops short-circuiting entirely. A producer that genuinely observes base-independently (a lint over the bare head) is then over-parked. The fix is for such a producer to **declare** base-independence as an `Invalidates`-style scope fact — but no such surface exists today, and adding the mechanism before a consumer needs it is the speculative design the charter's lazy-migration policy rejects. Revisit when one appears.
 
 ## 11. Validation plan
 
@@ -489,7 +572,8 @@ The gate is **binary and baseline-free**, in two parts. Both must pass.
 |---|---|---|
 | 1 | judge provider unavailable | `self_gated: true`, `retry_helps: false`, escape route printed, reason non-empty |
 | 2 | no `reviewDecision`, no `-readiness panel` grant | parks **naming the grant remedy** — not a generic readiness park |
-| 3 | checks green but observed before the merge-base | **refused as stale**, never counted |
+| 3a | check observed on an **old head** | **parks** (exit 2), remedy "re-run checks" |
+| 3b | check on the **current head** against a **stale merge-base** — the `ship#242` shape | **parks** (exit 2), remedy "update branch". v2's short-circuit passed this |
 | 4 | ollama down | `KindDegradation` with `role: "narrator"` in the run; `readiness.Fatal` false; stdout parses as JSON with zero preceding lines |
 | 5 | `gh pr create --body "…gh pr merge…"` | guard permits; remedy text (if any) names the real state dir |
 
@@ -501,7 +585,9 @@ Round 1 added four more, each pinning a v2 change against the failure it closes:
 | 7 | state-open / anchor / audit-chain failure | the route is an **external** repair path, never `console → escalate → gate resolve` |
 | 8 | `Escape("")` and `Escape("novel_unseen_code")` | both return a usable route via the explicit fallback key |
 | 9 | check ran against a force-pushed base with an **older rewritten** committer date | **parks** — the v1 timestamp path would have passed it |
-| 10 | `-reviews-optional` passed under a `readiness=human` grant | refuses, naming the grant — neither proceeds nor silently ignores the flag |
+| 10 | `-reviews-optional` passed under a `readiness=human` grant | **refuses** (exit 3), naming the grant — neither proceeds nor silently ignores the flag |
+| 11 | `KindDegradation` with an unrecognized `role` | `Fatal` returns **true** — an unknown role never reads as advisory |
+| 12 | aggregate with one stale-head and one stale-base member | parks naming **both**, each with its own remedy — not a generic "something is stale" |
 
 **2. Live self-direction canary (binary).** One real portfolio PR driven from park to merged where **every command run was named by the previous command's output** — no source reading, no state-dir guessing, no judging whether a green is stale. Checkable from the session transcript after the fact. It happened or it didn't.
 
