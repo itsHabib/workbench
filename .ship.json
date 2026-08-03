@@ -6,7 +6,7 @@
       { "name": "cursor", "trigger": "mention" },
       { "name": "copilot", "trigger": "reviewer-request" }
     ],
-    "require": ["codex", "claude", "cursor"],
+    "require": ["codex", "claude"],
     "settle_minutes": 15
   }
 }
