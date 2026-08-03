@@ -420,6 +420,8 @@ func TestSanitizedJudgeEnvironmentDropsAuthorityAndProviderSecrets(t *testing.T)
 	source := []string{
 		"PATH=/bin",
 		"HOME=/home/operator",
+		"USER=operator",
+		"LOGNAME=operator",
 		"GATE_KEY=gate-secret",
 		"GATE_STATE=/gate/state",
 		"OPENAI_API_KEY=openai-secret",
@@ -441,6 +443,15 @@ func TestSanitizedJudgeEnvironmentDropsAuthorityAndProviderSecrets(t *testing.T)
 			}
 			if strings.Contains(joined, "CLAUDE_CODE_SIMPLE") {
 				t.Fatalf("simple mode would disable saved-login auth: %v", got)
+			}
+			// The Claude CLI reads its saved login through the macOS keychain,
+			// which needs USER. Dropping it fails the judgment with empty
+			// stderr, so the identity variables are as load-bearing as HOME.
+			if !strings.Contains(joined, "USER=operator") {
+				t.Fatalf("USER was removed, breaking saved-login auth: %v", got)
+			}
+			if !strings.Contains(joined, "LOGNAME=operator") {
+				t.Fatalf("LOGNAME was removed: %v", got)
 			}
 		})
 	}

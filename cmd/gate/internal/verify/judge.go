@@ -465,6 +465,7 @@ var judgeEnvironmentAllowlist = map[string]struct{}{
 	"LANG":                {},
 	"LC_ALL":              {},
 	"LOCALAPPDATA":        {},
+	"LOGNAME":             {},
 	"NODE_EXTRA_CA_CERTS": {},
 	"NO_PROXY":            {},
 	"PATH":                {},
@@ -476,11 +477,16 @@ var judgeEnvironmentAllowlist = map[string]struct{}{
 	"TERM":                {},
 	"TMP":                 {},
 	"TMPDIR":              {},
-	"USERPROFILE":         {},
-	"WINDIR":              {},
-	"XDG_CACHE_HOME":      {},
-	"XDG_CONFIG_HOME":     {},
-	"XDG_DATA_HOME":       {},
+	// USER is the POSIX counterpart of USERPROFILE. Without it the Claude CLI
+	// cannot reach its saved login on macOS and exits non-zero with empty
+	// stderr, which surfaces as a bare "judge_provider_failed:" — every
+	// -auto judgment on a Mac fails for a reason nothing prints.
+	"USER":            {},
+	"USERPROFILE":     {},
+	"WINDIR":          {},
+	"XDG_CACHE_HOME":  {},
+	"XDG_CONFIG_HOME": {},
+	"XDG_DATA_HOME":   {},
 }
 
 // sanitizedJudgeEnvironment deliberately omits Gate custody, provider API
