@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,24 +95,33 @@ func TestRenewLoopRenewsEachTickThenStopsOnExit(t *testing.T) {
 
 	ticks := make(chan time.Time)
 	done := make(chan struct{})
-	go s.renewLoop(done, ticks)
+	exited := make(chan struct{})
+	go func() {
+		s.renewLoop(done, ticks)
+		close(exited)
+	}()
 
-	// The send blocks until the loop receives it, so on return the loop is
-	// committed to a renewAll. Sleep briefly to let that finish, then read once —
-	// no concurrent reader collides with the lease-file rename.
-	ticks <- time.Now()
-	time.Sleep(50 * time.Millisecond)
-	if after := readExpiry(t, dir, "dsr_r"); !after.After(before) {
-		t.Fatalf("lease expiry did not advance after a tick: before=%s after=%s", before, after)
-	}
+	// Wait on the renew actually landing, not on the clock: a sweep can exhaust
+	// its bounded lock-retry budget under a loaded -race runner, and production's
+	// answer to that is the next tick (renewAll keeps the lease and retries). The
+	// test drives the same recovery instead of asserting one sweep won a race.
+	waitForRenew(t, ticks, dir, "dsr_r", before)
 
 	// Session exit stops renewal: after done closes, the loop returns and no
-	// longer receives ticks (spec §6 — server exit stops renewal).
+	// longer receives ticks (spec §6 — server exit stops renewal). Assert the
+	// return first — racing a send against the close would just be reading
+	// select's coin flip, and the wait also keeps a late sweep from writing into
+	// an already-cleaned TempDir.
 	close(done)
+	select {
+	case <-exited:
+	case <-time.After(renewWaitTimeout):
+		t.Fatal("renewLoop did not return after exit")
+	}
 	select {
 	case ticks <- time.Now():
 		t.Fatal("renewLoop still receiving ticks after exit")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 }
 
@@ -264,17 +274,48 @@ func withTTL(t *testing.T, ttl time.Duration) {
 
 func readExpiry(t *testing.T, dir, run string) time.Time {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(dir, run, "lease.json"))
+	exp, err := leaseExpiry(dir, run)
 	if err != nil {
 		t.Fatalf("read lease: %v", err)
+	}
+	return exp
+}
+
+func leaseExpiry(dir, run string) (time.Time, error) {
+	data, err := os.ReadFile(filepath.Join(dir, run, "lease.json"))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read lease: %w", err)
 	}
 	var rec struct {
 		ExpiresAt time.Time `json:"expires_at"`
 	}
 	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("decode lease: %v", err)
+		return time.Time{}, fmt.Errorf("decode lease: %w", err)
 	}
-	return rec.ExpiresAt
+	return rec.ExpiresAt, nil
+}
+
+// renewWaitTimeout bounds waitForRenew. Generous on purpose: it is a failure
+// deadline, not a cadence — a healthy run satisfies it on the first tick.
+const renewWaitTimeout = 10 * time.Second
+
+// waitForRenew ticks renewLoop until run's on-disk lease expiry moves past prev,
+// and fails the test if it never does. Each send blocks until the loop receives
+// it, so a return means the loop committed to a renewAll — but not that the
+// sweep succeeded, so a stalled expiry just earns another tick. A read that
+// loses a race with the lease file's atomic rename counts as "not yet" too.
+func waitForRenew(t *testing.T, ticks chan<- time.Time, dir, run string, prev time.Time) {
+	t.Helper()
+	deadline := time.Now().Add(renewWaitTimeout)
+	for time.Now().Before(deadline) {
+		ticks <- time.Now()
+		exp, err := leaseExpiry(dir, run)
+		if err == nil && exp.After(prev) {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("lease expiry did not advance within %s of ticks: before=%s", renewWaitTimeout, prev)
 }
 
 // corruptLedger appends a well-formed but chain-breaking event line to a run's
