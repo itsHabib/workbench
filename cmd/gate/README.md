@@ -151,7 +151,7 @@ sanitized environment prevents this path from using API-key authentication.
   "subject": {"repo": "owner/repo", "number": 181, "head_sha": "<exact SHA>"},
   "grant": {"id": "grt_...", "max_tier": "T2"},
   "question": "<exact recorded question>",
-  "producer": "codex:gpt-5",
+  "producer": {"class": "judgment", "impl": "codex:gpt-5"},
   "decision": "pass",
   "tier": "T0",
   "confidence": 0.9,
@@ -165,7 +165,16 @@ presented ceiling, and a second judgment for the same escalation all refuse
 before the log changes. A judgment that legitimately produces a newer ceiling
 park may be followed by a judgment bound to that new escalation.
 `confidence` is required and numeric (`0` is valid; omitted or `null` is not),
-and producer provenance is trimmed and must remain non-empty.
+and `producer.impl` provenance is trimmed and must remain non-empty.
+`producer` is the shared `contracts` struct every other artifact in the log
+carries, not a bare string. Its `class` is the ladder rung, which a provider
+does not get to assert: omit it and Gate stamps `judgment`, or echo `judgment`
+exactly. Any other class is refused as `judgment_bad_producer_class` rather
+than quietly rewritten. A judgment saved while Gate's decoder disagreed with
+the contract and carried `producer` as a bare string is refused, not decoded
+alongside the contract shape — a forgiving parser at an authority boundary is
+how two shapes become permanent. The refusal names the fix: re-emit the
+judgment, or wrap the old string as `impl`.
 Judgment application is resumable across process interruption: if the
 hash-chained judgment or its reduced verdict reached disk before the caller saw
 success, the same run/escalation/grant retry reuses that artifact and appends

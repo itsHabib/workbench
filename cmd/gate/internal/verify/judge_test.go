@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
@@ -35,7 +36,7 @@ func judgmentFixture() (JudgmentRequestV1, JudgmentArtifactV1) {
 		Subject:      subject,
 		Grant:        grant,
 		Question:     request.Question,
-		Producer:     "codex:gpt-5",
+		Producer:     Producer{Class: ClassJudgment, Impl: "codex:gpt-5"},
 		Decision:     DecisionPass,
 		Tier:         "T2",
 		Confidence:   0.9,
@@ -50,7 +51,7 @@ func TestValidateJudgmentAcceptsExactBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Subject != request.Subject || got.Producer.Impl != artifact.Producer || got.Decision != DecisionPass {
+	if got.Subject != request.Subject || got.Producer != artifact.Producer || got.Decision != DecisionPass {
 		t.Fatalf("validated verdict lost bindings: %+v", got)
 	}
 }
@@ -131,7 +132,7 @@ func TestDecodeJudgmentArtifactPreservesZeroConfidence(t *testing.T) {
 
 func TestValidateJudgmentTrimsProducerAndRefusesWhitespaceOnly(t *testing.T) {
 	request, artifact := judgmentFixture()
-	artifact.Producer = "  codex:gpt-5  "
+	artifact.Producer.Impl = "  codex:gpt-5  "
 	got, err := ValidateJudgment(artifact, request)
 	if err != nil {
 		t.Fatal(err)
@@ -139,9 +140,88 @@ func TestValidateJudgmentTrimsProducerAndRefusesWhitespaceOnly(t *testing.T) {
 	if got.Producer.Impl != "codex:gpt-5" {
 		t.Fatalf("producer = %q, want trimmed provenance", got.Producer.Impl)
 	}
-	artifact.Producer = " \t "
-	if _, err := ValidateJudgment(artifact, request); err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance") {
+	artifact.Producer.Impl = " \t "
+	if _, err := ValidateJudgment(artifact, request); err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance: producer.impl is required") {
 		t.Fatalf("whitespace-only producer error = %v", err)
+	}
+}
+
+// One code, two sites: the message must name the field actually missing, or an
+// operator cannot tell which one to fix.
+func TestValidateJudgmentNamesTheMissingProvenanceField(t *testing.T) {
+	request, base := judgmentFixture()
+	cases := []struct {
+		name string
+		edit func(*JudgmentArtifactV1)
+		want string
+	}{
+		{"missing impl", func(a *JudgmentArtifactV1) { a.Producer.Impl = "" }, "producer.impl is required"},
+		{"missing why", func(a *JudgmentArtifactV1) { a.Why = "  " }, "why is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			artifact := base
+			tc.edit(&artifact)
+			_, err := ValidateJudgment(artifact, request)
+			if err == nil || !strings.Contains(err.Error(), "judgment_missing_provenance: "+tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The judgment producer is the shared contract struct, not a bare string: a
+// provider that mirrors the recorded verdicts it was shown must decode.
+func TestDecodeJudgmentArtifactAcceptsContractShapedProducer(t *testing.T) {
+	_, want := judgmentFixture()
+	raw := `{"version":"gate-judgment-v1","run":"run_123","escalation_id":"esc_123",
+	  "subject":{"repo":"o/r","number":17,"head_sha":"0123456789abcdef"},
+	  "grant":{"id":"grt_123","max_tier":"T2"},"question":"do the findings block?",
+	  "producer":{"class":"judgment","impl":"codex:gpt-5"},"decision":"pass",
+	  "tier":"T2","confidence":0.9,"why":"the exact-head findings are resolved"}`
+	got, err := DecodeJudgmentArtifact(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("decoded artifact = %+v, want %+v", got, want)
+	}
+}
+
+// The pre-contract string form is refused, not silently accepted alongside the
+// contract shape — but an operator holding a judgment saved in that form gets
+// told what to change, not a raw unmarshal error.
+func TestDecodeJudgmentArtifactRefusesStringProducerWithMigrationGuidance(t *testing.T) {
+	raw := `{"version":"gate-judgment-v1","producer":"codex:gpt-5","confidence":0.9}`
+	_, err := DecodeJudgmentArtifact(strings.NewReader(raw))
+	if err == nil {
+		t.Fatal("the pre-contract string producer was accepted")
+	}
+	for _, want := range []string{"judgment_malformed", "pre-contract string form", `{"class":"judgment","impl":"..."}`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want it to name %q", err, want)
+		}
+	}
+}
+
+// Class is the ladder rung. A submission may omit it — Gate stamps judgment —
+// but may never claim another producer's authority.
+func TestValidateJudgmentGovernsProducerClass(t *testing.T) {
+	request, artifact := judgmentFixture()
+	artifact.Producer.Class = ""
+	got, err := ValidateJudgment(artifact, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Producer.Class != ClassJudgment {
+		t.Fatalf("producer class = %q, want the Gate-stamped judgment rung", got.Producer.Class)
+	}
+	for _, class := range []string{ClassCode, ClassLocal, "reducer"} {
+		artifact.Producer.Class = class
+		_, err := ValidateJudgment(artifact, request)
+		if err == nil || !strings.Contains(err.Error(), "judgment_bad_producer_class") {
+			t.Fatalf("class %q error = %v, want refusal", class, err)
+		}
 	}
 }
 
@@ -225,7 +305,7 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 				provider,
 				request,
 				t.TempDir(),
-				judgeHelperEnvironment(""),
+				judgeHelperEnvironment(t, ""),
 				fakeJudgeResolver,
 				factory,
 			)
@@ -255,7 +335,7 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 		JudgeProviderCodex,
 		request,
 		t.TempDir(),
-		judgeHelperEnvironment("malformed"),
+		judgeHelperEnvironment(t, "malformed"),
 		fakeJudgeResolver,
 		factory,
 	)
@@ -264,19 +344,56 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 	}
 }
 
+// A failing provider must stay diagnosable: the provider, its exit status, and
+// whichever stream carried the diagnostic all reach the caller. A CLI that
+// reports on stdout, or says nothing at all, used to surface as an empty error.
 func TestAutoJudgeReportsProviderFailure(t *testing.T) {
-	request, _ := judgmentFixture()
-	factory := judgeHelperFactory(t, nil, nil)
-	_, err := autoJudge(
-		JudgeProviderCodex,
-		request,
-		t.TempDir(),
-		judgeHelperEnvironment("failed"),
-		fakeJudgeResolver,
-		factory,
-	)
-	if err == nil || !strings.Contains(err.Error(), "judge_provider_failed: helper failed") {
-		t.Fatalf("error = %v, want provider failure", err)
+	cases := []struct {
+		mode string
+		want []string
+	}{
+		{"failed", []string{"judge_provider_failed", "codex", "exited 23", "helper failed"}},
+		{"stdout-failed", []string{"judge_provider_failed", "codex", "exited 26", "helper failed on stdout"}},
+		{"silent-failed", []string{"judge_provider_failed", "codex", "exited 27", "no diagnostic output"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			request, _ := judgmentFixture()
+			factory := judgeHelperFactory(t, nil, nil)
+			_, err := autoJudge(
+				JudgeProviderCodex,
+				request,
+				t.TempDir(),
+				judgeHelperEnvironment(t, tc.mode),
+				fakeJudgeResolver,
+				factory,
+			)
+			if err == nil {
+				t.Fatal("provider failure was not reported")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want it to name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The cap is the ceiling on the whole quote, marker included, and a cut that
+// lands mid-rune must not leave mangled UTF-8 in the error.
+func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
+	got := providerDetail([]byte(strings.Repeat("x", providerDetailCap+64)))
+	if len(got) != providerDetailCap || !strings.HasSuffix(got, providerTruncateMark) {
+		t.Fatalf("detail length = %d, want exactly %d ending in the marker", len(got), providerDetailCap)
+	}
+	multibyte := providerDetail([]byte(strings.Repeat("é", providerDetailCap)))
+	if len(multibyte) > providerDetailCap || !utf8.ValidString(multibyte) {
+		t.Fatalf("multibyte detail length = %d, valid = %v", len(multibyte), utf8.ValidString(multibyte))
+	}
+	short := providerDetail([]byte("  boom  "))
+	if short != "boom" {
+		t.Fatalf("short detail = %q, want the trimmed quote unchanged", short)
 	}
 }
 
@@ -336,11 +453,17 @@ func fakeJudgeResolver(name string) (judgeExecutable, error) {
 	}, nil
 }
 
-func judgeHelperEnvironment(mode string) []string {
+func judgeHelperEnvironment(t *testing.T, mode string) []string {
+	t.Helper()
 	return append(
 		sanitizedJudgeEnvironment(os.Environ()),
 		"GATE_JUDGE_HELPER=1",
 		"GATE_JUDGE_HELPER_MODE="+mode,
+		// The helper is this coverage-instrumented test binary re-executed.
+		// Under `go test -cover` it writes "GOCOVERDIR not set" to stderr on
+		// exit, which is not the provider diagnostic under test — give it a
+		// scratch dir so the stream it uses is the one the mode chose.
+		"GOCOVERDIR="+t.TempDir(),
 	)
 }
 
@@ -372,6 +495,11 @@ func TestJudgeProviderHelper(_ *testing.T) {
 	case "failed":
 		fmt.Fprint(os.Stderr, "helper failed")
 		os.Exit(23)
+	case "stdout-failed":
+		fmt.Fprint(os.Stdout, "helper failed on stdout")
+		os.Exit(26)
+	case "silent-failed":
+		os.Exit(27)
 	}
 	var request JudgmentRequestV1
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
@@ -385,7 +513,7 @@ func TestJudgeProviderHelper(_ *testing.T) {
 		Subject:      request.Subject,
 		Grant:        request.Grant,
 		Question:     request.Question,
-		Producer:     "fixture-model",
+		Producer:     Producer{Class: ClassJudgment, Impl: "fixture-model"},
 		Decision:     DecisionPass,
 		Tier:         "T0",
 		Confidence:   0.9,

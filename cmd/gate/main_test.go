@@ -1382,7 +1382,7 @@ func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
 		Subject:      verify.Subject{Repo: "o/r", Number: 128, HeadSHA: "stale"},
 		Grant:        verify.JudgmentGrantV1{ID: grantArt.ID, MaxTier: "T2"},
 		Question:     escBody.Question,
-		Producer:     "codex:test",
+		Producer:     verify.Producer{Class: verify.ClassJudgment, Impl: "codex:test"},
 		Decision:     verify.DecisionPass,
 		Tier:         "T0",
 		Confidence:   1,

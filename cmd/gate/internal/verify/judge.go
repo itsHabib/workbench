@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,9 +32,10 @@ are not yours to override — you only resolve escalations. Be strict about
 correctness risks, lenient about style and doc nits.
 
 Return exactly one gate-judgment-v1 JSON object, with no markdown. Echo the
-request's run, escalation_id, subject, grant, and question exactly; identify
-your implementation in producer; set decision to pass or block; set tier no
-higher than the presented grant ceiling; and include confidence and why.
+request's run, escalation_id, subject, grant, and question exactly; set producer
+to the object {"class":"judgment","impl":"<your model or CLI identifier>"};
+set decision to pass or block; set tier no higher than the presented grant
+ceiling; and include confidence and why.
 `
 
 const (
@@ -72,7 +74,9 @@ type JudgmentRequestV1 struct {
 
 // JudgmentArtifactV1 is the provider-neutral submission accepted by Gate.
 // Every authority-relevant binding is repeated so Gate can validate it before
-// appending anything to the hash-chained log.
+// appending anything to the hash-chained log. Producer is the shared contract
+// struct — the same shape every other artifact in the log carries — so a
+// provider that mirrors the recorded verdicts it was shown is already correct.
 type JudgmentArtifactV1 struct {
 	Version      string          `json:"version"`
 	Run          string          `json:"run"`
@@ -80,7 +84,7 @@ type JudgmentArtifactV1 struct {
 	Subject      Subject         `json:"subject"`
 	Grant        JudgmentGrantV1 `json:"grant"`
 	Question     string          `json:"question"`
-	Producer     string          `json:"producer"`
+	Producer     Producer        `json:"producer"`
 	Decision     string          `json:"decision"`
 	Tier         string          `json:"tier"`
 	Confidence   float64         `json:"confidence"`
@@ -94,7 +98,7 @@ type judgmentArtifactWire struct {
 	Subject      Subject         `json:"subject"`
 	Grant        JudgmentGrantV1 `json:"grant"`
 	Question     string          `json:"question"`
-	Producer     string          `json:"producer"`
+	Producer     Producer        `json:"producer"`
 	Decision     string          `json:"decision"`
 	Tier         string          `json:"tier"`
 	Confidence   *float64        `json:"confidence"`
@@ -128,7 +132,7 @@ func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 	dec.DisallowUnknownFields()
 	var wire judgmentArtifactWire
 	if err := dec.Decode(&wire); err != nil {
-		return JudgmentArtifactV1{}, fmt.Errorf("judgment_malformed: %w", err)
+		return JudgmentArtifactV1{}, judgmentDecodeError(err)
 	}
 	if err := ensureEOF(dec); err != nil {
 		return JudgmentArtifactV1{}, err
@@ -149,6 +153,23 @@ func DecodeJudgmentArtifact(r io.Reader) (JudgmentArtifactV1, error) {
 		Confidence:   *wire.Confidence,
 		Why:          wire.Why,
 	}, nil
+}
+
+// judgmentDecodeError names the one migration an operator can actually hit: a
+// judgment saved while Gate's own decoder disagreed with the contract and
+// carried producer as a bare string. Gate does not decode both encodings —
+// a forgiving parser at an authority boundary is how two shapes become
+// permanent — but the refusal says exactly what to change and why.
+func judgmentDecodeError(err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Field == "producer" && typeErr.Value == "string" {
+		return fmt.Errorf(
+			`judgment_malformed: producer must be the contract object {"class":"judgment","impl":"..."}, `+
+				`not the pre-contract string form; re-emit the judgment or wrap the string as impl: %w`,
+			err,
+		)
+	}
+	return fmt.Errorf("judgment_malformed: %w", err)
 }
 
 func ensureEOF(dec *json.Decoder) error {
@@ -185,9 +206,12 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	if !tier.Valid(artifact.Tier) || tier.Rank(artifact.Tier) > tier.Rank(request.Grant.MaxTier) {
 		return Verdict{}, fmt.Errorf("judgment_tier_exceeded: %q exceeds %q", artifact.Tier, request.Grant.MaxTier)
 	}
-	producer := strings.TrimSpace(artifact.Producer)
-	if producer == "" || strings.TrimSpace(artifact.Why) == "" {
-		return Verdict{}, fmt.Errorf("judgment_missing_provenance: producer and why are required")
+	impl, err := judgmentProducerImpl(artifact.Producer)
+	if err != nil {
+		return Verdict{}, err
+	}
+	if strings.TrimSpace(artifact.Why) == "" {
+		return Verdict{}, fmt.Errorf("judgment_missing_provenance: why is required")
 	}
 	if artifact.Confidence < 0 || artifact.Confidence > 1 {
 		return Verdict{}, fmt.Errorf("judgment_bad_confidence: %v", artifact.Confidence)
@@ -195,12 +219,29 @@ func ValidateJudgment(artifact JudgmentArtifactV1, request JudgmentRequestV1) (V
 	return Verdict{
 		Subject:    request.Subject,
 		Source:     "submitted-judgment",
-		Producer:   Producer{Class: ClassJudgment, Impl: producer},
+		Producer:   Producer{Class: ClassJudgment, Impl: impl},
 		Decision:   artifact.Decision,
 		Tier:       artifact.Tier,
 		Confidence: artifact.Confidence,
 		Why:        artifact.Why,
 	}, nil
+}
+
+// judgmentProducerImpl returns the provenance a submission is entitled to
+// carry. Class is the ladder rung, not provenance: a judgment may only claim
+// its own, so a submission naming another class is refused rather than quietly
+// rewritten — that is a provider asserting authority it does not hold. An
+// omitted class is the contract's optional field, and Gate stamps the rung.
+func judgmentProducerImpl(producer Producer) (string, error) {
+	class := strings.TrimSpace(producer.Class)
+	if class != "" && class != ClassJudgment {
+		return "", fmt.Errorf("judgment_bad_producer_class: %q (want %q)", class, ClassJudgment)
+	}
+	impl := strings.TrimSpace(producer.Impl)
+	if impl == "" {
+		return "", fmt.Errorf("judgment_missing_provenance: producer.impl is required")
+	}
+	return impl, nil
 }
 
 type judgeProviderInvocation struct {
@@ -316,10 +357,7 @@ func autoJudge(
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return Verdict{}, fmt.Errorf("judge_provider_failed: %s", strings.TrimSpace(string(ee.Stderr)))
-		}
-		return Verdict{}, fmt.Errorf("judge_provider_failed: %w", err)
+		return Verdict{}, providerFailure(provider, out, err)
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
@@ -338,6 +376,45 @@ func autoJudge(
 		verdict.Producer.Impl,
 	)
 	return verdict, nil
+}
+
+// providerDetailCap is the hard ceiling on how much provider output an error
+// may quote, truncation marker included. The point is a diagnosable first
+// line, not the transcript.
+const (
+	providerDetailCap    = 2 * 1024
+	providerTruncateMark = " [... truncated ...]"
+)
+
+// providerFailure keeps the provider's own diagnostic. A CLI that reports its
+// failure on stdout — or exits non-zero saying nothing at all — used to surface
+// as a bare "judge_provider_failed:" with an empty body, which is impossible to
+// act on. The provider, its exit status, and whichever stream spoke are always
+// named.
+func providerFailure(provider string, stdout []byte, err error) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return fmt.Errorf("judge_provider_failed: %s: %w", provider, err)
+	}
+	detail := providerDetail(exit.Stderr)
+	if detail == "" {
+		detail = providerDetail(stdout)
+	}
+	if detail == "" {
+		detail = "no diagnostic output on stderr or stdout"
+	}
+	return fmt.Errorf("judge_provider_failed: %s exited %d: %s", provider, exit.ExitCode(), detail)
+}
+
+func providerDetail(stream []byte) string {
+	detail := strings.TrimSpace(string(stream))
+	if len(detail) <= providerDetailCap {
+		return detail
+	}
+	// The marker is part of the budget, and the cut can land mid-rune —
+	// provider output is arbitrary bytes, not guaranteed UTF-8.
+	kept := strings.ToValidUTF8(detail[:providerDetailCap-len(providerTruncateMark)], "")
+	return kept + providerTruncateMark
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {
