@@ -484,7 +484,7 @@ func providerDetail(stream []byte) string {
 }
 
 func detailWithin(stream []byte, limit int) string {
-	detail := escapeControls(strings.TrimSpace(string(stream)))
+	detail := escapeUnprintable(strings.TrimSpace(string(stream)))
 	if len(detail) <= limit {
 		return detail
 	}
@@ -501,23 +501,37 @@ func detailWithin(stream []byte, limit int) string {
 	return kept + providerTruncateMark
 }
 
-// escapeControls renders untrusted provider bytes safe to print. Provider
+// escapeUnprintable renders untrusted provider bytes safe to display. Provider
 // output is model-written text derived from a PR diff, so it can carry ANSI or
 // OSC sequences — and a terminal acts on those: they can erase or overwrite the
 // lines around them. What they would be forging here is the operator's recovery
 // route, which is exactly the text worth forging, so the quote is escaped
 // before it is ever handed to a terminal or a CI log.
 //
+// The predicate is IsPrint, not IsControl. IsControl is category Cc alone,
+// which leaves the Cf format characters — the bidi overrides and isolates,
+// U+202E and U+2066..U+2069 — to pass through and reorder the rendered line in
+// any bidi-aware terminal or browser. Reordering the route is the same forgery
+// by another mechanism, so the test is "can this be displayed" rather than a
+// list of the categories thought of so far.
+//
 // Escaped, not stripped: the bytes are evidence. `\x1b` says a provider emitted
 // an escape sequence, where a dropped byte or a replacement rune would hide it.
 // Printable runes pass through untouched, so a quoted JSON body still reads as
 // JSON, and the cap in detailWithin bounds the expansion.
-func escapeControls(s string) string {
+func escapeUnprintable(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if !unicode.IsControl(r) {
+		if unicode.IsPrint(r) {
 			b.WriteRune(r)
+			continue
+		}
+		// Multi-byte runes take the \u form: \x202e would read as \x20
+		// followed by a literal "2e", which is a quote an operator cannot
+		// trust to mean one thing.
+		if r > 0xff {
+			fmt.Fprintf(&b, "\\u%04x", r)
 			continue
 		}
 		fmt.Fprintf(&b, "\\x%02x", r)

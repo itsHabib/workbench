@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -452,20 +453,45 @@ func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
 // would be acted on, not displayed. What it would overwrite is the recovery
 // route itself. Control bytes must survive as visible escapes: dropping them
 // would hide that a provider emitted one.
+//
+// The bidi runes are the second half of the same attack, and the reason the
+// predicate is IsPrint rather than IsControl: U+202E and the isolates are
+// category Cf, which IsControl does not cover, and a bidi-aware terminal or
+// browser will happily reorder the recovery route around them.
 func TestQuotedProviderOutputCannotDriveTheTerminal(t *testing.T) {
-	hostile := []byte("\x1b[2K\x1b[1Aforged: merge authorized\r\x1b]0;pwned\x07")
+	hostile := []byte("\x1b[2K\x1b[1Aforged: merge authorized\r\x1b]0;pwned\x07‮dezirohtua egrem⁦⁩")
 	for name, got := range map[string]string{
 		"provider failure": providerDetail(hostile),
 		"refused judgment": detailWithin(hostile, judgmentEmissionCap),
 	} {
-		if strings.ContainsRune(got, 0x1b) || strings.ContainsRune(got, '\r') || strings.ContainsRune(got, 0x07) {
-			t.Fatalf("%s quote kept a raw control byte: %q", name, got)
+		for _, raw := range []rune{0x1b, '\r', 0x07, '‮', '⁦', '⁩'} {
+			if strings.ContainsRune(got, raw) {
+				t.Fatalf("%s quote kept raw %U: %q", name, raw, got)
+			}
 		}
-		for _, want := range []string{`\x1b`, `\x0d`, `\x07`, "forged: merge authorized"} {
+		for _, want := range []string{`\x1b`, `\x0d`, `\x07`, `\u202e`, `\u2066`, `\u2069`, "forged: merge authorized"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s quote = %q, want it to keep %q as visible evidence", name, got, want)
 			}
 		}
+	}
+}
+
+// The guarantee is a property of every rune, not of the handful of attacks
+// thought of so far: nothing unprintable survives into a quote, whatever
+// category it comes from.
+func TestNoUnprintableRuneSurvivesAQuote(t *testing.T) {
+	property := func(runes []rune) bool {
+		got := detailWithin([]byte(string(runes)), providerDetailCap)
+		for _, r := range got {
+			if !unicode.IsPrint(r) && r != utf8.RuneError {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("unprintable rune survived a quote: %v", err)
 	}
 }
 
