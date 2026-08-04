@@ -140,4 +140,22 @@ func TestReviewStanceWireKeys(t *testing.T) {
 			t.Fatalf("stance wire key %q missing — verify/readiness.go reads it: %s", key, raw)
 		}
 	}
+
+	// The envelope key matters as much as the fields inside it: readStances
+	// unmarshals against "stances", so renaming it here would compile clean,
+	// leave every other test green, and silently stop satisfying readiness.
+	body, err := json.Marshal(stancesBody{
+		PR:      PRRef{Repo: "o/r", Number: 1},
+		Stances: reviewStances([]rawComment{rawReview("mh", "User", "", "sha1", "APPROVED")}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := envelope["stances"]; !ok {
+		t.Fatalf("envelope key \"stances\" missing — verify/readiness.go readStances reads it: %s", body)
+	}
 }
