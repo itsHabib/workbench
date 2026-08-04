@@ -243,6 +243,11 @@ threshold ← panel.Declaration.RequireAtTier
 
 1. subject mismatch (repo/number/head)      → escalate   [unchanged, checked first]
 2. threshold == ""                          → today's behaviour (required)
+2b. Unknown contains "declaration"
+    OR len(Expected) == 0                   → escalate   [untrustworthy policy SOURCE —
+                                                          must precede step 5, else a
+                                                          parseable-but-empty declaration
+                                                          passes; see below]
 3. !tier.Valid(floorTier)                   → required   [fail closed]
 4. !tier.Valid(threshold)                   → escalate   [malformed policy is not a licence]
 5. tier.Rank(floorTier) < tier.Rank(threshold)
