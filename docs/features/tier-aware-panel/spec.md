@@ -6,10 +6,12 @@
 **Related:** `cmd/gate/docs/DESIGN.md` (ladder law, verdict schema) · `cmd/gate/README.md` (risk-scaled autonomy) · `.ship.json` (panel declaration) · dossier project `gate`
 
 > **Reviewers — focus areas:**
-> - **§4.1** — the floor-coupling decision. This is the one that actually costs something; everything else follows from it.
+> - **§4.1** — the floor-coupling decision. This is the one that actually costs something; everything else follows from it. **Revised after review**: the first draft's "widening not creating" argument was wrong and is retained, refuted, as a record.
 > - **§4.2** — hard skip vs. "not required but still consolidated". Changes what a T0 pass means.
 > - **§7.2** — the trust path for the policy value. If this is wrong, a PR can lower its own review bar.
 > - **§8** — the fail-closed table. An unreadable tier must never widen the gate.
+>
+> **Revision history:** v2 (2026-08-03) folds in the design review on PR #207 — §4.1 argument replaced, option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
 
 ---
 
@@ -96,17 +98,26 @@ The threshold itself rides in the existing panel evidence, so the policy and the
 
 **After this change, the floor's tier gates the panel.** If the floor ever classifies a code change as T0 — a path-override gap, a diff the classifier reads as docs — the change loses required review entirely rather than degrading to a weaker check.
 
-This is the decision that needs a call, not a rubber stamp. Options:
+**Name the cost precisely.** An earlier draft of this section argued the change merely "widens an existing trust dependency rather than creating one," on the grounds that gate already trusts the floor's tier for the capability ceiling. Review refuted that, correctly, and the refutation is recorded here because the wrong framing is the more persuasive one:
+
+- **Today:** floor under-tiers T3→T0 → the capability ceiling may be satisfied → **but the panel still runs**, and its findings still park the PR.
+- **After:** floor under-tiers T3→T0 → ceiling satisfied → **panel also skipped** → both controls fail together.
+
+The panel is currently a *compensating control* for floor accuracy. This change removes that compensation. That is not widening a dependency — it is eliminating a defense-in-depth layer, and the structural-parity framing conceals it.
+
+Options:
 
 | Option | Behaviour | Trade-off |
 |---|---|---|
-| **A. Accept the coupling** | T0 → panel not required. | Simplest, matches the risk-scaled thesis. Concentrates trust in `triage-floor`. |
-| **B. Floor-signal veto** | T0 skips the panel *only if* the floor recorded no signal above T0. | Narrower blast radius; a mixed diff keeps its review. More logic, and the floor already takes the max — this may be a distinction without a difference. |
-| **C. Path-class guard** | T0 skips only when every changed path is in a declared docs-like allowlist. | Strongest, but duplicates classification gate deliberately delegated to `triage-floor`. Two classifiers to keep in sync. |
+| **A. Accept the coupling** | T0 → panel not required. | Simplest, matches the risk-scaled thesis. Removes the compensating control. |
+| **B. Floor-signal veto** | T0 skips the panel *only if* the floor recorded no signal above T0. | **Confirmed ineffective — see below.** |
+| **C. Path-class guard** | T0 skips only when every changed path is in a declared docs-like allowlist. | The real fallback. Strongest, but duplicates classification deliberately delegated to `triage-floor`. Two classifiers to keep in sync. |
 
-**Recommendation: A**, with the mitigation that the compensating control already exists — `triage-floor` takes `-repo` and applies that repo's compiled-in path overrides ([`floor.go`](../../../cmd/gate/internal/verify/floor.go), the "gate-machinery blind spot" control). If the floor under-tiers gate's own machinery, that is a floor bug with a known fix location, and it is *already* load-bearing for the capability ceiling today. This change does not create the dependency on floor accuracy; it widens what that accuracy buys.
+**Option B does not work, and the draft's own parenthetical was right.** `floorResult.Signals` contains only the signals the classifier *recognized*. A path that tricks the classifier into reading code as docs produces a **T0 signal** — it is not silently absent. So "no signal above T0" passes for exactly the same reason option A does. B buys nothing over A. If reviewers want a genuine fallback, it is C.
 
-**Open for the reviewer:** is widening an existing trust dependency materially different from creating one? §10.1.
+**Recommendation: A** — but on an empirical argument, not a structural one. The compensating control's value is proportional to the floor's misclassification rate. The floor's known blind spot (gate's own machinery) is covered by the compiled-in `-repo` path overrides in [`floor.go`](../../../cmd/gate/internal/verify/floor.go), which already exist and are already load-bearing for the capability ceiling. The marginal risk from removing the panel as compensation is bounded by that coverage.
+
+**Open for the reviewer:** is that empirical bound good enough, or does removing a defense-in-depth layer warrant option C regardless of the measured rate? §10.1.
 
 ### 4.2 Hard skip vs. "not required, but still consolidated"
 
@@ -154,6 +165,8 @@ type Declaration struct {
 ```
 
 Additive and optional, so `schema_version` does not bump and every historical panel evidence artifact keeps decoding — the same append-only guarantee pinned by `TestHistoricalVerdictLineStillDecodes` (PR #202).
+
+**Gap surfaced in review.** The field being on the contract type is not sufficient: `fetchExpectedReviewers` currently parses an **anonymous struct** carrying only `require`, so `Declaration.RequireAtTier` would silently stay `""` no matter what `.ship.json` says — and by §8 that reads as "required at every tier", i.e. the feature would appear to do nothing. Fix by having `fetchExpectedReviewers` parse `reviewpanel.Declaration` directly instead of a parallel struct: one type, no drift, and the contract is the parser.
 
 ---
 
@@ -206,7 +219,14 @@ gh("api", fmt.Sprintf("repos/%s/contents/%s", repo, panelDeclarationPath))
 
 with **no `?ref=`**, so GitHub serves the **default branch**, not the PR head. A PR therefore cannot alter the panel it will be judged against — and, once this lands, cannot lower its own `require_at_tier` either. **This is the property that makes the whole design safe, and it is already true.**
 
-It must be pinned by a test, because it is currently an emergent consequence of an omitted parameter rather than an asserted invariant. Adding `?ref=<head>` "for correctness" would silently convert this into a self-service bypass.
+**The signature is the structural invariant.** `fetchExpectedReviewers(repo string)` takes only the repo — the head SHA is not a parameter, so a future developer cannot construct `?ref=<head>` by accident. That is stronger than the draft credited, and it means the test is a guard against two specific regressions rather than the sole defense:
+
+1. someone adds `headSHA string` to the signature "for some other purpose" and then uses it in the URL;
+2. a refactor of how `fetchPanel` calls it reintroduces the parameter implicitly.
+
+**The test must inspect the URL, not the behaviour.** A behavioural test — "the content returned is the default branch's" — passes on `?ref=main` when the default branch is `main`, which is precisely *not* the invariant. Spy on the `gh` call and assert the constructed path carries no ref parameter.
+
+**The comment at the fetch site is load-bearing, not decorative.** A one-line note naming the security property ("no `?ref=` so GitHub serves the default branch; a PR cannot lower its own review bar") is what stops the well-meaning "correctness" fix. Without it, that fix is *more* likely, not less.
 
 ### 7.3 Degraded paths
 
@@ -221,7 +241,7 @@ It must be pinned by a test, because it is currently an emergent consequence of 
 | Condition | Outcome | Why |
 |---|---|---|
 | `require_at_tier` absent | Panel required | Opt-in; no silent behaviour change for any existing repo. |
-| `require_at_tier` malformed | Escalate | A policy that does not parse is not a policy. |
+| `require_at_tier` malformed (`"T1x"`) | Escalate | A policy that does not parse is not a policy. Test this row **explicitly**: the invariant permits either escalate or required, so without a pinned row a later refactor can quietly convert it to "required" and lose the visibility the escalate was chosen for. |
 | Floor tier empty / invalid | Panel required | Absence of signal never reads as low risk. |
 | Panel evidence head ≠ judged head | Escalate | Integrity check precedes policy. |
 | `Unknown` non-empty | Escalate | Unchanged. |
@@ -235,9 +255,9 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 
 | Phase | Goal | High-level tasks | Depends on | Scope |
 |---|---|---|---|---|
-| **P1 — pin the trust path** | Make §7.2 an asserted invariant before anything depends on it. | Test that the declaration is fetched without a `ref` / from the default branch; comment naming why. | — | ~40 LOC, tests only |
+| **P1 — pin the trust path** | Make §7.2 an asserted invariant before anything depends on it. | **URL-inspection** test (not behavioural) asserting the declaration fetch carries no ref parameter; comment at the fetch site naming the security property. | — | ~40 LOC, tests only |
 | **P2 — thread the tier** | Tier reaches the panel rung; behaviour identical. | Add `floorTier` param to `PanelCompleteness` + `reviewVerdictIDs`; pass from the floor verdict; existing tests green unchanged. | P1 | ~60 LOC |
-| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~150 LOC |
+| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **switch `fetchExpectedReviewers` to parse `reviewpanel.Declaration` instead of its anonymous struct** (§5) or the field never populates; §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~150 LOC |
 | **VALIDATION GATE** | Does this actually remove the parks it was built for? | Re-run gate over the last N merged PRs with `backtest`; compare park rate and confirm no PR that *should* have required review passes. | P3 | — |
 | **P4 — adopt** | Turn it on for workbench. | Set `require_at_tier: "T1"` in workbench `.ship.json`; observe. | Gate | ~5 LOC |
 | **P5 — docs** | README + DESIGN describe the policy and its trust path. | `cmd/gate/README.md`, `docs/DESIGN.md`. | P4 | ~60 LOC |
@@ -249,7 +269,7 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 ## 10. Open questions
 
 1. **§4.1** — Is widening an existing trust dependency on `triage-floor` materially different from creating one? If reviewers think yes, option B (floor-signal veto) is the fallback.
-2. **Should `require_at_tier` also gate `review-consolidation`?** §4.2 recommends no — consolidation is governed by `-reviews-optional` and is a different question. But a repo setting `require_at_tier: "T1"` may reasonably expect T0 PRs to skip the paid rung too.
+2. **Should `require_at_tier` also gate `review-consolidation`?** §4.2 recommends no — consolidation is governed by `-reviews-optional` and is a different question. But a repo setting `require_at_tier: "T1"` may reasonably expect T0 PRs to skip the paid rung too. P4 adoption will likely surface this empirically; **record the decision and its reasoning in `docs/DESIGN.md` during P5** so the follow-on PR does not have to reconstruct the argument from scratch.
 3. **Per-reviewer thresholds?** e.g. codex required at T1, claude only at T2. Deferred — no evidence the extra expressiveness is wanted, and it multiplies the policy surface.
 4. **Does the escalation brief need the threshold?** When a PR parks *because* it is at or above the threshold, naming the threshold in the brief might help the judge. Cheap, but speculative until observed.
 
@@ -259,9 +279,10 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 
 **Binary go/no-go**, measured at the gate after P3:
 
+0. **The corpus is diverse enough to measure anything.** Before reading criteria 1–4, confirm the backtest corpus contains at least one recorded run from **each** escalation class: readiness block, floor tier block, panel-completeness park, CI escalate, consolidation escalate. If any class has zero coverage, say so explicitly — a corpus dominated by panel parks (likely, since that is the observed problem) satisfies criterion 2 trivially while exercising none of the paths a defect would live in. **Absent coverage is not evidence of no regression.**
 1. **It removes the parks it targets.** `gate backtest` over the recorded run history: with `require_at_tier: "T1"`, every run whose *only* escalation reason was `review-panel-completeness` at floor tier T0 now passes. Target: that class goes to zero.
-2. **It removes nothing else.** No run that escalated for any other reason changes outcome. Any change outside class (1) is a defect, not a win.
+2. **It removes nothing else.** No run outside class (1) changes from a **non-pass gate outcome to a pass gate outcome**. Measured on the gate *outcome* (exit code / action taken), not on individual rung verdicts — a run that escalated for panel completeness *and* another reason will legitimately show a changed panel verdict while its overall outcome stays parked, and that is not a regression. The looser wording ("changes outcome") also swept in harmless transitions like block→escalate; this is the criterion that must actually be falsifiable.
 3. **Fail-closed holds.** The §8 table passes as an explicit test, including the malformed-policy and invalid-tier rows.
-4. **The trust path is pinned.** P1's test fails if the declaration fetch is ever changed to read the PR head.
+4. **The trust path is pinned.** P1's URL-inspection test fails if the declaration fetch is ever changed to read the PR head.
 
-Failing (2) or (3) means the design is wrong, not that the thresholds need tuning — stop and revisit §4.1.
+Failing (2) or (3) means the design is wrong, not that the thresholds need tuning — stop and revisit §4.1. Failing (0) means the gate has not been measured at all yet.
