@@ -54,6 +54,7 @@ func fetchPanel(pr PRRef, headSHA string, reviews []rawComment, comments []Comme
 }
 
 func fetchExpectedReviewers(repo string) ([]string, string, error) {
+	// Deliberately omit a ref: GitHub serves the default branch, so a PR cannot lower its own review bar.
 	raw, err := gh("api", fmt.Sprintf("repos/%s/contents/%s", repo, panelDeclarationPath))
 	if err != nil {
 		return nil, "", err

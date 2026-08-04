@@ -1,11 +1,104 @@
 package evidence
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_GH_HELPER_PROCESS") == "1" {
+		os.Exit(runFakeGH())
+	}
+	os.Exit(m.Run())
+}
+
+func runFakeGH() int {
+	args := []byte(strings.Join(os.Args[1:], "\n") + "\n")
+	if err := os.WriteFile(os.Getenv("GH_ARGS_FILE"), args, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	response, err := os.ReadFile(os.Getenv("GH_RESPONSE_FILE"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if _, err := os.Stdout.Write(response); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func installFakeGH(t *testing.T, dir string) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	name := "gh"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	destination := filepath.Join(dir, name)
+	if err := os.Link(executable, destination); err == nil {
+		return
+	}
+	binary, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	if err := os.WriteFile(destination, binary, 0o755); err != nil {
+		t.Fatalf("install fake gh executable: %v", err)
+	}
+}
+
+func TestPanelDeclarationFetchCannotSelectARef(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
+	responsePath := filepath.Join(dir, "response.json")
+	declaration := base64.StdEncoding.EncodeToString([]byte(`{"review":{"require":["codex","claude"]}}`))
+	response, err := json.Marshal(contentResponse{
+		SHA: "declaration-sha", Encoding: "base64", Content: declaration,
+	})
+	if err != nil {
+		t.Fatalf("marshal fake gh response: %v", err)
+	}
+	if err := os.WriteFile(responsePath, response, 0o644); err != nil {
+		t.Fatalf("write fake gh response: %v", err)
+	}
+	installFakeGH(t, dir)
+	t.Setenv("GO_WANT_GH_HELPER_PROCESS", "1")
+	t.Setenv("GH_ARGS_FILE", argsPath)
+	t.Setenv("GH_RESPONSE_FILE", responsePath)
+	t.Setenv("PATH", dir)
+
+	expected, revision, err := fetchExpectedReviewers("owner/repo")
+	if err != nil {
+		t.Fatalf("fetch panel declaration: %v", err)
+	}
+	if !slices.Equal(expected, []string{"claude", "codex"}) || revision != "declaration-sha" {
+		t.Fatalf("panel declaration = (%v, %q)", expected, revision)
+	}
+	rawArgs, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake gh arguments: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(rawArgs)), "\n")
+	want := []string{"api", "repos/owner/repo/contents/.ship.json"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("panel declaration must come from the default branch; gh arguments cannot select a ref: got %q, want %q", got, want)
+	}
+}
 
 func TestClassifyPanelPermutations(t *testing.T) {
 	const head = "head"
