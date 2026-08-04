@@ -15,6 +15,8 @@
 > - **v2** — §4.1 argument replaced (the original was refuted), option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
 > - **v3** — the validation instrument was wrong: `gate backtest` re-gathers **live** evidence and does not replay recorded runs, so the gate as written was unmeasurable. Replaced with an offline analysis over `log.jsonl` (§9, §11). Resolved a §7.1/§8 contradiction on `Unknown` + below-threshold that would have had implementers and test authors disagree. Added §10.5 on policy-provenance auditability.
 > - **v4** — v2's own fix was wrong: `.ship.json` (config, nested, `require`) and `Declaration` (evidence, flat, `expected`) are deliberately different shapes, so parsing the contract type directly would have broken `Expected` too — extend the wrapper and keep translating. Also caught that `review-panel-v1.json` sets `additionalProperties:false`, so the schema must gain `require_at_tier` or it rejects every artifact the feature emits. §9 precision: the threshold is a parameter to the analysis, not something historical logs carry.
+> - **v9** — closed a **fail-open this feature would have introduced**: a parseable-but-empty declaration (`require: []` with a threshold) sets the threshold while marking `Unknown:["declaration"]`, so a T0 run reached the shortcut and passed — turning today's malformed-declaration escalation into a pass. Step 2b now escalates on an untrustworthy policy *source* at any tier. §4.2's preferred option is downgraded to unsettled: it relocates the park rather than removing it, and it breaks the §9 analyzer (§10.7).
+> - **v7/v8** — §4.2's recommendation needed a task (`reviewVerdictIDs`' early return) and a criterion that did not contradict it.
 > - **v5/v6** — chased references v3 left stale (§10.1 still asked the refuted question and named the ruled-out option B), then fixed the one that mattered most: §4.2's "soft skip" is a **hard** skip in CI, because the enforced workflow always passes `-reviews-optional` and consolidation never runs. Also: no existing test enforces Go↔schema parity, so v4's claim that conformance would catch an omitted property was false.
 
 ---
@@ -142,7 +144,7 @@ The design must therefore pick explicitly, and cannot have both:
 | | Behaviour in CI | Cost |
 |---|---|---|
 | **Accept hard skip at T0** | No review control at all below the threshold. | Simple, and arguably what "T0" should mean — but it is strictly weaker than today, and §4.2's original justification evaporates. |
-| **Keep consolidation when the panel is skipped** | `-reviews-optional` stops implying "skip consolidation" when the tier is below the threshold. One of the two review controls may be dropped, never both. | **Recommended.** Preserves the property this section exists for. |
+| **Keep consolidation when the panel is skipped** | `-reviews-optional` stops implying "skip consolidation" when the tier is below the threshold. One of the two review controls may be dropped, never both. | **Preferred, but NOT yet settled** — two unresolved problems, §10.7. |
 
 The recommended option carries a cost worth naming: it inverts the spend curve. T0 PRs — the cheapest, lowest-risk ones — become the only PRs paying for the model rung in CI, because higher tiers keep the deterministic panel instead. That is defensible (paying a little on the work you are *not* reviewing is the point) but it is a real change to §4.3's cost story and should not be discovered at adoption. Flagged as an open question in §10.6 for whoever locks the design.
 
@@ -252,7 +254,18 @@ Step 1 stays first: an evidence/head mismatch is a integrity failure and must no
 
 **Step 5 deliberately fires before the `Unknown` check, and that is the intended reading.** Review surfaced the case: floor T0, threshold T1, declaration parsed, but `fetchRequestedReviewers` fails so `panel.Unknown` is populated ([`panel.go:48-50`](../../../cmd/gate/internal/evidence/panel.go)). Step 5 passes and step 6's `Unknown` escalate is never reached. **If the panel is not required at this tier, being unable to determine the panel's state is not a reason to park** — there is no requirement whose satisfaction is in doubt.
 
-The dangerous-looking sibling case is self-protecting: when the *declaration itself* is unreadable, `Unknown` is `["declaration"]` and `Expected` is empty, so `threshold` is `""` and step 2 routes to today's behaviour (required) before step 5 can fire. A run can never skip the panel on a threshold it failed to read.
+**The sibling case is NOT self-protecting, and an earlier draft claimed it was.** The claim: when the declaration is unreadable, `Expected` is empty and `threshold` is `""`, so step 2 routes to "required" before step 5 fires. Review found the hole — a declaration can be *parseable but empty*:
+
+```json
+{ "review": { "require": [], "require_at_tier": "T1" } }
+```
+
+`fetchPanel` parses this successfully, records an empty `Expected`, marks `Unknown: ["declaration"]` ([`panel.go:41-45`](../../../cmd/gate/internal/evidence/panel.go)) — **and, once the translation lands, a populated threshold.** A T0 run then reaches step 5 and passes, converting today's malformed-declaration escalation into a pass. That is a fail-open in the merge boundary, produced by this feature.
+
+The fix is to split what "unknown" means, because the two cases are not alike:
+
+- **The policy source is untrustworthy** (`Unknown` contains `"declaration"`, or `Expected` is empty) → **escalate, before the threshold shortcut**. A threshold read out of a declaration we could not validate is not a policy, and §7.1 gains this as **step 2b**, ahead of step 5.
+- **The panel's state is merely undeterminable** (`Unknown` holds reviewer names — the requested-reviewers fetch failed while the declaration was sound) → below threshold, pass. No requirement is in doubt.
 
 §8's `Unknown` row is qualified accordingly. Getting this wrong in either direction is a real defect: a test author implementing §8 literally would assert `escalate` for `{T0, T1, Unknown:["codex"]}` and the implementation would emit `pass`.
 
@@ -291,8 +304,9 @@ with **no `?ref=`**, so GitHub serves the **default branch**, not the PR head. A
 | `require_at_tier` malformed (`"T1x"`) | Escalate | A policy that does not parse is not a policy. Test this row **explicitly**: the invariant permits either escalate or required, so without a pinned row a later refactor can quietly convert it to "required" and lose the visibility the escalate was chosen for. |
 | Floor tier empty / invalid | Panel required | Absence of signal never reads as low risk. |
 | Panel evidence head ≠ judged head | Escalate | Integrity check precedes policy. Fires regardless of tier. |
-| `Unknown` non-empty **and panel required** (step 5 did not fire) | Escalate | Unchanged. |
-| `Unknown` non-empty **and panel not required** (step 5 fired) | Pass | No requirement is in doubt, so undeterminable panel state is not a park. An unreadable *declaration* cannot reach here — see §7.1. |
+| `Unknown` contains `"declaration"`, or `Expected` empty | Escalate | **At any tier.** The policy source is untrustworthy, so its threshold is not a policy. Step 2b, ahead of the shortcut. |
+| `Unknown` holds reviewer names **and panel required** | Escalate | Unchanged. |
+| `Unknown` holds reviewer names **and panel not required** | Pass | No requirement is in doubt, so undeterminable panel *state* is not a park. |
 | Tier ≥ threshold | Today's checks | Unchanged. |
 
 The invariant to state in the test name: **no input to this rung can turn a would-be escalate into a pass except a valid tier strictly below a valid declared threshold.**
@@ -326,6 +340,11 @@ So the validation is an offline analysis over `log.jsonl`: for each recorded run
 2. **Should `require_at_tier` also gate `review-consolidation`?** §4.2 recommends no — consolidation is governed by `-reviews-optional` and is a different question. But a repo setting `require_at_tier: "T1"` may reasonably expect T0 PRs to skip the paid rung too. P4 adoption will likely surface this empirically; **record the decision and its reasoning in `docs/DESIGN.md` during P5** so the follow-on PR does not have to reconstruct the argument from scratch.
 3. **Per-reviewer thresholds?** e.g. codex required at T1, claude only at T2. Deferred — no evidence the extra expressiveness is wanted, and it multiplies the policy surface.
 4. **Does the escalation brief need the threshold?** When a PR parks *because* it is at or above the threshold, naming the threshold in the brief might help the judge. Cheap, but speculative until observed.
+7. **The conditional-consolidation option is not implementable as stated — resolve before P3.** Review surfaced two problems with §4.2's preferred option, and neither has an answer yet:
+   - **It relocates the park rather than removing it.** `verify.Reviews` escalates when there are no eligible bot comments ([`reviews.go:140-145`](../../../cmd/gate/internal/verify/reviews.go)). The common case this feature targets — a T0 PR with no reviews and no comments — would skip the panel and then park on consolidation instead. Extraction failures and low-confidence non-actionable comments park too. The skipped-panel path needs its own consolidation semantics (an empty comment set is a *pass* there, not an escalate), or the option delivers nothing.
+   - **It breaks the §9 validation instrument.** Once consolidation is conditional, the outcome stops being a pure function of `(floorTier, threshold, panel evidence)`: `verify.Reviews` consumes recorded comments and calls the model per comment, and historical `-reviews-optional` runs stored no consolidation verdict to reuse. An analyzer over those three inputs alone cannot produce the pass-vs-consolidation-escalate split criterion 1 now requires. Either the analyzer must replay consolidation over the recorded comments, or criterion 1 must be measurable without that split.
+
+   Until both are answered, §4.2's table is a live choice, not a recommendation. Hard-skip remains selectable and is the cheaper answer if these prove expensive.
 6. **Does T0 pay for consolidation in CI?** §4.2's recommended option means `-reviews-optional` stops implying "skip consolidation" when the tier is below the threshold — so T0 PRs become the only ones paying for the model rung in the enforced path, while higher tiers keep the deterministic panel. Defensible (you pay a little on the work you are *not* reviewing), but it inverts the spend curve and should be locked deliberately, not discovered at P4.
 5. **Retrospective auditability of a skip.** `Declaration.Revision` carries the **blob SHA** returned by the contents API, which identifies content but not the branch or commit it came from. So state alone cannot prove a given skip used *default-branch* policy — the live path is guarded by §7.2's URL-inspection test, but the recorded evidence does not carry the default-branch HEAD at fetch time. Recording it alongside the blob SHA would close this. Not a blocker; it only matters if retrospective audit of policy provenance becomes a requirement. Noted in P1.
 
