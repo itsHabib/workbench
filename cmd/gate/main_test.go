@@ -1376,11 +1376,74 @@ func TestJudgeSlotStateReportsWhetherTheOneShotWasSpent(t *testing.T) {
 		t.Fatalf("first judgment: %v", err)
 	}
 	jdg := firstOfKind(t, e, run, state.KindJudgment)
-	spent := judgeSlotState(e, run, esc.ID, cause)
-	for _, want := range []string{jdg.ID, "already recorded", "cannot replace"} {
-		if !strings.Contains(spent.Error(), want) {
-			t.Fatalf("post-append error = %v\nwant it to name %q", spent, want)
+	settled := judgeSlotState(e, run, esc.ID, cause)
+	for _, want := range []string{jdg.ID, "already produced an outcome", "judgment_duplicate"} {
+		if !strings.Contains(settled.Error(), want) {
+			t.Fatalf("settled-judgment error = %v\nwant it to name %q", settled, want)
 		}
+	}
+	if strings.Contains(settled.Error(), "a retry resumes") {
+		t.Fatalf("a settled park was advertised as resumable: %v", settled)
+	}
+}
+
+// A spent slot means two different things, and only one of them is retryable:
+// finishJudgment RESUMES a judgment whose reduction never reached an outcome,
+// and refuses one that did. Pinned against finishJudgment's own precondition so
+// the advice cannot drift from the behaviour it describes.
+func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 130, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+
+	// A judgment with no reduction yet is the resumable state — the same one
+	// finishJudgment drives to an outcome rather than refusing.
+	judgment := verify.Verdict{
+		Subject:    subject,
+		Source:     "operator-judgment",
+		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision:   verify.DecisionPass,
+		Tier:       "T0",
+		Confidence: 1,
+		Why:        "safe",
+	}
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantArt.ID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if judgmentSettled(arts, jArt.ID) {
+		t.Fatal("a judgment with no reduced verdict reported as settled")
+	}
+	resumable := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	if !strings.Contains(resumable.Error(), "a retry resumes") {
+		t.Fatalf("resumable error = %v\nwant it to say a retry resumes", resumable)
+	}
+
+	// Driving it to an outcome flips the same slot to settled.
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	arts, err = e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !judgmentSettled(arts, jArt.ID) {
+		t.Fatal("a judgment that produced an outcome reported as resumable")
 	}
 }
 

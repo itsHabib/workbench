@@ -1103,7 +1103,25 @@ func judgeSlotState(e env, run, escalationID string, cause error) error {
 	if !ok {
 		return fmt.Errorf("%w; no judgment is recorded for %s — the one judgment is unspent and a retry is legal", cause, escalationID)
 	}
-	return fmt.Errorf("%w; judgment %s is already recorded for %s — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
+	if judgmentSettled(arts, judgment.ID) {
+		return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate", cause, judgment.ID, escalationID)
+	}
+	return fmt.Errorf("%w; judgment %s is recorded for %s but produced no outcome — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
+}
+
+// judgmentSettled reports whether a recorded judgment already drove the run to
+// an outcome. It is the difference between the two things a spent slot can
+// mean: finishJudgment RESUMES a judgment whose reduction never reached an
+// outcome, and refuses one that did with judgment_duplicate. Collapsing them
+// would send an operator to retry a settled park and meet the same refusal —
+// the confidently-wrong advice this annotation exists to replace. It reads the
+// same two artifacts finishJudgment reads, so the two cannot disagree.
+func judgmentSettled(arts []state.Artifact, judgmentID string) bool {
+	reduced, ok := artifactForParent(arts, state.KindVerdict, judgmentID)
+	if !ok {
+		return false
+	}
+	return hasOutcomeFor(arts, reduced.ID)
 }
 
 // applyJudgment records a decision against a run's parked escalation and returns

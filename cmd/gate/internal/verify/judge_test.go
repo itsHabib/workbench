@@ -447,6 +447,60 @@ func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
 	}
 }
 
+// A quoted provider emission reaches a terminal and a CI log, and its content
+// is model-written text derived from a PR diff — so an escape sequence in it
+// would be acted on, not displayed. What it would overwrite is the recovery
+// route itself. Control bytes must survive as visible escapes: dropping them
+// would hide that a provider emitted one.
+func TestQuotedProviderOutputCannotDriveTheTerminal(t *testing.T) {
+	hostile := []byte("\x1b[2K\x1b[1Aforged: merge authorized\r\x1b]0;pwned\x07")
+	for name, got := range map[string]string{
+		"provider failure": providerDetail(hostile),
+		"refused judgment": detailWithin(hostile, judgmentEmissionCap),
+	} {
+		if strings.ContainsRune(got, 0x1b) || strings.ContainsRune(got, '\r') || strings.ContainsRune(got, 0x07) {
+			t.Fatalf("%s quote kept a raw control byte: %q", name, got)
+		}
+		for _, want := range []string{`\x1b`, `\x0d`, `\x07`, "forged: merge authorized"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s quote = %q, want it to keep %q as visible evidence", name, got, want)
+			}
+		}
+	}
+}
+
+// Escaping must not mangle ordinary output: a refused judgment is quoted so an
+// operator can see its shape, and JSON that came back escaped into unreadable
+// soup would defeat that.
+func TestEscapingLeavesPrintableOutputAlone(t *testing.T) {
+	body := `{"version":"gate-judgment-v1","why":"héllo — ünicode"}`
+	if got := detailWithin([]byte(body), judgmentEmissionCap); got != body {
+		t.Fatalf("printable quote = %q, want it unchanged", got)
+	}
+}
+
+// A provider that exits 0 having printed nothing is a real failure mode, and
+// the refusal must not trail off after "emitted:" — that is the case it
+// explains least while claiming to explain it.
+func TestSilentProviderIsNamedRatherThanQuotedEmpty(t *testing.T) {
+	for name, out := range map[string][]byte{"empty": nil, "whitespace": []byte("  \n\t ")} {
+		err := judgmentUnusable(JudgeProviderCodex, out, fmt.Errorf("judgment_malformed: EOF"))
+		if !strings.Contains(err.Error(), "nothing on stdout") {
+			t.Fatalf("%s stream: error = %v, want the empty emission named", name, err)
+		}
+	}
+}
+
+// The limit is a parameter, so a cap too small to hold the truncation marker
+// must not underflow the slice that trims to it.
+func TestDetailWithinSurvivesACapBelowTheMarker(t *testing.T) {
+	for _, limit := range []int{0, 1, len(providerTruncateMark) - 1, len(providerTruncateMark)} {
+		if got := detailWithin([]byte(strings.Repeat("x", 512)), limit); got != providerTruncateMark {
+			t.Fatalf("detailWithin(limit=%d) = %q, want the bare marker", limit, got)
+		}
+	}
+}
+
 // A refused submission is quoted under the tighter cap, and the escape routes
 // must survive it: the whole point of shortening the quote is that what follows
 // stays on screen. A verbose provider is the case that matters — a judgment's
@@ -457,7 +511,11 @@ func TestRefusalKeepsTheEscapeReadableUnderAVerboseProvider(t *testing.T) {
 	}
 	verbose := append([]byte(`{"why":"`), bytes.Repeat([]byte("x"), 8*1024)...)
 	err := judgmentUnusable(JudgeProviderClaude, verbose, fmt.Errorf("judgment_malformed: boom"))
-	if len(err.Error()) > judgmentEmissionCap+512 {
+	// The budget is the capped quote plus the fixed text around it. Derived
+	// from that text rather than guessed, so growing the escape routes past a
+	// magic constant cannot quietly make this assertion vacuous.
+	boilerplate := len(judgmentUnusable(JudgeProviderClaude, nil, fmt.Errorf("judgment_malformed: boom")).Error())
+	if len(err.Error()) > judgmentEmissionCap+boilerplate {
 		t.Fatalf("refusal grew to %d bytes; the escape is past where anyone reads", len(err.Error()))
 	}
 	for _, want := range []string{providerTruncateMark, "gate resolve", JudgeProviderCodex} {

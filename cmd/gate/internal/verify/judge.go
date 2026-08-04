@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
@@ -417,8 +418,20 @@ func judgmentUnusable(provider string, out []byte, err error) error {
 		"%w; %s's output is a fresh sample, so retry -provider %s, or cross to -provider %s, "+
 			"or resolve by hand: console -> escalate -> gate resolve; %s emitted: %s",
 		err, provider, provider, otherJudgeProvider(provider), provider,
-		detailWithin(out, judgmentEmissionCap),
+		judgmentEmission(out),
 	)
+}
+
+// judgmentEmission names an empty stream rather than quoting it. A provider
+// that exits 0 having printed nothing reaches this path too — the decode error
+// is a bare EOF — and an empty quote leaves the message trailing off after
+// "emitted:", which is least useful in exactly the case it explains least.
+func judgmentEmission(out []byte) string {
+	quoted := detailWithin(out, judgmentEmissionCap)
+	if quoted == "" {
+		return "nothing on stdout"
+	}
+	return quoted
 }
 
 // otherJudgeProvider names the independent path still open when one provider's
@@ -471,14 +484,45 @@ func providerDetail(stream []byte) string {
 }
 
 func detailWithin(stream []byte, limit int) string {
-	detail := strings.TrimSpace(string(stream))
+	detail := escapeControls(strings.TrimSpace(string(stream)))
 	if len(detail) <= limit {
 		return detail
+	}
+	// A budget at or below the marker leaves nothing to spend on the quote, and
+	// the slice below would underflow. Both callers pass caps far above it, but
+	// the limit is a parameter now and a third cap should not have to know
+	// this.
+	if limit <= len(providerTruncateMark) {
+		return providerTruncateMark
 	}
 	// The marker is part of the budget, and the cut can land mid-rune —
 	// provider output is arbitrary bytes, not guaranteed UTF-8.
 	kept := strings.ToValidUTF8(detail[:limit-len(providerTruncateMark)], "")
 	return kept + providerTruncateMark
+}
+
+// escapeControls renders untrusted provider bytes safe to print. Provider
+// output is model-written text derived from a PR diff, so it can carry ANSI or
+// OSC sequences — and a terminal acts on those: they can erase or overwrite the
+// lines around them. What they would be forging here is the operator's recovery
+// route, which is exactly the text worth forging, so the quote is escaped
+// before it is ever handed to a terminal or a CI log.
+//
+// Escaped, not stripped: the bytes are evidence. `\x1b` says a provider emitted
+// an escape sequence, where a dropped byte or a replacement rune would hide it.
+// Printable runes pass through untouched, so a quoted JSON body still reads as
+// JSON, and the cap in detailWithin bounds the expansion.
+func escapeControls(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "\\x%02x", r)
+	}
+	return b.String()
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {
