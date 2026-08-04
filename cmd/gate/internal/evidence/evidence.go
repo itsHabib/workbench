@@ -83,10 +83,17 @@ type ReviewStance struct {
 	IsBot  bool   `json:"is_bot"`
 	// Association is GitHub's author_association for the reviewer on this
 	// repository: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, and so on.
-	// It is the repository-authority signal, and it is load-bearing on a PUBLIC
-	// repo — anyone at all may submit a review there, and the reviews API
-	// reports every one of them as user.type "User".
+	// Recorded for provenance — it is NOT the authority signal. An org member
+	// with base read access reports MEMBER, and an outside collaborator with
+	// read or triage access reports COLLABORATOR; both may submit an APPROVED
+	// review while holding no write authority at all.
 	Association string `json:"association"`
+	// Permission is the reviewer's EFFECTIVE repository permission as GitHub
+	// computes it — admin, write, read, or none. This is the authority signal.
+	// The legacy field already collapses maintain into write and triage into
+	// read, which is exactly the boundary that matters. Empty means it could
+	// not be established, which consumers must treat as no authority.
+	Permission string `json:"permission"`
 	// State is the submission state: APPROVED, CHANGES_REQUESTED, or COMMENTED.
 	State string `json:"state"`
 	// CommitID is the commit the review was submitted against. A consumer that
@@ -173,7 +180,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.Panel = a.ID
 	a, err = st.Append(state.KindEvidence, run, nil,
-		stancesBody{PR: pr, Stances: reviewStances(reviews)})
+		stancesBody{PR: pr, Stances: withPermissions(pr, reviewStances(reviews))})
 	if err != nil {
 		return b, err
 	}
@@ -181,14 +188,25 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	return b, nil
 }
 
+// decisiveReviewState reports whether a submission state states a position on
+// whether the PR may merge. APPROVED and CHANGES_REQUESTED do; COMMENTED does
+// NOT — GitHub is unambiguous that commenting after approving does not withdraw
+// the approval — and DISMISSED is withdrawn evidence. Treating COMMENTED as a
+// position would let a reviewer silently lose their own approval by adding a
+// remark, and would let a comment hide someone else's outstanding objection.
+func decisiveReviewState(state string) bool {
+	return state == "APPROVED" || state == "CHANGES_REQUESTED"
+}
+
 // reviewStances reduces a PR's review submissions (oldest-first) to each
-// author's current position — their latest non-dismissed submission. It records
-// what each reviewer said and which commit they said it about; it decides
-// nothing.
+// author's current position — their latest DECISIVE submission. It records what
+// each reviewer said, which commit they said it about, and what authority they
+// hold; it decides nothing. Reviewers who have only commented hold no position
+// and do not appear.
 func reviewStances(reviews []rawComment) []ReviewStance {
 	latest := map[string]int{}
 	for i, rv := range reviews {
-		if rv.State == "DISMISSED" {
+		if !decisiveReviewState(rv.State) {
 			continue
 		}
 		latest[rv.User.Login] = i
@@ -291,6 +309,47 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	}
 	out = append(out, reviewBodies(reviews)...)
 	return out, nil
+}
+
+// withPermissions stamps each human stance with its author's effective
+// repository permission — the authority signal readiness needs, and the one
+// author_association cannot supply (read-access members still report MEMBER).
+//
+// A failed lookup records no permission rather than failing the run: a reviewer
+// who is not a collaborator legitimately has none, and GitHub answers that case
+// with an error rather than a value. Both land as "no authority", which costs an
+// escalation and never a merge. Bots are skipped — they are excluded from the
+// human-approval path by construction, and asking about them wastes a call.
+func withPermissions(pr PRRef, stances []ReviewStance) []ReviewStance {
+	seen := make(map[string]string, len(stances))
+	for i, s := range stances {
+		if s.IsBot || s.Author == "" {
+			continue
+		}
+		perm, ok := seen[s.Author]
+		if !ok {
+			perm = fetchPermission(pr, s.Author)
+			seen[s.Author] = perm
+		}
+		stances[i].Permission = perm
+	}
+	return stances
+}
+
+// fetchPermission returns the user's effective permission, or "" when it cannot
+// be established. It never reports an error: see withPermissions.
+func fetchPermission(pr PRRef, login string) string {
+	raw, err := gh("api", fmt.Sprintf("repos/%s/collaborators/%s/permission", pr.Repo, login))
+	if err != nil {
+		return ""
+	}
+	var body struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ""
+	}
+	return body.Permission
 }
 
 func fetchReviews(pr PRRef) ([]rawComment, error) {

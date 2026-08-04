@@ -93,7 +93,7 @@ func TestReviewStances(t *testing.T) {
 	in := []rawComment{
 		rawReview("mh", "User", "", "sha1", "CHANGES_REQUESTED"),
 		rawReview("mh", "User", "", "sha2", "APPROVED"), // supersedes the above
-		rawReview("codex[bot]", "Bot", "", "sha2", "COMMENTED"),
+		rawReview("codex[bot]", "Bot", "", "sha2", "APPROVED"),
 		rawReview("ghost", "User", "", "sha2", "APPROVED"),
 		rawReview("ghost", "User", "", "sha2", "DISMISSED"), // withdrawn: stance stays the APPROVED above
 	}
@@ -111,7 +111,7 @@ func TestReviewStances(t *testing.T) {
 	if s := byAuthor["mh"]; s.State != "APPROVED" || s.CommitID != "sha2" || s.IsBot {
 		t.Fatalf("latest human stance must win: %+v", s)
 	}
-	if s := byAuthor["codex[bot]"]; !s.IsBot || s.State != "COMMENTED" {
+	if s := byAuthor["codex[bot]"]; !s.IsBot || s.State != "APPROVED" {
 		t.Fatalf("bot stance mis-recorded: %+v", s)
 	}
 	// A DISMISSED submission is withdrawn evidence and must never BE the
@@ -157,5 +157,33 @@ func TestReviewStanceWireKeys(t *testing.T) {
 	}
 	if _, ok := envelope["stances"]; !ok {
 		t.Fatalf("envelope key \"stances\" missing — verify/readiness.go readStances reads it: %s", body)
+	}
+}
+
+// GitHub is unambiguous that a COMMENTED review does not withdraw an approval.
+// The stance reduction must therefore track the latest DECISIVE submission, not
+// the latest submission: otherwise a reviewer who approves and then adds a
+// remark silently loses their own approval, and a comment can hide someone
+// else's outstanding change request.
+func TestReviewStancesIgnoreCommentOnlyReviews(t *testing.T) {
+	got := reviewStances([]rawComment{
+		rawReview("mh", "User", "", "sha1", "APPROVED"),
+		rawReview("mh", "User", "one more thought", "sha1", "COMMENTED"),
+		rawReview("blocker", "User", "", "sha1", "CHANGES_REQUESTED"),
+		rawReview("blocker", "User", "still thinking", "sha1", "COMMENTED"),
+		rawReview("chatty", "User", "just a note", "sha1", "COMMENTED"),
+	})
+	byAuthor := make(map[string]ReviewStance, len(got))
+	for _, s := range got {
+		byAuthor[s.Author] = s
+	}
+	if s := byAuthor["mh"]; s.State != "APPROVED" {
+		t.Fatalf("a later comment must not withdraw an approval: %+v", s)
+	}
+	if s := byAuthor["blocker"]; s.State != "CHANGES_REQUESTED" {
+		t.Fatalf("a later comment must not clear a change request: %+v", s)
+	}
+	if s, ok := byAuthor["chatty"]; ok {
+		t.Fatalf("a comment-only reviewer holds no position and must not appear: %+v", s)
 	}
 }

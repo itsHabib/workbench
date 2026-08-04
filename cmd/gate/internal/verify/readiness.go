@@ -59,24 +59,29 @@ type reviewStance struct {
 	Author      string `json:"author"`
 	IsBot       bool   `json:"is_bot"`
 	Association string `json:"association"`
+	Permission  string `json:"permission"`
 	State       string `json:"state"`
 	CommitID    string `json:"commit_id"`
 }
 
-// authoritativeAssociations are the GitHub author_association values that carry
-// repository authority. On a PUBLIC repository — which this one is — any GitHub
-// user may submit an APPROVED review, and the reviews API reports every one of
-// them as user.type "User". Non-bot is therefore NOT a trust signal; without
-// this check a stranger's approval, or a second account, could satisfy readiness
-// whenever reviewDecision is empty.
+// authoritativePermissions are the effective repository permissions that carry
+// authority over what may merge. On a PUBLIC repository — which this one is —
+// any GitHub user may submit an APPROVED review, so "not a bot" is no trust
+// signal at all.
 //
-// The set is a closed allow-list. CONTRIBUTOR is deliberately absent: having
-// landed a patch before is not authority over what may merge now. Anything not
-// named here — including any value this code does not know — is unauthorized.
-var authoritativeAssociations = map[string]bool{
-	"OWNER":        true,
-	"MEMBER":       true,
-	"COLLABORATOR": true,
+// author_association is NOT sufficient here and an earlier revision wrongly used
+// it: an organization member with base read access still reports MEMBER, and an
+// outside collaborator with read or triage access still reports COLLABORATOR,
+// and read access is enough to approve. Only the effective permission answers
+// "may this account decide what merges".
+//
+// GitHub's legacy permission field already collapses maintain into write and
+// triage into read, which is exactly the line that matters. The set is a closed
+// allow-list: read, none, empty (lookup failed), and any value this code does
+// not know are all unauthorized. Fail closed.
+var authoritativePermissions = map[string]bool{
+	"admin": true,
+	"write": true,
 }
 
 // approvalStateApproved is the review submission state that counts. Anything
@@ -99,9 +104,10 @@ const approvalStateChangesRequested = "CHANGES_REQUESTED"
 //
 // Conditions, each load-bearing:
 //
-//   - the approver holds repository authority (authoritativeAssociations).
+//   - the approver holds write or admin permission (authoritativePermissions).
 //     "Not a bot" is not trust: on a public repo anyone may review, and they
-//     all report as user.type "User".
+//     all report as user.type "User". Nor is author_association — read-access
+//     members report MEMBER and can approve.
 //
 //   - no human's CURRENT stance is CHANGES_REQUESTED. On a protected repo
 //     GitHub would fold this into reviewDecision and readinessBlocks would
@@ -146,7 +152,7 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 		if s.Author == "" || s.Author == prAuthor {
 			continue
 		}
-		if !authoritativeAssociations[s.Association] {
+		if !authoritativePermissions[s.Permission] {
 			continue
 		}
 		return s.Author, true
@@ -272,13 +278,24 @@ func readStances(st *state.Store, id string) ([]reviewStance, error) {
 	if err != nil {
 		return nil, err
 	}
+	// RawMessage distinguishes an ABSENT key from an explicit null. A plain
+	// slice cannot: schema drift or a wrong evidence id would decode cleanly to
+	// nil and readiness would report "no review decision" — an infrastructure
+	// failure wearing the costume of a policy decision.
 	var body struct {
-		Stances []reviewStance `json:"stances"`
+		Stances json.RawMessage `json:"stances"`
 	}
 	if err := json.Unmarshal(a.Body, &body); err != nil {
 		return nil, fmt.Errorf("verify: parse stance evidence: %w", err)
 	}
-	return body.Stances, nil
+	if body.Stances == nil {
+		return nil, fmt.Errorf("verify: stance evidence %s carries no stances field", id)
+	}
+	var stances []reviewStance
+	if err := json.Unmarshal(body.Stances, &stances); err != nil {
+		return nil, fmt.Errorf("verify: parse stances: %w", err)
+	}
+	return stances, nil
 }
 
 // readinessBlocks computes the hard blocks from a PR view and the count of
