@@ -1,6 +1,9 @@
 package evidence
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func rawReview(login, typ, body, commit, state string) rawComment {
 	var rc rawComment
@@ -78,5 +81,63 @@ func TestReviewBodiesAllDismissedOrEmpty(t *testing.T) {
 	}
 	if out := reviewBodies(in); len(out) != 0 {
 		t.Fatalf("an author with only dismissed/empty reviews contributes nothing, got %+v", out)
+	}
+}
+
+// reviewStances feeds readiness's human-approval check, which trusts two
+// properties of this reduction: a DISMISSED review never becomes anyone's
+// stance, and only each author's LATEST submission does. Pin both directly —
+// end-to-end coverage would not say which one broke.
+func TestReviewStances(t *testing.T) {
+	// Oldest-first, as the reviews endpoint returns them.
+	in := []rawComment{
+		rawReview("mh", "User", "", "sha1", "CHANGES_REQUESTED"),
+		rawReview("mh", "User", "", "sha2", "APPROVED"), // supersedes the above
+		rawReview("codex[bot]", "Bot", "", "sha2", "COMMENTED"),
+		rawReview("ghost", "User", "", "sha2", "APPROVED"),
+		rawReview("ghost", "User", "", "sha2", "DISMISSED"), // withdrawn: stance stays the APPROVED above
+	}
+	got := reviewStances(in)
+	byAuthor := make(map[string]ReviewStance, len(got))
+	for _, s := range got {
+		if _, dup := byAuthor[s.Author]; dup {
+			t.Fatalf("author %s appears twice: %+v", s.Author, got)
+		}
+		byAuthor[s.Author] = s
+	}
+	if len(byAuthor) != 3 {
+		t.Fatalf("expected one stance per author, got %+v", got)
+	}
+	if s := byAuthor["mh"]; s.State != "APPROVED" || s.CommitID != "sha2" || s.IsBot {
+		t.Fatalf("latest human stance must win: %+v", s)
+	}
+	if s := byAuthor["codex[bot]"]; !s.IsBot || s.State != "COMMENTED" {
+		t.Fatalf("bot stance mis-recorded: %+v", s)
+	}
+	// A DISMISSED submission is withdrawn evidence and must never BE the
+	// stance; the author's prior non-dismissed review remains their position.
+	if s := byAuthor["ghost"]; s.State != "APPROVED" {
+		t.Fatalf("dismissed review must not become the stance: %+v", s)
+	}
+}
+
+// The stance artifact is read by verify through JSON alone — the two packages
+// never import each other. Pin the wire keys so a rename on this side cannot
+// silently stop satisfying readiness on the other.
+func TestReviewStanceWireKeys(t *testing.T) {
+	raw, err := json.Marshal(reviewStances([]rawComment{
+		rawReview("mh", "User", "", "sha1", "APPROVED"),
+	})[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"author", "is_bot", "state", "commit_id"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("stance wire key %q missing — verify/readiness.go reads it: %s", key, raw)
+		}
 	}
 }

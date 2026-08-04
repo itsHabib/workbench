@@ -67,8 +67,12 @@ type reviewStance struct {
 // not an approval. Fail closed.
 const approvalStateApproved = "APPROVED"
 
+// approvalStateChangesRequested is an outstanding human objection. It is not
+// merely "not an approval": it must suppress someone else's approval too.
+const approvalStateChangesRequested = "CHANGES_REQUESTED"
+
 // humanApprovalAtHead reports the login of a human who has APPROVED this exact
-// head, if one exists.
+// head with no human change request outstanding, if one exists.
 //
 // This is the readiness signal GitHub's reviewDecision is meant to carry and
 // does not: GitHub reports reviewDecision as null whenever branch protection
@@ -76,7 +80,14 @@ const approvalStateApproved = "APPROVED"
 // that requires none — every portfolio repo — an operator's explicit approval
 // was therefore invisible, and readiness escalated on every PR forever.
 //
-// Three conditions, each load-bearing:
+// Conditions, each load-bearing:
+//   - no human's CURRENT stance is CHANGES_REQUESTED. On a protected repo
+//     GitHub would fold this into reviewDecision and readinessBlocks would
+//     catch it — but this path exists precisely because reviewDecision is
+//     null, so nothing else would. One human approving does not clear
+//     another's outstanding objection, at any head: a change request stands
+//     until its author withdraws or supersedes it, and the safe answer to
+//     "approved by one, objected by another" is to escalate, not to pick.
 //   - the stance is APPROVED (not merely submitted)
 //   - it was submitted against headSHA — a new commit is new code, and an
 //     approval of earlier code is not an approval of this one
@@ -87,6 +98,11 @@ const approvalStateApproved = "APPROVED"
 func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (string, bool) {
 	if headSHA == "" {
 		return "", false
+	}
+	for _, s := range stances {
+		if !s.IsBot && s.State == approvalStateChangesRequested {
+			return "", false
+		}
 	}
 	for _, s := range stances {
 		if s.IsBot || s.State != approvalStateApproved || s.CommitID != headSHA {
@@ -137,6 +153,15 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	}
 	approver, humanApproved := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login)
 
+	// A verdict's parents name the evidence it judged (the artifact contract).
+	// Stance evidence is judged whenever it was supplied — not only when it
+	// changed the outcome — so provenance traversal can reach what readiness
+	// actually read, without inferring it from the verdict text.
+	parents := []string{viewEvidenceID}
+	if stancesEvidenceID != "" {
+		parents = append(parents, stancesEvidenceID)
+	}
+
 	v := Verdict{
 		Subject:    subject,
 		Source:     "readiness",
@@ -152,7 +177,7 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 		for _, b := range blocks {
 			v.Findings = append(v.Findings, Finding{Title: b, Severity: "block"})
 		}
-		art, err := Record(st, run, []string{viewEvidenceID}, v)
+		art, err := Record(st, run, parents, v)
 		return art, subject, err
 	}
 	// Absence of signal must not read as green. An empty rollup means CI
@@ -176,7 +201,7 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	if len(escalations) > 0 {
 		v.Decision = DecisionEscalate
 		v.Why = strings.Join(escalations, "; ") + " — cannot verify readiness"
-		art, err := Record(st, run, []string{viewEvidenceID}, v)
+		art, err := Record(st, run, parents, v)
 		return art, subject, err
 	}
 	v.Why = fmt.Sprintf("state=%s draft=%v mergeable=%s checks=%d green",
@@ -192,7 +217,7 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	case reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "":
 		v.Why += "; reviews-optional: absent GitHub review decision accepted"
 	}
-	art, err := Record(st, run, []string{viewEvidenceID}, v)
+	art, err := Record(st, run, parents, v)
 	return art, subject, err
 }
 

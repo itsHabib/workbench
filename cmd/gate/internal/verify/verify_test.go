@@ -909,11 +909,121 @@ func TestReadinessHumanApprovalDoesNotOverrideChangesRequested(t *testing.T) {
 	}
 }
 
+// One human's approval does not clear another human's outstanding change
+// request. On a protected repo GitHub folds this into reviewDecision; this path
+// exists because it does not, so nothing else would catch it.
+func TestReadinessApprovalDoesNotClearAnotherHumansChangeRequest(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "reviewer-a", "is_bot": false, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "reviewer-b", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("approval must not clear an outstanding change request, got %s (%s)", v.Decision, v.Why)
+	}
+
+	// Also when the objection was raised at an older head: a change request
+	// stands until its author withdraws or supersedes it.
+	v = readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "reviewer-a", "is_bot": false, "state": "CHANGES_REQUESTED", "commit_id": "oldhead"},
+		{"author": "reviewer-b", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("stale change request must still suppress the approval, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// A bot's CHANGES_REQUESTED is a finding, not a human objection, and must not
+// suppress a human approval — findings have their own rung.
+func TestReadinessBotChangeRequestDoesNotSuppressHumanApproval(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("bot findings must not suppress human readiness, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// Stance evidence is what carried an approval-derived pass, so the verdict must
+// name it as a parent — provenance traversal has to reach the evidence judged
+// without parsing the verdict text.
+func TestReadinessVerdictParentsIncludeStanceEvidence(t *testing.T) {
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": []map[string]any{
+		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStances bool
+	for _, p := range art.Parents {
+		if p == stc.ID {
+			sawStances = true
+		}
+	}
+	if !sawStances {
+		t.Fatalf("stance evidence must be a verdict parent, got parents %v", art.Parents)
+	}
+}
+
+// Stance evidence that cannot be parsed must be an ERROR, never read as
+// "nobody approved" — that would silently downgrade a pass to an escalation and
+// look like a policy decision rather than a broken read.
+func TestReadinessMalformedStanceEvidenceIsAnError(t *testing.T) {
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": "not-a-list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false); err == nil {
+		t.Fatal("malformed stance evidence must return an error, not read as no approval")
+	}
+}
+
 // Absent stance evidence must behave exactly as readiness did before stances
-// existed — no silent change for a caller that records none.
+// existed — both when the caller records an EMPTY id (nothing gathered) and
+// when it records an artifact carrying no stances.
 func TestReadinessWithoutStanceEvidenceIsUnchanged(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("abc123"), nil)
 	if v.Decision != DecisionEscalate {
-		t.Fatalf("no stances must escalate as before, got %s (%s)", v.Decision, v.Why)
+		t.Fatalf("empty stance list must escalate as before, got %s (%s)", v.Decision, v.Why)
+	}
+
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != DecisionEscalate {
+		t.Fatalf("absent stance evidence id must escalate as before, got %s (%s)", got.Decision, got.Why)
 	}
 }
