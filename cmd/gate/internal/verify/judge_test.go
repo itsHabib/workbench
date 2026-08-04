@@ -484,7 +484,7 @@ func TestNoUnprintableRuneSurvivesAQuote(t *testing.T) {
 	property := func(runes []rune) bool {
 		got := detailWithin([]byte(string(runes)), providerDetailCap)
 		for _, r := range got {
-			if !unicode.IsPrint(r) && r != utf8.RuneError {
+			if !unicode.IsPrint(r) {
 				return false
 			}
 		}
