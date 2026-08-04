@@ -29,9 +29,12 @@ shows up (users tripping on it past the quick-start), consider a distinct
 binary name — operator's call; renaming a CLI is a breaking change to every
 skill that shells to it.
 
-## ~~gate `resolve` open-check→append is not atomic (cross-process double-apply)~~ (2026-08-02, codex P1 on #137)
+## gate `resolve` open-check→append is not atomic (cross-process double-apply) — PARTIALLY CLOSED (2026-08-02, codex P1 on #137; scope corrected by codex P1s on #210)
 
-**Done.** The note called for "a single append that fails if the run's terminal
+**Partially closed.** The same-run case is fixed; two variants remain open and are
+named below. Do not read this entry as done.
+
+The note called for "a single append that fails if the run's terminal
 moved" — and by the time it was written that primitive already existed:
 `state.AppendIfAbsentParentWhereAfterAudit` evaluates a caller `check` against
 the audit snapshot *while holding the store lock* (it landed with the
@@ -52,7 +55,38 @@ serve process on the same `-state`, and a CLI resolve racing an HTTP callback.
 Note the uniqueness guard was never sufficient here on its own: it is keyed on
 the escalation id, so it stops a *second judgment for the same park* but not a
 judgment landing against a park a concurrent re-park had already superseded.
-That second case is what this closes.
+That second case, **within one run**, is what this closes.
+
+### Still open (1): the open-park notion is run-scoped; the inbox's is subject-scoped
+
+`newestTerminal` filters by run, matching the pre-existing `escalationIsOpen`.
+`observe.parkedRuns` does not: it folds per run and *then* reduces by subject —
+`key := "<repo>#<number>"`, newest `order` wins (`inbox.go:539-556`). So when one
+PR has been gated repeatedly, resolving a stale escalation on the older run passes
+the run-scoped check, appends an action at the end of the log, and that action
+becomes the subject's newest terminal — suppressing the genuinely newer park from
+both inbox projections.
+
+This predates the fix (main's `escalationIsOpen` was already run-scoped), so it is
+a scope limitation rather than a regression. The durable fix is to stop having
+three copies of "is this park open": `cmdResolve`'s pre-check, the locked check,
+and `parkedRuns` each reduce it independently. Extract the subject-scoped
+reduction once and have all three consume it — otherwise they will keep drifting.
+Owner: gate. Surfaced by codex P1 on #210.
+
+### Still open (2): the judgment is linearized, the terminal is not
+
+The locked check guards the *judgment* append. The state transition the inbox
+actually consumes is the terminal `act` append, which happens later in
+`finishJudgment` → `actAfterJudgment` under a separate lock whose predicate is
+`checkNoOpenClaim` — "the subject has no open claim," not "this escalation is
+still the open park." Another run can park for the same PR in that window; the
+resolve's action then lands after it and hides it.
+
+Closing this means carrying the expected-open escalation into the terminal append's
+predicate, which touches the shared `act` path used by ordinary gate runs — a wider
+blast radius than the judgment-only guard, and why it is not in #210. Owner: gate.
+Surfaced by codex P1 on #210.
 
 ## ~~`escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async~~ (2026-07-27, codex P1 on #140)
 
