@@ -540,6 +540,16 @@ func escapeUnprintable(s string) string {
 			continue
 		}
 		i += size
+		// The backslash is the escape syntax's own metacharacter, so it has to
+		// escape itself. Without this, a provider that writes the literal text
+		// \x1b renders identically to one that emitted a real ESC byte, and the
+		// evidence the branches above work to preserve is ambiguous again at
+		// the last step. Doubling it makes the encoding injective: every quote
+		// has exactly one input that produces it.
+		if r == '\\' {
+			b.WriteString(`\\`)
+			continue
+		}
 		if unicode.IsPrint(r) {
 			b.WriteRune(r)
 			continue

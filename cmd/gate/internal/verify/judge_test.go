@@ -497,6 +497,31 @@ func TestInvalidBytesStayDistinctFromAGenuineReplacementRune(t *testing.T) {
 	}
 }
 
+// The escaping has to be injective, or the evidence it preserves is ambiguous
+// at the last step: a provider that writes the literal text `\x1b` must not
+// render the same as one that emitted a real ESC byte. Distinctness across the
+// whole family is the property — pairwise, not one worked example.
+func TestEscapingIsInjectiveAcrossItsOwnSyntax(t *testing.T) {
+	inputs := map[string][]byte{
+		"real ESC byte":      {0x1b},
+		"literal backslash":  []byte(`\`),
+		"provider wrote x1b": []byte(`\x1b`),
+		"provider wrote esc": []byte(`\\x1b`),
+		"real invalid byte":  {0xff},
+		"provider wrote xff": []byte(`\xff`),
+	}
+	rendered := make(map[string]string, len(inputs))
+	for name, in := range inputs {
+		got := detailWithin(in, providerDetailCap)
+		for otherName, other := range rendered {
+			if got == other {
+				t.Fatalf("%q and %q both render as %q — the quote cannot be read back", name, otherName, got)
+			}
+		}
+		rendered[name] = got
+	}
+}
+
 // The guarantee is a property of every rune, not of the handful of attacks
 // thought of so far: nothing unprintable survives into a quote, whatever
 // category it comes from.
