@@ -68,6 +68,12 @@ type V1 struct {
 	// Optional: procedural parks and synthesis failures carry none, and the sink
 	// falls back to the raw Question.
 	Brief *Brief `json:"brief,omitempty"`
+	// Escape is the runnable route Gate printed for this park. It is carried in
+	// the hashed body so a later reader can reconstruct the same next step from
+	// state alone rather than trusting terminal scrollback.
+	Escape     *Escape `json:"escape,omitempty"`
+	SelfGated  bool    `json:"self_gated,omitempty"`
+	RetryHelps *bool   `json:"retry_helps,omitempty"`
 	// Resolution is the closed-loop stamp — decision, who, when, and the judgment
 	// it produced. It is NEVER written into the park artifact: the log is
 	// append-only, so the park is immutable. The back-channel appends a STANDALONE
@@ -76,6 +82,13 @@ type V1 struct {
 	// escalation. So it is absent on every real park body today; a projection is
 	// the only thing that ever populates it (deferred — see the plane spec).
 	Resolution *Resolution `json:"resolution,omitempty"`
+}
+
+// Escape is objective terminal guidance recorded by Gate: why this route does
+// not pass through the failed component and the one command to run next.
+type Escape struct {
+	Why  string `json:"why"`
+	Next string `json:"next"`
 }
 
 // Brief is the one-screen page an escalation carries for a zero-context

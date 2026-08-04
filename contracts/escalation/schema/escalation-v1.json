@@ -33,6 +33,18 @@
         "recommendation": { "type": "string" }
       }
     },
+    "escape": {
+      "type": "object",
+      "description": "The runnable route Gate printed for this park, sealed into the artifact body so state alone can reconstruct the next step.",
+      "required": ["why", "next"],
+      "additionalProperties": false,
+      "properties": {
+        "why": { "type": "string" },
+        "next": { "type": "string" }
+      }
+    },
+    "self_gated": { "type": "boolean", "description": "True when repairing this terminal state requires changing the automated component that failed." },
+    "retry_helps": { "type": "boolean", "description": "Whether repeating the identical invocation can change this terminal state." },
     "resolution": {
       "type": "object",
       "description": "The closed-loop stamp: decision, who, when, and the judgment it produced. It is NEVER written into the immutable park artifact (the log is append-only) — the back-channel appends a standalone resolution artifact, and this embedded field is the projected view a reader fills by joining that artifact back to the escalation. Its shape doubles as the body of that standalone artifact. Absent on every real park body today; a projection is the only thing that populates it.",

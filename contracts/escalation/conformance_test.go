@@ -138,6 +138,7 @@ func TestEscalationConformance(t *testing.T) {
 	}{
 		{"V1", reflect.TypeOf(V1{}), root},
 		{"Brief", reflect.TypeOf(Brief{}), root.child(t, "brief")},
+		{"Escape", reflect.TypeOf(Escape{}), root.child(t, "escape")},
 		{"Resolution", reflect.TypeOf(Resolution{}), root.child(t, "resolution")},
 	}
 	for _, c := range cases {
@@ -177,7 +178,7 @@ func TestSchemaVersion(t *testing.T) {
 // TestValidate_Golden proves each valid fixture passes the strict law: the
 // version gate and the required-field rule both accept it.
 func TestValidate_Golden(t *testing.T) {
-	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-resolved.json"} {
+	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json"} {
 		e, err := DecodeBody(readFixture(t, f))
 		if err != nil {
 			t.Fatalf("%s: decode: %v", f, err)
@@ -281,7 +282,7 @@ func TestDecodeBody_Tolerant(t *testing.T) {
 // is where the required-fields-always-marshal / optional-fields-never-marshal-
 // empty law is exercised end to end.
 func TestGoldenRoundTrip(t *testing.T) {
-	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-resolved.json"} {
+	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json"} {
 		t.Run(f, func(t *testing.T) {
 			raw := readFixture(t, f)
 			first, err := DecodeBody(raw)
