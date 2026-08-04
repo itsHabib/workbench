@@ -14,6 +14,7 @@
 > **Revision history:**
 > - **v2** — §4.1 argument replaced (the original was refuted), option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
 > - **v3** — the validation instrument was wrong: `gate backtest` re-gathers **live** evidence and does not replay recorded runs, so the gate as written was unmeasurable. Replaced with an offline analysis over `log.jsonl` (§9, §11). Resolved a §7.1/§8 contradiction on `Unknown` + below-threshold that would have had implementers and test authors disagree. Added §10.5 on policy-provenance auditability.
+> - **v4** — v2's own fix was wrong: `.ship.json` (config, nested, `require`) and `Declaration` (evidence, flat, `expected`) are deliberately different shapes, so parsing the contract type directly would have broken `Expected` too — extend the wrapper and keep translating. Also caught that `review-panel-v1.json` sets `additionalProperties:false`, so the schema must gain `require_at_tier` or it rejects every artifact the feature emits. §9 precision: the threshold is a parameter to the analysis, not something historical logs carry.
 
 ---
 
@@ -168,7 +169,28 @@ type Declaration struct {
 
 Additive and optional, so `schema_version` does not bump and every historical panel evidence artifact keeps decoding — the same append-only guarantee pinned by `TestHistoricalVerdictLineStillDecodes` (PR #202).
 
-**Gap surfaced in review.** The field being on the contract type is not sufficient: `fetchExpectedReviewers` currently parses an **anonymous struct** carrying only `require`, so `Declaration.RequireAtTier` would silently stay `""` no matter what `.ship.json` says — and by §8 that reads as "required at every tier", i.e. the feature would appear to do nothing. Fix by having `fetchExpectedReviewers` parse `reviewpanel.Declaration` directly instead of a parallel struct: one type, no drift, and the contract is the parser.
+**Gap surfaced in review.** The field being on the contract type is not sufficient: `fetchExpectedReviewers` currently parses an **anonymous struct** carrying only `require`, so `Declaration.RequireAtTier` would silently stay `""` no matter what `.ship.json` says — and by §8 that reads as "required at every tier", i.e. the feature would appear to do nothing.
+
+**But "parse `reviewpanel.Declaration` directly" — v2's fix — is also wrong, and would break `Expected` as well.** The two are different shapes on purpose. `.ship.json` is a *config file*:
+
+```json
+{ "review": { "require": ["codex", "claude"], "require_at_tier": "T1" } }
+```
+
+`Declaration` is an *evidence artifact*: flat, `expected` not `require`, plus `path`/`revision` that have no config counterpart. `fetchExpectedReviewers` also normalizes (lowercase, trim, dedupe, reject blanks) between the two. The correct fix is therefore to **extend the existing nesting wrapper and keep translating**:
+
+```go
+var declaration struct {
+    Review struct {
+        Require       []string `json:"require"`
+        RequireAtTier string   `json:"require_at_tier"`
+    } `json:"review"`
+}
+```
+
+The config→evidence translation is a real boundary, not incidental duplication. Collapsing it would couple the artifact schema to the config file's shape.
+
+**The JSON schema must be updated in the same change.** [`contracts/reviewpanel/schema/review-panel-v1.json`](../../../contracts/reviewpanel/schema/review-panel-v1.json) declares `declaration` with `"additionalProperties": false`, so until `require_at_tier` is added to its `properties`, the schema rejects **every artifact the feature produces** — and `contracts`' conformance tests enforce the schema against the Go types. Adding an optional property does not bump `schema_version`.
 
 ---
 
@@ -266,7 +288,7 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 |---|---|---|---|---|
 | **P1 — pin the trust path** | Make §7.2 an asserted invariant before anything depends on it. | **URL-inspection** test (not behavioural) asserting the declaration fetch carries no ref parameter; comment at the fetch site naming the security property. | — | ~40 LOC, tests only |
 | **P2 — thread the tier** | Tier reaches the panel rung; behaviour identical. | Add `floorTier` param to `PanelCompleteness` + `reviewVerdictIDs`; pass from the floor verdict; existing tests green unchanged. | P1 | ~60 LOC |
-| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **switch `fetchExpectedReviewers` to parse `reviewpanel.Declaration` instead of its anonymous struct** (§5) or the field never populates; §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~150 LOC |
+| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **add `require_at_tier` to `review-panel-v1.json`'s `declaration.properties`** or `additionalProperties:false` rejects every artifact the feature makes; **extend the `.ship.json` nesting wrapper and keep translating** — do *not* parse `Declaration` directly (§5); §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~170 LOC |
 | **VALIDATION GATE** | Does this actually remove the parks it was built for? | Offline analysis over `log.jsonl`: replay the §7.1 decision against each recorded run's floor tier + panel evidence, diff against recorded outcomes. **Not `gate backtest`** — see the note below. | P3 | ~80 LOC, throwaway |
 | **P4 — adopt** | Turn it on for workbench. | Set `require_at_tier: "T1"` in workbench `.ship.json`; observe. | Gate | ~5 LOC |
 | **P5 — docs** | README + DESIGN describe the policy and its trust path. | `cmd/gate/README.md`, `docs/DESIGN.md`. | P4 | ~60 LOC |
@@ -275,7 +297,9 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 
 Using it here would have made the gate unfalsifiable in two ways: criterion 1 could not be measured before P4 puts the threshold on the default branch (backtest reads `.ship.json` live and would find none), and criterion 2 would be confounded by evidence that changed in the intervening time — a PR that parked historically may simply have been reviewed since, so a pass could not be attributed to this feature.
 
-**The §7.1 decision is a pure function of `(floorTier, threshold, panel evidence)`, and all three are already recorded on every historical run.** So the validation is an offline analysis over `log.jsonl`: for each recorded run, read the floor verdict's tier and the panel evidence, evaluate the new flow, and compare against the recorded outcome. Deterministic, no live fetches, no confound, and no new gate verb. `gate backtest` stays what it is — a live dry-run preview, useful, but not this.
+**The §7.1 decision is a pure function of `(floorTier, threshold, panel evidence)`, and two of the three are already recorded on every historical run.** The floor verdict's tier and the panel evidence are in the log; the *threshold* is not, because no historical run had one — it is supplied as a **parameter to the analysis** (`"T1"` for criterion 1), which is precisely what lets the gate be measured before P4 puts anything on the default branch.
+
+So the validation is an offline analysis over `log.jsonl`: for each recorded run, read its floor tier and panel evidence, evaluate the new flow at the candidate threshold, and diff against the recorded outcome. Deterministic, no live fetches, no evidence-drift confound, and no new gate verb. `gate backtest` stays what it is — a live dry-run preview, useful, but not this.
 
 ---
 
