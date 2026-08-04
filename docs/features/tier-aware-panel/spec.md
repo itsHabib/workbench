@@ -15,6 +15,7 @@
 > - **v2** — §4.1 argument replaced (the original was refuted), option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
 > - **v3** — the validation instrument was wrong: `gate backtest` re-gathers **live** evidence and does not replay recorded runs, so the gate as written was unmeasurable. Replaced with an offline analysis over `log.jsonl` (§9, §11). Resolved a §7.1/§8 contradiction on `Unknown` + below-threshold that would have had implementers and test authors disagree. Added §10.5 on policy-provenance auditability.
 > - **v4** — v2's own fix was wrong: `.ship.json` (config, nested, `require`) and `Declaration` (evidence, flat, `expected`) are deliberately different shapes, so parsing the contract type directly would have broken `Expected` too — extend the wrapper and keep translating. Also caught that `review-panel-v1.json` sets `additionalProperties:false`, so the schema must gain `require_at_tier` or it rejects every artifact the feature emits. §9 precision: the threshold is a parameter to the analysis, not something historical logs carry.
+> - **v5/v6** — chased references v3 left stale (§10.1 still asked the refuted question and named the ruled-out option B), then fixed the one that mattered most: §4.2's "soft skip" is a **hard** skip in CI, because the enforced workflow always passes `-reviews-optional` and consolidation never runs. Also: no existing test enforces Go↔schema parity, so v4's claim that conformance would catch an omitted property was false.
 
 ---
 
@@ -129,7 +130,21 @@ When the tier is below the threshold:
 - **Hard skip** — panel completeness passes without examining `Completed`/`Missing`. Bot findings on a T0 PR are never read.
 - **Soft** — the panel is not *required*, but if bots did comment, `review-consolidation` still processes them, so an actionable finding still parks.
 
-**Recommendation: soft.** The failure this guards against is real and cheap to avoid: a T0 docs PR where codex flags an actionable problem, and the gate passes without anyone reading it. Note these are already separate rungs — consolidation is governed by `-reviews-optional`, not by panel completeness — so "soft" is close to free: it means *not* short-circuiting the consolidation rung, which panel completeness has no authority over anyway.
+**"Soft" is not available in the path that matters, and an earlier draft of this section was simply wrong about it.** The claim was that consolidation is a separate rung, so a below-threshold PR with an actionable bot finding would still park. Review checked the enforced workflow and it does not hold:
+
+- [`.github/workflows/gate.yml:384`](../../../.github/workflows/gate.yml) **always** passes `-reviews-optional`.
+- With that set, `reviewVerdictIDs` returns immediately after panel completeness ([`main.go:551-553`](../../../cmd/gate/main.go)) — consolidation never runs.
+
+So in CI, panel completeness is the **only** review-derived control. Skip it at T0 and an actionable bot finding cannot park the run: the exact failure "soft" was chosen to prevent. Locally, without `-reviews-optional`, soft behaves as described — which is why the error survived a reading that did not check the enforced invocation.
+
+The design must therefore pick explicitly, and cannot have both:
+
+| | Behaviour in CI | Cost |
+|---|---|---|
+| **Accept hard skip at T0** | No review control at all below the threshold. | Simple, and arguably what "T0" should mean — but it is strictly weaker than today, and §4.2's original justification evaporates. |
+| **Keep consolidation when the panel is skipped** | `-reviews-optional` stops implying "skip consolidation" when the tier is below the threshold. One of the two review controls may be dropped, never both. | **Recommended.** Preserves the property this section exists for. |
+
+The recommended option carries a cost worth naming: it inverts the spend curve. T0 PRs — the cheapest, lowest-risk ones — become the only PRs paying for the model rung in CI, because higher tiers keep the deterministic panel instead. That is defensible (paying a little on the work you are *not* reviewing is the point) but it is a real change to §4.3's cost story and should not be discovered at adoption. Flagged as an open question in §10.6 for whoever locks the design.
 
 ### 4.3 Threshold in `.ship.json`, not a flag
 
@@ -190,7 +205,9 @@ var declaration struct {
 
 The config→evidence translation is a real boundary, not incidental duplication. Collapsing it would couple the artifact schema to the config file's shape.
 
-**The JSON schema must be updated in the same change.** [`contracts/reviewpanel/schema/review-panel-v1.json`](../../../contracts/reviewpanel/schema/review-panel-v1.json) declares `declaration` with `"additionalProperties": false`, so until `require_at_tier` is added to its `properties`, the schema rejects **every artifact the feature produces** — and `contracts`' conformance tests enforce the schema against the Go types. Adding an optional property does not bump `schema_version`.
+**The JSON schema must be updated in the same change.** [`contracts/reviewpanel/schema/review-panel-v1.json`](../../../contracts/reviewpanel/schema/review-panel-v1.json) declares `declaration` with `"additionalProperties": false`, so until `require_at_tier` is added to its `properties`, the schema rejects **every artifact the feature produces** — for any external consumer validating against the portable contract, even though gate's own Go decoder accepts it. Adding an optional property does not bump `schema_version`.
+
+**Nothing currently catches that omission, and an earlier draft claimed otherwise.** `TestSchemaCollectionAndStateConformance` ([`reviewpanel_test.go:62-94`](../../../contracts/reviewpanel/reviewpanel_test.go)) checks collection shapes and the reviewer-state enum only — it never compares `Declaration`'s fields against `declaration.properties`, nor validates a marshaled artifact against the schema. P3 could ship the Go field, omit the schema property, and pass every existing contract test, recreating exactly the rejection above. **P3 must add Go↔schema parity coverage** (or a concrete marshaled-artifact validation) so the next additive field cannot repeat it.
 
 ---
 
@@ -288,7 +305,7 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 |---|---|---|---|---|
 | **P1 — pin the trust path** | Make §7.2 an asserted invariant before anything depends on it. | **URL-inspection** test (not behavioural) asserting the declaration fetch carries no ref parameter; comment at the fetch site naming the security property. | — | ~40 LOC, tests only |
 | **P2 — thread the tier** | Tier reaches the panel rung; behaviour identical. | Add `floorTier` param to `PanelCompleteness` + `reviewVerdictIDs`; pass from the floor verdict; existing tests green unchanged. | P1 | ~60 LOC |
-| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **add `require_at_tier` to `review-panel-v1.json`'s `declaration.properties`** or `additionalProperties:false` rejects every artifact the feature makes; **extend the `.ship.json` nesting wrapper and keep translating** — do *not* parse `Declaration` directly (§5); §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~170 LOC |
+| **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **add `require_at_tier` to `review-panel-v1.json`'s `declaration.properties`** or `additionalProperties:false` rejects every artifact the feature makes; **extend the `.ship.json` nesting wrapper and keep translating** — do *not* parse `Declaration` directly (§5); **add Go↔schema parity coverage** — nothing today catches an omitted schema property; §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~200 LOC |
 | **VALIDATION GATE** | Does this actually remove the parks it was built for? | Offline analysis over `log.jsonl`: replay the §7.1 decision against each recorded run's floor tier + panel evidence, diff against recorded outcomes. **Not `gate backtest`** — see the note below. | P3 | ~80 LOC, throwaway |
 | **P4 — adopt** | Turn it on for workbench. | Set `require_at_tier: "T1"` in workbench `.ship.json`; observe. | Gate | ~5 LOC |
 | **P5 — docs** | README + DESIGN describe the policy and its trust path. | `cmd/gate/README.md`, `docs/DESIGN.md`. | P4 | ~60 LOC |
@@ -309,6 +326,7 @@ So the validation is an offline analysis over `log.jsonl`: for each recorded run
 2. **Should `require_at_tier` also gate `review-consolidation`?** §4.2 recommends no — consolidation is governed by `-reviews-optional` and is a different question. But a repo setting `require_at_tier: "T1"` may reasonably expect T0 PRs to skip the paid rung too. P4 adoption will likely surface this empirically; **record the decision and its reasoning in `docs/DESIGN.md` during P5** so the follow-on PR does not have to reconstruct the argument from scratch.
 3. **Per-reviewer thresholds?** e.g. codex required at T1, claude only at T2. Deferred — no evidence the extra expressiveness is wanted, and it multiplies the policy surface.
 4. **Does the escalation brief need the threshold?** When a PR parks *because* it is at or above the threshold, naming the threshold in the brief might help the judge. Cheap, but speculative until observed.
+6. **Does T0 pay for consolidation in CI?** §4.2's recommended option means `-reviews-optional` stops implying "skip consolidation" when the tier is below the threshold — so T0 PRs become the only ones paying for the model rung in the enforced path, while higher tiers keep the deterministic panel. Defensible (you pay a little on the work you are *not* reviewing), but it inverts the spend curve and should be locked deliberately, not discovered at P4.
 5. **Retrospective auditability of a skip.** `Declaration.Revision` carries the **blob SHA** returned by the contents API, which identifies content but not the branch or commit it came from. So state alone cannot prove a given skip used *default-branch* policy — the live path is guarded by §7.2's URL-inspection test, but the recorded evidence does not carry the default-branch HEAD at fetch time. Recording it alongside the blob SHA would close this. Not a blocker; it only matters if retrospective audit of policy provenance becomes a requirement. Noted in P1.
 
 ---
