@@ -81,6 +81,12 @@ type commentsBody struct {
 type ReviewStance struct {
 	Author string `json:"author"`
 	IsBot  bool   `json:"is_bot"`
+	// Association is GitHub's author_association for the reviewer on this
+	// repository: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, and so on.
+	// It is the repository-authority signal, and it is load-bearing on a PUBLIC
+	// repo — anyone at all may submit a review there, and the reviews API
+	// reports every one of them as user.type "User".
+	Association string `json:"association"`
 	// State is the submission state: APPROVED, CHANGES_REQUESTED, or COMMENTED.
 	State string `json:"state"`
 	// CommitID is the commit the review was submitted against. A consumer that
@@ -193,10 +199,11 @@ func reviewStances(reviews []rawComment) []ReviewStance {
 			continue
 		}
 		out = append(out, ReviewStance{
-			Author:   rv.User.Login,
-			IsBot:    rv.User.Type == "Bot",
-			State:    rv.State,
-			CommitID: rv.CommitID,
+			Author:      rv.User.Login,
+			IsBot:       rv.User.Type == "Bot",
+			Association: rv.AuthorAssociation,
+			State:       rv.State,
+			CommitID:    rv.CommitID,
 		})
 	}
 	return out
@@ -237,6 +244,9 @@ type rawComment struct {
 	// APPROVED, CHANGES_REQUESTED, DISMISSED. Empty for comments. A DISMISSED
 	// review has been withdrawn and must not count as review evidence.
 	State string `json:"state"`
+	// AuthorAssociation is the reviewer's relationship to the repository, as
+	// GitHub reports it on the same review object — no extra fetch.
+	AuthorAssociation string `json:"author_association"`
 }
 
 const commentsPerPage = 100

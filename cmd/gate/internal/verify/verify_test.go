@@ -425,7 +425,7 @@ func TestReviewsEmptyPanelEscalates(t *testing.T) {
 		t.Fatalf("empty review panel must escalate, got %s (%s)", v.Decision, v.Why)
 	}
 	v = reviewsFor(t, []map[string]any{
-		{"author": "alice", "is_bot": false, "body": "human note, not a bot"},
+		{"author": "alice", "is_bot": false, "association": "OWNER", "body": "human note, not a bot"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("panel with no bot comments must escalate, got %s (%s)", v.Decision, v.Why)
@@ -840,7 +840,7 @@ func openPRAtHead(head string) map[string]any {
 // what carried the decision.
 func TestReadinessHumanApprovalAtHeadSatisfiesAbsentReviewDecision(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
-		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionPass {
 		t.Fatalf("human approval at head must satisfy readiness, got %s (%s)", v.Decision, v.Why)
@@ -854,7 +854,7 @@ func TestReadinessHumanApprovalAtHeadSatisfiesAbsentReviewDecision(t *testing.T)
 // moves, and an approval of earlier code is not an approval of this one.
 func TestReadinessStaleApprovalDoesNotSatisfyReadiness(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("newhead"), []map[string]any{
-		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "oldhead"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "oldhead"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("approval of a superseded head must not satisfy readiness, got %s (%s)", v.Decision, v.Why)
@@ -876,7 +876,7 @@ func TestReadinessBotApprovalDoesNotSatisfyReadiness(t *testing.T) {
 // rather than inherit it.
 func TestReadinessSelfApprovalDoesNotSatisfyReadiness(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
-		{"author": "agent", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "agent", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("PR author's own approval must not satisfy readiness, got %s (%s)", v.Decision, v.Why)
@@ -888,7 +888,7 @@ func TestReadinessSelfApprovalDoesNotSatisfyReadiness(t *testing.T) {
 func TestReadinessNonApprovedStancesDoNotSatisfyReadiness(t *testing.T) {
 	for _, stance := range []string{"COMMENTED", "CHANGES_REQUESTED", "SOMETHING_NEW"} {
 		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
-			{"author": "mh", "is_bot": false, "state": stance, "commit_id": "abc123"},
+			{"author": "mh", "is_bot": false, "association": "OWNER", "state": stance, "commit_id": "abc123"},
 		})
 		if v.Decision != DecisionEscalate {
 			t.Fatalf("stance %s must not satisfy readiness, got %s (%s)", stance, v.Decision, v.Why)
@@ -902,7 +902,7 @@ func TestReadinessHumanApprovalDoesNotOverrideChangesRequested(t *testing.T) {
 	view := openPRAtHead("abc123")
 	view["reviewDecision"] = "CHANGES_REQUESTED"
 	v := readinessWithStances(t, view, []map[string]any{
-		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionBlock {
 		t.Fatalf("CHANGES_REQUESTED must still block, got %s (%s)", v.Decision, v.Why)
@@ -914,8 +914,8 @@ func TestReadinessHumanApprovalDoesNotOverrideChangesRequested(t *testing.T) {
 // exists because it does not, so nothing else would catch it.
 func TestReadinessApprovalDoesNotClearAnotherHumansChangeRequest(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
-		{"author": "reviewer-a", "is_bot": false, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
-		{"author": "reviewer-b", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "reviewer-a", "is_bot": false, "association": "OWNER", "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "reviewer-b", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("approval must not clear an outstanding change request, got %s (%s)", v.Decision, v.Why)
@@ -924,8 +924,8 @@ func TestReadinessApprovalDoesNotClearAnotherHumansChangeRequest(t *testing.T) {
 	// Also when the objection was raised at an older head: a change request
 	// stands until its author withdraws or supersedes it.
 	v = readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
-		{"author": "reviewer-a", "is_bot": false, "state": "CHANGES_REQUESTED", "commit_id": "oldhead"},
-		{"author": "reviewer-b", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "reviewer-a", "is_bot": false, "association": "OWNER", "state": "CHANGES_REQUESTED", "commit_id": "oldhead"},
+		{"author": "reviewer-b", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("stale change request must still suppress the approval, got %s (%s)", v.Decision, v.Why)
@@ -937,7 +937,7 @@ func TestReadinessApprovalDoesNotClearAnotherHumansChangeRequest(t *testing.T) {
 func TestReadinessBotChangeRequestDoesNotSuppressHumanApproval(t *testing.T) {
 	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
 		{"author": "codex[bot]", "is_bot": true, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
-		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	})
 	if v.Decision != DecisionPass {
 		t.Fatalf("bot findings must not suppress human readiness, got %s (%s)", v.Decision, v.Why)
@@ -957,7 +957,7 @@ func TestReadinessVerdictParentsIncludeStanceEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": []map[string]any{
-		{"author": "mh", "is_bot": false, "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1025,5 +1025,47 @@ func TestReadinessWithoutStanceEvidenceIsUnchanged(t *testing.T) {
 	}
 	if got.Decision != DecisionEscalate {
 		t.Fatalf("absent stance evidence id must escalate as before, got %s (%s)", got.Decision, got.Why)
+	}
+}
+
+// On a PUBLIC repository anyone may submit a review, and the reviews API
+// reports every one of them as user.type "User". Non-bot is therefore not a
+// trust signal: without a repository-authority check, a stranger's approval —
+// or a second account — would satisfy readiness whenever reviewDecision is
+// empty. Only OWNER / MEMBER / COLLABORATOR carry authority; everything else,
+// including any value this code does not know, fails closed.
+func TestReadinessApprovalRequiresRepositoryAuthority(t *testing.T) {
+	for _, assoc := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "mh", "is_bot": false, "association": assoc, "state": "APPROVED", "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionPass {
+			t.Fatalf("%s must carry authority, got %s (%s)", assoc, v.Decision, v.Why)
+		}
+	}
+	// CONTRIBUTOR is deliberately excluded: having landed a patch before is not
+	// authority over what may merge now.
+	for _, assoc := range []string{"CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "MANNEQUIN", "NONE", "", "SOMETHING_NEW"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "drive-by", "is_bot": false, "association": assoc, "state": "APPROVED", "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionEscalate {
+			t.Fatalf("association %q must not satisfy readiness, got %s (%s)", assoc, v.Decision, v.Why)
+		}
+	}
+}
+
+// An unauthorized approval must not be rescued by an authorized one being
+// absent — nor should an authorized approval elsewhere launder it.
+func TestReadinessUnauthorizedApprovalIsIgnoredNotCounted(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "drive-by", "is_bot": false, "association": "NONE", "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("an authorized approval must still carry, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "mh") || strings.Contains(v.Why, "drive-by") {
+		t.Fatalf("verdict must credit the authorized approver only, got %q", v.Why)
 	}
 }

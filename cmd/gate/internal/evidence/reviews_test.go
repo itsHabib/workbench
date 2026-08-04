@@ -125,9 +125,9 @@ func TestReviewStances(t *testing.T) {
 // never import each other. Pin the wire keys so a rename on this side cannot
 // silently stop satisfying readiness on the other.
 func TestReviewStanceWireKeys(t *testing.T) {
-	raw, err := json.Marshal(reviewStances([]rawComment{
-		rawReview("mh", "User", "", "sha1", "APPROVED"),
-	})[0])
+	approved := rawReview("mh", "User", "", "sha1", "APPROVED")
+	approved.AuthorAssociation = "OWNER"
+	raw, err := json.Marshal(reviewStances([]rawComment{approved})[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestReviewStanceWireKeys(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"author", "is_bot", "state", "commit_id"} {
+	for _, key := range []string{"author", "is_bot", "association", "state", "commit_id"} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("stance wire key %q missing — verify/readiness.go reads it: %s", key, raw)
 		}

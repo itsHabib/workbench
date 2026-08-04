@@ -56,10 +56,27 @@ type prView struct {
 // reviewStance mirrors the evidence package's ReviewStance on the JSON seam —
 // evidence and verify share artifacts, never imports (see the repo charter).
 type reviewStance struct {
-	Author   string `json:"author"`
-	IsBot    bool   `json:"is_bot"`
-	State    string `json:"state"`
-	CommitID string `json:"commit_id"`
+	Author      string `json:"author"`
+	IsBot       bool   `json:"is_bot"`
+	Association string `json:"association"`
+	State       string `json:"state"`
+	CommitID    string `json:"commit_id"`
+}
+
+// authoritativeAssociations are the GitHub author_association values that carry
+// repository authority. On a PUBLIC repository — which this one is — any GitHub
+// user may submit an APPROVED review, and the reviews API reports every one of
+// them as user.type "User". Non-bot is therefore NOT a trust signal; without
+// this check a stranger's approval, or a second account, could satisfy readiness
+// whenever reviewDecision is empty.
+//
+// The set is a closed allow-list. CONTRIBUTOR is deliberately absent: having
+// landed a patch before is not authority over what may merge now. Anything not
+// named here — including any value this code does not know — is unauthorized.
+var authoritativeAssociations = map[string]bool{
+	"OWNER":        true,
+	"MEMBER":       true,
+	"COLLABORATOR": true,
 }
 
 // approvalStateApproved is the review submission state that counts. Anything
@@ -81,6 +98,9 @@ const approvalStateChangesRequested = "CHANGES_REQUESTED"
 // was therefore invisible, and readiness escalated on every PR forever.
 //
 // Conditions, each load-bearing:
+//   - the approver holds repository authority (authoritativeAssociations).
+//     "Not a bot" is not trust: on a public repo anyone may review, and they
+//     all report as user.type "User".
 //   - no human's CURRENT stance is CHANGES_REQUESTED. On a protected repo
 //     GitHub would fold this into reviewDecision and readinessBlocks would
 //     catch it — but this path exists precisely because reviewDecision is
@@ -109,6 +129,9 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 			continue
 		}
 		if s.Author == "" || s.Author == prAuthor {
+			continue
+		}
+		if !authoritativeAssociations[s.Association] {
 			continue
 		}
 		return s.Author, true
