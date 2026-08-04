@@ -98,9 +98,11 @@ const approvalStateChangesRequested = "CHANGES_REQUESTED"
 // was therefore invisible, and readiness escalated on every PR forever.
 //
 // Conditions, each load-bearing:
+//
 //   - the approver holds repository authority (authoritativeAssociations).
 //     "Not a bot" is not trust: on a public repo anyone may review, and they
 //     all report as user.type "User".
+//
 //   - no human's CURRENT stance is CHANGES_REQUESTED. On a protected repo
 //     GitHub would fold this into reviewDecision and readinessBlocks would
 //     catch it — but this path exists precisely because reviewDecision is
@@ -108,9 +110,22 @@ const approvalStateChangesRequested = "CHANGES_REQUESTED"
 //     another's outstanding objection, at any head: a change request stands
 //     until its author withdraws or supersedes it, and the safe answer to
 //     "approved by one, objected by another" is to escalate, not to pick.
+//
+//     Note the deliberate ASYMMETRY: approving requires repository authority,
+//     objecting does not. Any human's change request suppresses the approval
+//     path, including a drive-by account on a public repo. That is the
+//     cheaper mistake in both directions. An unauthorized objection costs an
+//     escalation — the pre-existing behavior, recoverable by dismissing the
+//     review on GitHub. An unauthorized objection IGNORED could merge over a
+//     real defect that an outside reviewer was first to spot. Escalating is
+//     never worse than the status quo; silently discarding an objection can
+//     be. Widen this only with a reason.
+//
 //   - the stance is APPROVED (not merely submitted)
+//
 //   - it was submitted against headSHA — a new commit is new code, and an
 //     approval of earlier code is not an approval of this one
+//
 //   - the approver is a human other than the PR author
 //
 // Bots are excluded deliberately. A bot panel is findings, and findings are not

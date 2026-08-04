@@ -1069,3 +1069,16 @@ func TestReadinessUnauthorizedApprovalIsIgnoredNotCounted(t *testing.T) {
 		t.Fatalf("verdict must credit the authorized approver only, got %q", v.Why)
 	}
 }
+
+// The approval/objection asymmetry is deliberate (see humanApprovalAtHead):
+// approving needs repository authority, objecting does not. Pin it so the
+// tradeoff cannot be silently reversed by someone "fixing the inconsistency".
+func TestReadinessUnauthorizedChangeRequestStillSuppressesApproval(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "drive-by", "is_bot": false, "association": "NONE", "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an unauthorized objection must still escalate, not be discarded: %s (%s)", v.Decision, v.Why)
+	}
+}
