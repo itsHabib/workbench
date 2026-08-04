@@ -48,6 +48,56 @@ type prView struct {
 	ReviewDecision    string        `json:"reviewDecision"`
 	HeadRefOid        string        `json:"headRefOid"`
 	StatusCheckRollup []rollupCheck `json:"statusCheckRollup"`
+	Author            struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+// reviewStance mirrors the evidence package's ReviewStance on the JSON seam —
+// evidence and verify share artifacts, never imports (see the repo charter).
+type reviewStance struct {
+	Author   string `json:"author"`
+	IsBot    bool   `json:"is_bot"`
+	State    string `json:"state"`
+	CommitID string `json:"commit_id"`
+}
+
+// approvalStateApproved is the review submission state that counts. Anything
+// else — COMMENTED, CHANGES_REQUESTED, or a state this code does not know — is
+// not an approval. Fail closed.
+const approvalStateApproved = "APPROVED"
+
+// humanApprovalAtHead reports the login of a human who has APPROVED this exact
+// head, if one exists.
+//
+// This is the readiness signal GitHub's reviewDecision is meant to carry and
+// does not: GitHub reports reviewDecision as null whenever branch protection
+// does not REQUIRE reviews, whether or not anyone approved. On a repository
+// that requires none — every portfolio repo — an operator's explicit approval
+// was therefore invisible, and readiness escalated on every PR forever.
+//
+// Three conditions, each load-bearing:
+//   - the stance is APPROVED (not merely submitted)
+//   - it was submitted against headSHA — a new commit is new code, and an
+//     approval of earlier code is not an approval of this one
+//   - the approver is a human other than the PR author
+//
+// Bots are excluded deliberately. A bot panel is findings, and findings are not
+// authorization; panel completeness is a separate verifier with its own rung.
+func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (string, bool) {
+	if headSHA == "" {
+		return "", false
+	}
+	for _, s := range stances {
+		if s.IsBot || s.State != approvalStateApproved || s.CommitID != headSHA {
+			continue
+		}
+		if s.Author == "" || s.Author == prAuthor {
+			continue
+		}
+		return s.Author, true
+	}
+	return "", false
 }
 
 // Readiness is the deterministic gh read-back: draft state, CI rollup, and
@@ -62,7 +112,12 @@ type prView struct {
 // behavior, where an empty decision escalates for a human to confirm. It only
 // suppresses the ABSENCE escalation; an explicit non-APPROVED decision
 // (CHANGES_REQUESTED, REVIEW_REQUIRED) still blocks below.
-func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
+// stancesEvidenceID names the review-stance artifact (each reviewer's current
+// position and the commit they took it against). A human APPROVED at the exact
+// head satisfies the absent-reviewDecision escalation — see humanApprovalAtHead.
+// Empty is tolerated so a caller with no stance evidence behaves exactly as
+// before this existed.
+func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
 	a, err := st.Get(viewEvidenceID)
 	if err != nil {
 		return state.Artifact{}, subject, err
@@ -75,6 +130,12 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, rev
 	}
 	pv := body.Data
 	subject.HeadSHA = pv.HeadRefOid
+
+	stances, err := readStances(st, stancesEvidenceID)
+	if err != nil {
+		return state.Artifact{}, subject, err
+	}
+	approver, humanApproved := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login)
 
 	v := Verdict{
 		Subject:    subject,
@@ -106,7 +167,10 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, rev
 	if effectiveChecks == 0 {
 		escalations = append(escalations, "no non-gate CI checks recorded for this head")
 	}
-	if !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
+	// A human's exact-head approval IS the review decision GitHub declined to
+	// report. Checked before reviewsOptional so the audit trail records the
+	// approval as the reason readiness held, not a policy flag.
+	if !humanApproved && !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
 		escalations = append(escalations, "no review decision reported by GitHub")
 	}
 	if len(escalations) > 0 {
@@ -117,16 +181,41 @@ func Readiness(st *state.Store, run, viewEvidenceID string, subject Subject, rev
 	}
 	v.Why = fmt.Sprintf("state=%s draft=%v mergeable=%s checks=%d green",
 		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
-	// Persist the policy choice in the verdict when it actually changed the
-	// outcome: a pass that accepted an ABSENT review decision only because
-	// reviews were optional must say so, or the audit log cannot tell an
-	// intentional acceptance from readiness wrongly passing an unverified PR
-	// (gate's decisions must be reconstructable from state alone).
-	if reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
+	// Persist what actually carried the decision, or the audit log cannot tell
+	// an intentional acceptance from readiness wrongly passing an unverified PR
+	// (gate's decisions must be reconstructable from state alone). The human
+	// approval is the stronger, more specific fact — record it in preference to
+	// the policy flag, and name the approver and the head it was given at.
+	switch {
+	case humanApproved && pv.State != "MERGED" && pv.ReviewDecision == "":
+		v.Why += fmt.Sprintf("; approved at head by %s (no GitHub review decision reported)", approver)
+	case reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "":
 		v.Why += "; reviews-optional: absent GitHub review decision accepted"
 	}
 	art, err := Record(st, run, []string{viewEvidenceID}, v)
 	return art, subject, err
+}
+
+// readStances loads the review-stance evidence. An empty id means the caller
+// recorded none, which is not an error: readiness then behaves exactly as it did
+// before stances existed. A malformed body IS an error — evidence that cannot be
+// parsed must never read as "nobody approved", which would silently downgrade a
+// pass to an escalation and look like a policy decision.
+func readStances(st *state.Store, id string) ([]reviewStance, error) {
+	if id == "" {
+		return nil, nil
+	}
+	a, err := st.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Stances []reviewStance `json:"stances"`
+	}
+	if err := json.Unmarshal(a.Body, &body); err != nil {
+		return nil, fmt.Errorf("verify: parse stance evidence: %w", err)
+	}
+	return body.Stances, nil
 }
 
 // readinessBlocks computes the hard blocks from a PR view and the count of

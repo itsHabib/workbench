@@ -21,12 +21,13 @@ type PRRef struct {
 	Number int    `json:"number"`
 }
 
-// Bundle holds the ids of the three evidence artifacts a gate run records.
+// Bundle holds the ids of the evidence artifacts a gate run records.
 type Bundle struct {
 	View     string // gh pr view JSON (checks, draft, mergeable, review decision)
 	Diff     string // unified diff
 	Comments string // bot review comments (inline + issue-level)
 	Panel    string // ReviewPanelV1 declaration + exact-head completion evidence
+	Stances  string // each reviewer's current review stance, head-anchored
 }
 
 type viewBody struct {
@@ -68,6 +69,32 @@ type commentsBody struct {
 	Comments []Comment `json:"comments"`
 }
 
+// ReviewStance is one reviewer's CURRENT position on a PR: their latest
+// non-dismissed submission, with the commit it was submitted against. Recorded
+// as fact, not judgment — whether an APPROVED stance at some commit satisfies
+// readiness is the verifier's rule, and lives there.
+//
+// A reviewer can submit several reviews without a new commit (request changes,
+// then approve), so only the latest reflects their position; a DISMISSED review
+// is withdrawn evidence and never becomes anyone's stance. Same reduction, and
+// the same reason, as reviewBodies.
+type ReviewStance struct {
+	Author string `json:"author"`
+	IsBot  bool   `json:"is_bot"`
+	// State is the submission state: APPROVED, CHANGES_REQUESTED, or COMMENTED.
+	State string `json:"state"`
+	// CommitID is the commit the review was submitted against. A consumer that
+	// treats a stance as authorization MUST check this against the head it is
+	// authorizing — GitHub keeps a review after the head moves, and an approval
+	// of earlier code is not an approval of this one.
+	CommitID string `json:"commit_id"`
+}
+
+type stancesBody struct {
+	PR      PRRef          `json:"pr"`
+	Stances []ReviewStance `json:"stances"`
+}
+
 type reviewFetchers struct {
 	reviews  func(PRRef) ([]rawComment, error)
 	comments func(PRRef, []rawComment) ([]Comment, error)
@@ -77,8 +104,11 @@ type reviewFetchers struct {
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	var b Bundle
+	// author is fetched so readiness can refuse to count a self-approval. GitHub
+	// already rejects approving your own PR, so this is defense in depth — but
+	// this is the authorization path, and it costs no extra round trip.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt")
+		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
 	if err != nil {
 		return b, err
 	}
@@ -117,7 +147,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.Diff = a.ID
 
-	comments, panel, err := fetchReviewEvidence(pr, viewed.HeadRefOid, reviewFetchers{
+	comments, panel, reviews, err := fetchReviewEvidence(pr, viewed.HeadRefOid, reviewFetchers{
 		reviews: fetchReviews, comments: fetchComments, panel: fetchPanel,
 	})
 	if err != nil {
@@ -136,23 +166,56 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.Panel = a.ID
+	a, err = st.Append(state.KindEvidence, run, nil,
+		stancesBody{PR: pr, Stances: reviewStances(reviews)})
+	if err != nil {
+		return b, err
+	}
+	b.Stances = a.ID
 	return b, nil
+}
+
+// reviewStances reduces a PR's review submissions (oldest-first) to each
+// author's current position — their latest non-dismissed submission. It records
+// what each reviewer said and which commit they said it about; it decides
+// nothing.
+func reviewStances(reviews []rawComment) []ReviewStance {
+	latest := map[string]int{}
+	for i, rv := range reviews {
+		if rv.State == "DISMISSED" {
+			continue
+		}
+		latest[rv.User.Login] = i
+	}
+	out := make([]ReviewStance, 0, len(latest))
+	for i, rv := range reviews {
+		if idx, ok := latest[rv.User.Login]; !ok || idx != i {
+			continue
+		}
+		out = append(out, ReviewStance{
+			Author:   rv.User.Login,
+			IsBot:    rv.User.Type == "Bot",
+			State:    rv.State,
+			CommitID: rv.CommitID,
+		})
+	}
+	return out
 }
 
 // fetchReviewEvidence takes the review-submission snapshot first. Both panel
 // completion and findings then derive from that same set; comments are fetched
 // afterward so an actionable inline finding belonging to a credited review
 // cannot be absent merely because it appeared between two review snapshots.
-func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]Comment, reviewpanel.Evidence, error) {
+func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]Comment, reviewpanel.Evidence, []rawComment, error) {
 	reviews, err := fetchers.reviews(pr)
 	if err != nil {
-		return nil, reviewpanel.Evidence{}, err
+		return nil, reviewpanel.Evidence{}, nil, err
 	}
 	comments, err := fetchers.comments(pr, reviews)
 	if err != nil {
-		return nil, reviewpanel.Evidence{}, err
+		return nil, reviewpanel.Evidence{}, nil, err
 	}
-	return comments, fetchers.panel(pr, headSHA, reviews, comments), nil
+	return comments, fetchers.panel(pr, headSHA, reviews, comments), reviews, nil
 }
 
 type rawComment struct {

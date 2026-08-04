@@ -28,7 +28,7 @@ func TestReviewAppearingBetweenReadsCannotCompleteSnapshot(t *testing.T) {
 			return classifyPanel(panel, snapshot, nil, comments)
 		},
 	}
-	comments, panel, err := fetchReviewEvidence(pr, "head", fetchers)
+	comments, panel, _, err := fetchReviewEvidence(pr, "head", fetchers)
 	if err != nil {
 		t.Fatal(err)
 	}
