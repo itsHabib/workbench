@@ -127,7 +127,9 @@ func TestReviewStances(t *testing.T) {
 func TestReviewStanceWireKeys(t *testing.T) {
 	approved := rawReview("mh", "User", "", "sha1", "APPROVED")
 	approved.AuthorAssociation = "OWNER"
-	raw, err := json.Marshal(reviewStances([]rawComment{approved})[0])
+	stances := withPermissions(PRRef{Repo: "o/r", Number: 1}, reviewStances([]rawComment{approved}),
+		func(PRRef, string) string { return "write" })
+	raw, err := json.Marshal(stances[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +137,7 @@ func TestReviewStanceWireKeys(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"author", "is_bot", "association", "state", "commit_id"} {
+	for _, key := range []string{"author", "is_bot", "association", "permission", "state", "commit_id"} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("stance wire key %q missing — verify/readiness.go reads it: %s", key, raw)
 		}
@@ -185,5 +187,43 @@ func TestReviewStancesIgnoreCommentOnlyReviews(t *testing.T) {
 	}
 	if s, ok := byAuthor["chatty"]; ok {
 		t.Fatalf("a comment-only reviewer holds no position and must not appear: %+v", s)
+	}
+}
+
+// withPermissions decides nothing, but readiness cannot authorize without what
+// it stamps — so its skip and cache behavior are worth pinning directly rather
+// than only through a live Gather.
+func TestWithPermissions(t *testing.T) {
+	pr := PRRef{Repo: "o/r", Number: 1}
+	var asked []string
+	fetch := func(_ PRRef, login string) string {
+		asked = append(asked, login)
+		if login == "mh" {
+			return "write"
+		}
+		return "read"
+	}
+	got := withPermissions(pr, []ReviewStance{
+		{Author: "mh", State: "APPROVED", CommitID: "sha1"},
+		{Author: "mh", State: "CHANGES_REQUESTED", CommitID: "sha1"},
+		{Author: "drive-by", State: "APPROVED", CommitID: "sha1"},
+		{Author: "codex[bot]", IsBot: true, State: "APPROVED", CommitID: "sha1"},
+		{Author: "", State: "APPROVED", CommitID: "sha1"},
+	}, fetch)
+
+	if got[0].Permission != "write" || got[1].Permission != "write" {
+		t.Fatalf("both stances for one author must carry their permission: %+v", got[:2])
+	}
+	if got[2].Permission != "read" {
+		t.Fatalf("per-author permission mis-stamped: %+v", got[2])
+	}
+	// A bot is excluded from the human-approval path by construction, and an
+	// empty author cannot be looked up — asking about either wastes a call.
+	if got[3].Permission != "" || got[4].Permission != "" {
+		t.Fatalf("bot and empty-author stances must not be stamped: %+v", got[3:])
+	}
+	// One lookup per distinct author, not per stance.
+	if len(asked) != 2 {
+		t.Fatalf("expected one lookup per distinct human author, asked %v", asked)
 	}
 }

@@ -180,7 +180,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.Panel = a.ID
 	a, err = st.Append(state.KindEvidence, run, nil,
-		stancesBody{PR: pr, Stances: withPermissions(pr, reviewStances(reviews))})
+		stancesBody{PR: pr, Stances: withPermissions(pr, reviewStances(reviews), fetchPermission)})
 	if err != nil {
 		return b, err
 	}
@@ -320,7 +320,7 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 // with an error rather than a value. Both land as "no authority", which costs an
 // escalation and never a merge. Bots are skipped — they are excluded from the
 // human-approval path by construction, and asking about them wastes a call.
-func withPermissions(pr PRRef, stances []ReviewStance) []ReviewStance {
+func withPermissions(pr PRRef, stances []ReviewStance, fetch func(PRRef, string) string) []ReviewStance {
 	seen := make(map[string]string, len(stances))
 	for i, s := range stances {
 		if s.IsBot || s.Author == "" {
@@ -328,7 +328,7 @@ func withPermissions(pr PRRef, stances []ReviewStance) []ReviewStance {
 		}
 		perm, ok := seen[s.Author]
 		if !ok {
-			perm = fetchPermission(pr, s.Author)
+			perm = fetch(pr, s.Author)
 			seen[s.Author] = perm
 		}
 		stances[i].Permission = perm
