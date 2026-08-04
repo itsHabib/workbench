@@ -11,7 +11,9 @@
 > - **§7.2** — the trust path for the policy value. If this is wrong, a PR can lower its own review bar.
 > - **§8** — the fail-closed table. An unreadable tier must never widen the gate.
 >
-> **Revision history:** v2 (2026-08-03) folds in the design review on PR #207 — §4.1 argument replaced, option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
+> **Revision history:**
+> - **v2** — §4.1 argument replaced (the original was refuted), option B ruled out, §5 parser gap, §7.2 test design, §8 malformed row, §11 corpus-diversity gate and a falsifiable criterion 2.
+> - **v3** — the validation instrument was wrong: `gate backtest` re-gathers **live** evidence and does not replay recorded runs, so the gate as written was unmeasurable. Replaced with an offline analysis over `log.jsonl` (§9, §11). Resolved a §7.1/§8 contradiction on `Unknown` + below-threshold that would have had implementers and test authors disagree. Added §10.5 on policy-provenance auditability.
 
 ---
 
@@ -209,6 +211,12 @@ threshold ← panel.Declaration.RequireAtTier
 
 Step 1 stays first: an evidence/head mismatch is a integrity failure and must not be short-circuited by a policy that says "no review needed". Step 4 escalates rather than falling back to "required" so a typo'd policy is *visible* rather than silently strict.
 
+**Step 5 deliberately fires before the `Unknown` check, and that is the intended reading.** Review surfaced the case: floor T0, threshold T1, declaration parsed, but `fetchRequestedReviewers` fails so `panel.Unknown` is populated ([`panel.go:48-50`](../../../cmd/gate/internal/evidence/panel.go)). Step 5 passes and step 6's `Unknown` escalate is never reached. **If the panel is not required at this tier, being unable to determine the panel's state is not a reason to park** — there is no requirement whose satisfaction is in doubt.
+
+The dangerous-looking sibling case is self-protecting: when the *declaration itself* is unreadable, `Unknown` is `["declaration"]` and `Expected` is empty, so `threshold` is `""` and step 2 routes to today's behaviour (required) before step 5 can fire. A run can never skip the panel on a threshold it failed to read.
+
+§8's `Unknown` row is qualified accordingly. Getting this wrong in either direction is a real defect: a test author implementing §8 literally would assert `escalate` for `{T0, T1, Unknown:["codex"]}` and the implementation would emit `pass`.
+
 ### 7.2 Trust path for the policy value — the one that must not regress
 
 `fetchExpectedReviewers` ([`cmd/gate/internal/evidence/panel.go`](../../../cmd/gate/internal/evidence/panel.go)) reads the declaration via:
@@ -243,8 +251,9 @@ with **no `?ref=`**, so GitHub serves the **default branch**, not the PR head. A
 | `require_at_tier` absent | Panel required | Opt-in; no silent behaviour change for any existing repo. |
 | `require_at_tier` malformed (`"T1x"`) | Escalate | A policy that does not parse is not a policy. Test this row **explicitly**: the invariant permits either escalate or required, so without a pinned row a later refactor can quietly convert it to "required" and lose the visibility the escalate was chosen for. |
 | Floor tier empty / invalid | Panel required | Absence of signal never reads as low risk. |
-| Panel evidence head ≠ judged head | Escalate | Integrity check precedes policy. |
-| `Unknown` non-empty | Escalate | Unchanged. |
+| Panel evidence head ≠ judged head | Escalate | Integrity check precedes policy. Fires regardless of tier. |
+| `Unknown` non-empty **and panel required** (step 5 did not fire) | Escalate | Unchanged. |
+| `Unknown` non-empty **and panel not required** (step 5 fired) | Pass | No requirement is in doubt, so undeterminable panel state is not a park. An unreadable *declaration* cannot reach here — see §7.1. |
 | Tier ≥ threshold | Today's checks | Unchanged. |
 
 The invariant to state in the test name: **no input to this rung can turn a would-be escalate into a pass except a valid tier strictly below a valid declared threshold.**
@@ -258,11 +267,15 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 | **P1 — pin the trust path** | Make §7.2 an asserted invariant before anything depends on it. | **URL-inspection** test (not behavioural) asserting the declaration fetch carries no ref parameter; comment at the fetch site naming the security property. | — | ~40 LOC, tests only |
 | **P2 — thread the tier** | Tier reaches the panel rung; behaviour identical. | Add `floorTier` param to `PanelCompleteness` + `reviewVerdictIDs`; pass from the floor verdict; existing tests green unchanged. | P1 | ~60 LOC |
 | **P3 — the policy** | `require_at_tier` decodes, is honoured, fails closed. | `Declaration.RequireAtTier`; **switch `fetchExpectedReviewers` to parse `reviewpanel.Declaration` instead of its anonymous struct** (§5) or the field never populates; §7.1 decision flow; §8 table as a table test; verdict `why` wording. | P2 | ~150 LOC |
-| **VALIDATION GATE** | Does this actually remove the parks it was built for? | Re-run gate over the last N merged PRs with `backtest`; compare park rate and confirm no PR that *should* have required review passes. | P3 | — |
+| **VALIDATION GATE** | Does this actually remove the parks it was built for? | Offline analysis over `log.jsonl`: replay the §7.1 decision against each recorded run's floor tier + panel evidence, diff against recorded outcomes. **Not `gate backtest`** — see the note below. | P3 | ~80 LOC, throwaway |
 | **P4 — adopt** | Turn it on for workbench. | Set `require_at_tier: "T1"` in workbench `.ship.json`; observe. | Gate | ~5 LOC |
 | **P5 — docs** | README + DESIGN describe the policy and its trust path. | `cmd/gate/README.md`, `docs/DESIGN.md`. | P4 | ~60 LOC |
 
-`gate backtest` already exists and is the right instrument for the gate — it replays recorded runs, so the validation is against real history rather than a synthetic corpus.
+**The validation instrument is a pure analysis over the recorded log — not `gate backtest`.** v1 of this doc claimed backtest "replays recorded runs." That is false, and the name plus its own doc comment ("replays the gate over historical PRs") is why: `runBacktest` calls `runGate` ([`main.go:1793`](../../../cmd/gate/main.go)), which calls `evidence.Gather` → `fetchPanel` → the **live GitHub API**. It replays *the gate*, not *the runs*, against today's PR state. It also mints a T2 ephemeral grant, so a T3 PR parks on the ceiling regardless of this feature.
+
+Using it here would have made the gate unfalsifiable in two ways: criterion 1 could not be measured before P4 puts the threshold on the default branch (backtest reads `.ship.json` live and would find none), and criterion 2 would be confounded by evidence that changed in the intervening time — a PR that parked historically may simply have been reviewed since, so a pass could not be attributed to this feature.
+
+**The §7.1 decision is a pure function of `(floorTier, threshold, panel evidence)`, and all three are already recorded on every historical run.** So the validation is an offline analysis over `log.jsonl`: for each recorded run, read the floor verdict's tier and the panel evidence, evaluate the new flow, and compare against the recorded outcome. Deterministic, no live fetches, no confound, and no new gate verb. `gate backtest` stays what it is — a live dry-run preview, useful, but not this.
 
 ---
 
@@ -272,6 +285,7 @@ The invariant to state in the test name: **no input to this rung can turn a woul
 2. **Should `require_at_tier` also gate `review-consolidation`?** §4.2 recommends no — consolidation is governed by `-reviews-optional` and is a different question. But a repo setting `require_at_tier: "T1"` may reasonably expect T0 PRs to skip the paid rung too. P4 adoption will likely surface this empirically; **record the decision and its reasoning in `docs/DESIGN.md` during P5** so the follow-on PR does not have to reconstruct the argument from scratch.
 3. **Per-reviewer thresholds?** e.g. codex required at T1, claude only at T2. Deferred — no evidence the extra expressiveness is wanted, and it multiplies the policy surface.
 4. **Does the escalation brief need the threshold?** When a PR parks *because* it is at or above the threshold, naming the threshold in the brief might help the judge. Cheap, but speculative until observed.
+5. **Retrospective auditability of a skip.** `Declaration.Revision` carries the **blob SHA** returned by the contents API, which identifies content but not the branch or commit it came from. So state alone cannot prove a given skip used *default-branch* policy — the live path is guarded by §7.2's URL-inspection test, but the recorded evidence does not carry the default-branch HEAD at fetch time. Recording it alongside the blob SHA would close this. Not a blocker; it only matters if retrospective audit of policy provenance becomes a requirement. Noted in P1.
 
 ---
 
