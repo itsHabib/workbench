@@ -1826,9 +1826,17 @@ func TestResolveRefusesEscalationSupersededBeforeAppend(t *testing.T) {
 }
 
 // TestJudgeDoesNotTakeTheResolveOnlyOpenGuard pins that the guard above is
-// opt-in, and why: judge derives the escalation from the run it is already
-// holding, so it is not exposed to the stale-id window resolve has. Recorded as
-// a test so a later decision to extend the guard reads as a change, not a fix.
+// opt-in — and pins the accepted cost, because the setup below IS the race:
+// it supersedes the escalation before the append and asserts the judgment
+// lands anyway.
+//
+// Judge is exempt because it derives the escalation itself, so its exposure is
+// the program-scale window between that read and the append rather than the
+// human-scale stale id resolve is handed. That is a probability judgement, not
+// immunity: the window is real, and failing judge on it would cost operators a
+// retry for a race that is practically improbable. FOLLOWUPS "Still open (3)"
+// carries it. Recorded as a test so extending the guard later reads as a
+// deliberate change of that trade-off, not as fixing an oversight.
 func TestJudgeDoesNotTakeTheResolveOnlyOpenGuard(t *testing.T) {
 	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
 	opts := judgmentOptions{

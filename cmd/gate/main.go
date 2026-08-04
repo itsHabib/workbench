@@ -1023,8 +1023,14 @@ type judgmentOptions struct {
 	// requireOpenEscalation makes "this escalation is still the run's open
 	// terminal" a condition of the judgment write itself, evaluated under the
 	// store lock. resolve sets it because its caller holds only an id a
-	// notification carried; judge does not, because it derives the escalation
-	// from the run it is already looking at.
+	// notification carried — human-scale stale, arbitrarily old.
+	//
+	// judge does not, and this is a probability trade-off rather than a
+	// structural guarantee: judge derives the escalation itself, so its
+	// exposure is the program-scale window between that read and this append,
+	// not an id that sat in a notification. Requiring judge to fail on that
+	// window would hand operators a retry for a race that is possible but
+	// practically improbable. Possible, though — see FOLLOWUPS "Still open (3)".
 	requireOpenEscalation bool
 }
 

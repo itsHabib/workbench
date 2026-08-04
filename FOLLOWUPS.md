@@ -43,8 +43,8 @@ authorization work, and `record`/`recordEscalation` already used it via
 `requireOpenEscalation` option: the check re-derives the run's newest
 action-or-escalation terminal from `audit.All` and refuses with
 `errStaleEscalation` unless it is still this escalation. `cmdResolve` sets the
-option; `judge` does not, because it derives the escalation from the run it is
-already holding.
+option; `judge` does not — a probability trade-off, not immunity, recorded as
+"Still open (3)" below.
 
 The unlocked `escalationIsOpen` pre-check in `cmdResolve` stays, now explicitly
 advisory — it gives a replayed tap a friendly message without a store round-trip,
@@ -87,6 +87,28 @@ Closing this means carrying the expected-open escalation into the terminal appen
 predicate, which touches the shared `act` path used by ordinary gate runs — a wider
 blast radius than the judgment-only guard, and why it is not in #210. Owner: gate.
 Surfaced by codex P1 on #210.
+
+### Still open (3): `judge` does not take the guard, by choice
+
+`cmdJudge` leaves `requireOpenEscalation` false, so the same TOCTOU the guard
+closes for `resolve` remains open on the judge path: `cmdJudge` reads the run,
+derives the newest escalation, and appends — and a concurrent re-park in that
+window lands the judgment against a superseded park.
+`TestJudgeDoesNotTakeTheResolveOnlyOpenGuard` constructs exactly that ordering
+and asserts the judgment is accepted, so the cost is pinned rather than hidden.
+
+The two paths differ in *how stale* their id can be, not in whether the window
+exists. `resolve` is handed an id a notification carried, which can be
+arbitrarily old — human-scale. `judge` derives its own, so its exposure is
+program-scale: the microseconds between read and append. Failing judge there
+would hand an operator a retry for a race that is possible but practically
+improbable, which is why the trade-off went this way.
+
+It is a probability judgement about a merge-authorization boundary, so it should
+be revisited if concurrent writers on one run ever stop being hypothetical — a
+second `escalate serve`, or agents judging the same run in parallel. Closing it
+is one line (`cmdJudge` sets the option) plus a decision to accept the retry.
+Owner: gate. Surfaced independently by codex P1 and by review on #210.
 
 ## ~~`escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async~~ (2026-07-27, codex P1 on #140)
 
