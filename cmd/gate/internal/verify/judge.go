@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
@@ -519,31 +520,51 @@ func detailWithin(stream []byte, limit int) string {
 // an escape sequence, where a dropped byte or a replacement rune would hide it.
 // Printable runes pass through untouched, so a quoted JSON body still reads as
 // JSON, and the cap in detailWithin bounds the expansion.
+//
+// Decoding is explicit rather than `for range`, which yields U+FFFD for every
+// byte that is not valid UTF-8. U+FFFD is printable, so ranging would pass that
+// substitution straight through and a raw 0xff would render identically to a
+// provider that genuinely emitted a replacement character \u2014 the one case where
+// quoting bytes as evidence has to be exact.
 func escapeUnprintable(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
-	for _, r := range s {
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		// (RuneError, 1) is how the decoder reports a byte that is not valid
+		// UTF-8; a genuine U+FFFD decodes at size 3, so the two stay
+		// distinguishable in the quote.
+		if r == utf8.RuneError && size == 1 {
+			fmt.Fprintf(&b, "\\x%02x", s[i])
+			i++
+			continue
+		}
+		i += size
 		if unicode.IsPrint(r) {
 			b.WriteRune(r)
 			continue
 		}
-		// Each escape is exactly as wide as its form conventionally is, so a
-		// quote can only be read one way. Escaping U+202E as a 4-digit \u
-		// gives \u202e; using \x there would give \x202e, which reads as
-		// \x20 followed by a literal "2e". The same trap is one plane up: a
-		// supplementary rune such as the tag character U+E0001 in the 4-digit
-		// form gives \ue0001, which reads as \ue000 followed by "1".
-		if r > 0xffff {
-			fmt.Fprintf(&b, "\\U%08x", r)
-			continue
-		}
-		if r > 0xff {
-			fmt.Fprintf(&b, "\\u%04x", r)
-			continue
-		}
-		fmt.Fprintf(&b, "\\x%02x", r)
+		writeRuneEscape(&b, r)
 	}
 	return b.String()
+}
+
+// writeRuneEscape sizes each escape to the width its form conventionally
+// carries, so a quote can only be read one way. Escaping U+202E as a 4-digit \u
+// gives \u202e; using \x there would give \x202e, which reads as \x20 followed
+// by a literal "2e". The same trap is one plane up: a supplementary rune such
+// as the tag character U+E0001 in the 4-digit form gives \ue0001, which reads
+// as \ue000 followed by "1".
+func writeRuneEscape(b *strings.Builder, r rune) {
+	if r > 0xffff {
+		fmt.Fprintf(b, "\\U%08x", r)
+		return
+	}
+	if r > 0xff {
+		fmt.Fprintf(b, "\\u%04x", r)
+		return
+	}
+	fmt.Fprintf(b, "\\x%02x", r)
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {

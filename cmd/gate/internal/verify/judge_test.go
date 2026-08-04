@@ -477,6 +477,26 @@ func TestQuotedProviderOutputCannotDriveTheTerminal(t *testing.T) {
 	}
 }
 
+// A byte that is not valid UTF-8 and a provider that genuinely emitted U+FFFD
+// must not render the same. `for range` over a string substitutes U+FFFD for
+// every invalid byte, and U+FFFD is printable — so ranging would pass the
+// substitution through and quietly turn a raw 0xff into the same glyph a
+// well-formed provider produced. The quote claims to be evidence; here is where
+// that claim is either exact or worthless.
+func TestInvalidBytesStayDistinctFromAGenuineReplacementRune(t *testing.T) {
+	got := detailWithin([]byte{'a', 0xff, 0xfe, 'b'}, providerDetailCap)
+	if got != `a\xff\xfeb` {
+		t.Fatalf("invalid bytes = %q, want each byte escaped by value", got)
+	}
+	genuine := detailWithin([]byte("a�b"), providerDetailCap)
+	if genuine != "a�b" {
+		t.Fatalf("genuine U+FFFD = %q, want it preserved as the rune it is", genuine)
+	}
+	if got == genuine {
+		t.Fatal("an invalid byte and a genuine U+FFFD rendered identically")
+	}
+}
+
 // The guarantee is a property of every rune, not of the handful of attacks
 // thought of so far: nothing unprintable survives into a quote, whatever
 // category it comes from.
