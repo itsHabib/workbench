@@ -1,11 +1,51 @@
 package evidence
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
+
+func TestPanelDeclarationFetchCannotSelectARef(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
+	declaration := base64.StdEncoding.EncodeToString([]byte(`{"review":{"require":["codex","claude"]}}`))
+	response, err := json.Marshal(contentResponse{
+		SHA: "declaration-sha", Encoding: "base64", Content: declaration,
+	})
+	if err != nil {
+		t.Fatalf("marshal fake gh response: %v", err)
+	}
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GH_ARGS_FILE\"\nprintf '%s\\n' '" + string(response) + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GH_ARGS_FILE", argsPath)
+	t.Setenv("PATH", dir)
+
+	expected, revision, err := fetchExpectedReviewers("owner/repo")
+	if err != nil {
+		t.Fatalf("fetch panel declaration: %v", err)
+	}
+	if !slices.Equal(expected, []string{"claude", "codex"}) || revision != "declaration-sha" {
+		t.Fatalf("panel declaration = (%v, %q)", expected, revision)
+	}
+	rawArgs, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake gh arguments: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(rawArgs)), "\n")
+	want := []string{"api", "repos/owner/repo/contents/.ship.json"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("panel declaration must come from the default branch; gh arguments cannot select a ref: got %q, want %q", got, want)
+	}
+}
 
 func TestClassifyPanelPermutations(t *testing.T) {
 	const head = "head"
