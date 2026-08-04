@@ -36,6 +36,12 @@ request's run, escalation_id, subject, grant, and question exactly; set producer
 to the object {"class":"judgment","impl":"<your model or CLI identifier>"};
 set decision to pass or block; set tier no higher than the presented grant
 ceiling; and include confidence and why.
+
+The object carries exactly these keys and no others: version (the string
+gate-judgment-v1), run, escalation_id, subject, grant, question, producer,
+decision, tier, confidence, why. Gate refuses a submission carrying any other
+key. In particular, the verifier verdicts quoted above carry findings and a
+judgment does not — put your reasoning in why.
 `
 
 const (
@@ -361,11 +367,11 @@ func autoJudge(
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
-		return Verdict{}, err
+		return Verdict{}, judgmentUnusable(provider, out, err)
 	}
 	verdict, err := ValidateJudgment(artifact, request)
 	if err != nil {
-		return Verdict{}, err
+		return Verdict{}, judgmentUnusable(provider, out, err)
 	}
 	verdict.Source = "auto-judgment"
 	verdict.Producer.Impl = fmt.Sprintf(
@@ -378,11 +384,65 @@ func autoJudge(
 	return verdict, nil
 }
 
-// providerDetailCap is the hard ceiling on how much provider output an error
-// may quote, truncation marker included. The point is a diagnosable first
-// line, not the transcript.
+// judgmentUnusable refuses a submission Gate cannot accept, in terms an
+// operator can act on. The bare decode/validate error names the offending
+// field and stops there — it says neither which provider produced the
+// submission nor what that provider actually emitted, so `unknown field
+// "findings"` reads as a permanent schema mismatch and sends the operator to
+// the source of both providers to find out which one is broken.
+//
+// The retry line is the load-bearing part, and it is specific to THIS path. A
+// provider's output is a fresh sample, so an unusable submission is a sampling
+// failure, not a fixed property of the provider: re-running the same command
+// can produce a valid judgment where the last call drifted. The same codes
+// arriving from `-judgment <path>` mean the opposite — that file is the same
+// file every time, and only editing it helps. The escape names a FLAG to
+// change rather than a whole command line, so it stays true under whatever
+// -state and -grant the operator actually ran with.
+//
+// Whether the run's one judgment was spent is deliberately NOT claimed here.
+// verify cannot read the ledger, and a refusal that guesses at the ledger is
+// the confident-and-wrong shape this message exists to remove; the judge
+// command answers it from state (see judgeSlotState).
+//
+// The quoted emission comes last and is capped short. Unlike a provider
+// failure — where the CLI's own diagnostic IS the whole finding — the decode or
+// validation error here has already named the fault, so the quote only has to
+// show the SHAPE: prose wrapped around the JSON, a markdown fence, an empty
+// stream. A full judgment's worth of prose would bury the routes above it and
+// the slot state the judge command appends after it, which is the burying this
+// message exists to undo.
+func judgmentUnusable(provider string, out []byte, err error) error {
+	return fmt.Errorf(
+		"%w; %s's output is a fresh sample, so retry -provider %s, or cross to -provider %s, "+
+			"or resolve by hand: console -> escalate -> gate resolve; %s emitted: %s",
+		err, provider, provider, otherJudgeProvider(provider), provider,
+		detailWithin(out, judgmentEmissionCap),
+	)
+}
+
+// otherJudgeProvider names the independent path still open when one provider's
+// submission is unusable. A closed two-provider set exists so that a judgment
+// is always reachable from a second party; a refusal that does not name the
+// other one leaves that property unused.
+func otherJudgeProvider(provider string) string {
+	if provider == JudgeProviderClaude {
+		return JudgeProviderCodex
+	}
+	return JudgeProviderClaude
+}
+
+// The ceilings on how much provider output an error may quote, truncation
+// marker included. The point is a diagnosable first line, not the transcript.
 const (
-	providerDetailCap    = 2 * 1024
+	// providerDetailCap bounds a FAILED provider's diagnostic, where the CLI's
+	// own message is the whole finding.
+	providerDetailCap = 2 * 1024
+	// judgmentEmissionCap bounds a submission that ran to completion and was
+	// refused. It is tighter because the decode or validation error has
+	// already named the fault: this quote only shows the shape. See
+	// judgmentUnusable.
+	judgmentEmissionCap  = 512
 	providerTruncateMark = " [... truncated ...]"
 )
 
@@ -407,13 +467,17 @@ func providerFailure(provider string, stdout []byte, err error) error {
 }
 
 func providerDetail(stream []byte) string {
+	return detailWithin(stream, providerDetailCap)
+}
+
+func detailWithin(stream []byte, limit int) string {
 	detail := strings.TrimSpace(string(stream))
-	if len(detail) <= providerDetailCap {
+	if len(detail) <= limit {
 		return detail
 	}
 	// The marker is part of the budget, and the cut can land mid-rune —
 	// provider output is arbitrary bytes, not guaranteed UTF-8.
-	kept := strings.ToValidUTF8(detail[:providerDetailCap-len(providerTruncateMark)], "")
+	kept := strings.ToValidUTF8(detail[:limit-len(providerTruncateMark)], "")
 	return kept + providerTruncateMark
 }
 

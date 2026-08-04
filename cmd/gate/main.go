@@ -1076,12 +1076,34 @@ func cmdJudge(args []string) error {
 	}
 	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, opts)
 	if err != nil {
-		return err
+		return judgeSlotState(e, *run, escalationID, err)
 	}
 	emitAuthorizedStamp(res, code, *stampOn)
 	printJSON(res)
 	os.Exit(code)
 	return nil
+}
+
+// judgeSlotState answers, from state, the question the one-shot contract forces
+// on every judgment failure: is the escalation's single judgment still there to
+// give? A judgment is irreversible once recorded, so whether a retry is even
+// legal depends on which side of the append the failure landed — and the error
+// alone never says. Without this the only way to find out is to grep
+// log.jsonl for a judgment artifact on the run, which is reading the ledger by
+// hand to learn something gate already knows.
+//
+// It annotates, never replaces: the cause stays wrapped and first, so a caller
+// matching on the failure code still matches.
+func judgeSlotState(e env, run, escalationID string, cause error) error {
+	arts, err := e.st.Run(run)
+	if err != nil {
+		return fmt.Errorf("%w; could not re-read %s to report whether a judgment was recorded: %v", cause, run, err)
+	}
+	judgment, ok := artifactForParent(arts, state.KindJudgment, escalationID)
+	if !ok {
+		return fmt.Errorf("%w; no judgment is recorded for %s — the one judgment is unspent and a retry is legal", cause, escalationID)
+	}
+	return fmt.Errorf("%w; judgment %s is already recorded for %s — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
 }
 
 // applyJudgment records a decision against a run's parked escalation and returns
@@ -1361,7 +1383,7 @@ func cmdResolve(args []string) error {
 	}
 	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why})
 	if err != nil {
-		return err
+		return judgeSlotState(e, run, *escID, err)
 	}
 	// Stamp the resolution only when a judgment was actually recorded (a
 	// capability refusal appends none): the stamp claims the loop closed, so it

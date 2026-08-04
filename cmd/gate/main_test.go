@@ -1337,6 +1337,53 @@ func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	}
 }
 
+// `judge` is one-shot and irreversible, so the operator's first question on any
+// failure is whether the shot was spent — and answering it used to mean
+// grepping log.jsonl for a judgment artifact on the run. Both sides of the
+// append are pinned: a refusal that recorded nothing says a retry is legal, and
+// one that already recorded a judgment says a retry resumes it rather than
+// replacing it. The cause stays wrapped either way, so a caller matching on the
+// failure code still matches.
+func TestJudgeSlotStateReportsWhetherTheOneShotWasSpent(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 129, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	cause := errors.New(`judgment_malformed: json: unknown field "findings"`)
+
+	unspent := judgeSlotState(e, run, esc.ID, cause)
+	if !errors.Is(unspent, cause) {
+		t.Fatalf("annotation dropped the cause it wraps: %v", unspent)
+	}
+	for _, want := range []string{"judgment_malformed", "no judgment is recorded", "retry is legal"} {
+		if !strings.Contains(unspent.Error(), want) {
+			t.Fatalf("pre-append error = %v\nwant it to name %q", unspent, want)
+		}
+	}
+
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
+		t.Fatalf("first judgment: %v", err)
+	}
+	jdg := firstOfKind(t, e, run, state.KindJudgment)
+	spent := judgeSlotState(e, run, esc.ID, cause)
+	for _, want := range []string{jdg.ID, "already recorded", "cannot replace"} {
+		if !strings.Contains(spent.Error(), want) {
+			t.Fatalf("post-append error = %v\nwant it to name %q", spent, want)
+		}
+	}
+}
+
 func TestAtMostOneJudgmentProperty(t *testing.T) {
 	property := func(attempts []bool) bool {
 		var arts []state.Artifact

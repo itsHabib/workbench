@@ -344,6 +344,56 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 	}
 }
 
+// The 2026-08-04 failure: a judgment carrying `findings` mirrored from the
+// verdicts the judge was shown. The decoder is strict on purpose and must stay
+// strict, so what has to improve is the refusal — which provider produced it,
+// what it emitted, and the two routes that do not go through the drift. Both
+// providers are checked because a refusal that only works for one of them
+// would hide exactly the "is this path dead?" question the message must answer.
+func TestAutoJudgeRefusalNamesProviderEmissionAndEscape(t *testing.T) {
+	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
+		t.Run(provider, func(t *testing.T) {
+			request, _ := judgmentFixture()
+			_, err := autoJudge(
+				provider,
+				request,
+				t.TempDir(),
+				judgeHelperEnvironment(t, "verdict-shaped"),
+				fakeJudgeResolver,
+				judgeHelperFactory(t, nil, nil),
+			)
+			if err == nil {
+				t.Fatal("a submission carrying an unknown key was accepted")
+			}
+			for _, want := range []string{
+				"judgment_malformed",       // the code a caller matches on, still first
+				`unknown field "findings"`, // the offending key, still named
+				provider,                   // WHICH provider drifted
+				"drifted-model",            // what it actually emitted
+				"fresh sample",             // retrying this provider can work
+				otherJudgeProvider(provider),
+				"gate resolve", // the route that needs no provider at all
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v\nwant it to name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// A refusal must name the other provider, never itself: the closed two-provider
+// set exists so a judgment stays reachable from a second party, and a message
+// that points back at the failing one wastes that.
+func TestOtherJudgeProviderCrossesToTheIndependentPath(t *testing.T) {
+	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
+		other := otherJudgeProvider(provider)
+		if other == provider || ValidateJudgeProvider(other) != nil {
+			t.Fatalf("otherJudgeProvider(%q) = %q, want the other supported provider", provider, other)
+		}
+	}
+}
+
 // A failing provider must stay diagnosable: the provider, its exit status, and
 // whichever stream carried the diagnostic all reach the caller. A CLI that
 // reports on stdout, or says nothing at all, used to surface as an empty error.
@@ -394,6 +444,26 @@ func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
 	short := providerDetail([]byte("  boom  "))
 	if short != "boom" {
 		t.Fatalf("short detail = %q, want the trimmed quote unchanged", short)
+	}
+}
+
+// A refused submission is quoted under the tighter cap, and the escape routes
+// must survive it: the whole point of shortening the quote is that what follows
+// stays on screen. A verbose provider is the case that matters — a judgment's
+// `why` alone can outrun the provider-failure cap.
+func TestRefusalKeepsTheEscapeReadableUnderAVerboseProvider(t *testing.T) {
+	if judgmentEmissionCap >= providerDetailCap {
+		t.Fatalf("emission cap %d does not tighten the provider-failure cap %d", judgmentEmissionCap, providerDetailCap)
+	}
+	verbose := append([]byte(`{"why":"`), bytes.Repeat([]byte("x"), 8*1024)...)
+	err := judgmentUnusable(JudgeProviderClaude, verbose, fmt.Errorf("judgment_malformed: boom"))
+	if len(err.Error()) > judgmentEmissionCap+512 {
+		t.Fatalf("refusal grew to %d bytes; the escape is past where anyone reads", len(err.Error()))
+	}
+	for _, want := range []string{providerTruncateMark, "gate resolve", JudgeProviderCodex} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v\nwant it to keep %q", err, want)
+		}
 	}
 }
 
@@ -502,6 +572,18 @@ func TestJudgeProviderHelper(_ *testing.T) {
 	switch os.Getenv("GATE_JUDGE_HELPER_MODE") {
 	case "malformed":
 		fmt.Fprint(os.Stdout, `{"version":`)
+		os.Exit(0)
+	case "verdict-shaped":
+		// The 2026-08-04 drift, reproduced exactly: a judgment that is correct
+		// in every authority binding and carries one extra key mirrored from
+		// the verdicts the judge was shown. The prompt now closes the key set,
+		// but a sampled provider can still emit this, so the refusal for it is
+		// pinned rather than assumed away.
+		fmt.Fprint(os.Stdout, `{"version":"gate-judgment-v1","run":"run_123","escalation_id":"esc_123",`+
+			`"subject":{"repo":"o/r","number":17,"head_sha":"0123456789abcdef"},`+
+			`"grant":{"id":"grt_123","max_tier":"T2"},"question":"do the findings block?",`+
+			`"producer":{"class":"judgment","impl":"drifted-model"},"decision":"block","tier":"T2",`+
+			`"confidence":0.7,"why":"unresolved finding","findings":[{"title":"race"}]}`)
 		os.Exit(0)
 	case "failed":
 		fmt.Fprint(os.Stderr, "helper failed")
