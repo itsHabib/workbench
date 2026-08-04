@@ -527,9 +527,16 @@ func escapeUnprintable(s string) string {
 			b.WriteRune(r)
 			continue
 		}
-		// Multi-byte runes take the \u form: \x202e would read as \x20
-		// followed by a literal "2e", which is a quote an operator cannot
-		// trust to mean one thing.
+		// Each escape is exactly as wide as its form conventionally is, so a
+		// quote can only be read one way. Escaping U+202E as a 4-digit \u
+		// gives \u202e; using \x there would give \x202e, which reads as
+		// \x20 followed by a literal "2e". The same trap is one plane up: a
+		// supplementary rune such as the tag character U+E0001 in the 4-digit
+		// form gives \ue0001, which reads as \ue000 followed by "1".
+		if r > 0xffff {
+			fmt.Fprintf(&b, "\\U%08x", r)
+			continue
+		}
 		if r > 0xff {
 			fmt.Fprintf(&b, "\\u%04x", r)
 			continue

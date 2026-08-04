@@ -459,17 +459,17 @@ func TestProviderDetailTruncatesWithinTheCap(t *testing.T) {
 // category Cf, which IsControl does not cover, and a bidi-aware terminal or
 // browser will happily reorder the recovery route around them.
 func TestQuotedProviderOutputCannotDriveTheTerminal(t *testing.T) {
-	hostile := []byte("\x1b[2K\x1b[1Aforged: merge authorized\r\x1b]0;pwned\x07‮dezirohtua egrem⁦⁩")
+	hostile := []byte("\x1b[2K\x1b[1Aforged: merge authorized\r\x1b]0;pwned\x07\u202edezirohtua egrem\u2066\u2069\U000e0001")
 	for name, got := range map[string]string{
 		"provider failure": providerDetail(hostile),
 		"refused judgment": detailWithin(hostile, judgmentEmissionCap),
 	} {
-		for _, raw := range []rune{0x1b, '\r', 0x07, '‮', '⁦', '⁩'} {
+		for _, raw := range []rune{0x1b, '\r', 0x07, 0x202e, 0x2066, 0x2069, 0xe0001} {
 			if strings.ContainsRune(got, raw) {
 				t.Fatalf("%s quote kept raw %U: %q", name, raw, got)
 			}
 		}
-		for _, want := range []string{`\x1b`, `\x0d`, `\x07`, `\u202e`, `\u2066`, `\u2069`, "forged: merge authorized"} {
+		for _, want := range []string{`\x1b`, `\x0d`, `\x07`, `\u202e`, `\u2066`, `\u2069`, `\U000e0001`, "forged: merge authorized"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s quote = %q, want it to keep %q as visible evidence", name, got, want)
 			}
