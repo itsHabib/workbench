@@ -40,7 +40,10 @@ Orientation block you can point an agent at to ground it fast.
   3 refused / 4 error are a load-bearing seam),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
-  and deferred decisions.
+  and deferred decisions (the engineering debt this codebase owes).
+  `friction-log.md` — where this repo's tooling and docs failed an agent working
+  in it; `/health` reads it for the cross-repo rollup, so tooling friction goes
+  there, not in FOLLOWUPS.
 
 ## The one rule
 
