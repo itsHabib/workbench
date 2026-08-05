@@ -1795,6 +1795,64 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 }
 
+// TestResolveRefusesEscalationSupersededBeforeAppend pins the compare-and-resolve:
+// the open-terminal test belongs to the judgment write, not to a read that
+// happened before it. cmdResolve's escalationIsOpen check is unlocked, so a
+// re-park landing between that check and the append would otherwise let a
+// judgment decide a park that is no longer the run's open one. The uniqueness
+// guard cannot catch this case — it is keyed on this escalation, and there is
+// only ever one judgment for it. beforeAppend stands in for the concurrent
+// re-park an out-of-process resolve would race.
+func TestResolveRefusesEscalationSupersededBeforeAppend(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	opts := judgmentOptions{
+		Decision:              verify.DecisionPass,
+		Why:                   "approved from the phone",
+		requireOpenEscalation: true,
+		beforeAppend: func() {
+			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	_, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts)
+	if !errors.Is(err, errStaleEscalation) {
+		t.Fatalf("superseded resolve error = %v, want errStaleEscalation", err)
+	}
+	arts := mustRunArtifacts(t, e, run)
+	if got := countKindParent(arts, state.KindJudgment, esc.ID); got != 0 {
+		t.Fatalf("a superseded resolve recorded a judgment anyway: %d artifacts", got)
+	}
+}
+
+// TestJudgeDoesNotTakeTheResolveOnlyOpenGuard pins that the guard above is
+// opt-in — and pins the accepted cost, because the setup below IS the race:
+// it supersedes the escalation before the append and asserts the judgment
+// lands anyway.
+//
+// Judge is exempt because it derives the escalation itself, so its exposure is
+// the program-scale window between that read and the append rather than the
+// human-scale stale id resolve is handed. That is a probability judgement, not
+// immunity: the window is real, and failing judge on it would cost operators a
+// retry for a race that is practically improbable. FOLLOWUPS "Still open (3)"
+// carries it. Recorded as a test so extending the guard later reads as a
+// deliberate change of that trade-off, not as fixing an oversight.
+func TestJudgeDoesNotTakeTheResolveOnlyOpenGuard(t *testing.T) {
+	e, run, grantID, _, esc, _, _ := resumableJudgmentFixture(t)
+	opts := judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "operator judged from the run",
+		beforeAppend: func() {
+			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, opts); err != nil {
+		t.Fatalf("judge must not inherit the resolve-only open-terminal guard: %v", err)
+	}
+}
+
 // TestRunOfEscalationRejectsWrongKind pins that resolve fails loudly on an id
 // that is not an escalation, so a mistyped or wrong-kind id never resolves the
 // wrong run.

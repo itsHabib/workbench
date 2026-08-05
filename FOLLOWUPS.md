@@ -29,24 +29,86 @@ shows up (users tripping on it past the quick-start), consider a distinct
 binary name — operator's call; renaming a CLI is a breaking change to every
 skill that shells to it.
 
-## gate `resolve` open-check→append is not atomic (cross-process double-apply)
+## gate `resolve` open-check→append is not atomic (cross-process double-apply) — PARTIALLY CLOSED (2026-08-02, codex P1 on #137; scope corrected by codex P1s on #210)
 
-`gate resolve` reads `escalationIsOpen` and then appends the judgment, verdict,
-action, and resolution as separate writes; gate locks each append, not the
-check→transition as a whole. So two concurrent resolves of the same escalation
-can both pass the open-check before either records a terminal, then both append
-authoritative outcomes — potentially conflicting pass/block for one park. This
-predates `escalate serve`: two parallel CLI `escalate resolve` invocations race
-identically.
+**Partially closed.** The same-run case is fixed; two variants remain open and are
+named below. Do not read this entry as done.
 
-`escalate serve` mitigates the common case with a process-local per-escalation
-lock (`cmd/escalate/internal/serve` `escLocks`), which fully serializes the
-single-process ingress that is the Phase-1 deployment. It does NOT cover a
-second serve process on the same `-state` or a CLI resolve racing an HTTP
-callback. The durable fix belongs in gate: make resolve an atomic
-compare-and-resolve (a per-run file lock around the open-check→append, or a
-single append that fails if the run's terminal moved). Owner: gate. Surfaced by
-codex review on workbench #137 (`escalate serve` Phase 1).
+The note called for "a single append that fails if the run's terminal
+moved" — and by the time it was written that primitive already existed:
+`state.AppendIfAbsentParentWhereAfterAudit` evaluates a caller `check` against
+the audit snapshot *while holding the store lock* (it landed with the
+authorization work, and `record`/`recordEscalation` already used it via
+`checkNoOpenClaim`). `applyJudgment` now takes that path with a
+`requireOpenEscalation` option: the check re-derives the run's newest
+action-or-escalation terminal from `audit.All` and refuses with
+`errStaleEscalation` unless it is still this escalation. `cmdResolve` sets the
+option; `judge` does not — a probability trade-off, not immunity, recorded as
+"Still open (3)" below.
+
+The unlocked `escalationIsOpen` pre-check in `cmdResolve` stays, now explicitly
+advisory — it gives a replayed tap a friendly message without a store round-trip,
+and the authoritative test is the one under the lock. This covers what the
+process-local `escLocks` in `cmd/escalate/internal/serve` could not: a second
+serve process on the same `-state`, and a CLI resolve racing an HTTP callback.
+
+Note the uniqueness guard was never sufficient here on its own: it is keyed on
+the escalation id, so it stops a *second judgment for the same park* but not a
+judgment landing against a park a concurrent re-park had already superseded.
+That second case, **within one run**, is what this closes.
+
+### Still open (1): the open-park notion is run-scoped; the inbox's is subject-scoped
+
+`newestTerminal` filters by run, matching the pre-existing `escalationIsOpen`.
+`observe.parkedRuns` does not: it folds per run and *then* reduces by subject —
+`key := "<repo>#<number>"`, newest `order` wins (`inbox.go:539-556`). So when one
+PR has been gated repeatedly, resolving a stale escalation on the older run passes
+the run-scoped check, appends an action at the end of the log, and that action
+becomes the subject's newest terminal — suppressing the genuinely newer park from
+both inbox projections.
+
+This predates the fix (main's `escalationIsOpen` was already run-scoped), so it is
+a scope limitation rather than a regression. The durable fix is to stop having
+three copies of "is this park open": `cmdResolve`'s pre-check, the locked check,
+and `parkedRuns` each reduce it independently. Extract the subject-scoped
+reduction once and have all three consume it — otherwise they will keep drifting.
+Owner: gate. Surfaced by codex P1 on #210.
+
+### Still open (2): the judgment is linearized, the terminal is not
+
+The locked check guards the *judgment* append. The state transition the inbox
+actually consumes is the terminal `act` append, which happens later in
+`finishJudgment` → `actAfterJudgment` under a separate lock whose predicate is
+`checkNoOpenClaim` — "the subject has no open claim," not "this escalation is
+still the open park." Another run can park for the same PR in that window; the
+resolve's action then lands after it and hides it.
+
+Closing this means carrying the expected-open escalation into the terminal append's
+predicate, which touches the shared `act` path used by ordinary gate runs — a wider
+blast radius than the judgment-only guard, and why it is not in #210. Owner: gate.
+Surfaced by codex P1 on #210.
+
+### Still open (3): `judge` does not take the guard, by choice
+
+`cmdJudge` leaves `requireOpenEscalation` false, so the same TOCTOU the guard
+closes for `resolve` remains open on the judge path: `cmdJudge` reads the run,
+derives the newest escalation, and appends — and a concurrent re-park in that
+window lands the judgment against a superseded park.
+`TestJudgeDoesNotTakeTheResolveOnlyOpenGuard` constructs exactly that ordering
+and asserts the judgment is accepted, so the cost is pinned rather than hidden.
+
+The two paths differ in *how stale* their id can be, not in whether the window
+exists. `resolve` is handed an id a notification carried, which can be
+arbitrarily old — human-scale. `judge` derives its own, so its exposure is
+program-scale: the microseconds between read and append. Failing judge there
+would hand an operator a retry for a race that is possible but practically
+improbable, which is why the trade-off went this way.
+
+It is a probability judgement about a merge-authorization boundary, so it should
+be revisited if concurrent writers on one run ever stop being hypothetical — a
+second `escalate serve`, or agents judging the same run in parallel. Closing it
+is one line (`cmdJudge` sets the option) plus a decision to accept the retry.
+Owner: gate. Surfaced independently by codex P1 and by review on #210.
 
 ## ~~`escalate serve`: acknowledge the Slack tap within 3s, deliver the outcome async~~ (2026-07-27, codex P1 on #140)
 
