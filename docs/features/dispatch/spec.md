@@ -1,6 +1,6 @@
 # dispatch — Technical Design Document
 
-**Status:** built — `cmd/runway/internal/controller/` (landed 2026-07-12, 6 test files). Design record, not an open proposal.
+**Status:** built — `cmd/dispatch/` (landed 2026-07-15, 6 test files). Design record, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-15
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md) (the boundary law this tool must obey), ship `docs/features/agent-runner-abstraction/spec.md` (the engines this routes across), `/provenance --by-model` (cc-skills — the scorecard that feeds §7's drift flow), `docs/features/model-lottery/` in ship (the experiment that motivated this).
