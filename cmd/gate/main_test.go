@@ -196,6 +196,31 @@ func TestTerminalErrorUsesExternalRouteForBrokenSubstrate(t *testing.T) {
 	}
 }
 
+func TestTerminalErrorIncludesHostedAnchorOnParseFailure(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	got := terminalErrorFor(
+		errors.New("state: parse anchor: invalid character"),
+		[]string{"audit", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"},
+	)
+	for _, want := range []string{"/srv/gate/anchor.json", "/srv/gate"} {
+		if !strings.Contains(got.Escape.Next, want) {
+			t.Fatalf("escape = %q, want hosted anchor target %q", got.Escape.Next, want)
+		}
+	}
+}
+
+func TestCapabilityRefusalUsesGrantKeyCustodyRoute(t *testing.T) {
+	err := fmt.Errorf("%w: /tmp/gate-key/grant.key", capability.ErrKeyMissing)
+	res := gateResult{Outcome: "capability_refused", Why: err.Error()}
+	decorateTerminalContext(
+		&res, resultSubstrateOK(res), "/tmp/gate-state",
+		[]string{"gate", "-key", "/tmp/gate-key"}, err,
+	)
+	if res.Escape == nil || res.Escape.Next != `ls -ld /tmp/gate-state /tmp /tmp/gate-key` {
+		t.Fatalf("escape = %+v", res.Escape)
+	}
+}
+
 func TestStateSubstrateClassification(t *testing.T) {
 	args := []string{"resolve", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
 	if !stateSubstrateOK(fmt.Errorf("state: artifact esc_typo: %w", state.ErrNotFound), args) {
@@ -1232,6 +1257,29 @@ func TestNewEphemeralEnvIsThrowaway(t *testing.T) {
 	}
 	if _, err := os.Stat(e.keyPath); !os.IsNotExist(err) {
 		t.Fatalf("cleanup left the ephemeral key behind: %q (stat err: %v)", e.keyPath, err)
+	}
+}
+
+func TestBacktestRejectsBadPRBeforeWritingStdout(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := runBacktest("owner/repo", "1,bad", "triage-floor")
+	_ = w.Close()
+	os.Stdout = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	if runErr == nil || !strings.Contains(runErr.Error(), `backtest: bad pr "bad"`) {
+		t.Fatalf("error = %v", runErr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("backtest wrote partial stdout before rejecting input: %q", out)
 	}
 }
 

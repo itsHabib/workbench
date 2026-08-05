@@ -109,6 +109,8 @@ var knownCodes = []string{
 	"cycle_count_unreadable",
 	"grant_expired",
 	"grant_absent",
+	"grant_key_missing",
+	"grant_key_invalid",
 	"capability_refused",
 	"log_integrity_failed",
 	"anchor_key_missing",

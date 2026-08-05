@@ -694,7 +694,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		for k, v := range extra {
 			body[k] = v
 		}
-		addTerminalArtifactMetadata(body, outcome, res, e.stateDir)
+		addTerminalArtifactMetadata(body, outcome, res, e.stateDir, filepath.Dir(e.keyPath))
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
@@ -1793,6 +1793,10 @@ func cmdBacktest(args []string) error {
 // return. backtest is -live-free (it only ever yields would_merge/blocked/
 // parked), so an ephemeral grant is all a dry run needs.
 func runBacktest(repo, prs, floorBin string) error {
+	numbers, err := parseBacktestPRs(prs)
+	if err != nil {
+		return err
+	}
 	e, cleanup, err := newEphemeralEnv(floorBin)
 	if err != nil {
 		return err
@@ -1806,11 +1810,7 @@ func runBacktest(repo, prs, floorBin string) error {
 	}
 
 	fmt.Printf("%-6s %-10s %-6s %-22s %s\n", "PR", "decision", "tier", "outcome", "run")
-	for _, s := range strings.Split(prs, ",") {
-		n, err := strconv.Atoi(strings.TrimSpace(s))
-		if err != nil {
-			return fmt.Errorf("backtest: bad pr %q", s)
-		}
+	for _, n := range numbers {
 		res, _, err := runGate(e, repo, n, grantArt.ID, false, "local", false)
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
@@ -1819,6 +1819,19 @@ func runBacktest(repo, prs, floorBin string) error {
 		fmt.Printf("#%-5d %-10s %-6s %-22s %s\n", n, res.Decision, res.Tier, res.Outcome, res.Run)
 	}
 	return nil
+}
+
+func parseBacktestPRs(prs string) ([]int, error) {
+	parts := strings.Split(prs, ",")
+	numbers := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("backtest: bad pr %q", part)
+		}
+		numbers = append(numbers, n)
+	}
+	return numbers, nil
 }
 
 // newEphemeralEnv builds an env backed by throwaway temp dirs for state and
@@ -1896,9 +1909,9 @@ func printJSON(v any) {
 // making every non-zero result self-directing. A pass carries no escape.
 func exitGateResult(res gateResult, code int, stateDir string) {
 	if code != codeMerge {
-		// Substrate failures exit through the pre-result error path; a completed
-		// result proves the store was usable when its terminal state was recorded.
-		decorateTerminal(&res, true, stateDir)
+		decorateTerminalContext(
+			&res, resultSubstrateOK(res), stateDir, os.Args[1:], errors.New(res.Why),
+		)
 	}
 	printJSON(res)
 	os.Exit(code)
@@ -1937,14 +1950,22 @@ func terminalErrorFor(err error, args []string) terminalError {
 }
 
 func decorateTerminal(res *gateResult, substrateOK bool, stateDir string) {
+	decorateTerminalContext(res, substrateOK, stateDir, nil, nil)
+}
+
+func decorateTerminalContext(res *gateResult, substrateOK bool, stateDir string, args []string, cause error) {
 	code := res.Code
 	if code == "" && res.Outcome != "parked_for_judgment" {
 		code = readiness.Code(res.Why)
 	}
-	decorateTerminalCode(res, code, substrateOK, stateDir)
+	decorateTerminalCodeContext(res, code, substrateOK, stateDir, args, cause)
 }
 
 func decorateTerminalCode(res *gateResult, code string, substrateOK bool, stateDir string) {
+	decorateTerminalCodeContext(res, code, substrateOK, stateDir, nil, nil)
+}
+
+func decorateTerminalCodeContext(res *gateResult, code string, substrateOK bool, stateDir string, args []string, cause error) {
 	retry := readiness.RetryHelps(code)
 	res.SelfGated = readiness.SelfGated(code)
 	res.RetryHelps = &retry
@@ -1959,8 +1980,16 @@ func decorateTerminalCode(res *gateResult, code string, substrateOK bool, stateD
 		return
 	}
 	route := readiness.Escape(code, substrateOK)
-	route.Next = routeWithState(route.Next, stateDir, nil, nil)
+	route.Next = routeWithState(route.Next, stateDir, args, cause)
 	res.Escape = &route
+}
+
+func resultSubstrateOK(res gateResult) bool {
+	code := res.Code
+	if code == "" {
+		code = readiness.Code(res.Why)
+	}
+	return code != "grant_key_missing" && code != "grant_key_invalid"
 }
 
 func explainRoute(run, stateDir, why string) *readiness.Route {
@@ -1987,6 +2016,17 @@ func substrateTargets(stateDir string, args []string, cause error) []string {
 		targets = append(targets, keyFlag(args))
 		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
 			targets = append(targets, hosted)
+		}
+	}
+	if cause != nil && strings.Contains(cause.Error(), "state: parse anchor:") {
+		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+			targets = append(targets, hosted, filepath.Dir(hosted))
+		}
+	}
+	if cause != nil {
+		code := readiness.Code(cause.Error())
+		if code == "grant_key_missing" || code == "grant_key_invalid" {
+			targets = append(targets, keyFlag(args))
 		}
 	}
 	return uniqueStrings(targets)
@@ -2087,6 +2127,8 @@ func stateSubstrateOK(err error, args []string) bool {
 		state.ErrAnchorKeyMissing,
 		state.ErrAnchorKeyInvalid,
 		state.ErrAnchorMissing,
+		capability.ErrKeyMissing,
+		capability.ErrKeyInvalid,
 		errLogTampered,
 	} {
 		if errors.Is(err, sentinel) {
@@ -2135,12 +2177,15 @@ func keyFlag(args []string) string {
 	return keyDir
 }
 
-func addTerminalArtifactMetadata(body map[string]any, outcome string, res gateResult, stateDir string) {
+func addTerminalArtifactMetadata(body map[string]any, outcome string, res gateResult, stateDir, keyDir string) {
 	if outcome != "blocked" && outcome != "capability_refused" {
 		return
 	}
 	res.Outcome = outcome
-	decorateTerminal(&res, true, stateDir)
+	decorateTerminalContext(
+		&res, resultSubstrateOK(res), stateDir,
+		[]string{"-key", keyDir}, errors.New(res.Why),
+	)
 	body["escape"] = res.Escape
 	body["self_gated"] = res.SelfGated
 	body["retry_helps"] = res.RetryHelps
