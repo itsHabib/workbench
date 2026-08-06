@@ -1,6 +1,6 @@
 # grant-materialized rooms - Technical Design Document
 
-**Status:** built — `cmd/runway/internal/backend/rooms/` (landed 2026-07-19, 6 test files). Design record, not an open proposal.
+**Status:** built (all four GMR slices) — custody attenuation + authority-receipt contract (P1+P2, merged 2026-07-22), custody tap listener + Runway authority resolver (P3, [`driver-p3.md`](driver-p3.md)); the §9 rooms-host validation-gate e2e is operator-run and not recorded as executed. Design record for the merged slices, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-22
 **Related:** [custody TDD](../custody/spec.md), [execution-runtime spec](../execution-runtime/spec.md),

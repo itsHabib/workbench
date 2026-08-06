@@ -1,6 +1,6 @@
 # Execution Runtime - Technical Design Document
 
-**Status:** built — `cmd/runway/` (landed 2026-07-12, 21 test files). Design record, not an open proposal.
+**Status:** built (Runway mechanism) — `cmd/runway/` (landed 2026-07-12, 21 test files); Gate C placement equivalence remains a downstream task ([`cmd/runway/README.md`](../../../cmd/runway/README.md)), and the §9 Phase 3 Ship-compiler thesis gate is uncommitted and open. Design record for the shipped phases, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-10
 **Related:** [`docs/DESIGN.md`](../../DESIGN.md), [`agentic-workbench-closure`](../agentic-workbench-closure/spec.md), `pers/rooms/docs/runner-contract.md`, `pers/rooms/docs/experiments/multi-agent-rooms-2026-07-09.md`, `pers/ship/packages/agent-runner/src/runner.ts`, `pers/cortex/docs/compute-spawning/phase-1-foundation/plans/behaviour-architect.md`
