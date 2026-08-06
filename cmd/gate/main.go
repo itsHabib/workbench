@@ -2149,7 +2149,14 @@ func stateSubstrateOK(err error, args []string) bool {
 }
 
 func substratePath(path string, args []string) bool {
-	for _, root := range []string{stateFlag(args), keyFlag(args), os.Getenv("GATE_ANCHOR_RECORD")} {
+	roots := []string{stateFlag(args), keyFlag(args)}
+	// The hosted anchor is a file written atomically: temp-create and rename
+	// failures carry sibling paths under its parent directory, so the parent
+	// belongs to the substrate alongside the record itself.
+	if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+		roots = append(roots, hosted, filepath.Dir(hosted))
+	}
+	for _, root := range roots {
 		if root == "" {
 			continue
 		}

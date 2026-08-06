@@ -237,6 +237,17 @@ func TestStateSubstrateClassification(t *testing.T) {
 	}
 }
 
+func TestHostedAnchorDirErrorsAreSubstrateFaults(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	args := []string{"gate", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
+	if stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/gate/.anchor-123.tmp", Err: os.ErrPermission}, args) {
+		t.Fatal("hosted anchor temp write was classified as a usable substrate")
+	}
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/other/file", Err: os.ErrNotExist}, args) {
+		t.Fatal("a path outside the hosted anchor dir was classified as a broken substrate")
+	}
+}
+
 func TestMalformedJudgmentRoutesToAlternateProvider(t *testing.T) {
 	got := terminalErrorFor(
 		errors.New(`judgment_malformed: json: unknown field "findings"`),

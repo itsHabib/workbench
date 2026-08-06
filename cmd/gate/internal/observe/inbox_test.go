@@ -37,6 +37,34 @@ func grant(repo string, expires time.Time) capability.Grant {
 	return capability.Grant{Repo: repo, Action: "merge", MaxTier: "T1", MaxCycles: 3, ExpiresAt: expires, MintedBy: "test", Sig: "fixture"}
 }
 
+// TestCeilingParkSurfacesStoredEscape pins that a ceiling park projects the
+// escape route sealed into its escalation artifact instead of a judge command:
+// judging under the same grant re-applies the ceiling, so advertising `gate
+// judge` contradicts the recorded route.
+func TestCeilingParkSurfacesStoredEscape(t *testing.T) {
+	ceiling := esc("grt_a", "tier T2 exceeds ceiling T1", "grant_tier_exceeded", "o/widget", 142)
+	ceiling["escape"] = map[string]any{"why": "mint a wider grant", "next": "gate explain -run 'run_a'"}
+	content := esc("grt_b", "needs judgment", "", "o/api", 87)
+	content["escape"] = map[string]any{"why": "inspect state", "next": "gate next"}
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_a", "esc_a", inboxBase, ceiling),
+		art(state.KindEscalation, "run_b", "esc_b", inboxBase.Add(time.Minute), content),
+	}
+
+	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+
+	if len(in.Parked) != 2 {
+		t.Fatalf("want 2 parked runs, got %d: %+v", len(in.Parked), in.Parked)
+	}
+	byRun := map[string]ParkedRun{in.Parked[0].Run: in.Parked[0], in.Parked[1].Run: in.Parked[1]}
+	if p := byRun["run_a"]; p.JudgeCommand != "" || p.Escape == nil || p.Escape.Next != "gate explain -run 'run_a'" {
+		t.Fatalf("ceiling park must surface the stored escape and drop the judge command, got %+v", p)
+	}
+	if p := byRun["run_b"]; p.JudgeCommand == "" || p.Escape == nil {
+		t.Fatalf("content park must keep its judge command alongside the stored escape, got %+v", p)
+	}
+}
+
 // TestBuildInboxParked pins the parked-run derivation: a run whose latest
 // terminal is an escalation is awaiting judgment; one resolved by a later action
 // is not; a run re-parked after a judgment is awaiting again; and the list is
