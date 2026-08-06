@@ -258,7 +258,7 @@ func readinessFor(t *testing.T, view map[string]any) Verdict {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, subj, false)
+	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func readinessOptFor(t *testing.T, view map[string]any) Verdict {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, subj, true)
+	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestReviewsEmptyPanelEscalates(t *testing.T) {
 		t.Fatalf("empty review panel must escalate, got %s (%s)", v.Decision, v.Why)
 	}
 	v = reviewsFor(t, []map[string]any{
-		{"author": "alice", "is_bot": false, "body": "human note, not a bot"},
+		{"author": "alice", "is_bot": false, "association": "OWNER", "permission": "write", "body": "human note, not a bot"},
 	})
 	if v.Decision != DecisionEscalate {
 		t.Fatalf("panel with no bot comments must escalate, got %s (%s)", v.Decision, v.Why)
@@ -794,5 +794,330 @@ func TestReduceUnknownTierFailsClosed(t *testing.T) {
 	}
 	if tierRank(got.Tier) != 3 {
 		t.Fatalf("unknown tier must rank highest (fail closed), got %d", tierRank(got.Tier))
+	}
+}
+
+// readinessWithStances drives readiness with review-stance evidence recorded
+// alongside the view, the shape a real gate run produces.
+func readinessWithStances(t *testing.T, view map[string]any, stances []map[string]any) Verdict {
+	t.Helper()
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": view})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": stances})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// openPRAtHead is the green, mergeable, no-review-decision view that escalates
+// today — the unconditional park every portfolio PR hits.
+func openPRAtHead(head string) map[string]any {
+	return map[string]any{
+		"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": head,
+		"statusCheckRollup": []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}},
+		"author":            map[string]any{"login": "agent"},
+	}
+}
+
+// A human's APPROVED review on the exact head IS the review decision GitHub
+// declines to report when branch protection requires no reviews. It must
+// satisfy readiness, and the verdict must say so — the audit log has to show
+// what carried the decision.
+func TestReadinessHumanApprovalAtHeadSatisfiesAbsentReviewDecision(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("human approval at head must satisfy readiness, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "mh") {
+		t.Fatalf("verdict must name the approver, got %q", v.Why)
+	}
+}
+
+// The head binding is the whole point: GitHub keeps a review after the head
+// moves, and an approval of earlier code is not an approval of this one.
+func TestReadinessStaleApprovalDoesNotSatisfyReadiness(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("newhead"), []map[string]any{
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "oldhead"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("approval of a superseded head must not satisfy readiness, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// Findings are not authorization. A bot panel has its own rung; it can never
+// stand in for the human readiness signal here.
+func TestReadinessBotApprovalDoesNotSatisfyReadiness(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "claude[bot]", "is_bot": true, "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("bot approval must not satisfy human readiness, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// GitHub rejects self-approval, but this is the authorization path: assert it
+// rather than inherit it.
+func TestReadinessSelfApprovalDoesNotSatisfyReadiness(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "agent", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("PR author's own approval must not satisfy readiness, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// Only APPROVED counts. A comment or a changes-request at the head is not an
+// approval, and an unknown state fails closed.
+func TestReadinessNonApprovedStancesDoNotSatisfyReadiness(t *testing.T) {
+	for _, stance := range []string{"COMMENTED", "CHANGES_REQUESTED", "SOMETHING_NEW"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": stance, "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionEscalate {
+			t.Fatalf("stance %s must not satisfy readiness, got %s (%s)", stance, v.Decision, v.Why)
+		}
+	}
+}
+
+// An explicit CHANGES_REQUESTED review decision is GitHub's own merge policy
+// and still blocks — a human approval at the head does not talk past it.
+func TestReadinessHumanApprovalDoesNotOverrideChangesRequested(t *testing.T) {
+	view := openPRAtHead("abc123")
+	view["reviewDecision"] = "CHANGES_REQUESTED"
+	v := readinessWithStances(t, view, []map[string]any{
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionBlock {
+		t.Fatalf("CHANGES_REQUESTED must still block, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// One human's approval does not clear another human's outstanding change
+// request. On a protected repo GitHub folds this into reviewDecision; this path
+// exists because it does not, so nothing else would catch it.
+func TestReadinessApprovalDoesNotClearAnotherHumansChangeRequest(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "reviewer-a", "is_bot": false, "association": "OWNER", "permission": "write", "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "reviewer-b", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("approval must not clear an outstanding change request, got %s (%s)", v.Decision, v.Why)
+	}
+
+	// Also when the objection was raised at an older head: a change request
+	// stands until its author withdraws or supersedes it.
+	v = readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "reviewer-a", "is_bot": false, "association": "OWNER", "permission": "write", "state": "CHANGES_REQUESTED", "commit_id": "oldhead"},
+		{"author": "reviewer-b", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("stale change request must still suppress the approval, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// A bot's CHANGES_REQUESTED is a finding, not a human objection, and must not
+// suppress a human approval — findings have their own rung.
+func TestReadinessBotChangeRequestDoesNotSuppressHumanApproval(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("bot findings must not suppress human readiness, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// Stance evidence is what carried an approval-derived pass, so the verdict must
+// name it as a parent — provenance traversal has to reach the evidence judged
+// without parsing the verdict text.
+func TestReadinessVerdictParentsIncludeStanceEvidence(t *testing.T) {
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": []map[string]any{
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStances bool
+	for _, p := range art.Parents {
+		if p == stc.ID {
+			sawStances = true
+		}
+	}
+	if !sawStances {
+		t.Fatalf("stance evidence must be a verdict parent, got parents %v", art.Parents)
+	}
+}
+
+// Stance evidence that cannot be parsed must be an ERROR, never read as
+// "nobody approved" — that would silently downgrade a pass to an escalation and
+// look like a policy decision rather than a broken read.
+func TestReadinessMalformedStanceEvidenceIsAnError(t *testing.T) {
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"stances": "not-a-list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false); err == nil {
+		t.Fatal("malformed stance evidence must return an error, not read as no approval")
+	}
+}
+
+// Absent stance evidence must behave exactly as readiness did before stances
+// existed — both when the caller records an EMPTY id (nothing gathered) and
+// when it records an artifact carrying no stances.
+func TestReadinessWithoutStanceEvidenceIsUnchanged(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), nil)
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("empty stance list must escalate as before, got %s (%s)", v.Decision, v.Why)
+	}
+
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != DecisionEscalate {
+		t.Fatalf("absent stance evidence id must escalate as before, got %s (%s)", got.Decision, got.Why)
+	}
+}
+
+// On a PUBLIC repository anyone may submit a review, and the reviews API
+// reports every one of them as user.type "User". Authority is the reviewer's
+// EFFECTIVE permission — admin or write. GitHub's legacy permission field
+// already folds maintain into write and triage into read, which is the line
+// that matters.
+func TestReadinessApprovalRequiresWritePermission(t *testing.T) {
+	for _, perm := range []string{"admin", "write"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "mh", "is_bot": false, "association": "OWNER", "permission": perm,
+				"state": "APPROVED", "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionPass {
+			t.Fatalf("permission %q must carry authority, got %s (%s)", perm, v.Decision, v.Why)
+		}
+	}
+	// read covers triage; "" means the lookup failed and must never read as
+	// authority; unknown values fail closed.
+	for _, perm := range []string{"read", "none", "", "triage", "SOMETHING_NEW"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "mh", "is_bot": false, "association": "OWNER", "permission": perm,
+				"state": "APPROVED", "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionEscalate {
+			t.Fatalf("permission %q must not satisfy readiness, got %s (%s)", perm, v.Decision, v.Why)
+		}
+	}
+}
+
+// author_association is NOT authority, and an earlier revision wrongly treated
+// it as such. An org member with base read access reports MEMBER; an outside
+// collaborator with read or triage reports COLLABORATOR. Both can approve and
+// neither may decide what merges.
+func TestReadinessAssociationAloneIsNotAuthority(t *testing.T) {
+	for _, assoc := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {
+		v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+			{"author": "read-only", "is_bot": false, "association": assoc, "permission": "read",
+				"state": "APPROVED", "commit_id": "abc123"},
+		})
+		if v.Decision != DecisionEscalate {
+			t.Fatalf("association %s with read access must not authorize, got %s (%s)", assoc, v.Decision, v.Why)
+		}
+	}
+}
+
+// An unauthorized approval must not be rescued by an authorized one being
+// absent — nor should an authorized approval elsewhere launder it.
+func TestReadinessUnauthorizedApprovalIsIgnoredNotCounted(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "drive-by", "is_bot": false, "association": "NONE", "state": "APPROVED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("an authorized approval must still carry, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "mh") || strings.Contains(v.Why, "drive-by") {
+		t.Fatalf("verdict must credit the authorized approver only, got %q", v.Why)
+	}
+}
+
+// The approval/objection asymmetry is deliberate (see humanApprovalAtHead):
+// approving needs repository authority, objecting does not. Pin it so the
+// tradeoff cannot be silently reversed by someone "fixing the inconsistency".
+func TestReadinessUnauthorizedChangeRequestStillSuppressesApproval(t *testing.T) {
+	v := readinessWithStances(t, openPRAtHead("abc123"), []map[string]any{
+		{"author": "drive-by", "is_bot": false, "association": "NONE", "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write", "state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an unauthorized objection must still escalate, not be discarded: %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// A stance artifact that is valid JSON but carries no stances field is a broken
+// read — schema drift, or a wrong evidence id. It must be an error, not a nil
+// slice: nil would report "no review decision" and escalate, dressing an
+// infrastructure failure as a policy decision.
+func TestReadinessStanceEvidenceWithoutStancesFieldIsAnError(t *testing.T) {
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": openPRAtHead("abc123")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stc, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"pr": map[string]any{"repo": "o/r"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false); err == nil {
+		t.Fatal("a stance artifact with no stances field must error, not read as no approval")
 	}
 }

@@ -21,12 +21,13 @@ type PRRef struct {
 	Number int    `json:"number"`
 }
 
-// Bundle holds the ids of the three evidence artifacts a gate run records.
+// Bundle holds the ids of the evidence artifacts a gate run records.
 type Bundle struct {
 	View     string // gh pr view JSON (checks, draft, mergeable, review decision)
 	Diff     string // unified diff
 	Comments string // bot review comments (inline + issue-level)
 	Panel    string // ReviewPanelV1 declaration + exact-head completion evidence
+	Stances  string // each reviewer's current review stance, head-anchored
 }
 
 type viewBody struct {
@@ -68,6 +69,45 @@ type commentsBody struct {
 	Comments []Comment `json:"comments"`
 }
 
+// ReviewStance is one reviewer's CURRENT position on a PR: their latest
+// non-dismissed submission, with the commit it was submitted against. Recorded
+// as fact, not judgment — whether an APPROVED stance at some commit satisfies
+// readiness is the verifier's rule, and lives there.
+//
+// A reviewer can submit several reviews without a new commit (request changes,
+// then approve), so only the latest reflects their position; a DISMISSED review
+// is withdrawn evidence and never becomes anyone's stance. Same reduction, and
+// the same reason, as reviewBodies.
+type ReviewStance struct {
+	Author string `json:"author"`
+	IsBot  bool   `json:"is_bot"`
+	// Association is GitHub's author_association for the reviewer on this
+	// repository: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, and so on.
+	// Recorded for provenance — it is NOT the authority signal. An org member
+	// with base read access reports MEMBER, and an outside collaborator with
+	// read or triage access reports COLLABORATOR; both may submit an APPROVED
+	// review while holding no write authority at all.
+	Association string `json:"association"`
+	// Permission is the reviewer's EFFECTIVE repository permission as GitHub
+	// computes it — admin, write, read, or none. This is the authority signal.
+	// The legacy field already collapses maintain into write and triage into
+	// read, which is exactly the boundary that matters. Empty means it could
+	// not be established, which consumers must treat as no authority.
+	Permission string `json:"permission"`
+	// State is the submission state: APPROVED, CHANGES_REQUESTED, or COMMENTED.
+	State string `json:"state"`
+	// CommitID is the commit the review was submitted against. A consumer that
+	// treats a stance as authorization MUST check this against the head it is
+	// authorizing — GitHub keeps a review after the head moves, and an approval
+	// of earlier code is not an approval of this one.
+	CommitID string `json:"commit_id"`
+}
+
+type stancesBody struct {
+	PR      PRRef          `json:"pr"`
+	Stances []ReviewStance `json:"stances"`
+}
+
 type reviewFetchers struct {
 	reviews  func(PRRef) ([]rawComment, error)
 	comments func(PRRef, []rawComment) ([]Comment, error)
@@ -77,8 +117,11 @@ type reviewFetchers struct {
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	var b Bundle
+	// author is fetched so readiness can refuse to count a self-approval. GitHub
+	// already rejects approving your own PR, so this is defense in depth — but
+	// this is the authorization path, and it costs no extra round trip.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt")
+		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
 	if err != nil {
 		return b, err
 	}
@@ -117,7 +160,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.Diff = a.ID
 
-	comments, panel, err := fetchReviewEvidence(pr, viewed.HeadRefOid, reviewFetchers{
+	comments, panel, reviews, err := fetchReviewEvidence(pr, viewed.HeadRefOid, reviewFetchers{
 		reviews: fetchReviews, comments: fetchComments, panel: fetchPanel,
 	})
 	if err != nil {
@@ -136,23 +179,68 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 		return b, err
 	}
 	b.Panel = a.ID
+	a, err = st.Append(state.KindEvidence, run, nil,
+		stancesBody{PR: pr, Stances: withPermissions(pr, reviewStances(reviews), fetchPermission)})
+	if err != nil {
+		return b, err
+	}
+	b.Stances = a.ID
 	return b, nil
+}
+
+// decisiveReviewState reports whether a submission state states a position on
+// whether the PR may merge. APPROVED and CHANGES_REQUESTED do; COMMENTED does
+// NOT — GitHub is unambiguous that commenting after approving does not withdraw
+// the approval — and DISMISSED is withdrawn evidence. Treating COMMENTED as a
+// position would let a reviewer silently lose their own approval by adding a
+// remark, and would let a comment hide someone else's outstanding objection.
+func decisiveReviewState(state string) bool {
+	return state == "APPROVED" || state == "CHANGES_REQUESTED"
+}
+
+// reviewStances reduces a PR's review submissions (oldest-first) to each
+// author's current position — their latest DECISIVE submission. It records what
+// each reviewer said, which commit they said it about, and what authority they
+// hold; it decides nothing. Reviewers who have only commented hold no position
+// and do not appear.
+func reviewStances(reviews []rawComment) []ReviewStance {
+	latest := map[string]int{}
+	for i, rv := range reviews {
+		if !decisiveReviewState(rv.State) {
+			continue
+		}
+		latest[rv.User.Login] = i
+	}
+	out := make([]ReviewStance, 0, len(latest))
+	for i, rv := range reviews {
+		if idx, ok := latest[rv.User.Login]; !ok || idx != i {
+			continue
+		}
+		out = append(out, ReviewStance{
+			Author:      rv.User.Login,
+			IsBot:       rv.User.Type == "Bot",
+			Association: rv.AuthorAssociation,
+			State:       rv.State,
+			CommitID:    rv.CommitID,
+		})
+	}
+	return out
 }
 
 // fetchReviewEvidence takes the review-submission snapshot first. Both panel
 // completion and findings then derive from that same set; comments are fetched
 // afterward so an actionable inline finding belonging to a credited review
 // cannot be absent merely because it appeared between two review snapshots.
-func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]Comment, reviewpanel.Evidence, error) {
+func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]Comment, reviewpanel.Evidence, []rawComment, error) {
 	reviews, err := fetchers.reviews(pr)
 	if err != nil {
-		return nil, reviewpanel.Evidence{}, err
+		return nil, reviewpanel.Evidence{}, nil, err
 	}
 	comments, err := fetchers.comments(pr, reviews)
 	if err != nil {
-		return nil, reviewpanel.Evidence{}, err
+		return nil, reviewpanel.Evidence{}, nil, err
 	}
-	return comments, fetchers.panel(pr, headSHA, reviews, comments), nil
+	return comments, fetchers.panel(pr, headSHA, reviews, comments), reviews, nil
 }
 
 type rawComment struct {
@@ -174,6 +262,9 @@ type rawComment struct {
 	// APPROVED, CHANGES_REQUESTED, DISMISSED. Empty for comments. A DISMISSED
 	// review has been withdrawn and must not count as review evidence.
 	State string `json:"state"`
+	// AuthorAssociation is the reviewer's relationship to the repository, as
+	// GitHub reports it on the same review object — no extra fetch.
+	AuthorAssociation string `json:"author_association"`
 }
 
 const commentsPerPage = 100
@@ -218,6 +309,47 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	}
 	out = append(out, reviewBodies(reviews)...)
 	return out, nil
+}
+
+// withPermissions stamps each human stance with its author's effective
+// repository permission — the authority signal readiness needs, and the one
+// author_association cannot supply (read-access members still report MEMBER).
+//
+// A failed lookup records no permission rather than failing the run: a reviewer
+// who is not a collaborator legitimately has none, and GitHub answers that case
+// with an error rather than a value. Both land as "no authority", which costs an
+// escalation and never a merge. Bots are skipped — they are excluded from the
+// human-approval path by construction, and asking about them wastes a call.
+func withPermissions(pr PRRef, stances []ReviewStance, fetch func(PRRef, string) string) []ReviewStance {
+	seen := make(map[string]string, len(stances))
+	for i, s := range stances {
+		if s.IsBot || s.Author == "" {
+			continue
+		}
+		perm, ok := seen[s.Author]
+		if !ok {
+			perm = fetch(pr, s.Author)
+			seen[s.Author] = perm
+		}
+		stances[i].Permission = perm
+	}
+	return stances
+}
+
+// fetchPermission returns the user's effective permission, or "" when it cannot
+// be established. It never reports an error: see withPermissions.
+func fetchPermission(pr PRRef, login string) string {
+	raw, err := gh("api", fmt.Sprintf("repos/%s/collaborators/%s/permission", pr.Repo, login))
+	if err != nil {
+		return ""
+	}
+	var body struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ""
+	}
+	return body.Permission
 }
 
 func fetchReviews(pr PRRef) ([]rawComment, error) {
