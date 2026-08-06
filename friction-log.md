@@ -161,3 +161,56 @@ false alarm.
   no-grant boundary.
 - No grant was minted, no merge was attempted, and nothing was pushed to
   `main`.
+
+---
+
+# Friction log — Map docs PR (#214) merge session
+
+Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
+
+## Worked as documented
+
+- **The delivery loop.** Worktree off `origin/main`, docs-only change, canonical
+  checks, PR #214, `@codex review` + `@claude review` per `.ship.json`
+  (`expected=2`). All three CI checks green; both reviewers cleared the exact
+  head with zero actionable findings on the first cycle.
+- **The mint boundary.** The agent stopped at the grant handoff as documented;
+  the operator minted `grt_28cb0dbdbe48a39b` and the read-only `gate next` view
+  surfaced it without prompting.
+
+## Friction
+
+### Ollama being down turns a clean T0 PR into a parked run
+
+- **What I tried:** `gate gate -repo itsHabib/workbench -pr 214` with a valid
+  T2 grant, on a two-file docs PR (+8/−2) with green CI and both required
+  reviewers completed at the exact head.
+- **What happened:** parked (exit 2, `run_4bb803ea7c990b90`). Three of four
+  verifiers passed; the only escalation was `review-consolidation`, whose
+  local-model extraction failed with `ollama: ... connection refused` — the
+  daemon wasn't running. The escalation-brief synthesis failed the same way.
+  The one comment it did parse it misread, taking Claude's "Reviewed commit"
+  blob hashes as the verdict and labelling it `unknown`. Nothing about the
+  review content needed judgment; the park was purely an infra outage
+  surfacing as "needs judgment".
+- **Class:** `infra-outage`.
+- **Smallest fix:** run ollama as a supervised service (`brew services start
+  ollama` — done this session, auto-starts on reboot). Better: when the local
+  model is unreachable, review-consolidation should say so in its verdict
+  (`local_model_unavailable`) instead of dressing an outage as a judgment
+  question — the operator's remedy differs completely.
+
+### Gate opens and parks runs on already-merged PRs
+
+- **What I tried:** the same `gate gate` invocation — unknown to the agent,
+  PR #214 had already been merged out of band minutes earlier.
+- **What happened:** gate's readiness verifier read back `state=MERGED` and
+  *passed*, the ladder ran, and the run parked for judgment. The park is
+  unresolvable: a merged PR has no merge left to authorize, and judging it
+  pass would stamp one-shot merge authorization for a merge that already
+  happened — manufactured audit evidence. The run was left parked and
+  unjudged.
+- **Class:** `tool-bug`.
+- **Smallest fix:** short-circuit in `gate gate` when the readback shows the
+  PR merged — refuse (exit 3, reason `already_merged`, naming the merge
+  commit) before the verifier ladder runs. Chipped as its own task.
