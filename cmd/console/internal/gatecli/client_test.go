@@ -103,6 +103,23 @@ func TestAuditTamperedMapsToFinding(t *testing.T) {
 	}
 }
 
+func TestAuditOperationalTokenIsNotTamper(t *testing.T) {
+	// The code is parsed from the terminal JSON's error field, never searched
+	// for in the raw text: an I/O failure on a path that happens to contain
+	// the token must propagate as an error, not raise the tamper banner.
+	for name, out := range map[string]string{
+		"token-in-path": `{"error": "state: anchor dir: mkdir /tmp/log_integrity_failed: not a directory", "retry_helps": false}` + "\n",
+		"token-in-text": "gate: could not stat /tmp/log_integrity_failed\n",
+	} {
+		c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(out), errors.New("exit status 4")
+		})
+		if _, err := c.Audit(context.Background()); err == nil {
+			t.Fatalf("%s: an operational failure was mapped to a tamper finding", name)
+		}
+	}
+}
+
 func TestAuditOtherErrorPropagates(t *testing.T) {
 	// A non-zero exit that is NOT a tamper finding (e.g. state unreadable) is a
 	// real error and must surface.
