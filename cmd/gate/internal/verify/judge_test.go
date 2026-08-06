@@ -509,6 +509,11 @@ func TestEscapingIsInjectiveAcrossItsOwnSyntax(t *testing.T) {
 		"provider wrote esc": []byte(`\\x1b`),
 		"real invalid byte":  {0xff},
 		"provider wrote xff": []byte(`\xff`),
+		// A raw invalid 0x80 and the valid two-byte encoding of U+0080 are
+		// different provider streams: \x is reserved for single bytes, \u for
+		// decoded runes, or the two collapse into one quote.
+		"raw invalid 0x80": {0x80},
+		"encoded U+0080":   {0xc2, 0x80},
 	}
 	rendered := make(map[string]string, len(inputs))
 	for name, in := range inputs {

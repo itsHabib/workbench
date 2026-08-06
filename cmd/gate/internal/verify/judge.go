@@ -575,10 +575,16 @@ func escapedRuneAt(b []byte) (string, int) {
 	if r > 0xffff {
 		return fmt.Sprintf(`\U%08x`, r), size
 	}
-	// And \x takes exactly two: \x202e would read as \x20 followed by "2e".
-	if r > 0xff {
+	// \u for every non-ASCII rune, not just those above 0xff: a valid
+	// two-byte U+0080 and a raw invalid 0x80 byte would otherwise both render
+	// \x80 — two distinct provider streams, one quote. \x is reserved for
+	// single bytes, which below 0x80 are always valid ASCII, so the two forms
+	// cannot collide.
+	if r > 0x7f {
 		return fmt.Sprintf(`\u%04x`, r), size
 	}
+	// And \x takes exactly two hex digits: \x202e would read as \x20 followed
+	// by "2e".
 	return fmt.Sprintf(`\x%02x`, r), size
 }
 

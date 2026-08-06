@@ -1104,20 +1104,32 @@ func judgeSlotState(e env, run, escalationID string, cause error) error {
 		return fmt.Errorf("%w; no judgment is recorded for %s — the one judgment is unspent and a retry is legal", cause, escalationID)
 	}
 	if judgmentSettled(arts, judgment.ID) {
+		// A wedge can land here too: the OUTCOME fsynced and its anchor update
+		// failed. The park is genuinely resolved — but audit-gated writes stay
+		// refused until the anchor reseals, and silence about that leaves the
+		// operator with only judgment_duplicate and no route.
+		if anchorWedge(cause) {
+			return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate — but the anchor was not updated before the interruption: audit-gated writes stay refused until the anchor reseals on the next successful plain append to this store (any new gate run)", cause, judgment.ID, escalationID)
+		}
 		return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate", cause, judgment.ID, escalationID)
 	}
 	// An interrupted append leaves the log one entry ahead of its anchor, and
 	// every audit-gated append — including the retry's own — refuses that
 	// ledger. Claiming "a retry resumes" here would send the operator into a
 	// refusal loop: the anchor must reseal first, which the next successful
-	// plain append performs under rebind's bounded, proven recovery. Two
-	// spellings name the same wedge: appendLocked's "state: anchor:" is the
-	// failure that creates it (the entry fsynced, the anchor update did not),
-	// and faultIncomplete's "incomplete-append:" is the retry meeting it.
-	if strings.Contains(cause.Error(), "incomplete-append:") || strings.Contains(cause.Error(), "state: anchor:") {
+	// plain append performs under rebind's bounded, proven recovery.
+	if anchorWedge(cause) {
 		return fmt.Errorf("%w; judgment %s is recorded for %s but the anchor was not updated before the interruption — retrying now meets the same audit refusal; the anchor reseals on the next successful append to this store (any new gate run), after which a retry resumes the judgment", cause, judgment.ID, escalationID)
 	}
 	return fmt.Errorf("%w; judgment %s is recorded for %s but produced no outcome — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
+}
+
+// anchorWedge reports whether cause names the one-entry-ahead ledger. Two
+// spellings name the same wedge: appendLocked's "state: anchor:" is the
+// failure that creates it (the entry fsynced, the anchor update did not), and
+// faultIncomplete's "incomplete-append:" is the retry's audit meeting it.
+func anchorWedge(cause error) bool {
+	return strings.Contains(cause.Error(), "incomplete-append:") || strings.Contains(cause.Error(), "state: anchor:")
 }
 
 // judgmentSettled reports whether a recorded judgment already drove the run to

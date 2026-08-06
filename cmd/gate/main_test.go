@@ -1438,13 +1438,14 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	// retry-resumable: every audit-gated append re-refuses the one-ahead
 	// ledger until the anchor reseals. The annotation must not promise a
 	// resume it cannot deliver.
-	for name, cause := range map[string]error{
+	wedgeCauses := map[string]error{
 		// The retry meeting the wedge: the audit refuses the one-ahead ledger.
 		"audit-refusal": errors.New("state: audit refused append: incomplete-append: log has 8 entries, anchor pinned 7 — append interrupted before the anchor updated"),
 		// The failure that creates the wedge: the entry fsynced, the anchor
 		// update did not (appendLocked's wrap).
 		"anchor-failure": errors.New("state: anchor: state: rename anchor: permission denied"),
-	} {
+	}
+	for name, cause := range wedgeCauses {
 		wedged := judgeSlotState(e, run, esc.ID, cause)
 		if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
 			t.Fatalf("%s: wedged error = %v\nmust not claim a bare retry resumes", name, wedged)
@@ -1466,6 +1467,18 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	}
 	if !judgmentSettled(arts, jArt.ID) {
 		t.Fatal("a judgment that produced an outcome reported as resumable")
+	}
+
+	// A wedge on the OUTCOME append lands in the settled branch: the park is
+	// resolved, but the reseal guidance must still reach the operator —
+	// audit-gated writes stay refused until the anchor reseals.
+	for name, cause := range wedgeCauses {
+		settled := judgeSlotState(e, run, esc.ID, cause)
+		for _, want := range []string{"judgment_duplicate", "anchor was not updated", "reseals"} {
+			if !strings.Contains(settled.Error(), want) {
+				t.Fatalf("%s: settled wedge error = %v\nwant it to mention %q", name, settled, want)
+			}
+		}
 	}
 }
 
