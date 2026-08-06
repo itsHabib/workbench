@@ -89,8 +89,10 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	// The grant, when the park ran under one. notify keys the resolve buttons
 	// on it: a grantless park (schema-valid since escalation.v1's second
 	// consumer) resolves out-of-band, so Approve/Block would offer a tap
-	// escalate's ingest is guaranteed to refuse.
-	if b.Grant != "" {
+	// escalate's ingest is guaranteed to refuse. A "none:"-prefixed value is
+	// the documented pre-amendment sentinel for that same situation ("I hold no
+	// grant"), so a persisted sentinel body lifts as grantless, not as a grant.
+	if b.Grant != "" && !strings.HasPrefix(b.Grant, "none:") {
 		fields["grant"] = b.Grant
 	}
 	// A routable signal for brief-presence: routing pages a human only for

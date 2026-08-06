@@ -103,7 +103,7 @@ their own shapes; `decision`/`tier` are never required of them.
   local routes file and is never written to errors or logs.
   - **Resolve actions (opt-in).** When a slack channel sets `"resolve_actions": true`, a
     *resolvable* parked escalation (a gate park — event kind `escalation` — carrying its
-    artifact id) additionally renders **Approve** and **Block** interactive buttons beside the
+    artifact id **and the grant it ran under**) additionally renders **Approve** and **Block** interactive buttons beside the
     `View PR` link. Each button carries the shared `contracts/escalation` action-id vocabulary
     (`ActionApprove` / `ActionBlock`) and the escalation artifact id as its value, so a signed
     Slack callback resolves the right park with nothing pasted. flare only *paints* the buttons —
@@ -112,8 +112,11 @@ their own shapes; `decision`/`tier` are never required of them.
     Request URL is pointed at a running `escalate serve` (behind a tunnel), and a rendered button
     with no configured Request URL is a dead tap. Turning it on is the operator's signal that the
     ingress is wired. Buttons never render for the other things that reach `SevEscalate` (a
-    verdict with an escalate decision, a cursor-alert, a park missing its id) — those are not
-    resolvable, so offering Approve/Block on them would be a tap `gate resolve` would refuse.
+    verdict with an escalate decision, a cursor-alert, a park missing its id, or a grantless
+    park — including one carrying the documented `none:`-prefixed sentinel, which lifts as
+    grantless) — those are not resolvable through `escalate`, so offering Approve/Block on
+    them would be a tap `gate resolve` would refuse; a grantless park resolves out-of-band in
+    the producer's own flow.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.

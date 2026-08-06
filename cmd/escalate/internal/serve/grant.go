@@ -19,6 +19,14 @@ import (
 // ahead of gate's own escalationIsOpen guard.
 var ErrNotParked = errors.New("serve: escalation is not currently parked")
 
+// ErrGrantlessPark marks a park that IS in the inbox but carries no gate grant
+// (schema-valid since escalation.v1's second consumer): it resolves out-of-band
+// in the producer's own flow, never through this back-channel. It wraps
+// ErrNotParked deliberately, so the handler's replay mapping (409) holds
+// unchanged, while the card text can name the real situation instead of
+// claiming the park was already resolved.
+var ErrGrantlessPark = fmt.Errorf("%w: park carries no gate grant", ErrNotParked)
+
 // GateGrantFinder is the production GrantFinder: it shells `gate next -json` —
 // gate's read-only console feed — and joins the parked escalation id to the
 // grant its run parked under. It reads gate's OUTPUT and never imports gate, the
@@ -72,7 +80,7 @@ func grantForEscalation(feed []byte, escID string) (string, error) {
 			continue
 		}
 		if p.Grant == "" {
-			return "", fmt.Errorf("%w: %s has no grant — a grantless park resolves out-of-band, not through this back-channel", ErrNotParked, escID)
+			return "", fmt.Errorf("%w: %s has no grant — a grantless park resolves out-of-band, not through this back-channel", ErrGrantlessPark, escID)
 		}
 		return p.Grant, nil
 	}

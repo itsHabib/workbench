@@ -75,13 +75,14 @@ func TestGateLogLiftsEscalationsAndNonPassVerdicts(t *testing.T) {
 // escalation.v1's second consumer — surfaces no grant field at all.
 func TestGateLogEscalationCarriesPRSubject(t *testing.T) {
 	withPR := `{"id":"esc_pr","kind":"escalation","run":"run_7","time":"2026-07-08T16:39:00Z","body":{"outcome":"parked_for_judgment","question":"your call","grant":"grt_7","repo":"itsHabib/workbench","number":64},"prev":"h1","hash":"h2"}`
-	src := gateFile(t, escLine+"\n"+withPR+"\n")
+	withSentinel := `{"id":"esc_sen","kind":"escalation","run":"sanity_1","time":"2026-07-08T16:39:30Z","body":{"outcome":"parked_for_judgment","question":"rollback?","grant":"none:roxiq-is-not-a-gate-run","repo":"itsHabib/roxiq","number":161},"prev":"h2","hash":"h3"}`
+	src := gateFile(t, escLine+"\n"+withPR+"\n"+withSentinel+"\n")
 	events, _, err := Read(src, Cursor{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("want both escalations, got %d: %+v", len(events), events)
+	if len(events) != 3 {
+		t.Fatalf("want all three escalations, got %d: %+v", len(events), events)
 	}
 	if f := events[0].Fields; f["repo"] != "" || f["number"] != "" {
 		t.Fatalf("subjectless escalation must not invent a PR, got %+v", f)
@@ -94,6 +95,9 @@ func TestGateLogEscalationCarriesPRSubject(t *testing.T) {
 	}
 	if f := events[1].Fields; f["grant"] != "grt_7" {
 		t.Fatalf("granted escalation must surface its grant, got %+v", f)
+	}
+	if f := events[2].Fields; f["grant"] != "" {
+		t.Fatalf("a sentinel grant means no grant — it must lift as grantless, got %+v", f)
 	}
 }
 
