@@ -2,6 +2,22 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## gate: mid-run merge race can still park (codex P1 on #219, deferred)
+
+The already-merged refusal (#219) reads the view snapshot gathered at run
+start. A PR that merges *during* the run — between evidence and the terminal
+outcome, a window the model rungs can stretch to minutes — still evaluates
+against the OPEN snapshot and can park. Eliminating the race would need a
+second live read inside `act`, which today decides purely from recorded state
+(the decisions-reconstructable-from-state-alone contract); any such read must
+be recorded as evidence, not consulted as a side channel. Deferred because the
+park is now recoverable instead of unresolvable: re-running `gate gate`
+refuses `already_merged`, and that refusal supersedes the stale park in both
+the inbox reduction and the protected-authorization terminal index. The pass
+path was already safe — the emitted merge command is `--match-head-commit`
+pinned and GitHub refuses to merge a merged PR. Revisit only if the race is
+observed parking runs in practice.
+
 ## AI gateway egress
 
 - **Construction-time credential read.** Gate reads `ANTHROPIC_API_KEY` once

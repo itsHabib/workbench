@@ -52,10 +52,10 @@ import (
 // outcome is an aborted run, not a decision.
 //
 //	code | outcome                                | driver action
-//	  0  | would_merge / merged / already_merged  | land the PR
+//	  0  | would_merge / merged                   | land the PR
 //	  1  | blocked                                | stop; do not merge
 //	  2  | parked_for_judgment                    | re-mint a wider grant (ceiling) or judge (escalation)
-//	  3  | capability_refused                     | mint/repair the grant, retry once
+//	  3  | capability_refused / already_merged    | mint/repair the grant and retry once / nothing to merge
 //	  4  | (hard error, no outcome)               | surface the error; no merge
 const (
 	codeMerge   = 0
