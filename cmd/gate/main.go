@@ -2158,14 +2158,7 @@ func stateSubstrateOK(err error, args []string) bool {
 }
 
 func substratePath(path string, args []string) bool {
-	roots := []string{stateFlag(args), keyFlag(args)}
-	// The hosted anchor is a file written atomically: temp-create and rename
-	// failures carry sibling paths under its parent directory, so the parent
-	// belongs to the substrate alongside the record itself.
-	if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
-		roots = append(roots, hosted, filepath.Dir(hosted))
-	}
-	for _, root := range roots {
+	for _, root := range []string{stateFlag(args), keyFlag(args)} {
 		if root == "" {
 			continue
 		}
@@ -2174,7 +2167,31 @@ func substratePath(path string, args []string) bool {
 			return true
 		}
 	}
-	return false
+	return hostedAnchorPath(path)
+}
+
+// hostedAnchorPath reports whether path belongs to hosted anchor custody: the
+// record itself, the .anchor-*.tmp siblings its atomic write creates, or the
+// exact parent directory (an anchor-dir MkdirAll failure). The parent's OTHER
+// children are not substrate — a relative GATE_ANCHOR_RECORD like
+// "anchor.json" has "." for a parent, and treating that as a root would
+// swallow every unrelated input-file error into the custody route.
+func hostedAnchorPath(path string) bool {
+	hosted := os.Getenv("GATE_ANCHOR_RECORD")
+	if hosted == "" {
+		return false
+	}
+	if within, err := dirWithin(path, hosted); err == nil && within {
+		return true
+	}
+	if filepath.Clean(path) == filepath.Dir(hosted) {
+		return true
+	}
+	base := filepath.Base(path)
+	if !strings.HasPrefix(base, ".anchor-") || !strings.HasSuffix(base, ".tmp") {
+		return false
+	}
+	return filepath.Dir(filepath.Clean(path)) == filepath.Dir(hosted)
 }
 
 func keyFlag(args []string) string {

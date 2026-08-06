@@ -256,8 +256,30 @@ func TestHostedAnchorDirErrorsAreSubstrateFaults(t *testing.T) {
 	if stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/gate/.anchor-123.tmp", Err: os.ErrPermission}, args) {
 		t.Fatal("hosted anchor temp write was classified as a usable substrate")
 	}
+	if stateSubstrateOK(&os.PathError{Op: "mkdir", Path: "/srv/gate", Err: os.ErrPermission}, args) {
+		t.Fatal("hosted anchor dir creation was classified as a usable substrate")
+	}
 	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/other/file", Err: os.ErrNotExist}, args) {
 		t.Fatal("a path outside the hosted anchor dir was classified as a broken substrate")
+	}
+	// Custody is the record, its temp siblings, and the exact parent — never
+	// the parent's other children.
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/gate/unrelated.json", Err: os.ErrNotExist}, args) {
+		t.Fatal("an unrelated sibling of the hosted anchor was classified as a broken substrate")
+	}
+}
+
+func TestRelativeHostedAnchorDoesNotSwallowInputErrors(t *testing.T) {
+	// A relative record has "." for a parent; the working directory must not
+	// become substrate, or `gate judge -judgment missing.json` gets the
+	// custody route instead of an input-file diagnosis.
+	t.Setenv("GATE_ANCHOR_RECORD", "anchor.json")
+	args := []string{"judge", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "missing.json", Err: os.ErrNotExist}, args) {
+		t.Fatal("an input file in the working directory was classified as a broken substrate")
+	}
+	if stateSubstrateOK(&os.PathError{Op: "open", Path: "anchor.json", Err: os.ErrPermission}, args) {
+		t.Fatal("the relative hosted anchor itself was classified as a usable substrate")
 	}
 }
 

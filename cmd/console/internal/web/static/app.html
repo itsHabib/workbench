@@ -406,7 +406,13 @@
   // judge_command (so -state is already baked in) with a drafted -why. Same
   // blocks as the run view; the operator can act without clicking through.
   function docketJudge(p) {
-    if (!p.judge_command) return "";
+    // A ceiling park suppresses the judge command — judging under the same
+    // grant re-applies the ceiling — and carries the route in escape instead.
+    if (!p.judge_command) {
+      if (!p.escape || !p.escape.next) return "";
+      var why = p.escape.why ? '<div class="state-note">' + esc(p.escape.why) + "</div>" : "";
+      return why + cmdRow(p.escape.next);
+    }
     var parts = p.judge_command.split(" -decision ");
     if (parts.length < 2) return cmdRow(p.judge_command); // unexpected shape — show gate's command as-is
     var base = parts[0];
