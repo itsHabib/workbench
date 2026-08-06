@@ -665,8 +665,9 @@ func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) Par
 		JudgeCommand:   judgeCommand(a.Run, b.Grant, stateArg),
 		ExplainCommand: fmt.Sprintf("gate explain%s -run %s -html", stateArg, a.Run),
 	}
-	if ceilingPark(b.Code) && b.Escape != nil {
+	if ceilingPark(b.Code) {
 		p.JudgeCommand = ""
+		p.Escape = ceilingEscape(a.Run, stateArg, b.Escape)
 	}
 	if p.Repo != "" && p.Number != 0 {
 		p.URL = fmt.Sprintf("https://github.com/%s/pull/%d", p.Repo, p.Number)
@@ -685,6 +686,22 @@ func judgeCommand(run, grant, stateArg string) string {
 // judgment cannot clear, because applyJudgment re-applies the grant ceiling.
 func ceilingPark(code string) bool {
 	return code == escalation.CodeTierExceeded || code == escalation.CodeCycleExceeded
+}
+
+// ceilingEscape rebuilds the ceiling route against the state path this
+// projection was invoked with. The sealed escape carries the writer's absolute
+// -state, which goes stale when the ledger is copied or mounted elsewhere, and
+// legacy ceiling parks predate sealed escapes entirely — so the command is
+// always derived here, and only the sealed prose is kept.
+func ceilingEscape(run, stateArg string, sealed *escalation.Escape) *escalation.Escape {
+	why := "the operator must mint a wider grant; inspect the recorded ceiling before requesting new authority"
+	if sealed != nil && sealed.Why != "" {
+		why = sealed.Why
+	}
+	return &escalation.Escape{
+		Why:  why,
+		Next: fmt.Sprintf("gate explain%s -run %s", stateArg, run),
+	}
 }
 
 // datedGrant pairs a ledger row with its expiry instant so the ledger can sort
