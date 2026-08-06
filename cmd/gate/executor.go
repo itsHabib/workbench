@@ -296,7 +296,7 @@ func evaluateHostedPreparation(
 	}
 	result, code, err := runGateWithSynthesis(
 		e, document.Request.Subject.Repo, document.Request.Subject.Number,
-		document.Request.GrantID, false, "local", true, false,
+		document.Request.GrantID, false, "local", true, false, true,
 	)
 	if err != nil {
 		return preparedGateState{}, err

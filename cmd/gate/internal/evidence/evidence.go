@@ -120,8 +120,11 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	// author is fetched so readiness can refuse to count a self-approval. GitHub
 	// already rejects approving your own PR, so this is defense in depth — but
 	// this is the authorization path, and it costs no extra round trip.
+	// mergeCommit is fetched so the already-merged refusal can name the commit
+	// that already landed — the fact that proves there is no merge left to
+	// authorize.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
+		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author,mergeCommit")
 	if err != nil {
 		return b, err
 	}
