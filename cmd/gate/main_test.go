@@ -209,6 +209,19 @@ func TestTerminalErrorIncludesHostedAnchorOnParseFailure(t *testing.T) {
 	}
 }
 
+func TestTerminalErrorIncludesAnchorCustodyOnTamperedChain(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	got := terminalErrorFor(
+		fmt.Errorf("%w: rewrite: anchor MAC mismatch", errLogTampered),
+		[]string{"audit", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"},
+	)
+	for _, want := range []string{"/tmp/gate-key", "/srv/gate/anchor.json", "/srv/gate"} {
+		if !strings.Contains(got.Escape.Next, want) {
+			t.Fatalf("escape = %q, want anchor custody target %q", got.Escape.Next, want)
+		}
+	}
+}
+
 func TestCapabilityRefusalUsesGrantKeyCustodyRoute(t *testing.T) {
 	err := fmt.Errorf("%w: /tmp/gate-key/grant.key", capability.ErrKeyMissing)
 	res := gateResult{Outcome: "capability_refused", Why: err.Error()}

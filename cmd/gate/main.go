@@ -2023,6 +2023,15 @@ func substrateTargets(stateDir string, args []string, cause error) []string {
 			targets = append(targets, hosted, filepath.Dir(hosted))
 		}
 	}
+	// An integrity failure — invalid anchor MAC, truncation, deletion, a
+	// head/count mismatch — is evidence produced BY the anchor, so the route
+	// must point at anchor custody too, not only at the state tree.
+	if errors.Is(cause, errLogTampered) {
+		targets = append(targets, keyFlag(args))
+		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+			targets = append(targets, hosted, filepath.Dir(hosted))
+		}
+	}
 	if cause != nil {
 		code := readiness.Code(cause.Error())
 		if code == "grant_key_missing" || code == "grant_key_invalid" {
