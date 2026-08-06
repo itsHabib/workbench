@@ -522,6 +522,44 @@ func TestEscapingIsInjectiveAcrossItsOwnSyntax(t *testing.T) {
 	}
 }
 
+// Truncation must fall between escapes, never through one: half of an escaped
+// U+202E is a shorter escape plus stray hex, which is a quote that reads as
+// something the provider never emitted. Every cut point is checked, because the
+// bug is a property of where the budget happens to land.
+func TestTruncationCutsOnlyBetweenEscapes(t *testing.T) {
+	stream := []byte(strings.Repeat("\u202e", 64))
+	for limit := len(providerTruncateMark) + 1; limit <= 400; limit++ {
+		got := strings.TrimSuffix(detailWithin(stream, limit), providerTruncateMark)
+		if len(got)%len(`\u202e`) != 0 {
+			t.Fatalf("limit %d cut through an escape: %q", limit, got)
+		}
+		if strings.Count(got, `\u202e`) != len(got)/len(`\u202e`) {
+			t.Fatalf("limit %d produced something other than whole escapes: %q", limit, got)
+		}
+	}
+}
+
+// Escaping expands its input, so the work has to be bounded by the budget
+// rather than by what the provider chose to emit — this is the failure path,
+// and the provider is already the thing that misbehaved. 8 MB of control bytes
+// would expand to 32 MB if the whole transcript were built before cutting.
+func TestQuotingCostIsBoundedByTheBudgetNotTheProvider(t *testing.T) {
+	flood := bytes.Repeat([]byte{0x1b}, 8<<20)
+	allocs := testing.AllocsPerRun(3, func() {
+		if got := detailWithin(flood, judgmentEmissionCap); len(got) > judgmentEmissionCap {
+			t.Fatalf("quote = %d bytes, want at most %d", len(got), judgmentEmissionCap)
+		}
+	})
+	// The two regimes are four orders of magnitude apart, so the ceiling does
+	// not need to be tight to be decisive: escaping only what fits costs one
+	// allocation per escape written, bounded by the budget, while escaping the
+	// whole stream first would be ~2M. Anything near the budget passes;
+	// anything tracking the provider cannot.
+	if allocs > 4*judgmentEmissionCap {
+		t.Fatalf("%v allocations for an 8 MB stream — the work tracks the provider, not the budget", allocs)
+	}
+}
+
 // The guarantee is a property of every rune, not of the handful of attacks
 // thought of so far: nothing unprintable survives into a quote, whatever
 // category it comes from.

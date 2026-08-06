@@ -484,97 +484,94 @@ func providerDetail(stream []byte) string {
 	return detailWithin(stream, providerDetailCap)
 }
 
+// detailWithin escapes only as much of stream as the budget can print. Two
+// reasons it is a bounded scan rather than "escape everything, then cut".
+//
+// Work: escaping EXPANDS its input — a run of control bytes grows fourfold — so
+// building the whole escaped transcript would let a hostile or merely verbose
+// provider make gate do work proportional to its output while at most `limit`
+// bytes are ever shown. That is on the failure path, where the provider is
+// already the thing that misbehaved.
+//
+// Correctness: a cut through a finished transcript can land inside an escape
+// sequence, and half of an escaped U+202E is a quote that means something
+// else. Growing the quote one whole rune at a time means a cut can only fall
+// on a boundary.
 func detailWithin(stream []byte, limit int) string {
-	detail := escapeUnprintable(strings.TrimSpace(string(stream)))
-	if len(detail) <= limit {
-		return detail
+	detail := bytes.TrimSpace(stream)
+	if len(detail) == 0 {
+		return ""
 	}
-	// A budget at or below the marker leaves nothing to spend on the quote, and
-	// the slice below would underflow. Both callers pass caps far above it, but
-	// the limit is a parameter now and a third cap should not have to know
-	// this.
+	// A budget at or below the marker leaves nothing to spend on the quote.
+	// Both callers pass caps far above it, but the limit is a parameter and a
+	// third cap should not have to know this.
 	if limit <= len(providerTruncateMark) {
 		return providerTruncateMark
 	}
-	// The marker is part of the budget, and the cut can land mid-rune —
-	// provider output is arbitrary bytes, not guaranteed UTF-8.
-	kept := strings.ToValidUTF8(detail[:limit-len(providerTruncateMark)], "")
-	return kept + providerTruncateMark
-}
-
-// escapeUnprintable renders untrusted provider bytes safe to display. Provider
-// output is model-written text derived from a PR diff, so it can carry ANSI or
-// OSC sequences — and a terminal acts on those: they can erase or overwrite the
-// lines around them. What they would be forging here is the operator's recovery
-// route, which is exactly the text worth forging, so the quote is escaped
-// before it is ever handed to a terminal or a CI log.
-//
-// The predicate is IsPrint, not IsControl. IsControl is category Cc alone,
-// which leaves the Cf format characters — the bidi overrides and isolates,
-// U+202E and U+2066..U+2069 — to pass through and reorder the rendered line in
-// any bidi-aware terminal or browser. Reordering the route is the same forgery
-// by another mechanism, so the test is "can this be displayed" rather than a
-// list of the categories thought of so far.
-//
-// Escaped, not stripped: the bytes are evidence. `\x1b` says a provider emitted
-// an escape sequence, where a dropped byte or a replacement rune would hide it.
-// Printable runes pass through untouched, so a quoted JSON body still reads as
-// JSON, and the cap in detailWithin bounds the expansion.
-//
-// Decoding is explicit rather than `for range`, which yields U+FFFD for every
-// byte that is not valid UTF-8. U+FFFD is printable, so ranging would pass that
-// substitution straight through and a raw 0xff would render identically to a
-// provider that genuinely emitted a replacement character \u2014 the one case where
-// quoting bytes as evidence has to be exact.
-func escapeUnprintable(s string) string {
+	budget := limit - len(providerTruncateMark)
 	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		// (RuneError, 1) is how the decoder reports a byte that is not valid
-		// UTF-8; a genuine U+FFFD decodes at size 3, so the two stay
-		// distinguishable in the quote.
-		if r == utf8.RuneError && size == 1 {
-			fmt.Fprintf(&b, "\\x%02x", s[i])
-			i++
-			continue
+	b.Grow(min(len(detail), limit))
+	for i := 0; i < len(detail); {
+		piece, size := escapedRuneAt(detail[i:])
+		if b.Len()+len(piece) > budget {
+			b.WriteString(providerTruncateMark)
+			return b.String()
 		}
+		b.WriteString(piece)
 		i += size
-		// The backslash is the escape syntax's own metacharacter, so it has to
-		// escape itself. Without this, a provider that writes the literal text
-		// \x1b renders identically to one that emitted a real ESC byte, and the
-		// evidence the branches above work to preserve is ambiguous again at
-		// the last step. Doubling it makes the encoding injective: every quote
-		// has exactly one input that produces it.
-		if r == '\\' {
-			b.WriteString(`\\`)
-			continue
-		}
-		if unicode.IsPrint(r) {
-			b.WriteRune(r)
-			continue
-		}
-		writeRuneEscape(&b, r)
 	}
 	return b.String()
 }
 
-// writeRuneEscape sizes each escape to the width its form conventionally
-// carries, so a quote can only be read one way. Escaping U+202E as a 4-digit \u
-// gives \u202e; using \x there would give \x202e, which reads as \x20 followed
-// by a literal "2e". The same trap is one plane up: a supplementary rune such
-// as the tag character U+E0001 in the 4-digit form gives \ue0001, which reads
-// as \ue000 followed by "1".
-func writeRuneEscape(b *strings.Builder, r rune) {
+// escapedRuneAt renders the one rune at the head of b as text safe to display,
+// and reports how many bytes it consumed. Provider output is model-written text
+// derived from a PR diff, so it can carry ANSI or OSC sequences — and a
+// terminal acts on those: they can erase or overwrite the lines around them.
+// What they would be forging is the operator's recovery route, which is exactly
+// the text worth forging, so nothing reaches a terminal or a CI log unescaped.
+//
+// Escaped, not stripped: the bytes are evidence. `\x1b` says a provider emitted
+// an escape sequence, where a dropped byte or a replacement rune would hide it.
+// Printable runes pass through untouched, so a quoted JSON body still reads as
+// JSON.
+//
+// The rules below are one requirement rather than a list of known attacks: the
+// rendering must be INJECTIVE — every quote has exactly one input that produces
+// it. Each rule exists because it names an input the previous ones could not
+// tell apart.
+func escapedRuneAt(b []byte) (string, int) {
+	r, size := utf8.DecodeRune(b)
+	// (RuneError, 1) is how the decoder reports a byte that is not valid UTF-8.
+	// A genuine U+FFFD decodes at size 3 and is printable, so without this a raw
+	// 0xff and a provider-written replacement character render identically.
+	if r == utf8.RuneError && size == 1 {
+		return fmt.Sprintf(`\x%02x`, b[0]), 1
+	}
+	// The backslash is the syntax's own metacharacter and must escape itself, or
+	// a provider writing the literal text \x1b renders the same as one that
+	// emitted a real ESC byte.
+	if r == '\\' {
+		return `\\`, size
+	}
+	// IsPrint, not IsControl: IsControl is category Cc alone, which lets the Cf
+	// format characters — the bidi overrides and isolates, U+202E and
+	// U+2066..U+2069 — through to reorder the rendered line in any bidi-aware
+	// terminal. The test is "can this be displayed", not a category list.
+	if unicode.IsPrint(r) {
+		return string(r), size
+	}
+	// Each escape carries the width its form conventionally has, so a quote can
+	// only be read one way. \u takes exactly four hex digits: a supplementary
+	// rune in that form runs to five digits, which reads as a 4-digit escape
+	// followed by a stray literal digit.
 	if r > 0xffff {
-		fmt.Fprintf(b, "\\U%08x", r)
-		return
+		return fmt.Sprintf(`\U%08x`, r), size
 	}
+	// And \x takes exactly two: \x202e would read as \x20 followed by "2e".
 	if r > 0xff {
-		fmt.Fprintf(b, "\\u%04x", r)
-		return
+		return fmt.Sprintf(`\u%04x`, r), size
 	}
-	fmt.Fprintf(b, "\\x%02x", r)
+	return fmt.Sprintf(`\x%02x`, r), size
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {
