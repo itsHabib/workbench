@@ -32,8 +32,9 @@ import (
 // V1 is one agent→human push: a gate run parked for judgment. Exactly
 // one line per park. Self-contained enough that a cold reader — a notification
 // sink, a projection, the resolution back-channel — answers what parked, why,
-// under which grant and verdict, about which PR, briefed how, and (once a human
-// acts) resolved how, from the body alone.
+// under which verdict (and grant, when the parking tool ran under one), about
+// which PR, briefed how, and (once a human acts) resolved how, from the body
+// alone.
 //
 // The field set is a superset of the map[string]any gate wrote before, so the
 // migration is non-breaking: every previously-persisted key keeps its json tag
@@ -44,11 +45,18 @@ type V1 struct {
 	// "parked_for_judgment"). It leads a notification's title, so it is a
 	// required part of the wire shape, not decoration.
 	Outcome string `json:"outcome"`
-	// Verdict is the reduced verdict id the park stands on; Grant is the grant
-	// the run ran under. Both are provenance the inbox reads to build a
-	// paste-ready judge/resolve command, so both always marshal.
+	// Verdict is the reduced verdict id the park stands on — provenance the
+	// inbox reads to build a paste-ready judge/resolve command, so it always
+	// marshals.
 	Verdict string `json:"verdict"`
-	Grant   string `json:"grant"`
+	// Grant is the grant id the run ran under, when the park arose from a
+	// granted run. Optional since the second consumer arrived: a park raised by
+	// a tool holding no grant (roxiq's sanity floor, which had to fill the
+	// then-required field with a none:roxiq-is-not-a-gate-run sentinel) omits it
+	// instead of inventing a value. Gate's own parks always carry it, and the
+	// resolution back-channel still refuses a grantless resolve — that law lives
+	// with the consumer, not the wire.
+	Grant string `json:"grant,omitempty"`
 	// Question is the park reason a zero-context reader sees first. Required: an
 	// escalation with no question is a page with no ask.
 	Question string `json:"question"`

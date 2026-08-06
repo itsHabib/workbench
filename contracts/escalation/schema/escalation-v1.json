@@ -3,15 +3,15 @@
   "$id": "https://itshabib.dev/schemas/escalation/escalation/v1",
   "title": "EscalationV1",
   "x-version": "escalation.v1",
-  "description": "One agent->human push: a gate run parked for judgment. Exactly one line per park. Carries why it parked, under which grant and verdict, about which PR, the plain-language brief for a zero-context approver, and — once a human decides — the resolution that closes the agent->human->agent loop with provenance. The typed replacement for the untyped body gate wrote and two readers redeclared.",
+  "description": "One agent->human push: a run parked for judgment. Exactly one line per park. Carries why it parked, under which verdict (and grant, when the parking tool ran under one), about which PR, the plain-language brief for a zero-context approver, and — once a human decides — the resolution that closes the agent->human->agent loop with provenance. The typed replacement for the untyped body gate wrote and two readers redeclared.",
   "type": "object",
-  "required": ["schema_version", "outcome", "verdict", "grant", "question"],
+  "required": ["schema_version", "outcome", "verdict", "question"],
   "additionalProperties": false,
   "properties": {
     "schema_version": { "type": "string", "const": "escalation.v1" },
     "outcome": { "type": "string", "description": "Gate's outcome string for the park (today always parked_for_judgment). Leads a notification title, so it is part of the wire shape." },
     "verdict": { "type": "string", "description": "The reduced verdict id the park stands on — provenance the inbox reads to build a paste-ready command." },
-    "grant": { "type": "string", "description": "The grant id the run ran under. The resolution back-channel re-checks it so the ceiling re-applies on resolve." },
+    "grant": { "type": "string", "description": "The grant id the run ran under, when the park arose from a granted run. Optional since the second consumer arrived: a park raised by a tool holding no grant (roxiq's sanity floor, which had to fill the then-required field with a none:roxiq-is-not-a-gate-run sentinel) omits it instead of inventing a value. Consumers that resolve THROUGH a grant keep their own law: the resolution back-channel still refuses a grantless resolve, so the ceiling re-applies on resolve — that check lives with the consumer, where it always belonged." },
     "question": { "type": "string", "description": "The park reason a zero-context reader sees first. An escalation with no question is a page with no ask." },
     "run_id": { "type": "string", "description": "The gate run this park belongs to. Optional and additive: the envelope already carries the run, but a self-contained body resolves it without the envelope." },
     "code": {

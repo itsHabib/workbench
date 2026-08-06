@@ -1,0 +1,15 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_3333333333333333",
+  "question": "prod sanity floor recommends rollback; the recommendation needs a human decision",
+  "run_id": "sanity_20260802T0300Z",
+  "repo": "itsHabib/roxiq",
+  "number": 161,
+  "brief": {
+    "what_it_is": "A maintenance-side park: the e2e sanity floor produced a rollback recommendation.",
+    "concern": "The deployed revision is serving errors the confidence report attributes to the last deploy.",
+    "risk": "High — production is degraded until a human confirms or rejects the rollback.",
+    "recommendation": "Review the confidence report and confirm the rollback, or reject with a reason."
+  }
+}

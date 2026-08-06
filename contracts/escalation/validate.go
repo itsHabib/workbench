@@ -39,9 +39,11 @@ func Validate(e V1) error {
 
 // validateFields enforces the required-field law JSON Schema states but a
 // stdlib-only leaf cannot run a validator for: the always-present envelope of a
-// park (outcome, verdict, grant, question) and, when a Resolution is present,
-// its own required members. Optional fields (code, repo, number, brief) are not
-// second-guessed.
+// park (outcome, verdict, question) and, when a Resolution is present, its own
+// required members. Optional fields (grant, code, repo, number, brief) are not
+// second-guessed — grant became optional with the second consumer, a parking
+// tool that holds no grant; the back-channel's grantless-resolve refusal is the
+// consumer's law, not the wire's.
 func validateFields(e V1) error {
 	for _, f := range []struct {
 		name string
@@ -49,7 +51,6 @@ func validateFields(e V1) error {
 	}{
 		{"outcome", e.Outcome},
 		{"verdict", e.Verdict},
-		{"grant", e.Grant},
 		{"question", e.Question},
 	} {
 		if f.val == "" {

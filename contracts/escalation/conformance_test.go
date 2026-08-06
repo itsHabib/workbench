@@ -178,7 +178,7 @@ func TestSchemaVersion(t *testing.T) {
 // TestValidate_Golden proves each valid fixture passes the strict law: the
 // version gate and the required-field rule both accept it.
 func TestValidate_Golden(t *testing.T) {
-	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json"} {
+	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json", "escalation-grantless-park.json"} {
 		e, err := DecodeBody(readFixture(t, f))
 		if err != nil {
 			t.Fatalf("%s: decode: %v", f, err)
@@ -214,6 +214,14 @@ func TestValidate_RequiredFields(t *testing.T) {
 	}
 	if err := Validate(base); err != nil {
 		t.Fatalf("a complete envelope must validate: %v", err)
+	}
+
+	// The second consumer's shape: a park raised by a tool holding no grant.
+	// Optional means genuinely optional — no sentinel required.
+	grantless := base
+	grantless.Grant = ""
+	if err := Validate(grantless); err != nil {
+		t.Errorf("a grantless park must validate — grant became optional with the second consumer: %v", err)
 	}
 
 	missingQuestion := base
@@ -282,7 +290,7 @@ func TestDecodeBody_Tolerant(t *testing.T) {
 // is where the required-fields-always-marshal / optional-fields-never-marshal-
 // empty law is exercised end to end.
 func TestGoldenRoundTrip(t *testing.T) {
-	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json"} {
+	for _, f := range []string{"escalation-content-park.json", "escalation-tier-ceiling.json", "escalation-self-gated.json", "escalation-resolved.json", "escalation-grantless-park.json"} {
 		t.Run(f, func(t *testing.T) {
 			raw := readFixture(t, f)
 			first, err := DecodeBody(raw)
