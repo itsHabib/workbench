@@ -1434,6 +1434,20 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 		t.Fatalf("resumable error = %v\nwant it to say a retry resumes", resumable)
 	}
 
+	// The same unsettled slot behind an incomplete-append refusal is NOT
+	// retry-resumable: every audit-gated append re-refuses the one-ahead
+	// ledger until the anchor reseals. The annotation must not promise a
+	// resume it cannot deliver.
+	wedged := judgeSlotState(e, run, esc.ID, errors.New("state: audit refused append: incomplete-append: log has 8 entries, anchor pinned 7 — append interrupted before the anchor updated"))
+	if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
+		t.Fatalf("wedged error = %v\nmust not claim a bare retry resumes", wedged)
+	}
+	for _, want := range []string{"anchor was not updated", "reseals"} {
+		if !strings.Contains(wedged.Error(), want) {
+			t.Fatalf("wedged error = %v\nwant it to mention %q", wedged, want)
+		}
+	}
+
 	// Driving it to an outcome flips the same slot to settled.
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass}); err != nil {
 		t.Fatalf("resume: %v", err)

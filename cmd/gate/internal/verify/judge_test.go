@@ -578,6 +578,21 @@ func TestNoUnprintableRuneSurvivesAQuote(t *testing.T) {
 	}
 }
 
+// A quote whose escaped form fits within the cap is returned whole even when
+// it is longer than cap-minus-marker: the marker's room is reserved only once
+// overflow is proven. On the failure path the diagnostic's final bytes are
+// often the actual error text — they are not discarded for a marker nothing
+// needs.
+func TestFittingDetailIsNeverTruncated(t *testing.T) {
+	for _, n := range []int{judgmentEmissionCap - len(providerTruncateMark) + 1, judgmentEmissionCap} {
+		body := strings.Repeat("x", n)
+		got := detailWithin([]byte(body), judgmentEmissionCap)
+		if got != body {
+			t.Fatalf("n=%d: fitting detail was altered: len=%d, marker=%v", n, len(got), strings.HasSuffix(got, providerTruncateMark))
+		}
+	}
+}
+
 // Escaping must not mangle ordinary output: a refused judgment is quoted so an
 // operator can see its shape, and JSON that came back escaped into unreadable
 // soup would defeat that.

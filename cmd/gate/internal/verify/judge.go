@@ -508,17 +508,25 @@ func detailWithin(stream []byte, limit int) string {
 	if limit <= len(providerTruncateMark) {
 		return providerTruncateMark
 	}
+	// The marker's room is reserved only once overflow is proven: an emission
+	// whose escaped form fits within limit is returned whole, even when it is
+	// longer than limit minus the marker. On the provider-failure path the
+	// diagnostic is the whole finding — its final bytes are not discarded to
+	// make room for a marker that nothing needs.
 	budget := limit - len(providerTruncateMark)
 	var b strings.Builder
 	b.Grow(min(len(detail), limit))
+	fits := 0 // last rune boundary that still leaves room for the marker
 	for i := 0; i < len(detail); {
 		piece, size := escapedRuneAt(detail[i:])
-		if b.Len()+len(piece) > budget {
-			b.WriteString(providerTruncateMark)
-			return b.String()
+		if b.Len()+len(piece) > limit {
+			return b.String()[:fits] + providerTruncateMark
 		}
 		b.WriteString(piece)
 		i += size
+		if b.Len() <= budget {
+			fits = b.Len()
+		}
 	}
 	return b.String()
 }

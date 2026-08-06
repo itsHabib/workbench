@@ -1106,6 +1106,15 @@ func judgeSlotState(e env, run, escalationID string, cause error) error {
 	if judgmentSettled(arts, judgment.ID) {
 		return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate", cause, judgment.ID, escalationID)
 	}
+	// An interrupted append leaves the log one entry ahead of its anchor, and
+	// every audit-gated append — including the retry's own — refuses that
+	// ledger. Claiming "a retry resumes" here would send the operator into a
+	// refusal loop: the anchor must reseal first, which the next successful
+	// plain append performs under rebind's bounded, proven recovery. The match
+	// is on faultIncomplete's stable reason prefix.
+	if strings.Contains(cause.Error(), "incomplete-append:") {
+		return fmt.Errorf("%w; judgment %s is recorded for %s but the anchor was not updated before the interruption — retrying now meets the same audit refusal; the anchor reseals on the next successful append to this store (any new gate run), after which a retry resumes the judgment", cause, judgment.ID, escalationID)
+	}
 	return fmt.Errorf("%w; judgment %s is recorded for %s but produced no outcome — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
 }
 
