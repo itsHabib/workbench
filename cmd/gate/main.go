@@ -1110,9 +1110,11 @@ func judgeSlotState(e env, run, escalationID string, cause error) error {
 	// every audit-gated append — including the retry's own — refuses that
 	// ledger. Claiming "a retry resumes" here would send the operator into a
 	// refusal loop: the anchor must reseal first, which the next successful
-	// plain append performs under rebind's bounded, proven recovery. The match
-	// is on faultIncomplete's stable reason prefix.
-	if strings.Contains(cause.Error(), "incomplete-append:") {
+	// plain append performs under rebind's bounded, proven recovery. Two
+	// spellings name the same wedge: appendLocked's "state: anchor:" is the
+	// failure that creates it (the entry fsynced, the anchor update did not),
+	// and faultIncomplete's "incomplete-append:" is the retry meeting it.
+	if strings.Contains(cause.Error(), "incomplete-append:") || strings.Contains(cause.Error(), "state: anchor:") {
 		return fmt.Errorf("%w; judgment %s is recorded for %s but the anchor was not updated before the interruption — retrying now meets the same audit refusal; the anchor reseals on the next successful append to this store (any new gate run), after which a retry resumes the judgment", cause, judgment.ID, escalationID)
 	}
 	return fmt.Errorf("%w; judgment %s is recorded for %s but produced no outcome — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)

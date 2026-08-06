@@ -1438,13 +1438,21 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	// retry-resumable: every audit-gated append re-refuses the one-ahead
 	// ledger until the anchor reseals. The annotation must not promise a
 	// resume it cannot deliver.
-	wedged := judgeSlotState(e, run, esc.ID, errors.New("state: audit refused append: incomplete-append: log has 8 entries, anchor pinned 7 — append interrupted before the anchor updated"))
-	if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
-		t.Fatalf("wedged error = %v\nmust not claim a bare retry resumes", wedged)
-	}
-	for _, want := range []string{"anchor was not updated", "reseals"} {
-		if !strings.Contains(wedged.Error(), want) {
-			t.Fatalf("wedged error = %v\nwant it to mention %q", wedged, want)
+	for name, cause := range map[string]error{
+		// The retry meeting the wedge: the audit refuses the one-ahead ledger.
+		"audit-refusal": errors.New("state: audit refused append: incomplete-append: log has 8 entries, anchor pinned 7 — append interrupted before the anchor updated"),
+		// The failure that creates the wedge: the entry fsynced, the anchor
+		// update did not (appendLocked's wrap).
+		"anchor-failure": errors.New("state: anchor: state: rename anchor: permission denied"),
+	} {
+		wedged := judgeSlotState(e, run, esc.ID, cause)
+		if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
+			t.Fatalf("%s: wedged error = %v\nmust not claim a bare retry resumes", name, wedged)
+		}
+		for _, want := range []string{"anchor was not updated", "reseals"} {
+			if !strings.Contains(wedged.Error(), want) {
+				t.Fatalf("%s: wedged error = %v\nwant it to mention %q", name, wedged, want)
+			}
 		}
 	}
 
