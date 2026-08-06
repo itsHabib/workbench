@@ -188,14 +188,18 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 }
 
 // resolvablePark reports whether this event is one `escalate` can actually
-// resolve: a gate PARK (Kind "escalation") that still carries its artifact id.
-// It deliberately excludes the other things that reach SevEscalate — a verdict
-// with an escalate decision, a cursor-alert — because those are not parked
-// escalations under a grant, so rendering Approve/Block on them would offer a
-// tap that `gate resolve` would refuse. The id must be present because it is the
-// button value the callback joins back to the parked run.
+// resolve: a gate PARK (Kind "escalation") that still carries its artifact id
+// AND the grant it ran under. It deliberately excludes the other things that
+// reach SevEscalate — a verdict with an escalate decision, a cursor-alert —
+// because those are not parked escalations under a grant, so rendering
+// Approve/Block on them would offer a tap that `gate resolve` would refuse.
+// The id must be present because it is the button value the callback joins
+// back to the parked run. The grant must be present because a grantless park
+// (schema-valid since escalation.v1's second consumer) resolves out-of-band:
+// escalate's ingest refuses an empty grant, so the buttons would be a tap
+// guaranteed to fail.
 func resolvablePark(ev event.Event) bool {
-	return ev.Kind == "escalation" && ev.ID != ""
+	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant"] != ""
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each

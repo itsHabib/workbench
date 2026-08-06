@@ -86,6 +86,13 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		fields["repo"] = b.Repo
 		fields["number"] = strconv.Itoa(b.Number)
 	}
+	// The grant, when the park ran under one. notify keys the resolve buttons
+	// on it: a grantless park (schema-valid since escalation.v1's second
+	// consumer) resolves out-of-band, so Approve/Block would offer a tap
+	// escalate's ingest is guaranteed to refuse.
+	if b.Grant != "" {
+		fields["grant"] = b.Grant
+	}
 	// A routable signal for brief-presence: routing pages a human only for
 	// escalations gate briefed, and keeps procedural/no-brief parks off Slack.
 	fields["briefed"] = "no"

@@ -114,7 +114,7 @@ no persisted wire value:
 | `schema_version` | ✓ | `escalation.v1` — the version gate's anchor (additive) |
 | `outcome` | ✓ | gate's outcome string (`parked_for_judgment`) — leads a notification title |
 | `verdict` | ✓ | the reduced verdict id the park stands on |
-| `grant` | ✓ | the grant the run ran under |
+| `grant` | — | the grant the run ran under, when the park arose from a granted run — optional since the second consumer (roxiq's sanity floor holds no grant and had to invent a `none:…` sentinel while it was required); gate's own parks always carry it |
 | `question` | ✓ | the park reason a zero-context reader sees first |
 | `run_id` | — | the run, for a self-contained body (additive) |
 | `code` | — | machine park code — `grant_tier_exceeded` / `cycle_count_unreadable` / `grant_cycle_exceeded`; **absent on a content park** (which carries a brief) |
@@ -130,6 +130,14 @@ gate's errors can never drift.
 `Resolution` is the missing seam made typed: `{decision (pass|block), who, at,
 judgment_id}`. It doubles as (a) the body of the standalone resolution artifact
 the back-channel appends and (b) the embedded `V1.Resolution` a reader projects.
+
+**Grantless parks resolve out-of-band.** The back-channel's law is unchanged:
+escalate's ingest refuses an empty grant, so a park written without one (a
+producer that holds no grant, like roxiq's sanity floor) cannot be resolved
+through `escalate` — flare suppresses its Approve/Block buttons and the human
+acts in the producer's own flow. The grant-ceiling-re-applies-on-resolve
+property is the consumer's law, held where resolution actually happens, not a
+wire requirement forcing grantless producers to lie.
 
 **Two readers, one law.** `DecodeBody` is tolerant — no version gate, unknown
 fields ignored — because the routing and projection readers must still render

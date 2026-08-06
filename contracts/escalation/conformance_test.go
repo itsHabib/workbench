@@ -224,6 +224,14 @@ func TestValidate_RequiredFields(t *testing.T) {
 		t.Errorf("a grantless park must validate — grant became optional with the second consumer: %v", err)
 	}
 
+	// The old workaround stays explicitly valid: grant is a plain optional
+	// string, so a body already persisted with the sentinel keeps validating.
+	sentinel := base
+	sentinel.Grant = "none:roxiq-is-not-a-gate-run"
+	if err := Validate(sentinel); err != nil {
+		t.Errorf("a persisted sentinel grant must keep validating: %v", err)
+	}
+
 	missingQuestion := base
 	missingQuestion.Question = ""
 	if err := Validate(missingQuestion); !errors.Is(err, ErrMissingField) {
