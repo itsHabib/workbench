@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -83,17 +82,24 @@ func TestAuditClean(t *testing.T) {
 }
 
 func TestAuditTamperedMapsToFinding(t *testing.T) {
-	// gate prints TAMPERED on stdout and exits non-zero; the client must map
-	// that to a finding, not propagate the exit as an operational error.
-	c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		return []byte("TAMPERED: rewrite (at esc_f6789012)\n"), errors.New("exit status 4")
-	})
-	st, err := c.Audit(context.Background())
-	if err != nil {
-		t.Fatalf("a tamper finding must not surface as an error: %v", err)
-	}
-	if st.OK || !strings.Contains(st.Reason, "TAMPERED") {
-		t.Fatalf("tampered audit = %+v", st)
+	// A broken chain exits non-zero with a tamper marker on stdout — the
+	// stable log_integrity_failed code in current gate's terminal JSON, or the
+	// TAMPERED line older binaries printed. Both map to a finding, never to an
+	// operational error.
+	for name, out := range map[string]string{
+		"terminal-json": `{"error": "log_integrity_failed: body hash mismatch (at evd_x)", "retry_helps": false}` + "\n",
+		"legacy-marker": "TAMPERED: rewrite (at esc_f6789012)\n",
+	} {
+		c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(out), errors.New("exit status 4")
+		})
+		st, err := c.Audit(context.Background())
+		if err != nil {
+			t.Fatalf("%s: a tamper finding must not surface as an error: %v", name, err)
+		}
+		if st.OK || st.Reason == "" {
+			t.Fatalf("%s: tampered audit = %+v", name, st)
+		}
 	}
 }
 
