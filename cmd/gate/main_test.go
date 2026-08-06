@@ -1438,23 +1438,31 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	// retry-resumable: every audit-gated append re-refuses the one-ahead
 	// ledger until the anchor reseals. The annotation must not promise a
 	// resume it cannot deliver.
-	wedgeCauses := map[string]error{
-		// The retry meeting the wedge: the audit refuses the one-ahead ledger.
-		"audit-refusal": errors.New("state: audit refused append: incomplete-append: log has 8 entries, anchor pinned 7 — append interrupted before the anchor updated"),
-		// The failure that creates the wedge: the entry fsynced, the anchor
-		// update did not (appendLocked's wrap).
-		"anchor-failure": errors.New("state: anchor: state: rename anchor: permission denied"),
+	// The wedge is classified from the audited state, never from error text:
+	// a mistyped grant id that state.Get embeds in its error can carry the
+	// wedge's spelling while the ledger is intact. On this healthy store the
+	// spoofed causes must still read as resumable.
+	spoofed := errors.New("state: artifact grt_incomplete-append:-oops: not found")
+	if got := judgeSlotState(e, run, esc.ID, spoofed); !strings.Contains(got.Error(), "a retry resumes that judgment") {
+		t.Fatalf("healthy store: spoofed cause = %v\nwant the resumable message", got)
 	}
-	for name, cause := range wedgeCauses {
-		wedged := judgeSlotState(e, run, esc.ID, cause)
-		if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
-			t.Fatalf("%s: wedged error = %v\nmust not claim a bare retry resumes", name, wedged)
+
+	// A REAL wedge: any cause must now carry the reseal guidance.
+	wedgeAnchor(t, e, run)
+	wedged := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
+		t.Fatalf("wedged error = %v\nmust not claim a bare retry resumes", wedged)
+	}
+	for _, want := range []string{"anchor was not updated", "reseals"} {
+		if !strings.Contains(wedged.Error(), want) {
+			t.Fatalf("wedged error = %v\nwant it to mention %q", wedged, want)
 		}
-		for _, want := range []string{"anchor was not updated", "reseals"} {
-			if !strings.Contains(wedged.Error(), want) {
-				t.Fatalf("%s: wedged error = %v\nwant it to mention %q", name, wedged, want)
-			}
-		}
+	}
+
+	// One plain append reseals the anchor under rebind's bounded recovery —
+	// the same route the guidance names — so the judgment can be driven on.
+	if _, err := e.st.Append(state.KindEvidence, run, nil, map[string]string{"note": "reseal"}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Driving it to an outcome flips the same slot to settled.
@@ -1472,13 +1480,29 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	// A wedge on the OUTCOME append lands in the settled branch: the park is
 	// resolved, but the reseal guidance must still reach the operator —
 	// audit-gated writes stay refused until the anchor reseals.
-	for name, cause := range wedgeCauses {
-		settled := judgeSlotState(e, run, esc.ID, cause)
-		for _, want := range []string{"judgment_duplicate", "anchor was not updated", "reseals"} {
-			if !strings.Contains(settled.Error(), want) {
-				t.Fatalf("%s: settled wedge error = %v\nwant it to mention %q", name, settled, want)
-			}
+	wedgeAnchor(t, e, run)
+	settled := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	for _, want := range []string{"judgment_duplicate", "anchor was not updated", "reseals"} {
+		if !strings.Contains(settled.Error(), want) {
+			t.Fatalf("settled wedge error = %v\nwant it to mention %q", settled, want)
 		}
+	}
+}
+
+// wedgeAnchor recreates the interrupted-append state: save the anchor, land
+// one more append, restore the stale anchor — log one ahead, anchor pinning a
+// matching prefix head. The next successful plain append reseals it.
+func wedgeAnchor(t *testing.T, e env, run string) {
+	t.Helper()
+	saved, err := os.ReadFile(e.anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Append(state.KindEvidence, run, nil, map[string]string{"note": "wedge"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.anchor, saved, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
