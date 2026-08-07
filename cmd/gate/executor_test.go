@@ -59,6 +59,44 @@ func TestPreparationConsumed(t *testing.T) {
 	}
 }
 
+// TestMergedRefusalStatePublishesBeforeRefusing pins the publish-then-refuse
+// contract: an already_merged preparation carries the refusal error INSIDE the
+// prepared state, alongside the snapshot files, so cmdExecutorPrepare pushes
+// the superseding refusal terminal to the hosted ledger before propagating the
+// refusal. Any other outcome declines without building a state.
+func TestMergedRefusalStatePublishesBeforeRefusing(t *testing.T) {
+	e := testEnv(t)
+	// The snapshot has substance only once the store has at least one entry —
+	// exactly the situation in production, where the refusal terminal was just
+	// appended.
+	if _, err := e.st.Append(state.KindEvidence, "run_x", nil, map[string]string{"note": "refusal"}); err != nil {
+		t.Fatal(err)
+	}
+	refusedResult := gateResult{Outcome: outcomeAlreadyMerged, Run: "run_x"}
+
+	prepared, refused, err := mergedRefusalState(e, codeRefused, refusedResult)
+	if err != nil || !refused {
+		t.Fatalf("refused=%v err=%v, want a refusal state", refused, err)
+	}
+	if prepared.refuse == nil || len(prepared.files.Log) == 0 || len(prepared.files.Anchor) == 0 {
+		t.Fatalf("refusal state must carry both the refusal and the publishable snapshot, got %+v", prepared)
+	}
+
+	for name, tc := range map[string]struct {
+		code   int
+		result gateResult
+	}{
+		"merge outcome":            {codeMerge, gateResult{Outcome: "would_merge"}},
+		"refused but not merged":   {codeRefused, gateResult{Outcome: "capability_refused"}},
+		"parked is not a refusal":  {codeParked, gateResult{Outcome: "parked_for_judgment"}},
+		"blocked is not a refusal": {codeBlocked, gateResult{Outcome: "blocked"}},
+	} {
+		if _, refused, err := mergedRefusalState(e, tc.code, tc.result); refused || err != nil {
+			t.Fatalf("%s: refused=%v err=%v, want pass-through", name, refused, err)
+		}
+	}
+}
+
 func TestValidatePreparedOutcome(t *testing.T) {
 	tests := []struct {
 		name     string
