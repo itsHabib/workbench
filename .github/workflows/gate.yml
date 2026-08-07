@@ -482,7 +482,10 @@ jobs:
                 ;;
               1) STATE=failure; DESC="blocked: $(trunc "$why")" ;;
               2) STATE=failure; DESC="parked_for_judgment: $(trunc "$why")" ;;
-              3) STATE=failure; DESC="capability_refused" ;;
+              # Exit 3 covers two distinct refusals with opposite remedies:
+              # capability_refused says repair/re-mint authority, already_merged
+              # says there is nothing left to merge. Name the parsed outcome.
+              3) STATE=failure; DESC="${outcome:-capability_refused}" ;;
               *) STATE=error;   DESC="gate error: $(trunc "$why")" ;;
             esac
           fi

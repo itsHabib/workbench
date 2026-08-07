@@ -492,15 +492,16 @@ func runGateWithSynthesis(
 		return res, codeRefused, nil
 	}
 
-	model, err := verify.ModelBackend(modelBackend)
-	if err != nil {
-		return res, codeError, err
-	}
-
 	run := state.NewRunID()
 	res.Run = run
 
-	bundle, err := evidence.Gather(e.st, run, evidence.PRRef{Repo: repo, Number: pr})
+	// The view is recorded FIRST, alone: the already-merged refusal must be
+	// decidable from this one read, before the model backend or the rest of
+	// the evidence sweep can fail the run with exit 4 (missing cloud
+	// credentials, a flaky diff fetch) — an early hard error would leave a
+	// stale would_merge as the newest published terminal in the hosted path.
+	ref := evidence.PRRef{Repo: repo, Number: pr}
+	viewID, view, err := evidence.View(e.st, run, ref)
 	if err != nil {
 		return res, codeError, err
 	}
@@ -511,13 +512,23 @@ func runGateWithSynthesis(
 	// the verifier ladder can run or an escalation can be written. Replay
 	// (backtest) skips this: evaluating historical, merged PRs is its purpose.
 	if refuseMerged {
-		mv, err := verify.MergedPR(e.st, bundle.View)
+		mv, err := verify.MergedPR(e.st, viewID)
 		if err != nil {
 			return res, codeError, err
 		}
 		if mv.Merged {
-			return refuseMergedRun(e, run, bundle.View, grantID, subject, mv, res)
+			return refuseMergedRun(e, run, viewID, grantID, subject, mv, res)
 		}
+	}
+
+	model, err := verify.ModelBackend(modelBackend)
+	if err != nil {
+		return res, codeError, err
+	}
+
+	bundle, err := evidence.GatherFrom(e.st, run, ref, viewID, view)
+	if err != nil {
+		return res, codeError, err
 	}
 
 	// The verifier ladder records one verdict artifact per rung.
