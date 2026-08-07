@@ -1,51 +1,59 @@
-# Resume — session-claims (paste into a fresh session)
+# Resume — session-claims + roll-call PR 11 (paste into a fresh session)
 
-Continuation prompt for picking up the session-claims work locally. Paste the block
-below as your first message in a new Claude Code session in the workbench repo.
-Delete this file once the work is underway (it's a handoff artifact, not spec).
+Continuation prompt for picking this up on another machine. Paste the block
+below as your first message in a new Claude Code session. Delete this file once
+the work is underway (it's a handoff artifact, not spec).
 
 ---
 
 ```
-I'm resuming the session-claims design work. Don't build anything until I
-answer the open questions below.
+I'm resuming two threads from a prior session (2026-08-07, personal Mac).
 
-Orientation:
+THREAD 1 — session-claims (this repo, PR #220, branch
+claude/session-organization-tooling-ku15uv):
 
-1. Read docs/features/session-claims/spec.md — a research sketch on PR #220
-   (draft, docs-only, branch claude/session-organization-tooling-ku15uv).
-   It maps live agent sessions to units of work via one opt-in verb plus a
-   storeless `roster` view.
+1. docs/features/session-claims/spec.md is the design: pure opt-in, two verbs
+   (/claim <work>, /release — working names, naming still open §7), one dumb
+   claims.jsonl at ~/.claude/session-claims/, one storeless roster view.
+   §4: liveness is DERIVED at read time (transcript mtime, PR state, aging);
+   v1 polish is auto-release closure hooks (gh pr merge, dossier
+   task_complete) with the invariant: hooks may only CLOSE claims, never
+   create them. An earlier tiered-adoption draft was deliberately dropped —
+   don't reintroduce it.
+2. v0 is BUILT and dogfooded: skills/session-claims/{claim,release,roster}/
+   in this repo are the source of truth — copy them to ~/.claude/skills/ on
+   this machine (see skills/session-claims/README.md). The prior session
+   claimed itself against PR 220 and PR roll-call#11 as the first log events.
+3. Open operator decisions: final verb names; roster-vs-/wip relationship;
+   log location; /release --handoff variant.
 
-2. The design is deliberately minimal — this was a decision, not an
-   oversight. An earlier draft had adoption tiers (SessionStart hooks
-   stubbing a row for every session, /worktree-add and /work-driver
-   auto-emitting claims, commit-trailer recovery). All dropped: the operator
-   wants pure opt-in, no optimization/concurrency story. Two skills
-   (/claim <work>, /release — working names), one dumb claims.jsonl, one
-   roster table. Don't reintroduce the tiers.
+THREAD 2 — roll-call PR #11 (v3 p0: Codex Voice amendment + debrief kernel):
 
-3. Known context you'd otherwise rediscover:
-   - driverstate/ has append-only JSONL prior art and its actor field is
-     already session:<id>, so roster joins it at read time — no need to
-     extend its ledger (that placement question was resolved toward a
-     separate advisory claims.jsonl).
-   - session-orchestrator is the complement (one session → N tasks).
-   - Motivating evidence: roxiq docs/qa/resume-tomorrow.md and
-     SESSION-HANDOFF-*.md — the hand-written genre this replaces.
+1. Fully driven to the merge boundary: docs folded per review direction,
+   p0 LOC gate raised 1,800→1,900 by operator decision (spec §2.2 records
+   why; head measures 1,899), codex cross-process revision race fixed (CAS
+   under O_EXCL record.lock in save(), in-process mutex deleted, atomic
+   rename stale-reclaim, Confirm artifact cleanup), all review threads
+   resolved (ctx-plumbing deferred post-p0 with rationale on-thread),
+   cycle-3 claude review verified all findings closed at head 64e3b4a,
+   CI green. Review caps are EXHAUSTED (3/3 cycles, 5/5 requests) — do not
+   request another automated review.
+2. Gate state (machine-local to the personal Mac, ~/dev/gate/state):
+   run_31cfc4c894af863f is parked with an operator PASS resolution already
+   recorded, but grant grt_37b5def8677ba290 hit its cycle ceiling
+   (grant_cycle_exceeded, cycle 5 > 3). Next step ON THE PERSONAL MAC:
+   operator mints
+     gate grant -repo itsHabib/roll-call -max-tier T2 -max-cycles 8 -ttl 24h \
+       -state ~/dev/gate/state
+   then retry gate resolve under the new grant, run the pinned merge command
+   gate emits, close #9 and #10 as consolidated, record the merge.
+   From another machine: the PR itself is mergeable-ready; only the gate
+   custody lives on the Mac.
+3. After merge, the next milestone is the p0 trial checklist
+   (codex-voice-mode.md Appendix A) — operator judgment, not agent work.
 
-4. Decisions I need to make (spec §7) — ask me, don't pick:
-   (a) Final skill names (/claim + /release are placeholders the operator
-       hasn't blessed; /track-session-task / /track-session-clear were the
-       first sketch — too long).
-   (b) Does roster subsume /wip or feed a section of it?
-   (c) Where claims.jsonl lives (dossier's state dir vs. its own).
-   (d) Does /release grow a --handoff variant that drafts the open-loops
-       note?
-
-5. Likely next steps once named:
-   - The claim/release skills + the claims append helper (tiny).
-   - `roster` reader (storeless; joins claims + worktrees + driver-state).
-   - Then decide whether the spec graduates from research sketch to a real
-     feature spec and PR #220 leaves draft.
+Context worth knowing: session-claims, roll-call, and the maintenance plane
+are one program at three time scales (live sessions / daily debrief / weekly
+health). roll-call's root-scoped-work-graph.md Q1 now carries the empirical
+session-metadata answer that also validates session-claims' roster signals.
 ```
