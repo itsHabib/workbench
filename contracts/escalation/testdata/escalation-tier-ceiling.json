@@ -7,5 +7,10 @@
   "run_id": "run_defdefdefdefdefd",
   "code": "grant_tier_exceeded",
   "repo": "itsHabib/ship",
-  "number": 130
+  "number": 130,
+  "escape": {
+    "why": "the operator must mint a wider grant; inspect the recorded ceiling before requesting new authority",
+    "next": "gate explain -run 'run_defdefdefdefdefd' -state '/tmp/gate-state'"
+  },
+  "retry_helps": false
 }

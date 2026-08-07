@@ -69,20 +69,25 @@ type ParkedRun struct {
 	// only the escalation id can join it to the grant the run parked under,
 	// without hunting the id out of the log. Empty only when the body predates
 	// the artifact id being carried.
-	Escalation     string `json:"escalation,omitempty"`
-	Repo           string `json:"repo,omitempty"`
-	Number         int    `json:"number,omitempty"`
-	Title          string `json:"title,omitempty"`
-	HeadSHA        string `json:"head_sha,omitempty"`
-	URL            string `json:"url,omitempty"`
-	PRState        string `json:"pr_state,omitempty"`
-	PRStateReason  string `json:"pr_state_reason,omitempty"`
-	Question       string `json:"question"`
-	Code           string `json:"code,omitempty"`
-	Grant          string `json:"grant,omitempty"`
-	ParkedAt       string `json:"parked_at"`
-	JudgeCommand   string `json:"judge_command"`
-	ExplainCommand string `json:"explain_command"`
+	Escalation    string `json:"escalation,omitempty"`
+	Repo          string `json:"repo,omitempty"`
+	Number        int    `json:"number,omitempty"`
+	Title         string `json:"title,omitempty"`
+	HeadSHA       string `json:"head_sha,omitempty"`
+	URL           string `json:"url,omitempty"`
+	PRState       string `json:"pr_state,omitempty"`
+	PRStateReason string `json:"pr_state_reason,omitempty"`
+	Question      string `json:"question"`
+	Code          string `json:"code,omitempty"`
+	Grant         string `json:"grant,omitempty"`
+	ParkedAt      string `json:"parked_at"`
+	// Escape is the route sealed into the escalation artifact, when one was
+	// recorded. On a ceiling park it replaces JudgeCommand: judging under the
+	// same grant re-applies the ceiling, so the stored route (inspect, then
+	// mint wider authority) is the only next step that can move the run.
+	Escape         *escalation.Escape `json:"escape,omitempty"`
+	JudgeCommand   string             `json:"judge_command,omitempty"`
+	ExplainCommand string             `json:"explain_command"`
 }
 
 // GrantLine is one grant in the ledger with its expiry resolved against now.
@@ -656,8 +661,13 @@ func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) Par
 		Code:           b.Code,
 		Grant:          b.Grant,
 		ParkedAt:       a.Time.UTC().Format(time.RFC3339),
+		Escape:         b.Escape,
 		JudgeCommand:   judgeCommand(a.Run, b.Grant, stateArg),
 		ExplainCommand: fmt.Sprintf("gate explain%s -run %s -html", stateArg, a.Run),
+	}
+	if ceilingPark(b.Code) {
+		p.JudgeCommand = ""
+		p.Escape = ceilingEscape(a.Run, stateArg, b.Escape)
 	}
 	if p.Repo != "" && p.Number != 0 {
 		p.URL = fmt.Sprintf("https://github.com/%s/pull/%d", p.Repo, p.Number)
@@ -670,6 +680,28 @@ func judgeCommand(run, grant, stateArg string) string {
 		grant = "grt_..."
 	}
 	return fmt.Sprintf("gate judge%s -run %s -grant %s -decision <pass|block> -why \"...\"", stateArg, run, grant)
+}
+
+// ceilingPark reports whether the park is an authorization ceiling — a code a
+// judgment cannot clear, because applyJudgment re-applies the grant ceiling.
+func ceilingPark(code string) bool {
+	return code == escalation.CodeTierExceeded || code == escalation.CodeCycleExceeded
+}
+
+// ceilingEscape rebuilds the ceiling route against the state path this
+// projection was invoked with. The sealed escape carries the writer's absolute
+// -state, which goes stale when the ledger is copied or mounted elsewhere, and
+// legacy ceiling parks predate sealed escapes entirely — so the command is
+// always derived here, and only the sealed prose is kept.
+func ceilingEscape(run, stateArg string, sealed *escalation.Escape) *escalation.Escape {
+	why := "the operator must mint a wider grant; inspect the recorded ceiling before requesting new authority"
+	if sealed != nil && sealed.Why != "" {
+		why = sealed.Why
+	}
+	return &escalation.Escape{
+		Why:  why,
+		Next: fmt.Sprintf("gate explain%s -run %s", stateArg, run),
+	}
 }
 
 // datedGrant pairs a ledger row with its expiry instant so the ledger can sort
@@ -963,7 +995,13 @@ func renderParked(w io.Writer, p ParkedRun) {
 	if p.PRState == "unknown" {
 		fmt.Fprintf(w, "  PR state unknown: %s\n", p.PRStateReason)
 	}
-	fmt.Fprintf(w, "  → %s\n", p.JudgeCommand)
+	if p.JudgeCommand != "" {
+		fmt.Fprintf(w, "  → %s\n", p.JudgeCommand)
+	}
+	if p.JudgeCommand == "" && p.Escape != nil {
+		fmt.Fprintf(w, "  %s\n", p.Escape.Why)
+		fmt.Fprintf(w, "  → %s\n", p.Escape.Next)
+	}
 	fmt.Fprintf(w, "  → %s\n\n", p.ExplainCommand)
 }
 

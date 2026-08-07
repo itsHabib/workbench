@@ -147,9 +147,14 @@ func TestNextCommandEndToEnd(t *testing.T) {
 	if p.Run != "run_park" || p.Repo != "o/r" || p.Number != 42 || p.Grant != "grt_x" {
 		t.Fatalf("parked projection wrong: %+v", p)
 	}
-	want := `gate judge -run run_park -grant grt_x -decision <pass|block> -why "..."`
-	if p.JudgeCommand != want {
-		t.Fatalf("ambient judge command should omit -state:\n got %q\nwant %q", p.JudgeCommand, want)
+	// The fixture park is a ceiling park: no judge command (judging under the
+	// same grant re-applies the ceiling), and the derived escape stays clean of
+	// -state under the ambient env.
+	if p.JudgeCommand != "" {
+		t.Fatalf("ceiling park must not advertise a judge command, got %q", p.JudgeCommand)
+	}
+	if p.Escape == nil || p.Escape.Next != "gate explain -run run_park" {
+		t.Fatalf("ambient ceiling escape should omit -state, got %+v", p.Escape)
 	}
 	if len(in.Grants) != 1 || in.Grants[0].Repo != "o/r" || in.Grants[0].Expired {
 		t.Fatalf("grant ledger wrong: %+v", in.Grants)

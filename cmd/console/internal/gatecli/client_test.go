@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -83,17 +82,41 @@ func TestAuditClean(t *testing.T) {
 }
 
 func TestAuditTamperedMapsToFinding(t *testing.T) {
-	// gate prints TAMPERED on stdout and exits non-zero; the client must map
-	// that to a finding, not propagate the exit as an operational error.
-	c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		return []byte("TAMPERED: rewrite (at esc_f6789012)\n"), errors.New("exit status 4")
-	})
-	st, err := c.Audit(context.Background())
-	if err != nil {
-		t.Fatalf("a tamper finding must not surface as an error: %v", err)
+	// A broken chain exits non-zero with a tamper marker on stdout — the
+	// stable log_integrity_failed code in current gate's terminal JSON, or the
+	// TAMPERED line older binaries printed. Both map to a finding, never to an
+	// operational error.
+	for name, out := range map[string]string{
+		"terminal-json": `{"error": "log_integrity_failed: body hash mismatch (at evd_x)", "retry_helps": false}` + "\n",
+		"legacy-marker": "TAMPERED: rewrite (at esc_f6789012)\n",
+	} {
+		c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(out), errors.New("exit status 4")
+		})
+		st, err := c.Audit(context.Background())
+		if err != nil {
+			t.Fatalf("%s: a tamper finding must not surface as an error: %v", name, err)
+		}
+		if st.OK || st.Reason == "" {
+			t.Fatalf("%s: tampered audit = %+v", name, st)
+		}
 	}
-	if st.OK || !strings.Contains(st.Reason, "TAMPERED") {
-		t.Fatalf("tampered audit = %+v", st)
+}
+
+func TestAuditOperationalTokenIsNotTamper(t *testing.T) {
+	// The code is parsed from the terminal JSON's error field, never searched
+	// for in the raw text: an I/O failure on a path that happens to contain
+	// the token must propagate as an error, not raise the tamper banner.
+	for name, out := range map[string]string{
+		"token-in-path": `{"error": "state: anchor dir: mkdir /tmp/log_integrity_failed: not a directory", "retry_helps": false}` + "\n",
+		"token-in-text": "gate: could not stat /tmp/log_integrity_failed\n",
+	} {
+		c := New("gate", "", func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(out), errors.New("exit status 4")
+		})
+		if _, err := c.Audit(context.Background()); err == nil {
+			t.Fatalf("%s: an operational failure was mapped to a tamper finding", name)
+		}
 	}
 }
 

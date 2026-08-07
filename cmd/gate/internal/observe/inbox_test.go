@@ -37,6 +37,46 @@ func grant(repo string, expires time.Time) capability.Grant {
 	return capability.Grant{Repo: repo, Action: "merge", MaxTier: "T1", MaxCycles: 3, ExpiresAt: expires, MintedBy: "test", Sig: "fixture"}
 }
 
+// TestCeilingParkSurfacesEscapeRoute pins that a ceiling park projects an
+// escape route instead of a judge command: judging under the same grant
+// re-applies the ceiling, so advertising `gate judge` contradicts the recorded
+// route. The command is rebuilt against the state path THIS projection was
+// invoked with — the sealed escape's absolute -state goes stale when the
+// ledger is copied or mounted elsewhere — and only the sealed prose is kept.
+// A legacy ceiling park with no sealed escape gets the same derived route.
+func TestCeilingParkSurfacesEscapeRoute(t *testing.T) {
+	ceiling := esc("grt_a", "tier T2 exceeds ceiling T1", "grant_tier_exceeded", "o/widget", 142)
+	ceiling["escape"] = map[string]any{"why": "mint a wider grant", "next": "gate explain -run run_a -state /old/mount"}
+	legacy := esc("grt_c", "cycle cap hit", "grant_cycle_exceeded", "o/widget", 143)
+	content := esc("grt_b", "needs judgment", "", "o/api", 87)
+	content["escape"] = map[string]any{"why": "inspect state", "next": "gate next"}
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_a", "esc_a", inboxBase, ceiling),
+		art(state.KindEscalation, "run_c", "esc_c", inboxBase.Add(time.Minute), legacy),
+		art(state.KindEscalation, "run_b", "esc_b", inboxBase.Add(2*time.Minute), content),
+	}
+
+	in := buildInbox(arts, inboxBase.Add(time.Hour), " -state /new/mount")
+
+	if len(in.Parked) != 3 {
+		t.Fatalf("want 3 parked runs, got %d: %+v", len(in.Parked), in.Parked)
+	}
+	byRun := make(map[string]ParkedRun, len(in.Parked))
+	for _, p := range in.Parked {
+		byRun[p.Run] = p
+	}
+	if p := byRun["run_a"]; p.JudgeCommand != "" || p.Escape == nil ||
+		p.Escape.Next != "gate explain -state /new/mount -run run_a" || p.Escape.Why != "mint a wider grant" {
+		t.Fatalf("ceiling park must rebind the escape to the current state path and drop the judge command, got %+v", p)
+	}
+	if p := byRun["run_c"]; p.JudgeCommand != "" || p.Escape == nil || p.Escape.Next != "gate explain -state /new/mount -run run_c" {
+		t.Fatalf("legacy ceiling park must derive an escape and drop the judge command, got %+v", p)
+	}
+	if p := byRun["run_b"]; p.JudgeCommand == "" || p.Escape == nil || p.Escape.Next != "gate next" {
+		t.Fatalf("content park must keep its judge command and sealed escape, got %+v", p)
+	}
+}
+
 // TestBuildInboxParked pins the parked-run derivation: a run whose latest
 // terminal is an escalation is awaiting judgment; one resolved by a later action
 // is not; a run re-parked after a judgment is awaiting again; and the list is
@@ -252,7 +292,7 @@ func TestReconcileInboxRepoErrorPreservesEverySurface(t *testing.T) {
 // id hunt.
 func TestBuildInboxJudgeCommand(t *testing.T) {
 	arts := []state.Artifact{
-		art(state.KindEscalation, "run_a", "esc_a", inboxBase, esc("grt_live", "why", "grant_tier_exceeded", "o/r", 5)),
+		art(state.KindEscalation, "run_a", "esc_a", inboxBase, esc("grt_live", "why", "", "o/r", 5)),
 	}
 
 	in := buildInbox(arts, inboxBase, "")
@@ -775,7 +815,10 @@ func TestNextTextRendersParked(t *testing.T) {
 		"awaiting judgment (1)",
 		"acme/widget#142  run_9f3a41c2  grant_tier_exceeded",
 		`"verdict tier T2 exceeds grant ceiling T1; flake is known"`,
-		"→ gate judge -run run_9f3a41c2 -grant grt_a1b2c3d4 -decision <pass|block>",
+		// A ceiling park advertises the derived escape, never a judge command:
+		// judging under the same grant re-applies the ceiling.
+		"the operator must mint a wider grant",
+		"→ gate explain -run run_9f3a41c2\n",
 		"→ gate explain -run run_9f3a41c2 -html",
 		"grants",
 		"grt_a1b2c3d4  acme/widget  merge  T1  in 4h49m",

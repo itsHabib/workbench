@@ -35,6 +35,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
+	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
 	"github.com/itsHabib/workbench/cmd/gate/internal/stamp"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
@@ -100,11 +101,13 @@ func main() {
 		if r == nil {
 			return
 		}
+		printTerminalError(fmt.Errorf("panic: %v", r), os.Args[1:])
 		fmt.Fprintln(os.Stderr, "gate: panic:", r)
 		os.Exit(codeError)
 	}()
 	if len(os.Args) < 2 {
 		usage()
+		printTerminalError(errors.New("command required"), nil)
 		os.Exit(codeError)
 	}
 	var err error
@@ -131,11 +134,12 @@ func main() {
 		err = cmdStress(os.Args[2:])
 	default:
 		usage()
-		os.Exit(codeError)
+		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
 	if err == nil {
 		return
 	}
+	printTerminalError(err, os.Args[1:])
 	fmt.Fprintln(os.Stderr, "gate:", err)
 	os.Exit(commandErrorCode(os.Args[1], err))
 }
@@ -397,6 +401,7 @@ type gateResult struct {
 	Tier     string `json:"tier"`
 	Outcome  string `json:"outcome"`
 	Why      string `json:"why"`
+	Code     string `json:"code,omitempty"`
 	Action   string `json:"action,omitempty"`
 	// HeadSHA is the head commit gate actually read and judged (the live
 	// headRefOid from evidence, carried on the reduced verdict). A caller that
@@ -412,6 +417,11 @@ type gateResult struct {
 	// decision. Set only on the pass path (the one path that stamps); empty on
 	// block/park/refuse/error, which post nothing.
 	Hash string `json:"hash,omitempty"`
+	// Escape is present on every non-zero result. It names one runnable route
+	// selected from the terminal code and the real state path.
+	Escape     *readiness.Route `json:"escape,omitempty"`
+	SelfGated  bool             `json:"self_gated,omitempty"`
+	RetryHelps *bool            `json:"retry_helps,omitempty"`
 }
 
 func cmdGate(args []string) error {
@@ -443,8 +453,7 @@ func cmdGate(args []string) error {
 		return err
 	}
 	emitAuthorizedStamp(res, code, *stampOn)
-	printJSON(res)
-	os.Exit(code)
+	exitGateResult(res, code, *stateDir)
 	return nil
 }
 
@@ -476,6 +485,7 @@ func runGateWithSynthesis(
 		recordGrantNeeded(e, repo, err)
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
+		res.Code = readiness.Code(res.Why)
 		return res, codeRefused, nil
 	}
 
@@ -660,6 +670,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	if pending {
 		res.Outcome = "capability_refused"
 		res.Why = authorization.ErrSubjectClaimPending.Error()
+		res.Code = readiness.Code(res.Why)
 		return res, codeRefused, nil
 	}
 	checkNoOpenClaim := func(audit state.AuditResult) error {
@@ -683,6 +694,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		for k, v := range extra {
 			body[k] = v
 		}
+		addTerminalArtifactMetadata(body, outcome, res, e.stateDir, filepath.Dir(e.keyPath))
 		// Parents[0] = the reduced verdict is a contract: cycleCount joins
 		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
@@ -700,6 +712,10 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// so a notification sink renders a direct click-target instead of a bare run
 	// id. The write shape is unchanged on the wire; only the type is now shared.
 	recordEscalation := func(question, code string, brief *escalation.Brief) error {
+		terminal := res
+		terminal.Outcome = "parked_for_judgment"
+		terminal.Why = question
+		decorateTerminalCode(&terminal, code, true, e.stateDir)
 		body := escalation.V1{
 			SchemaVersion: escalation.SchemaVersion,
 			Outcome:       "parked_for_judgment",
@@ -709,6 +725,11 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 			RunID:         run,
 			Code:          code,
 			Brief:         brief,
+			Escape: &escalation.Escape{
+				Why: terminal.Escape.Why, Next: terminal.Escape.Next,
+			},
+			SelfGated:  terminal.SelfGated,
+			RetryHelps: terminal.RetryHelps,
 		}
 		if reduced.Subject.Repo != "" && reduced.Subject.Number > 0 {
 			body.Repo = reduced.Subject.Repo
@@ -731,6 +752,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	if err != nil {
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
+		res.Code = readiness.Code(res.Why)
 		return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
 	}
 
@@ -751,6 +773,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		if _, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now); err != nil {
 			res.Outcome = "capability_refused"
 			res.Why = err.Error()
+			res.Code = readiness.Code(res.Why)
 			return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
 		}
 		res.Outcome = "parked_for_judgment"
@@ -758,7 +781,9 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	}
 	if !grant.TierWithin(reduced.Tier) {
 		res.Outcome = "parked_for_judgment"
-		res.Why = fmt.Sprintf("verdict tier %s exceeds grant ceiling %s; %s", reduced.Tier, grant.MaxTier, reduced.Why)
+		res.Code = escalation.CodeTierExceeded
+		res.Why = fmt.Sprintf("%s: verdict tier %s exceeds grant ceiling %s; %s",
+			escalation.CodeTierExceeded, reduced.Tier, grant.MaxTier, reduced.Why)
 		return res, codeParked, recordEscalation(res.Why, escalation.CodeTierExceeded, nil)
 	}
 	// The cycle number is state-derived, never caller-passed — the driver is
@@ -778,7 +803,8 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	}
 	if err != nil {
 		res.Outcome = "parked_for_judgment"
-		res.Why = fmt.Sprintf("cycle count unreadable: %v; %s", err, reduced.Why)
+		res.Code = escalation.CodeCountUnreadable
+		res.Why = fmt.Sprintf("%s: cycle count unreadable: %v; %s", escalation.CodeCountUnreadable, err, reduced.Why)
 		return res, codeParked, recordEscalation(res.Why, escalation.CodeCountUnreadable, nil)
 	}
 	if !grant.CyclesWithin(n + 1) {
@@ -786,6 +812,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		// an authorization decision. A judgment pass decides content and
 		// cannot launder a ceiling; this same check re-applies after judgment.
 		res.Outcome = "parked_for_judgment"
+		res.Code = escalation.CodeCycleExceeded
 		res.Why = fmt.Sprintf("%s: cycle %d exceeds grant ceiling %d; re-mint a wider -max-cycles grant to proceed; %s",
 			capability.ErrCycleExceeded, n+1, grant.MaxCycles, reduced.Why)
 		return res, codeParked, recordEscalation(res.Why, escalation.CodeCycleExceeded, nil)
@@ -1091,8 +1118,7 @@ func cmdJudge(args []string) error {
 		return judgeSlotState(e, *run, escalationID, err)
 	}
 	emitAuthorizedStamp(res, code, *stampOn)
-	printJSON(res)
-	os.Exit(code)
+	exitGateResult(res, code, *stateDir)
 	return nil
 }
 
@@ -1476,8 +1502,7 @@ func cmdResolve(args []string) error {
 	// entry point produced it. Downstream of the resolution stamp above, gated on
 	// codeMerge, best-effort.
 	emitAuthorizedStamp(res, code, *stampOn)
-	printJSON(res)
-	os.Exit(code)
+	exitGateResult(res, code, *stateDir)
 	return nil
 }
 
@@ -1852,11 +1877,7 @@ func cmdAudit(args []string) error {
 	if res.Artifact != "" {
 		at = " (at " + res.Artifact + ")"
 	}
-	fmt.Printf("TAMPERED: %s%s\n", res.Reason, at)
-	// codeError, not a bare 1: exit 1 belongs to codeBlocked in the decision
-	// contract, and a tamper finding is a hard fault, not a PR decision.
-	os.Exit(codeError)
-	return nil
+	return fmt.Errorf("%w: %s%s", errLogTampered, res.Reason, at)
 }
 
 func cmdBacktest(args []string) error {
@@ -1888,6 +1909,10 @@ func cmdBacktest(args []string) error {
 // return. backtest is -live-free (it only ever yields would_merge/blocked/
 // parked), so an ephemeral grant is all a dry run needs.
 func runBacktest(repo, prs, floorBin string) error {
+	numbers, err := parseBacktestPRs(prs)
+	if err != nil {
+		return err
+	}
 	e, cleanup, err := newEphemeralEnv(floorBin)
 	if err != nil {
 		return err
@@ -1901,11 +1926,7 @@ func runBacktest(repo, prs, floorBin string) error {
 	}
 
 	fmt.Printf("%-6s %-10s %-6s %-22s %s\n", "PR", "decision", "tier", "outcome", "run")
-	for _, s := range strings.Split(prs, ",") {
-		n, err := strconv.Atoi(strings.TrimSpace(s))
-		if err != nil {
-			return fmt.Errorf("backtest: bad pr %q", s)
-		}
+	for _, n := range numbers {
 		res, _, err := runGate(e, repo, n, grantArt.ID, false, "local", false)
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
@@ -1914,6 +1935,19 @@ func runBacktest(repo, prs, floorBin string) error {
 		fmt.Printf("#%-5d %-10s %-6s %-22s %s\n", n, res.Decision, res.Tier, res.Outcome, res.Run)
 	}
 	return nil
+}
+
+func parseBacktestPRs(prs string) ([]int, error) {
+	parts := strings.Split(prs, ",")
+	numbers := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("backtest: bad pr %q", part)
+		}
+		numbers = append(numbers, n)
+	}
+	return numbers, nil
 }
 
 // newEphemeralEnv builds an env backed by throwaway temp dirs for state and
@@ -1985,4 +2019,323 @@ func printJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.Encode(v)
+}
+
+// exitGateResult preserves the load-bearing outcome/exit-code pairing while
+// making every non-zero result self-directing. A pass carries no escape.
+func exitGateResult(res gateResult, code int, stateDir string) {
+	if code != codeMerge {
+		decorateTerminalContext(
+			&res, resultSubstrateOK(res), stateDir, os.Args[1:], errors.New(res.Why),
+		)
+	}
+	printJSON(res)
+	os.Exit(code)
+}
+
+type terminalError struct {
+	Error      string          `json:"error"`
+	Escape     readiness.Route `json:"escape"`
+	SelfGated  bool            `json:"self_gated,omitempty"`
+	RetryHelps bool            `json:"retry_helps"`
+}
+
+// printTerminalError is the pre-result path. It intentionally emits no
+// outcome: code 4 plus a missing outcome remains a hard error to machine
+// callers, while stdout still carries a parseable route for the operator.
+func printTerminalError(err error, args []string) {
+	printJSON(terminalErrorFor(err, args))
+}
+
+func terminalErrorFor(err error, args []string) terminalError {
+	stateDir := stateFlag(args)
+	code := readiness.Code(err.Error())
+	substrateOK := stateSubstrateOK(err, args)
+	route := readiness.Escape(code, substrateOK)
+	route.Next = routeWithState(route.Next, stateDir, args, err)
+	if code == "judgment_malformed" || code == "judge_provider_unsupported" {
+		if next := alternateJudgeCommand(args); next != "" {
+			route.Why = "the provider emitted an unusable judgment; retry through the independent provider"
+			route.Next = next
+		}
+	}
+	return terminalError{
+		Error: err.Error(), Escape: route,
+		SelfGated: readiness.SelfGated(code), RetryHelps: readiness.RetryHelps(code),
+	}
+}
+
+func decorateTerminal(res *gateResult, substrateOK bool, stateDir string) {
+	decorateTerminalContext(res, substrateOK, stateDir, nil, nil)
+}
+
+func decorateTerminalContext(res *gateResult, substrateOK bool, stateDir string, args []string, cause error) {
+	code := res.Code
+	if code == "" && res.Outcome != "parked_for_judgment" {
+		code = readiness.Code(res.Why)
+	}
+	decorateTerminalCodeContext(res, code, substrateOK, stateDir, args, cause)
+}
+
+func decorateTerminalCode(res *gateResult, code string, substrateOK bool, stateDir string) {
+	decorateTerminalCodeContext(res, code, substrateOK, stateDir, nil, nil)
+}
+
+func decorateTerminalCodeContext(res *gateResult, code string, substrateOK bool, stateDir string, args []string, cause error) {
+	retry := readiness.RetryHelps(code)
+	res.SelfGated = readiness.SelfGated(code)
+	res.RetryHelps = &retry
+	if res.Outcome == "blocked" && res.Run != "" {
+		res.Escape = explainRoute(res.Run, stateDir,
+			"the verifier ladder blocked this head; inspect the recorded decision before changing code")
+		return
+	}
+	if (code == "grant_cycle_exceeded" || code == "grant_tier_exceeded") && res.Run != "" {
+		res.Escape = explainRoute(res.Run, stateDir,
+			"the operator must mint a wider grant; inspect the recorded ceiling before requesting new authority")
+		return
+	}
+	route := readiness.Escape(code, substrateOK)
+	route.Next = routeWithState(route.Next, stateDir, args, cause)
+	res.Escape = &route
+}
+
+func resultSubstrateOK(res gateResult) bool {
+	code := res.Code
+	if code == "" {
+		code = readiness.Code(res.Why)
+	}
+	return code != "grant_key_missing" && code != "grant_key_invalid"
+}
+
+func explainRoute(run, stateDir, why string) *readiness.Route {
+	return &readiness.Route{
+		Why:  why,
+		Next: "gate explain -run " + shellQuoteExact(run) + " -state " + shellQuoteExact(absStateDir(stateDir)),
+	}
+}
+
+func routeWithState(command, stateDir string, args []string, cause error) string {
+	if command == readiness.SubstrateRoute {
+		return shellJoin(append([]string{"ls", "-ld"}, substrateTargets(stateDir, args, cause)...))
+	}
+	return command + " -state " + shellQuoteExact(absStateDir(stateDir))
+}
+
+func substrateTargets(stateDir string, args []string, cause error) []string {
+	targets := []string{absStateDir(stateDir), filepath.Dir(absStateDir(stateDir))}
+	var pathErr *os.PathError
+	if errors.As(cause, &pathErr) {
+		targets = append(targets, pathErr.Path, filepath.Dir(pathErr.Path))
+	}
+	if errors.Is(cause, state.ErrAnchorKeyMissing) || errors.Is(cause, state.ErrAnchorKeyInvalid) || errors.Is(cause, state.ErrAnchorMissing) {
+		targets = append(targets, keyFlag(args))
+		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+			targets = append(targets, hosted)
+		}
+	}
+	if cause != nil && strings.Contains(cause.Error(), "state: parse anchor:") {
+		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+			targets = append(targets, hosted, filepath.Dir(hosted))
+		}
+	}
+	// An integrity failure — invalid anchor MAC, truncation, deletion, a
+	// head/count mismatch — is evidence produced BY the anchor, so the route
+	// must point at anchor custody too, not only at the state tree.
+	if errors.Is(cause, errLogTampered) {
+		targets = append(targets, keyFlag(args))
+		if hosted := os.Getenv("GATE_ANCHOR_RECORD"); hosted != "" {
+			targets = append(targets, hosted, filepath.Dir(hosted))
+		}
+	}
+	if cause != nil {
+		code := readiness.Code(cause.Error())
+		if code == "grant_key_missing" || code == "grant_key_invalid" {
+			targets = append(targets, keyFlag(args))
+		}
+	}
+	return uniqueStrings(targets)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = filepath.Clean(value)
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func stateFlag(args []string) string {
+	stateDir := envOr("GATE_STATE", "state")
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "-state=") || strings.HasPrefix(arg, "--state=") {
+			return strings.SplitN(arg, "=", 2)[1]
+		}
+		if (arg == "-state" || arg == "--state") && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return stateDir
+}
+
+func alternateJudgeCommand(args []string) string {
+	if len(args) == 0 || args[0] != "judge" {
+		return ""
+	}
+	copyArgs := append([]string(nil), args...)
+	found := false
+	for i, arg := range copyArgs {
+		if strings.HasPrefix(arg, "-provider=") || strings.HasPrefix(arg, "--provider=") {
+			parts := strings.SplitN(arg, "=", 2)
+			copyArgs[i] = parts[0] + "=" + otherProvider(parts[1])
+			found = true
+			continue
+		}
+		if (arg == "-provider" || arg == "--provider") && i+1 < len(copyArgs) {
+			copyArgs[i+1] = otherProvider(copyArgs[i+1])
+			found = true
+		}
+	}
+	if !found {
+		return ""
+	}
+	return shellJoin(append([]string{"gate"}, copyArgs...))
+}
+
+func shellJoin(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		if shellTokenSafe(arg) {
+			quoted = append(quoted, arg)
+			continue
+		}
+		quoted = append(quoted, shellQuoteExact(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellTokenSafe(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		if strings.ContainsRune("_@%+=:,./-", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func shellQuoteExact(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func otherProvider(provider string) string {
+	if provider == "claude" {
+		return "codex"
+	}
+	return "claude"
+}
+
+func stateSubstrateOK(err error, args []string) bool {
+	for _, sentinel := range []error{
+		state.ErrAnchorKeyMissing,
+		state.ErrAnchorKeyInvalid,
+		state.ErrAnchorMissing,
+		capability.ErrKeyMissing,
+		capability.ErrKeyInvalid,
+		errLogTampered,
+	} {
+		if errors.Is(err, sentinel) {
+			return false
+		}
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return !substratePath(pathErr.Path, args)
+	}
+	message := err.Error()
+	for _, prefix := range []string{"state: parse anchor:", "state: parse log entry", "state: corrupt log"} {
+		if strings.Contains(message, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func substratePath(path string, args []string) bool {
+	for _, root := range []string{stateFlag(args), keyFlag(args)} {
+		if root == "" {
+			continue
+		}
+		within, err := dirWithin(path, root)
+		if err == nil && within {
+			return true
+		}
+	}
+	return hostedAnchorPath(path)
+}
+
+// hostedAnchorPath reports whether path belongs to hosted anchor custody: the
+// record itself, the .anchor-*.tmp siblings its atomic write creates, or the
+// exact parent directory (an anchor-dir MkdirAll failure). The parent's OTHER
+// children are not substrate — a relative GATE_ANCHOR_RECORD like
+// "anchor.json" has "." for a parent, and treating that as a root would
+// swallow every unrelated input-file error into the custody route.
+func hostedAnchorPath(path string) bool {
+	hosted := os.Getenv("GATE_ANCHOR_RECORD")
+	if hosted == "" {
+		return false
+	}
+	if within, err := dirWithin(path, hosted); err == nil && within {
+		return true
+	}
+	if filepath.Clean(path) == filepath.Dir(hosted) {
+		return true
+	}
+	base := filepath.Base(path)
+	if !strings.HasPrefix(base, ".anchor-") || !strings.HasSuffix(base, ".tmp") {
+		return false
+	}
+	return filepath.Dir(filepath.Clean(path)) == filepath.Dir(hosted)
+}
+
+func keyFlag(args []string) string {
+	keyDir := envOr("GATE_KEY", "")
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "-key=") || strings.HasPrefix(arg, "--key=") {
+			keyDir = strings.SplitN(arg, "=", 2)[1]
+		}
+		if (arg == "-key" || arg == "--key") && i+1 < len(args) {
+			keyDir = args[i+1]
+		}
+	}
+	if keyDir == "" {
+		return defaultKeyDir()
+	}
+	return keyDir
+}
+
+func addTerminalArtifactMetadata(body map[string]any, outcome string, res gateResult, stateDir, keyDir string) {
+	if outcome != "blocked" && outcome != "capability_refused" {
+		return
+	}
+	res.Outcome = outcome
+	decorateTerminalContext(
+		&res, resultSubstrateOK(res), stateDir,
+		[]string{"-key", keyDir}, errors.New(res.Why),
+	)
+	body["escape"] = res.Escape
+	body["self_gated"] = res.SelfGated
+	body["retry_helps"] = res.RetryHelps
 }

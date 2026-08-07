@@ -16,6 +16,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
+	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
@@ -131,6 +132,9 @@ func TestExitCodesAreStable(t *testing.T) {
 		if res.HeadSHA != "abc" {
 			t.Errorf("%s: head_sha = %q, want the judged head %q", c.name, res.HeadSHA, "abc")
 		}
+		if c.wantCode != codeMerge {
+			assertTerminalArtifactHasEscape(t, e, run)
+		}
 	}
 
 	// No valid grant: coded refusal, and the code↔outcome pairing holds there too.
@@ -147,6 +151,247 @@ func TestExitCodesAreStable(t *testing.T) {
 	}
 	if code != codeRefused || res.Outcome != "capability_refused" {
 		t.Errorf("expired grant: got code %d outcome %q, want %d %q", code, res.Outcome, codeRefused, "capability_refused")
+	}
+}
+
+func assertTerminalArtifactHasEscape(t *testing.T, e env, run string) {
+	t.Helper()
+	artifacts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := artifacts[len(artifacts)-1]
+	var body struct {
+		Escape     *readiness.Route `json:"escape"`
+		RetryHelps *bool            `json:"retry_helps"`
+	}
+	if err := json.Unmarshal(last.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Escape == nil || body.Escape.Why == "" || body.Escape.Next == "" {
+		t.Fatalf("terminal artifact %s has no usable escape: %s", last.ID, last.Body)
+	}
+	if body.RetryHelps == nil {
+		t.Fatalf("terminal artifact %s omitted retry_helps: %s", last.ID, last.Body)
+	}
+}
+
+func TestTerminalErrorBeforeResultStillPrintsARoute(t *testing.T) {
+	got := terminalErrorFor(errors.New("gate: -repo, -pr, -grant required"), []string{
+		"gate", "-repo", "o/r", "-state", "/tmp/gate-state",
+	})
+	if got.Escape.Next != `gate next -state '/tmp/gate-state'` {
+		t.Fatalf("escape = %+v", got.Escape)
+	}
+	if got.Error == "" {
+		t.Fatal("terminal error lost its cause")
+	}
+}
+
+func TestTerminalErrorUsesExternalRouteForBrokenSubstrate(t *testing.T) {
+	err := fmt.Errorf("open state: %w", state.ErrAnchorMissing)
+	got := terminalErrorFor(err, []string{"audit", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"})
+	if got.Escape.Next != `ls -ld /tmp/gate-state /tmp /tmp/gate-key` {
+		t.Fatalf("escape = %+v", got.Escape)
+	}
+}
+
+func TestTerminalErrorIncludesHostedAnchorOnParseFailure(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	got := terminalErrorFor(
+		errors.New("state: parse anchor: invalid character"),
+		[]string{"audit", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"},
+	)
+	for _, want := range []string{"/srv/gate/anchor.json", "/srv/gate"} {
+		if !strings.Contains(got.Escape.Next, want) {
+			t.Fatalf("escape = %q, want hosted anchor target %q", got.Escape.Next, want)
+		}
+	}
+}
+
+func TestTerminalErrorIncludesAnchorCustodyOnTamperedChain(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	got := terminalErrorFor(
+		fmt.Errorf("%w: rewrite: anchor MAC mismatch", errLogTampered),
+		[]string{"audit", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"},
+	)
+	for _, want := range []string{"/tmp/gate-key", "/srv/gate/anchor.json", "/srv/gate"} {
+		if !strings.Contains(got.Escape.Next, want) {
+			t.Fatalf("escape = %q, want anchor custody target %q", got.Escape.Next, want)
+		}
+	}
+}
+
+func TestCapabilityRefusalUsesGrantKeyCustodyRoute(t *testing.T) {
+	err := fmt.Errorf("%w: /tmp/gate-key/grant.key", capability.ErrKeyMissing)
+	res := gateResult{Outcome: "capability_refused", Why: err.Error()}
+	decorateTerminalContext(
+		&res, resultSubstrateOK(res), "/tmp/gate-state",
+		[]string{"gate", "-key", "/tmp/gate-key"}, err,
+	)
+	if res.Escape == nil || res.Escape.Next != `ls -ld /tmp/gate-state /tmp /tmp/gate-key` {
+		t.Fatalf("escape = %+v", res.Escape)
+	}
+}
+
+func TestStateSubstrateClassification(t *testing.T) {
+	args := []string{"resolve", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
+	if !stateSubstrateOK(fmt.Errorf("state: artifact esc_typo: %w", state.ErrNotFound), args) {
+		t.Fatal("an ordinary missing artifact was classified as a broken substrate")
+	}
+	if stateSubstrateOK(fmt.Errorf("audit: %w", errLogTampered), args) {
+		t.Fatal("a tampered log was classified as a usable substrate")
+	}
+	if stateSubstrateOK(&os.PathError{Op: "open", Path: "/tmp/gate-state/log.jsonl", Err: os.ErrNotExist}, args) {
+		t.Fatal("state log I/O was classified as a usable substrate")
+	}
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/tmp/input-judgment.json", Err: os.ErrNotExist}, args) {
+		t.Fatal("an unrelated input file was classified as a broken substrate")
+	}
+}
+
+func TestHostedAnchorDirErrorsAreSubstrateFaults(t *testing.T) {
+	t.Setenv("GATE_ANCHOR_RECORD", "/srv/gate/anchor.json")
+	args := []string{"gate", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
+	if stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/gate/.anchor-123.tmp", Err: os.ErrPermission}, args) {
+		t.Fatal("hosted anchor temp write was classified as a usable substrate")
+	}
+	if stateSubstrateOK(&os.PathError{Op: "mkdir", Path: "/srv/gate", Err: os.ErrPermission}, args) {
+		t.Fatal("hosted anchor dir creation was classified as a usable substrate")
+	}
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/other/file", Err: os.ErrNotExist}, args) {
+		t.Fatal("a path outside the hosted anchor dir was classified as a broken substrate")
+	}
+	// Custody is the record, its temp siblings, and the exact parent — never
+	// the parent's other children.
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "/srv/gate/unrelated.json", Err: os.ErrNotExist}, args) {
+		t.Fatal("an unrelated sibling of the hosted anchor was classified as a broken substrate")
+	}
+}
+
+func TestRelativeHostedAnchorDoesNotSwallowInputErrors(t *testing.T) {
+	// A relative record has "." for a parent; the working directory must not
+	// become substrate, or `gate judge -judgment missing.json` gets the
+	// custody route instead of an input-file diagnosis.
+	t.Setenv("GATE_ANCHOR_RECORD", "anchor.json")
+	args := []string{"judge", "-state", "/tmp/gate-state", "-key", "/tmp/gate-key"}
+	if !stateSubstrateOK(&os.PathError{Op: "open", Path: "missing.json", Err: os.ErrNotExist}, args) {
+		t.Fatal("an input file in the working directory was classified as a broken substrate")
+	}
+	if stateSubstrateOK(&os.PathError{Op: "open", Path: "anchor.json", Err: os.ErrPermission}, args) {
+		t.Fatal("the relative hosted anchor itself was classified as a usable substrate")
+	}
+}
+
+func TestMalformedJudgmentRoutesToAlternateProvider(t *testing.T) {
+	got := terminalErrorFor(
+		errors.New(`judgment_malformed: json: unknown field "findings"`),
+		[]string{"judge", "-run", "run_1", "-grant", "grt_1", "-auto", "-provider", "claude", "-state", "/tmp/gate-state"},
+	)
+	for _, want := range []string{"gate", "judge", "run_1", "grt_1", "-provider", "codex", "/tmp/gate-state"} {
+		if !strings.Contains(got.Escape.Next, want) {
+			t.Fatalf("escape = %q, want %q", got.Escape.Next, want)
+		}
+	}
+	if !got.SelfGated || got.RetryHelps {
+		t.Fatalf("terminal metadata = %+v", got)
+	}
+}
+
+func TestMalformedJudgmentRoutesDoubleDashProvider(t *testing.T) {
+	got := terminalErrorFor(
+		errors.New(`judgment_malformed: json: unknown field "findings"`),
+		[]string{"judge", "-run", "run_1", "-grant", "grt_1", "-auto", "--provider=claude"},
+	)
+	if !strings.Contains(got.Escape.Next, "--provider=codex") {
+		t.Fatalf("escape = %q", got.Escape.Next)
+	}
+}
+
+func TestMalformedEscalationDoesNotSwitchProviders(t *testing.T) {
+	got := terminalErrorFor(
+		errors.New("judgment_malformed_escalation: question is empty"),
+		[]string{"judge", "-run", "run_1", "-grant", "grt_1", "-auto", "-provider", "claude"},
+	)
+	if strings.Contains(got.Escape.Next, "codex") {
+		t.Fatalf("malformed escalation incorrectly switched providers: %q", got.Escape.Next)
+	}
+}
+
+func TestBlockedResultRoutesToItsRecordedDecision(t *testing.T) {
+	res := gateResult{Run: "run_1", Outcome: "blocked", Why: "code finding remains"}
+	decorateTerminal(&res, true, "/tmp/gate-state")
+	if res.Escape == nil || !strings.Contains(res.Escape.Next, `gate explain -run 'run_1'`) {
+		t.Fatalf("escape = %+v", res.Escape)
+	}
+	if res.RetryHelps == nil || *res.RetryHelps {
+		t.Fatalf("retry_helps = %v", res.RetryHelps)
+	}
+}
+
+func TestNonBlockedResultsCarryRunnableRoutes(t *testing.T) {
+	for _, outcome := range []string{"parked_for_judgment", "capability_refused"} {
+		res := gateResult{Run: "run_1", Outcome: outcome, Why: "grant_expired"}
+		decorateTerminal(&res, true, "/tmp/gate-state")
+		if res.Escape == nil || res.Escape.Next == "" {
+			t.Fatalf("%s escape = %+v", outcome, res.Escape)
+		}
+	}
+}
+
+func TestGrantCeilingRoutesToRecordedRunNotJudge(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		reason string
+	}{
+		{escalation.CodeCycleExceeded, "grant_cycle_exceeded: cycle 3"},
+		{escalation.CodeTierExceeded, "grant_tier_exceeded: verdict tier T2 exceeds grant ceiling T1"},
+	} {
+		res := gateResult{Run: "run_1", Outcome: "parked_for_judgment", Code: tc.code, Why: tc.reason}
+		decorateTerminal(&res, true, "/tmp/gate-state")
+		if res.Escape == nil || !strings.Contains(res.Escape.Next, "gate explain") || strings.Contains(res.Escape.Next, "gate judge") {
+			t.Fatalf("ceiling escape for %q = %+v", tc.reason, res.Escape)
+		}
+	}
+}
+
+func TestProceduralParkClassifiesStructuredCode(t *testing.T) {
+	res := gateResult{Run: "run_1", Outcome: "parked_for_judgment", Why: "cycle_count_unreadable: input/output error"}
+	decorateTerminalCode(&res, escalation.CodeCountUnreadable, true, "/tmp/gate-state")
+	if res.Escape == nil || res.Escape.Next != "gate next -state '/tmp/gate-state'" {
+		t.Fatalf("procedural escape = %+v", res.Escape)
+	}
+}
+
+func TestContentParkDoesNotInferProceduralCodeFromProse(t *testing.T) {
+	res := gateResult{Run: "run_1", Outcome: "parked_for_judgment", Why: "discussion mentions grant_tier_exceeded as an example"}
+	decorateTerminal(&res, true, "/tmp/gate-state")
+	if res.Escape == nil || strings.Contains(res.Escape.Next, "gate explain") {
+		t.Fatalf("content park inferred a procedural route: %+v", res.Escape)
+	}
+}
+
+func TestStateAndKeyFlagsAcceptDoubleDash(t *testing.T) {
+	args := []string{"audit", "--state=/tmp/gate-state", "--key", "/tmp/gate-key"}
+	if got := stateFlag(args); got != "/tmp/gate-state" {
+		t.Fatalf("stateFlag() = %q", got)
+	}
+	if got := keyFlag(args); got != "/tmp/gate-key" {
+		t.Fatalf("keyFlag() = %q", got)
+	}
+}
+
+func TestShellQuoteExactPreservesApostrophesForRunnableRoutes(t *testing.T) {
+	if got := shellQuoteExact("operator's state"); got != `'operator'"'"'s state'` {
+		t.Fatalf("shellQuoteExact() = %q", got)
+	}
+}
+
+func TestShellJoinLeavesFlagsLegibleAndQuotesUnsafeValues(t *testing.T) {
+	got := shellJoin([]string{"gate", "judge", "-run", "run_1", "-state", "operator's state"})
+	want := `gate judge -run run_1 -state 'operator'"'"'s state'`
+	if got != want {
+		t.Fatalf("shellJoin() = %q, want %q", got, want)
 	}
 }
 
@@ -1058,6 +1303,29 @@ func TestNewEphemeralEnvIsThrowaway(t *testing.T) {
 	}
 	if _, err := os.Stat(e.keyPath); !os.IsNotExist(err) {
 		t.Fatalf("cleanup left the ephemeral key behind: %q (stat err: %v)", e.keyPath, err)
+	}
+}
+
+func TestBacktestRejectsBadPRBeforeWritingStdout(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := runBacktest("owner/repo", "1,bad", "triage-floor")
+	_ = w.Close()
+	os.Stdout = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	if runErr == nil || !strings.Contains(runErr.Error(), `backtest: bad pr "bad"`) {
+		t.Fatalf("error = %v", runErr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("backtest wrote partial stdout before rejecting input: %q", out)
 	}
 }
 

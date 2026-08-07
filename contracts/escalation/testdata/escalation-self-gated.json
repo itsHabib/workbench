@@ -1,0 +1,16 @@
+{
+  "schema_version": "escalation.v1",
+  "outcome": "parked_for_judgment",
+  "verdict": "vrd_7777777777777777",
+  "grant": "grt_8888888888888888",
+  "question": "judgment_malformed: provider returned an unknown field",
+  "run_id": "run_7890789078907890",
+  "repo": "itsHabib/workbench",
+  "number": 215,
+  "escape": {
+    "why": "the automated decision path failed; inspect the recorded run and take the independent route it names",
+    "next": "gate next -state '/tmp/gate-state'"
+  },
+  "self_gated": true,
+  "retry_helps": false
+}

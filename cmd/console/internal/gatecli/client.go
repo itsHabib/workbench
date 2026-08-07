@@ -9,6 +9,7 @@ package gatecli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -78,20 +79,38 @@ type AuditStatus struct {
 	Reason string `json:"reason"`
 }
 
-// Audit runs `gate audit`. gate prints "chain intact" and exits 0 when clean,
-// or prints "TAMPERED: ..." on stdout and exits 4 on a broken chain — so a
-// non-zero exit that carries a TAMPERED line is a finding to map, not an
-// operational error to propagate. Any other non-zero exit is a real error.
+// Audit runs `gate audit`. gate prints "chain intact" and exits 0 when clean;
+// a broken chain exits non-zero with the stable `log_integrity_failed` code in
+// the terminal-error JSON on stdout (older binaries printed a "TAMPERED: ..."
+// line instead — both are recognized). A tamper finding is mapped, not
+// propagated; any other non-zero exit is a real error.
 func (c *Client) Audit(ctx context.Context) (AuditStatus, error) {
 	out, err := c.run(ctx, c.bin, c.args("audit")...)
 	text := strings.TrimSpace(string(out))
 	if err == nil {
 		return AuditStatus{OK: true, Reason: text}, nil
 	}
-	if strings.Contains(text, "TAMPERED") {
+	if tamperFinding(text) {
 		return AuditStatus{OK: false, Reason: text}, nil
 	}
 	return AuditStatus{}, err
+}
+
+// tamperFinding reports whether a failing audit's stdout names a broken
+// chain. The code is parsed, not searched for: an operational error whose
+// text merely contains the token — a path like /tmp/log_integrity_failed —
+// must surface as an error, never as the red tamper banner.
+func tamperFinding(text string) bool {
+	if strings.HasPrefix(text, "TAMPERED") {
+		return true
+	}
+	var terminal struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(text), &terminal) != nil {
+		return false
+	}
+	return strings.HasPrefix(terminal.Error, "log_integrity_failed")
 }
 
 // execRunner runs the gate binary for real. It returns stdout even on a
