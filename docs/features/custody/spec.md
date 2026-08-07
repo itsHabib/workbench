@@ -1,6 +1,6 @@
 # custody - Technical Design Document
 
-**Status:** draft / proposal - NOT a build commitment. The artifact we decide from.
+**Status:** built (phase-1 proxy) — `cmd/custody/` (landed 2026-07-21, 21 test files); the phase-1 week-long validation gate is not recorded as passed, and the `explain` / `keys import` verbs are unbuilt ([`cmd/custody/README.md`](../../../cmd/custody/README.md)) — later phases stay conditional on that gate. Design record for the shipped slice, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-20
 **Related:** [auto-mode defaults](../../auto-mode-defaults.md), [gate enforcement model](../../../cmd/gate/docs/enforcement.md), dossier project `workbench`

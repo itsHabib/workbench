@@ -1,6 +1,6 @@
 # driver-state — Technical Design Document
 
-**Status:** draft / proposal — NOT a build commitment. The artifact we decide from.
+**Status:** built (ledger mechanism + contract) — `driverstate/` + `contracts/driverstate/` (landed 2026-07-17, 10 test files); the §9 P3 cross-client validation gate is recorded as unproven ([`cmd/workbench-mcp/README.md`](../../../cmd/workbench-mcp/README.md)), and P4 (`session-engine-skill`) plus the committed P5 ship emitter remain open. Design record for the shipped spine, not an open proposal.
 **Owner:** @michael
 **Date:** 2026-07-16
 **Related:** `docs/DESIGN.md` (workbench charter), `contracts/` (verdict-v0.3.0 precedent), gate `docs/DESIGN.md` (artifact-ledger prior art), `pers/workbench-friction.md` 2026-07-15 entries (motivating evidence), dossier project `workbench`

@@ -1,6 +1,6 @@
 # Agentic Workbench Closure — Technical Design Document
 
-**Status:** draft / proposal — **NOT a build commitment.** This is the artifact we decide from.
+**Status:** built (contract slices) — closure receipt contract (#160), Codex exact-head reviewfindings producer (#156), exact-head panel completeness (#163), and the provider-neutral judgment seam (#159) shipped; Phase 1 Gate B remains partially unexecuted ([`driver.md`](driver.md)). Design record, not an open proposal.
 **Owner:** @itsHabib
 **Date:** 2026-07-10
 **Revision:** v1 — adds the cross-cutting property/model/fuzz testing strategy and names the authorization invariants each contract must preserve.

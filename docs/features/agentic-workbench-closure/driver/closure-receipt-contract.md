@@ -1,4 +1,4 @@
-**Status:** draft
+**Status:** shipped in PR #160 (`feat(closure): add reconstructable receipt contract`)
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** Dossier task `closure-receipt-contract` (`tsk_01KYMQGTT50C302GZA9Y3YVK93`)

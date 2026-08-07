@@ -1,4 +1,4 @@
-**Status:** draft
+**Status:** shipped (Workbench producer slice) in PR #156 (`feat(reviewfindings): add Codex exact-head producer`) — the cc-skills catalog projection (install/call from the canonical Codex review skill catalog, [`driver.md`](../driver.md)) and its acceptance checks ([`codex-review-findings.md`](../codex-review-findings.md)) remain open.
 **Owner:** @itsHabib
 **Date:** 2026-07-28
 **Related:** Dossier task `codex-native-reviewfindings-producer` (`tsk_01KYMQGTM65YSFX1QF3J0RZ5Y0`), Workbench PR #156, Ship PRs #186/#187
