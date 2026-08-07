@@ -182,9 +182,9 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
 
 ### Ollama being down turns a clean T0 PR into a parked run
 
-- **What I tried:** `gate gate -repo itsHabib/workbench -pr 214` with a valid
-  T2 grant, on a two-file docs PR (+8/−2) with green CI and both required
-  reviewers completed at the exact head.
+- **What I tried:** `gate gate -repo itsHabib/workbench -pr 214 -grant
+  grt_28cb0dbdbe48a39b` (a valid T2 grant), on a two-file docs PR (+8/−2) with
+  green CI and both required reviewers completed at the exact head.
 - **What happened:** parked (exit 2, `run_4bb803ea7c990b90`). Three of four
   verifiers passed; the only escalation was `review-consolidation`, whose
   local-model extraction failed with `ollama: ... connection refused` — the
@@ -203,7 +203,8 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
 ### Gate opens and parks runs on already-merged PRs
 
 - **What I tried:** the same `gate gate` invocation — unknown to the agent,
-  PR #214 had already been merged out of band minutes earlier.
+  PR #214 had already been merged out of band hours earlier (the squash
+  commit `dffa508` is stamped 2026-08-04 17:17 −0700).
 - **What happened:** gate's readiness verifier read back `state=MERGED` and
   *passed*, the ladder ran, and the run parked for judgment. The park is
   unresolvable: a merged PR has no merge left to authorize, and judging it
@@ -213,4 +214,7 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
 - **Class:** `tool-bug`.
 - **Smallest fix:** short-circuit in `gate gate` when the readback shows the
   PR merged — refuse (exit 3, reason `already_merged`, naming the merge
-  commit) before the verifier ladder runs. Chipped as its own task.
+  commit) before the verifier ladder runs. Chipped as its own task; landed as
+  PR #219, which also widens exit 3's contract definition (formerly
+  `capability_refused` alone) to name `already_merged` as a refusal, so the
+  exit-code table and this remedy agree.
