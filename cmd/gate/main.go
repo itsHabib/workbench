@@ -1088,12 +1088,79 @@ func cmdJudge(args []string) error {
 	}
 	res, code, _, err := applyJudgment(e, *run, escalationID, *grantID, opts)
 	if err != nil {
-		return err
+		return judgeSlotState(e, *run, escalationID, err)
 	}
 	emitAuthorizedStamp(res, code, *stampOn)
 	printJSON(res)
 	os.Exit(code)
 	return nil
+}
+
+// judgeSlotState answers, from state, the question the one-shot contract forces
+// on every judgment failure: is the escalation's single judgment still there to
+// give? A judgment is irreversible once recorded, so whether a retry is even
+// legal depends on which side of the append the failure landed — and the error
+// alone never says. Without this the only way to find out is to grep
+// log.jsonl for a judgment artifact on the run, which is reading the ledger by
+// hand to learn something gate already knows.
+//
+// It annotates, never replaces: the cause stays wrapped and first, so a caller
+// matching on the failure code still matches.
+func judgeSlotState(e env, run, escalationID string, cause error) error {
+	arts, err := e.st.Run(run)
+	if err != nil {
+		return fmt.Errorf("%w; could not re-read %s to report whether a judgment was recorded: %v", cause, run, err)
+	}
+	judgment, ok := artifactForParent(arts, state.KindJudgment, escalationID)
+	if !ok {
+		return fmt.Errorf("%w; no judgment is recorded for %s — the one judgment is unspent and a retry is legal", cause, escalationID)
+	}
+	if judgmentSettled(arts, judgment.ID) {
+		// A wedge can land here too: the OUTCOME fsynced and its anchor update
+		// failed. The park is genuinely resolved — but audit-gated writes stay
+		// refused until the anchor reseals, and silence about that leaves the
+		// operator with only judgment_duplicate and no route.
+		if anchorWedge(e) {
+			return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate — but the anchor was not updated before the interruption: audit-gated writes stay refused until the anchor reseals on the next successful plain append to this store (any new gate run)", cause, judgment.ID, escalationID)
+		}
+		return fmt.Errorf("%w; judgment %s already produced an outcome for %s — the park is resolved and a retry only returns judgment_duplicate", cause, judgment.ID, escalationID)
+	}
+	// An interrupted append leaves the log one entry ahead of its anchor, and
+	// every audit-gated append — including the retry's own — refuses that
+	// ledger. Claiming "a retry resumes" here would send the operator into a
+	// refusal loop: the anchor must reseal first, which the next successful
+	// plain append performs under rebind's bounded, proven recovery.
+	if anchorWedge(e) {
+		return fmt.Errorf("%w; judgment %s is recorded for %s but the anchor was not updated before the interruption — retrying now meets the same audit refusal; the anchor reseals on the next successful append to this store (any new gate run), after which a retry resumes the judgment", cause, judgment.ID, escalationID)
+	}
+	return fmt.Errorf("%w; judgment %s is recorded for %s but produced no outcome — a retry resumes that judgment, it cannot replace it", cause, judgment.ID, escalationID)
+}
+
+// anchorWedge reports whether the store is actually one entry ahead of its
+// anchor — the wedge an interrupted append leaves. It asks the audit, never
+// the rendered error: caller-controlled text (a mistyped grant id that
+// state.Get embeds in its error) can carry the wedge's spelling while the
+// ledger is intact, and both the failure that creates the wedge and the retry
+// that meets it leave the same audited state. The match is faultIncomplete's
+// stable reason prefix.
+func anchorWedge(e env) bool {
+	res, err := e.st.Audit()
+	return err == nil && !res.OK && strings.HasPrefix(res.Reason, "incomplete-append:")
+}
+
+// judgmentSettled reports whether a recorded judgment already drove the run to
+// an outcome. It is the difference between the two things a spent slot can
+// mean: finishJudgment RESUMES a judgment whose reduction never reached an
+// outcome, and refuses one that did with judgment_duplicate. Collapsing them
+// would send an operator to retry a settled park and meet the same refusal —
+// the confidently-wrong advice this annotation exists to replace. It reads the
+// same two artifacts finishJudgment reads, so the two cannot disagree.
+func judgmentSettled(arts []state.Artifact, judgmentID string) bool {
+	reduced, ok := artifactForParent(arts, state.KindVerdict, judgmentID)
+	if !ok {
+		return false
+	}
+	return hasOutcomeFor(arts, reduced.ID)
 }
 
 // applyJudgment records a decision against a run's parked escalation and returns
@@ -1394,7 +1461,7 @@ func cmdResolve(args []string) error {
 	}
 	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why, requireOpenEscalation: true})
 	if err != nil {
-		return err
+		return judgeSlotState(e, run, *escID, err)
 	}
 	// Stamp the resolution only when a judgment was actually recorded (a
 	// capability refusal appends none): the stamp claims the loop closed, so it

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
@@ -36,6 +38,12 @@ request's run, escalation_id, subject, grant, and question exactly; set producer
 to the object {"class":"judgment","impl":"<your model or CLI identifier>"};
 set decision to pass or block; set tier no higher than the presented grant
 ceiling; and include confidence and why.
+
+The object carries exactly these keys and no others: version (the string
+gate-judgment-v1), run, escalation_id, subject, grant, question, producer,
+decision, tier, confidence, why. Gate refuses a submission carrying any other
+key. In particular, the verifier verdicts quoted above carry findings and a
+judgment does not — put your reasoning in why.
 `
 
 const (
@@ -361,11 +369,11 @@ func autoJudge(
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
-		return Verdict{}, err
+		return Verdict{}, judgmentUnusable(provider, out, err)
 	}
 	verdict, err := ValidateJudgment(artifact, request)
 	if err != nil {
-		return Verdict{}, err
+		return Verdict{}, judgmentUnusable(provider, out, err)
 	}
 	verdict.Source = "auto-judgment"
 	verdict.Producer.Impl = fmt.Sprintf(
@@ -378,11 +386,77 @@ func autoJudge(
 	return verdict, nil
 }
 
-// providerDetailCap is the hard ceiling on how much provider output an error
-// may quote, truncation marker included. The point is a diagnosable first
-// line, not the transcript.
+// judgmentUnusable refuses a submission Gate cannot accept, in terms an
+// operator can act on. The bare decode/validate error names the offending
+// field and stops there — it says neither which provider produced the
+// submission nor what that provider actually emitted, so `unknown field
+// "findings"` reads as a permanent schema mismatch and sends the operator to
+// the source of both providers to find out which one is broken.
+//
+// The retry line is the load-bearing part, and it is specific to THIS path. A
+// provider's output is a fresh sample, so an unusable submission is a sampling
+// failure, not a fixed property of the provider: re-running the same command
+// can produce a valid judgment where the last call drifted. The same codes
+// arriving from `-judgment <path>` mean the opposite — that file is the same
+// file every time, and only editing it helps. The escape names a FLAG to
+// change rather than a whole command line, so it stays true under whatever
+// -state and -grant the operator actually ran with.
+//
+// Whether the run's one judgment was spent is deliberately NOT claimed here.
+// verify cannot read the ledger, and a refusal that guesses at the ledger is
+// the confident-and-wrong shape this message exists to remove; the judge
+// command answers it from state (see judgeSlotState).
+//
+// The quoted emission comes last and is capped short. Unlike a provider
+// failure — where the CLI's own diagnostic IS the whole finding — the decode or
+// validation error here has already named the fault, so the quote only has to
+// show the SHAPE: prose wrapped around the JSON, a markdown fence, an empty
+// stream. A full judgment's worth of prose would bury the routes above it and
+// the slot state the judge command appends after it, which is the burying this
+// message exists to undo.
+func judgmentUnusable(provider string, out []byte, err error) error {
+	return fmt.Errorf(
+		"%w; %s's output is a fresh sample, so retry -provider %s, or cross to -provider %s, "+
+			"or resolve by hand: console -> escalate -> gate resolve; %s emitted: %s",
+		err, provider, provider, otherJudgeProvider(provider), provider,
+		judgmentEmission(out),
+	)
+}
+
+// judgmentEmission names an empty stream rather than quoting it. A provider
+// that exits 0 having printed nothing reaches this path too — the decode error
+// is a bare EOF — and an empty quote leaves the message trailing off after
+// "emitted:", which is least useful in exactly the case it explains least.
+func judgmentEmission(out []byte) string {
+	quoted := detailWithin(out, judgmentEmissionCap)
+	if quoted == "" {
+		return "nothing on stdout"
+	}
+	return quoted
+}
+
+// otherJudgeProvider names the independent path still open when one provider's
+// submission is unusable. A closed two-provider set exists so that a judgment
+// is always reachable from a second party; a refusal that does not name the
+// other one leaves that property unused.
+func otherJudgeProvider(provider string) string {
+	if provider == JudgeProviderClaude {
+		return JudgeProviderCodex
+	}
+	return JudgeProviderClaude
+}
+
+// The ceilings on how much provider output an error may quote, truncation
+// marker included. The point is a diagnosable first line, not the transcript.
 const (
-	providerDetailCap    = 2 * 1024
+	// providerDetailCap bounds a FAILED provider's diagnostic, where the CLI's
+	// own message is the whole finding.
+	providerDetailCap = 2 * 1024
+	// judgmentEmissionCap bounds a submission that ran to completion and was
+	// refused. It is tighter because the decode or validation error has
+	// already named the fault: this quote only shows the shape. See
+	// judgmentUnusable.
+	judgmentEmissionCap  = 512
 	providerTruncateMark = " [... truncated ...]"
 )
 
@@ -407,14 +481,111 @@ func providerFailure(provider string, stdout []byte, err error) error {
 }
 
 func providerDetail(stream []byte) string {
-	detail := strings.TrimSpace(string(stream))
-	if len(detail) <= providerDetailCap {
-		return detail
+	return detailWithin(stream, providerDetailCap)
+}
+
+// detailWithin escapes only as much of stream as the budget can print. Two
+// reasons it is a bounded scan rather than "escape everything, then cut".
+//
+// Work: escaping EXPANDS its input — a run of control bytes grows fourfold — so
+// building the whole escaped transcript would let a hostile or merely verbose
+// provider make gate do work proportional to its output while at most `limit`
+// bytes are ever shown. That is on the failure path, where the provider is
+// already the thing that misbehaved.
+//
+// Correctness: a cut through a finished transcript can land inside an escape
+// sequence, and half of an escaped U+202E is a quote that means something
+// else. Growing the quote one whole rune at a time means a cut can only fall
+// on a boundary.
+func detailWithin(stream []byte, limit int) string {
+	detail := bytes.TrimSpace(stream)
+	if len(detail) == 0 {
+		return ""
 	}
-	// The marker is part of the budget, and the cut can land mid-rune —
-	// provider output is arbitrary bytes, not guaranteed UTF-8.
-	kept := strings.ToValidUTF8(detail[:providerDetailCap-len(providerTruncateMark)], "")
-	return kept + providerTruncateMark
+	// A budget at or below the marker leaves nothing to spend on the quote.
+	// Both callers pass caps far above it, but the limit is a parameter and a
+	// third cap should not have to know this.
+	if limit <= len(providerTruncateMark) {
+		return providerTruncateMark
+	}
+	// The marker's room is reserved only once overflow is proven: an emission
+	// whose escaped form fits within limit is returned whole, even when it is
+	// longer than limit minus the marker. On the provider-failure path the
+	// diagnostic is the whole finding — its final bytes are not discarded to
+	// make room for a marker that nothing needs.
+	budget := limit - len(providerTruncateMark)
+	var b strings.Builder
+	b.Grow(min(len(detail), limit))
+	fits := 0 // last rune boundary that still leaves room for the marker
+	for i := 0; i < len(detail); {
+		piece, size := escapedRuneAt(detail[i:])
+		if b.Len()+len(piece) > limit {
+			return b.String()[:fits] + providerTruncateMark
+		}
+		b.WriteString(piece)
+		i += size
+		if b.Len() <= budget {
+			fits = b.Len()
+		}
+	}
+	return b.String()
+}
+
+// escapedRuneAt renders the one rune at the head of b as text safe to display,
+// and reports how many bytes it consumed. Provider output is model-written text
+// derived from a PR diff, so it can carry ANSI or OSC sequences — and a
+// terminal acts on those: they can erase or overwrite the lines around them.
+// What they would be forging is the operator's recovery route, which is exactly
+// the text worth forging, so nothing reaches a terminal or a CI log unescaped.
+//
+// Escaped, not stripped: the bytes are evidence. `\x1b` says a provider emitted
+// an escape sequence, where a dropped byte or a replacement rune would hide it.
+// Printable runes pass through untouched, so a quoted JSON body still reads as
+// JSON.
+//
+// The rules below are one requirement rather than a list of known attacks: the
+// rendering must be INJECTIVE — every quote has exactly one input that produces
+// it. Each rule exists because it names an input the previous ones could not
+// tell apart.
+func escapedRuneAt(b []byte) (string, int) {
+	r, size := utf8.DecodeRune(b)
+	// (RuneError, 1) is how the decoder reports a byte that is not valid UTF-8.
+	// A genuine U+FFFD decodes at size 3 and is printable, so without this a raw
+	// 0xff and a provider-written replacement character render identically.
+	if r == utf8.RuneError && size == 1 {
+		return fmt.Sprintf(`\x%02x`, b[0]), 1
+	}
+	// The backslash is the syntax's own metacharacter and must escape itself, or
+	// a provider writing the literal text \x1b renders the same as one that
+	// emitted a real ESC byte.
+	if r == '\\' {
+		return `\\`, size
+	}
+	// IsPrint, not IsControl: IsControl is category Cc alone, which lets the Cf
+	// format characters — the bidi overrides and isolates, U+202E and
+	// U+2066..U+2069 — through to reorder the rendered line in any bidi-aware
+	// terminal. The test is "can this be displayed", not a category list.
+	if unicode.IsPrint(r) {
+		return string(r), size
+	}
+	// Each escape carries the width its form conventionally has, so a quote can
+	// only be read one way. \u takes exactly four hex digits: a supplementary
+	// rune in that form runs to five digits, which reads as a 4-digit escape
+	// followed by a stray literal digit.
+	if r > 0xffff {
+		return fmt.Sprintf(`\U%08x`, r), size
+	}
+	// \u for every non-ASCII rune, not just those above 0xff: a valid
+	// two-byte U+0080 and a raw invalid 0x80 byte would otherwise both render
+	// \x80 — two distinct provider streams, one quote. \x is reserved for
+	// single bytes, which below 0x80 are always valid ASCII, so the two forms
+	// cannot collide.
+	if r > 0x7f {
+		return fmt.Sprintf(`\u%04x`, r), size
+	}
+	// And \x takes exactly two hex digits: \x202e would read as \x20 followed
+	// by "2e".
+	return fmt.Sprintf(`\x%02x`, r), size
 }
 
 func resolveJudgeExecutable(name string) (judgeExecutable, error) {

@@ -1337,6 +1337,175 @@ func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	}
 }
 
+// `judge` is one-shot and irreversible, so the operator's first question on any
+// failure is whether the shot was spent — and answering it used to mean
+// grepping log.jsonl for a judgment artifact on the run. Both sides of the
+// append are pinned: a refusal that recorded nothing says a retry is legal, and
+// one that already recorded a judgment says a retry resumes it rather than
+// replacing it. The cause stays wrapped either way, so a caller matching on the
+// failure code still matches.
+func TestJudgeSlotStateReportsWhetherTheOneShotWasSpent(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 129, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+	cause := errors.New(`judgment_malformed: json: unknown field "findings"`)
+
+	unspent := judgeSlotState(e, run, esc.ID, cause)
+	if !errors.Is(unspent, cause) {
+		t.Fatalf("annotation dropped the cause it wraps: %v", unspent)
+	}
+	for _, want := range []string{"judgment_malformed", "no judgment is recorded", "retry is legal"} {
+		if !strings.Contains(unspent.Error(), want) {
+			t.Fatalf("pre-append error = %v\nwant it to name %q", unspent, want)
+		}
+	}
+
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
+		t.Fatalf("first judgment: %v", err)
+	}
+	jdg := firstOfKind(t, e, run, state.KindJudgment)
+	settled := judgeSlotState(e, run, esc.ID, cause)
+	for _, want := range []string{jdg.ID, "already produced an outcome", "judgment_duplicate"} {
+		if !strings.Contains(settled.Error(), want) {
+			t.Fatalf("settled-judgment error = %v\nwant it to name %q", settled, want)
+		}
+	}
+	if strings.Contains(settled.Error(), "a retry resumes") {
+		t.Fatalf("a settled park was advertised as resumable: %v", settled)
+	}
+}
+
+// A spent slot means two different things, and only one of them is retryable:
+// finishJudgment RESUMES a judgment whose reduction never reached an outcome,
+// and refuses one that did. Pinned against finishJudgment's own precondition so
+// the advice cannot drift from the behaviour it describes.
+func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
+	e := testEnv(t)
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: 130, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	esc := firstOfKind(t, e, run, state.KindEscalation)
+
+	// A judgment with no reduction yet is the resumable state — the same one
+	// finishJudgment drives to an outcome rather than refusing.
+	judgment := verify.Verdict{
+		Subject:    subject,
+		Source:     "operator-judgment",
+		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision:   verify.DecisionPass,
+		Tier:       "T0",
+		Confidence: 1,
+		Why:        "safe",
+	}
+	jArt, err := e.st.AppendIfAbsentParent(state.KindJudgment, run, esc.ID, []string{esc.ID, grantArt.ID}, judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if judgmentSettled(arts, jArt.ID) {
+		t.Fatal("a judgment with no reduced verdict reported as settled")
+	}
+	resumable := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	if !strings.Contains(resumable.Error(), "a retry resumes") {
+		t.Fatalf("resumable error = %v\nwant it to say a retry resumes", resumable)
+	}
+
+	// The same unsettled slot behind an incomplete-append refusal is NOT
+	// retry-resumable: every audit-gated append re-refuses the one-ahead
+	// ledger until the anchor reseals. The annotation must not promise a
+	// resume it cannot deliver.
+	// The wedge is classified from the audited state, never from error text:
+	// a mistyped grant id that state.Get embeds in its error can carry the
+	// wedge's spelling while the ledger is intact. On this healthy store the
+	// spoofed causes must still read as resumable.
+	spoofed := errors.New("state: artifact grt_incomplete-append:-oops: not found")
+	if got := judgeSlotState(e, run, esc.ID, spoofed); !strings.Contains(got.Error(), "a retry resumes that judgment") {
+		t.Fatalf("healthy store: spoofed cause = %v\nwant the resumable message", got)
+	}
+
+	// A REAL wedge: any cause must now carry the reseal guidance.
+	wedgeAnchor(t, e, run)
+	wedged := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	if strings.Contains(wedged.Error(), "a retry resumes that judgment") {
+		t.Fatalf("wedged error = %v\nmust not claim a bare retry resumes", wedged)
+	}
+	for _, want := range []string{"anchor was not updated", "reseals"} {
+		if !strings.Contains(wedged.Error(), want) {
+			t.Fatalf("wedged error = %v\nwant it to mention %q", wedged, want)
+		}
+	}
+
+	// One plain append reseals the anchor under rebind's bounded recovery —
+	// the same route the guidance names — so the judgment can be driven on.
+	if _, err := e.st.Append(state.KindEvidence, run, nil, map[string]string{"note": "reseal"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Driving it to an outcome flips the same slot to settled.
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	arts, err = e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !judgmentSettled(arts, jArt.ID) {
+		t.Fatal("a judgment that produced an outcome reported as resumable")
+	}
+
+	// A wedge on the OUTCOME append lands in the settled branch: the park is
+	// resolved, but the reseal guidance must still reach the operator —
+	// audit-gated writes stay refused until the anchor reseals.
+	wedgeAnchor(t, e, run)
+	settled := judgeSlotState(e, run, esc.ID, errors.New("anchor_failed: boom"))
+	for _, want := range []string{"judgment_duplicate", "anchor was not updated", "reseals"} {
+		if !strings.Contains(settled.Error(), want) {
+			t.Fatalf("settled wedge error = %v\nwant it to mention %q", settled, want)
+		}
+	}
+}
+
+// wedgeAnchor recreates the interrupted-append state: save the anchor, land
+// one more append, restore the stale anchor — log one ahead, anchor pinning a
+// matching prefix head. The next successful plain append reseals it.
+func wedgeAnchor(t *testing.T, e env, run string) {
+	t.Helper()
+	saved, err := os.ReadFile(e.anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Append(state.KindEvidence, run, nil, map[string]string{"note": "wedge"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.anchor, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAtMostOneJudgmentProperty(t *testing.T) {
 	property := func(attempts []bool) bool {
 		var arts []state.Artifact
