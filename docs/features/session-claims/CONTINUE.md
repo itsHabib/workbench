@@ -34,7 +34,7 @@ Orientation:
    - Motivating evidence: roxiq docs/qa/resume-tomorrow.md and
      SESSION-HANDOFF-*.md — the hand-written genre this replaces.
 
-4. Decisions I need to make (spec §6) — ask me, don't pick:
+4. Decisions I need to make (spec §7) — ask me, don't pick:
    (a) Final skill names (/claim + /release are placeholders the operator
        hasn't blessed; /track-session-task / /track-session-clear were the
        first sketch — too long).

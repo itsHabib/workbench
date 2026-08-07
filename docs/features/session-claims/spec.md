@@ -23,7 +23,7 @@ the ones you'd otherwise write a handoff doc for.
 
 ## 2. Shape: two skills + one log + one read-only view
 
-- **`/claim <work>`** (working name — naming is open, §6) — run inside any
+- **`/claim <work>`** (working name — naming is open, §7) — run inside any
   session. Appends a `claim` event for *this* session: session id, work unit,
   repo, branch, worktree, cwd — everything but `<work>` is picked up from the
   environment, so the command is one line with zero flags. `<work>` is whatever
@@ -71,7 +71,37 @@ no daemon. Any field not needed by the roster's one table doesn't get added.
 - **No optimization or concurrency story.** No locking, no scale targets, no
   contention design — one operator typing one command occasionally.
 
-## 4. Roster output (the one deliverable view)
+## 4. Staleness — liveness is derived, never recorded
+
+Opt-in means nothing touches the log after `/claim`, so the log alone can't
+tell "active" from "abandoned." Deliberate: **the log records intent; liveness
+is always derived at read time.** No heartbeats, no SessionEnd hook — the
+roster joins signals that already exist:
+
+1. **Session transcript mtime.** The claim carries session id + cwd; the
+   session's transcript at `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
+   updates every turn. `stat` it — that *is* the `LAST` column and the
+   liveness proxy, zero adoption cost. (Cloud sessions have no local
+   transcript; they fall through to 2 and 3.)
+2. **The work's own terminal state.** A linked PR merged/closed, or a claimed
+   worktree that no longer exists → the row renders "done (unreleased)" and
+   drops from the default view. Roster already fetches PR state for the `PRS`
+   column; this is free.
+3. **Aging backstop.** No activity >N hours → flagged stale; >M days → hidden
+   from the default view (visible under `roster --all`). `/release` stays
+   optional hygiene — its reward is the handoff note, not row removal.
+
+**v1 polish — auto-release closure hooks.** Once the manual loop proves out,
+two `PostToolUse` hooks may stamp durable `release` events instead of leaving
+roster to re-infer closure every render: on `gh pr merge` (reason
+`pr_merged` — the hook greps `claims.jsonl` for whichever session linked that
+PR and releases *that* session's claim, since the merging session is often a
+driver, not the claimant) and on dossier `task_complete` (reason
+`task_completed`). Invariant that keeps this from creeping back into the
+dropped tiers: **hooks may only close claims, never create them.** Claim stays
+a human verb; release can be plumbing.
+
+## 5. Roster output (the one deliverable view)
 
 ```
 SESSION        AGE   WORK                          BRANCH / WORKTREE        PRS        LAST
@@ -82,7 +112,7 @@ session_02Rd…  3h    dossier roll-call/v3-p0/t3    claude/v3-t3 (wt)        #9
 A work unit claimed by two live sessions is flagged — the collision the
 operator most wants to see.
 
-## 5. Non-goals
+## 6. Non-goals
 
 - No session control (spawn/kill/route). Visibility only — the overwhelm is a
   visibility problem; the existing loop handles the rest.
@@ -92,7 +122,7 @@ operator most wants to see.
 - Not a rebuild of /wip — roster feeds it (or becomes a section of it); they
   must not become two competing boards.
 
-## 6. Open questions (operator)
+## 7. Open questions (operator)
 
 1. Naming: `/claim` + `/release` are working names (`/track-session-task` /
    `/track-session-clear` were the first sketch — too long). Pick before build.
