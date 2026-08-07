@@ -33,6 +33,23 @@ func TestGrantForEscalation(t *testing.T) {
 		t.Fatalf("error should name the missing id, got %v", err)
 	}
 
+	// A park present but grantless must error by name — "resolves out-of-band",
+	// not ingest's generic "grant is required" — so the operator reads the right
+	// failure. Grantless parks are schema-valid since escalation.v1's second
+	// consumer. ErrGrantlessPark wraps ErrNotParked, so the handler's 409 replay
+	// mapping holds while the card can render the real situation.
+	grantless := []byte(`{"parked":[{"escalation":"esc_g","grant":""}]}`)
+	_, err = grantForEscalation(grantless, "esc_g")
+	if !errors.Is(err, ErrGrantlessPark) {
+		t.Fatalf("a grantless park must be ErrGrantlessPark, got %v", err)
+	}
+	if !errors.Is(err, ErrNotParked) {
+		t.Fatalf("ErrGrantlessPark must keep wrapping ErrNotParked for the 409 mapping, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "out-of-band") {
+		t.Fatalf("error should say the park resolves out-of-band, got %v", err)
+	}
+
 	if _, err := grantForEscalation([]byte("not json"), "esc_a"); err == nil {
 		t.Fatalf("an unreadable feed must error")
 	}

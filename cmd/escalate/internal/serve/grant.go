@@ -19,6 +19,14 @@ import (
 // ahead of gate's own escalationIsOpen guard.
 var ErrNotParked = errors.New("serve: escalation is not currently parked")
 
+// ErrGrantlessPark marks a park that IS in the inbox but carries no gate grant
+// (schema-valid since escalation.v1's second consumer): it resolves out-of-band
+// in the producer's own flow, never through this back-channel. It wraps
+// ErrNotParked deliberately, so the handler's replay mapping (409) holds
+// unchanged, while the card text can name the real situation instead of
+// claiming the park was already resolved.
+var ErrGrantlessPark = fmt.Errorf("%w: park carries no gate grant", ErrNotParked)
+
 // GateGrantFinder is the production GrantFinder: it shells `gate next -json` —
 // gate's read-only console feed — and joins the parked escalation id to the
 // grant its run parked under. It reads gate's OUTPUT and never imports gate, the
@@ -57,16 +65,24 @@ type inboxFeed struct {
 // matches, or errors if the id names no currently-parked escalation. That miss
 // is the correct failure: a resolution can only run against a live park, so an
 // id absent from the inbox — already resolved, superseded, or never parked — has
-// no grant to run under. It is pure policy, tested without a gate binary.
+// no grant to run under. A park present but grantless (schema-valid since
+// escalation.v1's second consumer) errors by name rather than falling through
+// to ingest's generic "grant is required" — the operator should read "this park
+// resolves out-of-band", not "you forgot a flag". It is pure policy, tested
+// without a gate binary.
 func grantForEscalation(feed []byte, escID string) (string, error) {
 	var in inboxFeed
 	if err := json.Unmarshal(feed, &in); err != nil {
 		return "", fmt.Errorf("serve: decode gate next feed: %w", err)
 	}
 	for _, p := range in.Parked {
-		if p.Escalation == escID {
-			return p.Grant, nil
+		if p.Escalation != escID {
+			continue
 		}
+		if p.Grant == "" {
+			return "", fmt.Errorf("%w: %s has no grant — a grantless park resolves out-of-band, not through this back-channel", ErrGrantlessPark, escID)
+		}
+		return p.Grant, nil
 	}
 	return "", fmt.Errorf("%w: %s not in gate inbox", ErrNotParked, escID)
 }

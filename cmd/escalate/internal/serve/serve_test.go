@@ -791,6 +791,9 @@ func TestOutcomeText(t *testing.T) {
 		{"refused", 3, nil, "Refused"},
 		{"gate error", 4, nil, "Gate error"},
 		{"not parked", 0, fmt.Errorf("%w: esc_x", ErrNotParked), "Already resolved"},
+		// A grantless park is still parked — it must render out-of-band, never
+		// the misleading "already resolved" its wrapped ErrNotParked would give.
+		{"grantless park", 0, fmt.Errorf("%w: esc_g has no grant", ErrGrantlessPark), "out-of-band"},
 		{"other error", 0, errors.New("boom"), "Could not record"},
 	}
 	for _, tc := range cases {

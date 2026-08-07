@@ -520,12 +520,18 @@ func outcomeCard(cb callback, code int, err error) ([]byte, error) {
 
 // outcomeText maps gate's exit code — and the ingest-side errors that
 // short-circuit before gate — to the one-line outcome shown on the card.
-// ErrNotParked is the expected replay outcome (the park is already gone), so it
-// reads as a benign "already resolved", not a failure. Any exit code outside
-// gate's 0–3 decision space (notably 4, its hard error) means no clean decision
-// landed, so the card says the tap may need retrying.
+// ErrGrantlessPark is checked before its wrapper target ErrNotParked: the park
+// is still there, so "already resolved" would be exactly the misleading status
+// the distinct error exists to avoid. ErrNotParked is the expected replay
+// outcome (the park is already gone), so it reads as a benign "already
+// resolved", not a failure. Any exit code outside gate's 0–3 decision space
+// (notably 4, its hard error) means no clean decision landed, so the card says
+// the tap may need retrying.
 func outcomeText(cb callback, code int, err error) string {
 	who := cb.decision.Who
+	if errors.Is(err, ErrGrantlessPark) {
+		return "↗️ This park carries no gate grant — it resolves out-of-band, in the producer's own flow."
+	}
 	if errors.Is(err, ErrNotParked) {
 		return "☑️ Already resolved — this escalation is no longer parked."
 	}

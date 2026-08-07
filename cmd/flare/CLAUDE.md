@@ -63,9 +63,12 @@ there first.
 - A corrupt `cursors.json` is recovered, not fatal: quarantined aside +
   `cursor-alert` + resweep from empty — it must never silently wedge the loop.
 - Resolve buttons render ONLY for a resolvable park (kind `escalation` + an
-  artifact id) on an opted-in channel; a verdict-escalate, a cursor-alert, or a
-  park missing its id never gets Approve/Block. flare renders the button; it
-  never handles the tap (the callback targets `escalate serve`).
+  artifact id + the grant it ran under) on an opted-in channel; a
+  verdict-escalate, a cursor-alert, a park missing its id, or a grantless park
+  (including the documented `none:`-prefixed sentinel, which lifts as
+  grantless) never gets Approve/Block — a grantless park resolves out-of-band.
+  flare renders the button; it never handles the tap (the callback targets
+  `escalate serve`).
 
 ## Checks
 

@@ -371,7 +371,7 @@ func TestSlackResolveButtonsRenderOnOptIn(t *testing.T) {
 		Body:     "your call",
 		Fields: map[string]string{
 			"run": "run_7", "repo": "itsHabib/workbench", "number": "137",
-			"brief_what": "escalate serve", "briefed": "yes",
+			"brief_what": "escalate serve", "briefed": "yes", "grant": "grt_7",
 		},
 	})
 	btns := resolveButtons(msg.Attachments[0].Blocks)
@@ -423,10 +423,10 @@ func TestSlackResolveButtonsRequireOptIn(t *testing.T) {
 
 // TestSlackResolveButtonsOnlyOnResolvableParks pins the correctness guard: even
 // opted in, resolve buttons render ONLY for a gate park (Kind "escalation") that
-// carries its artifact id. The other things that reach SevEscalate — a verdict
-// with an escalate decision, a cursor-alert, a park missing its id — are not
-// resolvable by `escalate`, so offering Approve/Block on them would be a tap
-// gate would refuse.
+// carries its artifact id AND its grant. The other things that reach SevEscalate
+// — a verdict with an escalate decision, a cursor-alert, a park missing its id,
+// a grantless park — are not resolvable by `escalate`, so offering Approve/Block
+// on them would be a tap gate would refuse.
 func TestSlackResolveButtonsOnlyOnResolvableParks(t *testing.T) {
 	cases := []struct {
 		name string
@@ -442,6 +442,13 @@ func TestSlackResolveButtonsOnlyOnResolvableParks(t *testing.T) {
 		{"park-missing-id", event.Event{
 			Source: "gate", ID: "", Kind: "escalation", Severity: event.SevEscalate,
 			Fields: map[string]string{"repo": "itsHabib/workbench", "number": "9"},
+		}},
+		// A grantless park — schema-valid since escalation.v1's second consumer —
+		// resolves out-of-band: escalate's ingest refuses an empty grant, so
+		// Approve/Block here would be a tap guaranteed to fail.
+		{"park-missing-grant", event.Event{
+			Source: "roxiq", ID: "esc-park-poc", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/roxiq", "number": "161", "briefed": "yes"},
 		}},
 	}
 	for _, tc := range cases {
