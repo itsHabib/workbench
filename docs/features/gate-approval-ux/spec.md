@@ -483,7 +483,11 @@ silently drop operator-inspectable evidence that today's
 - `prepare`/`execute` verbs: new `-display-operation`, `-display-pr`,
   `-display-head` flags; non-empty mismatch with the document → refusal
   (pre-credential). Empty display flags stay accepted, so raw Actions-UI
-  dispatches remain valid.
+  dispatches remain valid. A fourth display input, the **correlation
+  nonce** (§8), is carried in `run-name` for `submit` to match on; it is
+  *not* falsifiable against the document (it is per-dispatch, not derived
+  from it) and therefore carries no claim gate could check — it exists
+  only so the poller can identify its own run.
 - `gate-executor.yml`: three optional display inputs; `run-name` from
   them; new first job `describe` (`permissions: contents: read`, no
   environment, no secrets, no `gate-state` checkout, checks out the same
@@ -564,11 +568,30 @@ keep the separate, deliberately boring `reconcile` path.
   request, produce two runs: the first approved `prepare` publishes the
   action and the second refuses on duplicate-action/newest-action grounds;
   for `execute` the claim CAS arbitrates (§7.5). When two submits are both
-  polling, run-name matching alone is ambiguous — the tie-breaker is the
-  **newest-created run at or after this submit's dispatch time** (v2, from
-  review). A wrong pick is harmless (both runs carry the same document and
-  the loser refuses); the tie-breaker exists so the printed URL points at
-  the surviving run.
+  polling, run-name matching alone is ambiguous.
+
+  **⛔ The v2 "newest-created run" tie-breaker was wrong and is withdrawn
+  (v6, review round 5).** `gate-executor.yml` serializes every executor run
+  through a single repo-wide concurrency group with
+  `cancel-in-progress: false` (workflow lines 36–38). So a second dispatch
+  does **not** supersede the first — it *queues behind* it. The newest run
+  is therefore the **queued** one, while the run that actually reaches the
+  approval gate is the **older, active** one. Printing the newest URL sends
+  the operator to a run that cannot be approved yet; if they approve it
+  later it only advances to a duplicate refusal, and the real pending
+  approval sits unattended. The v2 claim that "a wrong pick is harmless"
+  assumed the runs were interchangeable, which the concurrency group makes
+  false.
+
+  **Correct rule (v6):** correlate explicitly rather than guessing.
+  `submit` sends a per-dispatch **correlation nonce** as an additional
+  display-only input, and matches the run carrying its own nonce. A nonce
+  is display data, never authority — gate falsifies display inputs per
+  §4.4, and a wrong or absent nonce can only mislabel a run, never
+  authorize one. If a retry produces two runs for the same request, select
+  the **earliest non-terminal** match (that is the one holding the queue
+  slot and therefore the approval), and say so in the output rather than
+  silently picking.
 - **`describe` failure:** independent of approval by construction (§4.3);
   worst case is a run without a pretty card, which degrades to today's UX.
 - **Slack outage:** notifications degrade to GitHub Mobile push alone;

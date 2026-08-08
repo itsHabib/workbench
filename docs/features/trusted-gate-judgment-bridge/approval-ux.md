@@ -1,7 +1,17 @@
 # Approval UX — calm, phone-friendly operator decisions
 
-Status: proposed — the committed slice (designs 1–3) is specified as a TDD in
-`docs/features/gate-approval-ux/spec.md`
+Status: **Design 2 and the Phase 0 recommendation are BLOCKED** — the
+committed slice (designs 1–3) is specified as a TDD in
+`docs/features/gate-approval-ux/spec.md`, and that TDD's **§4.1.1 withdraws
+the security argument Design 2 rests on**. A 44-bit phrase does *not* keep
+the binding intact: a compromised dispatcher can grind free-form request
+fields and substitute a materially different but independently valid
+request carrying the same phrase, and today's full-SHA-256 comment does not
+have that weakness. **Do not implement Design 2 (or the Phase 0
+recommendation that includes it) until a binding remedy is selected in
+§4.1.1.** Designs 1 and 3 are unaffected except that they assume the phrase
+Design 2 defines. Read this document as a design-space survey, not as
+current security guidance.
 Date: 2026-07-31
 
 `design.md` owns the security contract: run-specific independent environment
@@ -85,7 +95,14 @@ no secrets and no authority; if it lied, gate's own verification of the JSON
 refuses (I2, I3). Dispatch moving to the agent is covered by I1's
 different-actor check plus I3.
 
-## Design 2 — Word-coded approval phrases
+## Design 2 — Word-coded approval phrases ⛔ BLOCKED
+
+> **Blocked pending a §4.1.1 remedy in the TDD.** As specified below (44
+> bits / four words) this is a **regression** against today's full-digest
+> comment, not a neutral re-encoding — see `docs/features/gate-approval-ux/spec.md`
+> §4.1.1. The threat framing later in this section is retained only as a
+> record of what was believed; it is **superseded** by §4.1.1 and must not
+> be cited as justification.
 
 **Change.** Keep the exact-comment binding; change its encoding. Instead of
 `gpr_3f9c…`, gate derives the canonical comment as words:
@@ -260,7 +277,12 @@ with nothing half-done. The UX job is to say so calmly.
   itself controls.
 - No reviewer credential co-located with the agent (Design 4's custody rule).
 
-## Recommendation — Phase 0
+## Recommendation — Phase 0 ⛔ BLOCKED (item 3 below)
+
+> **This recommendation cannot be implemented as written.** It includes
+> word-coded phrases (Design 2), whose security argument is withdrawn in
+> TDD §4.1.1. Items 1, 2, 4 and 5 stand on their own; item 3 waits on a
+> binding remedy. The TDD, not this section, is the live plan.
 
 Ship **Designs 1 + 2, with Design 3 riding the already-built Slack seam**:
 
