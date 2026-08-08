@@ -142,6 +142,11 @@ type preparedGateState struct {
 	result   gateResult
 	actionID string
 	files    gateexecutor.StateFiles
+	// refuse, when set, is returned to the caller AFTER the hosted publish:
+	// an already_merged refusal is itself a terminal the hosted ledger must
+	// see, or its newest terminal stays a stale would_merge for the same
+	// subject that a later request could still accept.
+	refuse error
 }
 
 func cmdExecutorPrepare(args []string) error {
@@ -160,6 +165,9 @@ func cmdExecutorPrepare(args []string) error {
 	snapshot, err := publishHostedPreparation(flags, document, prepared.files)
 	if err != nil {
 		return err
+	}
+	if prepared.refuse != nil {
+		return prepared.refuse
 	}
 	printJSON(map[string]any{
 		"preparation_id": document.PreparationID,
@@ -296,7 +304,7 @@ func evaluateHostedPreparation(
 	}
 	result, code, err := runGateWithSynthesis(
 		e, document.Request.Subject.Repo, document.Request.Subject.Number,
-		document.Request.GrantID, false, "local", true, false,
+		document.Request.GrantID, false, "local", true, false, true,
 	)
 	if err != nil {
 		return preparedGateState{}, err
@@ -306,6 +314,9 @@ func evaluateHostedPreparation(
 	}
 	if err != nil {
 		return preparedGateState{}, err
+	}
+	if prepared, refused, err := mergedRefusalState(e, code, result); refused || err != nil {
+		return prepared, err
 	}
 	if err := validatePreparedOutcome(document.Request.Decision, code, result.Outcome); err != nil {
 		return preparedGateState{}, refuseExecutor(err)
@@ -333,6 +344,27 @@ func evaluateHostedPreparation(
 	return preparedGateState{
 		result: result, actionID: actionID, files: files,
 	}, nil
+}
+
+// mergedRefusalState builds the publish-then-refuse preparation state for an
+// already_merged gate outcome. The refusal terminal recorded locally
+// supersedes any stale would_merge for the same PR, so the hosted ledger must
+// receive the snapshot before the refusal propagates — refusing without
+// publishing would leave the hosted newest-terminal pointing at the stale
+// action for a later request to accept.
+func mergedRefusalState(e env, code int, result gateResult) (preparedGateState, bool, error) {
+	if code != codeRefused || result.Outcome != outcomeAlreadyMerged {
+		return preparedGateState{}, false, nil
+	}
+	files, err := readExecutorStateFiles(e)
+	if err != nil {
+		return preparedGateState{}, false, err
+	}
+	return preparedGateState{
+		result: result,
+		files:  files,
+		refuse: refuseExecutor(fmt.Errorf("executor prepare: gate outcome %s", result.Outcome)),
+	}, true, nil
 }
 
 func validatePreparedOutcome(decision string, code int, outcome string) error {

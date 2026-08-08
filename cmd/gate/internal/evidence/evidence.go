@@ -116,20 +116,42 @@ type reviewFetchers struct {
 
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
-	var b Bundle
+	viewID, view, err := View(st, run, pr)
+	if err != nil {
+		return Bundle{}, err
+	}
+	return GatherFrom(st, run, pr, viewID, view)
+}
+
+// View fetches and records the PR view alone — the cheapest recorded read.
+// It is split out so the already-merged refusal can be decided before the
+// model backend or the rest of the evidence sweep gets a chance to fail the
+// run with a hard error (missing cloud credentials, a flaky diff fetch): in
+// the hosted path an early error leaves a stale would_merge as the newest
+// published terminal, so the refusal must not depend on anything beyond this
+// one read.
+func View(st *state.Store, run string, pr PRRef) (string, json.RawMessage, error) {
 	// author is fetched so readiness can refuse to count a self-approval. GitHub
 	// already rejects approving your own PR, so this is defense in depth — but
 	// this is the authorization path, and it costs no extra round trip.
+	// mergeCommit is fetched so the already-merged refusal can name the commit
+	// that already landed — the fact that proves there is no merge left to
+	// authorize.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
+		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author,mergeCommit")
 	if err != nil {
-		return b, err
+		return "", nil, err
 	}
 	a, err := st.Append(state.KindEvidence, run, nil, viewBody{PR: pr, Data: view})
 	if err != nil {
-		return b, err
+		return "", nil, err
 	}
-	b.View = a.ID
+	return a.ID, view, nil
+}
+
+// GatherFrom completes the evidence sweep on top of an already-recorded view.
+func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.RawMessage) (Bundle, error) {
+	b := Bundle{View: viewID}
 	var viewed struct {
 		HeadRefOid string `json:"headRefOid"`
 	}
@@ -154,7 +176,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	if body.Method == "api" {
 		body.Diff = string(diff)
 	}
-	a, err = st.Append(state.KindEvidence, run, nil, body)
+	a, err := st.Append(state.KindEvidence, run, nil, body)
 	if err != nil {
 		return b, err
 	}

@@ -405,6 +405,43 @@ func TestBuildRequestAndClaimRefuseSupersededAction(t *testing.T) {
 	}
 }
 
+// TestBuildRequestAndClaimRefuseAfterMergedRefusal pins the terminal-indexing
+// fallback: an already_merged refusal is recorded before any verdict exists, so
+// its run carries no verdict to derive a subject from — the action body carries
+// repo/number itself. It must still supersede an older would_merge for the same
+// PR, or a stale pass could be sent for protected approval after the merge
+// already happened.
+func TestBuildRequestAndClaimRefuseAfterMergedRefusal(t *testing.T) {
+	fixture := newFixture(t)
+	oldRequest := fixture.request(t)
+	oldAuthorization := authorize(t, oldRequest)
+
+	evd, err := fixture.store.Append(state.KindEvidence, "run_merged", nil, map[string]string{"view": "state=MERGED"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.Append(state.KindAction, "run_merged", []string{evd.ID}, map[string]any{
+		"outcome": "already_merged",
+		"repo":    fixture.subject.Repo, "number": fixture.subject.Number,
+		"merge_commit": strings.Repeat("d", 40),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BuildRequest(fixture.audit(t), RequestInput{
+		ActionID: fixture.action.ID, Subject: fixture.subject,
+		JudgmentQuestion: "May Gate execute this exact merge action?",
+		ReplayID:         "evt_" + strings.Repeat("9", 32),
+		IssuedAt:         testNow, ExpiresAt: testNow.Add(20 * time.Minute),
+	}); !errors.Is(err, ErrSuperseded) {
+		t.Fatalf("BuildRequest() = %v, want superseded by the merged refusal", err)
+	}
+	if _, _, err := fixture.claim(
+		t, oldAuthorization, fixture.live(), testNow.Add(3*time.Minute),
+	); !errors.Is(err, ErrSuperseded) {
+		t.Fatalf("Claim() = %v, want superseded by the merged refusal", err)
+	}
+}
+
 func TestBuildRequestRefusesForgedArgv(t *testing.T) {
 	fixture := newFixtureWithArgv(t, []string{
 		"gh", "pr", "merge", "168", "-R", "itsHabib/workbench",

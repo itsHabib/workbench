@@ -52,10 +52,10 @@ import (
 // outcome is an aborted run, not a decision.
 //
 //	code | outcome                                | driver action
-//	  0  | would_merge / merged / already_merged  | land the PR
+//	  0  | would_merge / merged                   | land the PR
 //	  1  | blocked                                | stop; do not merge
 //	  2  | parked_for_judgment                    | re-mint a wider grant (ceiling) or judge (escalation)
-//	  3  | capability_refused                     | mint/repair the grant, retry once
+//	  3  | capability_refused / already_merged    | mint/repair the grant and retry once / nothing to merge
 //	  4  | (hard error, no outcome)               | surface the error; no merge
 const (
 	codeMerge   = 0
@@ -458,10 +458,12 @@ func cmdGate(args []string) error {
 }
 
 // runGate is one thin vertical pass: capability, evidence, verification,
-// reduction, outcome.
+// reduction, outcome. It is the LIVE verb: an already-merged subject refuses
+// here — replay (backtest) calls runGateWithSynthesis directly to keep
+// evaluating historical, merged PRs.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	return runGateWithSynthesis(
-		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true,
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true,
 	)
 }
 
@@ -474,6 +476,7 @@ func runGateWithSynthesis(
 	modelBackend string,
 	reviewsOptional bool,
 	synthesize bool,
+	refuseMerged bool,
 ) (gateResult, int, error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
 	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
@@ -489,15 +492,41 @@ func runGateWithSynthesis(
 		return res, codeRefused, nil
 	}
 
+	run := state.NewRunID()
+	res.Run = run
+
+	// The view is recorded FIRST, alone: the already-merged refusal must be
+	// decidable from this one read, before the model backend or the rest of
+	// the evidence sweep can fail the run with exit 4 (missing cloud
+	// credentials, a flaky diff fetch) — an early hard error would leave a
+	// stale would_merge as the newest published terminal in the hosted path.
+	ref := evidence.PRRef{Repo: repo, Number: pr}
+	viewID, view, err := evidence.View(e.st, run, ref)
+	if err != nil {
+		return res, codeError, err
+	}
+
+	// A merged PR has no merge left to authorize: a park on it is unresolvable,
+	// because judging it pass would stamp irreversible merge authorization for a
+	// merge that already happened — manufactured audit evidence. Refuse before
+	// the verifier ladder can run or an escalation can be written. Replay
+	// (backtest) skips this: evaluating historical, merged PRs is its purpose.
+	if refuseMerged {
+		mv, err := verify.MergedPR(e.st, viewID)
+		if err != nil {
+			return res, codeError, err
+		}
+		if mv.Merged {
+			return refuseMergedRun(e, run, viewID, grantID, subject, mv, res)
+		}
+	}
+
 	model, err := verify.ModelBackend(modelBackend)
 	if err != nil {
 		return res, codeError, err
 	}
 
-	run := state.NewRunID()
-	res.Run = run
-
-	bundle, err := evidence.Gather(e.st, run, evidence.PRRef{Repo: repo, Number: pr})
+	bundle, err := evidence.GatherFrom(e.st, run, ref, viewID, view)
 	if err != nil {
 		return res, codeError, err
 	}
@@ -566,6 +595,45 @@ func reviewVerdictIDs(e env, run string, bundle evidence.Bundle, subject verify.
 		return nil, err
 	}
 	return append(ids, reviewsArt.ID), nil
+}
+
+// outcomeAlreadyMerged is the coded refusal for a subject that is already
+// merged. Like grant_cycle_exceeded it is a terminal state that names its own
+// remedy: there is none — the merge already happened, so there is nothing for
+// gate to authorize and nothing a judgment could resolve.
+const outcomeAlreadyMerged = "already_merged"
+
+// refuseMergedRun finalizes a run whose subject GitHub reports as MERGED: a
+// terminal refused action (exit 3), recorded for audit, never a park. The
+// action carries the subject so the inbox's subject reduction lets it
+// supersede any stale park recorded against the same PR, and names the merge
+// commit as the fact that proves the refusal. A plain Append suffices — the
+// artifact is a refusal, not merge authority, so none of act's judgment/claim
+// preconditions apply. cycleCount excludes this outcome (countsAsCycle): no
+// ladder decision was produced, so no review cycle was consumed — and the
+// action's parent is view evidence, not a reduced verdict, so counting it
+// would make every later cycle count on this subject unreadable.
+func refuseMergedRun(e env, run, viewID, grantID string, subject verify.Subject, mv verify.MergedView, res gateResult) (gateResult, int, error) {
+	why := "PR is already merged"
+	if mv.MergeSHA != "" {
+		why = fmt.Sprintf("PR is already merged (merge commit %s)", mv.MergeSHA)
+	}
+	why += "; there is no merge left to authorize"
+	res.Outcome = outcomeAlreadyMerged
+	res.Why = why
+	res.HeadSHA = mv.HeadSHA
+	body := map[string]any{
+		"outcome":      outcomeAlreadyMerged,
+		"repo":         subject.Repo,
+		"number":       subject.Number,
+		"merge_commit": mv.MergeSHA,
+		"grant":        grantID,
+		"why":          why,
+	}
+	if _, err := e.st.Append(state.KindAction, run, []string{viewID}, body); err != nil {
+		return res, codeError, err
+	}
+	return res, codeRefused, nil
 }
 
 // recordGrantNeeded persists the top-level capability refusal as a durable,
@@ -978,7 +1046,11 @@ func countsAsCycle(a state.Artifact) (bool, error) {
 	if a.Kind == state.KindEscalation {
 		return b.Code == "", nil
 	}
-	return b.Outcome != "capability_refused", nil
+	// already_merged is a refusal, not a ladder decision, and its parent is
+	// view evidence rather than a reduced verdict — counting it would send
+	// outcomeSubjectMatches to a non-verdict parent and make every later
+	// cycle count on the subject unreadable.
+	return b.Outcome != "capability_refused" && b.Outcome != outcomeAlreadyMerged, nil
 }
 
 // outcomeSubjectMatches follows an outcome artifact to its parent reduced
@@ -1927,7 +1999,9 @@ func runBacktest(repo, prs, floorBin string) error {
 
 	fmt.Printf("%-6s %-10s %-6s %-22s %s\n", "PR", "decision", "tier", "outcome", "run")
 	for _, n := range numbers {
-		res, _, err := runGate(e, repo, n, grantArt.ID, false, "local", false)
+		// refuseMerged=false: replaying historical, merged PRs is backtest's
+		// whole purpose — the live verb's already-merged refusal must not fire.
+		res, _, err := runGateWithSynthesis(e, repo, n, grantArt.ID, false, "local", false, true, false)
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
 			continue

@@ -592,11 +592,35 @@ func buildIndex(artifacts []state.Artifact) (artifactIndex, error) {
 		index.byID[artifact.ID] = item
 		if artifact.Kind == state.KindAction || artifact.Kind == state.KindEscalation {
 			item.subject = subjects[artifact.Run]
+			if item.subject.Repo == "" {
+				item.subject = terminalBodySubject(artifact)
+			}
 			index.byID[artifact.ID] = item
 			index.terminals = append(index.terminals, item)
 		}
 	}
 	return index, nil
+}
+
+// terminalBodySubject reads the subject a terminal carries on its own body.
+// Most terminals name their subject through the run's reduced verdict
+// (subjects[run] in buildIndex); a refusal recorded before any verdict exists —
+// already_merged, which refuses ahead of the verifier ladder — cannot, so its
+// body carries repo/number itself. A body-derived subject only ADDS
+// supersession: newestTerminal exists solely to refuse a stale target
+// (ErrSuperseded), and the target itself must still pass validateAction (a
+// would_merge with a verdict parent), so this fallback can narrow authority,
+// never widen it. A malformed or subject-free body degrades to the empty
+// subject — exactly the pre-fallback behavior.
+func terminalBodySubject(artifact state.Artifact) contracts.Subject {
+	var body struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}
+	if err := json.Unmarshal(artifact.Body, &body); err != nil {
+		return contracts.Subject{}
+	}
+	return contracts.Subject{Repo: body.Repo, Number: body.Number}
 }
 
 func (index artifactIndex) newestTerminal(repo string, number int) indexedArtifact {

@@ -51,6 +51,9 @@ type prView struct {
 	Author            struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	MergeCommit struct {
+		Oid string `json:"oid"`
+	} `json:"mergeCommit"`
 }
 
 // reviewStance mirrors the evidence package's ReviewStance on the JSON seam —

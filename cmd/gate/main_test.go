@@ -848,6 +848,123 @@ func TestCycleCapJudgeCannotLaunderCeiling(t *testing.T) {
 	}
 }
 
+// TestRefuseMergedRunRefusesTerminally pins the already-merged refusal: a
+// subject GitHub reports as MERGED has no merge left to authorize, so the run
+// terminates with a coded refusal (exit 3) naming the merge commit — recorded
+// as a terminal action for audit, never a park. A park here would be
+// unresolvable: judging it pass would stamp irreversible merge authorization
+// for a merge that already happened.
+func TestRefuseMergedRunRefusesTerminally(t *testing.T) {
+	e := testEnv(t)
+	run := state.NewRunID()
+	view, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"data": map[string]any{
+			"state":       "MERGED",
+			"headRefOid":  "headsha",
+			"mergeCommit": map[string]any{"oid": "mergesha"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv, err := verify.MergedPR(e.st, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mv.Merged || mv.MergeSHA != "mergesha" || mv.HeadSHA != "headsha" {
+		t.Fatalf("MergedPR = %+v, want merged with both SHAs", mv)
+	}
+	subject := verify.Subject{Repo: "o/r", Number: 214}
+	res, code, err := refuseMergedRun(e, run, view.ID, "grt_x", subject, mv, gateResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || res.Outcome != outcomeAlreadyMerged {
+		t.Fatalf("code=%d outcome=%q, want refusal with %q", code, res.Outcome, outcomeAlreadyMerged)
+	}
+	if !strings.Contains(res.Why, "mergesha") {
+		t.Fatalf("the refusal must name the merge commit, got why=%q", res.Why)
+	}
+	if res.HeadSHA != "headsha" {
+		t.Fatalf("res.HeadSHA=%q, want the judged head from evidence", res.HeadSHA)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.Kind == state.KindEscalation {
+			t.Fatal("an already-merged subject must never park")
+		}
+	}
+	var body struct {
+		Outcome     string `json:"outcome"`
+		MergeCommit string `json:"merge_commit"`
+		Repo        string `json:"repo"`
+		Number      int    `json:"number"`
+	}
+	unmarshalKindBody(t, e, run, state.KindAction, &body)
+	if body.Outcome != outcomeAlreadyMerged || body.MergeCommit != "mergesha" {
+		t.Fatalf("action body = %+v, want terminal %s naming the merge commit", body, outcomeAlreadyMerged)
+	}
+	if body.Repo != "o/r" || body.Number != 214 {
+		t.Fatalf("action body must carry the subject (no verdict parent to join through), got %+v", body)
+	}
+}
+
+// TestMergedPROpenPRIsNotMerged pins the live path: an OPEN subject does not
+// trip the already-merged refusal.
+func TestMergedPROpenPRIsNotMerged(t *testing.T) {
+	e := testEnv(t)
+	view, err := e.st.Append(state.KindEvidence, state.NewRunID(), nil, map[string]any{
+		"data": map[string]any{"state": "OPEN", "headRefOid": "headsha"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv, err := verify.MergedPR(e.st, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mv.Merged {
+		t.Fatal("an OPEN PR must not read as merged")
+	}
+}
+
+// TestCycleCountSkipsAlreadyMerged pins two facts about the refusal artifact:
+// it consumes no review cycle, and — because its parent is view evidence, not
+// a reduced verdict — the cycle counter must skip it entirely rather than fail
+// the count unreadable (which would park every later run on the subject).
+func TestCycleCountSkipsAlreadyMerged(t *testing.T) {
+	e := testEnv(t)
+	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: "abc"}
+	run := state.NewRunID()
+	view, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"data": map[string]any{"state": "MERGED", "headRefOid": "abc", "mergeCommit": map[string]any{"oid": "m"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv, err := verify.MergedPR(e.st, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, code, err := refuseMergedRun(e, run, view.ID, "grt_x", subject, mv, gateResult{}); err != nil || code != codeRefused {
+		t.Fatalf("refusal: code %d err %v", code, err)
+	}
+
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 1, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryRun := state.NewRunID()
+	v := reducedVerdict(subject, verify.DecisionPass, "T0")
+	id := recordReduced(t, e, retryRun, v)
+	if _, code, err := act(e, retryRun, grantArt.ID, v, id, gateResult{}, false, nil); err != nil || code != codeMerge {
+		t.Fatalf("a prior already_merged refusal must not burn a cycle or break the count: code %d err %v", code, err)
+	}
+}
+
 // TestCycleCountSkipsCapabilityRefusals pins the consumption rule for the
 // refusal path: a run refused by an expired grant produced no ladder decision
 // and must not burn a cycle against the re-minted retry.
