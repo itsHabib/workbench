@@ -7,14 +7,17 @@
 contract this must not move), `docs/features/trusted-gate-judgment-bridge/approval-ux.md`
 (the design-space survey this TDD commits a slice of), `cmd/gate/docs/enforcement.md`.
 
-> **Reviewers — focus areas (v3):** §4.3 + §9 P0 — the phone-surface
-> assumptions are the largest unvalidated dependency and now block the
-> build; §4.1's revised binding argument (44 bits is grindable and the
-> design is indifferent — is the layering really carrying it?); §4.4's
-> stated limit (coherent lies are not caught by display falsification);
-> §11's adversarial drill. §4.2 and §7–§8 were reviewed in rounds 1–2 and
-> are settled unless something new surfaces. This is a design review, not a
+> **Reviewers — focus areas (v5):** §9.1 P0 is the live question — the
+> phone-surface assumptions block the build and the spike has not run yet;
+> §11's single-operator drill limitation (can an unwarned run actually be
+> arranged here?). §4.1's binding argument, §4.2, §4.4's stated limit,
+> §6.x, §7–§8, and normalization were reviewed across rounds 1–4 and read
+> as settled unless something new surfaces. This is a design review, not a
 > code review.
+>
+> *Review history: v2 folded round 1, v3 round 2 (§4.1 collision-claim
+> correction, P0 elevation), v4 round 3 (encoder ownership moved to
+> `contracts`), v5 round 4 (§6.3 field gap, drill mechanics).*
 
 ## 1. Problem & hypothesis
 
@@ -165,6 +168,13 @@ Two refinements of the grinding picture, for precision (v4):
   buys nothing against grinding — the attacker grinds locally and
   dispatches only on a hit — and why the argument must rest on
   independence rather than on cost.
+
+Why independence is the stronger ground (v5): a cost argument is
+contingent — it decays with hardware and has to be re-litigated every few
+years. Independence is structural. The phrase and the document are checked
+against different sources (the approver's typed input versus live GitHub
+and hosted state), so no single forged value satisfies both at once, and
+that property does not erode with compute.
 
 To be explicit about layering: the phrase check and the full-document
 verification are **parallel defenses in the same pre-credential block, not
@@ -371,10 +381,15 @@ keys, touches no `gate-state`, mints nothing.
 gate executor describe -request <file>
 ```
 
-Read-only; validates shape and prints the Markdown decision card
-(operation, PR + title, head short+full, base, merge-base, expiry, replay
-ID, exact phrase) for `$GITHUB_STEP_SUMMARY`. Malformed input → a card that
-says *malformed request* + non-zero exit — visible, not silent.
+Read-only; validates shape and prints the Markdown decision card for
+`$GITHUB_STEP_SUMMARY`. Fields: operation, PR + title, head short+full,
+base, merge-base, expiry, replay ID, exact phrase, **evidence digest, and
+judgment-question hash**. The last two are required, not optional (v5,
+from review round 4): §6.1 moves them off the typed string, so the card is
+the only place they remain inspectable, and a card without them would
+silently drop operator-inspectable evidence that today's
+`ExpectedApprovalComment` carries. Malformed input → a card that says
+*malformed request* + non-zero exit — visible, not silent.
 
 ### 6.4 Changed surfaces
 
@@ -513,14 +528,21 @@ review round 3).
   routine.
 
 **If (b) fails, this is an execution task, not a restart.** Candidate
-carriers to evaluate in order — the requirement is only that the content
-is rendered from the actually-dispatched document on trusted `main`, so
-any surface satisfying that inherits the §4.3 anti-spoof property:
+carriers below. **Rule: try them in the listed order and stop at the first
+one that satisfies both the §4.3 anti-spoof property (content rendered
+from the actually-dispatched document, on trusted `main`) and the (b)
+threshold above** (v5, from review round 4) — this is a first-pass-wins
+search, not a survey of all three. Any surface meeting both inherits the
+anti-spoof property; the ordering is by how little else it disturbs:
 
 1. **Check-run summary** on the PR head — rich markdown, renders in
    GitHub Mobile, and the Gate App can post it. Note it is display only:
    check-run *actions* remain rejected (§4.7), and posting must not create
-   a reusable green context.
+   a reusable green context — *i.e. the check run must never be selectable
+   as, or count toward, a branch-protection required check. A passing
+   state that outlives this one approval would decouple the display
+   surface from the decision it describes and hand a future PR a green
+   context it never earned* (v5).
 2. **Deployment description / environment URL** — smaller, but sits
    directly on the approval screen.
 3. **Pre-approval acknowledgement** — the Slack deep link resolves to the
@@ -552,11 +574,15 @@ chosen, since the drill tests the card habit.
    hyphen, spaces accepted as word separators, whitespace collapse, ASCII
    lowercase. Binding unchanged; only the typeable surface widened. P1
    goldens encode this table.
-3. **Expiry in `run-name`:** legible but goes stale as a label; the card
-   carries the live value. Leaning omit.
-4. **Slack card ownership:** agent layer composing from `submit -json`
-   vs a first-class `escalate` message kind. Affects which repo the P4
-   change lands in.
+3. **Expiry in `run-name` — resolve by P2** (it is a YAML decision made
+   when display inputs and `run-name` are built, not a later refactor):
+   legible but goes stale as a label; the card carries the live value.
+   Leaning omit.
+4. **Slack card ownership — resolve by P4** (it determines which repo the
+   change lands in): agent layer composing from `submit -json` vs a
+   first-class `escalate` message kind. Leaning `submit -json`, but
+   recorded as a *leaning, not a resolution* — both reviewers favour it,
+   and it stays open until P4 begins.
 
 ## 11. Validation plan
 
@@ -592,6 +618,36 @@ the seam, so it tests nothing) and a test-only flag in card composition
 (test-only code on a security-adjacent path, rejected on principle). Edit
 -in-place keeps the format, the timing, and the sender identical to what a
 compromised `submit` would produce, and needs no product code.
+
+**Who performs the edit, and with what (v5, from review round 4).** A bot
+message can only be edited through the Slack API with the sending app's
+token, so this is an **out-of-band operator action**: a manual
+`chat.update` call using the `escalate serve` Slack app credentials the
+operator already holds, at drill time. Explicitly **no `--corrupt-card`
+flag and no test-only branch in card composition** — that is the
+test-code-on-a-security-path option already rejected above, and it would
+also be a capability this spec has not authorized.
+
+**The single-operator problem, named rather than hidden.** That mechanism
+puts the edit in the hands of the same person who then approves, which
+means a one-operator drill cannot be genuinely unwarned — the operator
+knows the lie is coming and roughly what it says. Two honest options, in
+preference order:
+
+1. **A second person triggers it.** Anyone with the app token can run the
+   `chat.update`; they need no repository access and no approval rights,
+   so this borrows nobody's authority. This is the only variant that
+   yields a true unwarned pass.
+2. **Randomized timing, accepted at lower strength.** The operator
+   pre-arranges corruption of *one* card among the next N real approvals
+   without choosing which. Surprise about *which* is preserved; surprise
+   about *whether* is not. A pass here must be recorded as
+   *"habit fired under known-drill conditions"* — weaker than an unwarned
+   pass, and **not** sufficient on its own to close VG if option 1 is
+   available.
+
+If neither is arranged, the drill has not been run — an untested habit
+must not be written up as a tested one.
 
 **Warned vs unwarned (decided, v4):** the **first run is unwarned**. A
 warned drill tests whether the operator can perform the check once told to
