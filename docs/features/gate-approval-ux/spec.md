@@ -1,6 +1,12 @@
 # Gate approval UX — Technical Design Document
 
-**Status:** draft / proposal — NOT a build commitment. The artifact we decide from.
+**Status:** draft / proposal — **BLOCKED on §4.1.1**, NOT a build commitment.
+Round 4 (Codex, P1) invalidated §4.1's binding argument: the word phrase as
+specified is a *regression* against today's full-digest comment, and a
+compromised dispatcher can substitute a valid request carrying the opposite
+`Decision`. §4.1.1 states the attack and the remedy options; the choice is
+the operator's. **P1 must not start until it is made**, and P2 must not
+ship the concurrent `describe` shape (§4.3).
 **Owner:** @itsHabib
 **Date:** 2026-07-31
 **Related:** `docs/features/trusted-gate-judgment-bridge/design.md` (the security
@@ -169,12 +175,73 @@ Two refinements of the grinding picture, for precision (v4):
   dispatches only on a hit — and why the argument must rest on
   independence rather than on cost.
 
-Why independence is the stronger ground (v5): a cost argument is
-contingent — it decays with hardware and has to be re-litigated every few
-years. Independence is structural. The phrase and the document are checked
-against different sources (the approver's typed input versus live GitHub
-and hosted state), so no single forged value satisfies both at once, and
-that property does not erode with compute.
+### 4.1.1 ⛔ BLOCKED — the independence argument above is WRONG (v6, review round 4, Codex P1)
+
+**Everything from "The design is *indifferent*…" onward is withdrawn.** The
+claim "an attacker who can satisfy all of those does not need a phrase
+collision" assumed that *mechanically valid ⇒ materially equivalent*. That
+assumption is false against this contract, and the reviewer's attack works.
+
+**The attack.** A compromised dispatcher builds a **second, fully valid**
+request for the same repo, PR, head, base and operation, differing only in
+fields the operator cares about, and grinds a free field until its 44-bit
+phrase equals the phrase the operator was given for the request they
+intended. The operator types their phrase; it matches; the substituted
+document passes every document check on its own merits; the wrong request
+is approved.
+
+**Verified against the contract, and it is worse than the report:**
+
+- `PreparationRequest.Decision` is validated as `"pass"` **or** `"block"`
+  (`preparation.go:59`). Both are valid. So the two documents can carry
+  **opposite judgments** for the same PR and head.
+- The grinding space is not just `ReplayID` (`evt_` + 32 hex, shape-checked
+  only): `Why` is **up to 4096 free-form bytes** (`preparation.go:63`) and
+  `JudgmentQuestion` is free text on the execute side
+  (`gateauthorization.go:67`). All feed the canonical digest. Finding a
+  44-bit collision here is trivially parallel and offline.
+- `GrantID` also varies — a substituted request can spend a *different*
+  operator-minted grant.
+
+**This is a regression, not a pre-existing gap.** Today's comments bind the
+**full** canonical digest — `gate approve <authorizationID> …` and
+`approve gate preparation <gpr_…> …`, both full SHA-256 identities. That is
+ungrindable. Replacing them with 44 bits *removes* binding strength that
+exists today. The v3 restructure moved the argument off "grinding is
+expensive" and onto "independence"; round 4 shows independence does not
+hold either, because the phrase is the **only** thing distinguishing two
+valid documents that differ in what they authorize. The typed prefix does
+not help: `<operation> <pr-number>` is identical across both — it names the
+operation, never the *decision*.
+
+**Consequence: §4.1 is not settled and P1 must not start.** The
+"ready to lock" reading from round 4 is withdrawn.
+
+**Remedy options — operator's call, since they trade typing against binding
+and one touches `contracts`:**
+
+1. **Raise entropy past grinding.** 8 words ≈ 88 bits (or 6 ≈ 66 bits).
+   Restores an infeasible-to-grind binding with no contract change; costs
+   phone typing, which is the whole premise of this TDD. Needs a P0-style
+   check that 6–8 words is still tolerable on a phone.
+2. **Type the material fields, not just the operation.** e.g.
+   `prepare 182 block mango-harbor-violet-inlet` — the operator asserts the
+   decision, so a pass/block swap cannot hide behind a collision. Narrows
+   the attack rather than closing it: `GrantID` and evidence remain
+   distinguished only by the 44 bits.
+3. **Remove the grinding space.** Constrain the free fields that feed the
+   digest (derive `ReplayID` from content; bound/canonicalize `Why`). This
+   restores strength at 44 bits but changes `contracts` validation and has
+   the widest blast radius.
+4. **Keep the full digest as the binding and put the words beside it** —
+   phrase for attention, full ID still required somewhere in the flow.
+   Honest but reintroduces the paste this work exists to remove.
+
+My reading: **(1) combined with (2)** is the most likely answer — words the
+operator can type, at entropy that removes grinding, with the decision
+stated in words rather than implied by a hash. But this is a real trade
+against the phone-friendliness premise, so it is recorded as a decision the
+operator makes, not one this document takes.
 
 To be explicit about layering: the phrase check and the full-document
 verification are **parallel defenses in the same pre-credential block, not
@@ -234,8 +301,28 @@ no environment — and the protected job does **not** `needs:` it.
 approval must never skip verification anyway. The card is the anti-spoof
 anchor (derived on trusted `main` from the actually-dispatched JSON), so
 whatever a Slack message claims, the page the operator approves on shows
-the truth. **Alternative:** make approval depend on describe — couples
-authority to a display job, inverting the trust direction. Rejected.
+the truth.
+
+**⛔ Corrected (v6, review round 4, Codex P1): "no `needs:`" creates a race
+that defeats the anchor in the *normal* case.** With no dependency, the two
+jobs start together — but the protected job enters the environment-review
+wait (and fires the phone notification) within seconds, while `describe`
+must check out, set up Go, and build gate first. So the reviewer routinely
+reaches the approval screen **before the card exists**, leaving exactly the
+two surfaces §4.3 says must not be load-bearing: the untrusted Slack card
+and the agent-supplied run-name.
+
+The original rejection of `needs:` conflated two things. Coupling approval
+to a display job is bad for *trust* only if the display job could make the
+approval **fail open** — it cannot. If `describe` fails or is slow, the
+approval is simply not offered yet: that is **fail-closed**, an
+availability cost, not a security inversion. The correct requirement is
+therefore: **the card must be rendered before the approval is exposed.**
+Options for P2 — order the protected job behind `describe` (simplest,
+accepts ~1 min added latency per decision), or split describe into a fast
+render step the protected job waits on. Either way `describe` keeps its
+read-only, secretless, no-`gate-state` posture; what changes is only *when*
+the approval becomes offerable. **P2 must not ship the concurrent shape.**
 
 **The anchor must be reachable from the approval surface, or it anchors
 nothing (v3, from review round 2).** This is an *empirical* dependency on
