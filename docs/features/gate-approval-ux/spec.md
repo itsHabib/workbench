@@ -152,6 +152,20 @@ satisfy all of those does not need a phrase collision, and one who cannot
 is refused regardless of the phrase. The full 256-bit digest still rides
 in the request JSON, authorization, and claim, unchanged.
 
+Two refinements of the grinding picture, for precision (v4):
+
+- The grinding space is **not** arbitrary document content. A document
+  ground freely to hit a prefix contains fields gate never evaluated and
+  dies on panel coverage / action-hash / head checks before the phrase is
+  reached. The attacker's search is confined to fields that are *free
+  within an otherwise gate-valid document*.
+- That space is nevertheless **non-empty**: `ReplayID` is format-validated
+  (`evt_` + 32 chars, `gateauthorization.go:231`), not derived from
+  content, so it can be varied offline. This is why the 20-minute window
+  buys nothing against grinding — the attacker grinds locally and
+  dispatches only on a hit — and why the argument must rest on
+  independence rather than on cost.
+
 To be explicit about layering: the phrase check and the full-document
 verification are **parallel defenses in the same pre-credential block, not
 sequential**. A phrase-only match authorizes nothing — gate independently
@@ -231,8 +245,12 @@ paste ("proves clipboard possession, not attention", §4.1). Hence P0 in
 **Choice:** `run-name` is built from display-only dispatch inputs
 (`display-operation`, `display-pr`, `display-head`); `prepare`/`execute`
 gain matching flags and refuse pre-credential if any non-empty display
-value disagrees with the verified document. A mislabeled run can exist as a
-label but can never authorize anything. **Alternative:** parse the JSON in
+value disagrees with the verified document *(pre-credential in the
+protected job — i.e. after the environment approval but before the App
+token is minted; this is the same slot as every other refusal in §7, not a
+pre-approval check)*. A mislabeled run can exist as a label, and **can
+therefore still lie at the moment the operator decides**; it simply can
+never authorize anything. **Alternative:** parse the JSON in
 workflow expressions — not expressible in `run-name` context; and trusting
 labels without falsification is how display lies become approvals.
 
@@ -277,7 +295,7 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
   (derivation in §6.1). The digest input is the existing canonical semantic
   digest — no new hash, no new canonicalization.
 - **Vendored wordlist**: 2048 words, `go:embed` text file under
-  `cmd/gate/internal/`, byte-hash pinned by a golden test (a changed list
+  `contracts/gateauthorization` (§10.1), byte-hash pinned by a golden test (a changed list
   silently changes every phrase — the test makes that loud). The same
   golden also pins the four-word output for a fixed digest fixture (v3,
   from review round 2), so an off-by-one in the bit-slicing cannot survive
@@ -288,7 +306,11 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
 
 ## 6. API contract
 
-### 6.1 Phrase encoder (pure, `cmd/gate/internal/`)
+### 6.1 Phrase encoder (pure, `contracts/gateauthorization`)
+
+Placed beside the existing `ExpectedApprovalComment` /
+`ExpectedPreparationApprovalComment`, whose call sites it replaces — see
+§10.1 for why `cmd/gate/internal/` is not viable.
 
 ```go
 // ApprovalPhrase derives the canonical approval comment for a request.
@@ -298,6 +320,17 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
 // the embedded 2048-word list. Errors on unknown op or pr < 1. Never panics.
 func ApprovalPhrase(digest [32]byte, op string, pr int) (string, error)
 ```
+
+**One consequence to accept explicitly (v4).** Today's
+`ExpectedApprovalComment` is `gate approve <authorizationID>
+evidence=<digest> question=sha256:<hash>` — it deliberately "repeats the
+two dense evidence fields for operator inspection." The word phrase drops
+both from the *typed string*. That is the point (they are unreadable and
+un-typeable on a phone), but it means the evidence digest and judgment
+question move from the comment to the **describe card**, which §6.3
+already renders — so the card must carry them, and P0's reachability
+question (§4.3) now also governs whether those fields are inspectable at
+all. This is a strict improvement in legibility only if P0 passes.
 
 Comment verification normalizes the received comment, then requires exact
 equality with `ApprovalPhrase(...)` recomputed from the verified document.
@@ -448,7 +481,7 @@ phases after the code that assumes it.
 
 | Phase | Goal | High-level tasks | Depends on | Gate | Model/effort |
 |---|---|---|---|---|---|
-| **P0 `phone-spike`** | **Verify the two empirical assumptions before building on them** | one throwaway workflow with a protected environment + a step summary; on the reviewer account's phone confirm (a) the deployment-review dialog accepts a typed comment, and (b) the step-summary card is legible from / reachable from that screen | — | **binary, blocking: both hold, or §4.3 needs a different card carrier before P2 is designed** | ~30 min, operator + phone, no repo code |
+| **P0 `phone-spike`** | **Verify the two empirical assumptions before building on them** | one throwaway workflow with a protected environment + a step summary; on the reviewer account's phone confirm (a) the deployment-review dialog accepts a typed comment, and (b) the card meets the §9.1 reachability threshold | — | **binary, blocking** — see §9.1 for the pass bar and the fallback list | ~30 min, operator + phone, no repo code |
 | P1 `phrase` | Word-coded canonical comment, cutover in one commit | encoder + embedded wordlist + goldens; normalization; verification cutover; refusal-position test updates | P0 | unit gate: goldens + existing refusal suite green | opus/extra (touches verification) |
 | P2 `legible-run` | Run explains itself | `describe` verb + golden card; display inputs/flags + mismatch refusal; workflow job + run-name; pinned-workflow test updates | P0, P1 | workflow assertions green; card renders on a dry dispatch **and is reachable on the P0-verified surface** | sonnet/extra |
 | P3 `submit` | Agent-performed dispatch | `submit` verb (validate/dispatch/poll/`-json`); stubbed-API tests | P1 | stub suite green | sonnet/extra |
@@ -463,12 +496,57 @@ offline; GitHub Mobile on the reviewer account with deployment-review
 notifications; Slack channel reachable via existing `escalate serve`
 config.
 
+### 9.1 P0 pass criteria and fallback list
+
+"Reachable" needs a bar, or the spike returns a judgment call (v4, from
+review round 3).
+
+- **(a) Comment slot — binary.** The mobile deployment-review dialog
+  accepts a typed comment that lands as the approval's comment. No partial
+  credit: if it cannot, there is no phone flow and the design stops here.
+- **(b) Card reachability — the threshold is *visible on, or one tap from,
+  the deployment-review screen, without leaving the approval context and
+  returning*.** Two or more taps plus a back-navigate is a **fail**, even
+  though the operator could reach the card in principle: the habit this
+  design depends on is "read the card, then approve" in one flow, and
+  navigation that breaks the flow is navigation that gets skipped under
+  routine.
+
+**If (b) fails, this is an execution task, not a restart.** Candidate
+carriers to evaluate in order — the requirement is only that the content
+is rendered from the actually-dispatched document on trusted `main`, so
+any surface satisfying that inherits the §4.3 anti-spoof property:
+
+1. **Check-run summary** on the PR head — rich markdown, renders in
+   GitHub Mobile, and the Gate App can post it. Note it is display only:
+   check-run *actions* remain rejected (§4.7), and posting must not create
+   a reusable green context.
+2. **Deployment description / environment URL** — smaller, but sits
+   directly on the approval screen.
+3. **Pre-approval acknowledgement** — the Slack deep link resolves to the
+   card first and the operator acks it before the approval screen opens.
+   Weakest of the three: it puts an untrusted-transport surface earlier in
+   the flow, so it is a last resort and would need §4.6 revisited.
+
+A (b) failure also downgrades the §11 drill's meaning until a carrier is
+chosen, since the drill tests the card habit.
+
 ## 10. Open questions
 
-1. **Encoder location:** `cmd/gate/internal/` (only gate computes it) vs
-   `contracts/gateauthorization` (if another tool ever needs to *render*
-   phrases). Leaning internal until a second consumer exists — lazy
-   migration per repo charter.
+1. **Encoder location — RESOLVED, and the v2 leaning was wrong (v4, review
+   round 3):** it goes in **`contracts/gateauthorization`**, beside the
+   existing `ExpectedApprovalComment` / `ExpectedPreparationApprovalComment`.
+   The "wait for a second consumer" reasoning failed because the second
+   consumer already exists and is the contract itself: `ValidateReceipt`
+   and `ValidatePreparationApproval` live in `contracts` and *recompute the
+   expected comment* to compare against the receipt. `contracts` is a leaf
+   that may import nothing else in the module, so an encoder under
+   `cmd/gate/internal/` would have forced either dropping that binding
+   check or duplicating it — both unacceptable. Verified against
+   `contracts/gateauthorization/gateauthorization.go:392` and
+   `preparation.go:130`. This is placement of *format*, not decision logic,
+   so it respects the charter's leaf rule exactly as the existing expected-
+   comment builders do.
 2. **Normalization scope — RESOLVED (v2, review round 1):** expanded
    normalization adopted into §6.1 — Unicode hyphen family → ASCII
    hyphen, spaces accepted as word separators, whitespace collapse, ASCII
@@ -506,3 +584,19 @@ verification to refuse. If the drill fails, the finding is that the card is
 not actually being read at decision time, which invalidates the §4.6
 "Slack can mislead at worst" posture and sends the design back to §4.3's
 carrier question — not a tweak to the wording of the card.
+
+**How the deceptive card is injected (decided, v4):** by **editing the
+real card in place** after `submit` sends it. The alternatives were a
+hand-composed second message (reads as a drill — the operator recognizes
+the seam, so it tests nothing) and a test-only flag in card composition
+(test-only code on a security-adjacent path, rejected on principle). Edit
+-in-place keeps the format, the timing, and the sender identical to what a
+compromised `submit` would produce, and needs no product code.
+
+**Warned vs unwarned (decided, v4):** the **first run is unwarned**. A
+warned drill tests whether the operator can perform the check once told to
+look; only an unwarned run tests whether the habit fires unprompted, which
+is the property VG is trying to establish. If the unwarned run fails,
+debrief and re-run warned — but record the outcome honestly as *"habit not
+yet formed, check performed under instruction"*, which is a weaker claim
+and must not be written up as a VG pass. Only an unwarned pass counts.

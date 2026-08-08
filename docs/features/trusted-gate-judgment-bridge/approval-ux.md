@@ -64,7 +64,12 @@ it as a push notification.
   the approver must enter. It also sets a legible `run-name`
   (e.g. `prepare · PR #182 · 4e99892 · expires 14:32Z`) via display-only
   dispatch inputs that gate re-verifies against the JSON and refuses on
-  mismatch — so the label can never lie about the payload.
+  mismatch. **The label can still lie at the moment of decision** — gate
+  detects the mismatch only when the protected job runs, i.e. *after* the
+  reviewer approves — so the run-name is a convenience, never an approval
+  surface. The describe card is the surface of record; see
+  `docs/features/gate-approval-ux/spec.md` §4.4 for the precise scope of
+  what display falsification does and does not catch.
 - The independent reviewer account enables GitHub Mobile push notifications
   for deployment reviews. GitHub Mobile can approve environment deployments
   and attach the comment natively.
@@ -97,13 +102,18 @@ execute 182 copper-lantern-mesa-drum
   attention check: the operator cannot enter the phrase without stating which
   operation and which PR they believe they are approving.
 - Threat framing: the digest here is a *binding label inside a
-  20-minute, run-specific, replay-protected window* (I2), not a public
-  commitment an attacker gets offline preimage attempts against. The
-  realistic failure is "operator approves request A believing it is B", and
-  44 bits across the handful of concurrently-live requests makes an
-  accidental or engineered collision negligible. The full digest still rides
-  inside the request JSON and the claim; only the human-facing phrase is
-  shortened.
+  20-minute, run-specific, replay-protected window* (I2). The realistic
+  failure is "operator approves request A believing it is B", and 44 bits
+  across the handful of concurrently-live requests makes an **accidental**
+  collision negligible (~2⁻⁴⁴ per pair). **An engineered collision is not
+  negligible** — the window does not prevent offline grinding, since an
+  attacker can vary free-form fields locally and dispatch only once a
+  matching prefix is found — and the design does not rely on it being hard.
+  It relies on the phrase check and the full-document verification being
+  independent gates, so a colliding phrase authorizes nothing. The full
+  digest still rides inside the request JSON and the claim; only the
+  human-facing phrase is shortened. **`docs/features/gate-approval-ux/spec.md`
+  §4.1 is authoritative for this argument;** this bullet is a summary.
 
 **Operator sees/does:** types four words and a PR number from the
 notification card — comfortable on a phone keyboard, no clipboard gymnastics.
