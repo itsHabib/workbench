@@ -105,3 +105,62 @@ wiring `gate` into the merge tail.
   design change owed to the red-team-hardening thread — not a bolt-on. Until then the residual is
   one unauthenticated entry per genuine crash-recovery event, named here rather than implied
   closed.
+
+## Policy questions raised by the Lean verdict-laws model (Phase 0)
+
+Source: a separate experiment (`~/dev/workbench-laws-lean`) hand-ported gate's verdict reducer
+(`cmd/gate/internal/verify/verify.go` `Reduce`, at workbench commit
+`6eee6aa63ff0d7bcaf127b9cdf4f5af748659ac1`) and `Grant.TierWithin` into a pure Lean model and
+machine-checked laws about it. Full write-up: `~/dev/workbench-laws-lean/docs/report.md`
+(result + stop decision), `docs/source-map.md` (Go↔Lean conformance boundary), and
+`WorkbenchLaws/Verdict/Reachability.md` (the TierWithin matrix + reachability).
+
+**Provenance limit, stated once and load-bearing for both questions below.** The proofs bind to the
+**Lean model, not the running Go binary** — there is no executable Go↔Lean correspondence, and
+workbench can drift while every Lean proof stays green. So the report deliberately labeled BOTH
+findings *policy questions for workbench, neither a change made here*. The exports on the workbench
+side are correspondingly a **regression test that pins current behavior** plus the written question
+below — NOT a behavior change. Canonicalizing the tier (Q1) or validating the candidate (Q2)
+autonomously would be smuggling a policy decision out of a proof; that call is the operator's.
+
+- [ ] **Q1 — Should the composed tier be canonicalized at a rank tie so raw output is
+  order-independent?**
+  **Finding:** `Reduce` replaces the composed tier only on a STRICTLY-greater rank
+  (`cmd/gate/internal/verify/verify.go:142-144`), and `tier.Rank`
+  (`cmd/gate/internal/tier/tier.go:12-23`) ranks `"T3"` and every unknown/empty string alike at 3.
+  So at a rank tie the FIRST spelling reached wins: `[T3, garbage]` composes raw tier `"T3"`, the
+  reverse composes `"garbage"` — same decision, same tier rank, different raw string.
+  **Evidence / coverage:** the Rapid permutation + monotonicity generators draw only valid tiers
+  (`cmd/gate/internal/verify/property_test.go`, `genLadderVerdicts`), which have no rank ties, so
+  they never sampled this cross-product. Now pinned by
+  `TestReduceRawTierIsOrderDependentAtRankTie` (example) and
+  `TestPropReduceTierRankInvariantUnknownTiers` (property over the tie-bearing domain), which assert
+  the invariants that DO hold — decision and tier rank — and document that the raw string does not.
+  **Reachability / impact:** decision and tier rank — the axes any consumer branches on — are
+  unaffected; only the raw tier STRING recorded in the composed verdict varies with input order.
+  No current consumer branches on the raw tier string. Canonicalizing would make the artifact
+  byte-stable under reordering, at the cost of no longer reproducing the reducer's actual
+  first-strict-maximum behavior; per `source-map.md`, a later Gate-owned evaluation surface that
+  compares raw tier must reproduce first-strict-maximum exactly, so canonicalizing is a real
+  semantics choice, not a cleanup.
+  **Decision owner:** operator. Until decided, behavior is unchanged and the tests pin it.
+
+- [ ] **Q2 — Should `TierWithin` validate the candidate tier, given current reachability?**
+  **Finding:** `Grant.TierWithin` (`cmd/gate/internal/capability/capability.go:140-148`) validates
+  the grant's CEILING (`tier.Valid(g.MaxTier)`) but not the CANDIDATE; an unknown or empty candidate
+  ranks 3 (`tier.Rank`) and so compares "within" a valid **T3** ceiling — and is rejected by every
+  lower ceiling, exactly as a real T3 would be.
+  **Evidence / coverage:** the full matrix is in `Reachability.md`; the unknown/empty-at-each-ceiling
+  rows are now pinned by `TestTierWithinUnknownCandidateMatchesT3`
+  (`cmd/gate/internal/capability/capability_test.go`). The pre-existing `TestTierCeilingFailsClosed`
+  only exercised a T1 ceiling, where a rank-3 candidate is over the ceiling regardless — so the T3
+  row was uncovered.
+  **Reachability / impact:** per `Reachability.md`, every current owned producer path — triage-floor
+  (`parseFloorOutput` rejects invalid tiers), submitted judgment (`ValidateJudgment` requires a valid
+  tier + ceiling bound), readiness and ci-classify (both pin `T0`) — rejects or pins the tier before
+  an unknown candidate could reach a live `TierWithin` call. Reaching this row requires a
+  foreign/drifted artifact; the Lean project explicitly labeled it a semantics + reachability
+  question, NOT a vulnerability. Adding candidate validation (unknown candidate → `TierWithin`
+  false) would fail-close the drifted-artifact path; the question is whether that belongs here or in
+  the producer boundary that already pins tiers.
+  **Decision owner:** operator. Until decided, behavior is unchanged and the tests pin it.

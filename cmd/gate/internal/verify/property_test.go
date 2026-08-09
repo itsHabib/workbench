@@ -156,6 +156,85 @@ func TestPropReduceOrderIndependent(t *testing.T) {
 	})
 }
 
+// propTiers extends the valid-tier pool with unknown and empty strings. Every
+// unknown/empty string ranks 3 (tier.Rank), the SAME rank as "T3" — so drawing
+// from this pool samples the T3-vs-unknown rank tie that genLadderVerdicts, which
+// draws only valid tiers, structurally cannot. That tie is where the reducer's
+// strict-greater tier replacement (verify.go:142-144) makes the raw composed
+// tier string order-dependent while its rank stays fixed. Surfaced by a Lean
+// model of this reducer (workbench-laws-lean docs/report.md, source-map.md).
+var propTiers = []string{"T0", "T1", "T2", "T3", "T3", "unknown", "garbage", ""}
+
+// genTieredVerdicts is genLadderVerdicts's sibling for the tier-composition law:
+// same accepted-set shape (known classes/decisions, no local block, at most one
+// judgment, real floors) but tiers drawn from propTiers, so unknown/empty tiers
+// and rank ties are in the sample. The reducer does not validate tiers in Reduce
+// — it ranks them via tier.Rank — so these still reduce without error; the point
+// is what stays invariant under permutation once ties are possible.
+func genTieredVerdicts(t *rapid.T) []Verdict {
+	n := rapid.IntRange(0, 5).Draw(t, "n")
+	out := make([]Verdict, 0, n+1)
+	for i := 0; i < n; i++ {
+		class := rapid.SampledFrom([]string{ClassCode, ClassLocal}).Draw(t, "class")
+		decisions := []string{DecisionBlock, DecisionEscalate, DecisionPass}
+		if class == ClassLocal {
+			decisions = []string{DecisionEscalate, DecisionPass} // local may never block
+		}
+		out = append(out, Verdict{
+			Source:     rapid.SampledFrom(propSources).Draw(t, "source"),
+			Producer:   Producer{Class: class},
+			Decision:   rapid.SampledFrom(decisions).Draw(t, "decision"),
+			Tier:       rapid.SampledFrom(propTiers).Draw(t, "tier"),
+			Confidence: rapid.Float64Range(0, 1).Draw(t, "conf"),
+		})
+	}
+	if rapid.Bool().Draw(t, "hasJudgment") {
+		out = append(out, Verdict{
+			Source:     "operator",
+			Producer:   Producer{Class: ClassJudgment},
+			Decision:   rapid.SampledFrom([]string{DecisionBlock, DecisionEscalate, DecisionPass}).Draw(t, "jDecision"),
+			Tier:       rapid.SampledFrom(propTiers).Draw(t, "jTier"),
+			Confidence: rapid.Float64Range(0, 1).Draw(t, "jConf"),
+		})
+	}
+	return out
+}
+
+// TestPropReduceTierRankInvariantUnknownTiers is TestPropReduceOrderIndependent's
+// sibling over the tie-bearing domain: with unknown/empty tiers in the set, a
+// permutation still cannot change the decision, the tier RANK, or the confidence
+// — the axes the composition law promises. It deliberately does NOT assert the
+// raw tier STRING is invariant: at a rank tie first-strict-maximum makes the raw
+// spelling order-dependent (pinned concretely by
+// TestReduceRawTierIsOrderDependentAtRankTie). Asserting rank, not string, is the
+// honest statement of what Reduce guarantees — and closes the coverage gap the
+// valid-tier generator left. Whether to canonicalize the raw tier is open policy
+// question Q1 in cmd/gate/docs/FOLLOWUPS.md, not a change made here.
+func TestPropReduceTierRankInvariantUnknownTiers(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		vs := genTieredVerdicts(t)
+		base, err := Reduce(subj, vs)
+		if err != nil {
+			t.Fatalf("well-formed verdicts (unknown tiers included) must reduce without error: %v", err)
+		}
+		perm := permute(t, vs)
+		got, err := Reduce(subj, perm)
+		if err != nil {
+			t.Fatalf("reduce permuted: %v", err)
+		}
+		if got.Decision != base.Decision {
+			t.Fatalf("permutation changed the decision: %s vs %s for %+v", base.Decision, got.Decision, vs)
+		}
+		if tier.Rank(got.Tier) != tier.Rank(base.Tier) {
+			t.Fatalf("permutation changed the tier rank: %d (%q) vs %d (%q) for %+v",
+				tier.Rank(base.Tier), base.Tier, tier.Rank(got.Tier), got.Tier, vs)
+		}
+		if got.Confidence != base.Confidence {
+			t.Fatalf("permutation changed the confidence: %v vs %v for %+v", base.Confidence, got.Confidence, vs)
+		}
+	})
+}
+
 // permute returns a rapid-chosen permutation of vs by pairing each element with
 // a drawn sort key and stable-sorting on it.
 func permute(t *rapid.T, vs []Verdict) []Verdict {
