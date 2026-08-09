@@ -1,0 +1,613 @@
+diff --git a/docs/follow-ups.md b/docs/follow-ups.md
+index 7df08d7..44ae682 100644
+--- a/docs/follow-ups.md
++++ b/docs/follow-ups.md
+@@ -6,6 +6,7 @@ discovered. Per-issue depth in the linked PR; this file is just the index.
+ 
+ ## Open
+ 
++- 2026-08-08 — every non-egress `rooms run` warns `egress cleanup incomplete ... Chain 'ROOMS_EG_1' does not exist`: teardown probes the per-room egress chain even when no `--egress` policy created one, so the iptables `-C` miss surfaces as a WARN on a clean run. Gate the cleanup probe on the room having installed an egress chain. (aarch64-host bring-up PR)
+ - 2026-08-04 — `SnapshotMeta.base_repo_sha` is always `None`: `build_intent` passes `base_repo_sha: None` unconditionally, even though `base-create --repo` resolves a concrete repository HEAD to build the transport bundle. Snapshot metadata therefore cannot name the repository state baked into the guest, which is exactly what a checkpoint receipt (TDD §4 D5) has to carry to let a consumer re-run from an identical starting world. Thread the resolved HEAD through base provisioning into the room metadata, then into the snapshot plan. ([#99](https://github.com/itsHabib/rooms/pull/99))
+ - 2026-08-02 — `gc`'s pool-wide slot sweep reads the intent index outside the per-base snapshot lock: `gc()` gates `reconcile_leaked_slots` on `pending_all(config).is_empty()`, which reports empty for the whole window in which `snapshot create` holds the lock but has not yet written its intent. `reap_entry` now takes that lock per room, but the sweep still decides from the unlocked read, so a base whose liveness token reads dead mid-transaction could have its slot reclaimed underneath a live snapshot. Either take the lock around the sweep or have it skip any base whose lock is held. ([#99](https://github.com/itsHabib/rooms/pull/99))
+ 
+diff --git a/scripts/README.md b/scripts/README.md
+index 1f3b673..e13b54b 100644
+--- a/scripts/README.md
++++ b/scripts/README.md
+@@ -2,6 +2,23 @@
+ 
+ Host-side helpers for the `rooms` Firecracker substrate.
+ 
++## Host architectures
++
++Everything here is arch-aware for `x86_64` and `aarch64` (`uname -m` picks the
++artifact set; both sets are pinned in `checksums.txt`). On Apple Silicon
++(M3 or later, macOS 15+) the rooms-host runs as a Lima VM with nested
++virtualization — see `scripts/lima-rooms-host.yaml`:
++
++```sh
++limactl create --name rooms-host scripts/lima-rooms-host.yaml
++limactl start rooms-host
++limactl shell rooms-host   # then run setup-rooms-host.sh as usual
++```
++
++Note the aarch64 guest kernel is a Linux ARM64 boot `Image`, not an ELF
++vmlinux — the validation in `setup-rooms-host.sh`, `test-rootfs-alpine.sh`,
++and `rooms doctor` accepts both formats.
++
+ ## Agent rootfs (Alpine) — current
+ 
+ Build the agent guest image on Alpine (musl/busybox/openrc) with the claude-code native musl binary, paired with a Firecracker-tuned virtio-rng kernel. Boots to sshd in ~2 s; ~276 MB. The script is the source of truth; built images are **not** committed (see `images/.gitignore`).
+diff --git a/scripts/build-rootfs-alpine.sh b/scripts/build-rootfs-alpine.sh
+index c40e824..b87eb8d 100755
+--- a/scripts/build-rootfs-alpine.sh
++++ b/scripts/build-rootfs-alpine.sh
+@@ -40,8 +40,14 @@ SSH_KEY=""
+ EXTEND=""
+ 
+ ALPINE_CDN="https://dl-cdn.alpinelinux.org/alpine"
++# The image is built for the build host's own arch (chroot, no cross-build).
++BUILD_ARCH="$(uname -m)"
+ # Pinned in scripts/checksums.txt — do not trust the CDN .sha256 sidecar alone.
+-ALPINE_MINIROOTFS_SHA256="8cba1ea3e8b500ea986a313d8eecf3d5952a2a0d23a69117bb81c023d9ceac05"
++case "$BUILD_ARCH" in
++    x86_64)  ALPINE_MINIROOTFS_SHA256="8cba1ea3e8b500ea986a313d8eecf3d5952a2a0d23a69117bb81c023d9ceac05" ;;
++    aarch64) ALPINE_MINIROOTFS_SHA256="d1d1a3fae5f4d6146e9742790a47fcb116199622cfb8439f218a4d5fbe5000da" ;;
++    *) printf '\033[1;31m[build-alpine]\033[0m unsupported build arch: %s (x86_64 or aarch64)\n' "$BUILD_ARCH" >&2; exit 1 ;;
++esac
+ CLAUDE_KEY_URL="https://downloads.claude.ai/keys/claude-code.rsa.pub"
+ CLAUDE_KEY_SHA256="395759c1f7449ef4cdef305a42e820f3c766d6090d142634ebdb049f113168b6"
+ CLAUDE_APK_REPO="https://downloads.claude.ai/claude-code/apk/stable"
+@@ -93,8 +99,8 @@ assert_root
+ 
+ # Alpine branch is vMAJOR.MINOR (e.g. 3.21.7 -> v3.21).
+ ALPINE_BRANCH="v$(printf '%s' "$ALPINE_VERSION" | cut -d. -f1,2)"
+-TARBALL="alpine-minirootfs-${ALPINE_VERSION}-x86_64.tar.gz"
+-MIRROR="${ALPINE_CDN}/${ALPINE_BRANCH}/releases/x86_64"
++TARBALL="alpine-minirootfs-${ALPINE_VERSION}-${BUILD_ARCH}.tar.gz"
++MIRROR="${ALPINE_CDN}/${ALPINE_BRANCH}/releases/${BUILD_ARCH}"
+ 
+ MISSING=()
+ for cmd in mkfs.ext4 mount umount chroot losetup truncate curl sha256sum tar; do
+diff --git a/scripts/checksums.txt b/scripts/checksums.txt
+index 88041c6..15a353a 100644
+--- a/scripts/checksums.txt
++++ b/scripts/checksums.txt
+@@ -1,14 +1,22 @@
+ # Central sha256 pins for rooms build inputs. Bump deliberately when upstream
+ # versions change — this file is the single audit point for supply-chain pins.
+ # Format: sha256␠␠artifact-name (verified by setup-rooms-host.sh and rooms doctor).
++# Artifact names are arch-qualified; each host verifies the pins for its own
++# `uname -m` (x86_64 or aarch64).
+ #
+ # Download-time artifacts (setup-rooms-host.sh):
+-36112969952b0e34fadcfca769d48a55dc22cbba99af17e02bd0e24fc35adc77  firecracker-v1.10.1-x86_64.tgz
+-e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2  vmlinux-6.1.155.bin
+-2a840feeccb5cb161c6eab1ecd86667c06ed5e307da534d2d3c9e39a6ec6c30a  bionic.rootfs.ext4
++00cadf7f21e709e939dc0c8d16e2d2ce7b975a62bec6c50f74b421cc8ab3cab4  firecracker-v1.15.0-x86_64.tgz
++58325e6c3c539482a412ec0b60e6f539c3320adebcf8179c7629d06736aee0bd  firecracker-v1.15.0-aarch64.tgz
++e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2  vmlinux-6.1.155-x86_64.bin
++e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591  vmlinux-6.1.155-aarch64.bin
++2a840feeccb5cb161c6eab1ecd86667c06ed5e307da534d2d3c9e39a6ec6c30a  bionic.rootfs-x86_64.ext4
++aa5a84251a5f3aaa74c663b074e1ebb283756c244068aff8cf4d9adc13f825df  bionic.rootfs-aarch64.ext4
+ 6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf  rustup-init.sh
+ # Installed binaries (rooms doctor sha-drift check):
+-96d25e000e5fcbf5b11dca0e1275b5d7dc0922ff8b8206aeaed98e515a8468dc  firecracker-v1.10.1-x86_64
+-8965e9ee855537561ac3adaf0b086a3882456fdc55472691f3bbe489199014ce  jailer-v1.10.1-x86_64
++abbb763119b7519d204336b19ffd7629c0967c99f6266815fb072c837d70be06  firecracker-v1.15.0-x86_64
++3b5487ff3863c12318cc2cf3b4c182f6ccf9a0791d93bdb83fffb776158eac23  firecracker-v1.15.0-aarch64
++9f50ceec0a90cf8f823a97ddf23f80379aa93b243511c54b79234945bc97cae4  jailer-v1.15.0-x86_64
++b8871ccb985432596a46d7eaf8891f33a5e7a3937ee290acd30d6d11d9994914  jailer-v1.15.0-aarch64
+ # Rootfs builder (build-rootfs-alpine.sh):
+ 8cba1ea3e8b500ea986a313d8eecf3d5952a2a0d23a69117bb81c023d9ceac05  alpine-minirootfs-3.21.7-x86_64.tar.gz
++d1d1a3fae5f4d6146e9742790a47fcb116199622cfb8439f218a4d5fbe5000da  alpine-minirootfs-3.21.7-aarch64.tar.gz
+diff --git a/scripts/lima-rooms-host.yaml b/scripts/lima-rooms-host.yaml
+new file mode 100644
+index 0000000..b737d08
+--- /dev/null
++++ b/scripts/lima-rooms-host.yaml
+@@ -0,0 +1,25 @@
++# Lima config for the macOS rooms-host: an Ubuntu 24.04 ARM64 VM with nested
++# virtualization enabled so Firecracker gets /dev/kvm inside the guest.
++# Requires: Apple Silicon M3+, macOS 15+, Lima >= 1.0 with the vz backend.
++#
++#   limactl create --name rooms-host scripts/lima-rooms-host.yaml
++#   limactl start rooms-host
++#   limactl shell rooms-host -- ls -l /dev/kvm
++
++vmType: vz
++nestedVirtualization: true
++
++images:
++  - location: https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img
++    arch: aarch64
++
++cpus: 6
++memory: 8GiB
++disk: 60GiB
++
++mounts:
++  - location: "~/dev/rooms"
++    writable: true
++
++ssh:
++  forwardAgent: false
+diff --git a/scripts/setup-rooms-host.sh b/scripts/setup-rooms-host.sh
+index fdb3d19..fb7b31a 100644
+--- a/scripts/setup-rooms-host.sh
++++ b/scripts/setup-rooms-host.sh
+@@ -15,21 +15,23 @@ CHECKSUMS="${SCRIPT_DIR}/checksums.txt"
+ 
+ # --- config ---
+ 
+-FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-v1.10.1}"
++# v1.15.0 minimum for aarch64 hosts: older jailers panic when the outer
++# hypervisor (e.g. Apple vz) omits cpu cache geometry from sysfs.
++FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-v1.15.0}"
+ RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
+ IMAGES_DIR="${IMAGES_DIR:-$HOME/rooms/images}"
+ ARCH="$(uname -m)"
+ 
+-# Firecracker CI guest kernel (x86_64, uncompressed vmlinux) with virtio-rng
++# Firecracker CI guest kernel (uncompressed vmlinux, per-arch) with virtio-rng
+ # built in, so the guest CRNG seeds from the /entropy device with no host-side
+ # workaround. Pinned; bump deliberately (CI_VERSION tracks the firecracker
+ # release minor, e.g. v1.15.x -> v1.15).
+ FC_KERNEL_CI_VERSION="${FC_KERNEL_CI_VERSION:-v1.15}"
+ FC_KERNEL_VERSION="${FC_KERNEL_VERSION:-6.1.155}"
+-FC_KERNEL_URL="https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/${FC_KERNEL_CI_VERSION}/x86_64/vmlinux-${FC_KERNEL_VERSION}"
++FC_KERNEL_URL="https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/${FC_KERNEL_CI_VERSION}/${ARCH}/vmlinux-${FC_KERNEL_VERSION}"
+ # Quickstart bionic rootfs — a throwaway image to boot Firecracker once before
+ # building a real agent rootfs with scripts/build-rootfs-alpine.sh.
+-QUICKSTART_ROOTFS_URL="https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4"
++QUICKSTART_ROOTFS_URL="https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/rootfs/bionic.rootfs.ext4"
+ 
+ # --- helpers ---
+ 
+@@ -46,6 +48,17 @@ lookup_checksum() {
+     awk -v name="$artifact" '{ sub(/\r$/, "", $2) } $1 ~ /^[0-9a-f]{64}$/ && $2 == name { print $1; exit }' "$CHECKSUMS"
+ }
+ 
++# Firecracker guest kernels are ELF vmlinux on x86_64 but Linux ARM64 boot
++# Images on aarch64 (magic "ARM\x64" at byte offset 56) — validate per arch.
++is_guest_kernel() {
++    local f="$1"
++    if [[ "$ARCH" == "aarch64" ]]; then
++        [[ "$(dd if="$f" bs=1 skip=56 count=4 2>/dev/null)" == "ARMd" ]]
++        return
++    fi
++    file "$f" | grep -q 'ELF 64-bit'
++}
++
+ verify_sha256() {
+     local file="$1" artifact="$2"
+     [[ -f "$CHECKSUMS" ]] || fatal "checksums file not found: $CHECKSUMS"
+@@ -62,8 +75,8 @@ verify_sha256() {
+ 
+ log "preflight checks"
+ 
+-if [[ "$ARCH" != "x86_64" ]]; then
+-    fatal "this script targets x86_64; detected $ARCH"
++if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" ]]; then
++    fatal "this script targets x86_64 or aarch64; detected $ARCH"
+ fi
+ 
+ if [[ "$EUID" -eq 0 ]]; then
+@@ -81,8 +94,10 @@ require_cmd sha256sum
+ log "verifying /dev/kvm (nested virt)"
+ if [[ ! -e /dev/kvm ]]; then
+     fatal "/dev/kvm not found — nested virtualization is OFF.
+-    On the Windows host, with the VM shut down:
++    Hyper-V host (Windows), with the VM shut down:
+       Set-VMProcessor -VMName rooms-host -ExposeVirtualizationExtensions \$true
++    Lima host (macOS, M3+): set nestedVirtualization: true in the instance yaml
++    (see scripts/lima-rooms-host.yaml) and recreate the instance.
+     Then power the VM back on and re-run this script."
+ fi
+ 
+@@ -120,12 +135,12 @@ if command -v firecracker >/dev/null 2>&1; then
+ else
+     log "installing Firecracker $FIRECRACKER_VERSION"
+     tmp="$(mktemp -d)"
+-    url="https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tgz"
++    url="https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-${ARCH}.tgz"
+     curl -fSL "$url" -o "$tmp/fc.tgz"
+-    verify_sha256 "$tmp/fc.tgz" "firecracker-${FIRECRACKER_VERSION}-x86_64.tgz"
++    verify_sha256 "$tmp/fc.tgz" "firecracker-${FIRECRACKER_VERSION}-${ARCH}.tgz"
+     tar -C "$tmp" -xzf "$tmp/fc.tgz"
+-    sudo install -m 0755 "$tmp"/release-${FIRECRACKER_VERSION}-x86_64/firecracker-${FIRECRACKER_VERSION}-x86_64 /usr/local/bin/firecracker
+-    sudo install -m 0755 "$tmp"/release-${FIRECRACKER_VERSION}-x86_64/jailer-${FIRECRACKER_VERSION}-x86_64 /usr/local/bin/jailer
++    sudo install -m 0755 "$tmp"/release-${FIRECRACKER_VERSION}-${ARCH}/firecracker-${FIRECRACKER_VERSION}-${ARCH} /usr/local/bin/firecracker
++    sudo install -m 0755 "$tmp"/release-${FIRECRACKER_VERSION}-${ARCH}/jailer-${FIRECRACKER_VERSION}-${ARCH} /usr/local/bin/jailer
+     rm -rf "$tmp"
+     log "Firecracker installed: $(firecracker --version)"
+ fi
+@@ -141,10 +156,10 @@ if [[ ! -f "$KERNEL_FILE" ]]; then
+     # versioned kernel (a later run would otherwise skip the download and adopt
+     # the partial file).
+     curl -fSL "$FC_KERNEL_URL" -o "$KERNEL_FILE.tmp"
+-    verify_sha256 "$KERNEL_FILE.tmp" "vmlinux-${FC_KERNEL_VERSION}.bin"
+-    if ! file "$KERNEL_FILE.tmp" | grep -q 'ELF 64-bit'; then
++    verify_sha256 "$KERNEL_FILE.tmp" "vmlinux-${FC_KERNEL_VERSION}-${ARCH}.bin"
++    if ! is_guest_kernel "$KERNEL_FILE.tmp"; then
+         rm -f "$KERNEL_FILE.tmp"
+-        fatal "downloaded kernel is not an uncompressed ELF vmlinux: $FC_KERNEL_URL"
++        fatal "downloaded kernel is not an uncompressed vmlinux/Image: $FC_KERNEL_URL"
+     fi
+     mv "$KERNEL_FILE.tmp" "$KERNEL_FILE"
+ else
+@@ -153,8 +168,8 @@ fi
+ # Validate the kernel (cached or freshly downloaded) before adopting it, and
+ # always point vmlinux.bin at it so a host that still has the old bionic
+ # vmlinux.bin picks up the virtio-rng kernel instead of silently keeping it.
+-file "$KERNEL_FILE" | grep -q 'ELF 64-bit' \
+-    || fatal "cached kernel is not an uncompressed ELF vmlinux: $KERNEL_FILE"
++is_guest_kernel "$KERNEL_FILE" \
++    || fatal "cached kernel is not an uncompressed vmlinux/Image: $KERNEL_FILE"
+ cp -f "$KERNEL_FILE" "$IMAGES_DIR/vmlinux.bin"
+ 
+ if [[ -f "$IMAGES_DIR/rootfs.ext4" ]]; then
+@@ -162,7 +177,7 @@ if [[ -f "$IMAGES_DIR/rootfs.ext4" ]]; then
+ else
+     log "downloading quickstart rootfs (throwaway POC image; build-rootfs-alpine.sh replaces it)"
+     curl -fSL "$QUICKSTART_ROOTFS_URL" -o "$IMAGES_DIR/rootfs.ext4.tmp"
+-    verify_sha256 "$IMAGES_DIR/rootfs.ext4.tmp" "bionic.rootfs.ext4"
++    verify_sha256 "$IMAGES_DIR/rootfs.ext4.tmp" "bionic.rootfs-${ARCH}.ext4"
+     mv "$IMAGES_DIR/rootfs.ext4.tmp" "$IMAGES_DIR/rootfs.ext4"
+ fi
+ 
+diff --git a/scripts/test-rootfs-alpine.sh b/scripts/test-rootfs-alpine.sh
+index 5523e64..7bbdc3a 100755
+--- a/scripts/test-rootfs-alpine.sh
++++ b/scripts/test-rootfs-alpine.sh
+@@ -56,7 +56,14 @@ ROOTFS="$(readlink -f "$ROOTFS")"
+ KERNEL="$(dirname "$ROOTFS")/vmlinux.bin"
+ [[ -f "$KERNEL" ]] || fatal "kernel not found at $KERNEL (run scripts/setup-rooms-host.sh)"
+ KERNEL="$(readlink -f "$KERNEL")"
+-file "$KERNEL" | grep -q 'ELF 64-bit' || fatal "kernel $KERNEL is not an uncompressed ELF vmlinux"
++# ELF vmlinux on x86_64; Linux ARM64 boot Image (magic "ARMd" at offset 56)
++# on aarch64.
++if [[ "$(uname -m)" == "aarch64" ]]; then
++    [[ "$(dd if="$KERNEL" bs=1 skip=56 count=4 2>/dev/null)" == "ARMd" ]] \
++        || fatal "kernel $KERNEL is not an uncompressed ARM64 boot Image"
++else
++    file "$KERNEL" | grep -q 'ELF 64-bit' || fatal "kernel $KERNEL is not an uncompressed ELF vmlinux"
++fi
+ 
+ ip link show "$TAP" >/dev/null 2>&1 || fatal "TAP $TAP not found; run: sudo bash scripts/setup-tap.sh"
+ 
+diff --git a/src/doctor.rs b/src/doctor.rs
+index 18c1ba4..aa6adc5 100644
+--- a/src/doctor.rs
++++ b/src/doctor.rs
+@@ -14,18 +14,25 @@ use crate::rootfs::{kernel_sibling, validate_kernel, validate_rootfs};
+ /// Embedded checksum pins (same source as `scripts/checksums.txt`).
+ const CHECKSUMS_TXT: &str = include_str!("../scripts/checksums.txt");
+ 
++/// Host architecture as it appears in arch-qualified artifact names
++/// (`x86_64` / `aarch64`); doctor runs on the host, so the binary's own
++/// target arch is the host arch.
++const HOST_ARCH: &str = std::env::consts::ARCH;
++
+ /// Artifact names in `checksums.txt` checked against on-disk installs.
+ ///
+-/// `bionic.rootfs.ext4` is deliberately absent: its pin is verified at
++/// The bionic rootfs is deliberately absent: its pin is verified at
+ /// download time by `setup-rooms-host.sh`, and the provisioning runbook then
+ /// replaces the default rootfs path with a locally built agent image — so a
+ /// resting-state drift check against the bionic digest would warn on every
+ /// correctly provisioned host.
+-const DRIFT_ARTIFACTS: &[&str] = &[
+-    "firecracker-v1.10.1-x86_64",
+-    "jailer-v1.10.1-x86_64",
+-    "vmlinux-6.1.155.bin",
+-];
++fn drift_artifacts() -> [String; 3] {
++    [
++        format!("firecracker-v1.15.0-{HOST_ARCH}"),
++        format!("jailer-v1.15.0-{HOST_ARCH}"),
++        format!("vmlinux-6.1.155-{HOST_ARCH}.bin"),
++    ]
++}
+ 
+ /// Schema version for `--json` output (ED-4: forward-compatible).
+ pub const DOCTOR_SCHEMA_VERSION: u32 = 1;
+@@ -231,8 +238,24 @@ fn check_kvm() -> CheckResult {
+     }
+ }
+ 
++/// The effective Firecracker floor for this host. On aarch64 the jailer needs
++/// v1.15 — older jailers panic when the outer hypervisor omits cpu cache
++/// geometry from sysfs (the reason this port bumped the pin) — so a host that
++/// installed, say, v1.13 would otherwise pass `doctor` and only fail at boot
++/// with an opaque jailer panic. Take the stricter of the config floor and the
++/// arch floor.
++fn effective_min_fc_version(config: &RoomsConfig) -> (u32, u32) {
++    let arch_floor = if HOST_ARCH == "aarch64" {
++        (1, 15)
++    } else {
++        (0, 0)
++    };
++    config.min_firecracker_version.max(arch_floor)
++}
++
+ fn check_firecracker_version(config: &RoomsConfig) -> CheckResult {
+     let name = "firecracker".to_owned();
++    let min = effective_min_fc_version(config);
+     let output = Command::new(&config.firecracker_binary)
+         .arg("--version")
+         .output();
+@@ -241,24 +264,17 @@ fn check_firecracker_version(config: &RoomsConfig) -> CheckResult {
+         Ok(out) if out.status.success() => {
+             let version_str = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+             match parse_firecracker_version(&version_str) {
+-                Some((major, minor))
+-                    if version_meets_min(major, minor, config.min_firecracker_version) =>
+-                {
+-                    CheckResult {
+-                        name,
+-                        ok: true,
+-                        message: format!(
+-                            "firecracker {major}.{minor} (>= {}.{})",
+-                            config.min_firecracker_version.0, config.min_firecracker_version.1
+-                        ),
+-                    }
+-                }
++                Some((major, minor)) if version_meets_min(major, minor, min) => CheckResult {
++                    name,
++                    ok: true,
++                    message: format!("firecracker {major}.{minor} (>= {}.{})", min.0, min.1),
++                },
+                 Some((major, minor)) => CheckResult {
+                     name,
+                     ok: false,
+                     message: format!(
+                         "firecracker {major}.{minor} is below minimum {}.{}",
+-                        config.min_firecracker_version.0, config.min_firecracker_version.1
++                        min.0, min.1
+                     ),
+                 },
+                 None => CheckResult {
+@@ -903,6 +919,30 @@ fn parse_tap_index(line: &str) -> Option<u8> {
+ fn check_nested_virt() -> CheckResult {
+     let name = "nested_virt".to_owned();
+ 
++    // aarch64 has no kvm_intel/kvm_amd nested knob and kvm-ok is x86-only;
++    // usable KVM is itself the signal — the outer hypervisor either exposes
++    // virtualization to this VM or it doesn't. Gate on r/w openability, not mere
++    // existence, so a permission-denied /dev/kvm can't report `kvm` ❌ and
++    // `nested_virt` ✅ in the same run.
++    if HOST_ARCH == "aarch64" {
++        let usable = std::fs::OpenOptions::new()
++            .read(true)
++            .write(true)
++            .open("/dev/kvm")
++            .is_ok();
++        return CheckResult {
++            name,
++            ok: usable,
++            message: if usable {
++                "nested virtualization available (/dev/kvm r/w on aarch64)".to_owned()
++            } else if Path::new("/dev/kvm").exists() {
++                "/dev/kvm present but not r/w-accessible; see the kvm check".to_owned()
++            } else {
++                "/dev/kvm absent; enable nested virtualization on the outer VM".to_owned()
++            },
++        };
++    }
++
+     // Try kvm-ok first. Trust the exit status — the string match was a
+     // double-positive that would have flipped "nested virtualisation not
+     // enabled" stderr into a "ok" result.
+@@ -1002,15 +1042,19 @@ fn drift_target_path(
+     config: &RoomsConfig,
+     image: Option<&Path>,
+ ) -> Option<PathBuf> {
+-    match artifact {
+-        "firecracker-v1.10.1-x86_64" => resolve_in_path(&config.firecracker_binary),
+-        // jailer installs alongside firecracker (setup-rooms-host.sh) and is a
+-        // security-boundary binary, so cover its pin too. It is not in
+-        // RoomsConfig, so resolve the conventional name on PATH.
+-        "jailer-v1.10.1-x86_64" => resolve_in_path(Path::new("jailer")),
+-        "vmlinux-6.1.155.bin" => resolve_kernel_path(image),
+-        _ => None,
++    if artifact == format!("firecracker-v1.15.0-{HOST_ARCH}") {
++        return resolve_in_path(&config.firecracker_binary);
++    }
++    // jailer installs alongside firecracker (setup-rooms-host.sh) and is a
++    // security-boundary binary, so cover its pin too. It is not in
++    // RoomsConfig, so resolve the conventional name on PATH.
++    if artifact == format!("jailer-v1.15.0-{HOST_ARCH}") {
++        return resolve_in_path(Path::new("jailer"));
+     }
++    if artifact == format!("vmlinux-6.1.155-{HOST_ARCH}.bin") {
++        return resolve_kernel_path(image);
++    }
++    None
+ }
+ 
+ /// Resolve a binary to a concrete path. Absolute or directory-qualified paths
+@@ -1044,14 +1088,14 @@ where
+     let mut warnings = Vec::new();
+     let mut checked = 0u32;
+ 
+-    for artifact in DRIFT_ARTIFACTS {
+-        let Some(expected) = pins.get(*artifact) else {
++    for artifact in &drift_artifacts() {
++        let Some(expected) = pins.get(artifact.as_str()) else {
+             warnings.push(format!(
+                 "no checksum pin for {artifact} in embedded checksums"
+             ));
+             continue;
+         };
+-        let Some(path) = resolve_target(artifact, config, image) else {
++        let Some(path) = resolve_target(artifact.as_str(), config, image) else {
+             continue;
+         };
+         if !path.exists() {
+@@ -1169,6 +1213,26 @@ mod tests {
+         assert!(!version_meets_min(1, 6, (1, 7)));
+     }
+ 
++    #[test]
++    fn aarch64_raises_the_firecracker_floor_to_1_15() {
++        // The config default floor is (1, 7); the effective floor never drops
++        // below it, and on aarch64 it rises to (1, 15) — where the jailer stops
++        // panicking on a hypervisor that omits cpu cache geometry.
++        let config = RoomsConfig::default();
++        let effective = super::effective_min_fc_version(&config);
++        if super::HOST_ARCH == "aarch64" {
++            assert_eq!(effective, (1, 15));
++        } else {
++            assert_eq!(effective, config.min_firecracker_version);
++        }
++        // A stricter config floor always wins over the arch floor.
++        let strict = RoomsConfig {
++            min_firecracker_version: (2, 0),
++            ..RoomsConfig::default()
++        };
++        assert_eq!(super::effective_min_fc_version(&strict), (2, 0));
++    }
++
+     #[test]
+     fn parses_checksums_skips_comments_and_blanks() {
+         let digest = "a".repeat(64);
+@@ -1222,12 +1286,13 @@ mod tests {
+         // image, so a resting-state drift check would warn on every correctly
+         // provisioned host. Doctor must not resolve it as a drift target.
+         let config = RoomsConfig::default();
++        let bionic = format!("bionic.rootfs-{}.ext4", super::HOST_ARCH);
+         assert!(
+-            !super::DRIFT_ARTIFACTS.contains(&"bionic.rootfs.ext4"),
++            !super::drift_artifacts().contains(&bionic),
+             "bionic must not be drift-checked at rest"
+         );
+         assert_eq!(
+-            drift_target_path("bionic.rootfs.ext4", &config, None),
++            drift_target_path(&bionic, &config, None),
+             None,
+             "bionic must not resolve to any on-disk drift target"
+         );
+diff --git a/src/error.rs b/src/error.rs
+index 715b88f..da88c71 100644
+--- a/src/error.rs
++++ b/src/error.rs
+@@ -132,8 +132,8 @@ pub enum RootfsError {
+     },
+     #[error("kernel not found at {path}")]
+     KernelNotFound { path: PathBuf },
+-    #[error("kernel at {path} is not a valid ELF")]
+-    KernelNotElf { path: PathBuf },
++    #[error("kernel at {path} is neither an ELF vmlinux nor an ARM64 boot Image")]
++    KernelBadFormat { path: PathBuf },
+     #[error("io error: {0}")]
+     Io(#[from] std::io::Error),
+ }
+diff --git a/src/rootfs.rs b/src/rootfs.rs
+index 94b555e..654cec4 100644
+--- a/src/rootfs.rs
++++ b/src/rootfs.rs
+@@ -44,7 +44,9 @@ pub fn validate_rootfs(path: &Path, min_bytes: u64) -> Result<(), RootfsError> {
+     Ok(())
+ }
+ 
+-/// Validate that `path` exists and has a valid ELF header.
++/// Validate that `path` exists and is a bootable Firecracker guest kernel:
++/// an uncompressed ELF vmlinux (`x86_64`) or a Linux ARM64 boot `Image`
++/// (`aarch64`; magic `ARM\x64` at byte offset 56).
+ pub fn validate_kernel(path: &Path) -> Result<(), RootfsError> {
+     if !path.exists() {
+         return Err(RootfsError::KernelNotFound {
+@@ -52,11 +54,22 @@ pub fn validate_kernel(path: &Path) -> Result<(), RootfsError> {
+         });
+     }
+ 
+-    let mut header = [0_u8; 4];
++    let mut header = [0_u8; 60];
+     let mut file = std::fs::File::open(path)?;
+-    file.read_exact(&mut header)?;
+-    if header != [0x7F, b'E', b'L', b'F'] {
+-        return Err(RootfsError::KernelNotElf {
++    match file.read_exact(&mut header) {
++        Ok(()) => {}
++        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
++            return Err(RootfsError::KernelBadFormat {
++                path: path.to_path_buf(),
++            });
++        }
++        Err(e) => return Err(e.into()),
++    }
++
++    let elf = header[..4] == [0x7F, b'E', b'L', b'F'];
++    let arm64_image = header[56..60] == *b"ARM\x64";
++    if !elf && !arm64_image {
++        return Err(RootfsError::KernelBadFormat {
+             path: path.to_path_buf(),
+         });
+     }
+@@ -156,10 +169,64 @@ pub fn unmount_overlay(mount_point: &Path) {
+ mod tests {
+     #![allow(
+         clippy::expect_used,
++        clippy::indexing_slicing,
+         reason = "test helper: a missing shell is an immediate test failure"
+     )]
+ 
+-    use super::{baked_host_private_key, debugfs_spawn_error};
++    use super::{baked_host_private_key, debugfs_spawn_error, validate_kernel};
++    use crate::error::RootfsError;
++
++    fn write_kernel(bytes: &[u8]) -> tempfile::NamedTempFile {
++        use std::io::Write as _;
++        let mut f = tempfile::NamedTempFile::new().expect("tempfile");
++        f.write_all(bytes).expect("write");
++        f.flush().expect("flush");
++        f
++    }
++
++    #[test]
++    fn validate_kernel_accepts_elf_and_arm64_image_rejects_others() {
++        // x86_64 uncompressed vmlinux: ELF magic at offset 0.
++        let mut elf = vec![0_u8; 64];
++        elf[..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
++        let f = write_kernel(&elf);
++        assert!(validate_kernel(f.path()).is_ok(), "ELF vmlinux must pass");
++
++        // aarch64 Linux boot Image: "ARMd" magic at byte offset 56.
++        let mut image = vec![0_u8; 64];
++        image[56..60].copy_from_slice(b"ARM\x64");
++        let f = write_kernel(&image);
++        assert!(validate_kernel(f.path()).is_ok(), "ARM64 Image must pass");
++
++        // Neither magic → KernelBadFormat.
++        let f = write_kernel(&[0_u8; 64]);
++        assert!(
++            matches!(
++                validate_kernel(f.path()),
++                Err(RootfsError::KernelBadFormat { .. })
++            ),
++            "a buffer that is neither ELF nor ARM64 Image must be rejected"
++        );
++
++        // Too short to carry the offset-56 magic → KernelBadFormat, not a panic.
++        let f = write_kernel(&[0x7F, b'E']);
++        assert!(
++            matches!(
++                validate_kernel(f.path()),
++                Err(RootfsError::KernelBadFormat { .. })
++            ),
++            "a sub-header file must be rejected as bad format"
++        );
++    }
++
++    #[test]
++    fn validate_kernel_missing_file_is_not_found() {
++        let missing = std::path::Path::new("/nonexistent/rooms/vmlinux.bin");
++        assert!(matches!(
++            validate_kernel(missing),
++            Err(RootfsError::KernelNotFound { .. })
++        ));
++    }
+ 
+     #[test]
+     fn private_host_keys_are_rejected_but_public_halves_are_not() {

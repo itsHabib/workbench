@@ -1,0 +1,2405 @@
+diff --git a/scripts/build-rootfs-alpine.sh b/scripts/build-rootfs-alpine.sh
+index c40e824..8d0313e 100755
+--- a/scripts/build-rootfs-alpine.sh
++++ b/scripts/build-rootfs-alpine.sh
+@@ -208,6 +208,22 @@ start() {
+ EOF
+ chmod 0755 "$MNT/etc/init.d/rooms-provision"
+ 
++log "installing post-restore resume agent (hygiene nudge poll loop)"
++install -m 0755 "${SCRIPT_DIR}/lib/rooms-resume-agent.sh" "$MNT/sbin/rooms-resume-agent"
++cat >"$MNT/etc/init.d/rooms-resume" <<'EOF'
++#!/sbin/openrc-run
++description="poll for the post-restore hygiene nudge"
++command="/sbin/rooms-resume-agent"
++command_args="loop"
++command_background="yes"
++pidfile="/run/rooms-resume.pid"
++
++depend() {
++    before rooms-provision
++}
++EOF
++chmod 0755 "$MNT/etc/init.d/rooms-resume"
++
+ log "writing guest config (init, dns, hostname, settings)"
+ # ttyS0-only inittab — Firecracker never offers a VT, so the six default gettys
+ # would only burn spawns. openrc drives sysinit/boot/default runlevels.
+@@ -291,6 +307,7 @@ rc-update add hostname boot
+ # boot: the vsock secrets fetch — ordered before sshd so by the time the
+ # workload channel opens, delivery has already been acked (or never will be).
+ rc-update add rooms-secrets boot
++rc-update add rooms-resume boot
+ rc-update add rooms-provision boot
+ # default: the service rooms actually connects to.
+ rc-update add sshd default
+diff --git a/scripts/lib/rooms-resume-agent.sh b/scripts/lib/rooms-resume-agent.sh
+new file mode 100644
+index 0000000..8214f3f
+--- /dev/null
++++ b/scripts/lib/rooms-resume-agent.sh
+@@ -0,0 +1,138 @@
++#!/bin/sh
++# Post-restore hygiene agent — the guest half of the resume nudge.
++#
++# Runs as a boot-time poll loop baked into the neutral base (so it is in the
++# pre-warm process baseline and survives quiesce). No connection is held
++# across a snapshot: every attempt is a fresh bounded VSOCK connect that
++# fails fast in an ordinary base (the host binds the 5003 listener only in a
++# restored room's jail). After a restore the loop reconnects, applies the
++# hygiene nudge, and ACKs only once every step has succeeded.
++set -eu
++
++RESUME_DIR=/run/rooms
++SECRETS_DIR=/run/rooms-secrets
++
++fail() {
++    printf 'ERR %s\n' "$*" >&2
++    exit 1
++}
++
++# Stream a progress step to the host over the protocol stream (stdout). A
++# snapshot-resumed guest's serial console is detached, so this is the host's
++# only visibility into hygiene; the host logs each STEP and gates on the
++# terminal ACK.
++step() {
++    printf 'STEP %s\n' "$*"
++}
++
++read_frame() {
++    expected="$1"
++    destination="$2"
++    IFS=' ' read -r kind length || fail "missing $expected frame"
++    [ "$kind" = "$expected" ] || fail "wanted $expected frame, got $kind"
++    case "$length" in
++        ''|*[!0-9]*) fail "invalid $expected length" ;;
++    esac
++    : >"$destination"
++    if [ "$length" -ne 0 ]; then
++        # dd bs=1 count=N reads EXACTLY N bytes — one read(2) per byte, so it
++        # never consumes into the next frame's header. `head -c N` on a socket
++        # over-reads (a single large read() grabs the following frame bytes and
++        # discards them), which silently desyncs the stream.
++        dd bs=1 count="$length" >"$destination" 2>/dev/null
++    fi
++    actual="$(wc -c <"$destination")"
++    [ "$actual" -eq "$length" ] || fail "short $expected frame: wanted $length bytes, got $actual"
++}
++
++stage_secrets() {
++    source_file="$1"
++    if [ ! -s "$source_file" ]; then
++        rm -f "$source_file"
++        return 0
++    fi
++    install -d -m 0700 -o rooms -g rooms "$SECRETS_DIR"
++    install -m 0400 -o rooms -g rooms "$source_file" "$SECRETS_DIR/env"
++    rm -f "$source_file"
++}
++
++fresh_ssh_host_keys() {
++    rm -f /etc/ssh/ssh_host_*
++    ssh-keygen -A >/dev/null 2>&1 || fail "ssh-keygen -A failed"
++}
++
++# Step the clock from an epoch, tolerating busybox/coreutils date differences.
++step_clock() {
++    epoch="$1"
++    date -u -s "@$epoch" >/dev/null 2>&1 && return 0
++    stamp="$(date -u -d "@$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" || return 1
++    date -u -s "$stamp" >/dev/null 2>&1
++}
++
++# Start sshd directly rather than through openrc: a snapshot-resumed openrc
++# supervisor can stall, and the daemon is all we need for the SSH re-probe.
++# sshd was stopped at quiesce, so the openrc fallbacks try `start` before
++# `restart` (restart on a stopped service is the confusing-log case).
++start_sshd() {
++    /usr/sbin/sshd 2>/dev/null && return 0
++    rc-service sshd start >/dev/null 2>&1 && return 0
++    rc-service sshd restart >/dev/null 2>&1
++}
++
++session() {
++    printf 'ROOMS-RESUME/1\n'
++    IFS=' ' read -r kind room_id || fail "missing IDENTITY line"
++    [ "$kind" = IDENTITY ] || fail "wanted IDENTITY, got $kind"
++    IFS=' ' read -r kind epoch || fail "missing CLOCK line"
++    [ "$kind" = CLOCK ] || fail "wanted CLOCK, got $kind"
++    case "$epoch" in
++        ''|*[!0-9]*) fail "invalid CLOCK epoch" ;;
++    esac
++
++    # 0755 so an unprivileged workload can read its own room identity below;
++    # the transient entropy/secrets frames are removed right after use, and
++    # real secrets live in the 0700 SECRETS_DIR.
++    install -d -m 0755 "$RESUME_DIR"
++    read_frame ENTROPY "$RESUME_DIR/.entropy"
++    read_frame SECRETS "$RESUME_DIR/.secrets"
++    IFS=' ' read -r end end_length || fail "missing END frame"
++    [ "$end" = END ] && [ "$end_length" = 0 ] || fail "malformed END frame"
++
++    # Reseed first: everything after (host keys) must draw post-divergence.
++    cat "$RESUME_DIR/.entropy" >/dev/urandom || fail "cannot reseed /dev/urandom"
++    rm -f "$RESUME_DIR/.entropy"
++    step reseeded
++    step_clock "$epoch" || fail "cannot step clock"
++    step clock
++    printf '%s\n' "$room_id" >"$RESUME_DIR/identity"
++    chmod 0644 "$RESUME_DIR/identity"
++    stage_secrets "$RESUME_DIR/.secrets"
++    step identity
++    fresh_ssh_host_keys
++    step hostkeys
++    start_sshd || fail "cannot start sshd"
++    step sshd
++
++    printf 'ACK resume\n'
++}
++
++loop() {
++    # A SINGLE long-lived socat that retries the connect internally
++    # (retry/interval), rather than a shell loop respawning socat+sleep every
++    # iteration. That matters for the base: the quiesce gate refuses any
++    # non-baseline process to survive, and a respawning loop churns fresh
++    # socat/sleep pids the gate would flag. This one process is captured in the
++    # baseline and forks its EXEC child only on a successful connect — which
++    # only happens post-restore, after quiesce. `-T 120` bounds a wedged
++    # session; `forever` + `interval=2` polls until the host listener appears.
++    exec socat -T 120 \
++        VSOCK-CONNECT:2:5003,forever,interval=2,retry=1000000 \
++        EXEC:'/sbin/rooms-resume-agent session' \
++        >/dev/null 2>&1
++}
++
++case "${1:-}" in
++    session) session ;;
++    loop) loop ;;
++    *) fail "usage: rooms-resume-agent {session|loop}" ;;
++esac
+diff --git a/src/egress.rs b/src/egress.rs
+index ff8c2b1..ed6563f 100644
+--- a/src/egress.rs
++++ b/src/egress.rs
+@@ -499,12 +499,19 @@ pub fn remove_checked(tap: &str) -> Result<(), String> {
+     while iptables_exists(&input_drop_rule("-C", tap))? {
+         run_iptables(&input_drop_rule("-D", tap))?;
+     }
+-    // Delete the jump while present — a stale install could have left more than
+-    // one; the bounded loop clears every copy.
+-    while iptables_exists(&jump_args("-C", tap, &chain))? {
+-        run_iptables(&jump_args("-D", tap, &chain))?;
+-    }
++    // Probe the per-room subchain's existence FIRST. A jump can only exist
++    // while its target chain does — iptables refuses to delete a referenced
++    // chain — so when the subchain is absent (an Observe-plan room that never
++    // installed egress), there is provably no jump to remove. Skipping the
++    // jump `-C` probe in that case avoids the "Chain '…' does not exist" error
++    // it would otherwise raise, without broadening the strict absent-rule
++    // classifier (which must still surface a genuine inspection failure).
+     if iptables_exists(&["-S".to_owned(), chain.clone()])? {
++        // Delete the jump while present — a stale install could have left more
++        // than one; the bounded loop clears every copy.
++        while iptables_exists(&jump_args("-C", tap, &chain))? {
++            run_iptables(&jump_args("-D", tap, &chain))?;
++        }
+         run_iptables(&["-F".to_owned(), chain.clone()])?;
+         run_iptables(&["-X".to_owned(), chain])?;
+     }
+@@ -593,6 +600,14 @@ fn iptables_rule_is_absent(stderr: &str) -> bool {
+         || stderr.contains("No chain/target/match")
+         || stderr.contains("No rule exists at that position")
+         || (stderr.contains("rule in chain") && stderr.contains("not found"))
++        // The `-S <chain>` existence probe on a per-room subchain that was
++        // never installed (an Observe-plan room — no egress enforcement)
++        // reports the missing chain under nf_tables as `Chain '…' does not
++        // exist`. That is unambiguously "absent": only a query about a chain
++        // that isn't there produces it — a genuine inspection failure is
++        // permission/netlink/table wording, none of which name a Chain. The
++        // pair `Chain` + `does not exist` also excludes `Table does not exist`.
++        || (stderr.contains("Chain") && stderr.contains("does not exist"))
+ }
+ 
+ #[cfg(test)]
+@@ -657,6 +672,13 @@ mod tests {
+         assert!(iptables_rule_is_absent(
+             "iptables v1.8.10 (nf_tables): rule in chain INPUT not found"
+         ));
++        // A `-C` probe for a jump whose target subchain was never installed
++        // (an Observe-plan / non-egress restore) reports the missing chain, not
++        // a missing rule. That must read as absent — otherwise checked teardown
++        // errors and a restore lease is never returned.
++        assert!(iptables_rule_is_absent(
++            "iptables v1.8.10 (nf_tables): Chain 'ROOMS_EG_1' does not exist"
++        ));
+         assert!(
+             !iptables_rule_is_absent("iptables: Permission denied (you must be root)"),
+             "inspection failures must remain errors"
+diff --git a/src/firecracker.rs b/src/firecracker.rs
+index 229f26f..30cbf01 100644
+--- a/src/firecracker.rs
++++ b/src/firecracker.rs
+@@ -1131,7 +1131,10 @@ fn stage_jail_sync(
+ #[cfg(unix)]
+ fn teardown_jail_sync(instance_dir: &Path) -> bool {
+     let jail_root = instance_dir.join("root");
+-    for name in [JAIL_KERNEL, JAIL_ROOTFS] {
++    // snapshot.mem is a restore room's bind-mounted shared memory inode; in a
++    // boot room's jail it's at most a plain file, where the unmount fails
++    // harmlessly ("not mounted") and dir removal proceeds.
++    for name in [JAIL_KERNEL, JAIL_ROOTFS, crate::snapshot::SNAPSHOT_MEM_FILE] {
+         let target = jail_root.join(name);
+         if target.exists() {
+             if let Err(e) = unmount_settled(&target) {
+@@ -1652,6 +1655,359 @@ pub fn delete_tap(tap: &str) {
+     release_tap(Some(tap));
+ }
+ 
++/// Inputs to [`spawn_restore`].
++///
++/// No kernel and no boot config: the vmstate carries the machine, so the jail
++/// stages only the backing rootfs (read-only, at the snapshot's saved drive
++/// path), the copied vmstate, and the bind-mounted memory file.
++pub struct RestoreSpawnRequest<'a> {
++    /// The pre-minted restored room id.
++    pub room_id: &'a str,
++    /// Hash-verified backing rootfs (the same image the snapshot pinned).
++    pub rootfs: &'a Path,
++    /// Collected `snapshot.vmstate` on the host (copied into the jail).
++    pub host_vmstate: &'a Path,
++    /// Collected `snapshot.mem` on the host (bind-mounted into the jail —
++    /// never copied, so later clones share the one private inode).
++    pub host_mem: &'a Path,
++    pub descriptor: &'a room::RoomDescriptor,
++    /// The snapshot being restored — recorded as the room's lineage.
++    pub snapshot_id: &'a str,
++}
++
++/// A spawned-but-inert restore process.
++///
++/// The jailer is staged and running behind the launch barrier, with no
++/// network, no API activity, and no lease. The restore transaction releases
++/// the barrier only after the child's pid/starttime are durably recorded,
++/// then walks the ordered steps (lease → tap → custody → load → resume).
++pub struct RestoreLaunch {
++    child: Child,
++    barrier: Option<tokio::process::ChildStdin>,
++    guard: RoomGuard,
++    socket: PathBuf,
++    log_path: PathBuf,
++}
++
++impl RestoreLaunch {
++    /// The jailer child's pid (firecracker after its exec), if still running.
++    pub fn pid(&self) -> Option<u32> {
++        self.child.id()
++    }
++
++    /// Host path of the jailed Firecracker API socket.
++    #[must_use]
++    pub fn socket(&self) -> &Path {
++        &self.socket
++    }
++
++    /// Release the launch barrier: the launcher shell reads one line from its
++    /// inherited stdin and only then execs the jailer. Called strictly after
++    /// the pid/starttime breadcrumbs are durable. A parent crash before this
++    /// closes the pipe with no data, and the launcher exits without exec.
++    pub async fn release_barrier(&mut self) -> Result<(), FirecrackerError> {
++        use tokio::io::AsyncWriteExt;
++        let mut stdin = self.barrier.take().ok_or_else(|| {
++            FirecrackerError::Internal("restore barrier already released".to_owned())
++        })?;
++        stdin
++            .write_all(b"go\n")
++            .await
++            .map_err(FirecrackerError::Io)?;
++        stdin.flush().await.map_err(FirecrackerError::Io)?;
++        drop(stdin);
++        Ok(())
++    }
++
++    /// Wait for the jailed Firecracker's API socket to accept connections.
++    pub async fn wait_api(&mut self, timeout: Duration) -> Result<(), FirecrackerError> {
++        let socket = self.socket.clone();
++        let log_path = self.log_path.clone();
++        wait_for_socket(&socket, timeout, &mut self.child, Some(&log_path)).await
++    }
++
++    /// Create the leased slot's tap and record tap ownership on the guard.
++    ///
++    /// Deliberately does NOT bind a [`SlotRelease`]: a restore holds a lease,
++    /// not an ordinary claim, and the lease is returned explicitly by the
++    /// restore teardown after the reap-clean gate — never routed through
++    /// `slot::free`.
++    pub fn attach_leased_slot(&mut self, slot: &room::Slot) -> Result<(), FirecrackerError> {
++        self.guard.set_tap(slot.tap.clone());
++        self.guard.set_tap_owned(true);
++        create_slot_tap(slot)?;
++        Ok(())
++    }
++
++    pub fn guard_mut(&mut self) -> &mut RoomGuard {
++        &mut self.guard
++    }
++
++    /// Hand the launched process over as a [`BootedVm`] once it is resumed and
++    /// acked, so the workload / teardown paths are shared with `boot`.
++    #[must_use]
++    pub fn into_booted(self, witness: Option<Capture>) -> BootedVm {
++        BootedVm {
++            witness,
++            secrets_delivery: None,
++            provisioning_delivery: None,
++            guard: self.guard,
++            child: self.child,
++        }
++    }
++}
++
++/// Stage a restore jail and spawn its jailer behind the launch barrier.
++///
++/// On return the child exists but has NOT exec'd the jailer: it blocks on the
++/// barrier read. Nothing network-visible or slot-visible has happened.
++pub async fn spawn_restore(
++    req: &RestoreSpawnRequest<'_>,
++    config: &RoomsConfig,
++) -> Result<RestoreLaunch, FirecrackerError> {
++    ensure_root()?;
++    check_kvm()?;
++    let firecracker_binary = resolve_firecracker_binary(config)?;
++    let jailer_binary = resolve_jailer_binary(config)?;
++    // spawn_blocking to match boot(): getent is fast on a local passwd db but
++    // can stall on a slow NSS backend (LDAP), which must not block the runtime.
++    let (fc_uid, fc_gid) = tokio::task::spawn_blocking(lookup_firecracker_ids)
++        .await
++        .map_err(|e| FirecrackerError::Internal(format!("spawn_blocking panicked: {e}")))??;
++
++    let per_room_dir = config
++        .room_dir(req.room_id)
++        .ok_or(FirecrackerError::HomeUnset)?;
++    prepare_room_dir(&per_room_dir).await?;
++
++    let chroot_base = jailer_chroot_base(config)?;
++    let jail_root = jail_root_dir(&chroot_base, req.room_id);
++    let instance_dir = jail_instance_dir(&chroot_base, req.room_id);
++    stage_restore_jail(
++        &jail_root,
++        req.rootfs,
++        req.host_vmstate,
++        req.host_mem,
++        fc_uid,
++        fc_gid,
++    )?;
++
++    let socket = jail_root.join(JAIL_API_SOCK);
++    let log_path = per_room_dir.join("firecracker.log");
++    let mut guard = RoomGuard::new(per_room_dir.clone(), socket.clone(), config);
++    guard.set_jail_instance_dir(instance_dir);
++
++    let layout = JailLayout {
++        instance_dir: jail_instance_dir(&chroot_base, req.room_id),
++        host_socket: socket.clone(),
++    };
++    let launch = build_jailer_launch_plan(&JailerLaunchInput {
++        jailer_binary: &jailer_binary,
++        firecracker_binary: &firecracker_binary,
++        chroot_base: &chroot_base,
++        room_id: req.room_id,
++        fc_uid,
++        fc_gid,
++        layout: &layout,
++    });
++    let log_handles = open_log_file(&log_path).await?;
++    let mut child = spawn_barriered_jailer(&launch, log_handles)?;
++    let barrier = child.stdin.take();
++    guard.set_child(&child);
++
++    // room.json before the barrier release: pid + lineage recorded while the
++    // child is still inert. The slot stays unset until the lease succeeds.
++    let pid = child.id();
++    let pid_starttime = pid.and_then(room::starttime_of);
++    let mut meta = room::RoomMeta::new(
++        req.room_id.to_owned(),
++        req.descriptor.command.clone(),
++        pid,
++        pid_starttime,
++        req.descriptor.keep,
++        Utc::now(),
++    );
++    meta.snapshot_lineage = Some(req.snapshot_id.to_owned());
++    room::write_atomic(&per_room_dir, &meta).map_err(FirecrackerError::Io)?;
++
++    Ok(RestoreLaunch {
++        child,
++        barrier,
++        guard,
++        socket,
++        log_path,
++    })
++}
++
++/// Stage the restore jail root: rootfs bind-mounted read-only at the
++/// snapshot's saved drive path, vmstate copied with jailer ownership, and the
++/// memory file bind-mounted (shared inode, never copied).
++#[cfg(unix)]
++fn stage_restore_jail(
++    jail_root: &Path,
++    rootfs: &Path,
++    host_vmstate: &Path,
++    host_mem: &Path,
++    fc_uid: u32,
++    fc_gid: u32,
++) -> Result<(), FirecrackerError> {
++    // Any failure after the jail tree exists rolls the whole staging back —
++    // unmount the rootfs bind (a stranded mount would otherwise accumulate
++    // invisibly, since the room dir has no room.json yet and gc only reaps
++    // OrphanedDead rooms) and remove the instance dir, matching the boot
++    // path's stage_jail_sync rollback.
++    let result =
++        stage_restore_jail_inner(jail_root, rootfs, host_vmstate, host_mem, fc_uid, fc_gid);
++    if result.is_err() {
++        unmount_quiet(&jail_root.join(JAIL_ROOTFS));
++        unmount_quiet(&jail_root.join(crate::snapshot::SNAPSHOT_MEM_FILE));
++        if let Some(instance_dir) = jail_root.parent() {
++            let _ = std::fs::remove_dir_all(instance_dir);
++        }
++    }
++    result
++}
++
++#[cfg(unix)]
++fn stage_restore_jail_inner(
++    jail_root: &Path,
++    rootfs: &Path,
++    host_vmstate: &Path,
++    host_mem: &Path,
++    fc_uid: u32,
++    fc_gid: u32,
++) -> Result<(), FirecrackerError> {
++    let prep = |reason: String| FirecrackerError::JailPrepareFailed { reason };
++    std::fs::create_dir_all(jail_root)
++        .map_err(|e| prep(format!("create jail root {}: {e}", jail_root.display())))?;
++
++    let jail_rootfs = jail_root.join(JAIL_ROOTFS);
++    if !jail_rootfs.exists() {
++        std::fs::File::create(&jail_rootfs)
++            .map_err(|e| prep(format!("create rootfs mount target: {e}")))?;
++    }
++    bind_mount(
++        &rootfs
++            .canonicalize()
++            .map_err(|e| prep(format!("rootfs path {}: {e}", rootfs.display())))?,
++        &jail_rootfs,
++    )?;
++    remount_readonly(&jail_rootfs)?;
++
++    // vmstate: small, copied, owned by the jailed uid — no shared inode needed.
++    let jail_vmstate = jail_root.join(crate::snapshot::SNAPSHOT_VMSTATE_FILE);
++    copy_owned_private(host_vmstate, &jail_vmstate, fc_uid, fc_gid)
++        .map_err(|e| prep(format!("stage vmstate: {e}")))?;
++
++    // The memory file must already be private to the firecracker uid/gid —
++    // host collection staged it that way — and is bind-mounted, never copied.
++    ensure_owned_private(host_mem, fc_uid).map_err(prep)?;
++    let jail_mem = jail_root.join(crate::snapshot::SNAPSHOT_MEM_FILE);
++    if !jail_mem.exists() {
++        std::fs::File::create(&jail_mem)
++            .map_err(|e| prep(format!("create mem mount target: {e}")))?;
++    }
++    bind_mount(host_mem, &jail_mem)?;
++    Ok(())
++}
++
++#[cfg(not(unix))]
++fn stage_restore_jail(
++    _jail_root: &Path,
++    _rootfs: &Path,
++    _host_vmstate: &Path,
++    _host_mem: &Path,
++    _fc_uid: u32,
++    _fc_gid: u32,
++) -> Result<(), FirecrackerError> {
++    Err(FirecrackerError::KvmUnavailable)
++}
++
++/// Verify `path` is a regular file owned by the firecracker uid with no
++/// group/other access — the private-memory contract restore refuses to loosen.
++#[cfg(unix)]
++fn ensure_owned_private(path: &Path, fc_uid: u32) -> Result<(), String> {
++    use std::os::unix::fs::MetadataExt;
++    let meta =
++        std::fs::symlink_metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
++    if !meta.file_type().is_file() {
++        return Err(format!("{} is not a regular file", path.display()));
++    }
++    if meta.uid() != fc_uid {
++        return Err(format!(
++            "{} is not owned by the firecracker uid {fc_uid} (uid {}); re-collect the snapshot",
++            path.display(),
++            meta.uid()
++        ));
++    }
++    if meta.mode() & 0o077 != 0 {
++        return Err(format!(
++            "{} grants group/other access (mode {:o}); the memory file must stay private",
++            path.display(),
++            meta.mode() & 0o7777
++        ));
++    }
++    Ok(())
++}
++
++#[cfg(unix)]
++fn remount_readonly(target: &Path) -> Result<(), FirecrackerError> {
++    let output = std::process::Command::new("mount")
++        .args(["-o", "remount,ro,bind", &target.to_string_lossy()])
++        .output()
++        .map_err(FirecrackerError::Io)?;
++    if output.status.success() {
++        return Ok(());
++    }
++    Err(FirecrackerError::JailPrepareFailed {
++        reason: format!(
++            "remount {} read-only: {}",
++            target.display(),
++            String::from_utf8_lossy(&output.stderr).trim()
++        ),
++    })
++}
++
++#[cfg(unix)]
++fn copy_owned_private(
++    source: &Path,
++    target: &Path,
++    uid: u32,
++    gid: u32,
++) -> Result<(), std::io::Error> {
++    use std::os::unix::fs::{chown, PermissionsExt};
++    std::fs::copy(source, target)?;
++    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
++    chown(target, Some(uid), Some(gid))?;
++    Ok(())
++}
++
++/// Spawn the jailer behind a stdin launch barrier: a `sh` launcher reads one
++/// line before `exec`ing the jailer, so the parent decides — after its
++/// durable breadcrumb writes — whether the jailer runs at all. EOF (parent
++/// crash, dropped pipe) exits the launcher without exec.
++fn spawn_barriered_jailer(
++    plan: &JailerLaunchPlan,
++    (log_file, log_stderr): (std::fs::File, std::fs::File),
++) -> Result<Child, FirecrackerError> {
++    info!(socket = %plan.host_socket.display(), "spawning restore firecracker via barriered jailer");
++    let mut command = Command::new("/bin/sh");
++    command
++        .arg("-c")
++        .arg(r#"IFS= read -r _go || exit 1; exec "$0" "$@""#)
++        .arg(&plan.jailer_binary);
++    command.args(&plan.jailer_args);
++    command.arg("--");
++    command.args(&plan.firecracker_args);
++    command
++        .stdin(std::process::Stdio::piped())
++        .stdout(std::process::Stdio::from(log_file))
++        .stderr(std::process::Stdio::from(log_stderr))
++        .kill_on_drop(true)
++        .spawn()
++        .map_err(FirecrackerError::Io)
++}
++
+ /// Reap a snapshotted base after its slot claim has already become a durable
+ /// reservation. Unlike ordinary reap, this never frees the slot.
+ ///
+@@ -1663,6 +2019,25 @@ pub fn reap_reserved_base(
+     socket: &Path,
+     tap: &str,
+     config: &RoomsConfig,
++) -> Result<(), FirecrackerError> {
++    reap_room_only(room_dir, jail_instance_dir, socket, config)?;
++    remove_egress_and_tap(tap)
++}
++
++/// Reap only a room's OWN resources — process, jail binds, room dir.
++///
++/// Leaves the shared slot's tap and egress chain untouched, and errors
++/// (keeping the caller's recovery breadcrumb) if either dir survives.
++/// Split from the tap/egress teardown so a **restored** room can gate the
++/// slot-keyed network cleanup on still holding the lease: the tap is named by
++/// slot index alone, so deleting it unconditionally could tear down a tap a
++/// different room has since re-leased and recreated (see
++/// [`crate::slot::leased_by`]).
++pub fn reap_room_only(
++    room_dir: &Path,
++    jail_instance_dir: &Path,
++    socket: &Path,
++    config: &RoomsConfig,
+ ) -> Result<(), FirecrackerError> {
+     let mut guard = RoomGuard::for_orphan(
+         room_dir.to_path_buf(),
+@@ -1674,9 +2049,18 @@ pub fn reap_reserved_base(
+     guard.dismiss();
+     if jail_instance_dir.exists() || room_dir.exists() {
+         return Err(FirecrackerError::Internal(
+-            "snapshot base directories survived reap".to_owned(),
++            "room directories survived reap".to_owned(),
+         ));
+     }
++    Ok(())
++}
++
++/// Remove a slot's egress chain and delete its tap.
++///
++/// Both are checked and idempotent (already-absent is success). The caller
++/// owns the decision that this tap is safe to delete — for a leased slot, only
++/// after proving lease ownership.
++pub fn remove_egress_and_tap(tap: &str) -> Result<(), FirecrackerError> {
+     egress::remove_checked(tap).map_err(FirecrackerError::Internal)?;
+     delete_tap_checked(tap)
+ }
+diff --git a/src/lib.rs b/src/lib.rs
+index 1e21849..4ec2b02 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -12,6 +12,7 @@ pub mod lifecycle;
+ pub mod preflight;
+ pub mod registry;
+ pub mod restore;
++pub mod restore_exec;
+ pub mod room;
+ pub mod rootfs;
+ pub mod runner;
+diff --git a/src/main.rs b/src/main.rs
+index c7e6362..6260aa7 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -179,6 +179,49 @@ enum Command {
+         #[arg(long)]
+         json: bool,
+     },
++    /// Restore a snapshot into one fresh room on its frozen slot.
++    ///
++    /// Starts a fresh jailed Firecracker, leases the snapshot's reserved slot,
++    /// installs custody (witness/egress) before the guest resumes, loads the
++    /// snapshot, resumes, and gates readiness on the guest's hygiene ack
++    /// (reseeded RNG, stepped clock, fresh sshd host key, new identity).
++    /// Exactly one lifecycle mode is required: `--keep` or `--command`.
++    Restore {
++        /// Completed snapshot artifact directory (from `rooms snapshot`).
++        snapshot_dir: PathBuf,
++        /// The backing rootfs image; its hash must match the snapshot's pin.
++        #[arg(long)]
++        image: PathBuf,
++        /// Keep the restored room alive; hands ownership to the persisted room.
++        #[arg(long, conflicts_with = "command")]
++        keep: bool,
++        /// Run one command in the restored guest, then tear down.
++        #[arg(long, conflicts_with = "keep", value_parser = non_empty_command)]
++        command: Option<String>,
++        /// Slot to restore onto; must equal the snapshot's frozen slot.
++        #[arg(long)]
++        slot: Option<u8>,
++        /// Collect the guest's `/workspace/out` into this host directory.
++        #[arg(long = "out", conflicts_with = "keep")]
++        out_dir: Option<PathBuf>,
++        /// Record the room's egress on its own tap (requires `--out`).
++        #[arg(long, conflicts_with = "keep", requires = "out_dir")]
++        witness: bool,
++        /// Deliver the named host env var through the resume nudge
++        /// (repeatable). Same admission rules as `rooms run --secret`; the
++        /// value never traverses SSH environment forwarding.
++        #[arg(long = "secret", value_parser = valid_secret_name)]
++        secret: Vec<String>,
++        /// Enforce a host-side egress policy on the restored room's tap.
++        #[arg(long = "egress", value_parser = egress::parse)]
++        egress: Option<egress::Policy>,
++        /// Hard wall-clock cap on the `--command` workload.
++        #[arg(long = "max-wall", value_parser = parse_max_wall, conflicts_with = "keep")]
++        max_wall: Option<Duration>,
++        /// Emit a machine-readable terminal record on stdout.
++        #[arg(long)]
++        json: bool,
++    },
+     /// Resume an indexed snapshot transaction, or list all pending transactions.
+     SnapshotRecover {
+         /// Snapshot id to resume. Omit to list pending transactions.
+@@ -454,10 +497,10 @@ fn main() -> ExitCode {
+ /// Extract and harvest the `--secret` names of a `run` invocation; every
+ /// other command carries none.
+ fn harvest_cli_secrets(cli: &Cli) -> Result<Option<vsock::SecretsPayload>, RoomsError> {
+-    let Command::Run { secret, .. } = &cli.command else {
+-        return Ok(None);
+-    };
+-    harvest_secrets(secret)
++    match &cli.command {
++        Command::Run { secret, .. } | Command::Restore { secret, .. } => harvest_secrets(secret),
++        _ => Ok(None),
++    }
+ }
+ 
+ /// Whether the invocation asked for the machine-readable error record — the
+@@ -465,7 +508,9 @@ fn harvest_cli_secrets(cli: &Cli) -> Result<Option<vsock::SecretsPayload>, Rooms
+ const fn wants_json_error_record(cli: &Cli) -> bool {
+     matches!(
+         cli.command,
+-        Command::Run { json: true, .. } | Command::BaseCreate { json: true, .. }
++        Command::Run { json: true, .. }
++            | Command::BaseCreate { json: true, .. }
++            | Command::Restore { json: true, .. }
+     )
+ }
+ 
+@@ -553,6 +598,10 @@ fn emit_run_error_json(err: &RoomsError) {
+     }
+ }
+ 
++#[allow(
++    clippy::too_many_lines,
++    reason = "flat 1:1 CLI-variant → DTO router; no logic to extract, only field lists"
++)]
+ async fn dispatch(cli: Cli, secrets: Option<vsock::SecretsPayload>) -> Result<u8, RoomsError> {
+     let config = RoomsConfig::default();
+     match cli.command {
+@@ -624,6 +673,37 @@ async fn dispatch(cli: Cli, secrets: Option<vsock::SecretsPayload>) -> Result<u8
+         Command::Snapshot { id, out, json } => {
+             snapshot_cmd(&id, out.as_deref(), json, &config).await
+         }
++        Command::Restore {
++            snapshot_dir,
++            image,
++            keep,
++            command,
++            slot,
++            out_dir,
++            witness,
++            secret: _,
++            egress,
++            max_wall,
++            json,
++        } => {
++            restore_room(
++                RestoreArgs {
++                    snapshot_dir,
++                    image,
++                    keep,
++                    command,
++                    slot,
++                    out_dir,
++                    witness,
++                    secrets,
++                    egress: egress.unwrap_or(egress::Policy::Observe),
++                    max_wall,
++                    json,
++                },
++                &config,
++            )
++            .await
++        }
+         Command::SnapshotRecover { id, json } => {
+             snapshot_recover_cmd(id.as_deref(), json, &config).await
+         }
+@@ -1096,6 +1176,163 @@ fn emit_base_created(room_id: &str, slot: &room::Slot, provenance: room::Provena
+     }
+ }
+ 
++/// Bound on the restored guest's hygiene ack. The resume agent polls every
++/// ~2s and the nudge itself is a few small frames, so a healthy restore acks
++/// within seconds; the bound exists for images predating the agent.
++const RESTORE_ACK_TIMEOUT: Duration = Duration::from_mins(1);
++
++/// Flags for `rooms restore` (a flat mirror of the CLI variant).
++#[allow(
++    clippy::struct_excessive_bools,
++    reason = "a flat DTO mirroring independent, orthogonal CLI flags 1:1"
++)]
++struct RestoreArgs {
++    snapshot_dir: PathBuf,
++    image: PathBuf,
++    keep: bool,
++    command: Option<String>,
++    slot: Option<u8>,
++    out_dir: Option<PathBuf>,
++    witness: bool,
++    secrets: Option<vsock::SecretsPayload>,
++    egress: egress::Policy,
++    max_wall: Option<Duration>,
++    json: bool,
++}
++
++/// `rooms restore`: lease the frozen slot, resume the snapshot, gate on the
++/// hygiene ack, then run the requested lifecycle mode. The `--json` error
++/// record mirrors `run`.
++async fn restore_room(args: RestoreArgs, config: &RoomsConfig) -> Result<u8, RoomsError> {
++    let json = args.json;
++    let result = restore_room_inner(args, config).await;
++    if json {
++        if let Err(err) = &result {
++            emit_run_error_json(err);
++        }
++    }
++    result
++}
++
++async fn restore_room_inner(args: RestoreArgs, config: &RoomsConfig) -> Result<u8, RoomsError> {
++    info!(snapshot_dir = ?args.snapshot_dir, image = ?args.image, keep = args.keep, "rooms restore");
++    // Exactly one lifecycle mode, refused before any effect: a bare restore
++    // would immediately drop a successful guard, which is never what the
++    // operator meant.
++    if !args.keep && args.command.is_none() {
++        return Err(RoomsError::Internal(
++            "restore requires exactly one lifecycle mode: --keep or --command".to_owned(),
++        ));
++    }
++    ensure_witness_available(args.witness)?;
++    if let Err(remediation) = doctor::ensure_rooms_fwd_installed() {
++        return Err(RoomsError::Internal(remediation));
++    }
++    let egress_plan = egress::resolve(&args.egress).map_err(RoomsError::Internal)?;
++    warn_egress_without_witness(&egress_plan, args.witness);
++    let key = key_path()?;
++
++    let restored = rooms::restore_exec::restore(
++        config,
++        rooms::restore_exec::RestoreRequest {
++            snapshot_dir: &args.snapshot_dir,
++            image: &args.image,
++            target_slot: args.slot,
++            label: args.command.clone().or_else(|| Some("restore".to_owned())),
++            keep: args.keep,
++            witness: args.witness,
++            egress: &egress_plan,
++            secrets: args.secrets,
++            out_dir: args.out_dir.as_deref(),
++            ack_timeout: RESTORE_ACK_TIMEOUT,
++        },
++    )
++    .await
++    .map_err(|e| RoomsError::Internal(e.to_string()))?;
++
++    let rooms::restore_exec::Restored {
++        mut vm,
++        slot,
++        room_id,
++        snapshot_id,
++    } = restored;
++    let network = network_config_for(&slot);
++    emit_restored(&room_id, &snapshot_id, &slot, args.json);
++
++    if args.keep {
++        // Hand ownership to the persisted room: the guard dismisses, the
++        // intent tombstone stays with the lease it records, and `rooms gc`
++        // returns the lease once the room is conclusively dead.
++        vm.guard_mut().dismiss();
++        std::mem::forget(vm);
++        info!(room = %room_id, "--keep: restored room preserved; lease held until teardown");
++        return Ok(0);
++    }
++
++    let lifecycle = Lifecycle::disabled();
++    let env = PostBootEnv {
++        network: &network,
++        key: &key,
++        config,
++        max_wall: args.max_wall,
++        lifecycle: &lifecycle,
++        egress: &egress_plan,
++    };
++    let command = args
++        .command
++        .clone()
++        .ok_or_else(|| RoomsError::Internal("restore lifecycle lost its command".to_owned()))?;
++    let action = Action::Exec(runner::Runner::Command(command));
++    // Secrets arrived through the acked resume nudge, not the vsock one-shot,
++    // so the workload gate has no delivery to await here.
++    let outcome = post_boot(&env, &action, &mut vm, None).await;
++    collect_run_artifacts(&env, &action, &slot, args.out_dir.as_deref(), &mut vm).await;
++
++    if let Err(e) = vm.shutdown().await {
++        warn!(error = %e, "restore shutdown reported an error");
++    }
++    // The reap-clean gate + lease return: any residue keeps the intent
++    // tombstone for `rooms gc` and surfaces here as an error.
++    rooms::restore_exec::finish_teardown(config, &room_id, &snapshot_id, slot.index)
++        .map_err(|e| RoomsError::Internal(format!("restore teardown incomplete: {e}")))?;
++    outcome
++}
++
++/// Report a restored room — a human line, or a `--json` record.
++fn emit_restored(room_id: &str, snapshot_id: &str, slot: &room::Slot, json: bool) {
++    if json {
++        let record = serde_json::json!({
++            "room_id": room_id,
++            "snapshot_id": snapshot_id,
++            "slot": slot.index,
++            "guest_ip": slot.guest.to_string(),
++        });
++        match serde_json::to_string(&record) {
++            Ok(line) => {
++                #[allow(
++                    clippy::print_stdout,
++                    reason = "restore --json record; stdout is the documented contract"
++                )]
++                {
++                    println!("{line}");
++                }
++            }
++            Err(e) => warn!(error = %e, "failed to serialize restore --json record"),
++        }
++        return;
++    }
++    #[allow(
++        clippy::print_stdout,
++        reason = "restore human summary; stdout is the documented contract"
++    )]
++    {
++        println!(
++            "restored: room {room_id} from snapshot {snapshot_id} on slot {} (guest {})",
++            slot.index, slot.guest
++        );
++    }
++}
++
+ /// The on-disk traces a completed teardown must have erased. `cleanup` keeps
+ /// them on purpose when it can't finish (a stranded jail mount, a failed
+ /// room-dir removal) so `rooms gc` can retry — which is exactly what the
+diff --git a/src/registry.rs b/src/registry.rs
+index 688f9ee..adb3346 100644
+--- a/src/registry.rs
++++ b/src/registry.rs
+@@ -14,6 +14,7 @@ use tracing::warn;
+ 
+ use crate::config::RoomsConfig;
+ use crate::doctor;
++use crate::error::FirecrackerError;
+ use crate::error::RegistryError;
+ use crate::firecracker::{self, KillSignalOutcome};
+ use crate::room::{self, Liveness, RoomMeta};
+@@ -75,6 +76,13 @@ pub struct RoomEntry {
+     pub keep: bool,
+     /// The room's claimed network slot; `None` for a legacy shared-tap room.
+     pub slot: Option<room::Slot>,
++    /// The snapshot this room was restored from; `Some` marks a restored room
++    /// whose slot is held via a *lease*, not an ordinary claim — so its
++    /// teardown must return the lease (never `slot::free`) and only delete the
++    /// slot's tap while it still holds that lease. Internal — not in the
++    /// `ls --json` schema.
++    #[serde(skip)]
++    pub snapshot_lineage: Option<String>,
+ }
+ 
+ /// The `ls --json` payload (schema'd, like the doctor/diff reports).
+@@ -191,10 +199,31 @@ fn entry_for(config: &RoomsConfig, id: &str) -> RoomEntry {
+         pid_starttime,
+         started_at: meta.as_ref().map(|m| m.started_at),
+         keep,
+-        slot: meta.and_then(|m| m.slot),
++        slot: meta.as_ref().and_then(|m| m.slot.clone()),
++        snapshot_lineage: meta.and_then(|m| m.snapshot_lineage),
+     }
+ }
+ 
++/// Reap a confirmed-dead room's resources, routing a **restored** room (slot
++/// held via a lease) through the lease-aware teardown and every other room
++/// through the ordinary tap-delete + slot-free path.
++///
++/// A restored room's slot is an `@lease` token: `slot::free` would no-op on it
++/// (leaving the lease stuck and the slot permanently unusable), and its tap is
++/// slot-keyed so it must only be deleted while this room still holds the lease.
++/// `restore_exec::finish_teardown` owns both; the ordinary path owns everything
++/// else.
++fn reap_room(config: &RoomsConfig, entry: &RoomEntry) -> Result<(), RegistryError> {
++    if let (Some(snapshot_id), Some(slot)) = (&entry.snapshot_lineage, &entry.slot) {
++        return crate::restore_exec::finish_teardown(config, &entry.id, snapshot_id, slot.index)
++            .map_err(|e| RegistryError::Firecracker(FirecrackerError::Internal(e.to_string())));
++    }
++    let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
++    let slot = slot_release_for(config, entry)?;
++    firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, slot, config)
++        .map_err(RegistryError::Firecracker)
++}
++
+ /// Read a room's metadata, downgrading any read/parse error to `None` (one bad
+ /// file must not break `ls` for healthy rooms) with a warning.
+ fn load_meta_soft(room_dir: &Path) -> Option<RoomMeta> {
+@@ -286,6 +315,40 @@ pub fn gc(config: &RoomsConfig, opts: &GcOptions) -> Result<GcReport, RegistryEr
+             });
+         }
+     }
++    // Restore-intent tombstones: finish the teardown + lease return for every
++    // conclusively dead restore. Runs after the room loop so a dead restored
++    // room's dirs are already reaped through its own room.json; the tombstone
++    // then completes what an ordinary reap cannot — returning the exact lease.
++    if opts.dry_run {
++        for pending in
++            crate::restore_exec::pending_all(config).map_err(|error| snapshot_error(&error))?
++        {
++            let in_scope = opts
++                .only
++                .as_ref()
++                .is_none_or(|only| only == &pending.room_id);
++            if in_scope {
++                outcomes.push(GcOutcome {
++                    id: pending.room_id,
++                    state: RoomState::Unknown,
++                    reaped: false,
++                    reason: format!(
++                        "pending restore of snapshot {} at boundary {}",
++                        pending.snapshot_id, pending.boundary
++                    ),
++                });
++            }
++        }
++    } else {
++        for reconciled in crate::restore_exec::gc_reconcile(config, opts.only.as_deref()) {
++            outcomes.push(GcOutcome {
++                id: reconciled.room_id,
++                state: RoomState::Unknown,
++                reaped: reconciled.reaped,
++                reason: reconciled.reason,
++            });
++        }
++    }
+     Ok(GcReport {
+         schema_version: REGISTRY_SCHEMA_VERSION,
+         dry_run: opts.dry_run,
+@@ -332,12 +395,11 @@ fn reap_entry(
+     }
+     // Resolve + safety-check the dirs even for a dry-run, so a preview surfaces
+     // a path-escape rather than hiding it until the real run.
+-    let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
++    let _ = reap_paths(config, &entry.id)?;
+     if dry_run {
+         return Ok(outcome(entry, false, "would reap (dry-run)"));
+     }
+-    let slot = slot_release_for(config, entry)?;
+-    firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, slot, config)?;
++    reap_room(config, entry)?;
+     Ok(outcome(entry, true, "reaped"))
+ }
+ 
+@@ -562,6 +624,7 @@ fn unknown_entry(id: &str) -> RoomEntry {
+         started_at: None,
+         keep: false,
+         slot: None,
++        snapshot_lineage: None,
+     }
+ }
+ 
+@@ -657,9 +720,9 @@ fn reap_after_kill(
+     entry: &RoomEntry,
+     ok_reason: &str,
+ ) -> Result<KillOutcome, RegistryError> {
+-    let (room_dir, jail_instance_dir, socket) = reap_paths(config, &entry.id)?;
+-    let slot = slot_release_for(config, entry)?;
+-    match firecracker::reap_orphan(&room_dir, &jail_instance_dir, &socket, slot, config) {
++    // Validate the reap paths (defense-in-depth) before touching anything.
++    let _ = reap_paths(config, &entry.id)?;
++    match reap_room(config, entry) {
+         Ok(()) => Ok(kill_outcome(entry, KillDisposition::Killed, ok_reason)),
+         Err(e) => {
+             warn!(id = %entry.id, error = %e, "kill: reap after terminate failed");
+@@ -715,6 +778,7 @@ mod tests {
+             started_at: Some(Utc::now()),
+             keep: true,
+             slot: None,
++            snapshot_lineage: None,
+         }
+     }
+ 
+@@ -1208,6 +1272,7 @@ mod tests {
+             started_at: Some(Utc::now()),
+             keep: false,
+             slot: None,
++            snapshot_lineage: None,
+         };
+         let outcome = kill_live(&config, &entry).unwrap();
+         assert_eq!(
+diff --git a/src/restore_exec.rs b/src/restore_exec.rs
+new file mode 100644
+index 0000000..3d1df29
+--- /dev/null
++++ b/src/restore_exec.rs
+@@ -0,0 +1,851 @@
++//! Recoverable execution of the restore policy.
++//!
++//! [`crate::restore`] decides what a compatible restore means; this module
++//! owns the host effects and their durable transaction boundaries, mirroring
++//! [`crate::snapshot_exec`]'s shape: a per-room intent under
++//! `restore-intents/` is the durable claim, every boundary advance is an
++//! atomic rewrite, and the intent survives (as a tombstone) until both
++//! resource cleanup and the lease return are durably complete.
++
++use std::io::{Read, Write as _};
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++use tracing::{info, warn};
++
++use crate::config::RoomsConfig;
++use crate::firecracker::{self, RestoreLaunch, RestoreSpawnRequest};
++use crate::restore::{self, RestoreOp};
++use crate::room::{self, Liveness};
++use crate::slot::{self, Released};
++use crate::snapshot::{self, SnapshotMeta};
++use crate::snapshot_exec::{canonical_candidate, firecracker_version, overlaps, sha256_file};
++use crate::{egress, transport, vsock, witness};
++
++const INTENT_SCHEMA_VERSION: u32 = 1;
++
++/// Bytes of fresh host randomness mixed into the resumed guest's CRNG.
++const RESUME_ENTROPY_BYTES: usize = 64;
++
++#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
++#[serde(rename_all = "snake_case")]
++enum Boundary {
++    /// Durable before any child exists: records the planned identity/paths.
++    PreSpawn,
++    /// The child's pid/starttime are recorded; the barrier may release.
++    Spawned,
++    /// The snapshot reservation is leased to this room.
++    Leased,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++struct RestoreIntent {
++    schema_version: u32,
++    room_id: String,
++    snapshot_id: String,
++    slot_index: u8,
++    tap: String,
++    snapshot_dir: PathBuf,
++    image: PathBuf,
++    #[serde(default)]
++    pid: Option<u32>,
++    #[serde(default)]
++    pid_starttime: Option<u64>,
++    boundary: Boundary,
++}
++
++/// What a completed restore hands back to the orchestration layer: a live,
++/// acked room whose teardown must end in [`finish_teardown`].
++pub struct Restored {
++    pub vm: firecracker::BootedVm,
++    pub slot: room::Slot,
++    pub room_id: String,
++    pub snapshot_id: String,
++}
++
++/// Inputs to [`restore`].
++pub struct RestoreRequest<'a> {
++    pub snapshot_dir: &'a Path,
++    /// The backing rootfs; its hash must equal the snapshot's pinned hash.
++    pub image: &'a Path,
++    /// `--slot` override; must equal the frozen slot when given.
++    pub target_slot: Option<u8>,
++    /// Room label for `rooms ls`.
++    pub label: Option<String>,
++    pub keep: bool,
++    /// Witness capture on the leased tap (custody, pre-resume).
++    pub witness: bool,
++    /// Egress policy installed before the guest resumes (custody).
++    pub egress: &'a egress::Plan,
++    /// Admitted secrets, delivered only through the resume nudge.
++    pub secrets: Option<vsock::SecretsPayload>,
++    /// `--out` directory (already lifecycle-validated by the CLI); checked
++    /// here against every managed root before any process or lease exists.
++    pub out_dir: Option<&'a Path>,
++    /// Bound on the guest's hygiene ack after resume.
++    pub ack_timeout: std::time::Duration,
++}
++
++/// Drive a full restore: validate, spawn behind the barrier, lease the frozen
++/// slot, install custody, load + resume, and gate on the hygiene ack.
++///
++/// # Errors
++/// Fails closed at every step; a failure after the lease attempts full
++/// teardown and returns the lease before the intent tombstone is cleared.
++pub async fn restore(config: &RoomsConfig, req: RestoreRequest<'_>) -> anyhow::Result<Restored> {
++    let meta = read_snapshot_meta(req.snapshot_dir)?;
++    let image = canonical_candidate(req.image)?;
++    let snapshot_dir = canonical_candidate(req.snapshot_dir)?;
++    validate_output_disjoint(config, req.out_dir, &image, &snapshot_dir)?;
++
++    let host_fc = firecracker_version(config)?;
++    let rootfs_hash = sha256_file(&image)?;
++    let plan = restore::plan_restore(&meta, &host_fc, &rootfs_hash)?;
++    let slot_index = meta
++        .slot_index
++        .ok_or_else(|| anyhow::anyhow!("snapshot metadata carries no frozen slot"))?;
++    if let Some(requested) = req.target_slot {
++        if requested != slot_index {
++            anyhow::bail!(
++                "--slot {requested} differs from the snapshot's frozen slot {slot_index}; a restore must reclaim the exact frozen slot"
++            );
++        }
++    }
++
++    let room_id = firecracker::mint_room_id();
++    let mut intent = RestoreIntent {
++        schema_version: INTENT_SCHEMA_VERSION,
++        room_id: room_id.clone(),
++        snapshot_id: meta.snapshot_id.clone(),
++        slot_index,
++        tap: format!("tap-fc{slot_index}"),
++        snapshot_dir: snapshot_dir.clone(),
++        image: image.clone(),
++        pid: None,
++        pid_starttime: None,
++        boundary: Boundary::PreSpawn,
++    };
++    create_intent_exclusive(config, &intent)?;
++
++    let descriptor = room::RoomDescriptor {
++        command: req.label.clone(),
++        keep: req.keep,
++    };
++    let spawn_req = RestoreSpawnRequest {
++        room_id: &room_id,
++        rootfs: &image,
++        host_vmstate: &snapshot_dir.join(snapshot::SNAPSHOT_VMSTATE_FILE),
++        host_mem: &snapshot_dir.join(snapshot::SNAPSHOT_MEM_FILE),
++        descriptor: &descriptor,
++        snapshot_id: &meta.snapshot_id,
++    };
++    let mut launch = match firecracker::spawn_restore(&spawn_req, config).await {
++        Ok(launch) => launch,
++        Err(e) => {
++            // spawn_restore may have staged the room/jail dirs before failing
++            // (no lease was taken — this is still PreSpawn). Clean the planned
++            // paths, and clear the intent ONLY when that cleanup is proven
++            // complete; otherwise keep the tombstone so `rooms gc` retries from
++            // it, rather than orphaning a room dir GC would never touch.
++            clean_pre_spawn(config, &room_id);
++            return Err(e.into());
++        }
++    };
++
++    match drive_to_ready(config, &req, &meta, &mut intent, &mut launch, plan.ops).await {
++        Ok((slot, witness_capture)) => Ok(Restored {
++            vm: launch.into_booted(witness_capture),
++            slot,
++            room_id,
++            snapshot_id: meta.snapshot_id,
++        }),
++        Err(e) => {
++            abort_launch(config, launch, &intent);
++            Err(e)
++        }
++    }
++}
++
++/// The ordered post-spawn steps, factored so the caller owns the one abort
++/// path. Any error after the lease leaves the intent for the abort/GC flow.
++async fn drive_to_ready(
++    config: &RoomsConfig,
++    req: &RestoreRequest<'_>,
++    meta: &SnapshotMeta,
++    intent: &mut RestoreIntent,
++    launch: &mut RestoreLaunch,
++    ops: Vec<RestoreOp>,
++) -> anyhow::Result<(room::Slot, Option<witness::Capture>)> {
++    // Durable pid/starttime before the barrier releases: a crash right here
++    // leaves an inert launcher that exits on pipe EOF, classifiable from the
++    // intent alone.
++    intent.pid = launch.pid();
++    intent.pid_starttime = intent.pid.and_then(room::starttime_of);
++    intent.boundary = Boundary::Spawned;
++    write_intent_atomic(config, intent)?;
++    launch.release_barrier().await?;
++    launch.wait_api(config.api_socket_timeout).await?;
++
++    // Lease the frozen slot only now that the room has a conclusive liveness
++    // breadcrumb. Busy or foreign leases fail closed.
++    let state = state_base(config)?;
++    let slot = slot::lease(
++        &state,
++        intent.slot_index,
++        &intent.snapshot_id,
++        &intent.room_id,
++    )?;
++    intent.boundary = Boundary::Leased;
++    write_intent_atomic(config, intent)?;
++    record_slot_on_room(config, &intent.room_id, &slot)?;
++    launch.attach_leased_slot(&slot)?;
++
++    let jail_root = config
++        .jail_root_dir(&intent.room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve jail root"))?;
++    let room_dir = config
++        .room_dir(&intent.room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve room dir"))?;
++    let (fc_uid, fc_gid) = firecracker::lookup_firecracker_ids()?;
++
++    let mut witness_capture = None;
++    let mut resume_delivery = None;
++    for op in ops {
++        match op {
++            RestoreOp::InstallCustody => {
++                if req.witness {
++                    witness_capture = Some(
++                        witness::Capture::start(&slot.tap, &room_dir)
++                            .await
++                            .map_err(|e| anyhow::anyhow!("witness: {e}"))?,
++                    );
++                }
++                if req.egress.enforces() {
++                    egress::install(&slot.tap, req.egress).map_err(|e| anyhow::anyhow!(e))?;
++                }
++            }
++            RestoreOp::LoadSnapshot {
++                snapshot_path,
++                mem_backend_path,
++            } => {
++                // The nudge listener binds before the guest can resume: the
++                // polling agent must never find the port unbound after resume.
++                resume_delivery = Some(vsock::serve_resume(
++                    &jail_root,
++                    resume_payload(&intent.room_id, req.secrets.as_ref())?,
++                    Some((fc_uid, fc_gid)),
++                )?);
++                transport::api_put(
++                    launch.socket(),
++                    "/snapshot/load",
++                    &serde_json::json!({
++                        "snapshot_path": snapshot_path,
++                        "mem_backend": {
++                            "backend_type": "File",
++                            "backend_path": mem_backend_path,
++                        },
++                        "resume_vm": false,
++                    }),
++                    config,
++                )
++                .await?;
++            }
++            RestoreOp::ResumeVm => {
++                transport::api_patch(
++                    launch.socket(),
++                    "/vm",
++                    &serde_json::json!({"state": "Resumed"}),
++                    config,
++                )
++                .await?;
++                info!(room = %intent.room_id, snapshot = %meta.snapshot_id, "microVM resumed from snapshot");
++            }
++            RestoreOp::ApplyHygieneNudgeAndAwaitAck => {
++                let delivery = resume_delivery
++                    .take()
++                    .ok_or_else(|| anyhow::anyhow!("resume nudge was never armed"))?;
++                delivery
++                    .await_acked(req.ack_timeout)
++                    .await
++                    .map_err(|e| anyhow::anyhow!("resume hygiene ack: {e}"))?;
++            }
++        }
++    }
++    Ok((slot, witness_capture))
++}
++
++/// Build the per-restore nudge payload: identity, host clock, fresh entropy,
++/// and the admitted secrets (empty when none).
++fn resume_payload(
++    room_id: &str,
++    secrets: Option<&vsock::SecretsPayload>,
++) -> anyhow::Result<vsock::ResumePayload> {
++    let mut entropy = vec![0_u8; RESUME_ENTROPY_BYTES];
++    let mut urandom = std::fs::File::open("/dev/urandom")?;
++    urandom.read_exact(&mut entropy)?;
++    Ok(vsock::ResumePayload {
++        room_id: room_id.to_owned(),
++        epoch_secs: chrono::Utc::now().timestamp(),
++        entropy,
++        secrets: secrets.map_or_else(
++            || vsock::SecretsPayload::encode(&[]),
++            vsock::SecretsPayload::clone_bytes,
++        ),
++    })
++}
++
++/// Record the leased slot on the persisted room metadata (the spec's "set
++/// `RoomMeta.slot` before creating the TAP").
++fn record_slot_on_room(
++    config: &RoomsConfig,
++    room_id: &str,
++    slot: &room::Slot,
++) -> anyhow::Result<()> {
++    let room_dir = config
++        .room_dir(room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve room dir"))?;
++    let mut meta = room::read(&room_dir)?
++        .ok_or_else(|| anyhow::anyhow!("restore room.json disappeared before lease"))?;
++    meta.slot = Some(slot.clone());
++    room::write_atomic(&room_dir, &meta)?;
++    Ok(())
++}
++
++/// Abort a launched restore: kill + clean through the guard, then try the
++/// full teardown finish (which returns the lease only after the reap-clean
++/// gate). The intent tombstone survives any incomplete step for GC.
++fn abort_launch(config: &RoomsConfig, mut launch: RestoreLaunch, intent: &RestoreIntent) {
++    // cleanup() runs the guard teardown once (kill child, unmount jail, remove
++    // dirs, delete the leased tap); into_booted then moves that already-cleaned
++    // guard into a BootedVm we immediately dismiss so its Drop does NOT re-run
++    // cleanup. finish_teardown below is the lease-returning reap-clean gate.
++    launch.guard_mut().cleanup();
++    let mut booted = launch.into_booted(None);
++    booted.guard_mut().dismiss();
++    drop(booted);
++    if let Err(e) = finish_teardown(
++        config,
++        &intent.room_id,
++        &intent.snapshot_id,
++        intent.slot_index,
++    ) {
++        warn!(room = %intent.room_id, error = %e, "restore abort left residue; `rooms gc` will retry from the intent tombstone");
++    }
++}
++
++/// Clean a failed pre-spawn restore: no child ran and no lease was taken, so
++/// only the planned room/jail dirs can exist. Reap them room-only (never the
++/// shared slot's tap), and clear the intent only if that succeeds — a residual
++/// dir keeps the tombstone for `rooms gc`.
++fn clean_pre_spawn(config: &RoomsConfig, room_id: &str) {
++    let reaped = (|| -> anyhow::Result<()> {
++        let room_dir = config
++            .room_dir(room_id)
++            .ok_or_else(|| anyhow::anyhow!("cannot resolve room dir"))?;
++        let jail_dir = config
++            .jail_instance_dir(room_id)
++            .ok_or_else(|| anyhow::anyhow!("cannot resolve jail dir"))?;
++        let socket = config
++            .jail_socket(room_id)
++            .ok_or_else(|| anyhow::anyhow!("cannot resolve socket"))?;
++        firecracker::reap_room_only(&room_dir, &jail_dir, &socket, config)?;
++        Ok(())
++    })();
++    match reaped {
++        Ok(()) => {
++            let _ = finish_index(config, room_id);
++        }
++        Err(e) => {
++            warn!(room = %room_id, error = %e, "pre-spawn restore cleanup incomplete; keeping intent tombstone for `rooms gc`");
++        }
++    }
++}
++
++/// The terminal teardown gate: prove the process/jail/room/egress/tap are
++/// gone, then return the lease, then (and only then) clear the tombstone.
++///
++/// # Errors
++/// Any residue keeps the intent tombstone and returns the failure.
++pub fn finish_teardown(
++    config: &RoomsConfig,
++    room_id: &str,
++    snapshot_id: &str,
++    slot_index: u8,
++) -> anyhow::Result<()> {
++    let room_dir = config
++        .room_dir(room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve room dir"))?;
++    let jail_dir = config
++        .jail_instance_dir(room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve jail dir"))?;
++    let socket = config
++        .jail_socket(room_id)
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve socket"))?;
++    let tap = format!("tap-fc{slot_index}");
++    let state = state_base(config)?;
++    // Reap this room's OWN resources first (process/jail/room dir) — these are
++    // keyed by room id and always safe. If they survive, the reap errors and
++    // the tombstone stays for a retry, before we touch the shared slot.
++    firecracker::reap_room_only(&room_dir, &jail_dir, &socket, config)?;
++    // The tap and egress chain are named by slot index alone. Delete them ONLY
++    // while we still hold the lease: a GC retry after an earlier pass already
++    // returned the lease — or a `rooms kill` racing a re-lease — must never
++    // delete a tap a *different* room has since re-leased and recreated. We
++    // hold the free-lock proof: no one else can take our lease while we hold
++    // it, so the check can't race the delete.
++    if slot::leased_by(&state, slot_index, snapshot_id, room_id)? {
++        firecracker::remove_egress_and_tap(&tap).map_err(|e| anyhow::anyhow!(e.to_string()))?;
++        match slot::release_lease(&state, slot_index, snapshot_id, room_id)? {
++            Released::Returned | Released::AlreadyReturned => {}
++            Released::NotOurLease => {
++                anyhow::bail!(
++                    "lease vanished between ownership check and return for slot {slot_index}"
++                )
++            }
++        }
++    } else {
++        // Not our lease (already returned, or re-leased by another room). Our
++        // room-keyed residue is gone; leave the slot's tap/egress to whoever
++        // owns it now, and just clear our tombstone.
++        warn!(
++            slot = slot_index,
++            "restore teardown holds no lease for this room; leaving the slot tap/egress untouched"
++        );
++    }
++    finish_index(config, room_id)
++}
++
++/// One indexed restore transaction, as GC observability.
++#[derive(Debug, Clone, Serialize)]
++pub struct PendingRestore {
++    pub room_id: String,
++    pub snapshot_id: String,
++    pub boundary: String,
++    pub slot: u8,
++}
++
++/// All indexed restore transactions.
++pub fn pending_all(config: &RoomsConfig) -> anyhow::Result<Vec<PendingRestore>> {
++    Ok(read_intents(config)?
++        .iter()
++        .map(|intent| PendingRestore {
++            room_id: intent.room_id.clone(),
++            snapshot_id: intent.snapshot_id.clone(),
++            boundary: match intent.boundary {
++                Boundary::PreSpawn => "pre_spawn".to_owned(),
++                Boundary::Spawned => "spawned".to_owned(),
++                Boundary::Leased => "leased".to_owned(),
++            },
++            slot: intent.slot_index,
++        })
++        .collect())
++}
++
++/// One reconciled (or failed) restore intent from a GC sweep.
++#[derive(Debug, Clone)]
++pub struct ReconciledRestore {
++    pub room_id: String,
++    pub reaped: bool,
++    pub reason: String,
++}
++
++/// GC sweep over indexed restore transactions: finish the teardown (and lease
++/// return) for every conclusively dead restore; skip live and unprovable
++/// ones. `only` scopes the sweep to a single room id.
++pub fn gc_reconcile(config: &RoomsConfig, only: Option<&str>) -> Vec<ReconciledRestore> {
++    let intents = match read_intents(config) {
++        Ok(intents) => intents,
++        Err(e) => {
++            warn!(error = %e, "cannot read restore intents; skipping restore reconcile");
++            return Vec::new();
++        }
++    };
++    let mut reconciled = Vec::new();
++    for intent in intents {
++        if only.is_some_and(|only| only != intent.room_id) {
++            continue;
++        }
++        match reconcile_one(config, &intent) {
++            Ok(Some(line)) => reconciled.push(ReconciledRestore {
++                room_id: intent.room_id.clone(),
++                reaped: true,
++                reason: line,
++            }),
++            Ok(None) => {}
++            Err(e) => reconciled.push(ReconciledRestore {
++                room_id: intent.room_id.clone(),
++                reaped: false,
++                reason: format!("restore intent reconcile failed (kept for retry): {e}"),
++            }),
++        }
++    }
++    reconciled
++}
++
++fn reconcile_one(config: &RoomsConfig, intent: &RestoreIntent) -> anyhow::Result<Option<String>> {
++    let Some(pid) = intent.pid else {
++        // Pre-spawn: no child was ever authorized. The planned dirs may exist
++        // (room dir, staged jail) but nothing runs; clean and clear.
++        finish_teardown(
++            config,
++            &intent.room_id,
++            &intent.snapshot_id,
++            intent.slot_index,
++        )?;
++        return Ok(Some(format!(
++            "restore {}: cleared pre-spawn intent",
++            intent.room_id
++        )));
++    };
++    match room::probe(Some(pid), intent.pid_starttime) {
++        Liveness::Alive | Liveness::Unknown => Ok(None),
++        Liveness::Dead => {
++            finish_teardown(
++                config,
++                &intent.room_id,
++                &intent.snapshot_id,
++                intent.slot_index,
++            )?;
++            Ok(Some(format!(
++                "restore {}: reaped dead restore, lease returned to snapshot {}",
++                intent.room_id, intent.snapshot_id
++            )))
++        }
++    }
++}
++
++// --- output-overlap validation ------------------------------------------
++
++/// Refuse an output that overlaps (in either direction) the image, the rooms
++/// state base, any jail-instance root, or the snapshot directory itself; a
++/// pre-existing non-empty output is refused outright, which also rules out
++/// any snapshot artifacts *beneath* it. Ancestors are checked for a published
++/// `snapshot.json` so collection can never write inside a snapshot.
++fn validate_output_disjoint(
++    config: &RoomsConfig,
++    out_dir: Option<&Path>,
++    image: &Path,
++    snapshot_dir: &Path,
++) -> anyhow::Result<()> {
++    let Some(out) = out_dir else {
++        return Ok(());
++    };
++    let out = canonical_candidate(out)?;
++    if out.exists() {
++        if !out.is_dir() {
++            anyhow::bail!("restore output is not a directory: {}", out.display());
++        }
++        if std::fs::read_dir(&out)?.next().is_some() {
++            anyhow::bail!(
++                "refusing non-empty restore output {} (must be empty or absent)",
++                out.display()
++            );
++        }
++    }
++    let state = state_base(config)?;
++    let instances = config
++        .chroot_base()
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve jailer chroot base"))?
++        .join("firecracker");
++    for (name, root) in [
++        ("backing image", image.to_path_buf()),
++        ("rooms state base", canonical_candidate(&state)?),
++        ("jail instance root", canonical_candidate(&instances)?),
++        ("snapshot directory", snapshot_dir.to_path_buf()),
++    ] {
++        if overlaps(&out, &root) {
++            anyhow::bail!(
++                "restore output {} overlaps the {name} {}",
++                out.display(),
++                root.display()
++            );
++        }
++    }
++    for ancestor in out.ancestors().skip(1) {
++        if ancestor.join(snapshot::SNAPSHOT_META_FILE).exists() {
++            anyhow::bail!(
++                "restore output {} lies inside snapshot directory {}",
++                out.display(),
++                ancestor.display()
++            );
++        }
++    }
++    Ok(())
++}
++
++// --- snapshot input validation ------------------------------------------
++
++fn read_snapshot_meta(snapshot_dir: &Path) -> anyhow::Result<SnapshotMeta> {
++    for name in [snapshot::SNAPSHOT_VMSTATE_FILE, snapshot::SNAPSHOT_MEM_FILE] {
++        let path = snapshot_dir.join(name);
++        let meta = std::fs::symlink_metadata(&path)
++            .map_err(|e| anyhow::anyhow!("snapshot artifact {}: {e}", path.display()))?;
++        if !meta.file_type().is_file() || meta.len() == 0 {
++            anyhow::bail!(
++                "snapshot artifact missing, empty, or not regular: {}",
++                path.display()
++            );
++        }
++    }
++    let meta_path = snapshot_dir.join(snapshot::SNAPSHOT_META_FILE);
++    let bytes = std::fs::read(&meta_path)
++        .map_err(|e| anyhow::anyhow!("snapshot metadata {}: {e}", meta_path.display()))?;
++    let meta: SnapshotMeta = serde_json::from_slice(&bytes)?;
++    if !crate::registry::is_valid_room_id(&meta.snapshot_id)
++        || !crate::registry::is_valid_room_id(&meta.base_room_id)
++    {
++        anyhow::bail!("snapshot metadata carries an invalid id");
++    }
++    Ok(meta)
++}
++
++// --- intent index mechanics (mirrors snapshot_exec) ----------------------
++
++fn state_base(config: &RoomsConfig) -> anyhow::Result<PathBuf> {
++    config
++        .resolved_state_base()
++        .ok_or_else(|| anyhow::anyhow!("HOME unset; cannot locate rooms state"))
++}
++
++fn intent_dir(config: &RoomsConfig) -> anyhow::Result<PathBuf> {
++    config
++        .restore_intents_dir()
++        .ok_or_else(|| anyhow::anyhow!("cannot resolve restore intent directory"))
++}
++
++fn intent_path(config: &RoomsConfig, room_id: &str) -> anyhow::Result<PathBuf> {
++    Ok(intent_dir(config)?.join(format!("{room_id}.json")))
++}
++
++fn create_intent_exclusive(config: &RoomsConfig, intent: &RestoreIntent) -> anyhow::Result<()> {
++    let dir = intent_dir(config)?;
++    std::fs::create_dir_all(&dir)?;
++    let path = intent_path(config, &intent.room_id)?;
++    let bytes = serde_json::to_vec_pretty(intent)?;
++    let mut options = std::fs::OpenOptions::new();
++    options.create_new(true).write(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o600);
++    }
++    let mut file = options.open(&path)?;
++    file.write_all(&bytes)?;
++    file.sync_all()?;
++    drop(file);
++    sync_dir(&dir)?;
++    Ok(())
++}
++
++fn write_intent_atomic(config: &RoomsConfig, intent: &RestoreIntent) -> anyhow::Result<()> {
++    let dir = intent_dir(config)?;
++    let tmp = dir.join(format!(".{}.tmp", intent.room_id));
++    let bytes = serde_json::to_vec_pretty(intent)?;
++    let mut options = std::fs::OpenOptions::new();
++    options.create(true).write(true).truncate(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o600);
++    }
++    let mut file = options.open(&tmp)?;
++    file.write_all(&bytes)?;
++    file.sync_all()?;
++    drop(file);
++    std::fs::rename(&tmp, intent_path(config, &intent.room_id)?)?;
++    sync_dir(&dir)?;
++    Ok(())
++}
++
++fn finish_index(config: &RoomsConfig, room_id: &str) -> anyhow::Result<()> {
++    let path = intent_path(config, room_id)?;
++    match std::fs::remove_file(path) {
++        Ok(()) => sync_dir(&intent_dir(config)?),
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
++        Err(error) => Err(error.into()),
++    }
++}
++
++fn read_intents(config: &RoomsConfig) -> anyhow::Result<Vec<RestoreIntent>> {
++    let dir = intent_dir(config)?;
++    let entries = match std::fs::read_dir(&dir) {
++        Ok(entries) => entries,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
++        Err(error) => return Err(error.into()),
++    };
++    let mut intents = Vec::new();
++    for entry in entries {
++        let entry = entry?;
++        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
++            continue;
++        }
++        let bytes = std::fs::read(entry.path())?;
++        let intent: RestoreIntent = serde_json::from_slice(&bytes)?;
++        if intent.schema_version != INTENT_SCHEMA_VERSION {
++            anyhow::bail!(
++                "unsupported restore intent schema {}",
++                intent.schema_version
++            );
++        }
++        if !crate::registry::is_valid_room_id(&intent.room_id)
++            || !crate::registry::is_valid_room_id(&intent.snapshot_id)
++        {
++            anyhow::bail!("restore intent contains an invalid id");
++        }
++        intents.push(intent);
++    }
++    intents.sort_by(|left, right| left.room_id.cmp(&right.room_id));
++    Ok(intents)
++}
++
++#[cfg(unix)]
++fn sync_dir(path: &Path) -> anyhow::Result<()> {
++    std::fs::File::open(path)?.sync_all()?;
++    Ok(())
++}
++
++#[cfg(not(unix))]
++#[allow(
++    clippy::unnecessary_wraps,
++    reason = "keeps durable transaction call sites identical across cfg targets"
++)]
++fn sync_dir(_path: &Path) -> anyhow::Result<()> {
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    #![allow(
++        clippy::expect_used,
++        clippy::unwrap_used,
++        clippy::indexing_slicing,
++        reason = "test module"
++    )]
++
++    use super::{
++        create_intent_exclusive, finish_index, pending_all, read_intents, validate_output_disjoint,
++        write_intent_atomic, Boundary, RestoreIntent, INTENT_SCHEMA_VERSION,
++    };
++    use crate::config::RoomsConfig;
++    use std::path::Path;
++
++    const ROOM_ID: &str = "00000000000000000000000001";
++    const SNAP_ID: &str = "00000000000000000000000002";
++
++    fn config(base: &Path) -> RoomsConfig {
++        RoomsConfig {
++            state_base: Some(base.to_path_buf()),
++            ..RoomsConfig::default()
++        }
++    }
++
++    fn intent() -> RestoreIntent {
++        RestoreIntent {
++            schema_version: INTENT_SCHEMA_VERSION,
++            room_id: ROOM_ID.to_owned(),
++            snapshot_id: SNAP_ID.to_owned(),
++            slot_index: 3,
++            tap: "tap-fc3".to_owned(),
++            snapshot_dir: "/tmp/snap".into(),
++            image: "/tmp/image.ext4".into(),
++            pid: None,
++            pid_starttime: None,
++            boundary: Boundary::PreSpawn,
++        }
++    }
++
++    #[test]
++    fn intent_round_trips_and_is_exclusive() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config(dir.path());
++        create_intent_exclusive(&config, &intent()).expect("first create");
++        let dup = create_intent_exclusive(&config, &intent());
++        assert!(dup.is_err(), "a second intent for the room must be refused");
++        let read = read_intents(&config).expect("read");
++        assert_eq!(read.len(), 1);
++        assert_eq!(read[0].room_id, ROOM_ID);
++        assert_eq!(read[0].boundary, Boundary::PreSpawn);
++    }
++
++    #[test]
++    fn boundary_advance_and_finish_clear_the_index() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config(dir.path());
++        create_intent_exclusive(&config, &intent()).expect("create");
++        let mut advanced = intent();
++        advanced.pid = Some(42);
++        advanced.boundary = Boundary::Spawned;
++        write_intent_atomic(&config, &advanced).expect("advance");
++        let read = read_intents(&config).expect("read");
++        assert_eq!(read[0].boundary, Boundary::Spawned);
++        assert_eq!(read[0].pid, Some(42));
++        finish_index(&config, ROOM_ID).expect("finish");
++        assert!(read_intents(&config).expect("read").is_empty());
++        // Idempotent: a second finish is a no-op.
++        finish_index(&config, ROOM_ID).expect("finish again");
++    }
++
++    #[test]
++    fn pending_all_summarizes_boundaries() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config(dir.path());
++        let mut leased = intent();
++        leased.boundary = Boundary::Leased;
++        create_intent_exclusive(&config, &leased).expect("create");
++        let pending = pending_all(&config).expect("pending");
++        assert_eq!(pending.len(), 1);
++        assert_eq!(pending[0].boundary, "leased");
++        assert_eq!(pending[0].slot, 3);
++    }
++
++    #[test]
++    fn output_inside_state_base_is_refused() {
++        let dir = tempfile::tempdir().unwrap();
++        let config = config(dir.path());
++        let out = dir.path().join("rooms-out");
++        let image = dir.path().join("image.ext4");
++        std::fs::write(&image, b"x").unwrap();
++        let snap = dir.path().join("snap");
++        std::fs::create_dir_all(&snap).unwrap();
++        let err = validate_output_disjoint(&config, Some(&out), &image, &snap)
++            .expect_err("state-base overlap must be refused");
++        assert!(err.to_string().contains("state base"), "{err}");
++    }
++
++    #[test]
++    fn output_overlapping_the_snapshot_or_image_is_refused() {
++        let state = tempfile::tempdir().unwrap();
++        let elsewhere = tempfile::tempdir().unwrap();
++        let config = config(state.path());
++        let image = elsewhere.path().join("image.ext4");
++        std::fs::write(&image, b"x").unwrap();
++        let snap = elsewhere.path().join("snap");
++        std::fs::create_dir_all(&snap).unwrap();
++        // The production caller hands canonicalized paths; mirror that (on
++        // macOS the tempdir itself is behind a /private symlink).
++        let image = image.canonicalize().unwrap();
++        let snap = snap.canonicalize().unwrap();
++        let inside_snap = snap.join("out");
++        let err = validate_output_disjoint(&config, Some(&inside_snap), &image, &snap)
++            .expect_err("output inside the snapshot dir must be refused");
++        assert!(err.to_string().contains("snapshot"), "{err}");
++        let containing = elsewhere.path().canonicalize().unwrap();
++        let err = validate_output_disjoint(&config, Some(&containing), &image, &snap)
++            .expect_err("output containing the snapshot dir must be refused");
++        assert!(err.to_string().contains("non-empty"), "{err}");
++    }
++
++    #[test]
++    fn nonexistent_disjoint_output_is_accepted() {
++        let state = tempfile::tempdir().unwrap();
++        let elsewhere = tempfile::tempdir().unwrap();
++        let config = config(state.path());
++        let image = elsewhere.path().join("image.ext4");
++        std::fs::write(&image, b"x").unwrap();
++        let snap = elsewhere.path().join("snap");
++        std::fs::create_dir_all(&snap).unwrap();
++        let out = elsewhere.path().join("collect").join("here");
++        validate_output_disjoint(&config, Some(&out), &image, &snap)
++            .expect("a disjoint absent output is fine");
++    }
++}
+diff --git a/src/room.rs b/src/room.rs
+index 11c8d78..4ffa913 100644
+--- a/src/room.rs
++++ b/src/room.rs
+@@ -146,6 +146,11 @@ pub struct RoomMeta {
+     /// files keep their exact shape.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     provenance: Option<Provenance>,
++    /// The snapshot this room was restored from (`rooms restore`); `None` for
++    /// a booted (non-restored) room. Additive: absent in earlier schemas and
++    /// not serialized when unset, so legacy files keep their exact shape.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub snapshot_lineage: Option<String>,
+ }
+ 
+ impl RoomMeta {
+@@ -170,6 +175,7 @@ impl RoomMeta {
+             keep,
+             slot: None,
+             provenance: None,
++            snapshot_lineage: None,
+         }
+     }
+ 
+diff --git a/src/slot.rs b/src/slot.rs
+index a672559..661b4dc 100644
+--- a/src/slot.rs
++++ b/src/slot.rs
+@@ -250,6 +250,38 @@ pub fn claimed_by(state: &Path, slot_index: u8, room_id: &str) -> Result<bool, S
+     ))
+ }
+ 
++/// Whether an index currently holds `room_id`'s live lease against
++/// `snapshot_id`'s reservation.
++///
++/// A restored room's teardown reads this under the free-lock before deleting
++/// the slot's tap: the tap is named by slot index alone, so a teardown that
++/// already returned its lease (a crash-then-GC-retry, or `rooms kill` racing a
++/// re-lease) must NOT delete a tap a *different* room has since re-leased and
++/// recreated. The same never-act-on-a-resource-a-reused-identity-now-owns rule
++/// as [`free`]'s compare-and-delete.
++pub fn leased_by(
++    state: &Path,
++    slot_index: u8,
++    snapshot_id: &str,
++    room_id: &str,
++) -> Result<bool, SlotError> {
++    ensure_pool_index(slot_index)?;
++    let path = state.join(SLOTS_DIR).join(slot_index.to_string());
++    let _lock = lock_frees(state)?;
++    let contents = match std::fs::read_to_string(path) {
++        Ok(contents) => contents,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
++        Err(error) => return Err(SlotError::Io(error)),
++    };
++    Ok(matches!(
++        parse_token(&contents),
++        SlotToken::Leased {
++            snapshot_id: owner,
++            lessee,
++        } if owner == snapshot_id && lessee == room_id
++    ))
++}
++
+ /// The on-disk body of a reservation the walk allocator skips (the file exists,
+ /// so `O_EXCL` create loses) and [`reconcile`] leaves held (not a `Claimed`
+ /// token, so it is never judged by claimer liveness).
+@@ -753,7 +785,7 @@ mod tests {
+     )]
+ 
+     use super::{
+-        claim, claimed_by, classify_claimer_stat, free, lease, parse_token, reconcile,
++        claim, claimed_by, classify_claimer_stat, free, lease, leased_by, parse_token, reconcile,
+         release_lease, reserve, Claimer, Freed, Liveness, Released, Reserved, SlotError, SlotToken,
+         MAX_SLOT, SLOTS_DIR,
+     };
+@@ -1275,6 +1307,36 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn leased_by_is_true_only_for_the_exact_lessee_and_snapshot() {
++        let dir = tempfile::tempdir().unwrap();
++        let (base, snap) = (room_id(1), room_id(100));
++        let lessee = room_id(2);
++        base_claim(dir.path(), 5, &base);
++        reserve(dir.path(), 5, &snap, &base).unwrap();
++        // A bare reservation is not leased by anyone.
++        assert!(!leased_by(dir.path(), 5, &snap, &lessee).unwrap());
++        lease(dir.path(), 5, &snap, &lessee).unwrap();
++        assert!(leased_by(dir.path(), 5, &snap, &lessee).unwrap());
++        // A different lessee or a different snapshot does not match — the
++        // teardown tap-delete gate must be exact.
++        assert!(!leased_by(dir.path(), 5, &snap, &room_id(3)).unwrap());
++        assert!(!leased_by(dir.path(), 5, &room_id(200), &lessee).unwrap());
++        // After the lease returns to a reservation, no room holds it.
++        release_lease(dir.path(), 5, &snap, &lessee).unwrap();
++        assert!(!leased_by(dir.path(), 5, &snap, &lessee).unwrap());
++    }
++
++    #[test]
++    fn leased_by_is_false_for_an_ordinary_claim_and_absent_slot() {
++        let dir = tempfile::tempdir().unwrap();
++        base_claim(dir.path(), 5, &room_id(1));
++        // An ordinary claim is not a lease.
++        assert!(!leased_by(dir.path(), 5, &room_id(100), &room_id(1)).unwrap());
++        // An absent slot is not leased.
++        assert!(!leased_by(dir.path(), 6, &room_id(100), &room_id(2)).unwrap());
++    }
++
+     #[test]
+     fn release_returns_a_lease_to_the_reservation() {
+         let dir = tempfile::tempdir().unwrap();
+diff --git a/src/snapshot_exec.rs b/src/snapshot_exec.rs
+index 3b40edb..4eda889 100644
+--- a/src/snapshot_exec.rs
++++ b/src/snapshot_exec.rs
+@@ -574,7 +574,7 @@ fn managed_id_root(candidate: &Path, parent: &Path) -> Option<PathBuf> {
+     crate::registry::is_valid_room_id(id).then(|| parent.join(id))
+ }
+ 
+-fn canonical_candidate(path: &Path) -> anyhow::Result<PathBuf> {
++pub(crate) fn canonical_candidate(path: &Path) -> anyhow::Result<PathBuf> {
+     let mut current = if path.is_absolute() {
+         path.to_path_buf()
+     } else {
+@@ -598,7 +598,7 @@ fn canonical_candidate(path: &Path) -> anyhow::Result<PathBuf> {
+     Ok(resolved)
+ }
+ 
+-fn overlaps(left: &Path, right: &Path) -> bool {
++pub(crate) fn overlaps(left: &Path, right: &Path) -> bool {
+     left.starts_with(right) || right.starts_with(left)
+ }
+ 
+@@ -1047,7 +1047,7 @@ fn active_vsock(jail_root: &Path) -> anyhow::Result<bool> {
+     Ok(false)
+ }
+ 
+-fn firecracker_version(config: &RoomsConfig) -> anyhow::Result<String> {
++pub(crate) fn firecracker_version(config: &RoomsConfig) -> anyhow::Result<String> {
+     let output = std::process::Command::new(&config.firecracker_binary)
+         .arg("--version")
+         .output()?;
+@@ -1057,10 +1057,23 @@ fn firecracker_version(config: &RoomsConfig) -> anyhow::Result<String> {
+             String::from_utf8_lossy(&output.stderr).trim()
+         );
+     }
+-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
++    // First line only: newer firecrackers append a timestamped exit-log line
++    // to --version stdout, which would poison the pinned compat key with a
++    // value that never matches (observed on v1.15.0).
++    let stdout = String::from_utf8_lossy(&output.stdout);
++    let version = stdout
++        .lines()
++        .map(str::trim)
++        .find(|line| !line.is_empty())
++        .unwrap_or_default()
++        .to_owned();
++    if version.is_empty() {
++        anyhow::bail!("firecracker --version produced no output");
++    }
++    Ok(version)
+ }
+ 
+-fn sha256_file(path: &Path) -> anyhow::Result<String> {
++pub(crate) fn sha256_file(path: &Path) -> anyhow::Result<String> {
+     let mut file = File::open(path)?;
+     let mut hasher = Sha256::new();
+     let mut buf = vec![0_u8; 64 * 1024].into_boxed_slice();
+diff --git a/src/vsock.rs b/src/vsock.rs
+index 3aa7582..815a2a3 100644
+--- a/src/vsock.rs
++++ b/src/vsock.rs
+@@ -23,6 +23,13 @@ pub const PROVISION_PORT: u32 = 5001;
+ /// closed before the guest connects here.
+ pub const QUIESCED_PORT: u32 = 5002;
+ 
++/// Post-restore hygiene-nudge endpoint.
++///
++/// The in-guest resume agent polls this port with bounded connect retries (no
++/// connection is held across a snapshot); the host binds the listener only in
++/// a restored room's jail, so in an ordinary base the poll fails fast.
++pub const RESUME_PORT: u32 = 5003;
++
+ /// The guest's own CID (must be ≥ 3). With the hybrid UDS model there is no
+ /// host-wide CID namespace to collide in — isolation comes from the per-jail
+ /// socket path — so every room uses the same value.
+@@ -321,6 +328,156 @@ async fn read_bounded_line(stream: &mut tokio::net::UnixStream) -> Result<String
+     String::from_utf8(bytes).map_err(|e| format!("provisioning ack is not utf-8: {e}"))
+ }
+ 
++/// The per-restore hygiene nudge served to the resumed guest's agent.
++///
++/// Carries the new room/run identity, the host clock, fresh entropy, and the
++/// admitted secrets (empty when none were requested — the guest still walks
++/// one deterministic protocol either way).
++pub struct ResumePayload {
++    /// The restored room's id — the guest's new identity.
++    pub room_id: String,
++    /// Host wall-clock seconds since the epoch, to step the resumed guest's
++    /// stale clock.
++    pub epoch_secs: i64,
++    /// Fresh host randomness the guest mixes into its CRNG so two restores of
++    /// one snapshot diverge immediately.
++    pub entropy: Vec<u8>,
++    /// Encoded `NAME=value\n` secrets blob (empty = no secrets). Reuses the
++    /// [`SecretsPayload`] wire shape; overwritten on drop with it.
++    pub secrets: SecretsPayload,
++}
++
++/// Pending post-restore hygiene handshake.
++///
++/// The restore flow awaits the guest's terminal ack through
++/// [`ResumeDelivery::await_acked`]; readiness (SSH probe, workload) is gated
++/// on it. Dropping the handle aborts the serving task and the listener.
++#[derive(Debug)]
++pub struct ResumeDelivery {
++    rx: oneshot::Receiver<Result<(), String>>,
++    task: tokio::task::JoinHandle<()>,
++    listen_path: PathBuf,
++}
++
++impl ResumeDelivery {
++    /// Wait for the guest's `ACK resume`, bounded by `timeout`. `Ok(())` means
++    /// every hygiene step (reseed, clock, identity, secrets staging, fresh
++    /// sshd host key) succeeded in-guest — the only signal that may unblock
++    /// readiness.
++    pub async fn await_acked(mut self, timeout: std::time::Duration) -> Result<(), String> {
++        match tokio::time::timeout(timeout, &mut self.rx).await {
++            Ok(Ok(result)) => result,
++            Ok(Err(_)) => Err("resume nudge task ended without a result".to_owned()),
++            Err(_) => Err(format!(
++                "no resume ack within {}s (image predates the resume agent, or hygiene failed in-guest)",
++                timeout.as_secs()
++            )),
++        }
++    }
++}
++
++impl Drop for ResumeDelivery {
++    fn drop(&mut self) {
++        self.task.abort();
++        let _ = std::fs::remove_file(&self.listen_path);
++    }
++}
++
++/// Bind the resume-nudge endpoint in a restored room's jail root, before the
++/// VM resumes — the polling guest agent can never race a listener that
++/// outbinds it.
++#[cfg(unix)]
++pub fn serve_resume(
++    jail_root: &Path,
++    payload: ResumePayload,
++    owner: Option<(u32, u32)>,
++) -> std::io::Result<ResumeDelivery> {
++    let listen_path = listener_path_for(jail_root, RESUME_PORT);
++    let _ = std::fs::remove_file(&listen_path);
++    let listener = tokio::net::UnixListener::bind(&listen_path)?;
++    if let Some((uid, gid)) = owner {
++        std::os::unix::fs::chown(&listen_path, Some(uid), Some(gid))?;
++    }
++    let (tx, rx) = oneshot::channel();
++    let path = listen_path.clone();
++    let task = tokio::spawn(async move {
++        let result = serve_resume_inner(listener, &path, payload).await;
++        let _ = tx.send(result);
++    });
++    Ok(ResumeDelivery {
++        rx,
++        task,
++        listen_path,
++    })
++}
++
++#[cfg(not(unix))]
++pub fn serve_resume(
++    _jail_root: &Path,
++    _payload: ResumePayload,
++    _owner: Option<(u32, u32)>,
++) -> std::io::Result<ResumeDelivery> {
++    Err(std::io::Error::other(
++        "vsock resume nudge requires a unix host",
++    ))
++}
++
++/// Serve the nudge to the first agent connection: preface in, identity /
++/// clock / entropy / secrets frames out, then require the exact terminal ack.
++/// The endpoint retires on accept, like the secrets one-shot — the nudge
++/// carries secrets, so a second reader must find nothing.
++#[cfg(unix)]
++async fn serve_resume_inner(
++    listener: tokio::net::UnixListener,
++    listen_path: &Path,
++    payload: ResumePayload,
++) -> Result<(), String> {
++    use tokio::io::AsyncWriteExt;
++
++    let (mut stream, _) = listener
++        .accept()
++        .await
++        .map_err(|e| format!("accept resume agent: {e}"))?;
++    drop(listener);
++    std::fs::remove_file(listen_path).map_err(|e| format!("retire resume endpoint: {e}"))?;
++    tracing::debug!("resume: agent connected");
++
++    let preface = read_bounded_line(&mut stream).await?;
++    if preface != "ROOMS-RESUME/1" {
++        return Err(format!("resume preface malformed: {preface:?}"));
++    }
++    tracing::debug!("resume: preface ok, sending nudge frames");
++    stream
++        .write_all(format!("IDENTITY {}\n", payload.room_id).as_bytes())
++        .await
++        .map_err(|e| format!("write identity: {e}"))?;
++    stream
++        .write_all(format!("CLOCK {}\n", payload.epoch_secs).as_bytes())
++        .await
++        .map_err(|e| format!("write clock: {e}"))?;
++    write_typed_frame(&mut stream, "ENTROPY", &payload.entropy).await?;
++    write_typed_frame(&mut stream, "SECRETS", &payload.secrets.0).await?;
++    write_typed_frame(&mut stream, "END", &[]).await?;
++    tracing::debug!("resume: frames sent, awaiting hygiene steps + ack");
++    // The guest streams `STEP <name>` progress lines as it applies each
++    // hygiene action, then the terminal `ACK resume`. Logging the steps gives
++    // host-side visibility a snapshot-resumed guest's detached serial can't.
++    // Bounded so a chatty/looping peer can't stream forever.
++    for _ in 0..64 {
++        let line = read_bounded_line(&mut stream).await?;
++        if line == "ACK resume" {
++            tracing::debug!("resume: ack received");
++            return Ok(());
++        }
++        if let Some(step) = line.strip_prefix("STEP ") {
++            tracing::debug!(step, "resume: guest hygiene step");
++            continue;
++        }
++        return Err(format!("resume protocol: unexpected line {line:?}"));
++    }
++    Err("resume protocol: too many lines without an ack".to_owned())
++}
++
+ /// Bind `listen_path` and serve `payload` to the first connection ever made.
+ ///
+ /// The listener is closed and unlinked the moment that connection is
+@@ -460,8 +617,9 @@ mod tests {
+     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+ 
+     use super::{
+-        listener_path, listener_path_for, serve_one_shot, serve_provisioning, ProvisioningPayload,
+-        SecretsPayload, PROVISION_PORT, QUIESCED_PORT, SECRETS_PORT,
++        listener_path, listener_path_for, serve_one_shot, serve_provisioning, serve_resume,
++        ProvisioningPayload, ResumePayload, SecretsPayload, PROVISION_PORT, QUIESCED_PORT,
++        RESUME_PORT, SECRETS_PORT,
+     };
+ 
+     fn payload() -> SecretsPayload {
+@@ -509,6 +667,74 @@ mod tests {
+         (kind.to_owned(), bytes)
+     }
+ 
++    #[tokio::test]
++    async fn resume_nudge_streams_frames_then_gates_on_the_ack() {
++        let dir = tempfile::tempdir().unwrap();
++        let payload = ResumePayload {
++            room_id: "01resumeroomidresumeroomid".to_owned(),
++            epoch_secs: 1_700_000_000,
++            entropy: vec![7_u8; 64],
++            secrets: SecretsPayload::encode(&[("GH_TOKEN".to_owned(), "t-9".to_owned())]),
++        };
++        let delivery = serve_resume(dir.path(), payload, None).unwrap();
++
++        let path = listener_path_for(dir.path(), RESUME_PORT);
++        let mut guest = tokio::net::UnixStream::connect(path).await.unwrap();
++        // The guest speaks first: preface, then reads identity/clock/frames.
++        guest.write_all(b"ROOMS-RESUME/1\n").await.unwrap();
++        assert_eq!(
++            read_line(&mut guest).await,
++            "IDENTITY 01resumeroomidresumeroomid"
++        );
++        assert_eq!(read_line(&mut guest).await, "CLOCK 1700000000");
++        assert_eq!(
++            read_typed_frame(&mut guest).await,
++            ("ENTROPY".to_owned(), vec![7_u8; 64])
++        );
++        assert_eq!(
++            read_typed_frame(&mut guest).await,
++            ("SECRETS".to_owned(), b"GH_TOKEN=t-9\n".to_vec())
++        );
++        assert_eq!(
++            read_typed_frame(&mut guest).await,
++            ("END".to_owned(), Vec::new())
++        );
++        // Progress steps are logged and tolerated; only ACK resume completes it.
++        guest
++            .write_all(b"STEP reseeded\nSTEP sshd\nACK resume\n")
++            .await
++            .unwrap();
++        drop(guest);
++
++        delivery
++            .await_acked(Duration::from_secs(5))
++            .await
++            .expect("a well-formed hygiene handshake acks");
++    }
++
++    #[tokio::test]
++    async fn resume_nudge_without_ack_is_a_delivery_failure() {
++        let dir = tempfile::tempdir().unwrap();
++        let payload = ResumePayload {
++            room_id: "01resumeroomidresumeroomid".to_owned(),
++            epoch_secs: 1,
++            entropy: vec![0_u8; 64],
++            secrets: SecretsPayload::encode(&[]),
++        };
++        let delivery = serve_resume(dir.path(), payload, None).unwrap();
++        let path = listener_path_for(dir.path(), RESUME_PORT);
++        let mut guest = tokio::net::UnixStream::connect(path).await.unwrap();
++        guest.write_all(b"ROOMS-RESUME/1\n").await.unwrap();
++        // Read the nudge but never ack — hygiene "failed" in-guest.
++        let _ = read_line(&mut guest).await;
++        let err = delivery
++            .await_acked(Duration::from_millis(300))
++            .await
++            .expect_err("no ack must fail the delivery");
++        assert!(err.contains("no resume ack"), "got: {err}");
++        drop(guest);
++    }
++
+     #[test]
+     fn encode_frames_name_value_lines() {
+         let blob = payload();

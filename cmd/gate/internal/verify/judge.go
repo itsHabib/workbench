@@ -33,6 +33,21 @@ Decide whether the escalated concerns block the merge or not. Code-verifier bloc
 are not yours to override — you only resolve escalations. Be strict about
 correctness risks, lenient about style and doc nits.
 
+The diff between the markers is the CURRENT code at the exact head — the ground
+truth for whether a finding was addressed, above any reviewer comment text. When a
+finding cites a file:line, the diff shows a window of the current code there: read
+it and decide from the code, not from the comment. If the diff visibly resolves the
+finding, it does not block, even when the reviewer's comment — written against
+earlier code and never retracted — still stands. Reviewers on this path comment
+rather than post a formal approval and re-run on every push, so an absent GitHub
+approval, an incomplete reviewer panel, or an unresolved comment thread is a
+freshness-and-coverage signal about review, not evidence that a fix is missing — do
+not treat it as one. Weigh a clean diff at the cited loci plus green CI over the
+absence of a formal approval. Where the diff shows a cited correctness risk still
+unresolved, or shows no change at the cited locus and you cannot otherwise confirm
+the fix, hold the block: the point is to rule on the code, not to wave findings
+through.
+
 Return exactly one gate-judgment-v1 JSON object, with no markdown. Echo the
 request's run, escalation_id, subject, grant, and question exactly; set producer
 to the object {"class":"judgment","impl":"<your model or CLI identifier>"};
@@ -707,6 +722,7 @@ func scrub(s string) string {
 // judgeContext renders the artifacts a judge is entitled to: escalation,
 // verifier verdicts, and diff evidence — nothing outside state.
 func judgeContext(arts []state.Artifact) (string, error) {
+	loci := findingLoci(arts)
 	var b strings.Builder
 	for _, a := range arts {
 		switch a.Kind {
@@ -717,7 +733,7 @@ func judgeContext(arts []state.Artifact) (string, error) {
 				return "", err
 			}
 		case state.KindEvidence:
-			writeDiffSection(&b, a)
+			writeDiffSection(&b, a, loci)
 		}
 	}
 	if b.Len() == 0 {
@@ -751,9 +767,12 @@ func writeVerdictSection(b *strings.Builder, a state.Artifact) error {
 	return nil
 }
 
-const diffCap = 16 * 1024
-
-func writeDiffSection(b *strings.Builder, a state.Artifact) {
+// writeDiffSection quotes the recorded diff for the judge, windowed so the
+// current code at every cited finding locus is present. A naive head-truncation
+// dropped exactly the hunks a large multi-file PR carries near its tail — the
+// loci the judge is asked to rule on — leaving it to block on procedure; the
+// window (renderJudgeDiff) shows those loci first and never truncates them away.
+func writeDiffSection(b *strings.Builder, a state.Artifact, loci []locusRef) {
 	var body struct {
 		Diff string `json:"diff"`
 	}
@@ -763,9 +782,5 @@ func writeDiffSection(b *strings.Builder, a state.Artifact) {
 	if body.Diff == "" {
 		return
 	}
-	diff := body.Diff
-	if len(diff) > diffCap {
-		diff = diff[:diffCap] + "\n[... diff truncated ...]"
-	}
-	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s\n```\n\n", a.ID, scrub(diff))
+	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s```\n\n", a.ID, scrub(renderJudgeDiff(body.Diff, loci)))
 }
