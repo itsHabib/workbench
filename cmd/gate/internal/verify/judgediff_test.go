@@ -2,8 +2,7 @@ package verify
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,140 +107,131 @@ func itoa(i int) string {
 	return string(d)
 }
 
-// regressionCase pins a real gate run that auto-blocked on procedure: the cited
-// findings' code sat past the old 16 KB head-truncation, so the judge never saw
-// whether the fix landed. Each needle is the verbatim source line at a cited
-// locus; the window must surface every one.
-type regressionCase struct {
-	run     string
-	pr      string
-	fixture string
-	loci    []locusRef
-	needles []string
+// oldDiffCap is the naive head-truncation this change replaced. The synthetic
+// diff below deliberately pushes cited loci past it, reproducing the failure that
+// auto-blocked itsHabib/rooms #101 (run_c2f2ffaf551ceaba, a rootfs kernel-arch
+// finding at ~26 KB) and #102 (run_349c240be6b2cab8, main.rs / restore_exec.rs
+// findings at ~31 KB and ~44 KB) — loci the judge could not see, so it blocked on
+// "cannot confirm the fix". A byte-for-byte capture of those 95 KB / 29 KB diffs
+// is not carried here; the shape that mattered — cited code beyond the cut, one
+// locus inside a very large added hunk — is what the fixture recreates.
+const oldDiffCap = 16 * 1024
+
+// citedLocus pairs a cited file:line with the verbatim source line the fix must
+// let the judge read there.
+type citedLocus struct {
+	ref    locusRef
+	needle string
 }
 
-func regressionCases() []regressionCase {
-	return []regressionCase{
-		{
-			run:     "run_349c240be6b2cab8",
-			pr:      "102",
-			fixture: "pr102.diff",
-			loci: []locusRef{
-				{"src/main.rs", 1266},
-				{"src/restore_exec.rs", 397},
-				{"src/firecracker.rs", 1738},
-			},
-			needles: []string{
-				"vm.guard_mut().dismiss();",
-				"firecracker::remove_egress_and_tap(&tap)",
-				"create_slot_tap(slot)?;",
-			},
-		},
-		{
-			run:     "run_c2f2ffaf551ceaba",
-			pr:      "101",
-			fixture: "pr101.diff",
-			loci: []locusRef{
-				{"src/rootfs.rs", 71},
-				{"src/rootfs.rs", 72},
-				{"scripts/setup-rooms-host.sh", 20},
-			},
-			needles: []string{
-				"if !elf && !arm64_image {",
-				"return Err(RootfsError::KernelBadFormat {",
-				`FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-v1.15.0}"`,
-			},
-		},
+// syntheticParkedDiff builds a multi-file unified diff large enough that the
+// cited loci fall past oldDiffCap. host.rs is padded so its cited line, and every
+// file after it, sits beyond the old cut; restore.rs is a large added file with
+// its cited line deep inside one hunk, exercising within-hunk windowing end to
+// end.
+func syntheticParkedDiff() (string, []citedLocus) {
+	var b strings.Builder
+	loci := []citedLocus{
+		{locusRef{"src/host.rs", 400}, "let host_arch = uname_machine();"},
+		{locusRef{"src/restore.rs", 397}, "firecracker::remove_egress_and_tap(&tap)?;"},
+		{locusRef{"src/kill.rs", 150}, "vm.guard_mut().dismiss();"},
+	}
+	addSyntheticFile(&b, "src/host.rs", 420, 400, loci[0].needle)
+	addSyntheticFile(&b, "src/restore.rs", 851, 397, loci[1].needle)
+	addSyntheticFile(&b, "src/kill.rs", 200, 150, loci[2].needle)
+	return b.String(), loci
+}
+
+// addSyntheticFile renders an added-file diff section of n lines; the line at
+// mark carries needle, the rest are filler wide enough to cross the old cut fast.
+func addSyntheticFile(b *strings.Builder, path string, n, mark int, needle string) {
+	fmt.Fprintf(b, "diff --git a/%s b/%s\n", path, path)
+	fmt.Fprintf(b, "new file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/%s\n", path)
+	fmt.Fprintf(b, "@@ -0,0 +1,%d @@\n", n)
+	for i := 1; i <= n; i++ {
+		if i == mark {
+			fmt.Fprintf(b, "+%s\n", needle)
+			continue
+		}
+		fmt.Fprintf(b, "+    let filler_%d = compute_padding_value(%d);\n", i, i)
 	}
 }
 
-func loadFixture(t *testing.T, name string) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name))
+func lociRefs(cited []citedLocus) []locusRef {
+	refs := make([]locusRef, len(cited))
+	for i, c := range cited {
+		refs[i] = c.ref
+	}
+	return refs
+}
+
+// The regression: every cited locus's current code reaches the judge, and the
+// whole quote stays within budget — even though the loci sit past the old cut.
+func TestRenderJudgeDiffSurfacesCitedLoci(t *testing.T) {
+	diff, cited := syntheticParkedDiff()
+	out := renderJudgeDiff(diff, lociRefs(cited))
+	for _, c := range cited {
+		if !strings.Contains(out, c.needle) {
+			t.Errorf("windowed diff omits cited-locus code %q at %s:%d", c.needle, c.ref.path, c.ref.line)
+		}
+	}
+	// The 851-line restore.rs hunk is windowed, not dumped whole: lines far from
+	// the cited line are trimmed so one hunk cannot crowd the other loci out.
+	if strings.Contains(out, "filler_1 =") || strings.Contains(out, "filler_800 =") {
+		t.Error("large added hunk was not windowed around its cited line")
+	}
+	// At most one over-budget chunk is refused, so the output never exceeds the
+	// cap by more than the truncation note.
+	if over := len(out) - (judgeDiffCap + len(diffTruncated) + 1); over > 0 {
+		t.Errorf("rendered diff %d bytes over cap", over)
+	}
+}
+
+// The failure being fixed, made concrete: cited loci sit beyond the old 16 KB
+// head-truncation window, so the previous judge context could not contain them.
+// Guards against the fixture drifting so small it stops exercising the bug.
+func TestSyntheticDiffExercisesTheTruncationFailure(t *testing.T) {
+	diff, cited := syntheticParkedDiff()
+	var beyond int
+	for _, c := range cited {
+		if idx := strings.Index(diff, c.needle); idx >= oldDiffCap {
+			beyond++
+		}
+	}
+	if beyond < 2 {
+		t.Fatalf("only %d cited needles sit beyond the old %d-byte cut; fixture no longer reproduces the bug", beyond, oldDiffCap)
+	}
+}
+
+// judgeContext is the seam AutoJudge feeds the provider. Reconstructed from a
+// verdict carrying the cited loci plus the recorded diff evidence — the shape a
+// parked run holds — it must place every cited locus's code in the provider
+// context.
+func TestJudgeContextGroundsCitedLociInDiff(t *testing.T) {
+	diff, cited := syntheticParkedDiff()
+	var findings []Finding
+	for _, c := range cited {
+		findings = append(findings, Finding{Title: "cited", Locus: c.ref.path + ":" + itoa(c.ref.line)})
+	}
+	verdict, err := json.Marshal(Verdict{Source: "review-consolidation", Findings: findings})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
-}
-
-// The regression: on the exact diffs that parked #101/#102, every cited locus's
-// current code reaches the judge, and the whole quote stays within budget. Under
-// the old head-truncation the tail loci were dropped — proven by needleBeyondCap
-// below — so the judge blocked on "cannot confirm the fix".
-func TestRenderJudgeDiffSurfacesCitedLociFromRealRuns(t *testing.T) {
-	for _, tc := range regressionCases() {
-		t.Run(tc.pr, func(t *testing.T) {
-			diff := loadFixture(t, tc.fixture)
-			out := renderJudgeDiff(diff, tc.loci)
-			for _, n := range tc.needles {
-				if !strings.Contains(out, n) {
-					t.Errorf("%s (%s): windowed diff omits cited-locus code %q", tc.run, tc.pr, n)
-				}
-			}
-			// Budget holds: at most one over-budget chunk is refused, so the
-			// output never exceeds the cap by more than the truncation note.
-			if over := len(out) - (judgeDiffCap + len(diffTruncated) + 1); over > 0 {
-				t.Errorf("%s: rendered diff %d bytes over cap", tc.pr, over)
-			}
-		})
+	evidence, err := json.Marshal(map[string]string{"diff": diff})
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// The failure being fixed, made concrete: at least one cited needle in each run
-// sat beyond the old 16 KB head-truncation window, so the previous judge context
-// could not contain it. Guards against a future cap change silently masking the
-// regression these fixtures pin.
-func TestRealRunsExerciseTheTruncationFailure(t *testing.T) {
-	const oldCap = 16 * 1024
-	for _, tc := range regressionCases() {
-		t.Run(tc.pr, func(t *testing.T) {
-			diff := loadFixture(t, tc.fixture)
-			var beyond int
-			for _, n := range tc.needles {
-				if idx := strings.Index(diff, n); idx < 0 || idx >= oldCap {
-					beyond++
-				}
-			}
-			if beyond == 0 {
-				t.Fatalf("%s: no cited needle sits beyond the old %d-byte cut; fixture no longer exercises the bug", tc.pr, oldCap)
-			}
-		})
+	arts := []state.Artifact{
+		{Kind: state.KindVerdict, ID: "vrd_x", Body: verdict},
+		{Kind: state.KindEvidence, ID: "evd_x", Body: evidence},
 	}
-}
-
-// judgeContext is the seam AutoJudge feeds the provider. Reconstructing it from a
-// verdict carrying the cited loci plus the recorded diff evidence — the shape a
-// real parked run holds — must place every cited locus's code in the provider
-// context.
-func TestJudgeContextGroundsCitedLociInDiff(t *testing.T) {
-	for _, tc := range regressionCases() {
-		t.Run(tc.pr, func(t *testing.T) {
-			diff := loadFixture(t, tc.fixture)
-			var findings []Finding
-			for _, l := range tc.loci {
-				findings = append(findings, Finding{Title: "cited", Locus: l.path + ":" + itoa(l.line)})
-			}
-			verdict, err := json.Marshal(Verdict{Source: "review-consolidation", Findings: findings})
-			if err != nil {
-				t.Fatal(err)
-			}
-			evidence, err := json.Marshal(map[string]string{"diff": diff})
-			if err != nil {
-				t.Fatal(err)
-			}
-			arts := []state.Artifact{
-				{Kind: state.KindVerdict, ID: "vrd_x", Body: verdict},
-				{Kind: state.KindEvidence, ID: "evd_x", Body: evidence},
-			}
-			ctx, err := judgeContext(arts)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, n := range tc.needles {
-				if !strings.Contains(ctx, n) {
-					t.Errorf("%s: judge context omits cited-locus code %q", tc.pr, n)
-				}
-			}
-		})
+	ctx, err := judgeContext(arts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cited {
+		if !strings.Contains(ctx, c.needle) {
+			t.Errorf("judge context omits cited-locus code %q", c.needle)
+		}
 	}
 }
