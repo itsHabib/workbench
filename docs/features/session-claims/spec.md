@@ -1,6 +1,7 @@
-**Status**: research sketch — NOT a build commitment; the artifact we decide from
+**Status**: accepted; v0 implemented as personal skills under `skills/session-claims/`
 **Owner**: @mh
 **Date**: 2026-08-06
+**Accepted**: 2026-08-12
 **Related**: [driver-state](../driver-state/spec.md) (append-only JSONL prior art; its `actor` is already `session:<id>`, so the roster join is free); [session-orchestrator](../session-orchestrator/spec.md) (one session → N tasks — the complement of this doc); motivating evidence in roxiq `docs/qa/resume-tomorrow.md`, `docs/qa/SESSION-HANDOFF-2026-05-18-1540.md`
 
 # session-claims — mapping live sessions to units of work
@@ -23,7 +24,7 @@ the ones you'd otherwise write a handoff doc for.
 
 ## 2. Shape: two skills + one log + one read-only view
 
-- **`/claim <work>`** (working name — naming is open, §7) — run inside any
+- **`/claim <work>`** — run inside any
   session. Appends a `claim` event for *this* session: session id, work unit,
   repo, branch, worktree, cwd — everything but `<work>` is picked up from the
   environment, so the command is one line with zero flags. `<work>` is whatever
@@ -34,9 +35,9 @@ the ones you'd otherwise write a handoff doc for.
 - **`/release`** — the inverse. Appends a `release` closing this session's open
   claims. An optional trailing note lands in the release event — the generated
   replacement for `resume-tomorrow.md`.
-- **State**: `claims.jsonl` beside dossier's state. Dumb appends — no hash
+- **State**: `~/.claude/session-claims/claims.jsonl`. Dumb appends — no hash
   chain, no locks, no leases. Advisory observability input, not authoritative
-  state; deletable without ceremony.
+  state; machine-local and deletable without ceremony.
 - **Observability**: `roster` — storeless read-only reducer over `claims.jsonl`,
   joined at read time against the worktree list and driver-state/ship records
   (whose `actor` is already `session:<id>`). Owns no state, decides nothing.
@@ -119,14 +120,17 @@ operator most wants to see.
 - No sync/locking on the claims log — append-only, single operator, reducer
   tolerates duplicates and out-of-order.
 - No schema fields beyond what the roster table renders.
-- Not a rebuild of /wip — roster feeds it (or becomes a section of it); they
-  must not become two competing boards.
+- Not a rebuild of `/wip`. `roster` is the session-to-work ownership view;
+  `/wip` remains the cross-store portfolio board. They may join the same data,
+  but neither subsumes the other.
 
-## 7. Open questions (operator)
+## 7. Accepted decisions
 
-1. Naming: `/claim` + `/release` are working names (`/track-session-task` /
-   `/track-session-clear` were the first sketch — too long). Pick before build.
-2. Does roster subsume /wip, or render a section /wip embeds?
-3. Where exactly does `claims.jsonl` live (dossier's state dir vs. its own)?
-4. Does `/release` want a `--handoff` variant that drafts the open-loops note
-   from the session, or is a free-text note enough?
+1. The final verbs are `/claim`, `/release`, and `/roster`.
+2. `/roster` and `/wip` remain distinct views: session ownership versus the
+   whole-portfolio work board.
+3. The machine-local log lives at
+   `~/.claude/session-claims/claims.jsonl`, independent of dossier state.
+4. `/release` accepts an optional free-text note. When asked for a handoff, or
+   when meaningful loops remain and no note was supplied, the skill drafts a
+   short note; no separate `--handoff` variant is needed.
