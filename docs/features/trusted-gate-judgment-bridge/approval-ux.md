@@ -1,17 +1,10 @@
 # Approval UX — calm, phone-friendly operator decisions
 
-Status: **Design 2 and the Phase 0 recommendation are BLOCKED** — the
-committed slice (designs 1–3) is specified as a TDD in
-`docs/features/gate-approval-ux/spec.md`, and that TDD's **§4.1.1 withdraws
-the security argument Design 2 rests on**. A 44-bit phrase does *not* keep
-the binding intact: a compromised dispatcher can grind free-form request
-fields and substitute a materially different but independently valid
-request carrying the same phrase, and today's full-SHA-256 comment does not
-have that weakness. **Do not implement Design 2 (or the Phase 0
-recommendation that includes it) until a binding remedy is selected in
-§4.1.1.** Designs 1 and 3 are unaffected except that they assume the phrase
-Design 2 defines. Read this document as a design-space survey, not as
-current security guidance.
+Status: **Designs 1–3 selected; implementation gated on the TDD's P0 phone
+spike.** Design 2 uses an eight-word (88-bit), decision-bearing phrase to
+preserve infeasible-to-grind exact-request binding. The earlier four-word
+variant is retained below only as rejected history. The implementation source
+of truth is `docs/features/gate-approval-ux/spec.md`.
 Date: 2026-07-31
 
 `design.md` owns the security contract: run-specific independent environment
@@ -80,6 +73,8 @@ it as a push notification.
   surface. The describe card is the surface of record; see
   `docs/features/gate-approval-ux/spec.md` §4.4 for the precise scope of
   what display falsification does and does not catch.
+- Make the protected job depend on `describe`. Approval is unavailable until
+  the trusted card renders; render failure is fail-closed.
 - The independent reviewer account enables GitHub Mobile push notifications
   for deployment reviews. GitHub Mobile can approve environment deployments
   and attach the comment natively.
@@ -95,44 +90,31 @@ no secrets and no authority; if it lied, gate's own verification of the JSON
 refuses (I2, I3). Dispatch moving to the agent is covered by I1's
 different-actor check plus I3.
 
-## Design 2 — Word-coded approval phrases ⛔ BLOCKED
+## Design 2 — Eight-word, decision-bearing approval phrases
 
-> **Blocked pending a §4.1.1 remedy in the TDD.** As specified below (44
-> bits / four words) this is a **regression** against today's full-digest
-> comment, not a neutral re-encoding — see `docs/features/gate-approval-ux/spec.md`
-> §4.1.1. The threat framing later in this section is retained only as a
-> record of what was believed; it is **superseded** by §4.1.1 and must not
-> be cited as justification.
+> The reviewed four-word variant was grindable and is rejected. The selected
+> variant uses 88 digest bits and makes the requested preparation decision
+> explicit; see TDD §4.1.1.
 
 **Change.** Keep the exact-comment binding; change its encoding. Instead of
 `gpr_3f9c…`, gate derives the canonical comment as words:
 
 ```
-prepare 182 mango-harbor-violet-inlet
-execute 182 copper-lantern-mesa-drum
+prepare 182 block mango-harbor-violet-inlet-copper-lantern-mesa-drum
+execute 182 would_merge forest-river-anchor-silver-orbit-bamboo-cabin-sunset
 ```
 
 - The words are a deterministic encoding of the canonical semantic digest
-  (a fixed 2048-word list; 4 words ≈ 44 bits). Gate derives the same words
+  (a fixed 2048-word list; 8 words = 88 bits). Gate derives the same words
   server-side and requires an exact match, exactly as today.
-- The leading `prepare|execute <PR#>` makes the typing act itself the
-  attention check: the operator cannot enter the phrase without stating which
-  operation and which PR they believe they are approving.
-- Threat framing: the digest here is a *binding label inside a
-  20-minute, run-specific, replay-protected window* (I2). The realistic
-  failure is "operator approves request A believing it is B", and 44 bits
-  across the handful of concurrently-live requests makes an **accidental**
-  collision negligible (~2⁻⁴⁴ per pair). **An engineered collision is not
-  negligible** — the window does not prevent offline grinding, since an
-  attacker can vary free-form fields locally and dispatch only once a
-  matching prefix is found — and the design does not rely on it being hard.
-  It relies on the phrase check and the full-document verification being
-  independent gates, so a colliding phrase authorizes nothing. The full
-  digest still rides inside the request JSON and the claim; only the
-  human-facing phrase is shortened. **`docs/features/gate-approval-ux/spec.md`
-  §4.1 is authoritative for this argument;** this bullet is a summary.
+- The leading `prepare|execute <PR#> <decision>` makes the typing act itself
+  the attention check: the operator states the operation, PR, and requested
+  decision. The 88-bit digest encoding binds the remaining request fields
+  beyond a feasible targeted-grinding budget.
+- The full digest still rides inside the request JSON and claim. The shortened
+  human encoding remains an exact, recomputed, pre-credential check.
 
-**Operator sees/does:** types four words and a PR number from the
+**Operator sees/does:** types eight words, a PR number, and the decision from the
 notification card — comfortable on a phone keyboard, no clipboard gymnastics.
 
 **Security intact:** the verification is byte-for-byte the same exact-match
@@ -277,18 +259,13 @@ with nothing half-done. The UX job is to say so calmly.
   itself controls.
 - No reviewer credential co-located with the agent (Design 4's custody rule).
 
-## Recommendation — Phase 0 ⛔ BLOCKED (item 3 below)
-
-> **This recommendation cannot be implemented as written.** It includes
-> word-coded phrases (Design 2), whose security argument is withdrawn in
-> TDD §4.1.1. Items 1, 2, 4 and 5 stand on their own; item 3 waits on a
-> binding remedy. The TDD, not this section, is the live plan.
+## Recommendation — Phase 0 selected, pending P0 validation
 
 Ship **Designs 1 + 2, with Design 3 riding the already-built Slack seam**:
 
 1. agent-performed `workflow_dispatch` (operator never touches JSON);
 2. the `describe` job, verified display inputs, and legible `run-name`;
-3. word-coded canonical phrases (`prepare 182 mango-harbor-violet-inlet`);
+3. decision-bearing, eight-word canonical phrases;
 4. one Slack card per decision via `escalate`/`flare` with deep link,
    copyable phrase, and edited-in-place terminal state;
 5. GitHub Mobile deployment-review notifications on the reviewer account.
@@ -298,7 +275,7 @@ encoder (pure function + golden tests), a display job with no authority, and
 one more card type on an existing Slack transport. Every byte gate verifies
 is unchanged except the canonical comment encoding, which stays an
 exact-match check. The operator's day becomes: *phone buzzes → read card →
-tap link → type four words → done; buzzes again → confirm the merge → done.*
+tap link → type eight words → done; buzzes again → confirm the merge → done.*
 
 Design 5's escort sequencing is agent-side orchestration and can land any
 time after Phase 0. Design 4 is the later investment if phone friction still

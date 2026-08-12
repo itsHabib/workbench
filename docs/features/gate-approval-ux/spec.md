@@ -1,29 +1,26 @@
 # Gate approval UX — Technical Design Document
 
-**Status:** draft / proposal — **BLOCKED on §4.1.1**, NOT a build commitment.
-Round 4 (Codex, P1) invalidated §4.1's binding argument: the word phrase as
-specified is a *regression* against today's full-digest comment, and a
-compromised dispatcher can substitute a valid request carrying the opposite
-`Decision`. §4.1.1 states the attack and the remedy options; the choice is
-the operator's. **P1 must not start until it is made**, and P2 must not
-ship the concurrent `describe` shape (§4.3).
+**Status:** approved design — implementation is gated on P0. The approval
+phrase uses eight words (88 bits) and names the requested decision, closing
+the feasible offline-grinding attack found in review. The protected job waits
+for the trusted card to render before exposing approval. P0 still must prove
+the mobile comment and card surfaces before P1 begins.
 **Owner:** @itsHabib
 **Date:** 2026-07-31
 **Related:** `docs/features/trusted-gate-judgment-bridge/design.md` (the security
 contract this must not move), `docs/features/trusted-gate-judgment-bridge/approval-ux.md`
 (the design-space survey this TDD commits a slice of), `cmd/gate/docs/enforcement.md`.
 
-> **Reviewers — focus areas (v5):** §9.1 P0 is the live question — the
-> phone-surface assumptions block the build and the spike has not run yet;
-> §11's single-operator drill limitation (can an unwarned run actually be
-> arranged here?). §4.1's binding argument, §4.2, §4.4's stated limit,
-> §6.x, §7–§8, and normalization were reviewed across rounds 1–4 and read
-> as settled unless something new surfaces. This is a design review, not a
-> code review.
+> **Implementation focus (v6):** §9.1 P0 is the next move — the
+> phone-surface assumptions block implementation and the spike has not run
+> yet. §11's single-operator drill limitation remains an explicit validation
+> constraint. The exact-request binding and card-ordering findings are closed
+> by §4.1 and §4.3.
 >
 > *Review history: v2 folded round 1, v3 round 2 (§4.1 collision-claim
 > correction, P0 elevation), v4 round 3 (encoder ownership moved to
-> `contracts`), v5 round 4 (§6.3 field gap, drill mechanics).*
+> `contracts`), v5 round 4 (§6.3 field gap, drill mechanics), v6 locked the
+> eight-word decision-bearing phrase and fail-closed card ordering.*
 
 ## 1. Problem & hypothesis
 
@@ -41,8 +38,8 @@ nothing requires proofs of attention to be hex. The dispatch carries no
 authority (everything is re-verified pre-credential), so an agent can
 perform it. The run page can explain itself. A phone push can replace the
 navigation. We can make the operator's day "phone buzzes → read card → type
-four words → done" while every byte gate verifies stays the same, except
-one canonical encoding.
+eight words → done" while every verification step stays the same, except one
+canonical encoding.
 
 **Non-goals (and why):**
 
@@ -125,13 +122,15 @@ deployment-review UI.
 ### 4.1 Word-coded phrase instead of hex digest — **the load-bearing decision**
 
 **Choice:** canonical comment becomes
-`<operation> <pr-number> <w1>-<w2>-<w3>-<w4>`, e.g.
-`prepare 182 mango-harbor-violet-inlet` — four words = the first 44 bits of
-the request's *existing* canonical semantic digest, indexed into a vendored
-2048-word list (the BIP-39 English list as embedded data; no BIP-39
-library, no checksum semantics — just 2048 well-reviewed, distinct,
-phone-typeable words). Verification stays an exact-match comparison in the
-same pre-credential slot.
+`<operation> <pr-number> <intent> <w1>-…-<w8>`, e.g.
+`prepare 182 block mango-harbor-violet-inlet-copper-lantern-mesa-drum`.
+The intent is the preparation decision (`pass` or `block`) or the execution
+outcome (`would_merge`). Eight words encode the first 88 bits of the request's
+*existing* canonical semantic digest, indexed into a vendored
+2048-word list (the BIP-39 English list as embedded data; no BIP-39 library,
+no checksum semantics — just 2048 well-reviewed, distinct, phone-typeable
+words). Verification stays an exact-match comparison in the same
+pre-credential slot.
 
 **Alternatives:** (a) keep the full hex paste — maximally collision-proof,
 but it is the UX being removed, and it proves clipboard possession, not
@@ -139,48 +138,18 @@ attention; (b) drop the comment entirely and rely on run-specific approval
 — rejected: loses the only proof the approver engaged with *this* request
 rather than blind-approving a pending run.
 
-**The honest trade-off:** 44 bits is not a cryptographic commitment, and
-this design does not ask it to be. Two cases, stated separately because
-conflating them is how this paragraph was wrong in v1 (corrected in v3
-from review round 2):
+**Binding strength:** this design deliberately does ask the human encoding to
+be a cryptographic request binding. The earlier four-word design provided 44
+bits and was grindable offline. Eight words provide 88 bits: a targeted
+second-preimage search costs about 2⁸⁸ SHA-256 evaluations, beyond a feasible
+attacker budget. The full 256-bit digest still rides in the request JSON,
+authorization, and claim, unchanged.
 
-- **Accidental collision** between concurrently-live requests: ~2⁻⁴⁴
-  (5.7×10⁻¹⁴) per pair. Negligible at any plausible request rate.
-- **Engineered collision** — grinding a document whose digest shares a
-  *given* 44-bit prefix — is ~2⁴⁴ hash attempts: **well within reach of
-  commodity GPU hardware (order of an hour), not infeasible.** Any claim
-  otherwise should be treated as an error in this document.
+### 4.1.1 Resolved attack and decision record (v6)
 
-The design is *indifferent* to the second case, and that indifference —
-not the bit count — is the actual argument. A colliding phrase authorizes
-nothing, because the phrase check and the full-document verification are
-parallel, independent gates (below): the substituted document must still
-pass live head/base/merge-base match, panel coverage, newest-action and
-action-hash checks, expiry, and replay identity. An attacker who can
-satisfy all of those does not need a phrase collision, and one who cannot
-is refused regardless of the phrase. The full 256-bit digest still rides
-in the request JSON, authorization, and claim, unchanged.
-
-Two refinements of the grinding picture, for precision (v4):
-
-- The grinding space is **not** arbitrary document content. A document
-  ground freely to hit a prefix contains fields gate never evaluated and
-  dies on panel coverage / action-hash / head checks before the phrase is
-  reached. The attacker's search is confined to fields that are *free
-  within an otherwise gate-valid document*.
-- That space is nevertheless **non-empty**: `ReplayID` is format-validated
-  (`evt_` + 32 chars, `gateauthorization.go:231`), not derived from
-  content, so it can be varied offline. This is why the 20-minute window
-  buys nothing against grinding — the attacker grinds locally and
-  dispatches only on a hit — and why the argument must rest on
-  independence rather than on cost.
-
-### 4.1.1 ⛔ BLOCKED — the independence argument above is WRONG (v6, review round 4, Codex P1)
-
-**Everything from "The design is *indifferent*…" onward is withdrawn.** The
-claim "an attacker who can satisfy all of those does not need a phrase
-collision" assumed that *mechanically valid ⇒ materially equivalent*. That
-assumption is false against this contract, and the reviewer's attack works.
+The original four-word design was unsafe. Its argument assumed that
+*mechanically valid ⇒ materially equivalent*. That assumption is false
+against this contract, and the reviewer's attack works.
 
 **The attack.** A compromised dispatcher builds a **second, fully valid**
 request for the same repo, PR, head, base and operation, differing only in
@@ -214,34 +183,12 @@ valid documents that differ in what they authorize. The typed prefix does
 not help: `<operation> <pr-number>` is identical across both — it names the
 operation, never the *decision*.
 
-**Consequence: §4.1 is not settled and P1 must not start.** The
-"ready to lock" reading from round 4 is withdrawn.
-
-**Remedy options — operator's call, since they trade typing against binding
-and one touches `contracts`:**
-
-1. **Raise entropy past grinding.** 8 words ≈ 88 bits (or 6 ≈ 66 bits).
-   Restores an infeasible-to-grind binding with no contract change; costs
-   phone typing, which is the whole premise of this TDD. Needs a P0-style
-   check that 6–8 words is still tolerable on a phone.
-2. **Type the material fields, not just the operation.** e.g.
-   `prepare 182 block mango-harbor-violet-inlet` — the operator asserts the
-   decision, so a pass/block swap cannot hide behind a collision. Narrows
-   the attack rather than closing it: `GrantID` and evidence remain
-   distinguished only by the 44 bits.
-3. **Remove the grinding space.** Constrain the free fields that feed the
-   digest (derive `ReplayID` from content; bound/canonicalize `Why`). This
-   restores strength at 44 bits but changes `contracts` validation and has
-   the widest blast radius.
-4. **Keep the full digest as the binding and put the words beside it** —
-   phrase for attention, full ID still required somewhere in the flow.
-   Honest but reintroduces the paste this work exists to remove.
-
-My reading: **(1) combined with (2)** is the most likely answer — words the
-operator can type, at entropy that removes grinding, with the decision
-stated in words rather than implied by a hash. But this is a real trade
-against the phone-friendliness premise, so it is recorded as a decision the
-operator makes, not one this document takes.
+**Decision:** combine the first two remedies. The phrase carries eight words
+(88 bits), and the preparation comment names `pass` or `block`. This restores
+an infeasible-to-grind exact-request binding without changing request schemas
+or constraining existing free-form fields. P0 must include an eight-word phone
+typing check; failure sends the design back to a different authority surface,
+not to a shorter phrase.
 
 To be explicit about layering: the phrase check and the full-document
 verification are **parallel defenses in the same pre-credential block, not
@@ -251,10 +198,9 @@ merge-base, action hash, argv, expiry, replay ID) against live GitHub and
 hosted state. The phrase is the attention gate; the document verification
 is the correctness gate.
 
-**What the phrase is therefore load-bearing for:** exactly one thing — the
-operator asserting *which* request they engaged with. That makes its
-strength a property of the **surface the attention lands on**, not of the
-bit count (§4.3, §9 P0).
+**What the phrase is therefore load-bearing for:** the operator asserting
+*which exact request* they engaged with. Its security depends on both the
+88-bit binding and the trusted surface the attention lands on (§4.3, §9 P0).
 
 
 ### 4.2 The agent performs the dispatch
@@ -292,37 +238,17 @@ Two residuals named (v2, from review):
   encoded size and refuses locally with a clear error rather than letting
   the API reject it.
 
-### 4.3 Unprivileged `describe` job, not a gate on approval
+### 4.3 Unprivileged `describe` job gates approval availability
 
 **Choice:** the card-rendering job has read-only permissions, no secrets,
-no environment — and the protected job does **not** `needs:` it.
+and no environment. The protected job declares `needs: describe`, so GitHub
+cannot expose the environment approval until the trusted card exists.
 
-**Why:** a describe failure must not be able to park an approval, and an
-approval must never skip verification anyway. The card is the anti-spoof
-anchor (derived on trusted `main` from the actually-dispatched JSON), so
-whatever a Slack message claims, the page the operator approves on shows
-the truth.
-
-**⛔ Corrected (v6, review round 4, Codex P1): "no `needs:`" creates a race
-that defeats the anchor in the *normal* case.** With no dependency, the two
-jobs start together — but the protected job enters the environment-review
-wait (and fires the phone notification) within seconds, while `describe`
-must check out, set up Go, and build gate first. So the reviewer routinely
-reaches the approval screen **before the card exists**, leaving exactly the
-two surfaces §4.3 says must not be load-bearing: the untrusted Slack card
-and the agent-supplied run-name.
-
-The original rejection of `needs:` conflated two things. Coupling approval
-to a display job is bad for *trust* only if the display job could make the
-approval **fail open** — it cannot. If `describe` fails or is slow, the
-approval is simply not offered yet: that is **fail-closed**, an
-availability cost, not a security inversion. The correct requirement is
-therefore: **the card must be rendered before the approval is exposed.**
-Options for P2 — order the protected job behind `describe` (simplest,
-accepts ~1 min added latency per decision), or split describe into a fast
-render step the protected job waits on. Either way `describe` keeps its
-read-only, secretless, no-`gate-state` posture; what changes is only *when*
-the approval becomes offerable. **P2 must not ship the concurrent shape.**
+**Why:** the card is the anti-spoof anchor, derived on trusted `main` from
+the actually-dispatched JSON. A slow or failed render withholds the approval:
+that is fail-closed availability loss, not an authority inversion. P2 accepts
+the roughly one-minute latency rather than introducing a second fast-render
+path. `describe` keeps its read-only, secretless, no-`gate-state` posture.
 
 **The anchor must be reachable from the approval surface, or it anchors
 nothing (v3, from review round 2).** This is an *empirical* dependency on
@@ -394,7 +320,7 @@ No schema, artifact, grant, claim, or `gate-state` changes. What changes:
 - **Vendored wordlist**: 2048 words, `go:embed` text file under
   `contracts/gateauthorization` (§10.1), byte-hash pinned by a golden test (a changed list
   silently changes every phrase — the test makes that loud). The same
-  golden also pins the four-word output for a fixed digest fixture (v3,
+  golden also pins the eight-word output for a fixed digest fixture (v3,
   from review round 2), so an off-by-one in the bit-slicing cannot survive
   a wordlist that still hashes correctly — the two assertions fail
   independently and name different bugs.
@@ -413,9 +339,10 @@ Placed beside the existing `ExpectedApprovalComment` /
 // ApprovalPhrase derives the canonical approval comment for a request.
 // digest: the request's canonical semantic digest (existing bytes).
 // op: "prepare" | "execute". pr: the request's PR number.
-// Words: digest's first 44 bits, big-endian, as four 11-bit indices into
+// intent: "pass" | "block" for prepare; "would_merge" for execute.
+// Words: digest's first 88 bits, big-endian, as eight 11-bit indices into
 // the embedded 2048-word list. Errors on unknown op or pr < 1. Never panics.
-func ApprovalPhrase(digest [32]byte, op string, pr int) (string, error)
+func ApprovalPhrase(digest [32]byte, op string, pr int, intent string) (string, error)
 ```
 
 **One consequence to accept explicitly (v4).** Today's
@@ -436,13 +363,11 @@ attack hyphens with smart-punctuation substitution):
 
 1. map the Unicode hyphen family (U+2010–U+2014, U+2212, U+FE58, U+FE63,
    U+FF0D) to ASCII `-`;
-2. accept `-` or a single space as the separator between the four words
-   (`mango harbor violet inlet` and `mango-harbor-violet-inlet` both
-   pass);
+2. accept `-` or a single space as the separator between the eight words;
 3. trim, collapse internal whitespace runs to one space;
 4. lowercase ASCII.
 
-Word identity, word order, operation, and PR number stay exact — the
+Word identity, word order, operation, PR number, and intent stay exact — the
 normalization widens only the typeable surface, never the binding.
 
 ### 6.2 `gate executor submit`
@@ -488,10 +413,11 @@ silently drop operator-inspectable evidence that today's
   *not* falsifiable against the document (it is per-dispatch, not derived
   from it) and therefore carries no claim gate could check — it exists
   only so the poller can identify its own run.
-- `gate-executor.yml`: three optional display inputs; `run-name` from
+- `gate-executor.yml`: four optional display inputs; `run-name` from
   them; new first job `describe` (`permissions: contents: read`, no
   environment, no secrets, no `gate-state` checkout, checks out the same
-  pinned `github.sha`, builds gate, runs §6.3).
+  pinned `github.sha`, builds gate, runs §6.3); the protected job declares
+  `needs: describe` so approval cannot be exposed before the card renders.
 - Error model: everything is gate's existing refusal vocabulary; the only
   new reason is the display mismatch. Like every post-approval refusal
   (§7.3), a display mismatch exits non-zero so the run and its approved
@@ -506,7 +432,7 @@ silently drop operator-inspectable evidence that today's
 2. Agent: `submit` → dispatch → run URL + phrase; posts Slack card.
 3. `describe` job renders the card on the run page; protected job waits.
 4. Phone push (GitHub Mobile deployment review). Operator reads the card,
-   approves, types `prepare 182 mango-harbor-violet-inlet`.
+   approves, types `prepare 182 block mango-harbor-violet-inlet-copper-lantern-mesa-drum`.
 5. Gate verifies everything per design.md — the only changed comparison is
    comment encoding — evaluates against hosted state, publishes the action.
 6. Slack card → ✅ with the action reference.
@@ -592,8 +518,9 @@ keep the separate, deliberately boring `reconcile` path.
   the **earliest non-terminal** match (that is the one holding the queue
   slot and therefore the approval), and say so in the output rather than
   silently picking.
-- **`describe` failure:** independent of approval by construction (§4.3);
-  worst case is a run without a pretty card, which degrades to today's UX.
+- **`describe` failure:** the protected job never becomes approval-eligible
+  (§4.3). The run fails closed and must be regenerated after the render bug is
+  fixed; there is no cardless fallback.
 - **Slack outage:** notifications degrade to GitHub Mobile push alone;
   nothing authoritative is lost.
 
