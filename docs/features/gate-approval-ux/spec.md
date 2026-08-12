@@ -11,7 +11,7 @@ the mobile comment and card surfaces before P1 begins.
 contract this must not move), `docs/features/trusted-gate-judgment-bridge/approval-ux.md`
 (the design-space survey this TDD commits a slice of), `cmd/gate/docs/enforcement.md`.
 
-> **Implementation focus (v6):** §9.1 P0 is the next move — the
+> **Implementation focus (v7):** §9.1 P0 is the next move — the
 > phone-surface assumptions block implementation and the spike has not run
 > yet. §11's single-operator drill limitation remains an explicit validation
 > constraint. The exact-request binding and card-ordering findings are closed
@@ -20,7 +20,8 @@ contract this must not move), `docs/features/trusted-gate-judgment-bridge/approv
 > *Review history: v2 folded round 1, v3 round 2 (§4.1 collision-claim
 > correction, P0 elevation), v4 round 3 (encoder ownership moved to
 > `contracts`), v5 round 4 (§6.3 field gap, drill mechanics), v6 locked the
-> eight-word decision-bearing phrase and fail-closed card ordering.*
+> eight-word decision-bearing phrase and fail-closed card ordering; v7 closed
+> retry correlation, operation-specific cards, and fallback credential scope.*
 
 ## 1. Problem & hypothesis
 
@@ -376,9 +377,12 @@ normalization widens only the typeable surface, never the binding.
 gate executor submit -request <emitted-request.json> [-workflow gate-executor.yml] [-json]
 ```
 
-Validates the document (schema, expiry unexpired), derives display inputs
-and phrase, POSTs the workflow dispatch, then polls the run list (bounded,
-~60 s) for a post-dispatch run whose run-name matches its display inputs.
+Validates the document (schema, expiry unexpired), derives its stable request
+identity (`PreparationID` or `AuthorizationID`), display inputs, and phrase.
+Before dispatch, it queries runs for the earliest non-terminal run carrying
+that request identity; if one exists, `submit` reuses it and does not dispatch.
+Otherwise it POSTs the workflow dispatch, then polls the run list (bounded,
+~60 s) for the earliest non-terminal run carrying that request identity.
 Prints `run_url`, `phrase`, `pr/head/base`, `expires` (text and `-json`)
 **only once the run is found** (v3, from review round 2): the phrase is the
 string the operator will type, so it must never appear in output that
@@ -394,25 +398,31 @@ gate executor describe -request <file>
 ```
 
 Read-only; validates shape and prints the Markdown decision card for
-`$GITHUB_STEP_SUMMARY`. Fields: operation, PR + title, head short+full,
-base, merge-base, expiry, replay ID, exact phrase, **evidence digest, and
-judgment-question hash**. The last two are required, not optional (v5,
-from review round 4): §6.1 moves them off the typed string, so the card is
-the only place they remain inspectable, and a card without them would
-silently drop operator-inspectable evidence that today's
-`ExpectedApprovalComment` carries. Malformed input → a card that says
-*malformed request* + non-zero exit — visible, not silent.
+`$GITHUB_STEP_SUMMARY`. Common fields: operation, stable request ID, PR +
+title, head short+full, base, merge-base, expiry, replay ID, and exact phrase.
+Operation-specific fields are required:
+
+- **prepare:** grant ID, decision (`pass`/`block`), and `why`;
+- **execute:** action ID + hash, merge argv, evidence digest, and
+  judgment-question text + hash.
+
+The execution evidence and question fields are required, not optional (v5,
+from review round 4): §6.1 moves them off the typed string, so the card is the
+only place they remain inspectable. Preparation displays the fields its
+contract actually carries rather than inventing execution-only data.
+Malformed input → a card that says *malformed request* + non-zero exit —
+visible, not silent.
 
 ### 6.4 Changed surfaces
 
 - `prepare`/`execute` verbs: new `-display-operation`, `-display-pr`,
   `-display-head` flags; non-empty mismatch with the document → refusal
   (pre-credential). Empty display flags stay accepted, so raw Actions-UI
-  dispatches remain valid. A fourth display input, the **correlation
-  nonce** (§8), is carried in `run-name` for `submit` to match on; it is
-  *not* falsifiable against the document (it is per-dispatch, not derived
-  from it) and therefore carries no claim gate could check — it exists
-  only so the poller can identify its own run.
+  dispatches remain valid. A fourth display input, the stable **request
+  identity** (§8), is carried in `run-name` for `submit` to match on. Gate
+  derives and falsifies it against the document like the other display
+  claims. Because it is stable across retries, a restarted `submit` can find
+  and reuse the run already holding the executor queue slot.
 - `gate-executor.yml`: four optional display inputs; `run-name` from
   them; new first job `describe` (`permissions: contents: read`, no
   environment, no secrets, no `gate-state` checkout, checks out the same
@@ -509,15 +519,17 @@ keep the separate, deliberately boring `reconcile` path.
   assumed the runs were interchangeable, which the concurrency group makes
   false.
 
-  **Correct rule (v6):** correlate explicitly rather than guessing.
-  `submit` sends a per-dispatch **correlation nonce** as an additional
-  display-only input, and matches the run carrying its own nonce. A nonce
-  is display data, never authority — gate falsifies display inputs per
-  §4.4, and a wrong or absent nonce can only mislabel a run, never
-  authorize one. If a retry produces two runs for the same request, select
-  the **earliest non-terminal** match (that is the one holding the queue
-  slot and therefore the approval), and say so in the output rather than
-  silently picking.
+  **Correct rule (v7):** correlate on the stable request identity, not a
+  per-dispatch nonce. Before dispatch, `submit` searches for the earliest
+  non-terminal run whose display request ID equals the document's derived
+  `PreparationID` or `AuthorizationID`; if found, it returns that run and
+  does not dispatch. After dispatch it performs the same search. Concurrent
+  callers can still both pass the preflight before either run is visible, but
+  both then select the **earliest non-terminal** stable-ID match (the run
+  holding the queue slot) and report that reuse explicitly. The later queued
+  duplicate remains harmless and refuses once it advances; no caller points
+  the operator at it. Gate falsifies the displayed ID against the document,
+  so correlation adds no authority.
 - **`describe` failure:** the protected job never becomes approval-eligible
   (§4.3). The run fails closed and must be regenerated after the render bug is
   fixed; there is no cardless fallback.
@@ -572,14 +584,17 @@ threshold above** (v5, from review round 4) — this is a first-pass-wins
 search, not a survey of all three. Any surface meeting both inherits the
 anti-spoof property; the ordering is by how little else it disturbs:
 
-1. **Check-run summary** on the PR head — rich markdown, renders in
-   GitHub Mobile, and the Gate App can post it. Note it is display only:
-   check-run *actions* remain rejected (§4.7), and posting must not create
-   a reusable green context — *i.e. the check run must never be selectable
-   as, or count toward, a branch-protection required check. A passing
-   state that outlives this one approval would decouple the display
-   surface from the decision it describes and hand a future PR a green
-   context it never earned* (v5).
+1. **Check-run summary** on the PR head — rich markdown and visible in GitHub
+   Mobile. The secretless `describe` job posts it with that run's ephemeral
+   `GITHUB_TOKEN` and job-level `checks: write`; it never receives the Gate
+   App private key and never mints an App token. The check name includes the
+   stable request-ID suffix and remains `in_progress` while approval is
+   pending, so it cannot be configured as a reusable required green context.
+   It is display only: check-run *actions* remain rejected (§4.7), and the
+   protected job still performs every authority check before App-token
+   creation. If repository policy cannot grant this narrow permission, this
+   candidate fails and P0 proceeds to candidate 2 rather than widening
+   credentials.
 2. **Deployment description / environment URL** — smaller, but sits
    directly on the approval screen.
 3. **Pre-approval acknowledgement** — the Slack deep link resolves to the
