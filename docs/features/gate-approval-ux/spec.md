@@ -382,7 +382,10 @@ identity (`PreparationID` or `AuthorizationID`), display inputs, and phrase.
 Before dispatch, it queries runs for the earliest non-terminal run carrying
 that request identity; if one exists, `submit` reuses it and does not dispatch.
 Otherwise it POSTs the workflow dispatch, then polls the run list (bounded,
-~60 s) for the earliest non-terminal run carrying that request identity.
+~60 s) for the earliest non-terminal run carrying that request identity. Once
+the survivor is selected, `submit` cancels every later non-terminal run with
+the same stable identity and confirms each reaches a terminal cancelled state
+before it returns the survivor's URL.
 Prints `run_url`, `phrase`, `pr/head/base`, `expires` (text and `-json`)
 **only once the run is found** (v3, from review round 2): the phrase is the
 string the operator will type, so it must never appear in output that
@@ -526,10 +529,14 @@ keep the separate, deliberately boring `reconcile` path.
   does not dispatch. After dispatch it performs the same search. Concurrent
   callers can still both pass the preflight before either run is visible, but
   both then select the **earliest non-terminal** stable-ID match (the run
-  holding the queue slot) and report that reuse explicitly. The later queued
-  duplicate remains harmless and refuses once it advances; no caller points
-  the operator at it. Gate falsifies the displayed ID against the document,
-  so correlation adds no authority.
+  holding the queue slot) and report that reuse explicitly. They cancel every
+  later non-terminal match through the Actions API and poll until GitHub
+  reports each duplicate terminal. This cleanup is mandatory: a cancellation
+  failure makes `submit` exit non-zero and withhold the phrase rather than
+  leave a duplicate that can later occupy the repo-wide executor slot. The
+  operation is convergent when callers race—both keep the same earliest run,
+  and duplicate cancel requests are idempotent. Gate falsifies the displayed
+  ID against the document, so correlation and cleanup add no authority.
 - **`describe` failure:** the protected job never becomes approval-eligible
   (§4.3). The run fails closed and must be regenerated after the render bug is
   fixed; there is no cardless fallback.
