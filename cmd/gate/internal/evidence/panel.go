@@ -138,9 +138,9 @@ func panelCompletion(expected, headSHA string, reviews []rawComment, comments []
 			HeadSHA: review.CommitID, ReviewID: review.ID,
 		}, true
 	}
-	if comment, ok := codexCleanCompletion(expected, headSHA, comments); ok {
+	if comment, state, ok := codexIssueCompletion(expected, headSHA, comments); ok {
 		return reviewpanel.Reviewer{
-			Name: expected, Actor: comment.Author, State: "CLEAN",
+			Name: expected, Actor: comment.Author, State: state,
 			HeadSHA: headSHA, ReviewID: comment.ID,
 		}, true
 	}
@@ -155,23 +155,52 @@ func panelCompletion(expected, headSHA string, reviews []rawComment, comments []
 
 var codexReviewedCommit = regexp.MustCompile("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`\\r?$")
 
-func codexCleanCompletion(expected, headSHA string, comments []Comment) (Comment, bool) {
+// codexReviewPrefix opens every review the Codex connector posts, clean or not.
+// It is the connector harness's own framing, not model prose the review can
+// choose: a comment lacking it is not a Codex review submission at all.
+const codexReviewPrefix = "Codex Review:"
+
+// codexCleanPrefix additionally opens the no-findings variant. It selects the
+// recorded state, never whether the review counts as completed.
+const codexCleanPrefix = "Codex Review: Didn't find any major issues."
+
+// codexIssueCompletion reports the Codex connector's latest head-bound review
+// posted as an issue comment, and the panel state to record for it.
+//
+// Completion is not cleanliness. The panel asks one question — did this
+// reviewer review THIS head — and the connector's harness-emitted
+// reviewed-commit line answers it whether or not the review found anything.
+// Requiring the clean opener conflated the two and parked the gate on evidence
+// SHAPE: a Codex review that did its job and reported findings read as "codex
+// never reviewed this head". Findings are a separate fact, extracted by the
+// review-consolidation verifier from the same comments, and they still park
+// the run for judgment on their own merits.
+//
+// The head anchor is the connector's line, never the review's words. A comment
+// saying "Approved", "LGTM", or "ready to merge" without that line completes
+// nothing — prose is not authority here, and a verdict with no commit anchor
+// cannot state which tree it applies to.
+func codexIssueCompletion(expected, headSHA string, comments []Comment) (Comment, string, bool) {
 	if expected != "codex" {
-		return Comment{}, false
+		return Comment{}, "", false
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
 		comment := comments[i]
 		if comment.Author != "chatgpt-codex-connector[bot]" || !comment.IsBot ||
 			comment.CommitID != "" || comment.Path != "" ||
-			!strings.HasPrefix(comment.Body, "Codex Review: Didn't find any major issues.") {
+			!strings.HasPrefix(comment.Body, codexReviewPrefix) {
 			continue
 		}
 		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
-		if len(match) == 2 && strings.HasPrefix(headSHA, match[1]) {
-			return comment, true
+		if len(match) != 2 || !strings.HasPrefix(headSHA, match[1]) {
+			continue
 		}
+		if strings.HasPrefix(comment.Body, codexCleanPrefix) {
+			return comment, "CLEAN", true
+		}
+		return comment, "COMMENTED", true
 	}
-	return Comment{}, false
+	return Comment{}, "", false
 }
 
 // attestationAuthor is the only actor whose attestation counts: the repository's
