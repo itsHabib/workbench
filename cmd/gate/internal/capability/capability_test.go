@@ -141,6 +141,42 @@ func TestTierCeilingFailsClosed(t *testing.T) {
 	}
 }
 
+// TestTierWithinUnknownCandidateMatchesT3 pins current TierWithin semantics a
+// hand-ported Lean model of gate surfaced (workbench-laws-lean
+// Verdict/Reachability.md): TierWithin validates the grant's CEILING but not the
+// CANDIDATE (capability.go:140-148), and tier.Rank ranks every unknown/empty
+// string at 3 — the same rank as T3. So an unknown or empty candidate compares
+// "within" a valid T3 ceiling and is rejected by every lower ceiling, exactly as
+// a real T3 would be. TestTierCeilingFailsClosed only checks a T1 ceiling (where
+// rank-3 is over the ceiling regardless); the T3 row is the case it never saw.
+//
+// This is a semantics + reachability question, NOT a live vulnerability. Per
+// Reachability.md, every current owned producer path (triage-floor, submitted
+// judgment, readiness, ci-classify) rejects or pins the tier before an unknown
+// candidate could reach a live TierWithin call — reaching this row needs a
+// foreign/drifted artifact. Whether TierWithin should also validate the
+// candidate is open policy question Q2 in cmd/gate/docs/FOLLOWUPS.md, not a
+// change made here.
+func TestTierWithinUnknownCandidateMatchesT3(t *testing.T) {
+	for _, candidate := range []string{"garbage", ""} {
+		for _, c := range []struct {
+			ceiling string
+			within  bool
+		}{
+			{"T0", false},
+			{"T1", false},
+			{"T2", false},
+			{"T3", true}, // unknown/empty ranks 3, so only a T3 ceiling admits it
+		} {
+			g := Grant{MaxTier: c.ceiling}
+			if got := g.TierWithin(candidate); got != c.within {
+				t.Errorf("Grant{MaxTier:%q}.TierWithin(%q) = %v, want %v",
+					c.ceiling, candidate, got, c.within)
+			}
+		}
+	}
+}
+
 func TestMintRejectsUnknownCeiling(t *testing.T) {
 	st, key := setup(t)
 	now := fixedClock(time.Unix(1000, 0))

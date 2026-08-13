@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
+	"github.com/itsHabib/workbench/cmd/gate/internal/tier"
 )
 
 var subj = Subject{Repo: "o/r", Number: 1}
@@ -29,6 +30,55 @@ func TestReduceCodeBlockIsFinal(t *testing.T) {
 	}
 	if got.Decision != DecisionBlock {
 		t.Fatalf("judgment overrode a code block: %s", got.Decision)
+	}
+}
+
+// TestReduceRawTierIsOrderDependentAtRankTie pins a semantic edge a hand-ported
+// Lean model of this reducer surfaced (workbench-laws-lean docs/report.md,
+// source-map.md row "Strict-greater tier replacement; unknown/empty rank 3").
+// Reduce replaces the composed tier only on a STRICTLY-greater rank
+// (verify.go:142-144), and tier.Rank ranks "T3" and every unknown/empty string
+// alike at 3 (tier.go). So at a rank tie the FIRST spelling reached wins: the
+// decision and the tier RANK are identical either way, only the raw tier STRING
+// differs. The property generator draws only valid tiers, which have no rank
+// ties, so it never sampled this — this example is the coverage it was missing.
+//
+// This is current, defensible behavior, pinned here on purpose — NOT a bug being
+// fixed. Whether the composed tier should be canonicalized so raw output is
+// order-independent is open policy question Q1 in cmd/gate/docs/FOLLOWUPS.md.
+func TestReduceRawTierIsOrderDependentAtRankTie(t *testing.T) {
+	// Two real code floors (non-ci-classify sources), so the set reduces to a
+	// pass and we observe the composed tier rather than an escalation. "T3" and
+	// "garbage" both rank 3 — a rank tie.
+	forward := []Verdict{
+		{Source: "readiness", Producer: code, Decision: DecisionPass, Tier: "T3", Confidence: 1},
+		{Source: "custody", Producer: code, Decision: DecisionPass, Tier: "garbage", Confidence: 1},
+	}
+	reverse := []Verdict{forward[1], forward[0]}
+
+	fwd, err := Reduce(subj, forward)
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	rev, err := Reduce(subj, reverse)
+	if err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+
+	// Invariant across order: the decision and the tier RANK — the axes the
+	// composition law actually promises.
+	if fwd.Decision != rev.Decision {
+		t.Fatalf("decision changed with order: %s vs %s", fwd.Decision, rev.Decision)
+	}
+	if tier.Rank(fwd.Tier) != tier.Rank(rev.Tier) {
+		t.Fatalf("tier rank changed with order: %d vs %d", tier.Rank(fwd.Tier), tier.Rank(rev.Tier))
+	}
+	// NOT invariant: the raw tier string follows first-strict-maximum.
+	if fwd.Tier != "T3" {
+		t.Fatalf("forward composed tier = %q, want T3 (first spelling wins the rank tie)", fwd.Tier)
+	}
+	if rev.Tier != "garbage" {
+		t.Fatalf("reverse composed tier = %q, want garbage (first spelling wins the rank tie)", rev.Tier)
 	}
 }
 
