@@ -12,14 +12,20 @@ import (
 // its tail — precisely the loci the judge is asked to rule on — so it cannot see
 // whether the fix landed, defaults to "cannot confirm, will not clear a boundary-
 // touching check", and blocks an already-fixed PR on procedure. The window here
-// emits the current code around every cited locus FIRST and never truncates it
-// away; the remaining budget carries the rest of the diff for context.
+// emits the current code around every cited locus FIRST — falling back to a
+// tight window when the budget runs short, and never letting one refused window
+// abandon the loci after it; the remaining budget carries the rest of the diff
+// for context.
 const (
 	// judgeDiffCap bounds the whole diff quoted to the judge.
 	judgeDiffCap = 48 * 1024
 	// locusContext is the number of new-file lines kept on each side of a cited
 	// line, so the code at the locus is visible even inside a very large hunk.
 	locusContext = 40
+	// tightContext is the fallback per-side window when the full window no
+	// longer fits the remaining budget: enough to read the cited code itself,
+	// small enough that dozens of loci still fit under the cap.
+	tightContext = 5
 
 	diffElision   = "[... diff trimmed to the cited lines ...]"
 	diffTruncated = "[... diff truncated: budget exhausted; cited-locus windows shown above ...]"
@@ -232,42 +238,47 @@ func (h diffHunk) render() string {
 	return b.String()
 }
 
-// window renders the hunk trimmed to locusContext new-file lines around each
-// covered target, standing an elision marker in for trimmed spans. A hunk with
-// no covered target — or one small enough that nothing trims — renders whole.
-func (h diffHunk) window(targets []int) string {
+// window renders the hunk trimmed to ctx new-file lines around each covered
+// target, standing an elision marker in for every trimmed span — including the
+// span between two distant targets, so one hunk covering far-apart loci never
+// renders the whole stretch separating them. A hunk with no covered target — or
+// one small enough that nothing trims — renders whole.
+func (h diffHunk) window(targets []int, ctx int) string {
 	hit := h.covers(targets)
 	if len(hit) == 0 {
 		return h.render()
 	}
 	keep := make([]bool, len(h.body))
+	kept := false
 	newLine := h.newStart
 	for i, l := range h.body {
-		if nearAny(newLine, hit, locusContext) {
+		if nearAny(newLine, hit, ctx) {
 			keep[i] = true
+			kept = true
 		}
 		if advancesNewFile(l) {
 			newLine++
 		}
 	}
-	lo, hi, ok := keptRange(keep)
-	if !ok {
+	if !kept {
 		return h.render()
 	}
 	var b strings.Builder
 	b.WriteString(h.header)
 	b.WriteByte('\n')
-	if lo > 0 {
-		b.WriteString(diffElision)
+	elided := false
+	for i, l := range h.body {
+		if !keep[i] {
+			if !elided {
+				b.WriteString(diffElision)
+				b.WriteByte('\n')
+				elided = true
+			}
+			continue
+		}
+		b.WriteString(l)
 		b.WriteByte('\n')
-	}
-	for i := lo; i <= hi; i++ {
-		b.WriteString(h.body[i])
-		b.WriteByte('\n')
-	}
-	if hi < len(h.body)-1 {
-		b.WriteString(diffElision)
-		b.WriteByte('\n')
+		elided = false
 	}
 	return b.String()
 }
@@ -283,20 +294,6 @@ func nearAny(line int, targets []int, ctx int) bool {
 		}
 	}
 	return false
-}
-
-func keptRange(keep []bool) (lo, hi int, ok bool) {
-	lo, hi = -1, -1
-	for i, k := range keep {
-		if !k {
-			continue
-		}
-		if lo == -1 {
-			lo = i
-		}
-		hi = i
-	}
-	return lo, hi, lo != -1
 }
 
 // diffWriter accumulates rendered diff chunks under a shared byte budget, so the
@@ -347,8 +344,12 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 	w := &diffWriter{budget: judgeDiffCap, files: files, written: make([]bool, len(files))}
 
 	// Tranche 1: windows around cited loci, so they are shown before anything can
-	// exhaust the budget.
+	// exhaust the budget. The width is decided over the whole set: full windows
+	// when they all fit, tight ones for every locus when they cannot — many small
+	// windows ground the judge better than a few big ones that crowd the rest
+	// out. A refused window never abandons the loci after it.
 	emitted := make(map[[2]int]bool)
+	width := citedWidth(files, cited)
 	for fi := range files {
 		targets := cited[files[fi].path]
 		if len(targets) == 0 {
@@ -359,15 +360,22 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 			if len(h.covers(targets)) == 0 {
 				continue
 			}
-			if !w.emit(fi, h.window(targets)) {
-				return w.result()
+			if w.emit(fi, h.window(targets, width)) {
+				emitted[[2]int{fi, hi}] = true
 			}
-			emitted[[2]int{fi, hi}] = true
 		}
 	}
 
-	// Tranche 2: the rest of the diff, whole, until the budget runs out.
+	// Tranche 2: the rest of the diff — hunks whole, and the preface alone for a
+	// file that carries none (binary, mode-only, rename-only, submodule), so
+	// those changes stay visible to the judge — until the budget runs out.
 	for fi := range files {
+		if len(files[fi].hunks) == 0 && !w.written[fi] {
+			if !w.emit(fi, "") {
+				return w.result()
+			}
+			continue
+		}
 		for hi := range files[fi].hunks {
 			if emitted[[2]int{fi, hi}] {
 				continue
@@ -378,6 +386,35 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 		}
 	}
 	return w.result()
+}
+
+// citedWidth picks the per-side window width for the cited-locus tranche: full
+// when every cited window (with its file preface) fits the budget together,
+// tight otherwise — so a large cited set degrades uniformly instead of showing
+// the first loci in full and dropping the last ones entirely.
+func citedWidth(files []diffFile, cited map[string][]int) int {
+	total := 0
+	for fi := range files {
+		targets := cited[files[fi].path]
+		if len(targets) == 0 {
+			continue
+		}
+		counted := false
+		for _, h := range files[fi].hunks {
+			if len(h.covers(targets)) == 0 {
+				continue
+			}
+			if !counted {
+				total += len(filePreface(files[fi]))
+				counted = true
+			}
+			total += len(h.window(targets, locusContext))
+		}
+	}
+	if total > judgeDiffCap {
+		return tightContext
+	}
+	return locusContext
 }
 
 func (w *diffWriter) result() string {

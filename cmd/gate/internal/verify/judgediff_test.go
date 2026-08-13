@@ -66,7 +66,7 @@ func TestWindowBoundsLargeHunk(t *testing.T) {
 		body = append(body, "+        filler_line_number_"+itoa(i)+"();")
 	}
 	h := diffHunk{header: "@@ -0,0 +1,800 @@", newStart: 1, body: body}
-	out := h.window([]int{397})
+	out := h.window([]int{397}, locusContext)
 	if !strings.Contains(out, "the_cited_marker_line();") {
 		t.Fatal("window dropped the cited line")
 	}
@@ -89,9 +89,37 @@ func TestWindowSmallHunkRendersWhole(t *testing.T) {
 		newStart: 10,
 		body:     []string{" ctx", "+added_at_11", " ctx2"},
 	}
-	out := h.window([]int{11})
+	out := h.window([]int{11}, locusContext)
 	if !strings.Contains(out, "added_at_11") || strings.Contains(out, diffElision) {
 		t.Fatalf("small hunk should render whole without elision: %q", out)
+	}
+}
+
+// One hunk covering two far-apart cited lines keeps a band around each and
+// elides the stretch between them — rendering the whole span would let a single
+// wide hunk eat the budget the later loci depend on.
+func TestWindowElidesBetweenDistantLoci(t *testing.T) {
+	var body []string
+	for i := 1; i <= 800; i++ {
+		switch i {
+		case 100:
+			body = append(body, "+        first_cited_marker();")
+		case 700:
+			body = append(body, "+        second_cited_marker();")
+		default:
+			body = append(body, "+        filler_line_number_"+itoa(i)+"();")
+		}
+	}
+	h := diffHunk{header: "@@ -0,0 +1,800 @@", newStart: 1, body: body}
+	out := h.window([]int{100, 700}, locusContext)
+	if !strings.Contains(out, "first_cited_marker();") || !strings.Contains(out, "second_cited_marker();") {
+		t.Fatal("window dropped a cited line")
+	}
+	if strings.Contains(out, "filler_line_number_400()") {
+		t.Fatal("window rendered the span between two distant loci instead of eliding it")
+	}
+	if got := strings.Count(out, diffElision); got < 3 {
+		t.Fatalf("expected elisions before, between, and after the loci, got %d", got)
 	}
 }
 
@@ -200,6 +228,60 @@ func TestSyntheticDiffExercisesTheTruncationFailure(t *testing.T) {
 	}
 	if beyond < 2 {
 		t.Fatalf("only %d cited needles sit beyond the old %d-byte cut; fixture no longer reproduces the bug", beyond, oldDiffCap)
+	}
+}
+
+// When the cited windows collectively exceed the budget, a refused window must
+// not abandon the loci after it: later windows fall back to tight ones, so every
+// cited locus the budget can possibly carry still reaches the judge.
+func TestRenderJudgeDiffKeepsLaterCitedLociUnderPressure(t *testing.T) {
+	const nFiles = 24
+	var b strings.Builder
+	var cited []citedLocus
+	for f := 1; f <= nFiles; f++ {
+		path := "src/pressure_" + itoa(f) + ".rs"
+		needle := "cited_marker_in_file_" + itoa(f) + "();"
+		cited = append(cited, citedLocus{locusRef{path, 300}, needle})
+		addSyntheticFile(&b, path, 600, 300, needle)
+	}
+	out := renderJudgeDiff(b.String(), lociRefs(cited))
+	for _, c := range cited {
+		if !strings.Contains(out, c.needle) {
+			t.Errorf("cited locus %s:%d dropped under budget pressure", c.ref.path, c.ref.line)
+		}
+	}
+	if over := len(out) - (judgeDiffCap + len(diffTruncated) + 1); over > 0 {
+		t.Errorf("rendered diff %d bytes over cap", over)
+	}
+}
+
+// A file section with no hunks — binary, mode-only, rename-only, submodule —
+// still reaches the judge through its preface; iterating hunks alone would drop
+// the change entirely.
+func TestRenderJudgeDiffEmitsHunklessFiles(t *testing.T) {
+	diff := "diff --git a/img/logo.png b/img/logo.png\n" +
+		"index 1111111..2222222 100644\n" +
+		"Binary files a/img/logo.png and b/img/logo.png differ\n" +
+		"diff --git a/scripts/run.sh b/scripts/run.sh\n" +
+		"old mode 100644\n" +
+		"new mode 100755\n" +
+		"diff --git a/src/lib.rs b/src/lib.rs\n" +
+		"index 3333333..4444444 100644\n" +
+		"--- a/src/lib.rs\n" +
+		"+++ b/src/lib.rs\n" +
+		"@@ -1,2 +1,3 @@\n" +
+		" fn a() {}\n" +
+		"+fn cited_addition() {}\n" +
+		" fn b() {}\n"
+	out := renderJudgeDiff(diff, []locusRef{{"src/lib.rs", 2}})
+	if !strings.Contains(out, "Binary files a/img/logo.png and b/img/logo.png differ") {
+		t.Error("binary file section dropped from the judge diff")
+	}
+	if !strings.Contains(out, "new mode 100755") {
+		t.Error("mode-only file section dropped from the judge diff")
+	}
+	if !strings.Contains(out, "cited_addition") {
+		t.Error("cited hunk missing")
 	}
 }
 
