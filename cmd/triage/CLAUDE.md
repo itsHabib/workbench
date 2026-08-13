@@ -31,4 +31,4 @@ gofmt -l . && go vet ./... && golangci-lint run ./... && go test ./...
 
 Standard library only; today triage imports nothing else in the module. `contracts` adoption is deliberately NOT done yet — triage's verdict (floor/escalate/final/route) is a different domain shape from the merge verdict; adoption is coupled to the parked schema-alignment work (gate project, `align-triage-verdict-schema`), a behavior change that was out of scope for the byte-identical migration.
 
-The `/pr-risk` skill (canonical at `~/.claude/skills/pr-risk/`) is the runtime; this tenant is its engine + design home. Keep new *policy* in `RUBRIC.md`, new *deterministic signals* in `internal/floor`, and only genuinely-semantic judgment in the skill.
+The `/pr-risk` skill is the runtime; its private canonical source is `<portfolio-root>/cc-skills/skills/pr-risk/` and each harness receives a projection. This tenant is its engine + design home. Keep new *policy* in `RUBRIC.md`, new *deterministic signals* in `internal/floor`, and only genuinely-semantic judgment in the skill.

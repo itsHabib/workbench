@@ -116,7 +116,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: scoped agent guidance is discoverable
+      - name: scoped agent guidance is synchronized
         run: |
           fail=0
           for claude in cmd/*/CLAUDE.md; do
@@ -127,8 +127,8 @@ jobs:
               fail=1
               continue
             fi
-            if ! grep -q 'adjacent `CLAUDE.md`' "$agents"; then
-              echo "$agents must point Codex at the canonical scoped guidance" >&2
+            if ! cmp -s "$claude" "$agents"; then
+              echo "$claude and $agents must be byte-identical" >&2
               fail=1
             fi
           done
