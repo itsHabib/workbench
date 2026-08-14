@@ -173,6 +173,33 @@ Revisit this paragraph when `GATE_EXECUTOR_ARMED` lands and the canaries pass �
 point the bare-merge hole closes structurally and the guard's merge rule becomes
 defense-in-depth rather than the boundary.
 
+## Branch protection per repo
+
+The merge-gate flow ends in the exact `gh pr merge ... --match-head-commit ...` command gate
+emits — but whether that command *lands* depends on the target repo's branch protection, and
+that shape differs per repo. The house rule is that **BEHIND is not by itself proof a refresh
+is necessary**; on a strict repo it is, and the cost is real (refresh → CI re-run → a fresh
+gate judgment, because the judged run binds to the head it was made against). Each sweep was
+rediscovering this per repo, so the facts live here.
+
+Verified 2026-08-14 against `gh api repos/itsHabib/<repo>/branches/main/protection`.
+
+| Repo | Strict (up-to-date required) | Required contexts | Notes |
+|---|---|---|---|
+| `ship` | **yes** | `ubuntu-latest`, `windows-latest` | The expensive one. Any BEHIND PR costs refresh + full CI re-run + a fresh gate judgment; a refresh also resets panel attestations, so reviewed-and-green has to be re-established. Conversation resolution required. |
+| `dossier` | **yes** | `fmt`, `clippy`, `test` | **Drifted:** the job actually reports as the matrix pair `test (ubuntu-latest)` / `test (windows-latest)`, so the bare `test` context never arrives and sits pending forever. Being closed by `sweep-ci-test-aggregator` (an aggregator job named `test`); until it lands, expect a permanently-pending required check. Conversation resolution required. |
+| `drive` | no protection | — | `main` unprotected (HTTP 404 on the protection endpoint). Gate + the guard are the only boundary. |
+| `workbench` | no protection | — | `main` unprotected. Note the five-layer *rulesets* installed for the GitHub App executor bootstrap are a separate mechanism from classic branch protection and do not show up on this endpoint. |
+| `roxiq` | no | `deploy-secret-lint`, `Go`, `Frontend`, `Playwright` | Protected but **not** strict — a BEHIND PR merges without a refresh. Conversation resolution not required. |
+| `rooms` | no protection | — | `main` unprotected. |
+
+Admin enforcement is off everywhere above; required reviews are not configured on any of
+them. That is deliberate — merge authority is gate's, not GitHub's.
+
+**Maintenance rule: when a repo's protection changes, update its row in the same PR.** A
+stale row here is worse than no row, because the sweep that trusts it pays the refresh cost
+it was written to avoid. Re-verify with the `gh api` call above rather than from memory.
+
 ## Not now, and why
 
 - Model-in-the-loop approvals in the floor — the floor's whole value is that a model
