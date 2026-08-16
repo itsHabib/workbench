@@ -28,6 +28,34 @@ type Bundle struct {
 	Comments string // bot review comments (inline + issue-level)
 	Panel    string // ReviewPanelV1 declaration + exact-head completion evidence
 	Stances  string // each reviewer's current review stance, head-anchored
+	// Protection is the base branch's up-to-date requirement (strict required
+	// status checks) as GitHub reports it — the fact that decides whether a
+	// branch GitHub reports BEHIND must be refreshed before the merge command
+	// gate emits can land.
+	Protection string
+}
+
+// BaseProtection is what gate reads back from branch protection: whether the
+// base branch requires a PR branch to be current with it before merging
+// (required_status_checks.strict). Fact only — whether a BEHIND branch must
+// therefore refresh is the verifier's rule and lives there.
+//
+// Known distinguishes "GitHub answered" from "gate could not ask". Reading
+// protection needs admin on the repository, and GitHub answers 404 both for a
+// missing token scope and for an unprotected branch — so an unreadable answer
+// is never evidence that no requirement exists, and never evidence that one
+// does.
+type BaseProtection struct {
+	Base            string `json:"base"`
+	RequireUpToDate bool   `json:"require_up_to_date"`
+	Known           bool   `json:"known"`
+	// Reason records why the readback was inconclusive. Empty when Known.
+	Reason string `json:"reason,omitempty"`
+}
+
+type protectionBody struct {
+	PR         PRRef          `json:"pr"`
+	Protection BaseProtection `json:"protection"`
 }
 
 type viewBody struct {
@@ -121,7 +149,7 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	// already rejects approving your own PR, so this is defense in depth — but
 	// this is the authorization path, and it costs no extra round trip.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
+		"state,isDraft,mergeable,mergeStateStatus,baseRefName,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author")
 	if err != nil {
 		return b, err
 	}
@@ -131,11 +159,22 @@ func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	}
 	b.View = a.ID
 	var viewed struct {
-		HeadRefOid string `json:"headRefOid"`
+		HeadRefOid  string `json:"headRefOid"`
+		BaseRefName string `json:"baseRefName"`
 	}
 	if err := json.Unmarshal(view, &viewed); err != nil {
 		return b, fmt.Errorf("evidence: parse PR head: %w", err)
 	}
+
+	// The base branch's up-to-date requirement is recorded as its own artifact:
+	// it is a repository policy fact, not a property of the PR, and a run must
+	// be able to show what it read when it says a branch has to be refreshed.
+	a, err = st.Append(state.KindEvidence, run, nil,
+		protectionBody{PR: pr, Protection: fetchBaseProtection(pr, viewed.BaseRefName)})
+	if err != nil {
+		return b, err
+	}
+	b.Protection = a.ID
 
 	// method "api" records only that GitHub served the diff — not head/merge_base:
 	// gh pr diff reads by PR number and doesn't report which head it rendered, so
@@ -350,6 +389,38 @@ func fetchPermission(pr PRRef, login string) string {
 		return ""
 	}
 	return body.Permission
+}
+
+// fetchBaseProtection reads the base branch's protection and reports whether it
+// requires a PR branch to be current with the base
+// (required_status_checks.strict). It never fails the run: a repository with no
+// protection, or a token without admin, is a normal condition, and gate must
+// still gather the rest of its evidence. Both land as Known=false, which the
+// verifier treats as "unproven" — neither a requirement nor its absence.
+func fetchBaseProtection(pr PRRef, base string) BaseProtection {
+	if base == "" {
+		return BaseProtection{Reason: "PR view reported no base branch"}
+	}
+	p := BaseProtection{Base: base}
+	raw, err := gh("api", fmt.Sprintf("repos/%s/branches/%s/protection", pr.Repo, base))
+	if err != nil {
+		p.Reason = "branch protection not readable (unprotected branch, or token lacks admin)"
+		return p
+	}
+	// An absent required_status_checks object is a conclusive answer: the branch
+	// is protected and no strict check requirement is configured.
+	var body struct {
+		RequiredStatusChecks struct {
+			Strict bool `json:"strict"`
+		} `json:"required_status_checks"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		p.Reason = "branch protection response unparseable"
+		return p
+	}
+	p.Known = true
+	p.RequireUpToDate = body.RequiredStatusChecks.Strict
+	return p
 }
 
 func fetchReviews(pr PRRef) ([]rawComment, error) {

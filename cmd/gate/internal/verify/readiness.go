@@ -42,15 +42,104 @@ func isOwnGateStatus(c rollupCheck) bool {
 }
 
 type prView struct {
-	State             string        `json:"state"`
-	IsDraft           bool          `json:"isDraft"`
-	Mergeable         string        `json:"mergeable"`
+	State     string `json:"state"`
+	IsDraft   bool   `json:"isDraft"`
+	Mergeable string `json:"mergeable"`
+	// MergeStateStatus is GitHub's mergeability *state*: BEHIND means the head
+	// is not current with the base. Mergeable can read MERGEABLE at the same
+	// time — the PR has no conflicts, it is merely out of date — which is
+	// exactly the case that made GitHub reject a merge command gate emitted.
+	MergeStateStatus  string        `json:"mergeStateStatus"`
+	BaseRefName       string        `json:"baseRefName"`
 	ReviewDecision    string        `json:"reviewDecision"`
 	HeadRefOid        string        `json:"headRefOid"`
 	StatusCheckRollup []rollupCheck `json:"statusCheckRollup"`
 	Author            struct {
 		Login string `json:"login"`
 	} `json:"author"`
+}
+
+// baseProtection mirrors the evidence package's BaseProtection on the JSON seam
+// (same reason as reviewStance below: artifacts, never imports).
+type baseProtection struct {
+	Base            string `json:"base"`
+	RequireUpToDate bool   `json:"require_up_to_date"`
+	Known           bool   `json:"known"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+// mergeStateBehind is GitHub's mergeStateStatus for a head that is not current
+// with its base.
+const mergeStateBehind = "BEHIND"
+
+// upToDateRefresh is the prescription an out-of-date branch carries. Stating
+// the whole sequence matters: refreshing the branch moves the head, so the CI
+// gate read is no longer the CI of what would merge, and this run's pinned
+// --match-head-commit is dead. Anything less sends the operator back into the
+// same loop one step at a time — which is the friction this exists to remove.
+const upToDateRefresh = "merge the base branch into it, let CI finish on the new head, then re-run gate"
+
+// behindBase reports the base branch a LIVE PR is out of date with, if GitHub
+// says it is out of date at all. A MERGED subject is exempt: it has no live
+// merge state, and gating a historical PR (backtest) is about recorded
+// evidence — the same exemption the mergeability block above takes.
+func behindBase(pv prView) (string, bool) {
+	if pv.State == "MERGED" || pv.MergeStateStatus != mergeStateBehind {
+		return "", false
+	}
+	if pv.BaseRefName == "" {
+		return "the base branch", true
+	}
+	return pv.BaseRefName, true
+}
+
+// upToDateBlock reports the block for a branch that is behind its base on a
+// repository that PROVABLY requires branches to be current before merging —
+// the case where GitHub would reject gate's own emitted `gh pr merge`. Saying
+// it here, as a readiness block with the refresh sequence attached, is the
+// point: an emitted command that cannot land is worse than no command.
+//
+// BEHIND alone is deliberately NOT enough, and this is the whole subtlety. A
+// repository that does not require an up-to-date branch merges a behind PR
+// happily, and blocking there would invent a refresh cycle per run. Only proof
+// blocks:
+//
+//   - protection readable and strict → proven requirement, block.
+//   - protection readable and not strict → proven absent, no block. (A merge
+//     conflict is a different fact and already blocks on CONFLICTING.)
+//   - protection unreadable → nothing is proven in either direction, so this
+//     records no block. It escalates instead (upToDateEscalation), which is
+//     gate's vocabulary for "cannot verify" — a judge can settle it, and an
+//     unprovable guess never manufactures a refresh cycle.
+func upToDateBlock(pv prView, prot baseProtection) (string, bool) {
+	base, behind := behindBase(pv)
+	if !behind || !prot.Known || !prot.RequireUpToDate {
+		return "", false
+	}
+	return fmt.Sprintf("branch is behind %s and %s requires branches to be up to date before merging — %s",
+		base, base, upToDateRefresh), true
+}
+
+// upToDateEscalation reports the escalation for a behind branch whose base
+// protection gate could not read. GitHub answers 404 both for an unprotected
+// branch and for a token without admin, so an unreadable answer proves nothing;
+// naming it as unverified beats both silently passing (and emitting a merge
+// command GitHub may reject) and silently blocking (a refresh cycle per run on
+// every repo that requires nothing).
+func upToDateEscalation(pv prView, prot baseProtection) (string, bool) {
+	base, behind := behindBase(pv)
+	if !behind || prot.Known {
+		return "", false
+	}
+	return fmt.Sprintf("branch is behind %s and its protection could not be read (%s) — if the base requires up-to-date branches, %s",
+		base, protectionReason(prot), upToDateRefresh), true
+}
+
+func protectionReason(prot baseProtection) string {
+	if prot.Reason == "" {
+		return "no protection evidence recorded"
+	}
+	return prot.Reason
 }
 
 // reviewStance mirrors the evidence package's ReviewStance on the JSON seam —
@@ -177,7 +266,11 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 // head satisfies the absent-reviewDecision escalation — see humanApprovalAtHead.
 // Empty is tolerated so a caller with no stance evidence behaves exactly as
 // before this existed.
-func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
+// protectionEvidenceID names the base-branch protection artifact (whether the
+// base requires branches to be current before merging). Empty is tolerated —
+// readiness then treats the requirement as unproven, which only matters when
+// GitHub also reports the branch BEHIND; see upToDateBlock.
+func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID, protectionEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
 	a, err := st.Get(viewEvidenceID)
 	if err != nil {
 		return state.Artifact{}, subject, err
@@ -197,6 +290,11 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	}
 	approver, humanApproved := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login)
 
+	prot, err := readProtection(st, protectionEvidenceID)
+	if err != nil {
+		return state.Artifact{}, subject, err
+	}
+
 	// A verdict's parents name the evidence it judged (the artifact contract).
 	// Stance evidence is judged whenever it was supplied — not only when it
 	// changed the outcome — so provenance traversal can reach what readiness
@@ -204,6 +302,9 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	parents := []string{viewEvidenceID}
 	if stancesEvidenceID != "" {
 		parents = append(parents, stancesEvidenceID)
+	}
+	if protectionEvidenceID != "" {
+		parents = append(parents, protectionEvidenceID)
 	}
 
 	v := Verdict{
@@ -214,7 +315,7 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 		Tier:       "T0",
 		Confidence: 1.0,
 	}
-	blocks, effectiveChecks := readinessBlocks(pv)
+	blocks, effectiveChecks := readinessBlocks(pv, prot)
 	if len(blocks) > 0 {
 		v.Decision = DecisionBlock
 		v.Why = fmt.Sprint(blocks)
@@ -224,24 +325,7 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 		art, err := Record(st, run, parents, v)
 		return art, subject, err
 	}
-	// Absence of signal must not read as green. An empty rollup means CI
-	// never ran; an empty reviewDecision means GitHub reported no live merge
-	// policy — on an unprotected repo that would otherwise pass silently.
-	// Escalate rather than block: a judge may know the repo genuinely has no
-	// CI or requires no reviews. If both hold, one escalate naming the
-	// reasons is enough. The reviewDecision branch is MERGED-exempt (a
-	// backtested PR has no live review signal), mirroring the block checks
-	// above; the empty-CI branch is not, matching its long-standing behavior.
-	var escalations []string
-	if effectiveChecks == 0 {
-		escalations = append(escalations, "no non-gate CI checks recorded for this head")
-	}
-	// A human's exact-head approval IS the review decision GitHub declined to
-	// report. Checked before reviewsOptional so the audit trail records the
-	// approval as the reason readiness held, not a policy flag.
-	if !humanApproved && !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
-		escalations = append(escalations, "no review decision reported by GitHub")
-	}
+	escalations := readinessEscalations(pv, prot, effectiveChecks, humanApproved, reviewsOptional)
 	if len(escalations) > 0 {
 		v.Decision = DecisionEscalate
 		v.Why = strings.Join(escalations, "; ") + " — cannot verify readiness"
@@ -298,15 +382,81 @@ func readStances(st *state.Store, id string) ([]reviewStance, error) {
 	return stances, nil
 }
 
+// readinessEscalations computes the "cannot verify" reasons from a PR view.
+// Absence of signal must not read as green. An empty rollup means CI never ran;
+// an empty reviewDecision means GitHub reported no live merge policy — on an
+// unprotected repo that would otherwise pass silently; an unreadable base
+// protection on a behind branch means gate cannot tell whether the merge
+// command it is about to emit would even be accepted. Escalate rather than
+// block: a judge may know the repo genuinely has no CI, requires no reviews, or
+// does not require current branches. If several hold, one escalate naming every
+// reason is enough.
+func readinessEscalations(pv prView, prot baseProtection, effectiveChecks int, humanApproved, reviewsOptional bool) []string {
+	var escalations []string
+	// Said first: on a repo that turns out to require an up-to-date branch this
+	// is the fact that decides the whole run, and the one the operator has to
+	// act on before anything else — refreshing the branch re-runs CI anyway.
+	if e, unproven := upToDateEscalation(pv, prot); unproven {
+		escalations = append(escalations, e)
+	}
+	if effectiveChecks == 0 {
+		escalations = append(escalations, "no non-gate CI checks recorded for this head")
+	}
+	// A human's exact-head approval IS the review decision GitHub declined to
+	// report. Checked before reviewsOptional so the audit trail records the
+	// approval as the reason readiness held, not a policy flag. MERGED-exempt (a
+	// backtested PR has no live review signal), mirroring the block checks; the
+	// empty-CI branch is not, matching its long-standing behavior.
+	if !humanApproved && !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
+		escalations = append(escalations, "no review decision reported by GitHub")
+	}
+	return escalations
+}
+
+// readProtection loads the base-branch protection evidence. An empty id means
+// the caller recorded none — readiness then behaves exactly as it did before
+// this evidence existed. A malformed body IS an error, for the same reason as
+// readStances: an infrastructure failure must not wear the costume of a policy
+// decision on the one fact that decides whether the emitted merge command can
+// land.
+func readProtection(st *state.Store, id string) (baseProtection, error) {
+	if id == "" {
+		return baseProtection{Reason: "no protection evidence recorded"}, nil
+	}
+	a, err := st.Get(id)
+	if err != nil {
+		return baseProtection{}, err
+	}
+	var body struct {
+		Protection json.RawMessage `json:"protection"`
+	}
+	if err := json.Unmarshal(a.Body, &body); err != nil {
+		return baseProtection{}, fmt.Errorf("verify: parse protection evidence: %w", err)
+	}
+	if body.Protection == nil {
+		return baseProtection{}, fmt.Errorf("verify: protection evidence %s carries no protection field", id)
+	}
+	var prot baseProtection
+	if err := json.Unmarshal(body.Protection, &prot); err != nil {
+		return baseProtection{}, fmt.Errorf("verify: parse protection: %w", err)
+	}
+	return prot, nil
+}
+
 // readinessBlocks computes the hard blocks from a PR view and the count of
 // non-gate checks (effectiveChecks) the caller uses for the empty-CI escalation.
 // A block is final; the caller records a block verdict without escalating.
-func readinessBlocks(pv prView) (blocks []string, effectiveChecks int) {
+func readinessBlocks(pv prView, prot baseProtection) (blocks []string, effectiveChecks int) {
 	if pv.IsDraft {
 		blocks = append(blocks, "PR is a draft")
 	}
 	if pv.Mergeable == "CONFLICTING" {
 		blocks = append(blocks, "merge conflicts against base")
+	}
+	// Said before the check loop: a proven up-to-date requirement decides the
+	// run, and refreshing the branch invalidates every check below it anyway.
+	if b, behind := upToDateBlock(pv, prot); behind {
+		blocks = append(blocks, b)
 	}
 	// UNKNOWN means GitHub is still computing mergeability — not ready is
 	// not green. Merged subjects are exempt: they have no live mergeability,

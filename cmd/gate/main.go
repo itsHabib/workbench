@@ -493,7 +493,7 @@ func runGateWithSynthesis(
 	}
 
 	// The verifier ladder records one verdict artifact per rung.
-	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, bundle.Stances, subject, reviewsOptional)
+	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, bundle.Stances, bundle.Protection, subject, reviewsOptional)
 	if err != nil {
 		return res, codeError, err
 	}

@@ -216,8 +216,16 @@ One `gate` invocation is a single pass:
 3. **Verification ladder** — four rungs on a green run, each a verdict
    artifact (a fifth, CI-failure classification over the failed runs' logs,
    is recorded only when the checks are red):
-   - *readiness* (code): draft state, CI rollup, mergeability. Its blocks are
-     final — no judgment can talk a red check green.
+   - *readiness* (code): draft state, CI rollup, mergeability, and whether the
+     branch is current with a base that requires it. Its blocks are final — no
+     judgment can talk a red check green. The up-to-date rung reads the base
+     branch's protection as its own evidence artifact and blocks only on proof:
+     GitHub reporting the branch BEHIND is not itself an obstacle (a repo with
+     no strict-checks requirement merges a behind PR happily), so a proven
+     requirement blocks with the refresh → CI → re-gate prescription, a proven
+     absence passes, and protection gate could not read escalates rather than
+     inventing a refresh cycle. This exists so gate never emits a pinned
+     `gh pr merge` that GitHub will reject for being out of date.
    - *floor* (code): the deterministic risk floor over the diff. Never blocks;
      it assigns the tier the grant ceiling is checked against.
    - *panel completeness* (code): the repository-required reviewer set against
