@@ -40,6 +40,11 @@ type ReadyRow struct {
 	HeadSHA      string `json:"head_sha,omitempty"`
 	URL          string `json:"url,omitempty"`
 	MergeCommand string `json:"merge_command"`
+	// Coverage answers "is this repo actually covered by a live grant, and would
+	// its ceilings park the next run" for the PR the inbox is recommending —
+	// the inventory check that used to happen only at gate time. Advisory; see
+	// GrantCoverage.
+	Coverage *GrantCoverage `json:"grant_coverage,omitempty"`
 }
 
 // NeedsGrantRow is one repo whose gate runs were refused for want of a live
@@ -88,6 +93,10 @@ type ParkedRun struct {
 	Escape         *escalation.Escape `json:"escape,omitempty"`
 	JudgeCommand   string             `json:"judge_command,omitempty"`
 	ExplainCommand string             `json:"explain_command"`
+	// Coverage is the same inventory answer the ready rows carry: judging a park
+	// clean is wasted work if no live grant covers the repo the merge needs, or
+	// if the grant's ceiling would re-park the run straight afterwards.
+	Coverage *GrantCoverage `json:"grant_coverage,omitempty"`
 }
 
 // GrantLine is one grant in the ledger with its expiry resolved against now.
@@ -420,12 +429,22 @@ func collect(st *state.Store, now func() time.Time, stateArg string) (Inbox, err
 
 func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 	parked, unattributed := parkedRuns(arts, stateArg)
+	ready := readyToMergeRuns(arts)
+	// One index, both surfaces: the coverage question is asked per row but the
+	// log is read once, so N recommended PRs cost one scan.
+	idx := buildCoverageIndex(arts, now, stateArg)
+	for i := range parked {
+		parked[i].Coverage = idx.assess(parked[i].Repo, parked[i].Number, parked[i].Run)
+	}
+	for i := range ready {
+		ready[i].Coverage = idx.assess(ready[i].Repo, ready[i].Number, ready[i].Run)
+	}
 	return Inbox{
 		Parked:       parked,
 		Unattributed: unattributed,
 		Grants:       grantLines(arts, now),
 		NeedsGrant:   needsGrantRows(arts, now, stateArg),
-		ReadyToMerge: readyToMergeRuns(arts),
+		ReadyToMerge: ready,
 	}
 }
 
@@ -956,7 +975,9 @@ func renderReadyToMerge(w io.Writer, rows []ReadyRow) {
 		if r.HeadSHA != "" {
 			fmt.Fprintf(w, "  head %s\n", r.HeadSHA)
 		}
-		fmt.Fprintf(w, "  → %s\n\n", r.MergeCommand)
+		fmt.Fprintf(w, "  → %s\n", r.MergeCommand)
+		renderCoverage(w, r.Coverage)
+		fmt.Fprintln(w)
 	}
 }
 
@@ -996,13 +1017,15 @@ func renderParked(w io.Writer, p ParkedRun) {
 		fmt.Fprintf(w, "  PR state unknown: %s\n", p.PRStateReason)
 	}
 	if p.JudgeCommand != "" {
-		fmt.Fprintf(w, "  → %s\n", p.JudgeCommand)
+		fmt.Fprintf(w, "  \u2192 %s\n", p.JudgeCommand)
 	}
 	if p.JudgeCommand == "" && p.Escape != nil {
 		fmt.Fprintf(w, "  %s\n", p.Escape.Why)
-		fmt.Fprintf(w, "  → %s\n", p.Escape.Next)
+		fmt.Fprintf(w, "  \u2192 %s\n", p.Escape.Next)
 	}
-	fmt.Fprintf(w, "  → %s\n\n", p.ExplainCommand)
+	fmt.Fprintf(w, "  \u2192 %s\n", p.ExplainCommand)
+	renderCoverage(w, p.Coverage)
+	fmt.Fprintln(w)
 }
 
 func renderGrants(w io.Writer, grants []GrantLine) {
