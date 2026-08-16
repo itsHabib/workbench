@@ -237,6 +237,31 @@ func TestClassifyPanelCodexCleanIssueComment(t *testing.T) {
 	}
 }
 
+// A Codex review that reported findings still reviewed this exact head. It
+// completes the panel as COMMENTED; the findings park the run separately.
+func TestClassifyPanelCodexIssueCommentWithFindings(t *testing.T) {
+	const head = "e96af9fbfc123456789012345678901234567890"
+	panel := reviewpanel.Evidence{
+		SchemaVersion: 1,
+		Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: head},
+		Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"codex"}},
+	}
+	comment := Comment{
+		ID: 7, Author: "chatgpt-codex-connector[bot]", IsBot: true,
+		Body: "Codex Review: Found 1 P1 issue.\n\n**Reviewed commit:** `e96af9fbfc`\n",
+	}
+	got := classifyPanel(panel, nil, nil, []Comment{comment})
+	if len(got.Completed) != 1 || len(got.Missing) != 0 {
+		t.Fatalf("exact-head Codex review with findings not completed: %+v", got)
+	}
+	if got.Completed[0].State != "COMMENTED" || got.Completed[0].ReviewID != 7 {
+		t.Fatalf("codex review with findings recorded wrong: %+v", got.Completed[0])
+	}
+	if err := reviewpanel.Validate(got); err != nil {
+		t.Fatalf("evidence invalid: %v", err)
+	}
+}
+
 func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 	const head = "e96af9fbfc123456789012345678901234567890"
 	base := Comment{
@@ -247,7 +272,13 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 		"stale":       func(c *Comment) { c.Body = strings.Replace(c.Body, "e96af9fbfc", "aaaaaaaaaa", 1) },
 		"malformed":   func(c *Comment) { c.Body = strings.Replace(c.Body, "`e96af9fbfc`", "e96af9fbfc", 1) },
 		"wrong actor": func(c *Comment) { c.Author = "some-bot[bot]" },
-		"not clean":   func(c *Comment) { c.Body = strings.Replace(c.Body, "Didn't find any major issues.", "Found a P1.", 1) },
+		"not a codex review submission": func(c *Comment) {
+			c.Body = strings.Replace(c.Body, "Codex Review:", "Approved! LGTM,", 1)
+		},
+		"prose verdict, no head anchor": func(c *Comment) {
+			c.Body = "Codex Review: Approved — ready to merge.\n"
+		},
+		"inline comment": func(c *Comment) { c.Path = "cmd/gate/main.go"; c.Line = 4 },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
