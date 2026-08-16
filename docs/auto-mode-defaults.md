@@ -196,6 +196,14 @@ Verified 2026-08-14 against `gh api repos/itsHabib/<repo>/branches/main/protecti
 Admin enforcement is off everywhere above; required reviews are not configured on any of
 them. That is deliberate — merge authority is gate's, not GitHub's.
 
+Gate reads this setting itself before emitting a merge command: the up-to-date preflight rung
+blocks a BEHIND head on a strict base and prescribes refresh → CI → re-gate, rather than
+emitting a command GitHub was always going to reject. It keys off the repo's actual setting
+(classic protection, or a ruleset for repos like workbench whose only enforcement is one), so a
+BEHIND PR on a non-strict base still merges without a refresh. An unreadable protection
+endpoint degrades to the prior behaviour with a note — never to a block. The table remains the
+human-facing record; the rung is the machine-facing one.
+
 **Maintenance rule: when a repo's protection changes, update its row in the same PR.** A
 stale row here is worse than no row, because the sweep that trusts it pays the refresh cost
 it was written to avoid. Re-verify with the `gh api` call above rather than from memory.

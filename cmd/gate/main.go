@@ -540,11 +540,24 @@ func runGateWithSynthesis(
 	if err != nil {
 		return res, codeError, err
 	}
+	// The preflight: a BEHIND head on a base that requires up-to-date-ness is a
+	// merge GitHub will refuse, so say it here rather than emitting a doomed
+	// command. Reading the setting is best-effort by construction — an
+	// unreadable protection endpoint records unreadable evidence and the rung
+	// passes with that noted.
+	protectionID, err := evidence.Protection(e.st, run, ref, evidence.BaseRef(view))
+	if err != nil {
+		return res, codeError, err
+	}
+	upToDateArt, err := verify.UpToDate(e.st, run, bundle.View, protectionID, subject)
+	if err != nil {
+		return res, codeError, err
+	}
 	// The paid model-based review-consolidation rung is SKIPPED when reviews are
 	// advisory (reviewsOptional — the enforced CI check). The deterministic panel
 	// completeness rung still runs: optional judgment must not turn missing exact-
 	// head evidence green.
-	verdictIDs := []string{readinessArt.ID, floorArt.ID}
+	verdictIDs := []string{readinessArt.ID, floorArt.ID, upToDateArt.ID}
 	reviewIDs, err := reviewVerdictIDs(e, run, bundle, subject, model, reviewsOptional)
 	if err != nil {
 		return res, codeError, err

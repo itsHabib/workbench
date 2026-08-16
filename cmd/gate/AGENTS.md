@@ -86,6 +86,16 @@ Constraints that are design decisions, not omissions:
   credited, so a conflict-free base refresh no longer parks the panel or burns a
   review cycle. Everything else on the ladder still runs against the judged head
   — CI is re-read, findings re-extracted, and any park still reaches a judge.
+- **Up-to-date protection is a preflight, not an afterthought.** Before the
+  merge command is emitted, the ladder reads the base branch's up-to-date
+  requirement — classic branch protection's `required_status_checks.strict`,
+  falling back to a ruleset's `strict_required_status_checks_policy`, since both
+  are live in the portfolio — and blocks a BEHIND head only on a base that
+  requires one, naming the fix (refresh from base, let CI re-run, gate again).
+  BEHIND alone never blocks: most bases require nothing, and a refresh there
+  buys a wasted CI cycle. An unreadable protection endpoint degrades to the
+  prior behaviour with the degradation recorded in the verdict — an unread fact
+  is not evidence and must never stop a merge.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global
