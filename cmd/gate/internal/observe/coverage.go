@@ -61,6 +61,7 @@ type coverageIndex struct {
 	lastExpired map[string]time.Time
 	cycles      map[string]int
 	runTier     map[string]string
+	subjectRun  map[string]string
 	stateArg    string
 }
 
@@ -95,6 +96,7 @@ func buildCoverageIndex(arts []state.Artifact, now time.Time, stateArg string) c
 		lastExpired: make(map[string]time.Time),
 		cycles:      cyclesBySubject(arts),
 		runTier:     runTiers(arts),
+		subjectRun:  subjectRuns(arts),
 		stateArg:    stateArg,
 	}
 	for _, a := range arts {
@@ -187,6 +189,33 @@ func runTiers(arts []state.Artifact) map[string]string {
 		tiers[a.Run] = v.Tier
 	}
 	return tiers
+}
+
+// subjectRuns maps each repo#PR to the most recent run that recorded a verdict
+// for it, in log order. The inbox already knows a row's run; a sweep inventory
+// starts from a PR number instead, so it needs the same join to ask the coverage
+// question against the tier that PR's last gate run actually composed.
+func subjectRuns(arts []state.Artifact) map[string]string {
+	runs := make(map[string]string)
+	for _, a := range arts {
+		if a.Kind != state.KindVerdict {
+			continue
+		}
+		var v verdictBody
+		if err := json.Unmarshal(a.Body, &v); err != nil || v.Subject.Repo == "" {
+			continue
+		}
+		runs[subjectKey(v.Subject.Repo, v.Subject.Number)] = a.Run
+	}
+	return runs
+}
+
+// assessSubject is assess for a caller holding only a PR: it resolves the
+// subject's latest verdict-bearing run itself. A PR gate has never run against
+// resolves to no run, so its coverage carries no verdict tier — exactly the
+// never-gated case a sweep preflight is asking about.
+func (idx coverageIndex) assessSubject(repo string, number int) *GrantCoverage {
+	return idx.assess(repo, number, idx.subjectRun[subjectKey(repo, number)])
 }
 
 // cyclesBySubject counts consumed review cycles per repo#PR, mirroring gate's
