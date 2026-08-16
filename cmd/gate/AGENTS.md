@@ -101,6 +101,15 @@ Constraints that are design decisions, not omissions:
   branch, or a permissions problem). Anything unread degrades to the prior
   behaviour with the reason recorded in the verdict — an unread fact is not
   evidence and must never stop a merge.
+- **Thread disposition prepares, it never resolves.** `gate threads -repo R
+  -pr N` reads a PR's unresolved review threads and, for each, looks for the
+  commit after the thread's anchor that changes the reviewed file *and* carries
+  a test change. Only that pairing produces a disposition — an exact-commit +
+  evidence resolve comment plus the exact resolve call, for a human to run. A
+  missing fix commit, a fix with no accompanying test, or an anchor outside the
+  PR's history all report the thread still-actionable: a false "this was fixed"
+  buries a live finding, a false "still actionable" costs a look. Like `explain`
+  and `next` it is read-only — no artifact, no state write, exit 0 or 4 only.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

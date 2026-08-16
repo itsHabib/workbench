@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +127,8 @@ func main() {
 		err = cmdExplain(os.Args[2:])
 	case "next":
 		err = cmdNext(os.Args[2:])
+	case "threads":
+		err = cmdThreads(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "backtest":
@@ -156,7 +159,7 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|threads|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
@@ -172,6 +175,7 @@ func usage() {
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
+  threads  -repo R -pr N [-json]                     (prepare commit+test-backed dispositions for stale review threads)
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -1793,6 +1797,71 @@ func cmdNext(args []string) error {
 		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
 	}
 	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+}
+
+// cmdThreads prepares a disposition for every unresolved review thread on a
+// pull request: the commit that fixed the finding, the regression test riding
+// with it, and a resolve comment quoting both. It is read-only in both
+// directions — it writes no artifact and resolves no thread, so like explain
+// and next it returns nil (exit 0) or an error (exit 4) and never an exit code
+// a driver would read as a decision. A thread whose fix or test cannot be
+// identified is reported still-actionable; deciding one either way stays with
+// the human who reads the output.
+func cmdThreads(args []string) error {
+	fs := flag.NewFlagSet("threads", flag.ContinueOnError)
+	repo := fs.String("repo", "", "owner/repo")
+	pr := fs.Int("pr", 0, "pull request number")
+	asJSON := fs.Bool("json", false, "emit the dispositions as JSON")
+	help, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if help {
+		return nil
+	}
+	if *repo == "" || *pr == 0 {
+		return errors.New("threads: -repo and -pr required")
+	}
+	ref := evidence.PRRef{Repo: *repo, Number: *pr}
+	head, err := evidence.HeadSHA(ref)
+	if err != nil {
+		return err
+	}
+	dispositions, err := evidence.SweepThreads(ref, head)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(dispositions)
+	}
+	return writeDispositions(os.Stdout, ref, head, dispositions)
+}
+
+// writeDispositions renders the sweep for a human: what can be resolved with
+// evidence in hand, then what still needs them.
+func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
+	fmt.Fprintf(w, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
+	for _, d := range dispositions {
+		fmt.Fprintf(w, "\n%s %s:%d (%s)\n", dispositionMark(d), d.Thread.Path, d.Thread.Line, d.Thread.Author)
+		fmt.Fprintf(w, "  %s\n", d.Why)
+		if d.Actionable {
+			continue
+		}
+		for _, line := range strings.Split(d.Comment, "\n") {
+			fmt.Fprintf(w, "  | %s\n", line)
+		}
+		fmt.Fprintf(w, "  resolve: %s\n", d.ResolveCommand)
+	}
+	return nil
+}
+
+func dispositionMark(d evidence.Disposition) string {
+	if d.Actionable {
+		return "actionable"
+	}
+	return "dispositioned"
 }
 
 // lookupOpenPRs is the batched live seam: ONE `gh pr list` per repo returns all
