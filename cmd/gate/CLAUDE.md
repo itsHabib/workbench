@@ -79,7 +79,13 @@ Constraints that are design decisions, not omissions:
   attestation posted by the repository's own Actions token for a provider that
   publishes reviews only as issue comments (Claude). An attestation's authority
   is the workflow that checked out the head and ran the reviewer against it —
-  never the review body, which a model writes.
+  never the review body, which a model writes. The one non-judged head Gate
+  honours is a **diff-equivalent refresh**: when the PR's merge-base diff at an
+  earlier reviewed head digests byte-identically to the judged head's, the
+  evidence records a `ReviewPanelV1` `equivalence` and that head's reviews stay
+  credited, so a conflict-free base refresh no longer parks the panel or burns a
+  review cycle. Everything else on the ladder still runs against the judged head
+  — CI is re-read, findings re-extracted, and any park still reaches a judge.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

@@ -22,6 +22,22 @@ type Evidence struct {
 	Pending       []string    `json:"pending"`
 	Missing       []string    `json:"missing"`
 	Unknown       []string    `json:"unknown"`
+	// Equivalence is set only when the judged head is a diff-equivalent refresh
+	// of an earlier reviewed head: the SHA moved (a conflict-free base refresh)
+	// while the effective diff stayed byte-identical. It is what licenses a
+	// completed reviewer whose review is anchored to that earlier head.
+	Equivalence *Equivalence `json:"equivalence,omitempty"`
+}
+
+// Equivalence records that the judged head and one earlier head of the same
+// pull request produce a byte-identical diff. The producer asserts the fact by
+// digesting both diffs; it does not decide what the fact licenses.
+type Equivalence struct {
+	// ReviewedHeadSHA is the earlier head whose reviews are carried forward.
+	ReviewedHeadSHA string `json:"reviewed_head_sha"`
+	// DiffDigest is the digest both heads produced, prefixed by its algorithm
+	// (e.g. "sha256:..."). Identical at both heads by construction.
+	DiffDigest string `json:"diff_digest"`
 }
 
 // Subject binds panel evidence to one exact pull-request head.
@@ -81,6 +97,9 @@ func Validate(e Evidence) error {
 	case e.Declaration.Path == "":
 		return errors.New("reviewpanel: declaration path is empty")
 	}
+	if err := validateEquivalence(e); err != nil {
+		return err
+	}
 	if err := unique("expected", e.Declaration.Expected); err != nil {
 		return err
 	}
@@ -113,7 +132,7 @@ func validateCompleted(e Evidence) (map[string]struct{}, error) {
 		if !validReviewerState(reviewer.State) {
 			return nil, fmt.Errorf("reviewpanel: completed reviewer %s has invalid state %s", reviewer.Name, reviewer.State)
 		}
-		if reviewer.HeadSHA != e.Subject.HeadSHA {
+		if !reviewedHeadAllowed(e, reviewer.HeadSHA) {
 			return nil, fmt.Errorf("reviewpanel: completed reviewer %s is stale", reviewer.Name)
 		}
 		if _, ok := seen[reviewer.Name]; ok {
@@ -122,6 +141,35 @@ func validateCompleted(e Evidence) (map[string]struct{}, error) {
 		seen[reviewer.Name] = struct{}{}
 	}
 	return seen, nil
+}
+
+// reviewedHeadAllowed reports whether a completed reviewer may be anchored to
+// headSHA: the judged head always, and the diff-equivalent predecessor only
+// when the evidence declares that equivalence. Any other head is stale.
+func reviewedHeadAllowed(e Evidence, headSHA string) bool {
+	if headSHA == e.Subject.HeadSHA {
+		return true
+	}
+	return e.Equivalence != nil && headSHA == e.Equivalence.ReviewedHeadSHA
+}
+
+// validateEquivalence keeps a declared equivalence self-consistent. It says
+// nothing about whether the digests were honestly computed — that is the
+// producer's assertion — only that the claim names a different head and a
+// digest at all.
+func validateEquivalence(e Evidence) error {
+	if e.Equivalence == nil {
+		return nil
+	}
+	switch {
+	case e.Equivalence.ReviewedHeadSHA == "":
+		return errors.New("reviewpanel: equivalence reviewed_head_sha is empty")
+	case e.Equivalence.ReviewedHeadSHA == e.Subject.HeadSHA:
+		return errors.New("reviewpanel: equivalence reviewed_head_sha equals the judged head")
+	case e.Equivalence.DiffDigest == "":
+		return errors.New("reviewpanel: equivalence diff_digest is empty")
+	}
+	return nil
 }
 
 func validReviewerState(state string) bool {
