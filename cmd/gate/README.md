@@ -80,6 +80,23 @@ The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
 `gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
 needs-grant surfaces from one snapshot. Pass `-json` for the console feed.
 
+Every recommended PR — parked or ready to merge — carries an **inventory check**
+(`grant_coverage` in JSON) answering the question that used to be discovered only
+at gate time: does a live merge grant actually cover this repo, and would its
+tier or cycle ceiling park the next run before it reaches a decision. A row is
+`absent` (never minted), `expired` (lapsed, so it's a re-mint), `ceiling` (a live
+grant whose tier or `-max-cycles` would park), or `covered`. The first three
+print the gap and a paste-ready `gate grant` under the row they belong to;
+`covered` prints nothing, so the inbox stays a queue of things to do. The cycle
+count mirrors gate's own rule — one counting outcome per distinct run,
+authorization parks and capability refusals excluded — and the tier is the run's
+composed verdict tier, so the ceilings compared are the ones gate would compare.
+
+Like every `observe` projection it is **advisory**: `capability.Check` and the
+ladder remain the only authority. A `covered` row can still refuse, and the
+advisory count skips outcomes whose parent verdict it cannot follow rather than
+failing the whole inbox — it may undercount a corrupt log, never overcount.
+
 For profiling that live reconcile, `next` accepts three debug/experimental
 flags — `-cpuprofile <path>`, `-blockprofile <path>`, `-trace <path>` — each
 writing the corresponding `runtime/pprof` (or `runtime/trace`) artifact for the
