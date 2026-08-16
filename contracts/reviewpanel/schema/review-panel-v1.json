@@ -43,7 +43,16 @@
     },
     "pending": { "$ref": "#/$defs/names" },
     "missing": { "$ref": "#/$defs/names" },
-    "unknown": { "$ref": "#/$defs/names" }
+    "unknown": { "$ref": "#/$defs/names" },
+    "equivalence": {
+      "type": "object",
+      "required": ["reviewed_head_sha", "diff_digest"],
+      "properties": {
+        "reviewed_head_sha": { "type": "string", "minLength": 1 },
+        "diff_digest": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false,
   "$defs": {

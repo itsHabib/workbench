@@ -117,3 +117,31 @@ func validEvidence() Evidence {
 		Missing:       []string{"claude"},
 	}
 }
+
+func TestValidateEquivalentRefresh(t *testing.T) {
+	carried := func() Evidence {
+		e := validEvidence()
+		e.Completed[0].HeadSHA = "old"
+		e.Equivalence = &Equivalence{ReviewedHeadSHA: "old", DiffDigest: "sha256:abc"}
+		return e
+	}
+	if err := Validate(carried()); err != nil {
+		t.Fatalf("a declared diff-equivalent refresh must license its reviewer: %v", err)
+	}
+	tests := map[string]func(*Evidence){
+		"undeclared": func(e *Evidence) { e.Equivalence = nil },
+		"other head": func(e *Evidence) { e.Equivalence.ReviewedHeadSHA = "unrelated" },
+		"self":       func(e *Evidence) { e.Equivalence.ReviewedHeadSHA = e.Subject.HeadSHA },
+		"no digest":  func(e *Evidence) { e.Equivalence.DiffDigest = "" },
+		"no head":    func(e *Evidence) { e.Equivalence.ReviewedHeadSHA = "" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			e := carried()
+			mutate(&e)
+			if err := Validate(e); err == nil {
+				t.Fatal("Validate() error = nil")
+			}
+		})
+	}
+}

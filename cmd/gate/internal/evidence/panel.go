@@ -50,7 +50,8 @@ func fetchPanel(pr PRRef, headSHA string, reviews []rawComment, comments []Comme
 		panel.Unknown = append([]string(nil), expected...)
 		return panel
 	}
-	return classifyPanel(panel, reviews, requested, comments)
+	panel = classifyPanel(panel, reviews, requested, comments)
+	return carryEquivalentRefresh(panel, reviews, comments, prDiffDigester(pr))
 }
 
 func fetchExpectedReviewers(repo string) ([]string, string, error) {

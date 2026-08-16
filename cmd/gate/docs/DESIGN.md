@@ -73,6 +73,24 @@ log entry. Consequences the code enforces:
   harness-emitted, exact-head, and yield to a formal review when one exists.
   Anything else remains incomplete and the provider-neutral judgment path
   resolves the park.
+- **A diff-equivalent refresh is not a new review cycle.** A conflict-free base
+  refresh moves the head without changing a byte of what the panel reviewed;
+  head-bound panel evidence read that as every reviewer having vanished, so the
+  run parked and the driver re-triggered a review cycle that reviewed the same
+  diff again — burning one of the two fix-rounds the review-cycle discipline
+  allows. The evidence collector now digests the PR's effective diff (its
+  merge-base compare) at the judged head and at each head an unsatisfied
+  reviewer actually reviewed. On a byte-identical digest it records a
+  `ReviewPanelV1` `equivalence` — the earlier head plus the shared digest — and
+  credits that reviewer's head-bound review, which the contract then licenses
+  as non-stale. That equivalence buys exactly one thing. The rest of the ladder
+  runs unchanged against the judged head: CI is re-read on this run, the floor
+  and findings rungs re-run, and any park still reaches a judge. An unreadable
+  diff, a changed diff, or a reviewer absent at both heads parks as before —
+  absence of a digest is never evidence that nothing changed. Because the panel
+  no longer parks on a pure refresh, the refresh consumes no cycle: cycle count
+  is derived from parks and merge outcomes, and a refresh that produces neither
+  leaves the count where it was.
 - **An execution claim is permanent.** The exact action must still be the PR's
   newest terminal inside the same anchored-state lock that appends its claim.
   A command/token/transport failure never makes the action claimable again.
