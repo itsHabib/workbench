@@ -199,7 +199,7 @@ them. That is deliberate — merge authority is gate's, not GitHub's.
 Gate reads this setting itself before emitting a merge command: the up-to-date preflight rung
 blocks a BEHIND head on a strict base and prescribes refresh → CI → re-gate, rather than
 emitting a command GitHub was always going to reject. It keys off the repo's actual setting
-(classic protection, or a ruleset for repos like workbench whose only enforcement is one), so a
+(classic protection unioned with rulesets — workbench's only enforcement is a ruleset), so a
 BEHIND PR on a non-strict base still merges without a refresh. An unreadable protection
 endpoint degrades to the prior behaviour with a note — never to a block. The table remains the
 human-facing record; the rung is the machine-facing one.

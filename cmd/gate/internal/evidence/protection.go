@@ -26,7 +26,9 @@ import (
 // (required_status_checks.strict) and repository rulesets
 // (required_status_checks.strict_required_status_checks_policy). Workbench's
 // own main is unprotected classically yet carries rulesets, so reading only the
-// protection endpoint would report "no protection" on a repo that has it.
+// protection endpoint would report "no protection" on a repo that has it. They
+// are read as a union, not as alternatives — a base can carry both, and GitHub
+// enforces whichever requires more.
 
 // Protection sources, recorded so an audit reader can tell which mechanism
 // answered — the two endpoints disagree in the wild.
@@ -82,50 +84,123 @@ func protectionFrom(st *state.Store, run string, pr PRRef, baseRef string, fetch
 	return a.ID, nil
 }
 
-// readProtection classifies the base branch: classic protection first, then
-// rulesets, which is the order of specificity — a repo with classic protection
-// has the answer there, and the ruleset endpoint is the fallback for repos
-// (workbench) whose only enforcement is a ruleset.
+// mechanism is one enforcement mechanism's answer for a base branch.
+//
+// The three states are distinct and all load-bearing: readable+present carries
+// a real strictness fact, readable+absent means the mechanism is not configured
+// on this branch, and unreadable means gate could not establish either — which
+// is never the same as "no requirement".
+type mechanism struct {
+	readable bool
+	present  bool
+	strict   bool
+	source   string
+	note     string
+}
+
+// readProtection asks BOTH mechanisms and combines them. They are not
+// alternatives: a base can carry classic protection with strict false AND an
+// overlapping ruleset that requires up-to-date heads, and GitHub enforces the
+// union. Falling through to rulesets only when classic protection is absent
+// would record such a base as non-strict and emit the doomed merge command this
+// rung exists to prevent.
 func readProtection(pr PRRef, baseRef string, fetch protectionFetch) ProtectionBody {
 	if baseRef == "" {
 		return ProtectionBody{Note: "PR view recorded no base branch"}
 	}
-	raw, err := fetch(fmt.Sprintf("repos/%s/branches/%s/protection", pr.Repo, baseRef))
-	if err == nil {
-		strict, perr := strictFromProtection(raw)
-		if perr != nil {
-			return ProtectionBody{Note: perr.Error()}
-		}
-		return ProtectionBody{Readable: true, Strict: strict, Source: ProtectionSourceBranch}
-	}
-	// 404 is the documented answer for "this branch has no classic protection",
-	// not a failed read. Anything else (403 on a token without admin scope, a
-	// transport failure) leaves the setting genuinely unknown.
-	if !notProtected(err) {
-		return ProtectionBody{Note: err.Error()}
-	}
-	return rulesetProtection(pr, baseRef, fetch)
+	return combine(
+		classicProtection(pr, baseRef, fetch),
+		rulesetProtection(pr, baseRef, fetch),
+	)
 }
 
-func rulesetProtection(pr PRRef, baseRef string, fetch protectionFetch) ProtectionBody {
-	raw, err := fetch(fmt.Sprintf("repos/%s/rules/branches/%s", pr.Repo, baseRef))
-	if err != nil {
-		return ProtectionBody{Note: err.Error()}
+// combine reduces the two mechanisms to one recorded fact. Strictness is a
+// union — any mechanism requiring up-to-date heads makes the base strict. The
+// negative answer is the demanding one: "nothing requires it" is only a fact
+// when EVERY mechanism was read, so a single unreadable mechanism leaves the
+// whole setting unknown.
+func combine(mechanisms ...mechanism) ProtectionBody {
+	var strictSources, presentSources, notes []string
+	readable := true
+	for _, m := range mechanisms {
+		if !m.readable {
+			readable = false
+			notes = append(notes, m.note)
+			continue
+		}
+		if m.present {
+			presentSources = append(presentSources, m.source)
+		}
+		if m.strict {
+			strictSources = append(strictSources, m.source)
+		}
 	}
-	strict, rerr := strictFromRules(raw)
-	if rerr != nil {
-		return ProtectionBody{Note: rerr.Error()}
+	// A strict answer stands even if another mechanism was unreadable: the
+	// requirement is already established, and the unread one could only add
+	// another requirement gate is already honouring.
+	if len(strictSources) > 0 {
+		return ProtectionBody{Readable: true, Strict: true, Source: strings.Join(strictSources, "+")}
 	}
-	if !strict {
+	if !readable {
+		return ProtectionBody{Note: strings.Join(notes, "; ")}
+	}
+	if len(presentSources) == 0 {
 		return ProtectionBody{Readable: true, Source: ProtectionSourceNone}
 	}
-	return ProtectionBody{Readable: true, Strict: true, Source: ProtectionSourceRuleset}
+	return ProtectionBody{Readable: true, Source: strings.Join(presentSources, "+")}
 }
 
-// notProtected reports whether the error is GitHub's "branch not protected"
-// answer. gh surfaces it as an HTTP 404 on the protection endpoint.
+func classicProtection(pr PRRef, baseRef string, fetch protectionFetch) mechanism {
+	m := mechanism{source: ProtectionSourceBranch}
+	raw, err := fetch(fmt.Sprintf("repos/%s/branches/%s/protection", pr.Repo, baseRef))
+	if err != nil {
+		// Only GitHub's specific "Branch not protected" body is evidence the
+		// branch carries no classic protection. A bare 404 is not: a missing
+		// repository, a mistyped branch, and a token without admin scope all
+		// return one too, and reading those as "unprotected" would let a strict
+		// base pass the preflight and receive a doomed merge command.
+		if notProtected(err) {
+			m.readable = true
+			return m
+		}
+		m.note = err.Error()
+		return m
+	}
+	strict, perr := strictFromProtection(raw)
+	if perr != nil {
+		m.note = perr.Error()
+		return m
+	}
+	m.readable, m.present, m.strict = true, true, strict
+	return m
+}
+
+func rulesetProtection(pr PRRef, baseRef string, fetch protectionFetch) mechanism {
+	m := mechanism{source: ProtectionSourceRuleset}
+	raw, err := fetch(fmt.Sprintf("repos/%s/rules/branches/%s", pr.Repo, baseRef))
+	if err != nil {
+		// This endpoint answers an empty list for a branch with no rules, so it
+		// has no "not configured" error shape at all: every failure here is an
+		// unread mechanism.
+		m.note = err.Error()
+		return m
+	}
+	rules, rerr := statusCheckRules(raw)
+	if rerr != nil {
+		m.note = rerr.Error()
+		return m
+	}
+	m.readable, m.present, m.strict = true, rules.present, rules.strict
+	return m
+}
+
+// notProtected reports whether the error is GitHub's specific "branch not
+// protected" answer on the protection endpoint — the one 404 that IS a fact
+// about the branch rather than a failure to read it.
 func notProtected(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "HTTP 404")
+	return err != nil &&
+		strings.Contains(err.Error(), "Branch not protected") &&
+		strings.Contains(err.Error(), "HTTP 404")
 }
 
 func strictFromProtection(raw json.RawMessage) (bool, error) {
@@ -149,7 +224,10 @@ func strictFromProtection(raw json.RawMessage) (bool, error) {
 	return *p.RequiredStatusChecks.Strict, nil
 }
 
-func strictFromRules(raw json.RawMessage) (bool, error) {
+// statusCheckRules reports whether the branch has a required-status-checks rule
+// at all, and whether any such rule requires up-to-date heads.
+func statusCheckRules(raw json.RawMessage) (struct{ present, strict bool }, error) {
+	var out struct{ present, strict bool }
 	var rules []struct {
 		Type       string `json:"type"`
 		Parameters *struct {
@@ -157,17 +235,21 @@ func strictFromRules(raw json.RawMessage) (bool, error) {
 		} `json:"parameters"`
 	}
 	if err := json.Unmarshal(raw, &rules); err != nil {
-		return false, fmt.Errorf("evidence: parse branch rules: %w", err)
+		return out, fmt.Errorf("evidence: parse branch rules: %w", err)
 	}
 	for _, r := range rules {
-		if r.Type != "required_status_checks" || r.Parameters == nil || r.Parameters.Strict == nil {
+		if r.Type != "required_status_checks" {
 			continue
 		}
+		out.present = true
+		if r.Parameters == nil || r.Parameters.Strict == nil {
+			return out, fmt.Errorf("evidence: branch rule reports no strict policy field")
+		}
 		if *r.Parameters.Strict {
-			return true, nil
+			out.strict = true
 		}
 	}
-	return false, nil
+	return out, nil
 }
 
 // BaseRef reads the PR's base branch out of recorded view evidence. Empty when
