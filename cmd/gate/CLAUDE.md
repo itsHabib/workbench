@@ -86,6 +86,18 @@ Constraints that are design decisions, not omissions:
   credited, so a conflict-free base refresh no longer parks the panel or burns a
   review cycle. Everything else on the ladder still runs against the judged head
   — CI is re-read, findings re-extracted, and any park still reaches a judge.
+- **A complete panel is readiness's answer to an absent review decision.**
+  GitHub populates `reviewDecision` only from submitted reviews, so a panel of
+  comment-posting providers leaves it empty however completely it reviewed.
+  Readiness reuses the panel rung's own completeness rule — one function, two
+  callers, so the head binding (diff-equivalent refresh included) cannot drift —
+  instead of parking for a judge to re-derive a fixed inference from facts
+  already in state. It answers the ABSENCE of a decision only: an explicit
+  `CHANGES_REQUESTED`, a completed reviewer who asked for changes, and a human's
+  outstanding objection each still block or escalate, and an incomplete,
+  unknown, or stale-head panel escalates as before. Mergeability, conflicts, and
+  CI are untouched by it, and the verdict names what carried readiness — the
+  approval, the panel, or the reviews-optional flag.
 - **Up-to-date protection is a preflight, not an afterthought.** Before the
   merge command is emitted, the ladder reads the base branch's up-to-date
   requirement from BOTH mechanisms that carry it — classic branch protection's

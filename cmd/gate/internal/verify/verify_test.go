@@ -308,7 +308,7 @@ func readinessFor(t *testing.T, view map[string]any) Verdict {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, false)
+	art, _, err := Readiness(st, "run_t", evd.ID, "", "", subj, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func readinessOptFor(t *testing.T, view map[string]any) Verdict {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, true)
+	art, _, err := Readiness(st, "run_t", evd.ID, "", "", subj, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func readinessWithStances(t *testing.T, view map[string]any, stances []map[strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false)
+	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, "", subj, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1012,7 +1012,7 @@ func TestReadinessVerdictParentsIncludeStanceEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false)
+	art, _, err := Readiness(st, "run_t", evd.ID, stc.ID, "", subj, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,7 +1043,7 @@ func TestReadinessMalformedStanceEvidenceIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false); err == nil {
+	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, "", subj, false); err == nil {
 		t.Fatal("malformed stance evidence must return an error, not read as no approval")
 	}
 }
@@ -1065,7 +1065,7 @@ func TestReadinessWithoutStanceEvidenceIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, _, err := Readiness(st, "run_t", evd.ID, "", subj, false)
+	art, _, err := Readiness(st, "run_t", evd.ID, "", "", subj, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1167,7 @@ func TestReadinessStanceEvidenceWithoutStancesFieldIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, subj, false); err == nil {
+	if _, _, err := Readiness(st, "run_t", evd.ID, stc.ID, "", subj, false); err == nil {
 		t.Fatal("a stance artifact with no stances field must error, not read as no approval")
 	}
 }

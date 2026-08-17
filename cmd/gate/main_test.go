@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -66,6 +67,52 @@ func TestReviewsOptionalStillRunsPanelCompleteness(t *testing.T) {
 	}
 	if verdict.Source != "review-panel-completeness" || verdict.Decision != verify.DecisionEscalate {
 		t.Fatalf("reviews-optional skipped incomplete panel: %+v", verdict)
+	}
+}
+
+// The ladder wiring, pinned where the verify-level tests cannot see it: those
+// hand Readiness a panel id directly, so they stay green even if the composition
+// stops passing one. Without bundle.Panel reaching readiness, a complete
+// exact-head panel cannot answer an absent GitHub review decision and every PR
+// reviewed by comment-posting bots parks for a judge again.
+func TestReadinessJudgesTheGatheredPanel(t *testing.T) {
+	e := testEnv(t)
+	view, err := e.st.Append(state.KindEvidence, "run_t", nil, map[string]any{
+		"data": map[string]any{
+			"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "head",
+			"statusCheckRollup": []map[string]any{{"name": "ci", "conclusion": "SUCCESS"}},
+			"author":            map[string]any{"login": "agent"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel, err := e.st.Append(state.KindEvidence, "run_t", nil, reviewpanel.Evidence{
+		SchemaVersion: 1,
+		Subject:       reviewpanel.Subject{Repo: "o/r", Number: 1, HeadSHA: "head"},
+		Declaration:   reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"codex"}},
+		Completed: []reviewpanel.Reviewer{{
+			Name: "codex", Actor: "chatgpt-codex-connector[bot]", State: "COMMENTED",
+			HeadSHA: "head", ReviewID: 1,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := evidence.Bundle{View: view.ID, Panel: panel.ID}
+	artifact, _, err := readinessVerdict(e, "run_t", bundle, verify.Subject{Repo: "o/r", Number: 1}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := verify.Load(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Decision != verify.DecisionPass {
+		t.Fatalf("gathered panel did not reach readiness: %s (%s)", verdict.Decision, verdict.Why)
+	}
+	if !slices.Contains(artifact.Parents, panel.ID) {
+		t.Fatalf("readiness parents %v must name the panel evidence it judged", artifact.Parents)
 	}
 }
 
