@@ -319,3 +319,42 @@ func TestCovers(t *testing.T) {
 		}
 	}
 }
+
+// A test credited as coverage must still exist at the head being stamped.
+func TestCoverageDeletedByALaterCommitLeavesTheThreadActionable(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: []File{{Path: "unrelated.go"}}},
+		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+		{SHA: "c3", Files: []File{{Path: "a_test.go", Removed: true}}},
+	}
+	got, tests, touched := fixingCommit(commits, "a.go")
+	if got.SHA != "" || len(tests) != 0 {
+		t.Errorf("credited a test deleted before the head: commit=%q tests=%v", got.SHA, tests)
+	}
+	if touched != "c2" {
+		t.Errorf("touched = %q, want c2 — the file WAS changed, only the coverage is gone", touched)
+	}
+}
+
+func TestCoverageReAddedAfterRemovalStillCounts(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+		{SHA: "c2", Files: []File{{Path: "a_test.go", Removed: true}}},
+		{SHA: "c3", Files: []File{{Path: "a_test.go"}}},
+	}
+	got, tests, _ := fixingCommit(commits, "a.go")
+	if got.SHA != "c1" || len(tests) != 1 {
+		t.Errorf("a test present at head should count: commit=%q tests=%v", got.SHA, tests)
+	}
+}
+
+func TestSurvivingCoverageStillDispositions(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+		{SHA: "c2", Files: []File{{Path: "other.go"}}},
+	}
+	got, tests, _ := fixingCommit(commits, "a.go")
+	if got.SHA != "c1" || len(tests) != 1 || tests[0] != "a_test.go" {
+		t.Errorf("expected c1/a_test.go, got commit=%q tests=%v", got.SHA, tests)
+	}
+}

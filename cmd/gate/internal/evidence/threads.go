@@ -127,7 +127,7 @@ func disposition(th Thread, commits []Commit, index map[string]int, headSHA stri
 // file at all, so a caller can say which of the two facts is missing.
 func fixingCommit(after []Commit, file string) (Commit, []string, string) {
 	touched := ""
-	for _, c := range after {
+	for i, c := range after {
 		if !touches(c.Files, file) {
 			continue
 		}
@@ -138,9 +138,43 @@ func fixingCommit(after []Commit, file string) (Commit, []string, string) {
 		if len(tests) == 0 {
 			continue
 		}
+		// The credited test has to still be there at the head we stamp. A
+		// commit can add a_test.go alongside its fix and a later one remove it,
+		// and crediting the earlier commit would put a comment on the PR naming
+		// a test that is no longer in the tree — inviting a human to resolve a
+		// finding whose only evidence has since been deleted. Same false-fixed
+		// hazard as crediting a deletion, just spread across two commits.
+		tests = survivingTests(after[i+1:], tests)
+		if len(tests) == 0 {
+			continue
+		}
 		return c, tests, touched
 	}
 	return Commit{}, nil, touched
+}
+
+// survivingTests drops any credited test that a later commit removes. Anything
+// still standing at the stamped head is real evidence; anything deleted on the
+// way there never was.
+func survivingTests(later []Commit, tests []string) []string {
+	removed := map[string]bool{}
+	for _, c := range later {
+		for _, f := range c.Files {
+			if f.Removed {
+				removed[f.Path] = true
+				continue
+			}
+			// Re-added after a removal: present at head again, so it counts.
+			delete(removed, f.Path)
+		}
+	}
+	kept := make([]string, 0, len(tests))
+	for _, t := range tests {
+		if !removed[t] {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 func touches(files []File, file string) bool {
