@@ -50,6 +50,8 @@ export GATE_STATE=~/dev/gate/state                           # -state/-key defau
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
+./gate.exe preflight                                         # a whole sweep's inventory + every mint it needs, up front
+./gate.exe preflight -repo owner/a -repo owner/b -deny owner/b#7
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider codex
@@ -96,6 +98,45 @@ Like every `observe` projection it is **advisory**: `capability.Check` and the
 ladder remain the only authority. A `covered` row can still refuse, and the
 advisory count skips outcomes whose parent verdict it cannot follow rather than
 failing the whole inbox — it may undercount a corrupt log, never overcount.
+
+`gate preflight` is the same inventory question asked in BATCH, before a sweep
+starts rather than one PR at a time. It walks every open PR in scope (`-repo`,
+repeatable or comma-separated; with none, every repo the log already names),
+minus a `-deny` list of repos or `owner/repo#N` PRs, groups them by repo, and
+prints per repo: the branch-protection shape the merges land against (strict —
+where a BEHIND PR costs a refresh, a CI re-run, and a fresh gate judgment — the
+required contexts, conversation resolution), each PR's historical review-cycle
+count, its `grant_coverage` row, and **one** `gate grant` wide enough to cover
+that repo for the whole sweep. Every such command is then reprinted as a single
+batch at the end. That block is the point: the operator mints once, up front,
+instead of being interrupted per repo mid-sweep — the friction that left a clean,
+green PR unmerged purely for want of a grant, and ceiling-parked PRs whose review
+history had already spent the default `-max-cycles 3`.
+
+The composed mint never narrows a ceiling a live grant already carries, and a
+repo every PR of which is covered asks for nothing. **`preflight` PRINTS mint
+commands and never runs one** — minting is operator-only, and like `next` it is
+read-only, exiting 0 or 4. Both live reads are per repo and best-effort: one
+`gh pr list`, and a protection read against the repository's **resolved default
+branch** (`gh api repos/<repo>` then `.../branches/<default>/protection`) — never
+an assumed `main`, since a 404 on a guessed branch name would report a strict
+repo as unprotected. A repo that cannot be read keeps its row and records the
+failure. A 404 from the protection endpoint is an *answer* (no protection); any
+other failure, including an unresolvable default branch, stays an error, so a
+repo is never reported unprotected because `gh` could not reach it.
+
+An all-clear is claimed only over a **complete** inventory: a repo whose open PRs
+could not be listed was never assessed, so it is reported as unread (`unread` in
+JSON) and the tail prints the partial mint list rather than "every repo is
+covered" — an all-clear over an unassessed repo would start the very sweep-stall
+this verb exists to prevent. A saturated `gh pr list` page counts as *not listed*
+for the same reason: a full page means the PRs past it were never seen, so it is
+propagated as an incomplete read rather than returned as a short answer. That
+also fixes the read for `next`, where an unseen-but-open PR would previously have
+been reconciled as "not open" and had its row dropped.
+The per-repo shapes verified by hand live in
+[`../../docs/auto-mode-defaults.md`](../../docs/auto-mode-defaults.md); this verb
+reads them live.
 
 For profiling that live reconcile, `next` accepts three debug/experimental
 flags — `-cpuprofile <path>`, `-blockprofile <path>`, `-trace <path>` — each
