@@ -3,6 +3,7 @@ package evidence
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -152,7 +153,7 @@ func combine(mechanisms ...mechanism) ProtectionBody {
 
 func classicProtection(pr PRRef, baseRef string, fetch protectionFetch) mechanism {
 	m := mechanism{source: ProtectionSourceBranch}
-	raw, err := fetch(fmt.Sprintf("repos/%s/branches/%s/protection", pr.Repo, baseRef))
+	raw, err := fetch(fmt.Sprintf("repos/%s/branches/%s/protection", pr.Repo, escapeRef(baseRef)))
 	if err != nil {
 		// Only GitHub's specific "Branch not protected" body is evidence the
 		// branch carries no classic protection. A bare 404 is not: a missing
@@ -177,7 +178,7 @@ func classicProtection(pr PRRef, baseRef string, fetch protectionFetch) mechanis
 
 func rulesetProtection(pr PRRef, baseRef string, fetch protectionFetch) mechanism {
 	m := mechanism{source: ProtectionSourceRuleset}
-	raw, err := fetch(fmt.Sprintf("repos/%s/rules/branches/%s", pr.Repo, baseRef))
+	raw, err := fetch(fmt.Sprintf("repos/%s/rules/branches/%s", pr.Repo, escapeRef(baseRef)))
 	if err != nil {
 		// This endpoint answers an empty list for a branch with no rules, so it
 		// has no "not configured" error shape at all: every failure here is an
@@ -262,6 +263,19 @@ func BaseRef(view json.RawMessage) string {
 		return ""
 	}
 	return v.BaseRefName
+}
+
+// escapeRef makes a branch name safe as ONE path segment. gh api takes an
+// already-formed endpoint and substitutes nothing here, so a base like
+// release/1.2 would otherwise split into two segments: both reads would miss
+// the real branch, degrade to unreadable, and the rung would pass a BEHIND head
+// on a strict base straight to the doomed merge command. The degrade-to-pass
+// rule is right; it must not be reachable through an avoidable bug.
+//
+// pr.Repo is deliberately NOT escaped — it is owner/repo, two segments by
+// construction.
+func escapeRef(ref string) string {
+	return url.PathEscape(ref)
 }
 
 func ghAPI(path string) (json.RawMessage, error) {

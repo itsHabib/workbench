@@ -332,3 +332,26 @@ func TestStrictFromProtectionRejectsDrift(t *testing.T) {
 		t.Fatalf("the drift error must name what was missing: %v", err)
 	}
 }
+
+// A branch name is ONE path segment. A base like release/1.2 concatenated raw
+// would split into two, both reads would miss the real branch and degrade to
+// unreadable, and the rung would pass a BEHIND head on a strict base straight
+// to the doomed merge command — the degrade-to-pass rule reached through a bug
+// rather than through a genuinely unreadable endpoint.
+func TestReadProtectionEscapesTheBaseRef(t *testing.T) {
+	var asked []string
+	fetch := func(path string) (json.RawMessage, error) {
+		asked = append(asked, path)
+		switch path {
+		case "repos/o/r/branches/release%2F1.2/protection":
+			return json.RawMessage(`{"required_status_checks":{"strict":true}}`), nil
+		case "repos/o/r/rules/branches/release%2F1.2":
+			return json.RawMessage(noRules), nil
+		}
+		return nil, errors.New("evidence: gh [api " + path + "]: HTTP 404: Not Found")
+	}
+	got := readProtection(PRRef{Repo: "o/r", Number: 7}, "release/1.2", fetch)
+	if !got.Readable || !got.Strict {
+		t.Fatalf("a slashed base must still resolve its protection: %+v (asked %v)", got, asked)
+	}
+}
