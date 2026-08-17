@@ -102,13 +102,21 @@ log entry. Consequences the code enforces:
   with two callers is deliberate — readiness cannot call a panel complete that
   the panel rung parks, and the head binding that makes the stand-in safe,
   including exactly which non-judged head the refresh above buys, cannot drift
-  between them. The stand-in is scoped to ABSENCE: an explicit non-approving
-  `reviewDecision` blocks, a completed reviewer whose review asked for changes
-  escalates, a human's outstanding change request escalates at any head, and
-  mergeability, conflicts, and CI are untouched. What carried the decision is
-  written into the verdict — the approval, the panel, or the reviews-optional
-  flag — so the log tells an intentional acceptance apart from readiness passing
-  an unreviewed PR.
+  between them. The stand-in is scoped to ABSENCE, and to the panel's own
+  warrant: an explicit non-approving `reviewDecision` blocks outright, and a
+  completed reviewer whose review asked for changes — or a human's outstanding
+  change request, at any head — stops the PANEL standing in. It does not
+  reorder the stand-ins ranked above it. An authoritative human's exact-head
+  approval and the reviews-optional flag rest on different warrants (a person
+  with repository authority decided; the enforced-check context wants no
+  separate GitHub review) and still carry readiness on their own, over an
+  objecting panel as they did before — a separately pinned decision, since bot
+  findings are findings and authorization is not theirs. What carried the
+  decision is written into the verdict — the approval, the panel, or the flag —
+  along with any objection that pass stepped over, so the log tells an
+  intentional acceptance apart from readiness passing an unreviewed PR. The one
+  gap that leaves, a bodyless bot change request landing in no rung at all, is
+  recorded in `FOLLOWUPS.md` rather than closed here.
 - **An execution claim is permanent.** The exact action must still be the PR's
   newest terminal inside the same anchored-state lock that appends its claim.
   A command/token/transport failure never makes the action claimable again.
