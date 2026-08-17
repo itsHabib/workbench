@@ -5,14 +5,23 @@ import (
 	"testing"
 )
 
+// changed builds a commit's file list, all modifications.
+func changed(paths ...string) []File {
+	out := make([]File, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, File{Path: p})
+	}
+	return out
+}
+
 // commits is the PR history the disposition cases share: a thread anchored at
 // c1, a later commit that fixes the reviewed file with a test, and one that
 // touches it without.
 func threadCommits() []Commit {
 	return []Commit{
-		{SHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Subject: "first", Files: []string{"cmd/gate/internal/evidence/panel.go"}},
-		{SHA: "c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Subject: "fix the panel split", Files: []string{"cmd/gate/internal/evidence/panel.go", "cmd/gate/internal/evidence/panel_test.go"}},
-		{SHA: "c3cccccccccccccccccccccccccccccccccccccc", Subject: "docs only", Files: []string{"README.md"}},
+		{SHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Subject: "first", Files: changed("cmd/gate/internal/evidence/panel.go")},
+		{SHA: "c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Subject: "fix the panel split", Files: changed("cmd/gate/internal/evidence/panel.go", "cmd/gate/internal/evidence/panel_test.go")},
+		{SHA: "c3cccccccccccccccccccccccccccccccccccccc", Subject: "docs only", Files: changed("README.md")},
 	}
 }
 
@@ -53,7 +62,7 @@ func TestDispositionsFixedWithTest(t *testing.T) {
 // nothing on the record keeps it fixed.
 func TestDispositionsFixWithoutTestStaysActionable(t *testing.T) {
 	commits := threadCommits()
-	commits[1].Files = []string{"cmd/gate/internal/evidence/panel.go"}
+	commits[1].Files = changed("cmd/gate/internal/evidence/panel.go")
 	threads := []Thread{{
 		Path:      "cmd/gate/internal/evidence/panel.go",
 		AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -126,8 +135,8 @@ func TestDispositionsThreadWithoutPath(t *testing.T) {
 // A thread ON a test file must not credit that same file as its own coverage.
 func TestDispositionsTestFileThreadNeedsOtherCoverage(t *testing.T) {
 	commits := []Commit{
-		{SHA: "c1", Files: []string{"a_test.go"}},
-		{SHA: "c2", Files: []string{"a_test.go"}},
+		{SHA: "c1", Files: changed("a_test.go")},
+		{SHA: "c2", Files: changed("a_test.go")},
 	}
 	d := Dispositions([]Thread{{Path: "a_test.go", AnchorSHA: "c1"}}, commits, "head")[0]
 	if !d.Actionable {
@@ -139,9 +148,9 @@ func TestDispositionsTestFileThreadNeedsOtherCoverage(t *testing.T) {
 // more authoritative, and naming the first keeps the comment re-derivable.
 func TestFixingCommitPicksEarliestPairing(t *testing.T) {
 	commits := []Commit{
-		{SHA: "x1", Files: []string{"a.go"}},
-		{SHA: "x2", Files: []string{"a.go", "a_test.go"}},
-		{SHA: "x3", Files: []string{"a.go", "a_test.go"}},
+		{SHA: "x1", Files: changed("a.go")},
+		{SHA: "x2", Files: changed("a.go", "a_test.go")},
+		{SHA: "x3", Files: changed("a.go", "a_test.go")},
 	}
 	fix, tests, touched := fixingCommit(commits, "a.go")
 	if fix.SHA != "x2" || touched != "x1" || len(tests) != 1 {
@@ -184,5 +193,72 @@ func TestFirstRelevant(t *testing.T) {
 func TestShellSingleQuote(t *testing.T) {
 	if got := shellSingleQuote("a'b"); got != `'a'\''b'` {
 		t.Errorf("shellSingleQuote = %q", got)
+	}
+}
+
+// The false-fixed case the design exists to refuse: a commit that changes the
+// reviewed file while DELETING a test-looking file removes coverage; it must
+// never read as covering evidence.
+func TestDispositionsRemovedTestIsNotCoverage(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: changed("a.go")},
+		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go", Removed: true}}},
+	}
+	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
+	if !d.Actionable {
+		t.Fatalf("a deleted test file was credited as regression coverage: %+v", d)
+	}
+	if !strings.Contains(d.Why, "no test change") {
+		t.Errorf("why = %q", d.Why)
+	}
+}
+
+// A later commit that restores real coverage still disposes the thread — the
+// removal exclusion must not poison the whole file list.
+func TestDispositionsRemovedTestDoesNotBlockLaterCoverage(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: changed("a.go")},
+		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "old_test.go", Removed: true}}},
+		{SHA: "c3", Files: changed("a.go", "a_test.go")},
+	}
+	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
+	if d.Actionable || d.FixCommit != "c3" {
+		t.Fatalf("want c3 credited as the fix, got %+v", d)
+	}
+}
+
+func TestDispositionsEmptyAnchor(t *testing.T) {
+	d := Dispositions([]Thread{{Path: "cmd/gate/internal/evidence/panel.go"}}, threadCommits(), "head")[0]
+	if !d.Actionable || !strings.Contains(d.Why, "no anchor commit") {
+		t.Fatalf("want still-actionable with an anchor-less why, got %+v", d)
+	}
+	if strings.Contains(d.Why, "  ") {
+		t.Errorf("why has a double space: %q", d.Why)
+	}
+}
+
+// A GraphQL error arrives with HTTP 200 next to an empty data block. Consuming
+// it as an empty thread set would report a truncated PR as fully dispositioned.
+func TestParseThreadsPageRejectsGraphQLErrors(t *testing.T) {
+	raw := []byte(`{"data":{"repository":null},"errors":[{"message":"Could not resolve to a Repository"}]}`)
+	if _, err := parseThreadsPage(raw); err == nil {
+		t.Fatal("parseThreadsPage on an errors payload: want error")
+	} else if !strings.Contains(err.Error(), "Could not resolve") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestParseThreadsPageReadsNodes(t *testing.T) {
+	raw := []byte(`{"data":{"repository":{"pullRequest":{"reviewThreads":{
+	  "pageInfo":{"hasNextPage":false,"endCursor":""},
+	  "nodes":[{"id":"T1","isResolved":false,"path":"a.go","line":9,
+	    "comments":{"nodes":[{"body":"b","author":{"login":"codex"},"originalCommit":{"oid":"abc"}}]}}]}}}}}`)
+	page, err := parseThreadsPage(raw)
+	if err != nil {
+		t.Fatalf("parseThreadsPage: %v", err)
+	}
+	if len(page.Nodes) != 1 || page.Nodes[0].ID != "T1" ||
+		page.Nodes[0].Comments.Nodes[0].OriginalCommit.OID != "abc" {
+		t.Fatalf("page = %+v", page)
 	}
 }

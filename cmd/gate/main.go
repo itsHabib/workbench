@@ -1823,11 +1823,7 @@ func cmdThreads(args []string) error {
 		return errors.New("threads: -repo and -pr required")
 	}
 	ref := evidence.PRRef{Repo: *repo, Number: *pr}
-	head, err := evidence.HeadSHA(ref)
-	if err != nil {
-		return err
-	}
-	dispositions, err := evidence.SweepThreads(ref, head)
+	dispositions, head, err := evidence.SweepThreads(ref)
 	if err != nil {
 		return err
 	}
@@ -1844,7 +1840,7 @@ func cmdThreads(args []string) error {
 func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
 	fmt.Fprintf(w, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
 	for _, d := range dispositions {
-		fmt.Fprintf(w, "\n%s %s:%d (%s)\n", dispositionMark(d), d.Thread.Path, d.Thread.Line, d.Thread.Author)
+		fmt.Fprintf(w, "\n%s %s (%s)\n", dispositionMark(d), threadLocus(d.Thread), d.Thread.Author)
 		fmt.Fprintf(w, "  %s\n", d.Why)
 		if d.Actionable {
 			continue
@@ -1855,6 +1851,19 @@ func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions
 		fmt.Fprintf(w, "  resolve: %s\n", d.ResolveCommand)
 	}
 	return nil
+}
+
+// threadLocus names where a thread sits. A thread can carry no line (an
+// outdated anchor GitHub no longer maps) and, on a file-level review, no path
+// — neither should print as a `:0` a reader would take for line zero.
+func threadLocus(th evidence.Thread) string {
+	if th.Path == "" {
+		return "(no file anchor)"
+	}
+	if th.Line == 0 {
+		return th.Path
+	}
+	return fmt.Sprintf("%s:%d", th.Path, th.Line)
 }
 
 func dispositionMark(d evidence.Disposition) string {

@@ -108,8 +108,11 @@ Constraints that are design decisions, not omissions:
   evidence resolve comment plus the exact resolve call, for a human to run. A
   missing fix commit, a fix with no accompanying test, or an anchor outside the
   PR's history all report the thread still-actionable: a false "this was fixed"
-  buries a live finding, a false "still actionable" costs a look. Like `explain`
-  and `next` it is read-only — no artifact, no state write, exit 0 or 4 only.
+  buries a live finding, a false "still actionable" costs a look. A DELETED test
+  file is coverage removed, never coverage added. The head is read on both sides
+  of the sweep and the run is abandoned if it moved, so a stamped comment never
+  cites history its head does not contain. Like `explain` and `next` it is
+  read-only — no artifact, no state write, exit 0 or 4 only.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

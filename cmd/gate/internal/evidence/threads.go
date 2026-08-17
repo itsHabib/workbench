@@ -38,11 +38,18 @@ type Thread struct {
 	Resolved  bool   `json:"resolved,omitempty"`
 }
 
+// File is one file a commit touched, with the one status distinction the
+// disposition turns on: a deleted file changed the tree but covers nothing.
+type File struct {
+	Path    string `json:"path"`
+	Removed bool   `json:"removed,omitempty"`
+}
+
 // Commit is one commit of a pull request with the files it touched.
 type Commit struct {
-	SHA     string   `json:"sha"`
-	Subject string   `json:"subject,omitempty"`
-	Files   []string `json:"files,omitempty"`
+	SHA     string `json:"sha"`
+	Subject string `json:"subject,omitempty"`
+	Files   []File `json:"files,omitempty"`
 }
 
 // Disposition is what the sweep prepared for one unresolved thread: either a
@@ -86,6 +93,10 @@ func disposition(th Thread, commits []Commit, index map[string]int, headSHA stri
 	d := Disposition{Thread: th, Actionable: true}
 	if th.Path == "" {
 		d.Why = "thread has no file anchor — nothing to match a fixing commit against"
+		return d
+	}
+	if th.AnchorSHA == "" {
+		d.Why = "thread has no anchor commit — its first comment was not posted against a commit, so nothing can be ordered after it"
 		return d
 	}
 	anchor, ok := index[th.AnchorSHA]
@@ -132,9 +143,9 @@ func fixingCommit(after []Commit, file string) (Commit, []string, string) {
 	return Commit{}, nil, touched
 }
 
-func touches(files []string, file string) bool {
+func touches(files []File, file string) bool {
 	for _, f := range files {
-		if f == file {
+		if f.Path == file {
 			return true
 		}
 	}
@@ -143,14 +154,16 @@ func touches(files []string, file string) bool {
 
 // testFiles returns the commit's test files, excluding the reviewed file
 // itself: a change to a test file the thread was already about is the fix, not
-// independent coverage of it.
-func testFiles(files []string, reviewed string) []string {
+// independent coverage of it. A DELETED test file is excluded too — a commit
+// that removes coverage while touching the reviewed file is the false-fixed
+// case this whole path exists to refuse.
+func testFiles(files []File, reviewed string) []string {
 	var out []string
 	for _, f := range files {
-		if f == reviewed || !isTestFile(f) {
+		if f.Removed || f.Path == reviewed || !isTestFile(f.Path) {
 			continue
 		}
-		out = append(out, f)
+		out = append(out, f.Path)
 	}
 	return out
 }
@@ -242,6 +255,61 @@ const reviewThreadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cur
       nodes{id isResolved path line
         comments(first:1){nodes{body author{login} originalCommit{oid}}}}}}}}`
 
+type threadsPage struct {
+	PageInfo struct {
+		HasNextPage bool   `json:"hasNextPage"`
+		EndCursor   string `json:"endCursor"`
+	} `json:"pageInfo"`
+	Nodes []struct {
+		ID         string `json:"id"`
+		IsResolved bool   `json:"isResolved"`
+		Path       string `json:"path"`
+		Line       int    `json:"line"`
+		Comments   struct {
+			Nodes []struct {
+				Body   string `json:"body"`
+				Author struct {
+					Login string `json:"login"`
+				} `json:"author"`
+				OriginalCommit struct {
+					OID string `json:"oid"`
+				} `json:"originalCommit"`
+			} `json:"nodes"`
+		} `json:"comments"`
+	} `json:"nodes"`
+}
+
+// parseThreadsPage decodes one GraphQL page, refusing a response that carries
+// errors. GraphQL answers a bad repo, an unknown PR, or a lost permission with
+// HTTP 200 and a top-level errors array, which decodes cleanly into the
+// zero-value struct — a truncated or empty thread set that would read as "no
+// threads to disposition". A partial answer is not evidence.
+func parseThreadsPage(raw []byte) (threadsPage, error) {
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads threadsPage `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return threadsPage{}, fmt.Errorf("evidence: parse review threads: %w", err)
+	}
+	if len(resp.Errors) > 0 {
+		msgs := make([]string, 0, len(resp.Errors))
+		for _, e := range resp.Errors {
+			msgs = append(msgs, e.Message)
+		}
+		return threadsPage{}, fmt.Errorf("evidence: review threads query: %s", strings.Join(msgs, "; "))
+	}
+	return resp.Data.Repository.PullRequest.ReviewThreads, nil
+}
+
 // FetchThreads reads every review thread on a pull request. Threads are the
 // GraphQL-only surface — resolution, the node id the resolve mutation takes,
 // and the anchor commit all live there and nowhere in REST.
@@ -266,41 +334,10 @@ func FetchThreads(pr PRRef) ([]Thread, error) {
 		if err != nil {
 			return nil, err
 		}
-		var resp struct {
-			Data struct {
-				Repository struct {
-					PullRequest struct {
-						ReviewThreads struct {
-							PageInfo struct {
-								HasNextPage bool   `json:"hasNextPage"`
-								EndCursor   string `json:"endCursor"`
-							} `json:"pageInfo"`
-							Nodes []struct {
-								ID         string `json:"id"`
-								IsResolved bool   `json:"isResolved"`
-								Path       string `json:"path"`
-								Line       int    `json:"line"`
-								Comments   struct {
-									Nodes []struct {
-										Body   string `json:"body"`
-										Author struct {
-											Login string `json:"login"`
-										} `json:"author"`
-										OriginalCommit struct {
-											OID string `json:"oid"`
-										} `json:"originalCommit"`
-									} `json:"nodes"`
-								} `json:"comments"`
-							} `json:"nodes"`
-						} `json:"reviewThreads"`
-					} `json:"pullRequest"`
-				} `json:"repository"`
-			} `json:"data"`
+		threads, err := parseThreadsPage(raw)
+		if err != nil {
+			return nil, err
 		}
-		if err := json.Unmarshal(raw, &resp); err != nil {
-			return nil, fmt.Errorf("evidence: parse review threads: %w", err)
-		}
-		threads := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, th := range threads.Nodes {
 			t := Thread{ID: th.ID, Path: th.Path, Line: th.Line, Resolved: th.IsResolved}
 			if len(th.Comments.Nodes) > 0 {
@@ -360,7 +397,10 @@ func firstRelevant(commits []Commit, threads []Thread) int {
 	return earliest + 1
 }
 
-const commitsPerPage = 100
+const (
+	commitsPerPage = 100
+	filesPerPage   = 100
+)
 
 func pagedCommits(pr PRRef) ([]Commit, error) {
 	var out []Commit
@@ -388,24 +428,34 @@ func pagedCommits(pr PRRef) ([]Commit, error) {
 	}
 }
 
-func fetchCommitFiles(pr PRRef, sha string) ([]string, error) {
-	raw, err := gh("api", fmt.Sprintf("repos/%s/commits/%s", pr.Repo, sha))
-	if err != nil {
-		return nil, err
+// fetchCommitFiles reads every file a commit touched. The commit endpoint pages
+// its file list, so it is walked to exhaustion the same way the comment
+// endpoints are: one page deep would silently hide the reviewed path or its
+// test on a large commit, and a hidden test reads as missing coverage.
+func fetchCommitFiles(pr PRRef, sha string) ([]File, error) {
+	var out []File
+	for page := 1; ; page++ {
+		raw, err := gh("api", fmt.Sprintf("repos/%s/commits/%s?per_page=%d&page=%d",
+			pr.Repo, sha, filesPerPage, page))
+		if err != nil {
+			return nil, err
+		}
+		var body struct {
+			Files []struct {
+				Filename string `json:"filename"`
+				Status   string `json:"status"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return nil, fmt.Errorf("evidence: parse commit files: %w", err)
+		}
+		for _, f := range body.Files {
+			out = append(out, File{Path: f.Filename, Removed: f.Status == "removed"})
+		}
+		if len(body.Files) < filesPerPage {
+			return out, nil
+		}
 	}
-	var body struct {
-		Files []struct {
-			Filename string `json:"filename"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, fmt.Errorf("evidence: parse commit files: %w", err)
-	}
-	out := make([]string, 0, len(body.Files))
-	for _, f := range body.Files {
-		out = append(out, f.Filename)
-	}
-	return out, nil
 }
 
 func subjectOf(message string) string {
@@ -426,15 +476,33 @@ func HeadSHA(pr PRRef) (string, error) {
 }
 
 // SweepThreads reads a pull request's threads and commits and prepares a
-// disposition for each unresolved one. The whole path is read-only.
-func SweepThreads(pr PRRef, headSHA string) ([]Disposition, error) {
+// disposition for each unresolved one, stamped with the head it read. The whole
+// path is read-only.
+//
+// The head is read on both sides of the sweep and the run is abandoned if it
+// moved: a push mid-sweep would let a comment cite a fix from history the
+// stamped head does not contain, which is a claim no reader could re-derive.
+// The caller re-runs against the new head.
+func SweepThreads(pr PRRef) ([]Disposition, string, error) {
+	head, err := HeadSHA(pr)
+	if err != nil {
+		return nil, "", err
+	}
 	threads, err := FetchThreads(pr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	commits, err := FetchCommits(pr, threads)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return Dispositions(threads, commits, headSHA), nil
+	after, err := HeadSHA(pr)
+	if err != nil {
+		return nil, "", err
+	}
+	if after != head {
+		return nil, "", fmt.Errorf("evidence: head moved during the sweep (%s → %s) — re-run against the new head",
+			shortSHA(head), shortSHA(after))
+	}
+	return Dispositions(threads, commits, head), head, nil
 }

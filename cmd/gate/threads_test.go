@@ -51,3 +51,20 @@ func TestCmdThreadsRequiresSubject(t *testing.T) {
 		t.Fatal("cmdThreads with no -pr: want error")
 	}
 }
+
+// A thread with no line (or no file) must not print as line zero.
+func TestThreadLocus(t *testing.T) {
+	cases := []struct {
+		th   evidence.Thread
+		want string
+	}{
+		{evidence.Thread{Path: "a.go", Line: 12}, "a.go:12"},
+		{evidence.Thread{Path: "a.go"}, "a.go"},
+		{evidence.Thread{}, "(no file anchor)"},
+	}
+	for _, c := range cases {
+		if got := threadLocus(c.th); got != c.want {
+			t.Errorf("threadLocus(%+v) = %q, want %q", c.th, got, c.want)
+		}
+	}
+}

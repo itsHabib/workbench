@@ -1,0 +1,21 @@
+gate: harden thread disposition against false-fixed evidence
+
+Review round 1 on the sweep-layer disposition pass.
+
+- A DELETED test file no longer counts as regression coverage. The commit-file
+  decoder now retains the REST status and testFiles excludes removals, so a
+  commit that touches the reviewed file while removing coverage stays
+  actionable — precisely the false-fixed case the design refuses.
+- FetchThreads rejects a GraphQL response carrying a top-level errors array.
+  GraphQL answers a bad repo or lost permission with HTTP 200 and an empty
+  data block, which previously decoded as "no threads to disposition".
+- Commit file lists are paged to exhaustion. One page deep could hide the
+  reviewed path or its test on a large commit.
+- SweepThreads reads the head on both sides of the sweep and abandons the run
+  if it moved, so a stamped comment can never cite history its head lacks.
+- A thread with no anchor commit gets its own message instead of a
+  double-spaced fallback; a thread with no line no longer renders as ":0".
+
+Tests cover each: removed-test rejection (and that a later real test still
+disposes the thread), the GraphQL errors payload, the empty anchor, and the
+locus rendering.
