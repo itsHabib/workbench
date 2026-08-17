@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +127,8 @@ func main() {
 		err = cmdExplain(os.Args[2:])
 	case "next":
 		err = cmdNext(os.Args[2:])
+	case "preflight":
+		err = cmdPreflight(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "backtest":
@@ -156,7 +159,7 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
@@ -172,6 +175,7 @@ func usage() {
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
+  preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
   audit
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
@@ -1795,6 +1799,192 @@ func cmdNext(args []string) error {
 	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
 }
 
+// repeatedFlag collects a flag given more than once, so `-repo a -repo b` reads
+// as a list. It also splits on commas, because a sweep scope is as often pasted
+// as one comma-separated string as it is typed out flag by flag.
+type repeatedFlag []string
+
+func (r *repeatedFlag) String() string { return strings.Join(*r, ",") }
+
+func (r *repeatedFlag) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			*r = append(*r, s)
+		}
+	}
+	return nil
+}
+
+// cmdPreflight projects the whole sweep's inventory before any of it starts:
+// every open PR in scope grouped by repo, each repo's branch-protection shape
+// and historical review-cycle count, and the ONE batch of `gate grant` commands
+// the sweep will need. It exists because grants were discovered one repo at a
+// time, mid-sweep — a clean, green PR sat unmerged purely for want of one, and
+// the default cycle ceiling parked PRs whose review history had already spent
+// it. Both are knowable up front; this is where they get known.
+//
+// It PRINTS mint commands and never runs them: minting is operator-only, and
+// like next/explain/audit this sits outside the decision code space, returning
+// nil for success (exit 0) or an error (exit 4) — never a 0–3 a driver would
+// misread as a decision.
+func cmdPreflight(args []string) error {
+	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
+	stateDir, floorBin, keyDir := commonFlags(fs)
+	var repos, deny repeatedFlag
+	fs.Var(&repos, "repo", "repo to inventory, repeatable or comma-separated (default: every repo the log knows)")
+	fs.Var(&deny, "deny", "exclude owner/repo or owner/repo#N, repeatable or comma-separated")
+	asJSON := fs.Bool("json", false, "emit the JSON inventory")
+	help, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if help {
+		return nil
+	}
+	e, err := newEnv(*stateDir, *floorBin, *keyDir)
+	if err != nil {
+		return err
+	}
+	req := observe.PreflightRequest{
+		Repos:    repos,
+		Deny:     deny,
+		Fetch:    lookupOpenPRs,
+		Protect:  lookupProtection,
+		StateArg: stateArgFor(*stateDir),
+		Now:      time.Now,
+	}
+	if *asJSON {
+		return observe.PreflightJSON(os.Stdout, e.st, req)
+	}
+	return observe.PreflightText(os.Stdout, e.st, req)
+}
+
+// lookupProtection is the preflight's second live seam: per repo it resolves the
+// repository's ACTUAL default branch, then reads that branch's protection shape
+// — whether a BEHIND PR must be refreshed before it can merge, and what must be
+// green. Strict is the fact worth planning around: a refresh there costs a CI
+// re-run and a fresh gate judgment, since a judgment binds to the head it was
+// made against.
+//
+// The default branch is resolved rather than assumed to be `main`. On a repo
+// whose default is `master` (or anything else) the assumed path 404s, and a 404
+// is read here as "unprotected" — so the assumption would report a strict repo
+// as having no protection at all, which is the one error direction a sweep must
+// not make.
+func lookupProtection(repo string) (observe.Protection, error) {
+	const timeout = 6 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return lookupProtectionContext(ctx, repo, runGHAPI)
+}
+
+// ghAPIRunner runs one `gh api <path>`, returning stdout, stderr, and the exit
+// error separately — gh writes banners to stderr even on a clean exit, so
+// interleaving them would turn a good read into a decode error.
+type ghAPIRunner func(ctx context.Context, path string) ([]byte, []byte, error)
+
+func runGHAPI(ctx context.Context, path string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", "api", path)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), err
+	}
+	return stdout.Bytes(), stderr.Bytes(), nil
+}
+
+// defaultBranch reads the repository's default branch. A failure here is an
+// error, never a fallback to a guessed name: guessing is exactly what produces
+// the false "unprotected" this call exists to prevent.
+func defaultBranch(ctx context.Context, repo string, run ghAPIRunner) (string, error) {
+	stdout, stderr, err := run(ctx, "repos/"+repo)
+	if err != nil {
+		return "", ghAPIError(ctx, "read repo", repo, stderr, err)
+	}
+	var body struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(stdout, &body); err != nil {
+		return "", fmt.Errorf("decode repo %s: %w", repo, err)
+	}
+	if body.DefaultBranch == "" {
+		return "", fmt.Errorf("read repo %s: no default branch reported", repo)
+	}
+	return body.DefaultBranch, nil
+}
+
+// ghAPIError renders one gh failure, preferring the context error (a timeout or
+// cancellation) over gh's exit status and appending gh's own stderr detail.
+func ghAPIError(ctx context.Context, what, repo string, stderr []byte, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s %s: %w", what, repo, ctx.Err())
+	}
+	detail := strings.TrimSpace(string(stderr))
+	if detail != "" {
+		return fmt.Errorf("%s %s: %w: %s", what, repo, err, detail)
+	}
+	return fmt.Errorf("%s %s: %w", what, repo, err)
+}
+
+// protectionBody is the slice of GitHub's branch-protection response the sweep
+// reads. A deliberate copy of the API's shape, kept here so the projection stays
+// decoupled from the transport.
+type protectionBody struct {
+	RequiredStatusChecks struct {
+		Strict   bool     `json:"strict"`
+		Contexts []string `json:"contexts"`
+	} `json:"required_status_checks"`
+	RequiredConversationResolution struct {
+		Enabled bool `json:"enabled"`
+	} `json:"required_conversation_resolution"`
+}
+
+func lookupProtectionContext(ctx context.Context, repo string, run ghAPIRunner) (observe.Protection, error) {
+	branch, err := defaultBranch(ctx, repo, run)
+	if err != nil {
+		return observe.Protection{}, err
+	}
+	// The branch is one PATH SEGMENT and must be escaped as one. A perfectly
+	// valid default branch like `release/v1` would otherwise split into extra
+	// segments, 404, and be read below as "unprotected" — recreating the exact
+	// false-negative resolving the branch was meant to prevent. The repo is
+	// spliced raw on purpose: `owner/name` IS two segments.
+	stdout, stderr, err := run(ctx, fmt.Sprintf("repos/%s/branches/%s/protection", repo, url.PathEscape(branch)))
+	if err != nil {
+		return protectionFailure(ctx, repo, branch, stderr, err)
+	}
+	var body protectionBody
+	if err := json.Unmarshal(stdout, &body); err != nil {
+		return observe.Protection{}, fmt.Errorf("decode protection %s: %w", repo, err)
+	}
+	return observe.Protection{
+		Branch:                 branch,
+		Protected:              true,
+		Strict:                 body.RequiredStatusChecks.Strict,
+		Contexts:               body.RequiredStatusChecks.Contexts,
+		ConversationResolution: body.RequiredConversationResolution.Enabled,
+	}, nil
+}
+
+// protectionFailure separates the one failure that is an ANSWER from the ones
+// that are errors: an unprotected branch answers this endpoint with 404, and
+// "no protection — gate and the guard are the only boundary" is exactly the fact
+// the sweep needs. Anything else (auth, rate limit, timeout) stays an error so a
+// repo is never reported as unprotected because gh could not reach it.
+//
+// The 404 is trustworthy only because the branch was RESOLVED, not guessed: a
+// 404 on a guessed branch name says nothing about the branch these PRs target.
+func protectionFailure(ctx context.Context, repo, branch string, stderr []byte, err error) (observe.Protection, error) {
+	if ctx.Err() != nil {
+		return observe.Protection{}, fmt.Errorf("read protection %s: %w", repo, ctx.Err())
+	}
+	if strings.Contains(string(stderr), "HTTP 404") {
+		return observe.Protection{Branch: branch, Protected: false}, nil
+	}
+	return observe.Protection{}, ghAPIError(ctx, "read protection", repo, stderr, err)
+}
+
 // lookupOpenPRs is the batched live seam: ONE `gh pr list` per repo returns all
 // its open PRs keyed by number, serving the parked/ready reconcilers and the
 // needs_grant count from a single subprocess — O(repos), not O(PRs). It is
@@ -1809,13 +1999,13 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 
 type ghPRListRunner func(context.Context, string) ([]byte, []byte, error)
 
+// prListLimit bounds one open-PR read. It overrides gh's default page of 30, or
+// a busy repo would silently undercount. A repo that reaches it is reported as
+// an incomplete read rather than a short answer — see lookupOpenPRsContext.
+const prListLimit = 1000
+
 func runGHPRList(ctx context.Context, repo string) ([]byte, []byte, error) {
-	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
-	// silently cap at 30 and undercount. It may still truncate a repo with >1000
-	// open PRs — any still-open PR outside the page would then be absent from the
-	// map and reconciled as "not open" (dropped) — so the boundary is surfaced
-	// below rather than paginated away.
-	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", strconv.Itoa(prListLimit), "--json", "number,title,headRefOid,url")
 	// Capture stdout and stderr separately: gh can write progress/deprecation/
 	// rate-limit banners to stderr even on a zero exit, and interleaving them
 	// into the JSON buffer would turn a clean read into a confusing decode error.
@@ -1849,8 +2039,15 @@ func lookupOpenPRsContext(ctx context.Context, repo string, run ghPRListRunner) 
 	if err := json.Unmarshal(stdout, &prs); err != nil {
 		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
 	}
-	if len(prs) == 1000 {
-		fmt.Fprintf(os.Stderr, "gate: gh pr list for %s hit the 1000 limit; some open PRs may be treated as closed\n", repo)
+	// A full page is a TRUNCATED read, not a short answer: the PRs past it were
+	// never seen. Returning it as success is unsafe in both directions — the
+	// inbox would reconcile an unseen-but-open PR as "not open" and drop its
+	// row, and preflight would count the repo as assessed and fold it into an
+	// all-clear while a PR outside the page still needed a mint. Both callers
+	// degrade correctly on an error (rows kept as unknown; the repo reported as
+	// unread), so the truncation is propagated rather than warned about.
+	if len(prs) >= prListLimit {
+		return nil, fmt.Errorf("list PRs %s: hit the %d-item page limit; the open-PR read is incomplete", repo, prListLimit)
 	}
 	m := make(map[int]observe.LivePR, len(prs))
 	for _, pr := range prs {
