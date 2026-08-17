@@ -104,12 +104,15 @@ Constraints that are design decisions, not omissions:
 - **Thread disposition prepares, it never resolves.** `gate threads -repo R
   -pr N` reads a PR's unresolved review threads and, for each, looks for the
   commit after the thread's anchor that changes the reviewed file *and* carries
-  a test change. Only that pairing produces a disposition — an exact-commit +
+  a test change NAMING that file as its subject (`panel.go`/`panel_test.go`,
+  `foo.ts`/`foo.test.ts`, `thing.py`/`test_thing.py`). Only that pairing
+  produces a disposition — an exact-commit +
   evidence resolve comment plus the exact resolve call, for a human to run. A
   missing fix commit, a fix with no accompanying test, or an anchor outside the
   PR's history all report the thread still-actionable: a false "this was fixed"
   buries a live finding, a false "still actionable" costs a look. A DELETED test
-  file is coverage removed, never coverage added. The head is read on both sides
+  file is coverage removed, never coverage added; an unrelated test riding in the
+  same commit is not coverage of the reviewed change at all. The head is read on both sides
   of the sweep and the run is abandoned if it moved, so a stamped comment never
   cites history its head does not contain. Like `explain` and `next` it is
   read-only — no artifact, no state write, exit 0 or 4 only.

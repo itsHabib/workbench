@@ -110,7 +110,7 @@ func disposition(th Thread, commits []Commit, index map[string]int, headSHA stri
 		return d
 	}
 	if fix.SHA == "" {
-		d.Why = fmt.Sprintf("commit %s touches %s after the thread, but carries no test change — a human must confirm the finding is addressed", shortSHA(touched), th.Path)
+		d.Why = fmt.Sprintf("commit %s touches %s after the thread, but no test change in it names %s as its subject — a human must confirm the finding is addressed", shortSHA(touched), th.Path, path.Base(th.Path))
 		return d
 	}
 	d.Actionable = false
@@ -134,7 +134,7 @@ func fixingCommit(after []Commit, file string) (Commit, []string, string) {
 		if touched == "" {
 			touched = c.SHA
 		}
-		tests := testFiles(c.Files, file)
+		tests := coveringTests(c.Files, file)
 		if len(tests) == 0 {
 			continue
 		}
@@ -152,20 +152,51 @@ func touches(files []File, file string) bool {
 	return false
 }
 
-// testFiles returns the commit's test files, excluding the reviewed file
-// itself: a change to a test file the thread was already about is the fix, not
-// independent coverage of it. A DELETED test file is excluded too — a commit
-// that removes coverage while touching the reviewed file is the false-fixed
-// case this whole path exists to refuse.
-func testFiles(files []File, reviewed string) []string {
+// coveringTests returns the commit's test files that are evidence about the
+// REVIEWED file — its named counterparts, by the naming convention that ties a
+// test to its subject. Any-test-in-the-commit would be no evidence at all: a
+// commit changing a.go beside an unrelated other_test.go would produce a comment
+// claiming other_test.go keeps the finding fixed, and invite a human to resolve
+// a live thread on it.
+//
+// Three exclusions, each a way the pairing is not evidence: the reviewed file
+// itself (a test cannot be its own independent coverage), a DELETED test
+// (coverage removed, never added), and a test whose name ties it to some other
+// subject. A same-package test with an unrelated name may well cover the fix,
+// but nothing in the file list says so — and an unprovable connection leaves the
+// thread actionable, which is always the safe answer.
+func coveringTests(files []File, reviewed string) []string {
 	var out []string
 	for _, f := range files {
 		if f.Removed || f.Path == reviewed || !isTestFile(f.Path) {
 			continue
 		}
+		if !covers(f.Path, reviewed) {
+			continue
+		}
 		out = append(out, f.Path)
 	}
 	return out
+}
+
+// covers reports whether a test file's name ties it to the reviewed file:
+// panel.go/panel_test.go, foo.ts/foo.test.ts, src/foo.py/tests/test_foo.py. The
+// subject stem is the link, not the directory — a mirrored test tree names its
+// subject exactly as a sibling test does.
+func covers(test, reviewed string) bool {
+	return subjectStem(test) == subjectStem(reviewed)
+}
+
+// subjectStem reduces a file name to the subject it is about: the base name
+// without its extension and without the affixes that mark a test.
+func subjectStem(file string) string {
+	base := path.Base(file)
+	base = strings.TrimSuffix(base, path.Ext(base))
+	base = strings.TrimPrefix(base, "test_")
+	for _, affix := range []string{"_test", ".test", ".spec", "_spec", ".steps"} {
+		base = strings.TrimSuffix(base, affix)
+	}
+	return base
 }
 
 // isTestFile recognises the test-file conventions of the stacks in this

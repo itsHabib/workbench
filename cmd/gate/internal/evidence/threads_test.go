@@ -74,7 +74,7 @@ func TestDispositionsFixWithoutTestStaysActionable(t *testing.T) {
 	if d.Comment != "" || d.ResolveCommand != "" {
 		t.Errorf("actionable thread carries a prepared resolve: %+v", d)
 	}
-	if !strings.Contains(d.Why, "no test change") {
+	if !strings.Contains(d.Why, "no test change in it names") {
 		t.Errorf("why = %q", d.Why)
 	}
 }
@@ -208,7 +208,7 @@ func TestDispositionsRemovedTestIsNotCoverage(t *testing.T) {
 	if !d.Actionable {
 		t.Fatalf("a deleted test file was credited as regression coverage: %+v", d)
 	}
-	if !strings.Contains(d.Why, "no test change") {
+	if !strings.Contains(d.Why, "no test change in it names") {
 		t.Errorf("why = %q", d.Why)
 	}
 }
@@ -218,7 +218,7 @@ func TestDispositionsRemovedTestIsNotCoverage(t *testing.T) {
 func TestDispositionsRemovedTestDoesNotBlockLaterCoverage(t *testing.T) {
 	commits := []Commit{
 		{SHA: "c1", Files: changed("a.go")},
-		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "old_test.go", Removed: true}}},
+		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go", Removed: true}}},
 		{SHA: "c3", Files: changed("a.go", "a_test.go")},
 	}
 	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
@@ -260,5 +260,62 @@ func TestParseThreadsPageReadsNodes(t *testing.T) {
 	if len(page.Nodes) != 1 || page.Nodes[0].ID != "T1" ||
 		page.Nodes[0].Comments.Nodes[0].OriginalCommit.OID != "abc" {
 		t.Fatalf("page = %+v", page)
+	}
+}
+
+// An unrelated test riding in the same commit is not coverage of the reviewed
+// change — claiming it is would invite a human to resolve a live finding.
+func TestDispositionsUnrelatedTestIsNotCoverage(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: changed("a.go")},
+		{SHA: "c2", Files: changed("a.go", "other_test.go")},
+	}
+	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
+	if !d.Actionable {
+		t.Fatalf("an unrelated test was credited as coverage: %+v", d)
+	}
+	if len(d.Tests) != 0 || d.Comment != "" {
+		t.Errorf("actionable thread carries evidence: %+v", d)
+	}
+}
+
+// ...and the commit that DOES name the reviewed file as its subject disposes it.
+func TestDispositionsPrefersTheNamedCounterpart(t *testing.T) {
+	commits := []Commit{
+		{SHA: "c1", Files: changed("pkg/a.go")},
+		{SHA: "c2", Files: changed("pkg/a.go", "pkg/other_test.go")},
+		{SHA: "c3", Files: changed("pkg/a.go", "pkg/a_test.go")},
+	}
+	d := Dispositions([]Thread{{Path: "pkg/a.go", AnchorSHA: "c1"}}, commits, "head")[0]
+	if d.Actionable || d.FixCommit != "c3" {
+		t.Fatalf("want c3 credited, got %+v", d)
+	}
+	if len(d.Tests) != 1 || d.Tests[0] != "pkg/a_test.go" {
+		t.Errorf("tests = %v", d.Tests)
+	}
+}
+
+func TestCovers(t *testing.T) {
+	yes := [][2]string{
+		{"pkg/a_test.go", "pkg/a.go"},
+		{"src/foo.test.ts", "src/foo.ts"},
+		{"web/__tests__/foo.spec.js", "web/foo.js"},
+		{"tests/test_thing.py", "src/thing.py"},
+		{"native/src/parse_test.rs", "native/src/parse.rs"},
+	}
+	no := [][2]string{
+		{"pkg/other_test.go", "pkg/a.go"},
+		{"tests/test_other.py", "src/thing.py"},
+		{"web/bar.test.ts", "web/foo.ts"},
+	}
+	for _, c := range yes {
+		if !covers(c[0], c[1]) {
+			t.Errorf("covers(%q, %q) = false", c[0], c[1])
+		}
+	}
+	for _, c := range no {
+		if covers(c[0], c[1]) {
+			t.Errorf("covers(%q, %q) = true", c[0], c[1])
+		}
 	}
 }
