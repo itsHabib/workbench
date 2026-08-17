@@ -1845,22 +1845,32 @@ func cmdPreflight(args []string) error {
 	return observe.PreflightText(os.Stdout, e.st, req)
 }
 
-// lookupProtection is the preflight's second live seam: ONE `gh api` per repo
-// reads the default branch's protection shape — whether a BEHIND PR must be
-// refreshed before it can merge, and what must be green. Strict is the fact
-// worth planning around: a refresh there costs a CI re-run and a fresh gate
-// judgment, since a judgment binds to the head it was made against.
+// lookupProtection is the preflight's second live seam: per repo it resolves the
+// repository's ACTUAL default branch, then reads that branch's protection shape
+// — whether a BEHIND PR must be refreshed before it can merge, and what must be
+// green. Strict is the fact worth planning around: a refresh there costs a CI
+// re-run and a fresh gate judgment, since a judgment binds to the head it was
+// made against.
+//
+// The default branch is resolved rather than assumed to be `main`. On a repo
+// whose default is `master` (or anything else) the assumed path 404s, and a 404
+// is read here as "unprotected" — so the assumption would report a strict repo
+// as having no protection at all, which is the one error direction a sweep must
+// not make.
 func lookupProtection(repo string) (observe.Protection, error) {
-	const timeout = 3 * time.Second
+	const timeout = 6 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return lookupProtectionContext(ctx, repo, runGHProtection)
+	return lookupProtectionContext(ctx, repo, runGHAPI)
 }
 
-type ghProtectionRunner func(context.Context, string) ([]byte, []byte, error)
+// ghAPIRunner runs one `gh api <path>`, returning stdout, stderr, and the exit
+// error separately — gh writes banners to stderr even on a clean exit, so
+// interleaving them would turn a good read into a decode error.
+type ghAPIRunner func(ctx context.Context, path string) ([]byte, []byte, error)
 
-func runGHProtection(ctx context.Context, repo string) ([]byte, []byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", "api", fmt.Sprintf("repos/%s/branches/main/protection", repo))
+func runGHAPI(ctx context.Context, path string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", "api", path)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1868,6 +1878,39 @@ func runGHProtection(ctx context.Context, repo string) ([]byte, []byte, error) {
 		return stdout.Bytes(), stderr.Bytes(), err
 	}
 	return stdout.Bytes(), stderr.Bytes(), nil
+}
+
+// defaultBranch reads the repository's default branch. A failure here is an
+// error, never a fallback to a guessed name: guessing is exactly what produces
+// the false "unprotected" this call exists to prevent.
+func defaultBranch(ctx context.Context, repo string, run ghAPIRunner) (string, error) {
+	stdout, stderr, err := run(ctx, "repos/"+repo)
+	if err != nil {
+		return "", ghAPIError(ctx, "read repo", repo, stderr, err)
+	}
+	var body struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(stdout, &body); err != nil {
+		return "", fmt.Errorf("decode repo %s: %w", repo, err)
+	}
+	if body.DefaultBranch == "" {
+		return "", fmt.Errorf("read repo %s: no default branch reported", repo)
+	}
+	return body.DefaultBranch, nil
+}
+
+// ghAPIError renders one gh failure, preferring the context error (a timeout or
+// cancellation) over gh's exit status and appending gh's own stderr detail.
+func ghAPIError(ctx context.Context, what, repo string, stderr []byte, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s %s: %w", what, repo, ctx.Err())
+	}
+	detail := strings.TrimSpace(string(stderr))
+	if detail != "" {
+		return fmt.Errorf("%s %s: %w: %s", what, repo, err, detail)
+	}
+	return fmt.Errorf("%s %s: %w", what, repo, err)
 }
 
 // protectionBody is the slice of GitHub's branch-protection response the sweep
@@ -1883,16 +1926,21 @@ type protectionBody struct {
 	} `json:"required_conversation_resolution"`
 }
 
-func lookupProtectionContext(ctx context.Context, repo string, run ghProtectionRunner) (observe.Protection, error) {
-	stdout, stderr, err := run(ctx, repo)
+func lookupProtectionContext(ctx context.Context, repo string, run ghAPIRunner) (observe.Protection, error) {
+	branch, err := defaultBranch(ctx, repo, run)
 	if err != nil {
-		return protectionFailure(ctx, repo, stderr, err)
+		return observe.Protection{}, err
+	}
+	stdout, stderr, err := run(ctx, fmt.Sprintf("repos/%s/branches/%s/protection", repo, branch))
+	if err != nil {
+		return protectionFailure(ctx, repo, branch, stderr, err)
 	}
 	var body protectionBody
 	if err := json.Unmarshal(stdout, &body); err != nil {
 		return observe.Protection{}, fmt.Errorf("decode protection %s: %w", repo, err)
 	}
 	return observe.Protection{
+		Branch:                 branch,
 		Protected:              true,
 		Strict:                 body.RequiredStatusChecks.Strict,
 		Contexts:               body.RequiredStatusChecks.Contexts,
@@ -1905,18 +1953,17 @@ func lookupProtectionContext(ctx context.Context, repo string, run ghProtectionR
 // "no protection — gate and the guard are the only boundary" is exactly the fact
 // the sweep needs. Anything else (auth, rate limit, timeout) stays an error so a
 // repo is never reported as unprotected because gh could not reach it.
-func protectionFailure(ctx context.Context, repo string, stderr []byte, err error) (observe.Protection, error) {
+//
+// The 404 is trustworthy only because the branch was RESOLVED, not guessed: a
+// 404 on a guessed branch name says nothing about the branch these PRs target.
+func protectionFailure(ctx context.Context, repo, branch string, stderr []byte, err error) (observe.Protection, error) {
 	if ctx.Err() != nil {
 		return observe.Protection{}, fmt.Errorf("read protection %s: %w", repo, ctx.Err())
 	}
-	detail := strings.TrimSpace(string(stderr))
-	if strings.Contains(detail, "HTTP 404") {
-		return observe.Protection{Protected: false}, nil
+	if strings.Contains(string(stderr), "HTTP 404") {
+		return observe.Protection{Branch: branch, Protected: false}, nil
 	}
-	if detail != "" {
-		return observe.Protection{}, fmt.Errorf("read protection %s: %w: %s", repo, err, detail)
-	}
-	return observe.Protection{}, fmt.Errorf("read protection %s: %w", repo, err)
+	return observe.Protection{}, ghAPIError(ctx, "read protection", repo, stderr, err)
 }
 
 // lookupOpenPRs is the batched live seam: ONE `gh pr list` per repo returns all

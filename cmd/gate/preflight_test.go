@@ -7,20 +7,85 @@ import (
 	"testing"
 )
 
+// ghStub routes a fake `gh api` by path: the repo read answers with a default
+// branch, and the protection read answers per the case under test. It records
+// every path called, so "which branch did we actually ask about" is assertable.
+type ghStub struct {
+	defaultBranch string
+	repoErr       error
+	protection    string
+	protStderr    string
+	protErr       error
+	paths         []string
+}
+
+func (g *ghStub) run(_ context.Context, path string) ([]byte, []byte, error) {
+	g.paths = append(g.paths, path)
+	if !strings.Contains(path, "/branches/") {
+		if g.repoErr != nil {
+			return nil, []byte("gh: Bad credentials (HTTP 401)"), g.repoErr
+		}
+		return []byte(`{"default_branch":"` + g.defaultBranch + `"}`), nil, nil
+	}
+	if g.protErr != nil {
+		return nil, []byte(g.protStderr), g.protErr
+	}
+	return []byte(g.protection), nil, nil
+}
+
+// TestLookupProtectionResolvesTheDefaultBranch pins the fix for the assumed
+// `main`: protection is read from the repository's ACTUAL default branch. On a
+// `master` repo the assumed path 404s, and a 404 reads as unprotected — so the
+// assumption would report a strict repo as having no protection at all, the one
+// error direction a sweep must not make.
+func TestLookupProtectionResolvesTheDefaultBranch(t *testing.T) {
+	g := &ghStub{
+		defaultBranch: "master",
+		protection:    `{"required_status_checks":{"strict":true,"contexts":["Go"]}}`,
+	}
+	p, err := lookupProtectionContext(context.Background(), "o/r", g.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Protected || !p.Strict || p.Branch != "master" {
+		t.Fatalf("protection must come from the real default branch: %+v", p)
+	}
+	want := []string{"repos/o/r", "repos/o/r/branches/master/protection"}
+	if strings.Join(g.paths, "|") != strings.Join(want, "|") {
+		t.Errorf("gh paths = %v, want %v", g.paths, want)
+	}
+}
+
+// TestLookupProtectionUnresolvedBranchIsAnError pins that a failure to resolve
+// the default branch never falls back to a guessed name: guessing is what
+// produces the false "unprotected" this path exists to prevent.
+func TestLookupProtectionUnresolvedBranchIsAnError(t *testing.T) {
+	g := &ghStub{repoErr: errors.New("exit status 1")}
+	if _, err := lookupProtectionContext(context.Background(), "o/r", g.run); err == nil {
+		t.Fatal("an unresolvable default branch must be an error, not a guess")
+	}
+	if len(g.paths) != 1 {
+		t.Errorf("protection must not be read against a guessed branch: %v", g.paths)
+	}
+}
+
 // TestLookupProtectionUnprotectedIsAnAnswer pins the one gh failure that is a
 // FACT, not an error: an unprotected default branch answers the protection
 // endpoint with 404, and "no protection — gate and the guard are the only
-// boundary" is exactly what the sweep needs to know.
+// boundary" is exactly what the sweep needs to know. It is trustworthy only
+// because the branch was resolved first.
 func TestLookupProtectionUnprotectedIsAnAnswer(t *testing.T) {
-	run := func(context.Context, string) ([]byte, []byte, error) {
-		return nil, []byte("gh: Not Found (HTTP 404)"), errors.New("exit status 1")
+	g := &ghStub{
+		defaultBranch: "main",
+		protStderr:    "gh: Not Found (HTTP 404)",
+		protErr:       errors.New("exit status 1"),
 	}
-	p, err := lookupProtectionContext(context.Background(), "o/r", run)
+	p, err := lookupProtectionContext(context.Background(), "o/r", g.run)
 	if err != nil {
 		t.Fatalf("404 must read as unprotected, not an error: %v", err)
 	}
-	if p.Protected {
-		t.Errorf("404 must report Protected=false, got %+v", p)
+	if p.Protected || p.Branch != "main" {
+		t.Errorf("404 must report Protected=false on the resolved branch, got %+v", p)
 	}
 }
 
@@ -28,10 +93,12 @@ func TestLookupProtectionUnprotectedIsAnAnswer(t *testing.T) {
 // could not READ must never be reported as unprotected, or a sweep would plan a
 // refresh-free merge against a strict repo on the strength of an auth failure.
 func TestLookupProtectionErrorsAreNotUnprotected(t *testing.T) {
-	run := func(context.Context, string) ([]byte, []byte, error) {
-		return nil, []byte("gh: Bad credentials (HTTP 401)"), errors.New("exit status 1")
+	g := &ghStub{
+		defaultBranch: "main",
+		protStderr:    "gh: Bad credentials (HTTP 401)",
+		protErr:       errors.New("exit status 1"),
 	}
-	if _, err := lookupProtectionContext(context.Background(), "o/r", run); err == nil {
+	if _, err := lookupProtectionContext(context.Background(), "o/r", g.run); err == nil {
 		t.Fatal("an auth failure must stay an error")
 	}
 }
@@ -53,12 +120,12 @@ func TestLookupProtectionCancelledReportsContext(t *testing.T) {
 // TestLookupProtectionDecodesStrictShape pins the read a sweep plans around:
 // strict, the required contexts, and conversation resolution.
 func TestLookupProtectionDecodesStrictShape(t *testing.T) {
-	body := `{"required_status_checks":{"strict":true,"contexts":["ubuntu-latest","windows-latest"]},
-	          "required_conversation_resolution":{"enabled":true}}`
-	run := func(context.Context, string) ([]byte, []byte, error) {
-		return []byte(body), nil, nil
+	g := &ghStub{
+		defaultBranch: "main",
+		protection: `{"required_status_checks":{"strict":true,"contexts":["ubuntu-latest","windows-latest"]},
+		              "required_conversation_resolution":{"enabled":true}}`,
 	}
-	p, err := lookupProtectionContext(context.Background(), "o/r", run)
+	p, err := lookupProtectionContext(context.Background(), "o/r", g.run)
 	if err != nil {
 		t.Fatal(err)
 	}

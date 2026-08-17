@@ -36,6 +36,12 @@ type Preflight struct {
 	// Excluded lists the denylisted repos and PRs this inventory skipped, echoed
 	// back so a silently-dropped PR is never mistaken for a clean sweep.
 	Excluded []string `json:"excluded,omitempty"`
+	// Unread names every repo whose open PRs could not be listed. Those repos
+	// contributed no coverage rows and therefore no mints, so an empty Mints with
+	// a non-empty Unread means "not assessed", NOT "covered" — the distinction
+	// this field exists to keep, since an all-clear on an unread repo starts a
+	// sweep that stalls on the grant it never asked for.
+	Unread []string `json:"unread,omitempty"`
 }
 
 // RepoPlan is one repo's slice of the sweep: its open PRs, the protection shape
@@ -65,6 +71,10 @@ type RepoPlan struct {
 // Protected is false for a repo whose default branch carries no protection at
 // all, where gate and the guard are the only boundary.
 type Protection struct {
+	// Branch is the branch this shape was read from — the repository's actual
+	// default branch, not an assumed one. It is projected because "unprotected"
+	// and "I read the wrong branch" are indistinguishable to a reader otherwise.
+	Branch    string   `json:"branch,omitempty"`
 	Protected bool     `json:"protected"`
 	Strict    bool     `json:"strict"`
 	Contexts  []string `json:"contexts,omitempty"`
@@ -157,6 +167,9 @@ func buildPreflight(arts []state.Artifact, req PreflightRequest) Preflight {
 	for _, plan := range p.Repos {
 		if plan.Mint != "" {
 			p.Mints = append(p.Mints, plan.Mint)
+		}
+		if plan.PRsError != "" {
+			p.Unread = append(p.Unread, plan.Repo)
 		}
 	}
 	return p
@@ -423,7 +436,7 @@ func renderPreflight(w io.Writer, p Preflight) {
 		renderRepoPlan(w, plan)
 	}
 	renderExcluded(w, p.Excluded)
-	renderMints(w, p.Mints)
+	renderMints(w, p.Mints, p.Unread)
 }
 
 func renderRepoPlan(w io.Writer, plan RepoPlan) {
@@ -459,12 +472,16 @@ func renderProtection(w io.Writer, plan RepoPlan) {
 // the expensive one — a BEHIND PR there costs a refresh, a CI re-run, and a
 // fresh gate judgment.
 func protectionLine(p Protection) string {
-	if !p.Protected {
-		return "none — gate and the guard are the only boundary"
+	branch := ""
+	if p.Branch != "" {
+		branch = p.Branch + ": "
 	}
-	parts := []string{"not strict — a BEHIND PR merges without a refresh"}
-	if p.Strict {
-		parts = []string{"STRICT — a BEHIND PR costs refresh + CI re-run + a fresh gate judgment"}
+	if !p.Protected {
+		return branch + "none — gate and the guard are the only boundary"
+	}
+	parts := []string{branch + "STRICT — a BEHIND PR costs refresh + CI re-run + a fresh gate judgment"}
+	if !p.Strict {
+		parts = []string{branch + "not strict — a BEHIND PR merges without a refresh"}
 	}
 	if len(p.Contexts) > 0 {
 		parts = append(parts, "checks "+strings.Join(p.Contexts, ", "))
@@ -502,12 +519,40 @@ func renderExcluded(w io.Writer, excluded []string) {
 // renderMints prints the whole sweep's mint batch last, as one block. The point
 // of the surface: the operator mints every grant the sweep needs once, up front,
 // instead of being interrupted per repo. Gate never runs these.
-func renderMints(w io.Writer, mints []string) {
+//
+// An all-clear is claimed ONLY over a complete inventory. A repo whose open PRs
+// could not be listed was never assessed, and reporting "everything is covered"
+// over it would send the operator into a sweep that then stalls on the grant
+// this surface exists to have asked for — the worst failure it has.
+func renderMints(w io.Writer, mints, unread []string) {
+	if len(unread) > 0 {
+		renderIncomplete(w, mints, unread)
+		return
+	}
 	if len(mints) == 0 {
 		fmt.Fprintln(w, "every repo in scope is covered — no mints needed.")
 		return
 	}
 	fmt.Fprintf(w, "mint before the sweep (%d) — operator only; gate never runs these\n\n", len(mints))
+	renderMintList(w, mints)
+}
+
+// renderIncomplete is the honest tail for a partial inventory: the mints the
+// readable repos DID ask for, plus the repos that were never assessed at all.
+// It never claims coverage — the unread repos may each need a grant.
+func renderIncomplete(w io.Writer, mints, unread []string) {
+	fmt.Fprintf(w, "INVENTORY INCOMPLETE — %d repo(s) could not be listed: %s\n", len(unread), strings.Join(unread, ", "))
+	fmt.Fprintln(w, "their grant coverage was NOT assessed; they may each still need a mint.")
+	fmt.Fprintln(w)
+	if len(mints) == 0 {
+		fmt.Fprintln(w, "no mints from the repos that were readable.")
+		return
+	}
+	fmt.Fprintf(w, "mint before the sweep, from the readable repos (%d) — operator only; gate never runs these\n\n", len(mints))
+	renderMintList(w, mints)
+}
+
+func renderMintList(w io.Writer, mints []string) {
 	for _, m := range mints {
 		fmt.Fprintf(w, "  %s\n", m)
 	}

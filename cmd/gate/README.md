@@ -117,10 +117,19 @@ The composed mint never narrows a ceiling a live grant already carries, and a
 repo every PR of which is covered asks for nothing. **`preflight` PRINTS mint
 commands and never runs one** — minting is operator-only, and like `next` it is
 read-only, exiting 0 or 4. Both live reads are per repo and best-effort: one
-`gh pr list` and one `gh api .../branches/main/protection`, with a repo that
-cannot be read keeping its row and recording the failure. A 404 from the
-protection endpoint is an *answer* (no protection); any other failure stays an
-error, so a repo is never reported unprotected because `gh` could not reach it.
+`gh pr list`, and a protection read against the repository's **resolved default
+branch** (`gh api repos/<repo>` then `.../branches/<default>/protection`) — never
+an assumed `main`, since a 404 on a guessed branch name would report a strict
+repo as unprotected. A repo that cannot be read keeps its row and records the
+failure. A 404 from the protection endpoint is an *answer* (no protection); any
+other failure, including an unresolvable default branch, stays an error, so a
+repo is never reported unprotected because `gh` could not reach it.
+
+An all-clear is claimed only over a **complete** inventory: a repo whose open PRs
+could not be listed was never assessed, so it is reported as unread (`unread` in
+JSON) and the tail prints the partial mint list rather than "every repo is
+covered" — an all-clear over an unassessed repo would start the very sweep-stall
+this verb exists to prevent.
 The per-repo shapes verified by hand live in
 [`../../docs/auto-mode-defaults.md`](../../docs/auto-mode-defaults.md); this verb
 reads them live.

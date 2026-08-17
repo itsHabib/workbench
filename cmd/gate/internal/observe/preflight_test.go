@@ -219,6 +219,92 @@ func TestPreflightDegradesOnUnreachableRepo(t *testing.T) {
 	}
 }
 
+// TestPreflightUnreadableInventoryIsNeverAnAllClear pins the worst failure this
+// projection could have: a repo whose open PRs could not be listed contributes
+// no coverage rows and so no mint, and reporting "every repo is covered" over it
+// would send the operator into a sweep that then stalls on the grant this
+// surface exists to have asked for. Unread must read as unread.
+func TestPreflightUnreadableInventoryIsNeverAnAllClear(t *testing.T) {
+	arts := []state.Artifact{
+		art(state.KindGrant, "run_mint", "grt_a", inboxBase, grant("acme/ok", inboxBase.Add(5*time.Hour))),
+	}
+	table := map[string]map[int]LivePR{"acme/ok": {1: openPR("covered")}}
+
+	p := buildPreflight(arts, req([]string{"acme/ok", "acme/unreachable"}, fetchFrom(table, nil), nil))
+
+	if len(p.Mints) != 0 {
+		t.Fatalf("the readable repo is covered, so no mints: %v", p.Mints)
+	}
+	if strings.Join(p.Unread, ",") != "acme/unreachable" {
+		t.Fatalf("the unread repo must be named: %v", p.Unread)
+	}
+
+	var buf bytes.Buffer
+	renderPreflight(&buf, p)
+	out := buf.String()
+	if strings.Contains(out, "every repo in scope is covered") {
+		t.Errorf("an unread repo must never yield an all-clear:\n%s", out)
+	}
+	for _, want := range []string{
+		"INVENTORY INCOMPLETE — 1 repo(s) could not be listed: acme/unreachable",
+		"their grant coverage was NOT assessed",
+		"no mints from the repos that were readable.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("incomplete inventory missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+// TestPreflightIncompleteStillPrintsKnownMints pins that an incomplete
+// inventory still hands over the mints the readable repos did ask for — the
+// operator gets everything that IS known, labelled as partial.
+func TestPreflightIncompleteStillPrintsKnownMints(t *testing.T) {
+	table := map[string]map[int]LivePR{"acme/ok": {1: openPR("no grant")}}
+	p := buildPreflight(nil, req([]string{"acme/ok", "acme/unreachable"}, fetchFrom(table, nil), nil))
+
+	var buf bytes.Buffer
+	renderPreflight(&buf, p)
+	out := buf.String()
+	for _, want := range []string{
+		"INVENTORY INCOMPLETE",
+		"mint before the sweep, from the readable repos (1)",
+		"gate grant -repo acme/ok -action merge",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("partial inventory missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+// TestPreflightAssessesTheNewestRunNotTheLastUpdated pins the run join: judging
+// an older parked run appends a fresh verdict for THAT run at the end of the
+// log, so ordering on the newest verdict would assess the PR against a
+// superseded run's tier — suggesting a mint too narrow or needlessly wide.
+// Recency is where a run STARTS.
+func TestPreflightAssessesTheNewestRunNotTheLastUpdated(t *testing.T) {
+	arts := []state.Artifact{
+		// run_old starts first and composes T3.
+		tieredVerdict("run_old", "vrd_old", inboxBase, "acme/r", 5, "T3"),
+		// run_new starts later and composes T1 — the PR's current state.
+		tieredVerdict("run_new", "vrd_new", inboxBase.Add(time.Minute), "acme/r", 5, "T1"),
+		// The operator then judges the older park, appending another verdict for
+		// run_old at the END of the log. run_old is still the older run.
+		tieredVerdict("run_old", "vrd_old2", inboxBase.Add(2*time.Minute), "acme/r", 5, "T3"),
+	}
+	table := map[string]map[int]LivePR{"acme/r": {5: openPR("re-gated PR")}}
+
+	p := buildPreflight(arts, req([]string{"acme/r"}, fetchFrom(table, nil), nil))
+
+	got := p.Repos[0].PRs[0].Coverage
+	if got.VerdictTier != "T1" {
+		t.Fatalf("coverage must read the NEWEST run's tier (T1), got %q", got.VerdictTier)
+	}
+	if !strings.Contains(p.Repos[0].Mint, "-max-tier T1") {
+		t.Errorf("mint must be sized from the newest run, got %q", p.Repos[0].Mint)
+	}
+}
+
 // TestPreflightScopeDefaultsToKnownRepos pins the no-flag path: with no explicit
 // -repo, the sweep's scope is every repo the log already names — grants minted,
 // refusals recorded, PRs gated.
@@ -256,7 +342,7 @@ func TestPreflightTextRendersTheOperatorBlock(t *testing.T) {
 	}
 	table := map[string]map[int]LivePR{"acme/strict": {12: openPR("needs a grant")}}
 	prot := map[string]Protection{
-		"acme/strict": {Protected: true, Strict: true, Contexts: []string{"ubuntu-latest", "windows-latest"}, ConversationResolution: true},
+		"acme/strict": {Branch: "master", Protected: true, Strict: true, Contexts: []string{"ubuntu-latest", "windows-latest"}, ConversationResolution: true},
 	}
 
 	var buf bytes.Buffer
@@ -266,7 +352,9 @@ func TestPreflightTextRendersTheOperatorBlock(t *testing.T) {
 
 	for _, want := range []string{
 		"acme/strict (1 open PR(s))",
-		"protection: STRICT — a BEHIND PR costs refresh + CI re-run + a fresh gate judgment",
+		// The branch is named, so "unprotected" and "we read the wrong branch"
+		// can never look the same to a reader.
+		"protection: master: STRICT — a BEHIND PR costs refresh + CI re-run + a fresh gate judgment",
 		"checks ubuntu-latest, windows-latest",
 		"conversation resolution required",
 		`#12  "needs a grant"`,

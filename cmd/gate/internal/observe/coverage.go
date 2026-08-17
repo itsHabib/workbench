@@ -191,11 +191,17 @@ func runTiers(arts []state.Artifact) map[string]string {
 	return tiers
 }
 
-// subjectRuns maps each repo#PR to the most recent run that recorded a verdict
-// for it, in log order. The inbox already knows a row's run; a sweep inventory
-// starts from a PR number instead, so it needs the same join to ask the coverage
-// question against the tier that PR's last gate run actually composed.
+// subjectRuns maps each repo#PR to its NEWEST gate run — the one that started
+// last. The inbox already knows a row's run; a sweep inventory starts from a PR
+// number instead, so it needs this join to ask the coverage question against the
+// tier that PR's latest gate run actually composed.
+//
+// Recency is the run's FIRST artifact, never its last. Judging an older parked
+// run appends a fresh verdict for that run at the end of the log, so ordering on
+// the newest verdict would pick the most recently *updated* run and assess the
+// PR against a superseded run's tier.
 func subjectRuns(arts []state.Artifact) map[string]string {
+	started := runStartOrder(arts)
 	runs := make(map[string]string)
 	for _, a := range arts {
 		if a.Kind != state.KindVerdict {
@@ -205,9 +211,26 @@ func subjectRuns(arts []state.Artifact) map[string]string {
 		if err := json.Unmarshal(a.Body, &v); err != nil || v.Subject.Repo == "" {
 			continue
 		}
-		runs[subjectKey(v.Subject.Repo, v.Subject.Number)] = a.Run
+		key := subjectKey(v.Subject.Repo, v.Subject.Number)
+		if cur, ok := runs[key]; ok && started[cur] >= started[a.Run] {
+			continue
+		}
+		runs[key] = a.Run
 	}
 	return runs
+}
+
+// runStartOrder records where each run first appears in the log — the only
+// stable proxy for "which run started later", since a run's artifacts continue
+// to accrue long after a newer run has begun.
+func runStartOrder(arts []state.Artifact) map[string]int {
+	started := make(map[string]int)
+	for order, a := range arts {
+		if _, seen := started[a.Run]; !seen {
+			started[a.Run] = order
+		}
+	}
+	return started
 }
 
 // assessSubject is assess for a caller holding only a PR: it resolves the
