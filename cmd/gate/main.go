@@ -1838,17 +1838,20 @@ func cmdThreads(args []string) error {
 // writeDispositions renders the sweep for a human: what can be resolved with
 // evidence in hand, then what still needs them.
 func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
+	// Every field below carries GitHub-sourced text — author, path, the thread
+	// body folded into Why and Comment, and the node id inside ResolveCommand.
+	// None of it is printed raw: see sanitizeForTerminal.
 	fmt.Fprintf(w, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
 	for _, d := range dispositions {
-		fmt.Fprintf(w, "\n%s %s (%s)\n", dispositionMark(d), threadLocus(d.Thread), d.Thread.Author)
-		fmt.Fprintf(w, "  %s\n", d.Why)
+		fmt.Fprintf(w, "\n%s %s (%s)\n", dispositionMark(d), sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
+		fmt.Fprintf(w, "  %s\n", sanitizeForTerminal(d.Why))
 		if d.Actionable {
 			continue
 		}
 		for _, line := range strings.Split(d.Comment, "\n") {
-			fmt.Fprintf(w, "  | %s\n", line)
+			fmt.Fprintf(w, "  | %s\n", sanitizeForTerminal(line))
 		}
-		fmt.Fprintf(w, "  resolve: %s\n", d.ResolveCommand)
+		fmt.Fprintf(w, "  resolve: %s\n", sanitizeForTerminal(d.ResolveCommand))
 	}
 	return nil
 }
