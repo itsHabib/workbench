@@ -138,7 +138,7 @@ func View(st *state.Store, run string, pr PRRef) (string, json.RawMessage, error
 	// that already landed — the fact that proves there is no merge left to
 	// authorize.
 	view, err := gh("pr", "view", fmt.Sprint(pr.Number), "-R", pr.Repo, "--json",
-		"state,isDraft,mergeable,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author,mergeCommit")
+		"state,isDraft,mergeable,mergeStateStatus,baseRefName,reviewDecision,statusCheckRollup,headRefOid,title,mergedAt,author,mergeCommit")
 	if err != nil {
 		return "", nil, err
 	}
