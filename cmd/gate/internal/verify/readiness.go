@@ -335,29 +335,51 @@ func resolveStandIn(
 	stances []reviewStance,
 	reviewsOptional bool,
 ) (reviewStandIn, error) {
-	if approver, ok := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login); ok {
-		return reviewStandIn{
-			satisfied: true,
-			why: fmt.Sprintf("approved at head by %s (no GitHub review decision reported)",
-				approver),
-		}, nil
-	}
 	panel, err := panelStandIn(st, panelEvidenceID, subject, stances)
 	if err != nil {
 		return reviewStandIn{}, err
 	}
-	if panel.satisfied || !reviewsOptional {
-		return panel, nil
+	if approver, ok := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login); ok {
+		return reviewStandIn{
+			satisfied: true,
+			why: fmt.Sprintf("approved at head by %s (no GitHub review decision reported)%s",
+				approver, objectionNote(panel)),
+		}, nil
 	}
 	// reviews-optional is a policy assertion, not evidence, so it is consulted
-	// last — but it is unconditional where it applies. A panel that was rejected
-	// above does not narrow it: suppressing the absence escalation is this flag's
-	// entire job, and letting panel evidence veto it would change the enforced-
-	// check context, which is not what this path is for.
-	return reviewStandIn{
-		satisfied: true,
-		why:       "reviews-optional: absent GitHub review decision accepted",
-	}, nil
+	// last — but it is unconditional where it applies. A panel this run rejected
+	// does not narrow it: suppressing the absence escalation is this flag's
+	// entire job, and letting panel evidence veto it would change the
+	// enforced-check context, which is not what this path is for.
+	// TestReadinessReviewsOptionalIsNotNarrowedByPanelObjection pins that.
+	if !panel.satisfied && reviewsOptional {
+		return reviewStandIn{
+			satisfied: true,
+			why:       "reviews-optional: absent GitHub review decision accepted" + objectionNote(panel),
+		}, nil
+	}
+	return panel, nil
+}
+
+// objectionNote carries a rejected panel's reason onto a stand-in that did NOT
+// rest on the panel, so a pass never silently steps over a recorded objection.
+//
+// A human's exact-head approval outranks a bot's change request — a deliberate,
+// separately pinned decision (TestReadinessBotChangeRequestDoesNotSuppressHuman-
+// Approval): bot findings are findings, and authorization belongs to the person
+// with repository authority. Reversing that is not this rung's call. But the
+// decision log has to SHOW that the approval carried readiness past an
+// objection, or the one reader who needs to know — the person auditing why this
+// PR merged — cannot tell it apart from a clean panel. Same for the
+// reviews-optional flag.
+//
+// Empty when the panel satisfied readiness itself (its reason is already the
+// verdict's) or when it was merely incomplete (the panel rung records that).
+func objectionNote(panel reviewStandIn) string {
+	if panel.satisfied || panel.why == "" {
+		return ""
+	}
+	return "; " + panel.why
 }
 
 // panelStandIn reports whether the exact-head reviewer panel answers the

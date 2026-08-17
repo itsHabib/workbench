@@ -196,6 +196,51 @@ func TestReadinessPanelDoesNotMaskOtherBlocks(t *testing.T) {
 	}
 }
 
+// A human's approval outranks a bot's change request — pinned separately by
+// TestReadinessBotChangeRequestDoesNotSuppressHumanApproval, and not this rung's
+// decision to reverse. What this rung owes is visibility: the verdict must show
+// that the approval carried readiness PAST an objection, or an auditor cannot
+// tell this pass from one over a clean panel. The gap that makes it matter is
+// narrow but real — a bodyless CHANGES_REQUESTED review yields no findings for
+// the review-consolidation rung either, so the log is the only place it appears.
+func TestReadinessHumanApprovalRecordsThePanelObjectionItPassed(t *testing.T) {
+	panel := completePanelAt("abc123")
+	panel.Completed[0].State = "CHANGES_REQUESTED"
+	v := readinessWithPanel(t, openPRAtHead("abc123"), panel, []map[string]any{
+		{"author": "mh", "is_bot": false, "association": "OWNER", "permission": "write",
+			"state": "APPROVED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("human approval must still outrank a bot change request, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "approved at head by mh") {
+		t.Fatalf("verdict must record the approval that carried readiness, got %q", v.Why)
+	}
+	if !strings.Contains(v.Why, panel.Completed[0].Name+" requested changes") {
+		t.Fatalf("verdict must record the objection the approval passed, got %q", v.Why)
+	}
+}
+
+// The enforced-check context is unchanged by any of this: reviews-optional
+// suppresses the absence escalation unconditionally, and a panel objection does
+// not narrow it. Pre-existing behavior — before the stand-in existed, the flag
+// suppressed the escalation in every case — pinned here because the stand-in now
+// sits in front of the flag and could quietly start vetoing it.
+func TestReadinessReviewsOptionalIsNotNarrowedByPanelObjection(t *testing.T) {
+	panel := completePanelAt("abc123")
+	panel.Completed[0].State = "CHANGES_REQUESTED"
+	v := readinessOptWithPanel(t, openPRAtHead("abc123"), panel)
+	if v.Decision != DecisionPass {
+		t.Fatalf("reviews-optional must still accept the absent decision, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "reviews-optional") {
+		t.Fatalf("verdict must record the flag that carried readiness, got %q", v.Why)
+	}
+	if !strings.Contains(v.Why, panel.Completed[0].Name+" requested changes") {
+		t.Fatalf("verdict must record the objection the flag passed, got %q", v.Why)
+	}
+}
+
 // A human's exact-head approval is the more specific fact, so it stays what the
 // verdict records when both hold.
 func TestReadinessHumanApprovalOutranksPanelInTheRecord(t *testing.T) {
@@ -251,6 +296,33 @@ func TestReadinessMalformedPanelEvidenceIsAnError(t *testing.T) {
 func readinessWithPanel(t *testing.T, view map[string]any, panel reviewpanel.Evidence, stances []map[string]any) Verdict {
 	t.Helper()
 	art, _ := readinessRunWithPanel(t, view, panel, stances)
+	v, err := Load(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// readinessOptWithPanel drives readiness with reviewsOptional=true (the
+// enforced-check context) over panel evidence, mirroring readinessOptFor.
+func readinessOptWithPanel(t *testing.T, view map[string]any, panel reviewpanel.Evidence) Verdict {
+	t.Helper()
+	st, err := state.Open(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evd, err := st.Append(state.KindEvidence, "run_t", nil, map[string]any{"data": view})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pnl, err := st.Append(state.KindEvidence, "run_t", nil, panel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _, err := Readiness(st, "run_t", evd.ID, "", pnl.ID, subj, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	v, err := Load(art)
 	if err != nil {
 		t.Fatal(err)
