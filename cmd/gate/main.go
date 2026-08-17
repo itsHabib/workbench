@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1931,7 +1932,12 @@ func lookupProtectionContext(ctx context.Context, repo string, run ghAPIRunner) 
 	if err != nil {
 		return observe.Protection{}, err
 	}
-	stdout, stderr, err := run(ctx, fmt.Sprintf("repos/%s/branches/%s/protection", repo, branch))
+	// The branch is one PATH SEGMENT and must be escaped as one. A perfectly
+	// valid default branch like `release/v1` would otherwise split into extra
+	// segments, 404, and be read below as "unprotected" — recreating the exact
+	// false-negative resolving the branch was meant to prevent. The repo is
+	// spliced raw on purpose: `owner/name` IS two segments.
+	stdout, stderr, err := run(ctx, fmt.Sprintf("repos/%s/branches/%s/protection", repo, url.PathEscape(branch)))
 	if err != nil {
 		return protectionFailure(ctx, repo, branch, stderr, err)
 	}
@@ -1980,13 +1986,13 @@ func lookupOpenPRs(repo string) (map[int]observe.LivePR, error) {
 
 type ghPRListRunner func(context.Context, string) ([]byte, []byte, error)
 
+// prListLimit bounds one open-PR read. It overrides gh's default page of 30, or
+// a busy repo would silently undercount. A repo that reaches it is reported as
+// an incomplete read rather than a short answer — see lookupOpenPRsContext.
+const prListLimit = 1000
+
 func runGHPRList(ctx context.Context, repo string) ([]byte, []byte, error) {
-	// --limit overrides gh's default page of 30, or a busy repo's open PRs would
-	// silently cap at 30 and undercount. It may still truncate a repo with >1000
-	// open PRs — any still-open PR outside the page would then be absent from the
-	// map and reconciled as "not open" (dropped) — so the boundary is surfaced
-	// below rather than paginated away.
-	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", "1000", "--json", "number,title,headRefOid,url")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo, "--state", "open", "--limit", strconv.Itoa(prListLimit), "--json", "number,title,headRefOid,url")
 	// Capture stdout and stderr separately: gh can write progress/deprecation/
 	// rate-limit banners to stderr even on a zero exit, and interleaving them
 	// into the JSON buffer would turn a clean read into a confusing decode error.
@@ -2020,8 +2026,15 @@ func lookupOpenPRsContext(ctx context.Context, repo string, run ghPRListRunner) 
 	if err := json.Unmarshal(stdout, &prs); err != nil {
 		return nil, fmt.Errorf("decode PRs %s: %w", repo, err)
 	}
-	if len(prs) == 1000 {
-		fmt.Fprintf(os.Stderr, "gate: gh pr list for %s hit the 1000 limit; some open PRs may be treated as closed\n", repo)
+	// A full page is a TRUNCATED read, not a short answer: the PRs past it were
+	// never seen. Returning it as success is unsafe in both directions — the
+	// inbox would reconcile an unseen-but-open PR as "not open" and drop its
+	// row, and preflight would count the repo as assessed and fold it into an
+	// all-clear while a PR outside the page still needed a mint. Both callers
+	// degrade correctly on an error (rows kept as unknown; the repo reported as
+	// unread), so the truncation is propagated rather than warned about.
+	if len(prs) >= prListLimit {
+		return nil, fmt.Errorf("list PRs %s: hit the %d-item page limit; the open-PR read is incomplete", repo, prListLimit)
 	}
 	m := make(map[int]observe.LivePR, len(prs))
 	for _, pr := range prs {

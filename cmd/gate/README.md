@@ -129,7 +129,11 @@ An all-clear is claimed only over a **complete** inventory: a repo whose open PR
 could not be listed was never assessed, so it is reported as unread (`unread` in
 JSON) and the tail prints the partial mint list rather than "every repo is
 covered" — an all-clear over an unassessed repo would start the very sweep-stall
-this verb exists to prevent.
+this verb exists to prevent. A saturated `gh pr list` page counts as *not listed*
+for the same reason: a full page means the PRs past it were never seen, so it is
+propagated as an incomplete read rather than returned as a short answer. That
+also fixes the read for `next`, where an unseen-but-open PR would previously have
+been reconciled as "not open" and had its row dropped.
 The per-repo shapes verified by hand live in
 [`../../docs/auto-mode-defaults.md`](../../docs/auto-mode-defaults.md); this verb
 reads them live.

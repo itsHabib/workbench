@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,65 @@ func TestLookupProtectionResolvesTheDefaultBranch(t *testing.T) {
 	want := []string{"repos/o/r", "repos/o/r/branches/master/protection"}
 	if strings.Join(g.paths, "|") != strings.Join(want, "|") {
 		t.Errorf("gh paths = %v, want %v", g.paths, want)
+	}
+}
+
+// TestLookupProtectionEscapesTheBranchSegment pins that the resolved branch is
+// escaped as ONE path segment. A valid default branch like `release/v1` would
+// otherwise split into extra segments, 404, and be read as "unprotected" —
+// recreating the exact false-negative resolving the branch was added to
+// prevent. The repo stays raw: `owner/name` really is two segments.
+func TestLookupProtectionEscapesTheBranchSegment(t *testing.T) {
+	g := &ghStub{
+		defaultBranch: "release/v1",
+		protection:    `{"required_status_checks":{"strict":true}}`,
+	}
+	p, err := lookupProtectionContext(context.Background(), "o/r", g.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "repos/o/r/branches/release%2Fv1/protection"
+	if g.paths[1] != want {
+		t.Fatalf("protection path = %q, want %q", g.paths[1], want)
+	}
+	if !p.Protected || p.Branch != "release/v1" {
+		t.Errorf("the projection must carry the unescaped branch: %+v", p)
+	}
+}
+
+// TestLookupOpenPRsCappedListingIsIncomplete pins that a full page is reported
+// as a TRUNCATED read, not a short answer. Returning it as success is unsafe
+// both ways: the inbox would reconcile an unseen-but-open PR as "not open" and
+// drop its row, and preflight would fold the repo into an all-clear while a PR
+// past the page still needed a mint.
+func TestLookupOpenPRsCappedListingIsIncomplete(t *testing.T) {
+	var page []string
+	for i := 1; i <= prListLimit; i++ {
+		page = append(page, fmt.Sprintf(`{"number":%d,"title":"t","headRefOid":"sha","url":"u"}`, i))
+	}
+	full := "[" + strings.Join(page, ",") + "]"
+	run := func(context.Context, string) ([]byte, []byte, error) {
+		return []byte(full), nil, nil
+	}
+	_, err := lookupOpenPRsContext(context.Background(), "o/r", run)
+	if err == nil {
+		t.Fatal("a capped listing must not be reported as a complete read")
+	}
+	if !strings.Contains(err.Error(), "incomplete") {
+		t.Errorf("the error should name the truncation, got %v", err)
+	}
+
+	// One PR short of the page is a complete read and stays a success.
+	short := "[" + strings.Join(page[:prListLimit-1], ",") + "]"
+	runShort := func(context.Context, string) ([]byte, []byte, error) {
+		return []byte(short), nil, nil
+	}
+	prs, err := lookupOpenPRsContext(context.Background(), "o/r", runShort)
+	if err != nil {
+		t.Fatalf("an unsaturated page is a complete read: %v", err)
+	}
+	if len(prs) != prListLimit-1 {
+		t.Errorf("got %d PRs, want %d", len(prs), prListLimit-1)
 	}
 }
 
