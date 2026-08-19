@@ -69,6 +69,10 @@ there first.
   grantless) never gets Approve/Block — a grantless park resolves out-of-band.
   flare renders the button; it never handles the tap (the callback targets
   `escalate serve`).
+- The same resolvable-park rule gates the paste-ready `escalate resolve …`
+  context line on the card. It renders regardless of the channel's button
+  opt-in (it is prose, not an interactive element), so the loop closes from a
+  phone with Slack and a terminal even before the callback tunnel is up.
 
 ## Checks
 

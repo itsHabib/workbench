@@ -166,6 +166,10 @@ func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
 	}
+	if line := resolveLine(ev); line != "" {
+		hint := slackText{Type: "mrkdwn", Text: line}
+		blocks = append(blocks, slackBlock{Type: "context", Elements: []any{hint}})
+	}
 	footer := slackText{Type: "mrkdwn", Text: slackFooter(ev)}
 	return append(blocks, slackBlock{Type: "context", Elements: []any{footer}})
 }
@@ -200,6 +204,22 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 // guaranteed to fail.
 func resolvablePark(ev event.Event) bool {
 	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant"] != ""
+}
+
+// resolveLine is the paste-ready `escalate resolve` command for a resolvable
+// park — the path that works from a phone with nothing but Slack and a terminal,
+// independent of whether the channel opted into the Approve/Block buttons or the
+// callback tunnel is up. The escalation id and the grant the run parked under are
+// substituted verbatim; decision, who, and why stay placeholders because they are
+// the human's to fill. Gated on resolvablePark for the same reason the buttons
+// are: escalate's ingest refuses an empty grant, so a grantless park would get a
+// command guaranteed to fail. Rendering only — flare never runs it (Amendment 3).
+func resolveLine(ev event.Event) string {
+	if !resolvablePark(ev) {
+		return ""
+	}
+	return fmt.Sprintf("`escalate resolve -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
+		ev.ID, ev.Fields["grant"])
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each

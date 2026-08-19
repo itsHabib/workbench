@@ -461,6 +461,85 @@ func TestSlackResolveButtonsOnlyOnResolvableParks(t *testing.T) {
 	}
 }
 
+// TestSlackResolveLineOnResolvablePark pins the paste-ready route: a resolvable
+// park's card carries the verbatim `escalate resolve` line with BOTH real ids
+// substituted, so the loop closes from a phone with nothing but Slack and a
+// terminal. It renders independently of the channel's button opt-in — the line
+// is prose, not an interactive element.
+func TestSlackResolveLineOnResolvablePark(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		ID:       "esc_4ea400afe1ecc4c4",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "repo": "itsHabib/workbench", "number": "137", "grant": "grt_7f21",
+		},
+	}
+	// Wrapped in a code span so Slack renders it selectable and un-mangled.
+	want := "`escalate resolve -escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+		"-decision <pass|block> -who <you> -why \"...\"`"
+	for _, optIn := range []bool{false, true} {
+		msg := renderSlackMessage("C1", optIn, ev)
+		if !hasContextText(msg.Attachments[0].Blocks, want) {
+			t.Fatalf("resolve_actions=%v: card must carry %q:\n%s", optIn, want, mustJSON(t, msg))
+		}
+	}
+}
+
+// hasContextText reports whether some context block carries exactly this text —
+// a value comparison, so a drift in the rendered line fails loudly instead of
+// passing on a JSON substring that HTML-escapes the placeholders.
+func hasContextText(blocks []slackBlock, want string) bool {
+	for _, b := range blocks {
+		if b.Type != "context" {
+			continue
+		}
+		for _, el := range b.Elements {
+			if txt, ok := el.(slackText); ok && txt.Text == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestSlackResolveLineOnlyOnResolvableParks pins the same suppression rule the
+// buttons obey: no line for a park missing its grant or its artifact id, and
+// none for the events that reach SevEscalate without being parks at all — the
+// command would be one `escalate` is guaranteed to refuse.
+func TestSlackResolveLineOnlyOnResolvableParks(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   event.Event
+	}{
+		{"park-missing-grant", event.Event{
+			Source: "roxiq", ID: "esc-park-poc", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/roxiq", "number": "161"},
+		}},
+		{"park-missing-id", event.Event{
+			Source: "gate", ID: "", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/workbench", "number": "9", "grant": "grt_7"},
+		}},
+		{"verdict-escalate", event.Event{
+			Source: "gate", ID: "v1", Kind: "verdict", Severity: event.SevEscalate,
+			Fields: map[string]string{"decision": "escalate", "grant": "grt_7"},
+		}},
+		{"cursor-alert", event.Event{
+			Source: "gate", ID: "cursor-alert:gate:0001", Kind: "cursor-alert", Severity: event.SevEscalate,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, tc.ev)
+			if got := string(mustJSON(t, msg)); strings.Contains(got, "escalate resolve") {
+				t.Fatalf("%s must carry no resolve line:\n%s", tc.name, got)
+			}
+		})
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
