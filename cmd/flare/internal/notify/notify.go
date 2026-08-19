@@ -201,9 +201,21 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 // back to the parked run. The grant must be present because a grantless park
 // (schema-valid since escalation.v1's second consumer) resolves out-of-band:
 // escalate's ingest refuses an empty grant, so the buttons would be a tap
-// guaranteed to fail.
+// guaranteed to fail. A ceiling park is excluded for the same reason from the
+// other direction: `gate resolve` re-applies the grant's ceiling, so approving
+// one re-parks it on the identical code — the operator needs a wider grant, and
+// only they can mint it.
 func resolvablePark(ev event.Event) bool {
-	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant"] != ""
+	if ev.Kind != "escalation" || ev.ID == "" || ev.Fields["grant"] == "" {
+		return false
+	}
+	return !ceilingPark(ev.Fields["code"])
+}
+
+// ceilingPark reports whether the park stands on an authorization ceiling — the
+// codes a decision cannot clear, mirroring gate's inbox projection.
+func ceilingPark(code string) bool {
+	return code == escalation.CodeTierExceeded || code == escalation.CodeCycleExceeded
 }
 
 // resolveLine is the paste-ready `escalate resolve` command for a resolvable

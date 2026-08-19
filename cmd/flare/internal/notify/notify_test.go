@@ -540,6 +540,41 @@ func TestSlackResolveLineOnlyOnResolvableParks(t *testing.T) {
 	}
 }
 
+// TestSlackCeilingParkOffersNoResolution pins that a ceiling park — a park on a
+// code a decision cannot clear, because gate re-applies the grant's ceiling —
+// gets NEITHER the resolve line NOR the Approve/Block buttons, even though it
+// carries both its artifact id and its grant. Resolving one re-parks it on the
+// identical code; the operator has to mint a wider grant, and offering a
+// decision here would promise progress the command cannot deliver.
+func TestSlackCeilingParkOffersNoResolution(t *testing.T) {
+	for _, code := range []string{escalation.CodeTierExceeded, escalation.CodeCycleExceeded} {
+		t.Run(code, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, event.Event{
+				Source:   "gate",
+				ID:       "esc_ceiling",
+				Kind:     "escalation",
+				Severity: event.SevEscalate,
+				Body:     "tier T2 exceeds ceiling T1",
+				Fields: map[string]string{
+					"run": "run_7", "repo": "itsHabib/workbench", "number": "137",
+					"grant": "grt_7f21", "code": code,
+				},
+			})
+			got := string(mustJSON(t, msg))
+			if strings.Contains(got, "escalate resolve") {
+				t.Fatalf("ceiling park %s must carry no resolve line:\n%s", code, got)
+			}
+			if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+				t.Fatalf("ceiling park %s must carry no resolve buttons, got %+v", code, btns)
+			}
+			// The card still pages — only the dead-end action is withheld.
+			if !strings.Contains(got, "View PR #137") {
+				t.Fatalf("ceiling park must keep the View PR link:\n%s", got)
+			}
+		})
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

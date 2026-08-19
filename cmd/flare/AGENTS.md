@@ -67,12 +67,16 @@ there first.
   verdict-escalate, a cursor-alert, a park missing its id, or a grantless park
   (including the documented `none:`-prefixed sentinel, which lifts as
   grantless) never gets Approve/Block — a grantless park resolves out-of-band.
-  flare renders the button; it never handles the tap (the callback targets
-  `escalate serve`).
+  A CEILING park (`grant_tier_exceeded` / `grant_cycle_exceeded`) is excluded
+  too, from the other direction: gate re-applies the grant's ceiling, so a
+  decision re-parks on the identical code — the operator must mint a wider
+  grant. flare renders the button; it never handles the tap (the callback
+  targets `escalate serve`).
 - The same resolvable-park rule gates the paste-ready `escalate resolve …`
-  context line on the card. It renders regardless of the channel's button
-  opt-in (it is prose, not an interactive element), so the loop closes from a
-  phone with Slack and a terminal even before the callback tunnel is up.
+  context line on the card — including the ceiling exclusion, which gate's
+  inbox mirrors. It renders regardless of the channel's button opt-in (it is
+  prose, not an interactive element), so the loop closes from a phone with
+  Slack and a terminal even before the callback tunnel is up.
 
 ## Checks
 
