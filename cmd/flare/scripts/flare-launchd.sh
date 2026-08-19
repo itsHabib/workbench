@@ -98,11 +98,6 @@ bootstrap_label() {
 		die "launchctl bootstrap failed for $1 (already loaded? try '$0 restart')"
 }
 
-kickstart_label() {
-	launchctl kickstart -k "$DOMAIN/$1" >/dev/null ||
-		die "launchctl kickstart failed for $1 -- is it installed? ($0 install)"
-}
-
 require_installed() {
 	[ -f "$AGENT_DIR/$1.plist" ] || die "$1 is not installed. Run: $0 install"
 }
@@ -183,8 +178,12 @@ cmd_update() {
 cmd_restart() {
 	require_installed "$FLARE_LABEL"
 	require_installed "$ESCALATE_LABEL"
-	kickstart_label "$FLARE_LABEL"
-	kickstart_label "$ESCALATE_LABEL"
+	# bootout sends SIGTERM and waits, so escalate serve's in-flight resolve
+	# drains instead of dying under kickstart -k's SIGKILL.
+	bootout_label "$FLARE_LABEL"
+	bootout_label "$ESCALATE_LABEL"
+	bootstrap_label "$FLARE_LABEL"
+	bootstrap_label "$ESCALATE_LABEL"
 	printf 'restarted both agents (config reloaded).\n'
 	cmd_status
 }
