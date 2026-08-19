@@ -101,21 +101,19 @@ Constraints that are design decisions, not omissions:
   branch, or a permissions problem). Anything unread degrades to the prior
   behaviour with the reason recorded in the verdict — an unread fact is not
   evidence and must never stop a merge.
-- **Thread disposition prepares, it never resolves.** `gate threads -repo R
-  -pr N` reads a PR's unresolved review threads and, for each, looks for the
-  commit after the thread's anchor that changes the reviewed file *and* carries
-  a test change NAMING that file as its subject (`panel.go`/`panel_test.go`,
-  `foo.ts`/`foo.test.ts`, `thing.py`/`test_thing.py`). Only that pairing
-  produces a disposition — an exact-commit +
-  evidence resolve comment plus the exact resolve call, for a human to run. A
-  missing fix commit, a fix with no accompanying test, or an anchor outside the
-  PR's history all report the thread still-actionable: a false "this was fixed"
-  buries a live finding, a false "still actionable" costs a look. A DELETED test
-  file is coverage removed, never coverage added; an unrelated test riding in the
-  same commit is not coverage of the reviewed change at all. The head is read on both sides
-  of the sweep and the run is abandoned if it moved, so a stamped comment never
-  cites history its head does not contain. Like `explain` and `next` it is
-  read-only — no artifact, no state write, exit 0 or 4 only.
+- **Thread disposition observes, it never concludes.** `gate threads -repo R
+  -pr N` lists a PR's unresolved review threads and, for each, the commits after
+  its anchor that touch the reviewed file, flagging which of those also changed
+  a test naming that file. It does NOT say whether a thread is fixed, does not
+  prepare a resolve comment, and emits no resolve call. An earlier version did
+  all three, and review found seven distinct ways for that claim to be wrong
+  while reading exactly like a right one — a deleted test counted as coverage,
+  an unrelated test counted as coverage, a test added then removed later, a
+  truncated history, a rename, a reviewer's rebuttal posted after the candidate
+  fix, a loosely-matched test path. The claim was removed rather than patched an
+  eighth time: a false "this was fixed" buries a live finding, and nothing in
+  the output distinguishes a wrong verdict from a right one. Like `explain` and
+  `next` it is read-only — no artifact, no state write, exit 0 or 4 only.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

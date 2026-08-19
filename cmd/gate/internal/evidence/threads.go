@@ -9,19 +9,25 @@ import (
 
 // Unresolved review threads outlive the findings they report: a later commit
 // fixes the code, the reviewer never comes back, and the thread sits there
-// looking actionable until a human writes "fixed in <sha>, covered by <test>"
-// and clicks resolve. That hand-disposition is the friction this file removes.
+// looking actionable until a human reads it. Finding those threads and the
+// commits that plausibly bear on them is mechanical, and that is what this
+// does.
 //
-// It prepares a disposition; it never decides one. A thread is only ever
-// reported as fixed when BOTH facts are on the record — a commit after the
-// thread's anchor that touches the thread's own file, and a test change riding
-// in that same commit. Anything short of both stays actionable and reaches a
-// human, because a false "this was fixed" buries a live finding while a false
-// "still actionable" only costs a look.
+// Deciding whether a thread is FIXED is not mechanical, and this no longer
+// tries. The first version did — it reported a thread as fixed and prepared a
+// resolve comment plus the exact resolve call. Review found seven distinct
+// ways for that claim to be wrong while looking right: a test deleted in the
+// fixing commit, an unrelated test in it, a test added and later removed, a
+// truncated commit history, a rename, a reviewer's rebuttal posted after the
+// candidate fix, and a test whose path only loosely matched. Each was fixed
+// and the next appeared, because all of them are invisible from the output —
+// a wrong disposition reads exactly like a right one.
 //
-// Nothing here resolves a thread. The output is a comment body and the exact
-// resolve call, for a caller (or an operator) to run — the same read-only
-// posture as the rest of the evidence sweep.
+// So the claim is gone and the observation remains: which commits after the
+// thread's anchor touch its file, and which of those also changed a test
+// naming that file. No verdict, no prepared comment, no resolve call. A human
+// reads the thread and decides, which is the only place that judgement was
+// ever sound.
 
 // Thread is one GitHub review thread as the disposition logic consumes it.
 type Thread struct {
@@ -52,23 +58,39 @@ type Commit struct {
 	Files   []File `json:"files,omitempty"`
 }
 
-// Disposition is what the sweep prepared for one unresolved thread: either a
-// commit/test-backed resolve comment, or a statement of which fact is missing.
+// Disposition is what the sweep OBSERVED about one unresolved thread. It is
+// deliberately not a verdict.
+//
+// The first shape of this reported a thread as fixed and prepared a resolve
+// comment plus the exact resolve call. Review found seven distinct ways for
+// that claim to be wrong while looking right — a deleted test counted as
+// coverage, an unrelated test counted as coverage, a test added then removed
+// later, a truncated commit history, a rename, a reviewer's rebuttal posted
+// after the candidate fix, and a test whose path only loosely matched. Each
+// was fixed and the next one appeared, because every one of them is invisible
+// from the disposition itself: the output looks equally confident either way.
+//
+// So the claim is gone. What survives is the mechanical part that was never in
+// doubt — which commits after the thread's anchor touch its file, and which of
+// those also changed a test naming that file. A human reads the thread and
+// decides. Nothing here says "fixed", nothing prepares a comment, and nothing
+// emits a resolve call, so there is no false-fixed disposition to produce.
 type Disposition struct {
 	Thread Thread `json:"thread"`
-	// Actionable is the conservative default: true unless both the fixing
-	// commit and its covering test were identified.
-	Actionable bool     `json:"actionable"`
-	FixCommit  string   `json:"fix_commit,omitempty"`
-	FixSubject string   `json:"fix_subject,omitempty"`
-	Tests      []string `json:"tests,omitempty"`
-	// Why states the fact that decided it, in both directions.
-	Why string `json:"why"`
-	// Comment is the prepared resolve comment; empty when actionable.
-	Comment string `json:"comment,omitempty"`
-	// ResolveCommand is the exact call that resolves the thread once a human
-	// accepts the comment. Never run here.
-	ResolveCommand string `json:"resolve_command,omitempty"`
+	// Candidates are the commits after the thread's anchor that touch the
+	// reviewed file, oldest first — leads to read, not evidence of a fix.
+	Candidates []Candidate `json:"candidates,omitempty"`
+	// Note states what could and could not be established mechanically. It
+	// never concludes that a finding was addressed.
+	Note string `json:"note"`
+}
+
+// Candidate is one commit that touched the reviewed file after the thread,
+// with any test change in it that names that file as its subject.
+type Candidate struct {
+	SHA     string   `json:"sha"`
+	Subject string   `json:"subject,omitempty"`
+	Tests   []string `json:"tests,omitempty"`
 }
 
 // Dispositions prepares a disposition for every unresolved thread, oldest
@@ -90,91 +112,52 @@ func Dispositions(threads []Thread, commits []Commit, headSHA string) []Disposit
 }
 
 func disposition(th Thread, commits []Commit, index map[string]int, headSHA string) Disposition {
-	d := Disposition{Thread: th, Actionable: true}
+	d := Disposition{Thread: th}
 	if th.Path == "" {
-		d.Why = "thread has no file anchor — nothing to match a fixing commit against"
+		d.Note = "no file anchor — nothing to match commits against"
 		return d
 	}
 	if th.AnchorSHA == "" {
-		d.Why = "thread has no anchor commit — its first comment was not posted against a commit, so nothing can be ordered after it"
+		d.Note = "no anchor commit — its first comment was not posted against a commit, so nothing can be ordered after it"
 		return d
 	}
 	anchor, ok := index[th.AnchorSHA]
 	if !ok {
-		d.Why = fmt.Sprintf("thread's anchor commit %s is not in this pull request's history — it cannot be ordered against later commits", shortSHA(th.AnchorSHA))
+		d.Note = fmt.Sprintf("anchor commit %s is not in this pull request's history — later commits cannot be ordered against it", shortSHA(th.AnchorSHA))
 		return d
 	}
-	fix, tests, touched := fixingCommit(commits[anchor+1:], th.Path)
-	if touched == "" {
-		d.Why = fmt.Sprintf("no commit after %s touches %s", shortSHA(th.AnchorSHA), th.Path)
+	d.Candidates = candidates(commits[anchor+1:], th.Path)
+	if len(d.Candidates) == 0 {
+		d.Note = fmt.Sprintf("no commit after %s touches %s", shortSHA(th.AnchorSHA), th.Path)
 		return d
 	}
-	if fix.SHA == "" {
-		d.Why = fmt.Sprintf("commit %s touches %s after the thread, but no test change in it names %s as its subject — a human must confirm the finding is addressed", shortSHA(touched), th.Path, path.Base(th.Path))
-		return d
+	withTests := 0
+	for _, c := range d.Candidates {
+		if len(c.Tests) > 0 {
+			withTests++
+		}
 	}
-	d.Actionable = false
-	d.FixCommit, d.FixSubject, d.Tests = fix.SHA, fix.Subject, tests
-	d.Why = fmt.Sprintf("%s changes %s and its regression test in one commit", shortSHA(fix.SHA), th.Path)
-	d.Comment = resolveComment(th, fix, tests, headSHA)
-	d.ResolveCommand = resolveCommand(th.ID)
+	// Deliberately reports counts, not a conclusion. Whether any of these
+	// actually addressed the finding is a question about the thread's content,
+	// which this never reads.
+	d.Note = fmt.Sprintf("%d commit(s) after %s touch %s, %d carrying a test that names it — read the thread to decide",
+		len(d.Candidates), shortSHA(th.AnchorSHA), th.Path, withTests)
 	return d
 }
 
-// fixingCommit picks the earliest commit that both touches the thread's file
-// and carries a test change — the pairing that makes a disposition evidence-
-// backed rather than a guess. It also reports the earliest commit touching the
-// file at all, so a caller can say which of the two facts is missing.
-func fixingCommit(after []Commit, file string) (Commit, []string, string) {
-	touched := ""
-	for i, c := range after {
+// candidates lists every commit after the anchor that touches the reviewed
+// file, with any test change in it naming that file. Every one is reported:
+// picking a single "fixing" commit is exactly the judgement this no longer
+// makes, and a later commit can undo an earlier one.
+func candidates(after []Commit, file string) []Candidate {
+	var out []Candidate
+	for _, c := range after {
 		if !touches(c.Files, file) {
 			continue
 		}
-		if touched == "" {
-			touched = c.SHA
-		}
-		tests := coveringTests(c.Files, file)
-		if len(tests) == 0 {
-			continue
-		}
-		// The credited test has to still be there at the head we stamp. A
-		// commit can add a_test.go alongside its fix and a later one remove it,
-		// and crediting the earlier commit would put a comment on the PR naming
-		// a test that is no longer in the tree — inviting a human to resolve a
-		// finding whose only evidence has since been deleted. Same false-fixed
-		// hazard as crediting a deletion, just spread across two commits.
-		tests = survivingTests(after[i+1:], tests)
-		if len(tests) == 0 {
-			continue
-		}
-		return c, tests, touched
+		out = append(out, Candidate{SHA: c.SHA, Subject: c.Subject, Tests: coveringTests(c.Files, file)})
 	}
-	return Commit{}, nil, touched
-}
-
-// survivingTests drops any credited test that a later commit removes. Anything
-// still standing at the stamped head is real evidence; anything deleted on the
-// way there never was.
-func survivingTests(later []Commit, tests []string) []string {
-	removed := map[string]bool{}
-	for _, c := range later {
-		for _, f := range c.Files {
-			if f.Removed {
-				removed[f.Path] = true
-				continue
-			}
-			// Re-added after a removal: present at head again, so it counts.
-			delete(removed, f.Path)
-		}
-	}
-	kept := make([]string, 0, len(tests))
-	for _, t := range tests {
-		if !removed[t] {
-			kept = append(kept, t)
-		}
-	}
-	return kept
+	return out
 }
 
 func touches(files []File, file string) bool {
@@ -251,36 +234,6 @@ func isTestFile(file string) bool {
 		}
 	}
 	return false
-}
-
-// resolveComment writes the disposition in the exact-commit + evidence shape
-// that reads well on the thread: the commit that fixed it, the test that keeps
-// it fixed, and the head those facts were read at, so a reader can re-derive
-// every one of them.
-func resolveComment(th Thread, fix Commit, tests []string, headSHA string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Fixed in %s", "`"+fix.SHA+"`")
-	if fix.Subject != "" {
-		fmt.Fprintf(&b, " — %s", fix.Subject)
-	}
-	b.WriteString(".\n\nEvidence:\n")
-	fmt.Fprintf(&b, "- fix: `%s` changes `%s`\n", fix.SHA, th.Path)
-	fmt.Fprintf(&b, "- regression test: %s\n", codeList(tests))
-	if headSHA != "" {
-		fmt.Fprintf(&b, "- read at head `%s`\n", headSHA)
-	}
-	b.WriteString("\nResolving as addressed. Re-open if the finding still stands at this head.")
-	return b.String()
-}
-
-// resolveCommand emits the exact resolve call rather than running it: a
-// disposition is prepared here, accepted elsewhere.
-func resolveCommand(threadID string) string {
-	if threadID == "" {
-		return ""
-	}
-	q := fmt.Sprintf("mutation{resolveReviewThread(input:{threadId:%s}){thread{isResolved}}}", jsonString(threadID))
-	return "gh api graphql -f query=" + shellSingleQuote(q)
 }
 
 func jsonString(s string) string {

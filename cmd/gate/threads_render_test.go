@@ -40,10 +40,12 @@ func TestWriteDispositionsNeutralizesHostileThreadText(t *testing.T) {
 			Line:   12,
 			Author: "attacker\x1b[31m",
 		},
-		Actionable:     false,
-		Why:            "fixed in abc1234, covered by " + hostile,
-		Comment:        hostile,
-		ResolveCommand: "gate resolve --thread thr_1\x1b[2K",
+		Note: "1 commit(s) after abc1234 touch " + hostile,
+		Candidates: []evidence.Candidate{{
+			SHA:     "def5678\x1b[2K",
+			Subject: hostile,
+			Tests:   []string{"main_test.go\x1b[1G"},
+		}},
 	}}
 
 	var buf bytes.Buffer
@@ -60,15 +62,16 @@ func TestWriteDispositionsNeutralizesHostileThreadText(t *testing.T) {
 			t.Errorf("control rune %q survived into rendered output", r)
 		}
 	}
-	// The load-bearing property: a thread body cannot manufacture a LINE.
-	// Newlines inside it are stripped, so its text stays on whichever line gate
-	// chose to put it on and cannot forge a bare `resolve:` line of gate's own.
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "resolve:") && !strings.Contains(line, "gate resolve --thread") {
-			t.Errorf("thread text forged a resolve line: %q", line)
-		}
-	}
+	// A thread body cannot manufacture a LINE: newlines are stripped, so its
+	// text stays on whichever line gate chose to put it on.
 	if !strings.Contains(out, "nothing to seeresolve: gh api --silent") {
 		t.Error("expected the hostile newline to be stripped, keeping its text on one line")
+	}
+	// And the render must never imply a verdict.
+	if strings.Contains(strings.ToLower(out), "dispositioned") {
+		t.Error("output claims a disposition; the sweep only observes")
+	}
+	if !strings.Contains(out, "does not judge") {
+		t.Error("output should state plainly that gate is not judging these")
 	}
 }

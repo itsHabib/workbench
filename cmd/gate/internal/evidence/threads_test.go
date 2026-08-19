@@ -25,139 +25,6 @@ func threadCommits() []Commit {
 	}
 }
 
-func TestDispositionsFixedWithTest(t *testing.T) {
-	threads := []Thread{{
-		ID:        "PRRT_kw1",
-		Path:      "cmd/gate/internal/evidence/panel.go",
-		Line:      42,
-		Author:    "chatgpt-codex-connector",
-		AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}}
-	got := Dispositions(threads, threadCommits(), "c3cccccccccccccccccccccccccccccccccccccc")
-	if len(got) != 1 {
-		t.Fatalf("dispositions = %d, want 1", len(got))
-	}
-	d := got[0]
-	if d.Actionable {
-		t.Fatalf("thread reported actionable: %s", d.Why)
-	}
-	if d.FixCommit != "c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
-		t.Errorf("fix commit = %q", d.FixCommit)
-	}
-	if len(d.Tests) != 1 || d.Tests[0] != "cmd/gate/internal/evidence/panel_test.go" {
-		t.Errorf("tests = %v", d.Tests)
-	}
-	for _, want := range []string{"c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "panel_test.go", "fix the panel split", "c3cccccccccccccccccccccccccccccccccccccc"} {
-		if !strings.Contains(d.Comment, want) {
-			t.Errorf("comment missing %q:\n%s", want, d.Comment)
-		}
-	}
-	if !strings.Contains(d.ResolveCommand, "PRRT_kw1") || !strings.Contains(d.ResolveCommand, "resolveReviewThread") {
-		t.Errorf("resolve command = %q", d.ResolveCommand)
-	}
-}
-
-// A commit that changes the reviewed file but ships no test is exactly the case
-// that must NOT be auto-dispositioned: the finding may well be fixed, but
-// nothing on the record keeps it fixed.
-func TestDispositionsFixWithoutTestStaysActionable(t *testing.T) {
-	commits := threadCommits()
-	commits[1].Files = changed("cmd/gate/internal/evidence/panel.go")
-	threads := []Thread{{
-		Path:      "cmd/gate/internal/evidence/panel.go",
-		AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}}
-	d := Dispositions(threads, commits, "head")[0]
-	if !d.Actionable {
-		t.Fatalf("thread dispositioned without a test: %+v", d)
-	}
-	if d.Comment != "" || d.ResolveCommand != "" {
-		t.Errorf("actionable thread carries a prepared resolve: %+v", d)
-	}
-	if !strings.Contains(d.Why, "no test change in it names") {
-		t.Errorf("why = %q", d.Why)
-	}
-}
-
-func TestDispositionsNoLaterCommitTouchesFile(t *testing.T) {
-	threads := []Thread{{
-		Path:      "cmd/gate/internal/verify/reviews.go",
-		AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}}
-	d := Dispositions(threads, threadCommits(), "head")[0]
-	if !d.Actionable || !strings.Contains(d.Why, "no commit after") {
-		t.Fatalf("want still-actionable, got %+v", d)
-	}
-}
-
-// A fix that landed BEFORE the thread was posted is not a fix for it. Ordering
-// is the whole reason the anchor commit is carried.
-func TestDispositionsIgnoresCommitsBeforeAnchor(t *testing.T) {
-	threads := []Thread{{
-		Path:      "cmd/gate/internal/evidence/panel.go",
-		AnchorSHA: "c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-	}}
-	d := Dispositions(threads, threadCommits(), "head")[0]
-	if !d.Actionable {
-		t.Fatalf("credited an earlier commit as the fix: %+v", d)
-	}
-}
-
-func TestDispositionsUnknownAnchorStaysActionable(t *testing.T) {
-	threads := []Thread{{
-		Path:      "cmd/gate/internal/evidence/panel.go",
-		AnchorSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-	}}
-	d := Dispositions(threads, threadCommits(), "head")[0]
-	if !d.Actionable || !strings.Contains(d.Why, "not in this pull request's history") {
-		t.Fatalf("want still-actionable on an unknown anchor, got %+v", d)
-	}
-}
-
-func TestDispositionsSkipsResolvedThreads(t *testing.T) {
-	threads := []Thread{
-		{Path: "cmd/gate/internal/evidence/panel.go", AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Resolved: true},
-		{Path: "cmd/gate/internal/evidence/panel.go", AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-	}
-	got := Dispositions(threads, threadCommits(), "head")
-	if len(got) != 1 {
-		t.Fatalf("dispositions = %d, want the unresolved one only", len(got))
-	}
-}
-
-func TestDispositionsThreadWithoutPath(t *testing.T) {
-	d := Dispositions([]Thread{{AnchorSHA: "c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, threadCommits(), "head")[0]
-	if !d.Actionable || !strings.Contains(d.Why, "no file anchor") {
-		t.Fatalf("want still-actionable, got %+v", d)
-	}
-}
-
-// A thread ON a test file must not credit that same file as its own coverage.
-func TestDispositionsTestFileThreadNeedsOtherCoverage(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: changed("a_test.go")},
-		{SHA: "c2", Files: changed("a_test.go")},
-	}
-	d := Dispositions([]Thread{{Path: "a_test.go", AnchorSHA: "c1"}}, commits, "head")[0]
-	if !d.Actionable {
-		t.Fatalf("credited the reviewed test file as its own coverage: %+v", d)
-	}
-}
-
-// The earliest commit pairing the file with a test wins — a later one is not
-// more authoritative, and naming the first keeps the comment re-derivable.
-func TestFixingCommitPicksEarliestPairing(t *testing.T) {
-	commits := []Commit{
-		{SHA: "x1", Files: changed("a.go")},
-		{SHA: "x2", Files: changed("a.go", "a_test.go")},
-		{SHA: "x3", Files: changed("a.go", "a_test.go")},
-	}
-	fix, tests, touched := fixingCommit(commits, "a.go")
-	if fix.SHA != "x2" || touched != "x1" || len(tests) != 1 {
-		t.Fatalf("fix=%q touched=%q tests=%v", fix.SHA, touched, tests)
-	}
-}
-
 func TestIsTestFile(t *testing.T) {
 	yes := []string{"a_test.go", "src/a_test.rs", "test/helper.exs", "tests/x.py",
 		"web/__tests__/a.js", "web/a.spec.ts", "web/a.test.tsx", "py/test_thing.py"}
@@ -199,46 +66,6 @@ func TestShellSingleQuote(t *testing.T) {
 // The false-fixed case the design exists to refuse: a commit that changes the
 // reviewed file while DELETING a test-looking file removes coverage; it must
 // never read as covering evidence.
-func TestDispositionsRemovedTestIsNotCoverage(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: changed("a.go")},
-		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go", Removed: true}}},
-	}
-	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
-	if !d.Actionable {
-		t.Fatalf("a deleted test file was credited as regression coverage: %+v", d)
-	}
-	if !strings.Contains(d.Why, "no test change in it names") {
-		t.Errorf("why = %q", d.Why)
-	}
-}
-
-// A later commit that restores real coverage still disposes the thread — the
-// removal exclusion must not poison the whole file list.
-func TestDispositionsRemovedTestDoesNotBlockLaterCoverage(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: changed("a.go")},
-		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go", Removed: true}}},
-		{SHA: "c3", Files: changed("a.go", "a_test.go")},
-	}
-	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
-	if d.Actionable || d.FixCommit != "c3" {
-		t.Fatalf("want c3 credited as the fix, got %+v", d)
-	}
-}
-
-func TestDispositionsEmptyAnchor(t *testing.T) {
-	d := Dispositions([]Thread{{Path: "cmd/gate/internal/evidence/panel.go"}}, threadCommits(), "head")[0]
-	if !d.Actionable || !strings.Contains(d.Why, "no anchor commit") {
-		t.Fatalf("want still-actionable with an anchor-less why, got %+v", d)
-	}
-	if strings.Contains(d.Why, "  ") {
-		t.Errorf("why has a double space: %q", d.Why)
-	}
-}
-
-// A GraphQL error arrives with HTTP 200 next to an empty data block. Consuming
-// it as an empty thread set would report a truncated PR as fully dispositioned.
 func TestParseThreadsPageRejectsGraphQLErrors(t *testing.T) {
 	raw := []byte(`{"data":{"repository":null},"errors":[{"message":"Could not resolve to a Repository"}]}`)
 	if _, err := parseThreadsPage(raw); err == nil {
@@ -265,36 +92,6 @@ func TestParseThreadsPageReadsNodes(t *testing.T) {
 
 // An unrelated test riding in the same commit is not coverage of the reviewed
 // change — claiming it is would invite a human to resolve a live finding.
-func TestDispositionsUnrelatedTestIsNotCoverage(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: changed("a.go")},
-		{SHA: "c2", Files: changed("a.go", "other_test.go")},
-	}
-	d := Dispositions([]Thread{{Path: "a.go", AnchorSHA: "c1"}}, commits, "head")[0]
-	if !d.Actionable {
-		t.Fatalf("an unrelated test was credited as coverage: %+v", d)
-	}
-	if len(d.Tests) != 0 || d.Comment != "" {
-		t.Errorf("actionable thread carries evidence: %+v", d)
-	}
-}
-
-// ...and the commit that DOES name the reviewed file as its subject disposes it.
-func TestDispositionsPrefersTheNamedCounterpart(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: changed("pkg/a.go")},
-		{SHA: "c2", Files: changed("pkg/a.go", "pkg/other_test.go")},
-		{SHA: "c3", Files: changed("pkg/a.go", "pkg/a_test.go")},
-	}
-	d := Dispositions([]Thread{{Path: "pkg/a.go", AnchorSHA: "c1"}}, commits, "head")[0]
-	if d.Actionable || d.FixCommit != "c3" {
-		t.Fatalf("want c3 credited, got %+v", d)
-	}
-	if len(d.Tests) != 1 || d.Tests[0] != "pkg/a_test.go" {
-		t.Errorf("tests = %v", d.Tests)
-	}
-}
-
 func TestCovers(t *testing.T) {
 	yes := [][2]string{
 		{"pkg/a_test.go", "pkg/a.go"},
@@ -321,40 +118,82 @@ func TestCovers(t *testing.T) {
 }
 
 // A test credited as coverage must still exist at the head being stamped.
-func TestCoverageDeletedByALaterCommitLeavesTheThreadActionable(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: []File{{Path: "unrelated.go"}}},
-		{SHA: "c2", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
-		{SHA: "c3", Files: []File{{Path: "a_test.go", Removed: true}}},
+func TestDispositionsNeverClaimAThreadIsFixed(t *testing.T) {
+	// Every shape that previously produced a "dispositioned" verdict — and
+	// every shape that produced a WRONG one — now produces observations only.
+	// There is no field left that can say "fixed", which is the whole point.
+	cases := map[string][]Commit{
+		"fix with its named test": {
+			{SHA: "c1", Subject: "fix", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+		},
+		"test deleted in the same commit": {
+			{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go", Removed: true}}},
+		},
+		"unrelated test alongside": {
+			{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "other_test.go"}}},
+		},
+		"test added then removed later": {
+			{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+			{SHA: "c2", Files: []File{{Path: "a_test.go", Removed: true}}},
+		},
 	}
-	got, tests, touched := fixingCommit(commits, "a.go")
-	if got.SHA != "" || len(tests) != 0 {
-		t.Errorf("credited a test deleted before the head: commit=%q tests=%v", got.SHA, tests)
-	}
-	if touched != "c2" {
-		t.Errorf("touched = %q, want c2 — the file WAS changed, only the coverage is gone", touched)
+	for name, commits := range cases {
+		all := append([]Commit{{SHA: "anchor"}}, commits...)
+		got := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, all, "head")
+		if len(got) != 1 {
+			t.Fatalf("%s: expected one disposition, got %d", name, len(got))
+		}
+		d := got[0]
+		if strings.Contains(strings.ToLower(d.Note), "fixed") {
+			t.Errorf("%s: note claims a fix: %q", name, d.Note)
+		}
+		if len(d.Candidates) == 0 {
+			t.Errorf("%s: expected the touching commit to be reported as a candidate", name)
+		}
 	}
 }
 
-func TestCoverageReAddedAfterRemovalStillCounts(t *testing.T) {
+func TestDispositionsReportEveryTouchingCommit(t *testing.T) {
+	// Not just the first. Picking one was the judgement that kept being wrong,
+	// and a later commit can undo an earlier one.
 	commits := []Commit{
-		{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
-		{SHA: "c2", Files: []File{{Path: "a_test.go", Removed: true}}},
-		{SHA: "c3", Files: []File{{Path: "a_test.go"}}},
+		{SHA: "anchor"},
+		{SHA: "c1", Subject: "first", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+		{SHA: "c2", Subject: "second", Files: []File{{Path: "a.go"}}},
+		{SHA: "c3", Subject: "elsewhere", Files: []File{{Path: "b.go"}}},
 	}
-	got, tests, _ := fixingCommit(commits, "a.go")
-	if got.SHA != "c1" || len(tests) != 1 {
-		t.Errorf("a test present at head should count: commit=%q tests=%v", got.SHA, tests)
+	d := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits, "head")[0]
+	if len(d.Candidates) != 2 {
+		t.Fatalf("expected both commits touching a.go, got %d: %+v", len(d.Candidates), d.Candidates)
+	}
+	if d.Candidates[0].SHA != "c1" || d.Candidates[1].SHA != "c2" {
+		t.Errorf("candidates should be oldest-first: %+v", d.Candidates)
+	}
+	if len(d.Candidates[0].Tests) != 1 || len(d.Candidates[1].Tests) != 0 {
+		t.Errorf("tests should attach to the commit that carried them: %+v", d.Candidates)
 	}
 }
 
-func TestSurvivingCoverageStillDispositions(t *testing.T) {
-	commits := []Commit{
-		{SHA: "c1", Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
-		{SHA: "c2", Files: []File{{Path: "other.go"}}},
+func TestDispositionsSkipResolvedThreads(t *testing.T) {
+	got := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor", Resolved: true}},
+		[]Commit{{SHA: "anchor"}}, "head")
+	if len(got) != 0 {
+		t.Errorf("a resolved thread needs no disposition, got %d", len(got))
 	}
-	got, tests, _ := fixingCommit(commits, "a.go")
-	if got.SHA != "c1" || len(tests) != 1 || tests[0] != "a_test.go" {
-		t.Errorf("expected c1/a_test.go, got commit=%q tests=%v", got.SHA, tests)
+}
+
+func TestDispositionsSayWhatCouldNotBeEstablished(t *testing.T) {
+	for name, th := range map[string]Thread{
+		"no file anchor":   {ID: "t1", AnchorSHA: "anchor"},
+		"no anchor commit": {ID: "t2", Path: "a.go"},
+		"anchor not in PR": {ID: "t3", Path: "a.go", AnchorSHA: "elsewhere"},
+	} {
+		d := Dispositions([]Thread{th}, []Commit{{SHA: "anchor"}}, "head")[0]
+		if d.Note == "" {
+			t.Errorf("%s: expected a note explaining what could not be established", name)
+		}
+		if len(d.Candidates) != 0 {
+			t.Errorf("%s: nothing can be a candidate here", name)
+		}
 	}
 }

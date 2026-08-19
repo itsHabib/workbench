@@ -2665,24 +2665,33 @@ func cmdThreads(args []string) error {
 }
 
 // writeDispositions renders the sweep for a human: what can be resolved with
-// evidence in hand, then what still needs them.
+// evidence in hand — never a conclusion about whether a thread is resolved.
 func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
-	// Every field below carries GitHub-sourced text — author, path, the thread
-	// body folded into Why and Comment, and the node id inside ResolveCommand.
+	// Author, path, commit subjects and test paths are all GitHub-sourced text.
 	// None of it is printed raw: see sanitizeForTerminal.
 	fmt.Fprintf(w, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
 	for _, d := range dispositions {
-		fmt.Fprintf(w, "\n%s %s (%s)\n", dispositionMark(d), sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
-		fmt.Fprintf(w, "  %s\n", sanitizeForTerminal(d.Why))
-		if d.Actionable {
-			continue
+		fmt.Fprintf(w, "\n%s (%s)\n", sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
+		fmt.Fprintf(w, "  %s\n", sanitizeForTerminal(d.Note))
+		for _, c := range d.Candidates {
+			line := fmt.Sprintf("  · %s %s", shortSHA(c.SHA), c.Subject)
+			if len(c.Tests) > 0 {
+				line += fmt.Sprintf("  [test: %s]", strings.Join(c.Tests, ", "))
+			}
+			fmt.Fprintf(w, "%s\n", sanitizeForTerminal(line))
 		}
-		for _, line := range strings.Split(d.Comment, "\n") {
-			fmt.Fprintf(w, "  | %s\n", sanitizeForTerminal(line))
-		}
-		fmt.Fprintf(w, "  resolve: %s\n", sanitizeForTerminal(d.ResolveCommand))
+	}
+	if len(dispositions) > 0 {
+		fmt.Fprintf(w, "\ngate does not judge whether these are fixed. Read each thread and decide.\n")
 	}
 	return nil
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 // threadLocus names where a thread sits. A thread can carry no line (an
@@ -2696,11 +2705,4 @@ func threadLocus(th evidence.Thread) string {
 		return th.Path
 	}
 	return fmt.Sprintf("%s:%d", th.Path, th.Line)
-}
-
-func dispositionMark(d evidence.Disposition) string {
-	if d.Actionable {
-		return "actionable"
-	}
-	return "dispositioned"
 }

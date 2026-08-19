@@ -8,24 +8,23 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 )
 
-// The rendered sweep must separate the two states in words a reader cannot
-// misread, and must never print a resolve command for a thread the sweep could
-// not back with a commit and a test.
+// The rendered sweep lists what it saw and says plainly that it is not
+// judging. It must never print a resolve command, because it no longer decides
+// anything a resolve would act on.
 func TestWriteDispositions(t *testing.T) {
 	pr := evidence.PRRef{Repo: "itsHabib/workbench", Number: 231}
 	ds := []evidence.Disposition{
 		{
-			Thread:         evidence.Thread{Path: "a.go", Line: 12, Author: "codex"},
-			FixCommit:      "abc123",
-			Tests:          []string{"a_test.go"},
-			Why:            "abc123 changes a.go and its regression test in one commit",
-			Comment:        "Fixed in `abc123`.\n\nEvidence:\n- fix: `abc123` changes `a.go`",
-			ResolveCommand: "gh api graphql -f query='mutation{...}'",
+			Thread: evidence.Thread{Path: "a.go", Line: 12, Author: "codex"},
+			Note:   "2 commit(s) after c0 touch a.go, 1 carrying a test that names it — read the thread to decide",
+			Candidates: []evidence.Candidate{
+				{SHA: "abc12345", Subject: "fix the thing", Tests: []string{"a_test.go"}},
+				{SHA: "def67890", Subject: "tidy up"},
+			},
 		},
 		{
-			Thread:     evidence.Thread{Path: "b.go", Line: 7, Author: "claude"},
-			Actionable: true,
-			Why:        "no commit after c1 touches b.go",
+			Thread: evidence.Thread{Path: "b.go", Line: 7, Author: "claude"},
+			Note:   "no commit after c1 touches b.go",
 		},
 	}
 	var buf bytes.Buffer
@@ -33,13 +32,23 @@ func TestWriteDispositions(t *testing.T) {
 		t.Fatalf("writeDispositions: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"itsHabib/workbench#231 @ head1", "2 unresolved", "dispositioned a.go:12", "actionable b.go:7", "| Fixed in `abc123`.", "resolve: gh api graphql"} {
+	for _, want := range []string{
+		"itsHabib/workbench#231 @ head1", "2 unresolved",
+		"a.go:12", "b.go:7",
+		"abc12345 fix the thing", "[test: a_test.go]",
+		"def67890 tidy up",
+		"gate does not judge whether these are fixed",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Count(out, "resolve: ") != 1 {
-		t.Errorf("a resolve command was printed for an actionable thread:\n%s", out)
+	// The two things the sweep must never emit, because it no longer concludes.
+	if strings.Contains(out, "resolve:") {
+		t.Errorf("a resolve command was printed:\n%s", out)
+	}
+	if strings.Contains(strings.ToLower(out), "dispositioned") {
+		t.Errorf("output claims a verdict:\n%s", out)
 	}
 }
 
