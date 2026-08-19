@@ -22,6 +22,15 @@ func TestSanitizeForTerminalStripsControlSequences(t *testing.T) {
 		"tab survives":     {"a\tb", "a\tb"},
 		"plain text":       {"ordinary review comment", "ordinary review comment"},
 		"unicode kept":     {"café — naïve ✓", "café — naïve ✓"},
+		// Invisible formatting controls reorder or splice the visible line
+		// without any byte a control-character filter sees: U+202E flips the
+		// remainder of the line right-to-left, isolates re-nest it, zero-width
+		// characters hide splices inside one visible word.
+		"rtl override":     {"fix \u202egnihton od", "fix gnihton od"},
+		"bidi isolate":     {"a\u2066b\u2069c", "abc"},
+		"directional mark": {"x\u200e\u200fy", "xy"},
+		"zero width":       {"e\u200bv\u200ci\u200dl\u2060!", "evil!"},
+		"alm and bom":      {"\u061cnote\ufeff", "note"},
 	}
 	for name, tc := range cases {
 		if got := sanitizeForTerminal(tc.in); got != tc.want {
