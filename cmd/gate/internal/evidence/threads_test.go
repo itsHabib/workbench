@@ -139,7 +139,7 @@ func TestDispositionsNeverClaimAThreadIsFixed(t *testing.T) {
 	}
 	for name, commits := range cases {
 		all := append([]Commit{{SHA: "anchor"}}, commits...)
-		got := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, all, "head")
+		got := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, all)
 		if len(got) != 1 {
 			t.Fatalf("%s: expected one disposition, got %d", name, len(got))
 		}
@@ -162,7 +162,7 @@ func TestDispositionsReportEveryTouchingCommit(t *testing.T) {
 		{SHA: "c2", Subject: "second", Files: []File{{Path: "a.go"}}},
 		{SHA: "c3", Subject: "elsewhere", Files: []File{{Path: "b.go"}}},
 	}
-	d := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits, "head")[0]
+	d := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits)[0]
 	if len(d.Candidates) != 2 {
 		t.Fatalf("expected both commits touching a.go, got %d: %+v", len(d.Candidates), d.Candidates)
 	}
@@ -176,7 +176,7 @@ func TestDispositionsReportEveryTouchingCommit(t *testing.T) {
 
 func TestDispositionsSkipResolvedThreads(t *testing.T) {
 	got := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor", Resolved: true}},
-		[]Commit{{SHA: "anchor"}}, "head")
+		[]Commit{{SHA: "anchor"}})
 	if len(got) != 0 {
 		t.Errorf("a resolved thread needs no disposition, got %d", len(got))
 	}
@@ -188,7 +188,7 @@ func TestDispositionsSayWhatCouldNotBeEstablished(t *testing.T) {
 		"no anchor commit": {ID: "t2", Path: "a.go"},
 		"anchor not in PR": {ID: "t3", Path: "a.go", AnchorSHA: "elsewhere"},
 	} {
-		d := Dispositions([]Thread{th}, []Commit{{SHA: "anchor"}}, "head")[0]
+		d := Dispositions([]Thread{th}, []Commit{{SHA: "anchor"}})[0]
 		if d.Note == "" {
 			t.Errorf("%s: expected a note explaining what could not be established", name)
 		}

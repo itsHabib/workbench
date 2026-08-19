@@ -2657,6 +2657,12 @@ func cmdThreads(args []string) error {
 		return err
 	}
 	if *asJSON {
+		// A PR with no unresolved threads has nothing to disposition. Emit [],
+		// not null: the output is consumed as a JSON array, and a nil slice
+		// encodes as null, which is not the empty array a consumer expects.
+		if dispositions == nil {
+			dispositions = []evidence.Disposition{}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(dispositions)
@@ -2675,6 +2681,9 @@ func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions
 		fmt.Fprintf(w, "  %s\n", sanitizeForTerminal(d.Note))
 		for _, c := range d.Candidates {
 			line := fmt.Sprintf("  · %s %s", shortSHA(c.SHA), c.Subject)
+			if c.Deleted {
+				line += "  [deletes the file]"
+			}
 			if len(c.Tests) > 0 {
 				line += fmt.Sprintf("  [test: %s]", strings.Join(c.Tests, ", "))
 			}

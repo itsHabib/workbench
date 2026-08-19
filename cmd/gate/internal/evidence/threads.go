@@ -56,6 +56,12 @@ type Commit struct {
 	SHA     string `json:"sha"`
 	Subject string `json:"subject,omitempty"`
 	Files   []File `json:"files,omitempty"`
+	// Parents is how many parents the commit has. A merge commit has two or
+	// more, and the commits API reports its file list as the diff against the
+	// FIRST parent — so a merge of main into the branch lists main's files as if
+	// the merge introduced them. Those are not changes this PR made, so a merge
+	// is never a fix candidate. See candidates.
+	Parents int `json:"parents,omitempty"`
 }
 
 // Disposition is what the sweep OBSERVED about one unresolved thread. It is
@@ -91,12 +97,17 @@ type Candidate struct {
 	SHA     string   `json:"sha"`
 	Subject string   `json:"subject,omitempty"`
 	Tests   []string `json:"tests,omitempty"`
+	// Deleted marks a commit whose relationship to the reviewed file is that it
+	// REMOVED it. Still surfaced — deleting the file may well be how a thread was
+	// addressed — but marked, so it is not mistaken for a change that carries a
+	// fix and a covering test (it can carry neither).
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // Dispositions prepares a disposition for every unresolved thread, oldest
-// first. commits must be the pull request's commits in history order with
-// their touched files populated; headSHA is the head the sweep read.
-func Dispositions(threads []Thread, commits []Commit, headSHA string) []Disposition {
+// first. commits must be the pull request's commits in history order with their
+// touched files populated.
+func Dispositions(threads []Thread, commits []Commit) []Disposition {
 	index := make(map[string]int, len(commits))
 	for i, c := range commits {
 		index[c.SHA] = i
@@ -106,12 +117,12 @@ func Dispositions(threads []Thread, commits []Commit, headSHA string) []Disposit
 		if th.Resolved {
 			continue
 		}
-		out = append(out, disposition(th, commits, index, headSHA))
+		out = append(out, disposition(th, commits, index))
 	}
 	return out
 }
 
-func disposition(th Thread, commits []Commit, index map[string]int, headSHA string) Disposition {
+func disposition(th Thread, commits []Commit, index map[string]int) Disposition {
 	d := Disposition{Thread: th}
 	if th.Path == "" {
 		d.Note = "no file anchor — nothing to match commits against"
@@ -152,10 +163,20 @@ func disposition(th Thread, commits []Commit, index map[string]int, headSHA stri
 func candidates(after []Commit, file string) []Candidate {
 	var out []Candidate
 	for _, c := range after {
+		// A merge commit's file list is the diff against its first parent, not
+		// changes this PR made — crediting it would "fix" a thread with whatever
+		// arrived on the merged branch. Skip it whole.
+		if c.Parents > 1 {
+			continue
+		}
 		if !touches(c.Files, file) {
 			continue
 		}
-		out = append(out, Candidate{SHA: c.SHA, Subject: c.Subject, Tests: coveringTests(c.Files, file)})
+		out = append(out, Candidate{
+			SHA: c.SHA, Subject: c.Subject,
+			Tests:   coveringTests(c.Files, file),
+			Deleted: deletes(c.Files, file),
+		})
 	}
 	return out
 }
@@ -164,6 +185,18 @@ func touches(files []File, file string) bool {
 	for _, f := range files {
 		if f.Path == file {
 			return true
+		}
+	}
+	return false
+}
+
+// deletes reports whether the commit removed the reviewed file. A pure deletion
+// still touches the file, but it is not a change that could carry a fix, so the
+// candidate is marked rather than read as one.
+func deletes(files []File, file string) bool {
+	for _, f := range files {
+		if f.Path == file {
+			return f.Removed
 		}
 	}
 	return false
@@ -201,7 +234,31 @@ func coveringTests(files []File, reviewed string) []string {
 // subject stem is the link, not the directory — a mirrored test tree names its
 // subject exactly as a sibling test does.
 func covers(test, reviewed string) bool {
-	return subjectStem(test) == subjectStem(reviewed)
+	if subjectStem(test) != subjectStem(reviewed) {
+		return false
+	}
+	// Same stem is necessary but not sufficient. main_test.go names its subject
+	// "main", and so does every other main.go in the tree — cmd/console/main_-
+	// test.go would otherwise be credited as coverage for cmd/gate/main.go. A
+	// naming convention ties a test to its subject in one of two shapes: the test
+	// sits beside the file (Go's a_test.go, Rust's parse_test.rs), or it lives in
+	// a mirror test directory (Python's tests/, JS's __tests__/). Require one of
+	// them; a same-stem test in an unrelated package satisfies neither.
+	return path.Dir(test) == path.Dir(reviewed) || inTestDir(test)
+}
+
+// inTestDir reports whether any path segment marks a test directory — the mirror
+// convention's signal. A same-directory _test.go is NOT in one, which is what
+// separates a legitimate mirror (tests/test_foo.py) from a cross-package stem
+// collision (cmd/console/main_test.go).
+func inTestDir(file string) bool {
+	for _, seg := range strings.Split(path.Dir(file), "/") {
+		switch seg {
+		case "test", "tests", "__tests__":
+			return true
+		}
+	}
+	return false
 }
 
 // subjectStem reduces a file name to the subject it is about: the base name
@@ -433,12 +490,17 @@ func pagedCommits(pr PRRef) ([]Commit, error) {
 			Commit struct {
 				Message string `json:"message"`
 			} `json:"commit"`
+			Parents []struct {
+				SHA string `json:"sha"`
+			} `json:"parents"`
 		}
 		if err := json.Unmarshal(raw, &body); err != nil {
 			return nil, fmt.Errorf("evidence: parse pull commits: %w", err)
 		}
 		for _, c := range body {
-			out = append(out, Commit{SHA: c.SHA, Subject: subjectOf(c.Commit.Message)})
+			out = append(out, Commit{
+				SHA: c.SHA, Subject: subjectOf(c.Commit.Message), Parents: len(c.Parents),
+			})
 		}
 		if len(body) < commitsPerPage {
 			return out, nil
@@ -522,5 +584,5 @@ func SweepThreads(pr PRRef) ([]Disposition, string, error) {
 		return nil, "", fmt.Errorf("evidence: head moved during the sweep (%s → %s) — re-run against the new head",
 			shortSHA(head), shortSHA(after))
 	}
-	return Dispositions(threads, commits, head), head, nil
+	return Dispositions(threads, commits), head, nil
 }
