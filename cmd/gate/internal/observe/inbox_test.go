@@ -314,6 +314,41 @@ func TestBuildInboxJudgeCommand(t *testing.T) {
 	}
 }
 
+// TestBuildInboxResolveCommand pins the human route next to the judge one: a
+// park carrying both its artifact id and its grant projects a paste-ready
+// `escalate resolve` line (stateArg spliced like every other suggestion), while
+// a grantless park projects none — escalate's ingest refuses an empty grant, so
+// a placeholder there would be a command guaranteed to fail.
+func TestBuildInboxResolveCommand(t *testing.T) {
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_a", "esc_a", inboxBase, esc("grt_live", "why", "", "o/r", 5)),
+		art(state.KindEscalation, "run_b", "esc_b", inboxBase, esc("", "why", "", "o/r", 6)),
+	}
+
+	in := buildInbox(arts, inboxBase, "")
+	byRun := map[string]ParkedRun{}
+	for _, p := range in.Parked {
+		byRun[p.Run] = p
+	}
+	want := `escalate resolve -escalation esc_a -grant grt_live -decision <pass|block> -who <you> -why "..."`
+	if got := byRun["run_a"].ResolveCommand; got != want {
+		t.Fatalf("resolve command = %q, want %q", got, want)
+	}
+	if got := byRun["run_b"].ResolveCommand; got != "" {
+		t.Fatalf("a grantless park must project no resolve command, got %q", got)
+	}
+
+	in2 := buildInbox(arts, inboxBase, " -state /custom")
+	for _, p := range in2.Parked {
+		if p.Run != "run_a" {
+			continue
+		}
+		if !strings.Contains(p.ResolveCommand, "escalate resolve -state /custom -escalation esc_a") {
+			t.Fatalf("stateArg not spliced into resolve command: %q", p.ResolveCommand)
+		}
+	}
+}
+
 // TestBuildInboxUnparseableEscalation pins fail-visible decoding: an escalation
 // whose body isn't the expected object still lists its run (so the park is never
 // silently dropped), just without the decoded fields.

@@ -166,6 +166,10 @@ func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
 	}
+	if line := resolveLine(ev); line != "" {
+		hint := slackText{Type: "mrkdwn", Text: line}
+		blocks = append(blocks, slackBlock{Type: "context", Elements: []any{hint}})
+	}
 	footer := slackText{Type: "mrkdwn", Text: slackFooter(ev)}
 	return append(blocks, slackBlock{Type: "context", Elements: []any{footer}})
 }
@@ -197,9 +201,37 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 // back to the parked run. The grant must be present because a grantless park
 // (schema-valid since escalation.v1's second consumer) resolves out-of-band:
 // escalate's ingest refuses an empty grant, so the buttons would be a tap
-// guaranteed to fail.
+// guaranteed to fail. A ceiling park is excluded for the same reason from the
+// other direction: `gate resolve` re-applies the grant's ceiling, so approving
+// one re-parks it on the identical code — the operator needs a wider grant, and
+// only they can mint it.
 func resolvablePark(ev event.Event) bool {
-	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant"] != ""
+	if ev.Kind != "escalation" || ev.ID == "" || ev.Fields["grant"] == "" {
+		return false
+	}
+	return !ceilingPark(ev.Fields["code"])
+}
+
+// ceilingPark reports whether the park stands on an authorization ceiling — the
+// codes a decision cannot clear, mirroring gate's inbox projection.
+func ceilingPark(code string) bool {
+	return code == escalation.CodeTierExceeded || code == escalation.CodeCycleExceeded
+}
+
+// resolveLine is the paste-ready `escalate resolve` command for a resolvable
+// park — the path that works from a phone with nothing but Slack and a terminal,
+// independent of whether the channel opted into the Approve/Block buttons or the
+// callback tunnel is up. The escalation id and the grant the run parked under are
+// substituted verbatim; decision, who, and why stay placeholders because they are
+// the human's to fill. Gated on resolvablePark for the same reason the buttons
+// are: escalate's ingest refuses an empty grant, so a grantless park would get a
+// command guaranteed to fail. Rendering only — flare never runs it (Amendment 3).
+func resolveLine(ev event.Event) string {
+	if !resolvablePark(ev) {
+		return ""
+	}
+	return fmt.Sprintf("`escalate resolve -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
+		ev.ID, ev.Fields["grant"])
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each
