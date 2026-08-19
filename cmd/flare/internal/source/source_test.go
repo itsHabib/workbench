@@ -58,6 +58,9 @@ func TestGateLogLiftsEscalationsAndNonPassVerdicts(t *testing.T) {
 	if events[0].Fields["run"] != "run_1" {
 		t.Fatalf("escalation must surface its run for the card, got %q", events[0].Fields["run"])
 	}
+	if want := filepath.Dir(src.Path); events[0].Fields["state"] != want {
+		t.Fatalf("escalation must carry the watched ledger's state dir %q, got %q", want, events[0].Fields["state"])
+	}
 	if v := events[1].Fields; v["repo"] != "itsHabib/ship" || v["number"] != "182" ||
 		v["tier"] != "T3" || v["dimension"] != "reducer" || v["run"] != "run_2" {
 		t.Fatalf("verdict must surface repo/number/tier/dimension/run, got %+v", v)

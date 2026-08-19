@@ -203,8 +203,10 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 // escalate's ingest refuses an empty grant, so the buttons would be a tap
 // guaranteed to fail. A ceiling park is excluded for the same reason from the
 // other direction: `gate resolve` re-applies the grant's ceiling, so approving
-// one re-parks it on the identical code — the operator needs a wider grant, and
-// only they can mint it.
+// one re-parks it on the identical code. The remedies differ by code and
+// neither is a tap: a tier park needs wider authority only the operator can
+// mint; a cycle park is the stop signal that the process looped — the fix is
+// fewer review rounds, never a wider grant.
 func resolvablePark(ev event.Event) bool {
 	if ev.Kind != "escalation" || ev.ID == "" || ev.Fields["grant"] == "" {
 		return false
@@ -225,13 +227,22 @@ func ceilingPark(code string) bool {
 // substituted verbatim; decision, who, and why stay placeholders because they are
 // the human's to fill. Gated on resolvablePark for the same reason the buttons
 // are: escalate's ingest refuses an empty grant, so a grantless park would get a
-// command guaranteed to fail. Rendering only — flare never runs it (Amendment 3).
+// command guaranteed to fail. When the event carries the watched ledger's state
+// directory, the line pins it with -state: the watched path is explicit flare
+// config, while the paster's terminal holds whatever $GATE_STATE it holds — an
+// ambient-matching -state is harmless, a missing one against a non-ambient
+// ledger resolves the wrong log. Rendering only — flare never runs it
+// (Amendment 3).
 func resolveLine(ev event.Event) string {
 	if !resolvablePark(ev) {
 		return ""
 	}
-	return fmt.Sprintf("`escalate resolve -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
-		ev.ID, ev.Fields["grant"])
+	stateArg := ""
+	if dir := ev.Fields["state"]; dir != "" {
+		stateArg = " -state " + dir
+	}
+	return fmt.Sprintf("`escalate resolve%s -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
+		stateArg, ev.ID, ev.Fields["grant"])
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each

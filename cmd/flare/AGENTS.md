@@ -69,14 +69,19 @@ there first.
   grantless) never gets Approve/Block — a grantless park resolves out-of-band.
   A CEILING park (`grant_tier_exceeded` / `grant_cycle_exceeded`) is excluded
   too, from the other direction: gate re-applies the grant's ceiling, so a
-  decision re-parks on the identical code — the operator must mint a wider
-  grant. flare renders the button; it never handles the tap (the callback
-  targets `escalate serve`).
+  decision re-parks on the identical code. The remedies differ by code and
+  neither is a tap: a tier park needs wider authority only the operator can
+  mint; a cycle park is the stop signal that the review loop ran long — the
+  fix is fewer rounds, never a wider grant. flare renders the button; it never
+  handles the tap (the callback targets `escalate serve`).
 - The same resolvable-park rule gates the paste-ready `escalate resolve …`
   context line on the card — including the ceiling exclusion, which gate's
   inbox mirrors. It renders regardless of the channel's button opt-in (it is
   prose, not an interactive element), so the loop closes from a phone with
-  Slack and a terminal even before the callback tunnel is up.
+  Slack and a terminal even before the callback tunnel is up. The line pins
+  `-state` to the watched ledger's directory (the watched log's parent): the
+  watched path is explicit config, so the pasted command never trusts the
+  paster's ambient `$GATE_STATE` to name the same ledger.
 
 ## Checks
 

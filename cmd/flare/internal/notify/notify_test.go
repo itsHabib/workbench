@@ -488,6 +488,31 @@ func TestSlackResolveLineOnResolvablePark(t *testing.T) {
 	}
 }
 
+// TestSlackResolveLineCarriesWatchedState pins the ledger splice: when the
+// source lifted the watched log's state directory, the rendered command pins
+// it with -state, so the paste works from a terminal whose ambient $GATE_STATE
+// points elsewhere (or nowhere). The field-less case above stays the ambient
+// fallback — no -state is invented.
+func TestSlackResolveLineCarriesWatchedState(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		ID:       "esc_4ea400afe1ecc4c4",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "grant": "grt_7f21", "state": "/Users/mh/dev/gate/state",
+		},
+	}
+	want := "`escalate resolve -state /Users/mh/dev/gate/state " +
+		"-escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+		"-decision <pass|block> -who <you> -why \"...\"`"
+	msg := renderSlackMessage("C1", false, ev)
+	if !hasContextText(msg.Attachments[0].Blocks, want) {
+		t.Fatalf("card must pin the watched ledger with -state, want %q:\n%s", want, mustJSON(t, msg))
+	}
+}
+
 // hasContextText reports whether some context block carries exactly this text —
 // a value comparison, so a drift in the rendered line fails loudly instead of
 // passing on a JSON substring that HTML-escapes the placeholders.
