@@ -95,8 +95,13 @@ Constraints that are design decisions, not omissions:
   already in state. An explicit non-approving `reviewDecision` still blocks
   outright — the panel answers only that field's ABSENCE. What the PANEL may
   stand in for is narrower still: a completed reviewer who asked for changes, or
-  a human's outstanding objection, stops the panel standing in, and an
-  incomplete, unknown, or stale-head panel escalates as before. It does **not**
+  a human's or a bot's outstanding objection at any head, stops the panel
+  standing in, and an incomplete, unknown, or stale-head panel escalates as
+  before. The any-head clause is load-bearing: the panel rung's own change-
+  request check is bound to the exact head, so a connector that re-completes a
+  new head as COMMENTED would otherwise leave a formal CHANGES_REQUESTED
+  standing against the superseded head with no rung holding it — the stance
+  evidence is where it survives (`botChangeRequest`). It does **not**
   reorder the stand-ins ranked above it — an authoritative human's exact-head
   approval, and the reviews-optional flag in the enforced-check context, still
   carry readiness on their own warrant exactly as before, including over an

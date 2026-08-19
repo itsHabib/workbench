@@ -179,6 +179,30 @@ func humanChangeRequest(stances []reviewStance) (string, bool) {
 	return "", false
 }
 
+// botChangeRequest names a bot whose current decisive stance asks for changes,
+// if one exists. Deliberately head-AGNOSTIC, exactly as humanChangeRequest is: a
+// change request stands until its author withdraws or supersedes it, whatever
+// head it was filed against.
+//
+// This is the bot counterpart the panel rung's panelChangeRequest cannot be.
+// That rung reads panel.Completed, which is bound to the EXACT judged head — and
+// the providers that only ever post issue comments (codex through its connector)
+// record COMMENTED there, never CHANGES_REQUESTED, so a connector re-review of a
+// new head marks the panel complete with no objection recorded even while the
+// reviewer's formal CHANGES_REQUESTED, filed against the head it has since
+// superseded, still stands. panelChangeRequest sees the new head's COMMENTED,
+// humanChangeRequest skips the bot, and the objection is invisible to both. The
+// stance evidence is where it survives — reviewStances keeps each reviewer's
+// latest decisive submission regardless of head — so readiness consults it here.
+func botChangeRequest(stances []reviewStance) (string, bool) {
+	for _, s := range stances {
+		if s.IsBot && s.State == approvalStateChangesRequested {
+			return s.Author, true
+		}
+	}
+	return "", false
+}
+
 // Readiness is the deterministic gh read-back: draft state, CI rollup, and
 // mergeability. Producer class: code — its blocks are final; no judgment can
 // talk a red check green.
@@ -438,6 +462,14 @@ func panelStandIn(st *state.Store, evidenceID string, subject Subject, stances [
 	}
 	if human, ok := humanChangeRequest(stances); ok {
 		return reviewStandIn{why: "exact-head review panel complete but " + human + " requested changes"}, nil
+	}
+	// A bot's outstanding change request counts too, at any head. The exact-head
+	// panelChangeRequest above cannot see it when the reviewer re-completed the
+	// new head through a mechanism that records COMMENTED (a connector issue
+	// comment), leaving a formal CHANGES_REQUESTED standing at the head it
+	// superseded — see botChangeRequest.
+	if bot, ok := botChangeRequest(stances); ok {
+		return reviewStandIn{why: "exact-head review panel complete but " + bot + " has an unretracted change request from an earlier head"}, nil
 	}
 	return reviewStandIn{
 		satisfied: true,

@@ -151,6 +151,51 @@ func TestReadinessPanelReviewerChangeRequestDoesNotSatisfyReadiness(t *testing.T
 	}
 }
 
+// A bot's outstanding CHANGES_REQUESTED must not be papered over by a panel
+// complete on a NEWER head. The exact-head panelChangeRequest above cannot catch
+// this: a connector that re-reviews the new head posts an issue comment, which
+// records COMMENTED — never CHANGES_REQUESTED — so the panel reads clean while
+// the reviewer's formal objection still stands against the head it superseded.
+// humanChangeRequest skips the bot, and reviewDecision is empty because a bot
+// review does not populate the aggregate; the stance evidence is the only place
+// the objection survives. Before botChangeRequest, readiness PASSED here.
+func TestReadinessPanelDoesNotOverrideStaleBotChangeRequest(t *testing.T) {
+	v := readinessWithPanel(t, openPRAtHead("newhead"), completePanelAt("newhead"), []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "state": "CHANGES_REQUESTED", "commit_id": "oldhead"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("a bot change request at a superseded head must not be satisfied by a newer-head panel, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, "codex[bot] has an unretracted change request") {
+		t.Fatalf("escalation must name the objection it refused to step over, got %q", v.Why)
+	}
+}
+
+// The bot change request is head-agnostic in the same way the human one is: even
+// filed against the exact head, where a connector records it as COMMENTED in the
+// panel, the formal stance still refuses the stand-in.
+func TestReadinessPanelDoesNotOverrideExactHeadBotChangeRequest(t *testing.T) {
+	v := readinessWithPanel(t, openPRAtHead("abc123"), completePanelAt("abc123"), []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "state": "CHANGES_REQUESTED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("a bot change request at the exact head must not be satisfied by the panel, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
+// A bot that only COMMENTED holds no stance, so it does not refuse the stand-in:
+// COMMENTED is not a decisive position, and treating it as one would park every
+// PR a connector ever remarked on. This is the boundary botChangeRequest must
+// not cross.
+func TestReadinessPanelIsNotBlockedByBotComment(t *testing.T) {
+	v := readinessWithPanel(t, openPRAtHead("abc123"), completePanelAt("abc123"), []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "state": "COMMENTED", "commit_id": "abc123"},
+	})
+	if v.Decision != DecisionPass {
+		t.Fatalf("a bot that only commented must not refuse the stand-in, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 // A human's outstanding objection outranks a clean bot panel, at any head — the
 // same asymmetry humanApprovalAtHead already applies to the approval path.
 func TestReadinessPanelDoesNotOverrideHumanChangeRequest(t *testing.T) {

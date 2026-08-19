@@ -52,6 +52,18 @@ wiring `gate` into the merge tail.
   **Still open (out of scope for that pass, noted in the design):** the stale-lock TOCTOU takeover
   race and a SQLite/WAL durability model.
 
+## Tidy-up
+
+- [ ] **Load the review panel once per run.** `PanelCompleteness` and readiness's
+  `panelStandIn` each call `loadPanel` on the same evidence id, so one panel body is read,
+  JSON-parsed, `reviewpanel.Validate`-d, and `evaluatePanel`-ed twice per gate run. Correctness
+  is unaffected — it is the same validated evidence both times — so this is mechanism, not a
+  defect. Deduping means loading once in `runGateWithSynthesis` and passing the parsed
+  `reviewpanel.Evidence` to both consumers, which changes the exported signatures of
+  `verify.Readiness` and `verify.PanelCompleteness` (evidence id → parsed struct) and ripples
+  through their tests. Left out of the botChangeRequest PR to keep a security fix focused;
+  worth doing on its own.
+
 ## Before broader trust / real dogfood
 
 - [ ] **Decide what a bodyless bot `CHANGES_REQUESTED` is worth.**
