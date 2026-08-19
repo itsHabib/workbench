@@ -136,7 +136,6 @@ cmd_install() {
 	mkdir -p "$AGENT_DIR" "$LOG_DIR"
 	[ -f "$FLARE_HOME/routes.json" ] ||
 		warn "note: $FLARE_HOME/routes.json is missing -- copy $SCRIPT_DIR/routes.example.json and fill it in, or flare watch will exit at load."
-	warn_missing_env
 	render_all "$AGENT_DIR"
 	bootout_label "$FLARE_LABEL"
 	bootout_label "$ESCALATE_LABEL"
@@ -154,7 +153,10 @@ cmd_uninstall() {
 }
 
 cmd_update() {
+	# Both, before touching anything: a half-installed pair would rebuild fine
+	# and then die on the second bootstrap with a misleading "already loaded".
 	require_installed "$FLARE_LABEL"
+	require_installed "$ESCALATE_LABEL"
 	bootout_label "$FLARE_LABEL"
 	bootout_label "$ESCALATE_LABEL"
 	printf 'rebuilding from %s ...\n' "$REPO_ROOT"
@@ -184,6 +186,10 @@ cmd_restart() {
 cmd_status() {
 	print_agent "$FLARE_LABEL"
 	print_agent "$ESCALATE_LABEL"
+	# A crash-looping escalate serve shows up above as a non-zero last exit and
+	# nothing else. Name the usual cause here so the operator does not have to
+	# decode an exit code against the err.log.
+	warn_missing_env
 	printf -- '--- flare status (exit 1 == stale; informational) ---\n'
 	flare_bin=$(command -v flare 2>/dev/null || true)
 	if [ -z "$flare_bin" ]; then

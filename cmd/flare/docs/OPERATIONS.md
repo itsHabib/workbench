@@ -279,9 +279,10 @@ ESCALATE_ALLOWED_SLACK_USERS=U0123ABC,U0456DEF    # Slack user ids allowed to re
 `ESCALATE_ALLOWED_SLACK_USERS` — an unauthenticated ingress would accept forged
 decisions, and a signed callback alone only proves Slack sent it, not that the
 tapper may move a merge gate. With `KeepAlive` that refusal shows up as a
-restart loop with the reason in `~/.flare/logs/escalate-serve.err.log`;
-`install` warns about it up front, and `status` reports the non-zero last exit
-rather than hiding it. **`flare watch` is unaffected** — the outbound page works
+restart loop with the reason in `~/.flare/logs/escalate-serve.err.log`. `status`
+reports the non-zero last exit **and** names which of the two variables is
+missing, so the failure reads as a configuration gap rather than an exit code to
+decode. **`flare watch` is unaffected** — the outbound page works
 before the inbound ingress is wired.
 
 To rotate the Slack bot token, edit `~/.flare/routes.json`; to rotate the
