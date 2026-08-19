@@ -520,27 +520,68 @@ func fetchCommitFiles(pr PRRef, sha string) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		var body struct {
-			Files []struct {
-				Filename string `json:"filename"`
-				Status   string `json:"status"`
-			} `json:"files"`
+		files, n, err := parseCommitFiles(raw)
+		if err != nil {
+			return nil, err
 		}
-		if err := json.Unmarshal(raw, &body); err != nil {
-			return nil, fmt.Errorf("evidence: parse commit files: %w", err)
-		}
-		for _, f := range body.Files {
-			out = append(out, File{Path: f.Filename, Removed: f.Status == "removed"})
-		}
-		if len(body.Files) < filesPerPage {
+		out = append(out, files...)
+		if n < filesPerPage {
 			return out, nil
 		}
 	}
 }
 
+// parseCommitFiles decodes one page of a commit's file list. It returns the
+// decoded files and the raw page count — a rename decodes to two entries, so
+// pagination must count what GitHub sent, not what came out.
+//
+// A rename reports only the NEW name as the file's path, with the old one in
+// previous_filename. A thread anchored to the old path was still touched by
+// this commit — the path it reviewed is gone from the tree — so the old name is
+// recorded as removed: it shows up as a candidate, and a renamed-away test
+// stops counting as standing coverage.
+func parseCommitFiles(raw json.RawMessage) ([]File, int, error) {
+	var body struct {
+		Files []struct {
+			Filename         string `json:"filename"`
+			Status           string `json:"status"`
+			PreviousFilename string `json:"previous_filename"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, 0, fmt.Errorf("evidence: parse commit files: %w", err)
+	}
+	var out []File
+	for _, f := range body.Files {
+		out = append(out, File{Path: f.Filename, Removed: f.Status == "removed"})
+		if f.Status == "renamed" && f.PreviousFilename != "" {
+			out = append(out, File{Path: f.PreviousFilename, Removed: true})
+		}
+	}
+	return out, len(body.Files), nil
+}
+
 func subjectOf(message string) string {
 	line, _, _ := strings.Cut(message, "\n")
 	return strings.TrimSpace(line)
+}
+
+// truncated reports whether the paged history fails to reach the head the
+// sweep was read against. The commits endpoint stops at GitHub's 250-commit
+// ceiling, and the short final page is indistinguishable from normal
+// exhaustion. Every note the sweep writes is a completeness claim ("no commit
+// after X touches Y"), so a history that does not end at the head is refused,
+// never trimmed to.
+func truncated(commits []Commit, head string) bool {
+	return len(commits) == 0 || commits[len(commits)-1].SHA != head
+}
+
+// lastSHA names where a commit list actually ends, for the truncation refusal.
+func lastSHA(commits []Commit) string {
+	if len(commits) == 0 {
+		return "(none)"
+	}
+	return commits[len(commits)-1].SHA
 }
 
 // HeadSHA reads the pull request's current head — the head every prepared
@@ -575,6 +616,10 @@ func SweepThreads(pr PRRef) ([]Disposition, string, error) {
 	commits, err := FetchCommits(pr, threads)
 	if err != nil {
 		return nil, "", err
+	}
+	if truncated(commits, head) {
+		return nil, "", fmt.Errorf("evidence: commit history is truncated — %d commit(s) end at %s, not the head %s; the sweep cannot claim completeness",
+			len(commits), shortSHA(lastSHA(commits)), shortSHA(head))
 	}
 	after, err := HeadSHA(pr)
 	if err != nil {

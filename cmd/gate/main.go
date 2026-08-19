@@ -178,7 +178,7 @@ func usage() {
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
-  threads  -repo R -pr N [-json]                     (prepare commit+test-backed dispositions for stale review threads)
+  threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
   audit
   backtest -repo R -prs 174,175,...
@@ -2628,14 +2628,15 @@ func addTerminalArtifactMetadata(body map[string]any, outcome string, res gateRe
 	body["retry_helps"] = res.RetryHelps
 }
 
-// cmdThreads prepares a disposition for every unresolved review thread on a
-// pull request: the commit that fixed the finding, the regression test riding
-// with it, and a resolve comment quoting both. It is read-only in both
-// directions — it writes no artifact and resolves no thread, so like explain
-// and next it returns nil (exit 0) or an error (exit 4) and never an exit code
-// a driver would read as a decision. A thread whose fix or test cannot be
-// identified is reported still-actionable; deciding one either way stays with
-// the human who reads the output.
+// cmdThreads reports what the sweep OBSERVED about every unresolved review
+// thread on a pull request: the commits after its anchor that touch the
+// reviewed file, and which of those carry a test naming it. It never says a
+// thread is fixed, prepares no resolve comment, and emits no resolve call —
+// whether any candidate actually addressed the finding stays with the human
+// who reads the thread. It is read-only in both directions — it writes no
+// artifact and resolves no thread, so like explain and next it returns nil
+// (exit 0) or an error (exit 4) and never an exit code a driver would read as
+// a decision.
 func cmdThreads(args []string) error {
 	fs := flag.NewFlagSet("threads", flag.ContinueOnError)
 	repo := fs.String("repo", "", "owner/repo")
@@ -2658,14 +2659,19 @@ func cmdThreads(args []string) error {
 	}
 	if *asJSON {
 		// A PR with no unresolved threads has nothing to disposition. Emit [],
-		// not null: the output is consumed as a JSON array, and a nil slice
-		// encodes as null, which is not the empty array a consumer expects.
+		// not null: the dispositions are consumed as a JSON array, and a nil
+		// slice encodes as null, which is not the empty array a consumer
+		// expects. The head rides with them — persisted or read after another
+		// push, the document must say which PR snapshot it describes.
 		if dispositions == nil {
 			dispositions = []evidence.Disposition{}
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(dispositions)
+		return enc.Encode(struct {
+			Head         string                 `json:"head"`
+			Dispositions []evidence.Disposition `json:"dispositions"`
+		}{Head: head, Dispositions: dispositions})
 	}
 	return writeDispositions(os.Stdout, ref, head, dispositions)
 }
