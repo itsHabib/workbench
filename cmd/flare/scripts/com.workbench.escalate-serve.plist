@@ -21,7 +21,12 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>set -a; [ -f "$HOME/.flare/env" ] &amp;&amp; . "$HOME/.flare/env"; set +a; exec __ESCALATE_BIN__ serve</string>
+    <!-- -gate must be ABSOLUTE. escalate shells the gate binary to drive
+         `gate resolve`, and its default is the bare name `gate` — which
+         resolves against launchd's PATH, not the operator's shell. A bare name
+         fails only at the moment a human taps Approve, so the ingress looks
+         healthy right up until the one time it matters. -->
+    <string>set -a; [ -f "$HOME/.flare/env" ] &amp;&amp; . "$HOME/.flare/env"; set +a; exec __ESCALATE_BIN__ serve -gate __GATE_BIN__</string>
   </array>
 
   <key>RunAtLoad</key>

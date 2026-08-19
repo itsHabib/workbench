@@ -54,7 +54,7 @@ resolve_bin() {
 		return 0
 	fi
 	fallback="${GOBIN:-${GOPATH:-$HOME/go}/bin}/$name"
-	[ -x "$fallback" ] || die "$name not found on PATH or at $fallback -- run '$0 update' or 'go install ./cmd/$name' first."
+	[ -x "$fallback" ] || die "$name not found on PATH or at $fallback -- run 'go install ./cmd/$name' from the repo root first."
 	printf '%s\n' "$fallback"
 }
 
@@ -62,10 +62,11 @@ resolve_bin() {
 # placeholders and lint the result. A plist that fails plutil is never handed
 # to launchd.
 render_plist() {
-	template=$1 dest=$2 flare_bin=$3 escalate_bin=$4
+	template=$1 dest=$2 flare_bin=$3 escalate_bin=$4 gate_bin=$5
 	[ -f "$template" ] || die "template not found: $template"
 	sed -e "s|__FLARE_BIN__|$flare_bin|g" \
 		-e "s|__ESCALATE_BIN__|$escalate_bin|g" \
+		-e "s|__GATE_BIN__|$gate_bin|g" \
 		-e "s|__HOME__|$HOME|g" "$template" >"$dest"
 	plutil -lint "$dest" >/dev/null || die "rendered plist failed plutil -lint: $dest"
 }
@@ -74,12 +75,17 @@ render_all() {
 	dest_dir=$1
 	flare_bin=$(resolve_bin flare)
 	escalate_bin=$(resolve_bin escalate)
+	# gate is not built by `update`, but escalate serve shells it to resolve a
+	# park -- a plist carrying the bare name would produce an ingress that only
+	# fails at the tap.
+	gate_bin=$(resolve_bin gate)
 	mkdir -p "$dest_dir"
-	render_plist "$SCRIPT_DIR/$FLARE_LABEL.plist" "$dest_dir/$FLARE_LABEL.plist" "$flare_bin" "$escalate_bin"
-	render_plist "$SCRIPT_DIR/$ESCALATE_LABEL.plist" "$dest_dir/$ESCALATE_LABEL.plist" "$flare_bin" "$escalate_bin"
+	render_plist "$SCRIPT_DIR/$FLARE_LABEL.plist" "$dest_dir/$FLARE_LABEL.plist" "$flare_bin" "$escalate_bin" "$gate_bin"
+	render_plist "$SCRIPT_DIR/$ESCALATE_LABEL.plist" "$dest_dir/$ESCALATE_LABEL.plist" "$flare_bin" "$escalate_bin" "$gate_bin"
 	printf 'rendered %s + %s into %s\n' "$FLARE_LABEL" "$ESCALATE_LABEL" "$dest_dir"
 	printf '  flare:    %s\n' "$flare_bin"
 	printf '  escalate: %s\n' "$escalate_bin"
+	printf '  gate:     %s\n' "$gate_bin"
 }
 
 # bootout_label — idempotent: a not-loaded agent is not an error here.

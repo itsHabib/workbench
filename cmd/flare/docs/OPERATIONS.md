@@ -217,9 +217,17 @@ Task needs an elevated token.
 
 Templates live at `cmd/flare/scripts/com.workbench.flare-watch.plist` and
 `…escalate-serve.plist`. They carry `__FLARE_BIN__` / `__ESCALATE_BIN__` /
-`__HOME__` placeholders because **launchd expands neither `~` nor `$PATH` from
+`__GATE_BIN__` / `__HOME__` placeholders because **launchd expands neither `~` nor `$PATH` from
 your shell profile** — the installed plist must be fully absolute. Never copy a
 template into `~/Library/LaunchAgents/` by hand; the script renders it.
+
+`__GATE_BIN__` is why `gate` must be installed before `flare-launchd.sh
+install` — `escalate serve` shells the gate binary to run `gate resolve`, and
+its `-gate` default is the bare name `gate`. Under launchd that resolves
+against a PATH your shell profile never touched, and it fails **only at the
+moment a human taps Approve**: the ingress reports healthy right up until the
+one time it matters. So the script resolves gate to an absolute path at render
+time and refuses to install if it can't.
 
 ### Lifecycle: the `flare-launchd.sh` script
 
@@ -243,7 +251,7 @@ a real service.
 
 ```sh
 mkdir -p ~/.flare/logs
-go install ./cmd/flare ./cmd/escalate          # from the repo root; -> ~/go/bin
+go install ./cmd/flare ./cmd/escalate ./cmd/gate   # from the repo root; -> ~/go/bin
 cp cmd/flare/scripts/routes.example.json ~/.flare/routes.json
 $EDITOR ~/.flare/routes.json                   # fill token + channel id + real source paths
 $EDITOR ~/.flare/env                           # see "Secrets" below
@@ -270,7 +278,8 @@ No secret goes in a plist. Each agent's `ProgramArguments` is a wrapper —
 ```sh
 # ~/.flare/env — chmod 600, never committed
 GATE_STATE=/Users/<you>/dev/gate/state
-GATE_KEY=/Users/<you>/dev/gate/keys/signing.key   # if your gate install uses one
+GATE_KEY=/Users/<you>/dev/gate/keys               # key CUSTODY DIR, not a key file;
+                                                  # must be outside GATE_STATE
 SLACK_SIGNING_SECRET=...                          # Slack app -> Basic Information
 ESCALATE_ALLOWED_SLACK_USERS=U0123ABC,U0456DEF    # Slack user ids allowed to resolve
 ```
