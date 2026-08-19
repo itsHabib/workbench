@@ -31,7 +31,7 @@ batches:
         runtime: local
         model: sonnet
         effort: extra
-        touches: [cmd/flare/internal/notify/notify.go, cmd/gate/main.go]
+        touches: [cmd/flare/internal/notify/notify.go, cmd/gate/internal/observe/inbox.go]
         status: pending
 
 conflict_notes:

@@ -34,11 +34,16 @@ darwin equivalent so the operator can go from zero to a running `flare watch` +
     `ESCALATE_ALLOWED_SLACK_USERS` sourced from a non-committed env file
     (e.g. `~/.flare/env`) — never inline secrets in the plist. Use a shell wrapper
     (`/bin/sh -c 'set -a; . ~/.flare/env; exec ...'`) or equivalent.
-- **Helper script** `cmd/flare/scripts/flare-launchd.sh` with `install`,
-  `uninstall`, `status` verbs, mirroring what `flare-task.ps1` does on Windows:
-  render templates with the resolved binary path, `plutil -lint`, `launchctl
-  bootstrap gui/$UID` / `bootout`, and a status view (`launchctl print` + log tail
-  hint).
+- **Helper script** `cmd/flare/scripts/flare-launchd.sh` with the same five verbs
+  as `flare-task.ps1` on Windows — `install`, `update`, `restart`, `status`,
+  `uninstall`:
+  - `install` / `uninstall`: render templates with the resolved binary path,
+    `plutil -lint`, `launchctl bootstrap gui/$UID` / `bootout`.
+  - `update`: stop → `go install ./cmd/flare ./cmd/escalate` → start (the daemon
+    holds the compiled binary open; the day-2 "I changed the code" path).
+  - `restart`: bounce the daemons to reload `~/.flare/routes.json` after a config
+    edit, no rebuild (the day-2 "I edited routes" path).
+  - `status`: `launchctl print` summary + log tail hint.
 - **Routes template** `cmd/flare/scripts/routes.example.json` (example only, real
   config stays in `~/.flare/routes.json`): gate escalation source (gate state log)
   routed to a Slack channel with `resolve_actions: true`, plus ship
@@ -60,7 +65,7 @@ Note: /health board wiring for flare already exists (health skill reads
   hide it).
 - `routes.example.json` parses against `cmd/flare/internal/config` (add a small
   test loading the example file).
-- Docs walk zero → running with only secrets left blank.
+- Docs walk zero → running with only secrets left blank, including the `update` and `restart` day-2 paths.
 
 ## Test plan
 
