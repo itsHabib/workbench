@@ -2678,28 +2678,46 @@ func cmdThreads(args []string) error {
 
 // writeDispositions renders the sweep for a human: what can be resolved with
 // evidence in hand — never a conclusion about whether a thread is resolved.
+//
+// The render goes through a buffer and lands in ONE checked write. Fprintf
+// errors on a per-line basis would be easy to drop, and a dropped write error
+// turns a full disk or closed pipe into exit 0 over truncated observations.
 func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
 	// Author, path, commit subjects and test paths are all GitHub-sourced text.
 	// None of it is printed raw: see sanitizeForTerminal.
-	fmt.Fprintf(w, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
 	for _, d := range dispositions {
-		fmt.Fprintf(w, "\n%s (%s)\n", sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
-		fmt.Fprintf(w, "  %s\n", sanitizeForTerminal(d.Note))
+		fmt.Fprintf(&b, "\n%s (%s)\n", sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
+		fmt.Fprintf(&b, "  %s\n", sanitizeForTerminal(d.Note))
 		for _, c := range d.Candidates {
-			line := fmt.Sprintf("  · %s %s", shortSHA(c.SHA), c.Subject)
-			if c.Deleted {
-				line += "  [deletes the file]"
-			}
-			if len(c.Tests) > 0 {
-				line += fmt.Sprintf("  [test: %s]", strings.Join(c.Tests, ", "))
-			}
-			fmt.Fprintf(w, "%s\n", sanitizeForTerminal(line))
+			fmt.Fprintf(&b, "%s\n", sanitizeForTerminal(candidateLine(c)))
 		}
 	}
 	if len(dispositions) > 0 {
-		fmt.Fprintf(w, "\ngate does not judge whether these are fixed. Read each thread and decide.\n")
+		fmt.Fprintf(&b, "\ngate does not judge whether these are fixed. Read each thread and decide.\n")
+	}
+	if _, err := io.WriteString(w, b.String()); err != nil {
+		return fmt.Errorf("threads: write observations: %w", err)
 	}
 	return nil
+}
+
+// candidateLine renders one candidate commit with the marks a reader needs to
+// weigh it: a deletion is not a fix, a merge's file list mixes base changes
+// with conflict resolutions, and a named test is a lead, not proof.
+func candidateLine(c evidence.Candidate) string {
+	line := fmt.Sprintf("  · %s %s", shortSHA(c.SHA), c.Subject)
+	if c.Merge {
+		line += "  [merge — may be base changes, not this PR's]"
+	}
+	if c.Deleted {
+		line += "  [deletes the file]"
+	}
+	if len(c.Tests) > 0 {
+		line += fmt.Sprintf("  [test: %s]", strings.Join(c.Tests, ", "))
+	}
+	return line
 }
 
 func shortSHA(sha string) string {

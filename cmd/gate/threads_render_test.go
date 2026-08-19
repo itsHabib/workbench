@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -73,5 +74,38 @@ func TestWriteDispositionsNeutralizesHostileThreadText(t *testing.T) {
 	}
 	if !strings.Contains(out, "does not judge") {
 		t.Error("output should state plainly that gate is not judging these")
+	}
+}
+
+// A renderer that swallows write errors turns a full disk or a closed pipe into
+// exit 0 over truncated (or absent) observations. The whole render lands in one
+// checked write, and its failure is the command's failure.
+func TestWriteDispositionsPropagatesWriteErrors(t *testing.T) {
+	err := writeDispositions(failingWriter{}, evidence.PRRef{Repo: "o/r", Number: 1}, "deadbee", nil)
+	if err == nil {
+		t.Fatal("a failing writer must surface as an error, not as exit 0 over missing output")
+	}
+	if !strings.Contains(err.Error(), "write") {
+		t.Errorf("error should name the failed write, got %q", err)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("no space left on device")
+}
+
+// A merge candidate renders with its mark: its file list mixes base changes
+// with conflict resolutions, and the reader must not weigh it like a commit
+// this PR made.
+func TestCandidateLineMarksAMerge(t *testing.T) {
+	line := candidateLine(evidence.Candidate{SHA: "abcdef1234", Subject: "Merge main", Merge: true})
+	if !strings.Contains(line, "[merge") {
+		t.Errorf("a merge candidate must carry the merge mark, got %q", line)
+	}
+	line = candidateLine(evidence.Candidate{SHA: "abcdef1234", Subject: "fix"})
+	if strings.Contains(line, "[merge") {
+		t.Errorf("an ordinary candidate must not carry the merge mark, got %q", line)
 	}
 }

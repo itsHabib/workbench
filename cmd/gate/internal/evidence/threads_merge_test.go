@@ -3,26 +3,37 @@ package evidence
 import "testing"
 
 // A merge commit's file list is the diff against its FIRST parent, so merging
-// main into the branch lists main's files as if the merge introduced them.
-// Crediting that would report a thread "fixed" by whatever arrived on main, with
-// main's test as the regression test — proven on this PR's own head, where merge
-// commit 37c38c7's file list was main's #233 changes. A merge is never a fix
-// candidate.
-func TestDispositionsSkipMergeCommits(t *testing.T) {
+// main into the branch lists main's files as if the merge introduced them —
+// proven on this PR's own head, where merge commit 37c38c7's file list was
+// main's #233 changes — mixed with any conflict resolution the merge itself
+// made, which IS a change to the reviewed file. Neither crediting nor dropping
+// it is honest, so a touching merge surfaces marked and claims nothing: no
+// test, no deletion.
+func TestDispositionsMarkMergeCommitsAndCreditThemNothing(t *testing.T) {
 	commits := []Commit{
 		{SHA: "anchor"},
 		{SHA: "merge", Subject: "Merge main", Parents: 2,
-			Files: []File{{Path: "a.go"}, {Path: "a_test.go"}}},
+			Files: []File{{Path: "a.go", Removed: true}, {Path: "a_test.go"}}},
 	}
 	d := Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits)[0]
-	if len(d.Candidates) != 0 {
-		t.Fatalf("a merge commit must not be a fix candidate, got %+v", d.Candidates)
+	if len(d.Candidates) != 1 || !d.Candidates[0].Merge {
+		t.Fatalf("a touching merge must surface, marked as a merge, got %+v", d.Candidates)
 	}
-	// An ordinary (single-parent) commit touching the file is still a candidate.
+	if len(d.Candidates[0].Tests) != 0 || d.Candidates[0].Deleted {
+		t.Fatalf("a merge candidate must claim no test and no deletion — both could be base noise, got %+v", d.Candidates[0])
+	}
+	// A merge whose first-parent diff does not touch the file stays out.
+	commits[1].Files = []File{{Path: "other.go"}}
+	d = Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits)[0]
+	if len(d.Candidates) != 0 {
+		t.Fatalf("a merge not touching the file must not surface, got %+v", d.Candidates)
+	}
+	// An ordinary (single-parent) commit touching the file is still a candidate,
+	// unmarked.
 	commits[1] = Commit{SHA: "real", Parents: 1, Files: []File{{Path: "a.go"}}}
 	d = Dispositions([]Thread{{ID: "t1", Path: "a.go", AnchorSHA: "anchor"}}, commits)[0]
-	if len(d.Candidates) != 1 {
-		t.Fatalf("a real commit touching the file must still be a candidate, got %+v", d.Candidates)
+	if len(d.Candidates) != 1 || d.Candidates[0].Merge {
+		t.Fatalf("a real commit touching the file must still be an unmarked candidate, got %+v", d.Candidates)
 	}
 }
 

@@ -59,8 +59,8 @@ type Commit struct {
 	// Parents is how many parents the commit has. A merge commit has two or
 	// more, and the commits API reports its file list as the diff against the
 	// FIRST parent — so a merge of main into the branch lists main's files as if
-	// the merge introduced them. Those are not changes this PR made, so a merge
-	// is never a fix candidate. See candidates.
+	// the merge introduced them, mixed with any conflict resolution the merge
+	// itself made, and the file list cannot tell those apart. See candidates.
 	Parents int `json:"parents,omitempty"`
 }
 
@@ -102,6 +102,13 @@ type Candidate struct {
 	// addressed — but marked, so it is not mistaken for a change that carries a
 	// fix and a covering test (it can carry neither).
 	Deleted bool `json:"deleted,omitempty"`
+	// Merge marks a merge commit. Its file list is the diff against its first
+	// parent, which mixes what arrived on the merged branch with any conflict
+	// resolution the merge itself made — and the list cannot tell those apart.
+	// Still surfaced — a conflict resolution in the reviewed file is a real
+	// change to it — but marked, and carrying no test or deletion claim, since
+	// either could be base noise.
+	Merge bool `json:"merge,omitempty"`
 }
 
 // Dispositions prepares a disposition for every unresolved thread, oldest
@@ -163,13 +170,18 @@ func disposition(th Thread, commits []Commit, index map[string]int) Disposition 
 func candidates(after []Commit, file string) []Candidate {
 	var out []Candidate
 	for _, c := range after {
-		// A merge commit's file list is the diff against its first parent, not
-		// changes this PR made — crediting it would "fix" a thread with whatever
-		// arrived on the merged branch. Skip it whole.
-		if c.Parents > 1 {
+		if !touches(c.Files, file) {
 			continue
 		}
-		if !touches(c.Files, file) {
+		// A merge commit's file list is the diff against its first parent, which
+		// mixes changes that arrived on the merged branch with any conflict
+		// resolution the merge itself made in this file. Crediting it whole would
+		// "fix" a thread with whatever arrived on main; dropping it whole would
+		// let the note claim no later commit touches the file when a conflict
+		// resolution did. So it surfaces marked, with no test or deletion claim —
+		// either could be base noise.
+		if c.Parents > 1 {
+			out = append(out, Candidate{SHA: c.SHA, Subject: c.Subject, Merge: true})
 			continue
 		}
 		out = append(out, Candidate{
