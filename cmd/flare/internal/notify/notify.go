@@ -239,10 +239,23 @@ func resolveLine(ev event.Event) string {
 	}
 	stateArg := ""
 	if dir := ev.Fields["state"]; dir != "" {
-		stateArg = " -state " + dir
+		stateArg = " -state " + shellQuote(dir)
 	}
 	return fmt.Sprintf("`escalate resolve%s -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
 		stateArg, ev.ID, ev.Fields["grant"])
+}
+
+// shellQuote makes a path safe to paste into a POSIX shell. A path of
+// unambiguous characters passes through untouched — the common machine-managed
+// state dir stays readable on the card — anything else is single-quoted, with
+// embedded single quotes spliced as '\”. Without this, a state dir containing
+// a space splits under word-splitting and escalate's flag parser receives a
+// truncated -state, so the pasted command fails instead of resolving the park.
+func shellQuote(s string) string {
+	if !strings.ContainsAny(s, " \t\n'\"\\$`&|;<>()*?[]#~!{}") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each

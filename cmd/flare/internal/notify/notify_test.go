@@ -513,6 +513,37 @@ func TestSlackResolveLineCarriesWatchedState(t *testing.T) {
 	}
 }
 
+// TestSlackResolveLineQuotesUnsafeState pins the shell-quoting on the -state
+// splice: a state dir with a space (or any other shell-active character) is
+// single-quoted so the pasted command survives word-splitting, while the
+// common clean path above stays unquoted and readable. Embedded single quotes
+// use the standard '\” splice.
+func TestSlackResolveLineQuotesUnsafeState(t *testing.T) {
+	cases := []struct{ dir, rendered string }{
+		{"/Users/john doe/gate/state", "'/Users/john doe/gate/state'"},
+		{"/Users/o'brien/gate/state", `'/Users/o'\''brien/gate/state'`},
+	}
+	for _, tc := range cases {
+		ev := event.Event{
+			Source:   "gate",
+			ID:       "esc_4ea400afe1ecc4c4",
+			Kind:     "escalation",
+			Severity: event.SevEscalate,
+			Body:     "your call",
+			Fields: map[string]string{
+				"run": "run_7", "grant": "grt_7f21", "state": tc.dir,
+			},
+		}
+		want := "`escalate resolve -state " + tc.rendered +
+			" -escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+			"-decision <pass|block> -who <you> -why \"...\"`"
+		msg := renderSlackMessage("C1", false, ev)
+		if !hasContextText(msg.Attachments[0].Blocks, want) {
+			t.Fatalf("card must shell-quote %q, want %q:\n%s", tc.dir, want, mustJSON(t, msg))
+		}
+	}
+}
+
 // hasContextText reports whether some context block carries exactly this text —
 // a value comparison, so a drift in the rendered line fails loudly instead of
 // passing on a JSON substring that HTML-escapes the placeholders.
