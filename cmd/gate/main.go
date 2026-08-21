@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -127,6 +128,8 @@ func main() {
 		err = cmdExplain(os.Args[2:])
 	case "next":
 		err = cmdNext(os.Args[2:])
+	case "threads":
+		err = cmdThreads(os.Args[2:])
 	case "preflight":
 		err = cmdPreflight(os.Args[2:])
 	case "audit":
@@ -159,7 +162,7 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
@@ -175,6 +178,7 @@ func usage() {
   explain  -run run_x [-json | -html [-out path]]
   next     [-json] [-live]                           (what needs you: parked runs + grants)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
+  threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
   audit
   backtest -repo R -prs 174,175,...
@@ -2637,4 +2641,116 @@ func addTerminalArtifactMetadata(body map[string]any, outcome string, res gateRe
 	body["escape"] = res.Escape
 	body["self_gated"] = res.SelfGated
 	body["retry_helps"] = res.RetryHelps
+}
+
+// cmdThreads reports what the sweep OBSERVED about every unresolved review
+// thread on a pull request: the commits after its anchor that touch the
+// reviewed file, and which of those carry a test naming it. It never says a
+// thread is fixed, prepares no resolve comment, and emits no resolve call —
+// whether any candidate actually addressed the finding stays with the human
+// who reads the thread. It is read-only in both directions — it writes no
+// artifact and resolves no thread, so like explain and next it returns nil
+// (exit 0) or an error (exit 4) and never an exit code a driver would read as
+// a decision.
+func cmdThreads(args []string) error {
+	fs := flag.NewFlagSet("threads", flag.ContinueOnError)
+	repo := fs.String("repo", "", "owner/repo")
+	pr := fs.Int("pr", 0, "pull request number")
+	asJSON := fs.Bool("json", false, "emit the dispositions as JSON")
+	help, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if help {
+		return nil
+	}
+	if *repo == "" || *pr == 0 {
+		return errors.New("threads: -repo and -pr required")
+	}
+	ref := evidence.PRRef{Repo: *repo, Number: *pr}
+	dispositions, head, err := evidence.SweepThreads(ref)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		// A PR with no unresolved threads has nothing to disposition. Emit [],
+		// not null: the dispositions are consumed as a JSON array, and a nil
+		// slice encodes as null, which is not the empty array a consumer
+		// expects. The head rides with them — persisted or read after another
+		// push, the document must say which PR snapshot it describes.
+		if dispositions == nil {
+			dispositions = []evidence.Disposition{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(struct {
+			Head         string                 `json:"head"`
+			Dispositions []evidence.Disposition `json:"dispositions"`
+		}{Head: head, Dispositions: dispositions})
+	}
+	return writeDispositions(os.Stdout, ref, head, dispositions)
+}
+
+// writeDispositions renders the sweep for a human: what can be resolved with
+// evidence in hand — never a conclusion about whether a thread is resolved.
+//
+// The render goes through a buffer and lands in ONE checked write. Fprintf
+// errors on a per-line basis would be easy to drop, and a dropped write error
+// turns a full disk or closed pipe into exit 0 over truncated observations.
+func writeDispositions(w io.Writer, pr evidence.PRRef, head string, dispositions []evidence.Disposition) error {
+	// Author, path, commit subjects and test paths are all GitHub-sourced text.
+	// None of it is printed raw: see sanitizeForTerminal.
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s#%d @ %s — %d unresolved review thread(s)\n", pr.Repo, pr.Number, head, len(dispositions))
+	for _, d := range dispositions {
+		fmt.Fprintf(&b, "\n%s (%s)\n", sanitizeForTerminal(threadLocus(d.Thread)), sanitizeForTerminal(d.Thread.Author))
+		fmt.Fprintf(&b, "  %s\n", sanitizeForTerminal(d.Note))
+		for _, c := range d.Candidates {
+			fmt.Fprintf(&b, "%s\n", sanitizeForTerminal(candidateLine(c)))
+		}
+	}
+	if len(dispositions) > 0 {
+		fmt.Fprintf(&b, "\ngate does not judge whether these are fixed. Read each thread and decide.\n")
+	}
+	if _, err := io.WriteString(w, b.String()); err != nil {
+		return fmt.Errorf("threads: write observations: %w", err)
+	}
+	return nil
+}
+
+// candidateLine renders one candidate commit with the marks a reader needs to
+// weigh it: a deletion is not a fix, a merge's file list mixes base changes
+// with conflict resolutions, and a named test is a lead, not proof.
+func candidateLine(c evidence.Candidate) string {
+	line := fmt.Sprintf("  · %s %s", shortSHA(c.SHA), c.Subject)
+	if c.Merge {
+		line += "  [merge — may be base changes, not this PR's]"
+	}
+	if c.Deleted {
+		line += "  [deletes the file]"
+	}
+	if len(c.Tests) > 0 {
+		line += fmt.Sprintf("  [test: %s]", strings.Join(c.Tests, ", "))
+	}
+	return line
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// threadLocus names where a thread sits. A thread can carry no line (an
+// outdated anchor GitHub no longer maps) and, on a file-level review, no path
+// — neither should print as a `:0` a reader would take for line zero.
+func threadLocus(th evidence.Thread) string {
+	if th.Path == "" {
+		return "(no file anchor)"
+	}
+	if th.Line == 0 {
+		return th.Path
+	}
+	return fmt.Sprintf("%s:%d", th.Path, th.Line)
 }
