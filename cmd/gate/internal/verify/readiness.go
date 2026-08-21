@@ -112,13 +112,13 @@ const approvalStateChangesRequested = "CHANGES_REQUESTED"
 //     all report as user.type "User". Nor is author_association — read-access
 //     members report MEMBER and can approve.
 //
-//   - no human's CURRENT stance is CHANGES_REQUESTED. On a protected repo
-//     GitHub would fold this into reviewDecision and readinessBlocks would
-//     catch it — but this path exists precisely because reviewDecision is
-//     null, so nothing else would. One human approving does not clear
-//     another's outstanding objection, at any head: a change request stands
-//     until its author withdraws or supersedes it, and the safe answer to
-//     "approved by one, objected by another" is to escalate, not to pick.
+//   - no human's CURRENT stance is CHANGES_REQUESTED (humanChangeRequest). On
+//     a protected repo GitHub would fold this into reviewDecision and
+//     readinessBlocks would catch it — but this path exists precisely because
+//     reviewDecision is null, so nothing else would. One human approving does
+//     not clear another's outstanding objection, at any head: a change request
+//     stands until its author withdraws or supersedes it, and the safe answer
+//     to "approved by one, objected by another" is to escalate, not to pick.
 //
 //     Note the deliberate ASYMMETRY: approving requires repository authority,
 //     objecting does not. Any human's change request suppresses the approval
@@ -143,10 +143,8 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 	if headSHA == "" {
 		return "", false
 	}
-	for _, s := range stances {
-		if !s.IsBot && s.State == approvalStateChangesRequested {
-			return "", false
-		}
+	if _, objected := humanChangeRequest(stances); objected {
+		return "", false
 	}
 	for _, s := range stances {
 		if s.IsBot || s.State != approvalStateApproved || s.CommitID != headSHA {
@@ -159,6 +157,48 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 			continue
 		}
 		return s.Author, true
+	}
+	return "", false
+}
+
+// humanChangeRequest names a human whose current stance asks for changes, if one
+// exists. Deliberately head-agnostic and permission-agnostic: a change request
+// stands until its author withdraws or supersedes it, and objecting needs no
+// repository authority when approving does — humanApprovalAtHead spells out why
+// that asymmetry is the cheaper mistake in both directions.
+//
+// It is the single definition of "a human is asking for changes", shared by the
+// approval path and the review-panel stand-in, so neither can start disagreeing
+// with the other about whether an objection is outstanding.
+func humanChangeRequest(stances []reviewStance) (string, bool) {
+	for _, s := range stances {
+		if !s.IsBot && s.State == approvalStateChangesRequested {
+			return s.Author, true
+		}
+	}
+	return "", false
+}
+
+// botChangeRequest names a bot whose current decisive stance asks for changes,
+// if one exists. Deliberately head-AGNOSTIC, exactly as humanChangeRequest is: a
+// change request stands until its author withdraws or supersedes it, whatever
+// head it was filed against.
+//
+// This is the bot counterpart the panel rung's panelChangeRequest cannot be.
+// That rung reads panel.Completed, which is bound to the EXACT judged head — and
+// the providers that only ever post issue comments (codex through its connector)
+// record COMMENTED there, never CHANGES_REQUESTED, so a connector re-review of a
+// new head marks the panel complete with no objection recorded even while the
+// reviewer's formal CHANGES_REQUESTED, filed against the head it has since
+// superseded, still stands. panelChangeRequest sees the new head's COMMENTED,
+// humanChangeRequest skips the bot, and the objection is invisible to both. The
+// stance evidence is where it survives — reviewStances keeps each reviewer's
+// latest decisive submission regardless of head — so readiness consults it here.
+func botChangeRequest(stances []reviewStance) (string, bool) {
+	for _, s := range stances {
+		if s.IsBot && s.State == approvalStateChangesRequested {
+			return s.Author, true
+		}
 	}
 	return "", false
 }
@@ -178,9 +218,10 @@ func humanApprovalAtHead(stances []reviewStance, headSHA, prAuthor string) (stri
 // stancesEvidenceID names the review-stance artifact (each reviewer's current
 // position and the commit they took it against). A human APPROVED at the exact
 // head satisfies the absent-reviewDecision escalation — see humanApprovalAtHead.
-// Empty is tolerated so a caller with no stance evidence behaves exactly as
-// before this existed.
-func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
+// panelEvidenceID names the ReviewPanelV1 artifact; a complete exact-head panel
+// satisfies the same escalation — see panelStandIn. Either id may be empty, and
+// a caller supplying neither behaves exactly as it did before they existed.
+func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID, panelEvidenceID string, subject Subject, reviewsOptional bool) (state.Artifact, Subject, error) {
 	a, err := st.Get(viewEvidenceID)
 	if err != nil {
 		return state.Artifact{}, subject, err
@@ -198,15 +239,21 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	if err != nil {
 		return state.Artifact{}, subject, err
 	}
-	approver, humanApproved := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login)
+	stand, err := resolveStandIn(st, panelEvidenceID, subject, pv, stances, reviewsOptional)
+	if err != nil {
+		return state.Artifact{}, subject, err
+	}
 
 	// A verdict's parents name the evidence it judged (the artifact contract).
-	// Stance evidence is judged whenever it was supplied — not only when it
-	// changed the outcome — so provenance traversal can reach what readiness
-	// actually read, without inferring it from the verdict text.
+	// Stance and panel evidence are judged whenever they were supplied — not
+	// only when they changed the outcome — so provenance traversal can reach
+	// what readiness actually read, without inferring it from the verdict text.
 	parents := []string{viewEvidenceID}
 	if stancesEvidenceID != "" {
 		parents = append(parents, stancesEvidenceID)
+	}
+	if panelEvidenceID != "" {
+		parents = append(parents, panelEvidenceID)
 	}
 
 	v := Verdict{
@@ -239,11 +286,13 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 	if effectiveChecks == 0 {
 		escalations = append(escalations, "no non-gate CI checks recorded for this head")
 	}
-	// A human's exact-head approval IS the review decision GitHub declined to
-	// report. Checked before reviewsOptional so the audit trail records the
-	// approval as the reason readiness held, not a policy flag.
-	if !humanApproved && !reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "" {
-		escalations = append(escalations, "no review decision reported by GitHub")
+	// GitHub reported no aggregate review decision. An explicit one has already
+	// been handled — APPROVED fell through the block loop, anything else blocked
+	// there — and a merged subject has no live one, so this is exactly the
+	// ABSENCE resolveStandIn answers.
+	decisionAbsent := pv.State != "MERGED" && pv.ReviewDecision == ""
+	if decisionAbsent && !stand.satisfied {
+		escalations = append(escalations, standInEscalation(stand))
 	}
 	if len(escalations) > 0 {
 		v.Decision = DecisionEscalate
@@ -255,17 +304,177 @@ func Readiness(st *state.Store, run, viewEvidenceID, stancesEvidenceID string, s
 		pv.State, pv.IsDraft, pv.Mergeable, effectiveChecks)
 	// Persist what actually carried the decision, or the audit log cannot tell
 	// an intentional acceptance from readiness wrongly passing an unverified PR
-	// (gate's decisions must be reconstructable from state alone). The human
-	// approval is the stronger, more specific fact — record it in preference to
-	// the policy flag, and name the approver and the head it was given at.
-	switch {
-	case humanApproved && pv.State != "MERGED" && pv.ReviewDecision == "":
-		v.Why += fmt.Sprintf("; approved at head by %s (no GitHub review decision reported)", approver)
-	case reviewsOptional && pv.State != "MERGED" && pv.ReviewDecision == "":
-		v.Why += "; reviews-optional: absent GitHub review decision accepted"
+	// (gate's decisions must be reconstructable from state alone).
+	if decisionAbsent && stand.satisfied {
+		v.Why += "; " + stand.why
 	}
 	art, err := Record(st, run, parents, v)
 	return art, subject, err
+}
+
+// reviewStandIn is what stood in for an ABSENT GitHub aggregate review decision.
+//
+// why is the sentence the verdict records: the reason readiness held when
+// satisfied, and otherwise the reason the nearest candidate was REJECTED — an
+// escalation that says only "no review decision reported by GitHub" when a
+// complete panel was sitting right there sends the reader hunting for a
+// contradiction that is really a deliberate refusal.
+type reviewStandIn struct {
+	satisfied bool
+	why       string
+}
+
+// standInEscalation is the absent-decision escalation line, naming the rejected
+// near-miss when there was one. The leading clause is unchanged, so callers that
+// match on it keep working.
+func standInEscalation(stand reviewStandIn) string {
+	const base = "no review decision reported by GitHub"
+	if stand.why == "" {
+		return base
+	}
+	return base + " (" + stand.why + ")"
+}
+
+// resolveStandIn reports what may stand in for an absent GitHub review decision,
+// strongest evidence first:
+//
+//  1. a human's APPROVED review of the exact head — the decision GitHub declined
+//     to report, stated directly by someone with authority to state it;
+//  2. a complete exact-head reviewer panel (panelStandIn);
+//  3. the reviews-optional policy flag, which asserts no separate GitHub review
+//     is wanted here rather than showing evidence that one happened.
+//
+// Ordering is what the audit log records, not what it permits — any one of the
+// three satisfies readiness. Facts are recorded in preference to the policy
+// flag, so a verdict names the approval or the panel that actually carried it.
+//
+// It runs whether or not a decision is absent, so the verdict's parents can
+// truthfully name every artifact readiness read; the CALLER applies the result
+// only when the decision really is absent.
+func resolveStandIn(
+	st *state.Store,
+	panelEvidenceID string,
+	subject Subject,
+	pv prView,
+	stances []reviewStance,
+	reviewsOptional bool,
+) (reviewStandIn, error) {
+	panel, err := panelStandIn(st, panelEvidenceID, subject, stances)
+	if err != nil {
+		return reviewStandIn{}, err
+	}
+	if approver, ok := humanApprovalAtHead(stances, pv.HeadRefOid, pv.Author.Login); ok {
+		return reviewStandIn{
+			satisfied: true,
+			why: fmt.Sprintf("approved at head by %s (no GitHub review decision reported)%s",
+				approver, objectionNote(panel)),
+		}, nil
+	}
+	// reviews-optional is a policy assertion, not evidence, so it is consulted
+	// last — but it is unconditional where it applies. A panel this run rejected
+	// does not narrow it: suppressing the absence escalation is this flag's
+	// entire job, and letting panel evidence veto it would change the
+	// enforced-check context, which is not what this path is for.
+	// TestReadinessReviewsOptionalIsNotNarrowedByPanelObjection pins that.
+	if !panel.satisfied && reviewsOptional {
+		return reviewStandIn{
+			satisfied: true,
+			why:       "reviews-optional: absent GitHub review decision accepted" + objectionNote(panel),
+		}, nil
+	}
+	return panel, nil
+}
+
+// objectionNote carries a rejected panel's reason onto a stand-in that did NOT
+// rest on the panel, so a pass never silently steps over a recorded objection.
+//
+// A human's exact-head approval outranks a bot's change request — a deliberate,
+// separately pinned decision (TestReadinessBotChangeRequestDoesNotSuppressHuman-
+// Approval): bot findings are findings, and authorization belongs to the person
+// with repository authority. Reversing that is not this rung's call. But the
+// decision log has to SHOW that the approval carried readiness past an
+// objection, or the one reader who needs to know — the person auditing why this
+// PR merged — cannot tell it apart from a clean panel. Same for the
+// reviews-optional flag.
+//
+// Empty when the panel satisfied readiness itself (its reason is already the
+// verdict's) or when it was merely incomplete (the panel rung records that).
+func objectionNote(panel reviewStandIn) string {
+	if panel.satisfied || panel.why == "" {
+		return ""
+	}
+	return "; " + panel.why
+}
+
+// panelStandIn reports whether the exact-head reviewer panel answers the
+// question GitHub's aggregate reviewDecision did not: did the required reviewers
+// review THIS head?
+//
+// GitHub populates reviewDecision only from submitted reviews. The configured
+// panel providers publish issue COMMENTS — codex through its connector, claude
+// through a workflow attestation — so reviewDecision stays empty however
+// completely they reviewed, readiness escalated on every such PR, and a judge
+// then reached one fixed conclusion from facts gate already held: the panel rung
+// passed at the exact head. A fixed inference over recorded facts is a rule, not
+// a judgment. This is that rule, so the park and the one-shot judge invocation
+// it cost are gone.
+//
+// What keeps it safe, each condition load-bearing:
+//
+//   - It reuses evaluatePanel — the same rule the panel rung records its verdict
+//     from — so readiness can never call a panel complete that the panel rung
+//     parks. Incomplete, pending, missing, and unknown panels escalate exactly
+//     as they did before.
+//
+//   - Completeness is bound to the EXACT head. evaluatePanel matches the panel
+//     evidence's subject against the head readiness just read from the live PR
+//     view, and reviewpanel.Validate has already rejected any completed reviewer
+//     recorded against a different commit. A panel completed on an older commit
+//     therefore cannot satisfy readiness for a newer one — that binding is the
+//     property that makes standing in for reviewDecision safe at all.
+//
+//   - Nobody is asking for changes. A completed CHANGES_REQUESTED review is
+//     still completeness — the panel rung counts it, findings being a separate
+//     verdict — but it is precisely the negative decision reviewDecision would
+//     have carried. This path answers the ABSENCE of a decision; it must never
+//     paper over one that exists. A human's outstanding change request counts
+//     here too, at any head, on humanChangeRequest's reasoning.
+//
+// An empty evidence id means the caller recorded no panel, and readiness then
+// behaves exactly as it did before this existed.
+func panelStandIn(st *state.Store, evidenceID string, subject Subject, stances []reviewStance) (reviewStandIn, error) {
+	if evidenceID == "" {
+		return reviewStandIn{}, nil
+	}
+	panel, err := loadPanel(st, evidenceID)
+	if err != nil {
+		return reviewStandIn{}, err
+	}
+	outcome := evaluatePanel(panel, subject)
+	if !outcome.complete {
+		// The panel rung records the incompleteness itself, with the same
+		// reason; repeating it in the readiness escalation would double-count
+		// one fact in the brief a judge reads.
+		return reviewStandIn{}, nil
+	}
+	if reviewer, ok := panelChangeRequest(panel); ok {
+		return reviewStandIn{why: "exact-head review panel complete but " + reviewer + " requested changes"}, nil
+	}
+	if human, ok := humanChangeRequest(stances); ok {
+		return reviewStandIn{why: "exact-head review panel complete but " + human + " requested changes"}, nil
+	}
+	// A bot's outstanding change request counts too, at any head. The exact-head
+	// panelChangeRequest above cannot see it when the reviewer re-completed the
+	// new head through a mechanism that records COMMENTED (a connector issue
+	// comment), leaving a formal CHANGES_REQUESTED standing at the head it
+	// superseded — see botChangeRequest.
+	if bot, ok := botChangeRequest(stances); ok {
+		return reviewStandIn{why: "exact-head review panel complete but " + bot + " has an unretracted change request from an earlier head"}, nil
+	}
+	return reviewStandIn{
+		satisfied: true,
+		why:       "exact-head review panel stands in for the absent GitHub review decision: " + outcome.why,
+	}, nil
 }
 
 // readStances loads the review-stance evidence. An empty id means the caller

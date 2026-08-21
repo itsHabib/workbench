@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the escalate serve LaunchAgent — the inbound half of the loop
+  (Slack Approve/Block tap -> gate resolve). flare-launchd.sh renders the
+  __PLACEHOLDER__ tokens into
+  ~/Library/LaunchAgents/com.workbench.escalate-serve.plist.
+
+  serve REFUSES to start without SLACK_SIGNING_SECRET and
+  ESCALATE_ALLOWED_SLACK_USERS. That refusal is deliberate (an unauthenticated
+  ingress would accept forged decisions), and with KeepAlive it shows up as a
+  restart loop in the .err.log until ~/.flare/env carries both. `status`
+  surfaces it rather than hiding it.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.workbench.escalate-serve</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <!-- -gate must be ABSOLUTE. escalate shells the gate binary to drive
+         `gate resolve`, and its default is the bare name `gate` — which
+         resolves against launchd's PATH, not the operator's shell. A bare name
+         fails only at the moment a human taps Approve, so the ingress looks
+         healthy right up until the one time it matters. -->
+    <string>set -a; [ -f "$HOME/.flare/env" ] &amp;&amp; . "$HOME/.flare/env"; set +a; exec __ESCALATE_BIN__ serve -gate __GATE_BIN__</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- 30s between restarts: without secrets serve exits immediately, and this
+       keeps the failure legible in the log instead of a flood. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.flare/logs/escalate-serve.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.flare/logs/escalate-serve.err.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

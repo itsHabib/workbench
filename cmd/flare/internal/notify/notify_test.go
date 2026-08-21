@@ -461,6 +461,176 @@ func TestSlackResolveButtonsOnlyOnResolvableParks(t *testing.T) {
 	}
 }
 
+// TestSlackResolveLineOnResolvablePark pins the paste-ready route: a resolvable
+// park's card carries the verbatim `escalate resolve` line with BOTH real ids
+// substituted, so the loop closes from a phone with nothing but Slack and a
+// terminal. It renders independently of the channel's button opt-in — the line
+// is prose, not an interactive element.
+func TestSlackResolveLineOnResolvablePark(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		ID:       "esc_4ea400afe1ecc4c4",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "repo": "itsHabib/workbench", "number": "137", "grant": "grt_7f21",
+		},
+	}
+	// Wrapped in a code span so Slack renders it selectable and un-mangled.
+	want := "`escalate resolve -escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+		"-decision <pass|block> -who <you> -why \"...\"`"
+	for _, optIn := range []bool{false, true} {
+		msg := renderSlackMessage("C1", optIn, ev)
+		if !hasContextText(msg.Attachments[0].Blocks, want) {
+			t.Fatalf("resolve_actions=%v: card must carry %q:\n%s", optIn, want, mustJSON(t, msg))
+		}
+	}
+}
+
+// TestSlackResolveLineCarriesWatchedState pins the ledger splice: when the
+// source lifted the watched log's state directory, the rendered command pins
+// it with -state, so the paste works from a terminal whose ambient $GATE_STATE
+// points elsewhere (or nowhere). The field-less case above stays the ambient
+// fallback — no -state is invented.
+func TestSlackResolveLineCarriesWatchedState(t *testing.T) {
+	ev := event.Event{
+		Source:   "gate",
+		ID:       "esc_4ea400afe1ecc4c4",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields: map[string]string{
+			"run": "run_7", "grant": "grt_7f21", "state": "/Users/mh/dev/gate/state",
+		},
+	}
+	want := "`escalate resolve -state /Users/mh/dev/gate/state " +
+		"-escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+		"-decision <pass|block> -who <you> -why \"...\"`"
+	msg := renderSlackMessage("C1", false, ev)
+	if !hasContextText(msg.Attachments[0].Blocks, want) {
+		t.Fatalf("card must pin the watched ledger with -state, want %q:\n%s", want, mustJSON(t, msg))
+	}
+}
+
+// TestSlackResolveLineQuotesUnsafeState pins the shell-quoting on the -state
+// splice: a state dir with a space (or any other shell-active character) is
+// single-quoted so the pasted command survives word-splitting, while the
+// common clean path above stays unquoted and readable. Embedded single quotes
+// use the standard '\” splice.
+func TestSlackResolveLineQuotesUnsafeState(t *testing.T) {
+	cases := []struct{ dir, rendered string }{
+		{"/Users/john doe/gate/state", "'/Users/john doe/gate/state'"},
+		{"/Users/o'brien/gate/state", `'/Users/o'\''brien/gate/state'`},
+	}
+	for _, tc := range cases {
+		ev := event.Event{
+			Source:   "gate",
+			ID:       "esc_4ea400afe1ecc4c4",
+			Kind:     "escalation",
+			Severity: event.SevEscalate,
+			Body:     "your call",
+			Fields: map[string]string{
+				"run": "run_7", "grant": "grt_7f21", "state": tc.dir,
+			},
+		}
+		want := "`escalate resolve -state " + tc.rendered +
+			" -escalation esc_4ea400afe1ecc4c4 -grant grt_7f21 " +
+			"-decision <pass|block> -who <you> -why \"...\"`"
+		msg := renderSlackMessage("C1", false, ev)
+		if !hasContextText(msg.Attachments[0].Blocks, want) {
+			t.Fatalf("card must shell-quote %q, want %q:\n%s", tc.dir, want, mustJSON(t, msg))
+		}
+	}
+}
+
+// hasContextText reports whether some context block carries exactly this text —
+// a value comparison, so a drift in the rendered line fails loudly instead of
+// passing on a JSON substring that HTML-escapes the placeholders.
+func hasContextText(blocks []slackBlock, want string) bool {
+	for _, b := range blocks {
+		if b.Type != "context" {
+			continue
+		}
+		for _, el := range b.Elements {
+			if txt, ok := el.(slackText); ok && txt.Text == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestSlackResolveLineOnlyOnResolvableParks pins the same suppression rule the
+// buttons obey: no line for a park missing its grant or its artifact id, and
+// none for the events that reach SevEscalate without being parks at all — the
+// command would be one `escalate` is guaranteed to refuse.
+func TestSlackResolveLineOnlyOnResolvableParks(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   event.Event
+	}{
+		{"park-missing-grant", event.Event{
+			Source: "roxiq", ID: "esc-park-poc", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/roxiq", "number": "161"},
+		}},
+		{"park-missing-id", event.Event{
+			Source: "gate", ID: "", Kind: "escalation", Severity: event.SevEscalate,
+			Fields: map[string]string{"repo": "itsHabib/workbench", "number": "9", "grant": "grt_7"},
+		}},
+		{"verdict-escalate", event.Event{
+			Source: "gate", ID: "v1", Kind: "verdict", Severity: event.SevEscalate,
+			Fields: map[string]string{"decision": "escalate", "grant": "grt_7"},
+		}},
+		{"cursor-alert", event.Event{
+			Source: "gate", ID: "cursor-alert:gate:0001", Kind: "cursor-alert", Severity: event.SevEscalate,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, tc.ev)
+			if got := string(mustJSON(t, msg)); strings.Contains(got, "escalate resolve") {
+				t.Fatalf("%s must carry no resolve line:\n%s", tc.name, got)
+			}
+		})
+	}
+}
+
+// TestSlackCeilingParkOffersNoResolution pins that a ceiling park — a park on a
+// code a decision cannot clear, because gate re-applies the grant's ceiling —
+// gets NEITHER the resolve line NOR the Approve/Block buttons, even though it
+// carries both its artifact id and its grant. Resolving one re-parks it on the
+// identical code; the operator has to mint a wider grant, and offering a
+// decision here would promise progress the command cannot deliver.
+func TestSlackCeilingParkOffersNoResolution(t *testing.T) {
+	for _, code := range []string{escalation.CodeTierExceeded, escalation.CodeCycleExceeded} {
+		t.Run(code, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, event.Event{
+				Source:   "gate",
+				ID:       "esc_ceiling",
+				Kind:     "escalation",
+				Severity: event.SevEscalate,
+				Body:     "tier T2 exceeds ceiling T1",
+				Fields: map[string]string{
+					"run": "run_7", "repo": "itsHabib/workbench", "number": "137",
+					"grant": "grt_7f21", "code": code,
+				},
+			})
+			got := string(mustJSON(t, msg))
+			if strings.Contains(got, "escalate resolve") {
+				t.Fatalf("ceiling park %s must carry no resolve line:\n%s", code, got)
+			}
+			if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+				t.Fatalf("ceiling park %s must carry no resolve buttons, got %+v", code, btns)
+			}
+			// The card still pages — only the dead-end action is withheld.
+			if !strings.Contains(got, "View PR #137") {
+				t.Fatalf("ceiling park must keep the View PR link:\n%s", got)
+			}
+		})
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

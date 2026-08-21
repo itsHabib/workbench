@@ -166,6 +166,10 @@ func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
 	}
+	if line := resolveLine(ev); line != "" {
+		hint := slackText{Type: "mrkdwn", Text: line}
+		blocks = append(blocks, slackBlock{Type: "context", Elements: []any{hint}})
+	}
 	footer := slackText{Type: "mrkdwn", Text: slackFooter(ev)}
 	return append(blocks, slackBlock{Type: "context", Elements: []any{footer}})
 }
@@ -197,9 +201,61 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 // back to the parked run. The grant must be present because a grantless park
 // (schema-valid since escalation.v1's second consumer) resolves out-of-band:
 // escalate's ingest refuses an empty grant, so the buttons would be a tap
-// guaranteed to fail.
+// guaranteed to fail. A ceiling park is excluded for the same reason from the
+// other direction: `gate resolve` re-applies the grant's ceiling, so approving
+// one re-parks it on the identical code. The remedies differ by code and
+// neither is a tap: a tier park needs wider authority only the operator can
+// mint; a cycle park is the stop signal that the process looped — the fix is
+// fewer review rounds, never a wider grant.
 func resolvablePark(ev event.Event) bool {
-	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant"] != ""
+	if ev.Kind != "escalation" || ev.ID == "" || ev.Fields["grant"] == "" {
+		return false
+	}
+	return !ceilingPark(ev.Fields["code"])
+}
+
+// ceilingPark reports whether the park stands on an authorization ceiling — the
+// codes a decision cannot clear, mirroring gate's inbox projection.
+func ceilingPark(code string) bool {
+	return code == escalation.CodeTierExceeded || code == escalation.CodeCycleExceeded
+}
+
+// resolveLine is the paste-ready `escalate resolve` command for a resolvable
+// park — the path that works from a phone with nothing but Slack and a terminal,
+// independent of whether the channel opted into the Approve/Block buttons or the
+// callback tunnel is up. The escalation id and the grant the run parked under are
+// substituted verbatim; decision, who, and why stay placeholders because they are
+// the human's to fill. Gated on resolvablePark for the same reason the buttons
+// are: escalate's ingest refuses an empty grant, so a grantless park would get a
+// command guaranteed to fail. When the event carries the watched ledger's state
+// directory, the line pins it with -state: the watched path is explicit flare
+// config, while the paster's terminal holds whatever $GATE_STATE it holds — an
+// ambient-matching -state is harmless, a missing one against a non-ambient
+// ledger resolves the wrong log. Rendering only — flare never runs it
+// (Amendment 3).
+func resolveLine(ev event.Event) string {
+	if !resolvablePark(ev) {
+		return ""
+	}
+	stateArg := ""
+	if dir := ev.Fields["state"]; dir != "" {
+		stateArg = " -state " + shellQuote(dir)
+	}
+	return fmt.Sprintf("`escalate resolve%s -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"`",
+		stateArg, ev.ID, ev.Fields["grant"])
+}
+
+// shellQuote makes a path safe to paste into a POSIX shell. A path of
+// unambiguous characters passes through untouched — the common machine-managed
+// state dir stays readable on the card — anything else is single-quoted, with
+// embedded single quotes spliced as '\”. Without this, a state dir containing
+// a space splits under word-splitting and escalate's flag parser receives a
+// truncated -state, so the pasted command fails instead of resolving the park.
+func shellQuote(s string) string {
+	if !strings.ContainsAny(s, " \t\n'\"\\$`&|;<>()*?[]#~!{}") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // approveButton / blockButton render the two interactive resolve buttons. Each

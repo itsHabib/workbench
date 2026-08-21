@@ -3,6 +3,7 @@ package source
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,12 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 	if env.Run != "" {
 		fields["run"] = env.Run
 	}
+	// The state directory the watched ledger lives in (the log's parent — gate
+	// writes log.jsonl directly under -state). notify splices it into the
+	// resolve line as -state: the watched path is explicit flare config, so
+	// the pasted command must pin the ledger rather than trust the paster's
+	// ambient $GATE_STATE to point at the same one.
+	fields["state"] = filepath.Dir(src.Path)
 	// The PR subject, when the escalation names one, feeds notify's headline
 	// and View PR button — the click-target verdicts already get.
 	if b.Repo != "" && b.Number > 0 {

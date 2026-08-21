@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the flare watch LaunchAgent. flare-launchd.sh renders the
+  __PLACEHOLDER__ tokens and writes the result to
+  ~/Library/LaunchAgents/com.workbench.flare-watch.plist; never install this
+  file verbatim.
+
+  Secrets are NOT in this plist. The wrapper sources ~/.flare/env (mode 0600,
+  never committed) so a rotated Slack token needs no plist edit and no secret
+  ever lands in a world-readable LaunchAgent.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.workbench.flare-watch</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; [ -f "$HOME/.flare/env" ] &amp;&amp; . "$HOME/.flare/env"; set +a; exec __FLARE_BIN__ watch</string>
+  </array>
+
+  <!-- watch is a forever poll loop: start at login and keep it alive. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Back off restarts so a config error cannot spin the loop hot. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.flare/logs/flare-watch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.flare/logs/flare-watch.err.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -93,6 +93,12 @@ type ParkedRun struct {
 	Escape         *escalation.Escape `json:"escape,omitempty"`
 	JudgeCommand   string             `json:"judge_command,omitempty"`
 	ExplainCommand string             `json:"explain_command"`
+	// ResolveCommand is the paste-ready `escalate resolve` line for this park —
+	// the human-decision route alongside JudgeCommand's automated one. Empty when
+	// the park carries no escalation id or no grant (escalate's ingest refuses an
+	// empty grant), and on a ceiling park, which needs a wider grant rather than a
+	// decision.
+	ResolveCommand string `json:"resolve_command,omitempty"`
 	// Coverage is the same inventory answer the ready rows carry: judging a park
 	// clean is wasted work if no live grant covers the repo the merge needs, or
 	// if the grant's ceiling would re-park the run straight afterwards.
@@ -683,9 +689,11 @@ func parkedFromEscalation(a state.Artifact, facts runFacts, stateArg string) Par
 		Escape:         b.Escape,
 		JudgeCommand:   judgeCommand(a.Run, b.Grant, stateArg),
 		ExplainCommand: fmt.Sprintf("gate explain%s -run %s -html", stateArg, a.Run),
+		ResolveCommand: resolveCommand(a.ID, b.Grant, stateArg),
 	}
 	if ceilingPark(b.Code) {
 		p.JudgeCommand = ""
+		p.ResolveCommand = ""
 		p.Escape = ceilingEscape(a.Run, stateArg, b.Escape)
 	}
 	if p.Repo != "" && p.Number != 0 {
@@ -699,6 +707,19 @@ func judgeCommand(run, grant, stateArg string) string {
 		grant = "grt_..."
 	}
 	return fmt.Sprintf("gate judge%s -run %s -grant %s -decision <pass|block> -why \"...\"", stateArg, run, grant)
+}
+
+// resolveCommand is the paste-ready `escalate resolve` line for a park: the
+// human route through the back-channel, next to judgeCommand's automated one.
+// Unlike judgeCommand it substitutes no placeholder grant — escalate's ingest
+// refuses an empty grant, so a grantless park (or one whose body predates the
+// artifact id) gets no line at all rather than one guaranteed to fail.
+func resolveCommand(escalationID, grant, stateArg string) string {
+	if escalationID == "" || grant == "" {
+		return ""
+	}
+	return fmt.Sprintf("escalate resolve%s -escalation %s -grant %s -decision <pass|block> -who <you> -why \"...\"",
+		stateArg, escalationID, grant)
 }
 
 // ceilingPark reports whether the park is an authorization ceiling — a code a
@@ -1018,6 +1039,9 @@ func renderParked(w io.Writer, p ParkedRun) {
 	}
 	if p.JudgeCommand != "" {
 		fmt.Fprintf(w, "  \u2192 %s\n", p.JudgeCommand)
+	}
+	if p.ResolveCommand != "" {
+		fmt.Fprintf(w, "  \u2192 %s\n", p.ResolveCommand)
 	}
 	if p.JudgeCommand == "" && p.Escape != nil {
 		fmt.Fprintf(w, "  %s\n", p.Escape.Why)

@@ -52,7 +52,34 @@ wiring `gate` into the merge tail.
   **Still open (out of scope for that pass, noted in the design):** the stale-lock TOCTOU takeover
   race and a SQLite/WAL durability model.
 
+## Tidy-up
+
+- [ ] **Load the review panel once per run.** `PanelCompleteness` and readiness's
+  `panelStandIn` each call `loadPanel` on the same evidence id, so one panel body is read,
+  JSON-parsed, `reviewpanel.Validate`-d, and `evaluatePanel`-ed twice per gate run. Correctness
+  is unaffected — it is the same validated evidence both times — so this is mechanism, not a
+  defect. Deduping means loading once in `runGateWithSynthesis` and passing the parsed
+  `reviewpanel.Evidence` to both consumers, which changes the exported signatures of
+  `verify.Readiness` and `verify.PanelCompleteness` (evidence id → parsed struct) and ripples
+  through their tests. Left out of the botChangeRequest PR to keep a security fix focused;
+  worth doing on its own.
+
 ## Before broader trust / real dogfood
+
+- [ ] **Decide what a bodyless bot `CHANGES_REQUESTED` is worth.**
+  Raised by the Codex panel on the readiness panel stand-in PR, as a P1 against
+  `resolveStandIn`: a human's exact-head approval satisfies readiness even when a required
+  panel reviewer's completed review asks for changes. That ordering is deliberate and
+  separately pinned (`TestReadinessBotChangeRequestDoesNotSuppressHumanApproval` — bot
+  findings are findings; authorization belongs to the account with repository authority),
+  so reversing it was out of scope for that PR, and readiness now at least RECORDS the
+  objection it passed (`objectionNote`). The residual is narrower than the finding as
+  written: a change-request review **with a body** still reaches the review-consolidation
+  rung, which escalates on its findings. A **bodyless** one reaches nothing — no findings to
+  extract, and readiness deliberately declines to block — so an explicit objection can leave
+  no rung holding it. **Decide:** does a bodyless CHANGES_REQUESTED from a required reviewer
+  block, escalate, or stay advisory? Whichever way, the answer belongs in one rung with a
+  test, not in the gap between two.
 
 - [ ] **Make block/park verdicts sticky and bound judge re-runs.**
   Block verdicts aren't sticky and `judge -auto` is nondeterministic, so a judge can be re-run until

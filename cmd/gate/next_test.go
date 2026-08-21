@@ -156,8 +156,66 @@ func TestNextCommandEndToEnd(t *testing.T) {
 	if p.Escape == nil || p.Escape.Next != "gate explain -run run_park" {
 		t.Fatalf("ambient ceiling escape should omit -state, got %+v", p.Escape)
 	}
+	// Nor a resolve line: a ceiling park needs a wider grant from the operator,
+	// not a human decision — `escalate resolve` would re-apply the same ceiling.
+	if p.ResolveCommand != "" {
+		t.Fatalf("ceiling park must not advertise a resolve command, got %q", p.ResolveCommand)
+	}
 	if len(in.Grants) != 1 || in.Grants[0].Repo != "o/r" || in.Grants[0].Expired {
 		t.Fatalf("grant ledger wrong: %+v", in.Grants)
+	}
+}
+
+// TestNextCommandRendersResolveLine pins the paste-ready human route: an open
+// (non-ceiling) park prints the `escalate resolve` line carrying its real
+// escalation id and grant, alongside the unchanged `gate judge` line. A
+// grantless park in the same inbox prints neither — escalate's ingest refuses
+// an empty grant.
+func TestNextCommandRendersResolveLine(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+
+	st, err := state.Open(stateDir, func() time.Time { return time.Unix(1_000_000, 0).UTC() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Append(state.KindGrant, "run_mint", nil, capability.Grant{
+		Repo: "o/r", Action: "merge", MaxTier: "T2", MaxCycles: 3,
+		ExpiresAt: time.Now().UTC().Add(3 * time.Hour), MintedBy: "test", Sig: "fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	park, err := st.Append(state.KindEscalation, "run_open", []string{"vrd_x", "grt_x"}, map[string]any{
+		"outcome": "parked_for_judgment", "verdict": "vrd_x", "grant": "grt_x",
+		"question": "reviewer coverage incomplete", "code": "panel_incomplete",
+		"repo": "o/r", "number": 42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Append(state.KindEscalation, "run_grantless", []string{"vrd_y"}, map[string]any{
+		"outcome": "parked_for_judgment", "verdict": "vrd_y",
+		"question": "no grant on record", "code": "panel_incomplete",
+		"repo": "o/r", "number": 43,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GATE_STATE", stateDir)
+	t.Setenv("GATE_KEY", filepath.Join(root, "keys"))
+
+	out := captureStdout(t, func() error { return cmdNext(nil) })
+
+	want := "escalate resolve -escalation " + park.ID +
+		" -grant grt_x -decision <pass|block> -who <you> -why \"...\""
+	if !strings.Contains(out, want) {
+		t.Fatalf("gate next must print %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "gate judge -run run_open -grant grt_x") {
+		t.Fatalf("the judge line must be unchanged:\n%s", out)
+	}
+	if strings.Count(out, "escalate resolve") != 1 {
+		t.Fatalf("a grantless park must print no resolve line:\n%s", out)
 	}
 }
 

@@ -540,7 +540,7 @@ func runGateWithSynthesis(
 	}
 
 	// The verifier ladder records one verdict artifact per rung.
-	readinessArt, subject, err := verify.Readiness(e.st, run, bundle.View, bundle.Stances, subject, reviewsOptional)
+	readinessArt, subject, err := readinessVerdict(e, run, bundle, subject, reviewsOptional)
 	if err != nil {
 		return res, codeError, err
 	}
@@ -600,6 +600,21 @@ func runGateWithSynthesis(
 		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+// readinessVerdict runs the readiness rung over the gathered bundle. Readiness
+// judges the PANEL evidence alongside the view and stances: a complete
+// exact-head panel is what answers a GitHub review decision that comment-posting
+// reviewers leave empty, and the panel rung below independently records its own
+// verdict over the same artifact.
+//
+// Extracted so that wiring is testable without a live gh. Handing readiness an
+// empty panel id here would silently restore the park with every verify-level
+// test still green, because those pass the id directly.
+func readinessVerdict(e env, run string, bundle evidence.Bundle, subject verify.Subject, reviewsOptional bool) (state.Artifact, verify.Subject, error) {
+	return verify.Readiness(
+		e.st, run, bundle.View, bundle.Stances, bundle.Panel, subject, reviewsOptional,
+	)
 }
 
 func reviewVerdictIDs(e env, run string, bundle evidence.Bundle, subject verify.Subject, model verify.Model, reviewsOptional bool) ([]string, error) {

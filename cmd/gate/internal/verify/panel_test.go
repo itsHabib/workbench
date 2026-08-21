@@ -64,6 +64,20 @@ func TestPanelCompletenessPendingMissingUnknownPark(t *testing.T) {
 	}
 }
 
+// Completeness is not agreement: a reviewer who asked for changes still
+// REVIEWED this head, and the rung's job is who reviewed, with findings left to
+// the review-consolidation verdict. Pinned because readiness now refuses that
+// same panel as a stand-in for an absent GitHub review decision — the refusal
+// belongs to readiness alone and must never migrate into this rung.
+func TestPanelCompletenessCountsChangeRequestAsCompleted(t *testing.T) {
+	panel := panelEvidence([]string{"codex"}, 1, "head")
+	panel.Completed[0].State = "CHANGES_REQUESTED"
+	v := panelVerdict(t, panel, Subject{Repo: "o/r", Number: 1, HeadSHA: "head"})
+	if v.Decision != DecisionPass {
+		t.Fatalf("a completed change request is still a completed panel, got %s (%s)", v.Decision, v.Why)
+	}
+}
+
 func TestPanelCompletenessHeadAdvanceParks(t *testing.T) {
 	panel := panelEvidence([]string{"codex"}, 1, "old")
 	v := panelVerdict(t, panel, Subject{Repo: "o/r", Number: 1, HeadSHA: "new"})
