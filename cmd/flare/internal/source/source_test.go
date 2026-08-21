@@ -428,8 +428,22 @@ func TestTailOfMissingOrEmptyFileIsZero(t *testing.T) {
 }
 
 func TestTailOfCorruptGateLineFailsLoudly(t *testing.T) {
-	src := gateFile(t, escLine+"\nnot json\n")
-	if _, err := Tail(src); err == nil {
-		t.Fatal("a corrupt last line must fail placement, not pin an empty hash")
+	// Anywhere in the skipped prefix, not only the last line: anchoring past a
+	// malformed record would hide it behind the cursor for good.
+	for name, log := range map[string]string{
+		"last line":     escLine + "\nnot json\n",
+		"earlier line":  "not json\n" + escLine + "\n",
+		"verdict body":  `{"id":"vrd_x","kind":"verdict","run":"r","time":"2026-07-08T16:00:00Z","body":{"subject":{"repo":"x","number":1},"decision":123,"tier":"T1","why":"?"},"prev":"h0","hash":"h1"}` + "\n" + vrdEsc + "\n",
+		"receipt clock": receiptLine("wf1", "failed") + "\n" + `{"key":"wf_bad","source":"driver","outcome":"parked","generated_at":"not-a-time"}` + "\n" + receiptLine("wf2", "failed") + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := gateFile(t, log)
+			if name == "receipt clock" {
+				src = shipFile(t, log)
+			}
+			if _, err := Tail(src); err == nil {
+				t.Fatal("a corrupt record in the skipped prefix must fail placement, not be anchored past")
+			}
+		})
 	}
 }

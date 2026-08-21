@@ -30,6 +30,11 @@ type Cursor struct {
 // the cursor, so it is lifted once the writer finishes it. A file that does not
 // exist yet yields the zero cursor — nothing has been written, so everything
 // that appears is new. Tail reads; it never lifts or delivers.
+//
+// The whole skipped prefix is run through the same parser Read uses, and its
+// events discarded: a corrupt record anywhere in it fails placement loudly,
+// exactly as it would fail a read. Anchoring past a malformed line would hide
+// it behind the cursor for good — a corrupt artifact must never read as quiet.
 func Tail(src config.Source) (Cursor, error) {
 	raw, err := os.ReadFile(src.Path)
 	if os.IsNotExist(err) {
@@ -42,16 +47,11 @@ func Tail(src config.Source) (Cursor, error) {
 	if len(lines) == 0 {
 		return Cursor{}, nil
 	}
-	cur := Cursor{Offset: size}
-	if src.Kind != config.SourceGateLog {
-		return cur, nil
+	_, last, err := parse(src, lines)
+	if err != nil {
+		return Cursor{}, fmt.Errorf("placing at tail: %w", err)
 	}
-	var env contracts.Envelope
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &env); err != nil {
-		return Cursor{}, fmt.Errorf("source %s: bad artifact line at tail of %s: %w", src.Name, src.Path, err)
-	}
-	cur.LastHash = env.Hash
-	return cur, nil
+	return Cursor{Offset: size, LastHash: last}, nil
 }
 
 // Read returns the push-worthy events appended since cur, plus the advanced
