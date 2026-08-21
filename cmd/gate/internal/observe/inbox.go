@@ -86,6 +86,16 @@ type ParkedRun struct {
 	Code          string `json:"code,omitempty"`
 	Grant         string `json:"grant,omitempty"`
 	ParkedAt      string `json:"parked_at"`
+	// CyclesUsed and CyclesMax are the review-cycle budget this park sits
+	// under: the cycles its repo#PR has consumed (this park's own run included
+	// — a content park is a ladder decision) against the -max-cycles ceiling
+	// of the grant the run parked under, the same grant JudgeCommand names.
+	// CyclesMax is 0 when that grant is unbounded or not in this log. Rendered
+	// as "cycles N/M" on the row so a driver sees the budget before acting: a
+	// judgment of this run spends no new cycle, but a fresh `gate gate` would
+	// be cycle N+1, and refuses pre-flight once N+1 exceeds M.
+	CyclesUsed int `json:"cycles_used"`
+	CyclesMax  int `json:"cycles_max"`
 	// Escape is the route sealed into the escalation artifact, when one was
 	// recorded. On a ceiling park it replaces JudgeCommand: judging under the
 	// same grant re-applies the ceiling, so the stored route (inspect, then
@@ -441,6 +451,7 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 	idx := buildCoverageIndex(arts, now, stateArg)
 	for i := range parked {
 		parked[i].Coverage = idx.assess(parked[i].Repo, parked[i].Number, parked[i].Run)
+		parked[i].CyclesUsed, parked[i].CyclesMax = idx.budget(parked[i].Repo, parked[i].Number, parked[i].Grant)
 	}
 	for i := range ready {
 		ready[i].Coverage = idx.assess(ready[i].Repo, ready[i].Number, ready[i].Run)
@@ -853,6 +864,13 @@ func needsGrantRows(arts []state.Artifact, now time.Time, stateArg string) []Nee
 		if err := json.Unmarshal(a.Body, &b); err != nil || b.Repo == "" {
 			continue
 		}
+		// A pre-flight cycle refusal is recorded under the same kind, but the
+		// grant it refused against is live, just spent: the budget shows on the
+		// parked row itself, and folding it here would print a lapse that
+		// never happened.
+		if b.Reason == escalation.CodeCycleExceeded {
+			continue
+		}
 		at := grantNeededAt(b.At, a.Time)
 		cur, seen := latest[b.Repo]
 		// Most-recent wins; on an equal timestamp the later log-order record wins
@@ -1030,6 +1048,9 @@ func renderParked(w io.Writer, p ParkedRun) {
 	if p.Code != "" {
 		head += "  " + p.Code
 	}
+	if p.Repo != "" {
+		head += "  " + cyclesLabel(p.CyclesUsed, p.CyclesMax)
+	}
 	fmt.Fprintf(w, "  %s\n", head)
 	if p.Question != "" {
 		fmt.Fprintf(w, "  %q\n", p.Question)
@@ -1050,6 +1071,15 @@ func renderParked(w io.Writer, p ParkedRun) {
 	fmt.Fprintf(w, "  \u2192 %s\n", p.ExplainCommand)
 	renderCoverage(w, p.Coverage)
 	fmt.Fprintln(w)
+}
+
+// cyclesLabel renders a review-cycle budget as "cycles N/M"; an unbounded (or
+// unknown) ceiling reads "cycles N/∞".
+func cyclesLabel(used, maxCycles int) string {
+	if maxCycles == 0 {
+		return fmt.Sprintf("cycles %d/∞", used)
+	}
+	return fmt.Sprintf("cycles %d/%d", used, maxCycles)
 }
 
 func renderGrants(w io.Writer, grants []GrantLine) {

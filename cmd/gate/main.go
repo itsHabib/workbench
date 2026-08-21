@@ -419,6 +419,14 @@ type gateResult struct {
 	// it was computed against. Empty on paths that finalize before evidence
 	// (a pre-evidence capability refusal, a hard error with no verdict).
 	HeadSHA string `json:"head_sha"`
+	// CyclesUsed and CyclesMax are the review-cycle budget this run was checked
+	// against: how many cycles the repo+PR had already consumed (derived from
+	// the log, never caller-passed) and the grant's -max-cycles ceiling (0 ==
+	// unbounded). Present on every result so a driver sees the budget it is
+	// spending without a second read; both zero on a path that finalized
+	// before a grant was read.
+	CyclesUsed int `json:"cycles_used"`
+	CyclesMax  int `json:"cycles_max"`
 	// Hash is the deciding action artifact's chain hash — the tamper-evident
 	// anchor a downstream legibility marker (the gate/authorized commit status)
 	// carries so a skeptic can pin the stamp to a real, audit-replayable
@@ -492,7 +500,8 @@ func runGateWithSynthesis(
 	// No live grant, no gate: coded refusal, exit 3, nothing gathered. This
 	// precedes model construction so a missing/invalid grant refuses (codeRefused)
 	// before a missing ANTHROPIC_API_KEY could hard-error the model backend.
-	if _, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now); err != nil {
+	grant, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now)
+	if err != nil {
 		recordGrantNeeded(e, repo, err)
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
@@ -502,6 +511,17 @@ func runGateWithSynthesis(
 
 	run := state.NewRunID()
 	res.Run = run
+
+	// The cycle ceiling is checked BEFORE any evidence is gathered. A run that
+	// would land over the ceiling used to do the whole sweep and then park on
+	// grant_cycle_exceeded — and because every re-run by a driver consumed
+	// another cycle, the overrun was discovered only at `gate judge`, by which
+	// point the park could no longer be judged under its grant. Refusing here
+	// spends nothing and leaves the PR's existing park judgeable.
+	res, code, done, err := preflightCycles(e, run, grant, grantID, subject, res)
+	if done {
+		return res, code, err
+	}
 
 	// The view is recorded FIRST, alone: the already-merged refusal must be
 	// decidable from this one read, before the model backend or the rest of
@@ -860,6 +880,20 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		return res, codeRefused, record(state.KindAction, "capability_refused", map[string]any{"error": err.Error()})
 	}
 
+	// The cycle number is state-derived, never caller-passed — the driver is
+	// the identity the cap bounds. It is read here, before the decision
+	// branches, so every outcome's JSON carries the budget it was checked
+	// against; it is APPLIED only after the content decisions below, so an
+	// unreadable count still parks where it always did and never turns a block
+	// into a park. An unbounded grant skips the scan — it has no ceiling to
+	// enforce, so there is nothing to park on.
+	n, countErr := 0, error(nil)
+	if grant.MaxCycles != 0 {
+		n, countErr = cycleCount(e.st, reduced.Subject, run)
+	}
+	res.CyclesUsed = n
+	res.CyclesMax = grant.MaxCycles
+
 	if reduced.Decision == verify.DecisionBlock {
 		res.Outcome = "blocked"
 		return res, codeBlocked, record(state.KindAction, "blocked", nil)
@@ -890,25 +924,18 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 			escalation.CodeTierExceeded, reduced.Tier, grant.MaxTier, reduced.Why)
 		return res, codeParked, recordEscalation(res.Why, escalation.CodeTierExceeded, nil)
 	}
-	// The cycle number is state-derived, never caller-passed — the driver is
-	// the identity the cap bounds. An unreadable count parks: absence never
-	// reads as "0 cycles consumed, proceed". An unbounded grant skips the
-	// scan — it has no ceiling to enforce, so there is nothing to park on.
-	n := 0
-	if grant.MaxCycles != 0 {
-		n, err = cycleCount(e.st, reduced.Subject, run)
-	}
-	// A tampered log is corruption, not a judgment call: fail hard (codeError,
-	// no merge), never a park a re-mint could clear.
-	if errors.Is(err, errLogTampered) {
+	// An unreadable count parks: absence never reads as "0 cycles consumed,
+	// proceed". A tampered log is corruption, not a judgment call: fail hard
+	// (codeError, no merge), never a park a re-mint could clear.
+	if errors.Is(countErr, errLogTampered) {
 		res.Outcome = "error"
-		res.Why = err.Error()
-		return res, codeError, err
+		res.Why = countErr.Error()
+		return res, codeError, countErr
 	}
-	if err != nil {
+	if countErr != nil {
 		res.Outcome = "parked_for_judgment"
 		res.Code = escalation.CodeCountUnreadable
-		res.Why = fmt.Sprintf("%s: cycle count unreadable: %v; %s", escalation.CodeCountUnreadable, err, reduced.Why)
+		res.Why = fmt.Sprintf("%s: cycle count unreadable: %v; %s", escalation.CodeCountUnreadable, countErr, reduced.Why)
 		return res, codeParked, recordEscalation(res.Why, escalation.CodeCountUnreadable, nil)
 	}
 	if !grant.CyclesWithin(n + 1) {
@@ -1001,6 +1028,68 @@ func synthBrief(question string, synth briefFn) *escalation.Brief {
 		Risk:           b.Risk,
 		Recommendation: b.Recommendation,
 	}
+}
+
+// preflightCycles is the cycle-ceiling check run before evidence: the same
+// state-derived count act applies after reduction, applied first so an
+// over-ceiling run refuses (exit 3, grant_cycle_exceeded) instead of doing the
+// work and parking. done reports whether the run is finished here; when it is
+// not, res carries the count for the JSON output and the ladder proceeds. The
+// refusal is recorded as a grant_needed artifact — a refusal record, never an
+// outcome — so it neither consumes a cycle nor supersedes a park already
+// awaiting judgment for the same PR, which stays judgeable under its grant.
+//
+// Two non-refusals are deliberate. A tampered log is corruption and fails
+// hard (codeError). An otherwise unreadable count is not decidable here —
+// there is no verdict yet to hang a park on — so the run proceeds and act
+// parks it as cycle_count_unreadable over the recorded verdict, exactly as
+// before; absence still never reads as "0 cycles consumed, proceed".
+func preflightCycles(e env, run string, grant capability.Grant, grantID string, subject verify.Subject, res gateResult) (gateResult, int, bool, error) {
+	res.CyclesMax = grant.MaxCycles
+	n, err := cycleCount(e.st, subject, run)
+	if errors.Is(err, errLogTampered) {
+		res.Outcome = "error"
+		res.Why = err.Error()
+		return res, codeError, true, err
+	}
+	if err != nil {
+		return res, 0, false, nil
+	}
+	res.CyclesUsed = n
+	if grant.CyclesWithin(n + 1) {
+		return res, 0, false, nil
+	}
+	res.Outcome = "capability_refused"
+	res.Code = escalation.CodeCycleExceeded
+	res.Why = fmt.Sprintf("%s: cycle %d would exceed grant ceiling %d (%d of %d review cycles consumed by %s#%d); "+
+		"do not re-run gate — the ceiling is the stop signal; a run already parked for this PR stays judgeable, see gate next",
+		capability.ErrCycleExceeded, n+1, grant.MaxCycles, n, grant.MaxCycles, subject.Repo, subject.Number)
+	return res, codeRefused, true, recordCycleRefusal(e, run, grantID, subject, n, grant.MaxCycles, res.Why)
+}
+
+// recordCycleRefusal persists the pre-flight ceiling refusal under the run so
+// `gate explain -run` reconstructs it. Like recordGrantNeeded's records it is
+// KindGrantNeeded: isOutcome, the reducer, and cycleCount all ignore the kind,
+// and the inbox's subject reduction only folds actions and escalations — so
+// the record can neither burn a cycle nor hide the park it refused to
+// duplicate. Unlike a grant lapse it is written under a run id and carries the
+// budget it was refused against; the inbox's needs-grant surface skips the
+// reason, since the grant is live, just spent.
+func recordCycleRefusal(e env, run, grantID string, subject verify.Subject, used, maxCycles int, why string) error {
+	body := map[string]any{
+		"repo":        subject.Repo,
+		"number":      subject.Number,
+		"reason":      escalation.CodeCycleExceeded,
+		"grant":       grantID,
+		"cycles_used": used,
+		"cycles_max":  maxCycles,
+		"at":          time.Now().UTC().Format(time.RFC3339),
+		"why":         why,
+	}
+	if _, err := e.st.Append(state.KindGrantNeeded, run, []string{grantID}, body); err != nil {
+		return fmt.Errorf("record cycle refusal: %w", err)
+	}
+	return nil
 }
 
 // cycleCount derives how many review cycles this repo+PR has consumed, from

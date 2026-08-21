@@ -240,6 +240,21 @@ unscoped `capability.Check` cannot consume that grant. Repository code does not
 make the workflow trusted: App/environment/ruleset/state bootstrap and the live
 canary remain operator-owned.
 
+The cycle ceiling is enforced in the same place — before evidence. `gate gate`
+derives the PR's consumed review cycles from the log and, if this run would
+exceed the grant's `-max-cycles`, refuses immediately (`grant_cycle_exceeded`,
+exit 3) instead of gathering evidence, running the ladder, and parking. A
+ceiling discovered after the work is done is a ceiling discovered at `gate
+judge`, the last step, when the park can no longer be judged under its grant;
+refusing first costs nothing and leaves any existing park judgeable, since a
+judgment re-enters the run that parked and spends no new cycle. The refusal is
+recorded as a `grant_needed` artifact under the run (reason
+`grant_cycle_exceeded`, the grant, `cycles_used`, `cycles_max`) — not an
+outcome, so it consumes no cycle and cannot supersede the park in `next`'s
+subject reduction. Every run's result carries `cycles_used` / `cycles_max`; the
+post-reduction ceiling check in `act` stays as the backstop a judgment cannot
+launder.
+
 The top-level refusal — a run stopped before evidence for want of a live grant
 — also leaves a durable trace: a `grant_needed` artifact carrying the repo, the
 reason (`grant_expired` vs `grant_absent`), and a timestamp. It is deliberately

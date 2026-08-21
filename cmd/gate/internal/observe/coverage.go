@@ -60,6 +60,7 @@ type coverageIndex struct {
 	liveGrants  map[string][]coverageGrant
 	lastExpired map[string]time.Time
 	cycles      map[string]int
+	grantCycles map[string]int
 	runTier     map[string]string
 	subjectRun  map[string]string
 	stateArg    string
@@ -95,6 +96,7 @@ func buildCoverageIndex(arts []state.Artifact, now time.Time, stateArg string) c
 		liveGrants:  make(map[string][]coverageGrant),
 		lastExpired: make(map[string]time.Time),
 		cycles:      cyclesBySubject(arts),
+		grantCycles: grantCyclesByID(arts),
 		runTier:     runTiers(arts),
 		subjectRun:  subjectRuns(arts),
 		stateArg:    stateArg,
@@ -239,6 +241,31 @@ func runStartOrder(arts []state.Artifact) map[string]int {
 // never-gated case a sweep preflight is asking about.
 func (idx coverageIndex) assessSubject(repo string, number int) *GrantCoverage {
 	return idx.assess(repo, number, idx.subjectRun[subjectKey(repo, number)])
+}
+
+// grantCyclesByID maps every merge grant in the log — live or lapsed — to its
+// -max-cycles ceiling, so a park can be read against the grant it actually
+// parked under rather than whichever grant is widest now.
+func grantCyclesByID(arts []state.Artifact) map[string]int {
+	cycles := make(map[string]int)
+	for _, a := range arts {
+		g, ok := decodeMergeGrant(a)
+		if !ok {
+			continue
+		}
+		cycles[a.ID] = g.MaxCycles
+	}
+	return cycles
+}
+
+// budget is the review-cycle budget one parked row prints: cycles consumed by
+// the subject against the ceiling of the named grant (0 when unbounded or
+// unknown). Zero-valued for a row with no subject.
+func (idx coverageIndex) budget(repo string, number int, grantID string) (used, maxCycles int) {
+	if repo == "" || number == 0 {
+		return 0, 0
+	}
+	return idx.cycles[subjectKey(repo, number)], idx.grantCycles[grantID]
 }
 
 // cyclesBySubject counts consumed review cycles per repo#PR, mirroring gate's
