@@ -60,7 +60,9 @@ their own shapes; `decision`/`tier` are never required of them.
 
 1. **Watch.** Poll each source file on an interval (default 60s). Cursor per source persists
    across restarts. Catch-up is mandatory: on start, sweep from the cursor and route
-   everything missed — a late toast beats never.
+   everything missed — a late toast beats never. A source with **no cursor yet** is placed
+   at its current tail first (see *First run* under cursor integrity): catch-up covers the
+   gap since flare last looked, not the producer's whole life.
 2. **Match.** The source parser decides what is an *event* at all (gate: every escalation,
    every non-pass verdict; ship: failed/cancelled receipts). Every event is push-worthy by
    construction.
@@ -75,6 +77,21 @@ their own shapes; `decision`/`tier` are never required of them.
 
 ## Cursor integrity (absence must not read as calm)
 
+- **First run (no cursor yet):** a source absent from `cursors.json` — fresh state on a new
+  machine, or a source newly added to the config — is **placed at its current tail**: offset
+  = the end of the last complete line, `last_hash` = that record's hash (gate-log). The
+  placement is journaled as one `cursor-init` entry and logged once; nothing before it is
+  delivered. A producer's history is not a page queue: replaying a 4k-line gate ledger into
+  Slack pages every long-dead escalation (with live Approve/Block buttons) until the API
+  rate-limits, and tells the operator nothing they can act on. A file that does not exist
+  yet places at offset 0 — everything that appears is new. **`flare sweep -from-start`**
+  (also accepted by `watch`) is the deliberate opt-in to deliver the whole history; dedupe
+  holds on every later sweep as usual. The flag only affects sources with no cursor; it
+  never moves an existing one.
+- **Absent ≠ reset.** "No cursor" (fresh) and "cursor at offset 0" (a deliberate resweep) are
+  different facts and must never be confused: the resweeps below write an explicit zero
+  cursor, so recovery is never mistaken for a first run and placed at the tail — which would
+  silently skip exactly what the break hid.
 - **gate-log:** the cursor stores byte offset + the hash of the last processed line. On poll,
   the first new line's `prev` must equal the stored hash; the file shrinking below the offset
   means truncation. Either mismatch **fires a flare itself** (`cursor-alert`) and resweeps
@@ -82,9 +99,9 @@ their own shapes; `decision`/`tier` are never required of them.
 - **ship-receipts:** offset only (no chain); shrink → same alert + resweep.
 - **cursors.json corrupt:** a cursor *file* that exists but does not parse is recoverable, not
   fatal. The cycle quarantines it aside (`cursors.json.corrupt-<nanos>`, kept for forensics),
-  fires a `cursor-alert`, and resweeps from empty (dedupe prevents re-paging) — the same
-  "never a silent reset" contract as a chain mismatch, extended so a corrupt file can never
-  silently *wedge* the loop either. Writes are torn-proof: each save renders to a unique
+  fires a `cursor-alert`, and resweeps every configured source from an explicit offset 0
+  (dedupe prevents re-paging) — the same "never a silent reset" contract as a chain
+  mismatch, extended so a corrupt file can never silently *wedge* the loop either. Writes are torn-proof: each save renders to a unique
   `os.CreateTemp` file and renames, so no two writers share a temp to interleave into.
 - **watcher-down:** flare cannot supervise itself in v0. Honest mitigations: `watch` updates a
   `last_poll` timestamp every cycle; `flare status` exits non-zero when that is stale (wired
@@ -133,9 +150,10 @@ flare is not a State writer (writing into gate's anchored log would fail its aud
 storeless (dedupe/cursor/delivery facts must live somewhere). It keeps a private delivery
 journal no other plane reads:
 
-- `~/.flare/journal.jsonl` — append-only `{time, kind: delivered|skipped-dedupe|
-  skipped-throttle|cursor-alert|error, source, event_id, channel, note}`. Answers "was the
-  operator paged at T". flare explains delivery; producers explain decisions.
+- `~/.flare/journal.jsonl` — append-only `{time, kind: delivered|dropped|skipped-throttle|
+  cursor-alert|cursor-init|error, source, event_id, channel, note}`. Answers "was the
+  operator paged at T" — and, via `cursor-init`, "where did flare first look, and what did
+  it deliberately not deliver". flare explains delivery; producers explain decisions.
 - `~/.flare/cursors.json` — per-source cursor + `last_poll` (the liveness fact `status` reads).
 - Config default: `~/.flare/routes.json` (`-config` overrides).
 
@@ -174,6 +192,9 @@ omitted = any. When a match needs logic the table can't express, that is a signa
 - `flare watch` — poll loop (catch-up sweep first, then tick).
 - `flare sweep` — one catch-up pass, then exit. Exit 0 = swept clean; 1 = config/source
   error.
+- `-from-start` (`sweep`/`watch`) — a source with no cursor yet starts at offset 0 and
+  delivers its whole history instead of being placed at the tail. Opt-in, once; an
+  existing cursor is never moved by it.
 - `flare status` — JSON health (last poll, per-source cursor, journal tail). Exit 0 healthy,
   1 stale/never-ran, 2 config error. A corrupt cursor file reports `healthy:false` +
   `cursors_corrupt:true` and exits 1 (not a raw parse error) — the watcher is down, and

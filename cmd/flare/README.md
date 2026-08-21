@@ -21,11 +21,23 @@ routing/throttle rules, and the cursor-integrity behavior.
 flare sweep     # one catch-up pass: route everything new, then exit
 flare watch     # poll loop (catch-up first); default every 60s
 flare status    # health as JSON; exit 1 when the watcher looks dead
+
+flare sweep -from-start   # opt in to paging a source's WHOLE history (first run only)
 ```
 
 Config lives at `~/.flare/routes.json` (`-config` overrides); flare's own
 state (delivery journal, cursors) at `~/.flare/` (`-state` overrides). See
 `docs/DESIGN.md` for the config shape.
+
+**First run starts at the tail.** A source flare has never looked at (no
+`cursors.json` yet, or a source newly added to the config) is placed at the
+current end of its log and that placement is journaled as one `cursor-init`
+entry — nothing before it is delivered. On a new machine the gate ledger is
+history you already lived through, not a page queue; replaying it pages every
+dead escalation into Slack until the API rate-limits. If you really want the
+backlog, run `flare sweep -from-start` once before starting the watcher. A
+*deliberate* reset (corrupt-cursor recovery, chain-break resweep) still resweeps
+from offset 0 as before; dedupe keeps that from re-paging.
 
 Slack delivery uses a bot token and channel ID, posts through
 `chat.postMessage`, and treats the delivery as successful only when Slack

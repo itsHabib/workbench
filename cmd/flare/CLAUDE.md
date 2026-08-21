@@ -60,6 +60,11 @@ there first.
 - Single-instance: `watch`/`sweep` take an OS lock on `~/.flare/watch.lock` and
   refuse (exit 3) if another flare holds it — two writers corrupt the state.
   `status` never locks. Cursor saves use a unique temp (never a shared name).
+- A source with NO cursor yet (fresh state, or newly added to config) is
+  placed at the current tail and that placement is journaled (`cursor-init`);
+  the backlog is never delivered by default — `-from-start` is the one opt-in.
+  Absent ≠ reset: a deliberate resweep (chain break, corrupt cursors) writes an
+  explicit offset-0 cursor and still re-lifts the history (dedupe holds).
 - A corrupt `cursors.json` is recovered, not fatal: quarantined aside +
   `cursor-alert` + resweep from empty — it must never silently wedge the loop.
 - Resolve buttons render ONLY for a resolvable park (kind `escalation` + an

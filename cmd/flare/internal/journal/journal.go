@@ -13,13 +13,16 @@ import (
 	"time"
 )
 
-// Entry kinds: what happened to one event (or, for CursorAlert, to a
-// source's cursor).
+// Entry kinds: what happened to one event (or, for CursorAlert and
+// CursorInit, to a source's cursor). CursorInit records where a source with no
+// cursor was first placed — the one written fact that says "the history before
+// this offset was deliberately not delivered".
 const (
 	Delivered   = "delivered"
 	Dropped     = "dropped"
 	Throttled   = "skipped-throttle"
 	CursorAlert = "cursor-alert"
+	CursorInit  = "cursor-init"
 	Errored     = "error"
 )
 

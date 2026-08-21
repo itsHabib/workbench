@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // Channel URL paths on the capture sink. Each webhook channel points a distinct
@@ -108,7 +111,7 @@ func TestE2ESweepDeliversExpectedPagesToCaptureSink(t *testing.T) {
 	}
 	cfg, state, s := scenario(t)
 
-	runSweep(t, cfg, state)
+	runSweep(t, cfg, state, "-from-start")
 
 	got := s.deliveries()
 	// Exactly three page-worthy facts reach the sink: the escalation, the block
@@ -131,7 +134,7 @@ func TestE2EResweepIsIdempotent(t *testing.T) {
 	}
 	cfg, state, s := scenario(t)
 
-	runSweep(t, cfg, state)
+	runSweep(t, cfg, state, "-from-start")
 	first := len(s.deliveries())
 	if first != 3 {
 		t.Fatalf("first sweep: expected 3 deliveries, got %d", first)
@@ -139,10 +142,48 @@ func TestE2EResweepIsIdempotent(t *testing.T) {
 
 	// A second sweep against the same -state dir over unchanged fixtures must
 	// re-page nothing: the journal's seen-set and the advanced cursors hold.
+	// (-from-start is irrelevant once cursors exist; omit it to prove that.)
 	runSweep(t, cfg, state)
 	if second := len(s.deliveries()); second != first {
 		t.Fatalf("resweep produced %d new deliveries; dedupe must hold (want %d total, got %d)", second-first, first, second)
 	}
+}
+
+func TestE2EFirstSweepStartsAtTailThenDeliversWhatFollows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("e2e builds and execs the flare binary")
+	}
+	cfg, state, s := scenario(t)
+
+	// The first-run contract through the real binary: a fresh -state dir over
+	// seeded logs pages NOTHING — the history is placed behind the cursor, not
+	// replayed into the sink (the 63-stale-pages-then-429 failure).
+	runSweep(t, cfg, state)
+	if got := s.deliveries(); len(got) != 0 {
+		t.Fatalf("first sweep over a fresh state dir must not page the backlog, got %d: %+v", len(got), got)
+	}
+
+	// What the producer writes after that first sweep is new and must page,
+	// through the same chain check a long-running watcher applies.
+	gatePath := filepath.Join(filepath.Dir(cfg), "log.jsonl")
+	block := mustBody(t, contracts.Verdict{
+		Subject:  contracts.Subject{Repo: "itsHabib/ship", Number: 190},
+		Source:   "code",
+		Producer: contracts.Producer{Class: contracts.ClassCode, Impl: "secret-scan"},
+		Decision: contracts.DecisionBlock,
+		Tier:     "2",
+		Why:      "written after flare first looked",
+	})
+	appendGateEnvelope(t, gatePath, contracts.Envelope{
+		ID: "vrd-block-2", Kind: contracts.KindVerdict, Run: "ship-190",
+		Time: time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC), Body: block,
+	})
+	runSweep(t, cfg, state)
+	got := s.deliveries()
+	if len(got) != 1 {
+		t.Fatalf("expected exactly the post-placement block to page, got %d: %+v", len(got), got)
+	}
+	assertDelivered(t, got, pathBlocks, "vrd-block-2")
 }
 
 func assertDelivered(t *testing.T, got []delivery, path, id string) {

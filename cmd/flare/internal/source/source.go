@@ -24,6 +24,36 @@ type Cursor struct {
 	LastHash string `json:"last_hash,omitempty"`
 }
 
+// Tail returns the cursor a source with no history in flare starts from: the
+// end of its last complete line, pinned (for gate logs) to that line's hash so
+// the next poll's chain check has an anchor. A torn final line is left beyond
+// the cursor, so it is lifted once the writer finishes it. A file that does not
+// exist yet yields the zero cursor — nothing has been written, so everything
+// that appears is new. Tail reads; it never lifts or delivers.
+func Tail(src config.Source) (Cursor, error) {
+	raw, err := os.ReadFile(src.Path)
+	if os.IsNotExist(err) {
+		return Cursor{}, nil
+	}
+	if err != nil {
+		return Cursor{}, fmt.Errorf("source %s: read %s: %w", src.Name, src.Path, err)
+	}
+	lines, size := completeLines(raw)
+	if len(lines) == 0 {
+		return Cursor{}, nil
+	}
+	cur := Cursor{Offset: size}
+	if src.Kind != config.SourceGateLog {
+		return cur, nil
+	}
+	var env contracts.Envelope
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &env); err != nil {
+		return Cursor{}, fmt.Errorf("source %s: bad artifact line at tail of %s: %w", src.Name, src.Path, err)
+	}
+	cur.LastHash = env.Hash
+	return cur, nil
+}
+
 // Read returns the push-worthy events appended since cur, plus the advanced
 // cursor. When the file has been truncated or the hash chain no longer
 // matches the cursor, Read emits a cursor-alert event and resweeps from the

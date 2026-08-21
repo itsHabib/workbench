@@ -4,13 +4,18 @@
 // never writes into a producer — the inbound decision path is cmd/escalate, not
 // flare (Amendment 3).
 //
-//	flare watch  [-config path]   poll loop (catch-up sweep first)
-//	flare sweep  [-config path]   one catch-up pass, then exit
-//	flare status [-config path]   health as JSON; exit 1 when stale
+//	flare watch  [-config path] [-from-start]   poll loop (catch-up sweep first)
+//	flare sweep  [-config path] [-from-start]   one catch-up pass, then exit
+//	flare status [-config path]                 health as JSON; exit 1 when stale
 //
 // watch and sweep are single-instance: both take an exclusive lock on the state
 // dir and exit 3 if another flare already holds it (two writers corrupt the
 // journal + cursors). status is lock-free — it only reads.
+//
+// First run: a source with no cursor yet starts at the current tail of its log
+// and journals that placement — a producer's history is not a page queue.
+// -from-start opts in to delivering the whole history instead (dedupe still
+// holds on later sweeps).
 package main
 
 import (
@@ -39,14 +44,15 @@ func main() {
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	stateDir := fs.String("state", defaultStateDir(), "flare's own state dir (journal, cursors)")
 	cfgPath := fs.String("config", "", "routes config (default <state>/routes.json)")
+	fromStart := fs.Bool("from-start", false, "watch/sweep: a source with no cursor yet starts at offset 0 and delivers its whole history (default: start at the current tail)")
 	fs.Parse(os.Args[2:])
 	if *cfgPath == "" {
 		*cfgPath = filepath.Join(*stateDir, "routes.json")
 	}
-	os.Exit(run(os.Args[1], *cfgPath, *stateDir))
+	os.Exit(run(os.Args[1], *cfgPath, *stateDir, *fromStart))
 }
 
-func run(verb, cfgPath, stateDir string) int {
+func run(verb, cfgPath, stateDir string, fromStart bool) int {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -59,9 +65,9 @@ func run(verb, cfgPath, stateDir string) int {
 	}
 	switch verb {
 	case "sweep":
-		return sweep(cfg, j)
+		return sweep(cfg, j, fromStart)
 	case "watch":
-		return watch(cfg, j)
+		return watch(cfg, j, fromStart)
 	case "status":
 		return status(cfg, j)
 	}
@@ -69,7 +75,7 @@ func run(verb, cfgPath, stateDir string) int {
 	return 2
 }
 
-func watch(cfg config.Config, j *journal.Journal) int {
+func watch(cfg config.Config, j *journal.Journal, fromStart bool) int {
 	release, err := j.LockWatch()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flare watch: %v\n", err)
@@ -78,21 +84,21 @@ func watch(cfg config.Config, j *journal.Journal) int {
 	defer release()
 	r := route.New(cfg, time.Now)
 	for {
-		if err := cycle(cfg, j, r); err != nil {
+		if err := cycle(cfg, j, r, fromStart); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		time.Sleep(time.Duration(cfg.PollSeconds) * time.Second)
 	}
 }
 
-func sweep(cfg config.Config, j *journal.Journal) int {
+func sweep(cfg config.Config, j *journal.Journal, fromStart bool) int {
 	release, err := j.LockWatch()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flare sweep: %v\n", err)
 		return 3
 	}
 	defer release()
-	if err := cycle(cfg, j, route.New(cfg, time.Now)); err != nil {
+	if err := cycle(cfg, j, route.New(cfg, time.Now), fromStart); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -104,7 +110,12 @@ func sweep(cfg config.Config, j *journal.Journal) int {
 // dropped, or throttled) — a failed delivery holds the cursor so the next
 // cycle retries, and the journal's seen-set keeps retries from re-paging
 // what already got through.
-func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
+//
+// A source with no cursor at all is placed first (see placeCursor): absent
+// means flare has never looked at it, which is a different fact from a cursor
+// deliberately reset to offset 0 (a resweep), and the two must not be confused
+// — the first is fresh state, the second is recovery.
+func cycle(cfg config.Config, j *journal.Journal, r *route.Router, fromStart bool) error {
 	seen, err := j.Seen()
 	if err != nil {
 		return err
@@ -115,6 +126,11 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	}
 	var failed []string
 	for _, src := range cfg.Sources {
+		if err := placeCursor(j, src, cur, fromStart); err != nil {
+			fmt.Fprintf(os.Stderr, "flare: %v\n", err)
+			failed = append(failed, src.Name)
+			continue
+		}
 		next, err := pollSource(cfg, j, r, src, cur.Sources[src.Name], seen)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "flare: %v\n", err)
@@ -136,11 +152,57 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router) error {
 	return nil
 }
 
+// placeCursor gives a source that has no cursor yet its starting position, and
+// journals that placement so the state explains itself. It is a no-op for a
+// source that already has one (including a cursor deliberately reset to zero).
+//
+// The default is the current tail: a producer's log is history the operator
+// already lived through, not a page queue, and a fresh flare that replays it
+// pages every long-dead escalation (with live Approve/Block buttons) into
+// Slack until it is rate-limited. -from-start opts in to the full history; the
+// journal's seen-set then keeps any later sweep from re-paging it.
+func placeCursor(j *journal.Journal, src config.Source, cur journal.Cursors, fromStart bool) error {
+	if _, ok := cur.Sources[src.Name]; ok {
+		return nil
+	}
+	start, note, err := firstCursor(src, fromStart)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "flare: %s: %s\n", src.Name, note)
+	if err := j.Append(journal.Entry{Time: time.Now(), Kind: journal.CursorInit, Source: src.Name, Note: note}); err != nil {
+		return err
+	}
+	cur.Sources[src.Name] = start
+	return nil
+}
+
+// firstCursor decides where a never-seen source starts and says why, in the
+// words the journal keeps.
+func firstCursor(src config.Source, fromStart bool) (source.Cursor, string, error) {
+	if fromStart {
+		return source.Cursor{}, "no cursor yet: -from-start, delivering the whole history from offset 0", nil
+	}
+	tail, err := source.Tail(src)
+	if err != nil {
+		return source.Cursor{}, "", err
+	}
+	note := fmt.Sprintf("no cursor yet: initialized at tail (offset %d", tail.Offset)
+	if tail.LastHash != "" {
+		note += fmt.Sprintf(", hash %.12s", tail.LastHash)
+	}
+	note += "); history before this point is not delivered — `flare sweep -from-start` pages it on purpose"
+	return tail, note, nil
+}
+
 // recoverCorruptCursors self-heals a corrupt cursor file instead of wedging the
 // loop. A corrupt cursors.json is *why* flare stopped delivering, so the
 // recovery must be as loud as a source chain break: it PAGES the operator
 // through the normal notify path (dispatch → catch-all → Slack), and only then
-// quarantines the bad file and resweeps from empty (dedupe prevents re-paging).
+// quarantines the bad file and resweeps every configured source from offset 0
+// (dedupe prevents re-paging). The reset is written as an explicit zero cursor
+// per source, not an absent one: absent would read as fresh state and be
+// placed at the tail, silently skipping whatever the corruption hid.
 // If the page cannot be delivered, it holds the corrupt file and returns an
 // error so the next cycle retries — the gap is never hidden behind a freshly
 // healthy status, and a failed page never silently loses the alert.
@@ -154,6 +216,9 @@ func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Route
 	}
 	if _, err := j.QuarantineCursors(); err != nil {
 		return journal.Cursors{}, err
+	}
+	for _, src := range cfg.Sources {
+		cur.Sources[src.Name] = source.Cursor{}
 	}
 	return cur, nil
 }
