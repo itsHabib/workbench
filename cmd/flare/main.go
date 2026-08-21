@@ -174,6 +174,18 @@ func placeCursor(j *journal.Journal, src config.Source, cur journal.Cursors, fro
 		return err
 	}
 	cur.Sources[src.Name] = start
+	// Persist the placement now, before this source is polled — not at the end
+	// of the cycle. Left in memory, a crash or a failed end-of-cycle save would
+	// make the next cycle see the source as unseen again and place it at a
+	// NEWER tail, silently skipping everything appended in between (including
+	// a delivery that errored and was owed a retry). Journal first, then save:
+	// if the save fails the source retries next cycle and journals that
+	// placement too, so the durable cursor always matches the last journaled
+	// cursor-init.
+	if err := j.SaveCursors(cur); err != nil {
+		delete(cur.Sources, src.Name)
+		return fmt.Errorf("source %s: persist first placement: %w", src.Name, err)
+	}
 	return nil
 }
 

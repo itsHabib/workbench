@@ -106,6 +106,29 @@ func TestFirstRunStartsAtTailAndDeliversOnlyWhatFollows(t *testing.T) {
 	}
 }
 
+func TestFirstPlacementIsPersistedBeforePolling(t *testing.T) {
+	// The placement must be on disk the moment it is made, not at the end of
+	// the cycle: a crash (or failed end-of-cycle save) between placement and
+	// save would otherwise re-place the source at a newer tail next cycle and
+	// silently skip everything appended in between.
+	cfg, j, _ := quietGate(t, firstRunEsc+"\n"+firstRunVrd+"\n")
+	cur := journal.Cursors{Sources: map[string]source.Cursor{}}
+	if err := placeCursor(j, cfg.Sources[0], cur, false); err != nil {
+		t.Fatal(err)
+	}
+	onDisk, err := j.LoadCursors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := source.Cursor{Offset: int64(len(firstRunEsc) + 1 + len(firstRunVrd) + 1), LastHash: "h2"}
+	if got := onDisk.Sources["gate"]; got != want {
+		t.Fatalf("placement must be durable before any poll: on disk %+v, want %+v", got, want)
+	}
+	if _, inits := routedIDs(t, j); len(inits) != 1 {
+		t.Fatalf("the persisted placement must be the journaled one, got %v", inits)
+	}
+}
+
 func TestFromStartDeliversTheWholeHistory(t *testing.T) {
 	// The deliberate opt-in: -from-start places a never-seen source at offset 0
 	// so the full history pages, and says so in the journal.
