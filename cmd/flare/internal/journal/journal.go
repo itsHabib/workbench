@@ -27,7 +27,9 @@ const (
 )
 
 // seen reports which entry kinds settle an event: settled events are never
-// re-notified, errored ones are retried because the cursor holds.
+// re-notified, errored ones are retried because the cursor holds. Cursor
+// placements and alerts about flare's own state (CursorInit) carry no event
+// and are deliberately not in this set.
 var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true}
 
 // SeenKey composes an event's dedupe key. Event IDs are only unique within a
