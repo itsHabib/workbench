@@ -13,18 +13,23 @@ import (
 	"time"
 )
 
-// Entry kinds: what happened to one event (or, for CursorAlert, to a
-// source's cursor).
+// Entry kinds: what happened to one event (or, for CursorAlert and
+// CursorInit, to a source's cursor). CursorInit records where a source with no
+// cursor was first placed — the one written fact that says "the history before
+// this offset was deliberately not delivered".
 const (
 	Delivered   = "delivered"
 	Dropped     = "dropped"
 	Throttled   = "skipped-throttle"
 	CursorAlert = "cursor-alert"
+	CursorInit  = "cursor-init"
 	Errored     = "error"
 )
 
 // seen reports which entry kinds settle an event: settled events are never
-// re-notified, errored ones are retried because the cursor holds.
+// re-notified, errored ones are retried because the cursor holds. Cursor
+// placements and alerts about flare's own state (CursorInit) carry no event
+// and are deliberately not in this set.
 var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true}
 
 // SeenKey composes an event's dedupe key. Event IDs are only unique within a

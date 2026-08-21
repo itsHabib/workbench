@@ -172,6 +172,10 @@ Get-Content "$env:USERPROFILE\.flare\journal.jsonl" -Tail 20     # delivery jour
   on a bad source path — check `routes.json` `sources[].path` exists.
 - A `cursor-alert` in the journal means a source log shrank or its chain hash
   broke; flare resweeps rather than silently resetting.
+- A `cursor-init` in the journal is where flare first looked at a source: the
+  cursor was placed at the log's tail and nothing before it was delivered.
+  `flare sweep -from-start` (before the watcher exists) is the opt-in to page
+  the backlog.
 
 ## 6. Uninstall
 

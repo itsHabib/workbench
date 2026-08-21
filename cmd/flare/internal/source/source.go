@@ -24,6 +24,36 @@ type Cursor struct {
 	LastHash string `json:"last_hash,omitempty"`
 }
 
+// Tail returns the cursor a source with no history in flare starts from: the
+// end of its last complete line, pinned (for gate logs) to that line's hash so
+// the next poll's chain check has an anchor. A torn final line is left beyond
+// the cursor, so it is lifted once the writer finishes it. A file that does not
+// exist yet yields the zero cursor — nothing has been written, so everything
+// that appears is new. Tail reads; it never lifts or delivers.
+//
+// The whole skipped prefix is run through the same parser Read uses, and its
+// events discarded: a corrupt record anywhere in it fails placement loudly,
+// exactly as it would fail a read. Anchoring past a malformed line would hide
+// it behind the cursor for good — a corrupt artifact must never read as quiet.
+func Tail(src config.Source) (Cursor, error) {
+	raw, err := os.ReadFile(src.Path)
+	if os.IsNotExist(err) {
+		return Cursor{}, nil
+	}
+	if err != nil {
+		return Cursor{}, fmt.Errorf("source %s: read %s: %w", src.Name, src.Path, err)
+	}
+	lines, size := completeLines(raw)
+	if len(lines) == 0 {
+		return Cursor{}, nil
+	}
+	_, last, err := parse(src, lines)
+	if err != nil {
+		return Cursor{}, fmt.Errorf("placing at tail: %w", err)
+	}
+	return Cursor{Offset: size, LastHash: last}, nil
+}
+
 // Read returns the push-worthy events appended since cur, plus the advanced
 // cursor. When the file has been truncated or the hash chain no longer
 // matches the cursor, Read emits a cursor-alert event and resweeps from the

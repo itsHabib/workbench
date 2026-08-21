@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,11 +68,15 @@ func buildFlare() (string, func(), error) {
 	return bin, func() { os.RemoveAll(dir) }, nil
 }
 
-// runSweep execs `flare sweep -config <cfg> -state <state>` as a subprocess and
-// fails the test on a non-zero exit — a swept-clean lie must surface here.
-func runSweep(t *testing.T, cfg, state string) {
+// runSweep execs `flare sweep -config <cfg> -state <state> [flags...]` as a
+// subprocess and fails the test on a non-zero exit — a swept-clean lie must
+// surface here. Scenarios that seed a log and expect its contents paged pass
+// "-from-start": a fresh state dir otherwise places every cursor at the tail
+// (the first-run contract) and delivers nothing seeded before it.
+func runSweep(t *testing.T, cfg, state string, flags ...string) {
 	t.Helper()
-	cmd := exec.Command(flareBin, "sweep", "-config", cfg, "-state", state)
+	args := append([]string{"sweep", "-config", cfg, "-state", state}, flags...)
+	cmd := exec.Command(flareBin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("flare sweep failed: %v\n%s", err, out)
@@ -187,6 +192,36 @@ func chainLines(t *testing.T, envs []contracts.Envelope) []string {
 		lines[i] = string(b)
 	}
 	return lines
+}
+
+// appendGateEnvelope extends a seeded gate log by one envelope, chained from
+// the log's current last hash — what gate itself does on its next write, so a
+// post-placement append is a faithful "new event arrived" fixture.
+func appendGateEnvelope(t *testing.T, path string, env contracts.Envelope) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read gate log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	var last contracts.Envelope
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("decode last gate line: %v", err)
+	}
+	env.Prev = last.Hash
+	env.Hash = seal(env.Prev, env)
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal envelope %s: %v", env.ID, err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open gate log for append: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		t.Fatalf("append gate line: %v", err)
+	}
 }
 
 func seal(prev string, env contracts.Envelope) string {

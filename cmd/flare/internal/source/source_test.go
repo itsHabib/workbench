@@ -374,3 +374,76 @@ func TestCursorAlertIDIsStableForSameFailure(t *testing.T) {
 		t.Fatalf("cursor-alert ID must be stable for the same failure: %q != %q", e1[0].ID, e2[0].ID)
 	}
 }
+
+func TestTailPinsEndOfLastCompleteLineAndItsHash(t *testing.T) {
+	// First-run placement: the cursor sits after the last complete line, pinned
+	// to that line's hash so the next poll's chain check has an anchor. A torn
+	// final line stays beyond the cursor and is lifted once finished.
+	torn := `{"id":"esc_2","kind":"esc`
+	src := gateFile(t, escLine+"\n"+vrdEsc+"\n"+torn)
+	cur, err := Tail(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Cursor{Offset: int64(len(escLine) + 1 + len(vrdEsc) + 1), LastHash: "h3"}
+	if cur != want {
+		t.Fatalf("tail cursor = %+v, want %+v", cur, want)
+	}
+	// Reading from it must lift nothing until something new is appended — the
+	// contract that keeps a fresh watcher from replaying history.
+	events, next, err := Read(src, cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 || next != cur {
+		t.Fatalf("reading from the tail must be quiet and hold, got %+v / %+v", events, next)
+	}
+}
+
+func TestTailOfReceiptsCarriesNoHash(t *testing.T) {
+	r1 := receiptLine("wf1", "failed")
+	src := shipFile(t, r1+"\n")
+	cur, err := Tail(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != (Cursor{Offset: int64(len(r1) + 1)}) {
+		t.Fatalf("receipts have no chain; want offset-only cursor, got %+v", cur)
+	}
+}
+
+func TestTailOfMissingOrEmptyFileIsZero(t *testing.T) {
+	// Nothing written yet means everything that appears is new: the placement
+	// is offset 0, and it is not an error (gate's log may not exist on a fresh
+	// machine when flare first starts).
+	missing := config.Source{Name: "gate", Kind: config.SourceGateLog, Path: filepath.Join(t.TempDir(), "absent.jsonl")}
+	cur, err := Tail(missing)
+	if err != nil || cur != (Cursor{}) {
+		t.Fatalf("missing file must place at zero without error, got %+v / %v", cur, err)
+	}
+	cur, err = Tail(gateFile(t, ""))
+	if err != nil || cur != (Cursor{}) {
+		t.Fatalf("empty file must place at zero without error, got %+v / %v", cur, err)
+	}
+}
+
+func TestTailOfCorruptGateLineFailsLoudly(t *testing.T) {
+	// Anywhere in the skipped prefix, not only the last line: anchoring past a
+	// malformed record would hide it behind the cursor for good.
+	for name, log := range map[string]string{
+		"last line":     escLine + "\nnot json\n",
+		"earlier line":  "not json\n" + escLine + "\n",
+		"verdict body":  `{"id":"vrd_x","kind":"verdict","run":"r","time":"2026-07-08T16:00:00Z","body":{"subject":{"repo":"x","number":1},"decision":123,"tier":"T1","why":"?"},"prev":"h0","hash":"h1"}` + "\n" + vrdEsc + "\n",
+		"receipt clock": receiptLine("wf1", "failed") + "\n" + `{"key":"wf_bad","source":"driver","outcome":"parked","generated_at":"not-a-time"}` + "\n" + receiptLine("wf2", "failed") + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := gateFile(t, log)
+			if name == "receipt clock" {
+				src = shipFile(t, log)
+			}
+			if _, err := Tail(src); err == nil {
+				t.Fatal("a corrupt record in the skipped prefix must fail placement, not be anchored past")
+			}
+		})
+	}
+}

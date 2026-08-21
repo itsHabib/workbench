@@ -17,7 +17,14 @@
 # No verb needs sudo: these are per-user agents bootstrapped into gui/$UID.
 #
 # Verbs:
-#   install    render templates + plutil -lint + bootstrap both agents
+#   install    render templates + plutil -lint + bootstrap both agents.
+#              First run is quiet by contract: with no ~/.flare/cursors.json,
+#              flare watch places every source at the CURRENT TAIL of its log
+#              (journaled as a cursor-init entry) and pages only what is written
+#              afterwards -- it does not replay the gate ledger's history into
+#              Slack. To page the backlog on purpose, run
+#              `flare sweep -from-start` once BEFORE install. No hand-seeding
+#              of cursors.json is needed.
 #   update     stop -> go install ./cmd/flare ./cmd/escalate -> start
 #   restart    bounce both agents (reload ~/.flare/routes.json after an edit)
 #   uninstall  bootout both agents and remove the installed plists

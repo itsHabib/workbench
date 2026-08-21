@@ -33,3 +33,10 @@ Tracked here per portfolio convention (status doc, not issues).
   code. Operator decision, since it sends event titles off-box.
 - **`/health` wiring** — surface `flare status` in the sign-on health board
   so a dead watcher is visible where the operator already looks.
+- **`source.Tail` seeks from the end** — trigger: a first-run placement on a
+  log large enough that one `os.ReadFile` + full-prefix parse is felt (today
+  a 27 MB ledger is ~ms, and every poll already reads the whole file).
+- **Empty `hash` at the tail** — `Tail` pins whatever the last record's
+  `hash` is; an empty one (a future envelope format) disables the first
+  chain check, as a zero cursor already does. Trigger: the gate artifact
+  format ever stops sealing every line.
