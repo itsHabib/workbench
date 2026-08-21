@@ -232,6 +232,14 @@ func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Route
 	for _, src := range cfg.Sources {
 		cur.Sources[src.Name] = source.Cursor{}
 	}
+	// Persist the zero cursors now, before the resweep runs: quarantine left no
+	// cursors.json, and a crash mid-resweep would otherwise restart into fresh
+	// state — tail placement — skipping exactly the records this recovery owes.
+	// The remaining window is the rename→save gap between two syscalls, not the
+	// whole resweep.
+	if err := j.SaveCursors(cur); err != nil {
+		return journal.Cursors{}, fmt.Errorf("cursors.json corrupt: persist reset cursors: %w", err)
+	}
 	return cur, nil
 }
 

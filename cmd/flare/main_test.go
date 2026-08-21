@@ -239,8 +239,19 @@ func TestCorruptCursorsPagesThenQuarantinesAndResweeps(t *testing.T) {
 	if !ok || reset != (source.Cursor{}) || !cur.LastPoll.IsZero() {
 		t.Fatalf("recovered cursors must hold an explicit offset-0 cursor per source so the cycle resweeps, got %+v", cur)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "cursors.json")); !os.IsNotExist(statErr) {
-		t.Fatal("the corrupt file must be quarantined after the alert is delivered")
+	// The reset is durable before the resweep runs: the quarantined file is
+	// gone, and a fresh cursors.json holding the zero cursors has replaced it,
+	// so a crash mid-resweep restarts into a resweep — never into fresh state.
+	onDisk, err := j.LoadCursors()
+	if err != nil {
+		t.Fatalf("reset cursors must be saved before the resweep, got %v", err)
+	}
+	if got, ok := onDisk.Sources["gate"]; !ok || got != (source.Cursor{}) {
+		t.Fatalf("reset zero cursor must be on disk before the resweep, got %+v", onDisk)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "cursors.json.corrupt-*"))
+	if len(matches) != 1 {
+		t.Fatalf("the corrupt file must be quarantined aside for forensics, found %v", matches)
 	}
 	tail, err := j.Tail(1)
 	if err != nil {
