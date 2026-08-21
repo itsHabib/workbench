@@ -91,6 +91,32 @@ log entry. Consequences the code enforces:
   no longer parks on a pure refresh, the refresh consumes no cycle: cycle count
   is derived from parks and merge outcomes, and a refresh that produces neither
   leaves the count where it was.
+- **A complete panel satisfies readiness, because the judge's answer was never
+  a judgment.** GitHub reports its aggregate `reviewDecision` only from
+  submitted reviews, so the comment-posting panel above leaves it empty however
+  completely it reviewed — and readiness escalated on that absence, on every
+  such PR, for a judge to reach one fixed conclusion from facts gate already
+  held. A fixed inference over recorded facts is a rule, so it lives in code:
+  readiness consults the panel rung's own completeness function, and a panel
+  complete at the judged head stands in for the missing decision. One function
+  with two callers is deliberate — readiness cannot call a panel complete that
+  the panel rung parks, and the head binding that makes the stand-in safe,
+  including exactly which non-judged head the refresh above buys, cannot drift
+  between them. The stand-in is scoped to ABSENCE, and to the panel's own
+  warrant: an explicit non-approving `reviewDecision` blocks outright, and a
+  completed reviewer whose review asked for changes — or a human's outstanding
+  change request, at any head — stops the PANEL standing in. It does not
+  reorder the stand-ins ranked above it. An authoritative human's exact-head
+  approval and the reviews-optional flag rest on different warrants (a person
+  with repository authority decided; the enforced-check context wants no
+  separate GitHub review) and still carry readiness on their own, over an
+  objecting panel as they did before — a separately pinned decision, since bot
+  findings are findings and authorization is not theirs. What carried the
+  decision is written into the verdict — the approval, the panel, or the flag —
+  along with any objection that pass stepped over, so the log tells an
+  intentional acceptance apart from readiness passing an unreviewed PR. The one
+  gap that leaves, a bodyless bot change request landing in no rung at all, is
+  recorded in `FOLLOWUPS.md` rather than closed here.
 - **An execution claim is permanent.** The exact action must still be the PR's
   newest terminal inside the same anchored-state lock that appends its claim.
   A command/token/transport failure never makes the action claimable again.

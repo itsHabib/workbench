@@ -86,6 +86,31 @@ Constraints that are design decisions, not omissions:
   credited, so a conflict-free base refresh no longer parks the panel or burns a
   review cycle. Everything else on the ladder still runs against the judged head
   — CI is re-read, findings re-extracted, and any park still reaches a judge.
+- **A complete panel is readiness's answer to an absent review decision.**
+  GitHub populates `reviewDecision` only from submitted reviews, so a panel of
+  comment-posting providers leaves it empty however completely it reviewed.
+  Readiness reuses the panel rung's own completeness rule — one function, two
+  callers, so the head binding (diff-equivalent refresh included) cannot drift —
+  instead of parking for a judge to re-derive a fixed inference from facts
+  already in state. An explicit non-approving `reviewDecision` still blocks
+  outright — the panel answers only that field's ABSENCE. What the PANEL may
+  stand in for is narrower still: a completed reviewer who asked for changes, or
+  a human's or a bot's outstanding objection at any head, stops the panel
+  standing in, and an incomplete, unknown, or stale-head panel escalates as
+  before. The any-head clause is load-bearing: the panel rung's own change-
+  request check is bound to the exact head, so a connector that re-completes a
+  new head as COMMENTED would otherwise leave a formal CHANGES_REQUESTED
+  standing against the superseded head with no rung holding it — the stance
+  evidence is where it survives (`botChangeRequest`). It does **not**
+  reorder the stand-ins ranked above it — an authoritative human's exact-head
+  approval, and the reviews-optional flag in the enforced-check context, still
+  carry readiness on their own warrant exactly as before, including over an
+  objecting panel (`TestReadinessBotChangeRequestDoesNotSuppressHumanApproval`:
+  bot findings are findings; authorization belongs to the account with
+  repository authority). What is new there is only that the verdict records the
+  objection such a pass stepped over. Mergeability, conflicts, and CI are
+  untouched, and the verdict always names what carried readiness — the approval,
+  the panel, or the flag.
 - **Up-to-date protection is a preflight, not an afterthought.** Before the
   merge command is emitted, the ladder reads the base branch's up-to-date
   requirement from BOTH mechanisms that carry it — classic branch protection's
