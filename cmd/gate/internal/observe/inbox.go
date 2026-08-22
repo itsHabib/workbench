@@ -450,7 +450,7 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 	// log is read once, so N recommended PRs cost one scan.
 	idx := buildCoverageIndex(arts, now, stateArg)
 	for i := range parked {
-		parked[i].Coverage = idx.assess(parked[i].Repo, parked[i].Number, parked[i].Run)
+		parked[i].Coverage = idx.assessParked(parked[i])
 		parked[i].CyclesUsed, parked[i].CyclesMax = idx.budget(parked[i].Repo, parked[i].Number, parked[i].Grant)
 	}
 	for i := range ready {

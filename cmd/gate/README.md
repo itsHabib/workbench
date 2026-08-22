@@ -93,6 +93,11 @@ parking. `gate explain -run` prints the same label on an escalation still
 awaiting judgment. The label exists because a budget overrun used to surface only
 at `gate judge`, the last step, after repeated `gate gate` runs had already spent
 it.
+A content park sitting exactly at its ceiling is still judgeable, so `next`
+prints its judge command without a wider-cycles mint beside it — the ceiling is
+the stop signal, not a prompt to widen the grant. Only a ceiling park (one
+carrying an authorization code) keeps its suggested mint, since judging it under
+the same grant re-applies the ceiling it parked on.
 
 Every recommended PR — parked or ready to merge — carries an **inventory check**
 (`grant_coverage` in JSON) answering the question that used to be discovered only

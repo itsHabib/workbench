@@ -191,3 +191,23 @@ autonomously would be smuggling a policy decision out of a proof; that call is t
   false) would fail-close the drifted-artifact path; the question is whether that belongs here or in
   the producer boundary that already pins tiers.
   **Decision owner:** operator. Until decided, behavior is unchanged and the tests pin it.
+
+## Deferred from #242 (cycle-ceiling pre-flight) — review panel, 2026-08-22
+
+- [ ] **Concurrent admission is read-then-check, not atomic.** Two `gate gate` runs for the same
+  PR started with one cycle left can both pass `preflightCycles` and both record counting
+  outcomes: `act`'s block and content-park branches return before its ceiling backstop. Pre-existing
+  (the old `act` counted in the same place); #242 only moved the serial-driver refusal earlier. Each
+  resulting park stays judgeable (a judgment excludes its own run from the count), so the damage is
+  a wasted cycle, not unjudgeable state. **Fix:** per-subject admission serialization — a lock or a
+  reservation artifact with an expiry — which is its own design question in an append-only log.
+- [ ] **`cycles_used` is 0 under an unbounded grant.** Neither `preflightCycles` nor `act` counts
+  when `max_cycles == 0`, because the count replays the whole audited chain for a ceiling that does
+  not exist. The result comment documents `0/0` as "unmeasured, unbounded". If drivers need usage
+  under unbounded grants, count from a cached audit rather than a second replay.
+- [ ] **`recordCycleRefusal` is hard, not best-effort.** A refusal whose artifact cannot be written
+  exits 4 with no JSON, unlike the grant-lapse path. Deliberate: a refusal that is not in the log
+  is not reconstructable, and exit 4 is the honest answer. Revisit only if drivers prove to need the
+  exit-3 contract over durability.
+- [ ] **`Project` / `Explain` can now fail on `st.List`** while projecting an awaiting escalation's
+  budget (`parkedBudget`). Failing closed on a real I/O error is the chosen behaviour.

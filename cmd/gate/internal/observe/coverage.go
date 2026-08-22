@@ -440,3 +440,23 @@ func renderCoverage(w io.Writer, c *GrantCoverage) {
 	fmt.Fprintf(w, "  grant %s: %s\n", c.State, c.Why)
 	fmt.Fprintf(w, "  → %s\n", c.SuggestedMint)
 }
+
+// assessParked assesses a row awaiting judgment. A judgment re-enters the
+// parked run and spends no new cycle, so for a content park the cycle ceiling
+// is not a gap: the park is judgeable as it stands, and printing a wider-cycles
+// mint beside its judge command would tell the driver to widen the cap instead
+// of judging — the opposite of the cycle-stop discipline. The tier ceiling
+// still stands (a judge can never exceed the grant's tier), and a ceiling park
+// — one that carries an authorization code — keeps its mint, since judging it
+// under the same grant re-applies the ceiling it parked on.
+func (idx coverageIndex) assessParked(p ParkedRun) *GrantCoverage {
+	c := idx.assess(p.Repo, p.Number, p.Run)
+	if c == nil || c.State != "ceiling" || p.Code != "" {
+		return c
+	}
+	if c.VerdictTier != "" && tier.Rank(c.VerdictTier) > tier.Rank(c.MaxTier) {
+		return c
+	}
+	c.State, c.Why, c.SuggestedMint = "covered", "", ""
+	return c
+}

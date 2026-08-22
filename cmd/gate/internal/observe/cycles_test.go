@@ -144,3 +144,38 @@ func TestExplainShowsCycleBudgetOnAwaitingEscalation(t *testing.T) {
 		}
 	}
 }
+
+// TestJudgeableParkAtCeilingGetsNoWiderMint pins the recovery path the
+// pre-flight refusal points at: a content park sitting exactly at its grant's
+// cycle ceiling is still judgeable (a judgment spends no cycle), so `next`
+// must print its judge command without a wider-cycles mint beside it. A
+// ceiling park keeps its mint — judging it re-applies the ceiling.
+func TestJudgeableParkAtCeilingGetsNoWiderMint(t *testing.T) {
+	in := buildInbox(parkedCycleArts(2), inboxBase.Add(time.Hour), "")
+	if len(in.Parked) != 1 {
+		t.Fatalf("want one parked run, got %+v", in.Parked)
+	}
+	p := in.Parked[0]
+	if p.CyclesUsed != 2 || p.CyclesMax != 2 {
+		t.Fatalf("budget = %d/%d, want 2/2", p.CyclesUsed, p.CyclesMax)
+	}
+	if p.Coverage == nil || p.Coverage.State != "covered" || p.Coverage.SuggestedMint != "" {
+		t.Fatalf("a judgeable park at its ceiling must not suggest a wider mint, got %+v", p.Coverage)
+	}
+	var buf bytes.Buffer
+	renderInbox(&buf, in)
+	if strings.Contains(buf.String(), "gate grant") {
+		t.Fatalf("next must not print a mint beside a judgeable park:\n%s", buf.String())
+	}
+
+	arts := parkedCycleArts(1)
+	arts = append(arts,
+		subjectVerdict("run_3", "vrd_3", inboxBase.Add(4*time.Minute), "o/r", 7, "t", "sha"),
+		outcome(state.KindEscalation, "run_3", "esc_3", "vrd_3", inboxBase.Add(5*time.Minute),
+			esc("grt_a", "grant_cycle_exceeded: cycle 3", "grant_cycle_exceeded", "o/r", 7)),
+	)
+	in = buildInbox(arts, inboxBase.Add(time.Hour), "")
+	if c := in.Parked[0].Coverage; c == nil || c.State != "ceiling" || c.SuggestedMint == "" {
+		t.Fatalf("a ceiling park keeps its mint, got %+v", c)
+	}
+}

@@ -424,7 +424,9 @@ type gateResult struct {
 	// the log, never caller-passed) and the grant's -max-cycles ceiling (0 ==
 	// unbounded). Present on every result so a driver sees the budget it is
 	// spending without a second read; both zero on a path that finalized
-	// before a grant was read.
+	// before a grant was read, and both zero under an unbounded grant, where
+	// nothing is measured because nothing is bounded (measuring would replay
+	// the whole chain for a ceiling that does not exist).
 	CyclesUsed int `json:"cycles_used"`
 	CyclesMax  int `json:"cycles_max"`
 	// Hash is the deciding action artifact's chain hash — the tamper-evident
