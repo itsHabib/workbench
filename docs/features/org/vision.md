@@ -207,6 +207,86 @@ The escalation seam deserves one more line: the human answers the **role**. The 
 
 ---
 
+### 3.9 The organizing idea: one state machine, and every plane is a guard
+
+The six planes above are a decomposition, not yet a reason the pieces belong
+together. This is that reason, and it is the frame the rest of the document
+should be read through.
+
+**The platform is a state machine over work ownership in which illegal states
+are unrepresentable, and every plane exists to guard one of its transitions.**
+
+```
+Chartered ──attach──▶ Held(incarnation) ──retire──▶ Retired
+                            │      ▲
+                   claim(w) │      │ yield · complete · abandon
+                            ▼      │
+                     Active(incarnation, w)
+                            │
+                 every effect carries (role, incarnation, fence, w)
+```
+
+Four laws, each a guard, each owned by exactly one plane. They are stated as
+things the system *cannot represent*, not things an agent should remember.
+
+**L1 — An incarnation cannot exist without owned work.** `attach` requires a
+charter whose scope names at least one work reference, and `prev == tip`.
+There is no unscoped agent. A lead's scope is a scope, a maintainer's is an
+`area`, an IC's is a task; the `work.kind` vocabulary (§3.6) is what lets one
+rule cover all three. *Guarded by Continuity.*
+
+**L2 — An incarnation may hold many work items and may act on exactly one.**
+`claim(w)` requires `w` to be held, no other claim active, and no open intent.
+`act` requires the state to be `Active`. This is the law with the largest
+practical payoff and it was missing from every framing: because exactly one
+claim is active, **the `work_ref` on an effect stamp is derived from state
+rather than supplied by the caller.** An agent structurally cannot attribute
+an effect to the wrong work item — a misuse class deleted rather than
+documented. It also makes context-switching an event, so the chain records
+what the incarnation was actually doing at each moment instead of that it held
+five things. *Guarded by Continuity; consumed by Effect.*
+
+**L3 — Stopping must have an effect on the work.** An incarnation cannot end
+cleanly without a terminal record — `yield`, `complete`, `abandon`, or
+`handoff`. Abnormal termination leaves the claim dangling, the fold reports
+`dangling_claim`, and **the next incarnation must resolve it before it may
+claim anything.** Silent disappearance is not a representable outcome. This is
+the same shape as the open-intent rule and for the same reason: an
+unresolved obligation blocks progress rather than being inherited invisibly.
+*Guarded by Continuity; resolved with Effect.*
+
+**L4 — An action that propagates state must produce a receipt.** Every effect
+requires `Active`, a grant covering its class, and a declared recovery, and
+produces intent / attempt / outcome. No receipt, no effect. *Guarded by
+Authority and Effect.*
+
+**Why this is the organizing idea rather than a detail.** It answers the
+question the plane table cannot: why these six and not four or nine. Each
+plane is the guard on a transition that would otherwise be enforced by prose,
+and a plane with no transition to guard does not belong. It also explains the
+composition law — a guard needs the artifact the previous transition produced,
+never the previous plane's code — which is why contracts and not call stacks
+falls out of the model rather than being imposed on it.
+
+**Where the sum types go.** Go cannot express a state machine whose invalid
+combinations are unconstructible, and pretending otherwise produces a
+hand-maintained switch statement that drifts from the document. The move is
+the one §6 already makes for protocols: **define the lifecycle where sum types
+are real, prove the transition relation total and the illegal states
+unreachable, emit the transition table as a checked-in artifact, and have Go
+interpret it.** Same mechanism as `parleyc`, second use — which is the
+evidence the mechanism was right. Nobody installs GHC to run the product, and
+the state machine has machine-verified provenance instead of a reviewer's
+recollection.
+
+**The friction this creates, and its resolution.** "Cannot act without a
+claim" is correct for an IC under `enforce` and hostile to an operator opening
+a terminal to poke at something. Levels resolve it exactly as they resolve
+every other instance of this tension: at `observe` and `advise` the claim is
+auto-created from context as a free-text work reference and the absence of one
+is recorded rather than refused; at `enforce` it is required. Same evaluation,
+different handling — the rule levels already obey (§5).
+
 ## 4. Component map
 
 ### Load-bearing
