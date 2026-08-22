@@ -19,13 +19,15 @@
 > ids must be digests rather than counters (§5); and the cross-chain audit must
 > reason about absence or it is a suppression attack (§7.6).
 >
-> §4.11 is new and narrows the design's claim: agents are cattle, the chain is
-> what makes them so, and a simpler architecture — cron'd stateless sweeps with
-> GitHub as the source of truth — is correct for maintenance work and is now an
-> explicit non-goal here rather than a later phase of this machine. It also adds
-> the principle that governs what a record may hold (*if it can be derived,
-> don't record it*) and a `wip_limit` that bounds production the way grants
-> bound authority.
+> §4.11 is new. Agents are cattle and the chain is what makes them so; a
+> simpler per-tick architecture — cron'd sweeps with the world as the source of
+> truth — is correct for maintenance, and the two are not rival designs but
+> different **role kinds** whose chains differ only in density. It adds the law
+> governing what a record may hold (*if it can be derived, don't record it*),
+> a `wip_limit` bounding production the way grants bound authority, and the
+> observation that an organization's work item is usually a ticket or a doc
+> rather than a pull request — which is where a single external store stops
+> knowing the state and the chain earns its place.
 
 ## 1. Problem & hypothesis
 
@@ -85,9 +87,10 @@ boot prompt and becomes a theorem about a reducer.
   sessions on any host (Claude Code, Agent SDK, `codex exec`).
 - Not a new work store. dossier holds tasks; assignments point at them. More
   strongly (§4.11): the chain records only what has no other home.
-- Not a home for sweep work. Stateless, per-tick, idempotent maintenance —
-  dependency bumps, dead-code sweeps, test pruning — belongs on the simpler
-  architecture in §4.11, with no chain at all.
+- Not a scheduler, and not a replacement for cron. Sweep work — dependency
+  bumps, dead-code sweeps, test pruning, alert triage — runs on the simpler
+  per-tick architecture in §4.11. The *role* that owns such an area still has
+  a chain; its ticks do not.
 - Not a chat surface. The operator's interface is a conversation with the
   leads, hosted wherever they already talk to agents.
 - Not consensus. One writer per chain, a supervisor that may take over, a
@@ -452,18 +455,36 @@ one bounded unit, open a PR, exit. Nothing is ever half-finished inside an
 agent, because the work item *is* the pull request. There is no thread to
 preserve, so a chain would be pure overhead.
 
-The line between the two is the shape of the work, not the size of it:
+But the split is not *chain or no chain*, and an earlier draft of this section
+got that wrong by writing maintenance out of the design entirely. A monitor
+owner is still a **role**: somebody durably owns alert health for a repo, tuned
+this monitor and retired that one for stated reasons, and escalated the thing
+nobody could reproduce. The individual tick is stateless; the *ownership* is
+not. What differs between role kinds is only **how much their chain carries** —
+which falls straight out of the law below, since a sweep role has almost
+nothing that another store does not already know.
 
-| | Sweep work | Owned work |
-| --- | --- | --- |
-| Unit | one tick, idempotent | one task, held for days |
-| Where state lives | GitHub, re-derived every tick | GitHub + dossier + the chain |
-| Thread across restarts | none needed | decisions made and rejected, approaches tried, what it waits on |
-| Architecture | cron + loops + backpressure | roles, chains, supervision |
+| Role kind | Owns | Chain density | Cadence |
+| --- | --- | --- | --- |
+| **IC** | one work item at a time, for days | **thick** — checkpoints every N tool calls; the thread across restarts is the whole point | continuous while assigned |
+| **Maintainer / monitor owner** | a standing area: alert health, dependency health, test hygiene | **thin** — charter, tuning decisions and their why, escalations. Almost no checkpoints; each tick re-derives from the world | cron'd; per-tick idempotent |
+| **Lead** | a scope and the roles inside it | **medium** — delegations, reports received, escalations, and the calls made on them | event-driven |
 
-So the maintenance loop is **not** this machine pointed at production, which
-is how it was described before this article was read. It is seven cron'd
-sweeps, and building it costs almost nothing.
+A maintainer's chain may sit unchanged for days and that is correct, not a
+failure to record. Its ticks are Malucelli's architecture exactly — cron,
+re-read the world, one bounded unit, exit — and the chain holds only the part
+that would otherwise be lost: who owns this area, and what they decided about
+it.
+
+**And in an organization the work item is usually not a pull request.** It is a
+ticket, a design doc, a runbook, an incident, a thread. Malucelli's
+GitHub-as-truth works *because* his work item is a PR and GitHub therefore
+knows the entire state of it. The moment work spans a tracker, a docs site, a
+chat thread, and a repository, no single store knows what is going on — which
+is the argument for the chain at its strongest, not a weakening of it. The
+practical consequences are that `work.kind` must not be PR-shaped (§5) and
+that a charter's capabilities are custody action manifests — comment on a
+ticket, publish a doc, tune a monitor — rather than git verbs.
 
 **The principle this yields: if it can be derived, don't record it.** FR7
 already forbids recording liveness; generalize it. PR state, CI status, branch
@@ -527,13 +548,13 @@ record under the key dir (per gate). Optional `snapshot-<seq>.json` every
 
 | kind | body | law |
 | --- | --- | --- |
-| `genesis` | `charter{ scope[], decides[], never_decides[], escalates_to, supervisor, supervises[], capabilities[], wip_limit }` | seq 1 only; exactly one; `wip_limit` bounds open work this role may have in flight (§4.11) |
+| `genesis` | `charter{ kind, scope[], decides[], never_decides[], escalates_to, supervisor, supervises[], capabilities[], wip_limit }` | seq 1 only; exactly one. `kind ∈ {ic, maintainer, lead}` sets checkpoint cadence and expected chain density (§4.11). `capabilities[]` are custody action manifests — comment on a ticket, publish a doc, tune a monitor — never git verbs. `wip_limit` bounds open work in flight |
 | `resume` | `incarnation{ id, host, session_ref, started_at }` | `prev` == tip; starts an incarnation; `id` is the digest of this record, never a counter (see below) |
 | `checkpoint` | `state{ goal, doing, decided[{what, why}], open[], next[], refs[] }`, `incarnation_id`, `next_due` | `next` non-empty; ≤ 4 KB; `incarnation_id` == current; `next_due` in the future |
 | `handoff` | same as `checkpoint` + `reason: stop\|compaction\|release` | ends an incarnation cleanly; no `next_due` (nothing is coming) |
 | `mark` | `mechanical{ session_ref, git{branch, head, dirty[]}, last_tools[], transcript_offset }`, `next_due` | host-authored; degraded; exempt from `empty_next` (§4.7) |
 | `takeover` | `by: <supervisor role>, from_incarnation, reason, evidence[]` | only a role named `supervisor` in genesis; ends the current incarnation |
-| `assign` / `release` | `work{ kind: dossier, id }`, `incarnation_id` | one open assign per work id across all chains (checked by drive at write time, law at fold time) |
+| `assign` / `release` | `work{ kind, id }`, `incarnation_id` | `kind ∈ {dossier, jira, pr, doc, incident, area, free}` (drive's vocabulary, extended — open, never an enum in the schema); one open assign per work id across all chains (checked by drive at write time, law at fold time). `area` is the standing-ownership kind a maintainer holds indefinitely rather than completes |
 | `message.sent` / `message.received` | `msg{ type, to\|from, ref{role, seq, hash}, body }` | `type ∈ {delegate, report, escalate, ask, answer, takeover_notice}` |
 
 **Fold output — `RoleState`.**
