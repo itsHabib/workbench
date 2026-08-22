@@ -593,6 +593,37 @@ refusals with remedies, and which store each line came from. `org doctor`
 checks the environment the way rooms does: anchor key present, state dir
 writable, clock sane, orphaned chains, chains that no longer fold.
 
+**Adoption is a design property, and the portfolio has hard evidence about
+it.** Of 51 authored skills on this machine, 23 have ever been invoked and
+two-thirds have never fired once — including most of the delivery machinery
+(`work-driver`, `pr-risk`, `review-coordinator`, `shipped`, `health`,
+`roster`, `recover`, `consult`). The most-used skill by a factor of two is
+`/continue` at 16 invocations, which exists solely to hand-write a handoff
+when continuity fails. The pattern separating used from unused is not quality:
+a tool is used when there is an unmistakable moment of need and it is the
+obvious response, and unused when it must be *remembered* while the operator
+is thinking about something else. `/claim`'s two events are the same finding
+at a smaller scale.
+
+Two consequences bind this design:
+
+- **Nothing load-bearing may require remembering a verb.** `incarnate`,
+  `checkpoint`, `handoff`, and `mark` are hook-driven for this reason, and
+  that is not a convenience — it is the difference between working and joining
+  the unused two-thirds. The operator-facing verbs (`explain`, `doctor`,
+  `annul`, `audit`) survive only because a refusal's `remedy` field names the
+  command at the moment it is needed. Any future verb without such a delivery
+  path should be assumed dead on arrival.
+- **This must retire more surface than it adds.** In a portfolio where two
+  thirds of tools go unused, adding thirteen verbs is only defensible if the
+  chain subsumes what already exists. It does: `/continue` (the automatic
+  handoff replaces the hand-written one), `/claim` and `/release` (assignment
+  is structural), `/roster` and `/recover` (both re-derive at read time what
+  the chain records), and the state-reconstruction half of `/status` and
+  `/wip`. Retiring them is p3 scope, not a later tidy-up — if the chain ships
+  and `/continue` is still being typed, the design has failed on its own
+  terms regardless of what the reducer proves.
+
 **The agent is the primary user, and the untested assumption is checkpoint
 quality.** Roles are operated by agents far more than by people, and §4.7 asks
 an incarnation to author its own distilled state. If agents write vague
