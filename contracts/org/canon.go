@@ -42,6 +42,9 @@ const Scheme = "canon/v1"
 // addition is a new opportunity for two implementations to disagree.
 type Kind uint8
 
+// The closed set of Value kinds. Zero is deliberately not a kind, so an
+// uninitialized Value refuses at encode time instead of silently encoding as
+// something.
 const (
 	KindString Kind = iota + 1
 	KindInt
@@ -77,12 +80,24 @@ type Field struct {
 	Value Value
 }
 
-// String, Int, Bool, Null, List, and Map construct Values. They are the entire
-// authoring surface; a record type's canonical shape is a Map of these.
+// String is a UTF-8 text Value. Invalid UTF-8 is refused at encode time
+// rather than replaced, since silently rewriting a byte changes what was
+// recorded.
 func String(s string) Value { return Value{kind: KindString, str: s} }
-func Int(n int64) Value     { return Value{kind: KindInt, num: n} }
-func Bool(b bool) Value     { return Value{kind: KindBool, flag: b} }
-func Null() Value           { return Value{kind: KindNull} }
+
+// Int is a signed integer Value, encoded in shortest decimal form. Integers
+// are the only numeric kind: float decimal representation is the richest
+// source of cross-implementation digest disagreement, and no org record needs
+// one.
+func Int(n int64) Value { return Value{kind: KindInt, num: n} }
+
+// Bool is a boolean Value.
+func Bool(b bool) Value { return Value{kind: KindBool, flag: b} }
+
+// Null is the explicit absent Value. It is distinct from an omitted field: a
+// record that records "no supervisor" states it, rather than leaving a reader
+// to infer it from a missing key.
+func Null() Value { return Value{kind: KindNull} }
 
 // List is an ordered sequence. Order is meaningful and preserved: a chain's
 // records, a charter's scopes, and a checkpoint's next-actions all mean
