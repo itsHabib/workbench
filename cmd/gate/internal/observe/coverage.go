@@ -60,6 +60,7 @@ type coverageIndex struct {
 	liveGrants  map[string][]coverageGrant
 	lastExpired map[string]time.Time
 	cycles      map[string]int
+	grantCycles map[string]int
 	runTier     map[string]string
 	subjectRun  map[string]string
 	stateArg    string
@@ -95,6 +96,7 @@ func buildCoverageIndex(arts []state.Artifact, now time.Time, stateArg string) c
 		liveGrants:  make(map[string][]coverageGrant),
 		lastExpired: make(map[string]time.Time),
 		cycles:      cyclesBySubject(arts),
+		grantCycles: grantCyclesByID(arts),
 		runTier:     runTiers(arts),
 		subjectRun:  subjectRuns(arts),
 		stateArg:    stateArg,
@@ -241,6 +243,31 @@ func (idx coverageIndex) assessSubject(repo string, number int) *GrantCoverage {
 	return idx.assess(repo, number, idx.subjectRun[subjectKey(repo, number)])
 }
 
+// grantCyclesByID maps every merge grant in the log — live or lapsed — to its
+// -max-cycles ceiling, so a park can be read against the grant it actually
+// parked under rather than whichever grant is widest now.
+func grantCyclesByID(arts []state.Artifact) map[string]int {
+	cycles := make(map[string]int)
+	for _, a := range arts {
+		g, ok := decodeMergeGrant(a)
+		if !ok {
+			continue
+		}
+		cycles[a.ID] = g.MaxCycles
+	}
+	return cycles
+}
+
+// budget is the review-cycle budget one parked row prints: cycles consumed by
+// the subject against the ceiling of the named grant (0 when unbounded or
+// unknown). Zero-valued for a row with no subject.
+func (idx coverageIndex) budget(repo string, number int, grantID string) (used, maxCycles int) {
+	if repo == "" || number == 0 {
+		return 0, 0
+	}
+	return idx.cycles[subjectKey(repo, number)], idx.grantCycles[grantID]
+}
+
 // cyclesBySubject counts consumed review cycles per repo#PR, mirroring gate's
 // own rule (main.go cycleCount): one counting outcome per distinct run is one
 // cycle, authorization parks and capability refusals do not count, and the
@@ -309,6 +336,10 @@ type outcomeCoverageBody struct {
 // countsAsCycleRow mirrors main.go's countsAsCycle: an escalation counts only
 // when it carries no authorization code (a content park, not a ceiling park),
 // and an action counts unless it was a capability refusal.
+// An already_merged action is not excluded here, unlike in countsAsCycle:
+// countingSubject already drops it at the parent-kind check, since its parent
+// is view evidence, never a verdict. Do not "symmetrize" the two without
+// moving that guard.
 func countsAsCycleRow(kind string, b outcomeCoverageBody) bool {
 	if kind == state.KindEscalation {
 		return b.Code == ""
@@ -408,4 +439,24 @@ func renderCoverage(w io.Writer, c *GrantCoverage) {
 	}
 	fmt.Fprintf(w, "  grant %s: %s\n", c.State, c.Why)
 	fmt.Fprintf(w, "  → %s\n", c.SuggestedMint)
+}
+
+// assessParked assesses a row awaiting judgment. A judgment re-enters the
+// parked run and spends no new cycle, so for a content park the cycle ceiling
+// is not a gap: the park is judgeable as it stands, and printing a wider-cycles
+// mint beside its judge command would tell the driver to widen the cap instead
+// of judging — the opposite of the cycle-stop discipline. The tier ceiling
+// still stands (a judge can never exceed the grant's tier), and a ceiling park
+// — one that carries an authorization code — keeps its mint, since judging it
+// under the same grant re-applies the ceiling it parked on.
+func (idx coverageIndex) assessParked(p ParkedRun) *GrantCoverage {
+	c := idx.assess(p.Repo, p.Number, p.Run)
+	if c == nil || c.State != "ceiling" || p.Code != "" {
+		return c
+	}
+	if c.VerdictTier != "" && tier.Rank(c.VerdictTier) > tier.Rank(c.MaxTier) {
+		return c
+	}
+	c.State, c.Why, c.SuggestedMint = "covered", "", ""
+	return c
 }

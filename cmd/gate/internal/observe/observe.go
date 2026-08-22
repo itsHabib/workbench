@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts"
+	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
 // Run is a structured, read-only projection of one gate run's artifact chain.
@@ -35,6 +36,12 @@ type Node struct {
 	Parents  []string         `json:"parents,omitempty"`
 	Evidence *EvidenceSummary `json:"evidence,omitempty"`
 	Verdict  *VerdictSummary  `json:"verdict,omitempty"`
+	// Cycles is set on the one node that is still awaiting judgment — an
+	// escalation that is the run's newest terminal — and carries the
+	// review-cycle budget that park sits under, read the same way `next`
+	// reads it (the subject's consumed cycles against the parked-under grant's
+	// ceiling). A resolved escalation, and every other kind, carries none.
+	Cycles *CycleBudget `json:"cycles,omitempty"`
 	// Flat marshals in Go's map order (alphabetical keys) — key order carries
 	// no meaning in the JSON projection.
 	Flat map[string]any `json:"flat,omitempty"`
@@ -48,6 +55,15 @@ type Node struct {
 type flatKV struct {
 	key string
 	val any
+}
+
+// CycleBudget is the review-cycle budget explain prints on an awaiting
+// escalation: Used cycles for the subject against the Max ceiling (0 ==
+// unbounded or unknown) of Grant, the grant the run parked under.
+type CycleBudget struct {
+	Used  int    `json:"used"`
+	Max   int    `json:"max"`
+	Grant string `json:"grant,omitempty"`
 }
 
 // EvidenceSummary captures what explain shows for an evidence artifact.
@@ -89,7 +105,57 @@ func Project(st *state.Store, run string) (Run, error) {
 	for i, a := range arts {
 		out.Artifacts[i] = projectNode(a)
 	}
+	i := awaitingEscalation(arts)
+	if i < 0 {
+		return out, nil
+	}
+	budget, err := parkedBudget(st, arts, arts[i])
+	if err != nil {
+		return Run{}, err
+	}
+	out.Artifacts[i].Cycles = budget
 	return out, nil
+}
+
+// awaitingEscalation returns the index of the run's newest terminal when that
+// terminal is an escalation — the one artifact still awaiting judgment — or -1
+// when the run has no terminal or its newest terminal is an action.
+func awaitingEscalation(arts []state.Artifact) int {
+	newest := -1
+	for i, a := range arts {
+		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
+			newest = i
+		}
+	}
+	if newest < 0 || arts[newest].Kind != state.KindEscalation {
+		return -1
+	}
+	return newest
+}
+
+// parkedBudget reads the whole log once to place the run's park in its
+// review-cycle budget: consumed cycles for the subject the run's artifacts
+// name, against the ceiling of the grant the escalation parked under. A park
+// naming no subject (a legacy run) carries no budget.
+func parkedBudget(st *state.Store, runArts []state.Artifact, esc state.Artifact) (*CycleBudget, error) {
+	var facts runFacts
+	for _, a := range runArts {
+		facts = mergeRunFacts(facts, factsFromArtifact(a))
+	}
+	b, _ := escalation.DecodeBody(esc.Body)
+	facts = mergeRunFacts(facts, runFacts{Repo: b.Repo, Number: b.Number})
+	if facts.Repo == "" || facts.Number == 0 {
+		return nil, nil
+	}
+	all, err := st.List(nil)
+	if err != nil {
+		return nil, fmt.Errorf("observe: cycle budget: %w", err)
+	}
+	return &CycleBudget{
+		Used:  cyclesBySubject(all)[subjectKey(facts.Repo, facts.Number)],
+		Max:   grantCyclesByID(all)[b.Grant],
+		Grant: b.Grant,
+	}, nil
 }
 
 // Explain reconstructs a gate run's decision chain from the artifact log alone.
@@ -100,7 +166,7 @@ func Explain(w io.Writer, st *state.Store, run string) error {
 	}
 	fmt.Fprintf(w, "run %s — %d artifacts\n\n", run, len(proj.Artifacts))
 	for _, n := range proj.Artifacts {
-		fmt.Fprintf(w, "%s  %s  %s\n", n.Time, n.Kind, n.ID)
+		fmt.Fprintf(w, "%s  %s  %s%s\n", n.Time, n.Kind, n.ID, cyclesSuffix(n.Cycles))
 		if n.Hash != "" {
 			fmt.Fprintf(w, "         hash: %s\n", n.Hash)
 		}
@@ -111,6 +177,15 @@ func Explain(w io.Writer, st *state.Store, run string) error {
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// cyclesSuffix is the "  cycles N/M" tail on an awaiting escalation's line —
+// the same label `next` prints on the parked row — or "" for every other node.
+func cyclesSuffix(c *CycleBudget) string {
+	if c == nil {
+		return ""
+	}
+	return "  " + cyclesLabel(c.Used, c.Max)
 }
 
 // ExplainJSON marshals the run projection as one JSON document.
@@ -137,7 +212,7 @@ func projectNode(a state.Artifact) Node {
 		projectEvidence(&n, a.Body)
 	case state.KindVerdict, state.KindJudgment:
 		projectVerdict(&n, a.Body)
-	case state.KindGrant, state.KindEscalation, state.KindAction:
+	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded:
 		projectFlat(&n, a.Body)
 	}
 	return n
@@ -258,7 +333,7 @@ func renderNode(w io.Writer, n Node) {
 		renderEvidence(w, n.Evidence)
 	case state.KindVerdict, state.KindJudgment:
 		renderVerdict(w, n.Verdict)
-	case state.KindGrant, state.KindEscalation, state.KindAction:
+	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded:
 		renderFlat(w, n)
 	}
 }

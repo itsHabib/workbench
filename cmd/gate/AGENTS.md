@@ -139,6 +139,17 @@ Constraints that are design decisions, not omissions:
   eighth time: a false "this was fixed" buries a live finding, and nothing in
   the output distinguishes a wrong verdict from a right one. Like `explain` and
   `next` it is read-only — no artifact, no state write, exit 0 or 4 only.
+- **The cycle ceiling is a pre-flight, not a post-mortem.** `gate gate` counts
+  the PR's consumed review cycles from the log before it gathers any evidence
+  and, when the run would land over the grant's `-max-cycles`, refuses at once
+  — exit 3, `grant_cycle_exceeded`, a `grant_needed` record under the run —
+  instead of doing the sweep and parking. The record is deliberately not an
+  outcome: it burns no cycle and never supersedes a park already awaiting
+  judgment for the same PR, which stays judgeable under its grant (a judgment
+  spends no new cycle; a fresh run would). Every result carries `cycles_used`
+  / `cycles_max`, and `next` and `explain` print `cycles N/M` on each
+  awaiting-judgment line, so a driver sees the budget before acting. The
+  ceiling in `act` remains as the backstop a judgment cannot launder.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

@@ -82,6 +82,23 @@ The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
 `gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
 needs-grant surfaces from one snapshot. Pass `-json` for the console feed.
 
+Each parked row is labelled `cycles N/M` (`cycles_used` / `cycles_max` in JSON):
+the review cycles the PR has consumed — this park's own run included, since a
+content park is a ladder decision — against the `-max-cycles` ceiling of the
+grant the run parked under, the same grant the judge line names (`∞` when
+unbounded). Judging the park spends no new cycle; a fresh `gate gate` would be
+cycle N+1, and once that exceeds M it refuses **pre-flight** — exit 3,
+`grant_cycle_exceeded`, nothing gathered — rather than sweeping the PR and
+parking. `gate explain -run` prints the same label on an escalation still
+awaiting judgment. The label exists because a budget overrun used to surface only
+at `gate judge`, the last step, after repeated `gate gate` runs had already spent
+it.
+A content park sitting exactly at its ceiling is still judgeable, so `next`
+prints its judge command without a wider-cycles mint beside it — the ceiling is
+the stop signal, not a prompt to widen the grant. Only a ceiling park (one
+carrying an authorization code) keeps its suggested mint, since judging it under
+the same grant re-applies the ceiling it parked on.
+
 Every recommended PR — parked or ready to merge — carries an **inventory check**
 (`grant_coverage` in JSON) answering the question that used to be discovered only
 at gate time: does a live merge grant actually cover this repo, and would its
