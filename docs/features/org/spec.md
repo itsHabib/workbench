@@ -19,7 +19,8 @@
 > ids must be digests rather than counters (§5); and the cross-chain audit must
 > reason about absence or it is a suppression attack (§7.6).
 >
-> §4.11 is new. Agents are cattle and the chain is what makes them so; a
+> §4.11 is new. Every incarnation is disposable and the chain is what makes it
+> so; a
 > simpler per-tick architecture — cron'd sweeps with the world as the source of
 > truth — is correct for maintenance, and the two are not rival designs but
 > different **role kinds** whose chains differ only in density. It adds the law
@@ -428,14 +429,14 @@ fixture the mutant accepts and production refuses, and the refusal identifier
 frozen into a golden artifact digest so that renaming a code is a test
 failure. This is the difference between a law and a comment.
 
-### 4.11 Cattle, not pets — and the two architectures that follow
+### 4.11 Every incarnation is disposable, and the chain is what makes it so
 
-The agents are cattle. Any incarnation may be shot at any moment, and
-replacing one is routine rather than an incident. That is the design's
-premise, not a concession to it — and **the chain is what makes it true.** An
-agent holding three days of reasoning in its head is inherently a pet: you
-cannot kill it without losing something. Externalize what it knows and every
-incarnation becomes disposable by construction. Residency is settled by the
+Any incarnation may be killed at any moment, and replacing one is routine
+rather than an incident. That is the design's premise, not a concession to
+it — and **the chain is what makes it true.** An agent holding three days of
+reasoning in its head cannot be killed without losing something, so it is
+precious whether you wanted it to be or not. Externalize what it knows and
+disposability becomes structural. Residency is settled by the
 same argument, from the other side: switchboard showed a live process buys
 serialized ownership and nothing else, and the tip rule supplies that without
 the process.
