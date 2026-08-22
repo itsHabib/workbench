@@ -29,6 +29,15 @@
 > observation that an organization's work item is usually a ticket or a doc
 > rather than a pull request — which is where a single external store stops
 > knowing the state and the chain earns its place.
+>
+> §4.12 is new and answers a question the document had been treating as a
+> single line in a table: can anyone actually operate this? It adds the one
+> thing that was genuinely missing — a correction path, since an append-only
+> chain with no `annul` means a wrongly-recorded decision poisons every future
+> fold forever — plus refusals that carry their remedy as data, an `explain`
+> and a `doctor` in the shape the rest of the portfolio already uses, and the
+> observation that checkpoint quality is the design's biggest untested
+> assumption. Each is gated by §11.1c–1d rather than asserted.
 
 ## 1. Problem & hypothesis
 
@@ -135,6 +144,7 @@ boot prompt and becomes a theorem about a reducer.
 | Integrity | Tamper-evident against a state-dir-only writer: `HMAC(key, head ‖ count)` anchor with the key outside the state dir — gate's bounded claim, not non-repudiation. |
 | Determinism | The write path invokes no model. The distilled `state` is authored by the incarnation itself at checkpoint time; a mechanical `mark` stands in when it didn't (§4.7). |
 | Portability | Chains are files; a role can be incarnated on any machine that has the state dir and the anchor key. No server. |
+| Operability | Somebody who was not here can diagnose and repair a role using only the tools — no author, no transcript. Every refusal returns `{code, message, remedy, evidence}`; every mistake is correctable by append (`annul`); `explain` and `doctor` answer "what is going on" and "what is wrong" without joining stores by hand. Gated by §11.1d, not asserted (§4.12). |
 | Cost | No new subscriptions; agent spend unchanged. Checkpoint authoring costs one short tool call per cadence tick. |
 
 ## 3. Architecture overview
@@ -526,6 +536,71 @@ append-only record of who decided what under which authority, and an audit
 that reasons about absence — is the entire difference between a personal
 automation and something an organization can run.
 
+### 4.12 Somebody has to operate this
+
+Everything above is about being correct. This section is about being
+*operable*, which until now the document treated as one line in the
+non-functional table and a few assertions that refusals would "name the
+remedy." That is the same failure the whole workbench exists to correct —
+written intention where a mechanism belongs — so operability gets
+requirements, a mechanism, and a gate that can fail, exactly like correctness
+got the mutant discipline (§4.10).
+
+The bar is one sentence: **somebody who was not here must be able to work out
+what a role is doing, why it refused, and how to fix it — using only the tools
+and the artifacts, with no access to the author and no transcript.** That is
+the same property gate already claims for merges ("show me why this shipped")
+applied to roles.
+
+**A mistake must be correctable, and today it is not.** The chain is
+append-only and has no correction record, so an agent that records a wrong
+decision, a wrong assignment, or a checkpoint that misstates what it did has
+poisoned every future fold of that role — permanently, with no path back short
+of abandoning the role. Append-only is the right storage discipline and the
+wrong error-handling story. So there is an `annul` record: it names the record
+it corrects by `(seq, hash)`, carries a reason, and is itself an ordinary
+append — the original is never rewritten, and the fold reports both the
+mistake and the correction. Three laws keep it from becoming a rewrite
+primitive:
+
+- A role may annul **its own** content records; a supervisor may annul those
+  of roles it supervises. Self-correction is normal and should not need
+  ceremony.
+- **Structural records cannot be annulled** — `genesis`, `resume`, `takeover`.
+  Annulling those would rewrite ownership history, which is the one thing the
+  chain exists to make impossible.
+- An annulled record still counts for `seq`, `prev`, and the anchor. Annulment
+  changes interpretation, never the chain.
+
+**A refusal must carry its remedy, as data.** `prev_mismatch` is a code, not
+an answer, and `fence_regression` is worse — understanding it currently
+requires knowing about chains, sequences, incarnations, and a high-water mark
+that lives invisibly inside a verifier. So every refusal returns
+`{ code, message, remedy, evidence }`, where `remedy` is the command to run or
+the fact to check, and `evidence` names the records that produced the verdict.
+custody already does this — its refusals name the command that unsticks
+them — and this is that convention made a contract rather than a habit.
+
+**One command answers "what is going on with this role."** The portfolio
+already has this instinct everywhere else: `console` explains gate's state and
+decides nothing, `rooms doctor` runs twelve host checks, `gate explain` exists.
+The org plane had `audit` and `tree` and no equivalent, which would leave an
+operator joining the chain, the cap ledger, dossier, and GitHub by hand to
+find out whether the chain lied or the derivation did. `org explain <role>`
+renders one page — charter, current incarnation and how liveness was derived,
+folded state and its age, assignments, authority in force and its fence, recent
+refusals with remedies, and which store each line came from. `org doctor`
+checks the environment the way rooms does: anchor key present, state dir
+writable, clock sane, orphaned chains, chains that no longer fold.
+
+**The agent is the primary user, and the untested assumption is checkpoint
+quality.** Roles are operated by agents far more than by people, and §4.7 asks
+an incarnation to author its own distilled state. If agents write vague
+checkpoints, every downstream fold is confidently wrong — and because §11's
+gate grades the *resume*, a bad checkpoint and a bad fold produce identical
+failures. They must be graded separately (§11.1c) or a failure cannot be
+diagnosed, which is the operability bar applied to our own validation plan.
+
 ## 5. Data model
 
 **Role id.** `org/<role-slug>` — e.g. `org/lead-a`, `org/ivy-lead`,
@@ -557,6 +632,7 @@ record under the key dir (per gate). Optional `snapshot-<seq>.json` every
 | `takeover` | `by: <supervisor role>, from_incarnation, reason, evidence[]` | only a role named `supervisor` in genesis; ends the current incarnation |
 | `assign` / `release` | `work{ kind, id }`, `incarnation_id` | `kind ∈ {dossier, jira, pr, doc, incident, area, free}` (drive's vocabulary, extended — open, never an enum in the schema); one open assign per work id across all chains (checked by drive at write time, law at fold time). `area` is the standing-ownership kind a maintainer holds indefinitely rather than completes |
 | `message.sent` / `message.received` | `msg{ type, to\|from, ref{role, seq, hash}, body }` | `type ∈ {delegate, report, escalate, ask, answer, takeover_notice}` |
+| `annul` | `annuls{ seq, hash }, reason, by` | own content records, or a supervised role's; never `genesis`/`resume`/`takeover`; the annulled record still counts for seq, prev, and the anchor (§4.12) |
 
 **Fold output — `RoleState`.**
 
@@ -651,9 +727,21 @@ org takeover  <role> --by <supervisor> --reason <text> [--evidence ...]
 org assign    <role> --work dossier:<project/phase/task>
 org send      <role> --to <role> --type delegate|report|escalate|ask|answer --body <json>
 org fold      <role> [--at <seq>]                                   → RoleState
+org annul     <role> --seq <n> --reason <text>                      → corrects a content record (§4.12)
 org tree                                                            → the org chart with derived liveness
 org audit     <role>                                                → anchor + chain check (gate audit's twin)
+org explain   <role>                                                → one page: charter, incarnation and how
+                                                                      liveness was derived, folded state and its
+                                                                      age, assignments, authority and its fence,
+                                                                      recent refusals with remedies, and which
+                                                                      store each line came from
+org doctor    [--json]                                              → environment checks, rooms-style: anchor key,
+                                                                      state dir writable, clock sane, orphaned
+                                                                      chains, chains that no longer fold
 ```
+
+`explain` and `doctor` decide nothing and write nothing — console's stance,
+kept deliberately: an explainer that can act is an explainer you stop trusting.
 
 Every verb's stdout is the JSON result; exit codes `0` ok, `1` refused
 (code in JSON), `4` error. Refusals are loud and name the remedy, like
@@ -933,6 +1021,21 @@ Three binary tests, one per gate, no vibes.
    says plainly that the reasoning since then is gone rather than inventing
    it. A confident wrong answer here is a worse failure than an honest
    partial one, and this test is the only place that distinction is caught.
+   **1c — grade the checkpoint, not only the resume.** Before killing the
+   session, score its last authored `state` on its own terms: does `decided`
+   carry the *why*, does `next` name an action someone could start cold, does
+   `open` list what it is actually waiting on? A vague checkpoint and a broken
+   fold fail 1a identically, so without this the result cannot be diagnosed —
+   §4.12's bar applied to our own validation plan. If checkpoints score well
+   and resumes still fail, the fold is wrong; if checkpoints score badly, the
+   prompt is wrong and no amount of reducer work will fix it.
+   **1d — the operability bar.** Hand a second person, or a fresh agent with
+   no transcript, a role broken three ways: a chain that no longer folds, a
+   grant refused on its fence, and a checkpoint carrying a wrong decision.
+   Pass if they diagnose all three and repair the third using only
+   `org explain`, `org doctor`, `org audit`, and `org annul`, with no access
+   to whoever built it. This is the only test of §4.12, and it gates the same
+   way the others do: a design nobody else can operate has not shipped.
 2. **Ownership (p4 gate).** Two incarnations of one role race: exactly one
    holds the tip; the other's write is refused with `prev_mismatch`. A
    supervisor takeover makes the displaced incarnation's grant unspendable
