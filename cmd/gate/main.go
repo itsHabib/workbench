@@ -1046,6 +1046,12 @@ func synthBrief(question string, synth briefFn) *escalation.Brief {
 // before; absence still never reads as "0 cycles consumed, proceed".
 func preflightCycles(e env, run string, grant capability.Grant, grantID string, subject verify.Subject, res gateResult) (gateResult, int, bool, error) {
 	res.CyclesMax = grant.MaxCycles
+	// An unbounded grant has no ceiling to enforce, so there is nothing to
+	// count and no audit to replay here: act still audits the log once and
+	// fails hard on tampering, so skipping the pre-flight scan loosens nothing.
+	if grant.MaxCycles == 0 {
+		return res, 0, false, nil
+	}
 	n, err := cycleCount(e.st, subject, run)
 	if errors.Is(err, errLogTampered) {
 		res.Outcome = "error"

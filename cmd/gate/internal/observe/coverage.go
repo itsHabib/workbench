@@ -336,6 +336,10 @@ type outcomeCoverageBody struct {
 // countsAsCycleRow mirrors main.go's countsAsCycle: an escalation counts only
 // when it carries no authorization code (a content park, not a ceiling park),
 // and an action counts unless it was a capability refusal.
+// An already_merged action is not excluded here, unlike in countsAsCycle:
+// countingSubject already drops it at the parent-kind check, since its parent
+// is view evidence, never a verdict. Do not "symmetrize" the two without
+// moving that guard.
 func countsAsCycleRow(kind string, b outcomeCoverageBody) bool {
 	if kind == state.KindEscalation {
 		return b.Code == ""
