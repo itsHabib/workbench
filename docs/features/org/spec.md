@@ -18,6 +18,14 @@
 > one that re-reads the tip (§7.3), which reverses §6's check order; incarnation
 > ids must be digests rather than counters (§5); and the cross-chain audit must
 > reason about absence or it is a suppression attack (§7.6).
+>
+> §4.11 is new and narrows the design's claim: agents are cattle, the chain is
+> what makes them so, and a simpler architecture — cron'd stateless sweeps with
+> GitHub as the source of truth — is correct for maintenance work and is now an
+> explicit non-goal here rather than a later phase of this machine. It also adds
+> the principle that governs what a record may hold (*if it can be derived,
+> don't record it*) and a `wip_limit` that bounds production the way grants
+> bound authority.
 
 ## 1. Problem & hypothesis
 
@@ -75,7 +83,11 @@ boot prompt and becomes a theorem about a reducer.
 
 - Not an always-on runtime. Roles are durable; incarnations are disposable
   sessions on any host (Claude Code, Agent SDK, `codex exec`).
-- Not a new work store. dossier holds tasks; assignments point at them.
+- Not a new work store. dossier holds tasks; assignments point at them. More
+  strongly (§4.11): the chain records only what has no other home.
+- Not a home for sweep work. Stateless, per-tick, idempotent maintenance —
+  dependency bumps, dead-code sweeps, test pruning — belongs on the simpler
+  architecture in §4.11, with no chain at all.
 - Not a chat surface. The operator's interface is a conversation with the
   leads, hosted wherever they already talk to agents.
 - Not consensus. One writer per chain, a supervisor that may take over, a
@@ -413,6 +425,85 @@ fixture the mutant accepts and production refuses, and the refusal identifier
 frozen into a golden artifact digest so that renaming a code is a test
 failure. This is the difference between a law and a comment.
 
+### 4.11 Cattle, not pets — and the two architectures that follow
+
+The agents are cattle. Any incarnation may be shot at any moment, and
+replacing one is routine rather than an incident. That is the design's
+premise, not a concession to it — and **the chain is what makes it true.** An
+agent holding three days of reasoning in its head is inherently a pet: you
+cannot kill it without losing something. Externalize what it knows and every
+incarnation becomes disposable by construction. Residency is settled by the
+same argument, from the other side: switchboard showed a live process buys
+serialized ownership and nothing else, and the tip rule supplies that without
+the process.
+
+A working system on this premise already exists and is worth naming, because
+it is simpler than this one and correct where it applies. In
+[*Claude Code, 12 days straight*](https://malucelli.net/posts/2026-08-18-claude-code-12-days-straight/)
+Malucelli runs seven cron'd loops on a $40/month VM against a Claude Max
+subscription and reports 229 pull requests opened and 213 merged in twelve
+days. His whole state story is one sentence: *nothing on the box is worth
+backing up* — GitHub is the source of truth, every tick re-reads open PRs and
+tracking issues, and losing the box costs only the ticks it missed.
+
+**That is the right architecture for the work he runs, and this design should
+not compete with it.** His agents are stateless sweeps: read the world, find
+one bounded unit, open a PR, exit. Nothing is ever half-finished inside an
+agent, because the work item *is* the pull request. There is no thread to
+preserve, so a chain would be pure overhead.
+
+The line between the two is the shape of the work, not the size of it:
+
+| | Sweep work | Owned work |
+| --- | --- | --- |
+| Unit | one tick, idempotent | one task, held for days |
+| Where state lives | GitHub, re-derived every tick | GitHub + dossier + the chain |
+| Thread across restarts | none needed | decisions made and rejected, approaches tried, what it waits on |
+| Architecture | cron + loops + backpressure | roles, chains, supervision |
+
+So the maintenance loop is **not** this machine pointed at production, which
+is how it was described before this article was read. It is seven cron'd
+sweeps, and building it costs almost nothing.
+
+**The principle this yields: if it can be derived, don't record it.** FR7
+already forbids recording liveness; generalize it. PR state, CI status, branch
+existence, task status, worktree presence — all derived at read time, never
+appended. The chain earns a field only when the fact exists nowhere else:
+who currently owns this work, what authority is in force, what was decided and
+why, and what comes next. The 4 KB cap on `state` is that principle with a
+number attached; when a field is proposed for a record, the first question is
+which other store already knows it.
+
+**Backpressure belongs in the charter.** Malucelli bounds *production*, not
+just authority: a sweep with five or more of its own pull requests already
+open ends the tick instead of proposing a sixth, tying output to review
+velocity rather than to the clock. Grants bound what a role may *do* — TTL,
+tier ceiling, cycle cap — and nothing yet bounds how fast it may create work
+for others. A role's charter carries a `wip_limit`, and a role at its limit
+reports rather than produces. His merge ratio is the evidence that this is
+load-bearing and not decoration.
+
+**Two failure modes to design against, observed rather than predicted.**
+Claude Code sessions expire at seven days, so a lead meant to persist for
+weeks structurally cannot be one session — an external confirmation of §4.3.
+And a session that hits a usage limit *does not exit*; it sits holding the
+tick, which is why he screen-scrapes for the limit message. That case is the
+argument for `next_due` over a process check: a process-liveness test calls
+that session alive, while a declared deadline correctly reports a missed
+commitment. The supervisor must treat "process exists" as the weakest of its
+signals.
+
+**What his setup does not answer, and this one must.** Two secrets sit on the
+box — a signing key and a GitHub token — and a human SSHes in every couple of
+days to re-authenticate. One credential, full reach, no attenuation, no
+per-role scoping, no receipts beyond the PR list. That is fine for one
+person's repositories and it is exactly the property that stops the shape from
+travelling anywhere with a security review. The plumbing this design adds on
+top of his — attenuated per-role grants, a fence that survives takeover, an
+append-only record of who decided what under which authority, and an audit
+that reasons about absence — is the entire difference between a personal
+automation and something an organization can run.
+
 ## 5. Data model
 
 **Role id.** `org/<role-slug>` — e.g. `org/lead-a`, `org/ivy-lead`,
@@ -436,7 +527,7 @@ record under the key dir (per gate). Optional `snapshot-<seq>.json` every
 
 | kind | body | law |
 | --- | --- | --- |
-| `genesis` | `charter{ scope[], decides[], never_decides[], escalates_to, supervisor, supervises[], capabilities[] }` | seq 1 only; exactly one |
+| `genesis` | `charter{ scope[], decides[], never_decides[], escalates_to, supervisor, supervises[], capabilities[], wip_limit }` | seq 1 only; exactly one; `wip_limit` bounds open work this role may have in flight (§4.11) |
 | `resume` | `incarnation{ id, host, session_ref, started_at }` | `prev` == tip; starts an incarnation; `id` is the digest of this record, never a counter (see below) |
 | `checkpoint` | `state{ goal, doing, decided[{what, why}], open[], next[], refs[] }`, `incarnation_id`, `next_due` | `next` non-empty; ≤ 4 KB; `incarnation_id` == current; `next_due` in the future |
 | `handoff` | same as `checkpoint` + `reason: stop\|compaction\|release` | ends an incarnation cleanly; no `next_due` (nothing is coming) |
@@ -735,7 +826,7 @@ history stays byte-identical.
 | **p3 host adapter** | One role resumes mid-thought on Claude Code | `org` CLI (incarnate / checkpoint / handoff / mark / fold / audit) over `contracts/org`; hooks: SessionStart / PreCompact / Stop / N-calls; repo-keyed memory; chain state dir + anchor | p1 | **VALIDATION GATE** — §11 test 1 |
 | p4 drive runtime | Roles over driver/worker | genesis/charter verbs; supervision reducer; `takeover` mints caps and advances the fence; `org tree`; custody and gate adopt `contracts/authority` and keep a per-role fence high-water mark | p3 ✓ | §11 test 2 |
 | p5 parley | Legal conversations | `org-delegate.parley`; `grants`/`effects`/`receipt` in the algebra; `observe` over chain pairs | p4 | real chains classify clean |
-| p6 the slice | The org at 1/10 scale | one lead, three ICs, one repo, one day; kill an IC; count operator prompts | p4, p5 | §11 test 3 |
+| p6 the slice | The org at 1/10 scale | one lead, three ICs, one repo, one day; kill an IC; count operator prompts. **Runs on a rented VM, not the operator's laptop** — §4.11's reference setup is a $40/month box against an existing subscription, which is what makes four concurrent day-long sessions practical at all | p4, p5 | §11 test 3 |
 
 Committed: p0–p3. p4–p6 are gated on p3 proving the thesis for a single
 role. Rough scope: p1 ≈ execution's size (~1.5k weighted LOC incl. tests);
