@@ -2,10 +2,22 @@
 
 **Status:** draft / proposal — NOT a build commitment. The artifact we decide from.
 **Owner:** @mh
-**Date:** 2026-08-21
-**Related:** [drive-v0](../../../../drive/docs/features/drive-v0/spec.md) (session classes, scope-bound caps, FR6 "liveness is derived"); [session-claims](../session-claims/spec.md); [execution-runtime](../execution-runtime/spec.md) and `contracts/execution` (the leaf-package shape this copies); `contracts/envelope.go` (the hash-chained record this reuses); [gate DESIGN — tamper model](../../../../gate/docs/DESIGN.md); [agents-as-processes-gleam](../../../../agents-as-processes-gleam/README.md) (the ownership finding); [fm-epoch-replay-laws](../../../../fm-epoch-replay-laws/README.md) (the fold laws to port); [parley](../../../../parley/README.md) (role protocols); dossier project `org`.
+**Date:** 2026-08-21 · **v2** 2026-08-22 (review round 1 folded; four bakeoff kernels read and adopted)
+**Related:** [drive-v0](../../../../drive/docs/features/drive-v0/spec.md) (session classes, scope-bound caps, FR6 "liveness is derived"); [session-claims](../session-claims/spec.md); [execution-runtime](../execution-runtime/spec.md) and `contracts/execution` (the leaf-package shape this copies); `contracts/envelope.go` (the hash-chained record this reuses); [gate DESIGN — tamper model](../../../../gate/docs/DESIGN.md); [agents-as-processes-gleam](../../../../agents-as-processes-gleam/README.md) (the ownership finding); [fm-epoch-replay-laws](../../../../fm-epoch-replay-laws/README.md) (the fold laws to port); [parley](../../../../parley/README.md) (role protocols); the 21 Aug bakeoff kernels `hack-branchroom`, `hack-mandate`, `hack-obligation`, `hack-proofline` (§4.9); dossier project `org`.
 
-> **Reviewers — focus areas:** §4.2 (the tip of a role's chain *is* ownership — the load-bearing claim), §4.6 (grants bind to incarnations, not chain heads), §4.7 (who writes the distilled state, and what a mechanical `mark` may stand in for), §7.3 (crash → takeover → the stale incarnation's next write), §9 (what is committed before the validation gate vs. after).
+> **Reviewers — focus areas:** §4.2 (the tip of a role's chain *is* ownership; lock scope; the cap ledger as a derived cache), §4.6 (grants carry a fence — a change to gate's trust model, not an additive field), §4.9 (four of these laws are already built; port rather than rewrite), §7.3 (the re-reading stale writer — the case that decides §6's check order), §7.6 (absence-based audit and the suppression attack), §9 (what is committed before the validation gate vs. after).
+
+> **What changed in v2.** Nine findings from review round 1 are folded, and four
+> decisions replace v1 hand-waves: the append critical section is now specified
+> (§4.2); the cap ledger is demoted to a derived cache so the two-plane write
+> need not be atomic (§4.2); liveness thresholds become a `next_due` the
+> incarnation declares (§4.2); and grant revocation gets a real mechanism — a
+> fencing token that needs no replication and no runtime dependency on the org
+> subsystem (§4.6). Reading the four bakeoff kernels then produced three
+> corrections v1 got wrong: the stale-writer case that actually matters is the
+> one that re-reads the tip (§7.3), which reverses §6's check order; incarnation
+> ids must be digests rather than counters (§5); and the cross-chain audit must
+> reason about absence or it is a suppression attack (§7.6).
 
 ## 1. Problem & hypothesis
 
@@ -26,6 +38,15 @@ hold zero memory files between them; the hand-off verbs that would fix this
 (`/claim`, `/release`, `/continue`) are opt-in, and the drive spec records
 two claim events in the two days after they shipped. Instructions are
 advice; nobody types the verb.
+
+The two halves of that evidence are one mechanism, not two symptoms. Memory
+is keyed by working directory, so a worktree session accrues state into a
+bucket nothing will ever read again — which makes continuity *invisible*,
+which is why the hand-off verbs feel like bureaucracy nobody types. Fixing
+the key is not a footnote in the host adapter (§6); it is the smallest
+version of this document's whole claim, and the org substrate gets it as a
+consequence of making the chain — not the directory — the thing state hangs
+off.
 
 Two prior experiments fix the frame:
 
@@ -165,8 +186,48 @@ Relationship to drive's caps: they are the same event seen from two planes.
 drive's cap says *this session has authority over scope S*; the chain says
 *this incarnation is role R and knows what R knows*. A `takeover` record on
 R's chain is what mints the successor's cap and revokes the predecessor's
-(§7.3). *Alternative:* leases/heartbeats — rejected: liveness is never
-recorded (FR7); a lease is recorded liveness by another name.
+(§7.3). *Alternative:* leases/heartbeats — rejected twice over: liveness is
+never recorded (FR7), and a lease needs a clock-holding daemon, which is the
+always-on process the non-goals exclude.
+
+**The `prev` check is detective; the lock is what makes it preventive.**
+Without a lock, two incarnations can both read `tip = hash(41)`, both build a
+record with `prev = hash(41)`, and both append: the file now has two records
+at seq 42, and the *next reader* refuses with `seq_gap` — but both writers
+believed they won, which is precisely the corruption switchboard's baseline
+suffered. So the append verb takes an exclusive advisory lock on that one
+chain file across the **whole** critical section — acquire → read tail →
+`Admissible(tip, next)` → write → fsync → release — not just the write. The
+two mechanisms are deliberately redundant: the lock prevents the fork, and
+`prev` still detects it if the lock is ever bypassed (a hand-edited file, a
+second implementation, a stale-lock steal). Stale-lock handling reuses gate's
+`lock.go` staleness clock, including its known TOCTOU takeover race — bounded
+here because a thief still has to pass the `prev` check.
+
+**Authority is computed, not stored — the cap ledger is a derived cache.**
+The reviewer asked whether the chain append and drive's cap revocation are
+atomic. They are not, and making them atomic would require the contracts leaf
+to reach into drive's ledger, which the boundary law forbids. Instead the
+divergence is made *harmless* rather than merely detectable: **the chain is
+authoritative for role ownership; drive's cap ledger is a derived cache that
+may lag but can never grant more than the chain allows.** Every authority
+decision is a join of (cap ledger, chain tip) in which the chain wins, so a
+`takeover` that lands on the chain while the cap revoke fails leaves the
+displaced incarnation with a cap that no reader will honor. The cap ledger
+exists for speed and for drive's own bookkeeping, never as a second source of
+truth.
+
+**Liveness thresholds are declared, not configured.** §7.1 needs to know
+whether a tip is stale, and a global threshold would have to be tuned against
+the checkpoint cadence — the reviewer correctly noted these are one
+calibration, not two. Rather than couple them, every `checkpoint`, `handoff`,
+and `mark` carries `next_due`: a wall-clock deadline the incarnation commits
+to writing its next record by. Staleness is then a comparison against a
+timestamp already in the record, needing no global tuning, and an incarnation
+about to do something slow extends its own deadline rather than tripping a
+supervisor. A missed `next_due` is *evidence* of death, joined with host
+signals (§7.3) — never proof on its own, since FR7 still forbids treating a
+recorded timestamp as recorded liveness.
 
 ### 4.3 Roles are durable; incarnations are disposable
 
@@ -198,16 +259,53 @@ supervisor so there is no singleton whose death orphans the org.
 the non-goals exclude, and it is exactly the single point of failure the
 two-leads shape exists to avoid.
 
-### 4.6 Grants bind to incarnations, not chain heads
+### 4.6 Grants carry an incarnation and a fence
 
-A gate grant or custody grant minted for a role carries `incarnation_id`.
-*Alternative considered:* bind to the exact `(seq, hash)` at mint time —
-rejected: every checkpoint would invalidate every grant. Binding to the
-incarnation means grants survive checkpoints and die on `takeover`, which is
-the intended semantics: authority follows continuity, and a displaced
-incarnation that still holds a token cannot spend it. **Reviewer call:** this
-is additive to custody's grant shape (`cst2_…`) and gate's; confirm the field
-lands in both or in a shared `contracts/authority` extension.
+A gate grant or custody grant minted for a role carries two new fields:
+`incarnation` (which incarnation it was minted to) and `fence` (the role
+chain's `seq` at mint time). *Alternative considered:* bind to the exact
+`(seq, hash)` — rejected: every checkpoint would invalidate every grant.
+Binding to the incarnation means grants survive checkpoints and die on
+`takeover`, which is the intended semantics.
+
+**The fence is how a verifier refuses a displaced incarnation without asking
+anyone.** "A displaced incarnation cannot spend its grant" was a goal
+statement in v1, not a design. Three mechanisms were considered: gate queries
+the org chain at verify time (couples gate's availability to the org state
+dir, which a CI-hosted required check will not have); drive pushes a
+revocation to gate and custody at takeover (the same two-plane write, one
+level down — it can fail); or the takeover is replicated into gate's log as a
+record it already knows how to read (needs the replication step, which can
+also fail). All three leave a window.
+
+The fence closes it without replication, using the classic fencing token: a
+verifier keeps a **per-role high-water mark** of the highest `fence` it has
+honored, and refuses any grant presenting a `fence` below it. Because a
+`takeover` advances the chain's `seq`, the successor's grants necessarily
+carry a higher fence than the predecessor's; the first time the successor
+does anything at all, the predecessor's grants become permanently
+unspendable — at every verifier independently, with no message passing
+between planes. The residual window is "after the takeover, before the
+successor's first spend," and `org incarnate` closes even that by bumping the
+fence as a no-op on resume. The high-water mark is one integer per role in
+each verifier's existing state; gate and custody gain no dependency on the
+org subsystem, only a monotone comparison.
+
+**This is a real change to gate's trust model, not an additive field.** Gate
+grants are currently bounded by scope, tier, and time. A fence adds
+*ordering* as a fourth bound, and a stored high-water mark is new mutable
+state in the verifier. It is small, but it should be reviewed as a change to
+what gate promises, not as a schema addition.
+
+**Decision on where the fields live** (v1 left this to the reviewer): a
+shared `contracts/authority` extension carrying `Incarnation` and `Fence`,
+imported by both custody and gate — not parallel fields in each. The
+criterion is that this is one invariant ("authority follows continuity"), and
+an invariant maintained in two places is an invariant that will drift; a
+single type gives one import, one conformance test, and one place to state
+the monotonicity law. The cost is coupling between two grant shapes that may
+later diverge, which is accepted because the shapes are stable and the
+invariant is load-bearing.
 
 ### 4.7 Who writes the distilled state — and what a `mark` may stand in for
 
@@ -224,6 +322,31 @@ incarnation's first act is to reconstruct from refs. Contract law: a
 (`empty_next`); a chain whose tip is a `mark` is legal; a role with no chain
 is not a role (`chain_missing`).
 
+**The hook budget is a hard timeout, never a wait.** The adapter asks for a
+structured state and, when the ≤ 3 s budget expires, appends a `mark` and
+returns. It never blocks the session and never interrupts an in-flight model
+call to get one. A live-but-busy incarnation therefore produces marks, which
+is correct: a mark says "still here, nothing authored," which is exactly true.
+
+**`mark` is exempt from `empty_next`, and the asymmetry is deliberate.** A
+`checkpoint` is authored by the incarnation and is a statement of intent, so
+having no next action is malformed. A `mark` is authored by the host and is a
+statement of continuity, not intent — it has no `next` field at all. A reader
+of `validate.go` should find that stated rather than inferred.
+
+**The cold-reconstruction floor.** A `mark` points at a transcript that may
+be gone — the host crashed, the runner was ephemeral, the machine is another
+machine. So the guarantee is stated in two tiers rather than assumed. After a
+`mark` tip, a resumed incarnation is **guaranteed**: its role identity and
+charter; its open assignments; the last *authored* state from the most recent
+`checkpoint`/`handoff`, however old; and the mark's git facts (branch, head,
+dirty paths), which are recoverable from the repository itself even with no
+transcript. It is **not** guaranteed the reasoning since that last authored
+state. That is the honest floor: continuity of *commitment*, not of thought.
+It also sets the checkpoint cadence's real job — the cadence bounds how much
+thought a crash can cost, and §10.3's N is that dial. §11 test 1 therefore
+runs the cold case (transcript deleted before resume), not only the warm one.
+
 ### 4.8 Where it lives
 
 `contracts/org` is a leaf: types, embedded JSON schema, `validate.go`
@@ -233,10 +356,76 @@ runtime (incarnate, supervise, takeover, tree) is drive, which already owns
 session classes and scope caps. The Claude Code host adapter is hooks. The
 role protocols are parley. No new repository.
 
+### 4.9 Four of these laws are already built — port them
+
+The 21 Aug 2026 bakeoff round produced four standard-library Go kernels that,
+read against this design, are not experiments about verification in general.
+They are implementations of four laws this substrate needs, each with frozen
+fixtures and a planted mutant. p1 ports them; it does not rewrite them.
+
+| Kernel | Law it already implements | Where it lands |
+| --- | --- | --- |
+| **hack-branchroom** | A pure `Reduce(state, event) (state, Decision)` with the tip as `parentEventDigest`, `nextSequence` covering duplicate-and-gap in one condition, and a fresh-epoch check that refuses a *perfectly correlated* stale writer | `reduce.go` — the fold, near-verbatim |
+| **hack-mandate** | Attenuating delegation: a child may shrink actions, shrink the validity window, and decrement depth; subject and artifacts are equality-locked; the audience of a grant is the only key that may mint the next one | `contracts/authority` — lead → IC |
+| **hack-obligation** | A monotone frontier: content-addressed obligation identity, a four-state lattice where `discharged` is re-enterable and `superseded` is terminal, and an add-only agent overlay with a mandatory ratchet | the definition of done a role cannot shrink by fiat |
+| **hack-proofline** | The two-witness rule for a bilateral fact, and the split between *the edge that made something historical* and *everything that went historical* | `org audit` (§7.6) |
+
+**The single best idea across all four is content-addressed identity.**
+hack-obligation derives an obligation's id from `(kind, claim, goal
+identity)`, so a change to the subject *forks a new obligation* rather than
+mutating an existing one — cross-revision contamination becomes impossible by
+construction rather than by a check. §5's incarnation ids adopt the same
+move, and for the same reason.
+
+**What does not port.** Every one of the four models its subject as a git
+artifact — `base_sha`, `head_sha`, `diff_digest`. A dossier task has no head
+SHA. The generalization that preserves the useful properties is a fixed
+identity spine (`task`, `revision`, `kind`, `digest`) where the digest covers
+a kind-specific body: the structs stay comparable, the revision-pinning attack
+story survives, and git-ness leaves the contract. Three further mismatches are
+recorded as open questions rather than smoothed over: mandate's grants assume
+an immutable subject and a short window (§10.7), obligation assumes one active
+goal where a role holds many, and obligation treats an oracle snapshot as a
+*complete statement of the world* so that silence revokes — the semantic most
+likely to need inverting when signals come from independent sources.
+
+### 4.10 Two corrections that apply to all four, and to us
+
+**Canonical encoding must not be `json.Marshal`.** All four kernels
+canonicalize by marshalling Go structs, which means field order is Go
+*declaration* order and `&`, `<`, `>` are HTML-escaped. The digests are stable
+Go-to-Go and nowhere else, and none of them carries a digest-scheme version,
+so reordering a struct field silently invalidates every historical digest.
+That is acceptable in a frozen hackathon artifact and unacceptable in an
+append-only chain meant to outlive refactors and be verified by a second
+implementation. `contracts/org` ships an explicit field-ordered canonical
+encoder with a versioned scheme before it writes its first record. This is
+cheap now and unfixable later.
+
+**The mutant is not optional — it is how a law is stated.** Each kernel ships
+the *wrong* law as a first-class code path (a `headOnly bool`, a
+`SettledIsTerminal` string, a retain-parent-epoch binder that bypasses the
+public constructor) and asserts in tests that it gets the planted case wrong,
+while proving both paths consumed byte-identical input. That last assertion is
+what forecloses the "you fed them different inputs" objection. Every refusal
+in §6 gets the same treatment in p1: a mutant that removes the check, a
+fixture the mutant accepts and production refuses, and the refusal identifier
+frozen into a golden artifact digest so that renaming a code is a test
+failure. This is the difference between a law and a comment.
+
 ## 5. Data model
 
 **Role id.** `org/<role-slug>` — e.g. `org/lead-a`, `org/ivy-lead`,
 `org/ivy-ic-3`. Lowercase, stable, never reused.
+
+**Incarnation id must be unguessable.** It is the digest of the `resume` (or
+`takeover`) record that created it — not a counter, not a sequence. This is a
+correction taken from hack-branchroom, whose epochs are `parent + n` and are
+therefore trivially guessable: its stale-writer refusal is only sound if the
+displaced writer never stamps the fresh epoch, and a robust writer that
+re-reads the tail before appending will copy the fresh id *by accident* and
+sail through. A digest cannot be arrived at by a writer that has not read the
+record that minted it, which is exactly the population we want to exclude.
 
 **Chain layout.** `<state>/org/<role-slug>/chain.jsonl` plus the anchor
 record under the key dir (per gate). Optional `snapshot-<seq>.json` every
@@ -248,10 +437,10 @@ record under the key dir (per gate). Optional `snapshot-<seq>.json` every
 | kind | body | law |
 | --- | --- | --- |
 | `genesis` | `charter{ scope[], decides[], never_decides[], escalates_to, supervisor, supervises[], capabilities[] }` | seq 1 only; exactly one |
-| `resume` | `incarnation{ id, host, session_ref, started_at }` | `prev` == tip; starts an incarnation |
-| `checkpoint` | `state{ goal, doing, decided[{what, why}], open[], next[], refs[] }`, `incarnation_id` | `next` non-empty; ≤ 4 KB; `incarnation_id` == current |
-| `handoff` | same as `checkpoint` + `reason: stop\|compaction\|release` | ends an incarnation cleanly |
-| `mark` | `mechanical{ session_ref, git{branch, head, dirty[]}, last_tools[], transcript_offset }` | host-authored; degraded |
+| `resume` | `incarnation{ id, host, session_ref, started_at }` | `prev` == tip; starts an incarnation; `id` is the digest of this record, never a counter (see below) |
+| `checkpoint` | `state{ goal, doing, decided[{what, why}], open[], next[], refs[] }`, `incarnation_id`, `next_due` | `next` non-empty; ≤ 4 KB; `incarnation_id` == current; `next_due` in the future |
+| `handoff` | same as `checkpoint` + `reason: stop\|compaction\|release` | ends an incarnation cleanly; no `next_due` (nothing is coming) |
+| `mark` | `mechanical{ session_ref, git{branch, head, dirty[]}, last_tools[], transcript_offset }`, `next_due` | host-authored; degraded; exempt from `empty_next` (§4.7) |
 | `takeover` | `by: <supervisor role>, from_incarnation, reason, evidence[]` | only a role named `supervisor` in genesis; ends the current incarnation |
 | `assign` / `release` | `work{ kind: dossier, id }`, `incarnation_id` | one open assign per work id across all chains (checked by drive at write time, law at fold time) |
 | `message.sent` / `message.received` | `msg{ type, to\|from, ref{role, seq, hash}, body }` | `type ∈ {delegate, report, escalate, ask, answer, takeover_notice}` |
@@ -262,13 +451,19 @@ record under the key dir (per gate). Optional `snapshot-<seq>.json` every
 RoleState {
   Role, Charter,
   Tip{ Seq, Hash }, Count,
-  Incarnation *{ ID, Host, SessionRef, Since },     // nil when no live incarnation
+  Incarnation *{ ID, Host, SessionRef, Since, NextDue },  // nil when none live
   State{ Goal, Doing, Decided, Open, Next, Refs, Degraded bool, At seq },
+  OrphanedSince *int,        // set when a takeover cut an incarnation off mid-work;
+                             // the successor must assess the refs before continuing (§7.3)
   Assignments[]{ Work, Since },
   Outbox[]{ To, Type, Seq },  Inbox[]{ From, Type, Seq },
   Supervisor, Supervises[]
 }
 ```
+
+`NextDue` is a declared deadline, not a heartbeat: the fold reports what the
+incarnation committed to, and a supervisor joins that with host signals to
+*derive* liveness. Nothing in `RoleState` asserts that a role is alive.
 
 Liveness is **not** a field. drive derives it from `Tip` age and host
 signals at read time.
@@ -300,6 +495,37 @@ Refusal codes (stable strings, surfaced verbatim by every runtime):
 | `empty_next` | `checkpoint`/`handoff` with no next actions |
 | `oversize_state` | `state` > 4 KB |
 | `anchor_mismatch` | keyed tip anchor disagrees with `(head, count)` — truncation or rewrite |
+| `fence_regression` | a grant presents a `fence` below the verifier's high-water mark for that role (§4.6) |
+
+**Check order is part of the contract.** Refusals are evaluated
+structural-before-semantic, and the first failure wins, so that a given
+malformed record always produces the same code no matter which runtime
+evaluated it:
+
+1. **Version** — `schema_version` this reader accepts.
+2. **Shape** — `ValidateRecord`: per-kind body law (`empty_next`,
+   `oversize_state`, malformed ids and refs).
+3. **Role** — the record names this chain's role at all (a routing error, not
+   a staleness one).
+4. **Incarnation** — `stale_incarnation`, for every kind that carries an
+   `incarnation_id`. `resume` and `takeover` are exempt: they *establish* an
+   incarnation rather than asserting one.
+5. **Chain position** — `seq_gap`, then `prev_mismatch`.
+6. **Role semantics** — `not_supervisor`, one-open-assign.
+
+**Incarnation is checked before chain position, and that order is load-bearing
+rather than cosmetic.** The intuition runs the other way — structural before
+semantic — and v1 had it backwards. The case that decides it is §7.3's
+re-reading writer: a displaced incarnation that re-reads the tail before
+appending presents a correct `prev` and a correct `seq`, so a
+position-first order returns *no* refusal from step 5 and reaches the
+incarnation check anyway. Meanwhile a displaced incarnation that appends
+blindly gets `prev_mismatch` under a position-first order — a *worse*
+diagnosis, because the true condition is "you have been replaced," not "you
+lost a race." Checking incarnation first gives the same correct answer in both
+cases. hack-branchroom's reducer independently arrived at this: it compares
+epoch before branch, sequence, tip digest, and call id, precisely so that a
+perfectly-correlated stale writer still receives the specific reason.
 
 **Runtime verbs (drive; CLI + MCP, same names).**
 
@@ -354,18 +580,55 @@ than one cadence tick.
 ### 7.3 Crash → takeover → the stale write
 
 1. IC `ivy-ic-3`'s host dies mid-task. Its tip is a `checkpoint` at seq 41.
-2. Supervisor `ivy-lead` derives liveness at read time: tip age > threshold,
-   transcript mtime stale, no process. It appends
+2. Supervisor `ivy-lead` derives liveness at read time: the record's declared
+   `next_due` has passed, transcript mtime is stale, no process. It appends
    `takeover{ by: ivy-lead, from_incarnation: inc-7, reason, evidence }` at
    seq 42, then incarnates a replacement (`resume` at 43) — or spawns a
    worker that does.
-3. drive re-mints the scope cap for the new incarnation and revokes inc-7's;
-   custody/gate grants naming inc-7 are dead (§4.6).
-4. inc-7 was not dead, only slow. Its next `checkpoint` arrives with
-   `prev = hash(41)` and `incarnation_id = inc-7`: refused, `prev_mismatch`
-   (and `stale_incarnation` on the body). The refusal names the successor.
-   inc-7's host adapter stops the session cleanly. Nothing was corrupted;
-   nothing needed a lock.
+3. The successor's grants are minted at `fence = 43`. drive re-mints the scope
+   cap and marks inc-7's revoked, but that write is a cache update, not the
+   authority (§4.2): even if it fails, inc-7's grants carry `fence = 40` and
+   every verifier refuses them the moment it has honored a higher fence
+   (§4.6). `org incarnate` bumps the fence on resume so the window does not
+   depend on the successor reaching a verifier first.
+4. inc-7 was not dead, only slow, and comes back to write. There are **two
+   shapes, and the second is the common one**:
+   - *Blind append.* inc-7 writes with the `prev` it remembered,
+     `hash(41)` — refused on chain position.
+   - *Re-read then append.* inc-7's write fails, or its adapter simply reads
+     the tail before every append (the normal shape for a robust writer), so
+     it re-reads the chain and appends with the **current** tip, seq 44, and
+     `incarnation_id = inc-7`. Now `prev` matches. `seq` matches. Every
+     correlation field matches. **Only `incarnation_id` refuses it.**
+
+   The second case is why the incarnation check is not redundant with `prev`
+   in a linear chain, and it is exactly the law hack-branchroom's reducer
+   already implements and mutation-tests: its late-parent terminal is
+   perfectly correlated on branch, sequence, call id, and tip digest, and is
+   caught solely by the epoch comparison. v1 of this document described only
+   the blind-append case and would have justified dropping the check.
+
+   Either way the refusal names the successor, and inc-7's host adapter stops
+   the session cleanly.
+
+**What is and is not guaranteed here.** The chain is uncorrupted and no lock
+was needed for the ownership decision. But inc-7 may have *done work* between
+seq 41 and its refused append: files written, commits pushed, a message sent
+whose receiving chain now records a delegation from an incarnation that no
+longer exists. That work is real and lives outside the chain. The design does
+not pretend otherwise — it makes the assessment an explicit obligation of the
+successor: the fold surfaces `orphaned_since = 41` with the last-known refs,
+and the successor's first task is to assess what it finds at those refs before
+continuing. This is inherent to any crash-recovery model, not a flaw, but v1
+overclaimed by saying "nothing was corrupted" without qualifying it to the
+chain.
+
+**Cross-chain fallout.** A `message.sent` from inc-7 that a peer already
+recorded as `message.received` is not retracted — the record stands, since
+chains are append-only. What changes is its interpretation: `org audit`
+reports it as *sent by a since-displaced incarnation*, and the receiving role
+may treat it as advisory. Retraction, if it is ever wanted, is a new record on
+the sender's chain, never an edit.
 
 ### 7.4 Delegate
 
@@ -391,8 +654,42 @@ five percent.
 
 `org audit` over two chains: for every `message.sent` on A naming
 `(B, seq, hash)`, B's record at `seq` has that hash and is a
-`message.received` naming A's record back. Either chain can be lying; both
-can't agree on a lie without the anchor key.
+`message.received` naming A's record back.
+
+**The audit must reason about absence, not only presence.** This is the
+sharpest correction in the review round, and it comes from hack-proofline,
+which computes retraction only when *both* witnessing edges are recorded and
+otherwise reports "current." Over a single trusted bundle that fail-open rule
+is a feature: nothing is retracted without evidence. Across two chains that
+may disagree, **the identical rule is a suppression attack** — role B simply
+omits the record, and A's grant goes on looking live forever. So the audit
+carries a completeness obligation in both directions: every `message.sent` on
+A *must* have a counterpart on B, and a missing counterpart is a finding
+(`counterpart_absent`), never a silent pass. Presence-based reasoning is safe
+only when you trust the store, and the whole point of two chains is that you
+do not.
+
+**What the audit can and cannot catch.** With the keyed anchor it detects
+truncation, rewrite, and now omission. It does **not** by itself catch a
+*coherently* lying chain — an adversary who rewrites a record and updates
+every reference around it consistently. Catching that needs per-record
+signatures binding each append to the role's key, so that a record's presence
+on A is evidence *about A* rather than an assertion by whoever assembled the
+bundle. Signatures are deliberately **not** in p1: the realistic adversary
+here is drift and accident, matching gate's stated tamper model, and adding
+keys would cost the offline, keyless verification that makes the audit cheap
+to run everywhere. It is recorded as the next layer down rather than as
+something this design already has.
+
+**Invalidation is seq-scoped, not merely reachable.** When a takeover
+displaces an incarnation at seq N, the facts that become historical are those
+that depended on it *after* N. A pure reachability closure — proofline's
+`descendants()` over one relation — would also sweep in facts that consumed
+the incarnation legitimately *before* N. So the cascade filters on chain
+position, and the two outputs stay separate the way proofline separates them:
+the single edge that made something historical, and the set of everything
+that went historical. Nothing is deleted; status is computed per query and
+history stays byte-identical.
 
 ## 8. Concurrency / consistency / failure model
 
@@ -413,16 +710,30 @@ can't agree on a lie without the anchor key.
 - **Two supervisors race a takeover** → second `takeover` has a stale
   `prev`; refused. The two-leads topology makes this the common case, and it
   is handled by the same rule as every other fork.
+- **Both leads down at once** → nobody left who is named as supervisor, and
+  the org cannot recover itself. Rather than add a third watcher (which just
+  moves the problem), the **operator is the implicit supervisor of every
+  role**: `org takeover --by operator` is always legal, on any chain,
+  regardless of what the genesis names. This is the one privileged write in
+  the model, and it is the right one — the human is the root of authority
+  everywhere else in the workbench too. §11 test 3 kills both leads to
+  confirm the path is real rather than assumed.
+- **The supervisor itself is stale** → a supervisor derives liveness from
+  `next_due` plus host signals, and can be wrong. A takeover on a role that
+  was merely slow is not corruption: the displaced incarnation is refused
+  cleanly (§7.3) and the cost is the orphaned-work assessment. The model
+  optimizes for *never two owners*, accepting *occasionally a premature
+  handover* — the reverse trade would require recorded liveness.
 
 ## 9. Rollout / implementation plan
 
 | Phase | Goal | High-level tasks | Depends on | Gate |
 | --- | --- | --- | --- | --- |
 | **p0 charter** | This document reviewed and locked | Reviewer panel; fold findings; decide §10 | — | design locked |
-| **p1 contracts/org** | The leaf package | Types + embedded schemas for the 5 contracts; `validate.go`; `reduce.go` (fold + refusals); conformance, property, and fuzz tests; `Envelope` kind registration; hygiene CI (leaf imports nothing) | p0 | `go test ./contracts/org/...` green; mutation tests for each refusal |
+| **p1 contracts/org** | The leaf package | Canonical encoder (versioned scheme) **first**; types + embedded schemas for the 5 contracts; `validate.go`; `reduce.go` — the fold **ported from hack-branchroom**, not written fresh; `contracts/authority` ported from hack-mandate; conformance, property, and fuzz tests; `Envelope` kind registration; hygiene CI (leaf imports nothing) | p0 | `go test ./contracts/org/...` green; **one mutant per refusal code** (§4.10), each proving production and mutant consumed byte-identical input; refusal identifiers frozen into a golden digest |
 | **p2 laws** | Machine-checked chain laws | Port `fm-epoch-replay-laws` fold ≡ checkpoint-resume ≡ replay; add contiguity, single-tip, resume-requires-tip, takeover-invalidates-stale; adversarial reducer that admits a fork must fail | p1 | `lake build`, axiom audit, counterexample fixture |
 | **p3 host adapter** | One role resumes mid-thought on Claude Code | `org` CLI (incarnate / checkpoint / handoff / mark / fold / audit) over `contracts/org`; hooks: SessionStart / PreCompact / Stop / N-calls; repo-keyed memory; chain state dir + anchor | p1 | **VALIDATION GATE** — §11 test 1 |
-| p4 drive runtime | Roles over driver/worker | genesis/charter verbs; supervision reducer; `takeover` mints/revokes caps; `org tree`; grants carry `incarnation_id` (custody + gate) | p3 ✓ | §11 test 2 |
+| p4 drive runtime | Roles over driver/worker | genesis/charter verbs; supervision reducer; `takeover` mints caps and advances the fence; `org tree`; custody and gate adopt `contracts/authority` and keep a per-role fence high-water mark | p3 ✓ | §11 test 2 |
 | p5 parley | Legal conversations | `org-delegate.parley`; `grants`/`effects`/`receipt` in the algebra; `observe` over chain pairs | p4 | real chains classify clean |
 | p6 the slice | The org at 1/10 scale | one lead, three ICs, one repo, one day; kill an IC; count operator prompts | p4, p5 | §11 test 3 |
 
@@ -432,13 +743,16 @@ p3 ≈ 600 (bash + Go CLI); p2 ≈ one Lean file plus adversarial twin.
 
 ## 10. Open questions
 
-1. **Grant binding field** (§4.6): extend custody's and gate's grant bodies
-   separately, or introduce `contracts/authority` with an `incarnation`
-   field both adopt? Leaning shared; reviewer call.
-2. **Checkpoint authorship on hosts without a prompt surface** (`codex exec`,
+*(v1 items 1 and 2's first half are now decided — see §4.6 and §4.7. Items
+below are renumbered; new questions 8–10 come from reading hack-mandate.)*
+
+1. **Checkpoint authorship on hosts without a prompt surface** (`codex exec`,
    SDK workers): the adapter can only `mark`. Is a chain of marks with
    occasional agent-authored handoffs good enough for ICs, or does the SDK
-   host need a mandatory end-of-turn `org checkpoint` tool call?
+   host need a mandatory end-of-turn `org checkpoint` tool call? §4.7's cold
+   floor makes this measurable rather than theoretical — a mark-only host
+   guarantees continuity of commitment but never of thought, so the question
+   is whether an IC's 2–3 day run can afford that. Decide from p3 evidence.
 3. **N for the tool-call cadence.** Start at 25; measure state drift between
    checkpoints in p3 and tune.
 4. **Where the state dir lives across machines.** Today `~/dev/*-state`
@@ -457,6 +771,36 @@ p3 ≈ 600 (bash + Go CLI); p2 ≈ one Lean file plus adversarial twin.
    reordered delegations, switchboard's session actor (Gleam/OTP, journal
    replay, `SequenceGap`) is the ready-made answer for that one seam, and
    parley's Gleam bus already runs in its style.
+7. **Subject drift on long-running work.** hack-mandate binds authority to a
+   `TaskRevision`, and bumping it kills every outstanding grant instantly.
+   Correct for a fixed diff; a footgun for a three-day IC task where the lead
+   adds a phase on day two — you either never bump (defeating the binding) or
+   you silently revoke work in flight. The chain suggests a third path: a
+   revision bump is a `message.sent` to the assignee, and the IC's grant
+   survives until it acknowledges or the lead takes the work back. Needs
+   deciding before p4 mints anything against a dossier task.
+8. **Canonical encoding.** hack-mandate's `EncodeCanonical` is
+   `json.Marshal` — field order is Go declaration order and `&`/`<`/`>` are
+   HTML-escaped, so it is Go-to-Go only. Anything this substrate signs or
+   digests must use a real canonical form (RFC 8785 / JCS or an explicit
+   field-ordered encoder) before a second language or a second process ever
+   verifies it. Cheap now, expensive after the first signed record exists.
+9. **Does a role need an obligation frontier, and where?** hack-obligation's
+   monotone frontier is the natural answer to "may this role report done" —
+   an IC cannot close a task while mandatory work is open, and cannot shrink
+   that set by fiat. It is deliberately *not* in v0's record set, because it
+   needs two things this design has not settled: which principal may discharge
+   which kind of obligation (authority, which the frontier explicitly refuses
+   to hold), and whether a role's many concurrent goals each get their own
+   frontier. A p4 question. If it lands, take the kernel's lesson and **emit
+   the predicate** — a `mandatory_open` field, not a shape every caller
+   re-derives and half of them get wrong.
+10. **Grant consumption.** hack-mandate records no `RequestID` and enforces no
+   budget: "may push" is not "may push 200 times." A three-day IC will make
+   thousands of requests against one grant. Does `contracts/authority` need a
+   consumption counter, or does custody's request log plus the fence make
+   after-the-fact accounting sufficient? Leaning the latter — accounting
+   beats enforcement here — but it should be a decision, not an omission.
 
 ## 11. Validation plan
 
@@ -469,12 +813,25 @@ Three binary tests, one per gate, no vibes.
    open threads, and the next action — and a blind reader cannot tell the
    transcript was cut. Run with the chain and without (today's cold open) on
    the same three tasks; the delta is the result.
+   **1b — the cold case.** Repeat once per repo with the transcript deleted
+   before incarnating, so the tip is a `mark` pointing at nothing. Pass if
+   the resumed incarnation correctly reports what it does *and does not*
+   know: it names its charter, assignments, and last authored state, and it
+   says plainly that the reasoning since then is gone rather than inventing
+   it. A confident wrong answer here is a worse failure than an honest
+   partial one, and this test is the only place that distinction is caught.
 2. **Ownership (p4 gate).** Two incarnations of one role race: exactly one
    holds the tip; the other's write is refused with `prev_mismatch`. A
    supervisor takeover makes the displaced incarnation's grant unspendable
-   at custody — checked by a refused request in custody's log.
+   at custody — checked by a refused request in custody's log carrying
+   `fence_regression`, with the org state dir made *unreadable* during the
+   check to prove the verifier needed no access to it (§4.6).
 3. **The slice (p6 gate).** One lead, three ICs, one repo, one working day.
    Pass if: the operator sends ≤ 10 prompts; an IC killed mid-task is taken
    over and its replacement resumes from the chain without operator input;
    `org audit` over every chain pair is clean; parley `observe` classifies
    every trace as complete or stalled, none deviating.
+   **3b — decapitation.** Kill both leads at once. Pass if
+   `org takeover --by operator` recovers a lead chain and the org resumes —
+   confirming §8's supervisor-of-last-resort is a real path and not an
+   assumption written into a document.
