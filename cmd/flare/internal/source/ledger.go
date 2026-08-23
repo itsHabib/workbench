@@ -183,6 +183,16 @@ func (l *ledger) park(grantID, verdictID, repo string, number int, curRun string
 // It reports known=false when an outcome's parent verdict is missing from the
 // index. gate treats that as an error and parks; flare treats it as "cannot
 // say", because an undercount here would withhold a working button.
+//
+// KNOWN LIMITATION, accepted deliberately: one dangling parent anywhere in the
+// log disables the cycle pre-flight for EVERY subject, not just the one it
+// belongs to — the scan cannot tell whose outcome it was without the parent it
+// is missing. The direction is safe (uncertainty renders the ordinary card, and
+// gate re-applies the ceiling at judgment either way), and the measured join
+// rate on the live ledger is 100% of 332 parks, so it is a fail-open on a case
+// that does not currently occur. Narrowing it means indexing each outcome's
+// subject at write time; recorded in docs/FOLLOWUPS.md rather than guessed at
+// here.
 func (l *ledger) cycles(repo string, number int, curRun string) (int, bool) {
 	if repo == "" || number == 0 {
 		return 0, false

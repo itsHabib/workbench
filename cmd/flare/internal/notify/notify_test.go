@@ -721,3 +721,52 @@ func TestSlackPreflightFailsOpen(t *testing.T) {
 			mustJSON(t, silent), mustJSON(t, approvable))
 	}
 }
+
+// TestSlackCeilingParkHeadlineIsHonest closes the gap between a ceiling park's
+// headline and its body. A ceiling park is excluded from resolvablePark — it
+// has no tap to offer — but the pre-flight still proves its approval cannot
+// land, so its body says "Cannot approve" while the headline used to say "Your
+// call". The lock-screen line is the half the operator reads first, and it must
+// not promise a decision that is not theirs to make.
+func TestSlackCeilingParkHeadlineIsHonest(t *testing.T) {
+	for _, code := range []string{escalation.CodeTierExceeded, escalation.CodeCycleExceeded} {
+		t.Run(code, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, preflightPark(map[string]string{
+				"code":       code,
+				"approvable": "no",
+				"blocker":    "verdict tier T3 exceeds grant ceiling T1",
+				"needs":      "a T3 grant for itsHabib/workbench",
+				"mint":       "gate grant -repo itsHabib/workbench -max-tier T3 -ttl 24h",
+			}))
+			head := msg.Attachments[0].Blocks[0].Text.Text
+			if strings.Contains(head, "Your call") {
+				t.Errorf("a ceiling park must not be headed 'Your call', got %q", head)
+			}
+			if !strings.Contains(head, "Grant needed") {
+				t.Errorf("headline = %q, want it to lead with the missing authority", head)
+			}
+			if strings.Contains(msg.Attachments[0].Fallback, "Your call") {
+				t.Errorf("fallback = %q, want the honest lock-screen line", msg.Attachments[0].Fallback)
+			}
+			// The buttons stay off — that rule is resolvablePark's and unchanged.
+			if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+				t.Errorf("a ceiling park must carry no resolve buttons, got %+v", btns)
+			}
+		})
+	}
+}
+
+// TestBlockerBlockOmitsEmptyLabels keeps a label from rendering with nothing
+// after it — worse than no label at all.
+func TestBlockerBlockOmitsEmptyLabels(t *testing.T) {
+	got := blockerBlock(event.Event{Fields: map[string]string{
+		"approvable": "no",
+		"mint":       "gate grant -repo r -max-tier T2 -ttl 24h",
+	}})
+	if strings.Contains(got, "Cannot approve:*\n") || strings.HasPrefix(got, "*Cannot approve:* \n") {
+		t.Errorf("an absent blocker must not render an empty label:\n%s", got)
+	}
+	if !strings.Contains(got, "gate grant") {
+		t.Errorf("the mint must still render:\n%s", got)
+	}
+}

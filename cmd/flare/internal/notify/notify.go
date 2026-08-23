@@ -334,7 +334,13 @@ func escalateHeadline(ev event.Event) string {
 	// "Your call" is a lie when the recorded ceilings make an approval
 	// un-landable: the call is not the operator's until they mint. Lead with the
 	// authority that is actually missing so the lock-screen line is honest.
-	if resolvablePark(ev) && !approvable(ev) {
+	//
+	// Deliberately NOT gated on resolvablePark. A ceiling park is excluded from
+	// that check — it has no tap to offer — but the pre-flight still proves its
+	// approval cannot land, and its body already says "Cannot approve". Gating
+	// here would leave exactly that card headed "Your call", which is the
+	// dishonest half of the pair.
+	if !approvable(ev) {
 		if s != "" {
 			return "🔑 Grant needed for " + s + " — cannot approve as-is"
 		}
@@ -420,12 +426,21 @@ func blockerBlock(ev event.Event) string {
 	if approvable(ev) {
 		return ""
 	}
-	lines := []string{"*Cannot approve:* " + compact(ev.Fields["blocker"])}
+	var lines []string
+	// Each line is guarded on its own content: a label with nothing after it is
+	// worse than no label, and this block renders on any card the pre-flight
+	// refused, not only the ones it filled in completely.
+	if blocker := compact(ev.Fields["blocker"]); blocker != "" {
+		lines = append(lines, "*Cannot approve:* "+blocker)
+	}
 	if needs := compact(ev.Fields["needs"]); needs != "" {
 		lines = append(lines, "*Needs:* "+needs)
 	}
 	if mint := compact(ev.Fields["mint"]); mint != "" {
 		lines = append(lines, "```"+mint+"```")
+	}
+	if len(lines) == 0 {
+		return ""
 	}
 	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
 }
