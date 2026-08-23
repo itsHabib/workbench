@@ -51,6 +51,30 @@ A tool may share **types and schemas** through `contracts`. A tool may **not**
 import another tool's decision logic. When a tool needs another tool's *output*,
 it reads an artifact. CI's `hygiene` job enforces this — it is not a convention.
 
+## Where work happens
+
+**`~/dev/workbench` stays on `main`, clean.** Every change happens in a
+worktree — `/worktree-add`, or `git worktree add` under `.claude/worktrees/`.
+
+This is not tidiness. A session that works directly in the main checkout and
+leaves it parked on a feature branch produces a tree that *looks* like live
+work to everyone who opens the repo afterwards, and there is no way to tell
+that apart from real in-flight work without reconstructing history. It happened
+between 2026-08-06 and 2026-08-16: the checkout sat on a merged branch, 18,496
+lines behind `main`, with a dirty tree whose entire tracked content had already
+landed. Two later sessions read it as unclaimed work in progress, and
+disproving that cost more than the original cleanup would have.
+
+So, at the start of any session that touches this repo:
+
+```
+git -C ~/dev/workbench status --short   # expect no output
+git -C ~/dev/workbench branch --show-current   # expect: main
+```
+
+Anything else is stale until proven otherwise — check it before trusting the
+tree, and never assume a dirty main checkout belongs to a live session.
+
 ## Review-cycle discipline
 
 Per PR, at most **two fix-rounds** against the review panel: fix every
