@@ -2,6 +2,7 @@ package source
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/preflight"
@@ -32,6 +33,10 @@ type ledger struct {
 	grants   map[string]preflight.Grant
 	verdicts map[string]verdictRef
 	outcomes []outcomeRef
+	// lifecycle indexes (see the section at the bottom of this file)
+	escSubjects map[string]verdictRef
+	runSHA      map[string]string
+	escWho      map[string]string
 }
 
 // verdictRef is the slice of a verdict the joins need: the subject a cycle
@@ -87,8 +92,11 @@ func (l *lazyLedger) get() *ledger {
 // see the tolerance note above.
 func buildLedger(raw []byte) *ledger {
 	lg := &ledger{
-		grants:   map[string]preflight.Grant{},
-		verdicts: map[string]verdictRef{},
+		grants:      map[string]preflight.Grant{},
+		verdicts:    map[string]verdictRef{},
+		escSubjects: map[string]verdictRef{},
+		runSHA:      map[string]string{},
+		escWho:      map[string]string{},
 	}
 	lines, _ := completeLines(raw)
 	for _, l := range lines {
@@ -109,7 +117,87 @@ func (l *ledger) index(env contracts.Envelope) {
 		l.indexVerdict(env)
 	case contracts.KindAction, contracts.KindEscalation:
 		l.indexOutcome(env)
+		l.indexLifecycle(env)
+	case contracts.KindResolution:
+		l.indexResolution(env)
 	}
+}
+
+// indexResolution records the VERIFIED human identity a resolution carries,
+// keyed on the escalation it closed.
+//
+// It exists because gate writes a park's terminal artifacts as one transaction
+// — judgment, verdict, action, resolution — and the judgment lands first. Its
+// body names only the producer ("operator"), while the resolution beside it
+// names the actual human Slack authenticated. Reading the judgment alone would
+// close the card with the weaker name and, since a closed card is never closed
+// twice, the real one would never appear. Indexing the whole file lets either
+// artifact render the same, better answer.
+func (l *ledger) indexResolution(env contracts.Envelope) {
+	if len(env.Parents) == 0 {
+		return
+	}
+	var b struct {
+		Who string `json:"who"`
+	}
+	if err := json.Unmarshal(env.Body, &b); err != nil || b.Who == "" {
+		return
+	}
+	l.escWho[env.Parents[0]] = b.Who
+}
+
+// resolvedWho returns the verified identity recorded for an escalation, or ""
+// when nothing recorded one.
+func (l *ledger) resolvedWho(escID string) string { return l.escWho[escID] }
+
+// indexLifecycle records the two joins a card update needs: which subject a
+// park's card belongs to, and the head sha gate pinned a run's merge to.
+func (l *ledger) indexLifecycle(env contracts.Envelope) {
+	if env.Kind == contracts.KindEscalation {
+		l.indexParkSubject(env)
+		return
+	}
+	l.indexMergeSHA(env)
+}
+
+func (l *ledger) indexParkSubject(env contracts.Envelope) {
+	var b struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}
+	if err := json.Unmarshal(env.Body, &b); err != nil || b.Repo == "" || b.Number == 0 {
+		return
+	}
+	l.escSubjects[env.ID] = verdictRef{repo: b.Repo, number: b.Number}
+}
+
+func (l *ledger) indexMergeSHA(env contracts.Envelope) {
+	var b struct {
+		Argv    []string `json:"argv"`
+		Outcome string   `json:"outcome"`
+	}
+	if err := json.Unmarshal(env.Body, &b); err != nil || b.Outcome != "would_merge" {
+		return
+	}
+	if sha := matchHeadCommit(b.Argv); sha != "" {
+		l.runSHA[env.Run] = sha
+	}
+}
+
+// matchHeadCommit lifts the sha gate pinned the merge to out of the recorded
+// argv. The flag is the whole point of gate's merge line — it makes the merge
+// refuse if the head moved after verification — so the value beside it is the
+// exact revision the authorization covers.
+func matchHeadCommit(argv []string) string {
+	for i, a := range argv {
+		if a == "--match-head-commit" && i+1 < len(argv) {
+			return argv[i+1]
+		}
+		if after, ok := strings.CutPrefix(a, "--match-head-commit="); ok {
+			return after
+		}
+	}
+	return ""
 }
 
 func (l *ledger) indexGrant(env contracts.Envelope) {
@@ -211,4 +299,40 @@ func (l *ledger) cycles(repo string, number int, curRun string) (int, bool) {
 		}
 	}
 	return len(runs), true
+}
+
+// --- lifecycle: what closed a park -------------------------------------------
+//
+// A Slack card is a snapshot, and a snapshot of a park is stale the moment the
+// park resolves. gate's inbox reduces parked runs BY SUBJECT — only the latest
+// terminal artifact per repo#PR is still "parked" — so a re-park, a merge, or a
+// keyboard `gate judge` silently drops an older park out of the inbox while its
+// Approve button stays live in Slack. Tapping one then fails with "escalation
+// is not currently parked: esc_… not in gate inbox".
+//
+// These indexes are the read that lets flare close that card instead. Same
+// posture as the rest of this file: read-only, tolerant, decides nothing.
+
+// subjectOf maps an escalation artifact id to the PR its card was rendered for,
+// so a terminal artifact can be applied to every live card for that subject —
+// matching gate's own subject reduction rather than guessing.
+func (l *ledger) subjectOf(escID string) (string, int) {
+	v := l.escSubjects[escID]
+	return v.repo, v.number
+}
+
+// mergeSHA returns the head sha gate pinned the merge to for a run, taken from
+// the recorded `--match-head-commit` argument. gate's action is the
+// AUTHORIZATION to merge, not a receipt that one landed (`dry_run` is true —
+// the caller runs the emitted command), so callers must present this as the
+// authorized head, not a confirmed merge.
+func (l *ledger) mergeSHA(run string) string { return l.runSHA[run] }
+
+// subjectFromVerdict resolves an artifact's parent verdict to the PR it names.
+func (l *ledger) subjectFromVerdict(verdictID string) (string, int) {
+	v, ok := l.verdicts[verdictID]
+	if !ok {
+		return "", 0
+	}
+	return v.repo, v.number
 }
