@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ import (
 // from the evidence it left behind.
 func TestOnlyRunsThatDecideBurnACycle(t *testing.T) {
 	e := testEnv(t)
-	fakeGH(t, ghResetAfterView)
+	fakeGH(t)
 	g, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T1", 3, "test", time.Hour, time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -171,30 +172,76 @@ func mustCycleCount(t *testing.T, e env, subject verify.Subject) int {
 	return n
 }
 
-// ghResetAfterView stands in for the CLI on the day this bug was reported:
-// the view read lands, and every read after it dies on the transport. The
-// message is the one gh actually printed, so the retry classifier is exercised
-// on real text — the run makes all three bounded attempts and then aborts,
-// which is also the proof that the bound terminates.
-const ghResetAfterView = `#!/bin/sh
-# echo, not cat: PATH holds only this stub, so no external binary is reachable.
-if [ "$1 $2" = "pr view" ]; then
-  echo '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","baseRefName":"main","reviewDecision":"APPROVED","statusCheckRollup":[],"headRefOid":"abc123","title":"t","mergedAt":null,"author":{"login":"someone","is_bot":false},"mergeCommit":null}'
-  exit 0
-fi
-echo 'error connecting to api.github.com: Post "https://api.github.com/graphql": read tcp 10.0.0.2:53000->140.82.113.5:443: read: connection reset by peer' >&2
-exit 1
-`
+// TestMain lets this package's own binary stand in for the gh CLI. When the
+// helper variable is set the process is running AS gh — installed on PATH by
+// fakeGH — and must answer like it rather than run the suite. This is the
+// portable form of the stub: a shell script would tie the abort test to a
+// POSIX shell, and the evidence package already stubs gh this way.
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_GH_RESET_HELPER_PROCESS") == "1" {
+		os.Exit(runResetAfterView())
+	}
+	os.Exit(m.Run())
+}
 
-// fakeGH puts a stub gh on PATH for the test. PATH is replaced rather than
+// runResetAfterView is the CLI on the day this bug was reported: the view read
+// lands, and every read after it dies on the transport. The message is the one
+// gh actually printed, so the retry classifier is exercised on real text — the
+// run makes all three bounded attempts before it aborts, which is also the
+// proof that the bound terminates.
+func runResetAfterView() int {
+	if len(os.Args) > 2 && os.Args[1] == "pr" && os.Args[2] == "view" {
+		fmt.Println(openPRView)
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, resetPeer)
+	return 1
+}
+
+const resetPeer = `error connecting to api.github.com: Post "https://api.github.com/graphql": ` +
+	`read tcp 10.0.0.2:53000->140.82.113.5:443: read: connection reset by peer`
+
+// openPRView is the smallest view the sweep accepts: an open PR with a head to
+// judge, so the already-merged refusal declines to fire and the run proceeds to
+// the diff read that kills it.
+const openPRView = `{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",` +
+	`"baseRefName":"main","reviewDecision":"APPROVED","statusCheckRollup":[],"headRefOid":"abc123",` +
+	`"title":"t","mergedAt":null,"author":{"login":"someone","is_bot":false},"mergeCommit":null}`
+
+// fakeGH installs this test binary on PATH as gh. PATH is replaced rather than
 // prefixed so nothing can fall through to a real, authenticated CLI.
-func fakeGH(t *testing.T, script string) {
+// Deliberately a local copy of the evidence package's installer: a shared
+// test-only helper package would couple two suites for twenty lines.
+func fakeGH(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
 	}
+	name := "gh"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	install(t, executable, filepath.Join(dir, name))
+	t.Setenv("GO_WANT_GH_RESET_HELPER_PROCESS", "1")
 	t.Setenv("PATH", dir)
+}
+
+// install hard-links the binary when the filesystem allows it and copies
+// otherwise — the same fallback the evidence package needs across platforms.
+func install(t *testing.T, from, to string) {
+	t.Helper()
+	if err := os.Link(from, to); err == nil {
+		return
+	}
+	binary, err := os.ReadFile(from)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	if err := os.WriteFile(to, binary, 0o755); err != nil {
+		t.Fatalf("install fake gh: %v", err)
+	}
 }
 
 // TestAbortRecordIsScopedToUndecidedRuns pins which failures get annotated.

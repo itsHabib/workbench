@@ -128,6 +128,9 @@ func TestTransientGHIsAnAllowlist(t *testing.T) {
 		"gh: Resource not accessible by integration (HTTP 403)",
 		"gh: Validation Failed (HTTP 422)",
 		"evidence: gh [pr diff]: unexpected argument",
+		// An oversized diff routes to the local-diff fallback, not to a retry:
+		// the answer is deterministic, and retrying would only delay it.
+		"evidence: gh [pr diff]: HTTP 406: the diff exceeded the maximum number of lines",
 		"",
 	}
 	for _, msg := range transient {
