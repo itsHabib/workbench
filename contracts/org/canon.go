@@ -25,6 +25,7 @@ package org
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"unicode/utf8"
@@ -102,8 +103,13 @@ func Null() Value { return Value{kind: KindNull} }
 // List is an ordered sequence. Order is meaningful and preserved: a chain's
 // records, a charter's scopes, and a checkpoint's next-actions all mean
 // something different rearranged.
+//
+// The items are copied. A variadic call cannot alias, but List(slice...) can,
+// and a caller that mutated its slice after building the Value would change
+// what a later Encode produced — a digest that depends on when it was taken.
+// The copy is cheap and the alternative is a rule callers have to know.
 func List(items ...Value) Value {
-	return Value{kind: KindList, list: items}
+	return Value{kind: KindList, list: slices.Clone(items)}
 }
 
 // Map is an unordered set of named fields, encoded in sorted-name order.
@@ -152,12 +158,7 @@ var (
 // embedding canonical bytes inside a larger structure records the scheme once,
 // at the boundary where the digest is taken.
 func Encode(v Value) ([]byte, error) {
-	var buf []byte
-	buf, err := appendValue(buf, v)
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return appendValue(nil, v)
 }
 
 func appendValue(dst []byte, v Value) ([]byte, error) {

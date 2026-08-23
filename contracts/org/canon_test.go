@@ -191,10 +191,6 @@ func TestRefusalPropagatesThroughNesting(t *testing.T) {
 	}
 }
 
-// Golden digests. These pin the byte-to-digest mapping including the scheme
-// version, which is hashed in rather than merely recorded beside the digest.
-// A change to the encoder, the scheme string, or the hash construction breaks
-// these — which is the intent: they are the chain's compatibility contract.
 // Golden digests, pinning the byte-to-digest mapping including the scheme
 // version that is hashed in rather than recorded beside it. A change to the
 // encoder, the scheme string, or the hash construction breaks these — the
