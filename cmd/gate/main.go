@@ -446,6 +446,22 @@ type gateResult struct {
 	Escape     *readiness.Route `json:"escape,omitempty"`
 	SelfGated  bool             `json:"self_gated,omitempty"`
 	RetryHelps *bool            `json:"retry_helps,omitempty"`
+	// Stamp reports what happened to the gate/authorized commit status, on the
+	// one path that attempts one. It exists because "best-effort" was only ever
+	// half true: a failed post went to stderr, and the operator-facing channel —
+	// the Slack card that says "gate authorized the merge" — had no way to know
+	// and reported unqualified success while no status was posted. The decision
+	// is still authoritative without it; a caller renders the shortfall rather
+	// than reversing anything.
+	Stamp *stampResult `json:"stamp,omitempty"`
+}
+
+// stampResult is the reported outcome of the provenance stamp: whether the
+// status landed and, when it did not, why. Additive and omitempty — absent on
+// every path that attempts no stamp.
+type stampResult struct {
+	Posted bool   `json:"posted"`
+	Error  string `json:"error,omitempty"`
 }
 
 func cmdGate(args []string) error {
@@ -500,7 +516,7 @@ func cmdGate(args []string) error {
 	if err != nil {
 		return err
 	}
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }
@@ -1052,8 +1068,16 @@ func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
 // the finished result, never an input to act. Best-effort — a post failure is
 // a warning on stderr, never a change to the exit code the caller already
 // holds; the audit chain, not the stamp, is the authorization.
-func emitAuthorizedStamp(res gateResult, code int, on bool) {
+func emitAuthorizedStamp(res *gateResult, code int, on bool) {
 	if !on || code != codeMerge {
+		return
+	}
+	// res.Hash is the action artifact's chain hash, set only once that artifact
+	// is durably appended. Nothing on this path can run before the authorization
+	// is in the log, because stamp.Post refuses a stamp with no hash to pin to —
+	// the ordering is a precondition of the payload, not a convention about call
+	// order. Guard here too so the network is not even reached.
+	if res.Hash == "" {
 		return
 	}
 	// res.PR is "owner/repo#number" on every path that reaches codeMerge, so the
@@ -1070,8 +1094,11 @@ func emitAuthorizedStamp(res gateResult, code int, on bool) {
 		Hash:    res.Hash,
 	})
 	if err != nil {
+		res.Stamp = &stampResult{Error: err.Error()}
 		fmt.Fprintf(os.Stderr, "gate: authorized stamp not posted (decision stands): %v\n", err)
+		return
 	}
+	res.Stamp = &stampResult{Posted: true}
 }
 
 // synthBrief synthesizes the operator brief for a content park and returns it
@@ -1480,7 +1507,7 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return judgeSlotState(e, *run, escalationID, err)
 	}
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }
@@ -1898,7 +1925,7 @@ func cmdResolve(args []string) error {
 	// a direct gate/judge pass — the stamp reflects the authorization, whichever
 	// entry point produced it. Downstream of the resolution stamp above, gated on
 	// codeMerge, best-effort.
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }

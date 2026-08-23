@@ -18,6 +18,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
+	"github.com/itsHabib/workbench/cmd/gate/internal/stamp"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
@@ -2633,4 +2634,90 @@ func TestResolveFlagsCarryTheChannel(t *testing.T) {
 	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "", verify.MethodSlackInteractive); err == nil {
 		t.Fatal("a resolution naming nobody must be refused")
 	}
+}
+
+// TestStampCannotPrecedeADurableAuthorization pins the ordering that made a
+// killed resolve survivable: the stamp's payload REQUIRES the action artifact's
+// chain hash, which exists only once that artifact is appended. So there is no
+// state in which gate touches the network before the authorization is durable —
+// the ordering is a precondition of the payload, not a convention about call
+// order that a later edit could quietly invert.
+func TestStampCannotPrecedeADurableAuthorization(t *testing.T) {
+	// No hash: the authorization is not in the log, so nothing may be posted.
+	res := gateResult{Run: "run_1", PR: "o/r#7", HeadSHA: "abc"}
+	emitAuthorizedStamp(&res, codeMerge, true)
+	if res.Stamp != nil {
+		t.Fatalf("a stamp must not be attempted before the action is durable, got %+v", res.Stamp)
+	}
+	// stamp.Post itself refuses the same payload, so the guard is not the only
+	// thing standing between a caller and an ungrounded status.
+	err := stamp.Post(stamp.Authorized{Repo: "o/r", Number: 7, HeadSHA: "abc", Run: "run_1"})
+	if err == nil || !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("stamp.Post must refuse a stamp with no action hash, got %v", err)
+	}
+	// And every non-authorizing terminal posts nothing at all.
+	for _, code := range []int{codeBlocked, codeParked, codeRefused, codeError} {
+		out := gateResult{Run: "run_1", PR: "o/r#7", HeadSHA: "abc", Hash: "deadbeef"}
+		emitAuthorizedStamp(&out, code, true)
+		if out.Stamp != nil {
+			t.Fatalf("code %d must post nothing, got %+v", code, out.Stamp)
+		}
+	}
+}
+
+// TestStrandedLegacyJudgmentStillResumes is the recovery path for the run this
+// PR was written after: itsHabib/ivy#22, whose judgment landed and whose gate
+// was then killed before the action. The judgment predates the decider binding,
+// so the fix must not have made it unrecoverable — resume loads the PERSISTED
+// judgment and never rebuilds it, which is exactly why the write-path decider
+// requirement cannot strand a decision already in the log.
+func TestStrandedLegacyJudgmentStillResumes(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 622)
+	subject := verify.Subject{Repo: "o/r", Number: 622, HeadSHA: "abc"}
+	// A judgment with NO decider, appended directly — the shape the live ledger
+	// holds for every judgment recorded before this binding existed.
+	legacy := verify.Verdict{
+		Subject:    subject,
+		Source:     "operator-judgment",
+		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision:   verify.DecisionPass,
+		Tier:       "T0",
+		Confidence: 1.0,
+		Why:        "approved in Slack by @mhdevstuff",
+	}
+	jArt, err := e.st.Append(state.KindJudgment, run, []string{esc.ID, grantArt.ID}, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The park is still the run's terminal — which is exactly why it looked
+	// parked while its one judgment was already spent. (observe's own tests pin
+	// how the projection names this state.)
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newestTerminal(before, run) != esc.ID {
+		t.Fatal("a stranded run's terminal is still its park")
+	}
+
+	// Resuming completes it: the SAME decision, no new judgment, and an outcome.
+	_, _, gotID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "resume", Who: "operator",
+	})
+	if err != nil {
+		t.Fatalf("a stranded legacy judgment must still be completable: %v", err)
+	}
+	if gotID != jArt.ID {
+		t.Fatalf("resume must reuse the persisted judgment %s, got %s", jArt.ID, gotID)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newestTerminal(after, run) == esc.ID {
+		t.Fatal("after a resume the run's newest terminal must be an outcome, not the park")
+	}
+	assertChainIntact(t, e)
 }

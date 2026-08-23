@@ -18,11 +18,16 @@ import (
 // re-mint is one glance away). Like every observe view it renders; it never
 // decides — nothing here is scored or ranked by anything but age and expiry.
 type Inbox struct {
-	Parked       []ParkedRun     `json:"parked"`
-	Unattributed []ParkedRun     `json:"unattributed"`
-	Grants       []GrantLine     `json:"grants"`
-	NeedsGrant   []NeedsGrantRow `json:"needs_grant,omitempty"`
-	ReadyToMerge []ReadyRow      `json:"ready_to_merge,omitempty"`
+	// JudgedUnauthorized lists runs holding a recorded decision that produced no
+	// outcome — a judgment written, then nothing. It leads the projection because
+	// such a run ALSO looks parked, and judging a park whose one judgment is
+	// already spent is wasted work at best.
+	JudgedUnauthorized []StrandedRun   `json:"judged_unauthorized,omitempty"`
+	Parked             []ParkedRun     `json:"parked"`
+	Unattributed       []ParkedRun     `json:"unattributed"`
+	Grants             []GrantLine     `json:"grants"`
+	NeedsGrant         []NeedsGrantRow `json:"needs_grant,omitempty"`
+	ReadyToMerge       []ReadyRow      `json:"ready_to_merge,omitempty"`
 	// Discharged counts the rows this projection withheld, per surface. It is
 	// ALWAYS emitted, including when the rows themselves are not: an inbox that
 	// shrank from 164 rows to 3 must be able to say so, or a reader cannot tell
@@ -535,12 +540,13 @@ func buildInbox(arts []state.Artifact, now time.Time, req NextRequest) Inbox {
 		ready[i].Coverage = idx.assess(ready[i].Repo, ready[i].Number, ready[i].Run)
 	}
 	in := Inbox{
-		Parked:       parked,
-		Unattributed: unattributed,
-		Grants:       grantLines(arts, now),
-		NeedsGrant:   needsGrantRows(arts, now, req.StateArg),
-		ReadyToMerge: ready,
-		Discharged:   Discharged{Parked: count(parkedOut), ReadyToMerge: countReady(readyOut)},
+		JudgedUnauthorized: strandedRuns(arts, req.StateArg),
+		Parked:             parked,
+		Unattributed:       unattributed,
+		Grants:             grantLines(arts, now),
+		NeedsGrant:         needsGrantRows(arts, now, req.StateArg),
+		ReadyToMerge:       ready,
+		Discharged:         Discharged{Parked: count(parkedOut), ReadyToMerge: countReady(readyOut)},
 	}
 	if req.IncludeDischarged {
 		in.DischargedRows = &DischargedRows{Parked: parkedOut, ReadyToMerge: readyOut}
@@ -1107,6 +1113,7 @@ func shortDur(d time.Duration) string {
 }
 
 func renderInbox(w io.Writer, in Inbox) {
+	renderStranded(w, in.JudgedUnauthorized)
 	if len(in.Parked) == 0 {
 		fmt.Fprintln(w, "nothing awaits judgment.")
 	} else {
