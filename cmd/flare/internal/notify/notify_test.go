@@ -769,6 +769,9 @@ func TestBlockerBlockOmitsEmptyLabels(t *testing.T) {
 	}
 	if !strings.Contains(got, "gate grant") {
 		t.Errorf("the mint must still render:\n%s", got)
+	}
+}
+
 // TestFinalizeReplacesTheCardAndRepliesInThread pins the two calls a closed
 // park makes and the payloads they carry: chat.update addressed to the posted
 // message (buttons gone, outcome and decider on), then a threaded
