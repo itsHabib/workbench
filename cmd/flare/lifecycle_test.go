@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func (f *fakeCourier) courier() courier {
 	}
 }
 
-func tsFor(n int) string { return "170000000." + string(rune('0'+n)) }
+func tsFor(n int) string { return "170000000." + strconv.Itoa(n) }
 
 // posted reports whether an artifact id was paged as its own card.
 func (f *fakeCourier) posted(id string) bool {

@@ -51,17 +51,21 @@ func digest(cfg config.Config, j *journal.Journal, co courier, within time.Durat
 	}
 	defer release()
 
-	rows, err := authorityRows(cfg, time.Now())
+	// One instant for the whole digest: liveness, the expiry window and the
+	// dedupe read must all be answered as of the same moment, or a row can be
+	// live for one question and lapsed for the next.
+	now := time.Now()
+	rows, err := authorityRows(cfg, now)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	ev, ok := digestEvent(rows, time.Now(), within)
+	ev, ok := digestEvent(rows, now, within)
 	if !ok {
 		fmt.Println("flare digest: no authority pressure — nothing parked without a grant, nothing expiring soon")
 		return 0
 	}
-	replayed, err := j.Load(time.Now())
+	replayed, err := j.Load(now)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
