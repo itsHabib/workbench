@@ -114,7 +114,7 @@ func List(items ...Value) Value {
 
 // Map is an unordered set of named fields, encoded in sorted-name order.
 func Map(fields ...Field) Value {
-	return Value{kind: KindMap, pairs: fields}
+	return Value{kind: KindMap, pairs: slices.Clone(fields)}
 }
 
 // F is shorthand for one field, so a record's canonical shape reads as a table.
@@ -238,7 +238,9 @@ func sortFields(fields []Field) ([]Field, error) {
 }
 
 // hexDigits is the lowercase alphabet for \u escapes. Case is part of the
-// encoding:  and  are different bytes.
+// encoding: the escape "\u001B" and the escape "\u001b" are different byte
+// sequences for the same rune, so a second implementation has to be told
+// which of the two this scheme writes.
 const hexDigits = "0123456789abcdef"
 
 // appendString writes a quoted string under exactly one escape rule: the two
