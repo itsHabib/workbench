@@ -495,9 +495,9 @@ func runGateWithSynthesis(
 	reviewsOptional bool,
 	synthesize bool,
 	refuseMerged bool,
-) (gateResult, int, error) {
+) (res gateResult, code int, err error) {
 	subject := verify.Subject{Repo: repo, Number: pr}
-	res := gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
+	res = gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
 	// No live grant, no gate: coded refusal, exit 3, nothing gathered. This
 	// precedes model construction so a missing/invalid grant refuses (codeRefused)
@@ -524,6 +524,16 @@ func runGateWithSynthesis(
 	if done {
 		return res, code, err
 	}
+
+	// Every error exit below leaves a run that produced no decision — often
+	// with evidence already appended, as the transport failure mid-sweep that
+	// motivated this does. Recording the abort once here, rather than at each
+	// of the error sites downstream, is what lets the log say why such a run
+	// stopped instead of leaving it indistinguishable from one still in
+	// flight. It records a fact, never an outcome: the run still burns no
+	// review cycle. A tampered log is excluded — that is corruption, not an
+	// abort worth annotating, and appending to a broken chain only adds noise.
+	defer func() { err = recordAbortIfUndecided(e, run, grantID, subject, code, err) }()
 
 	// The view is recorded FIRST, alone: the already-merged refusal must be
 	// decidable from this one read, before the model backend or the rest of
@@ -1096,6 +1106,53 @@ func recordCycleRefusal(e env, run, grantID string, subject verify.Subject, used
 	}
 	if _, err := e.st.Append(state.KindGrantNeeded, run, []string{grantID}, body); err != nil {
 		return fmt.Errorf("record cycle refusal: %w", err)
+	}
+	return nil
+}
+
+// recordAbortIfUndecided annotates a run that ended without producing a
+// decision, and returns the error the run should surface. Two exits carry no
+// annotation: a clean terminal (any code but codeError produced a decision),
+// and a tampered log — that is corruption rather than an abort worth
+// describing, and appending to a broken chain only adds noise.
+//
+// A failed record is joined onto the run's own error rather than dropped. The
+// cause the operator needs is the original one, but a log that could not take
+// the abort is a fact of its own, and the counting this record documents is
+// only as good as the log it lands in.
+func recordAbortIfUndecided(e env, run, grantID string, subject verify.Subject, code int, cause error) error {
+	if code != codeError || cause == nil || errors.Is(cause, errLogTampered) {
+		return cause
+	}
+	if err := recordRunAborted(e, run, grantID, subject, cause); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+// recordRunAborted persists the fact that a run stopped before producing any
+// decision — the transport fault, unreachable backend, or parse failure that
+// ended it. Such a run leaves evidence and nothing else, which in an
+// append-only log is indistinguishable from a run still in flight; the honest
+// way to say "this one died" is to append the fact, never to delete the
+// evidence it had already recorded.
+//
+// The kind is deliberately KindRunAborted, outside the action/escalation
+// outcome families: isOutcome, the reducer, and the inbox's subject reduction
+// all ignore it, so an abort can neither consume a review cycle nor supersede
+// a park already awaiting judgment for the same PR. That is the invariant this
+// record exists to make explicit rather than incidental — a network blip must
+// not spend a scarce, operator-guarded cycle.
+func recordRunAborted(e env, run, grantID string, subject verify.Subject, cause error) error {
+	body := map[string]any{
+		"repo":   subject.Repo,
+		"number": subject.Number,
+		"grant":  grantID,
+		"error":  cause.Error(),
+		"at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	if _, err := e.st.Append(state.KindRunAborted, run, nil, body); err != nil {
+		return fmt.Errorf("record run abort: %w", err)
 	}
 	return nil
 }

@@ -212,7 +212,7 @@ func projectNode(a state.Artifact) Node {
 		projectEvidence(&n, a.Body)
 	case state.KindVerdict, state.KindJudgment:
 		projectVerdict(&n, a.Body)
-	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded:
+	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded, state.KindRunAborted:
 		projectFlat(&n, a.Body)
 	}
 	return n
@@ -333,7 +333,7 @@ func renderNode(w io.Writer, n Node) {
 		renderEvidence(w, n.Evidence)
 	case state.KindVerdict, state.KindJudgment:
 		renderVerdict(w, n.Verdict)
-	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded:
+	case state.KindGrant, state.KindEscalation, state.KindAction, state.KindGrantNeeded, state.KindRunAborted:
 		renderFlat(w, n)
 	}
 }

@@ -268,6 +268,34 @@ a refusal must never *create* a fresh state tree, which would bypass the
 mint-time fresh-tree guard. Other refusal classes (scope, signature, missing
 key) are misconfigurations, not grant-materialization facts, and record nothing.
 
+A run that dies before it decides anything is the mirror image of that
+refusal. Cycles are counted from OUTCOMES — one distinct run holding a counting
+action or escalation is one cycle, joined to its subject through the reduced
+verdict — never from the evidence a run recorded. That distinction is what a
+transport fault mid-sweep tests: `gh pr view` lands its evidence artifact,
+`gh pr diff` dies on a reset connection, and the run exits 4 having already
+written to the log. Counting evidence would spend a scarce, operator-guarded
+cycle on a network blip and silently make the ceiling tighter than the
+operator's stated policy.
+
+Such a run now says so. It appends a `run_aborted` record naming the subject
+and the error that ended it — outside the action/escalation families, so the
+cycle count, the reducer, and `next`'s subject reduction all ignore it exactly
+as they ignore `grant_needed`. The evidence already recorded stays; an
+append-only log answers "this run died" by appending the fact, never by
+un-writing what came before. Without the record an aborted run is
+indistinguishable from one still in flight, and `explain` shows a run that
+simply stops.
+
+Prevention sits one layer down, in the evidence reads themselves: each `gh`
+call retries up to three times with growing backoff when the failure is a
+transport fault or one of GitHub's retryable statuses. The classifier is an
+ALLOWLIST — anything unrecognized (a missing binary, a bad credential, a 404,
+a malformed query) fails on the first attempt rather than sleeping through the
+bound. Retrying is safe only because every one of these calls is a read, and
+it must never become a way to proceed without an answer: a failure that
+outlives the bound is returned unchanged and the run still aborts.
+
 ## Composition with existing tools
 
 - **triage** stays the home of the deterministic risk floor; `gate` invokes

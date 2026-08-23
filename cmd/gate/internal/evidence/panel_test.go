@@ -15,8 +15,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// One TestMain per package dispatches every helper-process stand-in for
+	// gh: runFakeGH replays a canned response, runFlakyGH (retry_test.go)
+	// fails a bounded number of times first.
 	if os.Getenv("GO_WANT_GH_HELPER_PROCESS") == "1" {
 		os.Exit(runFakeGH())
+	}
+	if os.Getenv("GO_WANT_GH_RETRY_HELPER_PROCESS") == "1" {
+		os.Exit(runFlakyGH())
 	}
 	os.Exit(m.Run())
 }
