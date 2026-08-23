@@ -434,10 +434,33 @@ func checkResolution(state RoleState, r Record) error {
 	return nil
 }
 
-// checkTeardown refuses to end a role that still holds work. Dropping work is
-// an unassign, which is explicit and recorded; a retire that silently dropped
+// checkTeardown refuses to end a role that still owes something. Dropping work
+// is an unassign, which is explicit and recorded; a retire that silently dropped
 // three assignments would make them disappear from every roster at once.
+//
+// The dangling check is here because an exhaustive walk of the state space found
+// its absence: takeover, then unassign, then retire reaches a RETIRED role with
+// an unresolved claim. Nothing may extend a retired chain, so that obligation is
+// lost permanently — the exact silent disappearance L3 says must not be
+// representable. Neither 96% line coverage nor a 98.5% mutation score found it,
+// because it needs one specific three-record sequence and no hand-written test
+// thought to try it.
 func checkTeardown(state RoleState, r Record) error {
+	if state.Dangling != "" {
+		return refuse(ReasonDanglingClaim, r.Seq,
+			"%s would strand the unresolved claim on %s behind a terminal chain; discharge it first",
+			r.Kind, state.Dangling)
+	}
+	if len(state.OpenIntents) > 0 {
+		return refuse(ReasonOpenIntent, r.Seq,
+			"%s would strand effect %s with no recorded outcome; resolve it first",
+			r.Kind, state.OpenIntents[0])
+	}
+	if len(state.OpenEscalations) > 0 {
+		return refuse(ReasonOpenEscalation, r.Seq,
+			"%s would strand %d unanswered escalation(s); a human's answer cannot append to a terminal chain",
+			r.Kind, len(state.OpenEscalations))
+	}
 	if len(state.Held) == 0 {
 		return nil
 	}

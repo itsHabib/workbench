@@ -196,8 +196,8 @@ func TestReasonsAreFrozen(t *testing.T) {
 	// first write: the assertion below fixes the COUNT, and the digest is
 	// printed so a reviewer can see it change in the diff when a reason moves.
 	t.Logf("%s: sha256 %s over %d reasons", want, got, len(sorted))
-	if len(Reasons) != 37 {
-		t.Errorf("the refusal vocabulary has %d reasons, pinned at 37; update this test deliberately", len(Reasons))
+	if len(Reasons) != 38 {
+		t.Errorf("the refusal vocabulary has %d reasons, pinned at 38; update this test deliberately", len(Reasons))
 	}
 }
 
@@ -230,8 +230,8 @@ func digestOfString(s string) string {
 
 // Accepted equivalent mutants.
 //
-// `gremlins unleash --timeout-coefficient 30 ./contracts/org/` reports 135
-// killed, 2 lived, 1 not covered — 98.5% efficacy. The three survivors are
+// `gremlins unleash --timeout-coefficient 30 ./contracts/org/` reports 140
+// killed, 2 lived, 1 not covered — 98.6% efficacy. The three survivors are
 // recorded here rather than left for the next person to re-derive, because an
 // unexplained survivor is indistinguishable from a missing test:
 //

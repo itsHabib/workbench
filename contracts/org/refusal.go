@@ -188,6 +188,11 @@ const (
 	// ReasonOpenWork fires when a retire lands while the role still holds work.
 	// Dropping it is unassign, which is explicit and recorded.
 	ReasonOpenWork = "open_work"
+	// ReasonOpenEscalation fires when teardown would strand a question a human
+	// has not answered yet. The human answers the ROLE, not the session, which
+	// is what makes human latency free — but only while the role can still be
+	// appended to. Behind a terminal chain the answer has nowhere to land.
+	ReasonOpenEscalation = "open_escalation"
 	// ReasonMinReader fires when the chain's charter demands a reader version
 	// above this one. Refusing the whole chain is the point: interpreting part
 	// of it is how two holders happen.
@@ -239,6 +244,7 @@ var Reasons = []string{
 	ReasonEscalationUnknown,
 	ReasonRetired,
 	ReasonOpenWork,
+	ReasonOpenEscalation,
 	ReasonMinReader,
 	ReasonFenceRegression,
 	ReasonAnnulUnknown,

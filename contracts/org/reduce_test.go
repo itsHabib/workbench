@@ -536,6 +536,7 @@ var chainLevelReasons = []string{
 	ReasonEscalationUnknown,
 	ReasonRetired,
 	ReasonOpenWork,
+	ReasonOpenEscalation,
 	ReasonMinReader,
 	ReasonFenceRegression,
 	ReasonAnnulUnknown,
@@ -622,4 +623,60 @@ func TestShortAbbreviatesOnlyLongDigests(t *testing.T) {
 	if got := short("123456789012345"); got != "12345678901234…" {
 		t.Errorf("short(15 chars) = %q; one past the boundary must be cut", got)
 	}
+}
+
+// TestRetireCannotStrandAnObligation is the regression for the state-space
+// walk's first real find. The sequence is takeover (orphaning a claim), then
+// unassign (emptying the held set, which was the only thing teardown checked),
+// then retire — reaching a RETIRED role with an unresolved claim behind a chain
+// nothing may extend. Three records, none of them individually suspicious.
+func TestRetireCannotStrandAnObligation(t *testing.T) {
+	c := chartered(t).
+		add(KindClaim, subject(Subject{Work: work})).
+		add(KindTakeover, subject(Subject{Party: boss})).
+		add(KindUnassign, subject(Subject{Work: work}))
+	if c.state.Dangling != work || len(c.state.Held) != 0 {
+		t.Fatalf("fixture is not in the trap state: dangling=%q held=%v", c.state.Dangling, c.state.Held)
+	}
+	c.refuses(ReasonDanglingClaim, KindRetire)
+	c.refuses(ReasonDanglingClaim, KindSplit, subject(Subject{Party: "ic:target"}))
+	c.refuses(ReasonDanglingClaim, KindMerge, subject(Subject{Party: "ic:target"}))
+
+	// Discharging it opens the door again.
+	c.add(KindAbandon, subject(Subject{Work: work}))
+	c.add(KindRetire)
+	if c.state.Phase != PhaseRetired {
+		t.Fatalf("retire refused after the obligation was discharged: phase %q", c.state.Phase)
+	}
+}
+
+// TestRetireCannotStrandAnEffect is the second find of the same family, and it
+// is the one that matters most: an intent with no recorded outcome behind a
+// chain nothing may extend is a permanent unknown effect. T2's whole claim is
+// that a replacement can always determine committed-versus-absent; a retired
+// role deletes the place that determination would be written.
+func TestRetireCannotStrandAnEffect(t *testing.T) {
+	c := chartered(t).
+		add(KindClaim, subject(Subject{Work: work})).
+		add(KindIntentRef, subject(Subject{Effect: "eff_1"})).
+		add(KindAbandon, subject(Subject{Work: work}))
+	if len(c.state.OpenIntents) != 1 || len(c.state.Held) != 0 {
+		t.Fatalf("fixture is not in the trap state: intents=%v held=%v", c.state.OpenIntents, c.state.Held)
+	}
+	c.refuses(ReasonOpenIntent, KindRetire)
+	c.add(KindResolution, subject(Subject{Effect: "eff_1"}))
+	c.add(KindRetire)
+}
+
+// TestRetireCannotStrandAnEscalation covers the third obligation. A human's
+// answer appends to the role, which is what makes their latency free — and
+// impossible once the chain is terminal.
+func TestRetireCannotStrandAnEscalation(t *testing.T) {
+	c := chartered(t).
+		add(KindUnassign, subject(Subject{Work: work})).
+		add(KindEscalation)
+	esc := c.state.Tip
+	c.refuses(ReasonOpenEscalation, KindRetire)
+	c.add(KindResolution, subject(Subject{Target: esc}))
+	c.add(KindRetire)
 }
