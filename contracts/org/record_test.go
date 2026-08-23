@@ -190,12 +190,16 @@ func TestReasonsAreFrozen(t *testing.T) {
 	sorted := slices.Clone(Reasons)
 	slices.Sort(sorted)
 	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
-	const want = "vocabulary digest"
 	got := hex.EncodeToString(sum[:])
-	// The digest is recorded here rather than asserted against a literal on
-	// first write: the assertion below fixes the COUNT, and the digest is
-	// printed so a reviewer can see it change in the diff when a reason moves.
-	t.Logf("%s: sha256 %s over %d reasons", want, got, len(sorted))
+	// The DIGEST is the assertion, not the count. Pinning only the count lets a
+	// rename through — and a rename is exactly what breaks every consumer doing
+	// errors.Is(err, &Refusal{Reason: ReasonXxx}), which is the whole thing the
+	// frozen vocabulary exists to prevent. Changing either number is a
+	// deliberate act with a test to update.
+	const wantDigest = "6b3215b7d8238d62731809045c915887e92050b42ae11013fdb1f5ef48e23f01"
+	if got != wantDigest {
+		t.Errorf("vocabulary digest %s, pinned %s — a reason was renamed, added or dropped; update deliberately", got, wantDigest)
+	}
 	if len(Reasons) != 38 {
 		t.Errorf("the refusal vocabulary has %d reasons, pinned at 38; update this test deliberately", len(Reasons))
 	}

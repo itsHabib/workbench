@@ -294,7 +294,7 @@ func checkScope(r Record) error {
 // has no retention or erasure rule, and the store cannot invent one after the
 // fact — which is precisely when someone asks for the erasure.
 func checkBody(r Record) error {
-	if r.BodyDigest == "" && r.BodyClass != "" {
+	if r.BodyDigest == "" && strings.TrimSpace(r.BodyClass) != "" {
 		return refuse(ReasonBodyClassMissing, r.Seq, "body_class without body_digest")
 	}
 	if r.BodyDigest == "" {

@@ -2,6 +2,7 @@ package org
 
 import (
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -423,6 +424,7 @@ func TestFoldOfPrefixPlusRemainder(t *testing.T) {
 		add(KindResolution, subject(Subject{Effect: "eff_1"})).
 		add(KindYield, subject(Subject{Work: work})).
 		add(KindSeal).
+		add(KindRecharter, charter(func(tm *Terms) { tm.Tier = "T3" })).
 		add(KindClaim, subject(Subject{Work: work})).
 		add(KindTakeover, subject(Subject{Party: boss})).
 		add(KindAbandon, subject(Subject{Work: work}))
@@ -454,6 +456,7 @@ func sameState(a, b RoleState) bool {
 		a.Holder == b.Holder && a.Fence == b.Fence && a.Active == b.Active &&
 		a.Dangling == b.Dangling && a.Seq == b.Seq && a.Tip == b.Tip &&
 		a.Seal == b.Seal && a.NextDue == b.NextDue && a.Degraded == b.Degraded &&
+		reflect.DeepEqual(a.Terms, b.Terms) &&
 		slices.Equal(a.Held, b.Held) &&
 		slices.Equal(a.OpenIntents, b.OpenIntents) &&
 		slices.Equal(a.OpenEscalations, b.OpenEscalations) &&

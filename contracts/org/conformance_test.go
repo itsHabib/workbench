@@ -194,3 +194,42 @@ func TestSchemaRequiresTheSpine(t *testing.T) {
 func unquote(raw json.RawMessage) string {
 	return strings.Trim(string(raw), `"`)
 }
+
+// TestWireFormatElidesEmptyOptionals pins what stdlib encoding/json actually
+// emits for a Record, because review raised `omitzero` as a json/v2-only tag
+// that the standard library silently ignores.
+//
+// It is not: `omitzero` landed in stdlib encoding/json in Go 1.24, and this
+// module requires Go 1.26 (go.mod). The tag is honored, an all-zero Subject is
+// elided, and there is no divergence between a canonical round-trip and a JSON
+// marshal. Pinned as a test rather than settled in a comment, so the next
+// reader gets an answer from the toolchain instead of from an argument — and so
+// a go.mod downgrade below 1.24 fails here rather than quietly changing the
+// wire format of every record.
+func TestWireFormatElidesEmptyOptionals(t *testing.T) {
+	bare, err := json.Marshal(Record{V: Version, Scheme: Scheme, Kind: KindRelease, KindClass: ClassStructural})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, absent := range []string{"subject", "terms", "refs", "incarnation", "body_digest", "next_due"} {
+		if strings.Contains(string(bare), `"`+absent+`"`) {
+			t.Errorf("an all-zero %s is on the wire: %s", absent, bare)
+		}
+	}
+	for _, present := range []string{"v", "scheme", "seq", "prev", "tenant", "role", "kind", "kind_class", "fence", "at"} {
+		if !strings.Contains(string(bare), `"`+present+`"`) {
+			t.Errorf("spine field %s is missing from the wire: %s", present, bare)
+		}
+	}
+
+	full, err := json.Marshal(Record{
+		V: Version, Scheme: Scheme, Kind: KindClaim, KindClass: ClassStructural,
+		Subject: Subject{Work: "github:acme/api#88"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(full), `"subject":{"work":"github:acme/api#88"}`) {
+		t.Errorf("a set subject did not round-trip: %s", full)
+	}
+}

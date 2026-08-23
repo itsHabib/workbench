@@ -80,6 +80,11 @@ type RoleState struct {
 	// Dangling is a claim orphaned by a takeover or revoke: the predecessor
 	// stopped without a terminal record. The successor must resolve it before
 	// it may claim anything, so silent disappearance is not representable.
+	//
+	// It may name work that is no longer in Held. Unassign blocks only the
+	// ACTIVE claim, so a successor can drop the work and still owe the close —
+	// which is correct: the obligation is to record how the claim ended, and
+	// that survives the work leaving the role's plate.
 	Dangling string
 	// Held is the work the role holds, in the order it was assigned.
 	Held []Assignment
