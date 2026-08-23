@@ -5,7 +5,7 @@
       { "name": "claude", "trigger": "mention" },
       { "name": "copilot", "trigger": "reviewer-request" }
     ],
-    "require": ["codex", "claude"],
+    "require": ["claude"],
     "settle_minutes": 15,
     "max_cycles": 3,
     "max_requests": 5
