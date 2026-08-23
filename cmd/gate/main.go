@@ -136,6 +136,10 @@ func main() {
 		err = cmdPreflight(os.Args[2:])
 	case "sweep":
 		err = cmdSweep(os.Args[2:])
+	case "receipt":
+		err = cmdReceipt(os.Args[2:])
+	case "reconcile":
+		err = cmdReconcile(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "backtest":
@@ -166,7 +170,7 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|grant-callback|gate|judge|resolve|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
@@ -186,7 +190,9 @@ func usage() {
   sweep    [-json] [-dry-run]                        (record which inbox subjects are no longer open, so next stops recommending dead PRs)
   threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
-  audit
+  receipt  -run run_x [-why "..."]                    (discharge one authorization with what landed)
+  reconcile -repo R [-since YYYY-MM-DD] [-branch b] [-effective-from YYYY-MM-DD] [-json]
+  audit    [-json] [-max-rows 10]
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
 }
@@ -2474,9 +2480,19 @@ func shellQuote(s string) string {
 	return s
 }
 
+// cmdAudit answers two different questions and keeps them apart.
+//
+// The chain check asks whether the log was TAMPERED with — a hard fault, and the
+// only thing that changes the exit code. The accountability findings ask whether
+// the log ACCOUNTS for what happened: authorizations nothing wrote back, merges
+// with nothing behind them, decisions naming nobody. A trustworthy record can be
+// incomplete, and reporting incompleteness as tampering would make an operator's
+// first honest audit look like an attack — so findings print and exit 0.
 func cmdAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
+	asJSON := fs.Bool("json", false, "emit the accountability findings as JSON")
+	maxRows := fs.Int("max-rows", 10, "rows to list per finding section (the count is the finding; the rows are a sample)")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -2492,15 +2508,24 @@ func cmdAudit(args []string) error {
 	if err != nil {
 		return err
 	}
-	if res.OK {
-		fmt.Println("chain intact")
-		return reportParkDischarge(e.st)
+	if !res.OK {
+		at := ""
+		if res.Artifact != "" {
+			at = " (at " + res.Artifact + ")"
+		}
+		return fmt.Errorf("%w: %s%s", errLogTampered, res.Reason, at)
 	}
-	at := ""
-	if res.Artifact != "" {
-		at = " (at " + res.Artifact + ")"
+	// res.All is the audited snapshot itself, so the findings are derived from
+	// exactly the artifacts the chain check verified — no second scan, no window
+	// for the log to change between the two reads.
+	findings := observe.Audit(res.All)
+	if *asJSON {
+		printJSON(findings)
+		return nil
 	}
-	return fmt.Errorf("%w: %s%s", errLogTampered, res.Reason, at)
+	fmt.Println("chain intact")
+	observe.RenderAudit(os.Stdout, findings, *maxRows)
+	return reportParkDischarge(e.st)
 }
 
 func cmdBacktest(args []string) error {

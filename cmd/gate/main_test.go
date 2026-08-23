@@ -17,6 +17,8 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
+	"github.com/itsHabib/workbench/cmd/gate/internal/ledger"
+	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
 	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
 	"github.com/itsHabib/workbench/cmd/gate/internal/stamp"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -2720,4 +2722,127 @@ func TestStrandedLegacyJudgmentStillResumes(t *testing.T) {
 		t.Fatal("after a resume the run's newest terminal must be an outcome, not the park")
 	}
 	assertChainIntact(t, e)
+}
+
+// authorizedRun builds a run that reached a would_merge action, returning the
+// run id and the action artifact — the exact state a receipt discharges.
+func authorizedRun(t *testing.T, e env, number int, head string) (string, state.Artifact) {
+	t.Helper()
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: number, HeadSHA: head}
+	recordVerifier(t, e, run, subject, verify.DecisionPass)
+	rv := reducedVerdict(subject, verify.DecisionPass, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeMerge {
+		t.Fatalf("authorize: code %d err %v", code, err)
+	}
+	return run, firstOfKind(t, e, run, state.KindAction)
+}
+
+// TestReceiptDischargesExactlyOneAction pins the invariant structurally rather
+// than by convention: the second receipt for an action is refused by the
+// substrate's absent-parent guard, so no code path — present or future — can
+// double-discharge an authorization and make one merge look like two.
+func TestReceiptDischargesExactlyOneAction(t *testing.T) {
+	e := testEnv(t)
+	run, action := authorizedRun(t, e, 700, "abc123")
+
+	auth, err := ledger.FindAuthorization(mustRun(t, e, run), run)
+	if err != nil {
+		t.Fatalf("FindAuthorization: %v", err)
+	}
+	if auth.Action != action.ID || auth.Head != "abc123" {
+		t.Fatalf("the receipt must discharge the run's action at its judged head, got %+v", auth)
+	}
+	landing := ledger.Landing{
+		Repo: "o/r", Number: 700, State: "MERGED", Merged: true, HeadSHA: "abc123",
+		MergeCommit: "deadbeef", Actor: "itsHabib", MergedAt: time.Now().UTC(),
+	}
+	receipt, err := ledger.NewReceipt(auth, landing, sourceExecutor, "", time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := appendReceipt(e, auth, receipt)
+	if err != nil {
+		t.Fatalf("first receipt: %v", err)
+	}
+	before := mustRun(t, e, run)
+	if _, err := appendReceipt(e, auth, receipt); err == nil || !strings.Contains(err.Error(), "receipt_duplicate") {
+		t.Fatalf("a second receipt for %s must be refused, got %v", auth.Action, err)
+	}
+	if after := mustRun(t, e, run); len(after) != len(before) {
+		t.Fatalf("the refused duplicate appended %d artifact(s)", len(after)-len(before))
+	}
+	// The discharge is legible from the log alone: the receipt names its action
+	// and is parented to it.
+	stored, err := e.st.Get(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Parents) != 1 || stored.Parents[0] != action.ID {
+		t.Fatalf("a receipt's sole parent is the action it discharges, got %v", stored.Parents)
+	}
+	assertChainIntact(t, e)
+}
+
+// TestAuditReportsTheAccountabilityAnomalies pins that the two gaps surface as
+// first-class findings — and that a chain-intact log with an unreceipted
+// authorization is reported as incomplete, never as tampered.
+func TestAuditReportsTheAccountabilityAnomalies(t *testing.T) {
+	e := testEnv(t)
+	run, action := authorizedRun(t, e, 701, "abc123")
+
+	res, err := e.st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("the chain must be intact: %s", res.Reason)
+	}
+	findings := observe.Audit(res.All)
+	if len(findings.AuthorizationWithoutReceipt) != 1 {
+		t.Fatalf("want one undischarged authorization, got %+v", findings.AuthorizationWithoutReceipt)
+	}
+	if findings.AuthorizationWithoutReceipt[0].Artifact != action.ID {
+		t.Fatalf("the finding must name the action, got %+v", findings.AuthorizationWithoutReceipt[0])
+	}
+	if len(findings.ReconciledRepos) != 0 {
+		t.Fatal("with no coverage record, merge-without-authorization must read as UNMEASURED, not zero")
+	}
+
+	// Discharging it clears the finding — the surface tracks the real state
+	// rather than accumulating.
+	auth, err := ledger.FindAuthorization(mustRun(t, e, run), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.NewReceipt(auth,
+		ledger.Landing{Repo: "o/r", Number: 701, State: "MERGED", Merged: true, HeadSHA: "abc123", MergedAt: time.Now().UTC()},
+		sourceExecutor, "", time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendReceipt(e, auth, receipt); err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows := observe.Audit(res.All).AuthorizationWithoutReceipt; len(rows) != 0 {
+		t.Fatalf("a discharged authorization must leave the finding, got %+v", rows)
+	}
+}
+
+func mustRun(t *testing.T, e env, run string) []state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
 }
