@@ -22,8 +22,9 @@ there first.
 
 ## Layout
 
-- `cmd/flare` — verbs: `watch`, `sweep`, `status`. Owns the cycle policy
-  (cursor advances only when every event from a source settled).
+- `cmd/flare` — verbs: `watch`, `sweep`, `status`, `digest`. Owns the cycle
+  policy (cursor advances only when every event from a source settled) and the
+  authority digest.
 - `internal/source` — tail + parse producers' JSONL into events, decoding the
   shared verdict + envelope types from the `contracts` package (no hand-rolled
   parser). Mechanism only; knows nothing about routing. `ledger.go` is the
@@ -46,8 +47,9 @@ there first.
   never flare's — Amendment 3). `toast` shells `powershell.exe` 5.1 (pwsh 7
   cannot project WinRT); `webhook` POSTs the event JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
-  delivery journal (the dedupe substrate, and the card index `LiveCards`
-  replays) + cursors with the `last_poll` liveness fact.
+  delivery journal + cursors. One `Load` replays the journal ONCE into
+  everything a cycle needs (settled events, live cards, reason counts); cursors
+  carry the `last_poll` liveness fact and any stalled source.
 
 ## Invariants (pinned by tests — keep them pinned)
 
@@ -103,6 +105,21 @@ there first.
   nothing). Closing strips the buttons, states the outcome, who decided and the
   authorized head sha, and posts the outcome to the card's thread — a
   successful tap and a silently failed one must not look identical.
+- **`grant_needed` pages.** gate records a refusal for want of authority
+  (`grant_absent` / `grant_expired` / `grant_cycle_exceeded`); flare used to
+  drop them. It is the one alert no agent can act on — only the operator mints
+  — so it pages early, as its own card class, carrying the paste-ready
+  `gate grant` at the ceilings the repo already held. flare proposes what has
+  worked before; it never widens and never mints.
+- **An identical question collapses, it is never suppressed.** Past two
+  deliveries of the same leading reason clause for a repo (7-day window) the
+  card names the repeated opener once and leads with what differs — PR, tier,
+  head, cycles left — plus the clauses after the opener. Every park still
+  pages.
+- **A running loop is not a healthy one.** A stalled source (an undeliverable
+  event holding an ordered cursor) is recorded in `cursors.json` and makes
+  `flare status` report `healthy: false` and `sweep` exit non-zero. A fresh
+  `last_poll` alone used to report healthy while nothing got through.
 - **Two event classes.** A PAGE routes; an UPDATE applies to a card already
   delivered and is NEVER routed (routing terminal artifacts would page the
   operator for every judgment gate records). An update with no live card

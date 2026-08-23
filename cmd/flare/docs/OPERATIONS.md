@@ -157,6 +157,26 @@ Exact test-line shape for the gate source is in `cmd/flare/internal/source` +
 `docs/DESIGN.md` (the source read shapes). `flare sweep` is the one-shot form
 of a cycle — use it to test without waiting on the loop.
 
+## 4b. The authority digest
+
+`flare digest` renders one card naming every repo that is waiting on a mint:
+parked work with no live grant, and grants lapsing within `-within` (default
+12h) with work behind them. Each row carries the exact `gate grant` to paste.
+
+```powershell
+flare digest              # deliver it now, if anything needs you
+flare digest -within 24h  # widen the "expiring soon" window
+```
+
+Exit 0 = delivered, or nothing needed saying. It journals, so it takes the same
+single-instance lock as `watch`/`sweep` (exit 3 if one is running — stop the
+watcher, or run it between polls). An unchanged digest does not re-page: its
+dedupe id is a hash of its own content.
+
+Run it on a timer beside the watcher — once in the morning and once mid-
+afternoon is enough, since the point is to reach the operator while they are
+still at a keyboard.
+
 ## 5. Read status / troubleshoot
 
 `flare-task.ps1 status` rolls the task state and `flare status` into one. The raw pieces:
@@ -167,7 +187,13 @@ Get-ScheduledTask -TaskName flare-watch | Get-ScheduledTaskInfo   # LastRunTime,
 Get-Content "$env:USERPROFILE\.flare\journal.jsonl" -Tail 20     # delivery journal (dedupe substrate)
 ```
 
-- `status` exit 1 = stale or never ran. Stale threshold = `3 × poll_seconds`.
+- `status` exit 1 = stale, never ran, or **stalled**. Stale threshold =
+  `3 × poll_seconds`.
+- A `stalled` block in `flare status` means a source's cursor is held behind an
+  event that will not deliver — and because the cursor is ordered, everything
+  after it is blocked too. It names when the stall began, the event id, and the
+  attempt count. Fix the delivery (usually the Slack token or connectivity);
+  the next clean poll clears it by itself.
 - A stale `last_poll` with the task "Running" usually means the loop is blocked
   on a bad source path — check `routes.json` `sources[].path` exists.
 - A `cursor-alert` in the journal means a source log shrank or its chain hash

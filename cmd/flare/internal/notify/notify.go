@@ -281,16 +281,15 @@ func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: headline(ev), Emoji: true}},
 	}
-	// A synthesized brief is the card body when the producer sent one; else the raw reason renders as before.
-	body := briefBlock(ev)
-	if body == "" {
-		body = whyBlock(ev.Body)
-	}
+	// Body selection, most-specific first: a pre-rendered detail block (the
+	// authority digest), then the collapsed form for a reason the operator has
+	// already read, then the producer's synthesized brief, then the raw reason.
+	body := firstNonEmpty(ev.Fields["detail"], repeatBlock(ev), briefBlock(ev), whyBlock(ev.Body))
 	if body != "" {
 		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: body}})
 	}
-	if blocker := blockerBlock(ev); blocker != "" {
-		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: blocker}})
+	if remedy := remedyBlock(ev); remedy != "" {
+		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: remedy}})
 	}
 	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
@@ -432,6 +431,15 @@ func blockButton(ev event.Event) slackButton {
 // headline is the one line that must make the required action obvious: a plain
 // imperative, with the subject woven in when the event names one.
 func headline(ev event.Event) string {
+	// Two kinds lead on something other than severity, because what the operator
+	// must DO is different in kind: a refusal for want of authority is a mint,
+	// not a decision, and a digest is a standing summary rather than one event.
+	if ev.Kind == "grant-needed" {
+		return grantNeededHeadline(ev)
+	}
+	if ev.Kind == "authority-digest" {
+		return "🔑 Authority check — grants that need you"
+	}
 	switch ev.Severity {
 	case event.SevBlock:
 		return blockHeadline(ev)
@@ -446,6 +454,31 @@ func headline(ev event.Event) string {
 		return runHeadline(ev, "cancelled", "⚪")
 	}
 	return "ℹ️ Notice"
+}
+
+// grantNeededHeadline leads with the repo and the fact only the operator can
+// change. An agent can re-run, re-review and re-judge; it cannot mint.
+func grantNeededHeadline(ev event.Event) string {
+	repo := shortRepo(ev.Fields["repo"])
+	if repo == "" {
+		return "🔑 Grant needed — gate refused a run for want of authority"
+	}
+	if ev.Fields["reason"] == "grant_cycle_exceeded" {
+		return "🔑 Cycle budget spent — " + repo + " needs a wider grant"
+	}
+	if ev.Fields["reason"] == "grant_expired" {
+		return "🔑 Grant expired — " + repo + " is stopped"
+	}
+	return "🔑 No live grant — " + repo + " is stopped"
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func blockHeadline(ev event.Event) string {
@@ -543,20 +576,19 @@ func briefBlock(ev event.Event) string {
 	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
 }
 
-// blockerBlock states, plainly, why this park cannot be approved from the phone
-// and what would clear it — the section that replaces a button whose tap was
-// guaranteed to fail. The mint command is fenced so it is one copy-paste at a
-// keyboard: minting is the operator's authority alone, and the card's whole job
-// is to make exercising it cost one paste instead of an investigation.
-func blockerBlock(ev event.Event) string {
-	if approvable(ev) {
-		return ""
-	}
+// remedyBlock states, plainly, what the operator must do that no agent can do
+// for them — and the exact command that does it. It covers the two cards that
+// need a mint: a park whose approval cannot land, and a run gate refused
+// outright for want of a grant. The command is fenced so it is one copy-paste
+// at a keyboard: minting is the operator's authority alone, and the card's
+// whole job is to make exercising it cost one paste instead of an
+// investigation.
+func remedyBlock(ev event.Event) string {
 	var lines []string
 	// Each line is guarded on its own content: a label with nothing after it is
-	// worse than no label, and this block renders on any card the pre-flight
-	// refused, not only the ones it filled in completely.
-	if blocker := compact(ev.Fields["blocker"]); blocker != "" {
+	// worse than no label, and this block renders on any card that needs a mint,
+	// not only the ones the pre-flight filled in completely.
+	if blocker := compact(ev.Fields["blocker"]); blocker != "" && !approvable(ev) {
 		lines = append(lines, "*Cannot approve:* "+blocker)
 	}
 	if needs := compact(ev.Fields["needs"]); needs != "" {
@@ -569,6 +601,53 @@ func blockerBlock(ev event.Event) string {
 		return ""
 	}
 	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
+}
+
+// repeatBlock is the collapsed body for a park whose REASON the operator has
+// already read. 318 of 355 parks in the live ledger ask the identical
+// readiness/panel question, and attention collapses after the second identical
+// warning — so restating the boilerplate a hundredth time buys nothing, while
+// what is DIFFERENT about this one is never surfaced at all.
+//
+// So it inverts the card: name the repetition once, then lead with the facts
+// that actually distinguish this park — the PR, the tier, the head the panel
+// was measured against, and how much review budget is left.
+func repeatBlock(ev event.Event) string {
+	n := ev.Fields["repeat"]
+	if n == "" {
+		return ""
+	}
+	lines := []string{fmt.Sprintf("_Same opening reason as the last %s parks in %s:_ %s",
+		n, shortRepo(ev.Fields["repo"]), compact(ev.Fields["reason_lead"]))}
+	if diff := repeatDiff(ev); diff != "" {
+		lines = append(lines, "*New here:* "+diff)
+	}
+	// The clauses AFTER the repeated opener are the part that is actually new,
+	// so a collapsed card shows them rather than hiding them behind the count.
+	if rest := compact(ev.Fields["reason_rest"]); rest != "" {
+		lines = append(lines, "*Also:* "+rest)
+	}
+	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
+}
+
+// repeatDiff lists what distinguishes this park from the identical ones before
+// it, using only facts already recorded. Absent facts are simply left out —
+// flare states what it has, never a placeholder.
+func repeatDiff(ev event.Event) string {
+	var parts []string
+	if s := subject(ev); s != "" {
+		parts = append(parts, s)
+	}
+	if tier := ev.Fields["verdict_tier"]; tier != "" {
+		parts = append(parts, "tier "+tier)
+	}
+	if head := ev.Fields["head"]; len(head) >= 7 {
+		parts = append(parts, "head `"+head[:7]+"`")
+	}
+	if used, maxc := ev.Fields["cycles_used"], ev.Fields["cycles_max"]; used != "" && maxc != "" {
+		parts = append(parts, "cycle "+used+" of "+maxc)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // subject is the short "repo#n" the header carries when the event names one.

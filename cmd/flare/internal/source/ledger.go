@@ -2,9 +2,14 @@ package source
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/preflight"
 	"github.com/itsHabib/workbench/contracts"
 )
@@ -45,11 +50,14 @@ type verdictRef struct {
 	repo   string
 	number int
 	tier   string
+	head   string
 }
 
 // outcomeRef is one artifact that may have consumed a review cycle: the run it
 // belongs to, the parent verdict naming its subject, and whether it counts.
 type outcomeRef struct {
+	id     string
+	kind   string
 	run    string
 	parent string
 	counts bool
@@ -219,7 +227,7 @@ func (l *ledger) indexVerdict(env contracts.Envelope) {
 	if !ok || err != nil {
 		return
 	}
-	l.verdicts[env.ID] = verdictRef{repo: v.Subject.Repo, number: v.Subject.Number, tier: v.Tier}
+	l.verdicts[env.ID] = verdictRef{repo: v.Subject.Repo, number: v.Subject.Number, tier: v.Tier, head: v.Subject.HeadSHA}
 }
 
 // indexOutcome records an action or escalation as a candidate consumed cycle,
@@ -237,6 +245,8 @@ func (l *ledger) indexOutcome(env contracts.Envelope) {
 		return
 	}
 	l.outcomes = append(l.outcomes, outcomeRef{
+		id:     env.ID,
+		kind:   env.Kind,
 		run:    env.Run,
 		parent: env.Parents[0],
 		counts: countsAsCycle(env.Kind, b),
@@ -328,6 +338,20 @@ func (l *ledger) subjectOf(escID string) (string, int) {
 // authorized head, not a confirmed merge.
 func (l *ledger) mergeSHA(run string) string { return l.runSHA[run] }
 
+// headOf returns the head sha a verdict was gathered against, or "".
+func (l *ledger) headOf(verdictID string) string { return l.verdicts[verdictID].head }
+
+// Authorities reads one gate log and reduces it to the authority rows a digest
+// renders. It is the package's one exported read beyond Read/Tail, and it is
+// read-only like the rest: open, index, reduce, close.
+func Authorities(src config.Source, now time.Time) ([]Authority, error) {
+	raw, err := os.ReadFile(src.Path)
+	if err != nil {
+		return nil, fmt.Errorf("source %s: read %s: %w", src.Name, src.Path, err)
+	}
+	return buildLedger(raw).authority(now), nil
+}
+
 // subjectFromVerdict resolves an artifact's parent verdict to the PR it names.
 func (l *ledger) subjectFromVerdict(verdictID string) (string, int) {
 	v, ok := l.verdicts[verdictID]
@@ -335,4 +359,123 @@ func (l *ledger) subjectFromVerdict(verdictID string) (string, int) {
 		return "", 0
 	}
 	return v.repo, v.number
+}
+
+// --- authority: who is waiting on the operator's mint --------------------------
+//
+// A grant is the only thing an agent cannot mint for itself, so "your authority
+// is the bottleneck" is the one alert that must never be silent. gate already
+// records it — a `grant_needed` artifact per refusal — and flare dropped them.
+//
+// The digest below answers the question those artifacts pose one at a time:
+// across every repo, what is parked, which grants are about to lapse, and where
+// is work waiting with no live grant at all.
+
+// Authority is the read a digest renders: per repo, how much is parked behind
+// the operator and what grant (if any) is standing.
+type Authority struct {
+	Repo string
+	// Parked is how many PRs are awaiting judgment for this repo.
+	Parked int
+	// Grant is the longest-lived grant still live for the repo; Live reports
+	// whether there is one at all. A repo with parked work and no live grant is
+	// the hard stop — nothing can proceed until the operator mints.
+	Grant preflight.Grant
+	Live  bool
+}
+
+// authority reduces the log to one row per repo that has parked work or a live
+// grant. Parked counting mirrors gate's inbox: a PR is parked when its LATEST
+// terminal artifact is an escalation — a later action (or a later park) retires
+// the earlier attempt.
+func (l *ledger) authority(now time.Time) []Authority {
+	rows := map[string]*Authority{}
+	for repo, n := range l.parkedByRepo() {
+		rows[repo] = &Authority{Repo: repo, Parked: n}
+	}
+	for repo, g := range l.liveGrants(now) {
+		row, ok := rows[repo]
+		if !ok {
+			row = &Authority{Repo: repo}
+			rows[repo] = row
+		}
+		row.Grant, row.Live = g, true
+	}
+	out := make([]Authority, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Repo < out[j].Repo })
+	return out
+}
+
+// parkedByRepo counts the PRs whose latest terminal artifact is an escalation.
+func (l *ledger) parkedByRepo() map[string]int {
+	latest := map[string]outcomeRef{}
+	for _, o := range l.outcomes {
+		if sub := l.outcomeSubject(o); sub.repo != "" {
+			latest[subjectKey(sub)] = o
+		}
+	}
+	counts := map[string]int{}
+	for key, o := range latest {
+		if o.kind != contracts.KindEscalation {
+			continue
+		}
+		counts[repoOf(key)]++
+	}
+	return counts
+}
+
+// outcomeSubject resolves an outcome artifact to the PR it is about: an
+// escalation names one directly, an action only through its parent verdict.
+func (l *ledger) outcomeSubject(o outcomeRef) verdictRef {
+	if v, ok := l.escSubjects[o.id]; ok && v.repo != "" {
+		return v
+	}
+	return l.verdicts[o.parent]
+}
+
+// liveGrants keeps, per repo, the grant that stands longest — the one an agent
+// would actually run under.
+func (l *ledger) liveGrants(now time.Time) map[string]preflight.Grant {
+	live := map[string]preflight.Grant{}
+	for _, g := range l.grants {
+		if g.Repo == "" || !g.ExpiresAt.After(now) {
+			continue
+		}
+		if cur, ok := live[g.Repo]; ok && !g.ExpiresAt.After(cur.ExpiresAt) {
+			continue
+		}
+		live[g.Repo] = g
+	}
+	return live
+}
+
+func subjectKey(v verdictRef) string { return v.repo + "#" + strconv.Itoa(v.number) }
+
+func repoOf(subjectKey string) string {
+	if i := strings.LastIndex(subjectKey, "#"); i >= 0 {
+		return subjectKey[:i]
+	}
+	return subjectKey
+}
+
+// lastCeilingsFor recovers the widest ceilings a repo has ever been granted —
+// what the operator has already judged appropriate for it. It is a proposal for
+// a re-mint, never an authorization: only the operator mints.
+func (l *ledger) lastCeilingsFor(repo string) (string, int) {
+	tier, cycles := "", 0
+	for _, g := range l.grants {
+		if g.Repo != repo {
+			continue
+		}
+		if preflight.TierAtLeast(g.MaxTier, tier) {
+			tier = g.MaxTier
+		}
+		if g.MaxCycles > cycles {
+			cycles = g.MaxCycles
+		}
+	}
+	return tier, cycles
 }

@@ -109,7 +109,7 @@ const (
 
 func runCycle(t *testing.T, cfg config.Config, j *journal.Journal, f *fakeCourier) {
 	t.Helper()
-	if err := cycle(cfg, j, route.New(cfg, time.Now), f.courier(), true); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: f.courier()}, true); err != nil {
 		t.Fatalf("cycle: %v", err)
 	}
 }
@@ -237,10 +237,11 @@ func TestCardUpdatesAreNotPages(t *testing.T) {
 		t.Fatalf("with no live card there is nothing to correct, finalized = %+v", f.finalized)
 	}
 	// Settled, not pending: a later cycle must not retry them forever.
-	seen, err := j.Seen()
+	replayed, err := j.Load(time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	seen := replayed.Seen
 	for _, id := range []string{"jdg_1", "res_1", "act_1"} {
 		if !seen[journal.SeenKey("gate", id)] {
 			t.Errorf("update %s must settle even with no card to apply it to", id)
@@ -278,10 +279,11 @@ func TestCardIndexSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cards, err := restarted.LiveCards()
+	replayed, err := restarted.Load(time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	cards := replayed.Cards
 	card, ok := cards[journal.SeenKey("gate", "esc_1")]
 	if !ok {
 		t.Fatalf("the delivered card must be replayable, got %+v", cards)
@@ -299,8 +301,10 @@ func TestCardIndexSurvivesRestart(t *testing.T) {
 
 // TestFailedCorrectionRetries pins the retry contract at the new seam: a
 // correction that could not be delivered must hold the cursor so the next cycle
-// tries again. A card left showing a dead Approve button is exactly the failure
-// this change exists to remove, so it must never be silently abandoned.
+// tries again — and must SURFACE, because the cursor is ordered and everything
+// behind the stuck event is blocked with it. A card left showing a dead Approve
+// button is exactly the failure this work exists to remove, so it must never be
+// silently abandoned.
 func TestFailedCorrectionRetries(t *testing.T) {
 	f := &fakeCourier{}
 	cfg, j, path := slackGate(t, lcGrant+"\n"+lcVrd+"\n"+lcPark+"\n")
@@ -308,16 +312,31 @@ func TestFailedCorrectionRetries(t *testing.T) {
 
 	appendLines(t, path, lcJudge, lcRes)
 	f.finalErr = errors.New("slack is down")
-	if err := cycle(cfg, j, route.New(cfg, time.Now), f.courier(), true); err != nil {
-		t.Fatalf("a failed correction is journaled, not a cycle error: %v", err)
+	err := cycle(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: f.courier()}, true)
+	if err == nil {
+		t.Fatal("a stalled source must surface: sweep exits non-zero and status reports unhealthy")
 	}
 	if len(f.finalized) != 0 {
 		t.Fatalf("nothing was delivered, finalized = %+v", f.finalized)
+	}
+	cur, cerr := j.LoadCursors()
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if _, stalled := cur.Stalled["gate"]; !stalled {
+		t.Fatalf("the stall must be recorded where status reads it, got %+v", cur.Stalled)
 	}
 
 	f.finalErr = nil
 	runCycle(t, cfg, j, f)
 	if len(f.finalized) == 0 {
 		t.Fatal("the correction must be retried once delivery recovers")
+	}
+	cur, cerr = j.LoadCursors()
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if len(cur.Stalled) != 0 {
+		t.Fatalf("a recovered source must clear its stall, got %+v", cur.Stalled)
 	}
 }

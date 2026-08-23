@@ -76,6 +76,11 @@ type Entry struct {
 	// message ref. Additive and omitempty: an entry written before cards existed
 	// simply has none, and replays as a delivery with no correctable card.
 	Card *Card `json:"card,omitempty"`
+	// ReasonID fingerprints the park REASON this delivery carried, scoped to its
+	// repo. It is what lets the next identical question be collapsed instead of
+	// restated — the journal already answers "was the operator paged at T", and
+	// this extends it to "how many times have they been asked THIS".
+	ReasonID string `json:"reason_id,omitempty"`
 }
 
 // Journal is flare's private state directory.
@@ -110,35 +115,58 @@ func (j *Journal) Append(e Entry) error {
 	return nil
 }
 
-// Seen replays the journal into the set of settled event keys (see SeenKey).
-// Rebuilding from the journal keeps dedupe truthful across restarts and
-// resweeps: only what was actually delivered (or explicitly dropped/throttled)
-// is skipped.
-func (j *Journal) Seen() (map[string]bool, error) {
-	f, err := os.Open(j.path())
-	if os.IsNotExist(err) {
-		return map[string]bool{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("journal: open: %w", err)
-	}
-	defer f.Close()
-	ids := map[string]bool{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		var e Entry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			continue // a torn tail line must not brick dedupe
-		}
+// Replay is everything a poll cycle needs to know about what has already
+// happened, reconstructed from the journal in ONE pass: what has settled, which
+// cards are still standing in Slack, and how often each park reason has been
+// put in front of the operator.
+//
+// The three facts are gathered together because they come from the same lines
+// and the journal only grows. Three separate scans of the whole delivery
+// history, every poll, for facts one pass already sees is waste that compounds.
+type Replay struct {
+	// Seen is the settled event keys (see SeenKey) — dedupe's substrate.
+	Seen map[string]bool
+	// Cards is the delivered cards not yet corrected to a terminal state,
+	// keyed by SeenKey(source, escalation id).
+	Cards map[string]Card
+	// Reasons counts deliveries per caller-supplied reason id since the cutoff.
+	Reasons map[string]int
+}
+
+// Load replays the journal once into everything a cycle needs. since bounds the
+// reason counts only; settled events and live cards are all-time facts.
+//
+// A torn or unreadable line is skipped, never fatal: a partial tail must not
+// brick dedupe or the card index — the cost of skipping one is at worst a
+// duplicate page or a card left live, both far cheaper than a wedged loop.
+func (j *Journal) Load(since time.Time) (Replay, error) {
+	r := Replay{Seen: map[string]bool{}, Cards: map[string]Card{}, Reasons: map[string]int{}}
+	err := j.replay(func(e Entry) {
+		key := SeenKey(e.Source, e.EventID)
 		if seen[e.Kind] {
-			ids[SeenKey(e.Source, e.EventID)] = true
+			r.Seen[key] = true
 		}
+		r.card(key, e)
+		// Reasons count DELIVERIES, not artifacts: a reason that was dropped or
+		// throttled never reached the operator, so it habituated them to nothing.
+		if e.Kind == Delivered && e.ReasonID != "" && !e.Time.Before(since) {
+			r.Reasons[e.ReasonID]++
+		}
+	})
+	if err != nil {
+		return Replay{}, err
 	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("journal: scan: %w", err)
+	return r, nil
+}
+
+func (r Replay) card(key string, e Entry) {
+	if e.Kind == CardFinal {
+		delete(r.Cards, key)
+		return
 	}
-	return ids, nil
+	if e.Kind == Delivered && e.Card != nil {
+		r.Cards[key] = *e.Card
+	}
 }
 
 // Tail returns the last n entries, oldest first.
@@ -165,31 +193,6 @@ func (j *Journal) Tail(n int) ([]Entry, error) {
 		entries = entries[len(entries)-n:]
 	}
 	return entries, nil
-}
-
-// LiveCards replays the journal into the delivered cards that have NOT yet been
-// corrected to a terminal state — the ones whose buttons are still live in
-// Slack. It is the same substrate as Seen and for the same reason: the journal
-// is the only durable record of what flare put in front of the operator, so
-// what is still standing there must be reconstructable across a restart.
-//
-// Keys are SeenKey(source, escalation id).
-func (j *Journal) LiveCards() (map[string]Card, error) {
-	cards := map[string]Card{}
-	err := j.replay(func(e Entry) {
-		key := SeenKey(e.Source, e.EventID)
-		if e.Kind == CardFinal {
-			delete(cards, key)
-			return
-		}
-		if e.Kind == Delivered && e.Card != nil {
-			cards[key] = *e.Card
-		}
-	})
-	if err != nil {
-		return nil, err
-	}
-	return cards, nil
 }
 
 // replay walks every well-formed entry oldest-first. A torn or unreadable line

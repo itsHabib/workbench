@@ -181,17 +181,37 @@ func MintCommand(repo, stateDir string, r Result) string {
 	if r.Known && r.Approve {
 		return ""
 	}
-	tier := r.MintTier
+	return Mint(repo, stateDir, r.MintTier, r.MintCycles)
+}
+
+// Mint is the one spelling of a `gate grant` line, so every surface that tells
+// the operator to mint tells them the same thing. An unrecognized tier falls
+// back to T2 — the working default — rather than emitting a command gate would
+// refuse at mint time.
+func Mint(repo, stateDir, tier string, cycles int) string {
 	if _, ok := tiers[tier]; !ok {
 		tier = "T2"
 	}
 	cmd := fmt.Sprintf("gate grant -repo %s -max-tier %s", repo, tier)
-	if r.MintCycles > 0 {
-		cmd += fmt.Sprintf(" -max-cycles %d", r.MintCycles)
+	if cycles > 0 {
+		cmd += fmt.Sprintf(" -max-cycles %d", cycles)
 	}
 	cmd += " -ttl 24h"
 	if stateDir != "" {
 		cmd += fmt.Sprintf(" -state %s", stateDir)
 	}
 	return cmd
+}
+
+// TierAtLeast reports whether a ranks at or above b. An unknown tier ranks
+// below every known one here — the opposite of the fail-closed reading Check
+// uses, and deliberately: this orders candidates for a SUGGESTION, where
+// letting an unrecognized string win would propose a mint gate refuses.
+func TierAtLeast(a, b string) bool {
+	ra, aok := tiers[a]
+	rb, bok := tiers[b]
+	if !aok {
+		return false
+	}
+	return !bok || ra >= rb
 }
