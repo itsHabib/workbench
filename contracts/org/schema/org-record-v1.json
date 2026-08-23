@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itshabib.dev/schemas/org/org-record/v1",
+  "title": "Record",
+  "x-version": "org-record.v1",
+  "description": "One link in a role's continuity chain. This is the SPINE only: fixed-shape, prose-free, canonically encoded under canon/v1, hash-chained, and retained forever. The record's prose lives in a content-addressed blob referenced by body_digest and is erasable — deleting it leaves a tombstone and the chain still verifies. Every identifier a transition needs is here rather than in the body, because the fold must be computable from the chain alone.",
+  "type": "object",
+  "required": ["v", "scheme", "seq", "prev", "tenant", "role", "kind", "kind_class", "fence", "at"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "type": "integer", "const": 1, "description": "Spine version. Distinct from scheme: a record's SHAPE and the BYTES a shape hashes to change for different reasons and must move separately." },
+    "scheme": { "type": "string", "const": "canon/v1", "description": "The canonical encoding these bytes were produced under. Hashed INTO the digest, so a scheme mismatch presents as a mismatched digest rather than as a field a reader may ignore." },
+    "seq": { "type": "integer", "minimum": 1, "description": "Chain position, contiguous from 1." },
+    "prev": { "type": "string", "description": "Digest of the record at seq-1; empty at genesis. This is the compare-and-swap: to append you must present the tip you read, which is what makes two incarnations unable to both hold the role." },
+    "tenant": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$", "description": "Root of every namespace and partition key of every chain, log, blob and anchor." },
+    "role": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$", "description": "The durable office this chain belongs to. Colon-separated segments let human:mh, lead:platform and ic:contracts-org all be role ids under one rule — the human is a role like any other." },
+    "kind": { "type": "string", "description": "The record kind. Open vocabulary on the wire: a reader that does not know a kind decides what to do from kind_class, not from this field." },
+    "kind_class": {
+      "type": "string",
+      "enum": ["structural", "advisory"],
+      "description": "Carried on the wire rather than derived from a table, because the kinds a reader must classify correctly are exactly the ones missing from its own table. An unknown STRUCTURAL kind refuses the fold; an unknown ADVISORY kind is preserved verbatim and skipped. The failure this prevents: an old reader silently skipping a takeover concludes it still holds the role — two holders, produced by routine version skew, with every hash valid."
+    },
+    "incarnation": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "The disposable session that wrote this record, identified by the digest of the attach or takeover that minted it. Absent on charter, attach and takeover — a record cannot contain its own digest. Digests rather than counters: a guessable id is one a re-reading writer copies by accident." },
+    "fence": { "type": "integer", "minimum": 0, "description": "The chain position this writer's authority was minted at. Long-lived verifiers keep a per-role high-water mark and refuse a lower fence. Fences are enforced by long-lived verifiers ONLY: an ephemeral CI runner's high-water mark is always zero and enforces nothing." },
+    "at": { "type": "string", "format": "date-time", "description": "Stamped by the HOME, never by the agent. No refusal anywhere in this contract depends on this field: no refusal may depend on a clock the refusing party does not own." },
+    "body_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "Reference to the erasable blob carrying this record's prose. Absent for most structural records." },
+    "body_class": { "type": "string", "description": "Classification the blob store keys retention, encryption and erasure on. Required whenever body_digest is present: an unclassified blob has no retention rule, and the store cannot invent one at the moment someone asks for the erasure." },
+    "refs": {
+      "type": "array",
+      "description": "What this record was derived from, each carrying its trust. The chain records CLAIMS by an incarnation; only broker outcomes are facts, and a prompt-injected checkpoint is durable and inherited by every future incarnation. Labelling the source is one of two structural mitigations that bound the blast radius; the other is that permitted effect classes are pinned in the charter.",
+      "items": {
+        "type": "object",
+        "required": ["uri", "trust"],
+        "additionalProperties": false,
+        "properties": {
+          "uri": { "type": "string", "minLength": 1 },
+          "trust": { "type": "string", "enum": ["operator", "internal", "external"] }
+        }
+      }
+    },
+    "next_due": { "type": "string", "format": "date-time", "description": "The deadline the writer itself declares for its own next append. Liveness is derived against this, never from self-report — so an incarnation that hangs without exiting is correctly seen as dead." },
+    "subject": {
+      "type": "object",
+      "description": "The transition's structural parameter. One fixed shape with optional members rather than a per-kind union, so there is exactly one canonical form for every kind; which members a kind requires is contract law in Go, not a schema constraint.",
+      "additionalProperties": false,
+      "properties": {
+        "work": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]*:\\S+$", "description": "A work URI with a scheme: github:acme/api#88, jira:PROJ-412, dossier:proj/phase/task. The scheme is the single field deciding whether this substrate attaches to work an organization already has, or only ever works for one tracker." },
+        "digest": { "type": "string", "description": "Pins the work item's content at assignment time, so a renamed or rewritten ticket reads as drift rather than being silently absorbed." },
+        "party": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$", "description": "A role id: the supervisor on a takeover, the assignee on an assign, the child on a delegate, the target on a split or merge." },
+        "effect": { "type": "string", "description": "An effect id, on intent-ref and on the resolution that closes one." },
+        "target": { "type": "string", "description": "An earlier record this one acts on: the annulled record, the escalation a resolution closes." }
+      }
+    },
+    "terms": {
+      "type": ["object", "null"],
+      "description": "The inherited charter. Present only on charter and recharter; any other kind carrying it is refused charter_immutable. Immutability is not tidiness: if each incarnation could rewrite the goal, a role's purpose would be subject to a dozen rounds of lossy re-summarization with nothing to compare against.",
+      "additionalProperties": false,
+      "properties": {
+        "scope": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]*:\\S+$" }, "description": "The work references this role owns. At least one: there is no unscoped role. A lead's scope is a scope, a maintainer's an area, an IC's a task — one rule covers all three because the URI scheme carries the difference." },
+        "tier": { "type": "string", "description": "The risk ceiling the role may act within." },
+        "effect_classes": { "type": "array", "items": { "type": "string" }, "description": "What the role may do to the outside world. Bounds an injected incarnation to what the role could do anyway." },
+        "supervisors": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$" }, "description": "The roles that may write a takeover against this one. The charter is the only place this can be stated: asking a holder to authorize its own replacement is exactly the case where it is unreachable." },
+        "spend_ceiling": { "type": "integer", "minimum": 0 },
+        "cycle_ceiling": { "type": "integer", "minimum": 0, "description": "Encodes the two-fix-rounds review rule as an attenuating dimension instead of as prose an agent may or may not read. A looping panel becomes a refusal with a remedy rather than a silently burned budget." },
+        "concurrency_ceiling": { "type": "integer", "minimum": 0 },
+        "min_reader": { "type": "integer", "minimum": 0, "description": "Monotone minimum reader version. A reader below it refuses the WHOLE chain rather than interpreting part of it — partial interpretation is how an old reader skips a takeover." },
+        "retire": { "type": "string", "description": "The condition under which the role should be retired. An identifier-length phrase; the paragraph is body." }
+      }
+    }
+  }
+}
