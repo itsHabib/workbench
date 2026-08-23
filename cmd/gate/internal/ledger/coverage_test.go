@@ -170,3 +170,22 @@ func TestReconcileCountsOutOfWindowOutstandingAuthorizations(t *testing.T) {
 		t.Fatalf("outstanding_outside_window = %d, want 1 — the exclusion must be visible", c.OutstandingOutsideWindow)
 	}
 }
+
+// TestOutOfWindowCountExcludesDischargedAuthorizations pins that the
+// outstanding count means what it says. An authorization issued and discharged
+// before the window is closed; counting it as outstanding would inflate the one
+// number whose whole meaning is "never closed".
+func TestOutOfWindowCountExcludesDischargedAuthorizations(t *testing.T) {
+	auths := []Authorization{
+		authorized("act_closed", 1, "aaa", "2026-06-01T00:00:00Z"),
+		authorized("act_open", 2, "bbb", "2026-06-02T00:00:00Z"),
+	}
+	c := Reconcile("itsHabib/workbench", "main",
+		window("2026-08-01T00:00:00Z", "2026-08-20T00:00:00Z"),
+		at("2026-05-01T00:00:00Z"), "flag", nil, auths,
+		map[string]string{"act_closed": "rct_closed"}, clock("2026-08-20T00:00:00Z"))
+
+	if c.OutstandingOutsideWindow != 1 {
+		t.Fatalf("outstanding_outside_window = %d, want 1 — a receipted authorization is closed, not outstanding", c.OutstandingOutsideWindow)
+	}
+}

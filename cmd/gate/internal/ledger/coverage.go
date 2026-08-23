@@ -165,9 +165,15 @@ func Reconcile(repo, branch string, w Window, effectiveFrom time.Time, effective
 		}
 		// Out-of-window authorizations are counted, not listed: the sweep's claim
 		// is scoped to its window, but an outstanding authorization the reader
-		// never learns exists is the failure this class is for.
+		// never learns exists is the failure this class is for. A receipt is
+		// checked here even though the landing itself is outside the window —
+		// the receipt is the discharge, and counting a closed authorization as
+		// outstanding would inflate the one number that is supposed to mean
+		// "something was authorized and never closed".
 		if a.At.Before(w.Since) || a.At.After(w.Until) {
-			c.OutstandingOutsideWindow++
+			if receipts[a.Action] == "" {
+				c.OutstandingOutsideWindow++
+			}
 			continue
 		}
 		c.AuthorizedNeverLanded = append(c.AuthorizedNeverLanded, CoverageRow{
