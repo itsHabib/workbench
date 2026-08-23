@@ -639,3 +639,85 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// preflightPark is the card input these tests vary: a briefed content park on
+// an opted-in channel — the one shape that renders Approve today.
+func preflightPark(extra map[string]string) event.Event {
+	fields := map[string]string{
+		"run": "run_242", "repo": "itsHabib/workbench", "number": "242",
+		"briefed": "yes", "grant": "grt_ceiling", "state": "/state",
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	return event.Event{
+		Source:   "gate",
+		ID:       "esc_content",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields:   fields,
+	}
+}
+
+// TestSlackPreflightWithholdsApprove is the acceptance for the burned tap: a
+// park the source proved un-approvable renders NO Approve button. Block stays —
+// no ceiling stops a human saying "don't merge" — and the card says plainly
+// what is missing, with the mint command the operator can paste at a keyboard.
+func TestSlackPreflightWithholdsApprove(t *testing.T) {
+	msg := renderSlackMessage("C1", true, preflightPark(map[string]string{
+		"approvable": "no",
+		"blocker":    "verdict tier T3 exceeds grant ceiling T1",
+		"needs":      "a T3 grant for itsHabib/workbench — a judgment cannot lower the tier",
+		"mint":       "gate grant -repo itsHabib/workbench -max-tier T3 -ttl 24h",
+	}))
+	btns := resolveButtons(msg.Attachments[0].Blocks)
+	if len(btns) != 1 || btns[0].ActionID != escalation.ActionBlock {
+		t.Fatalf("want Block only when an approval cannot land, got %+v", btns)
+	}
+	body := string(mustJSON(t, msg))
+	for _, want := range []string{
+		"Cannot approve",
+		"verdict tier T3 exceeds grant ceiling T1",
+		"gate grant -repo itsHabib/workbench -max-tier T3",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("card must say %q:\n%s", want, body)
+		}
+	}
+	// The lock-screen line must lead with the missing authority, not "Your call"
+	// — the call is not the operator's until they mint.
+	fallback := msg.Attachments[0].Fallback
+	if !strings.Contains(fallback, "Grant needed") || !strings.Contains(fallback, "T3") {
+		t.Errorf("fallback = %q, want it to lead with the missing grant", fallback)
+	}
+}
+
+// TestSlackPreflightKeepsApproveWhenItCanLand is the other direction: a park
+// the source proved approvable renders exactly the card it always did.
+func TestSlackPreflightKeepsApproveWhenItCanLand(t *testing.T) {
+	msg := renderSlackMessage("C1", true, preflightPark(map[string]string{"approvable": "yes"}))
+	btns := resolveButtons(msg.Attachments[0].Blocks)
+	if len(btns) != 2 {
+		t.Fatalf("an approvable park keeps Approve+Block, got %+v", btns)
+	}
+	if strings.Contains(string(mustJSON(t, msg)), "Cannot approve") {
+		t.Error("an approvable park must carry no blocker section")
+	}
+	if !strings.Contains(msg.Attachments[0].Fallback, "Your call") {
+		t.Errorf("fallback = %q, want the ordinary escalate headline", msg.Attachments[0].Fallback)
+	}
+}
+
+// TestSlackPreflightFailsOpen pins the sink law at the render seam: with no
+// pre-flight verdict recorded — an unreadable join, or a flare reading a log
+// written before the check existed — the card is byte-identical to the one
+// flare rendered before. Withholding happens on a proof, never on a gap.
+func TestSlackPreflightFailsOpen(t *testing.T) {
+	silent := renderSlackMessage("C1", true, preflightPark(nil))
+	approvable := renderSlackMessage("C1", true, preflightPark(map[string]string{"approvable": "yes"}))
+	if string(mustJSON(t, silent)) != string(mustJSON(t, approvable)) {
+		t.Fatalf("an absent pre-flight must render the approvable card:\n%s\n%s",
+			mustJSON(t, silent), mustJSON(t, approvable))
+	}
+}

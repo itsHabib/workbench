@@ -163,6 +163,9 @@ func slackBlocks(ev event.Event, resolveActions bool) []slackBlock {
 	if body != "" {
 		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: body}})
 	}
+	if blocker := blockerBlock(ev); blocker != "" {
+		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: blocker}})
+	}
 	if actions := actionElements(ev, resolveActions); len(actions) > 0 {
 		blocks = append(blocks, slackBlock{Type: "actions", Elements: actions})
 	}
@@ -185,10 +188,27 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 	if btn, ok := prButton(ev); ok {
 		elements = append(elements, btn)
 	}
-	if resolveActions && resolvablePark(ev) {
-		elements = append(elements, approveButton(ev), blockButton(ev))
+	if !resolveActions || !resolvablePark(ev) {
+		return elements
 	}
-	return elements
+	if approvable(ev) {
+		elements = append(elements, approveButton(ev))
+	}
+	// Block survives a failed pre-flight on purpose. The ceilings that make an
+	// approval un-landable are authorization ceilings on the MERGE path; there is
+	// no ceiling that stops a human deciding "don't merge this", and the operator
+	// away from a keyboard should still be able to say so.
+	return append(elements, blockButton(ev))
+}
+
+// approvable reports whether the Approve button may be painted. The source
+// records `approvable=no` only when it PROVED from gate's own artifacts that
+// the tap could not land (see internal/preflight); an absent field means the
+// facts did not support a verdict, and absence must render the card flare
+// rendered before this check existed. Hence the default-yes read: flare
+// withholds on a proof, never on a gap.
+func approvable(ev event.Event) bool {
+	return ev.Fields["approvable"] != "no"
 }
 
 // resolvablePark reports whether this event is one `escalate` can actually
@@ -310,7 +330,17 @@ func blockHeadline(ev event.Event) string {
 }
 
 func escalateHeadline(ev event.Event) string {
-	if s := subject(ev); s != "" {
+	s := subject(ev)
+	// "Your call" is a lie when the recorded ceilings make an approval
+	// un-landable: the call is not the operator's until they mint. Lead with the
+	// authority that is actually missing so the lock-screen line is honest.
+	if resolvablePark(ev) && !approvable(ev) {
+		if s != "" {
+			return "🔑 Grant needed for " + s + " — cannot approve as-is"
+		}
+		return "🔑 Grant needed — this park cannot be approved as-is"
+	}
+	if s != "" {
 		return "⚠️ Your call on " + s
 	}
 	return "⚠️ Your call — a run paused for your decision"
@@ -381,6 +411,25 @@ func briefBlock(ev event.Event) string {
 	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
 }
 
+// blockerBlock states, plainly, why this park cannot be approved from the phone
+// and what would clear it — the section that replaces a button whose tap was
+// guaranteed to fail. The mint command is fenced so it is one copy-paste at a
+// keyboard: minting is the operator's authority alone, and the card's whole job
+// is to make exercising it cost one paste instead of an investigation.
+func blockerBlock(ev event.Event) string {
+	if approvable(ev) {
+		return ""
+	}
+	lines := []string{"*Cannot approve:* " + compact(ev.Fields["blocker"])}
+	if needs := compact(ev.Fields["needs"]); needs != "" {
+		lines = append(lines, "*Needs:* "+needs)
+	}
+	if mint := compact(ev.Fields["mint"]); mint != "" {
+		lines = append(lines, "```"+mint+"```")
+	}
+	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
+}
+
 // subject is the short "repo#n" the header carries when the event names one.
 func subject(ev event.Event) string {
 	repo, num := ev.Fields["repo"], ev.Fields["number"]
@@ -431,7 +480,10 @@ func slackFooter(ev event.Event) string {
 // one, else the raw body — capped to Slack's text limit.
 func slackFallback(ev event.Event) string {
 	t := headline(ev)
-	why := compact(ev.Fields["brief_concern"])
+	why := compact(ev.Fields["blocker"])
+	if why == "" {
+		why = compact(ev.Fields["brief_concern"])
+	}
 	if why == "" {
 		why = compact(ev.Body)
 	}
