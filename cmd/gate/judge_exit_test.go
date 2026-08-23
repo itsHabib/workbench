@@ -61,6 +61,7 @@ func TestJudgeUnknownRunIsNotReportedAsUnparked(t *testing.T) {
 		"-run", "run_absent",
 		"-grant", f.grant,
 		"-decision", "pass",
+		"-who", "operator",
 		"-why", "because",
 		"-state", f.stateDir,
 		"-key", f.keyDir,
@@ -89,6 +90,7 @@ func TestJudgeUnknownRunNamesAnAbsoluteStateDir(t *testing.T) {
 		"-run", "run_absent",
 		"-grant", f.grant,
 		"-decision", "pass",
+		"-who", "operator",
 		"-why", "because",
 		"-state", dir,
 		"-key", f.keyDir,
@@ -118,6 +120,7 @@ func TestJudgeKnownRunWithoutEscalationStillReportsUnparked(t *testing.T) {
 		"-run", unparked,
 		"-grant", f.grant,
 		"-decision", "pass",
+		"-who", "operator",
 		"-why", "because",
 		"-state", f.stateDir,
 		"-key", f.keyDir,
@@ -184,7 +187,7 @@ func judgeExitHelper(c string) {
 	run := os.Getenv("GATE_TEST_RUN")
 	switch c {
 	case "unknown-run":
-		os.Args = append([]string{"gate", "judge", "-run", "run_absent", "-decision", "pass", "-why", "because"}, common...)
+		os.Args = append([]string{"gate", "judge", "-run", "run_absent", "-decision", "pass", "-why", "because", "-who", "operator"}, common...)
 	case "malformed-judgment":
 		os.Args = append([]string{"gate", "judge", "-run", run, "-judgment", os.Getenv("GATE_TEST_JUDGMENT")}, common...)
 	case "provider-failed":

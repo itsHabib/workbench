@@ -1717,14 +1717,14 @@ func TestResolveClosesLoop(t *testing.T) {
 		t.Fatalf("runOfEscalation resolved the wrong run: got %s want %s", gotRun, run)
 	}
 
-	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land"})
+	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land", Who: "operator"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
 	if judgmentID == "" {
 		t.Fatal("a recorded decision must return its judgment id")
 	}
-	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatalf("stampResolution: %v", err)
 	}
 
@@ -1749,7 +1749,7 @@ func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
 		t.Fatalf("park: code %d err %v", code, err)
 	}
 	esc := firstOfKind(t, e, run, state.KindEscalation)
-	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
 		t.Fatalf("first judgment: %v", err)
 	}
@@ -1803,7 +1803,7 @@ func TestJudgeSlotStateReportsWhetherTheOneShotWasSpent(t *testing.T) {
 		}
 	}
 
-	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
 		t.Fatalf("first judgment: %v", err)
 	}
@@ -1898,7 +1898,7 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	}
 
 	// Driving it to an outcome flips the same slot to settled.
-	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass}); err != nil {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"}); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	arts, err = e.st.Run(run)
@@ -2001,7 +2001,7 @@ func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := judgmentOptions{ArtifactPath: path}
+	opts := judgmentOptions{ArtifactPath: path, Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_stale_head") {
 		t.Fatalf("stale-head error = %v", err)
 	}
@@ -2047,7 +2047,7 @@ func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
 		t.Fatalf("content park: code %d err %v", code, err)
 	}
 	contentPark := firstOfKind(t, e, run, state.KindEscalation)
-	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe"}); err != nil || code != codeParked {
+	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe", Who: "operator"}); err != nil || code != codeParked {
 		t.Fatalf("narrow-grant judgment should re-park at ceiling: code %d err %v", code, err)
 	}
 	ceilingPark := lastOfKind(t, e, run, state.KindEscalation)
@@ -2058,7 +2058,7 @@ func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier"}); err != nil || code != codeMerge {
+	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier", Who: "operator"}); err != nil || code != codeMerge {
 		t.Fatalf("new ceiling park must accept its own judgment: code %d err %v", code, err)
 	}
 }
@@ -2122,7 +2122,7 @@ func TestRetryReauthorizesPersistedJudgmentWithReplacementGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"})
 	if err != nil {
 		t.Fatalf("replacement grant must resume immutable content judgment: %v", err)
 	}
@@ -2145,6 +2145,7 @@ func TestProviderDelayExpiryRefusesBeforeJudgmentAppend(t *testing.T) {
 	opts := judgmentOptions{
 		Decision: verify.DecisionPass,
 		Why:      "provider completed after the grant expired",
+		Who:      "operator",
 		beforeAppend: func() {
 			now = now.Add(2 * time.Hour)
 		},
@@ -2183,7 +2184,7 @@ func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"})
 	if err != nil {
 		t.Fatalf("replacement grant must resume after capability refusal: %v", err)
 	}
@@ -2200,7 +2201,7 @@ func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
 	if completed != 1 {
 		t.Fatalf("completed outcomes = %d, want exactly one", completed)
 	}
-	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
 		t.Fatalf("post-authorization duplicate error = %v", err)
 	}
 }
@@ -2211,17 +2212,17 @@ func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry", Who: "operator"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
 		t.Fatalf("conflicting retry error = %v", err)
 	}
 	if _, ok := artifactForParent(mustRunArtifacts(t, e, run), state.KindVerdict, jArt.ID); ok {
 		t.Fatal("conflicting retry advanced the judgment chain")
 	}
-	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry"})
+	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry", Who: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatal(err)
 	}
 	assertResolutionStamp(t, e, run, esc.ID, gotID, verify.DecisionPass)
@@ -2377,11 +2378,11 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 
 	// Resolve it (pass → would_merge writes a terminal action).
-	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land"})
+	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land", Who: "operator"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
-	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2409,6 +2410,8 @@ func TestResolveRefusesEscalationSupersededBeforeAppend(t *testing.T) {
 	opts := judgmentOptions{
 		Decision:              verify.DecisionPass,
 		Why:                   "approved from the phone",
+		Who:                   "@mhdevstuff (U123)",
+		Method:                verify.MethodSlackInteractive,
 		requireOpenEscalation: true,
 		beforeAppend: func() {
 			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
@@ -2443,6 +2446,7 @@ func TestJudgeDoesNotTakeTheResolveOnlyOpenGuard(t *testing.T) {
 	opts := judgmentOptions{
 		Decision: verify.DecisionPass,
 		Why:      "operator judged from the run",
+		Who:      "operator",
 		beforeAppend: func() {
 			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
 				t.Fatal(err)
@@ -2478,4 +2482,155 @@ func decodeResolution(body []byte) (escalation.Resolution, error) {
 		return escalation.Resolution{}, err
 	}
 	return r, nil
+}
+
+// parkedRunForDecider builds a run parked on a content escalation, returning the
+// run id, the grant, and the escalation — the exact state a judgment resolves.
+func parkedRunForDecider(t *testing.T, e env, number int) (string, state.Artifact, state.Artifact) {
+	t.Helper()
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: number, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	return run, grantArt, firstOfKind(t, e, run, state.KindEscalation)
+}
+
+// TestJudgmentRecordsItsDecider is the separation-of-duties invariant this
+// binding exists for: the judgment ARTIFACT — not a sidecar, not the free-text
+// why — names who decided and through which channel, so a human approval and an
+// agent-composed one stop being the same record.
+func TestJudgmentRecordsItsDecider(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 620)
+	at := time.Date(2026, 8, 21, 22, 15, 0, 0, time.UTC)
+	_, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "reviewed the diff; the residual is a nit",
+		Who:      "@mhdevstuff (U123)",
+		Method:   verify.MethodSlackInteractive,
+		now:      func() time.Time { return at },
+	})
+	if err != nil {
+		t.Fatalf("applyJudgment: %v", err)
+	}
+	artifact, err := e.st.Get(judgmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	judgment, err := verify.Load(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if judgment.Decider == nil {
+		t.Fatal("the judgment artifact must carry its decider — a sidecar resolution is not the decision")
+	}
+	if judgment.Decider.Who != "@mhdevstuff (U123)" {
+		t.Fatalf("decider.who = %q, want the identity the transport established", judgment.Decider.Who)
+	}
+	if judgment.Decider.Method != verify.MethodSlackInteractive {
+		t.Fatalf("decider.method = %q, want %q", judgment.Decider.Method, verify.MethodSlackInteractive)
+	}
+	if judgment.Decider.At != "2026-08-21T22:15:00Z" {
+		t.Fatalf("decider.at = %q, want the decider's own clock", judgment.Decider.At)
+	}
+	// The binding must survive the wire, not just the Go struct: an auditor reads
+	// log.jsonl, and a field that only exists in memory closes nothing.
+	if !strings.Contains(string(artifact.Body), `"decider"`) {
+		t.Fatalf("the decider must be persisted in the artifact body, got %s", artifact.Body)
+	}
+}
+
+// TestUnattributedJudgmentIsRefusedBeforeTheOneShotIsSpent pins the refusal at
+// the point that matters. A judgment is irreversible once appended, so refusing
+// after the write would burn the escalation's single judgment on a record that
+// names nobody — worse than the gap it was meant to close.
+func TestUnattributedJudgmentIsRefusedBeforeTheOneShotIsSpent(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 621)
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "safe",
+	})
+	if err == nil {
+		t.Fatal("a judgment naming nobody must be refused")
+	}
+	if !errors.Is(err, verify.ErrDeciderMissing) {
+		t.Fatalf("refusal must be classifiable as ErrDeciderMissing, got %v", err)
+	}
+	if judgmentID != "" {
+		t.Fatalf("a refused judgment must return no id, got %s", judgmentID)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("the refusal appended %d artifact(s); the one-shot must be unspent", len(after)-len(before))
+	}
+	// Unspent means retryable: the same escalation still takes a judgment once it
+	// names its decider.
+	if _, _, id, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "safe", Who: "operator",
+	}); err != nil || id == "" {
+		t.Fatalf("the escalation must still be judgeable after the refusal: id %q err %v", id, err)
+	}
+}
+
+// TestJudgeFlagsRequireADecider pins the CLI surface: every path a person
+// authors demands -who, and -auto refuses one because the provider is the
+// decider and gate derives it.
+func TestJudgeFlagsRequireADecider(t *testing.T) {
+	cases := []struct {
+		name    string
+		opts    judgmentOptions
+		wantErr string
+	}{
+		{"manual without who", judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}, "-who required"},
+		{"manual with who", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh"}, ""},
+		{"manual with slack channel", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh", Method: verify.MethodSlackInteractive}, ""},
+		{"manual with an unknown channel", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh", Method: "carrier-pigeon"}, "judgment_unattributed"},
+		{"submitted artifact without who", judgmentOptions{ArtifactPath: "j.json"}, "-who required"},
+		{"submitted artifact with who", judgmentOptions{ArtifactPath: "j.json", Who: "mh"}, ""},
+		{"auto derives its own decider", judgmentOptions{Auto: true, Provider: "claude"}, ""},
+		{"auto refuses a claimed decider", judgmentOptions{Auto: true, Provider: "claude", Who: "mh"}, "not accepted with -auto"},
+		{"auto refuses a claimed channel", judgmentOptions{Auto: true, Provider: "claude", Method: verify.MethodCLIOperator}, "not accepted with -auto"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateJudgeFlags("run_1", "grt_1", c.opts)
+			if c.wantErr == "" && err != nil {
+				t.Fatalf("validateJudgeFlags = %v, want nil", err)
+			}
+			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
+				t.Fatalf("validateJudgeFlags = %v, want an error containing %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestResolveFlagsCarryTheChannel pins that the back-channel's -method reaches
+// validation: the same operator string typed at a shell and produced by a
+// verified Slack callback are different facts, and only the channel separates
+// them.
+func TestResolveFlagsCarryTheChannel(t *testing.T) {
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "@mhdevstuff (U123)", verify.MethodSlackInteractive); err != nil {
+		t.Fatalf("a slack-interactive resolution must validate: %v", err)
+	}
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "@mhdevstuff (U123)", "carrier-pigeon"); err == nil {
+		t.Fatal("an unknown channel must be refused")
+	}
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "", verify.MethodSlackInteractive); err == nil {
+		t.Fatal("a resolution naming nobody must be refused")
+	}
 }

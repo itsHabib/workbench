@@ -172,8 +172,8 @@ func usage() {
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N (-grant grt_x | -slack) [-live]
   grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
-  resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." -who NAME [-method cli-operator|slack-interactive] | -judgment <path|-> -who NAME | -auto -provider claude|codex)
+  resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME [-method ...]  (resolve a park by its escalation id + stamp the resolution)
   executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
   executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
@@ -1339,10 +1339,23 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
 	}
 	if opts.Auto {
+		if opts.Who != "" || opts.Method != "" {
+			return errors.New("judge: -who/-method are not accepted with -auto — the provider is the decider and gate records it")
+		}
 		return verify.ValidateJudgeProvider(opts.Provider)
 	}
 	if opts.Provider != "" {
 		return errors.New("judge: -provider requires -auto")
+	}
+	// Every judgment a person authors must name that person. This is the write
+	// path, and it is the only place the binding can be enforced: a reader that
+	// refused an unattributed judgment could no longer explain the 200-odd runs
+	// recorded before the field existed.
+	if opts.Who == "" {
+		return errors.New("judge: -who required — a judgment records who decided")
+	}
+	if err := verify.ValidateDecider(verify.Decider{Who: opts.Who, Method: opts.method(), At: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return fmt.Errorf("judge: %w", err)
 	}
 	if opts.ArtifactPath != "" {
 		return nil
@@ -1362,6 +1375,17 @@ type judgmentOptions struct {
 	Auto         bool
 	ArtifactPath string
 	Provider     string
+	// Who and Method bind the decision to a decider: the identity that decided
+	// and the channel it arrived through. Required on every path a PERSON
+	// authors — manual and submitted-artifact — and derived on the -auto path,
+	// where the delegate is the decider and there is nothing for an operator to
+	// claim. Without them a human approval and an agent-composed one are the
+	// same record.
+	Who    string
+	Method string
+	// now is the decider's clock, injectable so a test can pin the stamped
+	// timestamp. Nil means time.Now.
+	now          func() time.Time
 	beforeAppend func()
 	// requireOpenEscalation makes "this escalation is still the run's open
 	// terminal" a condition of the judgment write itself, evaluated under the
@@ -1377,6 +1401,25 @@ type judgmentOptions struct {
 	requireOpenEscalation bool
 }
 
+// method is the channel to record, defaulting to the operator at a shell. The
+// default lives here rather than on the flag so that "-method set explicitly"
+// stays distinguishable from "not set" — which is what lets -auto refuse a
+// channel it would only ignore.
+func (o judgmentOptions) method() string {
+	if o.Method == "" {
+		return verify.MethodCLIOperator
+	}
+	return o.Method
+}
+
+// clock is the decider's clock, defaulting to the wall clock.
+func (o judgmentOptions) clock() func() time.Time {
+	if o.now == nil {
+		return time.Now
+	}
+	return o.now
+}
+
 func cmdJudge(args []string) error {
 	fs := flag.NewFlagSet("judge", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
@@ -1387,6 +1430,8 @@ func cmdJudge(args []string) error {
 	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
 	auto := fs.Bool("auto", false, "run a built-in local CLI provider over the versioned request")
 	provider := fs.String("provider", "", "built-in local CLI provider for -auto: claude or codex")
+	who := fs.String("who", "", "who decided — recorded on the judgment; omit only with -auto")
+	method := fs.String("method", "", "how the decider's identity was established: cli-operator (default) or slack-interactive")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -1401,6 +1446,8 @@ func cmdJudge(args []string) error {
 		Auto:         *auto,
 		ArtifactPath: *artifactPath,
 		Provider:     *provider,
+		Who:          *who,
+		Method:       *method,
 	}
 	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
@@ -1538,6 +1585,13 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	if err != nil {
 		return gateResult{}, 0, "", err
 	}
+	// The one gate every judgment write passes, whichever verb or transport
+	// composed it. The per-path construction above already stamps a decider;
+	// this refuses the composition that forgets to, so a future path cannot
+	// reopen the gap by omission.
+	if err := verify.RequireDecider(judgment); err != nil {
+		return gateResult{}, 0, "", err
+	}
 	if opts.beforeAppend != nil {
 		opts.beforeAppend()
 	}
@@ -1651,6 +1705,10 @@ func actAfterJudgment(e env, run, grantID string, subject verify.Subject, judgme
 
 func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subject verify.Subject, grantID, maxTier string, opts judgmentOptions) (verify.Verdict, error) {
 	if !opts.Auto && opts.ArtifactPath == "" {
+		decider, err := verify.NewDecider(opts.Who, opts.method(), opts.clock())
+		if err != nil {
+			return verify.Verdict{}, err
+		}
 		return verify.Verdict{
 			Subject:    subject,
 			Source:     "operator-judgment",
@@ -1659,12 +1717,15 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 			Tier:       "T0",
 			Confidence: 1.0,
 			Why:        opts.Why,
+			Decider:    &decider,
 		}, nil
 	}
 	request, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, maxTier)
 	if err != nil {
 		return verify.Verdict{}, err
 	}
+	// -auto derives its own decider: the resolved provider wrapper and the model
+	// it reported, on the auto-<provider> channel. Nothing here to supply.
 	if opts.Auto {
 		return verify.AutoJudge(opts.Provider, request)
 	}
@@ -1672,7 +1733,20 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 	if err != nil {
 		return verify.Verdict{}, err
 	}
-	return verify.ValidateJudgment(artifact, request)
+	verdict, err := verify.ValidateJudgment(artifact, request)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	// A submitted artifact names its producing model in Producer.Impl, but the
+	// model did not choose to submit it — a person did, out of band, and that
+	// person is who the record must be able to name. So the decider on this path
+	// is the submitter, not the model; the model stays in the producer.
+	decider, err := verify.NewDecider(opts.Who, opts.method(), opts.clock())
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	verdict.Decider = &decider
+	return verdict, nil
 }
 
 func artifactForParent(arts []state.Artifact, kind, parentID string) (state.Artifact, bool) {
@@ -1731,12 +1805,15 @@ func readJudgmentArtifact(path string) (verify.JudgmentArtifactV1, error) {
 	return verify.DecodeJudgmentArtifact(f)
 }
 
-func validateResolveFlags(escID, grantID, decision, why, who string) error {
+func validateResolveFlags(escID, grantID, decision, why, who, method string) error {
 	if escID == "" || grantID == "" {
 		return errors.New("resolve: -escalation and -grant required")
 	}
 	if who == "" {
-		return errors.New("resolve: -who required (the resolution stamp records who decided)")
+		return errors.New("resolve: -who required (the judgment and the resolution stamp record who decided)")
+	}
+	if err := verify.ValidateDecider(verify.Decider{Who: who, Method: method, At: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return fmt.Errorf("resolve: %w", err)
 	}
 	if why == "" {
 		return errors.New("resolve: -why required")
@@ -1768,7 +1845,8 @@ func cmdResolve(args []string) error {
 	grantID := fs.String("grant", "", "grant artifact id")
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the decision's reasoning")
-	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	who := fs.String("who", "", "who decided — recorded on the judgment and the resolution stamp")
+	method := fs.String("method", verify.MethodCLIOperator, "how the decider's identity was established: cli-operator or slack-interactive")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when the resolution authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -1777,7 +1855,7 @@ func cmdResolve(args []string) error {
 	if help {
 		return nil
 	}
-	if err := validateResolveFlags(*escID, *grantID, *decision, *why, *who); err != nil {
+	if err := validateResolveFlags(*escID, *grantID, *decision, *why, *who, *method); err != nil {
 		return err
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
@@ -1801,7 +1879,10 @@ func cmdResolve(args []string) error {
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
 	}
-	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why, requireOpenEscalation: true})
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{
+		Decision: *decision, Why: *why, Who: *who, Method: *method,
+		requireOpenEscalation: true,
+	})
 	if err != nil {
 		return judgeSlotState(e, run, *escID, err)
 	}
@@ -1809,7 +1890,7 @@ func cmdResolve(args []string) error {
 	// capability refusal appends none): the stamp claims the loop closed, so it
 	// must never outrun the judgment it links.
 	if judgmentID != "" {
-		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who); err != nil {
+		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who, *method); err != nil {
 			return err
 		}
 	}
@@ -1879,10 +1960,11 @@ var errStaleEscalation = errors.New("resolve: escalation is no longer the run's 
 // links. It is provenance, not a decision (the effect was the judgment + act
 // re-reduction the shared core already recorded), so it lands in its own
 // artifact kind that the cycle count and the parked/ready projections ignore.
-func stampResolution(e env, run, escID, judgmentID, decision, who string) error {
+func stampResolution(e env, run, escID, judgmentID, decision, who, method string) error {
 	res := escalation.Resolution{
 		Decision:   decision,
 		Who:        who,
+		Method:     method,
 		At:         time.Now().UTC().Format(time.RFC3339),
 		JudgmentID: judgmentID,
 	}

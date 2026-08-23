@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
 	"github.com/itsHabib/workbench/contracts/grantrequest"
 	"github.com/itsHabib/workbench/slackauth"
@@ -418,6 +419,11 @@ func callbackFromPayload(body []byte) (callback, error) {
 		return callback{}, err
 	}
 	cb.decision.Verdict = verdict
+	// The channel is this transport's own fact: the identity came from a
+	// signature-verified Slack callback against the allowlist, not from
+	// anything the caller could set. Naming it lets a later reader tell a
+	// tap on a phone from a shell an agent also had.
+	cb.decision.Method = contracts.MethodSlackInteractive
 	cb.decision.Why = fmt.Sprintf("%s in Slack by %s", verdictWord(verdict), who)
 	return cb, nil
 }

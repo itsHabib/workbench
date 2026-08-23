@@ -30,6 +30,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/cmd/escalate/internal/serve"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // codeIngestError is escalate's own failure code, deliberately outside gate's
@@ -85,7 +86,8 @@ func cmdResolve(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	grantID := fs.String("grant", "", "grant artifact id")
 	why := fs.String("why", "", "the decision's reasoning")
-	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	who := fs.String("who", "", "who decided — recorded on the judgment and the resolution stamp")
+	method := fs.String("method", contracts.MethodCLIOperator, "how the decider was established: cli-operator or slack-interactive")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -97,6 +99,7 @@ func cmdResolve(args []string) error {
 		Escalation: *escID,
 		Verdict:    *decision,
 		Who:        *who,
+		Method:     *method,
 		Why:        *why,
 		Grant:      *grantID,
 	})

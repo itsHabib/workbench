@@ -119,8 +119,16 @@ type Brief struct {
 // escalation it resolves and the judgment it links); a reader can also project
 // it onto V1.Resolution by joining that artifact back to the park.
 type Resolution struct {
-	Decision   string `json:"decision"`
-	Who        string `json:"who"`
+	Decision string `json:"decision"`
+	Who      string `json:"who"`
+	// Method is the channel the decision arrived through — a Slack button tap,
+	// an operator at a shell, a delegated provider. Who alone cannot separate
+	// those, and "a name in the record" is a much weaker claim than "this name,
+	// established this way": the same operator string can be typed by an agent
+	// at a shell or produced by a verified Slack callback, and only the channel
+	// tells them apart. Optional on the wire so resolutions stamped before the
+	// field existed still decode; the write path is where absence is refused.
+	Method     string `json:"method,omitempty"`
 	At         string `json:"at"`
 	JudgmentID string `json:"judgment_id"`
 }

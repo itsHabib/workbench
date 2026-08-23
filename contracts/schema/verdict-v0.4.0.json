@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://itshabib.dev/schemas/verdict/v0.3.0",
+  "$id": "https://itshabib.dev/schemas/verdict/v0.4.0",
   "title": "Verdict",
-  "x-version": "0.3.0",
+  "x-version": "0.4.0",
   "x-source-of-truth": "gate internal/verify/verify.go (type Verdict) — the PROMOTED type; the reducer there is the behavioral source of truth. The workbench-redesign POC copy is ancestral and stale (string producer).",
-  "x-versioning-note": "First versioned expression of the contract (pays the redesign RED-TEAM #7 unimportable/unversioned debt). Per the gate steward: this schema must be conformance-tested against gate's verify.Verdict and should graduate to live next to that type in gate — never maintained as an independent copy. v0.2.0: producer is a structured {class, impl} object. v0.3.0 (ci-classify design, gate PR #10): Finding gains an optional `evidence` field — the verbatim log line / diff span a finding quotes, the substrate the extract-shaped verifiers check; omitempty so existing rungs are unaffected.",
+  "x-versioning-note": "First versioned expression of the contract (pays the redesign RED-TEAM #7 unimportable/unversioned debt). Per the gate steward: this schema must be conformance-tested against gate's verify.Verdict and should graduate to live next to that type in gate — never maintained as an independent copy. v0.2.0: producer is a structured {class, impl} object. v0.3.0 (ci-classify design, gate PR #10): Finding gains an optional `evidence` field — the verbatim log line / diff span a finding quotes, the substrate the extract-shaped verifiers check; omitempty so existing rungs are unaffected. v0.4.0 (decision provenance): an optional `decider` object \u2014 who authored a JUDGMENT, through which channel, and when by their own clock. Additive and omitempty, so verdicts written before it still validate; the write path, not the reader, is where an unattributed new judgment is refused.",
   "description": "The one artifact body every verifier emits — code, local-model, or judgment. Two orthogonal axes: `decision` (block > escalate > pass) is INDEPENDENT of `tier` (risk band). Composition is monotone (Reduce): worst decision wins, max tier wins, min confidence carries. Ladder law: a local-model producer may only pass or escalate — a `block` from it is a structural violation (ErrLocalBlock), which is what makes 'a local classifier never gates a merge' free.",
   "type": "object",
   "required": ["subject", "source", "producer", "decision", "tier", "confidence", "why"],
@@ -57,6 +57,17 @@
         }
       }
     },
-    "why": { "type": "string" }
+    "why": { "type": "string" },
+    "decider": {
+      "type": "object",
+      "description": "Who stands behind a JUDGMENT-class verdict and how that identity was established. Absent on code and local-model verdicts (a deterministic verifier has no decider) and on judgments predating the field. Provenance only \u2014 the reducer must never branch on it.",
+      "required": ["who", "method", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "who": { "type": "string", "description": "The deciding identity: an operator's name, or the provider/model projection for a delegated auto-judgment." },
+        "method": { "type": "string", "description": "The channel the decision arrived through \u2014 cli-operator, slack-interactive, or auto-<provider>. It names the channel, never an authenticated claim: gate authenticates none of them." },
+        "at": { "type": "string", "format": "date-time", "description": "When the decision was made, RFC 3339 UTC \u2014 the decider's clock, distinct from the artifact envelope's append time." }
+      }
+    }
   }
 }

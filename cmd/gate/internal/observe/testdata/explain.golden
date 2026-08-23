@@ -26,6 +26,7 @@ run run_explain_fixture — 7 artifacts
          hash: 6c7d5af21ebf5a553c58f2e310c86d8c49f773a263019ecf5d511e0e492c6ac3
          from: [vrd_344689409e39c85c]
          operator [judgment] → pass tier=T0 conf=1.00
+         decided by: unattributed
          why: acceptable risk
 
 14:30:00  escalation  esc_85b46c7fa371d58f
