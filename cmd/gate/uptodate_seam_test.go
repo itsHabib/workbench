@@ -92,10 +92,15 @@ func TestUpToDateSeamBlocksOnRecordedStrictProtection(t *testing.T) {
 	}
 	// The base ref and source travel the same seam as the strictness bit and
 	// fail the same silent way, so the verdict must still name both.
-	for _, want := range []string{"main", evidence.ProtectionSourceBranch, "BEHIND"} {
+	for _, want := range []string{"main", evidence.ProtectionSourceBranch} {
 		if !strings.Contains(v.Why, want) {
 			t.Fatalf("the block lost %q crossing the seam: %s", want, v.Why)
 		}
+	}
+	// BEHIND is a literal in upToDateWhy's format string, not a field read back
+	// across the seam — this pins the block's message, not the contract.
+	if !strings.Contains(v.Why, "BEHIND") {
+		t.Fatalf("the block must say what it found: %s", v.Why)
 	}
 }
 
