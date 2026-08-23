@@ -332,7 +332,7 @@ func corruptCursorsAlert() event.Event {
 	return event.Event{
 		Source:   "flare",
 		ID:       "cursor-alert:flare:cursors-corrupt",
-		Kind:     "cursor-alert",
+		Kind:     event.KindCursorAlert,
 		Time:     time.Now(),
 		Severity: event.SevEscalate,
 		Title:    "flare: cursors.json was corrupt — quarantined, resweeping",
@@ -429,7 +429,9 @@ func dispatch(rn runner, ev event.Event, st *cycleState) bool {
 }
 
 // markRepeat tags an event whose park reason the operator has already read, and
-// returns the journal key that counts it. gate asks the identical
+// returns the journal key that counts it. It WRITES ev.Fields["repeat"] through
+// the shared map — ev is a value but its Fields is not, and the tag has to be
+// visible to routing and rendering downstream. gate asks the identical
 // readiness/panel question for most parks — 318 of 355 in the live ledger — and
 // habituation makes the third identical warning cost attention while buying
 // none. Past the threshold the card collapses the boilerplate and leads with
@@ -439,7 +441,7 @@ func dispatch(rn runner, ev event.Event, st *cycleState) bool {
 // repository is a different question.
 func markRepeat(ev event.Event, reasons map[string]int) string {
 	id := ev.Fields["reason_id"]
-	if ev.Kind != "escalation" || id == "" || ev.Fields["repo"] == "" {
+	if ev.Kind != event.KindEscalation || id == "" || ev.Fields["repo"] == "" {
 		return ""
 	}
 	key := ev.Fields["repo"] + "|" + id
@@ -463,7 +465,7 @@ func stalledEvent(err error) string {
 // PARK. A verdict or a cursor-alert never resolves into a terminal state a
 // later artifact reports, so tracking it would grow the index for nothing.
 func cardOf(channel string, ref notify.Ref, ev event.Event) *journal.Card {
-	if ev.Kind != "escalation" || !ref.Updatable() {
+	if ev.Kind != event.KindEscalation || !ref.Updatable() {
 		return nil
 	}
 	return &journal.Card{
@@ -564,7 +566,7 @@ func cardsFor(cards map[string]journal.Card, ev event.Event) map[string]journal.
 // 2026-08-21.
 func supersede(rn runner, ev event.Event, st *cycleState) bool {
 	subject := subjectOf(ev)
-	if ev.Kind != "escalation" || subject == "" {
+	if ev.Kind != event.KindEscalation || subject == "" {
 		return true
 	}
 	stale := map[string]journal.Card{}
@@ -585,7 +587,7 @@ func supersededBy(ev event.Event) event.Event {
 		Class:  event.ClassUpdate,
 		Source: ev.Source,
 		ID:     ev.ID,
-		Kind:   "card-update",
+		Kind:   event.KindCardUpdate,
 		Time:   ev.Time,
 		Fields: map[string]string{
 			"repo":    ev.Fields["repo"],

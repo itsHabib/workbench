@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func parkWithReason(id, run string, number int, question string) string {
 		itoa(number) + `}}`
 }
 
-func itoa(n int) string { return string(rune('0'+n/10)) + string(rune('0'+n%10)) }
+func itoa(n int) string { return strconv.Itoa(n) }
 
 const identicalQuestion = "readiness: no review decision reported by GitHub — cannot verify readiness"
 
@@ -190,14 +191,14 @@ func TestStalledSourceIsUnhealthy(t *testing.T) {
 func TestAuthorityDigestNamesTheBottleneck(t *testing.T) {
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	rows := []authorityRow{
-		{Authority: source.Authority{Repo: "itsHabib/roxiq", Parked: 2}, state: "/state"},
+		{Authority: source.Authority{Repo: "itsHabib/roxiq", Parked: 2, ProposedTier: "T3", ProposedCycles: 3}, state: "/state"},
 		{Authority: source.Authority{Repo: "itsHabib/ivy", Parked: 1, Live: true,
 			Grant: grantExpiring(now.Add(2 * time.Hour))}, state: "/state"},
 		{Authority: source.Authority{Repo: "itsHabib/rooms", Parked: 3, Live: true,
 			Grant: grantExpiring(now.Add(48 * time.Hour))}, state: "/state"},
 		{Authority: source.Authority{Repo: "itsHabib/quiet", Parked: 0}, state: "/state"},
 	}
-	ev, ok := digestEvent(config.Config{}, rows, now, 12*time.Hour)
+	ev, ok := digestEvent(rows, now, 12*time.Hour)
 	if !ok {
 		t.Fatal("a repo with parked work and no grant must produce a digest")
 	}
@@ -217,6 +218,12 @@ func TestAuthorityDigestNamesTheBottleneck(t *testing.T) {
 	if strings.Count(detail, "gate grant -repo") != 2 {
 		t.Errorf("every row needs its own paste-ready mint:\n%s", detail)
 	}
+	// A repo with no LIVE grant still proposes the ceilings it has held before,
+	// exactly as a single refusal card does — the two surfaces must not give
+	// different advice about the same repo.
+	if !strings.Contains(detail, "-repo itsHabib/roxiq -max-tier T3") {
+		t.Errorf("a lapsed repo must be re-proposed at the ceiling it held:\n%s", detail)
+	}
 	if ev.Severity != event.SevEscalate {
 		t.Errorf("severity = %v, want escalate while something is hard-stopped", ev.Severity)
 	}
@@ -230,7 +237,7 @@ func TestAuthorityDigestIsSilentWhenNothingNeedsYou(t *testing.T) {
 		{Authority: source.Authority{Repo: "itsHabib/ivy", Parked: 2, Live: true, Grant: grantExpiring(now.Add(48 * time.Hour))}},
 		{Authority: source.Authority{Repo: "itsHabib/roxiq", Parked: 0}},
 	}
-	if _, ok := digestEvent(config.Config{}, rows, now, 12*time.Hour); ok {
+	if _, ok := digestEvent(rows, now, 12*time.Hour); ok {
 		t.Fatal("no pressure must produce no digest")
 	}
 }
@@ -240,13 +247,13 @@ func TestAuthorityDigestIsSilentWhenNothingNeedsYou(t *testing.T) {
 func TestAuthorityDigestIDTracksContent(t *testing.T) {
 	now := time.Now()
 	rows := []authorityRow{{Authority: source.Authority{Repo: "itsHabib/roxiq", Parked: 2}}}
-	first, _ := digestEvent(config.Config{}, rows, now, 12*time.Hour)
-	same, _ := digestEvent(config.Config{}, rows, now.Add(time.Hour), 12*time.Hour)
+	first, _ := digestEvent(rows, now, 12*time.Hour)
+	same, _ := digestEvent(rows, now.Add(time.Hour), 12*time.Hour)
 	if first.ID != same.ID {
 		t.Errorf("an unchanged digest must keep its id: %s vs %s", first.ID, same.ID)
 	}
 	rows[0].Parked = 3
-	moved, _ := digestEvent(config.Config{}, rows, now, 12*time.Hour)
+	moved, _ := digestEvent(rows, now, 12*time.Hour)
 	if moved.ID == first.ID {
 		t.Error("a digest whose content moved must page again")
 	}

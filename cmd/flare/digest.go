@@ -32,6 +32,13 @@ import (
 // flare's own journal, and it decides nothing — every row is a reduction of
 // artifacts gate already wrote.
 
+// digestSource is the journal source the digest records under. It is FLARE's
+// own name, not a watched source's: the digest reduces every gate source at
+// once, so naming one of them would make the dedupe key depend on config
+// ORDER — reorder the sources and an unchanged picture re-pages. Uniqueness
+// comes from the content hash in the id; the source only scopes it.
+const digestSource = "flare"
+
 // digest builds and delivers the authority card. Exit 0 when there was nothing
 // to say or it was delivered, 1 on a read or delivery failure, 3 when another
 // flare holds the lock (it journals, so it takes the same single-instance lock
@@ -49,7 +56,7 @@ func digest(cfg config.Config, j *journal.Journal, co courier, within time.Durat
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	ev, ok := digestEvent(cfg, rows, time.Now(), within)
+	ev, ok := digestEvent(rows, time.Now(), within)
 	if !ok {
 		fmt.Println("flare digest: no authority pressure — nothing parked without a grant, nothing expiring soon")
 		return 0
@@ -105,7 +112,7 @@ func authorityRows(cfg config.Config, now time.Time) ([]authorityRow, error) {
 // fixes: parked work with NO live grant (a hard stop), and a live grant about
 // to lapse under parked work (a stop that is coming). A repo running fine is
 // left out — a digest that lists everything is another wall of text to skim.
-func digestEvent(cfg config.Config, rows []authorityRow, now time.Time, within time.Duration) (event.Event, bool) {
+func digestEvent(rows []authorityRow, now time.Time, within time.Duration) (event.Event, bool) {
 	var blocked, expiring []string
 	for _, r := range rows {
 		line, urgent, ok := digestLine(r, now, within)
@@ -127,9 +134,9 @@ func digestEvent(cfg config.Config, rows []authorityRow, now time.Time, within t
 		sev = event.SevEscalate
 	}
 	return event.Event{
-		Source:   digestSource(cfg),
+		Source:   digestSource,
 		ID:       fmt.Sprintf("authority-digest:%08x", hash32(detail)),
-		Kind:     "authority-digest",
+		Kind:     event.KindAuthorityDigest,
 		Time:     now,
 		Severity: sev,
 		Title:    digestTitle(len(blocked), len(expiring)),
@@ -144,7 +151,7 @@ func digestLine(r authorityRow, now time.Time, within time.Duration) (string, bo
 	if r.Parked == 0 {
 		return "", false, false
 	}
-	mint := "```" + preflight.Mint(r.Repo, r.state, r.Grant.MaxTier, r.Grant.MaxCycles) + "```"
+	mint := "```" + preflight.Mint(r.Repo, r.state, r.ProposedTier, r.ProposedCycles) + "```"
 	if !r.Live {
 		return fmt.Sprintf("*%s* — %s parked, *no live grant*\n%s", r.Repo, plural(r.Parked, "PR"), mint), true, true
 	}
@@ -172,17 +179,6 @@ func digestTitle(blocked, expiring int) string {
 		return fmt.Sprintf("%s stopped for want of a grant; %d expiring soon", plural(blocked, "repo"), expiring)
 	}
 	return fmt.Sprintf("%s with parked work and a grant expiring soon", plural(expiring, "repo"))
-}
-
-// digestSource names the gate source the digest reduced, so its dedupe key and
-// journal entries sit alongside that source's other facts.
-func digestSource(cfg config.Config) string {
-	for _, src := range cfg.Sources {
-		if src.Kind == config.SourceGateLog {
-			return src.Name
-		}
-	}
-	return "flare"
 }
 
 func plural(n int, noun string) string {

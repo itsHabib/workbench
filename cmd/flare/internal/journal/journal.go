@@ -159,7 +159,10 @@ func (j *Journal) Load(since time.Time) (Replay, error) {
 	return r, nil
 }
 
-func (r Replay) card(key string, e Entry) {
+// card folds one entry into the live-card index. Pointer receiver because it
+// MUTATES: a value receiver would work (maps are reference types) while
+// signalling the opposite to anyone reading the call site.
+func (r *Replay) card(key string, e Entry) {
 	if e.Kind == CardFinal {
 		delete(r.Cards, key)
 		return

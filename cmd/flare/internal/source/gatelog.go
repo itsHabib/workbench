@@ -122,7 +122,7 @@ func escalationEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) 
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "escalation",
+		Kind:     event.KindEscalation,
 		Time:     env.Time,
 		Severity: event.SevEscalate,
 		Title:    title,
@@ -247,7 +247,7 @@ func verdictEvent(src config.Source, env contracts.Envelope, v contracts.Verdict
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "verdict",
+		Kind:     event.KindVerdict,
 		Time:     env.Time,
 		Severity: sev,
 		Title:    fmt.Sprintf("%s: %s %s (%s, %s)", src.Name, subject, v.Decision, v.Source, v.Tier),
@@ -308,7 +308,7 @@ func updateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (eve
 		Class:    event.ClassUpdate,
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "card-update",
+		Kind:     event.KindCardUpdate,
 		Time:     env.Time,
 		Severity: event.SevInfo,
 		Title:    fmt.Sprintf("%s: %s#%s %s", src.Name, fields["repo"], fields["number"], fields["outcome"]),
@@ -523,7 +523,7 @@ func grantNeededEvent(src config.Source, env contracts.Envelope, lg *lazyLedger)
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "grant-needed",
+		Kind:     event.KindGrantNeeded,
 		Time:     env.Time,
 		Severity: event.SevEscalate,
 		Title:    fmt.Sprintf("%s: %s needs a grant (%s)", src.Name, b.Repo, b.Reason),

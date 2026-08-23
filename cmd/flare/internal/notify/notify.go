@@ -353,7 +353,7 @@ func approvable(ev event.Event) bool {
 // mint; a cycle park is the stop signal that the process looped — the fix is
 // fewer review rounds, never a wider grant.
 func resolvablePark(ev event.Event) bool {
-	if ev.Kind != "escalation" || ev.ID == "" || ev.Fields["grant"] == "" {
+	if ev.Kind != event.KindEscalation || ev.ID == "" || ev.Fields["grant"] == "" {
 		return false
 	}
 	return !ceilingPark(ev.Fields["code"])
@@ -434,10 +434,10 @@ func headline(ev event.Event) string {
 	// Two kinds lead on something other than severity, because what the operator
 	// must DO is different in kind: a refusal for want of authority is a mint,
 	// not a decision, and a digest is a standing summary rather than one event.
-	if ev.Kind == "grant-needed" {
+	if ev.Kind == event.KindGrantNeeded {
 		return grantNeededHeadline(ev)
 	}
-	if ev.Kind == "authority-digest" {
+	if ev.Kind == event.KindAuthorityDigest {
 		return "🔑 Authority check — grants that need you"
 	}
 	switch ev.Severity {

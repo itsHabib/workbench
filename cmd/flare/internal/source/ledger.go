@@ -382,6 +382,14 @@ type Authority struct {
 	// the hard stop — nothing can proceed until the operator mints.
 	Grant preflight.Grant
 	Live  bool
+	// ProposedTier / ProposedCycles are the ceilings a re-mint should carry: the
+	// live grant's when there is one, else the WIDEST the repo has ever held.
+	// Carried explicitly so the digest proposes exactly what a single refusal
+	// card proposes — a repo that has always run at T3 must not be told T2 on
+	// one surface and T3 on the other. flare proposes what the operator already
+	// judged appropriate; it never widens, and it never mints.
+	ProposedTier   string
+	ProposedCycles int
 }
 
 // authority reduces the log to one row per repo that has parked work or a live
@@ -403,6 +411,10 @@ func (l *ledger) authority(now time.Time) []Authority {
 	}
 	out := make([]Authority, 0, len(rows))
 	for _, r := range rows {
+		r.ProposedTier, r.ProposedCycles = l.lastCeilingsFor(r.Repo)
+		if r.Live {
+			r.ProposedTier, r.ProposedCycles = r.Grant.MaxTier, r.Grant.MaxCycles
+		}
 		out = append(out, *r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Repo < out[j].Repo })
