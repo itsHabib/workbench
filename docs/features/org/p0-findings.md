@@ -1,7 +1,8 @@
 # P0 — falsification findings
 
-**Date:** 2026-08-22
-**Status:** items 1 and 2 run. Items 3 and 4 outstanding.
+**Date:** 2026-08-22, corrected and completed 2026-08-23
+**Status:** all four items answered. Item 1's headline is corrected below —
+the 72% figure does not survive re-derivation.
 **Method:** analysis of `~/dev/gate/state/log.jsonl` (4,818 records) and 325
 Claude Code session transcripts under `~/.claude/projects`.
 
@@ -108,13 +109,104 @@ remains unmeasured until POC-A runs.
 
 ---
 
-## Items 3 and 4 — outstanding
+## Item 3 — The stalls. **Neither "life" nor "abandoned." The observer is keyed wrong.**
 
-- **Read 20 of the 81 stalled parley traces.** Defect or life? Until someone
-  does, "32% stalled" measures the protocol's optimism rather than the
-  system's health.
-- **Price a role-day.** Eight concurrent ICs, one real day, read
-  `spend-audit`, multiply by 60. Do this before designing for 75 roles.
+Two sessions answered this on 2026-08-23 and reached opposite verdicts —
+"0 defects, life not defect" and "not life, abandoned" — from different
+denominators (133 vs 81; 81 is the stale 2026-08-16 README snapshot). Both
+framings are wrong, and the disagreement is itself the finding.
+
+Measured directly against `~/dev/gate/state/log.jsonl`, without going through
+parley at all — for every run that emitted an escalation, did that run later
+record a judgment or an action?
+
+| | count | share |
+| --- | ---: | ---: |
+| runs that parked | 342 | — |
+| resolved in gate (judgment or action on the same run) | 236 | 69% |
+| **never resolved on that run** | **106** | **31%** |
+
+Of those 106, the decisive split:
+
+| | runs | |
+| --- | ---: | --- |
+| a **sibling run on the same PR** reached an action | 92 | gate did decide — on a different run id |
+| no run on that PR ever reached an action | 14 | across only **7 distinct PRs** |
+
+And the 7: `roll-call#8` and `workbench#214` merged with no gate decision at
+all; `roxiq#205` closed; `ivy#22`, `workbench#247`, `#249`, `#253` still open
+— three of those four are current in-flight work, not abandonment.
+
+**The defect is in the observer, not the protocol.** A trace is keyed by *run
+id*; a decision is keyed by *subject*. A park on run A that run B resolves is
+invisible to a run-keyed reader, which is 87% of what "stalled" was counting.
+Until the observer folds runs by subject, the stalled percentage measures its
+own keying and nothing about system health — so it cannot be used as evidence
+for or against any plane.
+
+The residual worth acting on is small and specific: **two PRs merged with no
+recorded gate decision.** That is a hole in the authorization record, and it is
+the honest version of what item 3 was reaching for.
+
+## Item 4 — A role-day. **Affordable at 75 only under the cheap definition.**
+
+Measured from `spend-audit` over 591 sessions, 27,697 billed messages,
+2026-08-02..23. Public-rate equivalents, not an invoice — the corpus carries
+no billing field, so it cannot say whether this was API-rate or absorbed by a
+flat subscription.
+
+A "role-day" has no single value; it has a 21x spread across defensible
+definitions of the same unit:
+
+| definition | n | mean $/role-day | 75 roles/month |
+| --- | ---: | ---: | ---: |
+| any session-day as observed (29 active min) | 700 | $9.10 | $14,327 |
+| >= 60 active min ("half shift") | 100 | $40.04 | $63,057 |
+| >= 120 active min ("long shift") | 32 | $62.82 | $98,937 |
+
+**A true 8-hour agent shift does not exist in this data.** Longest session-day
+ever recorded is 268 active minutes; the median is 14.
+
+Concurrency is the one clean invariant: cost per agent-minute is flat at
+$0.26-0.35 from 1 to 15 concurrent agents. No measured coordination penalty —
+so linear extrapolation holds *on that axis*.
+
+**Verdict.** Against a one-engineer budget, the affordable ceiling is ~109
+roles at the observed-session-day rate and **~25 roles at the half-shift
+rate**. If Baton roles do sustained work rather than fire in bursts, 25 is the
+honest ceiling and the design's 75 is 3x outside it. 83% of spend is cache
+mechanics, which is where any optimization has to aim.
+
+## Correction to item 1's headline — the 72% does not survive re-derivation
+
+The 72% figure above is not reproducible, and the reason matters more than the
+number. Re-classifying the same 87 blocked actions by *which producer emitted
+the block*:
+
+| | count | share |
+| --- | ---: | ---: |
+| a **judge** decided to block | 56 | 64% |
+| deterministic **readiness** block | 31 | 36% |
+
+Within the 31 deterministic blocks: 24 purely transient (would clear by
+waiting), 2 purely terminal, 5 mixed. So blocks that a wait would have fixed
+are **24-29 of 87 — 28-33%, not 72%.**
+
+Reaching 72-75% requires counting *judge* blocks whose prose mentions an
+evidence gap as "evidence not ready." That is defensible as a description of
+why the judge was called, but it is not the operational claim the split rests
+on: by then a cycle has already been spent and a judgment already recorded.
+Three sessions produced three numbers (72%, 75%, 33%) because the classifier
+boundary was never stated, not because anyone mis-counted.
+
+**Consequence for the split.** "Split `blocked` into no and not-yet" was
+recorded below as *the highest-value single change* on the strength of the 72%.
+At 28-33%, and with a separate analysis rejecting the split on termination
+grounds (its backstops derive from prior artifacts for the same subject, and
+CI mints state into a `mktemp -d` that is deleted on exit, so they are
+structurally unreachable there), that ranking no longer holds. Fix the
+observer keying and settle evidence before opening a run; revisit the terminal
+vocabulary only if that leaves a real residue.
 
 ---
 
