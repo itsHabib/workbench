@@ -76,8 +76,18 @@ carrying the run's own grant id, so resolving a park is never an id hunt) and
 the grant ledger (live grants soonest-to-expire first, plus grants expired in
 the last day). It is read-only and sits outside the 0–3 decision codes: like
 `explain` and `audit` it exits 0 or 4. The default projection collapses repeated
-runs by PR from log evidence alone. Pass `-live` to additionally remove subjects
-GitHub confirms are merged/closed; lookup failures remain visible as unknown.
+runs by PR from log evidence alone.
+
+It **reconciles against GitHub by default**: subjects GitHub confirms are
+merged or closed are removed, and lookup failures remain visible as `unknown`
+rather than silently dropped. The default is reconciled because the log alone
+cannot know a subject moved — gate records what it *decided*, never that the
+merge later happened, so an un-reconciled inbox only accumulates finished work
+(measured 2026-08-22: 149 rows, every one of them already merged or closed).
+Pass `-cached` to project the log alone — faster and offline, but rows may name
+work that is already done. `-live` is still accepted and ignored, so pasted
+commands keep working.
+
 The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
 `gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
 needs-grant surfaces from one snapshot. Pass `-json` for the console feed.

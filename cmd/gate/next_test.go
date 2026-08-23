@@ -134,7 +134,11 @@ func TestNextCommandEndToEnd(t *testing.T) {
 	t.Setenv("GATE_STATE", stateDir)
 	t.Setenv("GATE_KEY", keyDir)
 
-	out := captureStdout(t, func() error { return cmdNext([]string{"-json"}) })
+	// The default path reconciles, so inject a seam reporting the fixture PR
+	// open — otherwise the live pass would correctly drop a row for a PR that
+	// does not exist on GitHub, and this test asserts the projection, not the
+	// reconcile (which has its own cases below).
+	out := captureStdout(t, func() error { return runNext([]string{"-json"}, openFixture(42)) })
 
 	var in observe.Inbox
 	if err := json.Unmarshal([]byte(out), &in); err != nil {
@@ -204,7 +208,7 @@ func TestNextCommandRendersResolveLine(t *testing.T) {
 	t.Setenv("GATE_STATE", stateDir)
 	t.Setenv("GATE_KEY", filepath.Join(root, "keys"))
 
-	out := captureStdout(t, func() error { return cmdNext(nil) })
+	out := captureStdout(t, func() error { return runNext(nil, openFixture(42, 43)) })
 
 	want := "escalate resolve -escalation " + park.ID +
 		" -grant grt_x -decision <pass|block> -who <you> -why \"...\""
@@ -266,4 +270,105 @@ func TestStartNextProfilingWritesCPUProfile(t *testing.T) {
 	if info.Size() == 0 {
 		t.Fatalf("cpu profile is empty")
 	}
+}
+
+// openFixture is a live seam reporting exactly the given PR numbers as open, for
+// the repo the inbox fixtures use. Tests asserting the projection inject it so
+// the default (reconciling) path does not reach the network.
+func openFixture(numbers ...int) observe.OpenPRs {
+	return func(repo string) (map[int]observe.LivePR, error) {
+		out := make(map[int]observe.LivePR, len(numbers))
+		for _, n := range numbers {
+			out[n] = observe.LivePR{State: "OPEN", Title: "fixture", URL: "https://github.com/" + repo + "/pull/1"}
+		}
+		return out, nil
+	}
+}
+
+// TestNextReconcilesByDefault pins the default: `gate next` with no flags
+// reconciles, so a parked row whose PR has since merged (absent from the open
+// set) is DROPPED rather than shown. This is the whole point of the default —
+// an un-reconciled inbox accumulates finished work and reports it as pending.
+func TestNextReconcilesByDefault(t *testing.T) {
+	stateDir := seedParkedInbox(t)
+	t.Setenv("GATE_STATE", stateDir)
+	t.Setenv("GATE_KEY", t.TempDir())
+
+	called := false
+	// The PR is absent from the open set: it merged.
+	merged := func(string) (map[int]observe.LivePR, error) {
+		called = true
+		return map[int]observe.LivePR{}, nil
+	}
+	out := captureStdout(t, func() error { return runNext(nil, merged) })
+
+	if !called {
+		t.Fatal("the default path must reconcile against the live seam")
+	}
+	if strings.Contains(out, "run_park") {
+		t.Fatalf("a merged subject must not appear in the default view:\n%s", out)
+	}
+}
+
+// TestNextCachedSkipsTheReconcile pins the opt-out: -cached must not touch the
+// live seam, and keeps the row the log alone still believes is open.
+func TestNextCachedSkipsTheReconcile(t *testing.T) {
+	stateDir := seedParkedInbox(t)
+	t.Setenv("GATE_STATE", stateDir)
+	t.Setenv("GATE_KEY", t.TempDir())
+
+	fetch := func(string) (map[int]observe.LivePR, error) {
+		t.Fatal("-cached must not reach the live seam")
+		return nil, nil
+	}
+	out := captureStdout(t, func() error { return runNext([]string{"-cached"}, fetch) })
+
+	if !strings.Contains(out, "run_park") {
+		t.Fatalf("-cached must project the log alone:\n%s", out)
+	}
+}
+
+// TestNextLiveFlagStillAccepted pins the compatibility promise: -live was the
+// flag that turned reconciling ON, so every pasted command and older doc still
+// carries it. It must parse and behave exactly like the default, never error.
+func TestNextLiveFlagStillAccepted(t *testing.T) {
+	stateDir := seedParkedInbox(t)
+	t.Setenv("GATE_STATE", stateDir)
+	t.Setenv("GATE_KEY", t.TempDir())
+
+	called := false
+	merged := func(string) (map[int]observe.LivePR, error) {
+		called = true
+		return map[int]observe.LivePR{}, nil
+	}
+	// captureStdout fails the test if the verb returns an error, which is the
+	// assertion: -live must parse, not be rejected as an unknown flag.
+	captureStdout(t, func() error { return runNext([]string{"-live"}, merged) })
+	if !called {
+		t.Fatal("-live must reconcile, exactly like the default")
+	}
+}
+
+// seedParkedInbox writes a state dir holding one live grant and one parked run
+// on o/r#42, the shape the inbox projects.
+func seedParkedInbox(t *testing.T) string {
+	t.Helper()
+	stateDir := filepath.Join(t.TempDir(), "state")
+	st, err := state.Open(stateDir, func() time.Time { return time.Unix(1_000_000, 0).UTC() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Append(state.KindGrant, "run_mint", nil, capability.Grant{
+		Repo: "o/r", Action: "merge", MaxTier: "T1", MaxCycles: 3,
+		ExpiresAt: time.Now().UTC().Add(3 * time.Hour), MintedBy: "test", Sig: "fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Append(state.KindEscalation, "run_park", []string{"vrd_x", "grt_x"}, map[string]any{
+		"outcome": "parked_for_judgment", "verdict": "vrd_x", "grant": "grt_x",
+		"question": "needs judgment", "code": "panel_incomplete", "repo": "o/r", "number": 42,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return stateDir
 }

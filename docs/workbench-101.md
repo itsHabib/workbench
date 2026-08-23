@@ -545,8 +545,10 @@ panel escalates as unreviewed rather than passing (`verified`,
 
 **The operator inbox.** `gate next` (`verified`, `cmd/gate/internal/observe/inbox.go`)
 projects the log into what needs a human: runs parked for judgment and the grant
-ledger, each with paste-ready commands. `GATE_STATE` / `GATE_KEY` environment
-defaults mean the operator stops retyping `-state`/`-key` flags. And **console**
+ledger, each with paste-ready commands, reconciled against GitHub so a subject
+that has since merged drops out (`-cached` skips the reconcile). `GATE_STATE` /
+`GATE_KEY` environment defaults mean the operator stops retyping
+`-state`/`-key` flags. And **console**
 (section 7) renders the same inbox in a browser.
 
 **Enforcement, in one honest line:** a Gate decision, a required status, and

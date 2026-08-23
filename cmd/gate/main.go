@@ -176,7 +176,7 @@ func usage() {
   executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
-  next     [-json] [-live]                           (what needs you: parked runs + grants)
+  next     [-json] [-cached]                         (what needs you: parked runs + grants; reconciles with GitHub unless -cached)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
   threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
@@ -1877,11 +1877,32 @@ func explainHTMLFile(e env, run, path string) error {
 // and sits OUTSIDE the decision code space that grant/gate/judge own: like
 // explain and audit it returns nil for success (exit 0) or an error (exit 4),
 // and never os.Exits a 0–3 that a driver would misread as a decision.
-func cmdNext(args []string) error {
+func cmdNext(args []string) error { return runNext(args, lookupOpenPRs) }
+
+// runNext is cmdNext with the live seam injected, mirroring the
+// lookupOpenPRsContext shape: the verb's flag routing is then testable without
+// a network, and without a mutable package-level fetch a test could leave
+// swapped. cmdNext supplies the real one.
+func runNext(args []string, fetch observe.OpenPRs) error {
 	fs := flag.NewFlagSet("next", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
-	live := fs.Bool("live", false, "reconcile parked subjects with current GitHub PR state")
+	// Reconciling against GitHub is the DEFAULT, because the log alone cannot
+	// know that a subject moved: gate records what it decided, never that the
+	// merge later happened. Left un-reconciled the inbox only grows, and every
+	// row it accumulates is a job already finished — measured 2026-08-22 at 149
+	// rows, 149 of them already merged or closed, some for nineteen days. A view
+	// whose whole contract is "what needs you" cannot default to a projection
+	// that answers a strictly older question.
+	//
+	// The reconcile fails SAFE, which is what lets it be the default: a repo
+	// whose fetch errors keeps its rows and marks them PRState "unknown" with
+	// the reason (see observe.reconcileLive), so an offline or rate-limited run
+	// degrades to today's output plus an honest marker — never to a hidden gap.
+	cached := fs.Bool("cached", false, "skip the GitHub reconcile: project the log alone (rows may name already-merged work)")
+	// -live is retained as an accepted no-op so pasted commands, older docs, and
+	// scripts written against the pre-default flag keep working.
+	fs.Bool("live", false, "deprecated: reconciling is the default; accepted and ignored")
 	// Debug/experimental: profile the live reconcile. Off unless a path is given.
 	cpuProfile := fs.String("cpuprofile", "", "debug: write a CPU profile to this path")
 	blockProfile := fs.String("blockprofile", "", "debug: write a block profile to this path")
@@ -1903,16 +1924,16 @@ func cmdNext(args []string) error {
 		return err
 	}
 	stateArg := stateArgFor(*stateDir)
-	if *live && *asJSON {
-		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
-	}
-	if *live {
-		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
-	}
-	if *asJSON {
+	if *cached && *asJSON {
 		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
 	}
-	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+	if *cached {
+		return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+	}
+	if *asJSON {
+		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, fetch)
+	}
+	return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, fetch)
 }
 
 // repeatedFlag collects a flag given more than once, so `-repo a -repo b` reads
