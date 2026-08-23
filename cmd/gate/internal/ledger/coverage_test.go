@@ -148,3 +148,25 @@ func numbers(rows []CoverageRow) []int {
 	}
 	return out
 }
+
+// TestReconcileCountsOutOfWindowOutstandingAuthorizations pins that the window
+// scoping never hides an outstanding authorization: it is excluded from the
+// list, because the list is window-scoped like everything else, but counted so
+// the reader sees an exclusion rather than an absence.
+func TestReconcileCountsOutOfWindowOutstandingAuthorizations(t *testing.T) {
+	c := Reconcile("itsHabib/workbench", "main",
+		window("2026-08-01T00:00:00Z", "2026-08-20T00:00:00Z"),
+		at("2026-07-01T00:00:00Z"), "flag", nil,
+		[]Authorization{
+			authorized("act_old", 1, "aaa", "2026-06-01T00:00:00Z"), // before the window
+			authorized("act_in", 2, "bbb", "2026-08-05T00:00:00Z"),  // inside it
+		},
+		nil, clock("2026-08-20T00:00:00Z"))
+
+	if n := numbers(c.AuthorizedNeverLanded); len(n) != 1 || n[0] != 2 {
+		t.Fatalf("authorized_never_landed = %v, want only the in-window #2", n)
+	}
+	if c.OutstandingOutsideWindow != 1 {
+		t.Fatalf("outstanding_outside_window = %d, want 1 — the exclusion must be visible", c.OutstandingOutsideWindow)
+	}
+}

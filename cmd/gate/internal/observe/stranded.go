@@ -48,7 +48,9 @@ type StrandedRun struct {
 	// ResumeCommand completes the recorded decision. On resume gate loads the
 	// PERSISTED judgment — -why and -who are not re-recorded, only -decision is
 	// checked against it — so the command reasserts the decision and leaves the
-	// original attribution intact.
+	// original attribution intact. The NAME placeholder therefore does not become
+	// the decider: the flag parser only requires it to be non-empty, and whoever
+	// decided is already in the log.
 	ResumeCommand string `json:"resume_command,omitempty"`
 }
 

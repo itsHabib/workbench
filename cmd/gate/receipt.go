@@ -178,9 +178,13 @@ type mergedPR struct {
 	MergeCommit struct {
 		OID string `json:"oid"`
 	} `json:"mergeCommit"`
-	Author struct {
+	// MergedBy is who performed the merge — NOT the PR's author. On the bypass
+	// rows this is the whole point of the field: "who merged this without
+	// authorization" is a question about the merger, and on any repo where
+	// authors do not self-merge, the author is simply a different person.
+	MergedBy struct {
 		Login string `json:"login"`
-	} `json:"author"`
+	} `json:"mergedBy"`
 }
 
 // lookupMergedPRs lists the pull requests merged into a repo, newest first.
@@ -195,7 +199,7 @@ func lookupMergedPRs(repo string, limit int) ([]ledger.Landing, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "-R", repo,
 		"--state", "merged", "--limit", strconv.Itoa(limit),
-		"--json", "number,headRefOid,baseRefName,mergedAt,mergeCommit,author")
+		"--json", "number,headRefOid,baseRefName,mergedAt,mergeCommit,mergedBy")
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -213,7 +217,7 @@ func lookupMergedPRs(repo string, limit int) ([]ledger.Landing, error) {
 		l := ledger.Landing{
 			Repo: repo, Number: r.Number, State: "MERGED", Merged: true,
 			HeadSHA: r.HeadRefOid, MergeCommit: r.MergeCommit.OID,
-			Actor: r.Author.Login, BaseRef: r.BaseRefName,
+			Actor: r.MergedBy.Login, BaseRef: r.BaseRefName,
 		}
 		if at, err := time.Parse(time.RFC3339, r.MergedAt); err == nil {
 			l.MergedAt = at.UTC()
@@ -223,9 +227,15 @@ func lookupMergedPRs(repo string, limit int) ([]ledger.Landing, error) {
 	return landings, nil
 }
 
-// reconcileLimit bounds one sweep's PR fetch. Generous enough to cover a long
-// window on an active repo, bounded so a reconcile of a large repository is one
-// call rather than an unbounded pagination walk.
+// reconcileLimit bounds one sweep's PR fetch: generous enough for a long window
+// on an active repo, bounded so a reconcile is one call rather than an unbounded
+// pagination walk.
+//
+// The limit is RECORDED on the coverage artifact and printed, and a sweep that
+// hits it says so. A cap that silently drops the oldest merges in a window would
+// let a busy sprint produce a "0 bypasses" reading over half a window — a
+// coverage report whose scope the reader cannot see is worse than none, which is
+// the same reason the artifact states its basis.
 const reconcileLimit = 500
 
 // cmdReconcile answers the question no per-run artifact can: did anything merge
@@ -285,6 +295,11 @@ func cmdReconcile(args []string) error {
 	coverage := ledger.Reconcile(*repo, protectedBranch, window, effective, source,
 		inWindow(landings, protectedBranch, window),
 		ledger.Authorizations(arts, *repo), ledger.Receipts(arts), time.Now)
+	coverage.Limit = reconcileLimit
+	// gh returns newest-first, so a full page means older merges in the window may
+	// be missing. Say so on the artifact rather than letting the reader assume the
+	// sweep saw everything.
+	coverage.Truncated = len(landings) >= reconcileLimit
 
 	// The backstop. An executor that ran the pinned command and never called
 	// `gate receipt` leaves an authorization the ledger cannot close; reconcile
@@ -313,6 +328,12 @@ func cmdReconcile(args []string) error {
 
 // sweepReceipts writes a receipt for every authorization this sweep proved
 // landed at its authorized head and that nothing had discharged.
+//
+// Ordering note: receipts are appended BEFORE the coverage artifact. If the
+// coverage append then fails, the receipts are still durable and the sweep is
+// simply re-runnable — the discharges it proved are not lost, and the second run
+// finds them already present. The reverse order would risk a coverage record
+// claiming discharges that were never written.
 //
 // It writes ONLY the merged-at-the-authorized-head class. A superseded or
 // abandoned authorization is a judgement call about what an executor intended,
@@ -429,6 +450,12 @@ func resolveBranch(repo, flagValue string) (string, error) {
 func renderCoverage(w io.Writer, artifactID string, c ledger.Coverage) {
 	fmt.Fprintf(w, "coverage %s — %s (%s), %s .. %s\n", artifactID, c.Repo, c.Branch, c.Since, c.Until)
 	fmt.Fprintf(w, "basis: %s (a direct push to %s has no PR and is outside this claim)\n", c.Basis, c.Branch)
+	if c.Truncated {
+		fmt.Fprintf(w, "INCOMPLETE: the sweep hit its %d-PR ceiling, so older merges in this window are NOT included — narrow -since and re-run\n", c.Limit)
+	}
+	if !c.Truncated && c.Limit > 0 {
+		fmt.Fprintf(w, "sweep ceiling: %d merged PRs (not reached)\n", c.Limit)
+	}
 	if c.EffectiveFrom != "" {
 		fmt.Fprintf(w, "control effective from: %s (%s)\n", c.EffectiveFrom, c.EffectiveFromSource)
 	}
@@ -440,6 +467,9 @@ func renderCoverage(w io.Writer, artifactID string, c ledger.Coverage) {
 	coverageSection(w, "authorized, never landed", c.AuthorizedNeverLanded)
 	fmt.Fprintf(w, "authorized and landed: %d\n", len(c.AuthorizedAndLanded))
 	fmt.Fprintf(w, "pre-adoption (excluded from the bypass count): %d\n", len(c.PreAdoption))
+	if c.OutstandingOutsideWindow > 0 {
+		fmt.Fprintf(w, "authorizations outstanding from BEFORE this window (not listed above): %d — widen -since to see them\n", c.OutstandingOutsideWindow)
+	}
 	unreceipted := 0
 	for _, row := range c.AuthorizedAndLanded {
 		if row.Receipt == "" {

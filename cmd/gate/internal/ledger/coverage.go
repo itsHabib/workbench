@@ -63,7 +63,19 @@ type Coverage struct {
 	AuthorizedNeverLanded      []CoverageRow `json:"authorized_never_landed"`
 	LandedWithoutAuthorization []CoverageRow `json:"landed_without_authorization"`
 	PreAdoption                []CoverageRow `json:"pre_adoption"`
-	RecordedAt                 string        `json:"recorded_at"`
+	// OutstandingOutsideWindow counts authorizations issued BEFORE the window
+	// that nothing in it discharged. They are excluded from AuthorizedNeverLanded
+	// — that list is scoped to the window like everything else — but excluded
+	// silently they would hide the one class that says "something was authorized
+	// and never closed": an authorization from 60 days ago simply would not
+	// appear in a 30-day sweep, and the reader would see absence, not exclusion.
+	OutstandingOutsideWindow int `json:"outstanding_outside_window,omitempty"`
+	// Limit is the sweep's PR ceiling and Truncated reports whether it was
+	// reached. A cap the artifact does not state is a claim whose scope the reader
+	// cannot check.
+	Limit      int    `json:"limit,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	RecordedAt string `json:"recorded_at"`
 }
 
 // CoverageRow is one PR in one class.
@@ -151,7 +163,11 @@ func Reconcile(repo, branch string, w Window, effectiveFrom time.Time, effective
 		if !Authorizes(a.Outcome) || matched[a.Action] {
 			continue
 		}
+		// Out-of-window authorizations are counted, not listed: the sweep's claim
+		// is scoped to its window, but an outstanding authorization the reader
+		// never learns exists is the failure this class is for.
 		if a.At.Before(w.Since) || a.At.After(w.Until) {
+			c.OutstandingOutsideWindow++
 			continue
 		}
 		c.AuthorizedNeverLanded = append(c.AuthorizedNeverLanded, CoverageRow{
