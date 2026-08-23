@@ -227,3 +227,30 @@ func digestOfString(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return DigestPrefix + ":" + hex.EncodeToString(sum[:])
 }
+
+// Accepted equivalent mutants.
+//
+// `gremlins unleash --timeout-coefficient 30 ./contracts/org/` reports 135
+// killed, 2 lived, 1 not covered — 98.5% efficacy. The three survivors are
+// recorded here rather than left for the next person to re-derive, because an
+// unexplained survivor is indistinguishable from a missing test:
+//
+//  1. canon.go, `KindString Kind = iota + 1` — shifting every Kind constant by
+//     the same amount is unobservable. Kinds are only ever compared against
+//     each other, and the property that matters (zero is not a kind, so an
+//     uninitialized Value refuses) survives any positive offset.
+//
+//  2. canon.go, the sortFields comparator `<` mutated to `<=` — equivalent
+//     given the duplicate-name refusal two lines below it. No input reaching
+//     the comparator can contain two equal names and be admitted, so the two
+//     orderings cannot be distinguished by any legal input.
+//
+//  3. reduce.go, `state.Seq+1` inside a refusal's DETAIL string — prose, not
+//     contract. This one is a property of the design rather than a gap: every
+//     assertion in this package matches on Reason and never on the sentence,
+//     which is exactly what makes the refusal vocabulary safe to reword. A
+//     mutation tester cannot tell "untested" from "deliberately not part of
+//     the contract", so the distinction gets written down here.
+//
+// Re-check on every change to this package. A NEW survivor is a missing test
+// until argued otherwise in this list.

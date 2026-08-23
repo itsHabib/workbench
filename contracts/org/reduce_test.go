@@ -3,6 +3,7 @@ package org
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -538,4 +539,87 @@ var chainLevelReasons = []string{
 	ReasonMinReader,
 	ReasonFenceRegression,
 	ReasonAnnulUnknown,
+}
+
+// The four tests below exist because mutation testing found them missing.
+// Line coverage was 94.6% and every one of these lines was "covered" — executed
+// by some test that never asserted on what it did. That gap is the whole
+// argument for running mutants rather than trusting a coverage number.
+
+// TestMinReaderMayStayEqual pins the EQUALITY case of monotonicity. The refusal
+// test next to it only ever exercised a decrease, so mutating `<` to `<=` —
+// which would refuse a recharter that left min_reader alone — survived. Monotone
+// means non-decreasing, and "unchanged" is the common case.
+func TestMinReaderMayStayEqual(t *testing.T) {
+	c := newChain(t).
+		add(KindCharter, charter(func(tm *Terms) { tm.MinReader = Version })).
+		add(KindAttach)
+	c.add(KindRecharter, charter(func(tm *Terms) { tm.MinReader = Version }))
+	if c.state.Terms.MinReader != Version {
+		t.Errorf("min_reader %d after an equal recharter", c.state.Terms.MinReader)
+	}
+}
+
+// TestNextDueTracksTheLastDeclaredDeadline covers the field derived liveness is
+// computed against. Nothing asserted on it before, so inverting the guard that
+// sets it survived — and a liveness deadline that silently stopped advancing is
+// a role that reads as alive forever.
+func TestNextDueTracksTheLastDeclaredDeadline(t *testing.T) {
+	c := chartered(t)
+	if c.state.NextDue != "" {
+		t.Fatalf("a chain that declared no deadline has one: %q", c.state.NextDue)
+	}
+	const due = "2026-08-22T13:00:00Z"
+	c.add(KindNote, func(r *Record) { r.NextDue = due })
+	if c.state.NextDue != due {
+		t.Errorf("NextDue %q, want %q", c.state.NextDue, due)
+	}
+	// A record that declares no deadline leaves the last one standing rather
+	// than clearing it: silence is not a retraction.
+	c.add(KindNote)
+	if c.state.NextDue != due {
+		t.Errorf("a record with no deadline erased the standing one: %q", c.state.NextDue)
+	}
+	const later = "2026-08-22T15:00:00Z"
+	c.add(KindMark, func(r *Record) { r.NextDue = later })
+	if c.state.NextDue != later {
+		t.Errorf("NextDue %q, want %q", c.state.NextDue, later)
+	}
+}
+
+// TestRefusalErrorRendersBothForms covers the seq-0 branch, which no test
+// reached: a refusal not about one particular record must not claim "at seq 0".
+func TestRefusalErrorRendersBothForms(t *testing.T) {
+	withSeq := (&Refusal{Reason: ReasonSeqGap, Seq: 7, Detail: "detail"}).Error()
+	if !strings.Contains(withSeq, ReasonSeqGap) || !strings.Contains(withSeq, "seq 7") {
+		t.Errorf("seq-bearing refusal rendered as %q", withSeq)
+	}
+	withoutSeq := (&Refusal{Reason: ReasonMinReader, Detail: "detail"}).Error()
+	if strings.Contains(withoutSeq, "seq") {
+		t.Errorf("a refusal with no record claimed a seq: %q", withoutSeq)
+	}
+	if !strings.Contains(withoutSeq, ReasonMinReader) {
+		t.Errorf("refusal dropped its reason: %q", withoutSeq)
+	}
+}
+
+// TestShortAbbreviatesOnlyLongDigests covers the display helper's boundary. It
+// is cosmetic, but an untested branch in a function every refusal message calls
+// is a function nobody has watched work.
+func TestShortAbbreviatesOnlyLongDigests(t *testing.T) {
+	full := digestOfString("x")
+	if abbreviated := short(full); !strings.HasSuffix(abbreviated, "…") || len(abbreviated) >= len(full) {
+		t.Errorf("short(%q) = %q", full, abbreviated)
+	}
+	// Includes the exact boundary: 14 characters is passed through, 15 is cut.
+	// Without the boundary case the comparison could be < or <= and no test
+	// would notice, which is what the mutation run reported.
+	for _, s := range []string{"", "sha256:beef", "12345678901234"} {
+		if got := short(s); got != s {
+			t.Errorf("short(%q) = %q; a digest of %d chars is passed through whole", s, got, len(s))
+		}
+	}
+	if got := short("123456789012345"); got != "12345678901234…" {
+		t.Errorf("short(15 chars) = %q; one past the boundary must be cut", got)
+	}
 }
