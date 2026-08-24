@@ -405,3 +405,26 @@ func TestClosureStillSettlesAnOlderTerminal(t *testing.T) {
 			len(in.Parked), in.Discharged.Parked)
 	}
 }
+
+// TestUnrecognisedClosingStateLeavesTheRowVisible pins the fail-safe direction
+// of the state whitelist. `sweep` is the only writer today and always writes
+// `not_open`, but a future writer meaning something other than "finished" — or
+// a typo — must cost a stale row, never a hidden park. Only one of those two is
+// recoverable by looking at the screen.
+func TestUnrecognisedClosingStateLeavesTheRowVisible(t *testing.T) {
+	for _, claimed := range []string{"", "OPEN", "draft", "not-open"} {
+		t.Run(claimed, func(t *testing.T) {
+			arts := []state.Artifact{
+				art(state.KindEscalation, "run_1", "esc_1", inboxBase, esc("grt_a", "q", "", "o/widget", 7)),
+				art(state.KindSubjectClosed, "run_1", "sbc_1", inboxBase.Add(time.Hour), map[string]any{
+					"repo": "o/widget", "number": 7, "state": claimed,
+				}),
+			}
+			in := closureInbox(t, arts, NextRequest{})
+			if len(in.Parked) != 1 {
+				t.Fatalf("state %q must not close the subject, got %d parked (%+v)",
+					claimed, len(in.Parked), in.Discharged.Parked)
+			}
+		})
+	}
+}

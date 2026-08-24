@@ -208,12 +208,23 @@ type subjectClosedBody struct {
 	Source     string `json:"source"`
 }
 
+// closingStates are the states a subject_closed body may assert. The whitelist
+// is the fail-safe direction: an unrecognised state leaves the row VISIBLE
+// rather than hiding it. A future writer of this kind that means something other
+// than "finished" — or a typo — costs a stale row, never a hidden park, and
+// only one of those is recoverable by looking at the screen.
+var closingStates = map[string]bool{
+	ClosedNotOpen:   true,
+	ClosedMerged:    true,
+	ClosedAbandoned: true,
+}
+
 func (idx closureIndex) absorbSubjectClosed(a state.Artifact, order int) {
 	var b subjectClosedBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
 		return
 	}
-	if b.Repo == "" || b.Number == 0 {
+	if b.Repo == "" || b.Number == 0 || !closingStates[b.State] {
 		return
 	}
 	idx[subjectKey(b.Repo, b.Number)] = closingFact{
@@ -232,6 +243,14 @@ type receiptBody struct {
 }
 
 // receiptClosings maps a receipt outcome onto the closing state it proves.
+//
+// "superseded" closes the subject because in #249's vocabulary it is a fact
+// about the PR, not about the authorization: "the PR merged, but at a DIFFERENT
+// head than the one authorized." The merge happened and that authorization did
+// not cover it — which makes the receipt a bad discharge and a perfectly good
+// closing fact. Read it as "the authorization was superseded" and the mapping
+// looks wrong; it is the PR that is gone either way.
+//
 // "failed" is deliberately absent: a pinned merge command that ran and did not
 // land leaves the PR OPEN, so treating it as closed would hide a row that still
 // needs the operator — the exact failure this whole change exists to stop, run
