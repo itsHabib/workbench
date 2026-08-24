@@ -29,8 +29,11 @@ type Role struct {
 	Tenant string    `json:"tenant"`
 	Role   string    `json:"role"`
 	Phase  org.Phase `json:"phase"`
-	// Records is the chain length; Incarnations counts the sessions that ever
-	// held the role (an attach or a takeover each mint one).
+	// Records is the chain LENGTH — every line on disk, including one that
+	// stopped the replay. It is deliberately not "records counted", so a
+	// BROKEN row still says how much chain exists behind the break.
+	// Incarnations counts the sessions that ever held the role (an attach or a
+	// takeover each mint one).
 	Records      int `json:"records"`
 	Incarnations int `json:"incarnations"`
 	// Claims opened, and Terminals recorded against them. A claim still active
@@ -81,17 +84,29 @@ func Of(tenant, role string, records []org.Record, now time.Time) Role {
 	for _, rec := range records {
 		next, err := org.Advance(state, rec)
 		if err != nil {
+			// Carry the last state that DID fold. An obligation outstanding at
+			// the break is the most urgent thing on a broken chain, and a
+			// reader that sees only BROKEN would have to guess whether work
+			// was stranded behind it.
 			r.Err = err.Error()
-			return r
+			return withState(r, state, now)
 		}
 		count(&r, state, next, rec)
 		state = next
 	}
-	r.Phase, r.Dangling, r.Degraded = state.Phase, state.Dangling, state.Degraded
-	r.OpenIntents, r.OpenEscalations = len(state.OpenIntents), len(state.OpenEscalations)
 	if n := len(records); n > 0 {
 		r.LastAt = records[n-1].At
 	}
+	return withState(r, state, now)
+}
+
+// withState copies the folded state's reportable fields onto a row. It is one
+// function rather than two copies because the broken path and the healthy path
+// must report the same fields — a divergence there is exactly how a dangling
+// obligation goes missing from a sweep.
+func withState(r Role, state org.RoleState, now time.Time) Role {
+	r.Phase, r.Dangling, r.Degraded = state.Phase, state.Dangling, state.Degraded
+	r.OpenIntents, r.OpenEscalations = len(state.OpenIntents), len(state.OpenEscalations)
 	r.Late = late(state.NextDue, now)
 	return r
 }

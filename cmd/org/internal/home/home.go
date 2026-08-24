@@ -84,6 +84,16 @@ func (h *Home) Roles() ([][2]string, error) {
 	return out, nil
 }
 
+// Records reads a role's chain WITHOUT folding it.
+//
+// It exists for the sweep, which must report what a broken chain contains
+// rather than refuse to look at it: Load folds internally and is therefore
+// all-or-nothing, so a caller that needs the records behind a break cannot get
+// them through it. Nothing here validates — the caller replays.
+func (h *Home) Records(tenant, role string) ([]org.Record, error) {
+	return readChain(h.chainPath(tenant, role))
+}
+
 // Load reads and folds a role's chain. A missing chain is not an error: it
 // folds to the zero state, which is exactly what the kernel says an empty
 // chain means.

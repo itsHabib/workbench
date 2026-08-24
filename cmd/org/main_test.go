@@ -131,3 +131,45 @@ func TestStrictIdentityPolicy(t *testing.T) {
 		t.Fatalf("stale presented incarnation: exit %d, stderr %s", code, errOut)
 	}
 }
+
+// TestSweepReportsBrokenChainThroughTheCLI is the fix for the review's second
+// P2: cmdSweep used to read through Load, which folds internally and is
+// all-or-nothing, so a broken chain arrived empty and the sweep reported zero
+// of the work recorded before the break. It now reads the records and lets the
+// replay decide, which is the only path that can keep those counts.
+func TestSweepReportsBrokenChainThroughTheCLI(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:platform"}
+	for _, args := range [][]string{
+		{"charter", "-scope", "github:acme/api"},
+		{"attach"},
+		{"checkpoint", "-body", "real work happened"},
+	} {
+		if code, _, e := exec(t, state, append(args, role...)...); code != 0 {
+			t.Fatalf("%v: %s", args, e)
+		}
+	}
+
+	// Append a line the kernel must refuse: a claim on work nobody holds.
+	chain := filepath.Join(state, "acme", "lead--platform", "chain.jsonl")
+	raw, err := os.ReadFile(chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := `{"v":1,"scheme":"canon/v1","seq":4,"tenant":"acme","role":"lead:platform",` +
+		`"kind":"claim","kind_class":"structural","subject":{"work":"jira:NOPE-1"}}` + "\n"
+	if err := os.WriteFile(chain, append(raw, forged...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := exec(t, state, append([]string{"sweep"}, role...)...)
+	if code != 0 {
+		t.Fatalf("a broken chain must not fail the sweep: exit %d, %s", code, errOut)
+	}
+	if !strings.Contains(out, "BROKEN") {
+		t.Fatalf("sweep did not flag the broken chain:\n%s", out)
+	}
+	if !strings.Contains(out, "1 checkpoint(s) of 1 end(s)") {
+		t.Fatalf("counts recorded before the break were lost:\n%s", out)
+	}
+}

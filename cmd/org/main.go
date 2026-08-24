@@ -544,15 +544,14 @@ func cmdSweep(e *env, args []string) error {
 	now := time.Now()
 	roles := make([]survey.Role, 0, len(pairs))
 	for _, p := range pairs {
-		// Read the chain rather than Load: a chain that stops folding must be
-		// reported as a broken row, not abort the whole sweep.
-		records, _, loadErr := h.Load(p[0], p[1])
-		if loadErr != nil {
-			records = nil
-		}
+		// Records, not Load: Load folds internally and is all-or-nothing, so a
+		// chain that stops folding would arrive here empty and the sweep would
+		// report zero of the work recorded before the break. The replay in
+		// survey.Of is what decides admissibility, and it keeps what it counted.
+		records, err := h.Records(p[0], p[1])
 		row := survey.Of(p[0], p[1], records, now)
-		if loadErr != nil && row.Err == "" {
-			row.Err = loadErr.Error()
+		if err != nil && row.Err == "" {
+			row.Err = err.Error()
 		}
 		roles = append(roles, row)
 	}

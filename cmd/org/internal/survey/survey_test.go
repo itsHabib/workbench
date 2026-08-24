@@ -204,3 +204,62 @@ func TestLatenessFromDeclaredDeadline(t *testing.T) {
 		t.Fatal("a writer inside its own deadline must not read as late")
 	}
 }
+
+// TestRevokeOrphansToo pins the second displacement path. Revoke reaches the
+// same orphan() in the kernel as takeover, but through a different transition
+// — and "high confidence by inspection" is how the untested arm of a pair
+// eventually diverges.
+func TestRevokeOrphansToo(t *testing.T) {
+	c := newChain(t)
+	c.attach()
+	c.assign(work)
+	c.claim(work)
+	c.add(home.Draft{Kind: org.KindRevoke, Subject: org.Subject{Party: "human:op"}})
+
+	r := c.survey()
+	if r.Orphaned != 1 || r.Dangling != work {
+		t.Fatalf("after a revoke mid-claim: orphaned=%d dangling=%q, want 1/%q", r.Orphaned, r.Dangling, work)
+	}
+	// A revoke returns the role to Chartered rather than minting a holder, so
+	// it must not be counted as an incarnation.
+	if r.Incarnations != 1 {
+		t.Fatalf("incarnations = %d, want 1 (attach only — a revoke mints nobody)", r.Incarnations)
+	}
+}
+
+// TestBrokenChainKeepsItsObligation is the fix for the review's P2: a chain
+// that stops folding must still report the obligation outstanding at the
+// break. BROKEN says the state is uncertain; it must not say the stranded
+// work is absent.
+func TestBrokenChainKeepsItsObligation(t *testing.T) {
+	c := newChain(t)
+	c.attach()
+	c.assign(work)
+	c.claim(work)
+	c.add(home.Draft{Kind: org.KindTakeover, Subject: org.Subject{Party: "human:op"}})
+	records, _, err := c.h.Load(tenant, role)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	// A tail the kernel refuses: a claim while an inherited obligation is open.
+	broken := append(records, org.Record{
+		V: org.Version, Scheme: org.Scheme, Seq: int64(len(records) + 1),
+		Tenant: tenant, Role: role, Kind: org.KindClaim, KindClass: org.ClassStructural,
+		Subject: org.Subject{Work: work},
+	})
+
+	r := survey.Of(tenant, role, broken, now)
+	if r.Err == "" {
+		t.Fatal("the forged tail must be reported as broken")
+	}
+	if r.Dangling != work {
+		t.Fatalf("dangling = %q, want %q — a broken chain must not hide stranded work", r.Dangling, work)
+	}
+	if r.Orphaned != 1 {
+		t.Fatalf("orphaned = %d, want 1", r.Orphaned)
+	}
+	if tot := survey.Sum([]survey.Role{r}); tot.Dangling != 1 {
+		t.Fatalf("totals dangling = %d, want 1 — the aggregate must not undercount", tot.Dangling)
+	}
+}
