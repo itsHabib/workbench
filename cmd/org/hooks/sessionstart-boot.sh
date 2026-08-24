@@ -25,7 +25,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 [ -f "$MAP" ] || exit 0
 
 input="$(cat)"
-cwd="$(jq -r '.cwd // empty' <<<"$input")"
+cwd="$(jq -r '.cwd // empty' <<<"$input" 2>/dev/null)" || exit 0
 [ -n "$cwd" ] || exit 0
 
 tenant="" role="" best=0

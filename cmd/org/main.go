@@ -480,7 +480,7 @@ func cmdBlob(e *env, args []string) error {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("blob %s is erased or unknown", args[0])
+		return fmt.Errorf("blob %s is erased or unknown", s.fs.Arg(0))
 	}
 	_, err = e.stdout.Write(bodyBytes)
 	return err

@@ -25,10 +25,10 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
 # Re-entrancy: a Stop hook that makes the agent continue re-fires Stop.
-[ "$(jq -r '.stop_hook_active // false' <<<"$input")" = "true" ] && exit 0
-cwd="$(jq -r '.cwd // empty' <<<"$input")"
-session="$(jq -r '.session_id // empty' <<<"$input")"
-transcript="$(jq -r '.transcript_path // empty' <<<"$input")"
+[ "$(jq -r '.stop_hook_active // false' <<<"$input" 2>/dev/null)" = "true" ] && exit 0
+cwd="$(jq -r '.cwd // empty' <<<"$input" 2>/dev/null)" || exit 0
+session="$(jq -r '.session_id // empty' <<<"$input" 2>/dev/null)" || exit 0
+transcript="$(jq -r '.transcript_path // empty' <<<"$input" 2>/dev/null)" || exit 0
 [ -n "$cwd" ] || exit 0
 
 tenant="" role="" best=0
