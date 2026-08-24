@@ -26,7 +26,14 @@ there first.
   (cursor advances only when every event from a source settled).
 - `internal/source` — tail + parse producers' JSONL into events, decoding the
   shared verdict + envelope types from the `contracts` package (no hand-rolled
-  parser). Mechanism only; knows nothing about routing.
+  parser). Mechanism only; knows nothing about routing. `ledger.go` is the
+  read-only join a park needs — its grant and its verdict live in other
+  artifacts, named by id — built lazily over bytes the read already holds.
+- `internal/preflight` — policy leaf: given a park's grant ceilings, its
+  verdict tier and its consumed review cycles, could an Approve tap actually
+  land? Mirrors gate's ceilings (expiry → tier → cycles) rather than importing
+  them (boundary law), and resolves every uncertainty to *unknown* so a button
+  is withheld only on a proof. It decides what to PAINT, never what may merge.
 - `internal/route` — the declarative routes table + severity-monotone
   throttle. All policy comes from config.
 - `internal/notify` — one event to one channel. `slack` posts to
@@ -79,7 +86,15 @@ there first.
   mint; a cycle park is the stop signal that the review loop ran long — the
   fix is fewer rounds, never a wider grant. flare renders the button; it never
   handles the tap (the callback targets `escalate serve`).
-- The same resolvable-park rule gates the paste-ready `escalate resolve …`
+- **Approve is pre-flighted.** The tap is one-shot (`gate judge` cannot be
+  re-run), so Approve is withheld when the park's own recorded grant + verdict
+  PROVE it cannot land: an expired grant, a verdict tier over the grant's
+  ceiling, a spent cycle budget. The card names the blocker and the mint that
+  clears it instead. This catches what the ceiling-park rule above cannot — a
+  CONTENT park carries no code, so its ceilings are only checked downstream,
+  which is how workbench#242 burned a tap. Block always survives (no ceiling
+  stops "don't merge this"). Every unreadable fact renders the card flare
+  rendered before the check existed: withhold on a proof, never on a gap.- The same resolvable-park rule gates the paste-ready `escalate resolve …`
   context line on the card — including the ceiling exclusion, which gate's
   inbox mirrors. It renders regardless of the channel's button opt-in (it is
   prose, not an interactive element), so the loop closes from a phone with

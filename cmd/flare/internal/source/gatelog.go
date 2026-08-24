@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
+	"github.com/itsHabib/workbench/cmd/flare/internal/preflight"
 	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
 )
@@ -26,7 +28,7 @@ import (
 // log (evidence, grants, actions, passing verdicts) is not push-worthy.
 // Unparseable lines fail the whole read — a corrupt log must not read as
 // quiet.
-func parseGateLog(src config.Source, lines []string) ([]event.Event, string, error) {
+func parseGateLog(src config.Source, lines []string, lg *lazyLedger) ([]event.Event, string, error) {
 	var events []event.Event
 	last := ""
 	for _, l := range lines {
@@ -35,7 +37,7 @@ func parseGateLog(src config.Source, lines []string) ([]event.Event, string, err
 			return nil, "", fmt.Errorf("source %s: bad artifact line: %w", src.Name, err)
 		}
 		last = env.Hash
-		ev, ok, err := gateEvent(src, env)
+		ev, ok, err := gateEvent(src, env, lg)
 		if err != nil {
 			return nil, "", fmt.Errorf("source %s: %w", src.Name, err)
 		}
@@ -56,9 +58,9 @@ func parseGateLog(src config.Source, lines []string) ([]event.Event, string, err
 // it fails the read loudly (like a corrupt envelope line), so a block/escalate
 // can never vanish quietly and go unpaged. Only ok=false — a kind that is not a
 // verdict at all — is a legitimate skip.
-func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, error) {
+func gateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event.Event, bool, error) {
 	if env.Kind == contracts.KindEscalation {
-		return escalationEvent(src, env), true, nil
+		return escalationEvent(src, env, lg), true, nil
 	}
 	v, ok, err := env.Verdict()
 	if err != nil {
@@ -71,7 +73,7 @@ func gateEvent(src config.Source, env contracts.Envelope) (event.Event, bool, er
 	return ev, page, nil
 }
 
-func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
+func escalationEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) event.Event {
 	b, _ := escalation.DecodeBody(env.Body) // tolerant: an undecodable body yields the zero value (Brief nil → briefed "no" → drops under the briefed routes), never a corrupt page
 	title := fmt.Sprintf("%s: parked for judgment (%s)", src.Name, env.Run)
 	if b.Outcome != "" {
@@ -109,6 +111,7 @@ func escalationEvent(src config.Source, env contracts.Envelope) event.Event {
 		fields["briefed"] = "yes"
 	}
 	briefFields(fields, b.Brief)
+	preflightFields(fields, src, env, b, fields["grant"], lg)
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
@@ -139,6 +142,49 @@ func briefFields(fields map[string]string, b *escalation.Brief) {
 		}
 		fields[k] = v
 	}
+}
+
+// preflightFields records whether an Approve tap on this park could land, and
+// — when it could not — the blocker, the authority that clears it, and the
+// paste-ready mint command. The facts are gate's own (the grant's ceilings and
+// the verdict's tier, joined by the ids the park itself carries); flare only
+// reads them forward so notify can decline to paint a doomed button.
+//
+// It covers the gap notify's ceilingPark cannot: that check reads the park's
+// OWN code, so it withholds buttons on a park that already announced a ceiling.
+// A CONTENT park carries no code, and its ceilings are only checked downstream —
+// which is how workbench#242 got an Approve button on a T3 verdict under a T1
+// grant, recorded a judgment, and then died on grant_tier_exceeded. The tap was
+// one-shot; the refusal was arithmetic anyone holding both artifacts could have
+// done first.
+//
+// Absence is the fail-open signal: an unresolvable join writes no `approvable`
+// field at all, and notify renders exactly the card it renders today. flare
+// never withholds the operator's remote path on a guess.
+//
+// grantID is the caller's already-sanitized grant (empty for a grantless or
+// "none:"-sentinel park), so the sentinel is skipped here for free.
+func preflightFields(fields map[string]string, src config.Source, env contracts.Envelope, b escalation.V1, grantID string, lg *lazyLedger) {
+	if grantID == "" || b.Verdict == "" {
+		return
+	}
+	park := lg.get().park(grantID, b.Verdict, b.Repo, b.Number, env.Run)
+	res := preflight.Check(park, time.Now())
+	if !res.Known {
+		return
+	}
+	fields["verdict_tier"] = park.VerdictTier
+	fields["grant_tier"] = park.Grant.MaxTier
+	if res.Approve {
+		fields["approvable"] = "yes"
+		return
+	}
+	fields["approvable"] = "no"
+	fields["blocker"] = res.Blocker
+	fields["needs"] = res.Needs
+	// gate's state dir is the directory holding the log flare was CONFIGURED to
+	// watch — read off that configured path, never a hardcoded sibling.
+	fields["mint"] = preflight.MintCommand(b.Repo, filepath.Dir(src.Path), res)
 }
 
 // verdictEvent renders a page-worthy verdict into an event. Only block and

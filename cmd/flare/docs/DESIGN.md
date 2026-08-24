@@ -134,6 +134,36 @@ their own shapes; `decision`/`tier` are never required of them.
     grantless) — those are not resolvable through `escalate`, so offering Approve/Block on
     them would be a tap `gate resolve` would refuse; a grantless park resolves out-of-band in
     the producer's own flow.
+  - **Pre-flighting the Approve button.** A tap is **one-shot** — `gate judge` records a
+    judgment that cannot be re-run — so a button offered on a decision that is already
+    guaranteed to fail *burns* the operator's approval. On 2026-08-21 a tap on workbench#242
+    did exactly that: it recorded a judgment and then died on `grant_tier_exceeded: verdict
+    tier T3 exceeds grant ceiling T1`. The park was a **content** park (no code), so the
+    `ceilingPark` exclusion above — which reads the park's own code — did not apply; the
+    ceiling was only checked downstream, after the judgment was spent.
+
+    Before rendering **Approve**, flare now joins the park to the two artifacts it names by id
+    — the grant it ran under and the reduced verdict it stands on — and applies the same
+    ceilings gate applies, in gate's order: **expiry, then the tier ceiling, then the
+    review-cycle ceiling** (`internal/preflight`). When any of them proves the approval cannot
+    land, the card renders **without** Approve and states the blocker, the authority that
+    would clear it, and a paste-ready `gate grant` line. **Block still renders** — no ceiling
+    stops a human deciding "don't merge this", and the operator away from a keyboard should
+    still be able to say so.
+
+    This is flare **rendering a fact gate already recorded**, not flare gating: it decides
+    nothing, writes nothing, and cannot change any outcome. The failure direction is
+    deliberately asymmetric — a missing grant, an unknown tier, an underivable cycle count all
+    resolve to *unknown*, and an unknown renders exactly the card flare rendered before the
+    check existed. **A button is withheld only on a proof.** Withholding one the operator
+    needed is the worse failure, because the phone is the only surface they have away from a
+    keyboard.
+
+    The joins are read-only over the same log flare already tails (`internal/source/ledger.go`,
+    lazily built, so a poll with no park pays nothing). Two things the escalation artifact does
+    **not** carry make this a join rather than a read: the grant's ceilings and the verdict's
+    tier. An additive `ceilings: {verdict_tier, grant_tier, cycles_used, cycles_max}` on the
+    escalation body would make it a read — noted for gate in *Integration edges* below.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.
@@ -224,7 +254,15 @@ lock to reap). `status` never locks — it only reads.
    sink. Ask: emit a park receipt to `receipts.jsonl` (or an artifact log) at the
    `awaiting_judgment` transition. Until then flare covers failed/cancelled receipts only —
    this is the push-on-block gap that remains, and it is an emission gap, not a flare gap.
-2. **gate agent:** (a) publish the artifact *envelope* schema next to `verdict-schema-v0.json`
+2. **gate agent (additive, would turn a join into a read):** carry the park's **ceilings** on
+   the escalation body — `verdict_tier`, `grant_tier`, `cycles_used`, `cycles_max`. flare
+   pre-flights the Approve button today by joining the park's `grant` and `verdict` ids back
+   to their artifacts in the log; those four values are what the join is for. gate already
+   computes all of them (`gateResult.CyclesUsed`/`CyclesMax` since #242), so this is a
+   write-side field, not new logic — and it would let a reader with only the escalation line
+   decide, instead of one holding the whole log. Until then flare consumes them defensively:
+   an absent field is an old record and renders as before.
+3. **gate agent:** (a) publish the artifact *envelope* schema next to `verdict-schema-v0.json`
    so external readers stop parsing against prose; (b) when ci-classify's `infra` findings
    land, carry page-worthiness in a structured field (`Finding.severity` exists) rather than
    the `infra: <sig> — wants page` title prefix — flare will match on the title prefix as a
