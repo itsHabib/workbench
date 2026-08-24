@@ -36,6 +36,17 @@ Terminal transition is exclusive: `result.json` is written via temp file +
 immutable. If the process dies between those writes, `reconcile` treats the
 result as authoritative and appends only the missing terminal event.
 
+Readers that need both facts must read them in the **reverse** order — journal
+first, then `result.json`. These are two unsynchronized reads, so reading in the
+writer's order can straddle a concurrent commit and compose a
+terminal-without-result snapshot that never existed on disk. Observing
+`run_terminal` first proves the rename preceding it already landed. `watch`'s
+terminal fallback and `reconcile`'s pre-claim terminal check both follow this
+rule; only the durable state may be judged corrupt. The write order admits
+exactly one durable partial state — `result.json` present without
+`run_terminal` — so that is the only pairing `reconcile` repairs; its inverse
+is corruption, never a live race.
+
 ## Writer claim primitive (TDD open question #4)
 
 **Exclusivity** comes only from the filesystem: `os.OpenFile(...,
