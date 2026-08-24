@@ -24,6 +24,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -122,12 +123,16 @@ type env struct {
 	stdout, stderr io.Writer
 }
 
-// scope is the flag set every verb shares: which home, which chain.
+// scope is the flag set every verb shares: which home, which chain, which
+// identity, and how to speak.
 type scope struct {
-	fs     *flag.FlagSet
-	state  string
-	tenant string
-	role   string
+	fs          *flag.FlagSet
+	state       string
+	tenant      string
+	role        string
+	incarnation string
+	strict      bool
+	asJSON      bool
 }
 
 func newScope(name string) *scope {
@@ -135,6 +140,11 @@ func newScope(name string) *scope {
 	s.fs.StringVar(&s.state, "state", envOr("ORG_STATE", defaultState()), "state directory")
 	s.fs.StringVar(&s.tenant, "tenant", envOr("ORG_TENANT", "mh"), "tenant id")
 	s.fs.StringVar(&s.role, "role", "", "role id, e.g. lead:agentic-development")
+	s.fs.StringVar(&s.incarnation, "incarnation", os.Getenv("ORG_INCARNATION"),
+		"present the writer's incarnation id (the digest attach printed); defaults to writing as the current holder")
+	s.fs.BoolVar(&s.strict, "strict", os.Getenv("ORG_STRICT") != "",
+		"refuse to write without an explicitly presented incarnation")
+	s.fs.BoolVar(&s.asJSON, "json", false, "emit a JSON receipt instead of text")
 	return s
 }
 
@@ -178,9 +188,31 @@ func body(e *env, v string) ([]byte, error) {
 	return b, nil
 }
 
-// appendAndReport appends one draft and prints the record's position, which is
-// all a scripted caller needs to correlate with the chain.
+// receipt is the machine-readable result of one append: the record's identity
+// plus the state summary a caller decides its next move from. It is the JSON
+// half of the exit-code seam.
+type receipt struct {
+	Kind     string    `json:"kind"`
+	Seq      int64     `json:"seq"`
+	Digest   string    `json:"digest"`
+	Phase    org.Phase `json:"phase"`
+	Tip      string    `json:"tip"`
+	Holder   string    `json:"holder,omitempty"`
+	Active   string    `json:"active,omitempty"`
+	Dangling string    `json:"dangling,omitempty"`
+	Held     int       `json:"held"`
+	Fence    int64     `json:"fence"`
+}
+
+// appendAndReport applies the identity policy, appends one draft, and prints
+// the receipt — text for a human, `-json` for a machine.
 func appendAndReport(e *env, h *home.Home, s *scope, d home.Draft) error {
+	if s.strict && s.incarnation == "" && !home.MintsIdentity(d.Kind) {
+		return fmt.Errorf("strict mode: %s requires -incarnation (or ORG_INCARNATION); writing as the holder is disabled", d.Kind)
+	}
+	if d.Incarnation == "" {
+		d.Incarnation = s.incarnation
+	}
 	r, state, err := h.Append(s.tenant, s.role, d)
 	if err != nil {
 		return err
@@ -189,7 +221,24 @@ func appendAndReport(e *env, h *home.Home, s *scope, d home.Draft) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(e.stdout, "%s seq %d %s (phase %s)\n", r.Kind, r.Seq, digest, state.Phase)
+	if !s.asJSON {
+		fmt.Fprintf(e.stdout, "%s seq %d %s (phase %s)\n", r.Kind, r.Seq, digest, state.Phase)
+		return nil
+	}
+	return printJSON(e, receipt{
+		Kind: r.Kind, Seq: r.Seq, Digest: digest,
+		Phase: state.Phase, Tip: state.Tip, Holder: state.Holder,
+		Active: state.Active, Dangling: state.Dangling,
+		Held: len(state.Held), Fence: state.Fence,
+	})
+}
+
+func printJSON(e *env, v any) error {
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(e.stdout, string(out))
 	return nil
 }
 
@@ -233,6 +282,17 @@ func cmdAttach(e *env, args []string) error {
 	r, state, err := h.Append(s.tenant, s.role, d)
 	if err != nil {
 		return err
+	}
+	if s.asJSON {
+		digest, err := org.DigestOf(r)
+		if err != nil {
+			return err
+		}
+		return printJSON(e, receipt{
+			Kind: r.Kind, Seq: r.Seq, Digest: digest, Phase: state.Phase,
+			Tip: state.Tip, Holder: state.Holder, Active: state.Active,
+			Dangling: state.Dangling, Held: len(state.Held), Fence: state.Fence,
+		})
 	}
 	fmt.Fprintf(e.stdout, "attached: incarnation %s seq %d (phase %s)\n", state.Holder, r.Seq, state.Phase)
 	return nil
@@ -378,8 +438,8 @@ func cmdAdvisory(kind string) func(*env, []string) error {
 
 func cmdBoot(e *env, args []string) error {
 	s := newScope("boot")
-	asJSON := s.fs.Bool("json", false, "emit JSON instead of text")
-	budget := s.fs.Int("max-bytes", 2048, "text byte budget; depth is shed to fit")
+	budget := s.fs.Int("max-bytes", 2048, "boot-index byte budget; depth is shed to fit")
+	ctxBudget := s.fs.Int("context-bytes", 4096, "byte budget for operator context.d sources")
 	h, err := s.open(args, true)
 	if err != nil {
 		return err
@@ -395,16 +455,46 @@ func cmdBoot(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if !*asJSON {
-		fmt.Fprint(e.stdout, b.Text(*budget))
-		return nil
-	}
-	out, err := b.JSON()
+	files, err := h.Context(s.tenant, s.role)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(e.stdout, string(out))
+	if s.asJSON {
+		return printJSON(e, bootJSON(b, files))
+	}
+	fmt.Fprint(e.stdout, b.Text(*budget))
+	fmt.Fprint(e.stdout, contextText(files, *ctxBudget, h.ContextDir(s.tenant, s.role)))
 	return nil
+}
+
+// bootJSON pairs the boot index with the operator context for machine callers.
+func bootJSON(b render.Boot, files []home.ContextFile) map[string]any {
+	ctx := make([]map[string]string, 0, len(files))
+	for _, f := range files {
+		ctx = append(ctx, map[string]string{"name": f.Name, "body": string(f.Body)})
+	}
+	return map[string]any{"boot": b, "context": ctx}
+}
+
+// contextText renders the operator's context.d sources under one budget,
+// naming the directory when it truncates so the full files stay one read away.
+func contextText(files []home.ContextFile, budget int, dir string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## operator context (context.d)\n")
+	spent := 0
+	for _, f := range files {
+		entry := fmt.Sprintf("### %s\n%s\n", f.Name, strings.TrimSpace(string(f.Body)))
+		if spent+len(entry) > budget {
+			fmt.Fprintf(&sb, "… context truncated at %d bytes — read the rest in %s\n", budget, dir)
+			break
+		}
+		sb.WriteString(entry)
+		spent += len(entry)
+	}
+	return sb.String()
 }
 
 func cmdStatus(e *env, args []string) error {
@@ -428,6 +518,9 @@ func cmdStatus(e *env, args []string) error {
 			return err
 		}
 		rows = append(rows, render.NewRow(state, time.Now()))
+	}
+	if s.asJSON {
+		return printJSON(e, rows)
 	}
 	fmt.Fprint(e.stdout, render.Board(rows))
 	return nil
@@ -461,6 +554,11 @@ func cmdVerify(e *env, args []string) error {
 	records, state, err := h.Load(s.tenant, s.role)
 	if err != nil {
 		return err
+	}
+	if s.asJSON {
+		return printJSON(e, map[string]any{
+			"ok": true, "records": len(records), "phase": state.Phase, "tip": state.Tip,
+		})
 	}
 	fmt.Fprintf(e.stdout, "ok: %d records fold to phase %s, tip %s\n", len(records), state.Phase, state.Tip)
 	return nil
