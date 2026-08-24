@@ -358,6 +358,22 @@ func TestReopenedPRIsNotMootedByItsOldClosure(t *testing.T) {
 		}
 	})
 
+	// A hidden row is also UNSWEEPABLE: the sweep's work list is the live rows,
+	// so a wrongly-mooted subject could never be repaired by re-running the sweep.
+	// The reopened park must be back on the work list, not merely back on screen.
+	t.Run("the reopened park is sweepable again", func(t *testing.T) {
+		arts := []state.Artifact{
+			art(state.KindAction, "run_1", "act_1", inboxBase, wouldMergeFor("o/widget", 7, "x")),
+			closure,
+			art(state.KindEscalation, "run_2", "esc_2", inboxBase.Add(2*time.Hour), esc("grt_a", "q", "", "o/widget", 7)),
+		}
+		got := LiveSubjects(arts)
+		want := LiveSubject{Repo: "o/widget", Number: 7, Run: "run_2", Terminal: "esc_2"}
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("the reopened subject must be back on the sweep work list, got %+v", got)
+		}
+	})
+
 	t.Run("audit does not call the fresh park moot", func(t *testing.T) {
 		arts := []state.Artifact{
 			art(state.KindAction, "run_1", "act_1", inboxBase, wouldMergeFor("o/widget", 7, "x")),
