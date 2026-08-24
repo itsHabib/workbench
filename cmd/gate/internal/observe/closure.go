@@ -109,11 +109,22 @@ type Discharged struct {
 func (d Discharged) Total() int { return d.Parked.Total() + d.ReadyToMerge.Total() }
 
 // closingFact is what the log knows about one subject being finished: the state
-// gate observed, which artifact taught it, and when that observation was made.
+// gate observed, which artifact taught it, when that observation was made, and
+// its position in the log.
+//
+// The position is load-bearing. A pull request can be CLOSED AND REOPENED — this
+// repo's own review-cycle rule says a PR past its cap is "closed and re-opened
+// fresh" — and the re-gated PR then parks again AFTER the closure was recorded.
+// Without the ordering, that stale closing fact would moot the fresh park
+// forever: a live merge-authorization question silently hidden, which is the
+// exact failure this whole reduction exists to prevent, running backwards.
 type closingFact struct {
 	State  string
 	Source string
 	At     string
+	// order is the closing artifact's index in the log. It only settles a
+	// terminal it POSTDATES.
+	order int
 }
 
 // why renders the fact as the sentence a row carries.
@@ -142,23 +153,23 @@ type closureIndex map[string]closingFact
 // a row invisible, never mergeable.
 func buildClosureIndex(arts []state.Artifact, facts map[string]runFacts) closureIndex {
 	idx := make(closureIndex)
-	for _, a := range arts {
-		idx.absorb(a, facts)
+	for order, a := range arts {
+		idx.absorb(a, facts, order)
 	}
 	return idx
 }
 
 // absorb records every subject one artifact proves finished.
-func (idx closureIndex) absorb(a state.Artifact, facts map[string]runFacts) {
+func (idx closureIndex) absorb(a state.Artifact, facts map[string]runFacts, order int) {
 	switch a.Kind {
 	case state.KindAction:
-		idx.absorbAlreadyMerged(a, facts)
+		idx.absorbAlreadyMerged(a, facts, order)
 	case state.KindSubjectClosed:
-		idx.absorbSubjectClosed(a)
+		idx.absorbSubjectClosed(a, order)
 	case kindReceipt:
-		idx.absorbReceipt(a)
+		idx.absorbReceipt(a, order)
 	case kindCoverage:
-		idx.absorbCoverage(a)
+		idx.absorbCoverage(a, order)
 	}
 }
 
@@ -166,7 +177,7 @@ func (idx closureIndex) absorb(a state.Artifact, facts map[string]runFacts) {
 // refusing a run because the PR had merged before it ran. The subject comes from
 // the run's folded facts, since the refusal body carries the subject the same
 // way every other action does.
-func (idx closureIndex) absorbAlreadyMerged(a state.Artifact, facts map[string]runFacts) {
+func (idx closureIndex) absorbAlreadyMerged(a state.Artifact, facts map[string]runFacts, order int) {
 	var b actionBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
 		return
@@ -182,6 +193,7 @@ func (idx closureIndex) absorbAlreadyMerged(a state.Artifact, facts map[string]r
 		State:  ClosedMerged,
 		Source: "an already_merged refusal",
 		At:     a.Time.UTC().Format(time.RFC3339),
+		order:  order,
 	}
 }
 
@@ -196,7 +208,7 @@ type subjectClosedBody struct {
 	Source     string `json:"source"`
 }
 
-func (idx closureIndex) absorbSubjectClosed(a state.Artifact) {
+func (idx closureIndex) absorbSubjectClosed(a state.Artifact, order int) {
 	var b subjectClosedBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
 		return
@@ -208,6 +220,7 @@ func (idx closureIndex) absorbSubjectClosed(a state.Artifact) {
 		State:  b.State,
 		Source: "an open-PR sweep",
 		At:     b.ObservedAt,
+		order:  order,
 	}
 }
 
@@ -229,7 +242,7 @@ var receiptClosings = map[string]string{
 	"abandoned":  ClosedAbandoned,
 }
 
-func (idx closureIndex) absorbReceipt(a state.Artifact) {
+func (idx closureIndex) absorbReceipt(a state.Artifact, order int) {
 	var b receiptBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
 		return
@@ -242,6 +255,7 @@ func (idx closureIndex) absorbReceipt(a state.Artifact) {
 		State:  closed,
 		Source: "a receipt",
 		At:     a.Time.UTC().Format(time.RFC3339),
+		order:  order,
 	}
 }
 
@@ -260,7 +274,7 @@ type coverageRow struct {
 	MergedAt string `json:"merged_at"`
 }
 
-func (idx closureIndex) absorbCoverage(a state.Artifact) {
+func (idx closureIndex) absorbCoverage(a state.Artifact, order int) {
 	var b coverageBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
 		return
@@ -270,11 +284,11 @@ func (idx closureIndex) absorbCoverage(a state.Artifact) {
 	}
 	landed := [][]coverageRow{b.AuthorizedAndLanded, b.LandedWithoutAuthorization, b.PreAdoption}
 	for _, rows := range landed {
-		idx.absorbCoverageRows(b.Repo, rows)
+		idx.absorbCoverageRows(b.Repo, rows, order)
 	}
 }
 
-func (idx closureIndex) absorbCoverageRows(repo string, rows []coverageRow) {
+func (idx closureIndex) absorbCoverageRows(repo string, rows []coverageRow, order int) {
 	for _, r := range rows {
 		if r.Number == 0 {
 			continue
@@ -283,17 +297,27 @@ func (idx closureIndex) absorbCoverageRows(repo string, rows []coverageRow) {
 			State:  ClosedMerged,
 			Source: "a coverage sweep",
 			At:     r.MergedAt,
+			order:  order,
 		}
 	}
 }
 
-// lookup resolves one subject against the index.
-func (idx closureIndex) lookup(repo string, number int) (closingFact, bool) {
+// settles reports whether the log holds a closing fact for this subject that
+// POSTDATES the given terminal.
+//
+// The ordering check is what makes a reopened pull request work: a closure
+// recorded before the terminal describes a PR that has since been gated again,
+// and treating it as current would hide a live park. A closing fact never
+// settles a question the log asked after it.
+func (idx closureIndex) settles(repo string, number, terminalOrder int) (closingFact, bool) {
 	if repo == "" || number == 0 {
 		return closingFact{}, false
 	}
 	f, ok := idx[subjectKey(repo, number)]
-	return f, ok
+	if !ok || f.order <= terminalOrder {
+		return closingFact{}, false
+	}
+	return f, true
 }
 
 // subjectTerminals is the log folded once into, per subject, the terminal that
@@ -459,4 +483,16 @@ func appendLiveSubject(out []LiveSubject, seen map[string]bool, terms subjectTer
 	}
 	seen[key] = true
 	return append(out, LiveSubject{Repo: repo, Number: number, Run: t.artifact.Run, Terminal: t.artifact.ID})
+}
+
+// OpenSets reads every named repo's open-PR set ONCE, in parallel, and reports
+// which repos could not be read. It is the same batched machinery the live
+// inbox reconcile runs on, exported so `gate sweep` shares it rather than
+// growing a second, sequential copy of the fan-out.
+//
+// A repo appears in exactly one of the two maps, so a caller can never mistake
+// "read, and nothing is open" for "could not read".
+func OpenSets(repos []string, fetch OpenPRs) (open map[string]map[int]LivePR, errs map[string]error) {
+	live := resolveRepos(repos, fetch)
+	return live.open, live.errs
 }

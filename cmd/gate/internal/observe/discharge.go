@@ -69,11 +69,12 @@ func (r *ParkDischarge) classify(a state.Artifact, terms subjectTerminals, close
 		return
 	}
 	key := subjectKey(f.Repo, f.Number)
-	if terms.newest[key].artifact.ID != a.ID {
+	newest := terms.newest[key]
+	if newest.artifact.ID != a.ID {
 		r.BySupersession++
 		return
 	}
-	if _, finished := closed.lookup(f.Repo, f.Number); finished {
+	if _, finished := closed.settles(f.Repo, f.Number, newest.order); finished {
 		r.Moot++
 		return
 	}

@@ -116,7 +116,7 @@ func runSweep(st *state.Store, fetch observe.OpenPRs, now func() time.Time, dryR
 	if len(subjects) == 0 {
 		return res, nil
 	}
-	open, errs := fetchOpenPRs(subjects, fetch)
+	open, errs := observe.OpenSets(sweepRepos(subjects), fetch)
 	for _, s := range subjects {
 		if _, bad := errs[s.Repo]; bad {
 			continue
@@ -134,25 +134,18 @@ func runSweep(st *state.Store, fetch observe.OpenPRs, now func() time.Time, dryR
 	return res, nil
 }
 
-// fetchOpenPRs reads each distinct repo's open set once.
-func fetchOpenPRs(subjects []observe.LiveSubject, fetch observe.OpenPRs) (map[string]map[int]observe.LivePR, map[string]error) {
-	open := make(map[string]map[int]observe.LivePR)
-	errs := make(map[string]error)
+// sweepRepos is the deduplicated repo set behind a work list.
+func sweepRepos(subjects []observe.LiveSubject) []string {
+	seen := make(map[string]bool, len(subjects))
+	repos := make([]string, 0, len(subjects))
 	for _, s := range subjects {
-		if _, done := open[s.Repo]; done {
+		if seen[s.Repo] {
 			continue
 		}
-		if _, failed := errs[s.Repo]; failed {
-			continue
-		}
-		prs, err := fetch(s.Repo)
-		if err != nil {
-			errs[s.Repo] = err
-			continue
-		}
-		open[s.Repo] = prs
+		seen[s.Repo] = true
+		repos = append(repos, s.Repo)
 	}
-	return open, errs
+	return repos
 }
 
 // recordClosed appends one closure, parented to the terminal the stale row

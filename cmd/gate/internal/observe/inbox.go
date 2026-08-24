@@ -600,7 +600,7 @@ func readySubject(terms subjectTerminals, closed closureIndex, key string) (live
 	if !ok {
 		return live, discharged
 	}
-	fact, finished := closed.lookup(row.Repo, row.Number)
+	fact, finished := closed.settles(row.Repo, row.Number, terms.newest[key].order)
 	if finished {
 		return live, append(discharged, dischargeReady(row, DischargeMoot, fact.why()))
 	}
@@ -722,7 +722,7 @@ func parkedSubject(terms subjectTerminals, closed closureIndex, key, stateArg st
 		return live, discharged
 	}
 	row := parkedFromEscalation(newest.artifact, newest.facts, stateArg)
-	fact, finished := closed.lookup(row.Repo, row.Number)
+	fact, finished := closed.settles(row.Repo, row.Number, newest.order)
 	if finished {
 		return live, append(discharged, dischargeParked(row, DischargeMoot, fact.why()))
 	}

@@ -321,3 +321,71 @@ func TestUnreadRepoKeepsItsRows(t *testing.T) {
 
 // errFetch stands in for a failed open-PR read.
 var errFetch = errors.New("gh: network unreachable")
+
+// TestReopenedPRIsNotMootedByItsOldClosure pins the ordering rule, and it is the
+// bug this reduction would otherwise have introduced while claiming to fix its
+// mirror image. A pull request can be closed and REOPENED — this repo's own
+// review-cycle rule says a PR past its cap is "closed and re-opened fresh" — and
+// the re-gated PR parks again AFTER the closure was recorded. A closing fact
+// that settled a terminal it predates would hide that live park forever.
+func TestReopenedPRIsNotMootedByItsOldClosure(t *testing.T) {
+	closure := art(state.KindSubjectClosed, "run_1", "sbc_1", inboxBase.Add(time.Hour), map[string]any{
+		"repo": "o/widget", "number": 7, "state": ClosedNotOpen,
+	})
+
+	t.Run("park after the closure stays live", func(t *testing.T) {
+		arts := []state.Artifact{
+			art(state.KindAction, "run_1", "act_1", inboxBase, wouldMergeFor("o/widget", 7, "x")),
+			closure,
+			art(state.KindEscalation, "run_2", "esc_2", inboxBase.Add(2*time.Hour), esc("grt_a", "needs judgment", "", "o/widget", 7)),
+		}
+		in := closureInbox(t, arts, NextRequest{})
+		if len(in.Parked) != 1 {
+			t.Fatalf("a reopened PR's fresh park must be live, got %d parked (%+v)", len(in.Parked), in.Discharged.Parked)
+		}
+	})
+
+	t.Run("authorization after the closure stays ready", func(t *testing.T) {
+		arts := []state.Artifact{
+			art(state.KindEscalation, "run_1", "esc_1", inboxBase, esc("grt_a", "q", "", "o/widget", 7)),
+			closure,
+			art(state.KindAction, "run_2", "act_2", inboxBase.Add(2*time.Hour), wouldMergeFor("o/widget", 7, "x")),
+		}
+		in := closureInbox(t, arts, NextRequest{})
+		if len(in.ReadyToMerge) != 1 {
+			t.Fatalf("a reopened PR re-authorized after its closure must be ready, got %d (%+v)",
+				len(in.ReadyToMerge), in.Discharged.ReadyToMerge)
+		}
+	})
+
+	t.Run("audit does not call the fresh park moot", func(t *testing.T) {
+		arts := []state.Artifact{
+			art(state.KindAction, "run_1", "act_1", inboxBase, wouldMergeFor("o/widget", 7, "x")),
+			closure,
+			art(state.KindEscalation, "run_2", "esc_2", inboxBase.Add(2*time.Hour), esc("grt_a", "q", "", "o/widget", 7)),
+		}
+		rep := ParkDischargeReport(arts)
+		if rep.Live != 1 || rep.Moot != 0 {
+			t.Fatalf("want the reopened park counted live, got %+v", rep)
+		}
+	})
+}
+
+// TestClosureStillSettlesAnOlderTerminal is the ordering rule's other direction:
+// a closure recorded AFTER the terminal it settles must still work, or the fix
+// above would simply disable the moot class.
+func TestClosureStillSettlesAnOlderTerminal(t *testing.T) {
+	arts := []state.Artifact{
+		art(state.KindEscalation, "run_1", "esc_1", inboxBase, esc("grt_a", "q", "", "o/widget", 7)),
+		art(state.KindSubjectClosed, "run_1", "sbc_1", inboxBase.Add(time.Hour), map[string]any{
+			"repo": "o/widget", "number": 7, "state": ClosedNotOpen,
+		}),
+	}
+
+	in := closureInbox(t, arts, NextRequest{})
+
+	if len(in.Parked) != 0 || in.Discharged.Parked.Moot != 1 {
+		t.Fatalf("a closure postdating its terminal must still moot it, got %d parked / %+v",
+			len(in.Parked), in.Discharged.Parked)
+	}
+}
