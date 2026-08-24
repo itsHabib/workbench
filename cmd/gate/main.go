@@ -132,6 +132,8 @@ func main() {
 		err = cmdThreads(os.Args[2:])
 	case "preflight":
 		err = cmdPreflight(os.Args[2:])
+	case "sweep":
+		err = cmdSweep(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "backtest":
@@ -162,7 +164,7 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
@@ -176,8 +178,9 @@ func usage() {
   executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
-  next     [-json] [-live]                           (what needs you: parked runs + grants)
+  next     [-json] [-live] [-all]                    (what needs you: parked runs + grants; -all also shows discharged rows)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
+  sweep    [-json] [-dry-run]                        (record which inbox subjects are no longer open, so next stops recommending dead PRs)
   threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
   audit
@@ -1882,6 +1885,7 @@ func cmdNext(args []string) error {
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
 	live := fs.Bool("live", false, "reconcile parked subjects with current GitHub PR state")
+	all := fs.Bool("all", false, "also show the rows already discharged (superseded, moot, stale)")
 	// Debug/experimental: profile the live reconcile. Off unless a path is given.
 	cpuProfile := fs.String("cpuprofile", "", "debug: write a CPU profile to this path")
 	blockProfile := fs.String("blockprofile", "", "debug: write a block profile to this path")
@@ -1902,17 +1906,21 @@ func cmdNext(args []string) error {
 	if err != nil {
 		return err
 	}
-	stateArg := stateArgFor(*stateDir)
-	if *live && *asJSON {
-		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
+	req := observe.NextRequest{
+		StateArg:          stateArgFor(*stateDir),
+		IncludeDischarged: *all,
 	}
+	// Offline unless asked. `gate next -json` is on escalate serve's Slack path
+	// under a hard budget; one gh subprocess per distinct repo there would trade
+	// a stale queue for a stranded interaction. `gate sweep` is how the offline
+	// projection learns what a live read would have told it.
 	if *live {
-		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
+		req.Fetch = lookupOpenPRs
 	}
 	if *asJSON {
-		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
+		return observe.NextJSON(os.Stdout, e.st, time.Now, req)
 	}
-	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+	return observe.NextText(os.Stdout, e.st, time.Now, req)
 }
 
 // repeatedFlag collects a flag given more than once, so `-repo a -repo b` reads
@@ -2269,7 +2277,7 @@ func cmdAudit(args []string) error {
 	}
 	if res.OK {
 		fmt.Println("chain intact")
-		return nil
+		return reportParkDischarge(e.st)
 	}
 	at := ""
 	if res.Artifact != "" {
@@ -2850,4 +2858,19 @@ func threadLocus(th evidence.Thread) string {
 		return th.Path
 	}
 	return fmt.Sprintf("%s:%d", th.Path, th.Line)
+}
+
+// reportParkDischarge appends the park-discharge health metric to a clean audit.
+//
+// It is reported only after the chain verifies, and it never changes the exit
+// code: integrity and health are different claims, and a repo whose review loop
+// is churning is not a repo whose log has been tampered with. A metric that
+// could fail an audit would train the reader to ignore audit failures.
+func reportParkDischarge(st *state.Store) error {
+	arts, err := st.List(nil)
+	if err != nil {
+		return err
+	}
+	observe.RenderParkDischarge(os.Stdout, observe.ParkDischargeReport(arts))
+	return nil
 }

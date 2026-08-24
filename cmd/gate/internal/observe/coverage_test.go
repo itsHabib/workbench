@@ -51,7 +51,7 @@ func readyArts(repo string, number int) []state.Artifact {
 // recommended a PR whose repo had no merge grant at all, and the gap only
 // surfaced at gate time. The ready row must name it and carry the mint.
 func TestCoverageAbsentGrant(t *testing.T) {
-	in := buildInbox(readyArts("o/cc-skills", 24), inboxBase.Add(time.Hour), "")
+	in := buildInbox(readyArts("o/cc-skills", 24), inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.ReadyToMerge) != 1 {
 		t.Fatalf("want one ready row, got %+v", in.ReadyToMerge)
 	}
@@ -75,7 +75,7 @@ func TestCoverageAbsentGrant(t *testing.T) {
 func TestCoverageCoveredIsQuiet(t *testing.T) {
 	arts := append(readyArts("o/r", 7),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase, tieredGrant("o/r", "T2", 3, inboxBase.Add(24*time.Hour))))
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.State != "covered" {
 		t.Fatalf("coverage = %+v, want state covered", c)
@@ -103,7 +103,7 @@ func TestCoverageTierCeiling(t *testing.T) {
 		outcome(state.KindAction, "run_a", "act_a", "vrd_a", inboxBase.Add(time.Minute), wouldMerge(mergeCmd)),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase, tieredGrant("o/r", "T1", 3, inboxBase.Add(24*time.Hour))),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.State != "ceiling" {
 		t.Fatalf("coverage = %+v, want state ceiling", c)
@@ -128,7 +128,7 @@ func TestCoverageCycleCeiling(t *testing.T) {
 		outcome(state.KindAction, "run_2", "act_2", "vrd_2", inboxBase.Add(time.Hour+time.Minute), wouldMerge(mergeCmd)),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase, tieredGrant("o/r", "T1", 2, inboxBase.Add(24*time.Hour))),
 	}
-	in := buildInbox(arts, inboxBase.Add(2*time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(2*time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.State != "ceiling" {
 		t.Fatalf("coverage = %+v, want state ceiling", c)
@@ -155,7 +155,7 @@ func TestCoverageCycleCountSkipsCeilingParks(t *testing.T) {
 		subjectVerdict("run_3", "vrd_3", inboxBase.Add(2*time.Hour), "o/r", 7, "t", "sha"),
 		outcome(state.KindAction, "run_3", "act_3", "vrd_3", inboxBase.Add(2*time.Hour+time.Minute), wouldMerge(mergeCmd)),
 	}
-	in := buildInbox(arts, inboxBase.Add(3*time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(3*time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.CyclesUsed != 1 {
 		t.Fatalf("cycles_used = %+v, want only the would_merge run counted", c)
@@ -168,7 +168,7 @@ func TestCoverageExpiredNamesTheLapse(t *testing.T) {
 	expiry := inboxBase.Add(-time.Hour)
 	arts := append(readyArts("o/r", 7),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase.Add(-2*time.Hour), tieredGrant("o/r", "T1", 3, expiry)))
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.State != "expired" {
 		t.Fatalf("coverage = %+v, want state expired", c)
@@ -192,7 +192,7 @@ func TestCoverageWidestLiveGrantWins(t *testing.T) {
 		art(state.KindGrant, "run_g", "grt_narrow", inboxBase, tieredGrant("o/r", "T0", 1, inboxBase.Add(24*time.Hour))),
 		art(state.KindGrant, "run_g", "grt_wide", inboxBase, tieredGrant("o/r", "T3", 0, inboxBase.Add(12*time.Hour))),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	c := in.ReadyToMerge[0].Coverage
 	if c == nil || c.State != "covered" || c.Grant != "grt_wide" {
 		t.Fatalf("coverage = %+v, want covered by grt_wide", c)
@@ -204,7 +204,7 @@ func TestCoverageWidestLiveGrantWins(t *testing.T) {
 func TestCoverageUnboundedCyclesNeverCeiling(t *testing.T) {
 	arts := append(readyArts("o/r", 7),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase, tieredGrant("o/r", "T3", 0, inboxBase.Add(24*time.Hour))))
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if c := in.ReadyToMerge[0].Coverage; c == nil || c.State != "covered" {
 		t.Fatalf("coverage = %+v, want covered under an unbounded cycle ceiling", c)
 	}
@@ -220,7 +220,7 @@ func TestCoverageIgnoresOtherReposAndActions(t *testing.T) {
 	arts := append(readyArts("o/r", 7),
 		art(state.KindGrant, "run_g", "grt_other", inboxBase, other),
 		art(state.KindGrant, "run_g", "grt_deploy", inboxBase, nonMerge))
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if c := in.ReadyToMerge[0].Coverage; c == nil || c.State != "absent" {
 		t.Fatalf("coverage = %+v, want absent", c)
 	}
@@ -232,7 +232,7 @@ func TestCoverageOnParkedRuns(t *testing.T) {
 	arts := []state.Artifact{
 		art(state.KindEscalation, "run_p", "esc_p", inboxBase, esc("grt_x", "why?", "", "o/r", 7)),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 {
 		t.Fatalf("want one parked run, got %+v", in.Parked)
 	}
@@ -244,11 +244,11 @@ func TestCoverageOnParkedRuns(t *testing.T) {
 // TestCoverageMintSplicesStateArg keeps a copied mint pointed at the same log
 // the inbox read, matching every other suggested command.
 func TestCoverageMintSplicesStateArg(t *testing.T) {
-	in := buildInbox(readyArts("o/r", 7), inboxBase.Add(time.Hour), " -state /custom")
+	in := buildInbox(readyArts("o/r", 7), inboxBase.Add(time.Hour), NextRequest{StateArg: " -state /custom"})
 	if mint := in.ReadyToMerge[0].Coverage.SuggestedMint; !strings.Contains(mint, "-state /custom") {
 		t.Fatalf("suggested_mint %q missing -state", mint)
 	}
-	in2 := buildInbox(readyArts("o/r", 7), inboxBase.Add(time.Hour), "")
+	in2 := buildInbox(readyArts("o/r", 7), inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if mint := in2.ReadyToMerge[0].Coverage.SuggestedMint; strings.Contains(mint, "-state") {
 		t.Fatalf("ambient state dir must omit -state, got %q", mint)
 	}
@@ -261,10 +261,10 @@ func TestCoverageExpiryBoundaryMatchesCheck(t *testing.T) {
 	at := inboxBase.Add(time.Hour)
 	arts := append(readyArts("o/r", 7),
 		art(state.KindGrant, "run_g", "grt_a", inboxBase, tieredGrant("o/r", "T3", 0, at)))
-	if c := buildInbox(arts, at, "").ReadyToMerge[0].Coverage; c == nil || c.State != "covered" {
+	if c := buildInbox(arts, at, NextRequest{StateArg: ""}).ReadyToMerge[0].Coverage; c == nil || c.State != "covered" {
 		t.Fatalf("at expiry: coverage = %+v, want covered", c)
 	}
-	if c := buildInbox(arts, at.Add(time.Nanosecond), "").ReadyToMerge[0].Coverage; c == nil || c.State != "expired" {
+	if c := buildInbox(arts, at.Add(time.Nanosecond), NextRequest{StateArg: ""}).ReadyToMerge[0].Coverage; c == nil || c.State != "expired" {
 		t.Fatalf("past expiry: coverage = %+v, want expired", c)
 	}
 }
@@ -274,7 +274,7 @@ func TestCoverageExpiryBoundaryMatchesCheck(t *testing.T) {
 // hand.
 func TestCoverageRendersUnderTheRow(t *testing.T) {
 	var buf bytes.Buffer
-	renderReadyToMerge(&buf, buildInbox(readyArts("o/cc-skills", 24), inboxBase.Add(time.Hour), "").ReadyToMerge)
+	renderReadyToMerge(&buf, buildInbox(readyArts("o/cc-skills", 24), inboxBase.Add(time.Hour), NextRequest{StateArg: ""}).ReadyToMerge)
 	out := buf.String()
 	for _, want := range []string{"grant absent", "o/cc-skills", "gate grant"} {
 		if !strings.Contains(out, want) {

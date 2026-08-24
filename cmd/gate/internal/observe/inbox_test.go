@@ -56,7 +56,7 @@ func TestCeilingParkSurfacesEscapeRoute(t *testing.T) {
 		art(state.KindEscalation, "run_b", "esc_b", inboxBase.Add(2*time.Minute), content),
 	}
 
-	in := buildInbox(arts, inboxBase.Add(time.Hour), " -state /new/mount")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: " -state /new/mount"})
 
 	if len(in.Parked) != 3 {
 		t.Fatalf("want 3 parked runs, got %d: %+v", len(in.Parked), in.Parked)
@@ -94,7 +94,7 @@ func TestBuildInboxParked(t *testing.T) {
 		art(state.KindEscalation, "run_c", "esc_c2", inboxBase.Add(6*time.Minute), esc("grt_c", "q c2 still over cap", "grant_cycle_exceeded", "o/api", 88)),
 	}
 
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 
 	if len(in.Parked) != 2 {
 		t.Fatalf("want 2 parked runs (A + re-parked C), got %d: %+v", len(in.Parked), in.Parked)
@@ -133,7 +133,7 @@ func TestBuildInboxCollapsesRunsByPR(t *testing.T) {
 		art(state.KindAction, "run_new", "act_new", inboxBase.Add(-2*time.Minute), map[string]any{"outcome": "would_merge"}),
 	}
 
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 0 {
 		t.Fatalf("newer action for the same PR must suppress the old park, got %+v", in.Parked)
 	}
@@ -149,7 +149,7 @@ func TestBuildInboxRecoversSubjectDisplayFacts(t *testing.T) {
 		art(state.KindEscalation, "run_old", "esc_old", inboxBase.Add(time.Minute), esc("grt_a", "needs judgment", "", "", 0)),
 	}
 
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 {
 		t.Fatalf("want one recovered actionable park, got %+v", in)
 	}
@@ -167,7 +167,7 @@ func TestBuildInboxNewestParkWinsForPR(t *testing.T) {
 		art(state.KindEscalation, "run_old", "esc_old", inboxBase, esc("grt_a", "old", "", "o/r", 7)),
 		art(state.KindEscalation, "run_new", "esc_new", inboxBase.Add(time.Minute), esc("grt_b", "new", "", "o/r", 7)),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 || in.Parked[0].Run != "run_new" {
 		t.Fatalf("want only newest parked run for PR, got %+v", in.Parked)
 	}
@@ -203,7 +203,7 @@ func TestReconcileLiveKeepsOpenDropsAbsentUnknownOnError(t *testing.T) {
 		map[string]error{"o/broken": fmt.Errorf("lookup unavailable")},
 	)
 
-	got := reconcileLive(parked, live)
+	got, _ := reconcileLive(parked, live)
 	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_broken" {
 		t.Fatalf("live reconcile = %+v", got)
 	}
@@ -295,7 +295,7 @@ func TestBuildInboxJudgeCommand(t *testing.T) {
 		art(state.KindEscalation, "run_a", "esc_a", inboxBase, esc("grt_live", "why", "", "o/r", 5)),
 	}
 
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	want := `gate judge -run run_a -grant grt_live -decision <pass|block> -why "..."`
 	if in.Parked[0].JudgeCommand != want {
 		t.Fatalf("judge command = %q, want %q", in.Parked[0].JudgeCommand, want)
@@ -305,7 +305,7 @@ func TestBuildInboxJudgeCommand(t *testing.T) {
 	}
 
 	// A custom state dir is spliced into every suggested command.
-	in2 := buildInbox(arts, inboxBase, " -state /custom")
+	in2 := buildInbox(arts, inboxBase, NextRequest{StateArg: " -state /custom"})
 	if !strings.Contains(in2.Parked[0].JudgeCommand, "gate judge -state /custom -run run_a") {
 		t.Fatalf("stateArg not spliced into judge command: %q", in2.Parked[0].JudgeCommand)
 	}
@@ -325,7 +325,7 @@ func TestBuildInboxResolveCommand(t *testing.T) {
 		art(state.KindEscalation, "run_b", "esc_b", inboxBase, esc("", "why", "", "o/r", 6)),
 	}
 
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	byRun := map[string]ParkedRun{}
 	for _, p := range in.Parked {
 		byRun[p.Run] = p
@@ -338,7 +338,7 @@ func TestBuildInboxResolveCommand(t *testing.T) {
 		t.Fatalf("a grantless park must project no resolve command, got %q", got)
 	}
 
-	in2 := buildInbox(arts, inboxBase, " -state /custom")
+	in2 := buildInbox(arts, inboxBase, NextRequest{StateArg: " -state /custom"})
 	for _, p := range in2.Parked {
 		if p.Run != "run_a" {
 			continue
@@ -356,7 +356,7 @@ func TestBuildInboxUnparseableEscalation(t *testing.T) {
 	arts := []state.Artifact{
 		art(state.KindEscalation, "run_bad", "esc_bad", inboxBase, []string{"not", "an", "object"}),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.Parked) != 0 || len(in.Unattributed) != 1 || in.Unattributed[0].Run != "run_bad" {
 		t.Fatalf("unparseable escalation must stay visible but not actionable, got %+v", in)
 	}
@@ -381,7 +381,7 @@ func TestBuildInboxGrants(t *testing.T) {
 		art(state.KindGrant, "run_mint", "grt_old", now, grant("o/api", now.Add(-30*time.Hour))),
 	}
 
-	in := buildInbox(arts, now, "")
+	in := buildInbox(arts, now, NextRequest{StateArg: ""})
 
 	if len(in.Grants) != 3 {
 		t.Fatalf("want 3 ledger rows (2 live + 1 recently expired; old omitted), got %d: %+v", len(in.Grants), in.Grants)
@@ -410,7 +410,7 @@ func TestBuildInboxGrantsDeterministicTie(t *testing.T) {
 		art(state.KindGrant, "run_mint", "grt_bbb", inboxBase, grant("o/r", exp)),
 		art(state.KindGrant, "run_mint", "grt_aaa", inboxBase, grant("o/r", exp)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.Grants) != 2 || in.Grants[0].ID != "grt_aaa" || in.Grants[1].ID != "grt_bbb" {
 		t.Fatalf("equal-expiry grants must order by id, got %+v", in.Grants)
 	}
@@ -421,7 +421,7 @@ func TestBuildInboxGrantsDeterministicTie(t *testing.T) {
 func TestBuildInboxExpiryBoundaryMatchesCheck(t *testing.T) {
 	now := inboxBase
 	arts := []state.Artifact{art(state.KindGrant, "run_mint", "grt_edge", now, grant("o/r", now))}
-	in := buildInbox(arts, now, "")
+	in := buildInbox(arts, now, NextRequest{StateArg: ""})
 	if len(in.Grants) != 1 || in.Grants[0].Expired {
 		t.Fatalf("grant at exactly its expiry must read live, got %+v", in.Grants)
 	}
@@ -441,7 +441,7 @@ func TestNeedsGrantExpiredOnlyShows(t *testing.T) {
 	arts := []state.Artifact{
 		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/widget", "grant_expired", at)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 1 {
 		t.Fatalf("want exactly one needs_grant row, got %d: %+v", len(in.NeedsGrant), in.NeedsGrant)
 	}
@@ -466,7 +466,7 @@ func TestNeedsGrantLiveGrantSuppresses(t *testing.T) {
 		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/api", "grant_expired", at)),
 		art(state.KindGrant, "run_mint", "grt_live", inboxBase, grant("o/api", inboxBase.Add(5*time.Hour))),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 0 {
 		t.Fatalf("a live grant must suppress needs_grant, got %+v", in.NeedsGrant)
 	}
@@ -484,7 +484,7 @@ func TestNeedsGrantLiveButExpiringSuppresses(t *testing.T) {
 		art(state.KindGrant, "run_mint", "grt_edge", inboxBase, grant("o/edge", inboxBase)),
 		art(state.KindGrantNeeded, "run_r2", "gnd_2", at, needed("o/edge", "grant_expired", at)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 0 {
 		t.Fatalf("a live-but-expiring grant (and one exactly at expiry) must suppress, got %+v", in.NeedsGrant)
 	}
@@ -501,7 +501,7 @@ func TestNeedsGrantDedupsToMostRecent(t *testing.T) {
 		art(state.KindGrantNeeded, "run_b", "gnd_b", late, needed("o/r", "grant_expired", late)),
 		art(state.KindGrantNeeded, "run_c", "gnd_c", mid, needed("o/r", "grant_absent", mid)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 1 {
 		t.Fatalf("multiple refusals for one repo must fold to one row, got %+v", in.NeedsGrant)
 	}
@@ -522,7 +522,7 @@ func TestNeedsGrantEqualTimestampLastLogOrderWins(t *testing.T) {
 		art(state.KindGrantNeeded, "run_a", "gnd_a", same, needed("o/r", "grant_absent", same)),
 		art(state.KindGrantNeeded, "run_b", "gnd_b", same, needed("o/r", "grant_expired", same)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 1 {
 		t.Fatalf("want one folded row, got %+v", in.NeedsGrant)
 	}
@@ -538,7 +538,7 @@ func TestNeedsGrantAbsentHasNoExpiry(t *testing.T) {
 	arts := []state.Artifact{
 		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/r", "grant_absent", at)),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 1 || in.NeedsGrant[0].GrantState != "absent" {
 		t.Fatalf("want one absent row, got %+v", in.NeedsGrant)
 	}
@@ -554,7 +554,7 @@ func TestSuggestedMintParsesToGrant(t *testing.T) {
 	arts := []state.Artifact{
 		art(state.KindGrantNeeded, "run_r1", "gnd_1", at, needed("o/r", "grant_expired", at)),
 	}
-	in := buildInbox(arts, inboxBase, " -state /custom")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: " -state /custom"})
 	cmd := in.NeedsGrant[0].SuggestedMint
 	for _, want := range []string{"gate grant ", "-repo o/r", "-action merge", "-max-tier T1", "-ttl 24h", "-state /custom"} {
 		if !strings.Contains(cmd, want) {
@@ -562,7 +562,7 @@ func TestSuggestedMintParsesToGrant(t *testing.T) {
 		}
 	}
 	// Ambient state dir omits -state, keeping the command short.
-	in2 := buildInbox(arts, inboxBase, "")
+	in2 := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if strings.Contains(in2.NeedsGrant[0].SuggestedMint, "-state") {
 		t.Fatalf("ambient state dir must omit -state, got %q", in2.NeedsGrant[0].SuggestedMint)
 	}
@@ -646,7 +646,7 @@ func TestReadyToMergeBase(t *testing.T) {
 		subjectVerdict("run_a", "vrd_a", inboxBase, "o/widget", 142, "fix the docket", "deadbeef"),
 		art(state.KindAction, "run_a", "act_a", inboxBase.Add(time.Minute), wouldMerge(cmd)),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.ReadyToMerge) != 1 {
 		t.Fatalf("want one ready row, got %+v", in.ReadyToMerge)
 	}
@@ -673,7 +673,7 @@ func TestReadyToMergeSupersededByLaterTerminal(t *testing.T) {
 		// A newer run for the same PR parks — supersedes the earlier would_merge.
 		art(state.KindEscalation, "run_new", "esc_new", inboxBase.Add(2*time.Minute), esc("grt_a", "re-parked", "grant_tier_exceeded", "o/r", 7)),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.ReadyToMerge) != 0 {
 		t.Fatalf("a later terminal for the subject must supersede the would_merge, got %+v", in.ReadyToMerge)
 	}
@@ -691,7 +691,7 @@ func TestReadyToMergeNewerWouldMergeWins(t *testing.T) {
 		subjectVerdict("run_new", "vrd_new", inboxBase.Add(2*time.Minute), "o/r", 7, "t", "new"),
 		art(state.KindAction, "run_new", "act_new", inboxBase.Add(3*time.Minute), wouldMerge("gh pr merge 7 -R o/r --match-head-commit new")),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.ReadyToMerge) != 1 || in.ReadyToMerge[0].Run != "run_new" {
 		t.Fatalf("newest would_merge must win, got %+v", in.ReadyToMerge)
 	}
@@ -707,7 +707,7 @@ func TestReadyToMergeNonWouldMergeTerminalExcluded(t *testing.T) {
 		subjectVerdict("run_b", "vrd_b", inboxBase, "o/r", 9, "t", "sha"),
 		art(state.KindAction, "run_b", "act_b", inboxBase.Add(time.Minute), map[string]any{"outcome": "blocked"}),
 	}
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.ReadyToMerge) != 0 {
 		t.Fatalf("a blocked terminal must not appear in ready_to_merge, got %+v", in.ReadyToMerge)
 	}
@@ -729,7 +729,7 @@ func TestReconcileReadyLiveDropsClosedKeepsOpen(t *testing.T) {
 		},
 		map[string]error{"o/broken": fmt.Errorf("lookup unavailable")},
 	)
-	got := reconcileReadyLive(rows, live)
+	got, _ := reconcileReadyLive(rows, live)
 	if len(got) != 2 || got[0].Run != "run_open" || got[1].Run != "run_broken" {
 		t.Fatalf("absent (merged/closed) must drop, open + failed-fetch must stay: %+v", got)
 	}
@@ -755,7 +755,7 @@ func TestReconcileReadyLiveDropsOnHeadMove(t *testing.T) {
 			3: {State: "OPEN"},                     // empty live sha — not a confirmation
 		},
 	}, nil)
-	got := reconcileReadyLive(rows, live)
+	got, _ := reconcileReadyLive(rows, live)
 	if len(got) != 2 || got[0].Run != "run_same" || got[1].Run != "run_emptylive" {
 		t.Fatalf("a confirmed head move must drop; match + empty-live-sha must stay: %+v", got)
 	}
@@ -768,7 +768,7 @@ func TestReadyToMergeJSONShape(t *testing.T) {
 		subjectVerdict("run_a", "vrd_a", inboxBase, "o/widget", 142, "fix", "deadbeef"),
 		art(state.KindAction, "run_a", "act_a", inboxBase.Add(time.Minute), wouldMerge("gh pr merge 142 -R o/widget")),
 	}
-	raw, err := json.Marshal(buildInbox(arts, inboxBase.Add(time.Hour), ""))
+	raw, err := json.Marshal(buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,7 +824,7 @@ func TestNextTextEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	if err := NextText(&buf, st, func() time.Time { return inboxBase }, ""); err != nil {
+	if err := NextText(&buf, st, func() time.Time { return inboxBase }, NextRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "nothing awaits judgment.") {
@@ -842,7 +842,7 @@ func TestNextTextRendersParked(t *testing.T) {
 			esc("grt_a1b2c3d4", "verdict tier T2 exceeds grant ceiling T1; flake is known", "grant_tier_exceeded", "acme/widget", 142)),
 	}
 	var buf bytes.Buffer
-	renderInbox(&buf, buildInbox(arts, inboxBase.Add(time.Hour), ""))
+	renderInbox(&buf, buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""}))
 	out := buf.String()
 	t.Logf("\n%s", out)
 
@@ -881,7 +881,7 @@ func TestNextJSONOverStore(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := NextJSON(&buf, st, func() time.Time { return inboxBase }, ""); err != nil {
+	if err := NextJSON(&buf, st, func() time.Time { return inboxBase }, NextRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	var in Inbox

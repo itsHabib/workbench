@@ -50,6 +50,8 @@ export GATE_STATE=~/dev/gate/state                           # -state/-key defau
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
+./gate.exe next -all                                         # plus the rows already discharged, and why
+./gate.exe sweep                                             # record which subjects are no longer open
 ./gate.exe preflight                                         # a whole sweep's inventory + every mint it needs, up front
 ./gate.exe preflight -repo owner/a -repo owner/b -deny owner/b#7
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
@@ -81,6 +83,43 @@ GitHub confirms are merged/closed; lookup failures remain visible as unknown.
 The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
 `gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
 needs-grant surfaces from one snapshot. Pass `-json` for the console feed.
+
+A row leaves the inbox in one of three ways, all **derived** — the log is
+append-only and nothing is ever deleted:
+
+- **superseded** — a newer terminal for the same `repo#PR` displaced it;
+- **moot** — the pull request itself is no longer open;
+- **stale** — the PR is still open but its head moved past the SHA the pinned
+  merge command authorizes, so the PR needs re-gating. Deliberately *not* moot:
+  it is owed work, not finished work.
+
+The counts always print (`discharged` in JSON) and `-all` shows the rows
+themselves. Both halves matter: an inbox that shrinks from 164 rows to 3 must be
+able to say so, and a discharged row carries no `judge`/`resolve` command — a
+one-shot judgment must never be spendable on a settled question.
+
+```sh
+./gate.exe sweep -dry-run                                    # what is no longer open, without writing
+./gate.exe sweep                                             # record it, so the OFFLINE inbox is correct
+./gate.exe next -all                                         # the discharged rows, with their reasons
+```
+
+`gate sweep` exists because gate authorizes and an executor acts: every action
+gate writes is `dry_run` / `would_merge`, so once the emitted command landed the
+PR, nothing in the log ever said so and the row stood forever. `next -live`
+discovered that on every invocation and threw it away. `sweep` is the same
+batched open-PR read, **persisted** as a `subject_closed` artifact parented to
+the terminal the stale row stands on — so the store's absent-parent guard makes
+re-running it a no-op. It records only what that read proves (`not_open`); which
+commit landed, when, and by whom is `receipt`/`reconcile`'s claim, read back from
+the platform with its own clock and actor. An unread repo is left alone, never
+assumed closed. It is a separate verb rather than a flag on `next` because it
+writes, and `next -json` is on `escalate serve`'s Slack path under a hard budget.
+
+`gate audit` reports the ratio after the chain check, without touching the exit
+code: parks discharged **by judgment** are the loop working, parks discharged
+**by supersession** are questions a later run overtook before anyone answered —
+a churn signal for the review cycles upstream of the gate.
 
 Each parked row is labelled `cycles N/M` (`cycles_used` / `cycles_max` in JSON):
 the review cycles the PR has consumed — this park's own run included, since a
