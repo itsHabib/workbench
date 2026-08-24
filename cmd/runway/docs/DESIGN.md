@@ -42,7 +42,10 @@ writer's order can straddle a concurrent commit and compose a
 terminal-without-result snapshot that never existed on disk. Observing
 `run_terminal` first proves the rename preceding it already landed. `watch`'s
 terminal fallback and `reconcile`'s pre-claim terminal check both follow this
-rule; only the durable state may be judged corrupt.
+rule; only the durable state may be judged corrupt. The write order admits
+exactly one durable partial state — `result.json` present without
+`run_terminal` — so that is the only pairing `reconcile` repairs; its inverse
+is corruption, never a live race.
 
 ## Writer claim primitive (TDD open question #4)
 

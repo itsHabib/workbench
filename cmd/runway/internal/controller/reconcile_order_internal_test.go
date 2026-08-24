@@ -17,9 +17,12 @@ import (
 // that never existed on disk (the TestReconcileRace_OneWinner flake).
 //
 // result.json is planted as a directory: unreadable for every user including
-// root, on both unix and Windows. It is a probe, not a reachable state — a
+// root, which chmod 0 would not be under a root CI container. Reading it fails
+// on both targets and never as os.ErrNotExist — EISDIR on unix, a directory
+// handle that refuses Read on Windows — so readResultIfPresent reports an
+// error rather than a clean absence. It is a probe, not a reachable state: a
 // pre-check that touches it before deciding the journal is non-terminal
-// surfaces the read error and fails this test.
+// surfaces that error and fails this test.
 func TestReconcileAlreadyTerminalReadsJournalFirst(t *testing.T) {
 	run, err := state.Create(t.TempDir(), "run_order_probe")
 	if err != nil {
