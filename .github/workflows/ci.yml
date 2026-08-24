@@ -133,6 +133,30 @@ jobs:
             fi
           done
           exit $fail
+      - name: built binaries stay out of the tree
+        # `go build ./cmd/<tool>` at the repo root writes an extensionless
+        # binary named after the package directory; one rode into a commit on
+        # `git add -A` before .gitignore anchored these names. Deriving the
+        # list from `go list` here keeps .gitignore in step with cmd/ when a
+        # tool is added or renamed, instead of trusting whoever adds it to
+        # remember. A tracked root package of the same name is exempt: `go
+        # build` refuses to write over a directory, so there is no binary to
+        # ignore, and an entry would ignore new files in that package instead.
+        run: |
+          fail=0
+          for pkg in $(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./...); do
+            bin=$(basename "$pkg")
+            if [ -d "$bin" ]; then
+              echo "$bin: shielded by the tracked root package of the same name"
+              continue
+            fi
+            if ! git check-ignore -q "$bin"; then
+              echo "built binary '$bin' (from $pkg) is not ignored — add '/$bin' to .gitignore" >&2
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 0 ]; then echo "built binaries are ignored ✓"; fi
+          exit $fail
       - name: contracts is a leaf
         # Every contracts domain (contracts, contracts/execution, ...) is its
         # own leaf: it imports nothing else in the module, not even a sibling

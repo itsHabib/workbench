@@ -1,4 +1,40 @@
+# Build outputs. `*.exe` covers the Windows-style `go build -o <tool>.exe`
+# the tool READMEs document; the plain `go build ./cmd/<tool>` a macOS/Linux
+# checkout runs writes an *extensionless* binary named after the package
+# directory into the repo root, which nothing else here catches — an 11MB
+# `gate` once rode into a commit on `git add -A`. Each name is root-anchored
+# with a leading `/` so it matches only the build output: an unanchored `gate`
+# would also match the `cmd/gate/` source tree.
+#
+# `cmd/local` and `cmd/driverstate` are deliberately absent. `local/` and
+# `driverstate/` are tracked packages at the repo root, so `go build` refuses
+# to write over them ("build output already exists and is a directory") and
+# there is no stray binary to catch. Adding `/local` here would not fix a leak;
+# it would make git ignore new files inside that package. CI's `hygiene` job
+# keeps this list in step with `cmd/`, including that exemption.
 *.exe
+/ci-classify-eval
+/codexguard
+/console
+/custody
+/dispatch
+/escalate
+/eval
+/flare
+/gate
+/review
+/reviewfindings
+/runway
+/stubgate
+/tracelens
+/triage-advisory
+/triage-floor
+/workbench-mcp
+
+# Nested-module build output: cmd/gate/docs/features/ci-classify/eval/build is
+# its own module, so `go build` there writes beside its go.mod, not at the root.
+/cmd/gate/docs/features/ci-classify/eval/build/s2build
+
 coverage.out
 .demo-state/
 
