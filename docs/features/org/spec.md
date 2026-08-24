@@ -1,5 +1,12 @@
 # org — Technical Design Document
 
+> **SUPERSEDED by [`vision.md`](vision.md).** Kept for its review history and
+> for the §5 record table and §6 refusal codes that `contracts/org` was built
+> from. Where the two disagree, `vision.md` wins — notably the §3.9 state
+> machine, which added `claim` / `yield` / `complete` as structural kinds,
+> settled `abandon` as a claim terminal, and dropped `handoff` in favour of
+> release-then-attach. Do not start new work from this file.
+
 **Status:** draft / proposal — NOT a build commitment. The artifact we decide from.
 **Owner:** @mh
 **Date:** 2026-08-21 · **v2** 2026-08-22 (review round 1 folded; four bakeoff kernels read and adopted)

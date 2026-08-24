@@ -1,5 +1,38 @@
 # Baton — Architecture Vision
 
+> **This file is canonical.** One goal runs through every document listed below:
+> *the next agent starts where the last one stopped, and two agents do not
+> silently reach different conclusions about the same thing.* Everything else —
+> roles, chains, ownership, authorization — is machinery for that.
+>
+> | document | what it is | status |
+> |---|---|---|
+> | **`vision.md`** (this file) | the architecture and the argument for it | **canonical** |
+> | [`p0-findings.md`](p0-findings.md) | every number, and how it was measured | evidence; cite it rather than restating figures |
+> | [`where-this-stands.md`](where-this-stands.md) | proven vs claimed, and the next step | synthesis; **folds into §0 here once #245 is locked** |
+> | [`spec.md`](spec.md) | the earlier TDD draft | **superseded** by this file; kept for its review history |
+> | `drive:docs/features/discharge/spec.md` | conclusions as owned data, via two hooks | **the P1 slice that ships first** — see below |
+>
+> **Status, 2026-08-23.** `contracts/org` is on `main`: the spine, the contract
+> law, and the ownership fold, with all 86 reachable states walked. The §7 P0
+> gate has been evaluated and **does not currently pass** — false positives are
+> 27.6% against a <20% bar, a role-day is affordable to ~25 roles against a
+> target of 75, and the collision count is unmeasured. Do not start P2 through
+> P7.
+>
+> **Next step: `drive` PR #46 (discharge), phases d0 and d1.** It is the only
+> way to obtain the collision count, which is unmeasurable retrospectively
+> because holding was never recorded. It is also the same two hooks (§3.3) this
+> design needs regardless, so nothing built there is wasted either way.
+>
+> **How discharge and this design relate.** They want opposite things from the
+> same situation, and that is the point. Baton asks *who owns this work and may
+> act on it* and answers with a compare-and-swap that **refuses** the second
+> writer — acting is exclusive. Discharge asks *what was concluded, and where do
+> we disagree* and **records both**, rendering the disagreement — concluding is
+> not exclusive. Ownership without conclusions is a lock with nothing behind it;
+> conclusions without ownership is a wiki.
+
 ## 1. The system in one paragraph
 
 Baton is a control plane that gives every durable unit of organizational work an owner that outlives the process doing it, and gives every external effect a recorded intent that outlives the process that issued it. A **role** — lead, project lead, IC, maintainer — is a row of data with an append-only journal; an **incarnation** is a disposable session on some host that reads the journal's tip, takes the tip, acts, and writes back. To act you must append; to append you must present the tip you read. That one rule produces continuity (starting is folding), mutual exclusion (two incarnations cannot both hold the tip), handover (a supervisor appends a takeover), and revocation (credentials are minted against a chain position, so displacing an incarnation kills its authority everywhere with no message sent). Underneath it, a single broker is the only path from an agent to the outside world: it holds the credentials the agent never sees, records the *intent* of every effect before the wire and the *outcome* after, and refuses any effect that has not declared how a replacement resolves it if the issuer dies mid-flight. Everything else — the fleet, the boards, the protocol checker, the merge gate — is a client, a reader, or an adapter. The system is for one thing: **you can kill any agent at any moment, and nothing is lost and nothing is duplicated.**
