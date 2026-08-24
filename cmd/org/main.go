@@ -35,6 +35,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/org/internal/home"
 	"github.com/itsHabib/workbench/cmd/org/internal/render"
+	"github.com/itsHabib/workbench/cmd/org/internal/survey"
 	"github.com/itsHabib/workbench/contracts/org"
 )
 
@@ -74,6 +75,7 @@ var verbs = map[string]func(*env, []string) error{
 	"message":    cmdAdvisory(org.KindMessage),
 	"boot":       cmdBoot,
 	"status":     cmdStatus,
+	"sweep":      cmdSweep,
 	"log":        cmdLog,
 	"verify":     cmdVerify,
 	"blob":       cmdBlob,
@@ -112,7 +114,7 @@ lifecycle   charter · attach · release · retire · takeover · revoke · dele
 work        assign · unassign · claim · yield · complete · abandon
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
-read        boot · status · log · verify · blob
+read        boot · status · sweep · log · verify · blob
 
 every verb: -state <dir> (or ORG_STATE) · -tenant <id> (or ORG_TENANT) · -role <id>`)
 }
@@ -523,6 +525,42 @@ func cmdStatus(e *env, args []string) error {
 		return printJSON(e, rows)
 	}
 	fmt.Fprint(e.stdout, render.Board(rows))
+	return nil
+}
+
+// cmdSweep is the continuity instrument: it replays every chain and reports
+// what the substrate is a bet on — whether sessions leave distilled
+// conclusions, and whether inherited obligations get discharged.
+func cmdSweep(e *env, args []string) error {
+	s := newScope("sweep")
+	h, err := s.open(args, false)
+	if err != nil {
+		return err
+	}
+	pairs, err := h.Roles()
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	roles := make([]survey.Role, 0, len(pairs))
+	for _, p := range pairs {
+		// Read the chain rather than Load: a chain that stops folding must be
+		// reported as a broken row, not abort the whole sweep.
+		records, _, loadErr := h.Load(p[0], p[1])
+		if loadErr != nil {
+			records = nil
+		}
+		row := survey.Of(p[0], p[1], records, now)
+		if loadErr != nil && row.Err == "" {
+			row.Err = loadErr.Error()
+		}
+		roles = append(roles, row)
+	}
+	totals := survey.Sum(roles)
+	if s.asJSON {
+		return printJSON(e, map[string]any{"roles": roles, "totals": totals})
+	}
+	fmt.Fprint(e.stdout, render.Sweep(roles, totals))
 	return nil
 }
 

@@ -153,6 +153,14 @@ var verbs = []verb{
 		},
 	},
 	{
+		name:        "org_sweep",
+		description: "Continuity health across every role, replayed from the chains: claims opened vs closed, obligations orphaned vs discharged, session ends that distilled a conclusion vs ones only observed mechanically, plus liveness and any chain that no longer folds.",
+		schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		args: func(json.RawMessage) ([]string, error) {
+			return []string{"sweep", "-json"}, nil
+		},
+	},
+	{
 		name:        "org_attach",
 		description: "Become a role's incarnation (refused while another holds it). Returns the incarnation id in the receipt's holder field; present it on later writes. Optionally declare next_due (e.g. \"4h\") — your own liveness deadline.",
 		schema:      json.RawMessage(roleOnly),

@@ -103,7 +103,7 @@ func TestAllowlistExcludesStructureVerbs(t *testing.T) {
 	for _, v := range verbs {
 		names[v.name] = true
 	}
-	for _, want := range []string{"org_boot", "org_status", "org_attach", "org_claim", "org_yield", "org_checkpoint"} {
+	for _, want := range []string{"org_boot", "org_status", "org_sweep", "org_attach", "org_claim", "org_yield", "org_checkpoint"} {
 		if !names[want] {
 			t.Fatalf("surface lacks %s", want)
 		}
