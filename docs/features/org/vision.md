@@ -9,6 +9,7 @@
 > |---|---|---|
 > | **`vision.md`** (this file) | the architecture and the argument for it | **canonical** |
 > | [`p0-findings.md`](p0-findings.md) | every number, and how it was measured | evidence; cite it rather than restating figures |
+> | [`store-decision.md`](store-decision.md) | which substrate holds the chain, and why | **decided 2026-08-23**; read before building anything that writes |
 > | [`where-this-stands.md`](where-this-stands.md) | proven vs claimed, and the next step | synthesis; **folds into §0 here once #245 is locked** |
 > | [`spec.md`](spec.md) | the earlier TDD draft | **superseded** by this file; kept for its review history |
 > | `drive:docs/features/discharge/spec.md` | conclusions as owned data, via two hooks | **the P1 slice that ships first** — see below |
