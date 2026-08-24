@@ -41,18 +41,29 @@ Four findings, each checkable.
 "plain markdown you can grep and edit by hand; the server re-reads it on every
 call." 5.4 MB at `~/dev/dossier-state`, today.
 
-**2. Notes are write-only.** `task_update` appends to a task's `## Notes`
-section. `task_list` returns the task's `body` and **omits `## Notes`
-entirely** — verified 2026-08-23 by diffing `dossier task_list --project org`
-against the on-disk task file: known note text present on disk, absent from
-every field the CLI returns. There is no CLI or MCP path that reads back what
-the write verb writes.
+**2. Notes are readable only one task at a time, and only by an LLM.**
+`task_update` appends to a task's `## Notes` section. Three separate facts,
+each verified 2026-08-23:
 
-This is not a small gap. Discharge §4.1 says *the reader is the next agent, and
-the read ships first.* The channel the Stop hook writes into has no reader
-except `grep` over a path in someone's home directory — which is precisely what
-`scripts/discharge-sweep.sh` had to do, and why its corpus access is isolated
-in one function.
+- `task_list` returns a task's `body` and **omits `## Notes` entirely** —
+  diffed `dossier task_list --project org` against the on-disk task file: known
+  note text present on disk, absent from every field returned.
+- The **CLI** has no verb that returns notes at all. `dossier --help` lists
+  `serve`, `task_complete`, `task_update`, `artifact_link`, `task_list`,
+  `artifact_list`. Nothing there reads a note.
+- The **MCP** does have one: `task_get` returns a structured `notes` array
+  (`actor`, `body`, `posted_at`). It takes a single id and, by its own
+  description, *"walks the whole corpus"* to find it.
+
+So the read path exists, but only for an LLM holding an MCP connection, one
+task per call, at O(corpus) each. The Stop hook is bash and the sweep is bash;
+neither can reach it. That is why `scripts/discharge-sweep.sh` greps the corpus
+markdown, and why that access is isolated in one function.
+
+Discharge §4.1 says *the reader is the next agent, and the read ships first.*
+The next agent can in fact read — one task at a time, by full corpus walk. It
+is the writing tier that is blind, and the cost of a read scales with the
+corpus rather than with the answer.
 
 **3. It cannot be watched.** A watcher's whole question is *what changed since
 X*. A markdown tree answers that with a filesystem walk plus a re-parse. This
