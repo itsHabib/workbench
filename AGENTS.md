@@ -38,6 +38,9 @@ Orientation block you can point an agent at to ground it fast.
   `gate` (the merge-authorization boundary — grants, the verifier ladder, the
   hash-chained decision log; exit codes 0 pass / 1 blocked / 2 parked /
   3 refused / 4 error are a load-bearing seam),
+  `org` (the Baton home — role continuity chains over `contracts/org`:
+  attach/claim/yield lifecycle, the byte-capped `org boot` re-entry index, and
+  the SessionStart/Stop hook scripts that wire sessions to roles),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions (the engineering debt this codebase owes).

@@ -44,6 +44,9 @@ Orientation block you can point an agent at to ground it fast.
   decision for a parked escalation and drives `gate resolve` to close the
   agent→human→agent loop, shelling gate and never importing it; a contract+seam,
   not a plane — see `docs/features/escalation-plane/spec.md`),
+  `org` (the Baton home — role continuity chains over `contracts/org`:
+  attach/claim/yield lifecycle, the byte-capped `org boot` re-entry index, and
+  the SessionStart/Stop hook scripts that wire sessions to roles),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions (the engineering debt this codebase owes).
