@@ -273,3 +273,64 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
   measures polling, not whether the binary is current. The tools that ship
   *behavior* to a long-running local daemon need a staleness check that
   `status` surfaces; `#251` was merged, tested, and inert for eight days.
+
+# Friction log — runway reconcile read-window fix (#259)
+
+Agent: Claude (Opus 5). Started: 2026-08-23 (America/Los_Angeles).
+
+## Worked as documented
+
+- **The delivery loop.** Worktree, root-cause fix in
+  `cmd/runway/internal/controller`, canonical checks plus `-race`, PR #259,
+  `@claude please review` per `.ship.json` (`require=[claude]`). All three CI
+  checks green on the reviewed head; the reviewer cleared it with zero blocking
+  findings on the first cycle.
+- **The mint boundary.** The agent stopped at the grant handoff as documented;
+  the operator minted `grt_ad5944b6b4ff7aaa` (T2, `max-cycles 3`).
+- **`gate judge` is genuinely one-shot.** An escalation already carried a
+  judgment; the duplicate `-auto` call refused with `judgment_duplicate` and
+  named the existing `jdg_6bd4a74481c44b05` rather than stamping a second
+  authorization. The refusal is the feature working.
+
+## Friction
+
+### Ollama cold-start timeout parks a run even with the daemon supervised
+
+Second occurrence of the `#214` entry above, one failure mode further in.
+
+- **What I tried:** `gate gate -repo itsHabib/workbench -pr 259 -grant
+  grt_ad5944b6b4ff7aaa` on a reviewed, CI-green T1 PR at the exact head.
+- **What happened:** parked (exit 2, `run_3ab398ccb6bc3d89`). `triage-floor`
+  and `up-to-date` passed; `review-consolidation` escalated because its
+  extraction failed with `ollama: ... context deadline exceeded (Client.Timeout
+  exceeded while awaiting headers)`. The escalation-brief synthesis failed the
+  same way. **The daemon was up** — `brew services` from the #214 session, with
+  `qwen2.5:7b` present — so this is not the outage that entry describes: a cold
+  load of a 4.7 GB model exceeds gate's HTTP client timeout, and the first run
+  after the model is evicted from memory parks regardless of daemon health.
+- **Class:** `infra-timeout`.
+- **Smallest fix:** the #214 remedy still stands and is still unimplemented —
+  review-consolidation should report `local_model_unavailable` rather than
+  dressing an infra failure as a judgment question; a failed extraction is not
+  a finding, and the operator's remedy differs completely. Supervising the
+  daemon does not close this: either raise the client timeout for the first
+  call after a cold start, or pre-warm the model before the ladder runs.
+
+### Every PR burns an irreversible judgment to reach merge
+
+- **What I tried:** the same `gate gate` invocation, with the required
+  reviewer completed at the exact head and no blocking findings.
+- **What happened:** `readiness` escalated (`no review decision reported by
+  GitHub`) and `review-panel-completeness` escalated (`completed=0 expected=1
+  missing=[claude]`), because the panel signals by PR *comment* and never posts
+  a formal GitHub review decision. Both are structural, not PR-specific: the
+  same pair parked #248, and `gate next` currently lists 16 runs awaiting
+  judgment. The consequence is that the only terminating path for any PR in
+  this repo runs through `gate judge` — a one-shot, irreversible artifact —
+  even when every substantive rung passes.
+- **Class:** `tool-gap`.
+- **Smallest fix:** teach `review-panel-v1` to count a completed bot comment
+  from a panel member declared in `.ship.json` as a completed review, so a
+  clean PR can pass on evidence instead of consuming a judgment. Until then the
+  judgment is load-bearing bookkeeping rather than a decision, which makes the
+  16-deep judgment queue hard to read for genuine escalations.
