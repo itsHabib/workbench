@@ -48,6 +48,16 @@ catalogue may not contain the direct-provider default. Token acquisition is an
 operator action. Gate reads all three values once at process construction and
 never records the token or resolved endpoint in verdict artifacts or errors.
 
+## Local model timeouts
+
+The local rung (`review-consolidation`, the ci-classify advisory) calls ollama
+once per item. `GATE_OLLAMA_TIMEOUT` bounds one round-trip and accepts a Go
+duration (default 10m); anything unparseable or non-positive falls back to the
+default. A call that does not complete is never reported as a low-confidence
+extraction — the verdict escalates with `consolidation_unavailable` and names
+the infrastructure fault, so a judge is not asked about findings that were
+never read.
+
 Constraints that are design decisions, not omissions:
 
 - **State is the only channel.** Verifiers, the provider-neutral judge,

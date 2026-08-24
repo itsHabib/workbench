@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,40 @@ import (
 	"time"
 )
 
-var ollamaClient = &http.Client{Timeout: 3 * time.Minute}
+// ErrModelUnavailable marks a model call that never completed: transport
+// failure, client timeout, a non-200 backend status, an undecodable envelope.
+// It is the ABSENCE of an answer, not an uncertain one. Callers must report it
+// as an infrastructure fault and must never fold it into a low-confidence
+// path — that describes a dead backend as an ambiguous review, and sends a
+// judge a question about findings that were never read.
+var ErrModelUnavailable = errors.New("model backend unavailable")
+
+// unavailableErr marks err as a failure to complete the call. errors.Is is the
+// seam; the wrapped text stays the operator-facing cause.
+func unavailableErr(err error) error {
+	return fmt.Errorf("%w: %w", ErrModelUnavailable, err)
+}
+
+// ollamaTimeout bounds ONE local-model round-trip, not a whole consolidation:
+// the review rung calls per comment. A 7b model on a full bot-comment pile
+// pays cold weight load, a multi-kilobyte comment, and whatever else shares
+// the box, so a minute-scale ceiling clips healthy calls under load. Sized for
+// the slow tail; a genuinely down ollama fails on connect, not on this.
+const (
+	ollamaTimeoutEnv     = "GATE_OLLAMA_TIMEOUT"
+	ollamaTimeoutDefault = 10 * time.Minute
+)
+
+// ollamaTimeout reads the override, falling back to the default on anything
+// unparseable or non-positive: a typo in an env var must not strand a run with
+// a zero (unbounded) or negative timeout.
+func ollamaTimeout() time.Duration {
+	d, err := time.ParseDuration(os.Getenv(ollamaTimeoutEnv))
+	if err != nil || d <= 0 {
+		return ollamaTimeoutDefault
+	}
+	return d
+}
 
 const (
 	anthropicDirectURL = "https://api.anthropic.com/v1/messages"
@@ -38,7 +72,7 @@ func newLocalModel(url string) Model {
 	if url == "" {
 		url = ollamaURL
 	}
-	return &localModel{url: url, model: ollamaModel, client: ollamaClient}
+	return &localModel{url: url, model: ollamaModel, client: &http.Client{Timeout: ollamaTimeout()}}
 }
 
 func (m *localModel) impl() string { return m.model }
@@ -65,12 +99,12 @@ func (m *localModel) chat(ctx context.Context, system, user string, schema json.
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("ollama: %w", err)
+		return "", unavailableErr(fmt.Errorf("ollama: %w", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("ollama: status %d: %s", resp.StatusCode, body)
+		return "", unavailableErr(fmt.Errorf("ollama: status %d: %s", resp.StatusCode, body))
 	}
 
 	var cr struct {
@@ -79,7 +113,9 @@ func (m *localModel) chat(ctx context.Context, system, user string, schema json.
 		} `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return "", fmt.Errorf("ollama decode: %w", err)
+		// A body that is not an ollama envelope is a broken call, not a model
+		// answer — the extraction schema is checked a layer up.
+		return "", unavailableErr(fmt.Errorf("ollama decode: %w", err))
 	}
 	return cr.Message.Content, nil
 }
@@ -256,12 +292,12 @@ func (m *cloudModel) do(ctx context.Context, req *http.Request) (*http.Response,
 		return resp, nil
 	}
 	if !m.gateway {
-		return nil, fmt.Errorf("anthropic: %w", err)
+		return nil, unavailableErr(fmt.Errorf("anthropic: %w", err))
 	}
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("anthropic: request failed: %w", ctx.Err())
+		return nil, unavailableErr(fmt.Errorf("anthropic: request failed: %w", ctx.Err()))
 	}
-	return nil, fmt.Errorf("anthropic: request failed")
+	return nil, unavailableErr(errors.New("anthropic: request failed"))
 }
 
 func (m *cloudModel) statusError(resp *http.Response) error {
@@ -270,12 +306,12 @@ func (m *cloudModel) statusError(resp *http.Response) error {
 	}
 	if !m.gateway {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, body)
+		return unavailableErr(fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, body))
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("anthropic: authentication failed (status %d); re-authenticate and retry", resp.StatusCode)
+		return unavailableErr(fmt.Errorf("anthropic: authentication failed (status %d); re-authenticate and retry", resp.StatusCode))
 	}
-	return fmt.Errorf("anthropic: gateway status %d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
+	return unavailableErr(fmt.Errorf("anthropic: gateway status %d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode)))
 }
 
 // ModelBackend selects a Model implementation for the gate rungs.
