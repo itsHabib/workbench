@@ -1,5 +1,18 @@
 # Where this stands — 2026-08-23
 
+> **2026-08-24 build update.** The re-entry slice this doc calls closest to
+> buildable is now BUILT and live: `cmd/org` (the Baton home — chains as JSONL
+> under `~/dev/org/state`, flock-serialized appends, admission delegated to
+> `org.Advance`, `org boot` re-entry index, SessionStart/Stop hook scripts) in
+> PR #262, and `cmd/org-mcp` + JSON receipts + `ORG_INCARNATION` identity +
+> operator `context.d` boot sources in PR #263, both CI-green. Real chains
+> exist for `lead:agentic-development` and `lead:rooms`; `org-mcp` is
+> registered user-scope. Deliberate deviations, recorded in the PRs: no SQLite
+> store yet (the chain is not the discharge store §store-decision chose SQLite
+> for), write-as-holder default with `-strict` opt-out, marks-not-checkpoints
+> from the Stop hook. The discharge-rate measurement against the 18/40/0
+> baseline starts when the hooks are pasted into `~/.claude/settings.json`.
+
 A synthesis written at the point where the first real code landed and the first
 real numbers came in. It is deliberately separate from [`vision.md`](vision.md),
 which argues what to build, and [`p0-findings.md`](p0-findings.md), which

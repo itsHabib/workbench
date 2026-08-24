@@ -185,10 +185,16 @@ in settings layers, `/floor` is the tool that says what a layer actually did.
 
 ### A note on read paths
 
-`dossier` `task_list` returns a task's `body` and **omits its notes section**;
-no CLI verb reads a note. The MCP's `task_get` does return a structured `notes`
-array, but one id per call, walking the whole corpus. So the tier that *writes*
-conclusions (bash hooks, the sweep) cannot read them back. Verified 2026-08-24.
+**CORRECTED 2026-08-24 (second verification):** an earlier draft of this note
+claimed `task_list` omits notes and no CLI verb reads one. That is **refuted**
+against both the installed binary and source: `src/domain.rs:184` serializes
+`notes` (skipped only when empty), `src/server/mod.rs:489-493` clears
+body+notes only under `bodies:false`, and the CLI `task_list` path never clears
+them — verified live with structured notes in the output. So the write tier
+(bash hooks, the sweep) CAN read conclusions back via CLI `task_list`. Any
+argument resting on the "unreadable notes" premise — including hooks PR #43's
+"one substrate coupling" rationale and `store-decision.md` finding 2 — needs
+re-examination. `task_get` remains one-id-per-call; that half stood.
 
 ## 7. What to work out
 
