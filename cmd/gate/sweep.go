@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -80,6 +81,8 @@ type SweepResult struct {
 	// anything was actually written.
 	Checked int  `json:"checked"`
 	DryRun  bool `json:"dry_run,omitempty"`
+	// Regated counts the subjects re-gated mid-sweep, whose closure was declined.
+	Regated int `json:"regated,omitempty"`
 }
 
 // SweepClosed is one subject the sweep found is no longer open.
@@ -93,6 +96,11 @@ type SweepClosed struct {
 	// Already reports that a closure for this terminal was already on the log, so
 	// a repeated sweep is visibly a no-op rather than silently one.
 	Already bool `json:"already,omitempty"`
+	// Regated reports that the subject was re-gated while the sweep's GitHub read
+	// was in flight, so nothing was recorded. It is a normal outcome, not an
+	// error: the fresh terminal is the current truth and a later sweep can close
+	// it on its own merits.
+	Regated bool `json:"regated,omitempty"`
 }
 
 // SweepUnreadable is one repo the sweep could not read.
@@ -129,6 +137,9 @@ func runSweep(st *state.Store, fetch observe.OpenPRs, now func() time.Time, dryR
 			return SweepResult{}, err
 		}
 		res.Closed = append(res.Closed, closed)
+		if closed.Regated {
+			res.Regated++
+		}
 	}
 	res.Unreadable = unreadable(errs)
 	return res, nil
@@ -148,10 +159,28 @@ func sweepRepos(subjects []observe.LiveSubject) []string {
 	return repos
 }
 
+// errTerminalMoved reports that the subject was re-gated while the sweep's
+// GitHub read was in flight, so the closure no longer describes the log's
+// current state.
+var errTerminalMoved = errors.New("subject was re-gated during the sweep")
+
 // recordClosed appends one closure, parented to the terminal the stale row
-// stands on. The store's absent-parent guard makes "one closure per terminal"
-// structural, so a repeated sweep is a no-op rather than a second record of the
-// same observation.
+// stands on.
+//
+// Two guards, and they answer different questions. The store's absent-parent
+// guard makes "one closure per terminal" structural, so a repeated sweep is a
+// no-op rather than a second record of the same observation. The locked
+// revalidation below closes the read-to-append race the first guard cannot see:
+// the GitHub fetch takes seconds, and a PR reopened and re-gated inside that
+// window gets a NEW terminal. The closure would then land AFTER it in the log
+// and — since a closing fact settles by log order — moot the fresh park, while
+// the absent-parent guard happily allowed it because it is keyed on the OLD
+// terminal. Same defect the ordering rule fixed, arriving through a race
+// instead of through history.
+//
+// The revalidation reduces through observe's shared fold rather than a second
+// opinion about which terminal is current, and runs inside the store lock, so
+// no terminal can land between the check and the append.
 func recordClosed(st *state.Store, s observe.LiveSubject, now func() time.Time, dryRun bool) (SweepClosed, error) {
 	out := SweepClosed{Repo: s.Repo, Number: s.Number, Run: s.Run}
 	if dryRun {
@@ -164,9 +193,26 @@ func recordClosed(st *state.Store, s observe.LiveSubject, now func() time.Time, 
 		"observed_at": now().UTC().Format(time.RFC3339),
 		"source":      sweepSource,
 	}
-	a, err := st.AppendIfAbsentParent(state.KindSubjectClosed, s.Run, s.Terminal, []string{s.Terminal}, body)
-	if err == state.ErrAlreadyExists {
+	stillNewest := func(audit state.AuditResult) error {
+		newest, ok := observe.NewestTerminal(audit.All, s.Repo, s.Number)
+		if !ok || newest != s.Terminal {
+			return errTerminalMoved
+		}
+		return nil
+	}
+	a, err := st.AppendIfAbsentParentWhereAfterAudit(
+		state.KindSubjectClosed, []string{state.KindSubjectClosed},
+		s.Run, s.Terminal, []string{s.Terminal}, body, nil, stillNewest,
+	)
+	// The sentinel is wrapped by the store, so it is matched with errors.Is. A
+	// direct comparison silently never fires, turning a deduplicated concurrent
+	// sweep into a failed one.
+	if errors.Is(err, state.ErrAlreadyExists) {
 		out.Already = true
+		return out, nil
+	}
+	if errors.Is(err, errTerminalMoved) {
+		out.Regated = true
 		return out, nil
 	}
 	if err != nil {
@@ -189,18 +235,28 @@ func unreadable(errs map[string]error) []SweepUnreadable {
 	return out
 }
 
+// closedNote annotates a row the sweep did not actually write.
+func closedNote(c SweepClosed) string {
+	if c.Already {
+		return "  (already recorded)"
+	}
+	if c.Regated {
+		return "  (re-gated mid-sweep; not closed)"
+	}
+	return ""
+}
+
 func renderSweep(w io.Writer, res SweepResult) {
 	verb := "recorded"
 	if res.DryRun {
 		verb = "would record"
 	}
-	fmt.Fprintf(w, "swept %d live row(s); %s %d closure(s)\n", res.Checked, verb, len(res.Closed))
+	fmt.Fprintf(w, "swept %d live row(s); %s %d closure(s)\n", res.Checked, verb, len(res.Closed)-res.Regated)
 	for _, c := range res.Closed {
-		note := ""
-		if c.Already {
-			note = "  (already recorded)"
-		}
-		fmt.Fprintf(w, "  %s#%d  %s%s\n", c.Repo, c.Number, c.Run, note)
+		fmt.Fprintf(w, "  %s#%d  %s%s\n", c.Repo, c.Number, c.Run, closedNote(c))
+	}
+	if res.Regated > 0 {
+		fmt.Fprintln(w, "  a re-gated subject is left to the log's newer terminal, never closed behind it")
 	}
 	for _, u := range res.Unreadable {
 		fmt.Fprintf(w, "  %s  UNREAD: %s\n", u.Repo, u.Reason)

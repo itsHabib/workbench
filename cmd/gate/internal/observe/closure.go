@@ -515,3 +515,22 @@ func OpenSets(repos []string, fetch OpenPRs) (open map[string]map[int]LivePR, er
 	live := resolveRepos(repos, fetch)
 	return live.open, live.errs
 }
+
+// NewestTerminal returns the id of the terminal artifact that is a subject's
+// current state, from the same fold every projection reduces through.
+//
+// It exists for one caller: `gate sweep` revalidating, under the store lock,
+// that the terminal it decided to close is still the newest one. Deriving that
+// answer any other way would reintroduce exactly the drift this file exists to
+// remove — a second opinion about which terminal is current.
+func NewestTerminal(arts []state.Artifact, repo string, number int) (string, bool) {
+	if repo == "" || number == 0 {
+		return "", false
+	}
+	terms, _ := foldSubjectTerminals(arts)
+	t, ok := terms.newest[subjectKey(repo, number)]
+	if !ok {
+		return "", false
+	}
+	return t.artifact.ID, true
+}

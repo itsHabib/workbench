@@ -98,11 +98,99 @@ func TestSweepIsIdempotent(t *testing.T) {
 	if n := countArtifacts(t, st); n != firstLen {
 		t.Fatalf("a repeated sweep wrote %d new artifact(s)", n-firstLen)
 	}
-	for _, c := range second.Closed {
-		if !c.Already {
-			t.Fatalf("a repeated sweep must report each closure as already recorded, got %+v", c)
+	// The work list is the LIVE rows, so after the first sweep there is nothing
+	// left to check — which is why this assertion cannot reach the duplicate
+	// path and why TestSweepReportsAWrappedDuplicate exists.
+	if second.Checked != 0 {
+		t.Fatalf("a swept queue leaves nothing live to re-check, got %d", second.Checked)
+	}
+}
+
+// TestSweepReportsAWrappedDuplicate reaches the path a repeated single-process
+// sweep cannot: two sweeps racing on the SAME live terminal, where the second
+// append is refused by the absent-parent guard.
+//
+// The store wraps its sentinel (`fmt.Errorf("%w: run %s kind %s", ...)`), so a
+// direct `err == state.ErrAlreadyExists` silently never fires and a correctly
+// deduplicated concurrent sweep reports as a hard failure instead. Calling
+// recordClosed twice on one terminal is the smallest thing that exercises it.
+func TestSweepReportsAWrappedDuplicate(t *testing.T) {
+	st := sweepStore(t)
+	subjects := observe.LiveSubjects(mustList(t, st))
+	if len(subjects) == 0 {
+		t.Fatal("fixture must have a live subject")
+	}
+	s := subjects[0]
+
+	if _, err := recordClosed(st, s, clock, false); err != nil {
+		t.Fatal(err)
+	}
+	again, err := recordClosed(st, s, clock, false)
+	if err != nil {
+		t.Fatalf("a duplicate closure must be reported, not returned as an error: %v", err)
+	}
+	if !again.Already {
+		t.Fatalf("want the duplicate reported as already recorded, got %+v", again)
+	}
+}
+
+// TestSweepDeclinesAClosureForARegatedSubject pins the read-to-append race the
+// absent-parent guard cannot see. The GitHub fetch takes seconds; a PR reopened
+// and re-gated inside that window gets a NEW terminal, and the sweep's closure
+// would then land AFTER it in the log — mooting the fresh park, because a
+// closing fact settles by log order. The absent-parent guard allows it, being
+// keyed on the OLD terminal.
+//
+// The revalidation runs inside the store lock, so no terminal can land between
+// the check and the append.
+func TestSweepDeclinesAClosureForARegatedSubject(t *testing.T) {
+	st := sweepStore(t)
+	subjects := observe.LiveSubjects(mustList(t, st))
+	var park observe.LiveSubject
+	for _, s := range subjects {
+		if s.Repo == "o/widget" {
+			park = s
 		}
 	}
+	if park.Terminal == "" {
+		t.Fatal("fixture must have a live park for o/widget")
+	}
+
+	// The PR is reopened and re-gated while the fetch is in flight.
+	regate := map[string]any{
+		"outcome": "parked_for_judgment", "verdict": "vrd_y", "grant": "grt_a",
+		"question": "re-gated", "repo": "o/widget", "number": 7,
+	}
+	if _, err := st.Append(state.KindEscalation, "run_regate", nil, regate); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := recordClosed(st, park, clock, false)
+	if err != nil {
+		t.Fatalf("a re-gated subject is a normal outcome, not an error: %v", err)
+	}
+	if !got.Regated || got.Artifact != "" {
+		t.Fatalf("want the closure declined and reported, got %+v", got)
+	}
+
+	// The whole point: the fresh park must still be live and still sweepable.
+	in, err := observe.NextInbox(st, clock, observe.NextRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Parked) != 1 || in.Parked[0].Run != "run_regate" {
+		t.Fatalf("the re-gated park must survive the in-flight sweep, got %+v (discharged %+v)",
+			in.Parked, in.Discharged.Parked)
+	}
+}
+
+func mustList(t *testing.T, st *state.Store) []state.Artifact {
+	t.Helper()
+	arts, err := st.List(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
 }
 
 // TestSweepLeavesAnUnreadRepoAlone pins the safe direction. A failed read is not
