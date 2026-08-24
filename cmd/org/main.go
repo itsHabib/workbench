@@ -1,0 +1,493 @@
+// Command org is the Baton home: the runtime that keeps role continuity
+// chains on disk and lets sessions act as roles.
+//
+// The kernel — what a role is, which record may extend a chain, what the fold
+// means — lives in contracts/org and is imported as types and laws, never
+// wrapped or re-decided here. This binary owns the three things a pure kernel
+// cannot: WHERE chains live (a state directory of JSONL files + content-
+// addressed blobs), WHEN a record is stamped (the home's clock, the home's
+// lock), and HOW a fresh session re-enters (the boot index, byte-capped for
+// injection).
+//
+// Verbs map one-to-one onto record kinds; a session's lifecycle is:
+//
+//	org attach -role lead:x        # become the incarnation (refused if held)
+//	org boot   -role lead:x        # the index a session starts from
+//	org claim  -role lead:x -work dossier:org/p1/t3
+//	org note   -role lead:x -body "found the bug in ..."
+//	org yield  -role lead:x -work dossier:org/p1/t3 -body "..."
+//	org release -role lead:x       # hand the role back cleanly
+//
+// Exit codes are a load-bearing seam: 0 ok · 1 the kernel refused the record
+// (stderr carries the reason id) · 2 usage · 4 error. A refusal is not an
+// error: it is the substrate doing its one job.
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/itsHabib/workbench/cmd/org/internal/home"
+	"github.com/itsHabib/workbench/cmd/org/internal/render"
+	"github.com/itsHabib/workbench/contracts/org"
+)
+
+const (
+	codeOK      = 0
+	codeRefused = 1
+	codeUsage   = 2
+	codeError   = 4
+)
+
+func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
+
+// verbs maps each verb to its handler. Write verbs append exactly one record;
+// read verbs never take the lock.
+var verbs = map[string]func(*env, []string) error{
+	"charter":    cmdCharter,
+	"attach":     cmdAttach,
+	"assign":     cmdAssign,
+	"unassign":   cmdWork(org.KindUnassign),
+	"claim":      cmdWork(org.KindClaim),
+	"yield":      cmdWork(org.KindYield),
+	"complete":   cmdWork(org.KindComplete),
+	"abandon":    cmdWork(org.KindAbandon),
+	"release":    cmdBare(org.KindRelease),
+	"retire":     cmdBare(org.KindRetire),
+	"seal":       cmdBare(org.KindSeal),
+	"takeover":   cmdParty(org.KindTakeover),
+	"revoke":     cmdParty(org.KindRevoke),
+	"delegate":   cmdParty(org.KindDelegate),
+	"intent":     cmdIntent,
+	"resolve":    cmdResolve,
+	"escalate":   cmdBare(org.KindEscalation),
+	"note":       cmdAdvisory(org.KindNote),
+	"mark":       cmdAdvisory(org.KindMark),
+	"checkpoint": cmdAdvisory(org.KindCheckpoint),
+	"report":     cmdAdvisory(org.KindReport),
+	"message":    cmdAdvisory(org.KindMessage),
+	"boot":       cmdBoot,
+	"status":     cmdStatus,
+	"log":        cmdLog,
+	"verify":     cmdVerify,
+	"blob":       cmdBlob,
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		usage(stderr)
+		return codeUsage
+	}
+	cmd, ok := verbs[args[0]]
+	if !ok {
+		fmt.Fprintf(stderr, "org: unknown verb %q\n", args[0])
+		usage(stderr)
+		return codeUsage
+	}
+	e := &env{stdin: stdin, stdout: stdout, stderr: stderr}
+	err := cmd(e, args[1:])
+	if err == nil {
+		return codeOK
+	}
+	if org.RefusalReason(err) != "" {
+		// The kernel's refusal message already names the reason id; print it
+		// verbatim so scripted callers grep one string.
+		fmt.Fprintf(stderr, "%v\n", err)
+		return codeRefused
+	}
+	fmt.Fprintf(stderr, "org: %v\n", err)
+	return codeError
+}
+
+func usage(w io.Writer) {
+	fmt.Fprintln(w, `usage: org <verb> [flags]
+
+lifecycle   charter · attach · release · retire · takeover · revoke · delegate
+work        assign · unassign · claim · yield · complete · abandon
+obligations intent · resolve · escalate · seal
+narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
+read        boot · status · log · verify · blob
+
+every verb: -state <dir> (or ORG_STATE) · -tenant <id> (or ORG_TENANT) · -role <id>`)
+}
+
+// env carries the streams so every handler is testable without the process.
+type env struct {
+	stdin          io.Reader
+	stdout, stderr io.Writer
+}
+
+// scope is the flag set every verb shares: which home, which chain.
+type scope struct {
+	fs     *flag.FlagSet
+	state  string
+	tenant string
+	role   string
+}
+
+func newScope(name string) *scope {
+	s := &scope{fs: flag.NewFlagSet(name, flag.ContinueOnError)}
+	s.fs.StringVar(&s.state, "state", envOr("ORG_STATE", defaultState()), "state directory")
+	s.fs.StringVar(&s.tenant, "tenant", envOr("ORG_TENANT", "mh"), "tenant id")
+	s.fs.StringVar(&s.role, "role", "", "role id, e.g. lead:agentic-development")
+	return s
+}
+
+func defaultState() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "org-state"
+	}
+	return filepath.Join(home, "dev", "org", "state")
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func (s *scope) open(args []string, needRole bool) (*home.Home, error) {
+	if err := s.fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if needRole && s.role == "" {
+		return nil, fmt.Errorf("-role is required")
+	}
+	return home.Open(s.state)
+}
+
+// body reads a -body flag value: "-" is stdin, anything else is literal.
+func body(e *env, v string) ([]byte, error) {
+	if v == "" {
+		return nil, nil
+	}
+	if v != "-" {
+		return []byte(v), nil
+	}
+	b, err := io.ReadAll(e.stdin)
+	if err != nil {
+		return nil, fmt.Errorf("read body from stdin: %w", err)
+	}
+	return b, nil
+}
+
+// appendAndReport appends one draft and prints the record's position, which is
+// all a scripted caller needs to correlate with the chain.
+func appendAndReport(e *env, h *home.Home, s *scope, d home.Draft) error {
+	r, state, err := h.Append(s.tenant, s.role, d)
+	if err != nil {
+		return err
+	}
+	digest, err := org.DigestOf(r)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(e.stdout, "%s seq %d %s (phase %s)\n", r.Kind, r.Seq, digest, state.Phase)
+	return nil
+}
+
+func cmdCharter(e *env, args []string) error {
+	s := newScope("charter")
+	var scopes, supervisors, effects multi
+	tier := s.fs.String("tier", "", "risk tier ceiling, e.g. T2")
+	retire := s.fs.String("retire-when", "", "the condition under which this role retires")
+	spend := s.fs.Int64("spend-ceiling", 0, "spend ceiling")
+	cycles := s.fs.Int64("cycle-ceiling", 0, "review-cycle ceiling")
+	concurrency := s.fs.Int64("concurrency-ceiling", 0, "concurrent incarnation ceiling")
+	s.fs.Var(&scopes, "scope", "work reference this role owns (repeatable)")
+	s.fs.Var(&supervisors, "supervisor", "role that may take this one over (repeatable)")
+	s.fs.Var(&effects, "effect-class", "effect class this role may perform (repeatable)")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	return appendAndReport(e, h, s, home.Draft{
+		Kind: org.KindCharter,
+		Terms: &org.Terms{
+			Scope: scopes, Tier: *tier, Supervisors: supervisors,
+			EffectClasses: effects, Retire: *retire,
+			SpendCeiling: *spend, CycleCeiling: *cycles, ConcurrencyCeiling: *concurrency,
+			MinReader: 1,
+		},
+	})
+}
+
+func cmdAttach(e *env, args []string) error {
+	s := newScope("attach")
+	due := s.fs.Duration("next-due", 0, "declare the next append deadline, e.g. 90m")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	d := home.Draft{Kind: org.KindAttach}
+	if *due > 0 {
+		d.NextDue = time.Now().Add(*due)
+	}
+	r, state, err := h.Append(s.tenant, s.role, d)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(e.stdout, "attached: incarnation %s seq %d (phase %s)\n", state.Holder, r.Seq, state.Phase)
+	return nil
+}
+
+func cmdAssign(e *env, args []string) error {
+	s := newScope("assign")
+	work := s.fs.String("work", "", "work URI, e.g. dossier:org/p1/t3 or github:owner/repo#88")
+	digest := s.fs.String("digest", "", "content digest pinning the work item (sha256:…)")
+	pin := s.fs.String("pin", "", "text to pin instead of -digest; its sha256 becomes the digest")
+	party := s.fs.String("party", "", "assignee role, empty when self-assigned")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *digest == "" && *pin == "" {
+		return fmt.Errorf("-digest or -pin is required: an unpinned assignment cannot detect drift")
+	}
+	if *digest == "" {
+		*digest = org.DigestBytes([]byte(*pin))
+	}
+	return appendAndReport(e, h, s, home.Draft{
+		Kind:    org.KindAssign,
+		Subject: org.Subject{Work: *work, Digest: *digest, Party: *party},
+	})
+}
+
+// cmdWork covers the kinds whose subject is one work URI: claim and its
+// terminals, and unassign. Terminals accept an optional narrative body.
+func cmdWork(kind string) func(*env, []string) error {
+	return func(e *env, args []string) error {
+		s := newScope(kind)
+		work := s.fs.String("work", "", "work URI")
+		text := s.fs.String("body", "", `narrative body ("-" reads stdin)`)
+		due := s.fs.Duration("next-due", 0, "declare the next append deadline")
+		h, err := s.open(args, true)
+		if err != nil {
+			return err
+		}
+		if *work == "" {
+			return fmt.Errorf("-work is required")
+		}
+		b, err := body(e, *text)
+		if err != nil {
+			return err
+		}
+		d := home.Draft{Kind: kind, Subject: org.Subject{Work: *work}, Body: b}
+		if *due > 0 {
+			d.NextDue = time.Now().Add(*due)
+		}
+		return appendAndReport(e, h, s, d)
+	}
+}
+
+// cmdBare covers the kinds with no subject: release, retire, seal, escalation.
+func cmdBare(kind string) func(*env, []string) error {
+	return func(e *env, args []string) error {
+		s := newScope(kind)
+		text := s.fs.String("body", "", `narrative body ("-" reads stdin)`)
+		h, err := s.open(args, true)
+		if err != nil {
+			return err
+		}
+		b, err := body(e, *text)
+		if err != nil {
+			return err
+		}
+		return appendAndReport(e, h, s, home.Draft{Kind: kind, Body: b})
+	}
+}
+
+// cmdParty covers the kinds whose subject is another role: takeover, revoke,
+// delegate.
+func cmdParty(kind string) func(*env, []string) error {
+	return func(e *env, args []string) error {
+		s := newScope(kind)
+		party := s.fs.String("party", "", "the other role: supervisor on takeover, child on delegate")
+		h, err := s.open(args, true)
+		if err != nil {
+			return err
+		}
+		return appendAndReport(e, h, s, home.Draft{Kind: kind, Subject: org.Subject{Party: *party}})
+	}
+}
+
+func cmdIntent(e *env, args []string) error {
+	s := newScope("intent")
+	effect := s.fs.String("effect", "", "effect id being opened")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *effect == "" {
+		return fmt.Errorf("-effect is required")
+	}
+	return appendAndReport(e, h, s, home.Draft{Kind: org.KindIntentRef, Subject: org.Subject{Effect: *effect}})
+}
+
+func cmdResolve(e *env, args []string) error {
+	s := newScope("resolve")
+	effect := s.fs.String("effect", "", "open effect id to close")
+	target := s.fs.String("target", "", "open escalation digest to close")
+	text := s.fs.String("body", "", `narrative body ("-" reads stdin)`)
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	b, err := body(e, *text)
+	if err != nil {
+		return err
+	}
+	return appendAndReport(e, h, s, home.Draft{
+		Kind: org.KindResolution, Subject: org.Subject{Effect: *effect, Target: *target}, Body: b,
+	})
+}
+
+// cmdAdvisory covers narrative kinds. Body is required: an advisory record
+// with nothing to say is not worth a chain position.
+func cmdAdvisory(kind string) func(*env, []string) error {
+	return func(e *env, args []string) error {
+		s := newScope(kind)
+		text := s.fs.String("body", "", `the narrative ("-" reads stdin)`)
+		class := s.fs.String("body-class", "narrative", "blob retention class")
+		due := s.fs.Duration("next-due", 0, "declare the next append deadline")
+		h, err := s.open(args, true)
+		if err != nil {
+			return err
+		}
+		b, err := body(e, *text)
+		if err != nil {
+			return err
+		}
+		if len(b) == 0 {
+			return fmt.Errorf("-body is required for %s", kind)
+		}
+		d := home.Draft{Kind: kind, Body: b, BodyClass: *class}
+		if *due > 0 {
+			d.NextDue = time.Now().Add(*due)
+		}
+		return appendAndReport(e, h, s, d)
+	}
+}
+
+func cmdBoot(e *env, args []string) error {
+	s := newScope("boot")
+	asJSON := s.fs.Bool("json", false, "emit JSON instead of text")
+	budget := s.fs.Int("max-bytes", 2048, "text byte budget; depth is shed to fit")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	records, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	if state.Phase == org.PhaseVoid {
+		return fmt.Errorf("no chain for %s/%s under %s", s.tenant, s.role, h.Root())
+	}
+	b, err := render.NewBoot(state, records, h, time.Now())
+	if err != nil {
+		return err
+	}
+	if !*asJSON {
+		fmt.Fprint(e.stdout, b.Text(*budget))
+		return nil
+	}
+	out, err := b.JSON()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(e.stdout, string(out))
+	return nil
+}
+
+func cmdStatus(e *env, args []string) error {
+	s := newScope("status")
+	h, err := s.open(args, false)
+	if err != nil {
+		return err
+	}
+	pairs, err := h.Roles()
+	if err != nil {
+		return err
+	}
+	if len(pairs) == 0 {
+		fmt.Fprintln(e.stdout, "no roles chartered")
+		return nil
+	}
+	rows := make([]render.Row, 0, len(pairs))
+	for _, p := range pairs {
+		_, state, err := h.Load(p[0], p[1])
+		if err != nil {
+			return err
+		}
+		rows = append(rows, render.NewRow(state, time.Now()))
+	}
+	fmt.Fprint(e.stdout, render.Board(rows))
+	return nil
+}
+
+func cmdLog(e *env, args []string) error {
+	s := newScope("log")
+	n := s.fs.Int("n", 20, "records to show, newest last")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	records, _, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	start := max(0, len(records)-*n)
+	for _, r := range records[start:] {
+		subject := strings.TrimSpace(strings.Join([]string{r.Subject.Work, r.Subject.Party, r.Subject.Effect}, " "))
+		fmt.Fprintf(e.stdout, "%4d  %-11s  %-10s  %s\n", r.Seq, r.Kind, r.At, subject)
+	}
+	return nil
+}
+
+func cmdVerify(e *env, args []string) error {
+	s := newScope("verify")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	records, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(e.stdout, "ok: %d records fold to phase %s, tip %s\n", len(records), state.Phase, state.Tip)
+	return nil
+}
+
+func cmdBlob(e *env, args []string) error {
+	s := newScope("blob")
+	h, err := s.open(args, false)
+	if err != nil {
+		return err
+	}
+	if s.fs.Arg(0) == "" {
+		return fmt.Errorf("usage: org blob <digest>")
+	}
+	bodyBytes, found, err := h.Blob(s.fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("blob %s is erased or unknown", s.fs.Arg(0))
+	}
+	_, err = e.stdout.Write(bodyBytes)
+	return err
+}
+
+// multi is a repeatable string flag.
+type multi []string
+
+func (m *multi) String() string     { return strings.Join(*m, ",") }
+func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
