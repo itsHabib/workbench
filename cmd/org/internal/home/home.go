@@ -173,7 +173,7 @@ func (h *Home) draft(tenant, role string, state org.RoleState, d Draft) (org.Rec
 	if d.Kind == org.KindTakeover || d.Kind == org.KindRevoke {
 		r.Fence = r.Seq
 	}
-	if !mints(d.Kind) {
+	if !MintsIdentity(d.Kind) {
 		r.Incarnation = state.Holder
 		if d.Incarnation != "" {
 			r.Incarnation = d.Incarnation
@@ -196,10 +196,12 @@ func (h *Home) draft(tenant, role string, state org.RoleState, d Draft) (org.Rec
 	return r, nil
 }
 
-// mints reports the kinds whose own digest becomes an identity, and which
-// therefore carry no incarnation of their own. Revoke is not among them: it is
-// written by (or as) the displaced holder, and only advances the fence.
-func mints(kind string) bool {
+// MintsIdentity reports the kinds whose own digest becomes an identity, and
+// which therefore carry no incarnation of their own. Revoke is not among them:
+// it is written by (or as) the displaced holder, and only advances the fence.
+// Exported because the CLI's identity policy branches on the same fact and a
+// second copy of this list is how the two would drift.
+func MintsIdentity(kind string) bool {
 	return kind == org.KindCharter || kind == org.KindAttach || kind == org.KindTakeover
 }
 
@@ -229,6 +231,47 @@ func (h *Home) Blob(digest string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("read blob: %w", err)
 	}
 	return body, true, nil
+}
+
+// ContextFile is one operator-authored boot source: a file dropped into the
+// role's context.d directory.
+type ContextFile struct {
+	Name string
+	Body []byte
+}
+
+// Context reads the role's context.d — the operator's own boot sources. This
+// is deliberately the dumbest mechanism that works: whatever files are there,
+// sorted by name, injected at boot. No schema, no registry; an operator who
+// wants the next session to know something writes a file, and deleting the
+// file is the whole revocation story. A missing directory means no context.
+func (h *Home) Context(tenant, role string) ([]ContextFile, error) {
+	dir := filepath.Join(h.dirFor(tenant, role), "context.d")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read context.d: %w", err)
+	}
+	var out []ContextFile
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read context.d/%s: %w", e.Name(), err)
+		}
+		out = append(out, ContextFile{Name: e.Name(), Body: body})
+	}
+	return out, nil
+}
+
+// ContextDir reports where a role's operator context lives, so a renderer can
+// point a reader at the full files after truncating.
+func (h *Home) ContextDir(tenant, role string) string {
+	return filepath.Join(h.dirFor(tenant, role), "context.d")
 }
 
 // readChain decodes a JSONL chain file. Missing file folds as empty.

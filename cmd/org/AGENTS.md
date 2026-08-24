@@ -16,6 +16,16 @@ system name there is Baton; this binary is its first runtime slice.
   content-addressed erasable bodies under `blobs/`. Appends are serialized by
   an flock over the fold→admit→append critical section; admission is
   `org.Advance`, so nothing reaches a chain that the kernel would refuse.
+- **Receipts**: every write verb takes `-json` and emits a machine receipt
+  (kind, seq, digest, phase, tip, holder, active, dangling, held, fence);
+  `status`/`verify`/`boot` speak JSON too. Identity: `-incarnation` (or
+  `ORG_INCARNATION`) presents the writer's id from attach; `-strict` (or
+  `ORG_STRICT`) refuses the write-as-holder default.
+- **Operator context**: files dropped in
+  `$ORG_STATE/<tenant>/<role>/context.d/` ride the boot output, sorted,
+  under `-context-bytes` (default 4096), truncating with a pointer to the
+  directory. The dumbest mechanism that works: writing a file is publishing,
+  deleting it is revocation.
 - **Verbs** map one-to-one onto record kinds (charter, attach, claim, yield,
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),

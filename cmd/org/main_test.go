@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -70,5 +72,62 @@ func TestBootRefusesVoidChain(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "no chain") {
 		t.Fatalf("stderr: %s", errOut)
+	}
+}
+
+// TestBootInjectsOperatorContext proves the context.d sources ride the boot
+// output, sorted, and truncate with a pointer to the directory.
+func TestBootInjectsOperatorContext(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:platform"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api"}, role...)...); code != 0 {
+		t.Fatalf("charter: %s", errOut)
+	}
+	ctxDir := filepath.Join(state, "acme", "lead--platform", "context.d")
+	if err := os.MkdirAll(ctxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(ctxDir, "10-mission.md"), []byte("ship the org loop"), 0o644)
+	os.WriteFile(filepath.Join(ctxDir, "20-rules.md"), []byte("two fix-rounds, then the judge"), 0o644)
+
+	code, out, errOut := exec(t, state, append([]string{"boot"}, role...)...)
+	if code != 0 {
+		t.Fatalf("boot: %s", errOut)
+	}
+	mission := strings.Index(out, "ship the org loop")
+	rules := strings.Index(out, "two fix-rounds")
+	if mission < 0 || rules < 0 || mission > rules {
+		t.Fatalf("context missing or unordered (mission %d, rules %d):\n%s", mission, rules, out)
+	}
+
+	_, out, _ = exec(t, state, append([]string{"boot", "-context-bytes", "40"}, role...)...)
+	if !strings.Contains(out, "context truncated at 40 bytes") {
+		t.Fatalf("no truncation note:\n%s", out)
+	}
+}
+
+// TestStrictIdentityPolicy pins the -strict seam: a write without a presented
+// incarnation is refused before the append, a presented-but-stale incarnation
+// is the kernel's stale_incarnation refusal, and the minting kinds stay exempt.
+func TestStrictIdentityPolicy(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:platform"}
+	if code, _, e := exec(t, state, append([]string{"charter", "-scope", "github:acme/api", "-strict"}, role...)...); code != 0 {
+		t.Fatalf("strict charter must stay exempt (minting kind): %s", e)
+	}
+	if code, _, e := exec(t, state, append([]string{"attach", "-strict"}, role...)...); code != 0 {
+		t.Fatalf("strict attach must stay exempt (minting kind): %s", e)
+	}
+
+	code, _, errOut := exec(t, state, append([]string{"assign", "-strict", "-work", "github:acme/api#88", "-pin", "x"}, role...)...)
+	if code != codeError || !strings.Contains(errOut, "strict mode") {
+		t.Fatalf("strict write without incarnation: exit %d, stderr %s", code, errOut)
+	}
+
+	code, _, errOut = exec(t, state, append([]string{"assign", "-incarnation",
+		"sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		"-work", "github:acme/api#88", "-pin", "x"}, role...)...)
+	if code != codeRefused || !strings.Contains(errOut, "stale_incarnation") {
+		t.Fatalf("stale presented incarnation: exit %d, stderr %s", code, errOut)
 	}
 }
