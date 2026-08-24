@@ -32,6 +32,40 @@
 > we disagree* and **records both**, rendering the disagreement — concluding is
 > not exclusive. Ownership without conclusions is a lock with nothing behind it;
 > conclusions without ownership is a wiki.
+>
+> ---
+>
+> ### The target, stated by the operator
+>
+> Not a 75-role fleet. **A small number of role leads, each owning an area of
+> the operator's own work, each trusted with a set of dossier tasks, each
+> reporting back.** `lead:agentic-development` manages the portfolio's own
+> tooling; `lead:rooms` manages rooms. Two to five of them, not seventy-five.
+>
+> A role lead is real when four things are true, and each maps to something
+> that already exists or is in flight:
+>
+> | what makes it a *lead* | mechanism | status |
+> |---|---|---|
+> | it outlives any session | `contracts/org` chain + fold | **on `main`** |
+> | it holds work, and you can see what | `assign` over `dossier:proj/phase/task` URIs | contract done; binding not built |
+> | a fresh session inherits its judgment | discharge — `SessionStart` read, `Stop` write | `drive` PR #46 |
+> | you can trust it unattended | charter pins effect classes; every act is in the chain | designed, not enforced |
+>
+> **What a lead injects at session start** is the whole product in one screen:
+> its charter, the tasks it holds and their state, what the last incarnation
+> concluded, what it left open, and when it is next due. A session that starts
+> with that is productive in its first sentence rather than its fortieth.
+>
+> **Why this reframes the §7 P0 gate.** That gate asks whether to invest in an
+> enterprise substrate — collisions ≥ 10, a role-day affordable at 75. Those are
+> the right questions for a product sold to strangers and the wrong ones for
+> tooling whose only user is its builder. At two to five leads the role-day
+> arithmetic is not close to binding (see [`p0-findings.md`](p0-findings.md) §4:
+> ~25 roles is affordable, and this needs five), and the collision count is
+> something to *watch* rather than a threshold to clear before starting. **Ship
+> the increment that helps you build the next one; measure because the numbers
+> keep turning out different, not to earn permission.**
 
 ## 1. The system in one paragraph
 
