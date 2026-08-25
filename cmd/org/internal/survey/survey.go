@@ -30,9 +30,9 @@ type Role struct {
 	Tenant string    `json:"tenant"`
 	Role   string    `json:"role"`
 	Phase  org.Phase `json:"phase"`
-	// Records is the number of records decoded from disk. It includes a record
-	// that stopped the fold; when a line itself is not JSON, Err names that line
-	// and Records stops at the last decodable record.
+	// Records is the number of successfully decoded records supplied to replay.
+	// A decoded record that stops the fold is included; an undecodable JSON line
+	// is excluded, Err names it, and Records ends at the last decodable prefix.
 	// Incarnations counts the sessions that ever held the role (an attach or a
 	// takeover each mint one).
 	Records      int `json:"records"`

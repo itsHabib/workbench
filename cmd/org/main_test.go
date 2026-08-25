@@ -273,6 +273,9 @@ func TestSweepDetectsCrossRoleAssignmentConflicts(t *testing.T) {
 			t.Fatalf("text sweep lacks %q:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "attention: 1 assign_conflict(s)") || strings.Contains(out, "attention: 0 dangling") {
+		t.Fatalf("conflict-only attention is noisy or incomplete:\n%s", out)
+	}
 
 	f.write("lead:alpha", "unassign", "-work", f.work)
 	got = f.report()

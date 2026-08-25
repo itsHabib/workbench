@@ -39,6 +39,10 @@ func Sweep(roles []survey.Role, t survey.Totals, conflicts []survey.AssignConfli
 	fmt.Fprintf(&sb, "inherited obligations discharged: %s (%d of %d orphaned)\n",
 		rate(t.DischargeRate), t.Discharged, t.Orphaned)
 	if len(conflicts) > 0 {
+		if t.Dangling+t.Late+t.Broken == 0 {
+			fmt.Fprintf(&sb, "attention: %d assign_conflict(s)\n", len(conflicts))
+			return sb.String()
+		}
 		fmt.Fprintf(&sb, "attention: %d dangling · %d late · %d chain(s) that do not fold · %d assign_conflict(s)\n",
 			t.Dangling, t.Late, t.Broken, len(conflicts))
 		return sb.String()
