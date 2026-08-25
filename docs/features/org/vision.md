@@ -10,7 +10,7 @@
 > | **`vision.md`** (this file) | the architecture and the argument for it | **canonical** |
 > | [`p0-findings.md`](p0-findings.md) | every number, and how it was measured | evidence; cite it rather than restating figures |
 > | [`store-decision.md`](store-decision.md) | which substrate holds the chain, and why | **decided 2026-08-23**; read before building anything that writes |
-> | [`reconciliation-brief.md`](reconciliation-brief.md) | handoff prompt: fold the ten independent ownership streams into one org loop | **open question**; hand to a fresh analyst, output is a vocabulary + build order |
+> | [`reconciliation-brief.md`](reconciliation-brief.md) | handoff prompt: name the properties the org metaphor stood in for, and reconcile the ten implementations against them | **open question**; hand to a fresh analyst. Its §2 puts §4.5, §4.6 and §10.1 below in doubt |
 > | [`where-this-stands.md`](where-this-stands.md) | proven vs claimed, and the next step | synthesis; **folds into §0 here once #245 is locked** |
 > | [`spec.md`](spec.md) | the earlier TDD draft | **superseded** by this file; kept for its review history |
 > | `drive:docs/features/discharge/spec.md` | conclusions as owned data, via two hooks | **the P1 slice that ships first** — see below |
