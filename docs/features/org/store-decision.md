@@ -41,29 +41,37 @@ Four findings, each checkable.
 "plain markdown you can grep and edit by hand; the server re-reads it on every
 call." 5.4 MB at `~/dev/dossier-state`, today.
 
-**2. Notes are readable only one task at a time, and only by an LLM.**
-`task_update` appends to a task's `## Notes` section. Three separate facts,
-each verified 2026-08-23:
+**2. ~~Notes are unreadable.~~ WITHDRAWN — the premise was false.**
 
-- `task_list` returns a task's `body` and **omits `## Notes` entirely** —
-  diffed `dossier task_list --project org` against the on-disk task file: known
-  note text present on disk, absent from every field returned.
-- The **CLI** has no verb that returns notes at all. `dossier --help` lists
-  `serve`, `task_complete`, `task_update`, `artifact_link`, `task_list`,
-  `artifact_list`. Nothing there reads a note.
-- The **MCP** does have one: `task_get` returns a structured `notes` array
-  (`actor`, `body`, `posted_at`). It takes a single id and, by its own
-  description, *"walks the whole corpus"* to find it.
+This finding twice claimed that conclusions written by `task_update` could not
+be read back: first that no CLI or MCP path returned them, then, narrowed, that
+only the MCP's `task_get` did, one id per call.
 
-So the read path exists, but only for an LLM holding an MCP connection, one
-task per call, at O(corpus) each. The Stop hook is bash and the sweep is bash;
-neither can reach it. That is why `scripts/discharge-sweep.sh` greps the corpus
-markdown, and why that access is isolated in one function.
+**Both versions are wrong.** `dossier task_list` returns a structured `notes`
+array (`actor`, `body`, `posted_at`) for every task, in one call.
 
-Discharge §4.1 says *the reader is the next agent, and the read ships first.*
-The next agent can in fact read — one task at a time, by full corpus walk. It
-is the writing tier that is blind, and the cost of a read scales with the
-corpus rather than with the answer.
+The error is worth recording because it is a measurement error, not a reasoning
+one, and it survived two rounds of "verification". `Task.notes` is
+`#[serde(default, skip_serializing_if = "Vec::is_empty")]`
+(`~/dev/dossier/src/domain.rs:184`), so the key is **absent** from any task with
+no notes. The check that produced the finding ran `jq '.[0] | keys'` over a task
+list, saw no `notes` key on that one row, and generalised. Most rows have no
+notes. A conditionally-serialised field and an absent field are
+indistinguishable from a single sample.
+
+Refuted by a later analysis; confirmed here 2026-08-24 by querying a task known
+to carry notes (`org/p1-t3-reduce` → `has_notes_key: true, note_count: 3`).
+
+**What this costs the argument.** `hooks` PR #43 justified reading the corpus
+markdown directly on this premise; that code now reads through the CLI instead,
+and got 5x faster doing it. Discharge §4.1's *"the reader is the next agent, and
+the read ships first"* is in better shape than this document claimed — the read
+path exists at every tier, including bash.
+
+**What survives.** Nothing in the decision rests on this finding. Findings 1, 3
+and 4 are independent, and finding 4 alone is sufficient: a compare-and-swap has
+nowhere to live on markdown files. The substrate argument stands on a narrower
+base than it was written with, and should be read that way.
 
 **3. It cannot be watched.** A watcher's whole question is *what changed since
 X*. A markdown tree answers that with a filesystem walk plus a re-parse. This
