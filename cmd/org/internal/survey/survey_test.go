@@ -1,6 +1,7 @@
 package survey_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -259,6 +260,9 @@ func TestBrokenChainKeepsItsObligation(t *testing.T) {
 	if r.Orphaned != 1 {
 		t.Fatalf("orphaned = %d, want 1", r.Orphaned)
 	}
+	if !reflect.DeepEqual(r.Held, []string{work}) {
+		t.Fatalf("held = %v, want [%s] — conflicts use the last state that folded", r.Held, work)
+	}
 	if tot := survey.Sum([]survey.Role{r}); tot.Dangling != 1 {
 		t.Fatalf("totals dangling = %d, want 1 — the aggregate must not undercount", tot.Dangling)
 	}
@@ -288,5 +292,58 @@ func TestBrokenChainReportsWhenItLastHeld(t *testing.T) {
 	}
 	if r.LastAt != lastGood {
 		t.Fatalf("last_at = %q, want %q — the last record that folded", r.LastAt, lastGood)
+	}
+}
+
+// TestAssignConflictsAreTenantScopedAndDeterministic pins the honest A4
+// downgrade: cross-chain uniqueness is detected by tenant + exact work URI,
+// never claimed as a write-time invariant. Input order, held order, digest and
+// assignee metadata cannot change that answer.
+func TestAssignConflictsAreTenantScopedAndDeterministic(t *testing.T) {
+	roles := []survey.Role{
+		{Tenant: "beta", Role: "lead:other", Held: []string{"github:acme/api#88"}},
+		{Tenant: "acme", Role: "lead:zeta", Held: []string{"jira:PROJ-9", "github:acme/api#88"}},
+		{Tenant: "acme", Role: "lead:alpha", Held: []string{"github:acme/api#88"}},
+		// A duplicate row for one role is bad input, not a second owner.
+		{Tenant: "acme", Role: "lead:alpha", Held: []string{"github:acme/api#88"}},
+		{Tenant: "acme", Role: "lead:middle", Held: []string{"jira:PROJ-9"}},
+	}
+	want := []survey.AssignConflict{
+		{Tenant: "acme", Work: "github:acme/api#88", Roles: []string{"lead:alpha", "lead:zeta"}},
+		{Tenant: "acme", Work: "jira:PROJ-9", Roles: []string{"lead:middle", "lead:zeta"}},
+	}
+	if got := survey.AssignConflicts("acme", roles); !reflect.DeepEqual(got, want) {
+		t.Fatalf("conflicts = %#v, want %#v", got, want)
+	}
+
+	// The zero case must be a non-nil slice so JSON says [] rather than null.
+	got := survey.AssignConflicts("acme", []survey.Role{
+		{Tenant: "acme", Role: "lead:one", Held: []string{work}},
+		{Tenant: "beta", Role: "lead:two", Held: []string{work}},
+	})
+	if got == nil || len(got) != 0 {
+		t.Fatalf("cross-tenant conflicts = %#v, want non-nil empty slice", got)
+	}
+}
+
+// TestAssignConflictUsesHeldNotPhaseOrDangling prevents two tempting misses:
+// release leaves assignments open even though the role is chartered, while a
+// dangling claim may outlive an explicit unassign and is then an obligation,
+// not ownership.
+func TestAssignConflictUsesHeldNotPhaseOrDangling(t *testing.T) {
+	got := survey.AssignConflicts(tenant, []survey.Role{
+		{Tenant: tenant, Role: "lead:released", Phase: org.PhaseChartered, Held: []string{work}},
+		{Tenant: tenant, Role: "lead:active", Phase: org.PhaseActive, Held: []string{work}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("released role's open assignment was missed: %#v", got)
+	}
+
+	got = survey.AssignConflicts(tenant, []survey.Role{
+		{Tenant: tenant, Role: "lead:orphaned", Dangling: work},
+		{Tenant: tenant, Role: "lead:owner", Held: []string{work}},
+	})
+	if len(got) != 0 {
+		t.Fatalf("dangling claim was mistaken for ownership: %#v", got)
 	}
 }

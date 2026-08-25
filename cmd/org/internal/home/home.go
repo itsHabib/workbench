@@ -300,7 +300,10 @@ func readChain(path string) ([]org.Record, error) {
 		}
 		var r org.Record
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			return nil, fmt.Errorf("chain line %d: %w", i+1, err)
+			// Records callers need the valid prefix so a corrupt tail cannot
+			// erase ownership and continuity findings from the sweep. Load still
+			// fails closed on any error and discards this partial result.
+			return records, fmt.Errorf("chain line %d: %w", i+1, err)
 		}
 		records = append(records, r)
 	}

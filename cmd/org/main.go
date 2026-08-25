@@ -544,6 +544,9 @@ func cmdSweep(e *env, args []string) error {
 	now := time.Now()
 	roles := make([]survey.Role, 0, len(pairs))
 	for _, p := range pairs {
+		if p[0] != s.tenant {
+			continue
+		}
 		// Records, not Load: Load folds internally and is all-or-nothing, so a
 		// chain that stops folding would arrive here empty and the sweep would
 		// report zero of the work recorded before the break. The replay in
@@ -556,10 +559,13 @@ func cmdSweep(e *env, args []string) error {
 		roles = append(roles, row)
 	}
 	totals := survey.Sum(roles)
+	conflicts := survey.AssignConflicts(s.tenant, roles)
 	if s.asJSON {
-		return printJSON(e, map[string]any{"roles": roles, "totals": totals})
+		return printJSON(e, map[string]any{
+			"roles": roles, "totals": totals, "assign_conflicts": conflicts,
+		})
 	}
-	fmt.Fprint(e.stdout, render.Sweep(roles, totals))
+	fmt.Fprint(e.stdout, render.Sweep(roles, totals, conflicts))
 	return nil
 }
 

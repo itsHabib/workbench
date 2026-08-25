@@ -154,7 +154,7 @@ var verbs = []verb{
 	},
 	{
 		name:        "org_sweep",
-		description: "Continuity health across every role, replayed from the chains: claims opened vs closed, obligations orphaned vs discharged, session ends that distilled a conclusion vs ones only observed mechanically, plus liveness and any chain that no longer folds.",
+		description: "Continuity and ownership health across every role chain in the configured tenant: assignment conflicts, claims opened vs closed, obligations orphaned vs discharged, session ends that distilled a conclusion vs ones only observed mechanically, liveness, and any chain that no longer folds.",
 		schema:      json.RawMessage(`{"type":"object","properties":{}}`),
 		args: func(json.RawMessage) ([]string, error) {
 			return []string{"sweep", "-json"}, nil

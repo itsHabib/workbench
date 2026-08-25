@@ -30,14 +30,19 @@ system name there is Baton; this binary is its first runtime slice.
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
   `sweep`, `log`, `verify`, `blob`.
-- **`sweep`** is the continuity instrument: it REPLAYS every chain through the
-  kernel and counts what happened — claims opened vs closed, obligations
+- **`sweep`** is the continuity instrument: it REPLAYS every chain in the
+  configured tenant through the kernel and counts what happened — claims
+  opened vs closed, obligations
   orphaned by a displaced holder vs discharged by a successor, and session
   ends that distilled a conclusion (checkpoint) vs ones only observed
   (mark). An orphan is not a kind, so only a replay can see it. A rate with
   no data renders `—`, never 0%: "no session has ended yet" and "every
   session ended undistilled" must not share a value. A chain that stops
-  folding is a row with `BROKEN`, not a failed sweep.
+  folding is a row with `BROKEN`, not a failed sweep. It also detects one work
+  URI held by multiple role chains in the configured tenant as
+  `assign_conflicts`: an honest detected-not-prevented finding, not a global
+  lock or admission claim. The file-home scan is sequential, not an atomic
+  snapshot across chains; rerun after reconciliation to confirm it converged.
 - **Hooks** (`hooks/`): `sessionstart-boot.sh` injects `org boot` output into
   a session whose cwd maps to a role (`$ORG_STATE/roles.map`);
   `stop-mark.sh` appends a mechanical `mark` when a session stops. Both
