@@ -92,10 +92,11 @@ func Of(tenant, role string, records []org.Record, now time.Time) Role {
 			return withState(r, state, now)
 		}
 		count(&r, state, next, rec)
+		// Stamped per record rather than from the tip, so a BROKEN row reports
+		// when the chain last held valid state instead of nothing at all —
+		// state carries no timestamp, so withState cannot recover it later.
+		r.LastAt = rec.At
 		state = next
-	}
-	if n := len(records); n > 0 {
-		r.LastAt = records[n-1].At
 	}
 	return withState(r, state, now)
 }

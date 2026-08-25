@@ -263,3 +263,30 @@ func TestBrokenChainKeepsItsObligation(t *testing.T) {
 		t.Fatalf("totals dangling = %d, want 1 — the aggregate must not undercount", tot.Dangling)
 	}
 }
+
+// TestBrokenChainReportsWhenItLastHeld pins the round-2 finding: a BROKEN row
+// exists to be diagnosed from, and a reader cannot diagnose a chain that will
+// not say when it was last valid.
+func TestBrokenChainReportsWhenItLastHeld(t *testing.T) {
+	c := newChain(t)
+	c.attach()
+	records, _, err := c.h.Load(tenant, role)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	lastGood := records[len(records)-1].At
+
+	broken := append(records, org.Record{
+		V: org.Version, Scheme: org.Scheme, Seq: int64(len(records) + 1),
+		Tenant: tenant, Role: role, Kind: org.KindClaim, KindClass: org.ClassStructural,
+		Subject: org.Subject{Work: "jira:NOPE-1"},
+	})
+
+	r := survey.Of(tenant, role, broken, now)
+	if r.Err == "" {
+		t.Fatal("the forged tail must be reported as broken")
+	}
+	if r.LastAt != lastGood {
+		t.Fatalf("last_at = %q, want %q — the last record that folded", r.LastAt, lastGood)
+	}
+}
