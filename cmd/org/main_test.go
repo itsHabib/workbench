@@ -288,6 +288,40 @@ func TestSweepDetectsCrossRoleAssignmentConflicts(t *testing.T) {
 	}
 }
 
+// TestSweepDoesNotTraverseOtherTenants pins the tenant read boundary: a sweep
+// for acme must not depend on being able to enumerate an unrelated tenant.
+func TestSweepDoesNotTraverseOtherTenants(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:alpha"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api"}, role...)...); code != 0 {
+		t.Fatalf("charter: exit %d: %s", code, errOut)
+	}
+
+	unrelated := filepath.Join(state, "beta")
+	if err := os.Mkdir(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unrelated, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unrelated, 0o755) })
+	if _, err := os.ReadDir(unrelated); err == nil {
+		t.Skip("filesystem does not enforce an unreadable directory for this process")
+	}
+
+	code, out, errOut := exec(t, state, "sweep", "-json", "-tenant", "acme")
+	if code != 0 {
+		t.Fatalf("acme sweep traversed unreadable beta tenant: exit %d: %s", code, errOut)
+	}
+	var got sweepReport
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode sweep: %v\n%s", err, out)
+	}
+	if len(got.Roles) != 1 || got.Roles[0].Tenant != "acme" {
+		t.Fatalf("roles = %#v, want only acme", got.Roles)
+	}
+}
+
 // TestSweepMalformedTailKeepsAssignmentConflict proves a corrupt tail cannot
 // erase ownership already established by the valid prefix. The row remains
 // BROKEN, while the normal Load/write path still refuses the chain.

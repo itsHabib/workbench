@@ -70,16 +70,43 @@ func (h *Home) Roles() ([][2]string, error) {
 		if !t.IsDir() || t.Name() == "blobs" {
 			continue
 		}
-		roles, err := os.ReadDir(filepath.Join(h.root, t.Name()))
+		roles, err := h.rolesInTenant(t.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read tenant %s: %w", t.Name(), err)
+			return nil, err
 		}
-		for _, r := range roles {
-			if !r.IsDir() {
-				continue
-			}
-			out = append(out, [2]string{t.Name(), strings.ReplaceAll(r.Name(), "--", ":")})
+		out = append(out, roles...)
+	}
+	return out, nil
+}
+
+// RolesForTenant enumerates only tenant's chains. It first matches tenant to
+// an immediate child of the state root, so a path-like tenant cannot escape
+// the home and an unreadable unrelated tenant cannot break a scoped sweep.
+func (h *Home) RolesForTenant(tenant string) ([][2]string, error) {
+	tenants, err := os.ReadDir(h.root)
+	if err != nil {
+		return nil, fmt.Errorf("read state root: %w", err)
+	}
+	for _, t := range tenants {
+		if t.Name() != tenant || !t.IsDir() || t.Name() == "blobs" {
+			continue
 		}
+		return h.rolesInTenant(t.Name())
+	}
+	return make([][2]string, 0), nil
+}
+
+func (h *Home) rolesInTenant(tenant string) ([][2]string, error) {
+	roles, err := os.ReadDir(filepath.Join(h.root, tenant))
+	if err != nil {
+		return nil, fmt.Errorf("read tenant %s: %w", tenant, err)
+	}
+	out := make([][2]string, 0, len(roles))
+	for _, r := range roles {
+		if !r.IsDir() {
+			continue
+		}
+		out = append(out, [2]string{tenant, strings.ReplaceAll(r.Name(), "--", ":")})
 	}
 	return out, nil
 }

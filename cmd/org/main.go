@@ -528,25 +528,22 @@ func cmdStatus(e *env, args []string) error {
 	return nil
 }
 
-// cmdSweep is the continuity instrument: it replays every chain and reports
-// what the substrate is a bet on — whether sessions leave distilled
-// conclusions, and whether inherited obligations get discharged.
+// cmdSweep is the continuity instrument: it replays every chain in the selected
+// tenant and reports what the substrate is a bet on — whether sessions leave
+// distilled conclusions, and whether inherited obligations get discharged.
 func cmdSweep(e *env, args []string) error {
 	s := newScope("sweep")
 	h, err := s.open(args, false)
 	if err != nil {
 		return err
 	}
-	pairs, err := h.Roles()
+	pairs, err := h.RolesForTenant(s.tenant)
 	if err != nil {
 		return err
 	}
 	now := time.Now()
 	roles := make([]survey.Role, 0, len(pairs))
 	for _, p := range pairs {
-		if p[0] != s.tenant {
-			continue
-		}
 		// Records, not Load: Load folds internally and is all-or-nothing, so a
 		// chain that stops folding would arrive here empty and the sweep would
 		// report zero of the work recorded before the break. The replay in
