@@ -121,11 +121,19 @@ Postgres-only `RETURNING` in the store interface.
 > revisit when there's a real consumer that can't be served by dossier verbs +
 > an LLM doing its own retrieval.
 
-The role lead's SessionStart injection is that consumer, and it fails on
-exactly the two stated terms: dossier verbs **cannot** serve it (finding 2 —
-the conclusions are unreadable through the API), and an LLM doing its own
-retrieval **cannot** meet the 400 ms budget. The condition is met as written,
-not reinterpreted.
+The SessionStart injection is the candidate consumer. **With finding 2
+withdrawn, this condition is no longer clearly met**, and the honest reading is
+weaker than the one first written here.
+
+The condition has two terms. "Cannot be served by dossier verbs" is now **false**
+— `task_list` returns notes, so the verbs do serve retrieval. Only the second
+term survives: whether an LLM doing its own retrieval can meet the <400 ms p95
+injection budget against a 5.4 MB corpus that is re-parsed per call. That is a
+latency question, it is measurable, and **it has not been measured.**
+
+So cortex does not unpause on the strength of this document. It unpauses if
+someone measures the injection path and it misses the budget. Until then the
+revival condition stands unmet, which is what its own wording asks for.
 
 ## What this does not authorize
 
@@ -142,10 +150,15 @@ not reinterpreted.
 
 ## How this could be wrong
 
-- **If notes turn out to be readable** through some verb this survey missed,
-  finding 2 collapses and the pressure drops from "cannot" to "slow". The
-  substrate argument then rests on findings 3 and 4 alone — still sufficient
-  for the chain, no longer urgent for discharge.
+- **~~If notes turn out to be readable~~ — this happened.** The original text
+  read: *"If notes turn out to be readable through some verb this survey missed,
+  finding 2 collapses and the pressure drops from 'cannot' to 'slow'. The
+  substrate argument then rests on findings 3 and 4 alone — still sufficient for
+  the chain, no longer urgent for discharge."* That is exactly what occurred,
+  within a day. The prediction was right and so was the consequence: the chain
+  argument holds, the discharge urgency does not. Kept visible rather than
+  deleted — a falsification clause that fires is the most useful line in a
+  design document.
 - **If the migration is where corpora go to die**, the honest evidence is that
   five stores already died and none of them died of a bad *engine*. A migration
   that loses the operator's 5.4 MB of project memory would be the first new
