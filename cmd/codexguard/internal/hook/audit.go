@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/itsHabib/workbench/contracts/automode"
+	"github.com/itsHabib/workbench/filelock"
 )
 
 const maxAuditEventBytes = 1024 * 1024
@@ -89,7 +90,7 @@ func (a FileAudit) withFile(action func(*os.File) error) error {
 		return fmt.Errorf("hook audit: open: %w", err)
 	}
 	defer file.Close()
-	if err := lockFile(file); err != nil {
+	if err := filelock.Lock(file); err != nil {
 		return fmt.Errorf("hook audit: lock: %w", err)
 	}
 	return action(file)
