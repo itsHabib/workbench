@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/itsHabib/workbench/filelock"
 )
 
 // ErrWatchLocked reports that another flare process already holds the watch
@@ -12,10 +14,6 @@ import (
 // watcher, or a sweep racing a watcher — is the exact condition that corrupts
 // cursors.json, so the second instance must refuse rather than double-write.
 var ErrWatchLocked = errors.New("journal: another flare instance holds the watch lock")
-
-// errLockHeld is the per-OS "someone else has it" sentinel that lockFile
-// returns; LockWatch translates it into the exported ErrWatchLocked.
-var errLockHeld = errors.New("lock held")
 
 func (j *Journal) lockPath() string { return filepath.Join(j.dir, "watch.lock") }
 
@@ -29,9 +27,9 @@ func (j *Journal) LockWatch() (func() error, error) {
 	if err != nil {
 		return nil, fmt.Errorf("journal: open lock: %w", err)
 	}
-	if err := lockFile(f); err != nil {
+	if err := filelock.TryLock(f); err != nil {
 		f.Close()
-		if errors.Is(err, errLockHeld) {
+		if errors.Is(err, filelock.ErrHeld) {
 			return nil, ErrWatchLocked
 		}
 		return nil, fmt.Errorf("journal: lock: %w", err)
