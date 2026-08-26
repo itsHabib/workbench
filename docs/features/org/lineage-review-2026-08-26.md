@@ -151,15 +151,18 @@ Independently verified ground truth:
    store produces exactly one effect while a changed key detectably produces
    two; a released incarnation's strict write is refused; corrupt lease state
    is refused untouched. It proves nothing about live Jira/Ship/GitHub — and
-   says so itself. Two changes are owed before its first mutating tick: adopt
-   `org intent`/`org resolve` as the intent channel (the kernel already
-   refuses new claims *and* release while an intent is open —
-   `contracts/org/reduce.go:371-373,459-467` — turning the skill's whole §3
-   idempotency rule into chain law; recovery becomes
+   says so itself. Two changes were owed before its first mutating
+   tick, and both landed 2026-08-26 (cc-skills#29 `7c80825`, smoke green
+   against an `org` built from main): the intent channel moved onto
+   `org intent`/`org resolve` — an open effect survives crash, yield, and
+   release; the kernel refuses every new claim until a resolution records the
+   outcome and refuses retiring over one
+   (`contracts/org/reduce.go:371-373,459-467`) — turning the skill's §3
+   idempotency rule into chain law, with recovery reading
    `boot -json → .boot.open_intents[0]`, a structured field, instead of
-   prefix-parsing `last_word.excerpt`, a truncatable display surface), and
-   fold its last open thread (top-level PR comments in the review-completeness
-   rule — the known Codex verdict-shape trap).
+   prefix-parsing `last_word.excerpt`, a truncatable display surface; and the
+   review-completeness rule now reads top-level conversation comments (the
+   known Codex verdict-shape trap).
 7. **What remains hypothesis.** The epic steward and the five-stage delivery
    evidence chain (`cc-skills:skills/ticket-owner/references/continuity-chain.md`).
    Correctly labeled, correctly gated behind the one-ticket trial. The steward
@@ -193,7 +196,7 @@ Nothing below is promoted a rung because the story coheres.
 | The distiller (verbless checkpoint authoring) | **Still entirely untested** — vision's own "only untested load-bearing assumption," still true |
 | Resume canary / resume-fidelity ≥ 90% | **Still entirely untested** — nothing measures whether the chain carries thought rather than commitment |
 | `seal` every K checkpoints | **Shrunk** — manual verb only |
-| `annul` correction path | **Contract kind exists, no runtime verb** — unreachable in practice; §4.12's correctability bar unmet |
+| `annul` correction path | **Kernel admits a tip-only annul; no CLI/MCP verb exposes it** — unreachable in practice; §4.12's correctability bar unmet |
 | `explain` / `doctor` | **Not built** |
 | Takeover by supervisor | **Implemented, shrunk** — kernel requires a party named in Terms; spec §8's universal `--by operator` not implemented; the by-string is unauthenticated (open thread) |
 | Cross-chain two-witness audit; `counterpart_absent` | **Untested** — kinds exist; the audit is not built (`verify` is single-chain) |
@@ -239,7 +242,7 @@ Nothing below is promoted a rung because the story coheres.
 
 | Claim | Status |
 |---|---|
-| ticket-owner bounded tick (cc-skills#29) | **Fixture-proven only**; live Jira dogfood not run; one unresolved thread; intent-as-prose P1 stands |
+| ticket-owner bounded tick (cc-skills#29) | **Fixture-proven only**; live Jira dogfood not run; the intent-as-prose P1 and the last open thread were fixed 2026-08-26 (`7c80825`) |
 | Epic steward + delivery evidence chain | **Hypothesis only**; owes a named join to the substrate-autowiring `verdict`/`receipt` vocabulary on the personal side |
 
 ## 5. Duplications and missing joins
@@ -283,8 +286,8 @@ Missing joins (each is real work nobody owns yet):
   holder-writes a per-tenant/charter policy. *Recommended: flip before a
   second writer exists on any tenant.*
 - **D3 — Intent channel.** ticket-owner adopts `org intent`/`org resolve`;
-  recovery reads `open_intents`, never `last_word.excerpt`. *Recommended:
-  accept; it deletes prose.*
+  recovery reads `open_intents`, never `last_word.excerpt`. *Landed
+  2026-08-26: cc-skills#29 `7c80825`, smoke green against main.*
 - **D4 — Evidence vocabulary.** The delivery evidence chain names dossier
   `verdict`/`receipt` artifacts (substrate-autowiring) as its receipt form on
   the personal side; Jira/Ship native receipts at work. *Recommended: accept.*
@@ -295,9 +298,10 @@ Missing joins (each is real work nobody owns yet):
   own subject keying (#249/#254/#258 direction) and org stays out, or the
   gate observer folds by subject over org chains. Pick one. *Recommended:
   gate-side for now; revisit after the ticket trial.*
-- **D7 — The unreachable annul.** Either wire the `annul` verb (CLI + MCP) or
-  strike §4.12's correctability claim until it exists. *Recommended: wire; it
-  is small and the claim is load-bearing for operability.*
+- **D7 — The unreachable annul.** The kernel already admits a tip-only annul
+  (`contracts/org/reduce.go:487-493`); no CLI or MCP verb exposes it. Wire the
+  verb, or strike §4.12's correctability claim until one exists. *Recommended:
+  wire; it is small and the claim is load-bearing for operability.*
 - **D8 — vision.md status reconciliation.** Rewrite the §0 status block to
   2026-08-26 truth (runtime shipped and governed; sweep open; POC-A blocked on
   the paste; P0 gate status per p0-findings including the classifier-boundary
@@ -332,9 +336,10 @@ below is wiring and trials, not architecture.
    `/loop 10m /ticket-owner jira:<KEY> --role steward:<key> --repo <owner/name>
    --org-state <root> --tenant work`. Two identical read-only ticks proving
    same-state → same-conclusion is the first evidence, and it can land today.
-5. **Before the first mutating tick:** D3 lands on cc-skills#29 (intent
-   channel) and its last review thread folds. Then run the six break tests in
-   `dogfood.md` and keep the evidence card per tick.
+5. **D3 landed** (cc-skills#29 `7c80825`) — the intent channel and the
+   review-thread fold are in, smoke green against main. Run the six break
+   tests in `dogfood.md` and keep the evidence card per tick; mutating ticks
+   are unblocked once they pass.
 
 ### This week, on the personal machine
 
