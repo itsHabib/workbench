@@ -17,7 +17,9 @@ import (
 	"github.com/itsHabib/workbench/slackauth"
 )
 
-const slackGrantPollInterval = 500 * time.Millisecond
+// A Slack approval is human-paced and each observation scans the append-only
+// state log, so sub-second polling only creates avoidable I/O and lock pressure.
+const slackGrantPollInterval = 2 * time.Second
 
 type grantCallbackResult struct {
 	Outcome   string `json:"outcome"`
