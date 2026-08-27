@@ -346,6 +346,10 @@ func grantRequestDenied(env contracts.Envelope) (map[string]string, bool) {
 		return nil, false
 	}
 	var denial grantrequest.Denial
+	// A malformed terminal is withheld rather than rendered from untrusted body
+	// fields. The source card may remain visually actionable, but Gate state is
+	// authoritative and the callback will refuse the already-closed request. This
+	// matches Flare's general rule: withhold on failed proof, never invent fields.
 	if err := json.Unmarshal(env.Body, &denial); err != nil || grantrequest.ValidateDenial(denial) != nil {
 		return nil, false
 	}
@@ -362,6 +366,9 @@ func grantRequestDenied(env contracts.Envelope) (map[string]string, bool) {
 }
 
 func grantRequestParent(env contracts.Envelope) string {
+	// gqr_ is Gate state wire vocabulary (KindGrantRequest in state.kindPrefix).
+	// Flare cannot import Gate's internal state package, so keep the boundary
+	// explicit here just as parkParent does for esc_.
 	for _, parent := range env.Parents {
 		if strings.HasPrefix(parent, "gqr_") {
 			return parent

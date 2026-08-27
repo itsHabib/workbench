@@ -56,6 +56,8 @@ func cmdGrantCallback(args []string) error {
 	if len(allowed) == 0 {
 		return errors.New("grant-callback: ESCALATE_ALLOWED_SLACK_USERS is required")
 	}
+	// Read one byte beyond the contract ceiling so Verify can distinguish a body
+	// exactly at the limit from a truncated over-limit callback and refuse it.
 	body, err := io.ReadAll(io.LimitReader(os.Stdin, slackauth.MaxBody+1))
 	if err != nil {
 		return fmt.Errorf("grant-callback: read body: %w", err)

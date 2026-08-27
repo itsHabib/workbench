@@ -76,6 +76,7 @@ const (
 	codeBlocked = 1
 	codeParked  = 2
 	codeRefused = 3
+	codeError   = 4
 )
 
 // GrantFinder resolves a parked escalation id to the grant its run parked under.

@@ -126,11 +126,11 @@ func TestGrantCallbackIsSingleUseAcrossConcurrentApproveAndDeny(t *testing.T) {
 	start := make(chan struct{})
 	for _, action := range actions {
 		wg.Add(1)
-		go func() {
+		go func(action string) {
 			defer wg.Done()
 			<-start
 			_, _, _ = applyGrantCallback(e, grantInteraction(action, requestArt.ID), fixedHead(request.Request.Subject.HeadSHA))
-		}()
+		}(action)
 	}
 	close(start)
 	wg.Wait()
@@ -222,5 +222,42 @@ func TestGrantDenialBodyConforms(t *testing.T) {
 	}
 	if err := grantrequest.ValidateDenial(denial); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRequestSlackGrantRecordsExpiryWhileWaiting(t *testing.T) {
+	e := testEnv(t)
+	issued := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	e.now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return issued
+		}
+		return issued.Add(grantrequest.MaxValidity)
+	}
+	head := strings.Repeat("a", 40)
+	_, _, err := requestSlackGrant(e, "itsHabib/workbench", 245, fixedHead(head), time.Nanosecond)
+	if err == nil || !strings.Contains(err.Error(), grantrequest.DecisionExpired) {
+		t.Fatalf("expiry result = %v, want %s", err, grantrequest.DecisionExpired)
+	}
+	artifacts, err := e.st.List(func(artifact state.Artifact) bool {
+		return artifact.Kind == state.KindGrantRequest || artifact.Kind == state.KindGrantDenied
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 2 || artifacts[0].Kind != state.KindGrantRequest || artifacts[1].Kind != state.KindGrantDenied {
+		t.Fatalf("request expiry artifacts = %+v", artifacts)
+	}
+	if len(artifacts[1].Parents) != 1 || artifacts[1].Parents[0] != artifacts[0].ID {
+		t.Fatalf("denial parents = %v, request = %s", artifacts[1].Parents, artifacts[0].ID)
+	}
+	var denial grantrequest.Denial
+	if err := json.Unmarshal(artifacts[1].Body, &denial); err != nil {
+		t.Fatal(err)
+	}
+	if denial.Decision != grantrequest.DecisionExpired || denial.Who != "gate" {
+		t.Fatalf("denial = %+v", denial)
 	}
 }
