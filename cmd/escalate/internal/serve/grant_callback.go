@@ -31,9 +31,16 @@ func GateGrantCallback(bin, stateDir string) GrantCallback {
 		if err == nil {
 			return stdout.Bytes(), codeMerge, nil
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return stdout.Bytes(), codeError, fmt.Errorf("serve: gate grant-callback interrupted: %w", ctxErr)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return stdout.Bytes(), exitErr.ExitCode(), nil
+			code := exitErr.ExitCode()
+			if code >= codeBlocked && code <= codeError {
+				return stdout.Bytes(), code, nil
+			}
+			return stdout.Bytes(), codeError, fmt.Errorf("serve: gate grant-callback returned invalid exit code %d: %w", code, err)
 		}
 		return stdout.Bytes(), codeError, fmt.Errorf("serve: run gate grant-callback: %w", err)
 	}

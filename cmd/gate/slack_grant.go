@@ -136,6 +136,10 @@ func applyGrantCallback(e env, interaction slackauth.Interaction, headSHA func(e
 	if liveHead != request.Request.Subject.HeadSHA {
 		return denyGrantRequest(e, requestArt, request, grantrequest.DecisionStale, interaction.Actor(), fmt.Sprintf("head moved from %s to %s", request.Request.Subject.HeadSHA, liveHead), now)
 	}
+	now = e.now().UTC()
+	if !now.Before(request.Request.ExpiresAt) {
+		return denyGrantRequest(e, requestArt, request, grantrequest.DecisionExpired, interaction.Actor(), "request expired during live-head check", now)
+	}
 	ttl := request.Request.ExpiresAt.Sub(now)
 	grant, err := capability.MintBoundOnce(
 		e.st, e.keyPath,
@@ -231,10 +235,17 @@ func grantRequestTerminal(st *state.Store, request state.Artifact) (state.Artifa
 
 func terminalResult(requestArt state.Artifact, request grantrequest.RequestArtifact, terminal state.Artifact, who string) grantCallbackResult {
 	if terminal.Kind == state.KindGrant {
+		var grant capability.Grant
+		if err := json.Unmarshal(terminal.Body, &grant); err == nil && strings.TrimSpace(grant.MintedBy) != "" {
+			who = grant.MintedBy
+		}
 		return grantResult("already_granted", requestArt, request, who, terminal.ID, "request already resolved")
 	}
 	var denial grantrequest.Denial
 	if err := json.Unmarshal(terminal.Body, &denial); err == nil {
+		if strings.TrimSpace(denial.Who) != "" {
+			who = denial.Who
+		}
 		return grantResult("already_"+denial.Decision, requestArt, request, who, "", denial.Reason)
 	}
 	return grantResult("already_denied", requestArt, request, who, "", "request already resolved")

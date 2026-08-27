@@ -77,6 +77,36 @@ func TestGrantCallbackMintsOneExactT0Grant(t *testing.T) {
 	}
 }
 
+func TestGrantCallbackReplayKeepsOriginalTerminalActor(t *testing.T) {
+	tests := []struct {
+		name   string
+		action string
+		who    string
+	}{
+		{name: "grant", action: grantrequest.ActionApprove, who: "@operator (U123)"},
+		{name: "denial", action: grantrequest.ActionDeny, who: "@operator (U123)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			e, requestArt, request := slackRequestFixture(t)
+			if _, _, err := applyGrantCallback(e, grantInteraction(test.action, requestArt.ID), fixedHead(request.Request.Subject.HeadSHA)); err != nil {
+				t.Fatal(err)
+			}
+			replay := slackauth.Interaction{
+				UserID: "U999", Username: "replayer",
+				ActionID: grantrequest.ActionApprove, Value: requestArt.ID,
+			}
+			result, code, err := applyGrantCallback(e, replay, fixedHead(request.Request.Subject.HeadSHA))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != codeRefused || result.Who != test.who || !strings.HasPrefix(result.Outcome, "already_") {
+				t.Fatalf("replay result=%+v code=%d", result, code)
+			}
+		})
+	}
+}
+
 func TestGrantCallbackDeniesExpiresAndRefusesMovedHead(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -111,6 +141,30 @@ func TestGrantCallbackDeniesExpiresAndRefusesMovedHead(t *testing.T) {
 				t.Fatalf("terminals = %+v", terminals)
 			}
 		})
+	}
+}
+
+func TestGrantCallbackRechecksExpiryAfterLiveHeadRead(t *testing.T) {
+	e, requestArt, request := slackRequestFixture(t)
+	current := request.Request.ExpiresAt.Add(-time.Second)
+	e.now = func() time.Time { return current }
+	result, code, err := applyGrantCallback(
+		e,
+		grantInteraction(grantrequest.ActionApprove, requestArt.ID),
+		func(evidence.PRRef) (string, error) {
+			current = request.Request.ExpiresAt
+			return request.Request.Subject.HeadSHA, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != codeRefused || result.Outcome != grantrequest.DecisionExpired {
+		t.Fatalf("result=%+v code=%d", result, code)
+	}
+	terminals := requestTerminals(t, e, requestArt)
+	if len(terminals) != 1 || terminals[0].Kind != state.KindGrantDenied {
+		t.Fatalf("terminals = %+v", terminals)
 	}
 }
 
