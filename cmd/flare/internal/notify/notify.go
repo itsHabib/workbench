@@ -22,24 +22,82 @@ import (
 
 const (
 	slackPostMessageURL = "https://slack.com/api/chat.postMessage"
-	slackTextLimit      = 4000 // notification/preview text cap
-	slackSectionLimit   = 2900 // a section text block is rejected over ~3000 runes
+	slackUpdateURL      = "https://slack.com/api/chat.update"
+
+	// Method names for error text. They are literals, never derived from the
+	// endpoint URL: an error must never carry the URL (a pinned test asserts it,
+	// because the endpoint is configurable and an error is a place secrets leak).
+	methodPost        = "chat.postMessage"
+	methodUpdate      = "chat.update"
+	slackTextLimit    = 4000 // notification/preview text cap
+	slackSectionLimit = 2900 // a section text block is rejected over ~3000 runes
 )
 
+// Ref identifies one delivered Slack message so a later fact can update it in
+// place. It is the whole reason Send has a return value: a card with no ref can
+// never be corrected, and a card that is never corrected keeps showing live
+// Approve buttons for a park that resolved hours ago.
+//
+// Its zero value means "no updatable message" — every channel type but slack
+// returns one, and callers must treat it as "nothing to finalize" rather than
+// an error.
+type Ref struct {
+	ChannelID string `json:"channel_id"`
+	TS        string `json:"ts"`
+}
+
+// Updatable reports whether this ref names a message that can be corrected.
+func (r Ref) Updatable() bool { return r.ChannelID != "" && r.TS != "" }
+
 // Send delivers one event to one channel; the drop channel succeeds without
-// delivering anywhere.
-func Send(ch config.Channel, ev event.Event) error {
+// delivering anywhere. The returned Ref names the posted Slack message (zero
+// for every other channel type).
+func Send(ch config.Channel, ev event.Event) (Ref, error) {
 	switch ch.Type {
 	case config.ChannelToast:
-		return toast(ev)
+		return Ref{}, toast(ev)
 	case config.ChannelWebhook:
-		return webhook(ch.URL, ev)
+		return Ref{}, webhook(ch.URL, ev)
 	case config.ChannelSlack:
 		return slack(ch.Token, ch.ChannelID, ch.ResolveActions, ev)
 	case config.ChannelDrop:
+		return Ref{}, nil
+	}
+	return Ref{}, fmt.Errorf("notify: unknown channel type %q", ch.Type)
+}
+
+// Finalize corrects a delivered card to the terminal state of its park: the
+// buttons come off, the outcome and who decided go on, and the authorized head
+// sha goes on when the run reached one. It then posts that outcome as a THREAD
+// REPLY, because an updated card alone leaves a successful tap and a silently
+// failed one looking identical — the reply is the receipt.
+//
+// The two calls are not atomic and deliberately are not made so. flare's
+// delivery posture is at-least-once: a retry that re-posts a thread reply is
+// the safe way to err, where a card left showing a live Approve button is not.
+func Finalize(ch config.Channel, ref Ref, ev event.Event) error {
+	if ch.Type != config.ChannelSlack || !ref.Updatable() {
 		return nil
 	}
-	return fmt.Errorf("notify: unknown channel type %q", ch.Type)
+	client := &http.Client{Timeout: 15 * time.Second}
+	return finalizeSlack(client, slackUpdateURL, slackPostMessageURL, ch.Token, ref, ev)
+}
+
+// finalizeSlack is Finalize with its endpoints injected, mirroring postSlack —
+// the seam that lets a test drive the real payloads against an httptest server.
+func finalizeSlack(client *http.Client, updateURL, postURL, token string, ref Ref, ev event.Event) error {
+	c := call{client: client, token: token, channel: ref.ChannelID}
+	c.endpoint, c.method, c.payload = updateURL, methodUpdate, renderFinalCard(ref, ev)
+	if _, err := callSlack(c); err != nil {
+		return err
+	}
+	c.endpoint, c.method, c.payload = postURL, methodPost, slackReply{
+		Channel:  ref.ChannelID,
+		ThreadTS: ref.TS,
+		Text:     outcomeLine(ev),
+	}
+	_, err := callSlack(c)
+	return err
 }
 
 // A Slack message is one severity-colored attachment whose blocks lead on the
@@ -51,6 +109,22 @@ func Send(ch config.Channel, ev event.Event) error {
 type slackRequest struct {
 	Channel     string            `json:"channel"`
 	Attachments []slackAttachment `json:"attachments,omitempty"`
+}
+
+// slackUpdate is chat.update's shape: the same card, addressed to an existing
+// message by channel + ts instead of posted fresh.
+type slackUpdate struct {
+	Channel     string            `json:"channel"`
+	TS          string            `json:"ts"`
+	Text        string            `json:"text"`
+	Attachments []slackAttachment `json:"attachments,omitempty"`
+}
+
+// slackReply is a plain threaded message — the terminal receipt under the card.
+type slackReply struct {
+	Channel  string `json:"channel"`
+	ThreadTS string `json:"thread_ts"`
+	Text     string `json:"text"`
 }
 
 type slackAttachment struct {
@@ -93,40 +167,92 @@ type slackButton struct {
 type slackResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error"`
+	// TS and Channel identify the posted message. Slack echoes the resolved
+	// channel id even when the request named one, so the ref is always the id
+	// chat.update will accept.
+	TS      string `json:"ts"`
+	Channel string `json:"channel"`
 }
 
-func slack(token, channel string, resolveActions bool, ev event.Event) error {
+func slack(token, channel string, resolveActions bool, ev event.Event) (Ref, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	return postSlack(client, slackPostMessageURL, token, channel, resolveActions, ev)
 }
 
-func postSlack(client *http.Client, endpoint, token, channel string, resolveActions bool, ev event.Event) error {
-	body, err := json.Marshal(renderSlackMessage(channel, resolveActions, ev))
+func postSlack(client *http.Client, endpoint, token, channel string, resolveActions bool, ev event.Event) (Ref, error) {
+	res, err := callSlack(call{
+		client: client, endpoint: endpoint, token: token,
+		method: methodPost, channel: channel,
+		payload: renderSlackMessage(channel, resolveActions, ev),
+	})
 	if err != nil {
-		return fmt.Errorf("notify: slack channel %q: encode message: %w", channel, err)
+		return Ref{}, err
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	return Ref{ChannelID: refChannel(res.Channel, channel), TS: res.TS}, nil
+}
+
+// refChannel prefers the channel id Slack echoed back, falling back to the one
+// configured. chat.update needs an id; a config naming a #name would otherwise
+// produce a ref update cannot address.
+func refChannel(echoed, configured string) string {
+	if echoed != "" {
+		return echoed
+	}
+	return configured
+}
+
+// call bundles one Slack request. Method and Channel are for error text only —
+// neither the endpoint URL nor the token may ever appear in an error, which a
+// pinned test asserts.
+type call struct {
+	client   *http.Client
+	endpoint string
+	token    string
+	method   string
+	channel  string
+	payload  any
+}
+
+// callSlack is the one Slack transport: POST a JSON payload with the bot token,
+// require HTTP 200 AND "ok": true (Slack reports API errors inside 200 bodies),
+// and return the decoded response. Mechanism only — what to say is decided by
+// the renderers above it.
+func callSlack(c call) (slackResponse, error) {
+	body, err := json.Marshal(c.payload)
 	if err != nil {
-		return fmt.Errorf("notify: slack channel %q: build request: %w", channel, requestCause(err))
+		return slackResponse{}, c.errf("encode message: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return slackResponse{}, c.errf("build request: %w", requestCause(err))
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("notify: slack channel %q: request: %w", channel, requestCause(err))
+		return slackResponse{}, c.errf("request: %w", requestCause(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("notify: slack channel %q: status %s", channel, resp.Status)
+		return slackResponse{}, c.errf("status %s", resp.Status)
 	}
 	var result slackResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("notify: slack channel %q: decode response: %w", channel, err)
+		return slackResponse{}, c.errf("decode response: %w", err)
 	}
 	if !result.OK {
-		return fmt.Errorf("notify: slack channel %q: API error %q", channel, result.Error)
+		return slackResponse{}, c.errf("API error %q", result.Error)
 	}
-	return nil
+	return result, nil
+}
+
+// errf renders one transport failure: the channel and the Slack method, never
+// the endpoint or the token. The prefix is inlined into the caller's format so
+// a wrapped cause keeps its natural depth — an extra fmt.Errorf around it would
+// add an Unwrap level for nothing.
+func (c call) errf(format string, args ...any) error {
+	return fmt.Errorf("notify: slack channel %q: %s: "+format,
+		append([]any{c.channel, c.method}, args...)...)
 }
 
 func requestCause(err error) error {
@@ -542,4 +668,128 @@ func webhook(url string, ev event.Event) error {
 		return fmt.Errorf("notify: webhook: status %s", resp.Status)
 	}
 	return nil
+}
+
+// --- the finalized card ------------------------------------------------------
+//
+// A card is a snapshot, and a snapshot of a parked escalation is stale the
+// moment the park resolves. gate's inbox reduces parked runs by subject, so a
+// re-park, a merge, or a keyboard `gate judge` drops an older park out of the
+// inbox — while its Approve button stays live in Slack. Two taps died that way
+// on 2026-08-21 ("escalation is not currently parked: esc_… not in gate
+// inbox"), which reads as a broken tool rather than a card that moved on.
+//
+// So a resolved park gets its card rewritten: buttons off, outcome and decider
+// on, authorized head sha when the run reached one. This is still rendering,
+// not deciding — every fact below was recorded by gate.
+
+// renderFinalCard rewrites a delivered card as its terminal state. The actions
+// row keeps only the View PR link: the resolve buttons are exactly what must
+// not survive, since the park behind them is gone.
+func renderFinalCard(ref Ref, ev event.Event) slackUpdate {
+	blocks := []slackBlock{
+		{Type: "header", Text: &slackText{Type: "plain_text", Text: finalHeadline(ev), Emoji: true}},
+	}
+	if body := finalBody(ev); body != "" {
+		blocks = append(blocks, slackBlock{Type: "section", Text: &slackText{Type: "mrkdwn", Text: body}})
+	}
+	if btn, ok := prButton(ev); ok {
+		blocks = append(blocks, slackBlock{Type: "actions", Elements: []any{btn}})
+	}
+	blocks = append(blocks, slackBlock{
+		Type:     "context",
+		Elements: []any{slackText{Type: "mrkdwn", Text: slackFooter(ev)}},
+	})
+	return slackUpdate{
+		Channel:     ref.ChannelID,
+		TS:          ref.TS,
+		Text:        outcomeLine(ev),
+		Attachments: []slackAttachment{{Color: finalColor(ev), Fallback: outcomeLine(ev), Blocks: blocks}},
+	}
+}
+
+func finalHeadline(ev event.Event) string {
+	s := subject(ev)
+	if s != "" {
+		s = " — " + s
+	}
+	switch ev.Fields["outcome"] {
+	case event.OutcomeApproved:
+		return "✅ Approved" + s
+	case event.OutcomeBlocked:
+		return "⛔ Blocked" + s
+	case event.OutcomeMergeAuthorized:
+		return "🏁 Merge authorized" + s
+	case event.OutcomeSuperseded:
+		return "🕓 Superseded by a newer run" + s
+	}
+	return "☑️ Resolved" + s
+}
+
+// finalColor drains a resolved card of urgency: green for a decision that let
+// the work proceed, grey for everything else. A resolved card that keeps its
+// escalate-orange still reads as something to do.
+func finalColor(ev event.Event) string {
+	if ev.Fields["outcome"] == event.OutcomeApproved || ev.Fields["outcome"] == event.OutcomeMergeAuthorized {
+		return "#2E7D32"
+	}
+	return "#9AA0A6"
+}
+
+// finalBody states who decided and what the decision covers. The sha is labeled
+// AUTHORIZED, not merged: gate's action records the merge it authorizes and the
+// exact head it pins, but the merge is run by the caller and gate keeps no
+// receipt that one landed. Claiming "merged" would assert a fact nothing wrote.
+func finalBody(ev event.Event) string {
+	var lines []string
+	if who := compact(ev.Fields["who"]); who != "" {
+		lines = append(lines, "*Decided by:* "+who)
+	}
+	if sha := compact(ev.Fields["sha"]); sha != "" {
+		lines = append(lines, "*Authorized head:* `"+sha+"`")
+	}
+	if note := compact(ev.Fields["note"]); note != "" {
+		lines = append(lines, note)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return truncateRunes(strings.Join(lines, "\n"), slackSectionLimit)
+}
+
+// outcomeLine is the terminal receipt posted into the card's thread. Today a
+// successful tap and a silently failed one look identical once the ack fades;
+// this line is the difference. It is also the card's notification text, so the
+// resolution reaches a phone that never opens the thread.
+func outcomeLine(ev event.Event) string {
+	who := compact(ev.Fields["who"])
+	if who == "" {
+		who = "gate"
+	}
+	s := subject(ev)
+	switch ev.Fields["outcome"] {
+	case event.OutcomeApproved:
+		return approvedLine(who, s, compact(ev.Fields["sha"]))
+	case event.OutcomeBlocked:
+		return fmt.Sprintf("⛔ Blocked by %s — %s will not be merged under this run.", who, orThisPark(s))
+	case event.OutcomeMergeAuthorized:
+		return fmt.Sprintf("🏁 Merge authorized for %s at `%s`.", orThisPark(s), compact(ev.Fields["sha"]))
+	case event.OutcomeSuperseded:
+		return fmt.Sprintf("🕓 Superseded — a newer gate run parked %s, so this card's buttons no longer resolve anything.", orThisPark(s))
+	}
+	return fmt.Sprintf("☑️ Resolved by %s — %s is no longer awaiting judgment.", who, orThisPark(s))
+}
+
+func approvedLine(who, subject, sha string) string {
+	if sha == "" {
+		return fmt.Sprintf("✅ Approved by %s — %s recorded; gate has not authorized a merge for it.", who, orThisPark(subject))
+	}
+	return fmt.Sprintf("✅ Approved by %s — gate authorized the merge of %s at `%s`.", who, orThisPark(subject), sha)
+}
+
+func orThisPark(subject string) string {
+	if subject == "" {
+		return "this park"
+	}
+	return subject
 }

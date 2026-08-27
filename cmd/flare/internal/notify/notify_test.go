@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 	"github.com/itsHabib/workbench/contracts/escalation"
 )
@@ -46,7 +47,7 @@ func TestSlackPostRendersBlockKit(t *testing.T) {
 		Body:     "review found a critical issue\nthat needs judgment",
 		Fields:   map[string]string{"decision": "block", "repo": "itsHabib/workbench", "number": "33"},
 	}
-	if err := postSlack(server.Client(), server.URL, token, channel, false, ev); err != nil {
+	if _, err := postSlack(server.Client(), server.URL, token, channel, false, ev); err != nil {
 		t.Fatal(err)
 	}
 	if got.Channel != channel {
@@ -295,7 +296,7 @@ func TestSlackAPIFailureIsAnError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := postSlack(server.Client(), server.URL, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(server.Client(), server.URL, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, server.URL, channel, "invalid_payload")
 }
 
@@ -307,7 +308,7 @@ func TestSlackNetworkFailureIsAnError(t *testing.T) {
 	endpoint := server.URL
 	server.Close()
 
-	err := postSlack(client, endpoint, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(client, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "request")
 }
 
@@ -316,7 +317,7 @@ func TestSlackBuildRequestFailureIsSafe(t *testing.T) {
 	const channel = "C123"
 	const endpoint = "://secret-endpoint"
 
-	err := postSlack(http.DefaultClient, endpoint, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(http.DefaultClient, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "build request")
 }
 
@@ -768,5 +769,113 @@ func TestBlockerBlockOmitsEmptyLabels(t *testing.T) {
 	}
 	if !strings.Contains(got, "gate grant") {
 		t.Errorf("the mint must still render:\n%s", got)
+	}
+}
+
+// TestFinalizeReplacesTheCardAndRepliesInThread pins the two calls a closed
+// park makes and the payloads they carry: chat.update addressed to the posted
+// message (buttons gone, outcome and decider on), then a threaded
+// chat.postMessage carrying the terminal receipt — because today a successful
+// tap and a silently failed one look identical once the ack fades.
+func TestFinalizeReplacesTheCardAndRepliesInThread(t *testing.T) {
+	type seen struct {
+		path string
+		body map[string]any
+	}
+	var calls []seen
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		calls = append(calls, seen{path: r.URL.Path, body: body})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1.1","channel":"C999"}`))
+	}))
+	defer server.Close()
+
+	ref := Ref{ChannelID: "C999", TS: "170000000.1"}
+	ev := event.Event{
+		Source: "gate",
+		Kind:   "card-update",
+		Fields: map[string]string{
+			"repo": "itsHabib/ivy", "number": "23", "run": "run_1",
+			"outcome": event.OutcomeApproved,
+			"who":     "@mhdevstuff (U0B17RNEFCK)",
+			"sha":     "b33c512cfede769b128e9148b752cf6dd5836115",
+		},
+	}
+	if err := finalizeSlack(server.Client(), server.URL+"/chat.update", server.URL+"/chat.postMessage", "xoxb", ref, ev); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("want chat.update then a threaded chat.postMessage, got %d calls", len(calls))
+	}
+
+	update := calls[0]
+	if update.path != "/chat.update" {
+		t.Fatalf("first call = %s, want chat.update", update.path)
+	}
+	if update.body["ts"] != ref.TS || update.body["channel"] != ref.ChannelID {
+		t.Errorf("chat.update must address the posted message, got %+v", update.body)
+	}
+	rendered := string(mustJSON(t, update.body))
+	for _, gone := range []string{`"action_id":"approve"`, `"action_id":"block"`} {
+		if strings.Contains(rendered, gone) {
+			t.Errorf("a closed card must not keep %s:\n%s", gone, rendered)
+		}
+	}
+	for _, want := range []string{"Approved", "mhdevstuff", "b33c512cfede769b128e9148b752cf6dd5836115", "View PR #23"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("closed card must contain %q:\n%s", want, rendered)
+		}
+	}
+	// gate records the merge it AUTHORIZES, never a receipt that one landed.
+	if strings.Contains(rendered, "Merged") {
+		t.Errorf("the card must not claim a merge landed:\n%s", rendered)
+	}
+
+	reply := calls[1]
+	if reply.path != "/chat.postMessage" || reply.body["thread_ts"] != ref.TS {
+		t.Fatalf("second call must be a reply in the card's thread, got %s %+v", reply.path, reply.body)
+	}
+	text, _ := reply.body["text"].(string)
+	if !strings.Contains(text, "Approved by @mhdevstuff") {
+		t.Errorf("thread reply = %q, want the terminal outcome", text)
+	}
+}
+
+// TestFinalizeIsANoOpOffSlack keeps the lifecycle harmless on the channel types
+// that have no message to correct: a toast is fire-and-forget, and a ref with no
+// ts names nothing.
+func TestFinalizeIsANoOpOffSlack(t *testing.T) {
+	ev := event.Event{Fields: map[string]string{"outcome": event.OutcomeApproved}}
+	if err := Finalize(config.Channel{Type: config.ChannelToast}, Ref{ChannelID: "C1", TS: "1"}, ev); err != nil {
+		t.Errorf("finalizing a toast must be a no-op, got %v", err)
+	}
+	if err := Finalize(config.Channel{Type: config.ChannelSlack, Token: "x"}, Ref{}, ev); err != nil {
+		t.Errorf("finalizing an unrefereced card must be a no-op, got %v", err)
+	}
+}
+
+// TestSendReturnsTheMessageRef pins the ref the whole lifecycle hangs on: the
+// ts Slack assigned, and the channel id it resolved (which chat.update needs —
+// a config naming a #channel would otherwise yield a ref update cannot address).
+func TestSendReturnsTheMessageRef(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"170000000.5","channel":"C999"}`))
+	}))
+	defer server.Close()
+
+	ref, err := postSlack(server.Client(), server.URL, "xoxb", "#alerts", false, event.Event{Source: "gate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.TS != "170000000.5" || ref.ChannelID != "C999" {
+		t.Fatalf("ref = %+v, want the ts and resolved channel id Slack echoed", ref)
+	}
+	if !ref.Updatable() {
+		t.Error("a posted message must be updatable")
 	}
 }
