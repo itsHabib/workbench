@@ -153,6 +153,13 @@ their own shapes; `decision`/`tier` are never required of them.
     grantless) — those are not resolvable through `escalate`, so offering Approve/Block on
     them would be a tap `gate resolve` would refuse; a grantless park resolves out-of-band in
     the producer's own flow.
+  - **Exact T0 grant requests (same opt-in).** A Gate `grant_request` is lifted
+    as `kind=escalation`, so the existing phone route receives it. Its card
+    names the repo, PR, exact head, T0 ceiling, three-cycle bound, and expiry,
+    then renders `Approve T0` / `Deny` with the request artifact id as the only
+    value. The tap targets `escalate serve`; Flare remains read-only. A terminal
+    bound grant or denial updates only that request card, not every other park
+    for the same PR. This surface is never rendered for a broader tier.
   - **Pre-flighting the Approve button.** A tap is **one-shot** — `gate judge` records a
     judgment that cannot be re-run — so a button offered on a decision that is already
     guaranteed to fail *burns* the operator's approval. On 2026-08-21 a tap on workbench#242

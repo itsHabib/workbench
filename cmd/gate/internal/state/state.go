@@ -28,6 +28,13 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindGrantRequest is the inert, exact-subject T0 capability request shown
+	// to an operator. It grants nothing by itself. A signed KindGrant or a
+	// KindGrantDenied parented to it is its mutually exclusive terminal fact.
+	KindGrantRequest = "grant_request"
+	// KindGrantDenied records a terminal deny, expiry, or stale-head refusal of
+	// one KindGrantRequest. It is outside Gate's verdict/action families.
+	KindGrantDenied = "grant_denied"
 	// KindResolution records how a parked escalation was resolved THROUGH THE
 	// BACK-CHANNEL (`gate resolve`): the decision a human returned, who they are,
 	// when, and the judgment id it produced. It is provenance, NOT a decision —
@@ -95,6 +102,8 @@ var kindPrefix = map[string]string{
 	KindAction:          "act",
 	KindEscalation:      "esc",
 	KindJudgment:        "jdg",
+	KindGrantRequest:    "gqr",
+	KindGrantDenied:     "gdn",
 	KindResolution:      "res",
 	KindGrantNeeded:     "gnd",
 	KindRunAborted:      "abt",

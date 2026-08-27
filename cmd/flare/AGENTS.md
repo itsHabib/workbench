@@ -43,7 +43,10 @@ there first.
   carries the `View PR` link and — when the channel opts in with
   `resolve_actions` AND the event is a resolvable park (`resolvablePark`) — the
   **Approve/Block** interactive buttons (render-only; the tap is `escalate`'s,
-  never flare's — Amendment 3). `toast` shells `powershell.exe` 5.1 (pwsh 7
+  never flare's — Amendment 3). An exact `grant_request` on the same opted-in
+  channel renders **Approve T0/Deny** using only its request id; its terminal
+  update closes that exact card rather than every park for the PR. `toast`
+  shells `powershell.exe` 5.1 (pwsh 7
   cannot project WinRT); `webhook` POSTs the event JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
   delivery journal (the dedupe substrate, and the card index `LiveCards`
@@ -106,6 +109,10 @@ there first.
   mint; a cycle park is the stop signal that the review loop ran long — the
   fix is fewer rounds, never a wider grant. flare renders the button; it never
   handles the tap (the callback targets `escalate serve`).
+- A grant-request card is a separate exact-card lifecycle despite sharing the
+  `kind=escalation` phone route: its buttons use the `contracts/grantrequest`
+  vocabulary, it never claims wider than T0, it does not supersede a parked
+  review card for the same PR, and its grant/denial terminal closes only itself.
 - **Approve is pre-flighted.** The tap is one-shot (`gate judge` cannot be
   re-run), so Approve is withheld when the park's own recorded grant + verdict
   PROVE it cannot land: an expired grant, a verdict tier over the grant's

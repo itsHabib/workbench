@@ -1,35 +1,28 @@
-// Package serve is the HTTP transport adapter for the resolution back-channel:
-// it turns a Slack interactive-action callback into an ingest.Decision and
-// drives the SAME ingest.Client the `resolve` verb uses. It adds no decision
-// logic — the mechanism (validate → shell `gate resolve`) is unchanged; only
-// the SOURCE of the decision differs (a signed HTTP callback instead of CLI
-// flags). It is the second transport over one contract that lets a Slack button
-// and the CLI both drive one ingest.Decision.
+// Package serve is the HTTP transport adapter for the resolution back-channel.
+// A parked-escalation action becomes the same ingest.Decision the CLI drives.
+// An exact-T0 grant action is forwarded as the original signed bytes to Gate's
+// callback verb, which independently verifies and applies it. This package
+// transports decisions; it never writes Gate state or imports Gate policy.
 //
 // It is a security surface, so authentication is the first thing the handler
 // does and the last thing it trusts: every request is rejected unless it carries
 // a valid Slack signature over its raw body within a fresh timestamp window, and
 // the `who` recorded on the resolution is derived from the VERIFIED Slack
 // identity in the signed payload — never from a field a client could assert.
-// The endpoint can only ever drive `gate resolve` for an already-parked
-// escalation under an already-live grant, so the whole blast radius is
-// "approve/block a PR gate already parked for judgment" — nothing else.
+// Grant-request callbacks are additionally re-authenticated by Gate and can
+// mint only the immutable T0 subject Gate previously recorded.
 //
 // Slack requires an interactive callback be acknowledged within ~3s, but the
-// authoritative work (grant lookup + `gate resolve`, which shells `gate` and may
-// shell `gh`) can exceed that. So the handler splits: it verifies + authorizes
-// synchronously, ACKS immediately, and runs the resolve in the background,
-// delivering the final outcome to the interaction's `response_url`. The security
-// gate stays on the synchronous path — nothing an unauthenticated or
-// unauthorized caller sends ever reaches the background.
+// authoritative Gate work can exceed that. So the handler splits: it verifies
+// + authorizes synchronously, ACKS immediately, and runs the callback in the
+// background, delivering the final outcome to the interaction's `response_url`.
+// The security gate stays on the synchronous path — nothing an unauthenticated
+// or unauthorized caller sends ever reaches the background.
 package serve
 
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,13 +30,14 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
+	"github.com/itsHabib/workbench/slackauth"
 )
 
 const (
@@ -51,17 +45,17 @@ const (
 	// v0=hex(HMAC-SHA256(secret, "v0:"+timestamp+":"+rawBody)); the timestamp is
 	// the epoch second Slack signed at, and it is part of the signed base string
 	// so it cannot be replayed under a different clock.
-	hdrSig = "X-Slack-Signature"
-	hdrTS  = "X-Slack-Request-Timestamp"
+	hdrSig = slackauth.SignatureHeader
+	hdrTS  = slackauth.TimestampHeader
 
 	// maxSkew bounds how old a signed request may be. Slack recommends five
 	// minutes; anything staler is rejected before parsing, so a captured request
 	// cannot be replayed hours later.
-	maxSkew = 5 * time.Minute
+	maxSkew = slackauth.MaxSkew
 
 	// maxBody caps the request body a single Slack callback can carry, so a
 	// hostile client cannot exhaust memory before the signature is even checked.
-	maxBody = 1 << 20
+	maxBody = slackauth.MaxBody
 
 	// resolveTimeout bounds the detached gate resolve so a hung subprocess cannot
 	// pin a background goroutine forever. It is independent of the HTTP request
@@ -92,15 +86,22 @@ const (
 // it never imports gate.
 type GrantFinder func(ctx context.Context, escID string) (string, error)
 
-// Config assembles a Server. Secret and Ingest are required; a nil Now uses
-// time.Now. FindGrant is required in production but injectable for tests.
+// GrantCallback forwards the original signed Slack callback to Gate's
+// independent authorization ingress. Gate re-verifies it and returns a
+// machine-readable result plus Gate's exit code.
+type GrantCallback func(ctx context.Context, body []byte, signature, timestamp string) ([]byte, int, error)
+
+// Config assembles a Server. Secret and Authorize are required for every path;
+// a nil Now uses time.Now. Ingest+FindGrant serve park actions and GrantTap
+// serves exact-T0 actions; each mechanism is injectable for tests.
 // Authorize is the authorization gate (below); a nil Authorize is fail-closed —
 // it denies every caller — so a Server built without one resolves nothing.
 type Config struct {
 	Secret    []byte
 	Ingest    *ingest.Client
 	FindGrant GrantFinder
-	// Authorize reports whether the VERIFIED Slack user id may resolve a park. It
+	GrantTap  GrantCallback
+	// Authorize reports whether the VERIFIED Slack user id may act. It
 	// runs after signature verification: the signature proves Slack sent the
 	// callback, this proves the human behind it is allowed to act. Without it any
 	// member of the escalation channel could tap Approve/Block and move a live
@@ -112,12 +113,13 @@ type Config struct {
 
 // Server is the Slack callback ingress. It implements http.Handler, so a caller
 // wires it straight into http.ListenAndServe. Construct it with New; its zero
-// value is not useful (it needs a signing secret, an ingest client, and an
-// authorizer).
+// value is not useful (it needs a signing secret and an authorizer; each
+// callback family also needs its Gate adapter).
 type Server struct {
 	secret    []byte
 	ingest    *ingest.Client
 	findGrant GrantFinder
+	grantTap  GrantCallback
 	authorize func(string) bool
 	now       func() time.Time
 	locks     *escLocks
@@ -153,6 +155,7 @@ func New(cfg Config) *Server {
 		secret:    cfg.Secret,
 		ingest:    cfg.Ingest,
 		findGrant: cfg.FindGrant,
+		grantTap:  cfg.GrantTap,
 		authorize: authorize,
 		now:       now,
 		locks:     &escLocks{m: make(map[string]*sync.Mutex)},
@@ -176,22 +179,18 @@ func AllowUsers(ids ...string) func(string) bool {
 	return func(id string) bool { return id != "" && allowed[id] }
 }
 
-// escLocks serializes callbacks per escalation id WITHIN this process. The HTTP
-// transport serves each callback in its own goroutine, so two taps for the SAME
-// escalation — a double-tap, or a Slack retry racing the first — can arrive
-// concurrently. Gate's open-check and its terminal append are not one atomic
-// step, so without this both could pass the open-check before either records an
-// action and both would resolve one park. This holds one lock per escalation
-// across the whole lookup→resolve, so the second waits and then finds the park
-// already closed (refused, not double-applied). Different escalations never
-// contend. Entries are not reclaimed: they are bounded by the escalations a run
-// ever parks, so the growth is negligible for this single-process ingress.
+// escLocks serializes callbacks per interaction id within this process. The HTTP
+// transport serves each callback in its own goroutine, so a double-tap or Slack
+// retry can arrive concurrently. Park actions use this mutex to keep Gate's
+// open-check and terminal append from racing in this process. Grant-request
+// actions pass through it too, but their authority safety does not depend on
+// this mutex: Gate atomically excludes grant and denial terminals in state.
+// Different interactions never contend. Entries are not reclaimed; growth is
+// bounded by the interactions handled by this single-process ingress.
 //
-// SCOPE: this covers the Phase-1 deployment — ONE serve process behind one
-// tunnel. It does NOT serialize a second serve process on the same -state, nor a
-// CLI `escalate resolve` racing an HTTP callback; that race predates serve (two
-// parallel CLI resolves collide identically) and its durable fix is an atomic
-// compare-and-resolve in gate, tracked in FOLLOWUPS.md.
+// For park resolution only, this does not serialize a second serve process on
+// the same -state or a CLI `escalate resolve` racing an HTTP callback. That
+// pre-existing race still requires an atomic compare-and-resolve in Gate.
 type escLocks struct {
 	mu sync.Mutex
 	m  map[string]*sync.Mutex
@@ -216,8 +215,8 @@ func (k *escLocks) lock(id string) func() {
 // anything, map the verified payload to a callback, and authorize the verified
 // user — all synchronously, because these are the only failures a client can
 // still be told about over this request. Then it ACKS within Slack's ~3s window
-// and runs the authoritative resolve in the background (process), which delivers
-// the real outcome to the interaction's response_url. An unsigned, malformed, or
+// and runs the authoritative callback in the background (process), which
+// delivers the real outcome to the interaction's response_url. An unsigned, malformed, or
 // unauthorized request short-circuits with a status and never reaches gate.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -244,12 +243,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// lookup, or resolve — so a button visible to a whole channel still resolves
 	// only for the allowlist.
 	if !s.authorize(cb.userID) {
-		http.Error(w, "not authorized to resolve escalations", http.StatusForbidden)
+		http.Error(w, "not authorized to act", http.StatusForbidden)
 		return
 	}
+	cb.rawBody = append([]byte(nil), body...)
+	cb.signature = r.Header.Get(hdrSig)
+	cb.timestamp = r.Header.Get(hdrTS)
 	// The tap is authenticated and authorized and we are committed to acting on
 	// it. Ack now (Slack's ~3s window) so the tap reads as received, then run the
-	// resolve — which can exceed 3s — off the request path and report its outcome
+	// callback — which can exceed 3s — off the request path and report its outcome
 	// to response_url. The ack replaces the card's buttons so the tap can't be
 	// repeated while the resolve is in flight. Count the work in before spawning so
 	// a graceful shutdown drains it (Wait) rather than dropping the acked decision.
@@ -258,37 +260,36 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go s.process(cb)
 }
 
-// Wait blocks until every accepted resolution's background work has finished. A
+// Wait blocks until every accepted callback's background work has finished. A
 // caller drains it during graceful shutdown — after the HTTP server has stopped
 // accepting — so a redeploy or SIGTERM doesn't drop an acked-but-unrecorded tap.
-// It is bounded in practice: each resolve is capped by resolveTimeout and each
+// It is bounded in practice: each callback is capped by resolveTimeout and each
 // delivery by deliverTimeout.
 func (s *Server) Wait() { s.inflight.Wait() }
 
-// process runs the authoritative resolution off the request path, after the ack.
-// It holds the per-escalation lock across the whole lookup→resolve (so concurrent
-// taps for one escalation can't both act) and bounds the work with an independent
-// context — a client / Slack / tunnel disconnect must NOT cancel `gate resolve`
-// mid-append, since gate writes the judgment, verdict, action, and resolution
-// separately and a half-written transaction would let a retry double-apply.
-// Delivery runs under a FRESH context so a resolve that used most of resolveTimeout
-// can still post its outcome. A panic in one resolve is contained to that resolve
-// (recovered + logged), not allowed to take down the whole ingress. Its only
-// channels back to the operator are the Slack card (deliver) and the log.
+// process runs the authoritative callback off the request path, after the ack.
+// It holds the per-interaction lock across the work and bounds it with an
+// independent context — a client / Slack / tunnel disconnect must not cancel a
+// Gate append in flight. Park resolution still relies on the local lock to keep
+// its multi-append transaction from double-applying; the grant path has its own
+// durable cross-process terminal exclusion in Gate. Delivery gets a fresh
+// context so a callback that used most of resolveTimeout can still post its
+// outcome. A panic is contained to that callback and reported through the Slack
+// card when possible, or the serve log.
 func (s *Server) process(cb callback) {
 	defer s.inflight.Done()
 	defer func() {
 		if r := recover(); r != nil {
-			s.log.Printf("escalate serve: resolve %s panicked: %v", cb.decision.Escalation, r)
+			s.log.Printf("escalate serve: callback %s panicked: %v", cb.decision.Escalation, r)
 		}
 	}()
 	defer s.locks.lock(cb.decision.Escalation)()
 
 	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
 	defer cancel()
-	code, err := s.resolve(ctx, cb.decision)
+	code, cb, err := s.processCallback(ctx, cb)
 	if err != nil {
-		s.log.Printf("escalate serve: resolve %s: %v", cb.decision.Escalation, err)
+		s.log.Printf("escalate serve: callback %s: %v", cb.decision.Escalation, err)
 	}
 
 	dctx, dcancel := context.WithTimeout(context.Background(), deliverTimeout)
@@ -297,11 +298,32 @@ func (s *Server) process(cb callback) {
 	if err != nil {
 		return
 	}
+	if cb.grantRequest {
+		if code >= codeMerge && code <= codeRefused {
+			s.log.Printf("escalate serve: completed grant_request=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+			return
+		}
+		s.log.Printf("escalate serve: failed grant_request=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+		return
+	}
 	if code >= codeMerge && code <= codeRefused {
 		s.log.Printf("escalate serve: resolved escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
 		return
 	}
 	s.log.Printf("escalate serve: failed escalation=%s gate_exit=%d slack_updated=%t", cb.decision.Escalation, code, slackUpdated)
+}
+
+func (s *Server) processCallback(ctx context.Context, cb callback) (int, callback, error) {
+	if !cb.grantRequest {
+		code, err := s.resolve(ctx, cb.decision)
+		return code, cb, err
+	}
+	if s.grantTap == nil {
+		return 0, cb, errors.New("serve: Gate grant callback is not configured")
+	}
+	out, code, err := s.grantTap(ctx, cb.rawBody, cb.signature, cb.timestamp)
+	cb.gateOutput = out
+	return code, cb, err
 }
 
 // resolve reads the grant from the parked escalation and drives the ingest
@@ -348,46 +370,7 @@ func (s *Server) deliver(ctx context.Context, cb callback, code int, err error) 
 // never reaches the decision path. This is policy (what makes a callback
 // trustworthy), kept separate from the transport plumbing above.
 func verify(secret []byte, sig, ts string, body []byte, now time.Time) error {
-	if len(secret) == 0 {
-		return errors.New("serve: no signing secret configured")
-	}
-	if sig == "" || ts == "" {
-		return errors.New("serve: missing slack signature headers")
-	}
-	sec, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil {
-		return fmt.Errorf("serve: bad timestamp %q: %w", ts, err)
-	}
-	if skew := now.Sub(time.Unix(sec, 0)); skew > maxSkew || skew < -maxSkew {
-		return fmt.Errorf("serve: stale timestamp: skew %s exceeds %s", skew, maxSkew)
-	}
-	mac := hmac.New(sha256.New, secret)
-	fmt.Fprintf(mac, "v0:%s:%s", ts, body)
-	want := "v0=" + hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(want), []byte(sig)) {
-		return errors.New("serve: signature mismatch")
-	}
-	return nil
-}
-
-// slackPayload is the slice of a Slack interactive-action callback the
-// back-channel reads: who acted (the identity Slack verified when it signed the
-// request), which button they tapped (the action_id selects the verdict, the
-// value carries the escalation id), and the response_url — the per-interaction
-// webhook serve posts the outcome back to. A deliberate small copy of Slack's
-// shape rather than a dependency — serve only ever reads these fields.
-type slackPayload struct {
-	Type string `json:"type"`
-	User struct {
-		ID       string `json:"id"`
-		Username string `json:"username"`
-		Name     string `json:"name"`
-	} `json:"user"`
-	Actions []struct {
-		ActionID string `json:"action_id"`
-		Value    string `json:"value"`
-	} `json:"actions"`
-	ResponseURL string `json:"response_url"`
+	return slackauth.Verify(secret, sig, ts, body, now)
 }
 
 // callback is a parsed, verified Slack interaction serve acts on: the decision to
@@ -395,9 +378,14 @@ type slackPayload struct {
 // response_url (the outcome webhook). It bundles what the synchronous handler
 // derives and the background process consumes, so neither passes a widening tuple.
 type callback struct {
-	decision    ingest.Decision
-	userID      string
-	responseURL string
+	decision     ingest.Decision
+	userID       string
+	responseURL  string
+	grantRequest bool
+	rawBody      []byte
+	signature    string
+	timestamp    string
+	gateOutput   []byte
 }
 
 // callbackFromPayload maps a verified callback body to the decision to drive, the
@@ -408,39 +396,29 @@ type callback struct {
 // is no client-settable who to honor, and a stray `who` key in the JSON is
 // ignored by construction.
 func callbackFromPayload(body []byte) (callback, error) {
-	form, err := url.ParseQuery(string(body))
+	interaction, err := slackauth.Parse(body)
 	if err != nil {
-		return callback{}, fmt.Errorf("serve: parse form: %w", err)
+		return callback{}, fmt.Errorf("serve: %w", err)
 	}
-	raw := form.Get("payload")
-	if raw == "" {
-		return callback{}, errors.New("serve: no payload field")
+	who := interaction.Actor()
+	cb := callback{
+		decision: ingest.Decision{
+			Escalation: interaction.Value,
+			Who:        who,
+		},
+		userID: interaction.UserID, responseURL: interaction.ResponseURL,
 	}
-	var p slackPayload
-	if err := json.Unmarshal([]byte(raw), &p); err != nil {
-		return callback{}, fmt.Errorf("serve: decode payload: %w", err)
+	if interaction.ActionID == grantrequest.ActionApprove || interaction.ActionID == grantrequest.ActionDeny {
+		cb.grantRequest = true
+		return cb, nil
 	}
-	if len(p.Actions) == 0 {
-		return callback{}, errors.New("serve: payload carries no action")
-	}
-	verdict, err := verdictFor(p.Actions[0].ActionID)
+	verdict, err := verdictFor(interaction.ActionID)
 	if err != nil {
 		return callback{}, err
 	}
-	who := slackWho(p.User.Username, p.User.Name, p.User.ID)
-	if who == "" {
-		return callback{}, errors.New("serve: no verified slack identity in payload")
-	}
-	return callback{
-		decision: ingest.Decision{
-			Escalation: p.Actions[0].Value,
-			Verdict:    verdict,
-			Who:        who,
-			Why:        fmt.Sprintf("%s in Slack by %s", verdictWord(verdict), who),
-		},
-		userID:      p.User.ID,
-		responseURL: p.ResponseURL,
-	}, nil
+	cb.decision.Verdict = verdict
+	cb.decision.Why = fmt.Sprintf("%s in Slack by %s", verdictWord(verdict), who)
+	return cb, nil
 }
 
 // verdictFor maps a button's action_id to gate's decision vocabulary. The
@@ -474,17 +452,7 @@ func verdictWord(verdict string) string {
 // source of `who`: the resolution records who Slack said tapped the button, not
 // who a payload claimed to be.
 func slackWho(username, name, id string) string {
-	handle := username
-	if handle == "" {
-		handle = name
-	}
-	if handle == "" {
-		return id
-	}
-	if id == "" {
-		return "@" + handle
-	}
-	return "@" + handle + " (" + id + ")"
+	return (slackauth.Interaction{Username: username, Name: name, UserID: id}).Actor()
 }
 
 // responseMessage is the slice of Slack's message-update shape serve writes: the
@@ -502,9 +470,13 @@ type responseMessage struct {
 // again via response_url once the real outcome lands.
 func writeAck(w http.ResponseWriter, cb callback) {
 	w.Header().Set("Content-Type", "application/json")
+	message := fmt.Sprintf("⏳ Recording %s's decision…", cb.decision.Who)
+	if cb.grantRequest {
+		message = fmt.Sprintf("⏳ Asking Gate to verify %s's exact T0 decision…", cb.decision.Who)
+	}
 	msg := responseMessage{
 		ReplaceOriginal: true,
-		Text:            fmt.Sprintf("⏳ Recording %s's decision…", cb.decision.Who),
+		Text:            message,
 	}
 	// The ack body is best-effort presentation; the decision is already committed
 	// to the background, so a failed encode changes the card, not the outcome.
@@ -529,6 +501,9 @@ func outcomeCard(cb callback, code int, err error) ([]byte, error) {
 // the tap may need retrying.
 func outcomeText(cb callback, code int, err error) string {
 	who := cb.decision.Who
+	if cb.grantRequest {
+		return grantOutcomeText(cb, code, err)
+	}
 	if errors.Is(err, ErrGrantlessPark) {
 		return "↗️ This park carries no gate grant — it resolves out-of-band, in the producer's own flow."
 	}
@@ -549,6 +524,40 @@ func outcomeText(cb callback, code int, err error) string {
 		return fmt.Sprintf("🚫 Refused (%s).", who)
 	}
 	return fmt.Sprintf("⚠️ Gate error — %s's decision may not have landed; retry the tap.", who)
+}
+
+func grantOutcomeText(cb callback, code int, err error) string {
+	who := cb.decision.Who
+	if err != nil {
+		return fmt.Sprintf("❌ Gate could not verify %s's T0 decision — check the serve log.", who)
+	}
+	var result struct {
+		Outcome string `json:"outcome"`
+		Repo    string `json:"repo"`
+		PR      int    `json:"pr"`
+		HeadSHA string `json:"head_sha"`
+		Reason  string `json:"reason"`
+	}
+	if decodeErr := json.Unmarshal(cb.gateOutput, &result); decodeErr != nil {
+		return fmt.Sprintf("⚠️ Gate returned an unreadable T0 receipt for %s; check the serve log.", who)
+	}
+	short := result.HeadSHA
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	if code == codeMerge && result.Outcome == "granted" {
+		return fmt.Sprintf("✅ T0 approved by %s for %s#%d at %s — Gate can continue the evaluation.", who, result.Repo, result.PR, short)
+	}
+	if code == codeBlocked && result.Outcome == grantrequest.DecisionDenied {
+		return fmt.Sprintf("⛔ T0 request denied by %s for %s#%d.", who, result.Repo, result.PR)
+	}
+	if strings.HasPrefix(result.Outcome, "already_") {
+		return fmt.Sprintf("☑️ Already resolved — the T0 request for %s#%d is closed.", result.Repo, result.PR)
+	}
+	if result.Reason != "" {
+		return fmt.Sprintf("🚫 T0 request refused for %s#%d: %s.", result.Repo, result.PR, result.Reason)
+	}
+	return fmt.Sprintf("🚫 T0 request refused for %s#%d.", result.Repo, result.PR)
 }
 
 // postResponse is the default outcome transport: it POSTs the rendered card JSON

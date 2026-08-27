@@ -48,6 +48,7 @@ go build -o gate.exe ./cmd/gate
 export GATE_STATE=~/dev/gate/state                           # -state/-key default to $GATE_STATE/$GATE_KEY
 ./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
+./gate.exe gate  -repo owner/repo -pr 181 -slack             # request one exact T0 grant on the operator's phone, then evaluate
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
 ./gate.exe next -all                                         # plus the rows already discharged, and why
@@ -71,6 +72,26 @@ export GATE_STATE=~/dev/gate/state                           # -state/-key defau
 exported the whole verb surface drops its flag tail — and a stray `gate grant`
 from the wrong directory can no longer mint into a fresh relative `state` tree.
 An explicit flag still overrides the env.
+
+### Phone-native T0 authorization
+
+`gate gate -repo owner/repo -pr N -slack` replaces the pasted grant id for one
+narrow case. Gate reads the current head, appends a ten-minute request fixed to
+`merge`, `T0`, three review cycles, that PR, and that exact SHA, then waits. Flare
+renders the request on the existing Slack escalation route; Escalate receives
+the tap and passes the original signed callback to Gate's internal
+`grant-callback` verb. Gate independently verifies Slack's HMAC, five-minute
+freshness window, and `ESCALATE_ALLOWED_SLACK_USERS`, re-reads the head, and
+atomically records either one bound grant or one denial. Double taps, retries,
+and approve/deny races cannot change the first terminal result.
+
+The Slack tap does not authorize T1+, does not accept caller-selected scope,
+and does not merge. Once approved, the waiting command runs the ordinary Gate
+ladder under the bound grant and returns the normal exit/result contract; a pass
+still emits the exact `--match-head-commit` merge action for the caller. The
+state and signing-key directories must already be the canonical ones: `-slack`
+refuses a fresh state tree. See
+[`../../docs/features/slack-t0-authorization/spec.md`](../../docs/features/slack-t0-authorization/spec.md).
 
 `gate next` is the operator's inbox: it projects the log into what currently
 needs a human — runs parked for judgment (each with a paste-ready `gate judge`

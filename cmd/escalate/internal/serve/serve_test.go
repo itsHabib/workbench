@@ -24,6 +24,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
 
 var testSecret = []byte("8f742231b10c8537228d4e5a1a1a2d3f")
@@ -252,6 +253,46 @@ func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 	}
 	if got := sink.texts()[0]; !strings.Contains(got, "Approved by @michael (U1)") {
 		t.Fatalf("outcome card = %q, want an approved-merge card", got)
+	}
+}
+
+func TestServeHTTPForwardsOriginalSignedGrantCallbackToGate(t *testing.T) {
+	var capturedBody []byte
+	var capturedSignature, capturedTimestamp string
+	grantTap := func(_ context.Context, body []byte, signature, timestamp string) ([]byte, int, error) {
+		capturedBody = append([]byte(nil), body...)
+		capturedSignature = signature
+		capturedTimestamp = timestamp
+		return []byte(`{"outcome":"granted","repo":"o/r","pr":7,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`), codeMerge, nil
+	}
+	grantLookups := 0
+	srv := New(Config{
+		Secret: testSecret, GrantTap: grantTap,
+		FindGrant: func(context.Context, string) (string, error) {
+			grantLookups++
+			return "", errors.New("must not look up a parked grant")
+		},
+		Authorize: allowAll, Now: func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+	body := formBody(payloadJSON(grantrequest.ActionApprove, "gqr_abc", "michael"))
+	req := signedRequest(testSecret, fixedNow, body)
+	wantSignature := req.Header.Get(hdrSig)
+	wantTimestamp := req.Header.Get(hdrTS)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, want 200", rec.Code)
+	}
+	sink.wait(t, 1)
+	if !bytes.Equal(capturedBody, body) || capturedSignature != wantSignature || capturedTimestamp != wantTimestamp {
+		t.Fatalf("Gate did not receive the original signed callback")
+	}
+	if grantLookups != 0 {
+		t.Fatalf("grant request used parked-grant lookup %d times", grantLookups)
+	}
+	if got := sink.texts()[0]; !strings.Contains(got, "T0 approved") || !strings.Contains(got, "Gate can continue") {
+		t.Fatalf("grant outcome card = %q", got)
 	}
 }
 

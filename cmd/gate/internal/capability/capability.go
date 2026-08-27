@@ -77,6 +77,43 @@ func MintBound(st *state.Store, keyPath, repo, action, maxTier string, maxCycles
 	})
 }
 
+// MintBoundOnce signs and records an exact-subject grant only when the request
+// has no terminal grant or denial. The conflict check and append share Gate
+// state's cross-process lock, so a double tap or approve/deny race has one
+// winner. requestID is the sole parent and run is the request's run.
+func MintBoundOnce(st *state.Store, keyPath, repo, action, maxTier string, maxCycles int, mintedBy string, ttl time.Duration, head string, pr int, authorizationID, run, requestID string, now func() time.Time) (state.Artifact, error) {
+	if !validSHA(head) {
+		return state.Artifact{}, fmt.Errorf("%w: %q", ErrBadHead, head)
+	}
+	if pr < 1 || !validAuthorizationID(authorizationID) || run == "" || requestID == "" {
+		return state.Artifact{}, ErrBadSubject
+	}
+	if ttl <= 0 {
+		return state.Artifact{}, ErrExpired
+	}
+	g := Grant{
+		Repo: repo, Action: action, MaxTier: maxTier, MaxCycles: maxCycles,
+		ExpiresAt: now().UTC().Add(ttl), BoundHead: head, BoundPR: pr,
+		AuthorizationID: authorizationID, MintedBy: mintedBy,
+	}
+	if !tier.Valid(g.MaxTier) {
+		return state.Artifact{}, fmt.Errorf("%w: %q", ErrBadTier, g.MaxTier)
+	}
+	if g.MaxCycles < 0 {
+		return state.Artifact{}, fmt.Errorf("%w: %d", ErrBadCycles, g.MaxCycles)
+	}
+	key, err := loadOrCreateKey(keyPath)
+	if err != nil {
+		return state.Artifact{}, err
+	}
+	g.Sig = sign(key, g)
+	return st.AppendIfAbsentParentKinds(
+		state.KindGrant,
+		[]string{state.KindGrant, state.KindGrantDenied},
+		run, requestID, []string{requestID}, g,
+	)
+}
+
 func mint(st *state.Store, keyPath string, g Grant) (state.Artifact, error) {
 	if !tier.Valid(g.MaxTier) {
 		return state.Artifact{}, fmt.Errorf("%w: %q", ErrBadTier, g.MaxTier)
@@ -100,10 +137,42 @@ func Check(st *state.Store, keyPath, grantID, repo, action string, now func() ti
 	return CheckBound(st, keyPath, grantID, repo, action, "", 0, "", now)
 }
 
+// CheckSubject validates a grant for the exact subject Gate is evaluating.
+// Legacy unbound grants remain valid. A bound grant must match head and PR; its
+// authorization id remains HMAC-covered provenance but need not be supplied by
+// the evaluator, which starts from the signed grant artifact itself.
+func CheckSubject(st *state.Store, keyPath, grantID, repo, action, head string, pr int, now func() time.Time) (Grant, error) {
+	g, err := check(st, keyPath, grantID, repo, action)
+	if err != nil {
+		return Grant{}, err
+	}
+	if g.BoundHead != "" && g.BoundHead != head {
+		return Grant{}, fmt.Errorf("%w: grant is bound to %s", ErrHeadMismatch, g.BoundHead)
+	}
+	if g.BoundPR != 0 && g.BoundPR != pr {
+		return Grant{}, fmt.Errorf("%w: grant is bound to PR %d", ErrSubject, g.BoundPR)
+	}
+	return checkExpiry(g, now)
+}
+
 // CheckBound validates both ordinary scope and any exact authorization subject
 // encoded in a protected-workflow grant. An unbound legacy grant still matches
 // any subject; a bound grant requires every supplied subject field.
 func CheckBound(st *state.Store, keyPath, grantID, repo, action, head string, pr int, authorizationID string, now func() time.Time) (Grant, error) {
+	g, err := check(st, keyPath, grantID, repo, action)
+	if err != nil {
+		return Grant{}, err
+	}
+	if g.BoundHead != "" && g.BoundHead != head {
+		return Grant{}, fmt.Errorf("%w: grant is bound to %s", ErrHeadMismatch, g.BoundHead)
+	}
+	if g.BoundPR != 0 && (g.BoundPR != pr || g.AuthorizationID != authorizationID) {
+		return Grant{}, fmt.Errorf("%w: grant is bound to PR %d authorization %s", ErrSubject, g.BoundPR, g.AuthorizationID)
+	}
+	return checkExpiry(g, now)
+}
+
+func check(st *state.Store, keyPath, grantID, repo, action string) (Grant, error) {
 	a, err := st.Get(grantID)
 	if err != nil {
 		return Grant{}, err
@@ -125,12 +194,10 @@ func CheckBound(st *state.Store, keyPath, grantID, repo, action, head string, pr
 	if g.Repo != repo || g.Action != action {
 		return Grant{}, fmt.Errorf("%w: grant is %s/%s, asked %s/%s", ErrScope, g.Repo, g.Action, repo, action)
 	}
-	if g.BoundHead != "" && g.BoundHead != head {
-		return Grant{}, fmt.Errorf("%w: grant is bound to %s", ErrHeadMismatch, g.BoundHead)
-	}
-	if g.BoundPR != 0 && (g.BoundPR != pr || g.AuthorizationID != authorizationID) {
-		return Grant{}, fmt.Errorf("%w: grant is bound to PR %d authorization %s", ErrSubject, g.BoundPR, g.AuthorizationID)
-	}
+	return g, nil
+}
+
+func checkExpiry(g Grant, now func() time.Time) (Grant, error) {
 	if now().UTC().After(g.ExpiresAt) {
 		return Grant{}, fmt.Errorf("%w: expired %s", ErrExpired, g.ExpiresAt.Format(time.RFC3339))
 	}
@@ -245,8 +312,23 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("capability: key dir: %w", err)
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return loadKey(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("capability: create key: %w", err)
+	}
+	if _, err := file.Write(key); err != nil {
+		_ = file.Close()
 		return nil, fmt.Errorf("capability: write key: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("capability: sync key: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("capability: close key: %w", err)
 	}
 	return key, nil
 }
