@@ -74,6 +74,7 @@ var verbs = map[string]func(*env, []string) error{
 	"report":     cmdAdvisory(org.KindReport),
 	"message":    cmdAdvisory(org.KindMessage),
 	"boot":       cmdBoot,
+	"intake":     cmdIntake,
 	"status":     cmdStatus,
 	"sweep":      cmdSweep,
 	"log":        cmdLog,
@@ -114,7 +115,7 @@ lifecycle   charter · attach · release · retire · takeover · revoke · dele
 work        assign · unassign · claim · yield · complete · abandon
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
-read        boot · status · sweep · log · verify · blob
+read        boot · intake · status · sweep · log · verify · blob
 
 every verb: -state <dir> (or ORG_STATE) · -tenant <id> (or ORG_TENANT) · -role <id>`)
 }
@@ -497,6 +498,67 @@ func contextText(files []home.ContextFile, budget int, dir string) string {
 		spent += len(entry)
 	}
 	return sb.String()
+}
+
+// cmdIntake answers "where does this work belong" before anything is written:
+// which chartered lanes' scopes cover the URI (contracts/org.InScope), which
+// lanes already hold it — in or out of scope — and, when nothing covers it,
+// says so with the fix. Read-only, so it is safe as the reflex before assign.
+func cmdIntake(e *env, args []string) error {
+	s := newScope("intake")
+	work := s.fs.String("work", "", "work URI to route, e.g. github:owner/repo#88")
+	h, err := s.open(args, false)
+	if err != nil {
+		return err
+	}
+	if *work == "" {
+		return fmt.Errorf("-work is required")
+	}
+	if !org.ValidWorkURI(*work) {
+		return fmt.Errorf("-work %q is not a valid work URI (scheme:reference); the kernel could never record it", *work)
+	}
+	pairs, err := h.RolesForTenant(s.tenant)
+	if err != nil {
+		return err
+	}
+	in := render.Intake{Work: *work, Tenant: s.tenant}
+	for _, p := range pairs {
+		lane, keep := intakeLane(h, p[0], p[1], *work)
+		if !keep {
+			continue
+		}
+		in.Lanes = append(in.Lanes, lane)
+		if lane.ScopeMatch != "" {
+			in.Covered = true
+		}
+	}
+	if s.asJSON {
+		return printJSON(e, in)
+	}
+	fmt.Fprint(e.stdout, render.IntakeText(in))
+	return nil
+}
+
+// intakeLane judges one role against the work URI. An unreadable chain is
+// kept — it might cover the work, and saying "cannot judge" beats omitting it.
+func intakeLane(h *home.Home, tenant, role, work string) (render.IntakeLane, bool) {
+	lane := render.IntakeLane{Role: role}
+	_, state, err := h.Load(tenant, role)
+	if err != nil {
+		lane.Err = err.Error()
+		return lane, true
+	}
+	lane.Phase = state.Phase
+	if state.Phase == org.PhaseVoid || state.Phase == org.PhaseRetired {
+		return lane, false
+	}
+	lane.ScopeMatch, _ = org.MatchScope(state.Terms.Scope, work)
+	for _, a := range state.Held {
+		if a.Work == work {
+			lane.Holds = true
+		}
+	}
+	return lane, lane.ScopeMatch != "" || lane.Holds
 }
 
 func cmdStatus(e *env, args []string) error {

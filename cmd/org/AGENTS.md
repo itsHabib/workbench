@@ -29,7 +29,13 @@ system name there is Baton; this binary is its first runtime slice.
 - **Verbs** map one-to-one onto record kinds (charter, attach, claim, yield,
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
-  `sweep`, `log`, `verify`, `blob`.
+  `intake` (where does this work belong), `sweep`, `log`, `verify`, `blob`.
+- **`intake`** is the routing reflex before assign: given `-work <uri>` it
+  reports which chartered lanes' scopes cover it (the `contracts/org.InScope`
+  predicate — prefix-at-a-boundary, never across schemes), which lanes
+  already hold it (an out-of-scope hold is named as drift), and when nothing
+  covers it, says so with the fix. Read-only; safe to run on sight of new
+  work.
 - **`sweep`** is the continuity instrument: it REPLAYS every chain in the
   configured tenant through the kernel and counts what happened — claims
   opened vs closed, obligations
