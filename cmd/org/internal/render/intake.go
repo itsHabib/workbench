@@ -13,7 +13,7 @@ import (
 // out-of-scope hold is exactly the drift the report exists to surface.
 type IntakeLane struct {
 	Role  string    `json:"role"`
-	Phase org.Phase `json:"phase"`
+	Phase org.Phase `json:"phase,omitempty"`
 	// ScopeMatch is the charter entry that covers the work, empty when the
 	// lane holds it out of scope.
 	ScopeMatch string `json:"scope_match,omitempty"`
@@ -42,6 +42,11 @@ func IntakeText(in Intake) string {
 	if in.Covered {
 		return sb.String()
 	}
+	if n := unreadable(in.Lanes); n > 0 {
+		fmt.Fprintf(&sb, "no READABLE chartered scope covers %s — %d lane(s) unreadable and unjudged\n", in.Work, n)
+		sb.WriteString("fix: repair or verify the unreadable chain(s) before chartering anything new\n")
+		return sb.String()
+	}
 	fmt.Fprintf(&sb, "no chartered scope covers %s\n", in.Work)
 	sb.WriteString("fix: charter a lane whose -scope covers it, or recharter an existing lane\n")
 	return sb.String()
@@ -58,4 +63,15 @@ func laneNote(l IntakeLane) string {
 		return fmt.Sprintf("in scope (%s)", l.ScopeMatch)
 	}
 	return "holds it OUT OF SCOPE"
+}
+
+// unreadable counts lanes whose chains could not be judged.
+func unreadable(lanes []IntakeLane) int {
+	n := 0
+	for _, l := range lanes {
+		if l.Err != "" {
+			n++
+		}
+	}
+	return n
 }

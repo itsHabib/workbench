@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/org/internal/render"
+	"github.com/itsHabib/workbench/contracts/org"
 )
 
 // exec runs one verb against a state dir and returns exit code and streams.
@@ -501,5 +502,57 @@ func TestBeginStrictMintsIdentity(t *testing.T) {
 	code, _, errOut = exec(t, state, append([]string{"done"}, role...)...)
 	if code != codeError || !strings.Contains(errOut, "strict mode") {
 		t.Fatalf("strict done without identity: exit %d: %s", code, errOut)
+	}
+}
+
+// TestIntakeSchemeWideScopeAndUnreadableLanes pins two review findings: a
+// bare-scheme scope entry (`jira:`) is charterable and covers the scheme, and
+// an unreadable chain makes an uncovered report hedge instead of declaring
+// definitively that nothing covers the work.
+func TestIntakeSchemeWideScopeAndUnreadableLanes(t *testing.T) {
+	state := t.TempDir()
+	wide := []string{"-tenant", "acme", "-role", "supervisor:tickets"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "jira:", "-tier", "T1", "-supervisor", "human:op"}, wide...)...); code != 0 {
+		t.Fatalf("bare-scheme charter refused: %s", errOut)
+	}
+	_, out, _ := exec(t, state, "intake", "-work", "jira:ANY-1", "-tenant", "acme")
+	if !strings.Contains(out, "in scope (jira:)") {
+		t.Fatalf("scheme-wide scope did not cover a ticket:\n%s", out)
+	}
+
+	// Corrupt the chain: an uncovered URI must now hedge, not conclude.
+	chain := filepath.Join(state, "acme", "supervisor--tickets", "chain.jsonl")
+	if err := os.WriteFile(chain, []byte("not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := exec(t, state, "intake", "-work", "github:acme/api#1", "-tenant", "acme")
+	if code != 0 {
+		t.Fatalf("intake over a broken chain must still report: %s", errOut)
+	}
+	if !strings.Contains(out, "no READABLE chartered scope") || !strings.Contains(out, "1 lane(s) unreadable") {
+		t.Fatalf("uncovered report did not hedge on the unreadable lane:\n%s", out)
+	}
+}
+
+// TestDoneTargetRefusesToGuess pins the resolver's case matrix directly: it
+// never picks between several held items, and an explicit target must be
+// held (or active) — a typo is refused before anything is written.
+func TestDoneTargetRefusesToGuess(t *testing.T) {
+	held2 := org.RoleState{Held: []org.Assignment{{Work: "a"}, {Work: "b"}}}
+	if _, err := doneTarget(held2, ""); err == nil {
+		t.Fatal("must refuse to guess between 2 held items")
+	}
+	if _, err := doneTarget(held2, "c"); err == nil {
+		t.Fatal("must refuse an explicit target the role does not hold")
+	}
+	if got, err := doneTarget(held2, "b"); err != nil || got != "b" {
+		t.Fatalf("explicit held target = %q, %v", got, err)
+	}
+	active := org.RoleState{Active: "a", Held: []org.Assignment{{Work: "a"}}}
+	if got, err := doneTarget(active, ""); err != nil || got != "a" {
+		t.Fatalf("active target = %q, %v", got, err)
+	}
+	if _, err := doneTarget(active, "b"); err == nil {
+		t.Fatal("must refuse a different target while another is active")
 	}
 }

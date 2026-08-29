@@ -225,8 +225,8 @@ func cmdRelease(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, state, _ := h.Load(s.tenant, s.role)
-	if n := len(state.Held); n > 0 {
+	_, state, loadErr := h.Load(s.tenant, s.role)
+	if n := len(state.Held); loadErr == nil && n > 0 {
 		fmt.Fprintf(e.stderr, "warning: releasing while still holding %d item(s); finished work exits via complete (or done), yield means pausing\n", n)
 	}
 	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRelease, Body: b})
@@ -290,6 +290,9 @@ func cmdBegin(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
+	if held(state, *work) < 0 && *digest == "" && *pin == "" {
+		return fmt.Errorf("-digest or -pin is required: %s is not yet assigned, and an unpinned assignment cannot detect drift", *work)
+	}
 	var steps []receipt
 	inc := s.incarnation
 	if state.Holder == "" {
@@ -304,9 +307,6 @@ func cmdBegin(e *env, args []string) error {
 		steps, state, inc = append(steps, r), st, st.Holder
 	}
 	if held(state, *work) < 0 {
-		if *digest == "" && *pin == "" {
-			return fmt.Errorf("-digest or -pin is required: %s is not yet assigned, and an unpinned assignment cannot detect drift", *work)
-		}
 		if *digest == "" {
 			*digest = org.DigestBytes([]byte(*pin))
 		}
@@ -393,6 +393,9 @@ func doneTarget(state org.RoleState, work string) (string, error) {
 	if work != "" {
 		if state.Active != "" && state.Active != work {
 			return "", fmt.Errorf("%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
+		}
+		if state.Active != work && held(state, work) < 0 {
+			return "", fmt.Errorf("%s is not held by this role; nothing to finish", work)
 		}
 		return work, nil
 	}
@@ -754,7 +757,7 @@ func intakeLane(h *home.Home, tenant, role, work string) (render.IntakeLane, boo
 		return lane, true
 	}
 	lane.Phase = state.Phase
-	if state.Phase == org.PhaseRetired {
+	if state.Phase == org.PhaseVoid || state.Phase == org.PhaseRetired {
 		return lane, false
 	}
 	lane.ScopeMatch, _ = org.MatchScope(state.Terms.Scope, work)
