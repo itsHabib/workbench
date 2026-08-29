@@ -2,6 +2,32 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## org: scope membership cannot become an admission law as the kernel stands
+
+The field report (§4.4) proved `assign` enforces no scope at all: a lane
+chartered `github:Acme/Repo` accepted `jira:PROJ-9999`, `github:Other/Thing#1`
+and `banana:whatever` without a murmur. The predicate now exists
+(`contracts/org.InScope`) and both `intake` and `sweep` apply it, but it is a
+FINDING, not a refusal. Two facts block the law:
+
+1. **Replay re-admits.** `Reduce` folds by calling `Advance` → `Admissible` on
+   every historical record. A law added today is therefore applied to records
+   written years ago: every chain that ever assigned outside its scope stops
+   folding, which is a worse failure than the drift it prevents.
+2. **The obvious escape does not exist.** An opt-in charter term
+   (`scope_enforced`) would bind only new charters — except `Terms.Canonical`
+   emits *every* field, with no omission of zero values, so adding one changes
+   the canonical bytes of every charter ever written and invalidates their
+   digests. The encoder's own doc states the constraint: once a record is
+   written, the bytes that produced its hash can never change.
+
+So enforcement needs a scheme version: `canon/v2` with a Terms shape that
+omits absent fields, records written at the new scheme, and admission laws
+gated on the record's own scheme so a v1 record is judged by v1 rules. That is
+a real migration, not a flag. Until then, drift is reported by `org sweep`
+(`scope_drift`) and `org intake`, and the skills' "mechanical predicate" claim
+is true of the predicate but not of admission — say detected, not prevented.
+
 ## gate: mid-run merge race can still park (codex P1 on #219, deferred)
 
 The already-merged refusal (#219) reads the view snapshot gathered at run

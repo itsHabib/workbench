@@ -64,10 +64,12 @@ type Role struct {
 	LastAt string `json:"last_at,omitempty"`
 	Late   bool   `json:"late,omitempty"`
 	// Held is the last valid folded ownership set. It is carried only so a
-	// sweep across role chains can detect cross-role assignment conflicts; the
-	// top-level conflict list is the public JSON shape, so rows do not duplicate
-	// every work URI.
+	// sweep across role chains can detect cross-role assignment conflicts and
+	// scope drift; the top-level finding lists are the public JSON shape, so
+	// rows do not duplicate every work URI.
 	Held []string `json:"-"`
+	// Scope is the charter's scope, carried for the same reason as Held.
+	Scope []string `json:"-"`
 	// Err names a chain that does not fold, so a broken chain is reported as a
 	// finding rather than failing the whole sweep.
 	Err string `json:"error,omitempty"`
@@ -116,6 +118,7 @@ func withState(r Role, state org.RoleState, now time.Time) Role {
 	r.OpenIntents, r.OpenEscalations = len(state.OpenIntents), len(state.OpenEscalations)
 	r.Late = late(state.NextDue, now)
 	r.Held = heldWorks(state.Held)
+	r.Scope = state.Terms.Scope
 	return r
 }
 
@@ -136,6 +139,48 @@ type AssignConflict struct {
 	Tenant string   `json:"tenant"`
 	Work   string   `json:"work"`
 	Roles  []string `json:"roles"`
+}
+
+// ScopeDrift is one work item a role holds that its own charter scope does not
+// cover. The kernel cannot refuse this: admission is replayed over every
+// historical record, so a scope law added today would break the fold of every
+// chain that ever assigned outside its scope. Reporting it is the honest
+// alternative — the same detected-not-prevented posture as AssignConflict.
+type ScopeDrift struct {
+	Tenant string `json:"tenant"`
+	Role   string `json:"role"`
+	Work   string `json:"work"`
+	// Scope is the charter scope the work fell outside of, for the reader who
+	// has to decide whether the hold or the charter is wrong.
+	Scope []string `json:"scope"`
+}
+
+// ScopeDrifts reports every held work URI outside its holder's charter scope,
+// for one tenant, using the kernel's own membership predicate. A role with an
+// empty scope is skipped: the charter law already refuses that, so an empty
+// scope here means a chain that did not fold, not a role owning nothing.
+func ScopeDrifts(tenant string, roles []Role) []ScopeDrift {
+	drifts := make([]ScopeDrift, 0)
+	for _, role := range roles {
+		if role.Tenant != tenant || len(role.Scope) == 0 {
+			continue
+		}
+		for _, work := range role.Held {
+			if _, ok := org.MatchScope(role.Scope, work); ok {
+				continue
+			}
+			drifts = append(drifts, ScopeDrift{
+				Tenant: tenant, Role: role.Role, Work: work, Scope: role.Scope,
+			})
+		}
+	}
+	sort.Slice(drifts, func(i, j int) bool {
+		if drifts[i].Role != drifts[j].Role {
+			return drifts[i].Role < drifts[j].Role
+		}
+		return drifts[i].Work < drifts[j].Work
+	})
+	return drifts
 }
 
 // AssignConflicts detects cross-role ownership for one tenant by exact work

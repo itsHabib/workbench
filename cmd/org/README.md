@@ -24,6 +24,10 @@ org charter -role lead:agentic-development \
 # new work arrives: ask where it belongs before anything is written
 org intake  -work github:itsHabib/workbench#88
 
+# terms change; a record written in error is withdrawn (tip only)
+org recharter -role lead:agentic-development -scope dossier:org -tier T2 -supervisor human:mh
+org annul     -role lead:agentic-development -body "written against the wrong lane"
+
 # small work, bracketed by the composites: same records, two commands
 org begin -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
 org done  -role lead:agentic-development -body "where it ended up"

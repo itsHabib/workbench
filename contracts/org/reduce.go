@@ -105,6 +105,12 @@ type RoleState struct {
 	// NextDue is the deadline the last writer declared for its own next append.
 	// Liveness is derived against this, never from self-report, so an
 	// incarnation that hangs without exiting is correctly seen as dead.
+	//
+	// A deadline belongs to the writer that declared it, so ending a holder's
+	// tenure — release, revoke, retire, takeover — drops it, keeping only what
+	// that record itself declares. Without this a released role stays "late"
+	// forever against a deadline nobody is accountable for any more, which is
+	// a watcher paging about a lane that correctly went home.
 	NextDue string
 	// Degraded reports that the tip is a mechanical mark rather than a
 	// distilled record: the host observed activity the distiller has not yet
@@ -524,13 +530,16 @@ func applyStructural(state RoleState, r Record, digest string) RoleState {
 		state = orphan(state)
 		state.Holder = digest
 		state.Phase = PhaseHeld
+		state.NextDue = r.NextDue
 	case KindRevoke:
 		state = orphan(state)
 		state.Holder = ""
 		state.Phase = PhaseChartered
+		state.NextDue = r.NextDue
 	case KindRelease:
 		state.Holder = ""
 		state.Phase = PhaseChartered
+		state.NextDue = r.NextDue
 	case KindClaim:
 		state.Active = r.Subject.Work
 		state.Phase = PhaseActive
@@ -559,6 +568,7 @@ func applyStructural(state RoleState, r Record, digest string) RoleState {
 	case KindRetire, KindSplit, KindMerge:
 		state.Holder = ""
 		state.Phase = PhaseRetired
+		state.NextDue = r.NextDue
 	}
 	return state
 }

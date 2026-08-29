@@ -30,6 +30,11 @@ system name there is Baton; this binary is its first runtime slice.
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
   `intake` (where does this work belong), `sweep`, `log`, `verify`, `blob`.
+- **`recharter`** replaces the WHOLE terms block (the kernel swaps Terms
+  wholesale on that kind), so an unstated flag narrows the role; the verb
+  prints the before/after scope, tier and supervisors to stderr. **`annul`**
+  withdraws the tip, defaulting `-target` to it because the kernel admits an
+  annul against nothing else.
 - **Composites** `begin` and `done` bracket small work (field report §4.2):
   `begin -work <uri>` attaches when unheld, assigns when unassigned (only
   then requiring `-pin`/`-digest`), and claims — one command, the same
@@ -56,8 +61,13 @@ system name there is Baton; this binary is its first runtime slice.
   folding is a row with `BROKEN`, not a failed sweep. It also detects one work
   URI held by multiple role chains in the configured tenant as
   `assign_conflicts`: an honest detected-not-prevented finding, not a global
-  lock or admission claim. The file-home scan is sequential, not an atomic
-  snapshot across chains; rerun after reconciliation to confirm it converged.
+  lock or admission claim. It also reports `scope_drift` — work a role holds
+  that its own charter scope does not cover, judged by `contracts/org.InScope`.
+  That one CANNOT become an admission law: `Reduce` replays every historical
+  record through `Admissible`, so a scope law added today would refuse chains
+  that folded yesterday (see FOLLOWUPS). The file-home scan is sequential, not
+  an atomic snapshot across chains; rerun after reconciliation to confirm it
+  converged.
 - **Hooks** (`hooks/`): `sessionstart-boot.sh` injects `org boot` output into
   a session whose cwd maps to a role (`$ORG_STATE/roles.map`);
   `stop-mark.sh` appends a mechanical `mark` when a session stops. Both
@@ -74,7 +84,9 @@ system name there is Baton; this binary is its first runtime slice.
   (`-max-bytes`, default 2048), shedding depth (last-word excerpt, held list)
   but never the headline, the charter line, or a dangling obligation.
 - Liveness is derived from the writer's own declared `next_due`, never from
-  self-report at read time.
+  self-report at read time. A deadline belongs to the writer that declared it,
+  so ending a tenure (release, revoke, retire, takeover) drops it: a released
+  role is idle, never late.
 
 ## Exit codes (load-bearing seam)
 
