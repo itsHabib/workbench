@@ -67,6 +67,19 @@ type Match struct {
 	// escalations that carry a zero-context brief, and keep procedural/no-brief
 	// parks (readiness, review-consolidation churn) off the paging channel.
 	Briefed string `json:"briefed,omitempty"`
+	// Dimension matches a verdict by the ladder rung that produced it — its
+	// `source` in the verdict schema: "reducer" for the run-level fold, or a
+	// component rung like "readiness" / "review-panel-completeness" /
+	// "review-consolidation".
+	//
+	// It exists because a gate run emits the fold AND every component it folded,
+	// and the fold restates the worst component's `why` verbatim. Without this
+	// selector a routes table can only say "page every block", which pages the
+	// same sentence once per rung: one blocked run on 2026-08-29 put two
+	// identical "Don't merge ivy#50" cards in Slack a minute apart, and one
+	// parked run put seven. Match `dimension: "reducer"` to page the run's
+	// decision once and let its parts stay quiet.
+	Dimension string `json:"dimension,omitempty"`
 }
 
 // Route sends matching events to one channel, optionally throttled to at

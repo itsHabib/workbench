@@ -54,6 +54,14 @@ there first.
 - An event matching no route goes to the catch-all channel; silence requires
   an explicit `drop` route. Absence of a route must not read as
   not-page-worthy.
+- One run announces itself ONCE. A gate run emits the reducer's fold and every
+  component verdict it folded, and the fold restates the worst component's
+  `why` — so routing on `decision` alone pages the same sentence once per rung.
+  Routes select the fold with `dimension: "reducer"` and drop the rest. A
+  parked run is announced by its ESCALATION artifact, never by its escalate
+  verdicts: across 385 reducer-escalate runs, zero lacked the escalation, and
+  only the escalation card is tracked for correction — a verdict card can never
+  be closed, so a redundant one misreports live state forever.
 - Dedupe keys on stable event IDs (gate artifact ID; receipt key+outcome);
   a restart or resweep never re-pages.
 - The gate cursor pins the last processed chain hash; a mismatch or a
