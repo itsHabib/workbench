@@ -528,16 +528,16 @@ func cmdStatus(e *env, args []string) error {
 	return nil
 }
 
-// cmdSweep is the continuity instrument: it replays every chain and reports
-// what the substrate is a bet on — whether sessions leave distilled
-// conclusions, and whether inherited obligations get discharged.
+// cmdSweep is the continuity instrument: it replays every chain in the selected
+// tenant and reports what the substrate is a bet on — whether sessions leave
+// distilled conclusions, and whether inherited obligations get discharged.
 func cmdSweep(e *env, args []string) error {
 	s := newScope("sweep")
 	h, err := s.open(args, false)
 	if err != nil {
 		return err
 	}
-	pairs, err := h.Roles()
+	pairs, err := h.RolesForTenant(s.tenant)
 	if err != nil {
 		return err
 	}
@@ -556,10 +556,13 @@ func cmdSweep(e *env, args []string) error {
 		roles = append(roles, row)
 	}
 	totals := survey.Sum(roles)
+	conflicts := survey.AssignConflicts(s.tenant, roles)
 	if s.asJSON {
-		return printJSON(e, map[string]any{"roles": roles, "totals": totals})
+		return printJSON(e, map[string]any{
+			"roles": roles, "totals": totals, "assign_conflicts": conflicts,
+		})
 	}
-	fmt.Fprint(e.stdout, render.Sweep(roles, totals))
+	fmt.Fprint(e.stdout, render.Sweep(roles, totals, conflicts))
 	return nil
 }
 

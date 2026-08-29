@@ -14,7 +14,7 @@ import (
 // session has ended yet" and "every session ended without distilling" is the
 // whole finding, and a renderer that collapses them reports a failure that did
 // not happen.
-func Sweep(roles []survey.Role, t survey.Totals) string {
+func Sweep(roles []survey.Role, t survey.Totals, conflicts []survey.AssignConflict) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s  %-32s  %-9s  %5s  %5s  %5s  %9s  %8s  %s\n",
 		"TENANT", "ROLE", "PHASE", "RECS", "INCS", "CLMS", "ORPH/DISCH", "CKPT/MRK", "FLAGS")
@@ -25,12 +25,28 @@ func Sweep(roles []survey.Role, t survey.Totals) string {
 			fmt.Sprintf("%d/%d", r.Checkpoints, r.Marks),
 			flags(r))
 	}
+	if len(conflicts) > 0 {
+		fmt.Fprintln(&sb, "\nassign_conflicts (detected, not prevented):")
+		for _, conflict := range conflicts {
+			fmt.Fprintf(&sb, "  %s  %s  %s\n",
+				conflict.Tenant, conflict.Work, strings.Join(conflict.Roles, ", "))
+		}
+	}
 	fmt.Fprintf(&sb, "\n%d role(s) · %d records · %d incarnation(s) · %d claim(s), %d closed\n",
 		t.Roles, t.Records, t.Incarnations, t.Claims, t.Terminals)
 	fmt.Fprintf(&sb, "distilled session ends: %s (%d checkpoint(s) of %d end(s))\n",
 		rate(t.DistillRate), t.Checkpoints, t.Checkpoints+t.Marks)
 	fmt.Fprintf(&sb, "inherited obligations discharged: %s (%d of %d orphaned)\n",
 		rate(t.DischargeRate), t.Discharged, t.Orphaned)
+	if len(conflicts) > 0 {
+		if t.Dangling+t.Late+t.Broken == 0 {
+			fmt.Fprintf(&sb, "attention: %d assign_conflict(s)\n", len(conflicts))
+			return sb.String()
+		}
+		fmt.Fprintf(&sb, "attention: %d dangling · %d late · %d chain(s) that do not fold · %d assign_conflict(s)\n",
+			t.Dangling, t.Late, t.Broken, len(conflicts))
+		return sb.String()
+	}
 	if t.Dangling+t.Late+t.Broken > 0 {
 		fmt.Fprintf(&sb, "attention: %d dangling · %d late · %d chain(s) that do not fold\n",
 			t.Dangling, t.Late, t.Broken)

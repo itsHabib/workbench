@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -171,5 +173,183 @@ func TestSweepReportsBrokenChainThroughTheCLI(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 checkpoint(s) of 1 end(s)") {
 		t.Fatalf("counts recorded before the break were lost:\n%s", out)
+	}
+	if strings.Contains(out, "assign_conflict") {
+		t.Fatalf("unrelated BROKEN attention gained a zero-conflict suffix:\n%s", out)
+	}
+}
+
+type sweepConflict struct {
+	Tenant string   `json:"tenant"`
+	Work   string   `json:"work"`
+	Roles  []string `json:"roles"`
+}
+
+type sweepReport struct {
+	AssignConflicts []sweepConflict `json:"assign_conflicts"`
+	Roles           []struct {
+		Tenant string `json:"tenant"`
+	} `json:"roles"`
+	Totals struct {
+		Roles int `json:"roles"`
+	} `json:"totals"`
+}
+
+type conflictFixture struct {
+	t     *testing.T
+	state string
+	work  string
+}
+
+func newConflictFixture(t *testing.T) conflictFixture {
+	t.Helper()
+	f := conflictFixture{t: t, state: t.TempDir(), work: "github:acme/api#88"}
+	for _, role := range []string{"lead:zeta", "lead:alpha"} {
+		f.write(role, "charter", "-scope", "github:acme/api")
+		f.write(role, "attach")
+	}
+	f.write("lead:zeta", "assign", "-work", f.work, "-pin", "zeta version", "-party", "ic:zeta")
+	f.write("lead:alpha", "assign", "-work", f.work, "-pin", "alpha version", "-party", "ic:alpha")
+	return f
+}
+
+func (f conflictFixture) write(role string, args ...string) {
+	f.t.Helper()
+	scope := []string{"-tenant", "acme", "-role", role}
+	if code, _, errOut := exec(f.t, f.state, append(args, scope...)...); code != 0 {
+		f.t.Fatalf("%s %v: exit %d: %s", role, args, code, errOut)
+	}
+}
+
+func (f conflictFixture) report() sweepReport {
+	f.t.Helper()
+	code, out, errOut := exec(f.t, f.state, "sweep", "-json", "-tenant", "acme")
+	if code != 0 {
+		f.t.Fatalf("sweep -json: exit %d: %s", code, errOut)
+	}
+	var got sweepReport
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		f.t.Fatalf("decode sweep: %v\n%s", err, out)
+	}
+	return got
+}
+
+func (f conflictFixture) text() string {
+	f.t.Helper()
+	code, out, errOut := exec(f.t, f.state, "sweep", "-tenant", "acme")
+	if code != 0 {
+		f.t.Fatalf("sweep: exit %d: %s", code, errOut)
+	}
+	return out
+}
+
+// TestSweepDetectsCrossRoleAssignmentConflicts is the executable A4 control:
+// two real chains may each admit the same URI, so their tenant sweep must say so
+// deterministically. Unassign is the explicit reconciliation.
+func TestSweepDetectsCrossRoleAssignmentConflicts(t *testing.T) {
+	f := newConflictFixture(t)
+	got := f.report()
+	if len(got.AssignConflicts) != 1 {
+		t.Fatalf("assign_conflicts = %#v, want one", got.AssignConflicts)
+	}
+	wantRoles := []string{"lead:alpha", "lead:zeta"}
+	if c := got.AssignConflicts[0]; c.Tenant != "acme" || c.Work != f.work || !slices.Equal(c.Roles, wantRoles) {
+		t.Fatalf("assign_conflict = %#v, want acme/%s owned by %v", c, f.work, wantRoles)
+	}
+	code, other, errOut := exec(t, f.state, "sweep", "-json", "-tenant", "beta")
+	if code != 0 {
+		t.Fatalf("beta sweep: exit %d: %s", code, errOut)
+	}
+	var beta sweepReport
+	if err := json.Unmarshal([]byte(other), &beta); err != nil {
+		t.Fatalf("decode beta sweep: %v", err)
+	}
+	if beta.AssignConflicts == nil || len(beta.AssignConflicts) != 0 || len(beta.Roles) != 0 || beta.Totals.Roles != 0 {
+		t.Fatalf("acme data leaked into beta sweep: %#v", beta)
+	}
+	out := f.text()
+	for _, want := range append([]string{"assign_conflicts", "1 assign_conflict(s)", f.work}, wantRoles...) {
+		if !strings.Contains(out, want) {
+			t.Fatalf("text sweep lacks %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "attention: 1 assign_conflict(s)") || strings.Contains(out, "attention: 0 dangling") {
+		t.Fatalf("conflict-only attention is noisy or incomplete:\n%s", out)
+	}
+
+	f.write("lead:alpha", "unassign", "-work", f.work)
+	got = f.report()
+	if got.AssignConflicts == nil || len(got.AssignConflicts) != 0 {
+		t.Fatalf("after unassign: assign_conflicts = %#v, want []", got.AssignConflicts)
+	}
+	out = f.text()
+	if strings.Contains(out, "assign_conflict") {
+		t.Fatalf("clean text sweep retained a conflict warning:\n%s", out)
+	}
+}
+
+// TestSweepDoesNotTraverseOtherTenants pins the tenant read boundary: a sweep
+// for acme must not depend on being able to enumerate an unrelated tenant.
+func TestSweepDoesNotTraverseOtherTenants(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:alpha"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api"}, role...)...); code != 0 {
+		t.Fatalf("charter: exit %d: %s", code, errOut)
+	}
+
+	unrelated := filepath.Join(state, "beta")
+	if err := os.Mkdir(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unrelated, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unrelated, 0o755) })
+	if _, err := os.ReadDir(unrelated); err == nil {
+		t.Skip("filesystem does not enforce an unreadable directory for this process")
+	}
+
+	code, out, errOut := exec(t, state, "sweep", "-json", "-tenant", "acme")
+	if code != 0 {
+		t.Fatalf("acme sweep traversed unreadable beta tenant: exit %d: %s", code, errOut)
+	}
+	var got sweepReport
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode sweep: %v\n%s", err, out)
+	}
+	if len(got.Roles) != 1 || got.Roles[0].Tenant != "acme" {
+		t.Fatalf("roles = %#v, want only acme", got.Roles)
+	}
+}
+
+// TestSweepMalformedTailKeepsAssignmentConflict proves a corrupt tail cannot
+// erase ownership already established by the valid prefix. The row remains
+// BROKEN, while the normal Load/write path still refuses the chain.
+func TestSweepMalformedTailKeepsAssignmentConflict(t *testing.T) {
+	f := newConflictFixture(t)
+	chain := filepath.Join(f.state, "acme", "lead--alpha", "chain.jsonl")
+	chainFile, err := os.OpenFile(chain, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chainFile.WriteString("{not-json}\n"); err != nil {
+		chainFile.Close()
+		t.Fatal(err)
+	}
+	if err := chainFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := f.report()
+	if len(got.AssignConflicts) != 1 {
+		t.Fatalf("malformed tail suppressed valid-prefix conflict: %#v", got.AssignConflicts)
+	}
+	out := f.text()
+	if !strings.Contains(out, "BROKEN") || !strings.Contains(out, "assign_conflicts") {
+		t.Fatalf("malformed chain must be both BROKEN and conflicted:\n%s", out)
+	}
+	role := []string{"-tenant", "acme", "-role", "lead:alpha"}
+	if code, _, _ := exec(t, f.state, append([]string{"note", "-body", "must not append"}, role...)...); code == 0 {
+		t.Fatal("normal write path accepted a malformed chain")
 	}
 }

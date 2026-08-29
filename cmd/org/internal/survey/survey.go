@@ -19,6 +19,7 @@
 package survey
 
 import (
+	"sort"
 	"time"
 
 	"github.com/itsHabib/workbench/contracts/org"
@@ -29,9 +30,9 @@ type Role struct {
 	Tenant string    `json:"tenant"`
 	Role   string    `json:"role"`
 	Phase  org.Phase `json:"phase"`
-	// Records is the chain LENGTH — every line on disk, including one that
-	// stopped the replay. It is deliberately not "records counted", so a
-	// BROKEN row still says how much chain exists behind the break.
+	// Records is the number of successfully decoded records supplied to replay.
+	// A decoded record that stops the fold is included; an undecodable JSON line
+	// is excluded, Err names it, and Records ends at the last decodable prefix.
 	// Incarnations counts the sessions that ever held the role (an attach or a
 	// takeover each mint one).
 	Records      int `json:"records"`
@@ -62,6 +63,11 @@ type Role struct {
 	// deadline it declared for itself.
 	LastAt string `json:"last_at,omitempty"`
 	Late   bool   `json:"late,omitempty"`
+	// Held is the last valid folded ownership set. It is carried only so a
+	// sweep across role chains can detect cross-role assignment conflicts; the
+	// top-level conflict list is the public JSON shape, so rows do not duplicate
+	// every work URI.
+	Held []string `json:"-"`
 	// Err names a chain that does not fold, so a broken chain is reported as a
 	// finding rather than failing the whole sweep.
 	Err string `json:"error,omitempty"`
@@ -109,7 +115,76 @@ func withState(r Role, state org.RoleState, now time.Time) Role {
 	r.Phase, r.Dangling, r.Degraded = state.Phase, state.Dangling, state.Degraded
 	r.OpenIntents, r.OpenEscalations = len(state.OpenIntents), len(state.OpenEscalations)
 	r.Late = late(state.NextDue, now)
+	r.Held = heldWorks(state.Held)
 	return r
+}
+
+func heldWorks(assignments []org.Assignment) []string {
+	works := make([]string, 0, len(assignments))
+	for _, assignment := range assignments {
+		works = append(works, assignment.Work)
+	}
+	return works
+}
+
+// AssignConflict is one work URI held by more than one role in a tenant.
+//
+// This is deliberately a finding, not an admission result: no single-chain
+// fold can prove global uniqueness. Roles names the chains whose last valid
+// folded state still holds the work.
+type AssignConflict struct {
+	Tenant string   `json:"tenant"`
+	Work   string   `json:"work"`
+	Roles  []string `json:"roles"`
+}
+
+// AssignConflicts detects cross-role ownership for one tenant by exact work
+// URI. URI schemes stay opaque, and requiring the tenant keeps the new work-URI
+// projection inside the caller's configured partition.
+func AssignConflicts(tenant string, roles []Role) []AssignConflict {
+	owners := make(map[string]map[string]struct{})
+	for _, role := range roles {
+		if role.Tenant != tenant {
+			continue
+		}
+		for _, work := range role.Held {
+			addOwner(owners, work, role.Role)
+		}
+	}
+
+	conflicts := make([]AssignConflict, 0)
+	for work, roles := range owners {
+		if len(roles) < 2 {
+			continue
+		}
+		conflicts = append(conflicts, AssignConflict{
+			Tenant: tenant,
+			Work:   work,
+			Roles:  sortedOwners(roles),
+		})
+	}
+	sort.Slice(conflicts, func(i, j int) bool {
+		return conflicts[i].Work < conflicts[j].Work
+	})
+	return conflicts
+}
+
+func addOwner(owners map[string]map[string]struct{}, work, role string) {
+	roles, ok := owners[work]
+	if !ok {
+		roles = make(map[string]struct{})
+		owners[work] = roles
+	}
+	roles[role] = struct{}{}
+}
+
+func sortedOwners(owners map[string]struct{}) []string {
+	roles := make([]string, 0, len(owners))
+	for role := range owners {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
 }
 
 // count folds one record's contribution, reading transitions from the state
