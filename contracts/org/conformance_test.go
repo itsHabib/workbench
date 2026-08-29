@@ -141,6 +141,9 @@ func TestSchemaPatternsAgreeWithGo(t *testing.T) {
 		{"work", s.child(t, "subject").child(t, "work").Pattern,
 			[]string{"github:acme/api#88", "jira:PROJ-412", "dossier:p/ph/t"},
 			[]string{"PROJ-412", "the api", ""}},
+		{"scope", s.child(t, "terms").child(t, "scope").Items.Pattern,
+			[]string{"github:acme/api", "jira:PROJ-", "jira:"},
+			[]string{"PROJ-412", "jira: bad", ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.what, func(t *testing.T) {
@@ -170,6 +173,8 @@ func goPattern(t *testing.T, what string) func(string) bool {
 		return digestPattern.MatchString
 	case "work":
 		return workURIPattern.MatchString
+	case "scope":
+		return scopeEntryPattern.MatchString
 	}
 	t.Fatalf("no Go grammar named %q", what)
 	return nil

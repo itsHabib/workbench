@@ -414,6 +414,10 @@ func TestIntakeRoutesWork(t *testing.T) {
 	if code, _, _ := exec(t, state, "intake", "-tenant", "acme"); code != codeError {
 		t.Fatal("intake without -work must error")
 	}
+	// A URI the kernel could never record must not be routed to a lane.
+	if code, _, errOut := exec(t, state, "intake", "-work", "jira: bad", "-tenant", "acme"); code != codeError || !strings.Contains(errOut, "not a valid work URI") {
+		t.Fatalf("malformed -work: exit %d: %s", code, errOut)
+	}
 }
 
 // TestIntakeSchemeWideScopeAndUnreadableLanes pins two review findings: a
