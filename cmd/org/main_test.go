@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/cmd/org/internal/render"
 )
 
 // exec runs one verb against a state dir and returns exit code and streams.
@@ -351,5 +353,65 @@ func TestSweepMalformedTailKeepsAssignmentConflict(t *testing.T) {
 	role := []string{"-tenant", "acme", "-role", "lead:alpha"}
 	if code, _, _ := exec(t, f.state, append([]string{"note", "-body", "must not append"}, role...)...); code == 0 {
 		t.Fatal("normal write path accepted a malformed chain")
+	}
+}
+
+// TestIntakeRoutesWork pins the intake report: in-scope lanes surface, an
+// out-of-scope hold is named as drift, an uncovered URI states the fix, and
+// the verb never writes.
+func TestIntakeRoutesWork(t *testing.T) {
+	state := t.TempDir()
+	steward := []string{"-tenant", "acme", "-role", "steward:api"}
+	rogue := []string{"-tenant", "acme", "-role", "lead:misc"}
+	must := func(args []string, verb ...string) {
+		t.Helper()
+		if code, _, errOut := exec(t, state, append(verb, args...)...); code != 0 {
+			t.Fatalf("%v %v: %s", verb, args, errOut)
+		}
+	}
+	must(steward, "charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must(rogue, "charter", "-scope", "jira:MISC-", "-tier", "T1", "-supervisor", "human:op")
+	must(rogue, "attach")
+	// assign enforces no scope (field report §4.4), so the rogue hold lands.
+	must(rogue, "assign", "-work", "github:acme/api#7", "-pin", "drift")
+
+	code, out, errOut := exec(t, state, "intake", "-work", "github:acme/api#7", "-tenant", "acme", "-json")
+	if code != 0 {
+		t.Fatalf("intake: exit %d: %s", code, errOut)
+	}
+	var got render.Intake
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode intake: %v", err)
+	}
+	if !got.Covered || len(got.Lanes) != 2 {
+		t.Fatalf("intake = %#v, want covered with two lanes", got)
+	}
+	byRole := map[string]render.IntakeLane{}
+	for _, l := range got.Lanes {
+		byRole[l.Role] = l
+	}
+	if l := byRole["steward:api"]; l.ScopeMatch != "github:acme/api" || l.Holds {
+		t.Fatalf("steward lane = %#v", l)
+	}
+	if l := byRole["lead:misc"]; l.ScopeMatch != "" || !l.Holds {
+		t.Fatalf("rogue lane = %#v", l)
+	}
+
+	_, text, _ := exec(t, state, "intake", "-work", "github:acme/api#7", "-tenant", "acme")
+	for _, want := range []string{"in scope (github:acme/api)", "OUT OF SCOPE"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("intake text lacks %q:\n%s", want, text)
+		}
+	}
+
+	_, text, _ = exec(t, state, "intake", "-work", "banana:whatever", "-tenant", "acme")
+	for _, want := range []string{"no chartered scope covers banana:whatever", "fix: charter"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("uncovered intake lacks %q:\n%s", want, text)
+		}
+	}
+
+	if code, _, _ := exec(t, state, "intake", "-tenant", "acme"); code != codeError {
+		t.Fatal("intake without -work must error")
 	}
 }

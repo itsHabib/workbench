@@ -21,6 +21,9 @@ org charter -role lead:agentic-development \
   -tier T2 -supervisor human:mh -cycle-ceiling 3 \
   -retire-when "org loop merged into steward"
 
+# new work arrives: ask where it belongs before anything is written
+org intake  -work github:itsHabib/workbench#88
+
 # a session becomes the incarnation, works, and leaves a record
 org attach  -role lead:agentic-development -next-due 4h
 org assign  -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
