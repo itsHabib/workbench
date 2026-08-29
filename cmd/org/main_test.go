@@ -645,9 +645,10 @@ func TestSweepReportsScopeDrift(t *testing.T) {
 	}
 }
 
-// TestRecharterAndAnnul pins the two kernel kinds that had no way to be
-// written: terms can be changed, and the tip can be withdrawn.
-func TestRecharterAndAnnul(t *testing.T) {
+// TestAnnulRepudiatesWithoutReverting pins what annul actually is: the fold
+// records the digest and leaves the record's effect standing, so the verb must
+// say so rather than let a caller read "annul" as "undo".
+func TestAnnulRepudiatesWithoutReverting(t *testing.T) {
 	state := t.TempDir()
 	role := []string{"-tenant", "acme", "-role", "steward:api"}
 	must := func(verb ...string) (string, string) {
@@ -660,31 +661,23 @@ func TestRecharterAndAnnul(t *testing.T) {
 	}
 	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
 	must("attach")
+	must("assign", "-work", "github:acme/api#7", "-pin", "assigned in error")
 
-	// Recharter narrows the scope, and says plainly that it replaces the block.
-	_, warn := must("recharter", "-scope", "github:acme/api/docs", "-tier", "T1", "-supervisor", "human:op")
-	if !strings.Contains(warn, "replaces the whole terms block") || !strings.Contains(warn, "was: scope [github:acme/api]") {
-		t.Fatalf("recharter did not show the replacement: %s", warn)
+	_, warn := must("annul", "-body", "wrong lane")
+	if !strings.Contains(warn, "does not revert") || !strings.Contains(warn, "held 1") {
+		t.Fatalf("annul did not report the standing effect: %s", warn)
 	}
+	// The assignment it repudiated is still held — that is the kernel's law,
+	// and the reason the warning exists.
 	_, boot, _ := exec(t, state, append([]string{"boot"}, role...)...)
-	if !strings.Contains(boot, "github:acme/api/docs") {
-		t.Fatalf("recharter did not take effect:\n%s", boot)
+	if !strings.Contains(boot, "github:acme/api#7") {
+		t.Fatalf("annul silently reverted state; the fold does not do that:\n%s", boot)
 	}
-
-	// Intake now reads the narrowed scope: the repo root falls outside it.
-	_, out, _ := exec(t, state, "intake", "-work", "github:acme/api#7", "-tenant", "acme")
-	if !strings.Contains(out, "no chartered scope covers") {
-		t.Fatalf("narrowed scope not honored by intake:\n%s", out)
+	_, log, _ := exec(t, state, append([]string{"log"}, role...)...)
+	if !strings.Contains(log, "annul") {
+		t.Fatalf("annul absent from the chain:\n%s", log)
 	}
-
-	// Annul withdraws the tip, defaulting to it rather than asking for a digest.
-	must("note", "-body", "written in error")
-	must("annul", "-body", "withdrawn: wrong lane")
-	_, out, _ = exec(t, state, append([]string{"log"}, role...)...)
-	if !strings.Contains(out, "annul") {
-		t.Fatalf("annul absent from the chain:\n%s", out)
-	}
-	// An annul naming something other than the tip is the kernel's refusal.
+	// An annul naming anything but the tip is the kernel's refusal.
 	if code, _, errOut := exec(t, state, append([]string{"annul", "-target",
 		"sha256:0000000000000000000000000000000000000000000000000000000000000000"}, role...)...); code != codeRefused || !strings.Contains(errOut, "annul_unknown") {
 		t.Fatalf("non-tip annul: exit %d: %s", code, errOut)

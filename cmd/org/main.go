@@ -52,7 +52,6 @@ func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 // read verbs never take the lock.
 var verbs = map[string]func(*env, []string) error{
 	"charter":    cmdCharter,
-	"recharter":  cmdRecharter,
 	"annul":      cmdAnnul,
 	"attach":     cmdAttach,
 	"assign":     cmdAssign,
@@ -115,7 +114,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func usage(w io.Writer) {
 	fmt.Fprintln(w, `usage: org <verb> [flags]
 
-lifecycle   charter · recharter · attach · release · retire · takeover · revoke · delegate
+lifecycle   charter · attach · release · retire · takeover · revoke · delegate
 correction  annul (withdraw the tip)
 work        assign · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
@@ -441,6 +440,15 @@ func claimable(state org.RoleState, work string) error {
 	return nil
 }
 
+// orDashText renders an empty string as a dash, so an absent value reads as
+// absent rather than as a gap in the line.
+func orDashText(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
 // held reports the index of a work URI in a state's held set, or -1.
 func held(state org.RoleState, work string) int {
 	for i, a := range state.Held {
@@ -490,9 +498,9 @@ func printJSON(e *env, v any) error {
 }
 
 // termsFlags registers the charter-terms flags on a scope and returns the
-// builder that assembles them. Charter and recharter share it because the terms
-// vocabulary is one thing: a recharter that could only express a subset would
-// silently narrow a role every time it ran.
+// builder that assembles them. It is its own function so the terms vocabulary
+// lives in one place for the second writer this chain needs and does not yet
+// safely have (see FOLLOWUPS: recharter).
 func termsFlags(s *scope) func() *org.Terms {
 	var scopes, supervisors, effects multi
 	tier := s.fs.String("tier", "", "risk tier ceiling, e.g. T2")
@@ -524,38 +532,20 @@ func cmdCharter(e *env, args []string) error {
 	return appendAndReport(e, h, s, home.Draft{Kind: org.KindCharter, Terms: terms()})
 }
 
-// cmdRecharter changes a role's inherited terms. The terms it writes are the
-// WHOLE new terms, not a patch: the kernel replaces Terms wholesale on this
-// kind, so an unstated flag narrows the role rather than leaving it alone.
-// Printing the terms being replaced is the cheapest guard against that, since
-// the operator sees the before and after in one place.
-func cmdRecharter(e *env, args []string) error {
-	s := newScope("recharter")
-	terms := termsFlags(s)
-	h, err := s.open(args, true)
-	if err != nil {
-		return err
-	}
-	_, state, err := h.Load(s.tenant, s.role)
-	if err != nil {
-		return err
-	}
-	next := terms()
-	fmt.Fprintf(e.stderr, "recharter replaces the whole terms block, it does not patch it\n")
-	fmt.Fprintf(e.stderr, "  was: scope %v · tier %s · supervisors %v\n",
-		state.Terms.Scope, state.Terms.Tier, state.Terms.Supervisors)
-	fmt.Fprintf(e.stderr, "  now: scope %v · tier %s · supervisors %v\n",
-		next.Scope, next.Tier, next.Supervisors)
-	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRecharter, Terms: next})
-}
-
-// cmdAnnul withdraws the record at the tip. The kernel admits an annul only
-// against the tip, because a fold can verify nothing else — so this reads the
-// tip itself rather than asking the caller to copy a digest correctly.
+// cmdAnnul repudiates the record at the tip. It does NOT revert it: the fold
+// appends the digest to Annulled and leaves Terms, Held, Active and NextDue
+// exactly as that record left them, because an append-only chain corrects
+// forward. So this verb records the repudiation and says plainly which effect
+// is still standing — a caller who reads "annul" as "undo" would otherwise
+// walk away believing state changed.
+//
+// The kernel admits an annul only against the tip, because a fold can verify
+// nothing else, so -target defaults to the tip rather than asking the caller
+// to copy a digest correctly.
 func cmdAnnul(e *env, args []string) error {
 	s := newScope("annul")
-	target := s.fs.String("target", "", "digest of the record to withdraw (default: the tip)")
-	text := s.fs.String("body", "", `why it is withdrawn ("-" reads stdin)`)
+	target := s.fs.String("target", "", "digest of the record to repudiate (default: the tip)")
+	text := s.fs.String("body", "", `why it is repudiated ("-" reads stdin)`)
 	h, err := s.open(args, true)
 	if err != nil {
 		return err
@@ -564,13 +554,17 @@ func cmdAnnul(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
 	if *target == "" {
-		_, state, err := h.Load(s.tenant, s.role)
-		if err != nil {
-			return err
-		}
 		*target = state.Tip
 	}
+	fmt.Fprintf(e.stderr, "annul records a repudiation; it does not revert the record's effect\n")
+	fmt.Fprintf(e.stderr, "  still standing: phase %s · held %d · active %s · next-due %s\n",
+		state.Phase, len(state.Held), orDashText(state.Active), orDashText(state.NextDue))
+	fmt.Fprintf(e.stderr, "  correct it forward with the verb that undoes it (unassign, yield, a new assign)\n")
 	return appendAndReport(e, h, s, home.Draft{
 		Kind: org.KindAnnul, Subject: org.Subject{Target: *target}, Body: b,
 	})

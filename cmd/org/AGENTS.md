@@ -30,11 +30,14 @@ system name there is Baton; this binary is its first runtime slice.
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
   `intake` (where does this work belong), `sweep`, `log`, `verify`, `blob`.
-- **`recharter`** replaces the WHOLE terms block (the kernel swaps Terms
-  wholesale on that kind), so an unstated flag narrows the role; the verb
-  prints the before/after scope, tier and supervisors to stderr. **`annul`**
-  withdraws the tip, defaulting `-target` to it because the kernel admits an
-  annul against nothing else.
+- **`annul`** repudiates the tip; it does NOT revert it. The fold appends the
+  digest to `Annulled` and leaves `Terms`, `Held`, `Active` and `NextDue` as
+  that record left them — an append-only chain corrects forward — so the verb
+  prints the effect still standing and the verb that would undo it. `-target`
+  defaults to the tip, the only record a fold can verify. There is deliberately
+  no `recharter` verb: changing terms can WIDEN authority and the kernel has no
+  parent-authority check and no tier ordering to verify attenuation with (see
+  FOLLOWUPS).
 - **Composites** `begin` and `done` bracket small work (field report §4.2):
   `begin -work <uri>` attaches when unheld, assigns when unassigned (only
   then requiring `-pin`/`-digest`), and claims — one command, the same

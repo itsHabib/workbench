@@ -2,6 +2,45 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## org: recharter has no writer, because widening authority has no check
+
+`KindRecharter` is kernel-admissible and its own doc says it is "authored under
+the parent charter", but nothing enforces that: `checkRecharter` verifies only
+that `min_reader` is monotone, and `checkWriter` accepts the current holder's
+own incarnation. A CLI verb was written and then withdrawn from #272 on that
+finding — exposing it would let a role raise its own tier, add effect classes,
+lift its ceilings, drop the supervisors that may take it over, or widen its
+scope, all self-signed.
+
+Two things are missing, and the second is why the obvious guard does not work:
+
+1. **Parent authority.** There is no mechanism for a record to be authorized by
+   another role. `takeover` names a `party` and `checkTakeover` verifies it
+   against `Terms.Supervisors`, so the shape exists; recharter needs the same,
+   plus the operator-facing question of who the parent is for a top-level role.
+2. **Attenuation the kernel can verify.** Effect classes (subset), supervisors
+   (no shrink) and scope (every new entry covered by the old) are checkable.
+   `Tier` is an opaque string — the kernel imposes no ordering, so it cannot
+   tell T1→T3 from T3→T1 — and the ceilings have no consumer, so whether 0
+   means "none" or "unlimited" is undecided. A law refusing what it cannot
+   compare would have to freeze tier entirely.
+
+Until both exist, terms are set once at charter. A role whose terms are wrong
+is retired and re-chartered, which is visible in the chain rather than
+self-signed inside it.
+
+## org: annul is a repudiation, not a revert
+
+`applyStructural` appends the annulled digest to `Annulled` and changes nothing
+else: `Terms`, `Held`, `Active` and `NextDue` still carry whatever the annulled
+record did. That is consistent with an append-only chain (correct forward), and
+`org annul` now prints the effect still standing so the verb cannot be misread
+as undo. What is undecided is whether a reader should SKIP annulled records
+when folding. It cannot be done in one pass — a record's annulment is only
+known after it has been applied — so it would mean a two-pass fold, and it
+would change the derived state of every existing chain that carries an annul.
+Worth deciding before anything depends on `Annulled` for more than reporting.
+
 ## org: scope membership cannot become an admission law as the kernel stands
 
 The field report (§4.4) proved `assign` enforces no scope at all: a lane
