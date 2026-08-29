@@ -115,7 +115,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `usage: org <verb> [flags]
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
-correction  annul (withdraw the tip)
+correction  annul (repudiate the tip; corrects forward, does not revert)
 work        assign · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
 obligations intent · resolve · escalate · seal

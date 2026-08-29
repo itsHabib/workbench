@@ -336,6 +336,15 @@ func checkTransition(state RoleState, r Record) error {
 // above this one is refused whole: interpreting part of it is how an old reader
 // skips a takeover and concludes it still holds the role.
 func checkCharter(r Record) error {
+	// The schema declares min_reader >= 0 and the Go side did not, so a
+	// negative value produced a record this kernel accepted and every other
+	// reader of the contract must reject. Nothing in the wild can carry one:
+	// min_reader had no writer that could set it — every charter written so
+	// far hardcoded 1 — so closing the drift refuses no existing chain.
+	if r.Terms.MinReader < 0 {
+		return refuse(ReasonMinReader, r.Seq,
+			"min_reader %d is negative; the contract's floor is 0", r.Terms.MinReader)
+	}
 	if r.Terms.MinReader > Version {
 		return refuse(ReasonMinReader, r.Seq,
 			"chain requires reader version %d, this reader is %d; upgrade", r.Terms.MinReader, Version)

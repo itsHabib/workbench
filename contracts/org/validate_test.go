@@ -268,3 +268,18 @@ func TestReasonsPartition(t *testing.T) {
 		}
 	}
 }
+
+// TestCharterRefusesNegativeMinReader closes a schema/Go drift: the document
+// declares min_reader >= 0 and the fold did not, so a negative value produced a
+// record this kernel accepted and every other reader of the contract rejects.
+func TestCharterRefusesNegativeMinReader(t *testing.T) {
+	r := Record{
+		V: 1, Scheme: Scheme, Seq: 1, Tenant: "acme", Role: "lead:x",
+		Kind: KindCharter, KindClass: ClassStructural,
+		Terms: &Terms{Scope: []string{"github:acme/api"}, MinReader: -1},
+	}
+	_, err := Advance(RoleState{}, r)
+	if RefusalReason(err) != ReasonMinReader {
+		t.Fatalf("negative min_reader: err = %v, want %s", err, ReasonMinReader)
+	}
+}
