@@ -24,6 +24,10 @@ org charter -role lead:agentic-development \
 # new work arrives: ask where it belongs before anything is written
 org intake  -work github:itsHabib/workbench#88
 
+# small work, bracketed by the composites: same records, two commands
+org begin -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
+org done  -role lead:agentic-development -body "where it ended up"
+
 # a session becomes the incarnation, works, and leaves a record
 org attach  -role lead:agentic-development -next-due 4h
 org assign  -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"

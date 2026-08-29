@@ -59,7 +59,9 @@ var verbs = map[string]func(*env, []string) error{
 	"yield":      cmdWork(org.KindYield),
 	"complete":   cmdWork(org.KindComplete),
 	"abandon":    cmdWork(org.KindAbandon),
-	"release":    cmdBare(org.KindRelease),
+	"release":    cmdRelease,
+	"begin":      cmdBegin,
+	"done":       cmdDone,
 	"retire":     cmdBare(org.KindRetire),
 	"seal":       cmdBare(org.KindSeal),
 	"takeover":   cmdParty(org.KindTakeover),
@@ -113,6 +115,7 @@ func usage(w io.Writer) {
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
 work        assign · unassign · claim · yield · complete · abandon
+composite   begin (attach+assign+claim) · done (claim?+complete+release)
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
 read        boot · intake · status · sweep · log · verify · blob
@@ -205,6 +208,214 @@ type receipt struct {
 	Dangling string    `json:"dangling,omitempty"`
 	Held     int       `json:"held"`
 	Fence    int64     `json:"fence"`
+}
+
+// cmdRelease is cmdBare(release) plus the warning §4.3 asked for: releasing
+// while still holding unfinished work is the moment the wrong exit verb is
+// detectable, so say so — on stderr, without blocking, because pausing a
+// lane (yield then release) is legitimate and only the operator knows.
+func cmdRelease(e *env, args []string) error {
+	s := newScope("release")
+	text := s.fs.String("body", "", `narrative body ("-" reads stdin)`)
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	b, err := body(e, *text)
+	if err != nil {
+		return err
+	}
+	_, state, loadErr := h.Load(s.tenant, s.role)
+	if n := len(state.Held); loadErr == nil && n > 0 {
+		fmt.Fprintf(e.stderr, "warning: releasing while still holding %d item(s); finished work exits via complete (or done), yield means pausing\n", n)
+	}
+	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRelease, Body: b})
+}
+
+// step appends one record inside a composite verb, honoring strict identity
+// exactly as appendAndReport does, and returns the receipt for the roll-up.
+func step(h *home.Home, s *scope, d home.Draft) (receipt, org.RoleState, error) {
+	if d.Incarnation == "" {
+		d.Incarnation = s.incarnation
+	}
+	if s.strict && d.Incarnation == "" && !home.MintsIdentity(d.Kind) {
+		return receipt{}, org.RoleState{}, fmt.Errorf("strict mode: %s requires -incarnation (or ORG_INCARNATION); writing as the holder is disabled", d.Kind)
+	}
+	r, state, err := h.Append(s.tenant, s.role, d)
+	if err != nil {
+		return receipt{}, state, err
+	}
+	digest, err := org.DigestOf(r)
+	if err != nil {
+		return receipt{}, state, err
+	}
+	return receipt{
+		Kind: r.Kind, Seq: r.Seq, Digest: digest, Phase: state.Phase,
+		Tip: state.Tip, Holder: state.Holder, Active: state.Active,
+		Dangling: state.Dangling, Held: len(state.Held), Fence: state.Fence,
+	}, state, nil
+}
+
+// reportSteps renders a composite's receipts: one line per record, or the
+// receipt array under -json.
+func reportSteps(e *env, s *scope, steps []receipt) error {
+	if s.asJSON {
+		return printJSON(e, map[string]any{"steps": steps})
+	}
+	for _, r := range steps {
+		fmt.Fprintf(e.stdout, "%s seq %d %s (phase %s)\n", r.Kind, r.Seq, r.Digest, r.Phase)
+	}
+	return nil
+}
+
+// cmdBegin brackets the entry of small work: attach when the role is
+// unheld, assign when the work is unassigned (only then requiring a pin),
+// claim. The field report's §4.2 finding — seven bookkeeping writes around
+// twenty minutes of work — answered without weakening anything: the same
+// records land on the chain, one command writes them.
+func cmdBegin(e *env, args []string) error {
+	s := newScope("begin")
+	work := s.fs.String("work", "", "work URI to begin")
+	digest := s.fs.String("digest", "", "content digest pinning the work item (sha256:…), when it needs assigning")
+	pin := s.fs.String("pin", "", "text to pin instead of -digest, when it needs assigning")
+	due := s.fs.Duration("next-due", 0, "declare the next append deadline, e.g. 90m")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *work == "" {
+		return fmt.Errorf("-work is required")
+	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	if held(state, *work) < 0 && *digest == "" && *pin == "" {
+		return fmt.Errorf("-digest or -pin is required: %s is not yet assigned, and an unpinned assignment cannot detect drift", *work)
+	}
+	var steps []receipt
+	inc := s.incarnation
+	if state.Holder == "" {
+		d := home.Draft{Kind: org.KindAttach}
+		if *due > 0 {
+			d.NextDue = time.Now().Add(*due)
+		}
+		r, st, err := step(h, s, d)
+		if err != nil {
+			return err
+		}
+		steps, state, inc = append(steps, r), st, st.Holder
+	}
+	if held(state, *work) < 0 {
+		if *digest == "" {
+			*digest = org.DigestBytes([]byte(*pin))
+		}
+		r, st, err := step(h, s, home.Draft{
+			Kind:        org.KindAssign,
+			Subject:     org.Subject{Work: *work, Digest: *digest},
+			Incarnation: inc,
+		})
+		if err != nil {
+			return err
+		}
+		steps, state = append(steps, r), st
+	}
+	r, _, err := step(h, s, home.Draft{
+		Kind: org.KindClaim, Subject: org.Subject{Work: *work}, Incarnation: inc,
+	})
+	if err != nil {
+		return err
+	}
+	return reportSteps(e, s, append(steps, r))
+}
+
+// cmdDone brackets the exit of finished work: claim when the item is held
+// but unclaimed (§4.3's uncompletable trap — the claim is inferred, on the
+// chain, instead of hand-reconstructed), complete, release. The kernel's
+// no-claim law stands untouched; the composite writes the claim it implies.
+func cmdDone(e *env, args []string) error {
+	s := newScope("done")
+	work := s.fs.String("work", "", "work URI to finish (optional when one is active or exactly one is held)")
+	text := s.fs.String("body", "", `narrative body for the complete ("-" reads stdin)`)
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	b, err := body(e, *text)
+	if err != nil {
+		return err
+	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	target, err := doneTarget(state, *work)
+	if err != nil {
+		return err
+	}
+	var steps []receipt
+	var inc string
+	if state.Holder == "" {
+		r, st, err := step(h, s, home.Draft{Kind: org.KindAttach})
+		if err != nil {
+			return err
+		}
+		steps, state, inc = append(steps, r), st, st.Holder
+	}
+	if state.Active == "" {
+		r, st, err := step(h, s, home.Draft{Kind: org.KindClaim, Subject: org.Subject{Work: target}, Incarnation: inc})
+		if err != nil {
+			return err
+		}
+		steps, state = append(steps, r), st
+	}
+	r, state, err := step(h, s, home.Draft{
+		Kind: org.KindComplete, Subject: org.Subject{Work: target}, Body: b,
+		Incarnation: inc,
+	})
+	if err != nil {
+		return err
+	}
+	steps = append(steps, r)
+	if n := len(state.Held); n > 0 {
+		fmt.Fprintf(e.stderr, "warning: %d other item(s) still held; they stay assigned across the release\n", n)
+	}
+	r, _, err = step(h, s, home.Draft{Kind: org.KindRelease, Incarnation: inc})
+	if err != nil {
+		return err
+	}
+	return reportSteps(e, s, append(steps, r))
+}
+
+// doneTarget resolves which work item done finishes: the explicit -work, the
+// active claim, or the single held item — refusing to guess between several.
+func doneTarget(state org.RoleState, work string) (string, error) {
+	if work != "" {
+		if state.Active != "" && state.Active != work {
+			return "", fmt.Errorf("%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
+		}
+		if state.Active != work && held(state, work) < 0 {
+			return "", fmt.Errorf("%s is not held by this role; nothing to finish", work)
+		}
+		return work, nil
+	}
+	if state.Active != "" {
+		return state.Active, nil
+	}
+	if len(state.Held) == 1 {
+		return state.Held[0].Work, nil
+	}
+	return "", fmt.Errorf("-work is required: %d items held, none active", len(state.Held))
+}
+
+// held reports the index of a work URI in a state's held set, or -1.
+func held(state org.RoleState, work string) int {
+	for i, a := range state.Held {
+		if a.Work == work {
+			return i
+		}
+	}
+	return -1
 }
 
 // appendAndReport applies the identity policy, appends one draft, and prints
