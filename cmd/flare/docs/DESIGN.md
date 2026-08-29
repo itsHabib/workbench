@@ -164,6 +164,38 @@ their own shapes; `decision`/`tier` are never required of them.
     **not** carry make this a join rather than a read: the grant's ceilings and the verdict's
     tier. An additive `ceilings: {verdict_tier, grant_tier, cycles_used, cycles_max}` on the
     escalation body would make it a read — noted for gate in *Integration edges* below.
+  - **Card lifecycle: a card must reflect the park's current state.** A card is a snapshot,
+    and a snapshot of a parked escalation is stale the moment the park resolves. gate's inbox
+    reduces parked runs **by subject** — only the latest terminal artifact per `repo#PR` is
+    still parked — so a re-park, a merge, or a keyboard `gate judge` silently drops an older
+    park out of the inbox while its Approve button stays live in Slack. Tapping one then fails
+    with `escalation is not currently parked: esc_… not in gate inbox`, which reads as a broken
+    tool rather than a card that moved on. Two taps died that way on 2026-08-21.
+
+    flare records the message ref (`channel`+`ts`) of every park card it posts, in its own
+    journal, and closes that card when a terminal fact appears in the log:
+
+    | artifact | closes the card as |
+    |---|---|
+    | `judgment` parented to the escalation | approved / blocked, by whoever decided |
+    | `resolution` parented to the escalation | same, with the **verified** Slack identity |
+    | `action` with `would_merge` | merge authorized, with the pinned `--match-head-commit` sha |
+    | a **newer escalation for the same subject** | superseded — closed *before* the new card posts |
+
+    Closing a card removes the resolve buttons, states the outcome and who decided, and posts
+    the outcome as a **thread reply** — because today a successful tap and a silently failed
+    one look identical once the ack fades. The sha is labeled *authorized*, never *merged*:
+    gate's action records the merge command and the exact head it pins, but the merge is run by
+    the caller and gate keeps no receipt that one landed.
+
+    These terminal artifacts are a second **event class** (`ClassUpdate`): they are APPLIED to
+    a card, never routed. Routing them would page the operator for every judgment gate records
+    (237 in the live ledger). An update with no live card settles as handled — flare may have
+    started after the park was paged. A card already closed is not closed again; the index is
+    replayed from the journal, so a restart does not strand live cards.
+
+    Still a sink: every fact above was written by gate, and correcting a card writes nothing
+    anywhere but Slack and flare's own journal.
 - `toast` — Windows toast via `powershell.exe` 5.1 WinRT (`ToastNotificationManager`).
   Verified on this box 2026-07-08; pwsh 7 cannot project WinRT types, so the shell-out targets
   `powershell.exe` explicitly. Zero config.

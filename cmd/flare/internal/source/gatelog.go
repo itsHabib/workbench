@@ -62,6 +62,9 @@ func gateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event
 	if env.Kind == contracts.KindEscalation {
 		return escalationEvent(src, env, lg), true, nil
 	}
+	if ev, ok := updateEvent(src, env, lg); ok {
+		return ev, true, nil
+	}
 	v, ok, err := env.Verdict()
 	if err != nil {
 		return event.Event{}, false, fmt.Errorf("verdict %s: %w", env.ID, err)
@@ -232,4 +235,184 @@ func verdictFields(env contracts.Envelope, v contracts.Verdict) map[string]strin
 		fields["dimension"] = v.Source
 	}
 	return fields
+}
+
+// --- card updates ------------------------------------------------------------
+
+// updateEvent lifts a gate artifact that CLOSES a park into a ClassUpdate
+// event. These are not pages — routing them would notify the operator for every
+// judgment gate ever records — they are the current state of a card already
+// delivered, applied to it so a resolved park stops showing live Approve
+// buttons.
+//
+// Three artifacts close a park, matching the three ways one actually ends:
+//
+//   - a JUDGMENT parented to the escalation — a keyboard `gate judge`, or the
+//     judgment a Slack tap produced;
+//   - a RESOLUTION parented to the escalation — the back-channel's stamp, which
+//     carries the verified human identity;
+//   - an ACTION with a merge outcome — the run reached authorization, which in
+//     gate's inbox also resolves older parked attempts for the same PR.
+//
+// Each names a SUBJECT ("repo#n"), not just an escalation, because that is how
+// gate's inbox reduces: only the latest terminal per subject stays parked, so a
+// terminal artifact closes every older card for that PR too.
+func updateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event.Event, bool) {
+	fields, ok := updateFields(env, lg)
+	if !ok {
+		return event.Event{}, false
+	}
+	return event.Event{
+		Class:    event.ClassUpdate,
+		Source:   src.Name,
+		ID:       env.ID,
+		Kind:     "card-update",
+		Time:     env.Time,
+		Severity: event.SevInfo,
+		Title:    fmt.Sprintf("%s: %s#%s %s", src.Name, fields["repo"], fields["number"], fields["outcome"]),
+		Fields:   fields,
+	}, true
+}
+
+func updateFields(env contracts.Envelope, lg *lazyLedger) (map[string]string, bool) {
+	switch env.Kind {
+	case contracts.KindJudgment:
+		return judgmentUpdate(env, lg)
+	case contracts.KindResolution:
+		return resolutionUpdate(env, lg)
+	case contracts.KindAction:
+		return mergeUpdate(env, lg)
+	}
+	return nil, false
+}
+
+// judgmentBody is the slice of a judgment a card update reads.
+//
+// Who is consumed DEFENSIVELY: gate is adding a `who` to its decisions, and an
+// artifact written before that lands simply omits it. An absent Who falls back
+// to the producer's impl ("operator" for a keyboard judge), so an old record
+// still renders a truthful card rather than an empty one.
+type judgmentBody struct {
+	Decision string `json:"decision"`
+	Why      string `json:"why"`
+	Who      string `json:"who"`
+	Producer struct {
+		Impl string `json:"impl"`
+	} `json:"producer"`
+}
+
+func judgmentUpdate(env contracts.Envelope, lg *lazyLedger) (map[string]string, bool) {
+	esc := parkParent(env)
+	if esc == "" {
+		return nil, false
+	}
+	var b judgmentBody
+	if err := json.Unmarshal(env.Body, &b); err != nil {
+		return nil, false
+	}
+	return updateMap(lg, esc, env.Run, b.Decision, judgeWho(lg, esc, b)), true
+}
+
+// judgeWho names the decider. It prefers the identity a RESOLUTION recorded for
+// the same park — the verified human Slack authenticated — because gate writes
+// the judgment first and its body names only the producer. Then gate's own
+// `who` field on the judgment (additive; absent on an artifact written before
+// it lands), then the producer's impl. It never invents one.
+//
+// The resolution lookup works because the LEDGER IS BUILT FROM THE WHOLE FILE,
+// not the new-since-cursor slice (see newLazyLedger's call site in source.go):
+// gate writes a park's terminal artifacts as one transaction, so the resolution
+// is already indexed when the judgment that precedes it is turned into an
+// event. Narrowing the ledger to the unread tail would silently degrade this to
+// the producer's impl — a rename in an audit trail, not a crash — so the
+// dependency is stated here rather than left to be rediscovered.
+func judgeWho(lg *lazyLedger, esc string, b judgmentBody) string {
+	if who := lg.get().resolvedWho(esc); who != "" {
+		return who
+	}
+	if b.Who != "" {
+		return b.Who
+	}
+	return b.Producer.Impl
+}
+
+func resolutionUpdate(env contracts.Envelope, lg *lazyLedger) (map[string]string, bool) {
+	esc := parkParent(env)
+	if esc == "" {
+		return nil, false
+	}
+	var b escalation.Resolution
+	if err := json.Unmarshal(env.Body, &b); err != nil {
+		return nil, false
+	}
+	return updateMap(lg, esc, env.Run, b.Decision, b.Who), true
+}
+
+// mergeUpdate closes a card on the merge authorization: the run reached an
+// action, so nothing about that PR is awaiting judgment any more. The subject
+// comes from the action's parent verdict — an action body names no PR.
+//
+// An action with no recorded `--match-head-commit` yields NO update at all, and
+// that is the intended degradation rather than an oversight: this path exists
+// to add the pinned head, and a card with no head to add is already closed by
+// the judgment or resolution for the same park, which always carries one. The
+// worst case is a closed card missing its sha line — never a stale card.
+func mergeUpdate(env contracts.Envelope, lg *lazyLedger) (map[string]string, bool) {
+	if len(env.Parents) == 0 {
+		return nil, false
+	}
+	l := lg.get()
+	repo, number := l.subjectFromVerdict(env.Parents[0])
+	sha := l.mergeSHA(env.Run)
+	if repo == "" || number == 0 || sha == "" {
+		return nil, false
+	}
+	return map[string]string{
+		"repo":    repo,
+		"number":  strconv.Itoa(number),
+		"run":     env.Run,
+		"outcome": event.OutcomeMergeAuthorized,
+		"sha":     sha,
+	}, true
+}
+
+// parkParent returns the escalation a terminal artifact closes. gate parents a
+// judgment and a resolution to the escalation FIRST, so Parents[0] is the join;
+// an artifact whose first parent is not an escalation closes no card.
+func parkParent(env contracts.Envelope) string {
+	if len(env.Parents) == 0 || !strings.HasPrefix(env.Parents[0], "esc_") {
+		return ""
+	}
+	return env.Parents[0]
+}
+
+func updateMap(lg *lazyLedger, esc, run, decision, who string) map[string]string {
+	l := lg.get()
+	repo, number := l.subjectOf(esc)
+	fields := map[string]string{
+		"escalation": esc,
+		"run":        run,
+		"outcome":    decisionOutcome(decision),
+	}
+	if repo != "" && number > 0 {
+		fields["repo"] = repo
+		fields["number"] = strconv.Itoa(number)
+	}
+	if who != "" {
+		fields["who"] = who
+	}
+	if sha := l.mergeSHA(run); sha != "" {
+		fields["sha"] = sha
+	}
+	return fields
+}
+
+func decisionOutcome(decision string) string {
+	if decision == escalation.DecisionBlock {
+		return event.OutcomeBlocked
+	}
+	if decision == escalation.DecisionPass {
+		return event.OutcomeApproved
+	}
+	return event.OutcomeDecided
 }

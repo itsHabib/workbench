@@ -275,6 +275,11 @@ func checkTerms(r Record, law subjectLaw) error {
 	return checkScope(r)
 }
 
+// ValidWorkURI reports whether s is a well-formed subject work URI — the
+// grammar admission applies to Subject.Work. Exported so read verbs (intake)
+// can refuse to route a URI the kernel could never record.
+func ValidWorkURI(s string) bool { return workURIPattern.MatchString(s) }
+
 // checkScope enforces L1's precondition: there is no unscoped role. A charter
 // whose scope names no work reference would produce an incarnation that exists
 // without owned work, which the state machine has no state for.

@@ -725,6 +725,9 @@ func cmdIntake(e *env, args []string) error {
 	if *work == "" {
 		return fmt.Errorf("-work is required")
 	}
+	if !org.ValidWorkURI(*work) {
+		return fmt.Errorf("-work %q is not a valid work URI (scheme:reference); the kernel could never record it", *work)
+	}
 	pairs, err := h.RolesForTenant(s.tenant)
 	if err != nil {
 		return err
