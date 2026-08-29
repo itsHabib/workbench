@@ -63,28 +63,36 @@ func Reconcile(stateRoot, runID string) (ReconcileOutcome, error) {
 	return reconcileControllerLost(run, runID, cleanup)
 }
 
+// reconcileAlreadyTerminal reads the journal BEFORE result.json — the reverse
+// of the writer's order (result temp+Sync+rename, then the run_terminal
+// append). This pre-check runs before the claim is taken, so a concurrent
+// reconciler may commit between its two reads; reading in the writer's own
+// order lets that interleaving synthesize a terminal-without-result state that
+// never existed on disk. Observing run_terminal first proves the rename that
+// precedes it already landed, so the result read below cannot miss it and the
+// corrupt-state verdict stays a statement about durable state.
 func reconcileAlreadyTerminal(run state.RunDir) (ReconcileOutcome, bool, error) {
-	res, hasResult, err := readResultIfPresent(run)
-	if err != nil {
-		return ReconcileOutcome{}, true, err
-	}
 	term, err := HistoryTerminal(run)
 	if err != nil {
 		return ReconcileOutcome{}, true, err
 	}
-	if term && hasResult {
-		return ReconcileOutcome{
-			NoOp:     true,
-			Result:   &res,
-			ExitCode: ExitFromResult(res),
-		}, true, nil
+	if !term {
+		return ReconcileOutcome{}, false, nil
 	}
-	if term {
+	res, hasResult, err := readResultIfPresent(run)
+	if err != nil {
+		return ReconcileOutcome{}, true, err
+	}
+	if !hasResult {
 		// Terminal journal without result is corrupt — do not append a second
 		// run_terminal or invent a receipt (run_terminal-is-final invariant).
 		return ReconcileOutcome{}, true, fmt.Errorf("controller: corrupt run state: terminal journal without result")
 	}
-	return ReconcileOutcome{}, false, nil
+	return ReconcileOutcome{
+		NoOp:     true,
+		Result:   &res,
+		ExitCode: ExitFromResult(res),
+	}, true, nil
 }
 
 // assertControllerAbsentOrReused fails when the recorded controller identity

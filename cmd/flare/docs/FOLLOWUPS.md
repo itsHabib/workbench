@@ -21,7 +21,27 @@ Tracked here per portfolio convention (status doc, not issues).
    prefix. flare will match the title prefix as a stopgap and wants to delete
    that matcher.
 
+4. **gate agent — carry a park's ceilings on the escalation body.** flare
+   pre-flights the Approve button by joining the park's `grant` and `verdict`
+   ids back to their artifacts; `verdict_tier`, `grant_tier`, `cycles_used` and
+   `cycles_max` on the body would turn that join into a read. gate already
+   computes all four (`gateResult.CyclesUsed`/`CyclesMax` since #242), so it is
+   a write-side field, not new logic. Until then flare consumes them
+   defensively: an absent field is an old record and renders as before.
+
 ## Parked (with triggers)
+
+- **Narrow the cycle pre-flight's fail-open.** `ledger.cycles` reports "cannot
+  say" for EVERY subject if any single outcome in the log has a dangling parent
+  verdict — the scan cannot attribute an outcome without the parent it is
+  missing, so one bad line disables the cycle check globally. Raised as a P3 on
+  #247 and accepted: the direction is safe (uncertainty renders the ordinary
+  card, and gate re-applies the ceiling at judgment regardless), and the
+  measured join rate on the live ledger is 100% of 332 parks — a fail-open on a
+  case that does not currently occur. *Trigger:* a real log grows a dangling
+  parent, or the ceilings land on the escalation body (ask #4 above), which
+  removes the join entirely.
+
 
 - **`notified` artifact in State** — trigger: `explain` demonstrably needs
   delivery facts to reconstruct a decision.

@@ -75,6 +75,20 @@ func run(verb, cfgPath, stateDir string, fromStart bool) int {
 	return 2
 }
 
+// courier is the delivery seam the cycle uses: post a card, and correct one
+// already posted. It is a struct of two functions rather than an interface
+// because the cycle needs exactly these two calls and nothing else — the
+// narrowest input that does the job. liveCourier is the production wiring; a
+// test substitutes its own to drive the orchestration without a live Slack.
+type courier struct {
+	send     func(config.Channel, event.Event) (notify.Ref, error)
+	finalize func(config.Channel, notify.Ref, event.Event) error
+}
+
+func liveCourier() courier {
+	return courier{send: notify.Send, finalize: notify.Finalize}
+}
+
 func watch(cfg config.Config, j *journal.Journal, fromStart bool) int {
 	release, err := j.LockWatch()
 	if err != nil {
@@ -84,7 +98,7 @@ func watch(cfg config.Config, j *journal.Journal, fromStart bool) int {
 	defer release()
 	r := route.New(cfg, time.Now)
 	for {
-		if err := cycle(cfg, j, r, fromStart); err != nil {
+		if err := cycle(cfg, j, r, liveCourier(), fromStart); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		time.Sleep(time.Duration(cfg.PollSeconds) * time.Second)
@@ -98,7 +112,7 @@ func sweep(cfg config.Config, j *journal.Journal, fromStart bool) int {
 		return 3
 	}
 	defer release()
-	if err := cycle(cfg, j, route.New(cfg, time.Now), fromStart); err != nil {
+	if err := cycle(cfg, j, route.New(cfg, time.Now), liveCourier(), fromStart); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -115,12 +129,19 @@ func sweep(cfg config.Config, j *journal.Journal, fromStart bool) int {
 // means flare has never looked at it, which is a different fact from a cursor
 // deliberately reset to offset 0 (a resweep), and the two must not be confused
 // — the first is fresh state, the second is recovery.
-func cycle(cfg config.Config, j *journal.Journal, r *route.Router, fromStart bool) error {
+func cycle(cfg config.Config, j *journal.Journal, r *route.Router, co courier, fromStart bool) error {
 	seen, err := j.Seen()
 	if err != nil {
 		return err
 	}
-	cur, err := recoverCorruptCursors(cfg, j, r)
+	// The cards still standing in Slack, replayed from the journal so a restart
+	// does not lose track of what the operator is looking at. It is mutated
+	// through the cycle: a new park adds one, a terminal fact removes one.
+	cards, err := j.LiveCards()
+	if err != nil {
+		return err
+	}
+	cur, err := recoverCorruptCursors(cfg, j, r, co)
 	if err != nil {
 		return err
 	}
@@ -131,7 +152,7 @@ func cycle(cfg config.Config, j *journal.Journal, r *route.Router, fromStart boo
 			failed = append(failed, src.Name)
 			continue
 		}
-		next, err := pollSource(cfg, j, r, src, cur.Sources[src.Name], seen)
+		next, err := pollSource(cfg, j, r, co, src, cur.Sources[src.Name], seen, cards)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "flare: %v\n", err)
 			failed = append(failed, src.Name)
@@ -218,12 +239,12 @@ func firstCursor(src config.Source, fromStart bool) (source.Cursor, string, erro
 // If the page cannot be delivered, it holds the corrupt file and returns an
 // error so the next cycle retries — the gap is never hidden behind a freshly
 // healthy status, and a failed page never silently loses the alert.
-func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Router) (journal.Cursors, error) {
+func recoverCorruptCursors(cfg config.Config, j *journal.Journal, r *route.Router, co courier) (journal.Cursors, error) {
 	cur, err := j.LoadCursors()
 	if !errors.Is(err, journal.ErrCursorsCorrupt) {
 		return cur, err
 	}
-	if !dispatch(cfg, j, r, corruptCursorsAlert()) {
+	if !dispatch(cfg, j, r, co, corruptCursorsAlert(), map[string]journal.Card{}) {
 		return journal.Cursors{}, fmt.Errorf("cursors.json corrupt: recovery alert undelivered, holding for retry")
 	}
 	if _, err := j.QuarantineCursors(); err != nil {
@@ -259,7 +280,7 @@ func corruptCursorsAlert() event.Event {
 	}
 }
 
-func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src config.Source, cur source.Cursor, seen map[string]bool) (source.Cursor, error) {
+func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, co courier, src config.Source, cur source.Cursor, seen map[string]bool, cards map[string]journal.Card) (source.Cursor, error) {
 	// Read may return events AND an error together (a pending integrity alert
 	// alongside a parse failure). Deliver what it produced before surfacing the
 	// error, so an alert is never lost to the failure it arrived with.
@@ -268,7 +289,7 @@ func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src conf
 		if seen[journal.SeenKey(ev.Source, ev.ID)] {
 			continue
 		}
-		if !dispatch(cfg, j, r, ev) {
+		if !dispatch(cfg, j, r, co, ev, cards) {
 			return cur, err // delivery failed: hold the cursor, retry next cycle
 		}
 	}
@@ -278,9 +299,17 @@ func pollSource(cfg config.Config, j *journal.Journal, r *route.Router, src conf
 	return next, nil
 }
 
-// dispatch routes and delivers one event, journaling the outcome. Returns
-// false when delivery failed and the event must be retried.
-func dispatch(cfg config.Config, j *journal.Journal, r *route.Router, ev event.Event) bool {
+// dispatch handles one event, journaling the outcome. Returns false when the
+// work failed and the event must be retried.
+//
+// Two classes take two paths. A PAGE routes to a channel and becomes a
+// notification. An UPDATE is not news — it is the terminal state of a park
+// whose card is already in Slack — so it is applied to that card and never
+// routed; routing it would page the operator for every judgment gate records.
+func dispatch(cfg config.Config, j *journal.Journal, r *route.Router, co courier, ev event.Event, cards map[string]journal.Card) bool {
+	if ev.Class == event.ClassUpdate {
+		return applyUpdate(cfg, j, co, ev, cards)
+	}
 	entry := journal.Entry{
 		Time:     time.Now(),
 		Source:   ev.Source,
@@ -298,18 +327,180 @@ func dispatch(cfg config.Config, j *journal.Journal, r *route.Router, ev event.E
 		entry.Kind = journal.Dropped
 		return journalOK(j, entry)
 	}
+	// Close any card this event makes stale BEFORE posting the new one. A newer
+	// park for the same PR supersedes the older in gate's inbox, so the older
+	// card's Approve button is already dead — and doing this first keeps the
+	// retry clean: nothing is journaled as delivered, so a failure here replays
+	// the whole event rather than stranding a live-looking dead card.
+	if !supersede(cfg, j, co, ev, cards) {
+		return false
+	}
 	// Send before journaling: at-least-once by design. Journaling a delivery
 	// before the send could record one that never happened — a real block
 	// silently un-paged — which is the worse failure for a push sink. A
 	// duplicate page (journal fails after a good send) is the safe way to err.
-	if err := notify.Send(cfg.Channels[d.Channel], ev); err != nil {
+	ref, err := co.send(cfg.Channels[d.Channel], ev)
+	if err != nil {
 		entry.Kind = journal.Errored
 		entry.Note = err.Error()
 		journalOK(j, entry)
 		return false
 	}
 	entry.Kind = journal.Delivered
+	entry.Card = cardOf(d.Channel, ref, ev)
+	if !journalOK(j, entry) {
+		return false
+	}
+	if entry.Card != nil {
+		cards[journal.SeenKey(ev.Source, ev.ID)] = *entry.Card
+	}
+	return true
+}
+
+// cardOf records a delivered message as a correctable card — but only for a
+// PARK. A verdict or a cursor-alert never resolves into a terminal state a
+// later artifact reports, so tracking it would grow the index for nothing.
+func cardOf(channel string, ref notify.Ref, ev event.Event) *journal.Card {
+	if ev.Kind != "escalation" || !ref.Updatable() {
+		return nil
+	}
+	return &journal.Card{
+		Channel:   channel,
+		ChannelID: ref.ChannelID,
+		TS:        ref.TS,
+		Subject:   subjectOf(ev),
+	}
+}
+
+// subjectOf is the card index key: the "repo#n" gate's inbox reduces parked
+// runs by. Empty when the event names no PR — such a card is only ever closed
+// by its own escalation id.
+func subjectOf(ev event.Event) string {
+	repo, number := ev.Fields["repo"], ev.Fields["number"]
+	if repo == "" || number == "" {
+		return ""
+	}
+	return repo + "#" + number
+}
+
+// applyUpdate corrects every live card the terminal fact closes: buttons off,
+// outcome and decider on, and the outcome posted into the card's thread so a
+// successful tap and a silently failed one stop looking identical.
+//
+// An update with no live card is settled, not an error: flare may have started
+// after the park was paged, or the card may already have been corrected. The
+// journal records that it was dealt with either way.
+func applyUpdate(cfg config.Config, j *journal.Journal, co courier, ev event.Event, cards map[string]journal.Card) bool {
+	entry := journal.Entry{
+		Time:    time.Now(),
+		Kind:    journal.CardUpdate,
+		Source:  ev.Source,
+		EventID: ev.ID,
+		Note:    ev.Title,
+	}
+	targets := cardsFor(cards, ev)
+	if len(targets) == 0 {
+		entry.Note = "no live card for " + ev.Title
+		return journalOK(j, entry)
+	}
+	if !finalizeCards(cfg, j, co, ev, cards, targets) {
+		return false
+	}
 	return journalOK(j, entry)
+}
+
+// finalizeCards rewrites each target card and records it closed. A failure
+// leaves the remaining cards for the retry: the ones already closed are gone
+// from the index, so the retry finalizes only what is left.
+func finalizeCards(cfg config.Config, j *journal.Journal, co courier, ev event.Event, cards map[string]journal.Card, targets map[string]journal.Card) bool {
+	for key, card := range targets {
+		ref := notify.Ref{ChannelID: card.ChannelID, TS: card.TS}
+		if err := co.finalize(cfg.Channels[card.Channel], ref, ev); err != nil {
+			fmt.Fprintf(os.Stderr, "flare: finalize card %s: %v\n", key, err)
+			return false
+		}
+		delete(cards, key)
+		if !journalOK(j, journal.Entry{
+			Time: time.Now(), Kind: journal.CardFinal, Source: ev.Source,
+			EventID: escIDFromKey(key), Channel: card.Channel, Note: ev.Fields["outcome"],
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+// cardsFor selects the live cards a terminal fact closes. A fact naming an
+// escalation closes that card; a fact naming a PR closes every live card for
+// that PR, because gate's inbox reduces parked runs by subject — a merge or a
+// re-park retires the older attempts too.
+func cardsFor(cards map[string]journal.Card, ev event.Event) map[string]journal.Card {
+	out := map[string]journal.Card{}
+	esc := ev.Fields["escalation"]
+	if esc != "" {
+		if c, ok := cards[journal.SeenKey(ev.Source, esc)]; ok {
+			out[journal.SeenKey(ev.Source, esc)] = c
+		}
+	}
+	subject := subjectOf(ev)
+	if subject == "" {
+		return out
+	}
+	for key, c := range cards {
+		if c.Subject == subject {
+			out[key] = c
+		}
+	}
+	return out
+}
+
+// supersede closes the cards a NEW park makes stale. gate's inbox keeps only
+// the latest terminal per PR, so the moment a fresh run parks the same PR every
+// older card's Approve button resolves nothing — tapping one returns
+// "escalation is not currently parked: esc_… not in gate inbox", which reads as
+// a broken tool rather than a card that moved on. Two taps died that way on
+// 2026-08-21.
+func supersede(cfg config.Config, j *journal.Journal, co courier, ev event.Event, cards map[string]journal.Card) bool {
+	subject := subjectOf(ev)
+	if ev.Kind != "escalation" || subject == "" {
+		return true
+	}
+	stale := map[string]journal.Card{}
+	for key, c := range cards {
+		if c.Subject == subject && key != journal.SeenKey(ev.Source, ev.ID) {
+			stale[key] = c
+		}
+	}
+	if len(stale) == 0 {
+		return true
+	}
+	return finalizeCards(cfg, j, co, supersededBy(ev), cards, stale)
+}
+
+// supersededBy is the terminal fact a newer park represents for the older ones.
+func supersededBy(ev event.Event) event.Event {
+	return event.Event{
+		Class:  event.ClassUpdate,
+		Source: ev.Source,
+		ID:     ev.ID,
+		Kind:   "card-update",
+		Time:   ev.Time,
+		Fields: map[string]string{
+			"repo":    ev.Fields["repo"],
+			"number":  ev.Fields["number"],
+			"run":     ev.Fields["run"],
+			"outcome": event.OutcomeSuperseded,
+			"note":    "A newer gate run parked this PR. Resolve the current park from `gate next`.",
+		},
+	}
+}
+
+// escIDFromKey recovers the event id a SeenKey was built from.
+func escIDFromKey(key string) string {
+	if i := strings.IndexByte(key, 0); i >= 0 {
+		return key[i+1:]
+	}
+	return key
 }
 
 func journalOK(j *journal.Journal, e journal.Entry) bool {

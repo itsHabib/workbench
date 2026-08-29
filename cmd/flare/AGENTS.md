@@ -26,7 +26,14 @@ there first.
   (cursor advances only when every event from a source settled).
 - `internal/source` — tail + parse producers' JSONL into events, decoding the
   shared verdict + envelope types from the `contracts` package (no hand-rolled
-  parser). Mechanism only; knows nothing about routing.
+  parser). Mechanism only; knows nothing about routing. `ledger.go` is the
+  read-only join a park needs — its grant and its verdict live in other
+  artifacts, named by id — built lazily over bytes the read already holds.
+- `internal/preflight` — policy leaf: given a park's grant ceilings, its
+  verdict tier and its consumed review cycles, could an Approve tap actually
+  land? Mirrors gate's ceilings (expiry → tier → cycles) rather than importing
+  them (boundary law), and resolves every uncertainty to *unknown* so a button
+  is withheld only on a proof. It decides what to PAINT, never what may merge.
 - `internal/route` — the declarative routes table + severity-monotone
   throttle. All policy comes from config.
 - `internal/notify` — one event to one channel. `slack` posts to
@@ -39,8 +46,8 @@ there first.
   never flare's — Amendment 3). `toast` shells `powershell.exe` 5.1 (pwsh 7
   cannot project WinRT); `webhook` POSTs the event JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
-  delivery journal (the dedupe substrate) + cursors with the `last_poll`
-  liveness fact.
+  delivery journal (the dedupe substrate, and the card index `LiveCards`
+  replays) + cursors with the `last_poll` liveness fact.
 
 ## Invariants (pinned by tests — keep them pinned)
 
@@ -79,7 +86,28 @@ there first.
   mint; a cycle park is the stop signal that the review loop ran long — the
   fix is fewer rounds, never a wider grant. flare renders the button; it never
   handles the tap (the callback targets `escalate serve`).
-- The same resolvable-park rule gates the paste-ready `escalate resolve …`
+- **Approve is pre-flighted.** The tap is one-shot (`gate judge` cannot be
+  re-run), so Approve is withheld when the park's own recorded grant + verdict
+  PROVE it cannot land: an expired grant, a verdict tier over the grant's
+  ceiling, a spent cycle budget. The card names the blocker and the mint that
+  clears it instead. This catches what the ceiling-park rule above cannot — a
+  CONTENT park carries no code, so its ceilings are only checked downstream,
+  which is how workbench#242 burned a tap. Block always survives (no ceiling
+  stops "don't merge this"). Every unreadable fact renders the card flare
+  rendered before the check existed: withhold on a proof, never on a gap.
+- **A card is corrected, never left stale.** flare records each park card's
+  Slack message ref in its journal and closes the card when a terminal artifact
+  appears — a judgment or resolution parented to the escalation, a merge
+  authorization, or a NEWER park for the same subject (gate's inbox keeps only
+  the latest terminal per `repo#PR`, so an older park's buttons resolve
+  nothing). Closing strips the buttons, states the outcome, who decided and the
+  authorized head sha, and posts the outcome to the card's thread — a
+  successful tap and a silently failed one must not look identical.
+- **Two event classes.** A PAGE routes; an UPDATE applies to a card already
+  delivered and is NEVER routed (routing terminal artifacts would page the
+  operator for every judgment gate records). An update with no live card
+  settles as handled; a closed card is never closed twice; the card index is
+  replayed from the journal so a restart strands nothing.- The same resolvable-park rule gates the paste-ready `escalate resolve …`
   context line on the card — including the ceiling exclusion, which gate's
   inbox mirrors. It renders regardless of the channel's button opt-in (it is
   prose, not an interactive element), so the loop closes from a phone with

@@ -47,7 +47,7 @@ func Tail(src config.Source) (Cursor, error) {
 	if len(lines) == 0 {
 		return Cursor{}, nil
 	}
-	_, last, err := parse(src, lines)
+	_, last, err := parse(src, lines, newLazyLedger(raw))
 	if err != nil {
 		return Cursor{}, fmt.Errorf("placing at tail: %w", err)
 	}
@@ -78,7 +78,10 @@ func Read(src config.Source, cur Cursor) ([]event.Event, Cursor, error) {
 		cur = Cursor{}
 		lines, size = completeLines(raw)
 	}
-	events, last, err := parse(src, lines)
+	// The ledger indexes the WHOLE file, not just the new lines: a park's grant
+	// and verdict were written before it and sit behind the cursor. It is lazy,
+	// so a poll with no parked escalation in it never pays for the index.
+	events, last, err := parse(src, lines, newLazyLedger(raw))
 	if err != nil {
 		// A parse failure must not swallow a pending integrity alert: return it
 		// so the caller still routes the cursor-alert (a broken chain reaching
@@ -137,11 +140,11 @@ func chainBreak(src config.Source, cur Cursor, first string) string {
 	return ""
 }
 
-func parse(src config.Source, lines []string) ([]event.Event, string, error) {
+func parse(src config.Source, lines []string, lg *lazyLedger) ([]event.Event, string, error) {
 	if src.Kind == config.SourceShipReceipts {
 		return parseReceipts(src, lines)
 	}
-	return parseGateLog(src, lines)
+	return parseGateLog(src, lines, lg)
 }
 
 // alert builds a cursor-integrity event. Its ID is a stable hash of the note,

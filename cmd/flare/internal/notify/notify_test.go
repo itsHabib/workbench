@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 	"github.com/itsHabib/workbench/contracts/escalation"
 )
@@ -46,7 +47,7 @@ func TestSlackPostRendersBlockKit(t *testing.T) {
 		Body:     "review found a critical issue\nthat needs judgment",
 		Fields:   map[string]string{"decision": "block", "repo": "itsHabib/workbench", "number": "33"},
 	}
-	if err := postSlack(server.Client(), server.URL, token, channel, false, ev); err != nil {
+	if _, err := postSlack(server.Client(), server.URL, token, channel, false, ev); err != nil {
 		t.Fatal(err)
 	}
 	if got.Channel != channel {
@@ -295,7 +296,7 @@ func TestSlackAPIFailureIsAnError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := postSlack(server.Client(), server.URL, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(server.Client(), server.URL, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, server.URL, channel, "invalid_payload")
 }
 
@@ -307,7 +308,7 @@ func TestSlackNetworkFailureIsAnError(t *testing.T) {
 	endpoint := server.URL
 	server.Close()
 
-	err := postSlack(client, endpoint, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(client, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "request")
 }
 
@@ -316,7 +317,7 @@ func TestSlackBuildRequestFailureIsSafe(t *testing.T) {
 	const channel = "C123"
 	const endpoint = "://secret-endpoint"
 
-	err := postSlack(http.DefaultClient, endpoint, token, channel, false, event.Event{Source: "gate"})
+	_, err := postSlack(http.DefaultClient, endpoint, token, channel, false, event.Event{Source: "gate"})
 	assertSafeSlackError(t, err, token, endpoint, channel, "build request")
 }
 
@@ -638,4 +639,243 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// preflightPark is the card input these tests vary: a briefed content park on
+// an opted-in channel — the one shape that renders Approve today.
+func preflightPark(extra map[string]string) event.Event {
+	fields := map[string]string{
+		"run": "run_242", "repo": "itsHabib/workbench", "number": "242",
+		"briefed": "yes", "grant": "grt_ceiling", "state": "/state",
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	return event.Event{
+		Source:   "gate",
+		ID:       "esc_content",
+		Kind:     "escalation",
+		Severity: event.SevEscalate,
+		Body:     "your call",
+		Fields:   fields,
+	}
+}
+
+// TestSlackPreflightWithholdsApprove is the acceptance for the burned tap: a
+// park the source proved un-approvable renders NO Approve button. Block stays —
+// no ceiling stops a human saying "don't merge" — and the card says plainly
+// what is missing, with the mint command the operator can paste at a keyboard.
+func TestSlackPreflightWithholdsApprove(t *testing.T) {
+	msg := renderSlackMessage("C1", true, preflightPark(map[string]string{
+		"approvable": "no",
+		"blocker":    "verdict tier T3 exceeds grant ceiling T1",
+		"needs":      "a T3 grant for itsHabib/workbench — a judgment cannot lower the tier",
+		"mint":       "gate grant -repo itsHabib/workbench -max-tier T3 -ttl 24h",
+	}))
+	btns := resolveButtons(msg.Attachments[0].Blocks)
+	if len(btns) != 1 || btns[0].ActionID != escalation.ActionBlock {
+		t.Fatalf("want Block only when an approval cannot land, got %+v", btns)
+	}
+	body := string(mustJSON(t, msg))
+	for _, want := range []string{
+		"Cannot approve",
+		"verdict tier T3 exceeds grant ceiling T1",
+		"gate grant -repo itsHabib/workbench -max-tier T3",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("card must say %q:\n%s", want, body)
+		}
+	}
+	// The lock-screen line must lead with the missing authority, not "Your call"
+	// — the call is not the operator's until they mint.
+	fallback := msg.Attachments[0].Fallback
+	if !strings.Contains(fallback, "Grant needed") || !strings.Contains(fallback, "T3") {
+		t.Errorf("fallback = %q, want it to lead with the missing grant", fallback)
+	}
+}
+
+// TestSlackPreflightKeepsApproveWhenItCanLand is the other direction: a park
+// the source proved approvable renders exactly the card it always did.
+func TestSlackPreflightKeepsApproveWhenItCanLand(t *testing.T) {
+	msg := renderSlackMessage("C1", true, preflightPark(map[string]string{"approvable": "yes"}))
+	btns := resolveButtons(msg.Attachments[0].Blocks)
+	if len(btns) != 2 {
+		t.Fatalf("an approvable park keeps Approve+Block, got %+v", btns)
+	}
+	if strings.Contains(string(mustJSON(t, msg)), "Cannot approve") {
+		t.Error("an approvable park must carry no blocker section")
+	}
+	if !strings.Contains(msg.Attachments[0].Fallback, "Your call") {
+		t.Errorf("fallback = %q, want the ordinary escalate headline", msg.Attachments[0].Fallback)
+	}
+}
+
+// TestSlackPreflightFailsOpen pins the sink law at the render seam: with no
+// pre-flight verdict recorded — an unreadable join, or a flare reading a log
+// written before the check existed — the card is byte-identical to the one
+// flare rendered before. Withholding happens on a proof, never on a gap.
+func TestSlackPreflightFailsOpen(t *testing.T) {
+	silent := renderSlackMessage("C1", true, preflightPark(nil))
+	approvable := renderSlackMessage("C1", true, preflightPark(map[string]string{"approvable": "yes"}))
+	if string(mustJSON(t, silent)) != string(mustJSON(t, approvable)) {
+		t.Fatalf("an absent pre-flight must render the approvable card:\n%s\n%s",
+			mustJSON(t, silent), mustJSON(t, approvable))
+	}
+}
+
+// TestSlackCeilingParkHeadlineIsHonest closes the gap between a ceiling park's
+// headline and its body. A ceiling park is excluded from resolvablePark — it
+// has no tap to offer — but the pre-flight still proves its approval cannot
+// land, so its body says "Cannot approve" while the headline used to say "Your
+// call". The lock-screen line is the half the operator reads first, and it must
+// not promise a decision that is not theirs to make.
+func TestSlackCeilingParkHeadlineIsHonest(t *testing.T) {
+	for _, code := range []string{escalation.CodeTierExceeded, escalation.CodeCycleExceeded} {
+		t.Run(code, func(t *testing.T) {
+			msg := renderSlackMessage("C1", true, preflightPark(map[string]string{
+				"code":       code,
+				"approvable": "no",
+				"blocker":    "verdict tier T3 exceeds grant ceiling T1",
+				"needs":      "a T3 grant for itsHabib/workbench",
+				"mint":       "gate grant -repo itsHabib/workbench -max-tier T3 -ttl 24h",
+			}))
+			head := msg.Attachments[0].Blocks[0].Text.Text
+			if strings.Contains(head, "Your call") {
+				t.Errorf("a ceiling park must not be headed 'Your call', got %q", head)
+			}
+			if !strings.Contains(head, "Grant needed") {
+				t.Errorf("headline = %q, want it to lead with the missing authority", head)
+			}
+			if strings.Contains(msg.Attachments[0].Fallback, "Your call") {
+				t.Errorf("fallback = %q, want the honest lock-screen line", msg.Attachments[0].Fallback)
+			}
+			// The buttons stay off — that rule is resolvablePark's and unchanged.
+			if btns := resolveButtons(msg.Attachments[0].Blocks); len(btns) != 0 {
+				t.Errorf("a ceiling park must carry no resolve buttons, got %+v", btns)
+			}
+		})
+	}
+}
+
+// TestBlockerBlockOmitsEmptyLabels keeps a label from rendering with nothing
+// after it — worse than no label at all.
+func TestBlockerBlockOmitsEmptyLabels(t *testing.T) {
+	got := blockerBlock(event.Event{Fields: map[string]string{
+		"approvable": "no",
+		"mint":       "gate grant -repo r -max-tier T2 -ttl 24h",
+	}})
+	if strings.Contains(got, "Cannot approve:*\n") || strings.HasPrefix(got, "*Cannot approve:* \n") {
+		t.Errorf("an absent blocker must not render an empty label:\n%s", got)
+	}
+	if !strings.Contains(got, "gate grant") {
+		t.Errorf("the mint must still render:\n%s", got)
+	}
+}
+
+// TestFinalizeReplacesTheCardAndRepliesInThread pins the two calls a closed
+// park makes and the payloads they carry: chat.update addressed to the posted
+// message (buttons gone, outcome and decider on), then a threaded
+// chat.postMessage carrying the terminal receipt — because today a successful
+// tap and a silently failed one look identical once the ack fades.
+func TestFinalizeReplacesTheCardAndRepliesInThread(t *testing.T) {
+	type seen struct {
+		path string
+		body map[string]any
+	}
+	var calls []seen
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		calls = append(calls, seen{path: r.URL.Path, body: body})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1.1","channel":"C999"}`))
+	}))
+	defer server.Close()
+
+	ref := Ref{ChannelID: "C999", TS: "170000000.1"}
+	ev := event.Event{
+		Source: "gate",
+		Kind:   "card-update",
+		Fields: map[string]string{
+			"repo": "itsHabib/ivy", "number": "23", "run": "run_1",
+			"outcome": event.OutcomeApproved,
+			"who":     "@mhdevstuff (U0B17RNEFCK)",
+			"sha":     "b33c512cfede769b128e9148b752cf6dd5836115",
+		},
+	}
+	if err := finalizeSlack(server.Client(), server.URL+"/chat.update", server.URL+"/chat.postMessage", "xoxb", ref, ev); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("want chat.update then a threaded chat.postMessage, got %d calls", len(calls))
+	}
+
+	update := calls[0]
+	if update.path != "/chat.update" {
+		t.Fatalf("first call = %s, want chat.update", update.path)
+	}
+	if update.body["ts"] != ref.TS || update.body["channel"] != ref.ChannelID {
+		t.Errorf("chat.update must address the posted message, got %+v", update.body)
+	}
+	rendered := string(mustJSON(t, update.body))
+	for _, gone := range []string{`"action_id":"approve"`, `"action_id":"block"`} {
+		if strings.Contains(rendered, gone) {
+			t.Errorf("a closed card must not keep %s:\n%s", gone, rendered)
+		}
+	}
+	for _, want := range []string{"Approved", "mhdevstuff", "b33c512cfede769b128e9148b752cf6dd5836115", "View PR #23"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("closed card must contain %q:\n%s", want, rendered)
+		}
+	}
+	// gate records the merge it AUTHORIZES, never a receipt that one landed.
+	if strings.Contains(rendered, "Merged") {
+		t.Errorf("the card must not claim a merge landed:\n%s", rendered)
+	}
+
+	reply := calls[1]
+	if reply.path != "/chat.postMessage" || reply.body["thread_ts"] != ref.TS {
+		t.Fatalf("second call must be a reply in the card's thread, got %s %+v", reply.path, reply.body)
+	}
+	text, _ := reply.body["text"].(string)
+	if !strings.Contains(text, "Approved by @mhdevstuff") {
+		t.Errorf("thread reply = %q, want the terminal outcome", text)
+	}
+}
+
+// TestFinalizeIsANoOpOffSlack keeps the lifecycle harmless on the channel types
+// that have no message to correct: a toast is fire-and-forget, and a ref with no
+// ts names nothing.
+func TestFinalizeIsANoOpOffSlack(t *testing.T) {
+	ev := event.Event{Fields: map[string]string{"outcome": event.OutcomeApproved}}
+	if err := Finalize(config.Channel{Type: config.ChannelToast}, Ref{ChannelID: "C1", TS: "1"}, ev); err != nil {
+		t.Errorf("finalizing a toast must be a no-op, got %v", err)
+	}
+	if err := Finalize(config.Channel{Type: config.ChannelSlack, Token: "x"}, Ref{}, ev); err != nil {
+		t.Errorf("finalizing an unrefereced card must be a no-op, got %v", err)
+	}
+}
+
+// TestSendReturnsTheMessageRef pins the ref the whole lifecycle hangs on: the
+// ts Slack assigned, and the channel id it resolved (which chat.update needs —
+// a config naming a #channel would otherwise yield a ref update cannot address).
+func TestSendReturnsTheMessageRef(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"170000000.5","channel":"C999"}`))
+	}))
+	defer server.Close()
+
+	ref, err := postSlack(server.Client(), server.URL, "xoxb", "#alerts", false, event.Event{Source: "gate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.TS != "170000000.5" || ref.ChannelID != "C999" {
+		t.Fatalf("ref = %+v, want the ts and resolved channel id Slack echoed", ref)
+	}
+	if !ref.Updatable() {
+		t.Error("a posted message must be updatable")
+	}
 }

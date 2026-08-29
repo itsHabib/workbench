@@ -18,6 +18,23 @@ path was already safe — the emitted merge command is `--match-head-commit`
 pinned and GitHub refuses to merge a merged PR. Revisit only if the race is
 observed parking runs in practice.
 
+## runway: `writeResultAtomic` does not fsync the containing directory (claude on #259, deferred)
+
+`controller.writeResultAtomic` syncs the temp file before `os.Rename`, so
+`result.json`'s *contents* are durable, but it never fsyncs the run directory
+afterward. A power cut can therefore lose the directory entry for a file whose
+bytes reached the platter. Pre-existing — surfaced while reviewing the
+read-ordering fix in #259, not introduced by it.
+
+Deferred because the failure is already benign under the reconcile contract: a
+lost `result.json` reads as "no result", the journal cannot be terminal without
+it (that ordering is the invariant #259 restored on the read side), and
+`reconcileControllerLost` simply writes a fresh `controller_lost` receipt. The
+run loses its original terminal reason, not its terminal truth. Close this by
+opening the parent dir and `Sync`ing it after the rename — in
+`writeCancelMarker` and `claim.createExclusive` too, which share the shape — if
+runway ever needs the receipt's *reason* to survive host power loss.
+
 ## AI gateway egress
 
 - **Construction-time credential read.** Gate reads `ANTHROPIC_API_KEY` once

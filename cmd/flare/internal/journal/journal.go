@@ -24,13 +24,21 @@ const (
 	CursorAlert = "cursor-alert"
 	CursorInit  = "cursor-init"
 	Errored     = "error"
+	// CardUpdate settles a card-update event: the terminal state of a park was
+	// applied to the card(s) showing it (or there was no live card to apply it
+	// to, which is equally settled — the fact has been dealt with).
+	CardUpdate = "card-updated"
+	// CardFinal closes one delivered card. It is keyed on the ESCALATION's event
+	// id, not the update's, so replaying the journal knows which cards are still
+	// live and which have already been corrected.
+	CardFinal = "card-final"
 )
 
 // seen reports which entry kinds settle an event: settled events are never
 // re-notified, errored ones are retried because the cursor holds. Cursor
 // placements and alerts about flare's own state (CursorInit) carry no event
 // and are deliberately not in this set.
-var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true}
+var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true, CardUpdate: true}
 
 // SeenKey composes an event's dedupe key. Event IDs are only unique within a
 // single source's log (a gate artifact ID, a receipt key+outcome), so dedupe is
@@ -38,6 +46,21 @@ var seen = map[string]bool{Delivered: true, Dropped: true, Throttled: true}
 // two distinct facts, not a duplicate to suppress.
 func SeenKey(source, id string) string {
 	return source + "\x00" + id
+}
+
+// Card locates one delivered Slack message so a later fact can correct it.
+// Without it a card can never be updated, and a card that is never updated goes
+// on showing live Approve buttons for a park that resolved hours ago.
+//
+// Subject is the "repo#n" the card was rendered for. gate's inbox reduces
+// parked runs by subject — only the latest terminal per PR is still parked — so
+// the subject, not the escalation id alone, is what says which cards a later
+// park or merge makes stale.
+type Card struct {
+	Channel   string `json:"channel"`
+	ChannelID string `json:"channel_id"`
+	TS        string `json:"ts"`
+	Subject   string `json:"subject,omitempty"`
 }
 
 // Entry is one journaled delivery fact.
@@ -49,6 +72,10 @@ type Entry struct {
 	Channel  string    `json:"channel,omitempty"`
 	Severity string    `json:"severity,omitempty"`
 	Note     string    `json:"note,omitempty"`
+	// Card is set on a Delivered entry whose channel returned an updatable
+	// message ref. Additive and omitempty: an entry written before cards existed
+	// simply has none, and replays as a delivery with no correctable card.
+	Card *Card `json:"card,omitempty"`
 }
 
 // Journal is flare's private state directory.
@@ -138,4 +165,57 @@ func (j *Journal) Tail(n int) ([]Entry, error) {
 		entries = entries[len(entries)-n:]
 	}
 	return entries, nil
+}
+
+// LiveCards replays the journal into the delivered cards that have NOT yet been
+// corrected to a terminal state — the ones whose buttons are still live in
+// Slack. It is the same substrate as Seen and for the same reason: the journal
+// is the only durable record of what flare put in front of the operator, so
+// what is still standing there must be reconstructable across a restart.
+//
+// Keys are SeenKey(source, escalation id).
+func (j *Journal) LiveCards() (map[string]Card, error) {
+	cards := map[string]Card{}
+	err := j.replay(func(e Entry) {
+		key := SeenKey(e.Source, e.EventID)
+		if e.Kind == CardFinal {
+			delete(cards, key)
+			return
+		}
+		if e.Kind == Delivered && e.Card != nil {
+			cards[key] = *e.Card
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cards, nil
+}
+
+// replay walks every well-formed entry oldest-first. A torn or unreadable line
+// is skipped, never fatal: a partial tail must not brick dedupe or the card
+// index — the cost of skipping one is at worst a duplicate page or a card left
+// live, both far cheaper than a wedged loop.
+func (j *Journal) replay(visit func(Entry)) error {
+	f, err := os.Open(j.path())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("journal: open: %w", err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		var e Entry
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+			continue
+		}
+		visit(e)
+	}
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("journal: scan: %w", err)
+	}
+	return nil
 }

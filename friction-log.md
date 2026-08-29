@@ -218,3 +218,31 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
   PR #219, which also widens exit 3's contract definition (formerly
   `capability_refused` alone) to name `already_merged` as a refusal, so the
   exit-code table and this remedy agree.
+
+---
+
+## 2026-08-23 — a dirty main checkout read as live work
+
+- **What I tried:** act on a peer session's report that
+  `~/dev/workbench` carried "uncommitted changes that no session is claiming"
+  in `cmd/gate/internal/verify/`.
+- **What happened:** none of it was live. The reflog showed no branch activity
+  since 2026-08-07 and the files were last written 2026-08-16. Every tracked
+  modification's distinctive content was already on `main` (landed via #235).
+  `readiness_panel_test.go` and `docs/features/tier-aware-panel/` only *looked*
+  untracked because `HEAD` was an Aug-7 commit that predated them. Five
+  "hackathon" docs were byte-identical to `~/dev/bakeoff/token-opt-08-09/*/BRIEF.md`.
+  The checkout was 18,496 lines behind `main` across 147 files.
+- **Cost:** two sessions. One reported it as in-flight work; one spent a
+  significant part of a turn proving it was not.
+- **Class:** `stale-state`.
+- **Fix landed:** `CLAUDE.md` now states that the main checkout stays on `main`
+  and work happens in worktrees, with the two commands to verify it. The
+  checkout was reset and the genuinely-local content — five paths that existed
+  nowhere else — preserved on
+  `archive/main-checkout-leftovers-2026-08-23` before the reset, so nothing
+  was destroyed. 33 local branches whose PRs were merged or closed were removed
+  at the same time.
+- **What would have caught it sooner:** `git status --short` on the repo root
+  at session start. It is two seconds and it distinguishes "someone is working
+  here" from "someone left".

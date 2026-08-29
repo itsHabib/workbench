@@ -15,6 +15,11 @@ var ErrWatchLocked = errors.New("journal: another flare instance holds the watch
 
 // errLockHeld is the per-OS "someone else has it" sentinel that lockFile
 // returns; LockWatch translates it into the exported ErrWatchLocked.
+//
+// Flare keeps its own lock rather than importing the shared filelock package,
+// because its scoped design admits contracts as the sole in-repo dependency
+// (AGENTS.md). A leaf mechanism is still a second edge, and the boundary is
+// worth more than the duplication it costs.
 var errLockHeld = errors.New("lock held")
 
 func (j *Journal) lockPath() string { return filepath.Join(j.dir, "watch.lock") }

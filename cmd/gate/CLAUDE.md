@@ -178,6 +178,24 @@ Constraints that are design decisions, not omissions:
   before anyone answered — a churn signal for the review cycles upstream of the
   gate. A metric that could fail an audit would train the reader to ignore audit
   failures.
+- **A run that decides nothing spends nothing.** Cycles are counted from
+  OUTCOMES — one distinct run holding a counting action or escalation, joined
+  to its subject through the reduced verdict — never from the evidence a run
+  recorded. A run that dies mid-sweep (a reset connection under `gh pr diff`,
+  after `gh pr view` already landed its artifact) burns no cycle: it appends a
+  `run_aborted` record naming the subject and the cause, outside the
+  action/escalation families like `grant_needed`, so the count, the reducer,
+  and `next`'s subject reduction all ignore it. The evidence it recorded stays
+  — an append-only log says "this died" by appending, never by un-writing —
+  and `explain` shows why it stopped instead of leaving it indistinguishable
+  from a run still in flight.
+- **Evidence reads retry on an allowlist, and still fail closed.** Each `gh`
+  call retries up to three times with growing backoff on transport faults and
+  GitHub's retryable statuses; anything unrecognized (missing binary, bad
+  credential, 404, malformed query) fails on the first attempt instead of
+  sleeping through the bound. Retrying is safe only because these calls are
+  reads, and it must never become a way to proceed without an answer — a
+  failure that outlives the bound is returned unchanged and the run aborts.
 - **State and keys live outside the source tree.** A running gate's `-state`
   and `-key` dirs are operational data, never files in this source tree. The
   hosted executor uses a fresh Workbench-only ledger, never the machine-global

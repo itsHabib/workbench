@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
@@ -528,7 +529,40 @@ func lineOf(rc rawComment) int {
 	return 0
 }
 
+// ghAttempts bounds how many times one evidence read is tried before the run
+// gives up. Three is deliberate: a transport blip is almost always gone by the
+// second try, and a bound keeps a genuine GitHub outage from holding the store
+// lock while a driver waits.
+const ghAttempts = 3
+
+// ghBackoff is the base delay between attempts; attempt n waits n*ghBackoff.
+const ghBackoff = 500 * time.Millisecond
+
+// ghSleep is the backoff mechanism, a var so tests exercise the retry policy
+// without spending wall-clock on it. Production never reassigns it.
+var ghSleep = time.Sleep
+
+// gh runs one authenticated GitHub read, retrying a transient failure up to
+// ghAttempts times. Retrying is safe here because every call this package
+// makes is a read: a retry can only re-fetch the same fact, never repeat an
+// effect. It also cannot invent one — a failure that survives the bound is
+// returned unchanged and aborts the run, so the sweep still fails closed.
 func gh(args ...string) (json.RawMessage, error) {
+	for attempt := 1; ; attempt++ {
+		out, err := runGH(args...)
+		if err == nil {
+			return out, nil
+		}
+		if attempt == ghAttempts || !transientGH(err.Error()) {
+			return nil, err
+		}
+		ghSleep(time.Duration(attempt) * ghBackoff)
+	}
+}
+
+// runGH is the mechanism: one gh invocation, its stderr folded into the error
+// so the caller (and the retry policy above) can see what GitHub said.
+func runGH(args ...string) (json.RawMessage, error) {
 	out, err := exec.Command("gh", args...).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -537,4 +571,40 @@ func gh(args ...string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("evidence: gh %v: %w", args[:2], err)
 	}
 	return out, nil
+}
+
+// ghTransient lists the failure signatures worth a second try: transport faults
+// between this machine and GitHub, and the server-side statuses GitHub itself
+// documents as retryable. gh reports these as free text, so matching is on the
+// message — the same text an operator reads in the exit-4 error.
+var ghTransient = []string{
+	"connection reset by peer",
+	"connection refused",
+	"i/o timeout",
+	"tls handshake timeout",
+	"unexpected eof",
+	"no such host",
+	"server misbehaving",
+	"http 429",
+	"http 500",
+	"http 502",
+	"http 503",
+	"http 504",
+	"secondary rate limit",
+}
+
+// transientGH reports whether a failed read is worth retrying. It is an
+// ALLOWLIST: anything unrecognized is permanent, so a missing gh, a bad
+// credential, a 404 on a repo the grant cannot see, or a malformed query
+// fails on the first attempt instead of sleeping through the bound. Adding a
+// signature here must mean "the same call may now succeed" — never "the
+// caller would prefer this to pass".
+func transientGH(msg string) bool {
+	low := strings.ToLower(msg)
+	for _, sig := range ghTransient {
+		if strings.Contains(low, sig) {
+			return true
+		}
+	}
+	return false
 }

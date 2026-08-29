@@ -44,6 +44,11 @@ Orientation block you can point an agent at to ground it fast.
   decision for a parked escalation and drives `gate resolve` to close the
   agent→human→agent loop, shelling gate and never importing it; a contract+seam,
   not a plane — see `docs/features/escalation-plane/spec.md`),
+  `org` (the Baton home — role continuity chains over `contracts/org`:
+  attach/claim/yield lifecycle, the byte-capped `org boot` re-entry index,
+  the SessionStart/Stop hook scripts that wire sessions to roles, and
+  operator context.d boot sources; `org-mcp` is its stdio MCP surface,
+  shelling the binary),
   plus `local`'s CLIs (`local`, `eval`).
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions (the engineering debt this codebase owes).
@@ -56,6 +61,30 @@ Orientation block you can point an agent at to ground it fast.
 A tool may share **types and schemas** through `contracts`. A tool may **not**
 import another tool's decision logic. When a tool needs another tool's *output*,
 it reads an artifact. CI's `hygiene` job enforces this — it is not a convention.
+
+## Where work happens
+
+**`~/dev/workbench` stays on `main`, clean.** Every change happens in a
+worktree — `/worktree-add`, or `git worktree add` under `.claude/worktrees/`.
+
+This is not tidiness. A session that works directly in the main checkout and
+leaves it parked on a feature branch produces a tree that *looks* like live
+work to everyone who opens the repo afterwards, and there is no way to tell
+that apart from real in-flight work without reconstructing history. It happened
+between 2026-08-06 and 2026-08-16: the checkout sat on a merged branch, 18,496
+lines behind `main`, with a dirty tree whose entire tracked content had already
+landed. Two later sessions read it as unclaimed work in progress, and
+disproving that cost more than the original cleanup would have.
+
+So, at the start of any session that touches this repo:
+
+```
+git -C ~/dev/workbench status --short   # expect no output
+git -C ~/dev/workbench branch --show-current   # expect: main
+```
+
+Anything else is stale until proven otherwise — check it before trusting the
+tree, and never assume a dirty main checkout belongs to a live session.
 
 ## Review-cycle discipline
 

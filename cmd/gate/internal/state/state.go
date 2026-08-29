@@ -51,6 +51,17 @@ const (
 	// cycle or contaminates a decision chain. The projection folds it into the
 	// inbox's needs_grant[] surface.
 	KindGrantNeeded = "grant_needed"
+	// KindRunAborted records a gate run that stopped before it produced any
+	// decision — a transport failure mid-evidence, an unreachable model
+	// backend — naming the error that ended it. Like KindGrantNeeded it sits
+	// outside the action/escalation outcome families on purpose: the cycle
+	// count, the reducer, and the parked/ready projections all ignore it, so
+	// recording an abort can neither burn a review cycle nor masquerade as a
+	// park. It exists so the log says WHY a run holds evidence and nothing
+	// else; without it an aborted run is indistinguishable from one still in
+	// flight, and the only honest way to say "this run died" in an
+	// append-only log is to append the fact.
+	KindRunAborted = "run_aborted"
 	// KindExecutionClaim permanently consumes one Gate action for one execution.
 	KindExecutionClaim = "execution_claim"
 	// KindExecutionResult records the terminal outcome of one claimed execution.
@@ -86,6 +97,7 @@ var kindPrefix = map[string]string{
 	KindJudgment:        "jdg",
 	KindResolution:      "res",
 	KindGrantNeeded:     "gnd",
+	KindRunAborted:      "abt",
 	KindExecutionClaim:  "gxc",
 	KindExecutionResult: "gxr",
 	KindGatePreparation: "gpp",
