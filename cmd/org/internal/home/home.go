@@ -23,10 +23,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/contracts/org"
+	"github.com/itsHabib/workbench/filelock"
 )
 
 // Home is one state root: every chain and blob under one directory.
@@ -358,19 +358,20 @@ func appendLine(path string, r org.Record) error {
 	return f.Close()
 }
 
-// lock takes an exclusive flock on path, returning the release. The lock file
-// is separate from the chain so a reader never contends with the append fsync.
+// lock takes an exclusive file lock on path, returning the release. The lock
+// file is separate from the chain so a reader never contends with the append
+// fsync.
 func lock(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open lock: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("lock chain: %w", err)
 	}
 	return func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		filelock.Unlock(f)
 		f.Close()
 	}, nil
 }
