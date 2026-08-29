@@ -1,7 +1,7 @@
 # org-mcp
 
 The MCP surface of the Baton home: a stdio JSON-RPC 2.0 server exposing the
-org verbs as native agent tools (`org_boot`, `org_status`, `org_attach`,
+org verbs as native agent tools (`org_boot`, `org_status`, `org_sweep`, `org_attach`,
 `org_claim`, `org_yield`, `org_complete`, `org_abandon`, `org_assign`,
 `org_unassign`, `org_intent`, `org_resolve`, `org_escalate`, `org_note`,
 `org_checkpoint`, `org_release`, `org_verify`).

@@ -35,6 +35,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/org/internal/home"
 	"github.com/itsHabib/workbench/cmd/org/internal/render"
+	"github.com/itsHabib/workbench/cmd/org/internal/survey"
 	"github.com/itsHabib/workbench/contracts/org"
 )
 
@@ -74,6 +75,7 @@ var verbs = map[string]func(*env, []string) error{
 	"message":    cmdAdvisory(org.KindMessage),
 	"boot":       cmdBoot,
 	"status":     cmdStatus,
+	"sweep":      cmdSweep,
 	"log":        cmdLog,
 	"verify":     cmdVerify,
 	"blob":       cmdBlob,
@@ -112,7 +114,7 @@ lifecycle   charter · attach · release · retire · takeover · revoke · dele
 work        assign · unassign · claim · yield · complete · abandon
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
-read        boot · status · log · verify · blob
+read        boot · status · sweep · log · verify · blob
 
 every verb: -state <dir> (or ORG_STATE) · -tenant <id> (or ORG_TENANT) · -role <id>`)
 }
@@ -523,6 +525,44 @@ func cmdStatus(e *env, args []string) error {
 		return printJSON(e, rows)
 	}
 	fmt.Fprint(e.stdout, render.Board(rows))
+	return nil
+}
+
+// cmdSweep is the continuity instrument: it replays every chain in the selected
+// tenant and reports what the substrate is a bet on — whether sessions leave
+// distilled conclusions, and whether inherited obligations get discharged.
+func cmdSweep(e *env, args []string) error {
+	s := newScope("sweep")
+	h, err := s.open(args, false)
+	if err != nil {
+		return err
+	}
+	pairs, err := h.RolesForTenant(s.tenant)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	roles := make([]survey.Role, 0, len(pairs))
+	for _, p := range pairs {
+		// Records, not Load: Load folds internally and is all-or-nothing, so a
+		// chain that stops folding would arrive here empty and the sweep would
+		// report zero of the work recorded before the break. The replay in
+		// survey.Of is what decides admissibility, and it keeps what it counted.
+		records, err := h.Records(p[0], p[1])
+		row := survey.Of(p[0], p[1], records, now)
+		if err != nil && row.Err == "" {
+			row.Err = err.Error()
+		}
+		roles = append(roles, row)
+	}
+	totals := survey.Sum(roles)
+	conflicts := survey.AssignConflicts(s.tenant, roles)
+	if s.asJSON {
+		return printJSON(e, map[string]any{
+			"roles": roles, "totals": totals, "assign_conflicts": conflicts,
+		})
+	}
+	fmt.Fprint(e.stdout, render.Sweep(roles, totals, conflicts))
 	return nil
 }
 

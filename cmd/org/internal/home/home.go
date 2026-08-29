@@ -70,18 +70,55 @@ func (h *Home) Roles() ([][2]string, error) {
 		if !t.IsDir() || t.Name() == "blobs" {
 			continue
 		}
-		roles, err := os.ReadDir(filepath.Join(h.root, t.Name()))
+		roles, err := h.rolesInTenant(t.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read tenant %s: %w", t.Name(), err)
+			return nil, err
 		}
-		for _, r := range roles {
-			if !r.IsDir() {
-				continue
-			}
-			out = append(out, [2]string{t.Name(), strings.ReplaceAll(r.Name(), "--", ":")})
-		}
+		out = append(out, roles...)
 	}
 	return out, nil
+}
+
+// RolesForTenant enumerates only tenant's chains. It first matches tenant to
+// an immediate child of the state root, so a path-like tenant cannot escape
+// the home and an unreadable unrelated tenant cannot break a scoped sweep.
+func (h *Home) RolesForTenant(tenant string) ([][2]string, error) {
+	tenants, err := os.ReadDir(h.root)
+	if err != nil {
+		return nil, fmt.Errorf("read state root: %w", err)
+	}
+	for _, t := range tenants {
+		if t.Name() != tenant || !t.IsDir() || t.Name() == "blobs" {
+			continue
+		}
+		return h.rolesInTenant(t.Name())
+	}
+	return make([][2]string, 0), nil
+}
+
+func (h *Home) rolesInTenant(tenant string) ([][2]string, error) {
+	roles, err := os.ReadDir(filepath.Join(h.root, tenant))
+	if err != nil {
+		return nil, fmt.Errorf("read tenant %s: %w", tenant, err)
+	}
+	out := make([][2]string, 0, len(roles))
+	for _, r := range roles {
+		if !r.IsDir() {
+			continue
+		}
+		out = append(out, [2]string{tenant, strings.ReplaceAll(r.Name(), "--", ":")})
+	}
+	return out, nil
+}
+
+// Records reads a role's chain WITHOUT folding it.
+//
+// It exists for the sweep, which must report what a broken chain contains
+// rather than refuse to look at it: Load folds internally and is therefore
+// all-or-nothing, so a caller that needs the records behind a break cannot get
+// them through it. Nothing here validates — the caller replays.
+func (h *Home) Records(tenant, role string) ([]org.Record, error) {
+	return readChain(h.chainPath(tenant, role))
 }
 
 // Load reads and folds a role's chain. A missing chain is not an error: it
@@ -290,7 +327,10 @@ func readChain(path string) ([]org.Record, error) {
 		}
 		var r org.Record
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			return nil, fmt.Errorf("chain line %d: %w", i+1, err)
+			// Records callers need the valid prefix so a corrupt tail cannot
+			// erase ownership and continuity findings from the sweep. Load still
+			// fails closed on any error and discards this partial result.
+			return records, fmt.Errorf("chain line %d: %w", i+1, err)
 		}
 		records = append(records, r)
 	}
