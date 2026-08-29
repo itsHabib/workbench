@@ -22,6 +22,8 @@ func TestInScope(t *testing.T) {
 		{"jira:PROJ-", "jira:PROJ-123", true},
 		{"jira:PROJ-", "jira:OTHER-1", false},
 		{"github:owner/", "github:owner/any", true},
+		{"github:owner/repo#", "github:owner/repo#88", true},
+		{"github:owner/repo#", "github:other/repo#88", false},
 		{"jira:", "jira:PROJ-123", true},
 		{"jira:", "github:owner/repo", false},
 		// Without the trailing separator, project grain is not implied.

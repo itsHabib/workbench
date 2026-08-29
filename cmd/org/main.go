@@ -546,7 +546,7 @@ func intakeLane(h *home.Home, tenant, role, work string) (render.IntakeLane, boo
 		return lane, true
 	}
 	lane.Phase = state.Phase
-	if state.Phase == org.PhaseRetired {
+	if state.Phase == org.PhaseVoid || state.Phase == org.PhaseRetired {
 		return lane, false
 	}
 	lane.ScopeMatch, _ = org.MatchScope(state.Terms.Scope, work)

@@ -23,6 +23,11 @@ var (
 	// whether this substrate can attach to work an organization already has, or
 	// only ever works for one tracker.
 	workURIPattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]*:\S+$`)
+	// scopeEntryPattern is workURIPattern with the remainder optional: a
+	// charter's scope entry is a prefix, not a work item, and a bare scheme
+	// (`jira:`) is the widest legal grain a lane can state (see scope.go's
+	// open-prefix rule). Subject work URIs never get this latitude.
+	scopeEntryPattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]*:\S*$`)
 	// digestPattern matches the digest form digest.go produces.
 	digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 )
@@ -278,7 +283,7 @@ func checkScope(r Record) error {
 		return refuse(ReasonScopeEmpty, r.Seq, "a charter's scope must name at least one work reference")
 	}
 	for i, s := range r.Terms.Scope {
-		if !workURIPattern.MatchString(s) {
+		if !scopeEntryPattern.MatchString(s) {
 			return refuse(ReasonMalformedWorkURI, r.Seq, "terms.scope[%d] %q needs a scheme", i, s)
 		}
 	}

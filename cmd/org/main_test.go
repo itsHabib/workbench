@@ -415,3 +415,32 @@ func TestIntakeRoutesWork(t *testing.T) {
 		t.Fatal("intake without -work must error")
 	}
 }
+
+// TestIntakeSchemeWideScopeAndUnreadableLanes pins two review findings: a
+// bare-scheme scope entry (`jira:`) is charterable and covers the scheme, and
+// an unreadable chain makes an uncovered report hedge instead of declaring
+// definitively that nothing covers the work.
+func TestIntakeSchemeWideScopeAndUnreadableLanes(t *testing.T) {
+	state := t.TempDir()
+	wide := []string{"-tenant", "acme", "-role", "supervisor:tickets"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "jira:", "-tier", "T1", "-supervisor", "human:op"}, wide...)...); code != 0 {
+		t.Fatalf("bare-scheme charter refused: %s", errOut)
+	}
+	_, out, _ := exec(t, state, "intake", "-work", "jira:ANY-1", "-tenant", "acme")
+	if !strings.Contains(out, "in scope (jira:)") {
+		t.Fatalf("scheme-wide scope did not cover a ticket:\n%s", out)
+	}
+
+	// Corrupt the chain: an uncovered URI must now hedge, not conclude.
+	chain := filepath.Join(state, "acme", "supervisor--tickets", "chain.jsonl")
+	if err := os.WriteFile(chain, []byte("not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := exec(t, state, "intake", "-work", "github:acme/api#1", "-tenant", "acme")
+	if code != 0 {
+		t.Fatalf("intake over a broken chain must still report: %s", errOut)
+	}
+	if !strings.Contains(out, "no READABLE chartered scope") || !strings.Contains(out, "1 lane(s) unreadable") {
+		t.Fatalf("uncovered report did not hedge on the unreadable lane:\n%s", out)
+	}
+}
