@@ -30,6 +30,15 @@ system name there is Baton; this binary is its first runtime slice.
   complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
   read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
   `intake` (where does this work belong), `sweep`, `log`, `verify`, `blob`.
+- **Composites** `begin` and `done` bracket small work (field report §4.2):
+  `begin -work <uri>` attaches when unheld, assigns when unassigned (only
+  then requiring `-pin`/`-digest`), and claims — one command, the same
+  records. `done [-work <uri>]` claims when the item is held but unclaimed
+  (closing §4.3's uncompletable trap, re-attaching first when the lane was
+  released), completes, and releases. Each step is a normal kernel-admitted
+  record; a crash mid-composite leaves ordinary recoverable state. Plain
+  `release` now warns on stderr when unfinished items remain held —
+  finished work exits via `complete`/`done`, `yield` means pausing.
 - **`intake`** is the routing reflex before assign: given `-work <uri>` it
   reports which chartered lanes' scopes cover it (the `contracts/org.InScope`
   predicate — prefix-at-a-boundary, never across schemes), which lanes

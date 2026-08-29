@@ -415,3 +415,91 @@ func TestIntakeRoutesWork(t *testing.T) {
 		t.Fatal("intake without -work must error")
 	}
 }
+
+// TestBeginDoneBracketsSmallWork pins the §4.2 composites: two commands
+// bracket a small task, writing the same records the seven-verb ceremony
+// would, and §4.3's uncompletable trap — finished work on a released lane —
+// closes with one done.
+func TestBeginDoneBracketsSmallWork(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	must := func(verb ...string) (string, string) {
+		t.Helper()
+		code, out, errOut := exec(t, state, append(verb, role...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", verb, code, errOut)
+		}
+		return out, errOut
+	}
+	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+
+	out, _ := must("begin", "-work", "github:acme/api#7", "-pin", "delete the dead file")
+	for _, kind := range []string{"attach", "assign", "claim"} {
+		if !strings.Contains(out, kind) {
+			t.Fatalf("begin lacks %s:\n%s", kind, out)
+		}
+	}
+	if !strings.Contains(out, "phase active") {
+		t.Fatalf("begin did not end active:\n%s", out)
+	}
+
+	out, _ = must("done", "-body", "deleted; CI green")
+	for _, kind := range []string{"complete", "release"} {
+		if !strings.Contains(out, kind) {
+			t.Fatalf("done lacks %s:\n%s", kind, out)
+		}
+	}
+	if strings.Contains(out, "attach") || strings.Contains(out, "claim seq") {
+		t.Fatalf("done on an active lane re-wrote entry records:\n%s", out)
+	}
+
+	// The §4.3 trap: assign + yield + release leaves finished work held on a
+	// released lane. done must reconstruct and tear down in one command.
+	must("attach")
+	must("assign", "-work", "github:acme/api#8", "-pin", "second task")
+	must("claim", "-work", "github:acme/api#8")
+	must("yield", "-work", "github:acme/api#8")
+	_, errOut := must("release")
+	if !strings.Contains(errOut, "warning: releasing while still holding 1 item(s)") {
+		t.Fatalf("release did not warn about the held item: %s", errOut)
+	}
+	out, _ = must("done", "-work", "github:acme/api#8", "-body", "was already finished")
+	for _, kind := range []string{"attach", "claim", "complete", "release"} {
+		if !strings.Contains(out, kind) {
+			t.Fatalf("done from released lacks %s:\n%s", kind, out)
+		}
+	}
+	if !strings.Contains(out, "phase chartered") {
+		t.Fatalf("done did not return the role to chartered:\n%s", out)
+	}
+
+	// Nothing to finish: no held work, no active claim.
+	if code, _, _ := exec(t, state, append([]string{"done"}, role...)...); code != codeError {
+		t.Fatal("done with nothing held must error")
+	}
+	// begin of unassigned work without a pin must refuse to write.
+	if code, _, errOut := exec(t, state, append([]string{"begin", "-work", "github:acme/api#9"}, role...)...); code != codeError || !strings.Contains(errOut, "-digest or -pin is required") {
+		t.Fatalf("unpinned begin: exit %d: %s", code, errOut)
+	}
+}
+
+// TestBeginStrictMintsIdentity pins strict-mode composites: begin's fresh
+// attach mints the identity its later steps write under, so ORG_STRICT does
+// not force a human to copy digests mid-command.
+func TestBeginStrictMintsIdentity(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api", "-strict"}
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op"}, role...)...); code != 0 {
+		t.Fatalf("charter: %s", errOut)
+	}
+	code, _, errOut := exec(t, state, append([]string{"begin", "-work", "github:acme/api#7", "-pin", "task"}, role...)...)
+	if code != 0 {
+		t.Fatalf("strict begin: exit %d: %s", code, errOut)
+	}
+	// done on the now-held lane without presenting the incarnation must be
+	// refused by the strict policy before anything is written.
+	code, _, errOut = exec(t, state, append([]string{"done"}, role...)...)
+	if code != codeError || !strings.Contains(errOut, "strict mode") {
+		t.Fatalf("strict done without identity: exit %d: %s", code, errOut)
+	}
+}
