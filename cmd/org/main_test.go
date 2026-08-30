@@ -726,3 +726,154 @@ func TestCompositesPreflightAndDischarge(t *testing.T) {
 		t.Fatalf("done re-claimed a dangling obligation instead of discharging it:\n%s", out)
 	}
 }
+
+// transferFixture stands up two attached lanes in one tenant, the source
+// holding one work item.
+type transferFixture struct {
+	t                *testing.T
+	state            string
+	src, dst, srcInc string
+	dstInc, work     string
+}
+
+func newTransferFixture(t *testing.T, srcScope, dstScope, work string) *transferFixture {
+	t.Helper()
+	f := &transferFixture{t: t, state: t.TempDir(), src: "steward:a", dst: "steward:b", work: work}
+	f.srcInc = f.standUp(f.src, srcScope)
+	f.dstInc = f.standUp(f.dst, dstScope)
+	f.run(0, f.src, "assign", "-work", work, "-pin", "the item")
+	return f
+}
+
+func (f *transferFixture) standUp(role, scope string) string {
+	f.t.Helper()
+	f.run(0, role, "charter", "-scope", scope, "-tier", "T1", "-supervisor", "human:op")
+	out := f.run(0, role, "attach", "-json")
+	var r struct {
+		Holder string `json:"holder"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		f.t.Fatalf("decode attach: %v", err)
+	}
+	return r.Holder
+}
+
+func (f *transferFixture) run(want int, role string, args ...string) string {
+	f.t.Helper()
+	code, out, errOut := exec(f.t, f.state, append(args, "-tenant", "acme", "-role", role)...)
+	if code != want {
+		f.t.Fatalf("%v on %s: exit %d, want %d (%s)", args, role, code, want, errOut)
+	}
+	return out
+}
+
+// TestTransferMovesWorkAndResumes pins the verb's whole contract: the normal
+// move, the crash-window resume, and the completed no-op — all decided from
+// state, never from a flag.
+func TestTransferMovesWorkAndResumes(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "github:acme/api", "github:acme/api#7")
+
+	out := f.run(0, f.src, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-incarnation", f.srcInc)
+	for _, want := range []string{"assign", "unassign"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("transfer lacks %s:\n%s", want, out)
+		}
+	}
+	srcBoot := f.run(0, f.src, "boot")
+	if strings.Contains(srcBoot, f.work) {
+		t.Fatalf("source still holds the work:\n%s", srcBoot)
+	}
+	dstBoot := f.run(0, f.dst, "boot")
+	if !strings.Contains(dstBoot, f.work) {
+		t.Fatalf("destination did not receive the work:\n%s", dstBoot)
+	}
+
+	// Re-running a completed transfer is a no-op that says so.
+	again := f.run(0, f.src, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-incarnation", f.srcInc)
+	if !strings.Contains(again, "already transferred") {
+		t.Fatalf("completed transfer was not idempotent:\n%s", again)
+	}
+
+	// The crash window: assigned to the destination, not yet unassigned from
+	// the source. Re-running must finish it, not duplicate the assign.
+	f.run(0, f.src, "assign", "-work", f.work, "-pin", "the item", "-incarnation", f.srcInc)
+	resumed := f.run(0, f.src, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-incarnation", f.srcInc)
+	// Exactly one record: the unassign that finishes the move. ("unassign seq"
+	// contains "assign seq", so this counts lines rather than substrings.)
+	lines := strings.Split(strings.TrimSpace(resumed), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "unassign seq") {
+		t.Fatalf("resume did not finish with exactly one unassign:\n%s", resumed)
+	}
+	if code, _, _ := exec(t, f.state, "sweep", "-json", "-tenant", "acme"); code != 0 {
+		t.Fatal("sweep failed after resume")
+	}
+}
+
+// TestTransferRefusesRatherThanGuess pins what it will not do: mint authority
+// for an unattached lane, act on a chain that moved, or move an active claim.
+func TestTransferRefusesRatherThanGuess(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "github:acme/api", "github:acme/api#7")
+
+	// Destination unattached: refuse and name the command that fixes it.
+	f.run(0, f.dst, "release", "-incarnation", f.dstInc)
+	code, _, errOut := exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code != codeError || !strings.Contains(errOut, "is not held") {
+		t.Fatalf("unattached destination: exit %d: %s", code, errOut)
+	}
+	f.dstInc = f.standUpAgain(f.dst)
+
+	// A stale destination tip is a lost race, refused before anything moves.
+	code, _, errOut = exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		"-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code == 0 {
+		t.Fatal("transfer accepted a bogus destination incarnation")
+	}
+	srcBoot := f.run(0, f.src, "boot")
+	if !strings.Contains(srcBoot, f.work) {
+		t.Fatalf("a refused transfer moved the work anyway:\n%s", srcBoot)
+	}
+
+	// An active claim is not transferable.
+	f.run(0, f.src, "claim", "-work", f.work, "-incarnation", f.srcInc)
+	code, _, errOut = exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code != codeError || !strings.Contains(errOut, "active claim") {
+		t.Fatalf("active claim: exit %d: %s", code, errOut)
+	}
+}
+
+func (f *transferFixture) standUpAgain(role string) string {
+	f.t.Helper()
+	out := f.run(0, role, "attach", "-json")
+	var r struct {
+		Holder string `json:"holder"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		f.t.Fatalf("decode attach: %v", err)
+	}
+	return r.Holder
+}
+
+// TestTransferWarnsOnDestinationScopeDrift pins the posture this substrate
+// keeps everywhere the kernel cannot enforce: moving work outside the
+// destination's charter scope is allowed, named, and left for sweep to report.
+func TestTransferWarnsOnDestinationScopeDrift(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "jira:OTHER-", "github:acme/api#7")
+	code, _, errOut := exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code != 0 {
+		t.Fatalf("transfer: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "outside") || !strings.Contains(errOut, "scope_drift") {
+		t.Fatalf("no drift warning: %s", errOut)
+	}
+	_, sweep, _ := exec(t, f.state, "sweep", "-tenant", "acme")
+	if !strings.Contains(sweep, "scope_drift") {
+		t.Fatalf("sweep does not report the drift the transfer warned about:\n%s", sweep)
+	}
+}

@@ -38,6 +38,18 @@ system name there is Baton; this binary is its first runtime slice.
   no `recharter` verb: changing terms can WIDEN authority and the kernel has no
   parent-authority check and no tier ordering to verify attenuation with (see
   FOLLOWUPS).
+- **`transfer`** moves one work item between two roles in the same tenant.
+  Nothing about it is atomic — two chains, two locks, no cross-chain
+  transaction — so it makes the failure states RECOVERABLE instead: it
+  ASSIGNS to the destination FIRST (a crash then leaves the item held twice,
+  which `sweep` reports as an `assign_conflict`, rather than held by nobody,
+  which nothing can see), FENCES both chains to the tips it read
+  (`Draft.ExpectTip`; the kernel's prev check cannot serve, since the home
+  fills prev under its own lock and would silently accommodate the race), and
+  is IDEMPOTENT BY STATE — re-running finishes a half-done move or reports a
+  completed one. It manufactures no authority: both roles must already be
+  held and the destination's incarnation presented. Destination scope drift
+  is warned about, never prevented.
 - **Composites** `begin` and `done` bracket small work (field report §4.2):
   `begin -work <uri>` attaches when unheld, assigns when unassigned (only
   then requiring `-pin`/`-digest`), and claims — one command, the same

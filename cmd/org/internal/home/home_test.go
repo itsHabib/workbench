@@ -1,6 +1,7 @@
 package home
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -183,5 +184,39 @@ func TestRolesEnumeratesLayout(t *testing.T) {
 	}
 	if len(pairs) != 1 || pairs[0] != [2]string{tenant, role} {
 		t.Fatalf("roles = %v, want [[%s %s]]", pairs, tenant, role)
+	}
+}
+
+// TestAppendFencesAMovedTip pins the ExpectTip assertion: a caller that read a
+// tip and then lost a race must learn the world moved. The kernel cannot do
+// this — the home fills prev from the state it loads under its own lock, so a
+// concurrent write is silently accommodated — which is exactly why a caller
+// coordinating two chains needs the fence.
+func TestAppendFencesAMovedTip(t *testing.T) {
+	h, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.Append("acme", "lead:x", Draft{
+		Kind: org.KindCharter, Terms: &org.Terms{Scope: []string{"github:acme/api"}, MinReader: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, state, err := h.Load("acme", "lead:x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := state.Tip
+	if _, _, err := h.Append("acme", "lead:x", Draft{Kind: org.KindAttach}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.Append("acme", "lead:x", Draft{Kind: org.KindNote, ExpectTip: stale})
+	if !errors.Is(err, ErrTipMoved) {
+		t.Fatalf("stale ExpectTip: err = %v, want ErrTipMoved", err)
+	}
+	// The same append without a fence is accommodated, which is the behavior
+	// the fence exists to opt out of.
+	if _, _, err := h.Append("acme", "lead:x", Draft{Kind: org.KindNote}); err != nil {
+		t.Fatalf("unfenced append: %v", err)
 	}
 }

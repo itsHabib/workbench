@@ -19,6 +19,7 @@ package home
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,6 +154,28 @@ type Draft struct {
 	// lets the home write as the current holder, which is the single-operator
 	// posture this POC runs in; a multi-writer home would require it.
 	Incarnation string
+	// ExpectTip, when set, is the chain tip the caller read and is acting on.
+	// The append is refused if the chain has moved since. The kernel's own prev
+	// check cannot serve here: the home fills prev from the state it loads
+	// under the lock, so a concurrent write between a caller's read and its
+	// append is silently accommodated rather than refused. A caller
+	// coordinating TWO chains needs the opposite — it must learn that the world
+	// moved, because its second write may no longer be the right one.
+	ExpectTip string
+}
+
+// ErrTipMoved reports that a chain advanced between a caller's read and its
+// append. It is a lost race, not a malformed request: the caller re-reads and
+// decides again.
+var ErrTipMoved = errors.New("org: chain tip moved since it was read")
+
+// shortDigest trims a digest for a message. A full one buries the two values a
+// reader is comparing in 128 characters of noise.
+func shortDigest(d string) string {
+	if len(d) <= 14 {
+		return d
+	}
+	return d[:14] + "…"
 }
 
 // Append admits and appends one record under the chain's lock, returning the
@@ -171,6 +194,10 @@ func (h *Home) Append(tenant, role string, d Draft) (org.Record, org.RoleState, 
 	_, state, err := h.Load(tenant, role)
 	if err != nil {
 		return org.Record{}, org.RoleState{}, err
+	}
+	if d.ExpectTip != "" && d.ExpectTip != state.Tip {
+		return org.Record{}, state, fmt.Errorf("%w: %s expected %s, found %s",
+			ErrTipMoved, role, shortDigest(d.ExpectTip), shortDigest(state.Tip))
 	}
 	r, err := h.draft(tenant, role, state, d)
 	if err != nil {

@@ -64,8 +64,10 @@ So enforcement needs a scheme version: `canon/v2` with a Terms shape that
 omits absent fields, records written at the new scheme, and admission laws
 gated on the record's own scheme so a v1 record is judged by v1 rules. That is
 a real migration, not a flag. Until then, drift is reported by `org sweep`
-(`scope_drift`) and `org intake`, and the skills' "mechanical predicate" claim
-is true of the predicate but not of admission — say detected, not prevented.
+(`scope_drift`), `org intake`, and `org transfer` (which warns when the
+destination's scope does not cover the work it just moved), and the skills'
+"mechanical predicate" claim is true of the predicate but not of admission —
+say detected, not prevented.
 
 ## gate: mid-run merge race can still park (codex P1 on #219, deferred)
 
