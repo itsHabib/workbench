@@ -2,6 +2,7 @@ package org
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -147,15 +148,32 @@ func TestSchemaPatternsAgreeWithGo(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.what, func(t *testing.T) {
+			// COMPILE and run the schema's own pattern. Asserting only the Go
+			// matcher and quoting tc.pattern in the message is what let the
+			// scope grammars drift apart once already: a schema reverted to
+			// \S+ left this test green while non-Go readers disagreed.
+			if tc.pattern == "" {
+				t.Fatalf("schema carries no pattern for %s", tc.what)
+			}
+			schema, err := regexp.Compile(tc.pattern)
+			if err != nil {
+				t.Fatalf("schema pattern %q does not compile in Go's engine: %v", tc.pattern, err)
+			}
 			re := goPattern(t, tc.what)
 			for _, s := range tc.accept {
 				if !re(s) {
-					t.Errorf("Go rejects %q, which the schema pattern %q accepts", s, tc.pattern)
+					t.Errorf("Go rejects %q, which this case declares acceptable", s)
+				}
+				if !schema.MatchString(s) {
+					t.Errorf("schema pattern %q rejects %q, which Go accepts", tc.pattern, s)
 				}
 			}
 			for _, s := range tc.reject {
 				if re(s) {
-					t.Errorf("Go accepts %q, which the schema pattern %q rejects", s, tc.pattern)
+					t.Errorf("Go accepts %q, which this case declares unacceptable", s)
+				}
+				if schema.MatchString(s) {
+					t.Errorf("schema pattern %q accepts %q, which Go rejects", tc.pattern, s)
 				}
 			}
 		})

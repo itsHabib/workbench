@@ -105,6 +105,12 @@ type RoleState struct {
 	// NextDue is the deadline the last writer declared for its own next append.
 	// Liveness is derived against this, never from self-report, so an
 	// incarnation that hangs without exiting is correctly seen as dead.
+	//
+	// A deadline belongs to the writer that declared it, so ending a holder's
+	// tenure — release, revoke, retire, takeover — drops it, keeping only what
+	// that record itself declares. Without this a released role stays "late"
+	// forever against a deadline nobody is accountable for any more, which is
+	// a watcher paging about a lane that correctly went home.
 	NextDue string
 	// Degraded reports that the tip is a mechanical mark rather than a
 	// distilled record: the host observed activity the distiller has not yet
@@ -330,6 +336,15 @@ func checkTransition(state RoleState, r Record) error {
 // above this one is refused whole: interpreting part of it is how an old reader
 // skips a takeover and concludes it still holds the role.
 func checkCharter(r Record) error {
+	// The schema declares min_reader >= 0 and the Go side did not, so a
+	// negative value produced a record this kernel accepted and every other
+	// reader of the contract must reject. Nothing in the wild can carry one:
+	// min_reader had no writer that could set it — every charter written so
+	// far hardcoded 1 — so closing the drift refuses no existing chain.
+	if r.Terms.MinReader < 0 {
+		return refuse(ReasonMinReader, r.Seq,
+			"min_reader %d is negative; the contract's floor is 0", r.Terms.MinReader)
+	}
 	if r.Terms.MinReader > Version {
 		return refuse(ReasonMinReader, r.Seq,
 			"chain requires reader version %d, this reader is %d; upgrade", r.Terms.MinReader, Version)
@@ -524,13 +539,16 @@ func applyStructural(state RoleState, r Record, digest string) RoleState {
 		state = orphan(state)
 		state.Holder = digest
 		state.Phase = PhaseHeld
+		state.NextDue = r.NextDue
 	case KindRevoke:
 		state = orphan(state)
 		state.Holder = ""
 		state.Phase = PhaseChartered
+		state.NextDue = r.NextDue
 	case KindRelease:
 		state.Holder = ""
 		state.Phase = PhaseChartered
+		state.NextDue = r.NextDue
 	case KindClaim:
 		state.Active = r.Subject.Work
 		state.Phase = PhaseActive
@@ -559,6 +577,7 @@ func applyStructural(state RoleState, r Record, digest string) RoleState {
 	case KindRetire, KindSplit, KindMerge:
 		state.Holder = ""
 		state.Phase = PhaseRetired
+		state.NextDue = r.NextDue
 	}
 	return state
 }

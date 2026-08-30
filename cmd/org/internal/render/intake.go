@@ -26,10 +26,23 @@ type IntakeLane struct {
 // hold the URI, the lanes that already do, and — when nothing covers it —
 // that fact stated plainly instead of discovered an hour later.
 type Intake struct {
-	Work    string       `json:"work"`
-	Tenant  string       `json:"tenant"`
-	Covered bool         `json:"covered"`
-	Lanes   []IntakeLane `json:"lanes,omitempty"`
+	Work   string `json:"work"`
+	Tenant string `json:"tenant"`
+	// Covered is true only when a READABLE lane's scope covers the work.
+	// Indeterminate says the answer is not trustworthy: a chain could not be
+	// read, so a lane that covers this work may exist and be invisible here.
+	// A machine consumer that treats covered:false as "nothing covers it"
+	// would otherwise charter a duplicate lane over an unreadable one.
+	Covered       bool         `json:"covered"`
+	Indeterminate bool         `json:"indeterminate,omitempty"`
+	Unreadable    int          `json:"unreadable_lanes,omitempty"`
+	Lanes         []IntakeLane `json:"lanes,omitempty"`
+}
+
+// Resolve stamps the derived verdict fields from the lanes collected so far.
+func (in *Intake) Resolve() {
+	in.Unreadable = unreadable(in.Lanes)
+	in.Indeterminate = !in.Covered && in.Unreadable > 0
 }
 
 // IntakeText renders the report for a human.

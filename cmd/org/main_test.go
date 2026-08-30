@@ -560,3 +560,169 @@ func TestDoneTargetRefusesToGuess(t *testing.T) {
 		t.Fatal("must refuse a different target while another is active")
 	}
 }
+
+// TestNextDueDiesWithTheTenure pins the liveness law's kernel half: a deadline
+// belongs to the writer that declared it, so releasing drops it. Without this a
+// released lane reads "late" forever against a deadline nobody owns, and a
+// watcher pages about a lane that correctly went home.
+func TestNextDueDiesWithTheTenure(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	must := func(verb ...string) {
+		t.Helper()
+		if code, _, errOut := exec(t, state, append(verb, role...)...); code != 0 {
+			t.Fatalf("%v: %s", verb, errOut)
+		}
+	}
+	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must("attach", "-next-due", "1s")
+
+	_, out, _ := exec(t, state, append([]string{"boot"}, role...)...)
+	if !strings.Contains(out, "next-due:") {
+		t.Fatalf("attach did not declare a deadline:\n%s", out)
+	}
+	must("release")
+	_, out, _ = exec(t, state, append([]string{"boot"}, role...)...)
+	if strings.Contains(out, "next-due:") {
+		t.Fatalf("release kept the predecessor's deadline:\n%s", out)
+	}
+	_, board, _ := exec(t, state, "status", "-tenant", "acme")
+	if strings.Contains(board, "LATE") {
+		t.Fatalf("a released lane is not late:\n%s", board)
+	}
+}
+
+// TestSweepReportsScopeDrift pins the finding the kernel cannot enforce: work
+// held outside its own charter's scope. Admission is replayed over history, so
+// a scope law added now would break the fold of every chain that ever assigned
+// outside its scope — reporting is the honest alternative.
+func TestSweepReportsScopeDrift(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "lead:misc"}
+	must := func(verb ...string) {
+		t.Helper()
+		if code, _, errOut := exec(t, state, append(verb, role...)...); code != 0 {
+			t.Fatalf("%v: %s", verb, errOut)
+		}
+	}
+	must("charter", "-scope", "jira:MISC-", "-tier", "T1", "-supervisor", "human:op")
+	must("attach")
+	must("assign", "-work", "jira:MISC-1", "-pin", "in scope")
+	must("assign", "-work", "github:acme/api#7", "-pin", "out of scope")
+
+	code, out, errOut := exec(t, state, "sweep", "-json", "-tenant", "acme")
+	if code != 0 {
+		t.Fatalf("sweep: %s", errOut)
+	}
+	var report struct {
+		ScopeDrift []struct {
+			Role, Work string
+			Scope      []string
+		} `json:"scope_drift"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode sweep: %v", err)
+	}
+	if len(report.ScopeDrift) != 1 {
+		t.Fatalf("scope_drift = %#v, want exactly the out-of-scope hold", report.ScopeDrift)
+	}
+	if d := report.ScopeDrift[0]; d.Role != "lead:misc" || d.Work != "github:acme/api#7" {
+		t.Fatalf("scope_drift = %#v", d)
+	}
+	_, text, _ := exec(t, state, "sweep", "-tenant", "acme")
+	for _, want := range []string{"scope_drift (held outside", "github:acme/api#7", "attention: 1 scope_drift(s)"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text sweep lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "0 dangling") {
+		t.Fatalf("drift-only attention gained a zero-count prefix:\n%s", text)
+	}
+	must("unassign", "-work", "github:acme/api#7")
+	_, text, _ = exec(t, state, "sweep", "-tenant", "acme")
+	if strings.Contains(text, "scope_drift") {
+		t.Fatalf("clean sweep retained a drift warning:\n%s", text)
+	}
+}
+
+// TestAnnulRepudiatesWithoutReverting pins what annul actually is: the fold
+// records the digest and leaves the record's effect standing, so the verb must
+// say so rather than let a caller read "annul" as "undo".
+func TestAnnulRepudiatesWithoutReverting(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	must := func(verb ...string) (string, string) {
+		t.Helper()
+		code, out, errOut := exec(t, state, append(verb, role...)...)
+		if code != 0 {
+			t.Fatalf("%v: %s", verb, errOut)
+		}
+		return out, errOut
+	}
+	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must("attach")
+	must("assign", "-work", "github:acme/api#7", "-pin", "assigned in error")
+
+	_, warn := must("annul", "-body", "wrong lane")
+	if !strings.Contains(warn, "does not revert") || !strings.Contains(warn, "held 1") {
+		t.Fatalf("annul did not report the standing effect: %s", warn)
+	}
+	// The assignment it repudiated is still held — that is the kernel's law,
+	// and the reason the warning exists.
+	_, boot, _ := exec(t, state, append([]string{"boot"}, role...)...)
+	if !strings.Contains(boot, "github:acme/api#7") {
+		t.Fatalf("annul silently reverted state; the fold does not do that:\n%s", boot)
+	}
+	_, log, _ := exec(t, state, append([]string{"log"}, role...)...)
+	if !strings.Contains(log, "annul") {
+		t.Fatalf("annul absent from the chain:\n%s", log)
+	}
+	// An annul naming anything but the tip is the kernel's refusal.
+	if code, _, errOut := exec(t, state, append([]string{"annul", "-target",
+		"sha256:0000000000000000000000000000000000000000000000000000000000000000"}, role...)...); code != codeRefused || !strings.Contains(errOut, "annul_unknown") {
+		t.Fatalf("non-tip annul: exit %d: %s", code, errOut)
+	}
+}
+
+// TestCompositesPreflightAndDischarge pins the two composite deferrals: begin
+// refuses a blocked claim before writing anything, and done discharges a
+// dangling claim by completing it rather than trying to re-claim it.
+func TestCompositesPreflightAndDischarge(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	sup := []string{"-tenant", "acme", "-role", "human:op"}
+	must := func(args []string, verb ...string) {
+		t.Helper()
+		if code, _, errOut := exec(t, state, append(verb, args...)...); code != 0 {
+			t.Fatalf("%v: %s", verb, errOut)
+		}
+	}
+	must(role, "charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must(role, "begin", "-work", "github:acme/api#7", "-pin", "first task")
+
+	// A second begin while #7 is active is refused before any record lands.
+	before, _, _ := exec(t, state, append([]string{"log"}, role...)...)
+	code, _, errOut := exec(t, state, append([]string{"begin", "-work", "github:acme/api#8", "-pin", "second"}, role...)...)
+	if code != codeError || !strings.Contains(errOut, "already active") {
+		t.Fatalf("blocked begin: exit %d: %s", code, errOut)
+	}
+	after, _, _ := exec(t, state, append([]string{"log"}, role...)...)
+	if before != after {
+		t.Fatal("a refused begin still wrote to the chain")
+	}
+
+	// A takeover strands #7 as a dangling claim; done must close it.
+	must(sup, "charter", "-scope", "org:acme", "-tier", "T2", "-supervisor", "human:op")
+	must(role, "takeover", "-party", "human:op")
+	_, boot, _ := exec(t, state, append([]string{"boot"}, role...)...)
+	if !strings.Contains(boot, "github:acme/api#7") {
+		t.Fatalf("takeover did not strand the claim:\n%s", boot)
+	}
+	_, out, _ := exec(t, state, append([]string{"done", "-body", "successor discharge"}, role...)...)
+	if !strings.Contains(out, "complete") {
+		t.Fatalf("done did not complete the dangling claim:\n%s", out)
+	}
+	if strings.Contains(out, "claim seq") {
+		t.Fatalf("done re-claimed a dangling obligation instead of discharging it:\n%s", out)
+	}
+}

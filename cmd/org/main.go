@@ -52,6 +52,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 // read verbs never take the lock.
 var verbs = map[string]func(*env, []string) error{
 	"charter":    cmdCharter,
+	"annul":      cmdAnnul,
 	"attach":     cmdAttach,
 	"assign":     cmdAssign,
 	"unassign":   cmdWork(org.KindUnassign),
@@ -114,6 +115,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `usage: org <verb> [flags]
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
+correction  annul (repudiate the tip; corrects forward, does not revert)
 work        assign · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
 obligations intent · resolve · escalate · seal
@@ -293,6 +295,9 @@ func cmdBegin(e *env, args []string) error {
 	if held(state, *work) < 0 && *digest == "" && *pin == "" {
 		return fmt.Errorf("-digest or -pin is required: %s is not yet assigned, and an unpinned assignment cannot detect drift", *work)
 	}
+	if err := claimable(state, *work); err != nil {
+		return err
+	}
 	var steps []receipt
 	inc := s.incarnation
 	if state.Holder == "" {
@@ -355,6 +360,7 @@ func cmdDone(e *env, args []string) error {
 	}
 	var steps []receipt
 	var inc string
+	dangling := state.Dangling == target
 	if state.Holder == "" {
 		r, st, err := step(h, s, home.Draft{Kind: org.KindAttach})
 		if err != nil {
@@ -362,7 +368,10 @@ func cmdDone(e *env, args []string) error {
 		}
 		steps, state, inc = append(steps, r), st, st.Holder
 	}
-	if state.Active == "" {
+	// A dangling claim is already open — the predecessor's. Completing it IS
+	// the discharge the kernel demands; claiming first would be refused, and
+	// would also misrepresent a successor's close as a fresh claim.
+	if state.Active == "" && !dangling {
 		r, st, err := step(h, s, home.Draft{Kind: org.KindClaim, Subject: org.Subject{Work: target}, Incarnation: inc})
 		if err != nil {
 			return err
@@ -394,7 +403,7 @@ func doneTarget(state org.RoleState, work string) (string, error) {
 		if state.Active != "" && state.Active != work {
 			return "", fmt.Errorf("%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
 		}
-		if state.Active != work && held(state, work) < 0 {
+		if state.Active != work && state.Dangling != work && held(state, work) < 0 {
 			return "", fmt.Errorf("%s is not held by this role; nothing to finish", work)
 		}
 		return work, nil
@@ -402,10 +411,42 @@ func doneTarget(state org.RoleState, work string) (string, error) {
 	if state.Active != "" {
 		return state.Active, nil
 	}
+	// A dangling claim outranks the held set: the kernel refuses every new
+	// claim until it is discharged, so it is the only thing that CAN be
+	// finished next, whatever else the role holds.
+	if state.Dangling != "" {
+		return state.Dangling, nil
+	}
 	if len(state.Held) == 1 {
 		return state.Held[0].Work, nil
 	}
 	return "", fmt.Errorf("-work is required: %d items held, none active", len(state.Held))
+}
+
+// claimable reports why a claim on work would be refused, before any record is
+// written. The kernel refuses these anyway; checking here keeps a composite
+// from leaving a half-built entry (an attach, or an assign) behind a refusal
+// that was knowable from state the caller already read.
+func claimable(state org.RoleState, work string) error {
+	if state.Dangling != "" {
+		return fmt.Errorf("a predecessor's claim on %s is unresolved; finish it (org done -work %s) before beginning %s", state.Dangling, state.Dangling, work)
+	}
+	if len(state.OpenIntents) > 0 {
+		return fmt.Errorf("effect %s is still open; resolve it before beginning %s", state.OpenIntents[0], work)
+	}
+	if state.Active != "" && state.Active != work {
+		return fmt.Errorf("%s is already active; finish or pause it before beginning %s", state.Active, work)
+	}
+	return nil
+}
+
+// orDashText renders an empty string as a dash, so an absent value reads as
+// absent rather than as a gap in the line.
+func orDashText(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }
 
 // held reports the index of a work URI in a state's held set, or -1.
@@ -456,29 +497,76 @@ func printJSON(e *env, v any) error {
 	return nil
 }
 
-func cmdCharter(e *env, args []string) error {
-	s := newScope("charter")
+// termsFlags registers the charter-terms flags on a scope and returns the
+// builder that assembles them. It is its own function so the terms vocabulary
+// lives in one place for the second writer this chain needs and does not yet
+// safely have (see FOLLOWUPS: recharter).
+func termsFlags(s *scope) func() *org.Terms {
 	var scopes, supervisors, effects multi
 	tier := s.fs.String("tier", "", "risk tier ceiling, e.g. T2")
 	retire := s.fs.String("retire-when", "", "the condition under which this role retires")
 	spend := s.fs.Int64("spend-ceiling", 0, "spend ceiling")
 	cycles := s.fs.Int64("cycle-ceiling", 0, "review-cycle ceiling")
 	concurrency := s.fs.Int64("concurrency-ceiling", 0, "concurrent incarnation ceiling")
+	minReader := s.fs.Int64("min-reader", 1, "monotone minimum reader version")
 	s.fs.Var(&scopes, "scope", "work reference this role owns (repeatable)")
 	s.fs.Var(&supervisors, "supervisor", "role that may take this one over (repeatable)")
 	s.fs.Var(&effects, "effect-class", "effect class this role may perform (repeatable)")
+	return func() *org.Terms {
+		return &org.Terms{
+			Scope: scopes, Tier: *tier, Supervisors: supervisors,
+			EffectClasses: effects, Retire: *retire,
+			SpendCeiling: *spend, CycleCeiling: *cycles, ConcurrencyCeiling: *concurrency,
+			MinReader: *minReader,
+		}
+	}
+}
+
+func cmdCharter(e *env, args []string) error {
+	s := newScope("charter")
+	terms := termsFlags(s)
 	h, err := s.open(args, true)
 	if err != nil {
 		return err
 	}
+	return appendAndReport(e, h, s, home.Draft{Kind: org.KindCharter, Terms: terms()})
+}
+
+// cmdAnnul repudiates the record at the tip. It does NOT revert it: the fold
+// appends the digest to Annulled and leaves Terms, Held, Active and NextDue
+// exactly as that record left them, because an append-only chain corrects
+// forward. So this verb records the repudiation and says plainly which effect
+// is still standing — a caller who reads "annul" as "undo" would otherwise
+// walk away believing state changed.
+//
+// The kernel admits an annul only against the tip, because a fold can verify
+// nothing else, so -target defaults to the tip rather than asking the caller
+// to copy a digest correctly.
+func cmdAnnul(e *env, args []string) error {
+	s := newScope("annul")
+	target := s.fs.String("target", "", "digest of the record to repudiate (default: the tip)")
+	text := s.fs.String("body", "", `why it is repudiated ("-" reads stdin)`)
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	b, err := body(e, *text)
+	if err != nil {
+		return err
+	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	if *target == "" {
+		*target = state.Tip
+	}
+	fmt.Fprintf(e.stderr, "annul records a repudiation; it does not revert the record's effect\n")
+	fmt.Fprintf(e.stderr, "  still standing: phase %s · held %d · active %s · next-due %s\n",
+		state.Phase, len(state.Held), orDashText(state.Active), orDashText(state.NextDue))
+	fmt.Fprintf(e.stderr, "  correct it forward with the verb that undoes it (unassign, yield, a new assign)\n")
 	return appendAndReport(e, h, s, home.Draft{
-		Kind: org.KindCharter,
-		Terms: &org.Terms{
-			Scope: scopes, Tier: *tier, Supervisors: supervisors,
-			EffectClasses: effects, Retire: *retire,
-			SpendCeiling: *spend, CycleCeiling: *cycles, ConcurrencyCeiling: *concurrency,
-			MinReader: 1,
-		},
+		Kind: org.KindAnnul, Subject: org.Subject{Target: *target}, Body: b,
 	})
 }
 
@@ -743,6 +831,7 @@ func cmdIntake(e *env, args []string) error {
 			in.Covered = true
 		}
 	}
+	in.Resolve()
 	if s.asJSON {
 		return printJSON(e, in)
 	}
@@ -830,12 +919,14 @@ func cmdSweep(e *env, args []string) error {
 	}
 	totals := survey.Sum(roles)
 	conflicts := survey.AssignConflicts(s.tenant, roles)
+	drifts := survey.ScopeDrifts(s.tenant, roles)
 	if s.asJSON {
 		return printJSON(e, map[string]any{
-			"roles": roles, "totals": totals, "assign_conflicts": conflicts,
+			"roles": roles, "totals": totals,
+			"assign_conflicts": conflicts, "scope_drift": drifts,
 		})
 	}
-	fmt.Fprint(e.stdout, render.Sweep(roles, totals, conflicts))
+	fmt.Fprint(e.stdout, render.Sweep(roles, totals, conflicts, drifts))
 	return nil
 }
 

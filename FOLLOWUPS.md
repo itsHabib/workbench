@@ -2,6 +2,71 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## org: recharter has no writer, because widening authority has no check
+
+`KindRecharter` is kernel-admissible and its own doc says it is "authored under
+the parent charter", but nothing enforces that: `checkRecharter` verifies only
+that `min_reader` is monotone, and `checkWriter` accepts the current holder's
+own incarnation. A CLI verb was written and then withdrawn from #272 on that
+finding — exposing it would let a role raise its own tier, add effect classes,
+lift its ceilings, drop the supervisors that may take it over, or widen its
+scope, all self-signed.
+
+Two things are missing, and the second is why the obvious guard does not work:
+
+1. **Parent authority.** There is no mechanism for a record to be authorized by
+   another role. `takeover` names a `party` and `checkTakeover` verifies it
+   against `Terms.Supervisors`, so the shape exists; recharter needs the same,
+   plus the operator-facing question of who the parent is for a top-level role.
+2. **Attenuation the kernel can verify.** Effect classes (subset), supervisors
+   (no shrink) and scope (every new entry covered by the old) are checkable.
+   `Tier` is an opaque string — the kernel imposes no ordering, so it cannot
+   tell T1→T3 from T3→T1 — and the ceilings have no consumer, so whether 0
+   means "none" or "unlimited" is undecided. A law refusing what it cannot
+   compare would have to freeze tier entirely.
+
+Until both exist, terms are set once at charter. A role whose terms are wrong
+is retired and re-chartered, which is visible in the chain rather than
+self-signed inside it.
+
+## org: annul is a repudiation, not a revert
+
+`applyStructural` appends the annulled digest to `Annulled` and changes nothing
+else: `Terms`, `Held`, `Active` and `NextDue` still carry whatever the annulled
+record did. That is consistent with an append-only chain (correct forward), and
+`org annul` now prints the effect still standing so the verb cannot be misread
+as undo. What is undecided is whether a reader should SKIP annulled records
+when folding. It cannot be done in one pass — a record's annulment is only
+known after it has been applied — so it would mean a two-pass fold, and it
+would change the derived state of every existing chain that carries an annul.
+Worth deciding before anything depends on `Annulled` for more than reporting.
+
+## org: scope membership cannot become an admission law as the kernel stands
+
+The field report (§4.4) proved `assign` enforces no scope at all: a lane
+chartered `github:Acme/Repo` accepted `jira:PROJ-9999`, `github:Other/Thing#1`
+and `banana:whatever` without a murmur. The predicate now exists
+(`contracts/org.InScope`) and both `intake` and `sweep` apply it, but it is a
+FINDING, not a refusal. Two facts block the law:
+
+1. **Replay re-admits.** `Reduce` folds by calling `Advance` → `Admissible` on
+   every historical record. A law added today is therefore applied to records
+   written years ago: every chain that ever assigned outside its scope stops
+   folding, which is a worse failure than the drift it prevents.
+2. **The obvious escape does not exist.** An opt-in charter term
+   (`scope_enforced`) would bind only new charters — except `Terms.Canonical`
+   emits *every* field, with no omission of zero values, so adding one changes
+   the canonical bytes of every charter ever written and invalidates their
+   digests. The encoder's own doc states the constraint: once a record is
+   written, the bytes that produced its hash can never change.
+
+So enforcement needs a scheme version: `canon/v2` with a Terms shape that
+omits absent fields, records written at the new scheme, and admission laws
+gated on the record's own scheme so a v1 record is judged by v1 rules. That is
+a real migration, not a flag. Until then, drift is reported by `org sweep`
+(`scope_drift`) and `org intake`, and the skills' "mechanical predicate" claim
+is true of the predicate but not of admission — say detected, not prevented.
+
 ## gate: mid-run merge race can still park (codex P1 on #219, deferred)
 
 The already-merged refusal (#219) reads the view snapshot gathered at run
