@@ -576,6 +576,14 @@ func cmdTransfer(e *env, args []string) error {
 	if *work == "" || *to == "" {
 		return fmt.Errorf("-work and -to are required")
 	}
+	// Unconditionally, not only under -strict: with an empty incarnation the
+	// home substitutes the DESTINATION's own holder, so omitting this writes
+	// an assignment onto another role's chain over that role's signature. That
+	// is the misattribution stepRole exists to prevent, and -strict is an
+	// operator preference, not a security boundary.
+	if *toInc == "" {
+		return fmt.Errorf("-to-incarnation is required: writing to %s's chain means presenting %s's writer identity, never borrowing it", *to, *to)
+	}
 	if *to == s.role {
 		return fmt.Errorf("-to %s is the source role; a transfer moves work between two roles", *to)
 	}
@@ -593,17 +601,25 @@ func cmdTransfer(e *env, args []string) error {
 		return fmt.Errorf("neither %s nor %s holds %s; there is nothing to transfer", s.role, *to, *work)
 	}
 	if !srcHolds && dstHolds {
-		fmt.Fprintf(e.stdout, "already transferred: %s holds %s\n", *to, *work)
-		return nil
+		return reportNoOp(e, s, fmt.Sprintf("already transferred: %s holds %s", *to, *work))
 	}
 	if err := transferable(src, dst, s.role, *to, *work); err != nil {
 		return err
 	}
-	// The destination inherits the SOURCE's pin, not a fresh one. The digest is
+	pin := src.Held[held(src, *work)].Digest
+	// Both holding is only a RESUME if they hold the same thing. Different
+	// digests mean this is a pre-existing conflict over one URI, not a
+	// half-finished move — and unassigning the source there would silently
+	// bless a pin nobody transferred.
+	if dstHolds {
+		if got := dst.Held[held(dst, *work)].Digest; got != pin {
+			return fmt.Errorf("%s already holds %s pinned to %s, not the %s this transfer would move: that is an assign_conflict to resolve, not a half-finished transfer",
+				*to, *work, shortDigest(got), shortDigest(pin))
+		}
+	}
+	// The destination inherits the SOURCE's pin, resolved above: the digest is
 	// what makes drift detectable, so re-pinning here would quietly reset the
 	// baseline the assignment was made against.
-	pin := src.Held[held(src, *work)].Digest
-
 	var steps []receipt
 	if !dstHolds {
 		r, _, err := stepRole(h, s, *to, home.Draft{
@@ -615,6 +631,17 @@ func cmdTransfer(e *env, args []string) error {
 			return fmt.Errorf("assign to %s (nothing was moved): %w", *to, err)
 		}
 		steps = append(steps, r)
+	}
+	// Re-read the destination immediately before removing the source. The
+	// per-append fence protects each write against ITS own chain moving; it
+	// cannot protect the source's unassign against the DESTINATION changing,
+	// and a destination that dropped the work between the two appends would
+	// leave the item held by nobody — the silent orphan this ordering exists
+	// to prevent. This narrows that window to the gap between this read and
+	// the append below; closing it entirely needs a cross-chain transaction
+	// the substrate does not have (FOLLOWUPS).
+	if err := stillHolds(h, s.tenant, *to, *work, pin); err != nil {
+		return fmt.Errorf("%w; the source keeps %s, so nothing is orphaned — re-run once the destination is settled", err, *work)
 	}
 	r, _, err := step(h, s, home.Draft{
 		Kind:      org.KindUnassign,
@@ -630,6 +657,45 @@ func cmdTransfer(e *env, args []string) error {
 			*work, *to, dst.Terms.Scope)
 	}
 	return reportSteps(e, s, steps)
+}
+
+// stillHolds re-reads a role and reports whether it holds work at the expected
+// pin. It exists for the moment between a transfer's two appends, where the
+// only honest answer to "did the destination keep it?" is to look again.
+func stillHolds(h *home.Home, tenant, role, work, pin string) error {
+	_, state, err := h.Load(tenant, role)
+	if err != nil {
+		return fmt.Errorf("re-read %s: %w", role, err)
+	}
+	i := held(state, work)
+	if i < 0 {
+		return fmt.Errorf("%s no longer holds %s", role, work)
+	}
+	if got := state.Held[i].Digest; got != pin {
+		return fmt.Errorf("%s holds %s pinned to %s, not the %s just assigned", role, work, shortDigest(got), shortDigest(pin))
+	}
+	return nil
+}
+
+// reportNoOp renders a decided-nothing-to-do outcome. A machine caller that
+// retries after an uncertain response must be able to decode the success it
+// gets back, so -json returns the composite envelope with no steps rather than
+// a line of prose.
+func reportNoOp(e *env, s *scope, why string) error {
+	if s.asJSON {
+		return printJSON(e, map[string]any{"steps": []receipt{}, "note": why})
+	}
+	fmt.Fprintln(e.stdout, why)
+	return nil
+}
+
+// shortDigest trims a digest for a message; the full pair buries the two
+// values a reader is comparing in 128 characters of noise.
+func shortDigest(d string) string {
+	if len(d) <= 14 {
+		return d
+	}
+	return d[:14] + "…"
 }
 
 // transferable reports why a transfer cannot proceed, before either chain is

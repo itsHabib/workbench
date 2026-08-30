@@ -820,7 +820,7 @@ func TestTransferRefusesRatherThanGuess(t *testing.T) {
 	// Destination unattached: refuse and name the command that fixes it.
 	f.run(0, f.dst, "release", "-incarnation", f.dstInc)
 	code, _, errOut := exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
-		"-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+		"-to-incarnation", f.dstInc, "-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
 	if code != codeError || !strings.Contains(errOut, "is not held") {
 		t.Fatalf("unattached destination: exit %d: %s", code, errOut)
 	}
@@ -875,5 +875,64 @@ func TestTransferWarnsOnDestinationScopeDrift(t *testing.T) {
 	_, sweep, _ := exec(t, f.state, "sweep", "-tenant", "acme")
 	if !strings.Contains(sweep, "scope_drift") {
 		t.Fatalf("sweep does not report the drift the transfer warned about:\n%s", sweep)
+	}
+}
+
+// TestTransferDemandsTheDestinationCredential pins the boundary the verb
+// claims: an empty incarnation makes the home substitute the DESTINATION's own
+// holder, so an optional flag here would let one role write over another's
+// signature. It is required unconditionally — -strict is a preference, not a
+// security boundary.
+func TestTransferDemandsTheDestinationCredential(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "github:acme/api", "github:acme/api#7")
+	code, _, errOut := exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code != codeError || !strings.Contains(errOut, "-to-incarnation is required") {
+		t.Fatalf("missing destination credential: exit %d: %s", code, errOut)
+	}
+	srcBoot := f.run(0, f.src, "boot")
+	if !strings.Contains(srcBoot, f.work) {
+		t.Fatalf("a refused transfer moved the work anyway:\n%s", srcBoot)
+	}
+}
+
+// TestTransferRefusesAMismatchedPin pins that "both hold it" is only a resume
+// when they hold the SAME thing: two different digests on one URI is a
+// conflict to resolve, and unassigning the source would bless a pin nobody
+// transferred.
+func TestTransferRefusesAMismatchedPin(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "github:acme/api", "github:acme/api#7")
+	f.run(0, f.dst, "assign", "-work", f.work, "-pin", "a different understanding", "-incarnation", f.dstInc)
+
+	code, _, errOut := exec(t, f.state, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-tenant", "acme", "-role", f.src, "-incarnation", f.srcInc)
+	if code != codeError || !strings.Contains(errOut, "assign_conflict to resolve") {
+		t.Fatalf("mismatched pin: exit %d: %s", code, errOut)
+	}
+	srcBoot := f.run(0, f.src, "boot")
+	if !strings.Contains(srcBoot, f.work) {
+		t.Fatalf("source was unassigned into a conflict:\n%s", srcBoot)
+	}
+}
+
+// TestTransferNoOpSpeaksJSON pins the retry path for a machine caller: a
+// completed transfer re-run with -json must decode as the same envelope, not
+// as a line of prose.
+func TestTransferNoOpSpeaksJSON(t *testing.T) {
+	f := newTransferFixture(t, "github:acme/api", "github:acme/api", "github:acme/api#7")
+	f.run(0, f.src, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-incarnation", f.srcInc)
+
+	out := f.run(0, f.src, "transfer", "-work", f.work, "-to", f.dst,
+		"-to-incarnation", f.dstInc, "-incarnation", f.srcInc, "-json")
+	var envelope struct {
+		Steps []map[string]any `json:"steps"`
+		Note  string           `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("completed -json retry is not decodable: %v\n%s", err, out)
+	}
+	if len(envelope.Steps) != 0 || !strings.Contains(envelope.Note, "already transferred") {
+		t.Fatalf("no-op envelope = %#v", envelope)
 	}
 }

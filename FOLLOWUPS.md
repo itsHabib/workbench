@@ -2,6 +2,33 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## org: transfer's last orphan window needs a cross-chain transaction
+
+`org transfer` writes to two chains under two locks. It assigns to the
+destination first so a crash leaves a *visible* double-hold rather than a
+silent orphan, fences each append to the tip it read, and re-reads the
+destination immediately before unassigning the source. One window survives
+that: if the destination holder drops the work between that re-read and the
+source's append, the source's unassign still succeeds — its own tip has not
+moved — and the item ends up held by nobody.
+
+It cannot be closed at this layer. `Draft.ExpectTip` fences a chain against
+ITS own movement; there is no way to make one chain's append conditional on
+another chain's state, because there is no lock ordering across homes and no
+two-phase commit. The options, when it matters:
+
+- A tenant-level lock taken for the duration of a multi-chain verb. Simple,
+  and it serializes every transfer in the tenant against every other.
+- An intent record on both chains (the `intent`/`resolve` effect machinery
+  already models exactly this: an open effect survives a crash and blocks new
+  claims until resolved), making the transfer a two-phase operation whose
+  half-done state is a first-class, kernel-refused-until-resolved condition
+  rather than something a sweep notices afterwards.
+
+The second is the shape this substrate already believes in. Until then the
+residual window is documented, `sweep` reports the double-hold half of it,
+and nothing reports the orphan half — which is the honest gap.
+
 ## org: recharter has no writer, because widening authority has no check
 
 `KindRecharter` is kernel-admissible and its own doc says it is "authored under
