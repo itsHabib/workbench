@@ -553,12 +553,20 @@ func cmdCharter(e *env, args []string) error {
 //     held twice — which `org sweep` reports as an assign_conflict — instead
 //     of held by nobody, which nothing can see. A visible conflict is a
 //     recoverable state; a silent orphan is lost work.
-//   - Both chains are FENCED to the tips this command read. If either moved,
-//     the transfer refuses rather than acting on a world that changed
-//     underneath it.
+//   - Each APPEND is fenced to the tip it was decided from, so a chain that
+//     moved under that decision refuses the write. This is per-append, not a
+//     transaction over both chains: a resume performs no destination append
+//     and therefore fences nothing there, and the destination re-check below
+//     asserts the work is still held at the same digest — not that the
+//     destination chain sat still. A destination record that leaves work and
+//     digest intact passes, correctly, because nothing this verb depends on
+//     changed.
 //   - It is IDEMPOTENT by state, not by flag. Re-running after a crash reads
 //     the same four cases and finishes the half-done move; re-running after
 //     success is a no-op that says so.
+//   - One window survives all of it: a destination that drops the work between
+//     the re-check and the source's append orphans the item. Closing that
+//     needs a cross-chain transaction the substrate does not have (FOLLOWUPS).
 //
 // It manufactures no authority: both roles must already be held, and the
 // destination's writer must be presented. Minting an incarnation for a role
