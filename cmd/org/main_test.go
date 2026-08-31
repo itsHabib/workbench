@@ -936,3 +936,115 @@ func TestTransferNoOpSpeaksJSON(t *testing.T) {
 		t.Fatalf("no-op envelope = %#v", envelope)
 	}
 }
+
+// TestSubmitAddsSupervisorAndChangesNothingElse pins the property that makes
+// this verb safe to self-sign. FOLLOWUPS withdrew a general recharter because
+// a role could widen its own scope, lift its ceilings or drop the supervisors
+// that may take it over. Submit is admitted only because it moves one term in
+// the one direction the kernel can verify — supervisors, no shrink — so the
+// test asserts the whole rest of Terms survives byte-identical rather than
+// merely asserting the supervisor landed.
+func TestSubmitAddsSupervisorAndChangesNothingElse(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	must := func(verb ...string) string {
+		t.Helper()
+		code, out, errOut := exec(t, state, append(verb, role...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", verb, code, errOut)
+		}
+		return out
+	}
+	must("charter", "-scope", "github:acme/api", "-scope", "jira:API",
+		"-supervisor", "human:op", "-effect-class", "merge",
+		"-cycle-ceiling", "3", "-spend-ceiling", "500", "-retire-when", "api retires")
+	must("attach")
+
+	must("submit", "-party", "supervisor:acme")
+
+	var boot struct {
+		Boot struct {
+			Terms org.Terms `json:"terms"`
+		} `json:"boot"`
+	}
+	if err := json.Unmarshal([]byte(must("boot", "-json")), &boot); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	got := boot.Boot.Terms
+	if want := []string{"human:op", "supervisor:acme"}; !slices.Equal(got.Supervisors, want) {
+		t.Fatalf("supervisors = %v, want %v", got.Supervisors, want)
+	}
+	// Everything else is untouched. A general recharter would have dropped all
+	// of this to its flag defaults.
+	if want := []string{"github:acme/api", "jira:API"}; !slices.Equal(got.Scope, want) {
+		t.Fatalf("scope = %v, want %v — submit must not narrow scope", got.Scope, want)
+	}
+	if want := []string{"merge"}; !slices.Equal(got.EffectClasses, want) {
+		t.Fatalf("effect classes = %v, want %v", got.EffectClasses, want)
+	}
+	if got.CycleCeiling != 3 || got.SpendCeiling != 500 || got.Retire != "api retires" {
+		t.Fatalf("ceilings/retire drifted: cycles=%d spend=%d retire=%q",
+			got.CycleCeiling, got.SpendCeiling, got.Retire)
+	}
+}
+
+// TestSubmitEnablesTakeover is the reason the verb exists: a supervisor may
+// displace a holder only when the charter names it, so submit is what turns a
+// lane nobody can clear into one its supervisor can.
+func TestSubmitEnablesTakeover(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	run := func(verb ...string) (int, string, string) {
+		t.Helper()
+		return exec(t, state, append(verb, role...)...)
+	}
+	if code, _, err := run("charter", "-scope", "github:acme/api", "-supervisor", "human:op"); code != 0 {
+		t.Fatalf("charter: %s", err)
+	}
+	if code, _, err := run("attach"); code != 0 {
+		t.Fatalf("attach: %s", err)
+	}
+	// Before submit, the supervisor is a stranger to this charter.
+	code, _, errOut := run("takeover", "-party", "supervisor:acme")
+	if code != 1 || !strings.Contains(errOut, org.ReasonNotSupervisor) {
+		t.Fatalf("takeover before submit: exit %d, want 1 with %s: %s",
+			code, org.ReasonNotSupervisor, errOut)
+	}
+	if code, _, err := run("submit", "-party", "supervisor:acme"); code != 0 {
+		t.Fatalf("submit: %s", err)
+	}
+	if code, _, err := run("takeover", "-party", "supervisor:acme"); code != 0 {
+		t.Fatalf("takeover after submit: exit %d: %s", code, err)
+	}
+}
+
+// TestSubmitIsIdempotentAndNeedsAParty covers the two ways a caller gets it
+// wrong. Re-submitting an existing supervisor writes nothing rather than
+// growing the chain with a no-op recharter.
+func TestSubmitIsIdempotentAndNeedsAParty(t *testing.T) {
+	state := t.TempDir()
+	role := []string{"-tenant", "acme", "-role", "steward:api"}
+	run := func(verb ...string) (int, string, string) {
+		t.Helper()
+		return exec(t, state, append(verb, role...)...)
+	}
+	if code, _, err := run("charter", "-scope", "github:acme/api", "-supervisor", "human:op"); code != 0 {
+		t.Fatalf("charter: %s", err)
+	}
+	if code, _, err := run("attach"); code != 0 {
+		t.Fatalf("attach: %s", err)
+	}
+	if code, _, errOut := run("submit"); code == 0 {
+		t.Fatalf("submit without -party succeeded: %s", errOut)
+	}
+	if code, _, err := run("submit", "-party", "human:op"); code != 0 {
+		t.Fatalf("idempotent submit: %s", err)
+	}
+	code, out, err := run("log")
+	if code != 0 {
+		t.Fatalf("log: %s", err)
+	}
+	if strings.Contains(out, org.KindRecharter) {
+		t.Fatalf("re-submitting an existing supervisor wrote a record:\n%s", out)
+	}
+}

@@ -38,6 +38,18 @@ system name there is Baton; this binary is its first runtime slice.
   no `recharter` verb: changing terms can WIDEN authority and the kernel has no
   parent-authority check and no tier ordering to verify attenuation with (see
   FOLLOWUPS).
+- **`submit`** is the one slice of `KindRecharter` that is safe self-signed: it
+  adds ONE supervisor and leaves every other term byte-identical. FOLLOWUPS
+  names supervisors as a verifiable attenuation ("no shrink"), and the
+  direction is what admits it — naming another role that may displace you
+  strictly increases accountability and cannot widen your own authority, so
+  there is no escalation to guard against. It exists because `checkTakeover`
+  admits a displacement only from a role the charter names, so a lane nobody
+  can clear becomes clearable only by its own consent: recharter is admitted
+  from Held or Active under the writer's own incarnation, so a role submits to
+  oversight while sitting in its seat. Nothing can be made supervisable from
+  outside, which is why this is not the parent-authority mechanism the kernel
+  still lacks.
 - **`transfer`** moves one work item between two roles in the same tenant.
   Nothing about it is atomic — two chains, two locks, no cross-chain
   transaction — so it makes the failure states RECOVERABLE rather than

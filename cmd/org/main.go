@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 // read verbs never take the lock.
 var verbs = map[string]func(*env, []string) error{
 	"charter":    cmdCharter,
+	"submit":     cmdSubmit,
 	"annul":      cmdAnnul,
 	"attach":     cmdAttach,
 	"assign":     cmdAssign,
@@ -116,6 +118,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `usage: org <verb> [flags]
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
+            submit (accept a supervisor; the only self-signed terms change)
 correction  annul (repudiate the tip; corrects forward, does not revert)
 work        assign · transfer · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
@@ -539,6 +542,55 @@ func cmdCharter(e *env, args []string) error {
 		return err
 	}
 	return appendAndReport(e, h, s, home.Draft{Kind: org.KindCharter, Terms: terms()})
+}
+
+// cmdSubmit adds one supervisor to a live role's terms and changes nothing
+// else. It is the deliberately narrow slice of KindRecharter that is safe to
+// self-sign.
+//
+// A general recharter verb was written and withdrawn from #272, and FOLLOWUPS
+// records why: checkRecharter verifies only that min_reader is monotone, and
+// checkWriter accepts the holder's own incarnation, so exposing the whole kind
+// would let a role widen its own scope, lift its ceilings, add effect classes,
+// or drop the supervisors that may take it over — all self-signed. That
+// remains true and this verb does not change it.
+//
+// What makes THIS safe is the direction of travel. FOLLOWUPS names supervisors
+// as one of the three attenuations a kernel can actually verify ("no shrink"),
+// and adding one is monotone in the accountability direction: it strictly
+// increases the set of roles that may displace you and cannot widen your own
+// authority. There is no escalation available by naming more parties who can
+// remove you. So the guard is total rather than partial — every other term
+// must be byte-identical to the chain's current terms, and a supervisor may
+// only be added, never removed.
+//
+// Who writes it matters as much as what it says: recharter is admitted only
+// from Held or Active and carries the writer's own incarnation, so a role
+// submits to oversight while sitting in its own seat. Consent, not imposition
+// — no role can be made supervisable from outside, which is the property that
+// keeps this from becoming the parent-authority mechanism the kernel still
+// lacks.
+func cmdSubmit(e *env, args []string) error {
+	s := newScope("submit")
+	party := s.fs.String("party", "", "role to add as a supervisor, e.g. supervisor:mh")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *party == "" {
+		return fmt.Errorf("-party is required: the role being added as a supervisor")
+	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	if slices.Contains(state.Terms.Supervisors, *party) {
+		fmt.Fprintf(e.stderr, "%s already supervises %s; nothing to do\n", *party, s.role)
+		return nil
+	}
+	next := state.Terms
+	next.Supervisors = append(slices.Clone(state.Terms.Supervisors), *party)
+	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRecharter, Terms: &next})
 }
 
 // cmdTransfer moves one work item between two roles in the same tenant.

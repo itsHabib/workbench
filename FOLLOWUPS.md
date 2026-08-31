@@ -56,6 +56,16 @@ Until both exist, terms are set once at charter. A role whose terms are wrong
 is retired and re-chartered, which is visible in the chain rather than
 self-signed inside it.
 
+**Narrowed, 2026-08-31.** `org submit` now exposes exactly one slice of the
+kind: it adds a single supervisor and leaves every other term byte-identical.
+That is admissible under this entry's own criteria rather than in spite of
+them — supervisors are listed above as a verifiable attenuation ("no shrink"),
+and adding one is monotone in the accountability direction, so none of the five
+self-signed widenings this entry names are reachable through it. The two
+missing pieces are unchanged and still block the general verb; note only that
+`Tier` became inert in #275, so the tier half of gap 2 is now moot and the
+ceilings half is what remains.
+
 ## org: annul is a repudiation, not a revert
 
 `applyStructural` appends the annulled digest to `Annulled` and changes nothing
