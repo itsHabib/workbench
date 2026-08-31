@@ -228,7 +228,19 @@ type Terms struct {
 	// scope, a maintainer's an area, an IC's a task; one rule covers all three
 	// because a work URI's scheme carries the difference.
 	Scope []string `json:"scope,omitempty"`
-	// Tier is the risk ceiling the role may act within.
+	// Tier is inert and no longer settable. Nothing in this package enforces
+	// it: there is no tier refusal reason, and no reduction consults it. Risk
+	// is a property of a change, and a role holds many changes at once, so a
+	// single scalar here could never describe them — the max would ratchet
+	// every role to the highest tier forever. The enforcing tiers live where
+	// the evidence does: the classifier floors a real diff, and a grant
+	// ceilings the exact head (grant_tier_exceeded). Read
+	// docs/auto-mode-defaults.md — "the classifier decides tier; a grant
+	// decides ceiling; keep the two axes separate."
+	//
+	// The field survives only because Terms.Canonical projects it: dropping it
+	// changes every charter digest and no existing chain would fold under
+	// canon/v1. Retire it with the next scheme bump, not before.
 	Tier string `json:"tier,omitempty"`
 	// EffectClasses pins what the role may do to the outside world. It bounds
 	// an injected incarnation to what the role could do anyway.

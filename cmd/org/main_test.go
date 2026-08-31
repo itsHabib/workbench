@@ -36,7 +36,7 @@ func TestVerbLoopExitCodes(t *testing.T) {
 		return out, errOut
 	}
 
-	step(0, "charter", "-scope", "github:acme/api", "-tier", "T2", "-supervisor", "human:op")
+	step(0, "charter", "-scope", "github:acme/api", "-supervisor", "human:op")
 	step(0, "attach")
 	step(0, "assign", "-work", "github:acme/api#88", "-pin", "the ticket body")
 	step(0, "claim", "-work", "github:acme/api#88")
@@ -370,8 +370,8 @@ func TestIntakeRoutesWork(t *testing.T) {
 			t.Fatalf("%v %v: %s", verb, args, errOut)
 		}
 	}
-	must(steward, "charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
-	must(rogue, "charter", "-scope", "jira:MISC-", "-tier", "T1", "-supervisor", "human:op")
+	must(steward, "charter", "-scope", "github:acme/api", "-supervisor", "human:op")
+	must(rogue, "charter", "-scope", "jira:MISC-", "-supervisor", "human:op")
 	must(rogue, "attach")
 	// assign enforces no scope (field report §4.4), so the rogue hold lands.
 	must(rogue, "assign", "-work", "github:acme/api#7", "-pin", "drift")
@@ -436,7 +436,7 @@ func TestBeginDoneBracketsSmallWork(t *testing.T) {
 		}
 		return out, errOut
 	}
-	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must("charter", "-scope", "github:acme/api", "-supervisor", "human:op")
 
 	out, _ := must("begin", "-work", "github:acme/api#7", "-pin", "delete the dead file")
 	for _, kind := range []string{"attach", "assign", "claim"} {
@@ -494,7 +494,7 @@ func TestBeginDoneBracketsSmallWork(t *testing.T) {
 func TestBeginStrictMintsIdentity(t *testing.T) {
 	state := t.TempDir()
 	role := []string{"-tenant", "acme", "-role", "steward:api", "-strict"}
-	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op"}, role...)...); code != 0 {
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "github:acme/api", "-supervisor", "human:op"}, role...)...); code != 0 {
 		t.Fatalf("charter: %s", errOut)
 	}
 	code, _, errOut := exec(t, state, append([]string{"begin", "-work", "github:acme/api#7", "-pin", "task"}, role...)...)
@@ -516,7 +516,7 @@ func TestBeginStrictMintsIdentity(t *testing.T) {
 func TestIntakeSchemeWideScopeAndUnreadableLanes(t *testing.T) {
 	state := t.TempDir()
 	wide := []string{"-tenant", "acme", "-role", "supervisor:tickets"}
-	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "jira:", "-tier", "T1", "-supervisor", "human:op"}, wide...)...); code != 0 {
+	if code, _, errOut := exec(t, state, append([]string{"charter", "-scope", "jira:", "-supervisor", "human:op"}, wide...)...); code != 0 {
 		t.Fatalf("bare-scheme charter refused: %s", errOut)
 	}
 	_, out, _ := exec(t, state, "intake", "-work", "jira:ANY-1", "-tenant", "acme")
@@ -574,7 +574,7 @@ func TestNextDueDiesWithTheTenure(t *testing.T) {
 			t.Fatalf("%v: %s", verb, errOut)
 		}
 	}
-	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must("charter", "-scope", "github:acme/api", "-supervisor", "human:op")
 	must("attach", "-next-due", "1s")
 
 	_, out, _ := exec(t, state, append([]string{"boot"}, role...)...)
@@ -605,7 +605,7 @@ func TestSweepReportsScopeDrift(t *testing.T) {
 			t.Fatalf("%v: %s", verb, errOut)
 		}
 	}
-	must("charter", "-scope", "jira:MISC-", "-tier", "T1", "-supervisor", "human:op")
+	must("charter", "-scope", "jira:MISC-", "-supervisor", "human:op")
 	must("attach")
 	must("assign", "-work", "jira:MISC-1", "-pin", "in scope")
 	must("assign", "-work", "github:acme/api#7", "-pin", "out of scope")
@@ -659,7 +659,7 @@ func TestAnnulRepudiatesWithoutReverting(t *testing.T) {
 		}
 		return out, errOut
 	}
-	must("charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must("charter", "-scope", "github:acme/api", "-supervisor", "human:op")
 	must("attach")
 	must("assign", "-work", "github:acme/api#7", "-pin", "assigned in error")
 
@@ -697,7 +697,7 @@ func TestCompositesPreflightAndDischarge(t *testing.T) {
 			t.Fatalf("%v: %s", verb, errOut)
 		}
 	}
-	must(role, "charter", "-scope", "github:acme/api", "-tier", "T1", "-supervisor", "human:op")
+	must(role, "charter", "-scope", "github:acme/api", "-supervisor", "human:op")
 	must(role, "begin", "-work", "github:acme/api#7", "-pin", "first task")
 
 	// A second begin while #7 is active is refused before any record lands.
@@ -712,7 +712,7 @@ func TestCompositesPreflightAndDischarge(t *testing.T) {
 	}
 
 	// A takeover strands #7 as a dangling claim; done must close it.
-	must(sup, "charter", "-scope", "org:acme", "-tier", "T2", "-supervisor", "human:op")
+	must(sup, "charter", "-scope", "org:acme", "-supervisor", "human:op")
 	must(role, "takeover", "-party", "human:op")
 	_, boot, _ := exec(t, state, append([]string{"boot"}, role...)...)
 	if !strings.Contains(boot, "github:acme/api#7") {
@@ -747,7 +747,7 @@ func newTransferFixture(t *testing.T, srcScope, dstScope, work string) *transfer
 
 func (f *transferFixture) standUp(role, scope string) string {
 	f.t.Helper()
-	f.run(0, role, "charter", "-scope", scope, "-tier", "T1", "-supervisor", "human:op")
+	f.run(0, role, "charter", "-scope", scope, "-supervisor", "human:op")
 	out := f.run(0, role, "attach", "-json")
 	var r struct {
 		Holder string `json:"holder"`
