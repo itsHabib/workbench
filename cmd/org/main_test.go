@@ -701,10 +701,17 @@ func TestCompositesPreflightAndDischarge(t *testing.T) {
 	must(role, "begin", "-work", "github:acme/api#7", "-pin", "first task")
 
 	// A second begin while #7 is active is refused before any record lands.
+	// The exit code is the REFUSAL code, not the error code: this pre-flight
+	// stands in for a kernel law (claim_active), so a caller must not be able
+	// to tell the check happened early. The expectation here previously read
+	// codeError, which pinned the seam violation rather than the behaviour.
 	before, _, _ := exec(t, state, append([]string{"log"}, role...)...)
 	code, _, errOut := exec(t, state, append([]string{"begin", "-work", "github:acme/api#8", "-pin", "second"}, role...)...)
-	if code != codeError || !strings.Contains(errOut, "already active") {
+	if code != codeRefused || !strings.Contains(errOut, "already active") {
 		t.Fatalf("blocked begin: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, org.ReasonClaimActive) {
+		t.Fatalf("pre-flight did not name the law it stands in for: %s", errOut)
 	}
 	after, _, _ := exec(t, state, append([]string{"log"}, role...)...)
 	if before != after {

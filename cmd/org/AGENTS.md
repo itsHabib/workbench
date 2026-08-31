@@ -115,6 +115,15 @@ system name there is Baton; this binary is its first runtime slice.
 0 ok · 1 kernel refusal (stderr carries the reason id, e.g. `dangling_claim`)
 · 2 usage · 4 error. A refusal is the substrate working, not a failure.
 
+**A composite's pre-flight check must refuse, not error.** `begin` and `done`
+look at state before writing so a refusal cannot leave half an entry behind —
+but where such a check stands in for a kernel law it must return
+`preflight(<the reason the kernel would have named>, …)`, so a caller cannot
+tell the check happened early. A bare `fmt.Errorf` there reports a legitimate
+refusal as a crash at exit 4, and the refusals caught early are the common
+ones. A check that is genuinely the caller's mistake — an ambiguous `done`
+target — stays an error, because no law was broken.
+
 ## Checks
 
 ```

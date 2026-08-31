@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,7 +124,10 @@ obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
 read        boot · intake · status · sweep · log · verify · blob
 
-every verb: -state <dir> (or ORG_STATE) · -tenant <id> (or ORG_TENANT) · -role <id>`)
+shape: org <verb> -state <dir> -tenant <id> -role <id> [verb flags]
+       flags follow the verb — org -state … <verb> is an unknown verb, and any
+       flag after a positional argument is silently ignored
+       -state defaults to ORG_STATE, -tenant to ORG_TENANT`)
 }
 
 // env carries the streams so every handler is testable without the process.
@@ -255,7 +259,7 @@ func stepRole(h *home.Home, s *scope, role string, d home.Draft) (receipt, org.R
 	}
 	r, state, err := h.Append(s.tenant, role, d)
 	if err != nil {
-		return receipt{}, state, err
+		return receipt{}, state, nameTheMissingAttach(h, s.tenant, role, err)
 	}
 	digest, err := org.DigestOf(r)
 	if err != nil {
@@ -266,6 +270,38 @@ func stepRole(h *home.Home, s *scope, role string, d home.Draft) (receipt, org.R
 		Tip: state.Tip, Holder: state.Holder, Active: state.Active,
 		Dangling: state.Dangling, Held: len(state.Held), Fence: state.Fence,
 	}, state, nil
+}
+
+// nameTheMissingAttach rewrites the detail on an incarnation_missing refusal
+// when the chain has never been attached at all.
+//
+// The refusal is correct and the cause it names is not. On a charter-only lane
+// nothing was missing from the command: no incarnation COULD exist yet, because
+// none has ever been minted. An agent holding a digest from an earlier session
+// reads "must name the incarnation that wrote it" as "pass -incarnation" and
+// presents a dead one, which is exactly the impersonation strict identity
+// exists to stop. The fix was always `attach` (or `begin`), which the message
+// never mentioned.
+//
+// The Reason is deliberately unchanged. It is the frozen identifier callers
+// branch on, and a record-level law really did fire; what was wrong is the
+// prose, so the prose is what this repairs. A read failure here leaves the
+// original refusal alone — a worse message beats a message invented from a
+// chain nobody could read.
+func nameTheMissingAttach(h *home.Home, tenant, role string, err error) error {
+	if org.RefusalReason(err) != org.ReasonIncarnationMissing {
+		return err
+	}
+	records, readErr := h.Records(tenant, role)
+	if readErr != nil {
+		return err
+	}
+	if slices.ContainsFunc(records, func(r org.Record) bool { return r.Kind == org.KindAttach }) {
+		return err
+	}
+	return &org.Refusal{Reason: org.ReasonIncarnationMissing, Seq: int64(len(records)) + 1, Detail: fmt.Sprintf(
+		"%s has never been attached, so no incarnation exists to name — run org attach -role %s first (or org begin, which attaches for you). Do not present a digest from an earlier session",
+		role, role)}
 }
 
 // reportSteps renders a composite's receipts: one line per record, or the
@@ -408,13 +444,18 @@ func cmdDone(e *env, args []string) error {
 
 // doneTarget resolves which work item done finishes: the explicit -work, the
 // active claim, or the single held item — refusing to guess between several.
+//
+// Where a case mirrors a kernel law, it refuses with that law's reason (see
+// preflight). Where it is genuinely the caller's mistake — an ambiguous target
+// — it stays an error, because no law was broken.
 func doneTarget(state org.RoleState, work string) (string, error) {
 	if work != "" {
 		if state.Active != "" && state.Active != work {
-			return "", fmt.Errorf("%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
+			return "", preflight(org.ReasonClaimActive,
+				"%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
 		}
 		if state.Active != work && state.Dangling != work && held(state, work) < 0 {
-			return "", fmt.Errorf("%s is not held by this role; nothing to finish", work)
+			return "", preflight(org.ReasonWorkNotHeld, "%s is not held by this role; nothing to finish", work)
 		}
 		return work, nil
 	}
@@ -439,15 +480,36 @@ func doneTarget(state org.RoleState, work string) (string, error) {
 // that was knowable from state the caller already read.
 func claimable(state org.RoleState, work string) error {
 	if state.Dangling != "" {
-		return fmt.Errorf("a predecessor's claim on %s is unresolved; finish it (org done -work %s) before beginning %s", state.Dangling, state.Dangling, work)
+		return preflight(org.ReasonDanglingClaim,
+			"a predecessor's claim on %s is unresolved; finish it (org done -work %s) before beginning %s",
+			state.Dangling, state.Dangling, work)
 	}
 	if len(state.OpenIntents) > 0 {
-		return fmt.Errorf("effect %s is still open; resolve it before beginning %s", state.OpenIntents[0], work)
+		return preflight(org.ReasonOpenIntent,
+			"effect %s is still open; resolve it before beginning %s", state.OpenIntents[0], work)
 	}
 	if state.Active != "" && state.Active != work {
-		return fmt.Errorf("%s is already active; finish or pause it before beginning %s", state.Active, work)
+		return preflight(org.ReasonClaimActive,
+			"%s is already active; finish or pause it before beginning %s", state.Active, work)
 	}
 	return nil
+}
+
+// preflight builds the refusal a composite's early check must return so that
+// checking early is invisible to a caller.
+//
+// The seam this repairs is documented in the package comment: 1 is the kernel
+// refusing a record, 4 is the command failing. A pre-flight check returning a
+// bare error reports a legitimate refusal as a crash, and the refusals a
+// composite catches early are the common ones — so a caller branching on
+// 1-vs-4, which the doc invites, got the wrong answer most of the time.
+//
+// It names a reason from the frozen vocabulary, which is the property the
+// kernel's unexported constructor protects; what it must never do is invent
+// one, and it must name the SAME reason the kernel would have. Seq is 0: no
+// record was drafted, so there is no chain position to point at.
+func preflight(reason, format string, args ...any) error {
+	return &org.Refusal{Reason: reason, Detail: fmt.Sprintf(format, args...)}
 }
 
 // orDashText renders an empty string as a dash, so an absent value reads as
@@ -480,7 +542,7 @@ func appendAndReport(e *env, h *home.Home, s *scope, d home.Draft) error {
 	}
 	r, state, err := h.Append(s.tenant, s.role, d)
 	if err != nil {
-		return err
+		return nameTheMissingAttach(h, s.tenant, s.role, err)
 	}
 	digest, err := org.DigestOf(r)
 	if err != nil {
@@ -1160,21 +1222,35 @@ func cmdVerify(e *env, args []string) error {
 	return nil
 }
 
+// cmdBlob reads one body out of the store. It is the only verb taking a
+// positional argument, and that makes it the only one where a trailing flag is
+// silently dropped: Go's flag package stops parsing at the first non-flag
+// argument, so `org blob <digest> -state /tmp/x` reads the DEFAULT state root
+// and reports the blob missing from a home the caller never named. Refusing the
+// leftovers turns a wrong answer into a usage error, and -digest gives the
+// order-independent form.
 func cmdBlob(e *env, args []string) error {
 	s := newScope("blob")
+	digest := s.fs.String("digest", "", "blob digest to read (sha256:…); the same value may be passed positionally, but only AFTER every flag")
 	h, err := s.open(args, false)
 	if err != nil {
 		return err
 	}
-	if s.fs.Arg(0) == "" {
-		return fmt.Errorf("usage: org blob <digest>")
+	if *digest == "" {
+		*digest = s.fs.Arg(0)
 	}
-	bodyBytes, found, err := h.Blob(s.fs.Arg(0))
+	if *digest == "" {
+		return fmt.Errorf("usage: org blob -digest <sha256:…>  (or: org blob [flags] <sha256:…>)")
+	}
+	if n := s.fs.NArg(); n > 1 {
+		return fmt.Errorf("%q follows a positional argument and was not parsed as a flag; put every flag before the digest, or use -digest", s.fs.Arg(1))
+	}
+	bodyBytes, found, err := h.Blob(*digest)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("blob %s is erased or unknown", s.fs.Arg(0))
+		return fmt.Errorf("blob %s is erased or unknown", *digest)
 	}
 	_, err = e.stdout.Write(bodyBytes)
 	return err
