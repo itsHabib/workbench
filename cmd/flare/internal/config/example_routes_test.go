@@ -69,7 +69,10 @@ func routesEscalationTo(cfg Config, channels map[string]bool) bool {
 // decision alone therefore ships a channel that says the same thing once per
 // rung — 308 of 396 cards on the operator's own feed by 2026-08-29, none of
 // them closeable (only escalation cards are tracked for correction). The
-// example must show the fold paging and its parts explicitly silenced.
+// example must show the BLOCK-fold paging and its parts explicitly silenced.
+// The escalate-fold is deliberately not in that set: a parked run is announced
+// by its escalation artifact, which is also the only card flare can go back and
+// close.
 func TestExampleRoutesDoNotPageEveryLadderRung(t *testing.T) {
 	cfg, err := Load(exampleRoutes)
 	if err != nil {
@@ -80,7 +83,7 @@ func TestExampleRoutesDoNotPageEveryLadderRung(t *testing.T) {
 		if r.Match.Source != "gate" || r.Match.Kind != "verdict" {
 			continue
 		}
-		if r.Match.Dimension == "reducer" && r.Channel != ChannelDrop {
+		if r.Match.Dimension == "reducer" && r.Match.Decision == "block" && r.Channel != ChannelDrop {
 			foldPages = true
 		}
 		if r.Match.Dimension == "" && r.Channel == ChannelDrop {
