@@ -57,7 +57,7 @@
       "additionalProperties": false,
       "properties": {
         "scope": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]*:\\S*$" }, "description": "The work references this role owns. At least one: there is no unscoped role. A lead's scope is a scope, a maintainer's an area, an IC's a task — one rule covers all three because the URI scheme carries the difference." },
-        "tier": { "type": "string", "description": "The risk ceiling the role may act within." },
+        "tier": { "type": "string", "description": "Inert, and no longer settable. Retained only because the canonical projection includes it, so dropping it would change every charter digest; nothing reads it. Risk is decided where the evidence is: a classifier floors a change, a grant ceilings the exact head. Retire at the next scheme bump." },
         "effect_classes": { "type": "array", "items": { "type": "string" }, "description": "What the role may do to the outside world. Bounds an injected incarnation to what the role could do anyway." },
         "supervisors": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$" }, "description": "The roles that may write a takeover against this one. The charter is the only place this can be stated: asking a holder to authorize its own replacement is exactly the case where it is unreachable." },
         "spend_ceiling": { "type": "integer", "minimum": 0 },

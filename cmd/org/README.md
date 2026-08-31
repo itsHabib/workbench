@@ -18,7 +18,7 @@ go install ./cmd/org
 # the operator charters a role once
 org charter -role lead:agentic-development \
   -scope dossier:org -scope github:itsHabib/workbench \
-  -tier T2 -supervisor human:mh -cycle-ceiling 3 \
+  -supervisor human:mh -cycle-ceiling 3 \
   -retire-when "org loop merged into steward"
 
 # new work arrives: ask where it belongs before anything is written

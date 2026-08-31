@@ -68,7 +68,7 @@ func TestBootShedsDepthNotHeadline(t *testing.T) {
 	if len(small) > 400 {
 		t.Fatalf("budget 400 produced %d bytes", len(small))
 	}
-	for _, keep := range []string{"# baton boot", "charter: tier T2", "phase: held"} {
+	for _, keep := range []string{"# baton boot", "charter: scope github:acme/api", "phase: held"} {
 		if !strings.Contains(small, keep) {
 			t.Fatalf("shedding dropped %q:\n%s", keep, small)
 		}

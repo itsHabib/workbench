@@ -166,8 +166,8 @@ func (b Boot) text() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# baton boot — %s @ %s\n", b.Role, b.Tenant)
 	fmt.Fprintf(&sb, "phase: %s · seq %d · holder %s\n", b.Phase, b.Seq, shortOr(b.Holder, "none"))
-	fmt.Fprintf(&sb, "charter: tier %s · scope %s · supervisors %s\n",
-		orDash(b.Terms.Tier), joinOr(b.Terms.Scope, "-"), joinOr(b.Terms.Supervisors, "-"))
+	fmt.Fprintf(&sb, "charter: scope %s · supervisors %s\n",
+		joinOr(b.Terms.Scope, "-"), joinOr(b.Terms.Supervisors, "-"))
 	if b.Terms.Retire != "" {
 		fmt.Fprintf(&sb, "retire-when: %s\n", b.Terms.Retire)
 	}

@@ -513,7 +513,6 @@ func printJSON(e *env, v any) error {
 // safely have (see FOLLOWUPS: recharter).
 func termsFlags(s *scope) func() *org.Terms {
 	var scopes, supervisors, effects multi
-	tier := s.fs.String("tier", "", "risk tier ceiling, e.g. T2")
 	retire := s.fs.String("retire-when", "", "the condition under which this role retires")
 	spend := s.fs.Int64("spend-ceiling", 0, "spend ceiling")
 	cycles := s.fs.Int64("cycle-ceiling", 0, "review-cycle ceiling")
@@ -524,7 +523,7 @@ func termsFlags(s *scope) func() *org.Terms {
 	s.fs.Var(&effects, "effect-class", "effect class this role may perform (repeatable)")
 	return func() *org.Terms {
 		return &org.Terms{
-			Scope: scopes, Tier: *tier, Supervisors: supervisors,
+			Scope: scopes, Supervisors: supervisors,
 			EffectClasses: effects, Retire: *retire,
 			SpendCeiling: *spend, CycleCeiling: *cycles, ConcurrencyCeiling: *concurrency,
 			MinReader: *minReader,
