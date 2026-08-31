@@ -24,6 +24,10 @@ org charter -role lead:agentic-development \
 # new work arrives: ask where it belongs before anything is written
 org intake  -work github:itsHabib/workbench#88
 
+# move work between two attached lanes (assign-first, both tips fenced)
+org transfer -role steward:a -work github:itsHabib/workbench#88 \
+  -to steward:b -to-incarnation "$B_INC" -incarnation "$A_INC"
+
 # a record written in error is repudiated (tip only; corrects forward, not back)
 org annul   -role lead:agentic-development -body "written against the wrong lane"
 

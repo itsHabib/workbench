@@ -55,6 +55,7 @@ var verbs = map[string]func(*env, []string) error{
 	"annul":      cmdAnnul,
 	"attach":     cmdAttach,
 	"assign":     cmdAssign,
+	"transfer":   cmdTransfer,
 	"unassign":   cmdWork(org.KindUnassign),
 	"claim":      cmdWork(org.KindClaim),
 	"yield":      cmdWork(org.KindYield),
@@ -116,7 +117,7 @@ func usage(w io.Writer) {
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
 correction  annul (repudiate the tip; corrects forward, does not revert)
-work        assign · unassign · claim · yield · complete · abandon
+work        assign · transfer · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
@@ -234,16 +235,25 @@ func cmdRelease(e *env, args []string) error {
 	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRelease, Body: b})
 }
 
-// step appends one record inside a composite verb, honoring strict identity
-// exactly as appendAndReport does, and returns the receipt for the roll-up.
+// step appends one record to the session's own role inside a composite verb,
+// honoring strict identity exactly as appendAndReport does, and returns the
+// receipt for the roll-up.
 func step(h *home.Home, s *scope, d home.Draft) (receipt, org.RoleState, error) {
 	if d.Incarnation == "" {
 		d.Incarnation = s.incarnation
 	}
+	return stepRole(h, s, s.role, d)
+}
+
+// stepRole appends to a NAMED role. The session's incarnation is deliberately
+// not defaulted in: presenting one role's writer identity on another role's
+// chain is not a convenience, it is a misattribution, and the kernel would be
+// right to refuse it.
+func stepRole(h *home.Home, s *scope, role string, d home.Draft) (receipt, org.RoleState, error) {
 	if s.strict && d.Incarnation == "" && !home.MintsIdentity(d.Kind) {
 		return receipt{}, org.RoleState{}, fmt.Errorf("strict mode: %s requires -incarnation (or ORG_INCARNATION); writing as the holder is disabled", d.Kind)
 	}
-	r, state, err := h.Append(s.tenant, s.role, d)
+	r, state, err := h.Append(s.tenant, role, d)
 	if err != nil {
 		return receipt{}, state, err
 	}
@@ -530,6 +540,189 @@ func cmdCharter(e *env, args []string) error {
 		return err
 	}
 	return appendAndReport(e, h, s, home.Draft{Kind: org.KindCharter, Terms: terms()})
+}
+
+// cmdTransfer moves one work item between two roles in the same tenant.
+//
+// Nothing here is atomic: two chains, two locks, no cross-chain transaction.
+// The design makes the failure states RECOVERABLE instead of pretending they
+// cannot happen, which is the whole reason this verb exists rather than a
+// documented two-command recipe:
+//
+//   - ASSIGN FIRST, then unassign. A crash between the two leaves the item
+//     held twice — which `org sweep` reports as an assign_conflict — instead
+//     of held by nobody, which nothing can see. A visible conflict is a
+//     recoverable state; a silent orphan is lost work.
+//   - Each APPEND is fenced to the tip it was decided from, so a chain that
+//     moved under that decision refuses the write. This is per-append, not a
+//     transaction over both chains: a resume performs no destination append
+//     and therefore fences nothing there, and the destination re-check below
+//     asserts the work is still held at the same digest — not that the
+//     destination chain sat still. A destination record that leaves work and
+//     digest intact passes, correctly, because nothing this verb depends on
+//     changed.
+//   - It is IDEMPOTENT by state, not by flag. Re-running after a crash reads
+//     the same four cases and finishes the half-done move; re-running after
+//     success is a no-op that says so.
+//   - One window survives all of it: a destination that drops the work between
+//     the re-check and the source's append orphans the item. Closing that
+//     needs a cross-chain transaction the substrate does not have (FOLLOWUPS).
+//
+// It manufactures no authority: both roles must already be held, and the
+// destination's writer must be presented. Minting an incarnation for a role
+// the caller may not be entitled to hold is the same self-signing hole that
+// keeps `recharter` unexposed (see FOLLOWUPS).
+func cmdTransfer(e *env, args []string) error {
+	s := newScope("transfer")
+	work := s.fs.String("work", "", "work URI to move")
+	to := s.fs.String("to", "", "destination role id")
+	toInc := s.fs.String("to-incarnation", "", "the destination holder's incarnation (from its attach)")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *work == "" || *to == "" {
+		return fmt.Errorf("-work and -to are required")
+	}
+	// Unconditionally, not only under -strict: with an empty incarnation the
+	// home substitutes the DESTINATION's own holder, so omitting this writes
+	// an assignment onto another role's chain over that role's signature. That
+	// is the misattribution stepRole exists to prevent, and -strict is an
+	// operator preference, not a security boundary.
+	if *toInc == "" {
+		return fmt.Errorf("-to-incarnation is required: writing to %s's chain means presenting %s's writer identity, never borrowing it", *to, *to)
+	}
+	if *to == s.role {
+		return fmt.Errorf("-to %s is the source role; a transfer moves work between two roles", *to)
+	}
+	_, src, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return fmt.Errorf("source %s: %w", s.role, err)
+	}
+	_, dst, err := h.Load(s.tenant, *to)
+	if err != nil {
+		return fmt.Errorf("destination %s: %w", *to, err)
+	}
+
+	srcHolds, dstHolds := held(src, *work) >= 0, held(dst, *work) >= 0
+	if !srcHolds && !dstHolds {
+		return fmt.Errorf("neither %s nor %s holds %s; there is nothing to transfer", s.role, *to, *work)
+	}
+	if !srcHolds && dstHolds {
+		return reportNoOp(e, s, fmt.Sprintf("already transferred: %s holds %s", *to, *work))
+	}
+	if err := transferable(src, dst, s.role, *to, *work); err != nil {
+		return err
+	}
+	pin := src.Held[held(src, *work)].Digest
+	// Both holding is only a RESUME if they hold the same thing. Different
+	// digests mean this is a pre-existing conflict over one URI, not a
+	// half-finished move — and unassigning the source there would silently
+	// bless a pin nobody transferred.
+	if dstHolds {
+		if got := dst.Held[held(dst, *work)].Digest; got != pin {
+			return fmt.Errorf("%s already holds %s pinned to %s, not the %s this transfer would move: that is an assign_conflict to resolve, not a half-finished transfer",
+				*to, *work, shortDigest(got), shortDigest(pin))
+		}
+	}
+	// The destination inherits the SOURCE's pin, resolved above: the digest is
+	// what makes drift detectable, so re-pinning here would quietly reset the
+	// baseline the assignment was made against.
+	var steps []receipt
+	if !dstHolds {
+		r, _, err := stepRole(h, s, *to, home.Draft{
+			Kind:      org.KindAssign,
+			Subject:   org.Subject{Work: *work, Digest: pin},
+			ExpectTip: dst.Tip, Incarnation: *toInc,
+		})
+		if err != nil {
+			return fmt.Errorf("assign to %s (nothing was moved): %w", *to, err)
+		}
+		steps = append(steps, r)
+	}
+	// Re-read the destination immediately before removing the source. The
+	// per-append fence protects each write against ITS own chain moving; it
+	// cannot protect the source's unassign against the DESTINATION changing,
+	// and a destination that dropped the work between the two appends would
+	// leave the item held by nobody — the silent orphan this ordering exists
+	// to prevent. This narrows that window to the gap between this read and
+	// the append below; closing it entirely needs a cross-chain transaction
+	// the substrate does not have (FOLLOWUPS).
+	if err := stillHolds(h, s.tenant, *to, *work, pin); err != nil {
+		return fmt.Errorf("%w; the source keeps %s, so nothing is orphaned — re-run once the destination is settled", err, *work)
+	}
+	r, _, err := step(h, s, home.Draft{
+		Kind:      org.KindUnassign,
+		Subject:   org.Subject{Work: *work},
+		ExpectTip: src.Tip,
+	})
+	if err != nil {
+		return fmt.Errorf("unassign from %s — %s now holds %s TWICE, which org sweep reports as an assign_conflict; re-run this command to finish: %w", s.role, *to, *work, err)
+	}
+	steps = append(steps, r)
+	if _, ok := org.MatchScope(dst.Terms.Scope, *work); !ok {
+		fmt.Fprintf(e.stderr, "warning: %s is outside %s's charter scope %v; org sweep will report it as scope_drift\n",
+			*work, *to, dst.Terms.Scope)
+	}
+	return reportSteps(e, s, steps)
+}
+
+// stillHolds re-reads a role and reports whether it holds work at the expected
+// pin. It exists for the moment between a transfer's two appends, where the
+// only honest answer to "did the destination keep it?" is to look again.
+func stillHolds(h *home.Home, tenant, role, work, pin string) error {
+	_, state, err := h.Load(tenant, role)
+	if err != nil {
+		return fmt.Errorf("re-read %s: %w", role, err)
+	}
+	i := held(state, work)
+	if i < 0 {
+		return fmt.Errorf("%s no longer holds %s", role, work)
+	}
+	if got := state.Held[i].Digest; got != pin {
+		return fmt.Errorf("%s holds %s pinned to %s, not the %s just assigned", role, work, shortDigest(got), shortDigest(pin))
+	}
+	return nil
+}
+
+// reportNoOp renders a decided-nothing-to-do outcome. A machine caller that
+// retries after an uncertain response must be able to decode the success it
+// gets back, so -json returns the composite envelope with no steps rather than
+// a line of prose.
+func reportNoOp(e *env, s *scope, why string) error {
+	if s.asJSON {
+		return printJSON(e, map[string]any{"steps": []receipt{}, "note": why})
+	}
+	fmt.Fprintln(e.stdout, why)
+	return nil
+}
+
+// shortDigest trims a digest for a message; the full pair buries the two
+// values a reader is comparing in 128 characters of noise.
+func shortDigest(d string) string {
+	if len(d) <= 14 {
+		return d
+	}
+	return d[:14] + "…"
+}
+
+// transferable reports why a transfer cannot proceed, before either chain is
+// written. Both roles must be held: this verb moves work between two writers,
+// and it will not mint either one.
+func transferable(src, dst org.RoleState, srcRole, dstRole, work string) error {
+	if src.Holder == "" {
+		return fmt.Errorf("%s is not held; attach it before transferring out of it (org attach -role %s)", srcRole, srcRole)
+	}
+	if dst.Holder == "" {
+		return fmt.Errorf("%s is not held; attach it before transferring into it (org attach -role %s), then pass -to-incarnation", dstRole, dstRole)
+	}
+	if src.Active == work {
+		return fmt.Errorf("%s is the active claim on %s; end it (yield or done) before transferring it", work, srcRole)
+	}
+	if src.Dangling != "" {
+		return fmt.Errorf("%s has an unresolved claim on %s; discharge it before transferring anything", srcRole, src.Dangling)
+	}
+	return nil
 }
 
 // cmdAnnul repudiates the record at the tip. It does NOT revert it: the fold
