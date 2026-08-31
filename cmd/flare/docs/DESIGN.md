@@ -69,6 +69,25 @@ their own shapes; `decision`/`tier` are never required of them.
 3. **Route.** A declarative routes table (see config) picks the channel. An event matching no
    route goes to the **catch-all channel** — absence of a route must not read as "not
    page-worthy". Silence requires an explicit route to the `drop` channel.
+
+   A route selects on `source`, `kind`, `decision`, `outcome`, `code`, `briefed`, and
+   `dimension`; every set field must match, and an unset one matches anything. `dimension`
+   is the verdict's own `source` — the **ladder rung** that produced it: `reducer` for the
+   run-level fold, or a component rung (`readiness`, `review-panel-completeness`,
+   `review-consolidation`, …). It exists because step 2 lifts an event per *artifact*, and a
+   gate run writes the fold plus every component it folded — with the fold restating the
+   worst component's `why` verbatim. Selecting on `decision` alone therefore pages one card
+   per rung for a single decision. Match `dimension: "reducer"` to page the run once and
+   drop its parts.
+
+   Escalate-folds need no route at all: a parked run is announced by its **escalation**
+   artifact, which carries the brief, the resolve actions, and a `ts` flare can go back and
+   close. That asymmetry is load-bearing — only escalation cards enter the card index
+   (`cardOf`), so a verdict card is fire-and-forget and can never be corrected. A redundant
+   one misreports a resolved park as live for as long as the channel scrolls. Nor can
+   dropping escalate-folds hide a park: the escalation artifact is what *creates* the park
+   in gate's inbox, so a run without one has no park to hide (`gate next` is empty too, and
+   the caller saw the run die rather than park).
 4. **Dedupe/throttle.** Dedupe on artifact ID (gate) / `key+outcome` (ship): a
    restart-and-resweep never re-pages. Throttle is per-route (min seconds between pushes for
    the same route) and **severity-monotone**: a strictly worse event (block > escalate >

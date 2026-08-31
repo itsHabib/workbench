@@ -246,3 +246,30 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
 - **What would have caught it sooner:** `git status --short` on the repo root
   at session start. It is two seconds and it distinguishes "someone is working
   here" from "someone left".
+
+## 2026-08-29 — the notification plane was eight days stale, and nobody could tell
+
+- **What I tried:** find why the operator's Slack was "just noise" — two
+  identical "Don't merge ivy#50" cards a minute apart, and a parked ivy#51
+  still showing a live Approve button hours after it was judged.
+- **What happened:** two independent faults, and the second hid the first.
+  Routing paged every rung of the verifier ladder — the reducer's fold *and*
+  every component verdict it folded, which restate the fold's `why` verbatim.
+  396 delivered cards were 88 escalations and 308 restatements. Separately,
+  `~/go/bin/flare` was built 2026-08-21, so #251's close-a-park's-card-on-
+  resolve had never actually run on this machine: the journal contained
+  `delivered` and `error` records and not one `card-update`, ever.
+- **Cost:** unmeasurable but ongoing — the operator stopped reading the
+  channel, which is the only failure mode a notification plane really has.
+- **Class:** `stale-install` + `noisy-signal`.
+- **Fix landed:** `flare` reinstalled from `main` (card-closing now live);
+  routes tightened to page escalations and blocks and drop the restatements;
+  `dimension` added as a route selector (#271) so a routes file can say "page
+  the fold, not its parts", with the shipped example fixed at the same time.
+- **What would have caught it sooner:** nothing on this machine compares the
+  installed binary against `main`. A merged fix that never reaches the
+  operator's `$GOBIN` is indistinguishable from a fix that does not work —
+  and flare's own `status` reports `healthy: true` either way, because it
+  measures polling, not whether the binary is current. The tools that ship
+  *behavior* to a long-running local daemon need a staleness check that
+  `status` surfaces; `#251` was merged, tested, and inert for eight days.

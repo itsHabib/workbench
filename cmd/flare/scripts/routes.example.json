@@ -11,7 +11,8 @@
   },
   "routes": [
     {"match": {"source": "gate", "kind": "escalation"}, "channel": "phone"},
-    {"match": {"source": "gate", "decision": "block"}, "channel": "phone"},
+    {"match": {"source": "gate", "kind": "verdict", "decision": "block", "dimension": "reducer"}, "channel": "phone"},
+    {"match": {"source": "gate", "kind": "verdict"}, "channel": "drop"},
     {"match": {"source": "ship", "outcome": "parked"}, "channel": "log"},
     {"match": {"source": "ship", "outcome": "failed|cancelled"}, "channel": "log", "throttle_seconds": 300}
   ],

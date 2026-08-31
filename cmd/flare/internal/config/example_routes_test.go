@@ -63,3 +63,37 @@ func routesEscalationTo(cfg Config, channels map[string]bool) bool {
 	}
 	return false
 }
+
+// A gate run emits the reducer's fold AND every component verdict it folded,
+// and the fold restates the worst component's `why`. An example that routes on
+// decision alone therefore ships a channel that says the same thing once per
+// rung — 308 of 396 cards on the operator's own feed by 2026-08-29, none of
+// them closeable (only escalation cards are tracked for correction). The
+// example must show the BLOCK-fold paging and its parts explicitly silenced.
+// The escalate-fold is deliberately not in that set: a parked run is announced
+// by its escalation artifact, which is also the only card flare can go back and
+// close.
+func TestExampleRoutesDoNotPageEveryLadderRung(t *testing.T) {
+	cfg, err := Load(exampleRoutes)
+	if err != nil {
+		t.Fatalf("load example routes: %v", err)
+	}
+	var foldPages, componentsDrop bool
+	for _, r := range cfg.Routes {
+		if r.Match.Source != "gate" || r.Match.Kind != "verdict" {
+			continue
+		}
+		if r.Match.Dimension == "reducer" && r.Match.Decision == "block" && r.Channel != ChannelDrop {
+			foldPages = true
+		}
+		if r.Match.Dimension == "" && r.Channel == ChannelDrop {
+			componentsDrop = true
+		}
+	}
+	if !foldPages {
+		t.Fatal("example routes must page the run-level fold (dimension: reducer): a blocked run has to announce itself once")
+	}
+	if !componentsDrop {
+		t.Fatal("example routes must explicitly drop the remaining verdict rungs: they restate the fold, and a verdict card can never be closed")
+	}
+}

@@ -54,6 +54,26 @@ there first.
 - An event matching no route goes to the catch-all channel; silence requires
   an explicit `drop` route. Absence of a route must not read as
   not-page-worthy.
+- One run announces itself ONCE. A gate run emits the reducer's fold and every
+  component verdict it folded, and the fold restates the worst component's
+  `why` — so routing on `decision` alone pages the same sentence once per rung.
+  Routes select the fold with `dimension: "reducer"` and drop the rest. A
+  parked run is announced by its ESCALATION artifact, never by its escalate
+  verdicts, because only the escalation card is tracked for correction — a
+  verdict card can never be closed, so a redundant one misreports live state
+  forever.
+- Dropping escalate verdicts cannot hide a park, and the reason is gate's
+  inbox, not a census. gate appends one artifact per call, each with its own
+  open/write/fsync (`cmd/gate/internal/state/state.go`), so the fold and the
+  escalation are two writes with a window between them — a crash there leaves
+  the fold on disk and no escalation. That run is not a park flare stayed quiet
+  about: with no escalation artifact there is nothing in gate's inbox either,
+  `gate next` shows nothing, and the caller saw the run die rather than park.
+  flare mirrors gate's inbox; a run that never parked has nothing to announce,
+  and the next gate run writes a fresh escalation. (The steady-state fact —
+  385 reducer-escalate runs in the log, zero lacking the escalation — shows the
+  ordering is not merely conventional, but it is the inbox that makes the
+  silence correct.)
 - Dedupe keys on stable event IDs (gate artifact ID; receipt key+outcome);
   a restart or resweep never re-pages.
 - The gate cursor pins the last processed chain hash; a mismatch or a
