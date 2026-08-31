@@ -228,14 +228,19 @@ type Terms struct {
 	// scope, a maintainer's an area, an IC's a task; one rule covers all three
 	// because a work URI's scheme carries the difference.
 	Scope []string `json:"scope,omitempty"`
-	// Tier is inert and no longer settable. Nothing in this package enforces
-	// it: there is no tier refusal reason, and no reduction consults it. Risk
-	// is a property of a change, and a role holds many changes at once, so a
-	// single scalar here could never describe them — the max would ratchet
-	// every role to the highest tier forever. The enforcing tiers live where
-	// the evidence does: the classifier floors a real diff, and a grant
-	// ceilings the exact head (grant_tier_exceeded). Read
-	// docs/auto-mode-defaults.md — "the classifier decides tier; a grant
+	// Tier is inert and no longer settable. What is wrong with it is not that
+	// a per-role ceiling is incoherent: compared against one change at a time,
+	// a fixed ceiling would bound each independently, the way any capability
+	// bound works.
+	//
+	// The first defect is that nothing enforces it — there is no tier refusal
+	// reason, and no reduction consults it. The second is that enforcing it
+	// would duplicate authorization that already exists where the evidence is.
+	// Risk is a property of a change, not of the role holding it, and only the
+	// change carries what a tier decision needs: the classifier floors a real
+	// diff, and a grant ceilings the exact head (grant_tier_exceeded). A
+	// role-level scalar would be a third decision point that has seen neither.
+	// Read docs/auto-mode-defaults.md — "the classifier decides tier; a grant
 	// decides ceiling; keep the two axes separate."
 	//
 	// The field survives only because Terms.Canonical projects it: dropping it
