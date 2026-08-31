@@ -65,6 +65,16 @@ var repoOverrides = map[string][]overrideRule{
 		// T2 band — the driver merge/state machine.
 		mustOverride("packages/driver/**", T2, "driver machinery"),
 	},
+	"itshabib/roxiq": {
+		// T2 band — the gauntlet's repair isolation and the audit that proves it
+		// held. NewLooseObjectIDs is an escape-detection predicate: its object
+		// list feeds the retained-object secret scan, and the tree scan skips
+		// objects/ entirely, so nothing else covers what it clears. Graduated
+		// from the advisory trigger that fired on roxiq#225 (RUBRIC §6
+		// gate-machinery), per §5.7's rule that a stable pattern belongs on the
+		// deterministic floor.
+		mustOverride("internal/gauntlet/**", T2, "gauntlet repair isolation + escape-detection audit"),
+	},
 }
 
 // globToRe compiles a restricted path glob into an anchored regexp. `**`

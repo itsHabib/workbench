@@ -168,6 +168,43 @@ func TestOverridePerRepoGlobs(t *testing.T) {
 	}
 }
 
+// TestOverrideRoxiqGauntlet is the regression this row was graduated from:
+// roxiq#225 changed internal/gauntlet/private_repair_repo.go, the floor read it
+// as a plain internal change (T1), and only the agent advisory caught that it
+// altered the repository NewLooseObjectIDs audits. Under -repo itsHabib/roxiq
+// the floor now reaches T2 on its own, with no advisory in the loop.
+func TestOverrideRoxiqGauntlet(t *testing.T) {
+	const roxiq = "itsHabib/roxiq"
+	// The exact file from roxiq#225, plus a second gauntlet path to prove the
+	// glob covers the package rather than one file.
+	for _, path := range []string{
+		"internal/gauntlet/private_repair_repo.go",
+		"internal/gauntlet/live_session.go",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if got := classifyRepoDiff(t, goFileDiff(path), roxiq).Floor; got != T2 {
+				t.Fatalf("roxiq gauntlet floor(%s) = %s, want T2", path, got)
+			}
+		})
+	}
+
+	// Without -repo the same diff must stay at its pre-override base tier, so
+	// the row cannot change behavior for callers that pass no repo identity.
+	gauntlet := goFileDiff("internal/gauntlet/private_repair_repo.go")
+	if got := classifyRepoDiff(t, gauntlet, "").Floor; got != T1 {
+		t.Fatalf("no-repo passthrough broke: floor = %s, want T1", got)
+	}
+
+	// Per-repo isolation in both directions: roxiq's glob must not leak into
+	// workbench, and workbench's gate globs must not reach into roxiq.
+	if got := classifyRepoDiff(t, gauntlet, workbench).Floor; got != T1 {
+		t.Fatalf("roxiq's gauntlet glob leaked into workbench: floor = %s, want T1", got)
+	}
+	if got := classifyRepoDiff(t, goFileDiff("cmd/gate/main.go"), roxiq).Floor; got != T1 {
+		t.Fatalf("workbench's gate glob leaked into roxiq: floor = %s, want T1", got)
+	}
+}
+
 // TestOverrideFindingLine: an override hit records its own explainable signal —
 // name "path-override", the band label, and the file path — so a -v run names
 // each override hit and the verdict stays explainable.
