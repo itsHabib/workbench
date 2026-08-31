@@ -24,6 +24,11 @@ org charter -role lead:agentic-development \
 # new work arrives: ask where it belongs before anything is written
 org intake  -work github:itsHabib/workbench#88
 
+# work already in flight that never attached: put it on a plate, do not start it
+org adopt   -role steward:workbench -work github:itsHabib/workbench#88 \
+  -pin "head 9f2c1ab · branch fix/thing" -by supervisor:workbench \
+  -evidence "gh pr view 88 --json headRefOid"
+
 # move work between two attached lanes (assign-first, both tips fenced)
 org transfer -role steward:a -work github:itsHabib/workbench#88 \
   -to steward:b -to-incarnation "$B_INC" -incarnation "$A_INC"
