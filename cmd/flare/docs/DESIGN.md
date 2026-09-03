@@ -86,9 +86,11 @@ misinformed the operator in production.
   they are the ONE alert an agent cannot act on for itself: it can re-run, re-review and
   re-judge, but it cannot mint, and the operator cannot mint from a phone either. So the page
   must arrive *early*, while they are still near a keyboard, rather than being discovered later
-  as stalled work. Each card carries the paste-ready `gate grant` with the ceilings the repo
-  already held — flare proposes what the operator has already judged appropriate, and never
-  widens on its own.
+  as stalled work. An absent or expired grant's card carries the paste-ready `gate grant` with
+  the ceilings of the repo's most recent merge grant — one grant's tuple, never a composite of
+  several — so flare proposes what the operator has already judged appropriate and never widens
+  on its own. A spent cycle budget carries no mint at all: the ceiling is the stop signal that
+  the review loop ran long, and the remedy is fewer rounds, not a wider grant.
 
 - **`flare digest` — the standing authority picture.** The per-event pages answer one refusal
   at a time; the digest answers all of them at once: per repo, how much is parked, whether a

@@ -117,12 +117,13 @@ func authorityRows(cfg config.Config, now time.Time) ([]authorityRow, error) {
 // to lapse under parked work (a stop that is coming). A repo running fine is
 // left out — a digest that lists everything is another wall of text to skim.
 func digestEvent(rows []authorityRow, now time.Time, within time.Duration) (event.Event, bool) {
-	var blocked, expiring []string
+	var blocked, expiring, facts []string
 	for _, r := range rows {
 		line, urgent, ok := digestLine(r, now, within)
 		if !ok {
 			continue
 		}
+		facts = append(facts, digestFact(r))
 		if urgent {
 			blocked = append(blocked, line)
 			continue
@@ -137,9 +138,13 @@ func digestEvent(rows []authorityRow, now time.Time, within time.Duration) (even
 	if len(blocked) > 0 {
 		sev = event.SevEscalate
 	}
+	// The id is the dedupe identity, so it hashes the FACTS the picture is
+	// made of, never the rendered text: the detail carries a countdown that
+	// moves every minute, and hashing it would page an unchanged picture on
+	// every scheduled run.
 	return event.Event{
 		Source:   digestSource,
-		ID:       fmt.Sprintf("authority-digest:%08x", hash32(detail)),
+		ID:       fmt.Sprintf("authority-digest:%08x", hash32(strings.Join(facts, "\n"))),
 		Kind:     event.KindAuthorityDigest,
 		Time:     now,
 		Severity: sev,
@@ -165,6 +170,14 @@ func digestLine(r authorityRow, now time.Time, within time.Duration) (string, bo
 	}
 	return fmt.Sprintf("*%s* — %s parked, grant %s expires in %s\n%s",
 		r.Repo, plural(r.Parked, "PR"), r.Grant.MaxTier, roundDuration(left), mint), false, true
+}
+
+// digestFact is one row's stable identity: what is parked, which grant stands
+// and when it lapses (absolute), and what a mint would propose. Anything here
+// changing is news; the clock ticking is not.
+func digestFact(r authorityRow) string {
+	return fmt.Sprintf("%s|%d|%t|%s|%d|%s|%d",
+		r.Repo, r.Parked, r.Live, r.Grant.ID, r.Grant.ExpiresAt.Unix(), r.ProposedTier, r.ProposedCycles)
 }
 
 func digestDetail(blocked, expiring []string) string {

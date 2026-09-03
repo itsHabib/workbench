@@ -108,9 +108,13 @@ there first.
 - **`grant_needed` pages.** gate records a refusal for want of authority
   (`grant_absent` / `grant_expired` / `grant_cycle_exceeded`); flare used to
   drop them. It is the one alert no agent can act on — only the operator mints
-  — so it pages early, as its own card class, carrying the paste-ready
-  `gate grant` at the ceilings the repo already held. flare proposes what has
-  worked before; it never widens and never mints.
+  — so it pages early, as its own card class. An absent or expired grant
+  carries the paste-ready `gate grant` at the ceilings of the repo's most
+  recent merge grant — one grant's tuple, never the max tier of one and the max
+  cycles of another. A spent cycle budget carries NO mint: it is the stop
+  signal that the review loop ran long, and the fix is fewer rounds, never a
+  wider grant. flare proposes what has worked before; it never widens and
+  never mints.
 - **An identical question collapses, it is never suppressed.** Past two
   deliveries of the same leading reason clause for a repo (7-day window) the
   card names the repeated opener once and leads with what differs — PR, tier,

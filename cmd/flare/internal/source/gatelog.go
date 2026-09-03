@@ -532,24 +532,27 @@ func grantNeededEvent(src config.Source, env contracts.Envelope, lg *lazyLedger)
 	}
 }
 
-// grantNeededMint builds the remedy for each refusal reason. A spent cycle
-// budget needs a WIDER -max-cycles at the same tier; an absent or expired grant
-// needs a fresh one, and the last grant the repo held is the best evidence of
-// the ceiling it actually works at.
+// grantNeededMint builds the remedy for a refusal that a mint actually fixes:
+// an absent or expired grant needs a fresh one, and the last grant the repo
+// held is the best evidence of the ceiling it actually works at.
+//
+// A spent cycle budget gets NO mint. The ceiling is the stop signal that the
+// review loop ran long, and the remedy is fewer rounds or an operator looking
+// at why it looped — never a wider grant. Rendering "-max-cycles used+1" here
+// would turn the one signal designed to stop a loop into the paste that
+// continues it.
 func grantNeededMint(b grantNeededBody, lg *lazyLedger, stateDir string) string {
-	if b.Repo == "" {
+	if b.Repo == "" || b.Reason == reasonCycles {
 		return ""
 	}
 	tier, cycles := lastCeilings(b.Repo, b.Grant, lg)
-	if b.Reason == reasonCycles {
-		return preflight.Mint(b.Repo, stateDir, tier, b.CyclesUsed+1)
-	}
 	return preflight.Mint(b.Repo, stateDir, tier, cycles)
 }
 
 // lastCeilings recovers the ceilings to re-mint at: the refused grant's own
-// when the record names one, else the widest ceiling the repo has held. Both
-// are recorded facts — flare proposes what worked before, it never widens.
+// when the record names one, else the ceilings of the repo's most recent
+// grant. Both are recorded facts — flare proposes what worked before, it never
+// widens.
 func lastCeilings(repo, grantID string, lg *lazyLedger) (string, int) {
 	l := lg.get()
 	if g, ok := l.grants[grantID]; ok {
@@ -558,7 +561,19 @@ func lastCeilings(repo, grantID string, lg *lazyLedger) (string, int) {
 	return l.lastCeilingsFor(repo)
 }
 
+// cyclesExhausted is what a spent budget means, and it rides every cycle card
+// whether or not gate recorded its own why: the card's job is to stop the
+// operator reaching for a wider grant.
+const cyclesExhausted = "The ceiling is the stop signal, not friction: the review loop ran long, and the fix is fewer rounds, not more budget. No mint is proposed — look at why it looped before anything else."
+
 func grantNeededWhy(b grantNeededBody) string {
+	if b.Reason == reasonCycles {
+		why := "this PR has spent its grant's review-cycle budget."
+		if b.Why != "" {
+			why = strings.TrimSuffix(b.Why, ".") + "."
+		}
+		return why + " " + cyclesExhausted
+	}
 	if b.Why != "" {
 		return b.Why
 	}
@@ -567,8 +582,6 @@ func grantNeededWhy(b grantNeededBody) string {
 		return "gate found no live grant for this repo, so it refused before gathering any evidence. Nothing proceeds here until one is minted."
 	case reasonExpired:
 		return "the grant this repo was running under has expired. gate refuses every run until a fresh one is minted."
-	case reasonCycles:
-		return "this PR has spent its grant's review-cycle budget. The ceiling is the stop signal: check whether the review loop is looping before widening it."
 	}
 	return "gate refused a run for want of authority."
 }

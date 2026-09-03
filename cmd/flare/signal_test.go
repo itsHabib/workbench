@@ -53,6 +53,9 @@ func TestGrantNeededReachesThePhone(t *testing.T) {
 		if ev.Severity != event.SevEscalate {
 			t.Errorf("%s severity = %v, want escalate — the repo is stopped", id, ev.Severity)
 		}
+		if id == "gnd_c" {
+			continue // a spent cycle budget pages, but proposes no mint — see the next test
+		}
 		if !strings.HasPrefix(ev.Fields["mint"], "gate grant -repo ") {
 			t.Errorf("%s must carry a paste-ready mint, got %q", id, ev.Fields["mint"])
 		}
@@ -62,11 +65,12 @@ func TestGrantNeededReachesThePhone(t *testing.T) {
 	}
 }
 
-// TestGrantNeededMintProposesWhatWorkedBefore pins the remedy's arithmetic: a
-// spent cycle budget needs a WIDER -max-cycles at the same tier, and a lapsed
-// grant is re-proposed at the ceiling the repo already held. flare proposes
-// what the operator has already judged appropriate; it never widens on its own,
-// and it never mints.
+// TestGrantNeededMintProposesWhatWorkedBefore pins the remedy: a lapsed grant
+// is re-proposed at the ceiling the repo already held, and a spent cycle
+// budget proposes NOTHING — the ceiling is the stop signal that the review
+// loop ran long, and a card that pastes "-max-cycles used+1" turns the stop
+// signal into instructions to keep going. flare proposes what the operator has
+// already judged appropriate; it never widens on its own, and it never mints.
 func TestGrantNeededMintProposesWhatWorkedBefore(t *testing.T) {
 	f := &fakeCourier{}
 	cfg, j, _ := slackGate(t, lcGrant+"\n"+gnExpired+"\n"+gnCycles+"\n")
@@ -77,8 +81,11 @@ func TestGrantNeededMintProposesWhatWorkedBefore(t *testing.T) {
 		t.Errorf("a lapsed grant re-mints at the ceiling the repo held, got %q", expired.Fields["mint"])
 	}
 	cycles, _ := postedByID(f, "gnd_c")
-	if !strings.Contains(cycles.Fields["mint"], "-max-cycles 4") {
-		t.Errorf("a spent budget needs one more cycle than consumed, got %q", cycles.Fields["mint"])
+	if cycles.Fields["mint"] != "" {
+		t.Errorf("a spent cycle budget must not propose a wider grant, got %q", cycles.Fields["mint"])
+	}
+	if !strings.Contains(cycles.Body, "fewer rounds") {
+		t.Errorf("the card must explain the exhausted budget as the stop signal, got %q", cycles.Body)
 	}
 	if cycles.Fields["cycles_used"] != "3" || cycles.Fields["cycles_max"] != "3" {
 		t.Errorf("the budget must reach the card, got %s of %s", cycles.Fields["cycles_used"], cycles.Fields["cycles_max"])
@@ -184,6 +191,36 @@ func TestStalledSourceIsUnhealthy(t *testing.T) {
 	}
 }
 
+// TestUnplaceableSourceIsUnhealthy covers the other way a source never gets
+// read: it has no cursor yet and cannot be placed at its tail because the log
+// is corrupt. That failure used to be printed and forgotten, so LastPoll kept
+// refreshing and `flare status` reported healthy over a source flare had never
+// once read.
+func TestUnplaceableSourceIsUnhealthy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "log.jsonl")
+	if err := os.WriteFile(path, []byte(lcGrant+"\n{not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	j, err := journal.Open(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Version:     config.Version,
+		PollSeconds: 60,
+		Sources:     []config.Source{{Name: "gate", Kind: config.SourceGateLog, Path: path}},
+		Channels:    map[string]config.Channel{"phone": {Type: config.ChannelSlack, Token: "x", ChannelID: "C1"}},
+		CatchAll:    "phone",
+	}
+	if err := cycle(runnerFor(cfg, j, &fakeCourier{}), false); err == nil {
+		t.Fatal("a source that cannot be placed must not report a clean poll")
+	}
+	if code := statusCode(t, cfg, j); code != 1 {
+		t.Fatalf("flare status = %d, want 1 while a source has never been placed", code)
+	}
+}
+
 // TestAuthorityDigestNamesTheBottleneck pins the digest's content: a repo with
 // parked work and NO live grant is a hard stop and must lead, each row carries
 // the exact mint, and a repo that is running fine is left out — a digest that
@@ -256,6 +293,20 @@ func TestAuthorityDigestIDTracksContent(t *testing.T) {
 	moved, _ := digestEvent(rows, now, 12*time.Hour)
 	if moved.ID == first.ID {
 		t.Error("a digest whose content moved must page again")
+	}
+
+	// An expiring grant renders a countdown that moves every minute; the id
+	// must hash the absolute expiry, not the rendered text, or every scheduled
+	// run pages the same picture.
+	expiring := []authorityRow{{Authority: source.Authority{Repo: "itsHabib/ivy", Parked: 1, Live: true,
+		Grant: grantExpiring(now.Add(2 * time.Hour))}}}
+	a, _ := digestEvent(expiring, now, 12*time.Hour)
+	b, _ := digestEvent(expiring, now.Add(7*time.Minute), 12*time.Hour)
+	if a.Fields["detail"] == b.Fields["detail"] {
+		t.Fatal("test premise: the countdown must have moved")
+	}
+	if a.ID != b.ID {
+		t.Errorf("a ticking countdown is not news: %s vs %s", a.ID, b.ID)
 	}
 }
 

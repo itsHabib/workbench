@@ -194,9 +194,13 @@ func cycle(rn runner, fromStart bool) error {
 	}
 	var failed []string
 	for _, src := range rn.cfg.Sources {
+		// A source that cannot even be placed has never been read; it is as
+		// stalled as one that cannot deliver, and must be persisted as such
+		// or a fresh LastPoll every cycle reports it healthy indefinitely.
 		if err := placeCursor(rn.j, src, cur, fromStart); err != nil {
 			fmt.Fprintf(os.Stderr, "flare: %v\n", err)
 			failed = append(failed, src.Name)
+			cur.Stall(src.Name, "", err.Error(), time.Now())
 			continue
 		}
 		next, err := pollSource(rn, src, cur.Sources[src.Name], st)
