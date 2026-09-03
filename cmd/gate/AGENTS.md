@@ -150,6 +150,34 @@ Constraints that are design decisions, not omissions:
   / `cycles_max`, and `next` and `explain` print `cycles N/M` on each
   awaiting-judgment line, so a driver sees the budget before acting. The
   ceiling in `act` remains as the backstop a judgment cannot launder.
+- **The inbox is closed by supersession and by mootness, and `sweep` is what
+  records the second.** A park is settled when a NEWER terminal for the same
+  `repo#PR` displaces it, or when the pull request itself is no longer open.
+  Both classes are derived — never deleted — by one subject-scoped reduction in
+  `observe/closure.go` that the parked projection, the ready-to-merge
+  projection, and `audit` all consume. The counts always project; `-all` shows
+  the rows. A discharged park carries no `judge`/`resolve` command, so a
+  one-shot judgment cannot be spent on a settled question.
+  Mootness needs a fact the log could not previously hold: every action gate
+  writes is `dry_run` / `would_merge`, because gate authorizes and an executor
+  acts, so a landed PR left its row standing forever. `gate sweep` records that
+  fact as a `subject_closed` artifact — provenance, outside the
+  action/escalation families, so it burns no cycle and authorizes nothing. It
+  reuses the open-PR seam `next -live` and `preflight` already share, and
+  records only what that seam proves: `not_open`. Which commit landed, when, and
+  by whom is `receipt`/`reconcile`'s claim, read back from the platform; a sweep
+  must never fabricate it. `sweep` writes and therefore is NOT folded into
+  `next`: observability views stay read-only, and `next -json` is on `escalate
+  serve`'s Slack path under a hard budget where per-repo subprocesses would
+  strand an interaction. An unread repo is UNKNOWN, never closed — assuming
+  closure on a failed read would delete the queue on a network blip.
+- **`audit` reports park discharge as health, never as integrity.** It prints
+  the by-judgment / by-supersession ratio after the chain verifies and never
+  changes the exit code. A park discharged by judgment is the loop working; one
+  discharged by supersession is a question gate asked that a later run overtook
+  before anyone answered — a churn signal for the review cycles upstream of the
+  gate. A metric that could fail an audit would train the reader to ignore audit
+  failures.
 - **A run that decides nothing spends nothing.** Cycles are counted from
   OUTCOMES — one distinct run holding a counting action or escalation, joined
   to its subject through the reduced verdict — never from the evidence a run

@@ -23,6 +23,21 @@ type Inbox struct {
 	Grants       []GrantLine     `json:"grants"`
 	NeedsGrant   []NeedsGrantRow `json:"needs_grant,omitempty"`
 	ReadyToMerge []ReadyRow      `json:"ready_to_merge,omitempty"`
+	// Discharged counts the rows this projection withheld, per surface. It is
+	// ALWAYS emitted, including when the rows themselves are not: an inbox that
+	// shrank from 164 rows to 3 must be able to say so, or a reader cannot tell
+	// a working reduction from a lost queue.
+	Discharged Discharged `json:"discharged"`
+	// DischargedRows carries those withheld rows themselves, populated only when
+	// the caller asked for them. They are history and diagnostics, never work —
+	// each one is stripped of its paste-ready commands.
+	DischargedRows *DischargedRows `json:"discharged_rows,omitempty"`
+}
+
+// DischargedRows holds the withheld rows for a caller that asked to see them.
+type DischargedRows struct {
+	Parked       []ParkedRun `json:"parked,omitempty"`
+	ReadyToMerge []ReadyRow  `json:"ready_to_merge,omitempty"`
 }
 
 // ReadyRow is one PR whose latest terminal artifact is a would_merge action:
@@ -40,6 +55,10 @@ type ReadyRow struct {
 	HeadSHA      string `json:"head_sha,omitempty"`
 	URL          string `json:"url,omitempty"`
 	MergeCommand string `json:"merge_command"`
+	// Discharge is empty while the row is live, and otherwise names why the log
+	// has already settled it. DischargeWhy is the same fact as a sentence.
+	Discharge    Discharge `json:"discharge,omitempty"`
+	DischargeWhy string    `json:"discharge_why,omitempty"`
 	// Coverage answers "is this repo actually covered by a live grant, and would
 	// its ceilings park the next run" for the PR the inbox is recommending —
 	// the inventory check that used to happen only at gate time. Advisory; see
@@ -74,18 +93,27 @@ type ParkedRun struct {
 	// only the escalation id can join it to the grant the run parked under,
 	// without hunting the id out of the log. Empty only when the body predates
 	// the artifact id being carried.
-	Escalation    string `json:"escalation,omitempty"`
-	Repo          string `json:"repo,omitempty"`
-	Number        int    `json:"number,omitempty"`
-	Title         string `json:"title,omitempty"`
-	HeadSHA       string `json:"head_sha,omitempty"`
-	URL           string `json:"url,omitempty"`
-	PRState       string `json:"pr_state,omitempty"`
-	PRStateReason string `json:"pr_state_reason,omitempty"`
-	Question      string `json:"question"`
-	Code          string `json:"code,omitempty"`
-	Grant         string `json:"grant,omitempty"`
-	ParkedAt      string `json:"parked_at"`
+	Escalation string `json:"escalation,omitempty"`
+	// Discharge is empty while the park is live, and otherwise names why the log
+	// has already settled it: a later terminal for the same PR answered it, or
+	// the PR itself finished. DischargeWhy is the same fact as a sentence.
+	//
+	// A discharged park carries no JudgeCommand and no ResolveCommand. Handing
+	// one over would invite the operator to spend a one-shot judgment on a
+	// question that is no longer live.
+	Discharge     Discharge `json:"discharge,omitempty"`
+	DischargeWhy  string    `json:"discharge_why,omitempty"`
+	Repo          string    `json:"repo,omitempty"`
+	Number        int       `json:"number,omitempty"`
+	Title         string    `json:"title,omitempty"`
+	HeadSHA       string    `json:"head_sha,omitempty"`
+	URL           string    `json:"url,omitempty"`
+	PRState       string    `json:"pr_state,omitempty"`
+	PRStateReason string    `json:"pr_state_reason,omitempty"`
+	Question      string    `json:"question"`
+	Code          string    `json:"code,omitempty"`
+	Grant         string    `json:"grant,omitempty"`
+	ParkedAt      string    `json:"parked_at"`
 	// CyclesUsed and CyclesMax are the review-cycle budget this park sits
 	// under: the cycles its repo#PR has consumed (this park's own run included
 	// — a content park is a ladder decision) against the -max-cycles ceiling
@@ -154,11 +182,29 @@ type grantBody struct {
 // truth; the projection still renders best-effort, so a drifted body never drops
 // a park from the inbox.
 
-// NextText renders the inbox as scannable text. stateArg is spliced into the
-// paste-ready commands (empty for the ambient state dir; " -state <dir>" for an
-// explicit one) so a copied command targets the same log this inbox read.
-func NextText(w io.Writer, st *state.Store, now func() time.Time, stateArg string) error {
-	in, err := collect(st, now, stateArg)
+// NextRequest carries everything a projection needs beyond the store and the
+// clock. It follows preflight's shape rather than growing the four positional
+// entry points that preceded it: the offline/live and default/all axes multiply,
+// and a bare bool pair at a call site says nothing about which is which.
+type NextRequest struct {
+	// StateArg is the `-state` argument the inbox read under, threaded into every
+	// paste-ready command so a copied line runs against the same store.
+	StateArg string
+	// Fetch is the live open-PR seam. Nil means the offline projection: gate
+	// reduces from the log alone and makes no network call.
+	//
+	// It stays nil by default on purpose. `gate next -json` is on `escalate
+	// serve`'s Slack path under a hard budget, and putting one gh subprocess per
+	// distinct repo there would trade a stale queue for a stranded interaction.
+	Fetch OpenPRs
+	// IncludeDischarged asks for the withheld rows themselves. The COUNTS are
+	// always projected regardless.
+	IncludeDischarged bool
+}
+
+// NextText renders the console feed for a human.
+func NextText(w io.Writer, st *state.Store, now func() time.Time, req NextRequest) error {
+	in, err := next(st, now, req)
 	if err != nil {
 		return err
 	}
@@ -166,15 +212,28 @@ func NextText(w io.Writer, st *state.Store, now func() time.Time, stateArg strin
 	return nil
 }
 
-// NextJSON marshals the inbox projection as one JSON document — the console feed.
-func NextJSON(w io.Writer, st *state.Store, now func() time.Time, stateArg string) error {
-	in, err := collect(st, now, stateArg)
+// NextJSON emits the console feed as JSON.
+func NextJSON(w io.Writer, st *state.Store, now func() time.Time, req NextRequest) error {
+	in, err := next(st, now, req)
 	if err != nil {
 		return err
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(in)
+}
+
+// next builds the projection and, when a live seam was supplied, reconciles it
+// against current PR state.
+func next(st *state.Store, now func() time.Time, req NextRequest) (Inbox, error) {
+	in, err := collect(st, now, req)
+	if err != nil {
+		return Inbox{}, err
+	}
+	if req.Fetch == nil {
+		return in, nil
+	}
+	return reconcileInbox(in, req.Fetch), nil
 }
 
 // OpenPRs is the one live seam the inbox reconciles against: it returns every
@@ -220,40 +279,34 @@ func (l liveRepos) lookup(repo string, number int) (pr LivePR, open bool, err er
 	return pr, open, nil
 }
 
-// NextJSONLive emits the console feed reconciled with current PR state. A repo
-// whose fetch fails keeps its rows visible (parked as unknown); only a PR
-// confirmably absent from its repo's open set is removed from the queue.
-func NextJSONLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, fetch OpenPRs) error {
-	in, err := collect(st, now, stateArg)
-	if err != nil {
-		return err
-	}
-	in = reconcileInbox(in, fetch)
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(in)
-}
-
-// NextTextLive is the human-readable form of NextJSONLive.
-func NextTextLive(w io.Writer, st *state.Store, now func() time.Time, stateArg string, fetch OpenPRs) error {
-	in, err := collect(st, now, stateArg)
-	if err != nil {
-		return err
-	}
-	in = reconcileInbox(in, fetch)
-	renderInbox(w, in)
-	return nil
-}
-
 // reconcileInbox is the one live pass: fetch each distinct repo's open PRs ONCE
 // (in parallel), then reconcile every row LOCALLY against that snapshot. The
 // cost is O(distinct repos), never O(rows) — the whole point of the batched
 // seam. All three surfaces reconcile against the same snapshot.
+//
+// A row the snapshot proves finished is discharged as moot, exactly as a closing
+// fact in the log would discharge it, and counted the same way. The live path
+// and the offline path therefore reach the same classification by different
+// evidence, and `gate sweep` is what turns the former into the latter.
 func reconcileInbox(in Inbox, fetch OpenPRs) Inbox {
 	live := resolveRepos(distinctRepos(in), fetch)
-	in.Parked = reconcileLive(in.Parked, live)
-	in.ReadyToMerge = reconcileReadyLive(in.ReadyToMerge, live)
+	parked, parkedOut := reconcileLive(in.Parked, live)
+	ready, readyOut := reconcileReadyLive(in.ReadyToMerge, live)
+	in.Parked = parked
+	in.ReadyToMerge = ready
 	in.NeedsGrant = enrichNeedsGrant(in.NeedsGrant, live)
+	for _, r := range parkedOut {
+		in.Discharged.Parked.add(r.Discharge)
+	}
+	for _, r := range readyOut {
+		in.Discharged.ReadyToMerge.add(r.Discharge)
+	}
+	if in.DischargedRows != nil {
+		in.DischargedRows.Parked = append(in.DischargedRows.Parked, parkedOut...)
+		in.DischargedRows.ReadyToMerge = append(in.DischargedRows.ReadyToMerge, readyOut...)
+		sortParked(in.DischargedRows.Parked)
+		sortReady(in.DischargedRows.ReadyToMerge)
+	}
 	return in
 }
 
@@ -326,9 +379,9 @@ func resolveRepos(repos []string, fetch OpenPRs) liveRepos {
 // reconcileLive reconciles the parked rows against the batched snapshot: a repo
 // fetch error keeps the row visible as unknown (the failed-lookup default); a PR
 // present in its repo's open set is OPEN and enriched; a PR absent from the set
-// (no fetch error) is not open — merged or closed — and drops.
-func reconcileLive(parked []ParkedRun, live liveRepos) []ParkedRun {
-	out := make([]ParkedRun, 0, len(parked))
+// (no fetch error) is not open — merged or closed — and is discharged as moot
+// rather than dropped, so the shrinkage stays countable.
+func reconcileLive(parked []ParkedRun, live liveRepos) (out, discharged []ParkedRun) {
 	for _, p := range parked {
 		pr, open, err := live.lookup(p.Repo, p.Number)
 		if err != nil {
@@ -338,25 +391,30 @@ func reconcileLive(parked []ParkedRun, live liveRepos) []ParkedRun {
 			continue
 		}
 		if !open {
+			p.PRState = notOpenState
+			discharged = append(discharged, dischargeParked(p, DischargeMoot, liveMootWhy))
 			continue
 		}
 		p.PRState = "OPEN"
 		out = append(out, mergeLivePR(p, pr))
 	}
-	return out
+	return out, discharged
 }
 
 // reconcileReadyLive enforces the ready-row freshness law against the batched
-// snapshot. A row is DROPPED on a confirmed non-mergeable fact — the PR is
-// absent from its repo's open set (since MERGED or CLOSED), or its head has
-// MOVED past the SHA the would_merge command pins (both SHAs non-empty and
-// differing): a push after verification means the new head was never gated, so
-// the paste-ready `--match-head-commit <old sha>` would refuse and the PR needs
-// re-gating. A row is KEPT on anything ambiguous — a repo fetch error, or an
-// empty live SHA — because the safe default is never to silently hide a
-// possibly-mergeable PR.
-func reconcileReadyLive(rows []ReadyRow, live liveRepos) []ReadyRow {
-	out := make([]ReadyRow, 0, len(rows))
+// snapshot. A row is discharged on a confirmed non-mergeable fact, and the two
+// such facts are NOT the same fact:
+//
+//   - the PR is absent from its repo's open set (since MERGED or CLOSED) — the
+//     row is MOOT and nothing more is owed;
+//   - its head has MOVED past the SHA the would_merge command pins (both SHAs
+//     non-empty and differing) — the row is STALE, and the PR is still open and
+//     still needs re-gating. Counting that as moot would report a PR that needs
+//     work as one that is finished.
+//
+// A row is KEPT on anything ambiguous — a repo fetch error, or an empty live SHA
+// — because the safe default is never to silently hide a possibly-mergeable PR.
+func reconcileReadyLive(rows []ReadyRow, live liveRepos) (out, discharged []ReadyRow) {
 	for _, r := range rows {
 		pr, open, err := live.lookup(r.Repo, r.Number)
 		if err != nil {
@@ -364,14 +422,29 @@ func reconcileReadyLive(rows []ReadyRow, live liveRepos) []ReadyRow {
 			continue
 		}
 		if !open {
+			discharged = append(discharged, dischargeReady(r, DischargeMoot, liveMootWhy))
 			continue
 		}
 		if headMoved(r.HeadSHA, pr.HeadSHA) {
+			discharged = append(discharged, dischargeReady(r, DischargeStale, staleWhy(r.HeadSHA, pr.HeadSHA)))
 			continue
 		}
 		out = append(out, mergeLiveReady(r, pr))
 	}
-	return out
+	return out, discharged
+}
+
+// staleWhy explains a ready row whose PR moved past the head gate authorized.
+func staleWhy(authorized, live string) string {
+	return fmt.Sprintf("the PR head moved to %s; the pinned command authorizes %s and would refuse", short(live), short(authorized))
+}
+
+// short trims a SHA to the width a human reads.
+func short(sha string) string {
+	if len(sha) <= 12 {
+		return sha
+	}
+	return sha[:12]
 }
 
 // enrichNeedsGrant attaches a live open-PR count to each needs_grant row from
@@ -435,20 +508,25 @@ func mergeLivePR(p ParkedRun, live LivePR) ParkedRun {
 // collect reads the log once and folds it into the inbox projection. The single
 // read is deliberate: parked runs and the grant ledger are two views of one
 // snapshot, never two scans that could disagree under a concurrent append.
-func collect(st *state.Store, now func() time.Time, stateArg string) (Inbox, error) {
+func collect(st *state.Store, now func() time.Time, req NextRequest) (Inbox, error) {
 	arts, err := st.List(nil)
 	if err != nil {
 		return Inbox{}, err
 	}
-	return buildInbox(arts, now(), stateArg), nil
+	return buildInbox(arts, now(), req), nil
 }
 
-func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
-	parked, unattributed := parkedRuns(arts, stateArg)
-	ready := readyToMergeRuns(arts)
+func buildInbox(arts []state.Artifact, now time.Time, req NextRequest) Inbox {
+	// One fold of the log, then one closure index over it: every surface below
+	// reduces against the same two, so parked, ready, and the audit metric can
+	// never disagree about which terminal is current or which PR is finished.
+	terms, facts := foldSubjectTerminals(arts)
+	closed := buildClosureIndex(arts, facts)
+	parked, parkedOut, unattributed := parkedRuns(terms, closed, req.StateArg)
+	ready, readyOut := readyToMergeRuns(terms, closed)
 	// One index, both surfaces: the coverage question is asked per row but the
 	// log is read once, so N recommended PRs cost one scan.
-	idx := buildCoverageIndex(arts, now, stateArg)
+	idx := buildCoverageIndex(arts, now, req.StateArg)
 	for i := range parked {
 		parked[i].Coverage = idx.assessParked(parked[i])
 		parked[i].CyclesUsed, parked[i].CyclesMax = idx.budget(parked[i].Repo, parked[i].Number, parked[i].Grant)
@@ -456,57 +534,92 @@ func buildInbox(arts []state.Artifact, now time.Time, stateArg string) Inbox {
 	for i := range ready {
 		ready[i].Coverage = idx.assess(ready[i].Repo, ready[i].Number, ready[i].Run)
 	}
-	return Inbox{
+	in := Inbox{
 		Parked:       parked,
 		Unattributed: unattributed,
 		Grants:       grantLines(arts, now),
-		NeedsGrant:   needsGrantRows(arts, now, stateArg),
+		NeedsGrant:   needsGrantRows(arts, now, req.StateArg),
 		ReadyToMerge: ready,
+		Discharged:   Discharged{Parked: count(parkedOut), ReadyToMerge: countReady(readyOut)},
 	}
+	if req.IncludeDischarged {
+		in.DischargedRows = &DischargedRows{Parked: parkedOut, ReadyToMerge: readyOut}
+	}
+	return in
 }
 
-// readyToMergeRuns finds every PR whose latest terminal artifact is a
-// would_merge action — judged clean, dry-run, awaiting the operator's merge. It
-// mirrors parkedRuns' reduction exactly: fold per-run subject facts, take each
-// run's latest terminal (action or escalation, by log/chain order), then reduce
-// runs by subject keeping the newest terminal. A subject surfaces only when that
-// newest terminal is a would_merge action — a later park, block, or a newer run
-// for the same PR supersedes it and drops the row, so a stale "ready to merge"
-// with a merge command for an already-resolved PR cannot linger.
-func readyToMergeRuns(arts []state.Artifact) []ReadyRow {
-	last := make(map[string]terminalRun)
-	facts := make(map[string]runFacts)
-	for order, a := range arts {
-		facts[a.Run] = mergeRunFacts(facts[a.Run], factsFromArtifact(a))
-		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
-			last[a.Run] = terminalRun{artifact: a, order: order}
-		}
+// count tallies discharged parks by reason.
+func count(rows []ParkedRun) Closure {
+	var c Closure
+	for _, r := range rows {
+		c.add(r.Discharge)
 	}
+	return c
+}
 
-	latest := make(map[string]terminalRun)
-	for run, terminal := range last {
-		f := facts[run]
-		if f.Repo == "" || f.Number == 0 {
-			continue
-		}
-		key := fmt.Sprintf("%s#%d", f.Repo, f.Number)
-		terminal.facts = f
-		current, ok := latest[key]
-		if !ok || terminal.order > current.order {
-			latest[key] = terminal
-		}
+// countReady tallies discharged ready rows by reason.
+func countReady(rows []ReadyRow) Closure {
+	var c Closure
+	for _, r := range rows {
+		c.add(r.Discharge)
 	}
+	return c
+}
 
-	rows := make([]ReadyRow, 0, len(latest))
-	for _, terminal := range latest {
-		row, ok := readyRowFromTerminal(terminal)
+// readyToMergeRuns splits every subject whose current terminal is a would_merge
+// action into the rows still worth landing and the rows the log has already
+// discharged. It reads the shared subject fold, so "which terminal is current"
+// is decided in exactly one place for every surface.
+//
+// A subject surfaces as live only when its newest terminal is a would_merge
+// action AND no closing fact says the PR is finished. The second half is the
+// one that was missing: every action gate writes is dry_run/would_merge, so a
+// row survived its own merge and stood forever recommending a landed PR.
+func readyToMergeRuns(terms subjectTerminals, closed closureIndex) (live, discharged []ReadyRow) {
+	for _, key := range terms.subjects() {
+		l, d := readySubject(terms, closed, key)
+		live = append(live, l...)
+		discharged = append(discharged, d...)
+	}
+	sortReady(live)
+	sortReady(discharged)
+	return live, discharged
+}
+
+// readySubject classifies one subject's current and displaced would_merge
+// actions.
+func readySubject(terms subjectTerminals, closed closureIndex, key string) (live, discharged []ReadyRow) {
+	for _, t := range terms.superseded[key] {
+		row, ok := readyRowFromTerminal(t)
 		if !ok {
 			continue
 		}
-		rows = append(rows, row)
+		discharged = append(discharged, dischargeReady(row, DischargeSuperseded, supersededBy(terms.newest[key])))
 	}
-	sortReady(rows)
-	return rows
+	row, ok := readyRowFromTerminal(terms.newest[key])
+	if !ok {
+		return live, discharged
+	}
+	fact, finished := closed.settles(row.Repo, row.Number, terms.newest[key].order)
+	if finished {
+		return live, append(discharged, dischargeReady(row, DischargeMoot, fact.why()))
+	}
+	return append(live, row), discharged
+}
+
+func dischargeReady(r ReadyRow, d Discharge, why string) ReadyRow {
+	r.Discharge = d
+	r.DischargeWhy = why
+	return r
+}
+
+// supersededBy names the terminal that displaced a row, so a discharged row
+// explains itself instead of merely disappearing.
+func supersededBy(newest terminalRun) string {
+	if newest.artifact.Run == "" {
+		return "a later run for the same PR reached a terminal outcome"
+	}
+	return fmt.Sprintf("run %s reached a later terminal for the same PR", newest.artifact.Run)
 }
 
 // actionBody is the slice of a KindAction body the ready-to-merge projection
@@ -560,51 +673,73 @@ func sortReady(rows []ReadyRow) {
 	})
 }
 
-// parkedRuns finds every run whose latest terminal artifact is an escalation —
-// the runs still awaiting judgment. A run parks by appending an escalation and
-// resolves by appending an action (or a later escalation, if a judgment still
-// left it over-ceiling), so the last terminal in log order is the run's current
-// state. Output is oldest-park-first: age is a fact, not a priority call.
-func parkedRuns(arts []state.Artifact, stateArg string) ([]ParkedRun, []ParkedRun) {
-	last := make(map[string]terminalRun)
-	facts := make(map[string]runFacts)
-	for order, a := range arts {
-		facts[a.Run] = mergeRunFacts(facts[a.Run], factsFromArtifact(a))
-		if a.Kind == state.KindAction || a.Kind == state.KindEscalation {
-			last[a.Run] = terminalRun{artifact: a, order: order}
-		}
+// parkedRuns splits every park into the ones genuinely awaiting the operator and
+// the ones the log has already discharged.
+//
+// A run parks by appending an escalation and resolves by appending an action (or
+// a later escalation, if a judgment still left it over-ceiling), so a run's last
+// terminal is its current state. Reducing runs by subject then discharges the
+// earlier attempts at a PR gated more than once. What the reduction could not
+// see — and what left a 164-row inbox carrying 3 live rows — is the PR itself
+// ending: a merged or closed pull request keeps its newest terminal forever, and
+// an escalation there is a question nobody can answer any more.
+//
+// Discharged rows are classified and returned, never dropped. The counts are
+// what make the shrinkage legible, and `-all` is what makes the rows themselves
+// inspectable; silently hiding 161 of 164 rows would replace one unreadable
+// surface with another.
+//
+// Output is oldest-park-first: age is a fact, not a priority call.
+func parkedRuns(terms subjectTerminals, closed closureIndex, stateArg string) (live, discharged, unattributed []ParkedRun) {
+	for _, key := range terms.subjects() {
+		l, d := parkedSubject(terms, closed, key, stateArg)
+		live = append(live, l...)
+		discharged = append(discharged, d...)
 	}
-
-	// A PR may be gated repeatedly, producing a fresh run each time. Reduce
-	// those runs by subject so a later terminal action also resolves older
-	// parked attempts for that PR.
-	latest := make(map[string]terminalRun)
-	var unattributed []ParkedRun
-	for run, terminal := range last {
-		f := facts[run]
-		if f.Repo == "" || f.Number == 0 {
-			if terminal.artifact.Kind == state.KindEscalation {
-				unattributed = append(unattributed, parkedFromEscalation(terminal.artifact, f, stateArg))
-			}
+	for _, t := range terms.unattributed {
+		if t.artifact.Kind != state.KindEscalation {
 			continue
 		}
-		key := fmt.Sprintf("%s#%d", f.Repo, f.Number)
-		terminal.facts = f
-		current, ok := latest[key]
-		if !ok || terminal.order > current.order {
-			latest[key] = terminal
-		}
+		unattributed = append(unattributed, parkedFromEscalation(t.artifact, t.facts, stateArg))
 	}
-
-	parked := make([]ParkedRun, 0, len(latest))
-	for _, terminal := range latest {
-		if terminal.artifact.Kind == state.KindEscalation {
-			parked = append(parked, parkedFromEscalation(terminal.artifact, terminal.facts, stateArg))
-		}
-	}
-	sortParked(parked)
+	sortParked(live)
+	sortParked(discharged)
 	sortParked(unattributed)
-	return parked, unattributed
+	return live, discharged, unattributed
+}
+
+// parkedSubject classifies one subject's current and displaced parks.
+func parkedSubject(terms subjectTerminals, closed closureIndex, key, stateArg string) (live, discharged []ParkedRun) {
+	for _, t := range terms.superseded[key] {
+		if t.artifact.Kind != state.KindEscalation {
+			continue
+		}
+		row := parkedFromEscalation(t.artifact, t.facts, stateArg)
+		discharged = append(discharged, dischargeParked(row, DischargeSuperseded, supersededBy(terms.newest[key])))
+	}
+	newest := terms.newest[key]
+	if newest.artifact.Kind != state.KindEscalation {
+		return live, discharged
+	}
+	row := parkedFromEscalation(newest.artifact, newest.facts, stateArg)
+	fact, finished := closed.settles(row.Repo, row.Number, newest.order)
+	if finished {
+		return live, append(discharged, dischargeParked(row, DischargeMoot, fact.why()))
+	}
+	return append(live, row), discharged
+}
+
+// dischargeParked stamps a row with why it is no longer actionable and strips
+// the paste-ready commands. A discharged park must never hand the operator a
+// `gate judge` line: the one-shot judgment it would spend is spent against a
+// question the log has already answered.
+func dischargeParked(p ParkedRun, d Discharge, why string) ParkedRun {
+	p.Discharge = d
+	p.DischargeWhy = why
+	p.JudgeCommand = ""
+	p.ResolveCommand = ""
+	p.Escape = nil
+	return p
 }
 
 type terminalRun struct {
@@ -988,11 +1123,56 @@ func renderInbox(w io.Writer, in Inbox) {
 	}
 	renderReadyToMerge(w, in.ReadyToMerge)
 	renderNeedsGrant(w, in.NeedsGrant)
+	renderDischarged(w, in)
 	if len(in.Grants) == 0 {
 		return
 	}
 	fmt.Fprintln(w, "grants")
 	renderGrants(w, in.Grants)
+}
+
+// renderDischarged reports what the projection withheld. It prints whenever
+// anything was withheld, even though the rows themselves are hidden by default:
+// the count is the difference between an inbox that reduced correctly and one
+// that lost its queue, and the operator has been quoted the un-reduced number as
+// if it were real work.
+func renderDischarged(w io.Writer, in Inbox) {
+	total := in.Discharged.Total()
+	if total == 0 {
+		return
+	}
+	fmt.Fprintf(w, "discharged (%d) — already settled, not shown\n", total)
+	fmt.Fprintf(w, "  parked          %s\n", in.Discharged.Parked.summary())
+	fmt.Fprintf(w, "  ready to merge  %s\n", in.Discharged.ReadyToMerge.summary())
+	if in.DischargedRows == nil {
+		fmt.Fprintf(w, "  → gate next -all to see them\n\n")
+		return
+	}
+	fmt.Fprintln(w)
+	renderDischargedRows(w, *in.DischargedRows)
+}
+
+// renderDischargedRows lists the withheld rows themselves. They are history, so
+// each prints its reason and nothing to act on.
+func renderDischargedRows(w io.Writer, rows DischargedRows) {
+	for _, p := range rows.Parked {
+		fmt.Fprintf(w, "  %s  %s  [%s]\n", subjectOrRun(p.Repo, p.Number, p.Run), p.ParkedAt, p.Discharge)
+		fmt.Fprintf(w, "    %s\n", p.DischargeWhy)
+	}
+	for _, r := range rows.ReadyToMerge {
+		fmt.Fprintf(w, "  %s  ready  [%s]\n", subjectOrRun(r.Repo, r.Number, r.Run), r.Discharge)
+		fmt.Fprintf(w, "    %s\n", r.DischargeWhy)
+	}
+	fmt.Fprintln(w)
+}
+
+// subjectOrRun labels a row by its PR when it has one, and by its run when it
+// does not — the same fallback every other surface uses.
+func subjectOrRun(repo string, number int, run string) string {
+	if repo == "" || number == 0 {
+		return run
+	}
+	return fmt.Sprintf("%s#%d  %s", repo, number, run)
 }
 
 // renderReadyToMerge lists the PRs gate has judged clean and is ready to land,
@@ -1095,4 +1275,11 @@ func grantWhen(g GrantLine) string {
 		return "expired " + g.Remaining
 	}
 	return g.Remaining
+}
+
+// NextInbox returns the projection itself instead of rendering it. It is the
+// seam a caller needs when the inbox is an INPUT — `gate sweep` reducing its
+// work list, a test asserting on the reduction — rather than something to show.
+func NextInbox(st *state.Store, now func() time.Time, req NextRequest) (Inbox, error) {
+	return next(st, now, req)
 }

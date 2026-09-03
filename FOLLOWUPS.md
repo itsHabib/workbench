@@ -184,7 +184,28 @@ the escalation id, so it stops a *second judgment for the same park* but not a
 judgment landing against a park a concurrent re-park had already superseded.
 That second case, **within one run**, is what this closes.
 
-### Still open (1): the open-park notion is run-scoped; the inbox's is subject-scoped
+### ~~Still open (1): the open-park notion is run-scoped; the inbox's is subject-scoped~~ — REDUCTION EXTRACTED (2026-08-24)
+
+**The shared reduction now exists.** `observe/closure.go` holds one
+subject-scoped fold (`foldSubjectTerminals`) plus one closure index, and the
+parked projection, the ready-to-merge projection, `gate sweep`'s work list, and
+`gate audit`'s discharge metric all consume it —
+`TestParkDischargeAgreesWithTheInbox` pins that the metric and the inbox cannot
+report different live counts. That removes the duplication this entry named as
+the reason the notions drift.
+
+**What it does NOT close: the two writers still reduce independently.**
+`cmdResolve`'s unlocked pre-check and the locked `requireOpenEscalation` check
+remain run-scoped, so the concrete hazard below is unchanged — resolving a stale
+escalation on an older run still passes the run-scoped check and still appends an
+action that becomes the subject's newest terminal. What changed is that the
+result is now *visible*: the newer park it displaces is classified `superseded`
+and counted rather than silently vanishing from the projection. Pointing the two
+write-path checks at the shared reduction is a decision-path change with a wider
+blast radius than an observe-only PR should carry, and is what remains owed here.
+Owner: gate. Original text follows.
+
+### The original entry
 
 `newestTerminal` filters by run, matching the pre-existing `escalationIsOpen`.
 `observe.parkedRuns` does not: it folds per run and *then* reduces by subject —
@@ -263,6 +284,29 @@ replay any unfinished entries on startup — an at-least-once accept log in fron
 `gate resolve` (whose `escalationIsOpen` guard already makes replay idempotent).
 Owner: `escalate serve`. Warranted once the ingress is always-on / multi-operator
 rather than a phone-tap POC behind an off-by-default toggle.
+
+## gate: the inbox's moot class depends on producers that are not all landed
+
+`observe/closure.go` sources "this PR is finished" from four artifact kinds: an
+`already_merged` refusal and `gate sweep`'s `subject_closed` (both live today),
+plus `receipt` and `coverage` from PR #249, which is still open. Two consequences,
+both deliberate:
+
+- **The #249 kinds are matched by string literal** (`kindReceipt`,
+  `kindCoverage`), not through `state.Kind*`, so this projection compiles without
+  that branch. Rebase task when #249 lands: swap the two constants and delete
+  them from `closure.go`. `TestClosureReadsReceiptAndCoverage` constructs #249's
+  exact body shapes, so a drift in either fails loudly instead of silently
+  emptying the moot class and restoring the ghost queue.
+- **`sweep` and `reconcile` will both read GitHub for merge state**, with
+  different claims: `sweep` proves `not_open` from the batched open-PR list that
+  `next -live` and `preflight` already share, and `reconcile` reads back the
+  merge commit, actor, and clock. Neither is a second client for the other's
+  question, and `sweep` must never start asserting a landing it did not read.
+  Whether `reconcile`'s coverage sweep should subsume `sweep`'s work list once
+  both exist is worth revisiting — but only after #249 lands, since `coverage`'s
+  basis is `merged-pull-requests` and says nothing about a PR **closed without
+  merging**, which is a real part of the ghost population.
 
 ## Lazy-migration queue (graduate in when next touched)
 

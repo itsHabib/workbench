@@ -112,7 +112,7 @@ func assertParkSurvivesRefusal(t *testing.T, e env, parkRun string) {
 		t.Fatalf("a cycle refusal is not a lapsed grant, got needs_grant %+v", in.NeedsGrant)
 	}
 	var text bytes.Buffer
-	if err := observe.NextText(&text, e.st, time.Now, ""); err != nil {
+	if err := observe.NextText(&text, e.st, time.Now, observe.NextRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(text.String(), "o/r#7  "+parkRun+"  cycles 2/2") {
@@ -207,7 +207,7 @@ func assertCycleRefusalRecorded(t *testing.T, e env, run, grantID string) {
 func nextInbox(t *testing.T, e env) observe.Inbox {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := observe.NextJSON(&buf, e.st, time.Now, ""); err != nil {
+	if err := observe.NextJSON(&buf, e.st, time.Now, observe.NextRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	var in observe.Inbox

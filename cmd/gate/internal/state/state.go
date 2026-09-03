@@ -69,6 +69,23 @@ const (
 	// KindGatePreparation permanently consumes one protected preparation
 	// request before its decision artifacts are published to hosted state.
 	KindGatePreparation = "gate_preparation"
+	// KindSubjectClosed records that a pull request gate's inbox still held open
+	// is no longer open on GitHub. It is a durable, surfaceable OBSERVATION, not
+	// a decision: it sits outside the action/escalation outcome families, so
+	// recording one never counts as a review cycle, never re-parks a run, and
+	// never authorizes anything. Its only effect is on what the inbox shows.
+	//
+	// It exists because every action gate writes is dry_run/would_merge — gate
+	// authorizes and an executor acts — so the log could prove a merge was
+	// ALLOWED and could never say the PR had since finished. Without this the
+	// ready-to-merge and parked surfaces recommend work on dead pull requests
+	// forever, which is how a 164-row inbox came to carry 3 live rows.
+	//
+	// It is parented to the terminal artifact the stale row stands on, so the
+	// store's absent-parent guard makes "one closure per terminal" structural: a
+	// repeated sweep is a no-op, and a PR that is gated again later gets a fresh
+	// terminal that a later sweep can close on its own merits.
+	KindSubjectClosed = "subject_closed"
 )
 
 var kindPrefix = map[string]string{
@@ -84,6 +101,7 @@ var kindPrefix = map[string]string{
 	KindExecutionClaim:  "gxc",
 	KindExecutionResult: "gxr",
 	KindGatePreparation: "gpp",
+	KindSubjectClosed:   "sbc",
 }
 
 // ErrAlreadyExists is returned by AppendIfAbsentParent when the run already

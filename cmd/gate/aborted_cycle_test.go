@@ -89,7 +89,7 @@ func assertNextAgreesOnBudget(t *testing.T, e env, parkRun string, subject verif
 		t.Fatalf("next reports %d cycles, gate enforces %d — the two counts must agree", row.CyclesUsed, want)
 	}
 	var text bytes.Buffer
-	if err := observe.NextText(&text, e.st, time.Now, ""); err != nil {
+	if err := observe.NextText(&text, e.st, time.Now, observe.NextRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(text.String(), "cycles 2/3") {
