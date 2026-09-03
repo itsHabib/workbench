@@ -1040,7 +1040,19 @@ func TestSubmitIsIdempotentAndNeedsAParty(t *testing.T) {
 	if code, _, err := run("submit", "-party", "human:op"); code != 0 {
 		t.Fatalf("idempotent submit: %s", err)
 	}
-	code, out, err := run("log")
+	// A machine retry gets a decodable no-op, not an empty stdout.
+	code, out, err := run("submit", "-json", "-party", "human:op")
+	if code != 0 {
+		t.Fatalf("idempotent submit -json: %s", err)
+	}
+	var noop struct {
+		Steps []receipt `json:"steps"`
+		Note  string    `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(out), &noop); err != nil || len(noop.Steps) != 0 || noop.Note == "" {
+		t.Fatalf("idempotent submit -json must print a no-op receipt, got %q (%v)", out, err)
+	}
+	code, out, err = run("log")
 	if code != 0 {
 		t.Fatalf("log: %s", err)
 	}

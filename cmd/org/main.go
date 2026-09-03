@@ -585,12 +585,15 @@ func cmdSubmit(e *env, args []string) error {
 		return err
 	}
 	if slices.Contains(state.Terms.Supervisors, *party) {
-		fmt.Fprintf(e.stderr, "%s already supervises %s; nothing to do\n", *party, s.role)
-		return nil
+		return reportNoOp(e, s, fmt.Sprintf("%s already supervises %s; nothing to do", *party, s.role))
 	}
+	// The new terms are derived from the snapshot read above, so the append is
+	// fenced to that snapshot's tip: two concurrent submits would otherwise
+	// each carry "old supervisors + mine", and the second to land would
+	// silently drop the first's party — the one edit this verb must never make.
 	next := state.Terms
 	next.Supervisors = append(slices.Clone(state.Terms.Supervisors), *party)
-	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRecharter, Terms: &next})
+	return appendAndReport(e, h, s, home.Draft{Kind: org.KindRecharter, Terms: &next, ExpectTip: state.Tip})
 }
 
 // cmdTransfer moves one work item between two roles in the same tenant.
