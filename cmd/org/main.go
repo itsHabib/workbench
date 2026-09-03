@@ -573,6 +573,13 @@ func adoptable(h *home.Home, tenant, role string, state org.RoleState, work stri
 // second holder is the one thing adoption must not create: it is the state the
 // substrate can see but not resolve, and the routing question behind it —
 // which lane should own this — is not one a mechanical verb gets to answer.
+//
+// This is a preflight, not an admission law. Appends lock one role chain at a
+// time and the substrate has no tenant-wide lock or cross-chain transaction
+// (FOLLOWUPS), so two adoptions of the same work into two idle lanes can both
+// scan clean and both assign; sweep then reports the assign_conflict. The
+// window is the same one transfer documents — detected, not prevented — and
+// closing it is the cross-chain transaction FOLLOWUPS already names.
 func otherHolder(h *home.Home, tenant, role, work string) (string, error) {
 	pairs, err := h.RolesForTenant(tenant)
 	if err != nil {

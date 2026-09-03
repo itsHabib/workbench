@@ -81,7 +81,12 @@ system name there is Baton; this binary is its first runtime slice.
   this is a verb rather than a three-command recipe, since in a recipe the note
   is the optional step. Refuses when another lane already holds the work
   (`work_already_held`) rather than manufacturing the `assign_conflict` sweep
-  reports; warns on scope drift, like `transfer`. Whoever picks the work up
+  reports — a preflight over the peer chains, not an admission law: appends
+  lock one role chain at a time and there is no tenant-wide lock or
+  cross-chain transaction (FOLLOWUPS), so two adoptions of the same work into
+  two idle lanes that both scan before either assigns will both land, and
+  `sweep` reports the result as `assign_conflict` — detected, not prevented,
+  the same posture as `transfer`. Warns on scope drift, like `transfer`. Whoever picks the work up
   resumes it with `org begin -work <uri>`, no pin needed. It manufactures no
   authority — those four appends were always available to any process that can
   read the state directory — so WHO may invoke it is a charter question for the
