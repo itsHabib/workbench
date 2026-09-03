@@ -237,7 +237,7 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 	// memory. 1 MiB is far above any structured-output payload.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("anthropic read: %w", err)
+		return "", unavailableErr(fmt.Errorf("anthropic read: %w", err))
 	}
 
 	var envelope struct {
@@ -253,20 +253,25 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 	}
+	// Everything below a 200 status that still yields no tool input is the
+	// absence of an answer — a body that is not an Anthropic envelope, an
+	// error envelope behind a 200, a truncated or missing tool_use block — and
+	// carries ErrModelUnavailable like a transport failure does, so the review
+	// rung never files it as a low-confidence extraction.
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return "", fmt.Errorf("anthropic decode: %w", err)
+		return "", unavailableErr(fmt.Errorf("anthropic decode: %w", err))
 	}
 	if envelope.Type == "error" && envelope.Error != nil {
 		if m.gateway {
-			return "", fmt.Errorf("anthropic: gateway response error")
+			return "", unavailableErr(errors.New("anthropic: gateway response error"))
 		}
-		return "", fmt.Errorf("anthropic: %s: %s", envelope.Error.Type, envelope.Error.Message)
+		return "", unavailableErr(fmt.Errorf("anthropic: %s: %s", envelope.Error.Type, envelope.Error.Message))
 	}
 	// A max_tokens stop means the tool input was cut mid-JSON: even if it
 	// decodes, it is a partial answer. Fail closed rather than judge on a
 	// truncated payload.
 	if envelope.StopReason == "max_tokens" {
-		return "", fmt.Errorf("anthropic: response truncated (max_tokens)")
+		return "", unavailableErr(errors.New("anthropic: response truncated (max_tokens)"))
 	}
 	for _, block := range envelope.Content {
 		if block.Type != "tool_use" || block.Name != structuredToolName {
@@ -275,15 +280,15 @@ func (m *cloudModel) chat(ctx context.Context, system, user string, schema json.
 		// An absent or JSON-null tool input marshals to "null", which would
 		// slip past as a valid-looking payload. Fail closed instead.
 		if len(block.Input) == 0 {
-			return "", fmt.Errorf("anthropic: tool_use block has empty input")
+			return "", unavailableErr(errors.New("anthropic: tool_use block has empty input"))
 		}
 		out, err := json.Marshal(block.Input)
 		if err != nil {
-			return "", fmt.Errorf("anthropic tool input: %w", err)
+			return "", unavailableErr(fmt.Errorf("anthropic tool input: %w", err))
 		}
 		return string(out), nil
 	}
-	return "", fmt.Errorf("anthropic: no tool_use block in response")
+	return "", unavailableErr(errors.New("anthropic: no tool_use block in response"))
 }
 
 func (m *cloudModel) do(ctx context.Context, req *http.Request) (*http.Response, error) {

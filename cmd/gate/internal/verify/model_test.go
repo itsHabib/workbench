@@ -234,8 +234,11 @@ func TestCloudModelGatewayEnvelopeErrorIsRedacted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if err.Error() != "anthropic: gateway response error" {
+	if !strings.HasSuffix(err.Error(), ": anthropic: gateway response error") {
 		t.Fatalf("gateway envelope error must be stable and redacted: %v", err)
+	}
+	if !errors.Is(err, ErrModelUnavailable) {
+		t.Fatalf("gateway envelope error must be unavailable: %v", err)
 	}
 }
 
@@ -451,6 +454,35 @@ func TestLocalModelFailuresAreUnavailable(t *testing.T) {
 			t.Fatalf("undecodable envelope must be unavailable, got %v", err)
 		}
 	})
+}
+
+func TestCloudModelEnvelopeFailuresAreUnavailable(t *testing.T) {
+	// A 200 that carries no tool input is still the absence of an answer:
+	// the review rung must see ErrModelUnavailable, not a low-confidence
+	// extraction, for every envelope-level failure.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "undecodable envelope", body: "<html>proxy says no</html>"},
+		{name: "error envelope", body: `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`},
+		{name: "truncated", body: `{"type":"message","stop_reason":"max_tokens","content":[{"type":"tool_use","name":"structured_output","input":{}}]}`},
+		{name: "no tool_use block", body: `{"type":"message","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}`},
+		{name: "empty tool input", body: `{"type":"message","stop_reason":"end_turn","content":[{"type":"tool_use","name":"structured_output"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, tc.body)
+			}))
+			t.Cleanup(srv.Close)
+			m := &cloudModel{model: cloudModelDefault, apiKey: "k", url: srv.URL, client: srv.Client()}
+			_, err := m.chat(context.Background(), extractPrompt, "comment", extractSchema)
+			if !errors.Is(err, ErrModelUnavailable) {
+				t.Fatalf("%s must be unavailable, got %v", tc.name, err)
+			}
+		})
+	}
 }
 
 func TestOllamaTimeoutOverride(t *testing.T) {
