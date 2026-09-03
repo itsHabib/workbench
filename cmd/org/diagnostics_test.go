@@ -42,6 +42,19 @@ func TestPreflightRefusalsKeepTheExitCodeSeam(t *testing.T) {
 		t.Fatalf("early and late refusals differ: %d/%q vs %d/%q", code, errOut, code2, errOut2)
 	}
 
+	// done naming a HELD item while another is active: the record done would
+	// write is `complete #2`, and the kernel's answer to that is
+	// claim_subject_mismatch — not claim_active, which belongs to a claim done
+	// never writes. The bare verb is the comparison.
+	code, _, errOut = exec(t, state, append([]string{"done", "-work", "github:acme/api#2"}, role...)...)
+	if code != codeRefused || org.ReasonClaimSubjectMismatch != reasonOf(errOut) {
+		t.Fatalf("done over an active claim: exit %d: %s", code, errOut)
+	}
+	code2, _, errOut2 = exec(t, state, append([]string{"complete", "-work", "github:acme/api#2"}, role...)...)
+	if code2 != code || org.ReasonClaimSubjectMismatch != reasonOf(errOut2) {
+		t.Fatalf("early and late refusals differ: %d/%q vs %d/%q", code, errOut, code2, errOut2)
+	}
+
 	must("yield", "-work", "github:acme/api#1")
 
 	// done naming work the lane does not hold is work_not_held, not a crash.
@@ -126,6 +139,11 @@ func TestIntakeDoesNotNameAVerbThatDoesNotExist(t *testing.T) {
 	if !strings.Contains(out, "org retire") || !strings.Contains(out, "terms are set once") {
 		t.Fatalf("intake does not name the route that exists:\n%s", out)
 	}
+	// Retire is terminal for the chain, so the fresh charter must be told to
+	// use a new role id — the retired one is refused `retired`.
+	if !strings.Contains(out, "NEW role id") {
+		t.Fatalf("intake implies the retired role can be re-chartered:\n%s", out)
+	}
 	// Every verb the guidance names must actually be a verb.
 	for _, verb := range []string{"retire", "charter"} {
 		if _, ok := verbs[verb]; !ok {
@@ -165,6 +183,11 @@ func TestBlobRefusesSilentlyDroppedFlags(t *testing.T) {
 	}
 	if stdout.String() != "the body" {
 		t.Fatalf("blob [flags] <digest> printed %q", stdout.String())
+	}
+	// Both forms at once would read the flag and ignore the positional.
+	code, _, errOut = exec(t, state, "blob", "-digest", digest, "sha256:other")
+	if code != codeError || !strings.Contains(errOut, "alongside -digest") {
+		t.Fatalf("-digest plus positional: exit %d: %s", code, errOut)
 	}
 	// A flag AFTER the positional is refused rather than silently dropped —
 	// which is exactly the shape the exec helper produces.

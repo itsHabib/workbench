@@ -725,6 +725,14 @@ func TestCompositesPreflightAndDischarge(t *testing.T) {
 	if !strings.Contains(boot, "github:acme/api#7") {
 		t.Fatalf("takeover did not strand the claim:\n%s", boot)
 	}
+	// Naming a DIFFERENT held item while #7 dangles: done would claim it, and
+	// the kernel refuses every claim as dangling_claim first — so must the
+	// pre-flight, rather than reporting the item as not held.
+	must(role, "assign", "-work", "github:acme/api#8", "-pin", "second")
+	code, _, errOut = exec(t, state, append([]string{"done", "-work", "github:acme/api#8"}, role...)...)
+	if code != codeRefused || !strings.Contains(errOut, org.ReasonDanglingClaim) {
+		t.Fatalf("done past a dangling claim: exit %d: %s", code, errOut)
+	}
 	_, out, _ := exec(t, state, append([]string{"done", "-body", "successor discharge"}, role...)...)
 	if !strings.Contains(out, "complete") {
 		t.Fatalf("done did not complete the dangling claim:\n%s", out)

@@ -442,6 +442,31 @@ func cmdDone(e *env, args []string) error {
 	return reportSteps(e, s, append(steps, r))
 }
 
+// doneExplicit checks an explicitly named target against the record done
+// would write next, and refuses with the reason the kernel would name for THAT
+// record — not for a claim done never writes:
+//
+//   - another item is active: done skips the claim and writes `complete
+//     <work>`, which checkTerminal refuses as claim_subject_mismatch;
+//   - a predecessor's claim dangles on something else: done would claim
+//     <work>, and checkClaim refuses every claim as dangling_claim before it
+//     looks at what is held;
+//   - otherwise the claim names work the role does not hold: work_not_held.
+func doneExplicit(state org.RoleState, work string) (string, error) {
+	if state.Active != "" && state.Active != work {
+		return "", preflight(org.ReasonClaimSubjectMismatch,
+			"done would complete %s but the active claim is %s; finish that first or name it explicitly", work, state.Active)
+	}
+	if state.Active == "" && state.Dangling != "" && state.Dangling != work {
+		return "", preflight(org.ReasonDanglingClaim,
+			"a predecessor's claim on %s is unresolved; finish it before finishing %s", state.Dangling, work)
+	}
+	if state.Active != work && state.Dangling != work && held(state, work) < 0 {
+		return "", preflight(org.ReasonWorkNotHeld, "%s is not held by this role; nothing to finish", work)
+	}
+	return work, nil
+}
+
 // doneTarget resolves which work item done finishes: the explicit -work, the
 // active claim, or the single held item — refusing to guess between several.
 //
@@ -450,14 +475,7 @@ func cmdDone(e *env, args []string) error {
 // — it stays an error, because no law was broken.
 func doneTarget(state org.RoleState, work string) (string, error) {
 	if work != "" {
-		if state.Active != "" && state.Active != work {
-			return "", preflight(org.ReasonClaimActive,
-				"%s is active; finish it or name it explicitly before finishing %s", state.Active, work)
-		}
-		if state.Active != work && state.Dangling != work && held(state, work) < 0 {
-			return "", preflight(org.ReasonWorkNotHeld, "%s is not held by this role; nothing to finish", work)
-		}
-		return work, nil
+		return doneExplicit(state, work)
 	}
 	if state.Active != "" {
 		return state.Active, nil
@@ -1235,6 +1253,11 @@ func cmdBlob(e *env, args []string) error {
 	h, err := s.open(args, false)
 	if err != nil {
 		return err
+	}
+	// Both forms at once is the same wrong-answer shape as a dropped flag:
+	// `-digest A B` would read A and silently ignore B. Refuse it.
+	if *digest != "" && s.fs.NArg() > 0 {
+		return fmt.Errorf("%q was passed positionally alongside -digest; use one form or the other", s.fs.Arg(0))
 	}
 	if *digest == "" {
 		*digest = s.fs.Arg(0)
