@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,6 +18,13 @@ const (
 	ollamaURL      = "http://localhost:11434/api/chat"
 	ollamaModel    = "qwen2.5:7b"
 	confidenceGate = 0.6
+
+	// reasonConsolidationUnavailable names the one failure that is not about
+	// the review panel at all: the consolidator could not reach its model, so
+	// it read nothing. Reporting that as a low-confidence extraction tells the
+	// judge there were ambiguous findings when none were ever extracted — the
+	// escalation must name the infrastructure fault instead.
+	reasonConsolidationUnavailable = "consolidation_unavailable"
 
 	extractPrompt = `You EXTRACT structure from ONE AI code-review comment. Do NOT judge whether it is valid or already handled. Read off: (headline) the bot's OWN title or first line, cleaned of markdown, badges, and HTML comments — quote its words, do not paraphrase; (severity) the severity the bot itself stated (High/Medium/P1/P2), else "unknown"; (verdict) actionable if it reports a problem, nit if trivial or style, question if it asks something, none if it reports no problem — an approval, a "no issues found", or the bot's own statement that its findings are resolved or the change is ready; (confidence) a 0.0-1.0 estimate that you extracted headline and severity correctly. Output JSON only.`
 )
@@ -51,7 +59,8 @@ func knownVerdict(v string) bool {
 // Reviews consolidates the bot panel's comments via the selected model.
 // Producer class: local — by the ladder law it may pass or escalate, never
 // block: actionable findings and low-confidence extractions both park the
-// gate for judgment rather than deciding.
+// gate for judgment rather than deciding. A model call that never completed is
+// a third, separate outcome — see reasonConsolidationUnavailable.
 func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, model Model) (state.Artifact, error) {
 	if model == nil {
 		model = newLocalModel(ollamaURL)
@@ -61,15 +70,7 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		return state.Artifact{}, err
 	}
 	var body struct {
-		Comments []struct {
-			Author   string `json:"author"`
-			IsBot    bool   `json:"is_bot"`
-			Path     string `json:"path"`
-			Line     int    `json:"line"`
-			Body     string `json:"body"`
-			CommitID string `json:"commit_id"`
-			Resolved bool   `json:"resolved"`
-		} `json:"comments"`
+		Comments []reviewComment `json:"comments"`
 	}
 	if err := json.Unmarshal(a.Body, &body); err != nil {
 		return state.Artifact{}, fmt.Errorf("verify: parse comments evidence: %w", err)
@@ -83,62 +84,29 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		Tier:       "T0",
 		Confidence: 1.0,
 	}
-	actionable, lowConf, processed, stale := 0, 0, 0, 0
+	// The tally's baselines are the verdict's: full confidence, floor tier,
+	// lowered only by what a comment actually carries.
+	t := panelTally{minConfidence: 1.0, maxTier: "T0"}
 	for _, c := range body.Comments {
 		if !c.IsBot || strings.Contains(c.Body, "review-coordinator-verdict") {
 			continue
 		}
 		if staleComment(c.Resolved, c.CommitID, subject.HeadSHA) {
-			stale++
+			t.stale++
 			continue
 		}
-		processed++
-		ex, err := extractOne(context.Background(), c.Body, model)
-		if err != nil {
-			lowConf++
-			v.Findings = append(v.Findings, Finding{Title: "extraction failed: " + err.Error(), Locus: locus(c.Path, c.Line)})
-			continue
-		}
-		// An out-of-enum verdict from the cloud backend (whose schema is a
-		// steer, not a grammar) is an unreadable extraction: escalate exactly
-		// as a failed one, never fall through as "not actionable".
-		if !knownVerdict(ex.Verdict) {
-			lowConf++
-			v.Findings = append(v.Findings, Finding{Title: "extraction failed: out-of-enum verdict " + ex.Verdict, Locus: locus(c.Path, c.Line)})
-			continue
-		}
-		f := Finding{
-			Title:      fmt.Sprintf("[%s] %s (%s)", strings.TrimSuffix(c.Author, "[bot]"), ex.Headline, ex.Verdict),
-			Severity:   normSeverity(ex.Severity),
-			Locus:      locus(c.Path, c.Line),
-			Confidence: ex.Confidence,
-		}
-		v.Findings = append(v.Findings, f)
-		if ex.Confidence < v.Confidence {
-			v.Confidence = ex.Confidence
-		}
-		if ex.Verdict == "actionable" {
-			actionable++
-		}
-		if ex.Confidence < confidenceGate {
-			lowConf++
-		}
-		// A no-problem comment (approval, ship-it, findings-resolved note) may
-		// still quote a severity badge; it raises nothing.
-		if ex.Verdict == "none" {
-			continue
-		}
-		if severityTier(f.Severity) > tierRank(v.Tier) {
-			v.Tier = "T" + fmt.Sprint(severityTier(f.Severity))
-		}
+		t.add(consolidateComment(c, model))
 	}
+	v.Findings = t.findings
+	v.Confidence = t.minConfidence
+	v.Tier = t.maxTier
 
 	suffix := ""
-	if stale > 0 {
-		suffix = fmt.Sprintf(" (%d stale/resolved comments from earlier cycles excluded)", stale)
+	if t.stale > 0 {
+		suffix = fmt.Sprintf(" (%d stale/resolved comments from earlier cycles excluded)", t.stale)
 	}
 	switch {
-	case processed == 0:
+	case t.processed == 0:
 		// An empty panel is not a reviewed panel: a PR opened minutes ago,
 		// before any bot has run, must not read as consolidated. Escalate
 		// (the local rung's fail-closed) rather than pass — a judge can
@@ -147,13 +115,113 @@ func Reviews(st *state.Store, run, commentsEvidenceID string, subject Subject, m
 		// has no live review yet.
 		v.Decision = DecisionEscalate
 		v.Why = "no bot review comments for this head — cannot consolidate a panel" + suffix
-	case actionable > 0 || lowConf > 0:
+	case t.unavailable > 0:
+		// Dominates the finding tallies below: whatever the readable comments
+		// said, part of the panel was never consolidated. The judge is being
+		// asked about a broken consolidator, not about ambiguous findings, and
+		// confidence in this verdict is zero, not merely low.
 		v.Decision = DecisionEscalate
-		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment%s", processed, actionable, lowConf, suffix)
+		v.Confidence = 0
+		v.Why = fmt.Sprintf("%s: %d of %d bot comments were never read — the %s model call failed to complete, so nothing was extracted from them; this is an infrastructure fault, not an ambiguous review%s", reasonConsolidationUnavailable, t.unavailable, t.processed, model.impl(), suffix)
+	case t.actionable > 0 || t.lowConf > 0:
+		v.Decision = DecisionEscalate
+		v.Why = fmt.Sprintf("%d bot comments: %d actionable, %d low-confidence extractions — needs judgment%s", t.processed, t.actionable, t.lowConf, suffix)
 	default:
-		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)%s", processed, suffix)
+		v.Why = fmt.Sprintf("%d bot comments, none actionable (nits, questions, or no-problem)%s", t.processed, suffix)
 	}
 	return Record(st, run, []string{commentsEvidenceID}, v)
+}
+
+// reviewComment is the shape the panel evidence records per comment.
+type reviewComment struct {
+	Author   string `json:"author"`
+	IsBot    bool   `json:"is_bot"`
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	Body     string `json:"body"`
+	CommitID string `json:"commit_id"`
+	Resolved bool   `json:"resolved"`
+}
+
+// consolidated is one comment's contribution to the panel: its finding plus
+// which escalation gate it trips. The three failure modes are deliberately
+// distinct — unavailable means the call never completed (nothing was read),
+// lowConf means the model answered and the answer cannot be trusted.
+type consolidated struct {
+	finding     Finding
+	confidence  float64
+	actionable  bool
+	lowConf     bool
+	unavailable bool
+	raisesTier  bool
+}
+
+// consolidateComment extracts one bot comment. It decides how the comment
+// counts; the tally does the accumulating and Reviews does the composing.
+func consolidateComment(c reviewComment, model Model) consolidated {
+	ex, err := extractOne(context.Background(), c.Body, model)
+	// A call that never completed is not an uncertain reading of this comment:
+	// the comment was not read. Keep it out of the low-confidence tally so the
+	// escalation can name the real fault. A failed read lowers no confidence —
+	// there is no reading to be confident about — so it carries 1.
+	if errors.Is(err, ErrModelUnavailable) {
+		f := Finding{Title: reasonConsolidationUnavailable + ": " + err.Error(), Locus: locus(c.Path, c.Line)}
+		return consolidated{finding: f, confidence: 1, unavailable: true}
+	}
+	if err != nil {
+		f := Finding{Title: "extraction failed: " + err.Error(), Locus: locus(c.Path, c.Line)}
+		return consolidated{finding: f, confidence: 1, lowConf: true}
+	}
+	// An out-of-enum verdict from the cloud backend (whose schema is a steer,
+	// not a grammar) is an unreadable extraction: escalate exactly as a failed
+	// one, never fall through as "not actionable".
+	if !knownVerdict(ex.Verdict) {
+		f := Finding{Title: "extraction failed: out-of-enum verdict " + ex.Verdict, Locus: locus(c.Path, c.Line)}
+		return consolidated{finding: f, confidence: 1, lowConf: true}
+	}
+	return consolidated{
+		finding: Finding{
+			Title:      fmt.Sprintf("[%s] %s (%s)", strings.TrimSuffix(c.Author, "[bot]"), ex.Headline, ex.Verdict),
+			Severity:   normSeverity(ex.Severity),
+			Locus:      locus(c.Path, c.Line),
+			Confidence: ex.Confidence,
+		},
+		confidence: ex.Confidence,
+		actionable: ex.Verdict == "actionable",
+		lowConf:    ex.Confidence < confidenceGate,
+		// A no-problem comment (approval, ship-it, findings-resolved note) may
+		// still quote a severity badge; it raises nothing.
+		raisesTier: ex.Verdict != "none",
+	}
+}
+
+// panelTally accumulates consolidated comments monotonically: worst tier wins,
+// lowest confidence carries, each gate counts its own trips.
+type panelTally struct {
+	findings                                           []Finding
+	maxTier                                            string
+	minConfidence                                      float64
+	processed, stale, actionable, lowConf, unavailable int
+}
+
+func (t *panelTally) add(c consolidated) {
+	t.processed++
+	t.findings = append(t.findings, c.finding)
+	if c.confidence < t.minConfidence {
+		t.minConfidence = c.confidence
+	}
+	if c.actionable {
+		t.actionable++
+	}
+	if c.lowConf {
+		t.lowConf++
+	}
+	if c.unavailable {
+		t.unavailable++
+	}
+	if c.raisesTier && severityTier(c.finding.Severity) > tierRank(t.maxTier) {
+		t.maxTier = "T" + fmt.Sprint(severityTier(c.finding.Severity))
+	}
 }
 
 // staleComment reports whether a bot comment is a prior cycle's finding, not
