@@ -71,7 +71,7 @@ func TestFirstRunStartsAtTailAndDeliversOnlyWhatFollows(t *testing.T) {
 	// journaled, and only what is appended afterwards is delivered.
 	cfg, j, path := quietGate(t, firstRunEsc+"\n"+firstRunVrd+"\n")
 	r := route.New(cfg, time.Now)
-	if err := cycle(cfg, j, r, liveCourier(), false); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: r, co: liveCourier()}, false); err != nil {
 		t.Fatal(err)
 	}
 	ids, inits := routedIDs(t, j)
@@ -94,7 +94,7 @@ func TestFirstRunStartsAtTailAndDeliversOnlyWhatFollows(t *testing.T) {
 	if err := os.WriteFile(path, []byte(firstRunEsc+"\n"+firstRunVrd+"\n"+firstRunNew+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cycle(cfg, j, r, liveCourier(), false); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: r, co: liveCourier()}, false); err != nil {
 		t.Fatal(err)
 	}
 	ids, inits = routedIDs(t, j)
@@ -133,7 +133,7 @@ func TestFromStartDeliversTheWholeHistory(t *testing.T) {
 	// The deliberate opt-in: -from-start places a never-seen source at offset 0
 	// so the full history pages, and says so in the journal.
 	cfg, j, _ := quietGate(t, firstRunEsc+"\n"+firstRunVrd+"\n")
-	if err := cycle(cfg, j, route.New(cfg, time.Now), liveCourier(), true); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: liveCourier()}, true); err != nil {
 		t.Fatal(err)
 	}
 	ids, inits := routedIDs(t, j)
@@ -156,7 +156,7 @@ func TestResweepAfterChainBreakStillDelivers(t *testing.T) {
 	if err := j.SaveCursors(stale); err != nil {
 		t.Fatal(err)
 	}
-	if err := cycle(cfg, j, route.New(cfg, time.Now), liveCourier(), false); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: liveCourier()}, false); err != nil {
 		t.Fatal(err)
 	}
 	ids, inits := routedIDs(t, j)
@@ -176,7 +176,7 @@ func TestCorruptCursorRecoveryResweepsFromZeroNotTail(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.Sources[0].Path), "state", "cursors.json"), []byte(`garbage`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cycle(cfg, j, route.New(cfg, time.Now), liveCourier(), false); err != nil {
+	if err := cycle(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: liveCourier()}, false); err != nil {
 		t.Fatal(err)
 	}
 	ids, inits := routedIDs(t, j)
@@ -228,7 +228,7 @@ func TestCorruptCursorsPagesThenQuarantinesAndResweeps(t *testing.T) {
 		Channels: map[string]config.Channel{"quiet": {Type: config.ChannelDrop}},
 		CatchAll: "quiet",
 	}
-	cur, err := recoverCorruptCursors(cfg, j, route.New(cfg, time.Now), liveCourier())
+	cur, err := recoverCorruptCursors(runner{cfg: cfg, j: j, r: route.New(cfg, time.Now), co: liveCourier()})
 	if err != nil {
 		t.Fatalf("recovery must succeed once the alert settles, got %v", err)
 	}
@@ -278,7 +278,7 @@ func TestNamedDropChannelIsJournaledAsDropped(t *testing.T) {
 	}
 	r := route.New(cfg, time.Now)
 	ev := event.Event{Source: "gate", ID: "e1", Kind: "verdict", Severity: event.SevBlock, Fields: map[string]string{}}
-	if ok := dispatch(cfg, j, r, liveCourier(), ev, map[string]journal.Card{}); !ok {
+	if ok := dispatch(runner{cfg: cfg, j: j, r: r, co: liveCourier()}, ev, &cycleState{cards: map[string]journal.Card{}, reasons: map[string]int{}}); !ok {
 		t.Fatal("dispatch to a drop channel must settle (return true)")
 	}
 	tail, err := j.Tail(1)

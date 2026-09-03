@@ -94,6 +94,45 @@ their own shapes; `decision`/`tier` are never required of them.
    failed > cancelled) passes through an open throttle window — worst wins, the reducer's
    monotone spirit applied to notifications.
 
+## What reaches the phone
+
+Three rules beyond "every event is push-worthy", each answering a way the phone rung
+misinformed the operator in production.
+
+- **`grant_needed` is its own page class.** gate records a `grant_needed` artifact whenever a
+  run is refused for want of authority — `grant_absent`, `grant_expired`, or (since gate #242)
+  the pre-flight `grant_cycle_exceeded`. flare read those artifacts and **dropped them**, and
+  they are the ONE alert an agent cannot act on for itself: it can re-run, re-review and
+  re-judge, but it cannot mint, and the operator cannot mint from a phone either. So the page
+  must arrive *early*, while they are still near a keyboard, rather than being discovered later
+  as stalled work. An absent or expired grant's card carries the paste-ready `gate grant` with
+  the ceilings of the repo's most recent merge grant — one grant's tuple, never a composite of
+  several — so flare proposes what the operator has already judged appropriate and never widens
+  on its own. A spent cycle budget carries no mint at all: the ceiling is the stop signal that
+  the review loop ran long, and the remedy is fewer rounds, not a wider grant.
+
+- **`flare digest` — the standing authority picture.** The per-event pages answer one refusal
+  at a time; the digest answers all of them at once: per repo, how much is parked, whether a
+  grant is standing, and how soon it lapses. Two situations qualify, and only a mint fixes
+  either: parked work with **no live grant** (a hard stop), and a live grant about to lapse
+  under parked work (a stop that is coming). A repo running fine is left out — a digest that
+  lists everything is another wall of text to skim, and no pressure at all produces no card.
+  Its dedupe id is a hash of its own content, so an unchanged picture never re-pages and any
+  movement in it does.
+
+- **An identical question collapses.** 318 of 355 parks in the live ledger lead with the
+  identical readiness sentence, and attention to a repeated warning is spent by the second one
+  — so the third onward buys nothing by restating it, while what is DIFFERENT about this park
+  is never surfaced at all. flare fingerprints the park's **leading reason clause** (gate packs
+  reasons into one `"; "`-joined line whose first clause is the primary one; fingerprinting the
+  whole line matches almost never — 26 of 357 — even though the operator is reading the same
+  opening sentence every time), counts deliveries of it per repo over a 7-day window, and from
+  the third collapses the card: it names the repeated opener once, then leads with the PR, the
+  tier, the head the verdict was gathered against and the review budget left, and shows the
+  clauses AFTER the opener — the part that is actually new. **Measured on the live ledger: 276
+  of 357 parks (77%) would render collapsed; nothing is suppressed — the collapse changes the
+  card, never whether it is sent.**
+
 ## Cursor integrity (absence must not read as calm)
 
 - **First run (no cursor yet):** a source absent from `cursors.json` — fresh state on a new
@@ -277,9 +316,20 @@ omitted = any. When a match needs logic the table can't express, that is a signa
   delivers its whole history instead of being placed at the tail. Opt-in, once; an
   existing cursor is never moved by it.
 - `flare status` — JSON health (last poll, per-source cursor, journal tail). Exit 0 healthy,
-  1 stale/never-ran, 2 config error. A corrupt cursor file reports `healthy:false` +
+  1 stale/never-ran/**stalled**, 2 config error. A corrupt cursor file reports `healthy:false` +
   `cursors_corrupt:true` and exits 1 (not a raw parse error) — the watcher is down, and
   `/health` must be able to see why.
+  - **A running loop is not a healthy one.** A fresh `last_poll` proves the loop is *running*;
+    it does not prove anything is getting through. The cursor is ordered, so one undeliverable
+    event blocks every event behind it on that source — and that used to report
+    `healthy: true` while `sweep` exited 0. A stalled source is now recorded in
+    `cursors.json` (`stalled`: when it began, what it is stuck on, how many attempts) and
+    `status` reports `healthy: false` and names it. A source that polls cleanly clears its own
+    stall.
+- `flare digest [-within 12h]` — one authority card: repos with parked work and no live grant,
+  and grants lapsing within the window with work behind them, each with its mint. Exit 0 when
+  delivered or when there was nothing to say, 1 on a read/delivery failure, 3 if another flare
+  holds the lock (it journals, so it takes the same single-instance lock).
 
 **Single-instance (`watch` + `sweep`).** Both take an exclusive OS advisory lock on
 `~/.flare/watch.lock` (flock on Unix, `LockFileEx` on Windows) before touching state, and

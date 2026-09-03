@@ -760,7 +760,7 @@ func TestSlackCeilingParkHeadlineIsHonest(t *testing.T) {
 // TestBlockerBlockOmitsEmptyLabels keeps a label from rendering with nothing
 // after it — worse than no label at all.
 func TestBlockerBlockOmitsEmptyLabels(t *testing.T) {
-	got := blockerBlock(event.Event{Fields: map[string]string{
+	got := remedyBlock(event.Event{Fields: map[string]string{
 		"approvable": "no",
 		"mint":       "gate grant -repo r -max-tier T2 -ttl 24h",
 	}})

@@ -62,6 +62,9 @@ func gateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event
 	if env.Kind == contracts.KindEscalation {
 		return escalationEvent(src, env, lg), true, nil
 	}
+	if env.Kind == KindGrantNeeded {
+		return grantNeededEvent(src, env, lg), true, nil
+	}
 	if ev, ok := updateEvent(src, env, lg); ok {
 		return ev, true, nil
 	}
@@ -113,17 +116,45 @@ func escalationEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) 
 	if b.Brief != nil {
 		fields["briefed"] = "yes"
 	}
+	reasonFields(fields, b.Question)
 	briefFields(fields, b.Brief)
 	preflightFields(fields, src, env, b, fields["grant"], lg)
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "escalation",
+		Kind:     event.KindEscalation,
 		Time:     env.Time,
 		Severity: event.SevEscalate,
 		Title:    title,
 		Body:     b.Question,
 		Fields:   fields,
+	}
+}
+
+// reasonFields fingerprints the park's PRIMARY reason and separates the rest,
+// so the delivery journal can tell an operator's third identical readiness
+// question from a genuinely new one.
+//
+// gate packs a park's reasons into one "; "-joined line whose FIRST clause is
+// the primary one — 318 of 355 parks in the live ledger lead with the identical
+// readiness sentence, while the clauses after it vary. Fingerprinting the whole
+// line therefore almost never matches (26 of 357 collapse) even though the
+// operator is reading the same opening sentence over and over; fingerprinting
+// the leading clause matches what they actually experience.
+//
+// The remaining clauses are kept separately rather than folded in, because they
+// are the part that is NEW — a collapsed card shows them instead of hiding
+// them. Nothing is dropped: the full reason is one `gate explain` away, and the
+// card says so.
+func reasonFields(fields map[string]string, question string) {
+	if question == "" {
+		return
+	}
+	lead, rest, _ := strings.Cut(question, "; ")
+	fields["reason_id"] = fmt.Sprintf("%08x", noteHash(lead))
+	fields["reason_lead"] = lead
+	if rest != "" {
+		fields["reason_rest"] = rest
 	}
 }
 
@@ -171,7 +202,18 @@ func preflightFields(fields map[string]string, src config.Source, env contracts.
 	if grantID == "" || b.Verdict == "" {
 		return
 	}
-	park := lg.get().park(grantID, b.Verdict, b.Repo, b.Number, env.Run)
+	l := lg.get()
+	// The head the verdict was gathered against, and the review budget spent so
+	// far. Both are facts about THIS park that a card can lead with when the
+	// reason itself is the same sentence the operator has read a hundred times.
+	if head := l.headOf(b.Verdict); head != "" {
+		fields["head"] = head
+	}
+	park := l.park(grantID, b.Verdict, b.Repo, b.Number, env.Run)
+	if park.CyclesKnown && park.Grant.MaxCycles > 0 {
+		fields["cycles_used"] = strconv.Itoa(park.Cycles)
+		fields["cycles_max"] = strconv.Itoa(park.Grant.MaxCycles)
+	}
 	res := preflight.Check(park, time.Now())
 	if !res.Known {
 		return
@@ -205,7 +247,7 @@ func verdictEvent(src config.Source, env contracts.Envelope, v contracts.Verdict
 	return event.Event{
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "verdict",
+		Kind:     event.KindVerdict,
 		Time:     env.Time,
 		Severity: sev,
 		Title:    fmt.Sprintf("%s: %s %s (%s, %s)", src.Name, subject, v.Decision, v.Source, v.Tier),
@@ -266,7 +308,7 @@ func updateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (eve
 		Class:    event.ClassUpdate,
 		Source:   src.Name,
 		ID:       env.ID,
-		Kind:     "card-update",
+		Kind:     event.KindCardUpdate,
 		Time:     env.Time,
 		Severity: event.SevInfo,
 		Title:    fmt.Sprintf("%s: %s#%s %s", src.Name, fields["repo"], fields["number"], fields["outcome"]),
@@ -415,4 +457,131 @@ func decisionOutcome(decision string) string {
 		return event.OutcomeApproved
 	}
 	return event.OutcomeDecided
+}
+
+// --- grant_needed: the operator's authority is the bottleneck ------------------
+
+// KindGrantNeeded is gate's artifact kind for a run refused for want of
+// authority. It is not in the shared contracts vocabulary yet, so it is named
+// here as the string gate persists; flare reads it, never writes it.
+const KindGrantNeeded = "grant_needed"
+
+// Grant-refusal reasons gate records. grantAbsent and grantExpired come from a
+// top-level capability refusal; grantCycleExceeded from the pre-flight cycle
+// ceiling gate added in #242.
+const (
+	reasonAbsent  = "grant_absent"
+	reasonExpired = "grant_expired"
+	reasonCycles  = "grant_cycle_exceeded"
+)
+
+// grantNeededBody is gate's persisted refusal record. It has two shapes — a
+// bare {repo, reason, at} for an absent or expired grant, and a richer one
+// under a run for a spent cycle budget — and both decode into this one struct
+// with the absent fields left zero.
+type grantNeededBody struct {
+	Repo       string `json:"repo"`
+	Number     int    `json:"number"`
+	Reason     string `json:"reason"`
+	Grant      string `json:"grant"`
+	CyclesUsed int    `json:"cycles_used"`
+	CyclesMax  int    `json:"cycles_max"`
+	Why        string `json:"why"`
+}
+
+// grantNeededEvent lifts a refusal into its own page class.
+//
+// This is the ONE alert that means "your authority is the bottleneck": an agent
+// can re-run, re-review and re-judge, but it cannot mint — and the operator
+// cannot mint from a phone either. So the page must arrive EARLY, while they
+// are still near a keyboard, rather than being discovered later as stalled
+// work. flare read these artifacts and dropped them; every one is a run that
+// stopped dead.
+//
+// It carries the paste-ready mint, because the remedy is a single command the
+// operator runs at a keyboard and the whole job of the card is to make that one
+// paste instead of an investigation.
+func grantNeededEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) event.Event {
+	var b grantNeededBody
+	_ = json.Unmarshal(env.Body, &b) // tolerant: a body flare cannot read still pages, with less detail
+	fields := map[string]string{
+		"reason": b.Reason,
+		"repo":   b.Repo,
+		"state":  filepath.Dir(src.Path),
+	}
+	if env.Run != "" {
+		fields["run"] = env.Run
+	}
+	if b.Number > 0 {
+		fields["number"] = strconv.Itoa(b.Number)
+	}
+	if b.CyclesMax > 0 {
+		fields["cycles_used"] = strconv.Itoa(b.CyclesUsed)
+		fields["cycles_max"] = strconv.Itoa(b.CyclesMax)
+	}
+	fields["mint"] = grantNeededMint(b, lg, filepath.Dir(src.Path))
+	return event.Event{
+		Source:   src.Name,
+		ID:       env.ID,
+		Kind:     event.KindGrantNeeded,
+		Time:     env.Time,
+		Severity: event.SevEscalate,
+		Title:    fmt.Sprintf("%s: %s needs a grant (%s)", src.Name, b.Repo, b.Reason),
+		Body:     grantNeededWhy(b),
+		Fields:   fields,
+	}
+}
+
+// grantNeededMint builds the remedy for a refusal that a mint actually fixes:
+// an absent or expired grant needs a fresh one, and the last grant the repo
+// held is the best evidence of the ceiling it actually works at.
+//
+// A spent cycle budget gets NO mint. The ceiling is the stop signal that the
+// review loop ran long, and the remedy is fewer rounds or an operator looking
+// at why it looped — never a wider grant. Rendering "-max-cycles used+1" here
+// would turn the one signal designed to stop a loop into the paste that
+// continues it.
+func grantNeededMint(b grantNeededBody, lg *lazyLedger, stateDir string) string {
+	if b.Repo == "" || b.Reason == reasonCycles {
+		return ""
+	}
+	tier, cycles := lastCeilings(b.Repo, b.Grant, lg)
+	return preflight.Mint(b.Repo, stateDir, tier, cycles)
+}
+
+// lastCeilings recovers the ceilings to re-mint at: the refused grant's own
+// when the record names one, else the ceilings of the repo's most recent
+// grant. Both are recorded facts — flare proposes what worked before, it never
+// widens.
+func lastCeilings(repo, grantID string, lg *lazyLedger) (string, int) {
+	l := lg.get()
+	if g, ok := l.grants[grantID]; ok {
+		return g.MaxTier, g.MaxCycles
+	}
+	return l.lastCeilingsFor(repo)
+}
+
+// cyclesExhausted is what a spent budget means, and it rides every cycle card
+// whether or not gate recorded its own why: the card's job is to stop the
+// operator reaching for a wider grant.
+const cyclesExhausted = "The ceiling is the stop signal, not friction: the review loop ran long, and the fix is fewer rounds, not more budget. No mint is proposed — look at why it looped before anything else."
+
+func grantNeededWhy(b grantNeededBody) string {
+	if b.Reason == reasonCycles {
+		why := "this PR has spent its grant's review-cycle budget."
+		if b.Why != "" {
+			why = strings.TrimSuffix(b.Why, ".") + "."
+		}
+		return why + " " + cyclesExhausted
+	}
+	if b.Why != "" {
+		return b.Why
+	}
+	switch b.Reason {
+	case reasonAbsent:
+		return "gate found no live grant for this repo, so it refused before gathering any evidence. Nothing proceeds here until one is minted."
+	case reasonExpired:
+		return "the grant this repo was running under has expired. gate refuses every run until a fresh one is minted."
+	}
+	return "gate refused a run for want of authority."
 }

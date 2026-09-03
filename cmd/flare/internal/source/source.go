@@ -156,7 +156,7 @@ func alert(src config.Source, note string) event.Event {
 	return event.Event{
 		Source:   src.Name,
 		ID:       fmt.Sprintf("cursor-alert:%s:%08x", src.Name, noteHash(note)),
-		Kind:     "cursor-alert",
+		Kind:     event.KindCursorAlert,
 		Time:     time.Now(),
 		Severity: event.SevEscalate,
 		Title:    fmt.Sprintf("flare: %s cursor integrity", src.Name),

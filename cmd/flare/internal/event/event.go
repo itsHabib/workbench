@@ -56,6 +56,25 @@ const (
 	ClassUpdate
 )
 
+// Event kinds — flare's OWN vocabulary for what a fact is. Some mirror a
+// producer's artifact kind, others (cursor-alert, card-update, grant-needed,
+// authority-digest) exist only here, so this is not the contracts vocabulary
+// and must not be replaced by it.
+//
+// They live in one place because both ends read them: the source writes a kind
+// and notify, route and the cycle branch on it. Two literals drifting apart
+// does not crash — it silently stops matching, which for a sink means a card
+// that is never finalized or a page that never renders its class.
+const (
+	KindEscalation      = "escalation"
+	KindVerdict         = "verdict"
+	KindReceipt         = "receipt"
+	KindCursorAlert     = "cursor-alert"
+	KindCardUpdate      = "card-update"
+	KindGrantNeeded     = "grant-needed"
+	KindAuthorityDigest = "authority-digest"
+)
+
 // Card-update outcomes: the closed vocabulary an UPDATE event carries in
 // Fields["outcome"], naming how a park ended. The source writes them and notify
 // renders them, so the spelling lives here where both see it rather than as
@@ -80,7 +99,7 @@ type Event struct {
 	Class    Class     // page (routed) or update (applied to a delivered card)
 	Source   string    // config source name, e.g. "gate"
 	ID       string    // dedupe key: artifact ID / receipt key+outcome
-	Kind     string    // producer kind: "escalation", "verdict", "receipt", "cursor-alert"
+	Kind     string    // one of the Kind* constants above
 	Time     time.Time // producer's timestamp
 	Severity Severity
 	Title    string // one line, e.g. "gate: ship#181 parked for judgment"

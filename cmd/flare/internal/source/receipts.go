@@ -67,7 +67,7 @@ func receiptEvent(src config.Source, r receipt) (event.Event, bool, error) {
 	return event.Event{
 		Source:   src.Name,
 		ID:       r.Key + ":" + r.Outcome,
-		Kind:     "receipt",
+		Kind:     event.KindReceipt,
 		Time:     when,
 		Severity: sev,
 		Title:    fmt.Sprintf("%s: %s %s", src.Name, what, r.Outcome),
