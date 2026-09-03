@@ -273,3 +273,89 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
   measures polling, not whether the binary is current. The tools that ship
   *behavior* to a long-running local daemon need a staleness check that
   `status` surfaces; `#251` was merged, tested, and inert for eight days.
+
+# Friction log — runway reconcile read-window fix (#259)
+
+Agent: Claude (Opus 5). Started: 2026-08-23 (America/Los_Angeles).
+
+## Worked as documented
+
+- **The delivery loop.** Worktree, root-cause fix in
+  `cmd/runway/internal/controller`, canonical checks plus `-race`, PR #259,
+  `@claude please review` per `.ship.json` (`require=[claude]`). All three CI
+  checks green on the reviewed head; the reviewer cleared it with zero blocking
+  findings on the first cycle.
+- **The mint boundary.** The agent stopped at the grant handoff as documented;
+  the operator minted `grt_ad5944b6b4ff7aaa` (T2, `max-cycles 3`).
+- **`gate judge` is genuinely one-shot.** An escalation already carried a
+  judgment; the duplicate `-auto` call refused with `judgment_duplicate` and
+  named the existing `jdg_6bd4a74481c44b05` rather than stamping a second
+  authorization. The refusal is the feature working.
+
+## Friction
+
+### Ollama cold-start timeout parks a run even with the daemon supervised
+
+Second occurrence of the `#214` entry above, one failure mode further in.
+
+- **What I tried:** `gate gate -repo itsHabib/workbench -pr 259 -grant
+  grt_ad5944b6b4ff7aaa` on a reviewed, CI-green T1 PR at the exact head.
+- **What happened:** parked (exit 2, `run_3ab398ccb6bc3d89`). `triage-floor`
+  and `up-to-date` passed; `review-consolidation` escalated because its
+  extraction failed with `ollama: ... context deadline exceeded (Client.Timeout
+  exceeded while awaiting headers)`. The escalation-brief synthesis failed the
+  same way. **The daemon was up** — `brew services` from the #214 session, with
+  `qwen2.5:7b` present — so this is not the outage that entry describes: a cold
+  load of a 4.7 GB model outruns the three-minute client timeout hard-coded at
+  `local/local.go:28` (a package-level `var`, no flag, env var, or injection
+  point), and the first run after the model is evicted from memory parks
+  regardless of daemon health.
+- **Class:** `infra-timeout`.
+- **Smallest fix:** the #214 remedy still stands and is still unimplemented —
+  review-consolidation should report `local_model_unavailable` rather than
+  dressing an infra failure as a judgment question; a failed extraction is not
+  a finding, and the operator's remedy differs completely. Supervising the
+  daemon does not close this: pre-warm the model before the ladder runs, or
+  make that timeout injectable so a cold first call can be given more room.
+
+### A review request carrying context does not attest, so every PR burns a judgment
+
+- **What I tried:** the same `gate gate` invocation, with the required reviewer
+  completed at the exact head and no blocking findings.
+- **What happened:** `readiness` escalated (`no review decision reported by
+  GitHub`) and `review-panel-completeness` escalated (`completed=0 expected=1
+  missing=[claude]`), so the run parked and a one-shot judgment became the only
+  exit. The same pair parked #248.
+
+  The cause is not that the panel comments rather than approving — #235's
+  `panelStandIn` already answers an absent GitHub review decision, and
+  `readiness.go` only escalates when `decisionAbsent && !stand.satisfied`. It is
+  that the panel never completed, and it never completed because the
+  *attestation* step in `.github/workflows/claude.yml` did not fire. That step
+  posts the `gate:review-attestation` sentinel `evidence/panel.go` looks for,
+  and it validates the WHOLE comment body against
+  `^@claude [please] review [this [pr]]$`. Every review request in this repo
+  carries focus areas after the verb, so the step exits `not a review request —
+  no attestation`, the panel stays `missing=[claude]`, the stand-in cannot be
+  satisfied, and readiness escalates downstream of that.
+- **Class:** `tool-gap`.
+- **Smallest fix:** have the claude workflow post a formal GitHub review
+  (`gh pr review`) alongside its comment. That gives GitHub a real review
+  decision, which satisfies `readiness` directly and `latestExactHeadReview`
+  for panel completeness, and it needs no heuristic to be loosened.
+
+  **Not** the tempting fix: widening the regex to match `@claude review` as a
+  *prefix* is precisely what the step's own comment warns against, since
+  `@claude review permissions` and `@claude review the failing CI logs` start
+  identically and must not attest. The precision-over-recall choice there is
+  deliberate and documented; the recall should be recovered somewhere that
+  cannot credit a review that never happened.
+
+  Also **not** the fix I first proposed here: teaching `review-panel-v1` to
+  count a panel member's bot comment as a completed review. `evidence/panel.go`
+  refuses that by design — "prose is not authority here, and a verdict with no
+  commit anchor cannot state which tree it applies to." The sentinel exists
+  because counting bare prose was already considered and rejected.
+- **Workaround available today:** post the bare `@claude please review` as its
+  own comment so the attestation fires, and put the focus areas in a second
+  comment. Costs nothing and keeps the panel complete.
