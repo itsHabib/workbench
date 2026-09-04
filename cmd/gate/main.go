@@ -116,6 +116,8 @@ func main() {
 	switch os.Args[1] {
 	case "grant":
 		err = cmdGrant(os.Args[2:])
+	case "grant-callback":
+		err = cmdGrantCallback(os.Args[2:])
 	case "gate":
 		err = cmdGate(os.Args[2:])
 	case "judge":
@@ -164,11 +166,12 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <grant|grant-callback|gate|judge|resolve|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
-  gate     -repo R -pr N -grant grt_x [-live]
+  gate     -repo R -pr N (-grant grt_x | -slack) [-live]
+  grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
   executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
@@ -451,6 +454,7 @@ func cmdGate(args []string) error {
 	repo := fs.String("repo", "", "owner/repo")
 	pr := fs.Int("pr", 0, "PR number")
 	grantID := fs.String("grant", "", "grant artifact id")
+	slack := fs.Bool("slack", false, "request one exact T0 grant in Slack and wait for it")
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
@@ -462,14 +466,37 @@ func cmdGate(args []string) error {
 	if help {
 		return nil
 	}
-	if *repo == "" || *pr == 0 || *grantID == "" {
-		return errors.New("gate: -repo, -pr, -grant required")
+	if *repo == "" || *pr == 0 {
+		return errors.New("gate: -repo and -pr required")
+	}
+	if (*grantID == "" && !*slack) || (*grantID != "" && *slack) {
+		return errors.New("gate: choose exactly one of -grant or -slack")
+	}
+	if *slack {
+		if err := checkGrantStateDir(*stateDir, false); err != nil {
+			return err
+		}
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
 		return err
 	}
-	res, code, err := runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
+	var res gateResult
+	var code int
+	if *slack {
+		grant, request, grantErr := requestSlackGrant(e, *repo, *pr, evidence.HeadSHA, slackGrantPollInterval)
+		if grantErr != nil {
+			res = gateResult{
+				PR: fmt.Sprintf("%s#%d", *repo, *pr), Outcome: "capability_refused",
+				Why: grantErr.Error(), HeadSHA: request.Request.Subject.HeadSHA,
+			}
+			code = codeRefused
+		} else {
+			res, code, err = runGateBound(e, *repo, *pr, request.Request.Subject.HeadSHA, grant.ID, *live, *modelBackend, *reviewsOptional)
+		}
+	} else {
+		res, code, err = runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
+	}
 	if err != nil {
 		return err
 	}
@@ -484,7 +511,16 @@ func cmdGate(args []string) error {
 // evaluating historical, merged PRs.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	return runGateWithSynthesis(
-		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true,
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true, "",
+	)
+}
+
+// runGateBound is the Slack path: the grant must match the head captured in
+// the immutable request before Gate gathers anything, and act re-checks the
+// live reduced subject before recording an effect.
+func runGateBound(e env, repo string, pr int, head, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
+	return runGateWithSynthesis(
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true, head,
 	)
 }
 
@@ -498,14 +534,15 @@ func runGateWithSynthesis(
 	reviewsOptional bool,
 	synthesize bool,
 	refuseMerged bool,
+	boundHead string,
 ) (res gateResult, code int, err error) {
-	subject := verify.Subject{Repo: repo, Number: pr}
+	subject := verify.Subject{Repo: repo, Number: pr, HeadSHA: boundHead}
 	res = gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
 	// No live grant, no gate: coded refusal, exit 3, nothing gathered. This
 	// precedes model construction so a missing/invalid grant refuses (codeRefused)
 	// before a missing ANTHROPIC_API_KEY could hard-error the model backend.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now)
+	grant, err := checkGateCapability(e, grantID, subject, time.Now)
 	if err != nil {
 		recordGrantNeeded(e, repo, err)
 		res.Outcome = "capability_refused"
@@ -635,6 +672,20 @@ func runGateWithSynthesis(
 		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+// checkGateCapability selects the strictest check available from the subject.
+// Before evidence an ordinary run has no head and uses the legacy scope check;
+// the Slack path starts with its bound head. Every later action/judgment has a
+// complete subject and therefore checks exact head + PR.
+func checkGateCapability(e env, grantID string, subject verify.Subject, now func() time.Time) (capability.Grant, error) {
+	if subject.HeadSHA == "" {
+		return capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", now)
+	}
+	return capability.CheckSubject(
+		e.st, e.keyPath, grantID, subject.Repo, "merge",
+		subject.HeadSHA, subject.Number, now,
+	)
 }
 
 // readinessVerdict runs the readiness rung over the gathered bundle. Readiness
@@ -887,7 +938,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// The grant was live when the run started, but evidence gathering and
 	// verification take time. Re-check here so the TTL bounds the effect,
 	// not just the start of the run.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now)
+	grant, err := checkGateCapability(e, grantID, reduced.Subject, time.Now)
 	if err != nil {
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
@@ -923,7 +974,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		// Synthesis can stall to the model's HTTP timeout, outlasting the TTL
 		// the pre-synthesis check saw. Re-check at write time so an escalation
 		// never records under a grant that expired mid-synthesis.
-		if _, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now); err != nil {
+		if _, err := checkGateCapability(e, grantID, reduced.Subject, time.Now); err != nil {
 			res.Outcome = "capability_refused"
 			res.Why = err.Error()
 			res.Code = readiness.Code(res.Why)
@@ -1473,7 +1524,7 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now)
+	grant, err := checkGateCapability(e, grantID, subject, e.now)
 	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
@@ -1490,7 +1541,7 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 	if opts.beforeAppend != nil {
 		opts.beforeAppend()
 	}
-	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now); err != nil {
+	if _, err := checkGateCapability(e, grantID, subject, e.now); err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
 	// The open-terminal test rides the append's own lock rather than sitting
@@ -1546,7 +1597,7 @@ func persistedJudgmentGrant(e env, judgment state.Artifact, escalationID string,
 		}
 		if artifact.Kind == state.KindGrant {
 			atJudgment := func() time.Time { return judgment.Time }
-			if _, err := capability.Check(e.st, e.keyPath, parentID, subject.Repo, "merge", atJudgment); err != nil {
+			if _, err := checkGateCapability(e, parentID, subject, atJudgment); err != nil {
 				return "", fmt.Errorf("judgment_invalid_grant_lineage: %w", err)
 			}
 			return parentID, nil
@@ -2392,7 +2443,7 @@ func runBacktest(repo, prs, floorBin string) error {
 	for _, n := range numbers {
 		// refuseMerged=false: replaying historical, merged PRs is backtest's
 		// whole purpose — the live verb's already-merged refusal must not fire.
-		res, _, err := runGateWithSynthesis(e, repo, n, grantArt.ID, false, "local", false, true, false)
+		res, _, err := runGateWithSynthesis(e, repo, n, grantArt.ID, false, "local", false, true, false, "")
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
 			continue

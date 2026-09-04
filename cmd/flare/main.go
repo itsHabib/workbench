@@ -442,6 +442,9 @@ func cardsFor(cards map[string]journal.Card, ev event.Event) map[string]journal.
 			out[journal.SeenKey(ev.Source, esc)] = c
 		}
 	}
+	if ev.Fields["exact_card"] == "yes" {
+		return out
+	}
 	subject := subjectOf(ev)
 	if subject == "" {
 		return out
@@ -462,7 +465,7 @@ func cardsFor(cards map[string]journal.Card, ev event.Event) map[string]journal.
 // 2026-08-21.
 func supersede(cfg config.Config, j *journal.Journal, co courier, ev event.Event, cards map[string]journal.Card) bool {
 	subject := subjectOf(ev)
-	if ev.Kind != "escalation" || subject == "" {
+	if ev.Kind != "escalation" || subject == "" || ev.Fields["grant_request"] == "yes" {
 		return true
 	}
 	stale := map[string]journal.Card{}

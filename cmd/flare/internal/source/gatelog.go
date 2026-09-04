@@ -13,6 +13,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/flare/internal/preflight"
 	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
 
 // The escalation body flare renders is now the shared contract
@@ -59,6 +60,9 @@ func parseGateLog(src config.Source, lines []string, lg *lazyLedger) ([]event.Ev
 // can never vanish quietly and go unpaged. Only ok=false — a kind that is not a
 // verdict at all — is a legitimate skip.
 func gateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event.Event, bool, error) {
+	if env.Kind == contracts.KindGrantRequest {
+		return grantRequestEvent(src, env)
+	}
 	if env.Kind == contracts.KindEscalation {
 		return escalationEvent(src, env, lg), true, nil
 	}
@@ -74,6 +78,30 @@ func gateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (event
 	}
 	ev, page := verdictEvent(src, env, v)
 	return ev, page, nil
+}
+
+func grantRequestEvent(src config.Source, env contracts.Envelope) (event.Event, bool, error) {
+	var request grantrequest.RequestArtifact
+	if err := json.Unmarshal(env.Body, &request); err != nil {
+		return event.Event{}, false, fmt.Errorf("grant request %s: %w", env.ID, err)
+	}
+	if err := grantrequest.Validate(request); err != nil {
+		return event.Event{}, false, fmt.Errorf("grant request %s: %w", env.ID, err)
+	}
+	subject := request.Request.Subject
+	return event.Event{
+		Source: src.Name, ID: env.ID, Kind: "escalation", Time: env.Time,
+		Severity: event.SevEscalate,
+		Title:    fmt.Sprintf("%s: exact T0 approval requested for %s#%d", src.Name, subject.Repo, subject.Number),
+		Body:     fmt.Sprintf("Approve one merge evaluation for exact head `%s`. This cannot authorize T1+ and expires at %s.", subject.HeadSHA, request.Request.ExpiresAt.Format(time.RFC3339)),
+		Fields: map[string]string{
+			"grant_request": "yes", "briefed": "yes", "run": env.Run,
+			"repo": subject.Repo, "number": strconv.Itoa(subject.Number),
+			"head": subject.HeadSHA, "tier": request.Request.MaxTier,
+			"cycles":  strconv.Itoa(request.Request.MaxCycles),
+			"expires": request.Request.ExpiresAt.Format(time.RFC3339),
+		},
+	}, true, nil
 }
 
 func escalationEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) event.Event {
@@ -276,6 +304,10 @@ func updateEvent(src config.Source, env contracts.Envelope, lg *lazyLedger) (eve
 
 func updateFields(env contracts.Envelope, lg *lazyLedger) (map[string]string, bool) {
 	switch env.Kind {
+	case contracts.KindGrant:
+		return grantRequestApproved(env)
+	case contracts.KindGrantDenied:
+		return grantRequestDenied(env)
 	case contracts.KindJudgment:
 		return judgmentUpdate(env, lg)
 	case contracts.KindResolution:
@@ -284,6 +316,65 @@ func updateFields(env contracts.Envelope, lg *lazyLedger) (map[string]string, bo
 		return mergeUpdate(env, lg)
 	}
 	return nil, false
+}
+
+func grantRequestApproved(env contracts.Envelope) (map[string]string, bool) {
+	requestID := grantRequestParent(env)
+	if requestID == "" {
+		return nil, false
+	}
+	var body struct {
+		Repo      string `json:"repo"`
+		BoundPR   int    `json:"bound_pr"`
+		BoundHead string `json:"bound_head"`
+		MintedBy  string `json:"minted_by"`
+	}
+	if err := json.Unmarshal(env.Body, &body); err != nil || body.Repo == "" || body.BoundPR < 1 || body.BoundHead == "" {
+		return nil, false
+	}
+	return map[string]string{
+		"escalation": requestID, "exact_card": "yes",
+		"repo": body.Repo, "number": strconv.Itoa(body.BoundPR),
+		"outcome": event.OutcomeApproved, "who": body.MintedBy,
+		"note": "Exact T0 capability issued; the requesting Gate run may continue.",
+	}, true
+}
+
+func grantRequestDenied(env contracts.Envelope) (map[string]string, bool) {
+	requestID := grantRequestParent(env)
+	if requestID == "" {
+		return nil, false
+	}
+	var denial grantrequest.Denial
+	// A malformed terminal is withheld rather than rendered from untrusted body
+	// fields. The source card may remain visually actionable, but Gate state is
+	// authoritative and the callback will refuse the already-closed request. This
+	// matches Flare's general rule: withhold on failed proof, never invent fields.
+	if err := json.Unmarshal(env.Body, &denial); err != nil || grantrequest.ValidateDenial(denial) != nil {
+		return nil, false
+	}
+	outcome := event.OutcomeDecided
+	if denial.Decision == grantrequest.DecisionDenied {
+		outcome = event.OutcomeBlocked
+	}
+	return map[string]string{
+		"escalation": requestID, "exact_card": "yes",
+		"repo":    denial.Request.Request.Subject.Repo,
+		"number":  strconv.Itoa(denial.Request.Request.Subject.Number),
+		"outcome": outcome, "who": denial.Who, "note": denial.Reason,
+	}, true
+}
+
+func grantRequestParent(env contracts.Envelope) string {
+	// gqr_ is Gate state wire vocabulary (KindGrantRequest in state.kindPrefix).
+	// Flare cannot import Gate's internal state package, so keep the boundary
+	// explicit here just as parkParent does for esc_.
+	for _, parent := range env.Parents {
+		if strings.HasPrefix(parent, "gqr_") {
+			return parent
+		}
+	}
+	return ""
 }
 
 // judgmentBody is the slice of a judgment a card update reads.

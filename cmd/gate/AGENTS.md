@@ -60,6 +60,13 @@ never read.
 
 Constraints that are design decisions, not omissions:
 
+- **Slack may mint only one exact T0 subject.** `gate -slack` fixes merge/T0,
+  three cycles, ten minutes, one repo/PR/head. `grant-callback` accepts the
+  original raw Slack body, independently verifies its HMAC, timestamp, and
+  immutable-user allowlist, loads every scope field from the request artifact,
+  re-reads the head, and records one mutually exclusive grant/denial terminal
+  under the state lock. Flare and Escalate never receive a mint API. T1+ stays
+  on the existing stronger authority paths.
 - **State is the only channel.** Verifiers, the provider-neutral judge,
   `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path

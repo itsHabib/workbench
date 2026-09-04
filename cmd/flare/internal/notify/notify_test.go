@@ -13,7 +13,36 @@ import (
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
+
+func TestSlackGrantRequestRendersExactT0ActionsOnlyWhenEnabled(t *testing.T) {
+	ev := event.Event{
+		Source: "gate", ID: "gqr_0123456789abcdef", Kind: "escalation",
+		Severity: event.SevEscalate, Body: "Approve one exact T0 merge evaluation.",
+		Fields: map[string]string{
+			"grant_request": "yes", "repo": "itsHabib/workbench", "number": "245",
+			"head": strings.Repeat("a", 40), "tier": "T0", "cycles": "3",
+		},
+	}
+	without := string(mustJSON(t, renderSlackMessage("C1", false, ev)))
+	if strings.Contains(without, grantrequest.ActionApprove) || strings.Contains(without, grantrequest.ActionDeny) {
+		t.Fatalf("resolve_actions=false rendered grant actions:\n%s", without)
+	}
+	with := string(mustJSON(t, renderSlackMessage("C1", true, ev)))
+	for _, want := range []string{
+		"Approve exact T0 access for workbench#245", "Approve T0", "Deny",
+		grantrequest.ActionApprove, grantrequest.ActionDeny,
+		`"value":"gqr_0123456789abcdef"`,
+	} {
+		if !strings.Contains(with, want) {
+			t.Fatalf("grant request card missing %q:\n%s", want, with)
+		}
+	}
+	if strings.Contains(with, `"action_id":"`+escalation.ActionApprove+`"`) {
+		t.Fatalf("grant request reused parked-escalation approve action:\n%s", with)
+	}
+}
 
 func TestSlackPostRendersBlockKit(t *testing.T) {
 	const token = "test-token"

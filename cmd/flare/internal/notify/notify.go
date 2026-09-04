@@ -18,6 +18,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
 
 const (
@@ -314,7 +315,13 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 	if btn, ok := prButton(ev); ok {
 		elements = append(elements, btn)
 	}
-	if !resolveActions || !resolvablePark(ev) {
+	if !resolveActions {
+		return elements
+	}
+	if grantApprovalRequest(ev) {
+		return append(elements, grantApproveButton(ev), grantDenyButton(ev))
+	}
+	if !resolvablePark(ev) {
 		return elements
 	}
 	if approvable(ev) {
@@ -325,6 +332,24 @@ func actionElements(ev event.Event, resolveActions bool) []any {
 	// no ceiling that stops a human deciding "don't merge this", and the operator
 	// away from a keyboard should still be able to say so.
 	return append(elements, blockButton(ev))
+}
+
+func grantApprovalRequest(ev event.Event) bool {
+	return ev.Kind == "escalation" && ev.ID != "" && ev.Fields["grant_request"] == "yes"
+}
+
+func grantApproveButton(ev event.Event) slackButton {
+	return slackButton{
+		Type: "button", Text: slackText{Type: "plain_text", Text: "Approve T0", Emoji: true},
+		ActionID: grantrequest.ActionApprove, Value: ev.ID, Style: "primary",
+	}
+}
+
+func grantDenyButton(ev event.Event) slackButton {
+	return slackButton{
+		Type: "button", Text: slackText{Type: "plain_text", Text: "Deny", Emoji: true},
+		ActionID: grantrequest.ActionDeny, Value: ev.ID, Style: "danger",
+	}
 }
 
 // approvable reports whether the Approve button may be painted. The source
@@ -432,6 +457,12 @@ func blockButton(ev event.Event) slackButton {
 // headline is the one line that must make the required action obvious: a plain
 // imperative, with the subject woven in when the event names one.
 func headline(ev event.Event) string {
+	if grantApprovalRequest(ev) {
+		if s := subject(ev); s != "" {
+			return "🔐 Approve exact T0 access for " + s + "?"
+		}
+		return "🔐 Approve exact T0 access?"
+	}
 	switch ev.Severity {
 	case event.SevBlock:
 		return blockHeadline(ev)

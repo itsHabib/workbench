@@ -83,6 +83,29 @@ func TestBoundGrantRequiresExactAuthorizationSubject(t *testing.T) {
 	}
 }
 
+func TestCheckSubjectAcceptsLegacyAndRequiresBoundSubject(t *testing.T) {
+	st, key := setup(t)
+	now := fixedClock(time.Unix(1000, 0))
+	legacy, err := Mint(st, key, "o/r", "merge", "T1", 1, "operator", time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("a", 40)
+	if _, err := CheckSubject(st, key, legacy.ID, "o/r", "merge", head, 7, now); err != nil {
+		t.Fatalf("legacy grant stopped working on exact-subject path: %v", err)
+	}
+	bound, err := MintBound(st, key, "o/r", "merge", "T0", 3, "slack", time.Hour, head, 7, "gau_"+strings.Repeat("b", 64), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CheckSubject(st, key, bound.ID, "o/r", "merge", head, 7, now); err != nil {
+		t.Fatalf("exact bound subject refused: %v", err)
+	}
+	if _, err := CheckSubject(st, key, bound.ID, "o/r", "merge", head, 8, now); !errors.Is(err, ErrSubject) {
+		t.Fatalf("wrong PR = %v, want subject mismatch", err)
+	}
+}
+
 func TestMintBoundRejectsMalformedSubject(t *testing.T) {
 	st, key := setup(t)
 	now := fixedClock(time.Unix(1000, 0))
@@ -91,6 +114,22 @@ func TestMintBoundRejectsMalformedSubject(t *testing.T) {
 	}
 	if _, err := MintBound(st, key, "o/r", "merge", "T1", 1, "test", time.Minute, strings.Repeat("a", 40), 0, "gau_"+strings.Repeat("b", 64), now); !errors.Is(err, ErrBadSubject) {
 		t.Fatalf("bad PR = %v, want ErrBadSubject", err)
+	}
+}
+
+func TestMintBoundOnceRejectsElapsedAuthority(t *testing.T) {
+	st, key := setup(t)
+	now := fixedClock(time.Unix(1000, 0))
+	_, err := MintBoundOnce(
+		st, key, "o/r", "merge", "T0", 3, "slack", 0,
+		strings.Repeat("a", 40), 7, "gau_"+strings.Repeat("b", 64),
+		"run_request", "gqr_request", now,
+	)
+	if !errors.Is(err, ErrExpired) {
+		t.Fatalf("want ErrExpired, got %v", err)
+	}
+	if _, statErr := os.Stat(key); !os.IsNotExist(statErr) {
+		t.Fatal("elapsed authority created signing key material")
 	}
 }
 

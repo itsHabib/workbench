@@ -24,11 +24,17 @@ and the contract; this binary is one of its two new pieces (the other is gate's
 - **It is not flare.** The whole reason this is a separate binary: flare is a
   read-only sink (Amendment 3) and is architecturally forbidden from writing a
   decision. The resolution ingest therefore *cannot* be a flare change.
-- **Transport-agnostic ingest.** `ingest.Decision` is the shape a Slack action
+- **Transport-agnostic park ingest.** `ingest.Decision` is the shape a Slack action
   ack, a webhook POST, or a future gate UI would carry. The `resolve` verb fills
   it from CLI flags; the `serve` verb fills it from a signed Slack callback —
   two transports over one contract, the same `ingest.Client` mechanism under
   both.
+- **Grant callbacks remain Gate authority.** For `gate_t0_approve` / deny,
+  `serve` passes the unchanged signed body and original signature headers to
+  `gate grant-callback`. Gate independently repeats authentication,
+  authorization, live-head validation, and the single-use state write.
+  Escalate cannot select repo, PR, head, tier, cycles, TTL, or identity and
+  never receives the grant signing key API.
 
 ## Verbs
 
@@ -68,5 +74,6 @@ golangci-lint run ./cmd/escalate/...
 go test ./cmd/escalate/...
 ```
 
-The only in-repo dependency is `contracts/escalation` (the shared decision
-vocabulary + the escalation-id shape it validates).
+Shared leaves are `contracts/escalation`, `contracts/grantrequest`, and the
+policy-free `slackauth` callback mechanism. No Gate decision package is ever
+imported.

@@ -84,6 +84,14 @@ also what keeps the contracts-split trigger unpulled: an outside-the-module Go
 consumer of the shared types would force `contracts` into its own module; an
 inside one is the point of the repo.
 
+`slackauth` is the same kind of shared mechanism leaf: stdlib-only HMAC,
+freshness, form parsing, and immutable-user membership checks for Slack
+interactive callbacks. It contains no configured identities, action vocabulary,
+Gate scope, routing, or mint policy. Escalate uses it at the public ingress and
+Gate uses it again at the authority boundary; the shared bytes algorithm
+prevents authentication drift without letting either tool import the other's
+decisions.
+
 ## Lazy migration, not big-bang
 
 New planes are born here. Existing tools graduate in **when next touched** —

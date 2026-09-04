@@ -110,8 +110,9 @@ func cmdResolve(args []string) error {
 	return nil
 }
 
-// cmdServe runs the Slack interactive-action ingress: the same ingest mechanism
-// as resolve, fed by a signed HTTP callback instead of CLI flags. The signing
+// cmdServe runs the Slack interactive-action ingress. Park actions use the same
+// ingest mechanism as resolve; T0 grant actions pass their original signed
+// callback to Gate for independent verification. The signing
 // secret comes from SLACK_SIGNING_SECRET and is REQUIRED — an ingress with no
 // secret would accept forged decisions, so serve refuses to start without one
 // rather than expose an unauthenticated endpoint.
@@ -134,7 +135,7 @@ func cmdServe(args []string) error {
 	// only proves Slack sent it, not that the tapper may move a merge gate. Without
 	// an allowlist any member of the escalation channel could resolve a park, so
 	// serve refuses to start with no authorized users rather than expose a
-	// channel-wide control. Ids are the immutable Slack `Uxxxx`, comma-separated.
+	// channel-wide control. IDs are the immutable Slack `Uxxxx`, comma-separated.
 	allowed := splitList(os.Getenv("ESCALATE_ALLOWED_SLACK_USERS"))
 	if len(allowed) == 0 {
 		return errors.New("serve: ESCALATE_ALLOWED_SLACK_USERS is required (a comma-separated allowlist of Slack user ids; refusing to run an ingress any channel member could resolve)")
@@ -143,15 +144,16 @@ func cmdServe(args []string) error {
 		Secret:    []byte(secret),
 		Ingest:    ingest.New(*gateBin, *stateDir, nil),
 		FindGrant: serve.GateGrantFinder(*gateBin, *stateDir),
+		GrantTap:  serve.GateGrantCallback(*gateBin, *stateDir),
 		Authorize: serve.AllowUsers(allowed...),
 	})
 	// This listener faces a public tunnel, and signature verification only runs
 	// after the body is read — so an unauthenticated slow client could otherwise
 	// hold connections open indefinitely and exhaust goroutines before auth ever
 	// runs. Bounded read/write timeouts cap that. The handler now acks within
-	// Slack's ~3s window and runs `gate resolve` in the background (delivering the
-	// outcome to response_url), so the response itself is fast — a tight
-	// WriteTimeout is enough; the detached resolve has its own bound in serve.
+	// Slack's ~3s window and runs the Gate callback in the background (delivering
+	// the outcome to response_url), so the response itself is fast — a tight
+	// WriteTimeout is enough; the detached callback has its own bound in serve.
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           handler,
@@ -165,9 +167,9 @@ func cmdServe(args []string) error {
 
 // serveUntilSignal runs the ingress until ListenAndServe fails or an interrupt /
 // SIGTERM arrives, then shuts down GRACEFULLY: stop accepting, then drain the
-// accepted-but-unfinished background resolves (handler.Wait). Because a tap is
-// acked with a 200 before its resolve runs, Slack will not retry it — so a
-// redeploy that killed the process mid-resolve would silently lose the decision.
+// accepted-but-unfinished background callbacks (handler.Wait). Because a tap is
+// acked with a 200 before its callback runs, Slack will not retry it — so a
+// redeploy that killed the process mid-callback would silently lose the decision.
 // Draining on a controlled shutdown closes that window. (A hard crash / SIGKILL
 // mid-resolve is the residual gap; its durable fix — persist-before-ack — is
 // tracked in FOLLOWUPS.md.)
@@ -184,7 +186,7 @@ func serveUntilSignal(srv *http.Server, handler *serve.Server) error {
 	case <-ctx.Done():
 		stop()
 	}
-	log.Printf("escalate serve: signal received, draining in-flight resolutions…")
+	log.Printf("escalate serve: signal received, draining in-flight callbacks…")
 	shutCtx, cancel := context.WithTimeout(context.Background(), resolveDrainTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {

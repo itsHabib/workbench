@@ -1,6 +1,7 @@
 package source
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,50 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/flare/internal/config"
 	"github.com/itsHabib/workbench/cmd/flare/internal/event"
+	"github.com/itsHabib/workbench/contracts"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
+
+func TestGateLogLiftsSlackGrantRequestAndTerminalUpdates(t *testing.T) {
+	request, err := grantrequest.New(grantrequest.Subject{
+		Repo: "itsHabib/workbench", Number: 245,
+		HeadSHA: strings.Repeat("a", 40),
+	}, time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestBody, _ := json.Marshal(request)
+	grantBody, _ := json.Marshal(map[string]any{
+		"repo": request.Request.Subject.Repo, "bound_pr": request.Request.Subject.Number,
+		"bound_head": request.Request.Subject.HeadSHA, "minted_by": "@operator (U123)",
+	})
+	requestID := "gqr_0123456789abcdef"
+	lines := []contracts.Envelope{
+		{ID: requestID, Kind: contracts.KindGrantRequest, Run: "run_1", Time: request.Request.IssuedAt, Body: requestBody, Hash: "h1"},
+		{ID: "grt_0123456789abcdef", Kind: contracts.KindGrant, Run: "run_1", Time: request.Request.IssuedAt.Add(time.Minute), Parents: []string{requestID}, Body: grantBody, Prev: "h1", Hash: "h2"},
+	}
+	var content strings.Builder
+	for _, line := range lines {
+		encoded, _ := json.Marshal(line)
+		content.Write(encoded)
+		content.WriteByte('\n')
+	}
+	events, _, err := Read(gateFile(t, content.String()), Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %+v", events)
+	}
+	page := events[0]
+	if page.Kind != "escalation" || page.Fields["grant_request"] != "yes" || page.Fields["tier"] != "T0" || page.Fields["head"] != request.Request.Subject.HeadSHA {
+		t.Fatalf("grant request page = %+v", page)
+	}
+	update := events[1]
+	if update.Class != event.ClassUpdate || update.Fields["escalation"] != requestID || update.Fields["exact_card"] != "yes" || update.Fields["outcome"] != event.OutcomeApproved {
+		t.Fatalf("grant terminal update = %+v", update)
+	}
+}
 
 const (
 	escLine = `{"id":"esc_1","kind":"escalation","run":"run_1","time":"2026-07-08T16:37:12Z","body":{"outcome":"parked_for_judgment","question":"needs judgment"},"prev":"h0","hash":"h1"}`

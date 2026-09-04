@@ -11,6 +11,12 @@ the mobile comment and card surfaces before P1 begins.
 contract this must not move), `docs/features/trusted-gate-judgment-bridge/approval-ux.md`
 (the design-space survey this TDD commits a slice of), `cmd/gate/docs/enforcement.md`.
 
+> **Scope update (2026-08-27):** this document still governs the protected
+> environment T1+ executor flow. A separate local, exact-subject T0-only Slack
+> authority path is defined in
+> [`../slack-t0-authorization/spec.md`](../slack-t0-authorization/spec.md). It
+> does not weaken or replace the protected executor described here.
+
 > **Implementation focus (v7):** §9.1 P0 is the next move — the
 > phone-surface assumptions block implementation and the spike has not run
 > yet. §11's single-operator drill limitation remains an explicit validation
@@ -44,9 +50,10 @@ canonical encoding.
 
 **Non-goals (and why):**
 
-- No new approval authority — no Slack approvals, no check-run buttons, no
-  bot approvers. Only the independent reviewer's GitHub environment
-  decision counts, exactly as today.
+- No new approval authority in this protected-executor flow — no Slack
+  approvals, no check-run buttons, no bot approvers. Only the independent
+  reviewer's GitHub environment decision counts here; the separate exact-T0
+  path is outside this flow and cannot authorize T1+.
 - No reviewer-device approval inbox (approval-ux.md design 4) — deferred
   behind the validation gate; only worth its custody rules if friction
   survives this phase.
