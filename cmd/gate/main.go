@@ -112,50 +112,44 @@ func main() {
 		printTerminalError(errors.New("command required"), nil)
 		os.Exit(codeError)
 	}
-	var err error
-	switch os.Args[1] {
-	case "grant":
-		err = cmdGrant(os.Args[2:])
-	case "grant-callback":
-		err = cmdGrantCallback(os.Args[2:])
-	case "gate":
-		err = cmdGate(os.Args[2:])
-	case "judge":
-		err = cmdJudge(os.Args[2:])
-	case "resolve":
-		err = cmdResolve(os.Args[2:])
-	case "executor":
-		err = cmdExecutor(os.Args[2:])
-	case "explain":
-		err = cmdExplain(os.Args[2:])
-	case "next":
-		err = cmdNext(os.Args[2:])
-	case "threads":
-		err = cmdThreads(os.Args[2:])
-	case "preflight":
-		err = cmdPreflight(os.Args[2:])
-	case "sweep":
-		err = cmdSweep(os.Args[2:])
-	case "receipt":
-		err = cmdReceipt(os.Args[2:])
-	case "reconcile":
-		err = cmdReconcile(os.Args[2:])
-	case "audit":
-		err = cmdAudit(os.Args[2:])
-	case "backtest":
-		err = cmdBacktest(os.Args[2:])
-	case "stress":
-		err = cmdStress(os.Args[2:])
-	default:
+	run, ok := commands()[os.Args[1]]
+	if !ok {
 		usage()
-		err = fmt.Errorf("unknown command %q", os.Args[1])
+		printTerminalError(fmt.Errorf("unknown command %q", os.Args[1]), os.Args[1:])
+		fmt.Fprintf(os.Stderr, "gate: unknown command %q\n", os.Args[1])
+		os.Exit(codeError)
 	}
+	err := run(os.Args[2:])
 	if err == nil {
 		return
 	}
 	printTerminalError(err, os.Args[1:])
 	fmt.Fprintln(os.Stderr, "gate:", err)
 	os.Exit(commandErrorCode(os.Args[1], err))
+}
+
+// commands is the subcommand table: the name a caller types mapped to the
+// handler that owns it. A table rather than a switch so adding a verb costs one
+// row and no branch — dispatch stays mechanism, each handler keeps its policy.
+func commands() map[string]func([]string) error {
+	return map[string]func([]string) error{
+		"grant":          cmdGrant,
+		"grant-callback": cmdGrantCallback,
+		"gate":           cmdGate,
+		"judge":          cmdJudge,
+		"resolve":        cmdResolve,
+		"executor":       cmdExecutor,
+		"explain":        cmdExplain,
+		"next":           cmdNext,
+		"threads":        cmdThreads,
+		"preflight":      cmdPreflight,
+		"sweep":          cmdSweep,
+		"receipt":        cmdReceipt,
+		"reconcile":      cmdReconcile,
+		"audit":          cmdAudit,
+		"backtest":       cmdBacktest,
+		"stress":         cmdStress,
+	}
 }
 
 func commandErrorCode(command string, err error) int {
