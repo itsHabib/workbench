@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -398,6 +399,17 @@ func autoJudge(
 		executable.digest,
 		verdict.Producer.Impl,
 	)
+	// The delegate IS the decider on this path, so the recorded identity is the
+	// resolved wrapper and the model it reported — the same string the producer
+	// carries, which is the most specific thing gate can honestly name. The
+	// channel says the decision was delegated rather than taken by a person, so
+	// a later reader can separate the operator's own approvals from these
+	// without inferring it from an impl string's shape.
+	decider, err := NewDecider(verdict.Producer.Impl, MethodAuto+provider, time.Now)
+	if err != nil {
+		return Verdict{}, err
+	}
+	verdict.Decider = &decider
 	return verdict, nil
 }
 

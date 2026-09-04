@@ -17,7 +17,10 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
+	"github.com/itsHabib/workbench/cmd/gate/internal/ledger"
+	"github.com/itsHabib/workbench/cmd/gate/internal/observe"
 	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
+	"github.com/itsHabib/workbench/cmd/gate/internal/stamp"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 	"github.com/itsHabib/workbench/contracts/escalation"
@@ -1717,14 +1720,14 @@ func TestResolveClosesLoop(t *testing.T) {
 		t.Fatalf("runOfEscalation resolved the wrong run: got %s want %s", gotRun, run)
 	}
 
-	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land"})
+	res, code, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "the retry has a ceiling; safe to land", Who: "operator"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
 	if judgmentID == "" {
 		t.Fatal("a recorded decision must return its judgment id")
 	}
-	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatalf("stampResolution: %v", err)
 	}
 
@@ -1749,7 +1752,7 @@ func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
 		t.Fatalf("park: code %d err %v", code, err)
 	}
 	esc := firstOfKind(t, e, run, state.KindEscalation)
-	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
 		t.Fatalf("first judgment: %v", err)
 	}
@@ -1803,7 +1806,7 @@ func TestJudgeSlotStateReportsWhetherTheOneShotWasSpent(t *testing.T) {
 		}
 	}
 
-	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}
+	opts := judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err != nil {
 		t.Fatalf("first judgment: %v", err)
 	}
@@ -1898,7 +1901,7 @@ func TestJudgeSlotStateSeparatesResumableFromSettled(t *testing.T) {
 	}
 
 	// Driving it to an outcome flips the same slot to settled.
-	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass}); err != nil {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"}); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	arts, err = e.st.Run(run)
@@ -2001,7 +2004,7 @@ func TestStaleSubmittedJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := judgmentOptions{ArtifactPath: path}
+	opts := judgmentOptions{ArtifactPath: path, Who: "operator"}
 	if _, _, _, err := applyJudgment(e, run, esc.ID, grantArt.ID, opts); err == nil || !strings.Contains(err.Error(), "judgment_stale_head") {
 		t.Fatalf("stale-head error = %v", err)
 	}
@@ -2047,7 +2050,7 @@ func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
 		t.Fatalf("content park: code %d err %v", code, err)
 	}
 	contentPark := firstOfKind(t, e, run, state.KindEscalation)
-	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe"}); err != nil || code != codeParked {
+	if _, code, _, err := applyJudgment(e, run, contentPark.ID, narrow.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "content is safe", Who: "operator"}); err != nil || code != codeParked {
 		t.Fatalf("narrow-grant judgment should re-park at ceiling: code %d err %v", code, err)
 	}
 	ceilingPark := lastOfKind(t, e, run, state.KindEscalation)
@@ -2058,7 +2061,7 @@ func TestNewCeilingParkCanBeJudgedWithWiderGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier"}); err != nil || code != codeMerge {
+	if _, code, _, err := applyJudgment(e, run, ceilingPark.ID, wider.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "wider grant authorizes the tier", Who: "operator"}); err != nil || code != codeMerge {
 		t.Fatalf("new ceiling park must accept its own judgment: code %d err %v", code, err)
 	}
 }
@@ -2122,7 +2125,7 @@ func TestRetryReauthorizesPersistedJudgmentWithReplacementGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"})
 	if err != nil {
 		t.Fatalf("replacement grant must resume immutable content judgment: %v", err)
 	}
@@ -2145,6 +2148,7 @@ func TestProviderDelayExpiryRefusesBeforeJudgmentAppend(t *testing.T) {
 	opts := judgmentOptions{
 		Decision: verify.DecisionPass,
 		Why:      "provider completed after the grant expired",
+		Who:      "operator",
 		beforeAppend: func() {
 			now = now.Add(2 * time.Hour)
 		},
@@ -2183,7 +2187,7 @@ func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass})
+	res, code, gotID, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"})
 	if err != nil {
 		t.Fatalf("replacement grant must resume after capability refusal: %v", err)
 	}
@@ -2200,7 +2204,7 @@ func TestCapabilityRefusalDoesNotCompletePersistedJudgment(t *testing.T) {
 	if completed != 1 {
 		t.Fatalf("completed outcomes = %d, want exactly one", completed)
 	}
-	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, replacement.ID, judgmentOptions{Decision: verify.DecisionPass, Who: "operator"}); err == nil || !strings.Contains(err.Error(), "judgment_duplicate") {
 		t.Fatalf("post-authorization duplicate error = %v", err)
 	}
 }
@@ -2211,17 +2215,17 @@ func TestConflictingResolveRetryCannotChangePersistedDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
+	if _, _, _, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionBlock, Why: "conflicting retry", Who: "operator"}); err == nil || !strings.Contains(err.Error(), "judgment_retry_conflict") {
 		t.Fatalf("conflicting retry error = %v", err)
 	}
 	if _, ok := artifactForParent(mustRunArtifacts(t, e, run), state.KindVerdict, jArt.ID); ok {
 		t.Fatal("conflicting retry advanced the judgment chain")
 	}
-	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry"})
+	res, _, gotID, err := applyJudgment(e, run, esc.ID, grantID, judgmentOptions{Decision: verify.DecisionPass, Why: "same decision retry", Who: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, gotID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatal(err)
 	}
 	assertResolutionStamp(t, e, run, esc.ID, gotID, verify.DecisionPass)
@@ -2377,11 +2381,11 @@ func TestEscalationIsOpenGuard(t *testing.T) {
 	}
 
 	// Resolve it (pass → would_merge writes a terminal action).
-	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land"})
+	res, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{Decision: verify.DecisionPass, Why: "safe to land", Who: "operator"})
 	if err != nil {
 		t.Fatalf("applyJudgment: %v", err)
 	}
-	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator"); err != nil {
+	if err := stampResolution(e, run, esc.ID, judgmentID, res.Decision, "operator", verify.MethodCLIOperator); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2409,6 +2413,8 @@ func TestResolveRefusesEscalationSupersededBeforeAppend(t *testing.T) {
 	opts := judgmentOptions{
 		Decision:              verify.DecisionPass,
 		Why:                   "approved from the phone",
+		Who:                   "@mhdevstuff (U123)",
+		Method:                verify.MethodSlackInteractive,
 		requireOpenEscalation: true,
 		beforeAppend: func() {
 			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
@@ -2443,6 +2449,7 @@ func TestJudgeDoesNotTakeTheResolveOnlyOpenGuard(t *testing.T) {
 	opts := judgmentOptions{
 		Decision: verify.DecisionPass,
 		Why:      "operator judged from the run",
+		Who:      "operator",
 		beforeAppend: func() {
 			if _, err := e.st.Append(state.KindEscalation, run, []string{esc.ID}, map[string]any{"outcome": "parked_for_judgment"}); err != nil {
 				t.Fatal(err)
@@ -2478,4 +2485,364 @@ func decodeResolution(body []byte) (escalation.Resolution, error) {
 		return escalation.Resolution{}, err
 	}
 	return r, nil
+}
+
+// parkedRunForDecider builds a run parked on a content escalation, returning the
+// run id, the grant, and the escalation — the exact state a judgment resolves.
+func parkedRunForDecider(t *testing.T, e env, number int) (string, state.Artifact, state.Artifact) {
+	t.Helper()
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: number, HeadSHA: "abc"}
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	rv := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park: code %d err %v", code, err)
+	}
+	return run, grantArt, firstOfKind(t, e, run, state.KindEscalation)
+}
+
+// TestJudgmentRecordsItsDecider is the separation-of-duties invariant this
+// binding exists for: the judgment ARTIFACT — not a sidecar, not the free-text
+// why — names who decided and through which channel, so a human approval and an
+// agent-composed one stop being the same record.
+func TestJudgmentRecordsItsDecider(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 620)
+	at := time.Date(2026, 8, 21, 22, 15, 0, 0, time.UTC)
+	_, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass,
+		Why:      "reviewed the diff; the residual is a nit",
+		Who:      "@mhdevstuff (U123)",
+		Method:   verify.MethodSlackInteractive,
+		now:      func() time.Time { return at },
+	})
+	if err != nil {
+		t.Fatalf("applyJudgment: %v", err)
+	}
+	artifact, err := e.st.Get(judgmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	judgment, err := verify.Load(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if judgment.Decider == nil {
+		t.Fatal("the judgment artifact must carry its decider — a sidecar resolution is not the decision")
+	}
+	if judgment.Decider.Who != "@mhdevstuff (U123)" {
+		t.Fatalf("decider.who = %q, want the identity the transport established", judgment.Decider.Who)
+	}
+	if judgment.Decider.Method != verify.MethodSlackInteractive {
+		t.Fatalf("decider.method = %q, want %q", judgment.Decider.Method, verify.MethodSlackInteractive)
+	}
+	if judgment.Decider.At != "2026-08-21T22:15:00Z" {
+		t.Fatalf("decider.at = %q, want the decider's own clock", judgment.Decider.At)
+	}
+	// The binding must survive the wire, not just the Go struct: an auditor reads
+	// log.jsonl, and a field that only exists in memory closes nothing.
+	if !strings.Contains(string(artifact.Body), `"decider"`) {
+		t.Fatalf("the decider must be persisted in the artifact body, got %s", artifact.Body)
+	}
+}
+
+// TestUnattributedJudgmentIsRefusedBeforeTheOneShotIsSpent pins the refusal at
+// the point that matters. A judgment is irreversible once appended, so refusing
+// after the write would burn the escalation's single judgment on a record that
+// names nobody — worse than the gap it was meant to close.
+func TestUnattributedJudgmentIsRefusedBeforeTheOneShotIsSpent(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 621)
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, judgmentID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "safe",
+	})
+	if err == nil {
+		t.Fatal("a judgment naming nobody must be refused")
+	}
+	if !errors.Is(err, verify.ErrDeciderMissing) {
+		t.Fatalf("refusal must be classifiable as ErrDeciderMissing, got %v", err)
+	}
+	if judgmentID != "" {
+		t.Fatalf("a refused judgment must return no id, got %s", judgmentID)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("the refusal appended %d artifact(s); the one-shot must be unspent", len(after)-len(before))
+	}
+	// Unspent means retryable: the same escalation still takes a judgment once it
+	// names its decider.
+	if _, _, id, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "safe", Who: "operator",
+	}); err != nil || id == "" {
+		t.Fatalf("the escalation must still be judgeable after the refusal: id %q err %v", id, err)
+	}
+}
+
+// TestJudgeFlagsRequireADecider pins the CLI surface: every path a person
+// authors demands -who, and -auto refuses one because the provider is the
+// decider and gate derives it.
+func TestJudgeFlagsRequireADecider(t *testing.T) {
+	cases := []struct {
+		name    string
+		opts    judgmentOptions
+		wantErr string
+	}{
+		{"manual without who", judgmentOptions{Decision: verify.DecisionPass, Why: "safe"}, "-who required"},
+		{"manual with who", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh"}, ""},
+		{"manual with slack channel", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh", Method: verify.MethodSlackInteractive}, ""},
+		{"manual with an unknown channel", judgmentOptions{Decision: verify.DecisionPass, Why: "safe", Who: "mh", Method: "carrier-pigeon"}, "judgment_unattributed"},
+		{"submitted artifact without who", judgmentOptions{ArtifactPath: "j.json"}, "-who required"},
+		{"submitted artifact with who", judgmentOptions{ArtifactPath: "j.json", Who: "mh"}, ""},
+		{"auto derives its own decider", judgmentOptions{Auto: true, Provider: "claude"}, ""},
+		{"auto refuses a claimed decider", judgmentOptions{Auto: true, Provider: "claude", Who: "mh"}, "not accepted with -auto"},
+		{"auto refuses a claimed channel", judgmentOptions{Auto: true, Provider: "claude", Method: verify.MethodCLIOperator}, "not accepted with -auto"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateJudgeFlags("run_1", "grt_1", c.opts)
+			if c.wantErr == "" && err != nil {
+				t.Fatalf("validateJudgeFlags = %v, want nil", err)
+			}
+			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
+				t.Fatalf("validateJudgeFlags = %v, want an error containing %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestResolveFlagsCarryTheChannel pins that the back-channel's -method reaches
+// validation: the same operator string typed at a shell and produced by a
+// verified Slack callback are different facts, and only the channel separates
+// them.
+func TestResolveFlagsCarryTheChannel(t *testing.T) {
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "@mhdevstuff (U123)", verify.MethodSlackInteractive); err != nil {
+		t.Fatalf("a slack-interactive resolution must validate: %v", err)
+	}
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "@mhdevstuff (U123)", "carrier-pigeon"); err == nil {
+		t.Fatal("an unknown channel must be refused")
+	}
+	if err := validateResolveFlags("esc_1", "grt_1", verify.DecisionPass, "approved", "", verify.MethodSlackInteractive); err == nil {
+		t.Fatal("a resolution naming nobody must be refused")
+	}
+}
+
+// TestStampCannotPrecedeADurableAuthorization pins the ordering that made a
+// killed resolve survivable: the stamp's payload REQUIRES the action artifact's
+// chain hash, which exists only once that artifact is appended. So there is no
+// state in which gate touches the network before the authorization is durable —
+// the ordering is a precondition of the payload, not a convention about call
+// order that a later edit could quietly invert.
+func TestStampCannotPrecedeADurableAuthorization(t *testing.T) {
+	// No hash: the authorization is not in the log, so nothing may be posted.
+	res := gateResult{Run: "run_1", PR: "o/r#7", HeadSHA: "abc"}
+	emitAuthorizedStamp(&res, codeMerge, true)
+	if res.Stamp != nil {
+		t.Fatalf("a stamp must not be attempted before the action is durable, got %+v", res.Stamp)
+	}
+	// stamp.Post itself refuses the same payload, so the guard is not the only
+	// thing standing between a caller and an ungrounded status.
+	err := stamp.Post(stamp.Authorized{Repo: "o/r", Number: 7, HeadSHA: "abc", Run: "run_1"})
+	if err == nil || !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("stamp.Post must refuse a stamp with no action hash, got %v", err)
+	}
+	// And every non-authorizing terminal posts nothing at all.
+	for _, code := range []int{codeBlocked, codeParked, codeRefused, codeError} {
+		out := gateResult{Run: "run_1", PR: "o/r#7", HeadSHA: "abc", Hash: "deadbeef"}
+		emitAuthorizedStamp(&out, code, true)
+		if out.Stamp != nil {
+			t.Fatalf("code %d must post nothing, got %+v", code, out.Stamp)
+		}
+	}
+}
+
+// TestStrandedLegacyJudgmentStillResumes is the recovery path for the run this
+// PR was written after: itsHabib/ivy#22, whose judgment landed and whose gate
+// was then killed before the action. The judgment predates the decider binding,
+// so the fix must not have made it unrecoverable — resume loads the PERSISTED
+// judgment and never rebuilds it, which is exactly why the write-path decider
+// requirement cannot strand a decision already in the log.
+func TestStrandedLegacyJudgmentStillResumes(t *testing.T) {
+	e := testEnv(t)
+	run, grantArt, esc := parkedRunForDecider(t, e, 622)
+	subject := verify.Subject{Repo: "o/r", Number: 622, HeadSHA: "abc"}
+	// A judgment with NO decider, appended directly — the shape the live ledger
+	// holds for every judgment recorded before this binding existed.
+	legacy := verify.Verdict{
+		Subject:    subject,
+		Source:     "operator-judgment",
+		Producer:   verify.Producer{Class: verify.ClassJudgment, Impl: "operator"},
+		Decision:   verify.DecisionPass,
+		Tier:       "T0",
+		Confidence: 1.0,
+		Why:        "approved in Slack by @mhdevstuff",
+	}
+	jArt, err := e.st.Append(state.KindJudgment, run, []string{esc.ID, grantArt.ID}, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The park is still the run's terminal — which is exactly why it looked
+	// parked while its one judgment was already spent. (observe's own tests pin
+	// how the projection names this state.)
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newestTerminal(before, run) != esc.ID {
+		t.Fatal("a stranded run's terminal is still its park")
+	}
+
+	// Resuming completes it: the SAME decision, no new judgment, and an outcome.
+	_, _, gotID, err := applyJudgment(e, run, esc.ID, grantArt.ID, judgmentOptions{
+		Decision: verify.DecisionPass, Why: "resume", Who: "operator",
+	})
+	if err != nil {
+		t.Fatalf("a stranded legacy judgment must still be completable: %v", err)
+	}
+	if gotID != jArt.ID {
+		t.Fatalf("resume must reuse the persisted judgment %s, got %s", jArt.ID, gotID)
+	}
+	after, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newestTerminal(after, run) == esc.ID {
+		t.Fatal("after a resume the run's newest terminal must be an outcome, not the park")
+	}
+	assertChainIntact(t, e)
+}
+
+// authorizedRun builds a run that reached a would_merge action, returning the
+// run id and the action artifact — the exact state a receipt discharges.
+func authorizedRun(t *testing.T, e env, number int, head string) (string, state.Artifact) {
+	t.Helper()
+	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	subject := verify.Subject{Repo: "o/r", Number: number, HeadSHA: head}
+	recordVerifier(t, e, run, subject, verify.DecisionPass)
+	rv := reducedVerdict(subject, verify.DecisionPass, "T0")
+	rvID := recordReduced(t, e, run, rv)
+	if _, code, err := act(e, run, grantArt.ID, rv, rvID, gateResult{}, false, nil); err != nil || code != codeMerge {
+		t.Fatalf("authorize: code %d err %v", code, err)
+	}
+	return run, firstOfKind(t, e, run, state.KindAction)
+}
+
+// TestReceiptDischargesExactlyOneAction pins the invariant structurally rather
+// than by convention: the second receipt for an action is refused by the
+// substrate's absent-parent guard, so no code path — present or future — can
+// double-discharge an authorization and make one merge look like two.
+func TestReceiptDischargesExactlyOneAction(t *testing.T) {
+	e := testEnv(t)
+	run, action := authorizedRun(t, e, 700, "abc123")
+
+	auth, err := ledger.FindAuthorization(mustRun(t, e, run), run)
+	if err != nil {
+		t.Fatalf("FindAuthorization: %v", err)
+	}
+	if auth.Action != action.ID || auth.Head != "abc123" {
+		t.Fatalf("the receipt must discharge the run's action at its judged head, got %+v", auth)
+	}
+	landing := ledger.Landing{
+		Repo: "o/r", Number: 700, State: "MERGED", Merged: true, HeadSHA: "abc123",
+		MergeCommit: "deadbeef", Actor: "itsHabib", MergedAt: time.Now().UTC(),
+	}
+	receipt, err := ledger.NewReceipt(auth, landing, sourceExecutor, "", time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := appendReceipt(e, auth, receipt)
+	if err != nil {
+		t.Fatalf("first receipt: %v", err)
+	}
+	before := mustRun(t, e, run)
+	if _, err := appendReceipt(e, auth, receipt); err == nil || !strings.Contains(err.Error(), "receipt_duplicate") {
+		t.Fatalf("a second receipt for %s must be refused, got %v", auth.Action, err)
+	}
+	if after := mustRun(t, e, run); len(after) != len(before) {
+		t.Fatalf("the refused duplicate appended %d artifact(s)", len(after)-len(before))
+	}
+	// The discharge is legible from the log alone: the receipt names its action
+	// and is parented to it.
+	stored, err := e.st.Get(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Parents) != 1 || stored.Parents[0] != action.ID {
+		t.Fatalf("a receipt's sole parent is the action it discharges, got %v", stored.Parents)
+	}
+	assertChainIntact(t, e)
+}
+
+// TestAuditReportsTheAccountabilityAnomalies pins that the two gaps surface as
+// first-class findings — and that a chain-intact log with an unreceipted
+// authorization is reported as incomplete, never as tampered.
+func TestAuditReportsTheAccountabilityAnomalies(t *testing.T) {
+	e := testEnv(t)
+	run, action := authorizedRun(t, e, 701, "abc123")
+
+	res, err := e.st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("the chain must be intact: %s", res.Reason)
+	}
+	findings := observe.Audit(res.All)
+	if len(findings.AuthorizationWithoutReceipt) != 1 {
+		t.Fatalf("want one undischarged authorization, got %+v", findings.AuthorizationWithoutReceipt)
+	}
+	if findings.AuthorizationWithoutReceipt[0].Artifact != action.ID {
+		t.Fatalf("the finding must name the action, got %+v", findings.AuthorizationWithoutReceipt[0])
+	}
+	if len(findings.ReconciledRepos) != 0 {
+		t.Fatal("with no coverage record, merge-without-authorization must read as UNMEASURED, not zero")
+	}
+
+	// Discharging it clears the finding — the surface tracks the real state
+	// rather than accumulating.
+	auth, err := ledger.FindAuthorization(mustRun(t, e, run), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.NewReceipt(auth,
+		ledger.Landing{Repo: "o/r", Number: 701, State: "MERGED", Merged: true, HeadSHA: "abc123", MergedAt: time.Now().UTC()},
+		sourceExecutor, "", time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendReceipt(e, auth, receipt); err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.st.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows := observe.Audit(res.All).AuthorizationWithoutReceipt; len(rows) != 0 {
+		t.Fatalf("a discharged authorization must leave the finding, got %+v", rows)
+	}
+}
+
+func mustRun(t *testing.T, e env, run string) []state.Artifact {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arts
 }

@@ -16,6 +16,15 @@ gate governs). See [docs/enforcement.md](docs/enforcement.md) for the honest
 enforcement model — what forces merges through the gate, the named bypass, and
 the operator precondition for going live.
 
+**The bypass is now measurable, not just named.** `gate reconcile -repo <r>`
+reads the platform first and joins every merge on the protected branch back to
+the action that authorized it, recording a `coverage` artifact with three
+classes: authorized-and-landed, authorized-never-landed, and
+landed-without-authorization. Merges predating adoption are classified
+separately and never reported as bypasses. `gate audit` surfaces the anomalies —
+and says UNMEASURED rather than zero until a repo has actually been reconciled,
+because a control that cannot produce the number has not measured it.
+
 gate is **enforceable via its canary status check**: the `gate` workflow
 (`.github/workflows/gate.yml`, at the workbench module root) plus branch
 protection makes a merge to `main` require the green check, closing the

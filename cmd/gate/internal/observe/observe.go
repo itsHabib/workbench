@@ -75,8 +75,14 @@ type EvidenceSummary struct {
 
 // VerdictSummary captures what explain shows for verdict and judgment artifacts.
 type VerdictSummary struct {
-	Source     string           `json:"source"`
-	Producer   string           `json:"producer"`
+	Source   string `json:"source"`
+	Producer string `json:"producer"`
+	// Decider renders who stands behind a JUDGMENT and how their identity was
+	// established, or the literal "unattributed" when the judgment names nobody.
+	// Empty on non-judgment verdicts, which have no decider to show. The absent
+	// case is spelled out rather than omitted: "who approved this?" answered
+	// with a blank line is indistinguishable from the question not being asked.
+	Decider    string           `json:"decider,omitempty"`
 	Decision   string           `json:"decision"`
 	Tier       string           `json:"tier"`
 	Confidence float64          `json:"confidence"`
@@ -249,6 +255,13 @@ func projectVerdict(n *Node, body json.RawMessage) {
 		n.Unparseable = true
 		return
 	}
+	decider := ""
+	if v.Producer.Class == contracts.ClassJudgment {
+		decider = "unattributed"
+		if v.Decider != nil {
+			decider = fmt.Sprintf("%s via %s at %s", v.Decider.Who, v.Decider.Method, v.Decider.At)
+		}
+	}
 	producer := v.Producer.Class
 	if v.Producer.Impl != "" {
 		producer += "/" + v.Producer.Impl
@@ -265,6 +278,7 @@ func projectVerdict(n *Node, body json.RawMessage) {
 	n.Verdict = &VerdictSummary{
 		Source:     v.Source,
 		Producer:   producer,
+		Decider:    decider,
 		Decision:   v.Decision,
 		Tier:       v.Tier,
 		Confidence: v.Confidence,
@@ -359,6 +373,9 @@ func renderVerdict(w io.Writer, v *VerdictSummary) {
 		return
 	}
 	fmt.Fprintf(w, "         %s [%s] → %s tier=%s conf=%.2f\n", v.Source, v.Producer, v.Decision, v.Tier, v.Confidence)
+	if v.Decider != "" {
+		fmt.Fprintf(w, "         decided by: %s\n", v.Decider)
+	}
 	fmt.Fprintf(w, "         why: %s\n", v.Why)
 	for _, f := range v.Findings {
 		head := strings.TrimSpace(f.Severity + " " + f.Locus)

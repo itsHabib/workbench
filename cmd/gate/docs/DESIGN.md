@@ -19,8 +19,8 @@ or own project memory — those stay in the existing tools it composes with.
 
 ## Shape
 
-One Go binary. Verbs: `grant`, `gate`, `judge`, `executor`, `explain`,
-`audit`, `backtest`, `stress`. Callers integrate via exit codes and JSON on
+One Go binary. Verbs: `grant`, `gate`, `judge`, `resolve`, `receipt`,
+`reconcile`, `executor`, `explain`, `next`, `audit`, `backtest`, `stress`. Callers integrate via exit codes and JSON on
 stdout, never prose. Packages, dependencies pointing strictly downward:
 
 | package | responsibility |
@@ -31,14 +31,15 @@ stdout, never prose. Packages, dependencies pointing strictly downward:
 | `internal/executor` | GitHub App JWT/token custody and exact-head GitHub API execution |
 | `internal/evidence` | real GitHub reads via `gh`, recorded as evidence artifacts |
 | `internal/verify` | the verdict schema, the verifier rungs, the monotone reducer, the provider-neutral judgment contract |
-| `internal/observe` | `explain`/`audit` — read-only, storeless, state-fed |
+| `internal/ledger` | the authorization↔landing join: receipts and coverage, pure policy over injected platform reads |
+| `internal/observe` | `explain`/`audit`/`next` — read-only, storeless, state-fed |
 | `cmd/gate` | composition: wires one vertical pass per invocation |
 
 ## The artifact contract
 
 Every step of a gate run is an `Artifact`: typed (`evidence`, `verdict`,
-`grant`, `action`, `escalation`, `judgment`, `execution_claim`,
-`execution_result`), grouped by run id, with explicit
+`grant`, `action`, `escalation`, `judgment`, `resolution`, `receipt`,
+`coverage`, `execution_claim`, `execution_result`), grouped by run id, with explicit
 provenance (`Parents` — a verdict names the evidence it judged; an action
 names the verdict and grant that authorized it), hash-chained to the previous
 log entry. Consequences the code enforces:
@@ -117,6 +118,56 @@ log entry. Consequences the code enforces:
   intentional acceptance apart from readiness passing an unreviewed PR. The one
   gap that leaves, a bodyless bot change request landing in no rung at all, is
   recorded in `FOLLOWUPS.md` rather than closed here.
+- **A decision names its decider.** A judgment is the one verdict a person or
+  a delegated provider AUTHORS rather than a verifier computes, so it is the one
+  verdict whose author must be nameable afterwards. Its body carries a
+  `decider` — `{who, method, at}`: the identity, the CHANNEL it was established
+  through (`cli-operator`, `slack-interactive`, `auto-<provider>`), and the
+  decider's own clock, deliberately distinct from the envelope's append time
+  because a phone tap and its later append are two different, both-true facts.
+  Method names the channel, never an authenticated claim — gate authenticates
+  none of them, and the same operator string can be typed by an agent at a shell
+  or produced by a verified Slack callback; only the channel separates those.
+  The binding is enforced on the WRITE path and every reader stays tolerant, so
+  the judgments recorded before it existed still explain and re-reduce; `explain`
+  renders absence as the literal `unattributed` rather than a blank line, because
+  a missing line and an unasked question look identical.
+
+- **An authorization is discharged by a receipt, and the receipt's facts are the
+  platform's.** An `action` records that a merge was ALLOWED; a `receipt`,
+  parented to it, records what LANDED — outcome, merge commit, actor, and merge
+  time read back from the GitHub API. That readback is the point: an executor
+  reporting its own merge time and its own identity would be attesting to its own
+  behavior, which is the claim a receipt exists to check, so the record gets an
+  independent clock and an independent actor. The classification is head-to-head:
+  a PR that merged at a head the action never saw is `superseded`, never a clean
+  discharge — joining on the PR number alone would rebuild, one layer up in the
+  reporting, exactly the laundering `--match-head-commit` prevents. One receipt
+  per action is structural (the store's absent-parent guard), so no path can
+  double-discharge. **Gate still performs no merges**: gate authorizes, an
+  executor acts, `gate receipt -run <id>` records. Collapsing those would put the
+  decision and the effect in one process.
+
+- **A control that cannot prove the negative has not been measured.** Every other
+  surface reads gate's own decisions back and can only report what gate did.
+  `reconcile` reads the PLATFORM first and asks what gate can account for, so an
+  absence of artifacts becomes visible as an absence rather than as silence. It
+  writes a `coverage` artifact classifying authorized-and-landed,
+  authorized-never-landed, and landed-without-authorization. The basis is stated
+  ON the artifact (`merged-pull-requests`): a direct push to the protected branch
+  has no PR and no head to join by, so it is outside this claim and belongs to
+  branch protection — a report that quietly omitted it while implying it covered
+  everything would be worse than no report. Merges predating adoption are
+  classified separately and never counted as bypasses; the boundary defaults to a
+  fact state already holds (the first artifact naming the repo — the control took
+  effect when the control first ran), so the common case needs no config file and
+  cannot go stale, and `-effective-from` overrides it. `reconcile` also sweeps
+  receipts for authorizations it proved landed at the authorized head, and only
+  that class: inventing an outcome for a superseded or abandoned one is the
+  fabrication a receipt prevents. `audit` reports the two anomalies as
+  first-class findings, and says **UNMEASURED** rather than zero when no repo has
+  been reconciled.
+
 - **An execution claim is permanent.** The exact action must still be the PR's
   newest terminal inside the same anchored-state lock that appends its claim.
   A command/token/transport failure never makes the action claimable again.
@@ -180,6 +231,16 @@ chain is tamper-*evidence*, not access control or non-repudiation.
   who can read the key directory can still forge both. The claim is bounded —
   tamper-evident against accidental and naive modification, and, after this
   change, against rewrite and truncation by a state-dir-only writer.
+
+### Integrity is not accountability
+
+`audit` answers two different questions and keeps them apart. The chain replay
+asks whether the log was **tampered with** — a hard fault, and the only thing
+that changes the exit code. The accountability findings ask whether the log
+**accounts for what happened**: authorizations nothing wrote back, merges with
+nothing behind them, decisions naming nobody. A trustworthy record can be
+incomplete, and reporting incompleteness as tampering would make an operator's
+first honest audit look like an attack — so findings print and exit 0.
 
 **Explicitly untouched** (noted, not fixed here): the stale-lock TOCTOU takeover
 race (a second writer can win the lock between staleness check and re-create)
@@ -295,6 +356,30 @@ a malformed query) fails on the first attempt rather than sleeping through the
 bound. Retrying is safe only because every one of these calls is a read, and
 it must never become a way to proceed without an answer: a failure that
 outlives the bound is returned unchanged and the run still aborts.
+
+## Interruption and recovery
+
+Gate writes a resolution as several artifacts — judgment, re-reduced verdict,
+action — and callers run it as a subprocess under their own deadline. A deadline
+that lands mid-sequence does not cancel a decision, it **strands** one: the
+judgment is durable and nothing followed it (observed on `itsHabib/ivy#22`,
+`run_fe7ac73ddb7c59a7`). The contract for that state:
+
+- **It is recoverable, and it always was.** The judgment path RESUMES a persisted
+  judgment rather than refusing it as a duplicate: it re-checks the grant
+  lineage, refuses a retry that contradicts the recorded decision, re-reduces,
+  and records the outcome. The one-shot is not spent by a strand. Resume loads
+  the persisted judgment and never rebuilds it, which is why the write-path
+  decider requirement cannot strand a decision already in the log.
+- **It is named.** `gate next` surfaces such a run as `judged but not authorized`
+  with the command that finishes it. Without that it also reads as *parked*,
+  sending an operator to judge a park whose one judgment is already spent.
+- **No network precedes the durable authorization.** The `gate/authorized` stamp
+  requires the action artifact's chain hash, which exists only once that artifact
+  is appended — so the ordering is a precondition of the payload, not a
+  convention about call order. The stamp's outcome is reported on the result
+  JSON, not only logged: "best-effort" was half true while a failed post went to
+  a stderr nobody read and the operator-facing card reported unqualified success.
 
 ## Composition with existing tools
 

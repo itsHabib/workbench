@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
@@ -29,6 +30,7 @@ func validDecision() Decision {
 		Escalation: "esc_0123456789abcdef",
 		Verdict:    escalation.DecisionPass,
 		Who:        "operator",
+		Method:     contracts.MethodCLIOperator,
 		Why:        "the retry has a ceiling; safe to land",
 		Grant:      "grt_00000000",
 	}
@@ -58,6 +60,7 @@ func TestResolveBuildsGateArgv(t *testing.T) {
 		"-decision", "pass",
 		"-why", "the retry has a ceiling; safe to land",
 		"-who", "operator",
+		"-method", contracts.MethodCLIOperator,
 	}
 	if !reflect.DeepEqual(fr.gotArgs, want) {
 		t.Fatalf("argv mismatch:\n got=%v\nwant=%v", fr.gotArgs, want)
@@ -97,6 +100,7 @@ func TestResolveRejectsBadInput(t *testing.T) {
 		{"bad decision", func(d *Decision) { d.Verdict = "maybe" }, "must be"},
 		{"missing grant", func(d *Decision) { d.Grant = "" }, "grant is required"},
 		{"missing who", func(d *Decision) { d.Who = "" }, "who is required"},
+		{"missing method", func(d *Decision) { d.Method = "" }, "method is required"},
 		{"missing why", func(d *Decision) { d.Why = "" }, "why is required"},
 	}
 	for _, tc := range cases {

@@ -93,6 +93,19 @@ const (
 	// repeated sweep is a no-op, and a PR that is gated again later gets a fresh
 	// terminal that a later sweep can close on its own merits.
 	KindSubjectClosed = "subject_closed"
+	// KindReceipt discharges one action with what actually LANDED, read back
+	// from GitHub. It is the return half of the authorization: without it the log
+	// proves a merge was allowed and cannot say whether it happened, by whom, or
+	// as which commit. It is provenance, not a decision — it sits outside the
+	// action/escalation outcome families, so recording one never counts as a
+	// review cycle, never re-parks a run, and never authorizes anything.
+	KindReceipt = "receipt"
+	// KindCoverage records one reconciliation over a repo and window: what was
+	// authorized and landed, authorized and never landed, and landed with no
+	// authorization at all. It is how gate proves the NEGATIVE — that nothing
+	// merged around it — which no per-run artifact can express. Like a receipt it
+	// is provenance and decides nothing.
+	KindCoverage = "coverage"
 )
 
 var kindPrefix = map[string]string{
@@ -111,6 +124,8 @@ var kindPrefix = map[string]string{
 	KindExecutionResult: "gxr",
 	KindGatePreparation: "gpp",
 	KindSubjectClosed:   "sbc",
+	KindReceipt:         "rct",
+	KindCoverage:        "cvg",
 }
 
 // ErrAlreadyExists is returned by AppendIfAbsentParent when the run already
