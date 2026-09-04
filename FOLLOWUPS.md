@@ -450,11 +450,13 @@ path-filtering that could green a tool whose contract shifted under it). Split
 into per-tool path-filtered jobs when tool count or test time makes module-wide
 retest wasteful.
 
-## @claude reviewer
+## ~~@claude reviewer~~
 
-`claude.yml` is committed but @claude is **not** requested until the operator
+~~`claude.yml` is committed but @claude is **not** requested until the operator
 sets the `CLAUDE_CODE_OAUTH_TOKEN` repo secret. Once set, @claude joins the
-reviewer set (@codex, @cursor) on the next PR.
+reviewer set (@codex, @cursor) on the next PR.~~ Done 2026-08-03: the
+`CLAUDE_CODE_OAUTH_TOKEN` repo secret was set; @claude has joined the reviewer
+set (@codex, @cursor) and reviewed #275.
 
 ## ~~cmd/triage: gocognit debt in internal/floor (2026-07-17)~~
 
