@@ -115,6 +115,11 @@ type reviewFetchers struct {
 	panel    func(PRRef, string, []rawComment, []Comment) reviewpanel.Evidence
 }
 
+type primaryDiffFetchers struct {
+	diff func(PRRef) (json.RawMessage, error)
+	pull func(PRRef) (json.RawMessage, error)
+}
+
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	viewID, view, err := View(st, run, pr)
@@ -160,23 +165,19 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 		return b, fmt.Errorf("evidence: parse PR head: %w", err)
 	}
 
-	// method "api" records only that GitHub served the diff — not head/merge_base:
-	// gh pr diff reads by PR number and doesn't report which head it rendered, so
-	// stamping the view's head would claim a span this path never verified. The
-	// fallback path controls exact SHAs and stamps them.
+	// gh pr diff reads by PR number and doesn't report which head it rendered.
+	// The primary path therefore re-reads the pull after the diff and refuses a
+	// head mismatch before recording it. The fallback controls exact SHAs.
 	body := diffBody{PR: pr, Method: "api"}
-	diff, err := gh("pr", "diff", fmt.Sprint(pr.Number), "-R", pr.Repo)
+	r, err := primaryDiff(pr, viewed.HeadRefOid)
 	if tooLarge(err) {
-		var r diffResult
 		r, err = fallbackDiff(pr, view)
-		body.Diff, body.Method, body.MergeBase, body.Head = r.Diff, "local-merge-base", r.MergeBase, r.Head
+		body.Method = "local-merge-base"
 	}
 	if err != nil {
 		return b, err
 	}
-	if body.Method == "api" {
-		body.Diff = string(diff)
-	}
+	body.Diff, body.MergeBase, body.Head = r.Diff, r.MergeBase, r.Head
 	a, err := st.Append(state.KindEvidence, run, nil, body)
 	if err != nil {
 		return b, err
@@ -209,6 +210,40 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	}
 	b.Stances = a.ID
 	return b, nil
+}
+
+func primaryDiff(pr PRRef, viewHead string) (diffResult, error) {
+	return fetchPrimaryDiff(pr, viewHead, primaryDiffFetchers{
+		diff: func(pr PRRef) (json.RawMessage, error) {
+			return gh("pr", "diff", fmt.Sprint(pr.Number), "-R", pr.Repo)
+		},
+		pull: func(pr PRRef) (json.RawMessage, error) {
+			return gh("api", fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number))
+		},
+	})
+}
+
+// fetchPrimaryDiff binds gh pr diff's PR-number read to the view evidence by
+// re-reading the pull only after the diff succeeds. A force-push between those
+// reads therefore aborts the sweep instead of recording a diff for a head Gate
+// did not evaluate.
+func fetchPrimaryDiff(pr PRRef, viewHead string, fetchers primaryDiffFetchers) (diffResult, error) {
+	diff, err := fetchers.diff(pr)
+	if err != nil {
+		return diffResult{}, err
+	}
+	pull, err := fetchers.pull(pr)
+	if err != nil {
+		return diffResult{}, err
+	}
+	_, head, err := parsePullHeads(pull)
+	if err != nil {
+		return diffResult{}, err
+	}
+	if head != viewHead {
+		return diffResult{}, fmt.Errorf("evidence: pr head moved during gather: view %s, pulls %s", viewHead, head)
+	}
+	return diffResult{Diff: string(diff), Head: head}, nil
 }
 
 // decisiveReviewState reports whether a submission state states a position on
