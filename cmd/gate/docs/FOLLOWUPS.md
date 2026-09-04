@@ -101,11 +101,11 @@ wiring `gate` into the merge tail.
   by PR number with no head pin: a force-push to an innocent head between the view read and the
   diff read records that head's diff, and a force-push back before merge still satisfies
   `--match-head-commit`. Window is a sub-call race needing push access + green CI on the decoy, but
-  gate's threat model includes adversarial agents with push access. **Landed:** after a successful
-  `gh pr diff`, the primary path re-reads `pulls/<n>` and refuses unless
-  `head.sha == view.headRefOid`; the recorded evidence now carries the verified head. A deterministic
-  moved-head mutant proves the mismatched diff never becomes recordable evidence. The fallback path
-  already had this property.
+  gate's threat model includes adversarial agents with push access. **Landed:** the primary path
+  reads `pulls/<n>`, refuses unless `head.sha == view.headRefOid`, then fetches the merge-base diff
+  through the SHA-pinned `compare/<base>...<head>` endpoint; the recorded evidence carries that
+  verified head. Deterministic moved-head and A→B→A mutants prove that mismatched or substituted diff
+  bytes never become recordable evidence. The fallback path already had this property.
 
 - [x] **Refuse to reseal a mismatched anchor as crash recovery.**
   Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17); the gate judge blocked

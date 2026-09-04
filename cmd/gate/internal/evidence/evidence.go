@@ -40,7 +40,7 @@ type diffBody struct {
 	PR   PRRef  `json:"pr"`
 	Diff string `json:"diff"`
 	// Provenance — reconstructable from state alone which path produced the
-	// diff and which commits it spans. "api" = GitHub's merge-base diff;
+	// diff and which commits it spans. "api" = GitHub's SHA-pinned compare diff;
 	// "local-merge-base" = the oversized-PR fallback.
 	Method    string `json:"method,omitempty"`
 	Head      string `json:"head,omitempty"`
@@ -116,8 +116,8 @@ type reviewFetchers struct {
 }
 
 type primaryDiffFetchers struct {
-	diff func(PRRef) (json.RawMessage, error)
-	pull func(PRRef) (json.RawMessage, error)
+	pull    func(PRRef) (json.RawMessage, error)
+	compare func(PRRef, string, string) (json.RawMessage, error)
 }
 
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
@@ -165,9 +165,10 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 		return b, fmt.Errorf("evidence: parse PR head: %w", err)
 	}
 
-	// gh pr diff reads by PR number and doesn't report which head it rendered.
-	// The primary path therefore re-reads the pull after the diff and refuses a
-	// head mismatch before recording it. The fallback controls exact SHAs.
+	// The primary path reads the pull's immutable commit pair, checks that its
+	// head matches the view, then asks GitHub for that pair's compare diff. The
+	// fallback controls the same exact SHAs locally when GitHub rejects the diff
+	// as oversized.
 	body := diffBody{PR: pr, Method: "api"}
 	r, err := primaryDiff(pr, viewed.HeadRefOid)
 	if tooLarge(err) {
@@ -214,34 +215,41 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 
 func primaryDiff(pr PRRef, viewHead string) (diffResult, error) {
 	return fetchPrimaryDiff(pr, viewHead, primaryDiffFetchers{
-		diff: func(pr PRRef) (json.RawMessage, error) {
-			return gh("pr", "diff", fmt.Sprint(pr.Number), "-R", pr.Repo)
-		},
 		pull: func(pr PRRef) (json.RawMessage, error) {
 			return gh("api", fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number))
+		},
+		compare: func(pr PRRef, base, head string) (json.RawMessage, error) {
+			return gh("api", "-H", "Accept: application/vnd.github.v3.diff",
+				fmt.Sprintf("repos/%s/compare/%s...%s", pr.Repo, base, head))
 		},
 	})
 }
 
-// fetchPrimaryDiff binds gh pr diff's PR-number read to the view evidence by
-// re-reading the pull only after the diff succeeds. A force-push between those
-// reads therefore aborts the sweep instead of recording a diff for a head Gate
-// did not evaluate.
+// fetchPrimaryDiff binds the primary diff to an immutable commit pair. The
+// pull read must still match the view evidence, and the diff is then fetched by
+// those exact base/head SHAs rather than by mutable PR number. An A→B→A
+// force-push during the fetch cannot substitute B's bytes for A's evidence.
 func fetchPrimaryDiff(pr PRRef, viewHead string, fetchers primaryDiffFetchers) (diffResult, error) {
-	diff, err := fetchers.diff(pr)
-	if err != nil {
-		return diffResult{}, err
-	}
 	pull, err := fetchers.pull(pr)
 	if err != nil {
 		return diffResult{}, err
 	}
-	_, head, err := parsePullHeads(pull)
+	base, head, err := parsePullHeads(pull)
 	if err != nil {
 		return diffResult{}, err
 	}
+	if !reSHA.MatchString(base) || !reSHA.MatchString(head) {
+		return diffResult{}, fmt.Errorf("evidence: non-hex commit id from api (base=%q head=%q)", base, head)
+	}
 	if head != viewHead {
 		return diffResult{}, fmt.Errorf("evidence: pr head moved during gather: view %s, pulls %s", viewHead, head)
+	}
+	diff, err := fetchers.compare(pr, base, head)
+	if err != nil {
+		return diffResult{}, err
+	}
+	if len(diff) == 0 {
+		return diffResult{}, fmt.Errorf("evidence: empty diff at head %s", head)
 	}
 	return diffResult{Diff: string(diff), Head: head}, nil
 }

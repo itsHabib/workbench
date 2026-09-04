@@ -7,11 +7,19 @@ import (
 )
 
 func TestFetchPrimaryDiffPinsViewedHead(t *testing.T) {
-	const head = "1111111111111111111111111111111111111111"
+	const (
+		base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		head = "1111111111111111111111111111111111111111"
+	)
 	result, err := fetchPrimaryDiff(PRRef{Repo: "o/r", Number: 7}, head, primaryDiffFetchers{
-		diff: func(PRRef) (json.RawMessage, error) { return []byte("the diff"), nil },
 		pull: func(PRRef) (json.RawMessage, error) {
-			return pullHeads("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", head), nil
+			return pullHeads(base, head), nil
+		},
+		compare: func(_ PRRef, gotBase, gotHead string) (json.RawMessage, error) {
+			if gotBase != base || gotHead != head {
+				t.Fatalf("compare pair = %s...%s, want %s...%s", gotBase, gotHead, base, head)
+			}
+			return []byte("the diff"), nil
 		},
 	})
 	if err != nil {
@@ -22,24 +30,21 @@ func TestFetchPrimaryDiffPinsViewedHead(t *testing.T) {
 	}
 }
 
-// This is the moved-head mutant: gh pr diff returns bytes, then the pull read
-// reports a different head. The bytes must never escape as recordable evidence.
+// This is the moved-head mutant: the pull read reports a different head than
+// the view. No diff fetch may run and no bytes may escape as evidence.
 func TestFetchPrimaryDiffRefusesMovedHead(t *testing.T) {
 	const (
 		viewed = "1111111111111111111111111111111111111111"
 		moved  = "2222222222222222222222222222222222222222"
 	)
-	diffRead := false
+	compareCalled := false
 	result, err := fetchPrimaryDiff(PRRef{Repo: "o/r", Number: 7}, viewed, primaryDiffFetchers{
-		diff: func(PRRef) (json.RawMessage, error) {
-			diffRead = true
-			return []byte("diff for the moved head"), nil
-		},
 		pull: func(PRRef) (json.RawMessage, error) {
-			if !diffRead {
-				t.Fatal("pull head was read before the diff")
-			}
 			return pullHeads("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", moved), nil
+		},
+		compare: func(PRRef, string, string) (json.RawMessage, error) {
+			compareCalled = true
+			return []byte("diff for the moved head"), nil
 		},
 	})
 	if err == nil {
@@ -51,6 +56,38 @@ func TestFetchPrimaryDiffRefusesMovedHead(t *testing.T) {
 	}
 	if result != (diffResult{}) {
 		t.Fatalf("moved head returned partial evidence: %+v", result)
+	}
+	if compareCalled {
+		t.Fatal("moved head reached the compare diff fetch")
+	}
+}
+
+// This is the double-force-push mutant from review: the PR begins at A, moves
+// to B during the diff read, then returns to A. The compare fetch can still
+// receive only A's immutable commit pair.
+func TestFetchPrimaryDiffPinsABARaceToCommitPair(t *testing.T) {
+	const (
+		base   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		viewed = "1111111111111111111111111111111111111111"
+		moved  = "2222222222222222222222222222222222222222"
+	)
+	liveHead := viewed
+	result, err := fetchPrimaryDiff(PRRef{Repo: "o/r", Number: 7}, viewed, primaryDiffFetchers{
+		pull: func(PRRef) (json.RawMessage, error) { return pullHeads(base, liveHead), nil },
+		compare: func(_ PRRef, gotBase, gotHead string) (json.RawMessage, error) {
+			liveHead = moved
+			defer func() { liveHead = viewed }()
+			if gotBase != base || gotHead != viewed {
+				t.Fatalf("mutable pair reached compare: %s...%s", gotBase, gotHead)
+			}
+			return []byte("diff for immutable A"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("fetchPrimaryDiff under A-B-A race: %v", err)
+	}
+	if liveHead != viewed || result.Head != viewed || result.Diff != "diff for immutable A" {
+		t.Fatalf("A-B-A result = %+v, live head %s", result, liveHead)
 	}
 }
 
