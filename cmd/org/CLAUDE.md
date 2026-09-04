@@ -66,6 +66,31 @@ system name there is Baton; this binary is its first runtime slice.
   record; a crash mid-composite leaves ordinary recoverable state. Plain
   `release` now warns on stderr when unfinished items remain held —
   finished work exits via `complete`/`done`, `yield` means pausing.
+- **`adopt`** puts work that is already in flight onto an UNHELD lane's plate,
+  without the working session's cooperation: `attach` → `note` → `assign` →
+  `release`, four records, **no claim**. It exists because a session that never
+  attached still produced a branch, a PR and a head SHA — all observable from
+  outside — and none of it could become ownership. Two properties are the
+  kernel's rather than the verb's, and both are what make it safe to hand to a
+  watcher: it cannot displace a live session (`attach` on a held lane is refused
+  `already_held`, so adopt can never leak into takeover), and it never claims,
+  because a lane holds many items and acts on exactly one — putting work on a
+  plate is not starting it. `-by` is required: an unattributed assign is
+  indistinguishable from the lane's own coverage sweep, and since `assign` takes
+  no body the adopter's identity has nowhere to live but the note — which is why
+  this is a verb rather than a three-command recipe, since in a recipe the note
+  is the optional step. Refuses when another lane already holds the work
+  (`work_already_held`) rather than manufacturing the `assign_conflict` sweep
+  reports — a preflight over the peer chains, not an admission law: appends
+  lock one role chain at a time and there is no tenant-wide lock or
+  cross-chain transaction (FOLLOWUPS), so two adoptions of the same work into
+  two idle lanes that both scan before either assigns will both land, and
+  `sweep` reports the result as `assign_conflict` — detected, not prevented,
+  the same posture as `transfer`. Warns on scope drift, like `transfer`. Whoever picks the work up
+  resumes it with `org begin -work <uri>`, no pin needed. It manufactures no
+  authority — those four appends were always available to any process that can
+  read the state directory — so WHO may invoke it is a charter question for the
+  invoking role, not a property of this verb.
 - **`intake`** is the routing reflex before assign: given `-work <uri>` it
   reports which chartered lanes' scopes cover it (the `contracts/org.InScope`
   predicate — prefix-at-a-boundary, never across schemes), which lanes

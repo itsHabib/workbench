@@ -55,6 +55,7 @@ var verbs = map[string]func(*env, []string) error{
 	"annul":      cmdAnnul,
 	"attach":     cmdAttach,
 	"assign":     cmdAssign,
+	"adopt":      cmdAdopt,
 	"transfer":   cmdTransfer,
 	"unassign":   cmdWork(org.KindUnassign),
 	"claim":      cmdWork(org.KindClaim),
@@ -119,6 +120,7 @@ lifecycle   charter · attach · release · retire · takeover · revoke · dele
 correction  annul (repudiate the tip; corrects forward, does not revert)
 work        assign · transfer · unassign · claim · yield · complete · abandon
 composite   begin (attach+assign+claim) · done (claim?+complete+release)
+            adopt (attach+note+assign+release; puts in-flight work on a plate)
 obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
 read        boot · intake · status · sweep · log · verify · blob
@@ -448,6 +450,168 @@ func claimable(state org.RoleState, work string) error {
 		return fmt.Errorf("%s is already active; finish or pause it before beginning %s", state.Active, work)
 	}
 	return nil
+}
+
+// cmdAdopt puts work that is already in flight onto a lane's plate, without the
+// working session's cooperation and without touching what it is doing.
+//
+// The gap it closes: a session that never attached still produced a branch, a
+// PR and a head SHA, and every one of those is observable from outside. Nothing
+// in the substrate could turn that into ownership, so unowned work stayed
+// unowned however plainly it existed.
+//
+// Four records on the ADOPTED lane: attach → note → assign → release. The note
+// is the reason this is a verb rather than a documented recipe. `assign` takes
+// no body and `attach` rejects one, so an adopter's identity has nowhere to
+// live except a record of its own — and in a recipe that record is the optional
+// step, which means it is the step missing from the tick where it mattered. An
+// unattributed assign is indistinguishable from the lane's own coverage sweep,
+// and that indistinguishability is the whole cost of adopting at all.
+//
+// It manufactures no authority. `attach` carries no authorization check, so any
+// process that can read the state directory can already write these four
+// appends by hand; what the composite adds is that the trace is not optional
+// and the pin is not hand-assembled. WHO may invoke it is a question for the
+// invoking skill's charter, not for this verb.
+//
+// Two limits come from the kernel rather than from this verb, and both are what
+// make adoption safe to hand to a watcher:
+//
+//   - It never claims. Adoption writes Held, never Active. A lane holds many
+//     items and acts on exactly one, so putting work on a plate and starting it
+//     are different acts — and adoption is only ever the first.
+//   - It cannot displace. attach on a held lane is refused already_held, which
+//     means a live session is untouchable by construction. Adopt is not
+//     takeover, and the difference is enforced rather than promised.
+func cmdAdopt(e *env, args []string) error {
+	s := newScope("adopt")
+	work := s.fs.String("work", "", "work URI already in flight, e.g. github:owner/repo#88")
+	digest := s.fs.String("digest", "", "content digest pinning the work item (sha256:…)")
+	pin := s.fs.String("pin", "", "observable identity to pin instead of -digest: head SHA, branch, worktree")
+	by := s.fs.String("by", "", "role id performing the adoption, recorded on the adopted lane")
+	evidence := s.fs.String("evidence", "", "how the work was observed, ideally re-runnable commands")
+	h, err := s.open(args, true)
+	if err != nil {
+		return err
+	}
+	if *work == "" || *by == "" {
+		return fmt.Errorf("-work and -by are required: an adoption nobody signed is indistinguishable from the lane's own sweep")
+	}
+	if *digest == "" && *pin == "" {
+		return fmt.Errorf("-digest or -pin is required: an unpinned assignment cannot detect drift")
+	}
+	_, state, err := h.Load(s.tenant, s.role)
+	if err != nil {
+		return err
+	}
+	if held(state, *work) >= 0 {
+		return reportNoOp(e, s, fmt.Sprintf("already adopted: %s holds %s", s.role, *work))
+	}
+	if err := adoptable(h, s.tenant, s.role, state, *work); err != nil {
+		return err
+	}
+	if *digest == "" {
+		*digest = org.DigestBytes([]byte(*pin))
+	}
+	r, st, err := step(h, s, home.Draft{Kind: org.KindAttach})
+	if err != nil {
+		return err
+	}
+	steps, inc := []receipt{r}, st.Holder
+	r, _, err = step(h, s, home.Draft{
+		Kind: org.KindNote, Body: adoptionNote(*by, *work, *pin, *evidence),
+		BodyClass: "narrative", Incarnation: inc,
+	})
+	if err != nil {
+		return err
+	}
+	steps = append(steps, r)
+	r, _, err = step(h, s, home.Draft{
+		Kind:    org.KindAssign,
+		Subject: org.Subject{Work: *work, Digest: *digest}, Incarnation: inc,
+	})
+	if err != nil {
+		return err
+	}
+	steps = append(steps, r)
+	r, _, err = step(h, s, home.Draft{Kind: org.KindRelease, Incarnation: inc})
+	if err != nil {
+		return err
+	}
+	if _, ok := org.MatchScope(state.Terms.Scope, *work); !ok {
+		fmt.Fprintf(e.stderr, "warning: %s is outside %s's charter scope %v; org sweep will report it as scope_drift\n",
+			*work, s.role, state.Terms.Scope)
+	}
+	return reportSteps(e, s, append(steps, r))
+}
+
+// adoptable reports why an adoption cannot proceed, before any record is
+// written. Each refusal names a frozen reason, so the exit-code seam holds:
+// these are the substrate declining, not the command failing.
+func adoptable(h *home.Home, tenant, role string, state org.RoleState, work string) error {
+	if state.Phase == org.PhaseVoid {
+		return fmt.Errorf("%s has no chain; adoption puts work on an existing lane's plate, it does not charter one", role)
+	}
+	if state.Holder != "" {
+		return &org.Refusal{Reason: org.ReasonAlreadyHeld, Detail: fmt.Sprintf(
+			"%s is held by %s — somebody is working it. Adoption never displaces a live session; that would be a takeover",
+			role, shortDigest(state.Holder))}
+	}
+	other, err := otherHolder(h, tenant, role, work)
+	if err != nil {
+		return err
+	}
+	if other == "" {
+		return nil
+	}
+	return &org.Refusal{Reason: org.ReasonWorkAlreadyHeld, Detail: fmt.Sprintf(
+		"%s is already held by %s; adopting it here would manufacture the assign_conflict org sweep reports. Move it with org transfer, or leave it",
+		work, other)}
+}
+
+// otherHolder reports which OTHER role in the tenant holds work, or "". A
+// second holder is the one thing adoption must not create: it is the state the
+// substrate can see but not resolve, and the routing question behind it —
+// which lane should own this — is not one a mechanical verb gets to answer.
+//
+// This is a preflight, not an admission law. Appends lock one role chain at a
+// time and the substrate has no tenant-wide lock or cross-chain transaction
+// (FOLLOWUPS), so two adoptions of the same work into two idle lanes can both
+// scan clean and both assign; sweep then reports the assign_conflict. The
+// window is the same one transfer documents — detected, not prevented — and
+// closing it is the cross-chain transaction FOLLOWUPS already names.
+func otherHolder(h *home.Home, tenant, role, work string) (string, error) {
+	pairs, err := h.RolesForTenant(tenant)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range pairs {
+		if p[1] == role {
+			continue
+		}
+		// An unreadable peer chain is not evidence that it does not hold the
+		// work, and adopting past it could double-hold. Refuse with the cause.
+		_, st, err := h.Load(p[0], p[1])
+		if err != nil {
+			return "", fmt.Errorf("cannot tell whether %s holds %s: %w", p[1], work, err)
+		}
+		if held(st, work) >= 0 {
+			return p[1], nil
+		}
+	}
+	return "", nil
+}
+
+// adoptionNote is the record that makes an adoption legible six weeks later:
+// who did it, what was observed, and the word "adopted" so a reader never has
+// to infer it from an assign that looks exactly like a coverage sweep.
+func adoptionNote(by, work, pin, evidence string) []byte {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "adopted by %s: %s was in flight and on no chain.\n", by, work)
+	fmt.Fprintf(&sb, "pin: %s\n", orDashText(pin))
+	fmt.Fprintf(&sb, "evidence: %s\n", orDashText(evidence))
+	sb.WriteString("the work is held, not claimed: whoever picks it up starts it with org begin.\n")
+	return []byte(sb.String())
 }
 
 // orDashText renders an empty string as a dash, so an absent value reads as
