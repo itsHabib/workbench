@@ -61,7 +61,17 @@ func IntakeText(in Intake) string {
 		return sb.String()
 	}
 	fmt.Fprintf(&sb, "no chartered scope covers %s\n", in.Work)
-	sb.WriteString("fix: charter a lane whose -scope covers it, or recharter an existing lane\n")
+	// Naming a verb that does not exist is worse here than anywhere else: this
+	// line is read at the moment an agent is deciding how to route work, and it
+	// is the only guidance it gets. `recharter` has no CLI writer — the verb was
+	// withdrawn from #272 because nothing checks a widening — so terms are set
+	// once and changing them is retire-then-charter, which is visible in the
+	// chain instead of self-signed inside it (FOLLOWUPS).
+	// And the fresh charter needs a NEW role id: retire is terminal for that
+	// chain, so a charter under the retired id is refused `retired`.
+	sb.WriteString("fix: charter a lane whose -scope covers it (terms are set once —\n")
+	sb.WriteString("     changing an existing lane's scope means org retire, then a fresh charter\n")
+	sb.WriteString("     under a NEW role id; a retired role's chain is terminal and cannot be re-chartered)\n")
 	return sb.String()
 }
 
