@@ -1,0 +1,51 @@
+{
+  "_comment": "Path regexes. A changed file must match at least one rule or `fleet tier` refuses: there is no default tier. `critical` and `wire` are the hand-signed list of paths where a wrong verdict reaches a spindle; edit them with the operator, never alone.",
+  "non_runtime": [
+    "\\.md$",
+    "^docs/",
+    "^\\.github/",
+    "eslint",
+    "prettier",
+    "^tests?/",
+    "\\.test\\.[tj]sx?$",
+    "\\.spec\\.[tj]sx?$",
+    "^scratch/"
+  ],
+  "runtime": [
+    "^apps/[^/]+/src/",
+    "^packages/[^/]+/src/",
+    "\\.cs$"
+  ],
+  "critical": [
+    "^apps/web/src/api/cam_firewall",
+    "^apps/desktop/src/.*(upload|gate|verdict|engine)",
+    "hypermill",
+    "featureFlag|flagService"
+  ],
+  "wire": [
+    "^apps/web/src/api/",
+    "^apps/desktop/src/.*client",
+    "contracts?/"
+  ],
+  "failmode_diff": "\\b(catch|default|fallback|degraded|timeout|retry|\\?\\?|\\|\\|\\s*(false|null))\\b",
+  "evidence": {
+    "0": [
+      "CI green on the head",
+      "bot review answered"
+    ],
+    "1": [
+      "targeted tests for the changed files (~5s)",
+      "CI green on the head"
+    ],
+    "2": [
+      "targeted tests",
+      "a contract test on the changed wire",
+      "one live run with a named observable (fleet ready -> operator -> fleet receipt)",
+      "CI green"
+    ],
+    "3": [
+      "everything in T2",
+      "a NEGATIVE live run: induce the failure and observe the fail-closed screen"
+    ]
+  }
+}

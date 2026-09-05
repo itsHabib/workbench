@@ -1,0 +1,11 @@
+{
+  "kind": "infra",
+  "card": "card.md",
+  "denies": [
+    "Bash(gh pr merge:*)"
+  ],
+  "requires": [],
+  "produces": null,
+  "slots": 0,
+  "cadence": "90m"
+}
