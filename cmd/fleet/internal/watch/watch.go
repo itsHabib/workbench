@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
+	"github.com/itsHabib/workbench/filelock"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
 )
 
@@ -89,7 +90,11 @@ func Tick(interval time.Duration) (string, error) {
 			verbs.Out = prevOut
 		}
 	}
-	rows := fold(now, prevAt, slept)
+	prevStates := map[string]string{}
+	for p, r := range prevRows {
+		prevStates[p] = fleet.S(r, "state")
+	}
+	rows := fold(now, prevAt, slept, prevStates)
 	var transitions []fleet.Rec
 	for _, r := range rows {
 		from := fleet.S(prevRows[fleet.S(r, "path")], "state")
@@ -114,12 +119,33 @@ func Tick(interval time.Duration) (string, error) {
 		k := workKey(r)
 		seen[k] = true
 		work = append(work, r)
-		from, to := fleet.S(prevWork[k], "state"), fleet.S(r, "state")
-		if from == to {
+		prev := prevWork[k]
+		from, to := fleet.S(prev, "state"), fleet.S(r, "state")
+		// The sleep rule for rows too: a NEW attention classification after a gap may
+		// be the gap's silence, not an observation.
+		if slept && verbs.WorkAttention[to] && from != to {
+			r["unknown_since"] = prevAt
+			r["state"] = "unknown"
+			to = "unknown"
+		}
+		if from != to {
+			transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+				"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]})
 			continue
 		}
-		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
-			"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]})
+		// Responsibility can change with the state unchanged: who is accountable, who
+		// has hands, when it is due. Each is a transition the hub must see.
+		if prev == nil {
+			continue
+		}
+		for _, col := range []string{"for", "hands", "due"} {
+			a, b := colText(prev[col]), colText(r[col])
+			if a == b {
+				continue
+			}
+			transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+				"what": col, "from": nilIfEmpty(a), "to": b, "session": r["hands"], "branch": r["change"]})
+		}
 	}
 	for k, r := range prevWork {
 		if seen[k] || fleet.S(r, "state") == "gone" {
@@ -133,9 +159,6 @@ func Tick(interval time.Duration) (string, error) {
 	}
 	for _, t := range transitions {
 		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), t)
-		if attention[fleet.S(t, "to")] || (fleet.S(t, "change") != "" && (verbs.WorkAttention[fleet.S(t, "to")] || fleet.S(t, "to") == "done")) {
-			notify(t)
-		}
 	}
 	md := render(rows, work, now, prev, slept, transitions)
 	if err := fleet.WriteJSON(filepath.Join(dir(), "board.json"), rowsAny(rows)); err != nil {
@@ -154,13 +177,36 @@ func Tick(interval time.Duration) (string, error) {
 	if err := fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), hb); err != nil {
 		return "", err
 	}
+	// Notification AFTER publication: a slow notifier must not hold the board or the
+	// heartbeat back, and never widens the window in which a second watcher could start.
+	for _, t := range transitions {
+		if fleet.S(t, "what") != "" {
+			continue
+		}
+		if attention[fleet.S(t, "to")] || (fleet.S(t, "change") != "" && (verbs.WorkAttention[fleet.S(t, "to")] || fleet.S(t, "to") == "done")) {
+			notify(t)
+		}
+	}
 	return md, nil
+}
+
+// colText is a column's value as the text a transition records.
+func colText(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case float64:
+		return fmt.Sprintf("%.0f", x)
+	}
+	return fmt.Sprint(v)
 }
 
 // fold is the join, classified for the board: the roled paths from `fleet board`,
 // plus one state the board cannot see alone — a seat with an assignment and no one
 // in it — and the sleep rule applied over both.
-func fold(now, prevAt float64, slept bool) []fleet.Rec {
+func fold(now, prevAt float64, slept bool, prevStates map[string]string) []fleet.Rec {
 	var rows []fleet.Rec
 	for _, r := range verbs.BoardRows() {
 		row := fleet.Rec(r)
@@ -169,9 +215,19 @@ func fold(now, prevAt float64, slept bool) []fleet.Rec {
 		if state == "dead" && len(holds) > 0 {
 			state = "dead-holding-work"
 		}
+		// A dead session's work is reported whichever occupant won the row.
+		if dh := strsOf(row["dead_holds"]); len(dh) > 0 {
+			state = "dead-holding-work"
+			if len(holds) == 0 {
+				row["holds"] = dh
+			}
+		}
 		if slept && (state == "dead" || state == "dead-holding-work" || state == "busy-and-overdue") {
-			// The evidence for this classification may be the silence of a sleeping machine.
-			if last := fleet.F(row, "last_event_at"); last == 0 || last > prevAt {
+			// The evidence for a classification the previous tick did not make may be
+			// the silence of a sleeping machine — a deadline that "expired" or a pid
+			// that "died" while nothing was running — as may a last event inside the gap.
+			last := fleet.F(row, "last_event_at")
+			if prevStates[fleet.S(row, "path")] != state || last == 0 || last > prevAt {
 				row["unknown_since"] = prevAt
 				state = "unknown"
 			}
@@ -199,6 +255,22 @@ func fold(now, prevAt float64, slept bool) []fleet.Rec {
 // workKey identifies an ownership row across ticks.
 func workKey(r fleet.Rec) string {
 	return fleet.S(r, "repo") + "|" + fleet.S(r, "change") + "|" + fleet.S(r, "relationship")
+}
+
+func strsOf(v any) []string {
+	switch h := v.(type) {
+	case []string:
+		return h
+	case []any:
+		var out []string
+		for _, x := range h {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func holdsOf(r fleet.Rec) []string {
@@ -309,6 +381,10 @@ func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, tra
 				from = "—"
 			}
 			if c := fleet.S(t, "change"); c != "" {
+				if what := fleet.S(t, "what"); what != "" {
+					fmt.Fprintf(&b, "- %s %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), what, from, fleet.S(t, "to"))
+					continue
+				}
 				fmt.Fprintf(&b, "- %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), from, fleet.S(t, "to"))
 				continue
 			}
@@ -429,9 +505,21 @@ func notify(t fleet.Rec) {
 // Serve ticks forever. One per machine: a second watcher finding a fresh heartbeat
 // from a live pid exits rather than compete.
 func Serve(interval time.Duration) error {
-	if hb := Heartbeat(); hb != nil && !Stale(2) && fleet.PidAlive(int(fleet.F(hb, "pid"))) && int(fleet.F(hb, "pid")) != os.Getpid() {
-		return fmt.Errorf("a watcher is already ticking (pid %d, last tick %s ago)", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")))
+	// One writer of one board: an advisory lock held for the process's lifetime, so a
+	// second watcher started inside the first's tick — before any heartbeat exists —
+	// is refused too. Kernel-released on death, like every lock here.
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		return err
 	}
+	owner, err := os.OpenFile(filepath.Join(dir(), "owner.lock"), os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := filelock.TryLock(owner); err != nil {
+		hb := Heartbeat()
+		return fmt.Errorf("a watcher is already ticking here (owner.lock held; heartbeat pid %d, %s ago)", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")))
+	}
+	defer func() { _ = filelock.Unlock(owner) }()
 	for {
 		if _, err := Tick(interval); err != nil {
 			_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch tick: " + err.Error()})

@@ -21,6 +21,14 @@ type Event = map[string]any
 // operator who deletes the wrong line must be able to strip a session of a role it
 // should not have.
 func TouchSession(sid string, ev Event, fields Rec) Rec {
+	rec, _ := TouchErr(sid, ev, fields)
+	return rec
+}
+
+// TouchErr is TouchSession with the publication error. A session record is evidence,
+// not authority — except on the lease path, where a holder whose record cannot be
+// read would be taken over by the next session; the caller there refuses.
+func TouchErr(sid string, ev Event, fields Rec) (Rec, error) {
 	// Under the session's own lock. The harness runs parallel tool calls, so two
 	// PreToolUse hooks for one session run at once, and an unlocked read-modify-write
 	// here let the later writer drop what the earlier one had just added — a handoff
@@ -29,18 +37,19 @@ func TouchSession(sid string, ev Event, fields Rec) Rec {
 	// If the lock cannot be had in time the touch proceeds unlocked, as it always
 	// did, rather than lose the event: a session record is evidence, not authority.
 	var rec Rec
+	var werr error
 	err := KeyLock("session:"+sid, func() error {
-		rec = touchSessionLocked(sid, ev, fields)
+		rec, werr = touchSessionLocked(sid, ev, fields)
 		return nil
 	})
 	if err != nil {
 		logError(Rec{"session": sid, "error": "touch_session unlocked: " + err.Error()})
-		rec = touchSessionLocked(sid, ev, fields)
+		rec, werr = touchSessionLocked(sid, ev, fields)
 	}
-	return rec
+	return rec, werr
 }
 
-func touchSessionLocked(sid string, ev Event, fields Rec) Rec {
+func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 	p := Path("sessions", sid+".json")
 	rec := ReadJSON(p)
 	TestPause("IN_TOUCH") // between the read and the write; a rival's write must not be lost
@@ -103,8 +112,7 @@ func touchSessionLocked(sid string, ev Event, fields Rec) Rec {
 		rec["branch"] = nilIfEmpty(BranchOf(cwd))
 		rec["repo"] = nilIfEmpty(RepoID(cwd))
 	}
-	_ = WriteJSON(p, rec)
-	return rec
+	return rec, WriteJSON(p, rec)
 }
 
 // InflightKey is the key PreToolUse writes and PostToolUse reads for one command:
@@ -288,7 +296,11 @@ func AssignmentLine(slot, sid string) string {
 // most. The last word exists for every session that ever stopped. `fleet handoff`
 // stays as the better, declared version when an agent bothers.
 func RecordLastWord(sid string, ev Event, rec Rec) {
-	text := lastAssistantMessage(S(ev, "transcript_path"))
+	// The harness's own statement of the final message first; else its transcript.
+	text := collapse(S(ev, "last_assistant_message"))
+	if text == "" {
+		text = lastAssistantMessage(S(ev, "transcript_path"))
+	}
 	if text == "" {
 		return
 	}
@@ -317,32 +329,58 @@ func lastAssistantMessage(transcript string) string {
 	}
 	lines := strings.Split(raw, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		r := ReadJSONBytes([]byte(lines[i]))
-		if r == nil || S(r, "type") != "assistant" {
-			continue
+		if text := collapse(assistantText(ReadJSONBytes([]byte(lines[i])))); text != "" {
+			return text
 		}
-		msg := M(r, "message")
-		var parts []string
-		switch c := msg["content"].(type) {
-		case string:
-			parts = append(parts, c)
-		case []any:
-			for _, block := range c {
-				if b, ok := block.(map[string]any); ok && S(b, "type") == "text" {
-					parts = append(parts, S(b, "text"))
-				}
-			}
-		}
-		text := strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
-		if text == "" {
-			continue
-		}
-		if len(text) > 600 {
-			text = text[:600] + "…"
-		}
-		return text
 	}
 	return ""
+}
+
+// assistantText is the text of one transcript line when it is an assistant message,
+// in either harness's shape: Claude's top-level {type: assistant, message: {content}},
+// or Codex's {type: response_item, payload: {type: message, role: assistant, content}}.
+func assistantText(r Rec) string {
+	if r == nil {
+		return ""
+	}
+	var content any
+	switch S(r, "type") {
+	case "assistant":
+		content = M(r, "message")["content"]
+	case "response_item":
+		p := M(r, "payload")
+		if S(p, "type") != "message" || S(p, "role") != "assistant" {
+			return ""
+		}
+		content = p["content"]
+	default:
+		return ""
+	}
+	var parts []string
+	switch c := content.(type) {
+	case string:
+		parts = append(parts, c)
+	case []any:
+		for _, block := range c {
+			b, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			if t := S(b, "type"); t == "text" || t == "output_text" {
+				parts = append(parts, S(b, "text"))
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// collapse is whitespace-folded text, capped for injection.
+func collapse(s string) string {
+	text := strings.Join(strings.Fields(s), " ")
+	if len(text) > 600 {
+		text = text[:600] + "…"
+	}
+	return text
 }
 
 // headSha is the commit the checkout's branch points at, read from refs without a
@@ -429,7 +467,7 @@ func BoardLines(sincePrompt float64) []string {
 	for _, raw := range work {
 		r, _ := raw.(map[string]any)
 		st := S(r, "state")
-		if st != "dead" && st != "late" && st != "undeclared" {
+		if st != "dead" && st != "late" && st != "undeclared" && st != "abandoned" && st != "failed" {
 			fineWork++
 			continue
 		}
@@ -476,6 +514,10 @@ func BoardLines(sincePrompt float64) []string {
 				acc := S(t, "for")
 				if acc == "" {
 					acc = "—"
+				}
+				if what := S(t, "what"); what != "" {
+					changes = append(changes, fmt.Sprintf("%s %s %s: %s → %s", acc, c, what, from, S(t, "to")))
+					continue
 				}
 				changes = append(changes, fmt.Sprintf("%s %s: %s → %s", acc, c, from, S(t, "to")))
 				continue
@@ -576,3 +618,15 @@ func canonPath(p string) string {
 
 // CanonPath is canonPath, exported for the verbs.
 func CanonPath(p string) string { return canonPath(p) }
+
+// Within reports whether p is dir or a path-component descendant of it, on either
+// separator: CanonPath keeps the platform's, and a test that appends "/" misses every
+// Windows descendant.
+func Within(p, dir string) bool {
+	a := strings.TrimRight(canonPath(p), `/\`)
+	b := strings.TrimRight(canonPath(dir), `/\`)
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(a, b+`\`)
+}

@@ -281,7 +281,12 @@ func onPreTool(ev Event, sid string) *Verdict {
 		}
 		fields["handoff"] = Rec{"from": nilIfEmpty(key), "to": tos, "start": target, "at": Now()}
 	}
-	rec = TouchSession(sid, ev, fields)
+	var terr error
+	rec, terr = TouchErr(sid, ev, fields)
+	if terr != nil && branch != "" && writes {
+		// The lease above is only as good as the record that says its holder is alive.
+		return deny(fmt.Sprintf("this session's record could not be published (%v), so the lease on %s would read as a dead holder's and be taken over by the next session; nothing runs. Next action: check that %s is a writable directory, then retry.", terr, branch, Path("sessions")))
+	}
 	// A stop on a resource this lane requires stands the session down like a stop on
 	// its branch.
 	for _, r := range Strs(M(rec, "lane"), "requires") {

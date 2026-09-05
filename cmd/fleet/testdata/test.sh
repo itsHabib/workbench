@@ -1118,7 +1118,7 @@ out=$(FLEET_LANES="$work/lanes-bad" "$PY" "$F" role "$REPO" cad:cam 2>&1); rc=$?
 # MCP: the same functions over stdio. Eight tools, one-line descriptions, refusals verbatim.
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fleet_who","arguments":{"name":"repo3-finisher-1"}}}' \
-  '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"fleet_assign","arguments":{"slot":"repo3-finisher-1","branch":"feat/p"}}}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_assign\",\"arguments\":{\"slot\":\"repo3-finisher-1\",\"branch\":\"feat/p\",\"cwd\":\"$WORK\"}}}" \
   "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_done\",\"arguments\":{\"revision\":\"$SHA3\"}}}" \
   '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"fleet_assign","arguments":{"slot":"repo3-finisher-1"}}}' \
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
@@ -1262,12 +1262,16 @@ def watch():
         except OSError:
             seen_empty.append(("missing", time.time()))
 t = threading.Thread(target=watch); t.start()
+rcs = []
 for _ in range(6):
-    subprocess.run([sys.executable, fleetpy, "role", repo3, "finisher:repo3"], capture_output=True, env={**os.environ, "ORG_TENANT": "work"})
+    rcs.append(subprocess.run([sys.executable, fleetpy, "role", repo3, "finisher:repo3"], capture_output=True, env={**os.environ, "ORG_TENANT": "work"}).returncode)
 stop = True; t.join()
+bound = any(line.split()[:3] == [repo3, "work", "finisher:repo3"] for line in open(mapfile).read().splitlines() if line.strip() and not line.startswith("#"))
 if seen_empty:
     print("    observed empty/missing map", len(seen_empty), "times")
-sys.exit(1 if seen_empty else 0)
+if any(rcs) or not bound:
+    print("    role writes rc=%s bound=%s" % (rcs, bound))
+sys.exit(1 if (seen_empty or any(rcs) or not bound) else 0)
 PY
 # ---------- Second panel round: presence, seats, done semantics, unowned, the MCP tools nobody called ----------
 # Presence is prefix, role is exact: a tab opened in <slot>/src is IN the worktree for every view that decides whether to touch it.
@@ -1591,7 +1595,7 @@ subprocess.run(["git", "branch", "feat/w3"], cwd=r, capture_output=True)
 bad_as = fleet("dispatch", "feat/w3", "--as", "Not A Word")
 d = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:alpha", "--due", "1s", "--brief", "verify the thing")
 rec = hook.read_json(hook.path("dispatch", hook.safe(hook.repo_id(r) + "__feat/w3__verify") + ".json")) or {}
-report(bad_as.returncode != 0 and d.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "operator" and rec.get("relationship") == "verify"
+report(bad_as.returncode != 0 and d.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "finisher:watchrepo" and rec.get("relationship") == "verify"
        and rec.get("due", 0) > rec.get("at", 1) and state_of("feat/w3", "verify") == "dispatched",
        "fleet dispatch declares the row (change, relationship, for, by, due) and work reads it as dispatched",
        f"bad-as rc={bad_as.returncode} dispatch rc={d.returncode} {(d.stdout+d.stderr)[:160]!r} rec={rec} state={state_of('feat/w3','verify')}")
@@ -1774,6 +1778,150 @@ report(d3.returncode == 0 and "record: local only" in d3.stdout and hook.read_js
        "with no gh the dispatch still happens and says the record is local only", f"rc={d3.returncode} out={d3.stdout[:200]!r}")
 fleet("undispatch", "feat/w3")
 hook._unlink(hook.path("prs", "seed.json")); hook._unlink(hook.path("cache", "github", "o__r.json"))
+sys.exit(1 if bad else 0)
+PY
+
+# ---- Review round one on 84e1927: each finding with the input that reproduced it.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$REPO" "$work" "$ORG_STATE" <<'PY' || fails=$((fails+1))
+import glob, json, os, shutil, subprocess, sys, time
+state, hookpy, fleetpy, repo, work, org = sys.argv[1:7]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+def hookrun(ev, env=None): return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True, env=env or os.environ)
+r = os.path.join(work, "watchrepo")
+def fleet(*a, cwd=r, env=None): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=cwd, env=env or {**os.environ, "ORG_TENANT": "work"})
+def live(sid, cwd, branch, turn_open=False):
+    hook.write_json(hook.path("sessions", sid + ".json"), {"session": sid, "cwd": cwd, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "finisher:watchrepo", "branch": branch, "repo": hook.repo_id(cwd), "turn_open": turn_open})
+def dead(sid):
+    s = hook.read_json(hook.path("sessions", sid + ".json")); s["pid"] = 999999; s["pid_kind"] = "harness"; hook.write_json(hook.path("sessions", sid + ".json"), s)
+def rows(): return {(x["change"], x.get("relationship")): x for x in json.loads(fleet("work", "--json").stdout or "[]")}
+def wstate(change, rel): return rows().get((change, rel), {}).get("state")
+def obs(): return [json.loads(l) for l in open(hook.path("watch", "observed.jsonl")).read().splitlines() if l.strip()]
+cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
+for b in ("feat/r1", "feat/r2"): subprocess.run(["git", "branch", b], cwd=r, capture_output=True)
+# 1. unreadable holder evidence is not death
+st2 = os.path.join(work, "state-unreadable"); shutil.rmtree(st2, ignore_errors=True); os.makedirs(os.path.join(st2, "leases"))
+open(os.path.join(st2, "sessions"), "w").write("not a directory\n")
+key = hook.scope(r, cur)
+json.dump(hook.lease_record(key, "holderA", "finisher:watchrepo", r, "held"), open(os.path.join(st2, "leases", hook.safe(key) + ".json"), "w"))
+env2 = {**os.environ, "FLEET_STATE": st2}
+edit = lambda sid: {"hook_event_name": "PreToolUse", "session_id": sid, "cwd": r, "tool_name": "Edit", "tool_input": {"file_path": os.path.join(r, "x.txt"), "old_string": "a", "new_string": "b"}}
+b1 = hookrun(edit("writerB"), env=env2); a1 = hookrun(edit("holderA"), env=env2)
+lease_after = json.load(open(os.path.join(st2, "leases", hook.safe(key) + ".json")))
+report(b1.returncode == 2 and "cannot be read" in b1.stderr and lease_after.get("session") == "holderA" and a1.returncode == 2 and "could not be published" in a1.stderr,
+       "a holder whose session record cannot be read is not dead: the rival is refused and the lease stands; a session that cannot publish its own record is refused too",
+       f"B rc={b1.returncode} {b1.stderr[:160]!r} | A rc={a1.returncode} {a1.stderr[:160]!r} | lease={lease_after.get('session')}")
+# 2. done: the receipt's full head decides
+head_a = "abcdef0" + "a" * 33; head_b = "abcdef0" + "b" * 33
+hook.write_json(hook.path("receipts", head_a + ".build.json"), {"sha": "abcdef0", "head": head_a, "kind": "build", "verdict": "pass", "at": hook.now(), "session": "x", "observable": "x"})
+d_ok = fleet("done", head_a, "--kind", "build"); d_bad = fleet("done", head_b, "--kind", "build")
+report(d_ok.returncode == 0 and d_bad.returncode != 0, "done matches the requested revision against the receipt's full head only; a receipt for another head sharing a prefix is not evidence",
+       f"same rc={d_ok.returncode} other rc={d_bad.returncode} {(d_bad.stdout+d_bad.stderr)[:120]!r}")
+hook._unlink(hook.path("receipts", head_a + ".build.json"))
+# 3/4a. presence belongs to the nearest mapped directory
+sub = os.path.join(r, "src"); os.makedirs(sub, exist_ok=True)
+mapfile = os.path.join(org, "roles.map"); before_map = open(mapfile).read()
+open(mapfile, "a").write(f"{sub} work sub:watchrepo\n")
+live("nested1", sub, cur)
+brows = {x["path"]: x for x in json.loads(fleet("board", "--json").stdout)}
+report(brows.get(sub, {}).get("session") == "nested1" and brows.get(r, {}).get("session") is None and brows.get(r, {}).get("state") == "vacant",
+       "a session in a nested mapped directory is present there and not in the checkout above it",
+       f"sub={brows.get(sub, {}).get('session')} root={brows.get(r, {}).get('session')}/{brows.get(r, {}).get('state')}")
+hook._unlink(hook.path("sessions", "nested1.json")); open(mapfile, "w").write(before_map)
+# 4b. a dead holder beside a live occupant
+k2 = hook.scope(r, "feat/r2")
+live("deadA", r, "feat/r2"); hook.acquire_lease(k2, hook.lease_record(k2, "deadA", "finisher:watchrepo", r, "held")); dead("deadA")
+live("liveB", r, cur)
+fleet("watch", "--once", "--interval", "60s"); fleet("watch", "--once", "--interval", "60s")
+brow = next((x for x in (hook.read_json(hook.path("watch", "board.json")) or []) if x.get("path") == r), {})
+drow = next((x for x in json.loads(fleet("work", "--json").stdout) if x.get("hands") == "deadA"), {})
+report(brow.get("state") == "dead-holding-work" and brow.get("session") == "liveB" and drow.get("state") == "dead" and drow.get("relationship") is None,
+       "a dead holder beside a live occupant still reads dead-holding-work on the board; work shows the dead undeclared holder as dead",
+       f"board={brow.get('state')} occupant={brow.get('session')} holds={brow.get('holds')} work={drow}")
+hook.drop_lease(k2, "deadA"); hook._unlink(hook.path("sessions", "deadA.json")); hook._unlink(hook.path("sessions", "liveB.json"))
+# 5. hands that left, and failed evidence, are attention states
+fleet("dispatch", "feat/r2", "--as", "build", "--for", "hub:alpha")
+wt_r2 = os.path.join(work, "wt-r2"); subprocess.run(["git", "worktree", "add", "-q", wt_r2, "feat/r2"], cwd=r, capture_output=True)
+live("workerC", wt_r2, "feat/r2"); hook.acquire_lease(k2, hook.lease_record(k2, "workerC", "finisher:watchrepo", wt_r2, "held"))
+s_idle = wstate("feat/r2", "build")
+hookrun({"hook_event_name": "SessionEnd", "session_id": "workerC", "cwd": wt_r2, "reason": "exit"})
+s_left = wstate("feat/r2", "build")
+head2 = subprocess.run(["git", "rev-parse", "refs/heads/feat/r2"], cwd=r, capture_output=True, text=True).stdout.strip()
+hook.write_json(hook.path("receipts", head2 + ".build.json"), {"sha": head2[:10], "head": head2, "kind": "build", "verdict": "fail", "at": hook.now(), "session": "workerC", "observable": "x"})
+s_fail = wstate("feat/r2", "build")
+t5 = fleet("watch", "--once", "--interval", "60s").stdout
+report(s_idle == "idle" and s_left == "abandoned" and s_fail == "failed" and "Work needing a decision" in t5 and "failed feat/r2/build" in t5,
+       "declared work whose hands left is abandoned, and failed evidence is failed; both are in the board's decision section, never under fine",
+       f"idle={s_idle} left={s_left} failed={s_fail} board={t5[:240]!r}")
+hook._unlink(hook.path("receipts", head2 + ".build.json")); fleet("undispatch", "feat/r2")
+# 6. a deadline that expired during a sleep gap is unknown, not overdue
+live("sleeper", r, cur, turn_open=True)
+s6 = hook.read_json(hook.path("sessions", "sleeper.json")); s6["turn_open_at"] = hook.now() - 650; s6["last_event_at"] = hook.now() - 650; s6["lane"] = {"cadence": 600.0}; hook.write_json(hook.path("sessions", "sleeper.json"), s6)
+fleet("watch", "--once", "--interval", "60s")
+bj = hook.path("watch", "board.json"); board = hook.read_json(bj) or []
+for x in board:
+    if x.get("path") == r: x["state"] = "busy"
+hook.write_json(bj, board)
+hb = hook.path("watch", "heartbeat.json"); h = hook.read_json(hb); h["at"] = hook.now() - 4 * 60; hook.write_json(hb, h)
+t6 = fleet("watch", "--once", "--interval", "60s")
+st6 = next((x.get("state") for x in (hook.read_json(bj) or []) if x.get("path") == r), None)
+report(st6 == "unknown" and "slept" in t6.stdout, "after a sleep gap, a deadline that expired inside the gap reads unknown, not overdue: the previous tick saw busy and nothing observed the expiry",
+       f"state={st6} out={t6.stdout[:200]!r}")
+hook._unlink(hook.path("sessions", "sleeper.json"))
+# 7. one watcher per machine, even inside the first's tick
+env7 = {**os.environ, "ORG_TENANT": "work", "FLEET_NOTIFY": "sleep 1"}
+pA = subprocess.Popen([sys.executable, fleetpy, "watch", "--interval", "60s"], cwd=r, env=env7, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+time.sleep(0.5)
+try:
+    pB = subprocess.run([sys.executable, fleetpy, "watch", "--interval", "60s"], cwd=r, env=env7, capture_output=True, text=True, timeout=15)
+    b_rc, b_out = pB.returncode, pB.stdout + pB.stderr
+except subprocess.TimeoutExpired as e:
+    b_rc, b_out = None, "second watcher kept running for 15s: " + str(e)
+pA.kill(); pA.wait()
+report(b_rc not in (None, 0) and "already" in b_out, "a second watcher is refused for the first's whole lifetime, not only after its first heartbeat", f"B rc={b_rc} {b_out[:160]!r}")
+# 8. the last word in Codex's transcript shape, and the harness's own statement of it
+tp = os.path.join(work, "codex-transcript.jsonl")
+open(tp, "w").write(json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done: pushed the fix"}]}}) + "\n")
+live("codexS", r, cur)
+hookrun({"hook_event_name": "Stop", "session_id": "codexS", "cwd": r, "transcript_path": tp})
+words = " ".join((hook.read_json(f) or {}).get("text", "") for f in glob.glob(os.path.join(state, "last-word", "*.json")))
+hookrun({"hook_event_name": "Stop", "session_id": "codexS", "cwd": r, "last_assistant_message": "final: shipped it"})
+words2 = " ".join((hook.read_json(f) or {}).get("text", "") for f in glob.glob(os.path.join(state, "last-word", "*.json")))
+report("pushed the fix" in words and "shipped it" in words2, "the last word is read from Codex's transcript shape, and from the event's own last_assistant_message when given",
+       f"after transcript={words[:120]!r} after event={words2[:120]!r}")
+hook._unlink(hook.path("sessions", "codexS.json"))
+# 9. a legacy-keyed lease published after the marker still counts
+live("legacyA", r, cur)
+hook._unlink(hook.path("leases", hook.safe(key) + ".json"))
+json.dump({"repo": hook.repo_id(r), "branch": cur, "session": "legacyA", "role": "finisher:watchrepo", "cwd": r, "since": hook.now(), "note": "legacy writer"}, open(hook.path("leases", "legacy-after-marker.json"), "w"))
+b9 = hookrun(edit("writerZ"))
+report(b9.returncode == 2 and "legacyA" in b9.stderr, "a legacy-keyed lease written after the migration marker is re-keyed before the next verdict, so its live holder is still the holder",
+       f"rc={b9.returncode} {b9.stderr[:200]!r}")
+hook.drop_lease(key, "legacyA"); hook._unlink(hook.path("sessions", "legacyA.json")); hook._unlink(hook.path("leases", "legacy-after-marker.json"))
+# 10. reassignment is a transition the hub sees
+fleet("dispatch", "feat/r1", "--as", "build", "--for", "hub:alpha"); fleet("watch", "--once", "--interval", "60s")
+fleet("reassign", "feat/r1", "--for", "hub:beta"); fleet("watch", "--once", "--interval", "60s")
+report(any(o.get("change") == "feat/r1" and o.get("what") == "for" and o.get("from") == "hub:alpha" and o.get("to") == "hub:beta" for o in obs()),
+       "a change of accountable role is a recorded transition (what=for), state unchanged", f"tail={obs()[-3:]}")
+# 11. MCP: accountable defaults to the caller's role, never the transport; unroled needs for
+mcp = os.path.join(os.environ["FLEET_HOOK_DIR"], "fleet-mcp.py")
+def call(cwd, args, i):
+    lines = [json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}), json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+             json.dumps({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "fleet_dispatch", "arguments": args}})]
+    out = subprocess.run([sys.executable, mcp], input="\n".join(lines) + "\n", capture_output=True, text=True, cwd=cwd, env={**os.environ, "ORG_TENANT": "work"}).stdout
+    return next((json.loads(l) for l in out.splitlines() if l.strip() and json.loads(l).get("id") == i), {})
+unroled = os.path.join(work, "unroled-repo"); subprocess.run(["git", "init", "-q", unroled]); subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=unroled); subprocess.run(["git", "branch", "feat/u"], cwd=unroled, capture_output=True)
+m1 = call(r, {"change": "feat/r1", "as": "scope", "cwd": r}, 3)
+m2 = call(unroled, {"change": "feat/u", "as": "scope", "cwd": unroled}, 4)
+rec1 = hook.read_json(hook.path("dispatch", hook.safe(hook.repo_id(r) + "__feat/r1__scope") + ".json")) or {}
+m2text = json.dumps(m2.get("result", {}).get("content", ""))
+report(not m1.get("result", {}).get("isError") and rec1.get("for") == "finisher:watchrepo" and rec1.get("by") == "finisher:watchrepo" and m2.get("result", {}).get("isError") is True and "role" in m2text,
+       "an MCP dispatch without `for` is accountable to the caller's own role; from an unroled directory it is refused, never `mcp`",
+       f"m1={json.dumps(m1)[:160]} rec={rec1.get('for')}/{rec1.get('by')} m2={json.dumps(m2)[:200]}")
+fleet("undispatch", "feat/r1")
 sys.exit(1 if bad else 0)
 PY
 

@@ -168,6 +168,7 @@ const (
 	HeldMalformed HeldState = "malformed" //
 	HeldOrphaned  HeldState = "orphaned"  // dead resource holder
 	HeldDead      HeldState = "dead"      // dead branch holder
+	HeldUnknown   HeldState = "unknown"   // the holder's record cannot be read: not free, not taken over
 	HeldLive      HeldState = "live"      // a live foreign holder
 )
 
@@ -187,13 +188,40 @@ func HeldByOther(key, sid string) (HeldState, Rec) {
 	if S(cur, "session") == sid {
 		return HeldFree, cur
 	}
-	if SessionAlive(ReadJSON(Path("sessions", S(cur, "session")+".json"))) {
+	alive, known := Liveness(S(cur, "session"))
+	if !known {
+		return HeldUnknown, cur
+	}
+	if alive {
 		return HeldLive, cur
 	}
 	if IsResource(key) {
 		return HeldOrphaned, cur
 	}
 	return HeldDead, cur
+}
+
+// Liveness is observed liveness with its evidence: alive, and whether the evidence
+// could be read at all. A record that cannot be read for any reason other than
+// absence — the sessions directory unavailable, the file unparseable — is UNKNOWN,
+// never dead. Unavailable evidence must not become proof of death on the lease path.
+func Liveness(sid string) (alive, known bool) {
+	b, err := os.ReadFile(Path("sessions", sid+".json"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return false, false
+		}
+		st, serr := os.Stat(Path("sessions"))
+		if serr != nil || !st.IsDir() {
+			return false, false
+		}
+		return false, true
+	}
+	rec := ReadJSONBytes(b)
+	if rec == nil {
+		return false, false
+	}
+	return SessionAlive(rec), true
 }
 
 // TestPause is the substrate's one test seam. A TOCTOU race cannot be proven by
@@ -246,7 +274,13 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 		if holderRole == "" {
 			holderRole = "a session"
 		}
-		if SessionAlive(ReadJSON(Path("sessions", S(cur, "session")+".json"))) {
+		alive, known := Liveness(S(cur, "session"))
+		if !known {
+			reason = fmt.Sprintf("%s is held by %s %s and the holder's session record cannot be read (%s). Unavailable evidence is not death: not free, not taken over. Next action: check that %s is a readable directory, then retry.",
+				KeyLabel(key), holderRole, Short(S(cur, "session")), Path("sessions", S(cur, "session")+".json"), Path("sessions"))
+			return nil
+		}
+		if alive {
 			what := "branch " + branch
 			if IsResource(key) {
 				what = key

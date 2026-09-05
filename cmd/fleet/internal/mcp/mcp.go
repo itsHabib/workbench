@@ -60,7 +60,7 @@ var tools = []schema{
 	{"name": "fleet_assign",
 		"description": "Place work into a free slot: check the branch out there and record the assignment the slot's next session reads.",
 		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "cwd": cwdArg},
-			"required": []any{"slot", "branch"}}},
+			"required": []any{"slot", "branch", "cwd"}}},
 	{"name": "fleet_dispatch",
 		"description": "The one declared act: write a change's ownership row (relationship, accountable role, due), placed in a slot when named; refused over live hands unless take.",
 		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),

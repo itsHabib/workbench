@@ -148,15 +148,17 @@ func RolesMap() string { return filepath.Join(OrgState, "roles.map") }
 // an exact match, and an unlisted directory has no role rather than a borrowed one.
 func MapRowsFor(cwd string) (role, tenant, slot string) {
 	_, rows := MapRows(RolesMap())
-	want := NormCase(LongPath(cwd))
+	// Canonical on both sides: a map entry written as /var/x and a cwd reported as
+	// /private/var/x are one directory.
+	want := canonPath(cwd)
 	best := 0
 	for _, r := range rows {
-		entry := NormCase(LongPath(r.Path))
+		entry := canonPath(r.Path)
 		if entry == want {
 			role, slot = r.Role, r.Slot
 		}
 		// An ancestor is a path-component prefix, never a string prefix.
-		above := entry == want || strings.HasPrefix(want, strings.TrimRight(entry, "/")+"/")
+		above := entry == want || Within(cwd, r.Path)
 		if above && len(entry) > best {
 			best, tenant = len(entry), r.Tenant
 		}

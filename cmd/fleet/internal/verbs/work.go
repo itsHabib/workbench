@@ -114,8 +114,9 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by string, take bool) e
 	if err != nil {
 		return err
 	}
-	if by == "" {
-		by = "operator"
+	by = dispatcher(by)
+	if forRole == "" && by == "mcp" {
+		return refuse("fleet dispatch: %s has no role bound, so the dispatching hub cannot be told from the call; pass for=<role>", cwd())
 	}
 	if forRole == "" {
 		forRole = by
@@ -149,6 +150,19 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by string, take bool) e
 	}
 	say("dispatched %s/%s for %s%s; %s", branch, rel, forRole, tail, upsertOwnership(rid, branch))
 	return nil
+}
+
+// dispatcher is who is acting: the role bound to the cwd when there is one; else the
+// operator at a terminal, or the transport's name for an MCP call with no role — which
+// is never allowed to become the accountable column.
+func dispatcher(by string) string {
+	if role := fleet.RoleOf(cwd()); role != "" {
+		return role
+	}
+	if by == "" {
+		return "operator"
+	}
+	return by
 }
 
 // CmdReassign moves every row of a change to another accountable role. Two
@@ -217,6 +231,7 @@ func branchHead(rid, branch string) string {
 func WorkRows(forRole string) []WorkRow {
 	now := fleet.Now()
 	declared := map[string]bool{}
+	sessions := sessionRows()
 	var rows []WorkRow
 	for _, d := range dispatchRows() {
 		rid, branch, rel := fleet.S(d, "repo"), fleet.S(d, "change"), fleet.S(d, "relationship")
@@ -239,20 +254,34 @@ func WorkRows(forRole string) []WorkRow {
 				state = "idle"
 			}
 		}
+		if state == "dispatched" {
+			// No hands now. A session that left with the branch is not "never started".
+			for _, s := range sessions {
+				if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) {
+					state = "abandoned"
+					row["left"] = s["session"]
+					break
+				}
+			}
+		}
 		if head := branchHead(rid, branch); head != "" {
 			row["head"] = head
 			for _, r := range receiptRows(head, rel, 0, false) {
 				if fleet.S(r, "malformed") != "" {
 					continue
 				}
+				// Rows are newest first: the latest receipt of the kind decides.
 				if fleet.S(r, "verdict") == "pass" {
 					state = "done"
 					row["done_at"] = r["at"]
+				} else if state != "dead" {
+					state = "failed"
+					row["failed_at"] = r["at"]
 				}
-				break // rows are newest first: the latest receipt of the kind decides
+				break
 			}
 		}
-		if due := fleet.F(d, "due"); due > 0 && now > due && state != "done" && state != "dead" {
+		if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle") {
 			state = "late"
 		}
 		row["state"] = state
@@ -264,12 +293,13 @@ func WorkRows(forRole string) []WorkRow {
 			continue
 		}
 		sid := fleet.S(l, "session")
+		state := "undeclared"
 		if !fleet.SessionAlive(fleet.SessionRecord(sid)) {
-			continue
+			state = "dead" // a dead holder nobody declared is still a dead holder
 		}
 		parts := fleet.KeyParts(key)
 		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
-			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": "undeclared", "head": nil, "done_at": nil})
+			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil})
 	}
 	rows = append(rows, remoteRows(declared, now)...)
 	if forRole != "" {
@@ -281,7 +311,7 @@ func WorkRows(forRole string) []WorkRow {
 		}
 		rows = mine
 	}
-	order := map[string]int{"dead": 0, "late": 1, "undeclared": 2, "working": 3, "idle": 4, "dispatched": 5, "remote": 6, "done": 7}
+	order := map[string]int{"dead": 0, "failed": 1, "abandoned": 2, "late": 3, "undeclared": 4, "working": 5, "idle": 6, "dispatched": 7, "remote": 8, "done": 9}
 	sortBy(rows, func(a, b WorkRow) bool {
 		oa, ob := order[fleet.S(a, "state")], order[fleet.S(b, "state")]
 		if oa != ob {
@@ -293,7 +323,7 @@ func WorkRows(forRole string) []WorkRow {
 }
 
 // WorkAttention is the set of work states a hub must decide something about.
-var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true}
+var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true}
 
 // WorkLine is one row as a hub reads it.
 func WorkLine(r WorkRow, now float64) string {
@@ -304,6 +334,9 @@ func WorkLine(r WorkRow, now float64) string {
 	who := "nobody"
 	if h := fleet.S(r, "hands"); h != "" {
 		who = fleet.Short(h)
+	}
+	if l := fleet.S(r, "left"); l != "" {
+		who = fleet.Short(l) + " left"
 	}
 	acc := fleet.S(r, "for")
 	if acc == "" {

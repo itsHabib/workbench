@@ -30,20 +30,36 @@ func sessionsAt(path string, rows []fleet.Rec) []fleet.Rec {
 	if rows == nil {
 		rows = sessionRows()
 	}
-	want := strings.TrimRight(canon(path), "/")
+	_, mapped := fleet.MapRows(fleet.RolesMap())
+	want := pathKey(path)
 	var hits []fleet.Rec
 	for _, r := range rows {
 		c := fleet.S(r, "cwd")
-		if c == "" {
+		if c == "" || !fleet.Within(c, path) {
 			continue
 		}
-		cc := canon(c)
-		if cc == want || strings.HasPrefix(cc, want+"/") {
-			hits = append(hits, r)
+		// Presence belongs to the NEAREST mapped directory: a session in a nested
+		// roled worktree is not also in the checkout above it.
+		if nearestMapped(c, mapped) != want {
+			continue
 		}
+		hits = append(hits, r)
 	}
 	sortBy(hits, func(a, b fleet.Rec) bool { return fleet.F(a, "last_event_at") > fleet.F(b, "last_event_at") })
 	return hits
+}
+
+func pathKey(p string) string { return strings.TrimRight(canon(p), `/\`) }
+
+// nearestMapped is the longest mapped path that contains cwd, as a pathKey, or "".
+func nearestMapped(cwd string, mapped []fleet.MapRow) string {
+	best, bestLen := "", -1
+	for _, m := range mapped {
+		if fleet.Within(cwd, m.Path) && len(m.Path) > bestLen {
+			best, bestLen = pathKey(m.Path), len(m.Path)
+		}
+	}
+	return best
 }
 
 // sessionState is one of the board's states from a session record, what it holds,
@@ -120,13 +136,21 @@ func BoardRows() []BoardRow {
 		if holds == nil {
 			holds = []string{}
 		}
+		// Work held by a DEAD session here is reported whichever occupant wins the
+		// row: a live tab beside a dead holder must not hide the holder.
+		deadHolds := []string{}
+		for _, r := range here {
+			if !fleet.SessionAlive(r) {
+				deadHolds = append(deadHolds, bySession[fleet.S(r, "session")]...)
+			}
+		}
 		cadence := laneCadence(rec, mr.Role)
 		state := "vacant"
 		if rec != nil {
 			state = sessionState(rec, holds, cadence)
 		}
 		row := BoardRow{"path": mr.Path, "tenant": mr.Tenant, "role": mr.Role, "slot": nilIfEmpty(mr.Slot), "state": state,
-			"session": nil, "branch": nil, "holds": holds, "last_event_at": nil, "last_event": nil, "turn_open_at": nil,
+			"session": nil, "branch": nil, "holds": holds, "dead_holds": deadHolds, "last_event_at": nil, "last_event": nil, "turn_open_at": nil,
 			"cadence": nilIfZero(cadence), "others": 0, "left": 0}
 		if rec != nil {
 			row["session"] = fleet.S(rec, "session")
@@ -700,9 +724,7 @@ func CmdAssign(slot, branch, brief, by, forRole string) error {
 			out = refuse("fleet assign: after checkout %s is on %s, not %s; nothing was assigned", slot, fleet.PyRepr(landed), fleet.PyRepr(branch))
 			return nil
 		}
-		if by == "" {
-			by = "operator"
-		}
+		by = dispatcher(by)
 		// `by` is who dispatched; `for` is the role accountable until the work is done. The
 		// same session today, and they diverge the moment there are two hubs — a column on
 		// the row, never a tree in configuration, is what makes splitting a hub two commands.

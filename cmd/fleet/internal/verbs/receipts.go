@@ -151,11 +151,11 @@ func receiptRows(sha, kind string, since float64, hasSince bool) []fleet.Rec {
 			rows = append(rows, fleet.Rec{"malformed": p})
 			continue
 		}
-		if sha != "" {
-			rs := fleet.S(r, "sha")
-			if !(strings.HasPrefix(fleet.S(r, "head"), sha) || (rs != "" && strings.HasPrefix(sha, rs))) {
-				continue
-			}
+		// The requested revision is a prefix of the receipt's FULL head, or it is not
+		// this receipt. The stored short sha never widens the match: two heads sharing
+		// seven characters are two heads.
+		if sha != "" && !strings.HasPrefix(fleet.S(r, "head"), sha) {
+			continue
 		}
 		if kind != "" && fleet.S(r, "kind") != kind {
 			continue

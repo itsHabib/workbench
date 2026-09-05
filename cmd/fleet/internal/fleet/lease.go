@@ -256,6 +256,21 @@ func SessionAlive(rec Rec) bool {
 	return Now()-F(rec, "last_event_at") < float64(StaleS)
 }
 
+// changedSince reports whether any of the store's subdirectories has a newer
+// modification time than the marker file.
+func changedSince(marker string, subs ...string) bool {
+	mst, err := os.Stat(marker)
+	if err != nil {
+		return true
+	}
+	for _, sub := range subs {
+		if st, err := os.Stat(Path(sub)); err == nil && st.ModTime().After(mst.ModTime()) {
+			return true
+		}
+	}
+	return false
+}
+
 // MigrateLegacyKeys re-keys per-branch state written before keys became strings.
 // Idempotent, marker-guarded so the steady state is one stat.
 //
@@ -271,7 +286,10 @@ func SessionAlive(rec Rec) bool {
 // collision for an operator to resolve, and both files are left for `fleet leases`.
 func MigrateLegacyKeys() {
 	marker := Path("migrated-keys.v1")
-	if exists(marker) {
+	// The marker says a pass completed; it cannot say no old writer has published a
+	// legacy record since. A directory that changed after the marker is rescanned —
+	// one stat per directory — and the marker re-stamped after.
+	if exists(marker) && !changedSince(marker, "leases", "stop", "handoff") {
 		return
 	}
 	done := true
