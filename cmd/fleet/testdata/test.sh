@@ -1124,7 +1124,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_who\",\"arguments\":{\"name\":\"feat/q\",\"cwd\":\"$SL1\"}}}" \
   | (cd "$work" && "$PY" "$here/fleet-mcp.py") > "$work/mcp.out" 2>"$work/mcp.err"
-"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 8 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
+"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 11 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
 import json, sys
 by = {}
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -1132,7 +1132,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
 bad = []
 if by[1]["result"]["serverInfo"]["name"] != "fleet": bad.append("initialize")
 tools = by[2]["result"]["tools"]
-if len(tools) != 8 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
+if len(tools) != 11 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
 if sys.argv[2] not in by[3]["result"]["content"][0]["text"] or by[3]["result"]["isError"]: bad.append("who")
 if not by[4]["result"]["isError"] or "busy" not in by[4]["result"]["content"][0]["text"]: bad.append("assign refusal")
 if by[5]["result"]["isError"] or '"ok": false' not in by[5]["result"]["content"][0]["text"]: bad.append("done")
@@ -1562,6 +1562,106 @@ report(a.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == 
 fleet("unassign", "watchrepo-finisher-1")
 for sid in (hub, worker):
     hookrun({"hook_event_name": "SessionEnd", "session_id": sid, "cwd": repo, "reason": "exit"})
+sys.exit(1 if bad else 0)
+PY
+
+# ---- Go port, rung 5: the ownership row. dispatch declares (change, relationship, for, due, slot);
+# hands and state are observed; done is a passing receipt of the relationship's kind at the head;
+# undeclared work is visible; reassign moves `for` alone; the watcher folds rows and the hub's
+# prompt carries the ones needing a decision.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$REPO" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, hookpy, fleetpy, repo, work = sys.argv[1:6]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+def hookrun(ev): return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True)
+def ctx(out):
+    try: return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    except Exception: return out
+r = os.path.join(work, "watchrepo")
+def fleet(*a): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=r, env={**os.environ, "ORG_TENANT": "work"})
+def rows():
+    try: return {(x["change"], x.get("relationship")): x for x in json.loads(fleet("work", "--json").stdout)}
+    except Exception as e: return {}
+def state_of(change, rel): return rows().get((change, rel), {}).get("state")
+subprocess.run(["git", "branch", "feat/w3"], cwd=r, capture_output=True)
+bad_as = fleet("dispatch", "feat/w3", "--as", "Not A Word")
+d = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:alpha", "--due", "1s", "--brief", "verify the thing")
+rec = hook.read_json(hook.path("dispatch", hook.safe(hook.repo_id(r) + "__feat/w3__verify") + ".json")) or {}
+report(bad_as.returncode != 0 and d.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "operator" and rec.get("relationship") == "verify"
+       and rec.get("due", 0) > rec.get("at", 1) and state_of("feat/w3", "verify") == "dispatched",
+       "fleet dispatch declares the row (change, relationship, for, by, due) and work reads it as dispatched",
+       f"bad-as rc={bad_as.returncode} dispatch rc={d.returncode} {(d.stdout+d.stderr)[:160]!r} rec={rec} state={state_of('feat/w3','verify')}")
+# hands: a live session takes the branch lease -> idle; turn open -> working
+key = hook.scope(r, "feat/w3")
+hook.write_json(hook.path("sessions", "hands5.json"), {"session": "hands5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": "feat/w3", "turn_open": False})
+hook.acquire_lease(key, hook.lease_record(key, "hands5", "x:watchrepo", r, "held"))
+s_idle = state_of("feat/w3", "verify")
+srec = hook.read_json(hook.path("sessions", "hands5.json")); srec["turn_open"] = True; hook.write_json(hook.path("sessions", "hands5.json"), srec)
+s_work = state_of("feat/w3", "verify")
+hands = rows().get(("feat/w3", "verify"), {}).get("hands")
+report(s_idle == "idle" and s_work == "working" and hands == "hands5",
+       "hands are observed from the branch lease: idle with the turn closed, working with it open",
+       f"idle={s_idle} working={s_work} hands={hands}")
+# a second dispatch of the same row with live hands is refused without --take; --take rewrites it
+again = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:beta")
+took = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:beta", "--due", "1s", "--take")
+report(again.returncode != 0 and "hands5" in (again.stdout + again.stderr) and took.returncode == 0 and rows()[("feat/w3", "verify")]["for"] == "hub:beta",
+       "a row with live hands is not re-dispatched by accident: refused naming the hands; --take rewrites it",
+       f"again rc={again.returncode} {(again.stdout+again.stderr)[:160]!r} took rc={took.returncode} for={rows().get(('feat/w3','verify'),{}).get('for')}")
+# late: due has passed and nothing is done
+time.sleep(1.1)
+s_late = state_of("feat/w3", "verify")
+# dead: the hands' session is gone
+srec["pid"] = 999999; srec["pid_kind"] = "harness"; hook.write_json(hook.path("sessions", "hands5.json"), srec)
+s_dead = state_of("feat/w3", "verify")
+report(s_late == "late" and s_dead == "dead", "past due and not done reads late; the hands' session gone reads dead", f"late={s_late} dead={s_dead}")
+# done: a passing receipt of the relationship's kind at the branch head, even though it is past due
+head = subprocess.run(["git", "rev-parse", "refs/heads/feat/w3"], cwd=r, capture_output=True, text=True).stdout.strip()
+hook.write_json(hook.path("receipts", head + ".other.json"), {"sha": head[:10], "head": head, "kind": "other", "verdict": "pass", "at": hook.now(), "session": "hands5", "observable": "x"})
+s_other = state_of("feat/w3", "verify")
+hook.write_json(hook.path("receipts", head + ".verify.json"), {"sha": head[:10], "head": head, "kind": "verify", "verdict": "pass", "at": hook.now() + 1, "session": "hands5", "observable": "x"})
+s_done = state_of("feat/w3", "verify")
+hook.write_json(hook.path("receipts", head + ".verify.json"), {"sha": head[:10], "head": head, "kind": "verify", "verdict": "fail", "at": hook.now() + 2, "session": "hands5", "observable": "x"})
+s_failed = state_of("feat/w3", "verify")
+report(s_other == "dead" and s_done == "done" and s_failed == "dead",
+       "done is a passing receipt of the relationship's kind at the head; a receipt of another kind is not, and a later failing one undoes it",
+       f"other-kind={s_other} done={s_done} after-fail={s_failed}")
+# undeclared: a live session holds a branch nobody dispatched
+key2 = hook.scope(r, "feat/w2")
+hook.write_json(hook.path("sessions", "undec5.json"), {"session": "undec5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": "feat/w2", "turn_open": True})
+hook.acquire_lease(key2, hook.lease_record(key2, "undec5", "x:watchrepo", r, "held"))
+u = rows().get(("feat/w2", None), {})
+report(u.get("state") == "undeclared" and u.get("hands") == "undec5" and u.get("for") is None,
+       "a live session on a branch nobody dispatched shows as undeclared with no one accountable",
+       f"row={u}")
+# reassign moves `for` alone; --for filters
+ra = fleet("reassign", "feat/w3", "--for", "hub:gamma")
+mine = fleet("work", "--for", "hub:gamma").stdout
+theirs = fleet("work", "--for", "hub:beta").stdout
+report(ra.returncode == 0 and rows()[("feat/w3", "verify")]["for"] == "hub:gamma" and "feat/w3/verify" in mine and "feat/w3" not in theirs,
+       "reassign moves the accountable role and nothing else; work --for shows one hub's rows",
+       f"rc={ra.returncode} for={rows().get(('feat/w3','verify'),{}).get('for')} mine={mine[:120]!r} theirs={theirs[:120]!r}")
+# the watcher folds the rows; the hub's prompt names the ones needing a decision and the transitions
+t = fleet("watch", "--once", "--interval", "60s")
+wj = hook.read_json(hook.path("watch", "work.json")) or []
+obs = [json.loads(l) for l in open(hook.path("watch", "observed.jsonl")).read().splitlines() if l.strip()]
+hub = "rung5_hub"
+hookrun({"hook_event_name": "SessionStart", "session_id": hub, "cwd": repo, "source": "startup"})
+hookrun({"hook_event_name": "UserPromptSubmit", "session_id": hub, "cwd": repo, "prompt": "hi"})
+fleet("undispatch", "feat/w3")
+fleet("watch", "--once", "--interval", "60s")
+h2 = ctx(hookrun({"hook_event_name": "UserPromptSubmit", "session_id": hub, "cwd": repo, "prompt": "and now"}).stdout)
+report(any(w.get("state") == "dead" and w.get("change") == "feat/w3" for w in wj) and any(o.get("change") == "feat/w3" and o.get("to") == "dead" for o in obs)
+       and "Work needing a decision" in t.stdout and "undeclared feat/w2" in t.stdout and "dead → gone" in h2,
+       "the watcher folds work rows (work.json, observed transitions, the board's work section); a retired row is a transition to gone at the hub's next prompt",
+       f"work.json={[(w.get('change'), w.get('state')) for w in wj]} board={t.stdout[:300]!r} prompt2={h2[:300]!r}")
+hookrun({"hook_event_name": "SessionEnd", "session_id": hub, "cwd": repo, "reason": "exit"})
+hook.drop_lease(key2, "undec5"); hook._unlink(hook.path("sessions", "undec5.json")); hook._unlink(hook.path("sessions", "hands5.json"))
+hook.drop_lease(key, "hands5")
 sys.exit(1 if bad else 0)
 PY
 

@@ -90,23 +90,53 @@ func Tick(interval time.Duration) (string, error) {
 			"session": r["session"], "branch": r["branch"]}
 		transitions = append(transitions, t)
 	}
+	// The ownership rows, diffed by (change, relationship). A row that disappears
+	// (undispatched, or an undeclared holder that let go) is a transition to "gone".
+	prevWork := map[string]fleet.Rec{}
+	for _, r := range readRows(filepath.Join(dir(), "work.json")) {
+		prevWork[workKey(r)] = r
+	}
+	work := make([]fleet.Rec, 0)
+	seen := map[string]bool{}
+	for _, w := range verbs.WorkRows("") {
+		r := fleet.Rec(w)
+		k := workKey(r)
+		seen[k] = true
+		work = append(work, r)
+		from, to := fleet.S(prevWork[k], "state"), fleet.S(r, "state")
+		if from == to {
+			continue
+		}
+		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+			"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]})
+	}
+	for k, r := range prevWork {
+		if seen[k] || fleet.S(r, "state") == "gone" {
+			continue
+		}
+		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+			"from": nilIfEmpty(fleet.S(r, "state")), "to": "gone", "session": r["hands"], "branch": r["change"]})
+	}
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return "", err
 	}
 	for _, t := range transitions {
 		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), t)
-		if attention[fleet.S(t, "to")] {
+		if attention[fleet.S(t, "to")] || (fleet.S(t, "change") != "" && (verbs.WorkAttention[fleet.S(t, "to")] || fleet.S(t, "to") == "done")) {
 			notify(t)
 		}
 	}
-	md := render(rows, now, prev, slept, transitions)
+	md := render(rows, work, now, prev, slept, transitions)
 	if err := fleet.WriteJSON(filepath.Join(dir(), "board.json"), rowsAny(rows)); err != nil {
+		return "", err
+	}
+	if err := fleet.WriteJSON(filepath.Join(dir(), "work.json"), rowsAny(work)); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(dir(), "board.md"), []byte(md), 0o644); err != nil {
 		return "", err
 	}
-	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "transitions": float64(len(transitions))}
+	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions))}
 	if slept {
 		hb["gap_from"] = prevAt
 	}
@@ -153,6 +183,11 @@ func fold(now, prevAt float64, slept bool) []fleet.Rec {
 		}
 	}
 	return rows
+}
+
+// workKey identifies an ownership row across ticks.
+func workKey(r fleet.Rec) string {
+	return fleet.S(r, "repo") + "|" + fleet.S(r, "change") + "|" + fleet.S(r, "relationship")
 }
 
 func holdsOf(r fleet.Rec) []string {
@@ -204,7 +239,7 @@ func readRows(p string) []fleet.Rec {
 
 // render is the attention-budgeted board: rows needing a decision first, grouped by
 // role; then what changed this tick; then everything that is fine, as one line.
-func render(rows []fleet.Rec, now float64, prev fleet.Rec, slept bool, transitions []fleet.Rec) string {
+func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, transitions []fleet.Rec) string {
 	host, _ := os.Hostname()
 	var b strings.Builder
 	hbAge := "first tick"
@@ -233,6 +268,22 @@ func render(rows []fleet.Rec, now float64, prev fleet.Rec, slept bool, transitio
 			b.WriteString(line(r, now))
 		}
 	}
+	// Work first by accountable role: the rows a hub must decide something about.
+	var needWork, fineWork []fleet.Rec
+	for _, w := range work {
+		if verbs.WorkAttention[fleet.S(w, "state")] {
+			needWork = append(needWork, w)
+			continue
+		}
+		fineWork = append(fineWork, w)
+	}
+	sort.SliceStable(needWork, func(i, j int) bool { return fleet.S(needWork[i], "for") < fleet.S(needWork[j], "for") })
+	if len(needWork) > 0 {
+		fmt.Fprintf(&b, "\n## Work needing a decision (%d)\n", len(needWork))
+		for _, w := range needWork {
+			fmt.Fprintf(&b, "- %s\n", verbs.WorkLine(w, now))
+		}
+	}
 	if len(unknown) > 0 {
 		fmt.Fprintf(&b, "\n## Unknown (%d) — no evidence since the machine slept\n", len(unknown))
 		for _, r := range unknown {
@@ -245,6 +296,10 @@ func render(rows []fleet.Rec, now float64, prev fleet.Rec, slept bool, transitio
 			from := fleet.S(t, "from")
 			if from == "" {
 				from = "—"
+			}
+			if c := fleet.S(t, "change"); c != "" {
+				fmt.Fprintf(&b, "- %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), from, fleet.S(t, "to"))
+				continue
 			}
 			fmt.Fprintf(&b, "- %s %s: %s → %s\n", fleet.S(t, "role"), nameOf(t), from, fleet.S(t, "to"))
 		}
@@ -269,7 +324,36 @@ func render(rows []fleet.Rec, now float64, prev fleet.Rec, slept bool, transitio
 	} else if len(rows) == 0 {
 		b.WriteString("\nno roled paths\n")
 	}
+	if len(fineWork) > 0 {
+		wc := map[string]int{}
+		for _, w := range fineWork {
+			wc[fleet.S(w, "state")]++
+		}
+		var wp []string
+		for _, k := range []string{"working", "idle", "dispatched", "done"} {
+			if wc[k] > 0 {
+				wp = append(wp, fmt.Sprintf("%d %s", wc[k], k))
+			}
+		}
+		fmt.Fprintf(&b, "%d work rows fine (%s)\n", len(fineWork), strings.Join(wp, ", "))
+	}
 	return b.String()
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+// workName is change/relationship, or the change alone for an undeclared row.
+func workName(r fleet.Rec) string {
+	n := fleet.S(r, "change")
+	if rel := fleet.S(r, "relationship"); rel != "" {
+		n += "/" + rel
+	}
+	return n
 }
 
 func nameOf(r fleet.Rec) string {

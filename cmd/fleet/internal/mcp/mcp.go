@@ -61,6 +61,19 @@ var tools = []schema{
 		"description": "Place work into a free slot: check the branch out there and record the assignment the slot's next session reads.",
 		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "cwd": cwdArg},
 			"required": []any{"slot", "branch"}}},
+	{"name": "fleet_dispatch",
+		"description": "The one declared act: write a change's ownership row (relationship, accountable role, due), placed in a slot when named; refused over live hands unless take.",
+		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),
+			"for": str("accountable role; default: the dispatcher"), "due": str("duration like 45m or 2h"), "slot": str("free slot to place the work in (fleet_slots)"),
+			"brief": str("one line the slot's session reads at start"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
+			"required": []any{"change", "as", "cwd"}}},
+	{"name": "fleet_work",
+		"description": "Every ownership row on this machine with its observed state: dead, late, undeclared (need a decision); working, idle, dispatched, done.",
+		"inputSchema": schema{"type": "object", "properties": schema{"for": str("only rows this role is accountable for"), "cwd": cwdArg}}},
+	{"name": "fleet_reassign",
+		"description": "Move every row of a change to another accountable role; the second command of splitting a hub.",
+		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch name or #<n>"), "for": str("the role now accountable"), "cwd": cwdArg},
+			"required": []any{"change", "for", "cwd"}}},
 	{"name": "fleet_take",
 		"description": "Lease a machine resource (slot:<name>) for this session; refused if a live session holds it, orphaned needs takeover.",
 		"inputSchema": schema{"type": "object", "properties": schema{"resource": str("slot:<name>"), "why": str("one line, recorded on the lease"),
@@ -239,6 +252,15 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		return buf.String(), false
 	case "fleet_assign":
 		return runVerb(func() error { return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp", s("for")) })
+	case "fleet_dispatch":
+		take, _ := a["take"].(bool)
+		return runVerb(func() error {
+			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", take)
+		})
+	case "fleet_work":
+		return js(verbs.WorkRows(s("for"))), false
+	case "fleet_reassign":
+		return runVerb(func() error { return verbs.CmdReassign(s("change"), s("for")) })
 	case "fleet_take":
 		takeover, _ := a["takeover"].(bool)
 		return runVerb(func() error { return verbs.CmdTake(s("resource"), s("why"), takeover, s("session")) })

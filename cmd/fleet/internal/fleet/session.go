@@ -423,14 +423,38 @@ func BoardLines(sincePrompt float64) []string {
 			fine++
 		}
 	}
+	// Ownership rows: the ones needing a decision are named; the rest are a count.
+	work, _ := readAny(Path("watch", "work.json")).([]any)
+	fineWork := 0
+	for _, raw := range work {
+		r, _ := raw.(map[string]any)
+		st := S(r, "state")
+		if st != "dead" && st != "late" && st != "undeclared" {
+			fineWork++
+			continue
+		}
+		name := S(r, "change")
+		if rel := S(r, "relationship"); rel != "" {
+			name += "/" + rel
+		}
+		acc := S(r, "for")
+		if acc == "" {
+			acc = "no one accountable"
+		}
+		who := "nobody"
+		if h := S(r, "hands"); h != "" {
+			who = Short(h)
+		}
+		need = append(need, fmt.Sprintf("%s %s for %s (hands %s)", st, name, acc, who))
+	}
 	if len(need) > 0 {
 		line := fmt.Sprintf("[fleet] board (%s ago): %d need a decision — %s", FmtAge(age), len(need), strings.Join(need, "; "))
 		if len(line) > 700 {
 			line = line[:700] + "…"
 		}
 		lines = append(lines, line)
-	} else if len(rows) > 0 {
-		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine", FmtAge(age), fine))
+	} else if len(rows) > 0 || fineWork > 0 {
+		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine, %d work rows fine", FmtAge(age), fine, fineWork))
 	}
 	// Transitions since this session's last prompt, newest last, capped.
 	if sincePrompt > 0 {
@@ -444,6 +468,17 @@ func BoardLines(sincePrompt float64) []string {
 			from := S(t, "from")
 			if from == "" {
 				from = "—"
+			}
+			if c := S(t, "change"); c != "" {
+				if rel := S(t, "relationship"); rel != "" {
+					c += "/" + rel
+				}
+				acc := S(t, "for")
+				if acc == "" {
+					acc = "—"
+				}
+				changes = append(changes, fmt.Sprintf("%s %s: %s → %s", acc, c, from, S(t, "to")))
+				continue
 			}
 			name := S(t, "slot")
 			if name == "" {

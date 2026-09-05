@@ -73,6 +73,11 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet slots [<repo>] [--json]                  one line per slot: free · busy(<sid8>, <branch>) · dirty · orphaned(<sid8>) · missing [cold] [assigned(<branch>)]
   fleet assign <slot> <branch> ["<brief>"]       check <branch> out in a free slot and record the assignment (read at the slot's next SessionStart)
   fleet unassign <slot>                          clear it
+  fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--take]
+                                                 the one declared act: an ownership row (change, relationship, accountable, due), placed in a slot when named
+  fleet work [--for <role>] [--json]             every row with its observed state: dead · late · undeclared · working · idle · dispatched · done
+  fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
+  fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
   fleet handoff <branch> "<conclusion>" ["<next>"]  one-line handoff, replaced not appended; injected at the next SessionStart
@@ -244,6 +249,35 @@ func Dispatch(args []string) error {
 			return refuse("usage: fleet unassign <slot>")
 		}
 		return cmdUnassign(parg(0))
+	case "dispatch":
+		vals := map[string]string{}
+		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief"} {
+			v, err := optValue(plain, f, verb)
+			if err != nil {
+				return err
+			}
+			vals[f] = v
+		}
+		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief")
+		return CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", contains(plain, "--take"))
+	case "reassign":
+		forRole, err := optValue(plain, "--for", verb)
+		if err != nil {
+			return err
+		}
+		return CmdReassign(first(positional(plain, "--for")), forRole)
+	case "undispatch":
+		rel, err := optValue(plain, "--as", verb)
+		if err != nil {
+			return err
+		}
+		return cmdUndispatch(first(positional(plain, "--as")), rel)
+	case "work":
+		forRole, err := optValue(plain, "--for", verb)
+		if err != nil {
+			return err
+		}
+		return cmdWork(forRole, asJSON)
 	case "receipt", "take", "drop":
 		sess, err := optValue(rest, "--session", verb)
 		if err != nil {
