@@ -147,7 +147,7 @@ func fold(now, prevAt float64, slept bool) []fleet.Rec {
 			for _, row := range rows {
 				if fleet.S(row, "slot") == fleet.S(s, "slot") {
 					row["state"] = "assigned-no-occupant"
-					row["assigned"] = fleet.Rec{"branch": a["branch"], "at": a["at"], "by": a["by"]}
+					row["assigned"] = fleet.Rec{"branch": a["branch"], "at": a["at"], "by": a["by"], "for": a["for"]}
 				}
 			}
 		}
@@ -300,7 +300,7 @@ func line(r fleet.Rec, now float64) string {
 		detail = fmt.Sprintf(" — turn open %s, cadence %s", fleet.FmtAge(now-fleet.F(r, "turn_open_at")), fleet.FmtAge(fleet.F(r, "cadence")))
 	case "assigned-no-occupant":
 		a := fleet.M(r, "assigned")
-		detail = fmt.Sprintf(" — assigned %s %s ago by %s, nobody there", fleet.S(a, "branch"), fleet.FmtAge(now-fleet.F(a, "at")), fleet.S(a, "by"))
+		detail = fmt.Sprintf(" — assigned %s %s ago by %s for %s, nobody there", fleet.S(a, "branch"), fleet.FmtAge(now-fleet.F(a, "at")), fleet.S(a, "by"), fleet.S(a, "for"))
 	case "unknown":
 		detail = fmt.Sprintf(" — unknown since %s ago", fleet.FmtAge(now-fleet.F(r, "unknown_since")))
 	}

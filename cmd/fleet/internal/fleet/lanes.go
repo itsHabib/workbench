@@ -97,7 +97,11 @@ func LaneOf(role string) Rec {
 	if c := ParseDuration(m["cadence"]); c > 0 {
 		cadence = c
 	}
-	return Rec{"kind": kind, "requires": req, "produces": prod, "cadence": cadence}
+	// `watch`: this lane reads the board at every prompt — the attention rows and what
+	// changed since its last prompt, injected so a hub never has to ask. Per-kind data
+	// admitted under the same rule as cadence; the substrate does not know which kind.
+	watch, _ := m["watch"].(bool)
+	return Rec{"kind": kind, "requires": req, "produces": prod, "cadence": cadence, "watch": watch}
 }
 
 // MapRow is one real line of roles.map.

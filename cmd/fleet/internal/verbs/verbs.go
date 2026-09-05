@@ -230,10 +230,15 @@ func Dispatch(args []string) error {
 		}
 		return cmdPool(pos[0], at(pos, 1), at(pos, 2), contains(plain, "--rewarm"), tenant)
 	case "assign":
-		if len(plain) < 2 {
-			return refuse(`usage: fleet assign <slot> <branch> ["<brief>"]`)
+		forRole, err := optValue(plain, "--for", verb)
+		if err != nil {
+			return err
 		}
-		return CmdAssign(plain[0], plain[1], strings.Join(plain[2:], " "), "")
+		pos := positional(plain, "--for")
+		if len(pos) < 2 {
+			return refuse(`usage: fleet assign <slot> <branch> ["<brief>"] [--for <role>]`)
+		}
+		return CmdAssign(pos[0], pos[1], strings.Join(pos[2:], " "), "", forRole)
 	case "unassign":
 		if parg(0) == "" {
 			return refuse("usage: fleet unassign <slot>")

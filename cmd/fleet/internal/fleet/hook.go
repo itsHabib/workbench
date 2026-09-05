@@ -149,8 +149,9 @@ func onSessionStart(ev Event, sid string) *Verdict {
 
 func onPrompt(ev Event, sid string) *Verdict {
 	prev := SessionRecord(sid)
-	// `turn_open_at` is what the board measures a busy session's overdue-ness from.
-	TouchSession(sid, ev, Rec{"turn_open": true, "turn_open_at": Now()})
+	// `turn_open_at` is what the board measures a busy session's overdue-ness from;
+	// `last_prompt_at` is what the board delta below is measured since.
+	rec := TouchSession(sid, ev, Rec{"turn_open": true, "turn_open_at": Now(), "last_prompt_at": Now()})
 	var lines []string
 	if last := F(prev, "last_stop_at"); last > 0 {
 		if gap := Now() - last; gap > 60 {
@@ -158,6 +159,9 @@ func onPrompt(ev Event, sid string) *Verdict {
 		}
 	}
 	lines = append(lines, resumeLines(sid, prev, ev)...)
+	if B(M(rec, "lane"), "watch") {
+		lines = append(lines, BoardLines(F(prev, "last_prompt_at"))...)
+	}
 	if dl := DecisionsLine(); dl != "" {
 		lines = append(lines, dl)
 	}

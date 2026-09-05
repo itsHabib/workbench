@@ -386,6 +386,85 @@ func LastWordLine(key, branch, sid string) string {
 	return fmt.Sprintf("[fleet] last word on %s (%s ago, %s): %s", branch, FmtAge(Now()-F(r, "at")), who, text)
 }
 
+// BoardLines is the watcher's board for a lane that reads it at every prompt: the rows
+// needing a decision, and what changed since this session's last prompt — so a hub
+// answers "how is it going" from words already in its context instead of rebuilding
+// state from the network each time. Attention-budgeted: a few lines, capped, and "all
+// fine" is one line. When no watcher has ticked, that is said rather than hidden.
+func BoardLines(sincePrompt float64) []string {
+	hb := ReadJSON(Path("watch", "heartbeat.json"))
+	if hb == nil {
+		return []string{"[fleet] no board: the watcher has never ticked here (`fleet watch --once` to see one now)"}
+	}
+	age := Now() - F(hb, "at")
+	iv := F(hb, "interval")
+	if iv <= 0 {
+		iv = 60
+	}
+	var lines []string
+	if age > 2*iv {
+		lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: the watcher is not ticking (any SessionStart revives it)", FmtAge(age)))
+	}
+	rows, _ := readAny(Path("watch", "board.json")).([]any)
+	var need []string
+	fine := 0
+	for _, raw := range rows {
+		r, _ := raw.(map[string]any)
+		st := S(r, "state")
+		switch st {
+		case "busy-and-overdue", "dead-holding-work", "assigned-no-occupant", "unknown":
+			who := Short(S(r, "session"))
+			name := S(r, "slot")
+			if name == "" {
+				name = filepath.Base(strings.TrimRight(S(r, "path"), "/"))
+			}
+			need = append(need, fmt.Sprintf("%s %s %s (%s)", st, S(r, "role"), name, who))
+		default:
+			fine++
+		}
+	}
+	if len(need) > 0 {
+		line := fmt.Sprintf("[fleet] board (%s ago): %d need a decision — %s", FmtAge(age), len(need), strings.Join(need, "; "))
+		if len(line) > 700 {
+			line = line[:700] + "…"
+		}
+		lines = append(lines, line)
+	} else if len(rows) > 0 {
+		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine", FmtAge(age), fine))
+	}
+	// Transitions since this session's last prompt, newest last, capped.
+	if sincePrompt > 0 {
+		text, _ := readText(Path("watch", "observed.jsonl"))
+		var changes []string
+		for _, l := range strings.Split(text, "\n") {
+			t := ReadJSONBytes([]byte(l))
+			if t == nil || F(t, "at") <= sincePrompt {
+				continue
+			}
+			from := S(t, "from")
+			if from == "" {
+				from = "—"
+			}
+			name := S(t, "slot")
+			if name == "" {
+				name = filepath.Base(strings.TrimRight(S(t, "path"), "/"))
+			}
+			changes = append(changes, fmt.Sprintf("%s %s: %s → %s", S(t, "role"), name, from, S(t, "to")))
+		}
+		if n := len(changes); n > 0 {
+			if n > 8 {
+				changes = append(changes[n-8:], fmt.Sprintf("(+%d earlier)", n-8))
+			}
+			line := "[fleet] since your last prompt: " + strings.Join(changes, "; ")
+			if len(line) > 700 {
+				line = line[:700] + "…"
+			}
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // PullFile is prs/<repo-id>__<n>.json.
 func PullFile(rid string, number int) string {
 	return Path("prs", fmt.Sprintf("%s__%d.json", rid, number))

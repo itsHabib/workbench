@@ -59,7 +59,7 @@ var tools = []schema{
 			"required": []any{"revision"}}},
 	{"name": "fleet_assign",
 		"description": "Place work into a free slot: check the branch out there and record the assignment the slot's next session reads.",
-		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "cwd": cwdArg},
+		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "cwd": cwdArg},
 			"required": []any{"slot", "branch"}}},
 	{"name": "fleet_take",
 		"description": "Lease a machine resource (slot:<name>) for this session; refused if a live session holds it, orphaned needs takeover.",
@@ -238,7 +238,7 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		}
 		return buf.String(), false
 	case "fleet_assign":
-		return runVerb(func() error { return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp") })
+		return runVerb(func() error { return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp", s("for")) })
 	case "fleet_take":
 		takeover, _ := a["takeover"].(bool)
 		return runVerb(func() error { return verbs.CmdTake(s("resource"), s("why"), takeover, s("session")) })

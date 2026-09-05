@@ -1512,6 +1512,59 @@ hook.drop_lease(key, "watch_dead"); hook._unlink(sess)
 sys.exit(1 if bad else 0)
 PY
 
+# ---- Go port, rung 4: the board delta at a hub's prompt (manifest `watch: true`, no domain word),
+# and `--for` on assign: who is accountable, distinct from who dispatched.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$REPO" "$WT" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, hookpy, fleetpy, repo, wt, work = sys.argv[1:7]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+def hookrun(ev): return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True)
+def ctx(out):
+    try: return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    except Exception: return out
+def fleet(*a): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, env={**os.environ, "ORG_TENANT": "work"})
+# 4a: a dead session holding work on the roled watchrepo path; one watcher tick; then a prompt in a lane
+# whose manifest says watch:true (the shipped supervisor's) carries the attention row, and a lane
+# without it does not. Nothing here names the lane kind: the hook read a boolean off a manifest.
+r = os.path.join(work, "watchrepo")
+hook.write_json(hook.path("sessions", "watch_dead2.json"), {"session": "watch_dead2", "cwd": r, "pid": 999999, "pid_kind": "harness", "last_event_at": hook.now() - 600, "role": "finisher:watchrepo", "branch": "feat/w", "turn_open": False})
+key = hook.scope(r, "feat/w"); hook.acquire_lease(key, hook.lease_record(key, "watch_dead2", "finisher:watchrepo", r, "held"))
+fleet("watch", "--once", "--interval", "60s")
+hub, worker = "rung4_hub", "rung4_worker"
+hookrun({"hook_event_name": "SessionStart", "session_id": hub, "cwd": repo, "source": "startup"})
+hookrun({"hook_event_name": "SessionStart", "session_id": worker, "cwd": wt, "source": "startup"})
+h1 = ctx(hookrun({"hook_event_name": "UserPromptSubmit", "session_id": hub, "cwd": repo, "prompt": "how is it going"}).stdout)
+w1 = ctx(hookrun({"hook_event_name": "UserPromptSubmit", "session_id": worker, "cwd": wt, "prompt": "hi"}).stdout)
+report("[fleet] board" in h1 and "dead-holding-work" in h1 and "finisher:watchrepo" in h1 and "[fleet] board" not in w1,
+       "a lane with watch:true gets the board's attention rows at its prompt; a lane without it does not",
+       f"hub prompt: {h1[:220]!r} | worker prompt: {w1[:120]!r}")
+# a change since the hub's last prompt: the dead session is released, the row goes vacant, the next prompt says so
+hook.drop_lease(key, "watch_dead2"); hook._unlink(hook.path("sessions", "watch_dead2.json"))
+fleet("watch", "--once", "--interval", "60s")
+h2 = ctx(hookrun({"hook_event_name": "UserPromptSubmit", "session_id": hub, "cwd": repo, "prompt": "and now"}).stdout)
+report("since your last prompt" in h2 and "dead-holding-work → vacant" in h2,
+       "the hub's next prompt carries what changed since its last one, from the watcher's transitions",
+       f"hub prompt 2: {h2[:260]!r}")
+# 4b: assign --for records the accountable role, distinct from by; slots shows it.
+subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=r)
+subprocess.run(["git", "branch", "feat/w2"], cwd=r, capture_output=True)
+fleet("pool", r, "finisher", "1")
+a = fleet("assign", "watchrepo-finisher-1", "feat/w2", "finish this", "--for", "hub:alpha")
+rec = hook.read_json(hook.path("assign", "watchrepo-finisher-1.json")) or {}
+sl = fleet("slots", "watchrepo").stdout
+report(a.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "operator" and "assigned(feat/w2 for hub:alpha)" in sl,
+       "fleet assign --for records the accountable role on the row, distinct from who dispatched, and slots shows it",
+       f"assign rc={a.returncode} {(a.stdout+a.stderr)[:160]!r} rec={rec} slots={sl[:160]!r}")
+fleet("unassign", "watchrepo-finisher-1")
+for sid in (hub, worker):
+    hookrun({"hook_event_name": "SessionEnd", "session_id": sid, "cwd": repo, "reason": "exit"})
+sys.exit(1 if bad else 0)
+PY
+
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
 echo "liveness path on this box: $(liveness_path)"

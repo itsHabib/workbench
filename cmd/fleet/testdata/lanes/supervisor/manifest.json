@@ -9,5 +9,6 @@
   "requires": [],
   "produces": null,
   "slots": 0,
-  "cadence": "30m"
+  "cadence": "30m",
+  "watch": true
 }

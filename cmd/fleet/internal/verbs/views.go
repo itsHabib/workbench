@@ -463,7 +463,12 @@ func cmdSlots(repo string, asJSON bool) error {
 			tail += " cold"
 		}
 		if a, ok := r["assigned"].(fleet.Rec); ok && a != nil {
-			tail += fmt.Sprintf(" assigned(%s)", fleet.S(a, "branch"))
+			tail += fmt.Sprintf(" assigned(%s", fleet.S(a, "branch"))
+			// The accountable role is named only when it is not the dispatcher.
+			if f := fleet.S(a, "for"); f != "" && f != fleet.S(a, "by") {
+				tail += " for " + f
+			}
+			tail += ")"
 		}
 		say("%-28s %-36s %-24s %s%s", fleet.S(r, "slot"), st, fleet.S(r, "role"), fleet.S(r, "path"), tail)
 	}
@@ -639,7 +644,7 @@ var branchNameRe = regexp.MustCompile(`\A[A-Za-z0-9._/@+-]+\z`)
 // the assignment. This is where *assigned* is written, attached to the act of
 // dispatching. The decision and the checkout happen under the seat's own lock, the
 // same lock a SessionStart in that slot takes; the fetch runs before it.
-func CmdAssign(slot, branch, brief, by string) error {
+func CmdAssign(slot, branch, brief, by, forRole string) error {
 	r := slotRow(slot)
 	if r == nil {
 		var names []string
@@ -698,9 +703,15 @@ func CmdAssign(slot, branch, brief, by string) error {
 		if by == "" {
 			by = "operator"
 		}
+		// `by` is who dispatched; `for` is the role accountable until the work is done. The
+		// same session today, and they diverge the moment there are two hubs — a column on
+		// the row, never a tree in configuration, is what makes splitting a hub two commands.
+		if forRole == "" {
+			forRole = by
+		}
 		return fleet.WriteJSON(fleet.Path("assign", fleet.Safe(slot)+".json"), fleet.Rec{
 			"slot": slot, "branch": branch, "brief": nilIfEmpty(strings.TrimSpace(brief)), "at": fleet.Now(),
-			"by": by, "repo": nilIfEmpty(fleet.RepoID(path)), "path": path})
+			"by": by, "for": forRole, "repo": nilIfEmpty(fleet.RepoID(path)), "path": path})
 	})
 	if lerr == fleet.ErrKeyBusy {
 		return refuse("fleet assign: %s is being occupied or assigned right now and this command could not take its lock in time; nothing was assigned. `fleet slots`, then retry.", slot)
@@ -1038,6 +1049,9 @@ func cmdUnowned(repo string, asJSON bool) error {
 		a := ""
 		if am, ok := r["assigned"].(fleet.Rec); ok && am != nil {
 			a = fmt.Sprintf("  assigned to %s %s ago, nobody there", fleet.S(am, "slot"), ago(fleet.F(am, "at")))
+			if f := fleet.S(am, "for"); f != "" {
+				a += " (for " + f + ")"
+			}
 		}
 		last := ""
 		if lh := fleet.S(r, "last_holder"); lh != "" {

@@ -313,6 +313,11 @@ func manifestShapeErrors(m map[string]any) []string {
 	if c := m["cadence"]; c != nil && fleet.ParseDuration(c) == 0 {
 		errs = append(errs, "cadence must be a duration like 45m, 2h or 900 (seconds), or absent")
 	}
+	if w := m["watch"]; w != nil {
+		if _, ok := w.(bool); !ok {
+			errs = append(errs, "watch must be true or false, or absent")
+		}
+	}
 	return errs
 }
 
