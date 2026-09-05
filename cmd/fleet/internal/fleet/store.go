@@ -112,7 +112,15 @@ func readAny(p string) any {
 // WriteJSON writes obj to p through a per-process temp and a rename, so a reader
 // never sees a partial file. The temp name carries the pid: concurrent hooks for
 // one session once shared a temp and raced on the rename.
+// ReadOnly is shadow mode: every verdict is computed from the live store and nothing
+// is written to it. The one exception is the shadow log itself, written by the
+// caller through ShadowAppend. Set once at process start, never toggled.
+var ReadOnly bool
+
 func WriteJSON(p string, obj any) error {
+	if ReadOnly {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -125,6 +133,9 @@ func WriteJSON(p string, obj any) error {
 
 // AppendJSONL appends one line.
 func AppendJSONL(p string, obj any) error {
+	if ReadOnly {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -451,7 +462,27 @@ func sha1hex(s string) string {
 }
 
 // Unlink removes p and never fails.
-func Unlink(p string) { _ = os.Remove(p) }
+func Unlink(p string) {
+	if ReadOnly {
+		return
+	}
+	_ = os.Remove(p)
+}
+
+// ShadowAppend appends one record to a JSONL file regardless of ReadOnly: the shadow
+// log is the only thing shadow mode writes.
+func ShadowAppend(p string, obj any) error {
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(DumpJSON(obj), '\n'))
+	return err
+}
 
 func exists(p string) bool {
 	_, err := os.Stat(p)

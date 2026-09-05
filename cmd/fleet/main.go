@@ -3,6 +3,8 @@
 //
 //	fleet hook claude        read one Claude Code hook event on stdin; exit 0 allow / 2 deny
 //	fleet hook codex         the same, translated from Codex's event shape
+//	fleet hook <h> --shadow  compute the verdict from the live store, write nothing but
+//	                         shadow.jsonl, always exit 0: a day's numbers before a switch
 //	fleet mcp                the verbs as MCP tools over stdio
 //	fleet <verb> ...         the operator's side: stop, resume, revoke, take, drop, board, ...
 //
@@ -93,12 +95,53 @@ func runWatch(args []string) {
 	}
 }
 
+// runShadow is the hook beside the installed one: the same verdict from the same
+// store, nothing written but one line of shadow.jsonl, exit 0 whatever the verdict.
+// The harness never sees it. `fleet shadow-report` reads the day.
+func runShadow(which string, ev map[string]any) {
+	fleet.ReadOnly = true
+	defer os.Exit(0)
+	defer func() { _ = recover() }()
+	t0 := time.Now()
+	var v *fleet.Verdict
+	switch which {
+	case "codex":
+		v = codex.Run(ev)
+	default:
+		v = fleet.Run(ev)
+	}
+	rec := map[string]any{"at": fleet.Now(), "harness": which, "event": ev["hook_event_name"], "session": ev["session_id"],
+		"tool": ev["tool_name"], "tool_use_id": ev["tool_use_id"], "code": 0.0, "reason": nil, "ms": float64(time.Since(t0).Microseconds()) / 1000}
+	if v != nil {
+		rec["code"] = float64(v.Code)
+		if v.Err != "" {
+			rec["reason"] = cut(v.Err, 300)
+		}
+		if v.Out != "" {
+			rec["out"] = cut(v.Out, 200)
+		}
+	}
+	_ = fleet.ShadowAppend(fleet.Path("shadow.jsonl"), rec)
+}
+
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
 // runHook reads one event and applies the verdict. The fail-open law lives here: a
 // malformed event, or any panic that escaped Run, exits 0 with no output.
 func runHook(args []string) {
 	which := "claude"
-	if len(args) > 0 {
-		which = args[0]
+	shadow := false
+	for _, a := range args {
+		if a == "--shadow" {
+			shadow = true
+			continue
+		}
+		which = a
 	}
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -107,6 +150,10 @@ func runHook(args []string) {
 	var ev map[string]any
 	if err := json.Unmarshal(raw, &ev); err != nil || ev == nil {
 		os.Exit(0)
+	}
+	if shadow {
+		runShadow(which, ev)
+		return
 	}
 	switch which {
 	case "claude":

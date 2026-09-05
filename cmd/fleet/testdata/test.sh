@@ -1925,6 +1925,57 @@ fleet("undispatch", "feat/r1")
 sys.exit(1 if bad else 0)
 PY
 
+# ---- Shadow mode: the same verdict from the live store, nothing written but shadow.jsonl, exit 0
+# whatever the verdict; shadow-report proves a divergence when the installed hook allowed what the
+# shadow would have refused.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$work" <<'PY' || fails=$((fails+1))
+import hashlib, json, os, subprocess, sys
+state, hookpy, fleetpy, work = sys.argv[1:5]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+r = os.path.join(work, "watchrepo")
+cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
+bin_ = os.environ["FLEET_BIN"]
+def shadow(ev): return subprocess.run([bin_, "hook", "claude", "--shadow"], input=json.dumps(ev), capture_output=True, text=True)
+def fleet(*a): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=r, env={**os.environ, "ORG_TENANT": "work"})
+def digest():
+    h = hashlib.sha1()
+    for root, dirs, files in os.walk(state):
+        dirs[:] = sorted(d for d in dirs if d not in ("keylocks",))
+        for f in sorted(files):
+            if f == "shadow.jsonl" or f.startswith(".tmp"): continue
+            p = os.path.join(root, f); h.update(p.encode()); h.update(open(p, "rb").read())
+    return h.hexdigest()
+# a live holder on the checkout's branch; a rival's write would be refused by the real hook
+key = hook.scope(r, cur)
+hook.write_json(hook.path("sessions", "shadowA.json"), {"session": "shadowA", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "finisher:watchrepo", "branch": cur, "turn_open": True})
+hook.acquire_lease(key, hook.lease_record(key, "shadowA", "finisher:watchrepo", r, "held"))
+try: os.remove(hook.path("shadow.jsonl"))
+except FileNotFoundError: pass
+before = digest()
+pre = shadow({"hook_event_name": "PreToolUse", "session_id": "shadowB", "cwd": r, "tool_name": "Edit", "tool_use_id": "tu-1", "tool_input": {"file_path": os.path.join(r, "f.txt"), "old_string": "a", "new_string": "b"}})
+start = shadow({"hook_event_name": "SessionStart", "session_id": "shadowB", "cwd": r, "source": "startup"})
+post = shadow({"hook_event_name": "PostToolUse", "session_id": "shadowB", "cwd": r, "tool_name": "Edit", "tool_use_id": "tu-1", "tool_input": {"file_path": os.path.join(r, "f.txt")}, "tool_response": "ok"})
+after = digest()
+lines = [json.loads(l) for l in open(hook.path("shadow.jsonl")).read().splitlines() if l.strip()]
+report(pre.returncode == 0 and pre.stdout == "" and pre.stderr == "" and start.returncode == 0 and before == after and not os.path.exists(hook.path("sessions", "shadowB.json")),
+       "shadow exits 0 with no output whatever the verdict and writes nothing to the store, not even the session record",
+       f"pre rc={pre.returncode} out={pre.stdout[:80]!r} err={pre.stderr[:80]!r} store-changed={before != after} sessionB={os.path.exists(hook.path('sessions', 'shadowB.json'))}")
+report(len(lines) == 3 and lines[0]["code"] == 2 and "shadowA" in (lines[0].get("reason") or "") and lines[0]["tool_use_id"] == "tu-1" and lines[1]["event"] == "SessionStart" and lines[1]["code"] == 0,
+       "shadow.jsonl carries each event's verdict with the refusal text the real hook would have printed",
+       f"lines={[(l.get('event'), l.get('code'), (l.get('reason') or '')[:60]) for l in lines]}")
+rep = json.loads(fleet("shadow-report", "--json").stdout or "{}")
+plain = fleet("shadow-report").stdout
+report(rep.get("events") == 3 and len(rep.get("denies", [])) == 1 and len(rep.get("divergences", [])) == 1 and rep["divergences"][0]["tool_use_id"] == "tu-1" and "DIVERGENCE" in plain and "p95" in plain,
+       "shadow-report counts events and latency, and proves the divergence: the shadow refused tu-1 and a PostToolUse for tu-1 followed",
+       f"rep={json.dumps(rep)[:300]} plain={plain[:200]!r}")
+hook.drop_lease(key, "shadowA"); hook._unlink(hook.path("sessions", "shadowA.json")); os.remove(hook.path("shadow.jsonl"))
+sys.exit(1 if bad else 0)
+PY
+
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
 echo "liveness path on this box: $(liveness_path)"

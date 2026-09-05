@@ -85,6 +85,9 @@ func nilIfEmpty(s string) any {
 // lock held, which is why a plain replace is right. The temp-then-rename is still
 // used so the final path never names a partial file to a reader, which takes no lock.
 func WriteLease(key string, rec Rec) error {
+	if ReadOnly {
+		return nil
+	}
 	final := KeyFile("leases", key)
 	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
 		return err
@@ -289,7 +292,7 @@ func MigrateLegacyKeys() {
 	// The marker says a pass completed; it cannot say no old writer has published a
 	// legacy record since. A directory that changed after the marker is rescanned —
 	// one stat per directory — and the marker re-stamped after.
-	if exists(marker) && !changedSince(marker, "leases", "stop", "handoff") {
+	if ReadOnly || (exists(marker) && !changedSince(marker, "leases", "stop", "handoff")) {
 		return
 	}
 	done := true

@@ -3,6 +3,9 @@
 #
 #   bash cmd/fleet/install.sh            dry run: shows every change it would make
 #   bash cmd/fleet/install.sh --apply    build, back up, rewrite hook commands, install lanes
+#   bash cmd/fleet/install.sh --shadow   build, back up, ADD `fleet hook <h> --shadow` beside each
+#                                        installed hook line; nothing else changes. A day later,
+#                                        `fleet shadow-report` says whether to --apply.
 #   bash cmd/fleet/install.sh --rollback restore the newest backups of the hook configs
 #
 # What --apply does, in order, each step said before it runs:
@@ -46,14 +49,47 @@ rollback() {
 }
 
 if [ "$mode" = "--rollback" ]; then rollback; exit 0; fi
-if [ "$mode" != "--apply" ] && [ "$mode" != "dry" ]; then say "usage: install.sh [--apply|--rollback]"; exit 2; fi
+if [ "$mode" != "--apply" ] && [ "$mode" != "--shadow" ] && [ "$mode" != "dry" ]; then say "usage: install.sh [--apply|--shadow|--rollback]"; exit 2; fi
 
 say "fleet install ($mode) — FLEET_HOME=$FLEET_HOME"
 plan "go build -o $bin ./cmd/fleet   (from $root)"
-if [ "$mode" = "--apply" ]; then
+if [ "$mode" = "--apply" ] || [ "$mode" = "--shadow" ]; then
   mkdir -p "$FLEET_HOME/bin"
   (cd "$root" && go build -o "$bin" ./cmd/fleet)
-  "$bin" --version >/dev/null 2>&1 || true
+fi
+
+# Shadow: add the Go hook beside every installed fleet hook line and stop there.
+shadow_add() {
+  f="$1"; harness="$2"
+  [ -f "$f" ] || { say "  $f absent; skipped"; return; }
+  n="$({ grep -o "\"[^\"]*/\(hook\|codex-adapter\)\.py\"" "$f" || true; } | wc -l | tr -d ' ')"
+  plan "$f: add '$bin hook $harness --shadow' beside $n fleet hook line(s) (backup $f.bak-$stamp)"
+  if [ "$mode" = "--shadow" ]; then
+    cp "$f" "$f.bak-$stamp"
+    python3 - "$f" "$bin" "$harness" <<'PY'
+import sys, json, io
+f, bin, harness = sys.argv[1:4]
+d = json.load(io.open(f, encoding="utf-8"))
+cmd = "%s hook %s --shadow" % (bin, harness)
+added = 0
+for ev, groups in (d.get("hooks") or {}).items():
+    for g in groups:
+        hooks = g.get("hooks") or []
+        if any(h.get("command", "").endswith(("/hook.py", "/codex-adapter.py")) for h in hooks) and not any(h.get("command") == cmd for h in hooks):
+            hooks.append({"type": "command", "command": cmd, **({"statusMessage": "fleet shadow"} if harness == "codex" else {})})
+            g["hooks"] = hooks; added += 1
+io.open(f, "w", encoding="utf-8").write(json.dumps(d, indent=2) + "\n")
+print("  added to %d event group(s)" % added)
+PY
+  fi
+}
+if [ "$mode" = "--shadow" ] || [ "$mode" = "dry" ]; then
+  shadow_add "$claude_settings" claude
+  shadow_add "$codex_hooks" codex
+fi
+if [ "$mode" = "--shadow" ]; then
+  say "shadow installed. Nothing in the store changes; $FLEET_HOME/shadow.jsonl fills. Tomorrow: '$bin shadow-report --since 24h'. Undo: bash $here/install.sh --rollback"
+  exit 0
 fi
 
 if [ -d "$LANES_SRC" ]; then

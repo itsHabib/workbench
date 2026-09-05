@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
@@ -375,8 +376,32 @@ func cmdWork(forRole string, asJSON bool) error {
 		return nil
 	}
 	now := fleet.Now()
+	// Grouped by who is accountable: each hub's rows read as one block, attention
+	// first within it; rows with no one accountable come last.
+	groups := map[string][]WorkRow{}
+	var order []string
 	for _, r := range rows {
-		say("%s", WorkLine(r, now))
+		acc := fleet.S(r, "for")
+		if _, seen := groups[acc]; !seen {
+			order = append(order, acc)
+		}
+		groups[acc] = append(groups[acc], r)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if (order[i] == "") != (order[j] == "") {
+			return order[j] == ""
+		}
+		return order[i] < order[j]
+	})
+	for _, acc := range order {
+		head := acc
+		if head == "" {
+			head = "no one accountable"
+		}
+		say("%s (%d)", head, len(groups[acc]))
+		for _, r := range groups[acc] {
+			say("  %s", WorkLine(r, now))
+		}
 	}
 	scope := "scope: rows declared on this machine; hands from this machine's leases"
 	if ages := cacheAges(now); ages != "" {

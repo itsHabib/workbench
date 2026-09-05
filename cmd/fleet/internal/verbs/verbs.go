@@ -79,6 +79,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
   fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
+  fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
   fleet handoff <branch> "<conclusion>" ["<next>"]  one-line handoff, replaced not appended; injected at the next SessionStart
@@ -285,6 +286,20 @@ func Dispatch(args []string) error {
 			return err
 		}
 		return CmdSync(repo)
+	case "shadow-report":
+		since, err := optValue(plain, "--since", verb)
+		if err != nil {
+			return err
+		}
+		var from float64
+		if since != "" {
+			secs := fleet.ParseDuration(since)
+			if secs == 0 {
+				return refuse("fleet shadow-report: --since wants a duration like 24h, got %s", fleet.PyRepr(since))
+			}
+			from = fleet.Now() - secs
+		}
+		return cmdShadowReport(from, asJSON)
 	case "receipt", "take", "drop":
 		sess, err := optValue(rest, "--session", verb)
 		if err != nil {
