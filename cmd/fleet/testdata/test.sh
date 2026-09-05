@@ -1466,6 +1466,52 @@ for s in (sid, sid2, "rung2_successor"):
 sys.exit(1 if bad else 0)
 PY
 
+# ---- Go port, rung 3: fleet watch, the read-only watcher. One tick folds the store into board.json
+# and an attention-budgeted board.md, records each transition, and ticks a clock nobody else has; a
+# gap longer than three intervals is a slept machine, and silence inside it is `unknown`, not `dead`.
+"$PY" - "$FLEET_STATE" "$F" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, fleetpy, work = sys.argv[1:4]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+def fleet(*a): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, env={**os.environ, "ORG_TENANT": "work"})
+# A roled path of this scenario's own, with a dead session holding a branch lease there.
+r = os.path.join(work, "watchrepo"); subprocess.run(["git", "init", "-q", r])
+subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=r); subprocess.run(["git", "checkout", "-q", "-b", "feat/w"], cwd=r)
+fleet("role", r, "finisher:watchrepo", "--tenant", "work")
+hook.write_json(hook.path("sessions", "watch_dead.json"), {"session": "watch_dead", "cwd": r, "pid": 999999, "pid_kind": "harness", "last_event_at": hook.now() - 600, "role": "finisher:watchrepo", "branch": "feat/w", "turn_open": False})
+key = hook.scope(r, "feat/w"); hook.acquire_lease(key, hook.lease_record(key, "watch_dead", "finisher:watchrepo", r, "held"))
+wd = hook.path("watch")
+for f in ("heartbeat.json", "board.json", "board.md", "observed.jsonl"):
+    hook._unlink(os.path.join(wd, f))
+t1 = fleet("watch", "--once", "--interval", "60s")
+rows = {x["path"]: x for x in (hook.read_json(os.path.join(wd, "board.json")) or [])}
+row = rows.get(hook.read_json(hook.path("sessions", "watch_dead.json"))["cwd"]) or next((x for x in rows.values() if x.get("role") == "finisher:watchrepo"), {})
+report(t1.returncode == 0 and os.path.exists(os.path.join(wd, "heartbeat.json")) and row.get("state") == "dead-holding-work" and "Needs a decision" in t1.stdout and "dead-holding-work" in t1.stdout and "feat/w" in t1.stdout,
+       "fleet watch --once writes the board and puts a dead session holding work under 'Needs a decision'",
+       f"watch tick: rc={t1.returncode} state={row.get('state')} out={t1.stdout[:220]!r} err={t1.stderr[:120]!r}")
+obs = [json.loads(l) for l in open(os.path.join(wd, "observed.jsonl")) if l.strip()] if os.path.exists(os.path.join(wd, "observed.jsonl")) else []
+report(any(o.get("to") == "dead-holding-work" and o.get("role") == "finisher:watchrepo" for o in obs) and "fine (" in t1.stdout,
+       "the tick records the transition to observed.jsonl and collapses everything fine into one line with a count",
+       f"observed={obs[-3:]} fine-line={'fine (' in t1.stdout}")
+# The machine sleeps: the heartbeat is four intervals old. The dead classification's only evidence is the
+# silence inside that gap, so the row must read unknown — and read dead again once a fresh tick has seen it.
+hb = hook.path("watch", "heartbeat.json"); h = hook.read_json(hb); h["at"] = hook.now() - 4 * 60; hook.write_json(hb, h)
+sess = hook.path("sessions", "watch_dead.json"); sd = hook.read_json(sess); sd["last_event_at"] = hook.now() - 120; hook.write_json(sess, sd)   # last seen inside the gap
+t2 = fleet("watch", "--once", "--interval", "60s")
+rows2 = {x.get("role"): x for x in (hook.read_json(os.path.join(wd, "board.json")) or [])}
+t3 = fleet("watch", "--once", "--interval", "60s")
+rows3 = {x.get("role"): x for x in (hook.read_json(os.path.join(wd, "board.json")) or [])}
+report(rows2.get("finisher:watchrepo", {}).get("state") == "unknown" and "slept" in t2.stdout and rows3.get("finisher:watchrepo", {}).get("state") == "dead-holding-work",
+       "after a slept gap the silent row reads unknown, not dead, and reads dead again on the next fresh tick",
+       f"after sleep: {rows2.get('finisher:watchrepo', {}).get('state')} | after fresh tick: {rows3.get('finisher:watchrepo', {}).get('state')} | out2={t2.stdout[:160]!r}")
+hook.drop_lease(key, "watch_dead"); hook._unlink(sess)
+sys.exit(1 if bad else 0)
+PY
+
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
 echo "liveness path on this box: $(liveness_path)"

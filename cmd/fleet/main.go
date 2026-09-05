@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/codex"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/mcp"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/watch"
 )
 
 func main() {
@@ -38,8 +40,56 @@ func main() {
 		runHook(args[1:])
 	case "mcp":
 		mcp.Serve(os.Stdin, os.Stdout)
+	case "watch":
+		runWatch(args[1:])
 	default:
 		verbs.Run(args)
+	}
+}
+
+// reviveWatcher starts a detached watcher from SessionStart when none has ticked
+// recently. SessionStart is the one event where a spawn is permitted, and this is
+// what makes the watcher need no install step: any session revives it. It lives here
+// rather than in the hook package because the watcher folds through the verbs, and
+// the hook package cannot import what imports it.
+func reviveWatcher(ev map[string]any) {
+	if ev["hook_event_name"] != "SessionStart" {
+		return
+	}
+	defer func() { _ = recover() }() // never a reason for a hook to fail
+	watch.EnsureRunning()
+}
+
+// runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
+// board; `--interval 30s` sets the tick.
+func runWatch(args []string) {
+	interval := watch.DefaultInterval
+	once := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--once":
+			once = true
+		case "--interval":
+			if i+1 < len(args) {
+				if d, err := time.ParseDuration(args[i+1]); err == nil && d > 0 {
+					interval = d
+				}
+				i++
+			}
+		}
+	}
+	if once {
+		md, err := watch.Tick(interval)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fleet watch: "+err.Error())
+			os.Exit(4)
+		}
+		fmt.Print(md)
+		return
+	}
+	if err := watch.Serve(interval); err != nil {
+		fmt.Fprintln(os.Stderr, "fleet watch: "+err.Error())
+		os.Exit(1)
 	}
 }
 
@@ -60,9 +110,13 @@ func runHook(args []string) {
 	}
 	switch which {
 	case "claude":
-		fleet.Exit(fleet.Run(ev))
+		v := fleet.Run(ev)
+		reviveWatcher(ev)
+		fleet.Exit(v)
 	case "codex":
-		fleet.Exit(codex.Run(ev))
+		v := codex.Run(ev)
+		reviveWatcher(ev)
+		fleet.Exit(v)
 	default:
 		fmt.Fprintf(os.Stderr, "fleet hook: unknown harness %q (claude|codex)\n", which)
 		os.Exit(2)

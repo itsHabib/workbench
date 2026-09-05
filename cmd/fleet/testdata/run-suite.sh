@@ -10,6 +10,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 ( cd "$root" && go build -o "$here/fleet.bin" ./cmd/fleet/ ) || { echo "build failed"; exit 1; }
 export FLEET_BIN="$here/fleet.bin"
+export FLEET_WATCH=off   # the suite must not spawn watchers from its hundreds of SessionStarts
 case "${1:-}" in
   codex) exec bash "$here/test-codex.sh" ;;
   *)     exec bash "$here/test.sh" ;;
