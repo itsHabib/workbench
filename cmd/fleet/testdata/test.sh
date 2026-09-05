@@ -1417,9 +1417,59 @@ if [ $? = 0 ] && ! grep -q UnicodeEncodeError "$work/glyph.err" && grep -q glyph
 else
   echo "  FAIL  verb aborted on its own output: $(cat "$work/glyph.err")"; fails=$((fails+1))
 fi
+# ---- Go port, rung 2: the session record under its own lock (ruling 8); role bound at the launch
+# directory (a cd is not a change of who you are); the last word observed at Stop (ruling 6). Each is
+# discriminating: revert the change and its line goes red.
+"$PY" - "$FLEET_STATE" "$H" "$WT" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, hookpy, wt, work = sys.argv[1:5]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+def hookrun(ev, env=None):
+    return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True, env={**os.environ, **(env or {})})
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext)
+    bad += 0 if ok else 1
+# 2a: two hooks for one session at once. A is paused between its read and its write of the session
+# record; B records a branch-switch handoff meanwhile. Unlocked, A's stale write dropped B's handoff.
+r = os.path.join(work, "rung2repo")
+subprocess.run(["git", "init", "-q", r]); subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=r)
+subprocess.run(["git", "branch", "feat/q"], cwd=r); subprocess.run(["git", "checkout", "-q", "-b", "feat/a"], cwd=r)
+sid = "rung2_sess"
+hookrun({"hook_event_name": "SessionStart", "session_id": sid, "cwd": r, "source": "startup"})
+a = subprocess.Popen([sys.executable, hookpy], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, env={**os.environ, "FLEET_TEST_PAUSE_IN_TOUCH": "0.6"})
+a.stdin.write(json.dumps({"hook_event_name": "PreToolUse", "session_id": sid, "cwd": r, "tool_name": "Bash", "tool_use_id": "r2a", "tool_input": {"command": "git status"}})); a.stdin.close()
+time.sleep(0.2)
+hookrun({"hook_event_name": "PreToolUse", "session_id": sid, "cwd": r, "tool_name": "Bash", "tool_use_id": "r2b", "tool_input": {"command": "git checkout feat/q"}})
+a.wait()
+rec = hook.read_json(hook.path("sessions", f"{sid}.json")) or {}
+report(isinstance(rec.get("handoff"), dict), "the session record is written under its own lock: a parallel touch cannot drop a handoff in flight", "a parallel touch dropped the handoff in flight (session record unlocked): " + json.dumps(rec)[:200])
+# 2b: identity is the launch directory. Started unroled, one event from inside a roled checkout.
+sid2 = "rung2_unroled"
+hookrun({"hook_event_name": "SessionStart", "session_id": sid2, "cwd": work, "source": "startup"})
+hookrun({"hook_event_name": "PreToolUse", "session_id": sid2, "cwd": wt, "tool_name": "Bash", "tool_use_id": "r2c", "tool_input": {"command": "git status"}})
+rec2 = hook.read_json(hook.path("sessions", f"{sid2}.json")) or {}
+report(not rec2.get("role") and rec2.get("launch_dir") == work, "role binds at the launch directory: a cd into a roled checkout does not re-role the session", f"a cd into a roled checkout re-roled the session: role={rec2.get('role')!r} launch_dir={rec2.get('launch_dir')!r}")
+# 2c: the last word. Stop carries the transcript path; the final assistant message is recorded
+# against the branch and injected at the next SessionStart there, with no act by the agent.
+tp = os.path.join(work, "rung2-transcript.jsonl")
+open(tp, "w").write(json.dumps({"type": "user", "message": {"content": "do the thing"}}) + "\n"
+                    + json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Fixed the parser; the guard now fires on the reverted bug.   Next: wire the receipt."}]}}) + "\n")
+hookrun({"hook_event_name": "Stop", "session_id": sid, "cwd": r, "transcript_path": tp})
+key = hook.scope(r, "feat/a")
+lw = hook.read_json(hook.key_file("last-word", key)) or {}
+out = hookrun({"hook_event_name": "SessionStart", "session_id": "rung2_successor", "cwd": r, "source": "startup"}).stdout
+report("guard now fires" in (lw.get("text") or "") and "last word on feat/a" in out and "guard now fires" in out, "the last word is observed at Stop from the transcript and injected at the next SessionStart on that branch", "last word not recorded or not injected: " + json.dumps(lw)[:120] + " | " + out[:160].replace("\n", " "))
+for s in (sid, sid2, "rung2_successor"):
+    hookrun({"hook_event_name": "SessionEnd", "session_id": s, "cwd": r, "reason": "exit"})
+sys.exit(1 if bad else 0)
+PY
+
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
 echo "liveness path on this box: $(liveness_path)"
 rm -rf "$work"
 [ "$fails" = 0 ] && { echo; echo "all scenarios passed"; exit 0; }
+
 echo; echo "$fails scenario(s) FAILED"; exit 1

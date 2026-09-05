@@ -501,13 +501,18 @@ func SettleHandoff(sid string, rec Rec) {
 			}
 		}
 	}
-	p := Path("sessions", sid+".json")
-	cur := ReadJSON(p)
-	if cur == nil {
-		cur = Rec{}
-	}
-	cur["handoff"] = nil
-	if err := WriteJSON(p, cur); fail(err) {
+	// Clearing the record is a read-modify-write on the session file, under its lock
+	// like every other one; a parallel hook's touch must not be lost here either.
+	err := KeyLock("session:"+sid, func() error {
+		p := Path("sessions", sid+".json")
+		cur := ReadJSON(p)
+		if cur == nil {
+			cur = Rec{}
+		}
+		cur["handoff"] = nil
+		return WriteJSON(p, cur)
+	})
+	if fail(err) {
 		return
 	}
 }

@@ -140,6 +140,9 @@ func onSessionStart(ev Event, sid string) *Verdict {
 		if hl := HandoffLine(Scope(cwd, b), b); hl != "" {
 			lines = append(lines, hl)
 		}
+		if lw := LastWordLine(Scope(cwd, b), b, sid); lw != "" {
+			lines = append(lines, lw)
+		}
 	}
 	return context(ev, strings.Join(lines, "\n"))
 }
@@ -349,7 +352,8 @@ func onStop(ev Event, sid string) *Verdict {
 	if B(ev, "stop_hook_active") {
 		return allow
 	}
-	TouchSession(sid, ev, Rec{"turn_open": false, "last_stop_at": Now()})
+	rec := TouchSession(sid, ev, Rec{"turn_open": false, "last_stop_at": Now()})
+	RecordLastWord(sid, ev, rec)
 	return allow
 }
 

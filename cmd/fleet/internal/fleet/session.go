@@ -21,8 +21,29 @@ type Event = map[string]any
 // operator who deletes the wrong line must be able to strip a session of a role it
 // should not have.
 func TouchSession(sid string, ev Event, fields Rec) Rec {
+	// Under the session's own lock. The harness runs parallel tool calls, so two
+	// PreToolUse hooks for one session run at once, and an unlocked read-modify-write
+	// here let the later writer drop what the earlier one had just added — a handoff
+	// in flight, a last_denied, turn_open. This is the second multi-writer object in
+	// the store, keyed by session rather than by key, and it takes the same lock.
+	// If the lock cannot be had in time the touch proceeds unlocked, as it always
+	// did, rather than lose the event: a session record is evidence, not authority.
+	var rec Rec
+	err := KeyLock("session:"+sid, func() error {
+		rec = touchSessionLocked(sid, ev, fields)
+		return nil
+	})
+	if err != nil {
+		logError(Rec{"session": sid, "error": "touch_session unlocked: " + err.Error()})
+		rec = touchSessionLocked(sid, ev, fields)
+	}
+	return rec
+}
+
+func touchSessionLocked(sid string, ev Event, fields Rec) Rec {
 	p := Path("sessions", sid+".json")
 	rec := ReadJSON(p)
+	TestPause("IN_TOUCH") // between the read and the write; a rival's write must not be lost
 	name := S(ev, "hook_event_name")
 	starting := name == "SessionStart"
 	if rec == nil {
@@ -42,8 +63,20 @@ func TouchSession(sid string, ev Event, fields Rec) Rec {
 		rec["cwd"] = nil
 	}
 	cwd := S(rec, "cwd")
+	// Identity comes from the directory the session was LAUNCHED in, recorded once
+	// at SessionStart. The role used to re-resolve from the event's cwd whenever it
+	// was empty, so a session that started unroled in ~/dev and ran one
+	// `cd ~/dev/cc-skills && …` came out wearing that checkout's card. A `cd` is not
+	// a change of who you are.
 	if starting {
-		role, _, slot := MapRowsFor(cwd)
+		rec["launch_dir"] = nilIfEmpty(cwd)
+	}
+	launch := S(rec, "launch_dir")
+	if launch == "" {
+		launch = cwd // a record from before launch_dir existed
+	}
+	if starting {
+		role, _, slot := MapRowsFor(launch)
 		rec["role"], rec["slot"] = nilIfEmpty(role), nilIfEmpty(slot)
 		lane := LaneOf(role)
 		if lane == nil {
@@ -56,7 +89,7 @@ func TouchSession(sid string, ev Event, fields Rec) Rec {
 		}
 	}
 	if S(rec, "role") == "" {
-		role, _, slot := MapRowsFor(cwd)
+		role, _, slot := MapRowsFor(launch)
 		rec["role"], rec["slot"] = nilIfEmpty(role), nilIfEmpty(slot)
 		if role != "" {
 			if lane := LaneOf(role); lane != nil {
@@ -242,6 +275,115 @@ func AssignmentLine(slot, sid string) string {
 		tail = fmt.Sprintf(`. The dispatcher (%s) wrote, quoted and not a fleet rule: "%s"`, by, brief)
 	}
 	return fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
+}
+
+// RecordLastWord captures the session's conclusion at Stop with no act by the agent:
+// the final assistant message, read from the transcript the event names, keyed by the
+// work (the branch) so a successor on that branch finds it at SessionStart.
+//
+// This is the observed form of the one declaration the design had kept. A declared
+// conclusion — `fleet handoff` — is written only when an agent remembers, and the
+// chain shows nineteen mechanical marks for every checkpoint anyone wrote; it also
+// cannot exist for the sessions that died, which is exactly when a cold pickup matters
+// most. The last word exists for every session that ever stopped. `fleet handoff`
+// stays as the better, declared version when an agent bothers.
+func RecordLastWord(sid string, ev Event, rec Rec) {
+	text := lastAssistantMessage(S(ev, "transcript_path"))
+	if text == "" {
+		return
+	}
+	cwd := S(rec, "cwd")
+	branch := S(rec, "branch")
+	if cwd == "" || branch == "" {
+		return
+	}
+	key := Scope(cwd, branch)
+	if key == "" {
+		return
+	}
+	_ = WriteJSON(KeyFile("last-word", key), Rec{"key": key, "branch": branch, "repo": nilIfEmpty(S(rec, "repo")),
+		"session": sid, "role": nilIfEmpty(S(rec, "role")), "head": nilIfEmpty(headSha(cwd)), "at": Now(), "text": text})
+}
+
+// lastAssistantMessage is the text of the last assistant turn in a harness transcript
+// (JSONL, one event per line), whitespace-collapsed and capped. "" when there is none.
+func lastAssistantMessage(transcript string) string {
+	if transcript == "" {
+		return ""
+	}
+	raw, ok := readText(transcript)
+	if !ok {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		r := ReadJSONBytes([]byte(lines[i]))
+		if r == nil || S(r, "type") != "assistant" {
+			continue
+		}
+		msg := M(r, "message")
+		var parts []string
+		switch c := msg["content"].(type) {
+		case string:
+			parts = append(parts, c)
+		case []any:
+			for _, block := range c {
+				if b, ok := block.(map[string]any); ok && S(b, "type") == "text" {
+					parts = append(parts, S(b, "text"))
+				}
+			}
+		}
+		text := strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+		if text == "" {
+			continue
+		}
+		if len(text) > 600 {
+			text = text[:600] + "…"
+		}
+		return text
+	}
+	return ""
+}
+
+// headSha is the commit the checkout's branch points at, read from refs without a
+// spawn; "" when it cannot be read.
+func headSha(start string) string {
+	branch := BranchOf(start)
+	_, common := GitDirs(start)
+	if branch == "" || common == "" {
+		return ""
+	}
+	if sha, ok := readText(filepath.Join(append([]string{common, "refs", "heads"}, strings.Split(branch, "/")...)...)); ok {
+		return strings.TrimSpace(sha)
+	}
+	packed, _ := readText(filepath.Join(common, "packed-refs"))
+	for _, line := range strings.Split(packed, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[1] == "refs/heads/"+branch {
+			return f[0]
+		}
+	}
+	return ""
+}
+
+// LastWordLine is the branch's last word for injection at SessionStart, or "".
+func LastWordLine(key, branch, sid string) string {
+	if key == "" {
+		return ""
+	}
+	r := ReadJSON(KeyFile("last-word", key))
+	if r == nil || S(r, "text") == "" {
+		return ""
+	}
+	who := Short(S(r, "session"))
+	if S(r, "session") == sid {
+		who = "you, last time"
+	}
+	text := S(r, "text")
+	if len(text) > 300 {
+		text = text[:300] + "…"
+	}
+	return fmt.Sprintf("[fleet] last word on %s (%s ago, %s): %s", branch, FmtAge(Now()-F(r, "at")), who, text)
 }
 
 // PullFile is prs/<repo-id>__<n>.json.
