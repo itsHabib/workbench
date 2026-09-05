@@ -78,6 +78,17 @@ func Tick(interval time.Duration) (string, error) {
 			prevRows[fleet.S(r, "path")] = r
 		}
 	}
+	// The read side of the remote record: every tenth tick, when gh is here.
+	ticks := fleet.F(prev, "ticks")
+	if os.Getenv("FLEET_GITHUB") != "off" && int(ticks)%10 == 0 {
+		if _, err := exec.LookPath("gh"); err == nil {
+			var sink strings.Builder
+			prevOut := verbs.Out
+			verbs.Out = &sink
+			_ = verbs.CmdSync("")
+			verbs.Out = prevOut
+		}
+	}
 	rows := fold(now, prevAt, slept)
 	var transitions []fleet.Rec
 	for _, r := range rows {
@@ -136,7 +147,7 @@ func Tick(interval time.Duration) (string, error) {
 	if err := os.WriteFile(filepath.Join(dir(), "board.md"), []byte(md), 0o644); err != nil {
 		return "", err
 	}
-	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions))}
+	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1}
 	if slept {
 		hb["gap_from"] = prevAt
 	}

@@ -78,6 +78,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet work [--for <role>] [--json]             every row with its observed state: dead · late · undeclared · working · idle · dispatched · done
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
   fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
+  fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
   fleet handoff <branch> "<conclusion>" ["<next>"]  one-line handoff, replaced not appended; injected at the next SessionStart
@@ -278,6 +279,12 @@ func Dispatch(args []string) error {
 			return err
 		}
 		return cmdWork(forRole, asJSON)
+	case "sync":
+		repo, err := optValue(plain, "--repo", verb)
+		if err != nil {
+			return err
+		}
+		return CmdSync(repo)
 	case "receipt", "take", "drop":
 		sess, err := optValue(rest, "--session", verb)
 		if err != nil {

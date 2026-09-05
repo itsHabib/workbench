@@ -1665,6 +1665,118 @@ hook.drop_lease(key, "hands5")
 sys.exit(1 if bad else 0)
 PY
 
+# ---- Go port, rung 6: the row's remote half. dispatch/reassign/undispatch upsert ONE sticky comment
+# on the change's pull request (this machine's rows replace its own, another machine's are kept);
+# `fleet sync` caches other machines' rows; `work` shows them as remote with the cache's age; the
+# watcher syncs every tenth tick; without gh the verbs say "local only" and still act.
+mkdir -p "$work/fakegh" && cat > "$work/fakegh/gh" <<'FAKE'
+#!/usr/bin/env python3
+import sys, json, os
+store = os.environ["FAKE_GH_STORE"]
+db = json.load(open(store)) if os.path.exists(store) else {"comments": [], "next": 100, "calls": []}
+a = sys.argv[1:]
+db["calls"].append(a)
+def save(): json.dump(db, open(store, "w"))
+save()
+if a[:2] == ["pr", "view"]:
+    print(json.dumps({"number": 7, "url": "https://github.com/o/r/pull/7"})); sys.exit(0)
+if a[:2] == ["pr", "list"]:
+    if "-R" in a and a[a.index("-R") + 1] != "o/r":
+        print("[]"); sys.exit(0)
+    print(json.dumps([{"number": 7, "headRefName": "feat/w3", "headRefOid": "abc123", "url": "https://github.com/o/r/pull/7", "updatedAt": "2026-09-05T00:00:00Z"}])); sys.exit(0)
+if a[0] == "api":
+    path = a[1]; method = a[a.index("--method") + 1] if "--method" in a else "GET"
+    body = json.load(sys.stdin) if "--input" in a else None
+    if path.endswith("/comments") and method == "GET":
+        print(json.dumps(db["comments"])); sys.exit(0)
+    if path.endswith("/comments") and method == "POST":
+        c = {"id": db["next"], "body": body["body"]}; db["next"] += 1; db["comments"].append(c); save(); print(json.dumps(c)); sys.exit(0)
+    if "/issues/comments/" in path and method == "PATCH":
+        cid = int(path.rsplit("/", 1)[1])
+        for c in db["comments"]:
+            if c["id"] == cid: c["body"] = body["body"]
+        save(); print(json.dumps({"id": cid})); sys.exit(0)
+print("fake gh: unhandled " + " ".join(a), file=sys.stderr); sys.exit(1)
+FAKE
+chmod +x "$work/fakegh/gh"
+"$PY" - "$FLEET_STATE" "$F" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time, socket
+state, fleetpy, work = sys.argv[1:4]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+r = os.path.join(work, "watchrepo"); store = os.path.join(work, "ghstore.json")
+gh_env = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "on", "FAKE_GH_STORE": store, "PATH": os.path.join(work, "fakegh") + os.pathsep + os.environ["PATH"]}
+nogh_env = {**gh_env, "PATH": os.path.join(work, "nogh") + os.pathsep + os.environ["PATH"]}
+def fleet(*a, env=gh_env): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=r, env=env)
+def db(): return json.load(open(store)) if os.path.exists(store) else {"comments": [], "calls": []}
+def rows_in(body):
+    i = body.index("```json"); j = body.index("```", i + 7)
+    return json.loads(body[i + 7:j])["rows"]
+host = socket.gethostname().lower()
+if host.endswith(".local"): host = host[:-6]
+d1 = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:alpha", "--due", "2h")
+c = db()["comments"]
+report(d1.returncode == 0 and "record: o/r#7" in d1.stdout and len(c) == 1 and "<!-- fleet:ownership v1 -->" in c[0]["body"]
+       and [(x["relationship"], x["for"], x["machine"]) for x in rows_in(c[0]["body"])] == [("verify", "hub:alpha", host)],
+       "dispatch writes the row to the change's pull request as one marked comment carrying this machine's name",
+       f"rc={d1.returncode} out={d1.stdout[:200]!r} err={d1.stderr[:200]!r} comments={len(c)} rows={[(x.get('relationship'), x.get('for'), x.get('machine')) for x in rows_in(c[0]['body'])] if c else None} host={host}")
+d2 = fleet("dispatch", "feat/w3", "--as", "judge", "--for", "hub:beta")
+c = db()["comments"]
+report(d2.returncode == 0 and len(c) == 1 and [x["relationship"] for x in rows_in(c[0]["body"])] == ["judge", "verify"],
+       "a second row on the same change updates the one comment rather than adding another",
+       f"rc={d2.returncode} out={d2.stdout[:200]!r} comments={len(c)} rows={[x.get('relationship') for x in rows_in(c[0]['body'])] if c else None}")
+# another machine's row on the same change survives this machine's writes
+d = db(); body = d["comments"][0]["body"]; i = body.index("```json"); j = body.index("```", i + 7); doc = json.loads(body[i + 7:j])
+doc["rows"].append({"relationship": "finish", "for": "hub:win", "by": "operator", "at": hook.now(), "due": hook.now() - 60, "slot": None, "brief": None, "machine": "work-win"})
+d["comments"][0]["body"] = body[:i + 7] + "\n" + json.dumps(doc) + "\n" + body[j:]; json.dump(d, open(store, "w"))
+ra = fleet("reassign", "feat/w3", "--for", "hub:gamma")
+rows = rows_in(db()["comments"][0]["body"])
+report(ra.returncode == 0 and {(x["relationship"], x["for"], x["machine"]) for x in rows} == {("judge", "hub:gamma", host), ("verify", "hub:gamma", host), ("finish", "hub:win", "work-win")},
+       "reassign rewrites this machine's rows on the comment and keeps another machine's row as it was",
+       f"rc={ra.returncode} rows={[(x.get('relationship'), x.get('for'), x.get('machine')) for x in rows]}")
+un = fleet("undispatch", "feat/w3", "--as", "judge")
+rows = rows_in(db()["comments"][0]["body"])
+report(un.returncode == 0 and [x["relationship"] for x in rows] == ["finish", "verify"],
+       "undispatch removes the row from the comment too", f"rc={un.returncode} rows={[x.get('relationship') for x in rows]}")
+# the read side: sync caches the other machine's row; work shows it as remote/late with the cache's age; ours are not doubled
+hook.write_json(hook.path("prs", "seed.json"), {"github": "o/r", "repo": hook.repo_id(r), "branch": "feat/w3", "number": 7, "at": hook.now()})
+sy = fleet("sync")
+cache = hook.read_json(hook.path("cache", "github", "o__r.json")) or {}
+w = fleet("work", "--json"); wr = json.loads(w.stdout or "[]")
+remote = [x for x in wr if x.get("machine") == "work-win"]
+plain = fleet("work").stdout
+report(sy.returncode == 0 and cache.get("repo") == "o/r" and len(cache.get("prs", [])) == 1 and len(remote) == 1 and remote[0]["relationship"] == "finish"
+       and remote[0]["state"] == "late" and remote[0]["for"] == "hub:win" and sum(1 for x in wr if x.get("relationship") == "verify") == 1
+       and "cache" in plain and "fleet sync" in plain,
+       "sync caches the open changes and their rows; work shows another machine's row (late past its due) once, with the cache's age in scope",
+       f"sync rc={sy.returncode} {(sy.stdout+sy.stderr)[:160]!r} cache={list(cache.keys())} remote={remote} verify_rows={sum(1 for x in wr if x.get('relationship') == 'verify')} plain={plain[:200]!r}")
+# a row this machine wrote is local truth: once its local record is gone, the cache's copy is not read back as remote
+fleet("undispatch", "feat/w3", "--as", "verify", env=nogh_env)
+wr2 = json.loads(fleet("work", "--json").stdout or "[]")
+report(not any(x.get("relationship") == "verify" for x in wr2) and any(x.get("relationship") == "finish" for x in wr2),
+       "a row this machine wrote is never read back from the cache as another machine's; the other machine's row still is",
+       f"rows={[(x.get('relationship'), x.get('machine'), x.get('state')) for x in wr2]}")
+# the watcher syncs on its tenth tick, not every tick
+hook._unlink(hook.path("cache", "github", "o__r.json"))
+hb = hook.read_json(hook.path("watch", "heartbeat.json")) or {}; hb["ticks"] = 3; hook.write_json(hook.path("watch", "heartbeat.json"), hb)
+fleet("watch", "--once", "--interval", "60s")
+no_sync = not os.path.exists(hook.path("cache", "github", "o__r.json"))
+hb = hook.read_json(hook.path("watch", "heartbeat.json")); hb["ticks"] = 10; hook.write_json(hook.path("watch", "heartbeat.json"), hb)
+fleet("watch", "--once", "--interval", "60s")
+synced = os.path.exists(hook.path("cache", "github", "o__r.json"))
+report(no_sync and synced, "the watcher refreshes the GitHub cache every tenth tick, never every tick", f"tick4 synced={not no_sync} tick11 synced={synced}")
+# without gh the act still happens and says so
+d3 = fleet("dispatch", "feat/w3", "--as", "scope", "--for", "hub:alpha", env=nogh_env)
+report(d3.returncode == 0 and "record: local only" in d3.stdout and hook.read_json(hook.path("dispatch", hook.safe(hook.repo_id(r) + "__feat/w3__scope") + ".json")) is not None,
+       "with no gh the dispatch still happens and says the record is local only", f"rc={d3.returncode} out={d3.stdout[:200]!r}")
+fleet("undispatch", "feat/w3")
+hook._unlink(hook.path("prs", "seed.json")); hook._unlink(hook.path("cache", "github", "o__r.json"))
+sys.exit(1 if bad else 0)
+PY
+
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
 echo "liveness path on this box: $(liveness_path)"

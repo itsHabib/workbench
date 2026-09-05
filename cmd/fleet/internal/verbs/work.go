@@ -147,7 +147,7 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by string, take bool) e
 	if slot != "" {
 		tail += ", in " + slot
 	}
-	say("dispatched %s/%s for %s%s", branch, rel, forRole, tail)
+	say("dispatched %s/%s for %s%s; %s", branch, rel, forRole, tail, upsertOwnership(rid, branch))
 	return nil
 }
 
@@ -176,7 +176,7 @@ func CmdReassign(change, forRole string) error {
 	if n == 0 {
 		return refuse("fleet reassign: no row for %s here; `fleet dispatch` declares one", branch)
 	}
-	say("%s: %d row(s) now for %s", branch, n, forRole)
+	say("%s: %d row(s) now for %s; %s", branch, n, forRole, upsertOwnership(rid, branch))
 	return nil
 }
 
@@ -200,7 +200,7 @@ func cmdUndispatch(change, rel string) error {
 	if n == 0 {
 		return refuse("fleet undispatch: no row for %s here", branch)
 	}
-	say("%s: %d row(s) retired", branch, n)
+	say("%s: %d row(s) retired; %s", branch, n, upsertOwnership(rid, branch))
 	return nil
 }
 
@@ -222,6 +222,7 @@ func WorkRows(forRole string) []WorkRow {
 		rid, branch, rel := fleet.S(d, "repo"), fleet.S(d, "change"), fleet.S(d, "relationship")
 		key := "repo:" + rid + ":" + branch
 		declared[key] = true
+		declared[rid+"|"+branch+"|"+rel] = true
 		row := WorkRow{"change": branch, "repo": rid, "relationship": rel, "for": d["for"], "by": d["by"], "at": d["at"],
 			"due": d["due"], "slot": d["slot"], "brief": d["brief"], "key": key, "hands": nil, "state": "dispatched", "head": nil, "done_at": nil}
 		state := "dispatched"
@@ -270,6 +271,7 @@ func WorkRows(forRole string) []WorkRow {
 		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
 			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": "undeclared", "head": nil, "done_at": nil})
 	}
+	rows = append(rows, remoteRows(declared, now)...)
 	if forRole != "" {
 		var mine []WorkRow
 		for _, r := range rows {
@@ -279,7 +281,7 @@ func WorkRows(forRole string) []WorkRow {
 		}
 		rows = mine
 	}
-	order := map[string]int{"dead": 0, "late": 1, "undeclared": 2, "working": 3, "idle": 4, "dispatched": 5, "done": 6}
+	order := map[string]int{"dead": 0, "late": 1, "undeclared": 2, "working": 3, "idle": 4, "dispatched": 5, "remote": 6, "done": 7}
 	sortBy(rows, func(a, b WorkRow) bool {
 		oa, ob := order[fleet.S(a, "state")], order[fleet.S(b, "state")]
 		if oa != ob {
@@ -318,6 +320,10 @@ func WorkLine(r WorkRow, now float64) string {
 	if s := fleet.S(r, "slot"); s != "" {
 		tail += ", in " + s
 	}
+	if m := fleet.S(r, "machine"); m != "" {
+		who = "on " + m
+		tail += fmt.Sprintf(", cache %s old", fleet.FmtAge(now-fleet.F(r, "cache_at")))
+	}
 	return fmt.Sprintf("%s %s for %s (hands %s%s)", fleet.S(r, "state"), name, acc, who, tail)
 }
 
@@ -339,6 +345,10 @@ func cmdWork(forRole string, asJSON bool) error {
 	for _, r := range rows {
 		say("%s", WorkLine(r, now))
 	}
-	say("scope: rows declared on this machine; hands from this machine's leases")
+	scope := "scope: rows declared on this machine; hands from this machine's leases"
+	if ages := cacheAges(now); ages != "" {
+		scope += "; other machines' rows from the GitHub cache (" + ages + "; `fleet sync` refreshes)"
+	}
+	say("%s", scope)
 	return nil
 }
