@@ -236,20 +236,37 @@ func dump(b *bytes.Buffer, v any) {
 	}
 }
 
+// dumpFloat is Python's float repr: the shortest round-tripping digits, plain
+// notation for decimal exponents in [-4, 16), exponent notation outside (1e+17,
+// 1e-07), and a whole float keeps its ".0". A timestamp is 1788651458.341428 in both
+// languages, never 1.788651458341428e+09 in one of them.
 func dumpFloat(b *bytes.Buffer, f float64) {
+	if f == 0 {
+		b.WriteString("0.0")
+		return
+	}
 	switch {
 	case math.IsNaN(f):
 		b.WriteString("NaN")
+		return
 	case math.IsInf(f, 1):
 		b.WriteString("Infinity")
+		return
 	case math.IsInf(f, -1):
 		b.WriteString("-Infinity")
-	case f == math.Trunc(f) && math.Abs(f) < 1e15:
-		// A whole number is written as Python writes a float: `5.0`, never `5`.
-		b.WriteString(strconv.FormatFloat(f, 'f', 1, 64))
-	default:
-		b.WriteString(strconv.FormatFloat(f, 'g', -1, 64))
+		return
 	}
+	e := strconv.FormatFloat(f, 'e', -1, 64) // d.ddde±XX
+	exp, _ := strconv.Atoi(e[strings.LastIndexAny(e, "e")+1:])
+	if exp < -4 || exp >= 16 {
+		b.WriteString(e)
+		return
+	}
+	s := strconv.FormatFloat(f, 'f', -1, 64)
+	if !strings.ContainsAny(s, ".") {
+		s += ".0"
+	}
+	b.WriteString(s)
 }
 
 func dumpString(b *bytes.Buffer, s string) {
