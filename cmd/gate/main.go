@@ -1438,6 +1438,28 @@ func cmdJudge(args []string) error {
 	return nil
 }
 
+// preAppendFailure answers, for the reads that PRECEDE any append, the same
+// question judgeSlotState answers after one: could this failure have recorded
+// something? Both reads take the store lock — resolving the escalation to its
+// run, and checking the park is still open — so both can fail on contention,
+// and a caller driving `resolve` (the Slack ingress does, on a phone tap) must
+// know whether a retry could double-apply a resolution. The error alone never
+// says, and an unannotated lock timeout from here is indistinguishable from one
+// raised while stamping the resolution, where the decision is already recorded.
+//
+// Here the answer is structural and needs no read — which matters, because the
+// usual cause of these failures is a lock this process could not take: this
+// invocation appended nothing. What it does NOT claim is that the run's one
+// judgment is unspent; an EARLIER invocation may have spent it, and gate's own
+// replay guard refuses that retry rather than double-applying it. Only a lock
+// failure is annotated: a mistyped id is not made retryable by saying so.
+func preAppendFailure(cause error) error {
+	if !errors.Is(cause, state.ErrLockTimeout) {
+		return cause
+	}
+	return fmt.Errorf("%w; this failure landed before any append — nothing was recorded and a retry is legal", cause)
+}
+
 // judgeSlotState answers, from state, the question the one-shot contract forces
 // on every judgment failure: is the escalation's single judgment still there to
 // give? A judgment is irreversible once recorded, so whether a retry is even
@@ -1786,7 +1808,7 @@ func cmdResolve(args []string) error {
 	}
 	run, err := runOfEscalation(e, *escID)
 	if err != nil {
-		return err
+		return preAppendFailure(err)
 	}
 	// Replay + stale-id guard: only the run's current unresolved terminal is
 	// resolvable. A retried notification callback, a double-tapped Slack button,
@@ -1796,7 +1818,7 @@ func cmdResolve(args []string) error {
 	// is recorded.
 	open, err := escalationIsOpen(e, run, *escID)
 	if err != nil {
-		return err
+		return preAppendFailure(err)
 	}
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)

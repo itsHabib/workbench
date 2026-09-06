@@ -24,12 +24,21 @@ const gateLockTimeoutJSON = `{"error":"resolve: state_lock_timeout after 10s: op
 	`no judgment is recorded for esc_ab — the one judgment is unspent and a retry is legal",` +
 	`"escape":{"why":"","next":""},"retry_helps":false}`
 
+// gateLockReadTimeoutJSON is the OTHER pre-append shape: the lock lost in the
+// reads that resolve the escalation to its run and check the park is still
+// open, before gate appends anything. It carries preAppendFailure's annotation
+// rather than judgeSlotState's, and serve keys on the phrase both share.
+const gateLockReadTimeoutJSON = `{"error":"resolve: escalation esc_ab: state_lock_timeout after 10s: ` +
+	`open /Users/mh/dev/gate/state/log.lock: file exists; this failure landed before any append — ` +
+	`nothing was recorded and a retry is legal","escape":{"why":"","next":""},"retry_helps":false}`
+
 // gateLockAfterAppendJSON is the same lock timeout landing LATER in the same
 // resolve: gate appended the decision and then lost the lock stamping the
-// resolution. gate's own annotation is absent, because there is nothing unspent
-// to retry — the decision is recorded. Retrying this would find the park closed
-// and report a benign "already resolved" over a missing stamp.
-const gateLockAfterAppendJSON = `{"error":"resolve: stamp resolution: state_lock_timeout after 10s: ` +
+// resolution. The stamp's append returns the store's error bare, so no
+// annotation is attached — which is the point: the decision is recorded, and
+// retrying would find the park closed and report a benign "already resolved"
+// over a missing stamp.
+const gateLockAfterAppendJSON = `{"error":"state_lock_timeout after 10s: ` +
 	`open /Users/mh/dev/gate/state/log.lock: file exists","escape":{"why":"","next":""},"retry_helps":false}`
 
 // fakeGate models the one property of gate that produced the burst failure: its
@@ -287,6 +296,7 @@ func TestBusyClassification(t *testing.T) {
 		wantGrant   bool
 	}{
 		{"lock timeout before any append", gateLockTimeoutJSON, codeError, true, true},
+		{"lock timeout in the pre-append reads", gateLockReadTimeoutJSON, codeError, true, true},
 		{"lock timeout after the decision landed", gateLockAfterAppendJSON, codeError, false, true},
 		{"merge", `{"outcome":"would_merge"}`, codeMerge, false, false},
 		{"blocked", `{"outcome":"blocked"}`, codeBlocked, false, false},

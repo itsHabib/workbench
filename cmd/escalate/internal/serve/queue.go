@@ -48,15 +48,19 @@ const (
 
 	// gateRetryLegal is gate's own verdict on where a failed resolve landed. A
 	// resolve is SEVERAL appends — judgment, verdict, action, then the resolution
-	// stamp — and each takes the lock separately, so "lost the lock" does not by
+	// stamp — each taking the lock separately, so "lost the lock" does not by
 	// itself mean "recorded nothing": lose it between appends and the decision is
 	// already in the log with only its stamp missing. gate answers that question
-	// itself (judgeSlotState re-reads the run) and says a retry is legal ONLY for
-	// a failure that landed before any append; a spent slot reads "a retry only
-	// returns judgment_duplicate" or "a retry resumes that judgment" instead.
-	// Requiring these words is what makes the resolve retry safe. If gate ever
-	// rewords them serve stops retrying, which is the safe direction to fail.
-	gateRetryLegal = "unspent and a retry is legal"
+	// itself and says a retry is legal in exactly two places, both of which mean
+	// nothing was recorded: preAppendFailure (the reads that precede any append,
+	// where the answer is structural) and judgeSlotState (a judgment slot it
+	// re-read and found unspent). A failure that DID record something reads "a
+	// retry only returns judgment_duplicate" or "a retry resumes that judgment",
+	// and one lost while stamping the resolution carries no annotation at all —
+	// none of the three match this phrase. Requiring it is what makes the resolve
+	// retry safe. If gate ever rewords it serve stops retrying, which is the safe
+	// direction to fail.
+	gateRetryLegal = "a retry is legal"
 )
 
 // resolveBackoff is the wait before retry 1, 2, and 3. It is a Server field

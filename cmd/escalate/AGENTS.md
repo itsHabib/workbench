@@ -57,8 +57,8 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   Taps are SERIALIZED through one in-process queue, so a burst never makes taps
   contend with each other for gate's single state lock, and a `state_lock_timeout`
   is retried four times over ~90s before the tap is called failed — but only when
-  gate's own output also says the judgment is unspent, since a resolve is several
-  appends and a lock lost after the decision landed must NOT be retried. A grant
+  gate's own output also says a retry is legal, since a resolve is several appends
+  and a lock lost after the decision landed must NOT be retried. A grant
   callback needs no such annotation (one single-use append) but gets a budget
   bounded by the life left on the signature gate re-verifies. The card tracks all
   of it: queued, then retrying, and only "NOT recorded" once the retries are spent.

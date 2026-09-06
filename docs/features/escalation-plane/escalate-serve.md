@@ -117,11 +117,13 @@ semantics or its 10s timeout:
    taking the lock separately, so "lost the lock" does not by itself mean "wrote
    nothing": lose it between appends and the decision is already in the log with
    only its stamp missing, and a retry would find the park closed and read as a
-   benign "already resolved". gate answers that question itself (`judgeSlotState`
-   re-reads the run) and says *"the one judgment is unspent and a retry is legal"*
-   only for a failure that landed before any append. serve requires BOTH that and
-   the lock timeout — read off gate's own output, never imported — before naming
-   the failure `ErrStateBusy` and retrying it four times over ~90s. Everything
+   benign "already resolved". gate answers that question itself and says *"a retry
+   is legal"* in exactly two places, both meaning nothing was recorded: the reads
+   that precede any append (`preAppendFailure` — where the answer is structural,
+   which matters because the usual cause is a lock this process could not take)
+   and an unspent judgment slot it re-read (`judgeSlotState`). serve requires BOTH
+   that phrase and the lock timeout — read off gate's own output, never imported —
+   before naming the failure `ErrStateBusy` and retrying it four times over ~90s. Everything
    else, including every landed decision (0..3), is reported on the first try. A
    grant callback needs no such annotation: its whole effect is one single-use
    append gate excludes atomically, so a lost lock wrote nothing and a retry that
