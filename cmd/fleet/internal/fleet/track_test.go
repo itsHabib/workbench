@@ -105,3 +105,14 @@ func TestWaitContextCapIncludesEscaping(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitLabelPreservesAnExactFit(t *testing.T) {
+	for _, label := range []string{strings.Repeat("x", 160), strings.Repeat("界", 160), strings.Repeat(`\`, 80)} {
+		if got := quoteWaitLabel(label); got != strconv.Quote(label) {
+			t.Errorf("exact-fit label unnecessarily truncated: %s", got)
+		}
+	}
+	if got := quoteWaitLabel(strings.Repeat("x", 161)); got != strconv.Quote(strings.Repeat("x", 159)+"…") {
+		t.Errorf("over-limit label not bounded: %s", got)
+	}
+}

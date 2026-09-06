@@ -53,6 +53,10 @@ func waitLines(sid string, now time.Time) []string {
 // quoteWaitLabel bounds the rendered label, including escape expansion. Reserve
 // space for an ellipsis and only append whole escapes, keeping the quote valid.
 func quoteWaitLabel(label string) string {
+	quotedLabel := strconv.Quote(label)
+	if utf8.RuneCountInString(quotedLabel) <= 162 { // 160 label runes plus quotes
+		return quotedLabel
+	}
 	var b strings.Builder
 	used := 0
 	for _, c := range label {
