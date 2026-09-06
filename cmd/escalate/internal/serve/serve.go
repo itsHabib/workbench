@@ -57,11 +57,15 @@ const (
 	// hostile client cannot exhaust memory before the signature is even checked.
 	maxBody = slackauth.MaxBody
 
-	// resolveTimeout bounds the detached gate resolve so a hung subprocess cannot
+	// resolveTimeout bounds ONE detached gate attempt so a hung subprocess cannot
 	// pin a background goroutine forever. It is independent of the HTTP request
 	// (which has already been acked), so the transport can never abort a decision
-	// in flight, and a wedged gate is still capped.
-	resolveTimeout = 25 * time.Second
+	// in flight, and a wedged gate is still capped. It must clear TWO of gate's
+	// own 10s state-lock waits — the grant lookup's and the resolve's — or a
+	// contended attempt is killed mid-run (exit -1) instead of failing cleanly as
+	// a retryable lock timeout, which is what the 2026-09-05 burst recorded at the
+	// old 25s.
+	resolveTimeout = 45 * time.Second
 
 	// deliverTimeout bounds the outcome POST to response_url. It is a FRESH budget,
 	// started after the resolve returns — never the resolve's leftover deadline, or
@@ -123,7 +127,14 @@ type Server struct {
 	grantTap  GrantCallback
 	authorize func(string) bool
 	now       func() time.Time
-	locks     *escLocks
+	// queue is the one slot every background callback passes through, so this
+	// process never runs two gate invocations against one state dir at once.
+	queue *resolveQueue
+	// backoff is the wait before each state-lock retry and notice is how long a
+	// queued tap waits before its card says so. Both are white-box test seams
+	// (like post below), defaulted from the package schedule.
+	backoff []time.Duration
+	notice  time.Duration
 	// post ships the rendered outcome card to the interaction's response_url. It
 	// is a white-box test seam: production uses postResponse (the https,
 	// Slack-host-guarded POST); a test overrides it to capture the card without a
@@ -159,7 +170,9 @@ func New(cfg Config) *Server {
 		grantTap:  cfg.GrantTap,
 		authorize: authorize,
 		now:       now,
-		locks:     &escLocks{m: make(map[string]*sync.Mutex)},
+		queue:     newResolveQueue(),
+		backoff:   resolveBackoff,
+		notice:    queueNotice,
 		post:      postResponse,
 		log:       log.Default(),
 	}
@@ -178,37 +191,6 @@ func AllowUsers(ids ...string) func(string) bool {
 		}
 	}
 	return func(id string) bool { return id != "" && allowed[id] }
-}
-
-// escLocks serializes callbacks per interaction id within this process. The HTTP
-// transport serves each callback in its own goroutine, so a double-tap or Slack
-// retry can arrive concurrently. Park actions use this mutex to keep Gate's
-// open-check and terminal append from racing in this process. Grant-request
-// actions pass through it too, but their authority safety does not depend on
-// this mutex: Gate atomically excludes grant and denial terminals in state.
-// Different interactions never contend. Entries are not reclaimed; growth is
-// bounded by the interactions handled by this single-process ingress.
-//
-// For park resolution only, this does not serialize a second serve process on
-// the same -state or a CLI `escalate resolve` racing an HTTP callback. That
-// pre-existing race still requires an atomic compare-and-resolve in Gate.
-type escLocks struct {
-	mu sync.Mutex
-	m  map[string]*sync.Mutex
-}
-
-// lock acquires the per-id mutex and returns its release. The outer mutex guards
-// only the tiny map lookup; the per-id mutex is what callers actually hold.
-func (k *escLocks) lock(id string) func() {
-	k.mu.Lock()
-	l, ok := k.m[id]
-	if !ok {
-		l = new(sync.Mutex)
-		k.m[id] = l
-	}
-	k.mu.Unlock()
-	l.Lock()
-	return l.Unlock
 }
 
 // ServeHTTP handles one Slack interactive-action callback. The order is the
@@ -269,14 +251,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Wait() { s.inflight.Wait() }
 
 // process runs the authoritative callback off the request path, after the ack.
-// It holds the per-interaction lock across the work and bounds it with an
-// independent context — a client / Slack / tunnel disconnect must not cancel a
-// Gate append in flight. Park resolution still relies on the local lock to keep
-// its multi-append transaction from double-applying; the grant path has its own
-// durable cross-process terminal exclusion in Gate. Delivery gets a fresh
-// context so a callback that used most of resolveTimeout can still post its
-// outcome. A panic is contained to that callback and reported through the Slack
-// card when possible, or the serve log.
+// It takes the process-wide resolve slot for the whole of its work, so two taps
+// never drive gate against one state dir at once, and it bounds itself with an
+// independent budget — a client / Slack / tunnel disconnect must not cancel a
+// Gate append in flight. The queue keeps a park's multi-append transaction from
+// double-applying within this process (the grant path has its own durable
+// cross-process terminal exclusion in Gate); a lock a DIFFERENT process holds is
+// ridden out by the retry schedule instead. Delivery gets a fresh context so a
+// callback that used most of its budget can still post its outcome. A panic is
+// contained to that callback and reported through the Slack card when possible,
+// or the serve log.
 func (s *Server) process(cb callback) {
 	defer s.inflight.Done()
 	defer func() {
@@ -284,11 +268,13 @@ func (s *Server) process(cb callback) {
 			s.log.Printf("escalate serve: callback %s panicked: %v", cb.decision.Escalation, r)
 		}
 	}()
-	defer s.locks.lock(cb.decision.Escalation)()
 
-	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
+	// The budget runs from the ack, covering the queue wait and the backoffs but
+	// never an attempt already in flight, so a graceful drain is bounded by one
+	// window rather than by however many taps are queued behind this one.
+	ctx, cancel := context.WithTimeout(context.Background(), resolveBudget)
 	defer cancel()
-	code, cb, err := s.processCallback(ctx, cb)
+	code, cb, err := s.runQueued(ctx, cb)
 	if err != nil {
 		s.log.Printf("escalate serve: callback %s: %v", cb.decision.Escalation, err)
 	}
@@ -324,22 +310,87 @@ func (s *Server) processCallback(ctx context.Context, cb callback) (int, callbac
 	}
 	out, code, err := s.grantTap(ctx, cb.rawBody, cb.signature, cb.timestamp)
 	cb.gateOutput = out
-	return code, cb, err
+	if err != nil {
+		return code, cb, err
+	}
+	return code, cb, busy(out, code)
+}
+
+// runQueued waits for this process's single resolve slot and then drives the
+// callback under the state-lock retry schedule. Waiting is itself an outcome the
+// operator sees: a queue wait long enough to notice replaces the card with a
+// queued state, and a wait that outlives the budget reports honestly that the
+// tap never ran rather than resolving it minutes late.
+func (s *Server) runQueued(ctx context.Context, cb callback) (int, callback, error) {
+	release, err := s.queue.enter(ctx, s.notice, func() { s.status(cb, queuedText(cb)) })
+	if err != nil {
+		return 0, cb, fmt.Errorf("%w: no turn within %s (%v)", ErrStateBusy, resolveBudget, err)
+	}
+	defer release()
+	return s.attempts(ctx, cb)
+}
+
+// attempts drives the callback, retrying ONLY a state-lock timeout — the one
+// failure gate itself calls unspent, because the lock is taken before any
+// append. Everything else, including every landed decision, is returned on the
+// first try. The operator is told once, on the first retry, that gate is busy;
+// Slack allows a handful of response_url updates per interaction, so the card
+// gets a queued state, a retrying state, and the outcome, not one per attempt.
+func (s *Server) attempts(ctx context.Context, cb callback) (int, callback, error) {
+	for attempt := 1; ; attempt++ {
+		code, out, err := s.attempt(cb)
+		if !errors.Is(err, ErrStateBusy) || attempt >= resolveAttempts {
+			return code, out, err
+		}
+		if attempt == 1 {
+			s.status(cb, retryingText(cb))
+		}
+		if werr := wait(ctx, s.backoffFor(attempt)); werr != nil {
+			return code, out, err
+		}
+	}
+}
+
+// attempt runs ONE callback under its own timeout rather than the tap's
+// remaining budget: an attempt in flight is never cut short, so a budget that
+// runs out stops the NEXT try instead of killing gate mid-append.
+func (s *Server) attempt(cb callback) (int, callback, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
+	defer cancel()
+	return s.processCallback(ctx, cb)
+}
+
+// backoffFor is the wait before the given retry, holding the last step for any
+// attempt past the schedule. An empty schedule retries immediately, which is
+// what a test that compresses the wait asks for.
+func (s *Server) backoffFor(attempt int) time.Duration {
+	if len(s.backoff) == 0 {
+		return 0
+	}
+	if attempt > len(s.backoff) {
+		return s.backoff[len(s.backoff)-1]
+	}
+	return s.backoff[attempt-1]
 }
 
 // resolve reads the grant from the parked escalation and drives the ingest
 // client — the same mechanism the CLI resolve verb uses. A grant-lookup failure
 // (including ErrNotParked for an already-resolved park) short-circuits before any
 // resolve, so a replayed tap records nothing. It returns gate's exit code, which
-// deliver maps to the human outcome.
+// deliver maps to the human outcome — unless gate's own output says it never took
+// its state lock, which is named ErrStateBusy so the caller can retry a decision
+// that was never recorded.
 func (s *Server) resolve(ctx context.Context, d ingest.Decision) (int, error) {
 	grant, err := s.findGrant(ctx, d.Escalation)
 	if err != nil {
 		return 0, err
 	}
 	d.Grant = grant
-	_, code, err := s.ingest.Resolve(ctx, d)
-	return code, err
+	out, code, err := s.ingest.Resolve(ctx, d)
+	if err != nil {
+		return code, err
+	}
+	return code, busy(out, code)
 }
 
 // deliver renders the outcome as a Slack card and posts it to the interaction's
@@ -362,6 +413,28 @@ func (s *Server) deliver(ctx context.Context, cb callback, code int, err error) 
 		return false
 	}
 	return true
+}
+
+// status replaces the card with an interim state — queued, or retrying — while
+// the tap waits for gate's state lock. It keeps the card honest: the operator
+// sees that their decision is still coming rather than a stuck ack, and only a
+// tap that runs out of retries ever shows a failure. It is best-effort
+// presentation on its own fresh budget, like deliver, and is called at most
+// twice per tap so the outcome always has a response_url use left.
+func (s *Server) status(cb callback, text string) {
+	if cb.responseURL == "" {
+		return
+	}
+	card, err := json.Marshal(responseMessage{ReplaceOriginal: true, Text: text})
+	if err != nil {
+		s.log.Printf("escalate serve: render status for %s: %v", cb.decision.Escalation, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deliverTimeout)
+	defer cancel()
+	if perr := s.post(ctx, cb.responseURL, card); perr != nil {
+		s.log.Printf("escalate serve: deliver status for %s: %v", cb.decision.Escalation, perr)
+	}
 }
 
 // verify is the authentication gate. It rejects a request that is missing
@@ -491,6 +564,18 @@ func outcomeCard(cb callback, code int, err error) ([]byte, error) {
 	return json.Marshal(responseMessage{ReplaceOriginal: true, Text: outcomeText(cb, code, err)})
 }
 
+// queuedText and retryingText are the interim card vocabulary: a tap waiting its
+// turn behind another resolve, and a tap riding out a state lock some other
+// process holds. Both say the decision is still coming, which is the honest
+// state — nothing has been recorded and nothing has been lost.
+func queuedText(cb callback) string {
+	return fmt.Sprintf("⏳ Queued — %s's decision is waiting its turn for gate's state lock…", cb.decision.Who)
+}
+
+func retryingText(cb callback) string {
+	return fmt.Sprintf("🔁 gate's state is busy — still trying to record %s's decision…", cb.decision.Who)
+}
+
 // outcomeText maps gate's exit code — and the ingest-side errors that
 // short-circuit before gate — to the one-line outcome shown on the card.
 // ErrGrantlessPark is checked before its wrapper target ErrNotParked: the park
@@ -511,6 +596,9 @@ func outcomeText(cb callback, code int, err error) string {
 	if errors.Is(err, ErrNotParked) {
 		return "☑️ Already resolved — this escalation is no longer parked."
 	}
+	if errors.Is(err, ErrStateBusy) {
+		return fmt.Sprintf("❌ gate's state stayed busy — %s's decision was NOT recorded. Nothing was spent: the park is still open, so decide it again once the run holding gate's lock finishes.", who)
+	}
 	if err != nil {
 		return fmt.Sprintf("❌ Could not record %s's decision — check the serve log.", who)
 	}
@@ -529,6 +617,9 @@ func outcomeText(cb callback, code int, err error) string {
 
 func grantOutcomeText(cb callback, code int, err error) string {
 	who := cb.decision.Who
+	if errors.Is(err, ErrStateBusy) {
+		return fmt.Sprintf("❌ gate's state stayed busy — %s's T0 decision was NOT applied. Nothing was spent: the request is still open.", who)
+	}
 	if err != nil {
 		return fmt.Sprintf("❌ Gate could not verify %s's T0 decision — check the serve log.", who)
 	}

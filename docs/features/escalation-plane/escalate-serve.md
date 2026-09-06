@@ -93,6 +93,44 @@ Handler outline (one Slack interactive-action POST):
 > work. The serve unit tests cover the ack-before-resolve + card vocabulary; the
 > e2e drives the async ack→background-resolve→journal path through the real binary.
 
+### Burst behaviour — one queue, and a retry for the one unspent failure
+
+**Measured (2026-09-05).** Six taps landed inside ~10s. serve ran every resolve in
+its own goroutine, so they all shelled `gate` at once and contended for gate's
+single state lock: one resolved, four died on `state_lock_timeout after 10s`, one
+was killed by the 25s attempt timeout (exit -1) after waiting on the lock twice —
+once for the `gate next` lookup, once for the resolve. Each failure line even said
+"no judgment is recorded … the one judgment is unspent and a retry is legal", and
+nothing retried; the cards said the decisions had failed. The same thing happens
+with a single tap when a long `gate gate` run holds the lock.
+
+Two mechanisms close it, both inside serve, neither touching gate's lock
+semantics or its 10s timeout:
+
+1. **One queue.** Every background callback passes through a single slot, so this
+   process never runs two gate invocations against one state dir at once. Taps
+   stop contending with each other; they wait their turn. This subsumes the
+   per-escalation lock it replaces — a double-tap is still serialized, and now so
+   are different escalations.
+2. **Retry the lock, and only the lock.** A `state_lock_timeout` is the one
+   failure gate takes *before* any append, so it recorded nothing and gate itself
+   calls a retry legal. serve names it `ErrStateBusy` (read off gate's own output,
+   never imported) and retries four times over ~90s, riding out a lock some other
+   process holds. Every other failure — and every landed decision, 0..3 — is
+   reported on the first try, because retrying one of those could double-apply.
+
+The card stays honest throughout: a queued tap says queued, a retrying tap says
+gate is busy, and only a tap that spends all four attempts says the decision was
+NOT recorded (naming that nothing was spent, so it can be decided again). The
+attempt timeout is now 45s so a contended attempt fails *cleanly* as a retryable
+lock timeout instead of being killed mid-run, and a tap's whole background life is
+bounded at 3 minutes from its ack — a budget that stops the next attempt but never
+interrupts one in flight, so a graceful drain stays bounded.
+
+Residual, in `FOLLOWUPS.md`: a lock held longer than the budget still ends with a
+failed card and a CLI resolve. The durable answer is the same accept-before-ack
+log the hard-crash entry needs.
+
 Where does the **grant** come from? The escalation body carries its `grant` id
 (`escalation.V1.Grant`), so `serve` can read it from the parked escalation rather
 than requiring the operator to paste it. (Resolve still re-checks the grant is

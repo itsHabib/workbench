@@ -54,6 +54,11 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   the card is replaced with a working state that drops the buttons) and runs the
   grant lookup + `gate resolve` in the background, delivering the outcome to the
   interaction's `response_url` (`replace_original`, guarded to an https Slack host).
+  Taps are SERIALIZED through one in-process queue, so a burst never makes taps
+  contend with each other for gate's single state lock, and a `state_lock_timeout`
+  — the one gate failure that records nothing — is retried four times over ~90s
+  before the tap is called failed. The card tracks that: queued, then retrying,
+  and only "NOT recorded" once the retries are spent.
   Like `resolve`, it shells `gate` with no `-key`, so set `GATE_KEY` (or use
   gate's default key dir) or gate refuses the grant with `grant_bad_signature`.
   Binds loopback by default; a tunnel (ngrok/cloudflared) exposes it to Slack.
