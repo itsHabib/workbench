@@ -13,6 +13,7 @@ export FLEET_BIN="$here/fleet.bin"
 # CI's check job runs gofmt; fail here first.
 unformatted="$(gofmt -l "$here/.." 2>/dev/null || true)"
 if [ -n "$unformatted" ]; then echo "unformatted (gofmt -w them):"; echo "$unformatted"; exit 1; fi
+(cd "$here/../../.." && go vet ./cmd/fleet/...) || { echo "go vet failed"; exit 1; }
 export FLEET_WATCH=off FLEET_GITHUB=off   # the suite must not spawn watchers from its hundreds of SessionStarts
 case "${1:-}" in
   codex) exec bash "$here/test-codex.sh" ;;

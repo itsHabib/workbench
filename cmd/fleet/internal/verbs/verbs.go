@@ -200,7 +200,6 @@ func dispatchControl(verb string, rest []string, arg func(int) string) (bool, er
 	default:
 		return false, nil
 	}
-	return true, nil
 }
 
 // dispatchViews is the lookup plane: every answer derived from records, nothing written.
@@ -246,7 +245,6 @@ func dispatchViews(verb string, plain []string, parg func(int) string, asJSON bo
 	default:
 		return false, nil
 	}
-	return true, nil
 }
 
 // dispatchSeats is the seats: pooled worktrees and what is placed in them.
@@ -280,7 +278,6 @@ func dispatchSeats(verb string, plain []string, parg func(int) string) (bool, er
 	default:
 		return false, nil
 	}
-	return true, nil
 }
 
 // dispatchWork is the ownership row: the one declared act and its views.
@@ -338,7 +335,6 @@ func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 	default:
 		return false, nil
 	}
-	return true, nil
 }
 
 // dispatchActs is what a session does by hand: receipts, resources, handoff, role binding.
@@ -394,7 +390,6 @@ func dispatchActs(verb string, rest []string, arg func(int) string) (bool, error
 	default:
 		return false, nil
 	}
-	return true, nil
 }
 
 // ---------- argument helpers ----------
