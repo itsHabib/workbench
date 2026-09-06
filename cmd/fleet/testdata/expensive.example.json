@@ -1,0 +1,16 @@
+[
+ {
+  "name": "full unit suite",
+  "pattern": "\\b(vitest|jest)\\b|\\b(npm|pnpm|yarn)\\s+(run\\s+)?test\\b|\\bturbo\\s+run\\s+test\\b",
+  "unless": "\\S+\\.(test|spec)\\.[tj]sx?\\b|\\s-t\\s|--filter",
+  "seconds": 1800,
+  "instead": "vitest run <the test files for your diff> (~5s measured); CI runs the full suite on every push"
+ },
+ {
+  "name": "project typecheck",
+  "pattern": "\\btsc\\b",
+  "unless": "\\s-p\\s+\\S+",
+  "seconds": 90,
+  "instead": "tsc --noEmit -p <the package you touched>, or let CI do it"
+ }
+]
