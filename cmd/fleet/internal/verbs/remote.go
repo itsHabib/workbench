@@ -179,7 +179,7 @@ func upsertOwnership(rid, branch string) string {
 	}
 	host := hostName()
 	path := fmt.Sprintf("repos/%s/issues/%d/comments", slug, n)
-	data, why := ghJSON("gh", "api", path, "--paginate")
+	data, why := ghJSON("gh", "api", path+"?per_page=100")
 	if why != "" {
 		return fmt.Sprintf("record: local only (%s: %s)", slug, why)
 	}
@@ -314,6 +314,14 @@ func syncRepo(slug string) (int, string) {
 		}
 		return 0, why
 	}
+	// A change whose comments could not be read this time keeps what the last
+	// sync saw, marked stale: a failed read is not "no rows".
+	prior := map[int]map[string]any{}
+	for _, px := range fleet.L(fleet.ReadJSON(cacheFile(slug)), "prs") {
+		if p, ok := px.(map[string]any); ok {
+			prior[int(fleet.F(p, "number"))] = p
+		}
+	}
 	changes := make([]any, 0, len(list))
 	for i, x := range list {
 		if i >= 30 {
@@ -321,9 +329,7 @@ func syncRepo(slug string) (int, string) {
 		}
 		ch, _ := x.(map[string]any)
 		n := int(fleet.F(ch, "number"))
-		rows, receipts := commentsOn(slug, n)
-		changes = append(changes, map[string]any{"number": n, "branch": fleet.S(ch, "headRefName"), "head": fleet.S(ch, "headRefOid"), "url": fleet.S(ch, "url"),
-			"updated_at": fleet.S(ch, "updatedAt"), "rows": rows, "receipts": receipts})
+		changes = append(changes, changeEntry(ch, n, prior[n], slug))
 	}
 	if err := fleet.WriteJSON(cacheFile(slug), map[string]any{"at": fleet.Now(), "repo": slug, "prs": changes}); err != nil {
 		return 0, err.Error()
@@ -331,14 +337,31 @@ func syncRepo(slug string) (int, string) {
 	return len(changes), ""
 }
 
+// changeEntry is one cached change: its rows and receipts read now, or the prior
+// sync's copy marked stale when the read failed.
+func changeEntry(ch map[string]any, n int, prior map[string]any, slug string) map[string]any {
+	entry := map[string]any{"number": n, "branch": fleet.S(ch, "headRefName"), "head": fleet.S(ch, "headRefOid"), "url": fleet.S(ch, "url"),
+		"updated_at": fleet.S(ch, "updatedAt"), "rows": []any{}, "receipts": []any{}}
+	rows, receipts, ok := commentsOn(slug, n)
+	if ok {
+		entry["rows"], entry["receipts"], entry["comments_read_at"] = rows, receipts, fleet.Now()
+		return entry
+	}
+	entry["comments_stale"] = true
+	if prior != nil {
+		entry["rows"], entry["receipts"], entry["comments_read_at"] = prior["rows"], prior["receipts"], prior["comments_read_at"]
+	}
+	return entry
+}
+
 // commentsOn is what the fleet wrote on a change: the ownership rows (one sticky
 // comment) and every receipt (one comment each), in posting order.
-func commentsOn(slug string, n int) ([]any, []any) {
+func commentsOn(slug string, n int) ([]any, []any, bool) {
 	rows, receipts := []any{}, []any{}
-	cdata, _ := ghJSON("gh", "api", fmt.Sprintf("repos/%s/issues/%d/comments", slug, n), "--paginate")
+	cdata, why := ghJSON("gh", "api", fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", slug, n))
 	comments, ok := cdata.([]any)
-	if !ok {
-		return rows, receipts
+	if why != "" || !ok {
+		return rows, receipts, false
 	}
 	seenRows := false
 	for _, cx := range comments {
@@ -358,7 +381,7 @@ func commentsOn(slug string, n int) ([]any, []any) {
 			seenRows = true
 		}
 	}
-	return rows, receipts
+	return rows, receipts, true
 }
 
 // remoteRows is the rows another machine declared, from the cache: state `remote`

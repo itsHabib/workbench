@@ -17,7 +17,7 @@ var FileTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, 
 // past env assignments. A git write is a git SUBCOMMAND read there — the old
 // bag-of-words form denied `git log -- src/apply.ts` on a held branch while letting
 // `git branch -D` through.
-const cmdPos = `(?:^|&&|\|\||;|\||\()\s*(?:\w+=(?:"[^"]*"|'[^']*'|\S+)\s+)*`
+const cmdPos = `(?:^|&&|\|\||;|\||\(|\n|\r)\s*(?:\w+=(?:"[^"]*"|'[^']*'|\S+)\s+)*`
 const gitOpts = `(?:-[cC]\s+\S+\s+)*`
 
 var (
@@ -267,6 +267,9 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 		cur := Lease(key)
 		TestPause("AFTER_OBSERVE") // inside the lock: a rival now BLOCKS rather than races
 		if cur == nil {
+			if reason = acquireGuards(key, sid, role, cwd); reason != "" {
+				return nil
+			}
 			return WriteLease(key, LeaseRecord(key, sid, role, cwd, "claimed on first write"))
 		}
 		if IsMalformed(cur) {
@@ -300,6 +303,9 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 				key, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), key)
 			return nil
 		}
+		if reason = acquireGuards(key, sid, role, cwd); reason != "" {
+			return nil
+		}
 		return WriteLease(key, LeaseRecord(key, sid, role, cwd, "took over from dead session "+Short(S(cur, "session"))))
 	})
 	if err == ErrKeyBusy {
@@ -313,6 +319,50 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 
 func substrateError(key, msg string) string {
 	return fmt.Sprintf("the fleet store could not be read or written for %s (%s), so this session does not hold it and nothing was written. A lease is not assumed on a substrate error. Next action: check ~/.fleet is writable, then retry.", KeyLabel(key), msg)
+}
+
+// acquireGuards runs inside the key's lock before a lease is written for sid, on a
+// claim or a takeover. Two things an acquisition must not do:
+//
+// Publish a lease naming a session that is not on disk yet. A rival reading the
+// lease between the write and this session's own record publication finds no
+// record in a readable directory, which Liveness reports as known-dead, and takes
+// the key over while this tool call is running. So the record is published first,
+// here, and a failure to publish it refuses the write: an acquisition that a
+// rival would read as dead is not an acquisition.
+//
+// Take a key that a pre-migration record still names for another live session. The
+// migration leaves a genuine collision for a person, and `fleet leases` reports it;
+// a report is not a fence, so the fence is here.
+func acquireGuards(key, sid, role, cwd string) string {
+	if lg := legacyHolder(key); lg != nil && S(lg, "session") != sid {
+		if alive, known := Liveness(S(lg, "session")); alive || !known {
+			return fmt.Sprintf("%s is also named by a pre-migration lease for %s %s (%s), left in place because it collides with the current one. Not free, not taken over. Next action: `fleet leases`, then remove the stale one by hand.",
+				KeyLabel(key), roleOf(lg), Short(S(lg, "session")), Path("leases"))
+		}
+	}
+	if err := ensurePublished(sid, role, cwd); err != nil {
+		return fmt.Sprintf("this session's record could not be published before taking %s (%v), so the lease would read as a dead holder's and be taken over by the next session; nothing runs. Next action: check that %s is a writable directory, then retry.",
+			KeyLabel(key), err, Path("sessions"))
+	}
+	return ""
+}
+
+func roleOf(rec Rec) string {
+	if r := S(rec, "role"); r != "" {
+		return r
+	}
+	return "a session"
+}
+
+// ensurePublished writes a minimal live session record when none is on disk. The
+// hook's touch, which follows the verdict, fills it in.
+func ensurePublished(sid, role, cwd string) error {
+	if ReadOnly || exists(Path("sessions", sid+".json")) {
+		return nil
+	}
+	return WriteJSON(Path("sessions", sid+".json"), Rec{"session": sid, "cwd": cwd, "role": nilIfEmpty(role), "pid_kind": "parent-unverified",
+		"last_event_at": Now(), "last_event": "lease", "turn_open": true, "ended": false})
 }
 
 // ExemptFromRequires reports a standalone substrate verb the guard lets through.

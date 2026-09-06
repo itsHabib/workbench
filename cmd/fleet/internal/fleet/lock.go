@@ -45,6 +45,9 @@ func KeyLock(key string, fn func() error) error {
 }
 
 func keyLockN(key string, tries int, pause time.Duration, fn func() error) error {
+	if ReadOnly {
+		return fn() // shadow writes nothing, so there is nothing to fence and no lock file to leave behind
+	}
 	p := Path("keylocks", Safe(key)+".lock")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err

@@ -15,7 +15,7 @@ mkdir -p "$FLEET_STATE" "$ORG_STATE" "$CODEX_HOME"
 cd "$work" || exit 1
 git init -q repo && git -C repo -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
   && git -C repo checkout -q -b feat/x && git -C repo worktree add -q "$work/wt" -b feat/y || exit 1
-REPO="$(native "$work/repo")"; WT="$(native "$work/wt")"; WORK="$(native "$work")"
+REPO="$(native "$work/repo")"; WT="$(native "$work/wt")"; WORK="$(native "$work")"; export FLEET_TEST_REPO="$REPO"
 printf '%s work supervisor:cam\n%s work finisher:cam\n' "$REPO" "$WT" > "$ORG_STATE/roles.map"
 cp "$here/expensive.example.json" "$FLEET_STATE/expensive.json"
 H="${FLEET_HOOK:-$here/hook.py}"; F="$here/fleet.py"
@@ -1695,7 +1695,9 @@ if a[:2] == ["pr", "list"]:
         print("[]"); sys.exit(0)
     print(json.dumps([{"number": 7, "headRefName": "feat/w3", "headRefOid": db.get("head", "abc123"), "url": "https://github.com/o/r/pull/7", "updatedAt": "2026-09-05T00:00:00Z"}])); sys.exit(0)
 if a[0] == "api":
-    path = a[1]; method = a[a.index("--method") + 1] if "--method" in a else "GET"
+    path = a[1].split("?")[0]; method = a[a.index("--method") + 1] if "--method" in a else "GET"
+    if path.endswith("/comments") and method == "GET" and os.environ.get("FAKE_GH_FAIL_COMMENTS"):
+        print("gh: 503", file=sys.stderr); sys.exit(1)
     body = json.load(sys.stdin) if "--input" in a else None
     if path.endswith("/comments") and method == "GET":
         print(json.dumps(db["comments"])); sys.exit(0)
@@ -1950,7 +1952,7 @@ def fleet(*a): return subprocess.run([sys.executable, fleetpy, *a], capture_outp
 def digest():
     h = hashlib.sha1()
     for root, dirs, files in os.walk(state):
-        dirs[:] = sorted(d for d in dirs if d not in ("keylocks",))
+        dirs[:] = sorted(dirs)
         for f in sorted(files):
             if f == "shadow.jsonl" or f.startswith(".tmp"): continue
             p = os.path.join(root, f); h.update(p.encode()); h.update(open(p, "rb").read())
@@ -2032,6 +2034,93 @@ report(s_old == "remote" and s_done == "done" and s_failed == "failed",
 hook._unlink(hook.path("sessions", "rcpt5.json")); hook._unlink(hook.path("prs", "seed2.json")); hook._unlink(hook.path("cache", "github", "o__r.json"))
 for f in os.listdir(hook.path("receipts")):
     if f.startswith(head): os.remove(hook.path("receipts", f))
+sys.exit(1 if bad else 0)
+PY
+
+# ---- Round two of the Claude review on #282: publication before acquisition, the legacy fence,
+# a failed sync keeps prior rows, abandoned needs a session that was there after the dispatch,
+# unknown work is attention, and a newline is a command separator.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, hookpy, fleetpy, work = sys.argv[1:5]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+r = os.path.join(work, "watchrepo"); bin_ = os.environ["FLEET_BIN"]; REPO = os.environ["FLEET_TEST_REPO"]
+def hookrun(ev, env=None): return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True, env=env)
+def fleet(*a, env=None): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=r, env=env or {**os.environ, "ORG_TENANT": "work"})
+# The branch under test is whatever the tree is on: the hook reads the branch from the tree.
+br = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
+key = hook.scope(r, br)
+def clear(): hook._unlink(hook.path("leases", hook.safe(key) + ".json"))
+clear()
+# 1. A session with no record on disk takes a branch; while its touch is paused (lease written, record
+#    not yet touched), a live rival checks the same key. The record must already be there.
+env = {**os.environ, "FLEET_TEST_PAUSE_IN_TOUCH": "1.5"}
+p = subprocess.Popen([sys.executable, hookpy], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+p.stdin.write(json.dumps({"hook_event_name": "PreToolUse", "session_id": "pub_new", "cwd": r, "tool_name": "Edit", "tool_use_id": "t1", "tool_input": {"file_path": os.path.join(r, "f"), "old_string": "a", "new_string": "b"}})); p.stdin.close()
+time.sleep(0.6)
+hook.write_json(hook.path("sessions", "pub_rival.json"), {"session": "pub_rival", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": br, "turn_open": True})
+rival = subprocess.run([bin_, "x-check-lease", key, br, "pub_rival", "x:watchrepo", r], capture_output=True, text=True, env=os.environ)
+p.wait()
+holder = (hook.read_json(hook.path("leases", hook.safe(key) + ".json")) or {}).get("session")
+report(p.returncode == 0 and rival.returncode == 1 and "held by" in rival.stdout and holder == "pub_new",
+       "a session's record is published before its lease is written, so a rival mid-window reads it as alive and is refused",
+       f"new rc={p.returncode} rival rc={rival.returncode} {rival.stdout[:160]!r} holder={holder}")
+clear(); hook._unlink(hook.path("sessions", "pub_new.json")); hook._unlink(hook.path("sessions", "pub_rival.json"))
+# 2. A pre-migration lease naming a live session collides with a current lease for a dead one:
+#    a third session's write is refused, not handed the key.
+hook.write_json(hook.path("sessions", "leg_live.json"), {"session": "leg_live", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": br, "turn_open": True})
+hook.write_json(hook.path("sessions", "leg_dead.json"), {"session": "leg_dead", "cwd": r, "pid": 999999, "pid_kind": "harness", "last_event_at": hook.now() - 600, "role": "x:watchrepo", "branch": br, "turn_open": False})
+hook.acquire_lease(key, hook.lease_record(key, "leg_dead", "x:watchrepo", r, "held"))
+hook.write_json(hook.path("leases", "legacy__feat__r2.json"), {"repo": hook.repo_id(r), "branch": br, "session": "leg_live", "role": "x:watchrepo", "cwd": r, "since": hook.now()})
+hook.write_json(hook.path("sessions", "leg_third.json"), {"session": "leg_third", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": br, "turn_open": True})
+third = subprocess.run([bin_, "x-check-lease", key, br, "leg_third", "x:watchrepo", r], capture_output=True, text=True, env=os.environ)
+holder = (hook.read_json(hook.path("leases", hook.safe(key) + ".json")) or {}).get("session")
+report(third.returncode == 1 and "pre-migration" in third.stdout and holder == "leg_dead",
+       "a pre-migration lease naming a live session fences a takeover of the current one; the report in `fleet leases` is not the fence",
+       f"rc={third.returncode} {third.stdout[:200]!r} holder={holder}")
+hook._unlink(hook.path("leases", "legacy__feat__r2.json")); clear()
+for sid in ("leg_live", "leg_dead", "leg_third"): hook._unlink(hook.path("sessions", sid + ".json"))
+# 3. A failed comment read during sync keeps the prior rows, marked stale, rather than erasing them.
+store = os.path.join(work, "ghstore.json")
+gh_env = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "on", "FAKE_GH_STORE": store, "PATH": os.path.join(work, "fakegh") + os.pathsep + os.environ["PATH"]}
+json.dump({"comments": [{"id": 1, "body": "<!-- fleet:ownership v1 -->\n```json\n" + json.dumps({"v": 1, "change": "feat/w3", "rows": [{"relationship": "live", "for": "hub:win", "by": "operator", "at": hook.now(), "due": None, "slot": None, "brief": None, "machine": "work-win"}]}) + "\n```\n"}], "next": 2, "calls": []}, open(store, "w"))
+hook.write_json(hook.path("prs", "seed3.json"), {"github": "o/r", "repo": hook.repo_id(r), "branch": "feat/w3", "number": 7, "at": hook.now()})
+fleet("sync", env=gh_env)
+c1 = hook.read_json(hook.path("cache", "github", "o__r.json")) or {}
+fleet("sync", env={**gh_env, "FAKE_GH_FAIL_COMMENTS": "1"})
+c2 = hook.read_json(hook.path("cache", "github", "o__r.json")) or {}
+pr2 = (c2.get("prs") or [{}])[0]
+report(len((c1.get("prs") or [{}])[0].get("rows", [])) == 1 and len(pr2.get("rows", [])) == 1 and pr2.get("comments_stale") is True,
+       "a failed comment read during sync keeps the change's prior rows and marks them stale; it never erases them",
+       f"first={[(p.get('number'), len(p.get('rows', []))) for p in c1.get('prs', [])]} second={[(p.get('number'), len(p.get('rows', [])), p.get('comments_stale')) for p in c2.get('prs', [])]}")
+hook._unlink(hook.path("prs", "seed3.json")); hook._unlink(hook.path("cache", "github", "o__r.json"))
+# 4. A session that visited the branch BEFORE the dispatch does not make the fresh row abandoned.
+hook.write_json(hook.path("sessions", "old_visit.json"), {"session": "old_visit", "cwd": r, "pid": 999999, "pid_kind": "harness", "last_event_at": hook.now() - 3600, "role": "x:watchrepo", "branch": br, "repo": hook.repo_id(r), "turn_open": False, "ended": True})
+off = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "off"}
+fleet("dispatch", br, "--as", "check", "--for", "hub:alpha", env=off)
+rows = json.loads(fleet("work", "--json").stdout or "[]")
+st = next((x.get("state") for x in rows if x.get("change") == br), None)
+report(st == "dispatched", "an ended session that left the branch before the dispatch does not make the new row abandoned", f"state={st}")
+fleet("undispatch", br, env=off); hook._unlink(hook.path("sessions", "old_visit.json"))
+# 5. An unknown work row is named at the hub's prompt, never counted fine.
+hook.write_json(hook.path("watch", "work.json"), [{"change": "feat/u", "repo": "x", "relationship": "verify", "for": "hub:alpha", "state": "unknown", "hands": None}])
+hb = hook.read_json(hook.path("watch", "heartbeat.json")) or {"interval": 60}; hb["at"] = hook.now(); hook.write_json(hook.path("watch", "heartbeat.json"), hb)
+hookrun({"hook_event_name": "SessionStart", "session_id": "r2_hub", "cwd": REPO, "source": "startup"})
+line = hookrun({"hook_event_name": "UserPromptSubmit", "session_id": "r2_hub", "cwd": REPO, "prompt": "hi"}).stdout
+report("unknown feat/u/verify" in line, "an unknown work row after a sleep is named as needing a decision, not counted fine", f"line={line[:300]!r}")
+hookrun({"hook_event_name": "SessionEnd", "session_id": "r2_hub", "cwd": REPO, "reason": "exit"})
+# 6. A newline is a command separator: `echo x\ngit push` on a held branch is a write and is refused.
+hook.write_json(hook.path("sessions", "nl_hold.json"), {"session": "nl_hold", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": br, "turn_open": True})
+hook.write_json(hook.path("sessions", "nl_rival.json"), {"session": "nl_rival", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "x:watchrepo", "branch": br, "turn_open": True})
+clear()
+hook.acquire_lease(key, hook.lease_record(key, "nl_hold", "x:watchrepo", r, "held"))
+nl = hookrun({"hook_event_name": "PreToolUse", "session_id": "nl_rival", "cwd": r, "tool_name": "Bash", "tool_use_id": "t9", "tool_input": {"command": "echo reading only\ngit push origin " + br}})
+report(nl.returncode == 2 and "held by" in nl.stderr, "a git write on the second line of a Bash command is a write: refused on a held branch", f"rc={nl.returncode} err={nl.stderr[:160]!r}")
+clear(); hook._unlink(hook.path("sessions", "nl_hold.json")); hook._unlink(hook.path("sessions", "nl_rival.json"))
 sys.exit(1 if bad else 0)
 PY
 

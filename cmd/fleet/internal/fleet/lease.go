@@ -275,15 +275,6 @@ func changedSince(marker string, subs ...string) bool {
 }
 
 // MigrateLegacyKeys re-keys per-branch state written before keys became strings.
-// Idempotent, marker-guarded so the steady state is one stat.
-//
-// Installing new code over a live store without re-keying its runtime directories is
-// FAIL-OPEN: the new code looks under the new name, finds nothing, and hands a second
-// session a lease on a branch whose incumbent still holds the old one. So it runs on
-// every event, before any key is read — a session already running when the install
-// lands has long since passed its SessionStart.
-//
-// MigrateLegacyKeys re-keys per-branch state written before keys became strings.
 // Idempotent, marker-guarded so the steady state is one stat per directory.
 //
 // Installing new code over a live store without re-keying its runtime directories is
@@ -297,6 +288,32 @@ func changedSince(marker string, subs ...string) bool {
 // Publication is under the key's lock with a rename; a name that already exists is a
 // collision for an operator to resolve, and both files are left for `fleet leases`.
 func MigrateLegacyKeys() {
+	migrateLegacyKeys()
+}
+
+// legacyHolder is a pre-migration lease record that names the same repo and branch
+// as key but was left in place by a collision, or nil.
+func legacyHolder(key string) Rec {
+	parts := KeyParts(key)
+	if S(parts, "kind") != "branch" {
+		return nil
+	}
+	for _, name := range listDir(Path("leases")) {
+		if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		r := ReadJSON(filepath.Join(Path("leases"), name))
+		if r == nil || S(r, "key") != "" || S(r, "session") == "" {
+			continue
+		}
+		if S(r, "repo") == S(parts, "repo") && S(r, "branch") == S(parts, "branch") {
+			return r
+		}
+	}
+	return nil
+}
+
+func migrateLegacyKeys() {
 	marker := Path("migrated-keys.v1")
 	// The marker says a pass completed; it cannot say no old writer has published a
 	// legacy record since. A directory that changed after the marker is rescanned —

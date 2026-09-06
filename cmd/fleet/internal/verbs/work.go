@@ -273,7 +273,7 @@ func declaredRow(d fleet.Rec, sessions []fleet.Rec, now float64) WorkRow {
 	if state == "dispatched" {
 		// No hands now. A session that left with the branch is not "never started".
 		for _, s := range sessions {
-			if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) {
+			if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) && fleet.F(s, "last_event_at") > fleet.F(d, "at") {
 				state = "abandoned"
 				row["left"] = s["session"]
 				break
@@ -355,7 +355,7 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 }
 
 // WorkAttention is the set of work states a hub must decide something about.
-var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true}
+var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true, "unknown": true}
 
 // WorkLine is one row as a hub reads it.
 func WorkLine(r WorkRow, now float64) string {
