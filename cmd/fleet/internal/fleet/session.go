@@ -282,6 +282,10 @@ func AssignmentLine(slot, sid string) string {
 		}
 		tail = fmt.Sprintf(`. The dispatcher (%s) wrote, quoted and not a fleet rule: "%s"`, by, brief)
 	}
+	// The dispatcher's address, verbatim: what to do with it is the card's business.
+	if r := S(a, "reply_to"); r != "" {
+		tail += fmt.Sprintf(". Reply to: %s", r)
+	}
 	return fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
 }
 

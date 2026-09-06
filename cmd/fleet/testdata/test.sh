@@ -1557,12 +1557,18 @@ report("since your last prompt" in h2 and "dead-holding-work → vacant" in h2,
 subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=r)
 subprocess.run(["git", "branch", "feat/w2"], cwd=r, capture_output=True)
 fleet("pool", r, "finisher", "1")
-a = fleet("assign", "watchrepo-finisher-1", "feat/w2", "finish this", "--for", "hub:alpha")
+a = fleet("assign", "watchrepo-finisher-1", "feat/w2", "finish this", "--for", "hub:alpha", "--reply-to", "local_hub0001")
 rec = hook.read_json(hook.path("assign", "watchrepo-finisher-1.json")) or {}
 sl = fleet("slots", "watchrepo").stdout
-report(a.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "operator" and "assigned(feat/w2 for hub:alpha)" in sl,
-       "fleet assign --for records the accountable role on the row, distinct from who dispatched, and slots shows it",
+report(a.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "operator" and "assigned(feat/w2 for hub:alpha)" in sl and rec.get("reply_to") == "local_hub0001",
+       "fleet assign --for records the accountable role on the row, distinct from who dispatched, and slots shows it; --reply-to rides the record",
        f"assign rc={a.returncode} {(a.stdout+a.stderr)[:160]!r} rec={rec} slots={sl[:160]!r}")
+seat = os.path.join(work, "watchrepo-finisher-1")
+st = ctx(hookrun({"hook_event_name": "SessionStart", "session_id": "rung4_seat", "cwd": seat, "source": "startup"}).stdout)
+report("Reply to: local_hub0001" in st and "finish this" in st,
+       "the seat's first line carries the dispatcher's address verbatim, beside the brief; what to do with it is the card's business",
+       f"start={st[:300]!r}")
+hookrun({"hook_event_name": "SessionEnd", "session_id": "rung4_seat", "cwd": seat, "reason": "exit"})
 fleet("unassign", "watchrepo-finisher-1")
 for sid in (hub, worker):
     hookrun({"hook_event_name": "SessionEnd", "session_id": sid, "cwd": repo, "reason": "exit"})

@@ -96,8 +96,8 @@ func liveHands(key string) string {
 // CmdDispatch is the one declared act: write the row, and place the work when a
 // slot is named. Placement is `assign`, under the slot's lock, before the row is
 // written, so a refused placement leaves no row behind.
-func CmdDispatch(change, rel, forRole, due, slot, brief, by string, take bool) error {
-	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--take]`
+func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
+	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <session>] [--take]`
 	if change == "" || rel == "" {
 		return refuse("%s", usage)
 	}
@@ -129,13 +129,13 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by string, take bool) e
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
 	}
 	if slot != "" {
-		if err := CmdAssign(slot, branch, brief, by, forRole); err != nil {
+		if err := CmdAssign(slot, branch, brief, by, forRole, replyTo); err != nil {
 			return err
 		}
 	}
 	now := fleet.Now()
 	rec := fleet.Rec{"change": branch, "repo": rid, "relationship": rel, "for": forRole, "by": by, "at": now,
-		"due": nil, "slot": nilIfEmpty(slot), "brief": nilIfEmpty(strings.TrimSpace(brief)), "head_at_dispatch": nilIfEmpty(sha)}
+		"due": nil, "slot": nilIfEmpty(slot), "brief": nilIfEmpty(strings.TrimSpace(brief)), "reply_to": nilIfEmpty(replyTo), "head_at_dispatch": nilIfEmpty(sha)}
 	if dueSecs > 0 {
 		rec["due"] = now + dueSecs
 	}

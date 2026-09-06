@@ -73,7 +73,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet slots [<repo>] [--json]                  one line per slot: free · busy(<sid8>, <branch>) · dirty · orphaned(<sid8>) · missing [cold] [assigned(<branch>)]
   fleet assign <slot> <branch> ["<brief>"]       check <branch> out in a free slot and record the assignment (read at the slot's next SessionStart)
   fleet unassign <slot>                          clear it
-  fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--take]
+  fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--reply-to <session>] [--take]
                                                  the one declared act: an ownership row (change, relationship, accountable, due), placed in a slot when named
   fleet work [--for <role>] [--json]             every row with its observed state: dead · late · undeclared · working · idle · dispatched · done
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
@@ -265,11 +265,15 @@ func dispatchSeats(verb string, plain []string, parg func(int) string) (bool, er
 		if err != nil {
 			return true, err
 		}
-		pos := positional(plain, "--for")
-		if len(pos) < 2 {
-			return true, refuse(`usage: fleet assign <slot> <branch> ["<brief>"] [--for <role>]`)
+		replyTo, err := optValue(plain, "--reply-to", verb)
+		if err != nil {
+			return true, err
 		}
-		return true, CmdAssign(pos[0], pos[1], strings.Join(pos[2:], " "), "", forRole)
+		pos := positional(plain, "--for", "--reply-to")
+		if len(pos) < 2 {
+			return true, refuse(`usage: fleet assign <slot> <branch> ["<brief>"] [--for <role>] [--reply-to <session>]`)
+		}
+		return true, CmdAssign(pos[0], pos[1], strings.Join(pos[2:], " "), "", forRole, replyTo)
 	case "unassign":
 		if parg(0) == "" {
 			return true, refuse("usage: fleet unassign <slot>")
@@ -285,15 +289,15 @@ func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 	switch verb {
 	case "dispatch":
 		vals := map[string]string{}
-		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief"} {
+		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief", "--reply-to"} {
 			v, err := optValue(plain, f, verb)
 			if err != nil {
 				return true, err
 			}
 			vals[f] = v
 		}
-		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief")
-		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", contains(plain, "--take"))
+		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief", "--reply-to")
+		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", vals["--reply-to"], contains(plain, "--take"))
 	case "reassign":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {

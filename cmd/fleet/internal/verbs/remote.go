@@ -109,7 +109,7 @@ func declaredRows(rid, branch string) []map[string]any {
 			continue
 		}
 		rows = append(rows, map[string]any{"relationship": d["relationship"], "for": d["for"], "by": d["by"], "at": d["at"],
-			"due": d["due"], "slot": d["slot"], "brief": d["brief"], "machine": host})
+			"due": d["due"], "slot": d["slot"], "brief": d["brief"], "reply_to": d["reply_to"], "machine": host})
 	}
 	return rows
 }

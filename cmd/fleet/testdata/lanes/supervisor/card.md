@@ -9,8 +9,12 @@ it. One action, then end the turn.
 
 Actions are verbs, never messages:
 
-- `fleet dispatch <branch|#n> --as <relationship> --for <you> --due 45m --slot <free slot> --brief "…"`
+- `fleet dispatch <branch|#n> --as <relationship> --for <you> --due 45m --slot <free slot> --brief "…" --reply-to <your session id>`
   declares a row and places it. `--as` names the receipt kind that means done.
+  `--reply-to` is your address: the seat reads it at start, and a worker's
+  question reaches you through the desktop's send_message. A question that
+  cannot wait comes that way; every question is also written on the change,
+  so the board can show the row as waiting on you.
 - `fleet reassign <change> --for <role>` hands a change to another hub.
 - `fleet revoke <branch> --to <session> "<why>"` takes a branch off its holder, on the record.
 - `fleet stop <key>` stops work; `fleet decide` records a correction;

@@ -59,13 +59,13 @@ var tools = []schema{
 			"required": []any{"revision"}}},
 	{"name": "fleet_assign",
 		"description": "Place work into a free slot: check the branch out there and record the assignment the slot's next session reads.",
-		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "cwd": cwdArg},
+		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "reply_to": str("your session id, handed to the seat as its address for questions"), "cwd": cwdArg},
 			"required": []any{"slot", "branch", "cwd"}}},
 	{"name": "fleet_dispatch",
 		"description": "The one declared act: write a change's ownership row (relationship, accountable role, due), placed in a slot when named; refused over live hands unless take.",
 		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),
 			"for": str("accountable role; default: the dispatcher"), "due": str("duration like 45m or 2h"), "slot": str("free slot to place the work in (fleet_slots)"),
-			"brief": str("one line the slot's session reads at start"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
+			"brief": str("one line the slot's session reads at start"), "reply_to": str("your session id, handed to the seat as its address for questions"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
 			"required": []any{"change", "as", "cwd"}}},
 	{"name": "fleet_work",
 		"description": "Every ownership row on this machine with its observed state: dead, late, undeclared (need a decision); working, idle, dispatched, done.",
@@ -251,11 +251,13 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		}
 		return buf.String(), false
 	case "fleet_assign":
-		return runVerb(func() error { return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp", s("for")) })
+		return runVerb(func() error {
+			return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp", s("for"), s("reply_to"))
+		})
 	case "fleet_dispatch":
 		take, _ := a["take"].(bool)
 		return runVerb(func() error {
-			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", take)
+			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take)
 		})
 	case "fleet_work":
 		return js(verbs.WorkRows(s("for"))), false

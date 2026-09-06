@@ -762,7 +762,7 @@ var branchNameRe = regexp.MustCompile(`\A[A-Za-z0-9._/@+-]+\z`)
 // the assignment. This is where *assigned* is written, attached to the act of
 // dispatching. The decision and the checkout happen under the seat's own lock, the
 // same lock a SessionStart in that slot takes; the fetch runs before it.
-func CmdAssign(slot, branch, brief, by, forRole string) error {
+func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 	r := slotRow(slot)
 	if r == nil {
 		var names []string
@@ -800,7 +800,7 @@ func CmdAssign(slot, branch, brief, by, forRole string) error {
 			forRole = by
 		}
 		return fleet.WriteJSON(fleet.Path("assign", fleet.Safe(slot)+".json"), fleet.Rec{
-			"slot": slot, "branch": branch, "brief": nilIfEmpty(strings.TrimSpace(brief)), "at": fleet.Now(),
+			"slot": slot, "branch": branch, "brief": nilIfEmpty(strings.TrimSpace(brief)), "reply_to": nilIfEmpty(replyTo), "at": fleet.Now(),
 			"by": by, "for": forRole, "repo": nilIfEmpty(fleet.RepoID(path)), "path": path})
 	})
 	if lerr == fleet.ErrKeyBusy {
