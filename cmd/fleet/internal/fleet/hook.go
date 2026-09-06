@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Verdict is what a hook event produces: an exit code, stderr (a denial's reason)
@@ -184,7 +185,7 @@ func onPrompt(ev Event, sid string) *Verdict {
 	// `turn_open_at` is what the board measures a busy session's overdue-ness from;
 	// `last_prompt_at` is what the board delta below is measured since.
 	rec := TouchSession(sid, ev, Rec{"turn_open": true, "turn_open_at": Now(), "last_prompt_at": Now()})
-	var lines []string
+	lines := waitLines(sid, time.Now())
 	if last := F(prev, "last_stop_at"); last > 0 {
 		if gap := Now() - last; gap > 60 {
 			lines = append(lines, fmt.Sprintf("[fleet] %s passed since your last turn ended.", FmtAge(gap)))
