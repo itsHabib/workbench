@@ -276,9 +276,10 @@ func (s *Server) process(cb callback) {
 	// The budget runs from the ack, covering the queue wait and the backoffs but
 	// never an attempt already in flight, so a graceful drain is bounded by one
 	// window rather than by however many taps are queued behind this one.
-	ctx, cancel := context.WithTimeout(context.Background(), s.budgetFor(cb))
+	budget := s.budgetFor(cb)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	code, cb, err := s.runQueued(ctx, cb)
+	code, cb, err := s.runQueued(ctx, budget, cb)
 	if err != nil {
 		s.log.Printf("escalate serve: callback %s: %v", cb.decision.Escalation, err)
 	}
@@ -325,10 +326,13 @@ func (s *Server) processCallback(ctx context.Context, cb callback) (int, callbac
 // operator sees: a queue wait long enough to notice replaces the card with a
 // queued state, and a wait that outlives the budget reports honestly that the
 // tap never ran rather than resolving it minutes late.
-func (s *Server) runQueued(ctx context.Context, cb callback) (int, callback, error) {
+func (s *Server) runQueued(ctx context.Context, budget time.Duration, cb callback) (int, callback, error) {
 	release, err := s.queue.enter(ctx, s.notice, func() { s.status(cb, queuedText(cb)) })
 	if err != nil {
-		return 0, cb, fmt.Errorf("%w: no turn within %s (%v)", ErrStateBusy, resolveBudget, err)
+		// The tap's own budget, not the package default: a grant callback's is the
+		// life left on its signature, and a log naming the wrong window would send
+		// the operator looking for a wait that never happened.
+		return 0, cb, fmt.Errorf("%w: no turn within %s (%v)", ErrStateBusy, budget, err)
 	}
 	defer release()
 	return s.attempts(ctx, cb)
@@ -350,7 +354,10 @@ func (s *Server) attempts(ctx context.Context, cb callback) (int, callback, erro
 			s.status(cb, retryingText(cb))
 		}
 		if werr := wait(ctx, s.backoffFor(attempt)); werr != nil {
-			return code, out, err
+			// Why the tap stopped is not the same fact as what failed, and only the
+			// log carries it: the budget ran out mid-backoff, with attempts to
+			// spare. The card is unchanged — ErrStateBusy stays in the chain.
+			return code, out, fmt.Errorf("%w; stopped after %d of %d attempts: %v", err, attempt, resolveAttempts, werr)
 		}
 	}
 }
