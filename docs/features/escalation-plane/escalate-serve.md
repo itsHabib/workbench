@@ -112,12 +112,20 @@ semantics or its 10s timeout:
    stop contending with each other; they wait their turn. This subsumes the
    per-escalation lock it replaces — a double-tap is still serialized, and now so
    are different escalations.
-2. **Retry the lock, and only the lock.** A `state_lock_timeout` is the one
-   failure gate takes *before* any append, so it recorded nothing and gate itself
-   calls a retry legal. serve names it `ErrStateBusy` (read off gate's own output,
-   never imported) and retries four times over ~90s, riding out a lock some other
-   process holds. Every other failure — and every landed decision, 0..3 — is
-   reported on the first try, because retrying one of those could double-apply.
+2. **Retry the lock, and only when gate says nothing was recorded.** A resolve is
+   several appends — judgment, verdict, action, then the resolution stamp — each
+   taking the lock separately, so "lost the lock" does not by itself mean "wrote
+   nothing": lose it between appends and the decision is already in the log with
+   only its stamp missing, and a retry would find the park closed and read as a
+   benign "already resolved". gate answers that question itself (`judgeSlotState`
+   re-reads the run) and says *"the one judgment is unspent and a retry is legal"*
+   only for a failure that landed before any append. serve requires BOTH that and
+   the lock timeout — read off gate's own output, never imported — before naming
+   the failure `ErrStateBusy` and retrying it four times over ~90s. Everything
+   else, including every landed decision (0..3), is reported on the first try. A
+   grant callback needs no such annotation: its whole effect is one single-use
+   append gate excludes atomically, so a lost lock wrote nothing and a retry that
+   raced a winner is answered "already resolved", never applied twice.
 
 The card stays honest throughout: a queued tap says queued, a retrying tap says
 gate is busy, and only a tap that spends all four attempts says the decision was
@@ -126,6 +134,13 @@ attempt timeout is now 45s so a contended attempt fails *cleanly* as a retryable
 lock timeout instead of being killed mid-run, and a tap's whole background life is
 bounded at 3 minutes from its ack — a budget that stops the next attempt but never
 interrupts one in flight, so a graceful drain stays bounded.
+
+A grant callback gets a smaller budget still: the life left on the Slack
+signature, less one attempt. gate re-verifies that same signature independently,
+so a forward that arrives outside Slack's ±5-min window is refused however long
+serve waited — waiting past it would turn a decision into a confusing refusal. A
+tap whose budget is already gone still gets its attempt whenever the queue is
+free; gate, not serve, is the authority on whether a signature is still good.
 
 Residual, in `FOLLOWUPS.md`: a lock held longer than the budget still ends with a
 failed card and a CLI resolve. The durable answer is the same accept-before-ack

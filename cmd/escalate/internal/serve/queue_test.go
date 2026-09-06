@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,12 +15,22 @@ import (
 	"github.com/itsHabib/workbench/contracts/escalation"
 )
 
-// gateLockTimeoutJSON is what gate prints on stdout when its state lock stayed
-// held: the terminal-error envelope carrying the coded error. Copied from the
-// 2026-09-05 burst log rather than imagined, since this string is the seam serve
-// classifies on.
-const gateLockTimeoutJSON = `{"error":"resolve: state_lock_timeout after 10s: open /Users/mh/dev/gate/state/log.lock: file exists",` +
+// gateLockTimeoutJSON is what gate prints on stdout when a resolve loses its
+// state lock BEFORE writing anything: the terminal-error envelope carrying the
+// coded error and gate's own re-read of the run, which says the judgment is
+// unspent. Copied from the 2026-09-05 burst log rather than imagined, since both
+// halves of this string are the seam serve classifies on.
+const gateLockTimeoutJSON = `{"error":"resolve: state_lock_timeout after 10s: open /Users/mh/dev/gate/state/log.lock: file exists; ` +
+	`no judgment is recorded for esc_ab — the one judgment is unspent and a retry is legal",` +
 	`"escape":{"why":"","next":""},"retry_helps":false}`
+
+// gateLockAfterAppendJSON is the same lock timeout landing LATER in the same
+// resolve: gate appended the decision and then lost the lock stamping the
+// resolution. gate's own annotation is absent, because there is nothing unspent
+// to retry — the decision is recorded. Retrying this would find the park closed
+// and report a benign "already resolved" over a missing stamp.
+const gateLockAfterAppendJSON = `{"error":"resolve: stamp resolution: state_lock_timeout after 10s: ` +
+	`open /Users/mh/dev/gate/state/log.lock: file exists","escape":{"why":"","next":""},"retry_helps":false}`
 
 // fakeGate models the one property of gate that produced the burst failure: its
 // state log is guarded by a single lock, taken by ONE process at a time, and an
@@ -260,31 +271,103 @@ func TestBurstGivesUpAfterAttempts(t *testing.T) {
 	}
 }
 
-// TestBusyClassification pins the retry policy itself, which is the risky part:
-// only a gate failure that names its lock timeout may be retried, and a LANDED
-// decision never is — retrying one would double-apply a resolution.
+// TestBusyClassification pins the retry policy itself, which is the risky part.
+// A resolve is retried only when gate reports its lock timeout AND says the
+// judgment is unspent; a landed decision never is, and neither is a lock lost
+// after gate already appended the decision — retrying either would report a
+// benign outcome over a resolution that is missing its stamp or applied twice.
+// A grant callback needs no such annotation: its whole effect is one single-use
+// append gate excludes atomically.
 func TestBusyClassification(t *testing.T) {
 	cases := []struct {
-		name string
-		out  string
-		code int
-		want bool
+		name        string
+		out         string
+		code        int
+		wantResolve bool
+		wantGrant   bool
 	}{
-		{"lock timeout", gateLockTimeoutJSON, codeError, true},
-		{"merge", `{"outcome":"would_merge"}`, codeMerge, false},
-		{"blocked", `{"outcome":"blocked"}`, codeBlocked, false},
-		{"refused", `{"outcome":"refused"}`, codeRefused, false},
-		{"other hard error", `{"error":"resolve: escalation is not the run's open park"}`, codeError, false},
+		{"lock timeout before any append", gateLockTimeoutJSON, codeError, true, true},
+		{"lock timeout after the decision landed", gateLockAfterAppendJSON, codeError, false, true},
+		{"merge", `{"outcome":"would_merge"}`, codeMerge, false, false},
+		{"blocked", `{"outcome":"blocked"}`, codeBlocked, false, false},
+		{"refused", `{"outcome":"refused"}`, codeRefused, false, false},
+		{"other hard error", `{"error":"resolve: escalation is not the run's open park"}`, codeError, false, false},
 		// A decision that landed is never retried, whatever its output says.
-		{"decision quoting the lock error", gateLockTimeoutJSON, codeMerge, false},
+		{"decision quoting the lock error", gateLockTimeoutJSON, codeMerge, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := busy([]byte(tc.out), tc.code)
-			if got := err != nil; got != tc.want {
-				t.Fatalf("busy(%q, %d) = %v, want retryable=%t", tc.out, tc.code, err, tc.want)
+			if got := resolveBusy([]byte(tc.out), tc.code) != nil; got != tc.wantResolve {
+				t.Fatalf("resolveBusy(%q, %d) retryable=%t, want %t", tc.out, tc.code, got, tc.wantResolve)
+			}
+			if got := busy([]byte(tc.out), tc.code) != nil; got != tc.wantGrant {
+				t.Fatalf("busy(%q, %d) retryable=%t, want %t", tc.out, tc.code, got, tc.wantGrant)
 			}
 		})
+	}
+}
+
+// TestLockLostAfterTheDecisionLandedIsNotRetried is the end-to-end half of that
+// policy, and the case a retry keyed on the lock timeout alone gets wrong: gate
+// recorded the decision and then lost the lock stamping the resolution. serve
+// must NOT retry — a retry finds the park closed and reads as "already resolved"
+// — and must show the gate-error card that sends the operator to look.
+func TestLockLostAfterTheDecisionLandedIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	runner := func(context.Context, string, ...string) ([]byte, int, error) {
+		calls.Add(1)
+		return []byte(gateLockAfterAppendJSON), codeError, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", runner),
+		FindGrant: func(context.Context, string) (string, error) { return "grt_live", nil },
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+	srv.backoff = []time.Duration{time.Millisecond}
+
+	body := formBody(payloadJSON(escalation.ActionApprove, "esc_ab", "michael"))
+	srv.ServeHTTP(httptest.NewRecorder(), signedRequest(testSecret, fixedNow, body))
+	sink.wait(t, 1)
+	srv.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("gate was called %d times; a lock lost after the decision landed must not be retried", got)
+	}
+	if got := sink.texts()[0]; !strings.Contains(got, "Gate error") {
+		t.Fatalf("card = %q, want the gate-error card that sends the operator to look", got)
+	}
+}
+
+// TestGrantCallbackBudgetTracksItsSignature pins the other half of the queue's
+// cost: gate re-verifies the same Slack signature a grant callback carries, so
+// waiting past Slack's ±5-min window turns a decision into a refusal. A grant
+// tap's budget is the life left on its signature, never the park budget, and a
+// park tap is unaffected.
+func TestGrantCallbackBudgetTracksItsSignature(t *testing.T) {
+	srv := New(Config{Secret: testSecret, Authorize: allowAll, Now: func() time.Time { return fixedNow }})
+	stamp := func(at time.Time) string { return strconv.FormatInt(at.Unix(), 10) }
+
+	park := callback{timestamp: stamp(fixedNow.Add(-4 * time.Minute))}
+	if got := srv.budgetFor(park); got != resolveBudget {
+		t.Fatalf("park budget = %s, want the ordinary %s", got, resolveBudget)
+	}
+	fresh := callback{grantRequest: true, timestamp: stamp(fixedNow)}
+	if got := srv.budgetFor(fresh); got != resolveBudget {
+		t.Fatalf("fresh grant budget = %s, want it capped at %s", got, resolveBudget)
+	}
+	aging := callback{grantRequest: true, timestamp: stamp(fixedNow.Add(-4 * time.Minute))}
+	if want := maxSkew - 4*time.Minute - resolveTimeout; srv.budgetFor(aging) != want {
+		t.Fatalf("aging grant budget = %s, want the %s left on its signature", srv.budgetFor(aging), want)
+	}
+	stale := callback{grantRequest: true, timestamp: stamp(fixedNow.Add(-6 * time.Minute))}
+	if got := srv.budgetFor(stale); got != 0 {
+		t.Fatalf("stale grant budget = %s, want none — it may still attempt, but never wait", got)
+	}
+	if got := srv.budgetFor(callback{grantRequest: true, timestamp: "nonsense"}); got != 0 {
+		t.Fatalf("unparseable timestamp budget = %s, want none", got)
 	}
 }
 

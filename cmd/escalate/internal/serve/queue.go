@@ -45,6 +45,18 @@ const (
 	// held — `state.ErrLockTimeout`, read off gate's OUTPUT rather than imported,
 	// which is the boundary law (serve reads gate's artifacts, never its code).
 	gateLockTimeout = "state_lock_timeout"
+
+	// gateRetryLegal is gate's own verdict on where a failed resolve landed. A
+	// resolve is SEVERAL appends — judgment, verdict, action, then the resolution
+	// stamp — and each takes the lock separately, so "lost the lock" does not by
+	// itself mean "recorded nothing": lose it between appends and the decision is
+	// already in the log with only its stamp missing. gate answers that question
+	// itself (judgeSlotState re-reads the run) and says a retry is legal ONLY for
+	// a failure that landed before any append; a spent slot reads "a retry only
+	// returns judgment_duplicate" or "a retry resumes that judgment" instead.
+	// Requiring these words is what makes the resolve retry safe. If gate ever
+	// rewords them serve stops retrying, which is the safe direction to fail.
+	gateRetryLegal = "unspent and a retry is legal"
 )
 
 // resolveBackoff is the wait before retry 1, 2, and 3. It is a Server field
@@ -69,23 +81,41 @@ func stateBusy(out []byte) bool { return bytes.Contains(out, []byte(gateLockTime
 func decided(code int) bool { return code >= codeMerge && code <= codeRefused }
 
 // busy names a gate invocation that failed on the state lock, and nil for every
-// other result. It is the one policy that decides what may be retried, so it is
-// deliberately narrow: a landed decision is never busy however its output reads,
-// and a failure whose output does not name gate's lock timeout is reported as it
+// other result. A landed decision is never busy however its output reads, and a
+// failure whose output does not name gate's lock timeout is reported as it
 // happened. gate prints the coded error on the stdout the caller already holds.
+//
+// This is the whole test for a GRANT callback, whose effect is one single-use
+// append that gate excludes atomically: a callback that lost the lock wrote
+// nothing, and a retry that raced a winner is answered "already resolved", never
+// applied twice. A resolve needs more (resolveBusy).
 func busy(out []byte, code int) error {
 	if decided(code) || !stateBusy(out) {
 		return nil
 	}
-	return fmt.Errorf("%w: gate exited %d without taking its state lock, so nothing was recorded", ErrStateBusy, code)
+	return fmt.Errorf("%w: gate exited %d without taking its state lock", ErrStateBusy, code)
+}
+
+// resolveBusy is the same test plus gate's own statement that the failure landed
+// before any append. A resolve that lost the lock BETWEEN appends — or on the
+// resolution stamp, after the decision was already recorded — is not retried:
+// the retry would find the park closed and report a benign "already resolved"
+// while the missing stamp went unmentioned. Such a failure is reported as the
+// error it was, which is what sends the operator to look.
+func resolveBusy(out []byte, code int) error {
+	err := busy(out, code)
+	if err == nil || !bytes.Contains(out, []byte(gateRetryLegal)) {
+		return nil
+	}
+	return err
 }
 
 // resolveQueue serializes every resolve this PROCESS runs, so concurrent taps
 // take gate's state lock one at a time instead of racing each other for it. It
-// is one slot, taken in FIFO order (Go wakes blocked channel senders in arrival
-// order), held across a tap's whole lookup→resolve including its retries — a
-// second waiter would only lose the same lock, and waiting is what the queue is
-// for.
+// is one slot, held across a tap's whole lookup→resolve including its retries —
+// a second waiter would only lose the same lock, and waiting is what the queue
+// is for. Waiters are woken roughly in arrival order, but nothing here depends
+// on that: the guarantee is mutual exclusion, not fairness.
 //
 // It subsumes the per-escalation lock it replaced: same-escalation taps are
 // still serialized (so gate's open-check and its terminal append can't interleave
@@ -115,6 +145,15 @@ func newResolveQueue() *resolveQueue {
 // the tap's own outcome card and could leave a resolved park showing "queued",
 // and losing a place in a queue only costs latency.
 func (q *resolveQueue) enter(ctx context.Context, notice time.Duration, announce func()) (func(), error) {
+	// A free slot is taken without consulting the clock, so an idle ingress always
+	// proceeds — even for a tap whose budget is already spent (a grant callback
+	// arriving near the end of its signature window). Only a tap that must WAIT
+	// behind another can be stopped by its budget.
+	select {
+	case q.slot <- struct{}{}:
+		return func() { <-q.slot }, nil
+	default:
+	}
 	timer := time.NewTimer(notice)
 	defer timer.Stop()
 	for {

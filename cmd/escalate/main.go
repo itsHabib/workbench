@@ -38,9 +38,11 @@ import (
 const codeIngestError = 5
 
 // resolveDrainTimeout bounds the graceful HTTP shutdown on a signal. The
-// authoritative drain of in-flight resolves is handler.Wait (each resolve is
-// self-bounded by serve's own timeouts); this only caps how long Shutdown waits
-// for active request handlers, which return as soon as they have acked.
+// authoritative drain of in-flight resolves is handler.Wait — bounded by serve's
+// own per-tap budget (about three minutes from a tap's ack, plus a final
+// attempt), since a queued or retrying tap keeps working after the listener
+// stops. This constant only caps how long Shutdown waits for active request
+// handlers, which return as soon as they have acked.
 const resolveDrainTimeout = 40 * time.Second
 
 func main() {

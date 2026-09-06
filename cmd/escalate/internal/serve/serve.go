@@ -30,6 +30,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -246,8 +247,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Wait blocks until every accepted callback's background work has finished. A
 // caller drains it during graceful shutdown — after the HTTP server has stopped
 // accepting — so a redeploy or SIGTERM doesn't drop an acked-but-unrecorded tap.
-// It is bounded in practice: each callback is capped by resolveTimeout and each
-// delivery by deliverTimeout.
+// It is bounded in practice: a callback stops starting attempts once its own
+// resolveBudget (measured from its ack) is spent, each attempt is capped by
+// resolveTimeout, and each delivery by deliverTimeout. Since every budget runs
+// from its own ack rather than from its turn in the queue, the drain is bounded
+// by roughly one budget plus a final attempt, not by the number of queued taps.
 func (s *Server) Wait() { s.inflight.Wait() }
 
 // process runs the authoritative callback off the request path, after the ack.
@@ -272,7 +276,7 @@ func (s *Server) process(cb callback) {
 	// The budget runs from the ack, covering the queue wait and the backoffs but
 	// never an attempt already in flight, so a graceful drain is bounded by one
 	// window rather than by however many taps are queued behind this one.
-	ctx, cancel := context.WithTimeout(context.Background(), resolveBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), s.budgetFor(cb))
 	defer cancel()
 	code, cb, err := s.runQueued(ctx, cb)
 	if err != nil {
@@ -360,6 +364,26 @@ func (s *Server) attempt(cb callback) (int, callback, error) {
 	return s.processCallback(ctx, cb)
 }
 
+// budgetFor is how long this tap may spend queued and backing off. A park
+// resolution gets the ordinary budget. A GRANT callback gets the life left on
+// the Slack signature instead, because gate re-verifies that same signature
+// itself: a forward that arrives outside Slack's ±5-min window is refused
+// however long serve waited, so waiting past it only turns a decision into a
+// confusing refusal. One attempt's headroom is subtracted, and a tap whose
+// budget is gone still gets its attempt whenever the queue is free — gate, not
+// serve, is the authority on whether a signature is still good.
+func (s *Server) budgetFor(cb callback) time.Duration {
+	if !cb.grantRequest {
+		return resolveBudget
+	}
+	sec, err := strconv.ParseInt(cb.timestamp, 10, 64)
+	if err != nil {
+		return 0
+	}
+	left := time.Unix(sec, 0).Add(maxSkew).Sub(s.now()) - resolveTimeout
+	return max(0, min(left, resolveBudget))
+}
+
 // backoffFor is the wait before the given retry, holding the last step for any
 // attempt past the schedule. An empty schedule retries immediately, which is
 // what a test that compresses the wait asks for.
@@ -390,7 +414,7 @@ func (s *Server) resolve(ctx context.Context, d ingest.Decision) (int, error) {
 	if err != nil {
 		return code, err
 	}
-	return code, busy(out, code)
+	return code, resolveBusy(out, code)
 }
 
 // deliver renders the outcome as a Slack card and posts it to the interaction's
