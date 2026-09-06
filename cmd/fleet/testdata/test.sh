@@ -1687,7 +1687,7 @@ if a[:2] == ["pr", "view"]:
 if a[:2] == ["pr", "list"]:
     if "-R" in a and a[a.index("-R") + 1] != "o/r":
         print("[]"); sys.exit(0)
-    print(json.dumps([{"number": 7, "headRefName": "feat/w3", "headRefOid": "abc123", "url": "https://github.com/o/r/pull/7", "updatedAt": "2026-09-05T00:00:00Z"}])); sys.exit(0)
+    print(json.dumps([{"number": 7, "headRefName": "feat/w3", "headRefOid": db.get("head", "abc123"), "url": "https://github.com/o/r/pull/7", "updatedAt": "2026-09-05T00:00:00Z"}])); sys.exit(0)
 if a[0] == "api":
     path = a[1]; method = a[a.index("--method") + 1] if "--method" in a else "GET"
     body = json.load(sys.stdin) if "--input" in a else None
@@ -1973,6 +1973,59 @@ report(rep.get("events") == 3 and len(rep.get("denies", [])) == 1 and len(rep.ge
        "shadow-report counts events and latency, and proves the divergence: the shadow refused tu-1 and a PostToolUse for tu-1 followed",
        f"rep={json.dumps(rep)[:300]} plain={plain[:200]!r}")
 hook.drop_lease(key, "shadowA"); hook._unlink(hook.path("sessions", "shadowA.json")); os.remove(hook.path("shadow.jsonl"))
+sys.exit(1 if bad else 0)
+PY
+
+# ---- Receipts on the change: `fleet receipt` posts one marked comment; sync caches them; another
+# machine's row reads done / failed from the latest receipt of its kind AT THE CACHED HEAD.
+"$PY" - "$FLEET_STATE" "$F" "$work" "$ORG_STATE" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys
+state, fleetpy, work, org = sys.argv[1:5]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+store = os.path.join(work, "ghstore.json")
+try: os.remove(store)
+except FileNotFoundError: pass
+r = os.path.join(work, "rcptrepo"); subprocess.run(["git", "init", "-q", r])
+subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], cwd=r)
+subprocess.run(["git", "checkout", "-q", "-b", "feat/w3"], cwd=r)
+head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
+gh_env = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "on", "FAKE_GH_STORE": store, "PATH": os.path.join(work, "fakegh") + os.pathsep + os.environ["PATH"]}
+def fleet(*a, env=gh_env, cwd=r): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=cwd, env=env)
+fleet("role", r, "liverun:rcptrepo", "--tenant", "work")
+hook.write_json(hook.path("sessions", "rcpt5.json"), {"session": "rcpt5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "liverun:rcptrepo", "branch": "feat/w3", "turn_open": True,
+                                                       "lane": {"kind": "liverun", "produces": "live", "requires": [], "denies": []}})
+rid = hook.repo_id(r)
+hook.write_json(hook.path("prs", "seed2.json"), {"github": "o/r", "repo": rid, "branch": "feat/w3", "number": 7, "at": hook.now()})
+rc1 = fleet("receipt", head[:10], "live", "pass", "guard fired", "--session", "rcpt5")
+db = json.load(open(store)); receipts = [c for c in db["comments"] if "<!-- fleet:receipt v1 -->" in c["body"]]
+def rjson(body):
+    i = body.index("```json"); j = body.index("```", i + 7); return json.loads(body[i + 7:j])
+report(rc1.returncode == 0 and "record: o/r#7" in rc1.stdout and len(receipts) == 1 and rjson(receipts[0]["body"]) .get("head") == head and rjson(receipts[0]["body"]).get("kind") == "live" and rjson(receipts[0]["body"]).get("verdict") == "pass",
+       "fleet receipt posts one marked comment on the change carrying the exact head, kind and verdict",
+       f"rc={rc1.returncode} out={(rc1.stdout+rc1.stderr)[:200]!r} receipts={len(receipts)}")
+# another machine's row for live on this change; the fake's pr list reports head abc123, so first the receipt is for an OLDER head: not evidence
+db["comments"].insert(0, {"id": 50, "body": "<!-- fleet:ownership v1 -->\n```json\n" + json.dumps({"v": 1, "change": "feat/w3", "rows": [{"relationship": "live", "for": "hub:win", "by": "operator", "at": hook.now(), "due": None, "slot": None, "brief": None, "machine": "work-win"}]}) + "\n```\n"})
+json.dump(db, open(store, "w"))
+fleet("sync")
+def remote_state():
+    rows = json.loads(fleet("work", "--json").stdout or "[]")
+    return next((x.get("state") for x in rows if x.get("machine") == "work-win" and x.get("relationship") == "live"), None)
+s_old = remote_state()
+# now the cached head is the receipt's head: done; a later fail at that head: failed
+db = json.load(open(store)); db["head"] = head; json.dump(db, open(store, "w"))
+fleet("sync"); s_done = remote_state()
+rc2 = fleet("receipt", head[:10], "live", "fail", "guard did not fire", "--session", "rcpt5")
+fleet("sync"); s_failed = remote_state()
+report(s_old == "remote" and s_done == "done" and s_failed == "failed",
+       "another machine's row reads done from a posted pass at the cached head, failed from a later fail there, and nothing from a receipt for an older head",
+       f"older-head={s_old} at-head={s_done} after-fail={s_failed} rc2={rc2.returncode} {(rc2.stdout+rc2.stderr)[:120]!r}")
+hook._unlink(hook.path("sessions", "rcpt5.json")); hook._unlink(hook.path("prs", "seed2.json")); hook._unlink(hook.path("cache", "github", "o__r.json"))
+for f in os.listdir(hook.path("receipts")):
+    if f.startswith(head): os.remove(hook.path("receipts", f))
 sys.exit(1 if bad else 0)
 PY
 

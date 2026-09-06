@@ -81,7 +81,11 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 	if hasCard {
 		tail += " — card " + card
 	}
-	say("receipt: %s %s @ %s by %s %s%s", kind, verdict, sha, roleOr(rec, "session"), fleet.Short(sid), tail)
+	// The receipt is local evidence; its copy on the change's pull request is what
+	// another machine's `done` reads. Best effort, and the note says which happened.
+	note := postReceipt(fleet.RepoID(here), fleet.S(rec, "branch"), fleet.Rec{"kind": kind, "verdict": verdict, "sha": sha, "head": head,
+		"observable": observable, "session": sid, "role": nilIfEmpty(fleet.S(rec, "role")), "card": cardV, "at": fleet.Now()})
+	say("receipt: %s %s @ %s by %s %s%s; %s", kind, verdict, sha, roleOr(rec, "session"), fleet.Short(sid), tail, note)
 	return nil
 }
 

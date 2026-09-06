@@ -30,6 +30,10 @@ import (
 
 const ownershipMarker = "<!-- fleet:ownership v1 -->"
 
+// receiptMarker marks a receipt posted to a change: one comment per receipt, never
+// edited, so the change's page is the ledger another machine's `done` reads.
+const receiptMarker = "<!-- fleet:receipt v1 -->"
+
 var pullPathRe = regexp.MustCompile(`github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)`)
 
 func githubOff() bool { return os.Getenv("FLEET_GITHUB") == "off" }
@@ -211,6 +215,54 @@ func upsertOwnership(rid, branch string) string {
 	return fmt.Sprintf("record: %s#%d (%d row(s))", slug, n, len(rows))
 }
 
+// postReceipt copies a receipt to the change's pull request as one marked comment.
+// Exact head, kind and verdict travel in the JSON; a person reads the line above it.
+func postReceipt(rid, branch string, r fleet.Rec) string {
+	if githubOff() {
+		return "record: local only (FLEET_GITHUB=off)"
+	}
+	if rid == "" || branch == "" {
+		return "record: local only (no branch to find the change by)"
+	}
+	slug, n, why := changeRemote(rid, branch)
+	if why != "" {
+		return "record: local only (" + why + ")"
+	}
+	r["machine"] = hostName()
+	obs := fleet.S(r, "observable")
+	body := fmt.Sprintf("%s\n**fleet receipt · %s %s** at `%s` by %s on %s — %s\n\n```json\n%s\n```\n",
+		receiptMarker, fleet.S(r, "kind"), fleet.S(r, "verdict"), cut(fleet.S(r, "head"), 12), fleet.Short(fleet.S(r, "session")), fleet.S(r, "machine"), obs, string(fleet.DumpJSON(r)))
+	payload, _ := json.Marshal(map[string]any{"body": body})
+	if _, why := ghRun(string(payload), "api", fmt.Sprintf("repos/%s/issues/%d/comments", slug, n), "--method", "POST", "--input", "-"); why != "" {
+		return fmt.Sprintf("record: local only (%s#%d: %s)", slug, n, why)
+	}
+	return fmt.Sprintf("record: %s#%d", slug, n)
+}
+
+// parseReceipt is the receipt in a comment body, or nil when it is not one.
+func parseReceipt(body string) map[string]any {
+	if !strings.Contains(body, receiptMarker) {
+		return nil
+	}
+	i := strings.Index(body, "```json")
+	if i < 0 {
+		return nil
+	}
+	rest := body[i+len("```json"):]
+	j := strings.Index(rest, "```")
+	if j < 0 {
+		return nil
+	}
+	var r map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(rest[:j])), &r); err != nil {
+		return nil
+	}
+	if fleet.S(r, "kind") == "" || fleet.S(r, "head") == "" || (fleet.S(r, "verdict") != "pass" && fleet.S(r, "verdict") != "fail") {
+		return nil
+	}
+	return r
+}
+
 // ---------- sync: the read side ----------
 
 func cacheFile(slug string) string { return fleet.Path("cache", "github", fleet.Safe(slug)+".json") }
@@ -269,8 +321,9 @@ func syncRepo(slug string) (int, string) {
 		}
 		ch, _ := x.(map[string]any)
 		n := int(fleet.F(ch, "number"))
+		rows, receipts := commentsOn(slug, n)
 		changes = append(changes, map[string]any{"number": n, "branch": fleet.S(ch, "headRefName"), "head": fleet.S(ch, "headRefOid"), "url": fleet.S(ch, "url"),
-			"updated_at": fleet.S(ch, "updatedAt"), "rows": ownershipRowsOn(slug, n)})
+			"updated_at": fleet.S(ch, "updatedAt"), "rows": rows, "receipts": receipts})
 	}
 	if err := fleet.WriteJSON(cacheFile(slug), map[string]any{"at": fleet.Now(), "repo": slug, "prs": changes}); err != nil {
 		return 0, err.Error()
@@ -278,26 +331,34 @@ func syncRepo(slug string) (int, string) {
 	return len(changes), ""
 }
 
-// ownershipRowsOn is the rows in a change's ownership comment, or none.
-func ownershipRowsOn(slug string, n int) []any {
-	rs := []any{}
+// commentsOn is what the fleet wrote on a change: the ownership rows (one sticky
+// comment) and every receipt (one comment each), in posting order.
+func commentsOn(slug string, n int) ([]any, []any) {
+	rows, receipts := []any{}, []any{}
 	cdata, _ := ghJSON("gh", "api", fmt.Sprintf("repos/%s/issues/%d/comments", slug, n), "--paginate")
 	comments, ok := cdata.([]any)
 	if !ok {
-		return rs
+		return rows, receipts
 	}
+	seenRows := false
 	for _, cx := range comments {
 		c, _ := cx.(map[string]any)
-		rows := parseOwnership(fleet.S(c, "body"))
-		if rows == nil {
+		body := fleet.S(c, "body")
+		if r := parseReceipt(body); r != nil {
+			receipts = append(receipts, r)
 			continue
 		}
-		for _, r := range rows {
-			rs = append(rs, r)
+		if seenRows {
+			continue
 		}
-		return rs
+		if rs := parseOwnership(body); rs != nil {
+			for _, r := range rs {
+				rows = append(rows, r)
+			}
+			seenRows = true
+		}
 	}
-	return rs
+	return rows, receipts
 }
 
 // remoteRows is the rows another machine declared, from the cache: state `remote`
@@ -331,15 +392,37 @@ func remoteRowsOf(ch, cache fleet.Rec, declared map[string]bool, rids map[string
 		if r == nil || fleet.S(r, "machine") == host || declaredLocally(declared, rids, branch, fleet.S(r, "relationship")) {
 			continue
 		}
-		state := "remote"
-		if due := fleet.F(r, "due"); due > 0 && now > due {
+		state, doneAt := remoteEvidence(ch, fleet.S(r, "relationship"))
+		if due := fleet.F(r, "due"); state == "remote" && due > 0 && now > due {
 			state = "late"
 		}
 		out = append(out, WorkRow{"change": branch, "repo": fleet.S(cache, "repo"), "number": ch["number"], "relationship": r["relationship"], "for": r["for"], "by": r["by"],
 			"at": r["at"], "due": r["due"], "slot": r["slot"], "brief": r["brief"], "key": nil, "hands": nil, "state": state, "head": ch["head"],
-			"done_at": nil, "machine": r["machine"], "cache_at": fleet.F(cache, "at")})
+			"done_at": doneAt, "machine": r["machine"], "cache_at": fleet.F(cache, "at")})
 	}
 	return out
+}
+
+// remoteEvidence is what the change's posted receipts say about a relationship at
+// the cached head: the latest receipt of that kind AT THAT HEAD decides — done on
+// pass, failed on fail; a receipt for an older head is not evidence about this one.
+func remoteEvidence(ch fleet.Rec, rel string) (string, any) {
+	head := fleet.S(ch, "head")
+	state, doneAt := "remote", any(nil)
+	var latest float64
+	for _, rx := range fleet.L(ch, "receipts") {
+		r, _ := rx.(map[string]any)
+		if fleet.S(r, "kind") != rel || fleet.S(r, "head") != head || fleet.F(r, "at") < latest {
+			continue
+		}
+		latest = fleet.F(r, "at")
+		if fleet.S(r, "verdict") == "pass" {
+			state, doneAt = "done", r["at"]
+			continue
+		}
+		state, doneAt = "failed", nil
+	}
+	return state, doneAt
 }
 
 func declaredLocally(declared map[string]bool, rids map[string]bool, branch, rel string) bool {
