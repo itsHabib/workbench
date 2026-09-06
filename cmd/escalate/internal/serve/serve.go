@@ -279,7 +279,7 @@ func (s *Server) process(cb callback) {
 	budget := s.budgetFor(cb)
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	code, cb, err := s.runQueued(ctx, budget, cb)
+	code, cb, err := s.runCallback(ctx, budget, cb)
 	if err != nil {
 		s.log.Printf("escalate serve: callback %s: %v", cb.decision.Escalation, err)
 	}
@@ -321,17 +321,28 @@ func (s *Server) processCallback(ctx context.Context, cb callback) (int, callbac
 	return code, cb, busy(out, code)
 }
 
-// runQueued waits for this process's single resolve slot and then drives the
-// callback under the state-lock retry schedule. Waiting is itself an outcome the
+// runCallback drives one callback under the state-lock retry schedule, queueing
+// it first when it is a park resolution. Waiting is itself an outcome the
 // operator sees: a queue wait long enough to notice replaces the card with a
 // queued state, and a wait that outlives the budget reports honestly that the
 // tap never ran rather than resolving it minutes late.
-func (s *Server) runQueued(ctx context.Context, budget time.Duration, cb callback) (int, callback, error) {
+//
+// A GRANT callback is never queued. It carries a Slack signature gate
+// re-verifies on arrival, so every second it spends waiting is authority
+// draining away, and a queue deep enough to outlast the signature would consume
+// the operator's tap and apply nothing. Its effect also needs no help from the
+// queue to be safe: one single-use append gate excludes atomically. So it keeps
+// the immediate forward it had before the queue existed, and the queue does what
+// it was built for — stopping a burst of park taps from contending with each
+// other.
+func (s *Server) runCallback(ctx context.Context, budget time.Duration, cb callback) (int, callback, error) {
+	if cb.grantRequest {
+		return s.attempts(ctx, cb)
+	}
 	release, err := s.queue.enter(ctx, s.notice, func() { s.status(cb, queuedText(cb)) })
 	if err != nil {
-		// The tap's own budget, not the package default: a grant callback's is the
-		// life left on its signature, and a log naming the wrong window would send
-		// the operator looking for a wait that never happened.
+		// The tap's own budget rather than the package default, so the log names the
+		// window this tap actually had.
 		return 0, cb, fmt.Errorf("%w: no turn within %s (%v)", ErrStateBusy, budget, err)
 	}
 	defer release()
@@ -371,13 +382,14 @@ func (s *Server) attempt(cb callback) (int, callback, error) {
 	return s.processCallback(ctx, cb)
 }
 
-// budgetFor is how long this tap may spend queued and backing off. A park
-// resolution gets the ordinary budget. A GRANT callback gets the life left on
-// the Slack signature instead, because gate re-verifies that same signature
-// itself: a forward that arrives outside Slack's ±5-min window is refused
-// however long serve waited, so waiting past it only turns a decision into a
-// confusing refusal. One attempt's headroom is subtracted, and a tap whose
-// budget is gone still gets its attempt whenever the queue is free — gate, not
+// budgetFor is how long this tap may spend waiting rather than working: queued
+// and backing off for a park resolution, and backing off alone for a grant
+// callback, which is never queued. A park resolution gets the ordinary budget. A
+// grant callback gets the life left on the Slack signature instead, because gate
+// re-verifies that same signature itself: a retry that arrives outside Slack's
+// ±5-min window is refused however long serve waited, so waiting past it only
+// turns a decision into a confusing refusal. One attempt's headroom is
+// subtracted, and a budget of zero still buys the first attempt — gate, not
 // serve, is the authority on whether a signature is still good.
 func (s *Server) budgetFor(cb callback) time.Duration {
 	if !cb.grantRequest {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/contracts/escalation"
+	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
 
 // gateLockTimeoutJSON is what gate prints on stdout when a resolve loses its
@@ -278,6 +279,58 @@ func TestBurstGivesUpAfterAttempts(t *testing.T) {
 	if journal := gate.journal(); len(journal) != 0 {
 		t.Fatalf("a timed-out resolve must record nothing, got %v", journal)
 	}
+}
+
+// TestGrantCallbackIsNotQueuedBehindResolves is the loss path the queue must not
+// create. A grant callback carries a signature gate re-verifies on arrival, so a
+// queue deep enough to outlast it would consume the operator's tap and apply
+// nothing — the tap is acked and its buttons are gone, so there is no second one.
+// It is therefore forwarded while a park resolve holds the slot, exactly as it
+// was before the queue existed.
+func TestGrantCallbackIsNotQueuedBehindResolves(t *testing.T) {
+	held := make(chan struct{})
+	holding := make(chan struct{})
+	forwarded := make(chan struct{})
+	parkRunner := func(context.Context, string, ...string) ([]byte, int, error) {
+		close(holding) // the slot is now taken, and stays taken until `held` closes
+		<-held
+		return []byte(`{"outcome":"would_merge"}`), codeMerge, nil
+	}
+	grantTap := func(context.Context, []byte, string, string) ([]byte, int, error) {
+		close(forwarded)
+		return []byte(`{"outcome":"granted","repo":"o/r","pr":7,"head_sha":"aaaaaaaa"}`), codeMerge, nil
+	}
+	srv := New(Config{
+		Secret:    testSecret,
+		Ingest:    ingest.New("gate", "", parkRunner),
+		FindGrant: func(context.Context, string) (string, error) { return "grt_live", nil },
+		GrantTap:  grantTap,
+		Authorize: allowAll,
+		Now:       func() time.Time { return fixedNow },
+	})
+	sink := withSink(srv)
+
+	park := formBody(payloadJSON(escalation.ActionApprove, "esc_ab", "michael"))
+	srv.ServeHTTP(httptest.NewRecorder(), signedRequest(testSecret, fixedNow, park))
+	select {
+	case <-holding:
+	case <-time.After(2 * time.Second):
+		close(held)
+		t.Fatal("the park resolve never took the queue slot, so nothing is being tested")
+	}
+	grant := formBody(payloadJSON(grantrequest.ActionApprove, "gqr_abc", "michael"))
+	srv.ServeHTTP(httptest.NewRecorder(), signedRequest(testSecret, fixedNow, grant))
+
+	select {
+	case <-forwarded:
+	case <-time.After(2 * time.Second):
+		close(held)
+		t.Fatal("the grant callback waited on the queue — its signature drains while it waits")
+	}
+	close(held)
+	countCards(t, sink, "T0 approved", 1)
+	countCards(t, sink, "Approved by", 1)
+	srv.Wait()
 }
 
 // TestBusyClassification pins the retry policy itself, which is the risky part.

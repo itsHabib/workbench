@@ -54,8 +54,9 @@ and the contract; this binary is one of its two new pieces (the other is gate's
   the card is replaced with a working state that drops the buttons) and runs the
   grant lookup + `gate resolve` in the background, delivering the outcome to the
   interaction's `response_url` (`replace_original`, guarded to an https Slack host).
-  Taps are SERIALIZED through one in-process queue, so a burst never makes taps
-  contend with each other for gate's single state lock, and a `state_lock_timeout`
+  Park resolutions are SERIALIZED through one in-process queue, so a burst never
+  makes taps contend with each other for gate's single state lock (a T0 grant
+  callback is not queued — its signature drains while it waits), and a `state_lock_timeout`
   is retried four times over ~90s before the tap is called failed — but only when
   gate's own output also says a retry is legal, since a resolve is several appends
   and a lock lost after the decision landed must NOT be retried. A grant

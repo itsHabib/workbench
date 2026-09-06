@@ -150,9 +150,8 @@ func newResolveQueue() *resolveQueue {
 // and losing a place in a queue only costs latency.
 func (q *resolveQueue) enter(ctx context.Context, notice time.Duration, announce func()) (func(), error) {
 	// A free slot is taken without consulting the clock, so an idle ingress always
-	// proceeds — even for a tap whose budget is already spent (a grant callback
-	// arriving near the end of its signature window). Only a tap that must WAIT
-	// behind another can be stopped by its budget.
+	// proceeds and never arms a timer. Only a tap that must WAIT behind another
+	// can be stopped by its budget.
 	select {
 	case q.slot <- struct{}{}:
 		return func() { <-q.slot }, nil

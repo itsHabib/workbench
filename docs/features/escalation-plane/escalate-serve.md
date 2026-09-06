@@ -107,11 +107,15 @@ with a single tap when a long `gate gate` run holds the lock.
 Two mechanisms close it, both inside serve, neither touching gate's lock
 semantics or its 10s timeout:
 
-1. **One queue.** Every background callback passes through a single slot, so this
-   process never runs two gate invocations against one state dir at once. Taps
-   stop contending with each other; they wait their turn. This subsumes the
-   per-escalation lock it replaces — a double-tap is still serialized, and now so
-   are different escalations.
+1. **One queue, for park resolutions.** Every background park resolution passes
+   through a single slot, so a burst never runs two of them against one state dir
+   at once. Taps stop contending with each other; they wait their turn. This
+   subsumes the per-escalation lock it replaces — a double-tap is still
+   serialized, and now so are different escalations. A T0 grant callback is
+   deliberately NOT queued: it carries a signature gate re-verifies on arrival, so
+   a queue deep enough to outlast the signature would consume the operator's tap
+   and apply nothing, and its own effect is one single-use append gate excludes
+   atomically. It keeps the immediate forward it had before the queue existed.
 2. **Retry the lock, and only when gate says nothing was recorded.** A resolve is
    several appends — judgment, verdict, action, then the resolution stamp — each
    taking the lock separately, so "lost the lock" does not by itself mean "wrote
@@ -137,12 +141,12 @@ lock timeout instead of being killed mid-run, and a tap's whole background life 
 bounded at 3 minutes from its ack — a budget that stops the next attempt but never
 interrupts one in flight, so a graceful drain stays bounded.
 
-A grant callback gets a smaller budget still: the life left on the Slack
-signature, less one attempt. gate re-verifies that same signature independently,
-so a forward that arrives outside Slack's ±5-min window is refused however long
-serve waited — waiting past it would turn a decision into a confusing refusal. A
-tap whose budget is already gone still gets its attempt whenever the queue is
-free; gate, not serve, is the authority on whether a signature is still good.
+A grant callback gets a smaller budget still, and it bounds retries rather than a
+queue wait: the life left on the Slack signature, less one attempt. gate
+re-verifies that same signature independently, so a retry that arrives outside
+Slack's ±5-min window is refused however long serve waited. A budget of zero
+still buys the first attempt; gate, not serve, is the authority on whether a
+signature is still good.
 
 Residual, in `FOLLOWUPS.md`: a lock held longer than the budget still ends with a
 failed card and a CLI resolve. The durable answer is the same accept-before-ack
