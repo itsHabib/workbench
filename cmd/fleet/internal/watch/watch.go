@@ -94,7 +94,7 @@ func Tick(interval time.Duration) (string, error) {
 	for p, r := range prevRows {
 		prevStates[p] = fleet.S(r, "state")
 	}
-	rows := fold(now, prevAt, slept, prevStates)
+	rows := fold(prevAt, slept, prevStates)
 	var transitions []fleet.Rec
 	for _, r := range rows {
 		from := fleet.S(prevRows[fleet.S(r, "path")], "state")
@@ -206,7 +206,7 @@ func colText(v any) string {
 // fold is the join, classified for the board: the roled paths from `fleet board`,
 // plus one state the board cannot see alone — a seat with an assignment and no one
 // in it — and the sleep rule applied over both.
-func fold(now, prevAt float64, slept bool, prevStates map[string]string) []fleet.Rec {
+func fold(prevAt float64, slept bool, prevStates map[string]string) []fleet.Rec {
 	var rows []fleet.Rec
 	for _, r := range verbs.BoardRows() {
 		row := fleet.Rec(r)

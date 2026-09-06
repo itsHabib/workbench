@@ -58,18 +58,7 @@ func Run(ev Event) (v *Verdict) {
 
 func onSessionStart(ev Event, sid string) *Verdict {
 	rec := TouchSession(sid, ev, Rec{"turn_open": false, "ended": false})
-	role, branch := S(rec, "role"), S(rec, "branch")
-	if role == "" {
-		role = "?"
-	}
-	if branch == "" {
-		branch = "(detached/none)"
-	}
-	line := fmt.Sprintf("[fleet] session %s · role %s · branch %s", Short(sid), role, branch)
-	if slot := S(rec, "slot"); slot != "" {
-		line += " · slot " + slot
-	}
-	lines := []string{line}
+	lines := []string{identityLine(sid, rec)}
 	if slot := S(rec, "slot"); slot != "" {
 		if contested := occupySlot(sid, slot, S(rec, "role"), S(rec, "cwd")); contested != "" {
 			lines = append(lines, contested)
@@ -82,28 +71,76 @@ func onSessionStart(ev Event, sid string) *Verdict {
 	if cwd == "" {
 		cwd = "."
 	}
-	if b := S(rec, "branch"); b != "" {
-		key := Scope(cwd, b)
-		flag, cur := StopFlag(key), Lease(key)
-		// Same exemption as CheckStop: a revoke's flag names the one session allowed
-		// to act, and telling that session it is stopped made it stand down on resume.
-		if flag != nil && S(flag, "except") != sid {
-			lines = append(lines, fmt.Sprintf("[fleet] STOP flag on %s: %s", b, S(flag, "reason")))
-		}
-		if IsMalformed(cur) {
-			lines = append(lines, fmt.Sprintf("[fleet] the lease file for %s is malformed (%s); writes there will be refused until it is removed", b, S(cur, "malformed")))
-		} else if cur != nil && S(cur, "session") != sid {
-			r := S(cur, "role")
-			if r == "" {
-				r = "session"
-			}
-			lines = append(lines, fmt.Sprintf("[fleet] %s is held by %s %s — you cannot write to it", b, r, Short(S(cur, "session"))))
-		}
-	}
+	lines = append(lines, branchStartLines(rec, sid, cwd)...)
 	lane := M(rec, "lane")
 	if S(rec, "role") != "" && lane == nil {
 		lines = append(lines, fmt.Sprintf("[fleet] role %s has no manifest under lanes/; requires and produces unchecked", strings.SplitN(S(rec, "role"), ":", 2)[0]))
 	}
+	lines = append(lines, requiresLines(lane, sid)...)
+	if cl := costLine(); cl != "" {
+		lines = append(lines, cl)
+	}
+	if dl := DecisionsLine(); dl != "" {
+		lines = append(lines, dl)
+	}
+	if b := S(rec, "branch"); b != "" {
+		if hl := HandoffLine(Scope(cwd, b), b); hl != "" {
+			lines = append(lines, hl)
+		}
+		if lw := LastWordLine(Scope(cwd, b), b, sid); lw != "" {
+			lines = append(lines, lw)
+		}
+	}
+	return context(ev, strings.Join(lines, "\n"))
+}
+
+// identityLine is the first line every session reads: who it is, where.
+func identityLine(sid string, rec Rec) string {
+	role, branch := S(rec, "role"), S(rec, "branch")
+	if role == "" {
+		role = "?"
+	}
+	if branch == "" {
+		branch = "(detached/none)"
+	}
+	line := fmt.Sprintf("[fleet] session %s · role %s · branch %s", Short(sid), role, branch)
+	if slot := S(rec, "slot"); slot != "" {
+		line += " · slot " + slot
+	}
+	return line
+}
+
+// branchStartLines is what the session's branch says at start: a stop flag, a
+// malformed lease, or another session's hold.
+func branchStartLines(rec Rec, sid, cwd string) []string {
+	b := S(rec, "branch")
+	if b == "" {
+		return nil
+	}
+	key := Scope(cwd, b)
+	flag, cur := StopFlag(key), Lease(key)
+	var lines []string
+	// Same exemption as CheckStop: a revoke's flag names the one session allowed
+	// to act, and telling that session it is stopped made it stand down on resume.
+	if flag != nil && S(flag, "except") != sid {
+		lines = append(lines, fmt.Sprintf("[fleet] STOP flag on %s: %s", b, S(flag, "reason")))
+	}
+	if IsMalformed(cur) {
+		return append(lines, fmt.Sprintf("[fleet] the lease file for %s is malformed (%s); writes there will be refused until it is removed", b, S(cur, "malformed")))
+	}
+	if cur == nil || S(cur, "session") == sid {
+		return lines
+	}
+	r := S(cur, "role")
+	if r == "" {
+		r = "session"
+	}
+	return append(lines, fmt.Sprintf("[fleet] %s is held by %s %s — you cannot write to it", b, r, Short(S(cur, "session"))))
+}
+
+// requiresLines is the state of every resource the lane requires, one line each.
+func requiresLines(lane Rec, sid string) []string {
+	var lines []string
 	for _, r := range Strs(lane, "requires") {
 		state, cur := HeldByOther(r, sid)
 		switch {
@@ -123,28 +160,23 @@ func onSessionStart(ev Event, sid string) *Verdict {
 			lines = append(lines, fmt.Sprintf("[fleet] %s is held by %s %s", r, hr, Short(S(cur, "session"))))
 		}
 	}
-	if rows := CostRows(); len(rows) > 0 {
-		if len(rows) > 8 {
-			rows = rows[:8]
-		}
-		var parts []string
-		for _, r := range rows {
-			parts = append(parts, fmt.Sprintf("`%s` %ds (n=%d)", r.Sig, int(r.Med), r.N))
-		}
-		lines = append(lines, "[fleet] measured costs on this machine (median, n): "+strings.Join(parts, "; "))
+	return lines
+}
+
+// costLine is the measured cost of the slowest commands here, or "".
+func costLine() string {
+	rows := CostRows()
+	if len(rows) == 0 {
+		return ""
 	}
-	if dl := DecisionsLine(); dl != "" {
-		lines = append(lines, dl)
+	if len(rows) > 8 {
+		rows = rows[:8]
 	}
-	if b := S(rec, "branch"); b != "" {
-		if hl := HandoffLine(Scope(cwd, b), b); hl != "" {
-			lines = append(lines, hl)
-		}
-		if lw := LastWordLine(Scope(cwd, b), b, sid); lw != "" {
-			lines = append(lines, lw)
-		}
+	var parts []string
+	for _, r := range rows {
+		parts = append(parts, fmt.Sprintf("`%s` %ds (n=%d)", r.Sig, int(r.Med), r.N))
 	}
-	return context(ev, strings.Join(lines, "\n"))
+	return "[fleet] measured costs on this machine (median, n): " + strings.Join(parts, "; ")
 }
 
 func onPrompt(ev Event, sid string) *Verdict {
@@ -206,25 +238,8 @@ func onPreTool(ev Event, sid string) *Verdict {
 	// A branch switch from the previous call is settled first, from HEAD.
 	SettleHandoff(sid, rec)
 	tool := S(ev, "tool_name")
-	inp := M(ev, "tool_input")
-	cmd := S(inp, "command")
-	// The EVENT's cwd first, exactly as TouchSession would have recorded it.
-	target := S(inp, "file_path")
-	if target == "" {
-		target = S(inp, "notebook_path")
-	}
-	if target == "" {
-		target = S(ev, "cwd")
-	}
-	if target == "" {
-		target = S(rec, "cwd")
-	}
-	if target == "" {
-		target = "."
-	}
-	if tool == "Bash" {
-		target = BashTarget(cmd, target)
-	}
+	cmd := S(M(ev, "tool_input"), "command")
+	target := preToolTarget(ev, rec, tool, cmd)
 	branch := BranchOf(target)
 	key := ""
 	if branch != "" {
@@ -236,11 +251,7 @@ func onPreTool(ev Event, sid string) *Verdict {
 	}
 	if branch != "" {
 		if reason := CheckStop(key, branch, sid); reason != "" {
-			// Record that a stop refused this session, so the next turn can tell it
-			// the flag is gone.
-			flag := StopFlag(key)
-			TouchSession(sid, ev, Rec{"last_denied": Rec{"kind": "stop", "branch": branch, "key": key, "at": Now(), "revoke": S(flag, "except") != ""}})
-			RetireDeliveredStop(key, sid)
+			denyStopped(ev, sid, key, branch)
 			return deny(reason)
 		}
 	}
@@ -250,24 +261,9 @@ func onPreTool(ev Event, sid string) *Verdict {
 			return deny(reason)
 		}
 	}
-	// A branch switch leases the DESTINATION before git runs: refused if a live
-	// session holds it, and nothing has moved. The origin stays held until the next
-	// hook reads HEAD and sees where the tree landed.
-	var toKeys []string
-	if tool == "Bash" {
-		for _, to := range uniq(SwitchTargets(cmd, target)) {
-			if to == branch {
-				continue
-			}
-			toKey := Scope(target, to)
-			if toKey == "" || contains(toKeys, toKey) {
-				continue
-			}
-			if reason := CheckLease(toKey, to, sid, S(rec, "role"), evCwd); reason != "" {
-				return deny(reason)
-			}
-			toKeys = append(toKeys, toKey)
-		}
+	toKeys, reason := switchDestinations(tool, cmd, target, branch, sid, S(rec, "role"), evCwd)
+	if reason != "" {
+		return deny(reason)
 	}
 	// The verdicts above are in. Now the record may be written.
 	fields := Rec{"turn_open": true}
@@ -291,9 +287,7 @@ func onPreTool(ev Event, sid string) *Verdict {
 	// its branch.
 	for _, r := range Strs(M(rec, "lane"), "requires") {
 		if reason := CheckStop(r, r, sid); reason != "" {
-			flag := StopFlag(r)
-			TouchSession(sid, ev, Rec{"last_denied": Rec{"kind": "stop", "branch": r, "key": r, "at": Now(), "revoke": S(flag, "except") != ""}})
-			RetireDeliveredStop(r, sid)
+			denyStopped(ev, sid, r, r)
 			return deny(reason)
 		}
 	}
@@ -306,12 +300,72 @@ func onPreTool(ev Event, sid string) *Verdict {
 	if reason := CheckCost(cmd, sid); reason != "" {
 		return deny(reason)
 	}
+	recordInflight(ev, sid, cmd)
+	return allow
+}
+
+// preToolTarget is the path the tool call acts on: the event's file, else its cwd,
+// exactly as TouchSession would have recorded it; a Bash command may name its own.
+func preToolTarget(ev Event, rec Rec, tool, cmd string) string {
+	inp := M(ev, "tool_input")
+	target := S(inp, "file_path")
+	if target == "" {
+		target = S(inp, "notebook_path")
+	}
+	if target == "" {
+		target = S(ev, "cwd")
+	}
+	if target == "" {
+		target = S(rec, "cwd")
+	}
+	if target == "" {
+		target = "."
+	}
+	if tool == "Bash" {
+		target = BashTarget(cmd, target)
+	}
+	return target
+}
+
+// denyStopped records that a stop refused this session, so the next turn can tell
+// it when the flag is gone.
+func denyStopped(ev Event, sid, key, branch string) {
+	flag := StopFlag(key)
+	TouchSession(sid, ev, Rec{"last_denied": Rec{"kind": "stop", "branch": branch, "key": key, "at": Now(), "revoke": S(flag, "except") != ""}})
+	RetireDeliveredStop(key, sid)
+}
+
+// switchDestinations leases every branch a Bash command switches to BEFORE git runs:
+// refused if a live session holds one, and nothing has moved. The origin stays held
+// until the next hook reads HEAD and sees where the tree landed.
+func switchDestinations(tool, cmd, target, branch, sid, role, evCwd string) ([]string, string) {
+	if tool != "Bash" {
+		return nil, ""
+	}
+	var toKeys []string
+	for _, to := range uniq(SwitchTargets(cmd, target)) {
+		if to == branch {
+			continue
+		}
+		toKey := Scope(target, to)
+		if toKey == "" || contains(toKeys, toKey) {
+			continue
+		}
+		if reason := CheckLease(toKey, to, sid, role, evCwd); reason != "" {
+			return nil, reason
+		}
+		toKeys = append(toKeys, toKey)
+	}
+	return toKeys, ""
+}
+
+// recordInflight notes a Bash command's start for the cost ledger and the rule locks.
+func recordInflight(ev Event, sid, cmd string) {
 	ik := InflightKey(ev, sid, cmd)
 	_ = WriteJSON(Path("inflight", Safe(ik)+".json"), Rec{"sig": Signature(cmd), "cmd": cut(cmd, 200), "at": Now(), "session": sid})
 	if rule := MatchedRule(cmd); rule != nil {
 		_ = WriteJSON(Path("locks", Safe(S(rule, "name"))+".json"), Rec{"session": sid, "at": Now(), "key": ik})
 	}
-	return allow
 }
 
 func onPostTool(ev Event, sid string) *Verdict {

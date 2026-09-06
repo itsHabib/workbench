@@ -109,14 +109,14 @@ func readAny(p string) any {
 	return v
 }
 
-// WriteJSON writes obj to p through a per-process temp and a rename, so a reader
-// never sees a partial file. The temp name carries the pid: concurrent hooks for
-// one session once shared a temp and raced on the rename.
 // ReadOnly is shadow mode: every verdict is computed from the live store and nothing
 // is written to it. The one exception is the shadow log itself, written by the
 // caller through ShadowAppend. Set once at process start, never toggled.
 var ReadOnly bool
 
+// WriteJSON writes obj to p through a per-process temp and a rename, so a reader
+// never sees a partial file. The temp name carries the pid: concurrent hooks for
+// one session once shared a temp and raced on the rename.
 func WriteJSON(p string, obj any) error {
 	if ReadOnly {
 		return nil
@@ -169,11 +169,7 @@ func dump(b *bytes.Buffer, v any) {
 	case nil:
 		b.WriteString("null")
 	case bool:
-		if x {
-			b.WriteString("true")
-		} else {
-			b.WriteString("false")
-		}
+		b.WriteString(strconv.FormatBool(x))
 	case string:
 		dumpString(b, x)
 	case float64:
@@ -183,48 +179,13 @@ func dump(b *bytes.Buffer, v any) {
 	case int64:
 		b.WriteString(strconv.FormatInt(x, 10))
 	case []string:
-		b.WriteByte('[')
-		for i, s := range x {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			dumpString(b, s)
-		}
-		b.WriteByte(']')
+		dumpList(b, len(x), func(i int) { dumpString(b, x[i]) })
 	case []any:
-		b.WriteByte('[')
-		for i, e := range x {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			dump(b, e)
-		}
-		b.WriteByte(']')
+		dumpList(b, len(x), func(i int) { dump(b, x[i]) })
 	case []Rec:
-		b.WriteByte('[')
-		for i, e := range x {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			dump(b, e)
-		}
-		b.WriteByte(']')
+		dumpList(b, len(x), func(i int) { dump(b, x[i]) })
 	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		b.WriteByte('{')
-		for i, k := range keys {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			dumpString(b, k)
-			b.WriteString(": ")
-			dump(b, x[k])
-		}
-		b.WriteByte('}')
+		dumpMap(b, x)
 	default:
 		// Anything else goes through the standard encoder; it is never a store record.
 		enc, err := json.Marshal(x)
@@ -234,6 +195,35 @@ func dump(b *bytes.Buffer, v any) {
 		}
 		b.Write(enc)
 	}
+}
+
+func dumpList(b *bytes.Buffer, n int, each func(i int)) {
+	b.WriteByte('[')
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		each(i)
+	}
+	b.WriteByte(']')
+}
+
+func dumpMap(b *bytes.Buffer, x map[string]any) {
+	keys := make([]string, 0, len(x))
+	for k := range x {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		dumpString(b, k)
+		b.WriteString(": ")
+		dump(b, x[k])
+	}
+	b.WriteByte('}')
 }
 
 // dumpFloat is Python's float repr: the shortest round-tripping digits, plain

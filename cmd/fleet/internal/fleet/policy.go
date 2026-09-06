@@ -164,12 +164,18 @@ func CheckStop(key, branch, sid string) string {
 type HeldState string
 
 const (
-	HeldFree      HeldState = ""          // this session may proceed (free, or ours)
+	// HeldFree means this session may proceed: the key is free, or ours.
+	HeldFree HeldState = ""
+	// HeldMalformed means the lease file did not parse: nothing is inferred from it.
 	HeldMalformed HeldState = "malformed" //
-	HeldOrphaned  HeldState = "orphaned"  // dead resource holder
-	HeldDead      HeldState = "dead"      // dead branch holder
-	HeldUnknown   HeldState = "unknown"   // the holder's record cannot be read: not free, not taken over
-	HeldLive      HeldState = "live"      // a live foreign holder
+	// HeldOrphaned means a dead session holds a resource; not taken over by itself.
+	HeldOrphaned HeldState = "orphaned" // dead resource holder
+	// HeldDead means a dead session holds a branch; the next writer takes it over.
+	HeldDead HeldState = "dead" // dead branch holder
+	// HeldUnknown means the holder's record cannot be read: not free, not taken over.
+	HeldUnknown HeldState = "unknown" // the holder's record cannot be read: not free, not taken over
+	// HeldLive means a live session other than this one holds the key.
+	HeldLive HeldState = "live" // a live foreign holder
 )
 
 // HeldByOther is (state, record) from ONE read of key. The record is returned, never
@@ -396,10 +402,10 @@ func cut(s string, n int) string {
 	return s
 }
 
-// SwitchTargets is every local branch the `git checkout|switch` commands in cmd may
-// land on, in command order, or nil when none is a branch switch. Read from .git, no
-// spawn. Not a switch: a path restore, a detached target, `switch -`, or a token that
-// names no local or remote-tracking branch and is not being created with -b/-c.
+// SwitchTargets is every branch a Bash command switches the tree to (`git
+// checkout <b>`, `git switch <b>`, `-b/-c <new>`, `--track origin/<b>`), resolved
+// against the repo at start. A detached checkout, a path restore, or a name that
+// names no local or remote-tracking branch and is not being created is not a switch.
 func SwitchTargets(cmd, start string) []string {
 	var out []string
 	_, common := GitDirs(start)
@@ -408,46 +414,10 @@ func SwitchTargets(cmd, start string) []string {
 	}
 	for _, m := range switchRe.FindAllStringSubmatch(cmd, -1) {
 		verb, toks := m[1], shellWords(m[2])
-		if contains(toks, "--") {
+		if contains(toks, "--") || isDetachedSwitch(toks) {
 			continue
 		}
-		detached := false
-		for _, t := range toks {
-			if switchDetach[t] {
-				detached = true
-			}
-		}
-		if detached {
-			continue
-		}
-		target := ""
-		haveTarget := false
-		skip := false
-		var plain []string
-		track := false
-		for _, t := range toks {
-			if t == "-t" || t == "--track" || strings.HasPrefix(t, "--track=") {
-				track = true
-			}
-			if skip {
-				skip = false
-				if !haveTarget {
-					target, haveTarget = t, true
-				}
-				continue
-			}
-			if switchValued[t] {
-				skip = true
-				continue
-			}
-			if strings.HasPrefix(t, "-") {
-				if k, v, ok := strings.Cut(t, "="); ok && switchValued[k] && !haveTarget {
-					target, haveTarget = v, true
-				}
-				continue
-			}
-			plain = append(plain, t)
-		}
+		target, haveTarget, plain, track := switchOperands(toks)
 		if haveTarget {
 			name := target
 			if track && strings.Contains(target, "/") {
@@ -464,19 +434,66 @@ func SwitchTargets(cmd, start string) []string {
 		if verb == "checkout" && len(plain) > 1 {
 			continue // `git checkout <tree-ish> <paths...>` restores paths
 		}
-		cand := plain[0]
-		if spelled := BranchSpelling(common, cand); spelled != "" {
-			out = append(out, spelled)
-			continue
-		}
-		if RemoteNames(common)[strings.SplitN(cand, "/", 2)[0]] {
-			continue // `git checkout origin/x` detaches; it is not a branch switch
-		}
-		if RemoteBranchExists(common, cand) {
-			out = append(out, cand)
+		if name := switchCandidate(common, plain[0]); name != "" {
+			out = append(out, name)
 		}
 	}
 	return out
+}
+
+func isDetachedSwitch(toks []string) bool {
+	for _, t := range toks {
+		if switchDetach[t] {
+			return true
+		}
+	}
+	return false
+}
+
+// switchOperands separates a switch's options from its operands: the branch named
+// by a valued option (-b/-c/--track=...), the plain words, and whether --track was
+// given.
+func switchOperands(toks []string) (target string, haveTarget bool, plain []string, track bool) {
+	skip := false
+	for _, t := range toks {
+		if t == "-t" || t == "--track" || strings.HasPrefix(t, "--track=") {
+			track = true
+		}
+		if skip {
+			skip = false
+			if !haveTarget {
+				target, haveTarget = t, true
+			}
+			continue
+		}
+		if switchValued[t] {
+			skip = true
+			continue
+		}
+		if strings.HasPrefix(t, "-") {
+			if k, v, ok := strings.Cut(t, "="); ok && switchValued[k] && !haveTarget {
+				target, haveTarget = v, true
+			}
+			continue
+		}
+		plain = append(plain, t)
+	}
+	return target, haveTarget, plain, track
+}
+
+// switchCandidate is the branch a bare operand names: a local branch under its own
+// spelling, or a remote branch by name; `origin/x` detaches and names nothing.
+func switchCandidate(common, cand string) string {
+	if spelled := BranchSpelling(common, cand); spelled != "" {
+		return spelled
+	}
+	if RemoteNames(common)[strings.SplitN(cand, "/", 2)[0]] {
+		return ""
+	}
+	if RemoteBranchExists(common, cand) {
+		return cand
+	}
+	return ""
 }
 
 // SettleHandoff closes a branch switch this session has in flight. The switch took
@@ -551,49 +568,24 @@ func SettleHandoff(sid string, rec Rec) {
 	}
 }
 
-// CachePullRequest derives the change-number -> branch fact from a `gh pr
-// create|view|checkout` the session ran anyway. The BRANCH is read from the tree,
-// never from the command's output: output is untrusted text. The NUMBER comes from
-// the command's explicit target when it has one, else from the single URL a create
-// or bare view printed.
+// CachePullRequest records the change a `gh pr` command was about, from the
+// command's own operands or from the single pull request URL in its output, bound
+// to the TREE's branch — never to a headRefName the output could print. An explicit
+// `view <n>` of another change, or a bare `checkout` with no number, records nothing.
 func CachePullRequest(cmd string, response any, start, sid string) {
 	m := ghPullRe.FindStringSubmatch(cmd)
 	if m == nil {
 		return
 	}
 	verb, toks := m[1], shellWords(m[2])
-	var owner, name, number string
-	explicit := false
-	for _, t := range toks {
-		if strings.HasPrefix(t, "-") {
-			continue
-		}
-		if u := pullURLRe.FindStringSubmatch(t); u != nil {
-			owner, name, number, explicit = u[1], u[2], u[3], true
-		} else if isDigits(t) {
-			owner, name, number, explicit = "", "", t, true
-		}
-	}
+	owner, name, number, explicit := explicitPull(toks)
 	if verb == "view" && explicit {
 		return
 	}
 	if verb == "checkout" && !explicit {
 		return
 	}
-	var text string
-	if s, ok := response.(string); ok {
-		text = s
-	} else if response != nil {
-		text = string(DumpJSON(response))
-	}
-	var urls [][]string
-	seen := map[string]bool{}
-	for _, u := range pullURLRe.FindAllStringSubmatch(text, -1) {
-		if !seen[u[0]] {
-			seen[u[0]] = true
-			urls = append(urls, u)
-		}
-	}
+	urls := pullURLsIn(response)
 	if !explicit && len(urls) != 1 {
 		return // a body that links other changes names no single change; no guess
 	}
@@ -617,6 +609,43 @@ func CachePullRequest(cmd string, response any, start, sid string) {
 		url = fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, name, n)
 	}
 	_ = WriteJSON(PullFile(rid, n), Rec{"number": float64(n), "repo": rid, "github": gh, "branch": branch, "url": url, "at": Now(), "session": sid})
+}
+
+// explicitPull is the change a `gh pr` command names on its own line: a URL or a
+// bare number. The last one wins, as gh itself reads it.
+func explicitPull(toks []string) (owner, name, number string, explicit bool) {
+	for _, t := range toks {
+		if strings.HasPrefix(t, "-") {
+			continue
+		}
+		if u := pullURLRe.FindStringSubmatch(t); u != nil {
+			owner, name, number, explicit = u[1], u[2], u[3], true
+			continue
+		}
+		if isDigits(t) {
+			owner, name, number, explicit = "", "", t, true
+		}
+	}
+	return owner, name, number, explicit
+}
+
+// pullURLsIn is every distinct pull request URL in a tool response, in order.
+func pullURLsIn(response any) [][]string {
+	var text string
+	if s, ok := response.(string); ok {
+		text = s
+	} else if response != nil {
+		text = string(DumpJSON(response))
+	}
+	var urls [][]string
+	seen := map[string]bool{}
+	for _, u := range pullURLRe.FindAllStringSubmatch(text, -1) {
+		if !seen[u[0]] {
+			seen[u[0]] = true
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }
 
 func isDigits(s string) bool {

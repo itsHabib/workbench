@@ -424,11 +424,8 @@ func LastWordLine(key, branch, sid string) string {
 	return fmt.Sprintf("[fleet] last word on %s (%s ago, %s): %s", branch, FmtAge(Now()-F(r, "at")), who, text)
 }
 
-// BoardLines is the watcher's board for a lane that reads it at every prompt: the rows
-// needing a decision, and what changed since this session's last prompt — so a hub
-// answers "how is it going" from words already in its context instead of rebuilding
-// state from the network each time. Attention-budgeted: a few lines, capped, and "all
-// fine" is one line. When no watcher has ticked, that is said rather than hidden.
+// BoardLines is the board as a hub reads it at its prompt: staleness, what needs a
+// decision (seats and ownership rows), and what changed since its last prompt.
 func BoardLines(sincePrompt float64) []string {
 	hb := ReadJSON(Path("watch", "heartbeat.json"))
 	if hb == nil {
@@ -444,6 +441,30 @@ func BoardLines(sincePrompt float64) []string {
 		lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: the watcher is not ticking (any SessionStart revives it)", FmtAge(age)))
 	}
 	rows, _ := readAny(Path("watch", "board.json")).([]any)
+	need, fine := seatAttention(rows)
+	work, _ := readAny(Path("watch", "work.json")).([]any)
+	needWork, fineWork := workAttention(work)
+	need = append(need, needWork...)
+	if len(need) > 0 {
+		lines = append(lines, capLine(fmt.Sprintf("[fleet] board (%s ago): %d need a decision — %s", FmtAge(age), len(need), strings.Join(need, "; "))))
+	} else if len(rows) > 0 || fineWork > 0 {
+		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine, %d work rows fine", FmtAge(age), fine, fineWork))
+	}
+	if changes := changesSince(sincePrompt); len(changes) > 0 {
+		lines = append(lines, capLine("[fleet] since your last prompt: "+strings.Join(changes, "; ")))
+	}
+	return lines
+}
+
+func capLine(line string) string {
+	if len(line) > 700 {
+		return line[:700] + "…"
+	}
+	return line
+}
+
+// seatAttention is the seat rows needing a decision, as text, and the count that do not.
+func seatAttention(rows []any) ([]string, int) {
 	var need []string
 	fine := 0
 	for _, raw := range rows {
@@ -451,29 +472,24 @@ func BoardLines(sincePrompt float64) []string {
 		st := S(r, "state")
 		switch st {
 		case "busy-and-overdue", "dead-holding-work", "assigned-no-occupant", "unknown":
-			who := Short(S(r, "session"))
-			name := S(r, "slot")
-			if name == "" {
-				name = filepath.Base(strings.TrimRight(S(r, "path"), "/"))
-			}
-			need = append(need, fmt.Sprintf("%s %s %s (%s)", st, S(r, "role"), name, who))
+			need = append(need, fmt.Sprintf("%s %s %s (%s)", st, S(r, "role"), seatName(r), Short(S(r, "session"))))
 		default:
 			fine++
 		}
 	}
-	// Ownership rows: the ones needing a decision are named; the rest are a count.
-	work, _ := readAny(Path("watch", "work.json")).([]any)
-	fineWork := 0
+	return need, fine
+}
+
+// workAttention is the ownership rows needing a decision, as text, and the count that do not.
+func workAttention(work []any) ([]string, int) {
+	var need []string
+	fine := 0
 	for _, raw := range work {
 		r, _ := raw.(map[string]any)
 		st := S(r, "state")
 		if st != "dead" && st != "late" && st != "undeclared" && st != "abandoned" && st != "failed" {
-			fineWork++
+			fine++
 			continue
-		}
-		name := S(r, "change")
-		if rel := S(r, "relationship"); rel != "" {
-			name += "/" + rel
 		}
 		acc := S(r, "for")
 		if acc == "" {
@@ -483,63 +499,64 @@ func BoardLines(sincePrompt float64) []string {
 		if h := S(r, "hands"); h != "" {
 			who = Short(h)
 		}
-		need = append(need, fmt.Sprintf("%s %s for %s (hands %s)", st, name, acc, who))
+		need = append(need, fmt.Sprintf("%s %s for %s (hands %s)", st, changeName(r), acc, who))
 	}
-	if len(need) > 0 {
-		line := fmt.Sprintf("[fleet] board (%s ago): %d need a decision — %s", FmtAge(age), len(need), strings.Join(need, "; "))
-		if len(line) > 700 {
-			line = line[:700] + "…"
-		}
-		lines = append(lines, line)
-	} else if len(rows) > 0 || fineWork > 0 {
-		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine, %d work rows fine", FmtAge(age), fine, fineWork))
+	return need, fine
+}
+
+func seatName(r Rec) string {
+	if name := S(r, "slot"); name != "" {
+		return name
 	}
-	// Transitions since this session's last prompt, newest last, capped.
-	if sincePrompt > 0 {
-		text, _ := readText(Path("watch", "observed.jsonl"))
-		var changes []string
-		for _, l := range strings.Split(text, "\n") {
-			t := ReadJSONBytes([]byte(l))
-			if t == nil || F(t, "at") <= sincePrompt {
-				continue
-			}
-			from := S(t, "from")
-			if from == "" {
-				from = "—"
-			}
-			if c := S(t, "change"); c != "" {
-				if rel := S(t, "relationship"); rel != "" {
-					c += "/" + rel
-				}
-				acc := S(t, "for")
-				if acc == "" {
-					acc = "—"
-				}
-				if what := S(t, "what"); what != "" {
-					changes = append(changes, fmt.Sprintf("%s %s %s: %s → %s", acc, c, what, from, S(t, "to")))
-					continue
-				}
-				changes = append(changes, fmt.Sprintf("%s %s: %s → %s", acc, c, from, S(t, "to")))
-				continue
-			}
-			name := S(t, "slot")
-			if name == "" {
-				name = filepath.Base(strings.TrimRight(S(t, "path"), "/"))
-			}
-			changes = append(changes, fmt.Sprintf("%s %s: %s → %s", S(t, "role"), name, from, S(t, "to")))
-		}
-		if n := len(changes); n > 0 {
-			if n > 8 {
-				changes = append(changes[n-8:], fmt.Sprintf("(+%d earlier)", n-8))
-			}
-			line := "[fleet] since your last prompt: " + strings.Join(changes, "; ")
-			if len(line) > 700 {
-				line = line[:700] + "…"
-			}
-			lines = append(lines, line)
-		}
+	return filepath.Base(strings.TrimRight(S(r, "path"), "/"))
+}
+
+func changeName(r Rec) string {
+	name := S(r, "change")
+	if rel := S(r, "relationship"); rel != "" {
+		name += "/" + rel
 	}
-	return lines
+	return name
+}
+
+// changesSince is the watcher's transitions after a moment, newest last, capped at
+// eight with the count of earlier ones.
+func changesSince(since float64) []string {
+	if since <= 0 {
+		return nil
+	}
+	text, _ := readText(Path("watch", "observed.jsonl"))
+	var changes []string
+	for _, l := range strings.Split(text, "\n") {
+		t := ReadJSONBytes([]byte(l))
+		if t == nil || F(t, "at") <= since {
+			continue
+		}
+		changes = append(changes, transitionText(t))
+	}
+	if n := len(changes); n > 8 {
+		changes = append(changes[n-8:], fmt.Sprintf("(+%d earlier)", n-8))
+	}
+	return changes
+}
+
+// transitionText is one observed transition as a hub reads it.
+func transitionText(t Rec) string {
+	from := S(t, "from")
+	if from == "" {
+		from = "—"
+	}
+	if S(t, "change") == "" {
+		return fmt.Sprintf("%s %s: %s → %s", S(t, "role"), seatName(t), from, S(t, "to"))
+	}
+	acc := S(t, "for")
+	if acc == "" {
+		acc = "—"
+	}
+	if what := S(t, "what"); what != "" {
+		return fmt.Sprintf("%s %s %s: %s → %s", acc, changeName(t), what, from, S(t, "to"))
+	}
+	return fmt.Sprintf("%s %s: %s → %s", acc, changeName(t), from, S(t, "to"))
 }
 
 // PullFile is prs/<repo-id>__<n>.json.
@@ -609,11 +626,11 @@ func occupySlot(sid, slot, role, cwd string) string {
 // canonPath is one directory identity for comparing a recorded cwd with a live one:
 // symlinks resolved, long-form, forward-slashed, case-folded where the filesystem is.
 func canonPath(p string) string {
-	real, err := filepath.EvalSymlinks(p)
+	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {
-		real = p
+		resolved = p
 	}
-	return NormCase(LongPath(real))
+	return NormCase(LongPath(resolved))
 }
 
 // CanonPath is canonPath, exported for the verbs.

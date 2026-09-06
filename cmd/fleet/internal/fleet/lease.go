@@ -129,7 +129,7 @@ func AcquireLease(key string, rec Rec) (bool, error) {
 // every other mutation, and it can afford to: there is nothing a kill can leave
 // behind. Returns the record it displaced, read inside the same critical section, so
 // the caller can name the right session on the stand-down flag.
-func TakeLease(key, branch, sid, role, cwd string, note any) (Rec, error) {
+func TakeLease(key, _, sid, role, cwd string, note any) (Rec, error) {
 	var displaced Rec
 	err := KeyLock(key, func() error {
 		cur := Lease(key)
@@ -283,6 +283,15 @@ func changedSince(marker string, subs ...string) bool {
 // every event, before any key is read — a session already running when the install
 // lands has long since passed its SessionStart.
 //
+// MigrateLegacyKeys re-keys per-branch state written before keys became strings.
+// Idempotent, marker-guarded so the steady state is one stat per directory.
+//
+// Installing new code over a live store without re-keying its runtime directories is
+// FAIL-OPEN: the new code looks under the new name, finds nothing, and hands a second
+// session a lease on a branch whose incumbent still holds the old one. So it runs on
+// every event, before any key is read — a session already running when the install
+// lands has long since passed its SessionStart.
+//
 // A record is re-keyed from its own repo and branch fields, never its filename
 // (Safe() is not invertible), and recognised by shape (repo and branch, no key).
 // Publication is under the key's lock with a rename; a name that already exists is a
@@ -297,65 +306,12 @@ func MigrateLegacyKeys() {
 	}
 	done := true
 	for _, sub := range []string{"leases", "stop", "handoff"} {
-		d := Path(sub)
-		for _, name := range listDir(d) {
+		for _, name := range listDir(Path(sub)) {
 			if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
 				continue
 			}
-			old := filepath.Join(d, name)
-			rec := ReadJSON(old)
-			if rec == nil {
-				done = false // exists but did not parse: unfinished, not absent
-				continue
-			}
-			if S(rec, "key") != "" || S(rec, "repo") == "" || S(rec, "branch") == "" {
-				continue
-			}
-			key := "repo:" + S(rec, "repo") + ":" + S(rec, "branch")
-			rec["key"] = key
-			if sub == "leases" {
-				if !Has(rec, "kind") {
-					rec["kind"] = "branch"
-				}
-				if !Has(rec, "name") {
-					rec["name"] = nil
-				}
-			}
-			err := KeyLock(key, func() error {
-				dest := KeyFile(sub, key)
-				landed := ReadJSON(dest)
-				if landed == nil {
-					if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-						return err
-					}
-					tmp := filepath.Join(d, fmt.Sprintf(".tmp.migrate.%d", os.Getpid()))
-					f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-					if err != nil {
-						return err
-					}
-					if _, err := f.Write(DumpJSON(rec)); err != nil {
-						f.Close()
-						return err
-					}
-					_ = f.Sync()
-					if err := f.Close(); err != nil {
-						return err
-					}
-					if err := os.Rename(tmp, dest); err != nil {
-						return err
-					}
-					Unlink(old)
-					return nil
-				}
-				if S(landed, "session") == S(rec, "session") {
-					Unlink(old) // a kill after publish, before unlink; same holder
-				}
-				// else: a genuine collision. Leave both; `fleet leases` reports it as LEGACY.
-				return nil
-			})
-			if err != nil {
+			if !migrateOne(sub, name) {
 				done = false
-				logError(Rec{"error": fmt.Sprintf("migrate %s: %v", key, err)})
 			}
 		}
 	}
@@ -363,4 +319,70 @@ func MigrateLegacyKeys() {
 		return
 	}
 	_ = os.WriteFile(marker, []byte(fmt.Sprint(Now())), 0o644)
+}
+
+// migrateOne re-keys one legacy record, or leaves it: true when nothing is left
+// unfinished for this file (re-keyed, not legacy, or a collision left for a person).
+func migrateOne(sub, name string) bool {
+	old := filepath.Join(Path(sub), name)
+	rec := ReadJSON(old)
+	if rec == nil {
+		return false // exists but did not parse: unfinished, not absent
+	}
+	if S(rec, "key") != "" || S(rec, "repo") == "" || S(rec, "branch") == "" {
+		return true
+	}
+	key := "repo:" + S(rec, "repo") + ":" + S(rec, "branch")
+	rec["key"] = key
+	if sub == "leases" {
+		if !Has(rec, "kind") {
+			rec["kind"] = "branch"
+		}
+		if !Has(rec, "name") {
+			rec["name"] = nil
+		}
+	}
+	err := KeyLock(key, func() error {
+		dest := KeyFile(sub, key)
+		landed := ReadJSON(dest)
+		if landed == nil {
+			return publishMigrated(old, dest, rec)
+		}
+		if S(landed, "session") == S(rec, "session") {
+			Unlink(old) // a kill after publish, before unlink; same holder
+		}
+		// else: a genuine collision. Leave both; `fleet leases` reports it as LEGACY.
+		return nil
+	})
+	if err != nil {
+		logError(Rec{"error": fmt.Sprintf("migrate %s: %v", key, err)})
+		return false
+	}
+	return true
+}
+
+// publishMigrated writes the re-keyed record beside the old one and renames it into
+// place, then removes the legacy file.
+func publishMigrated(old, dest string, rec Rec) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(filepath.Dir(old), fmt.Sprintf(".tmp.migrate.%d", os.Getpid()))
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(DumpJSON(rec)); err != nil {
+		f.Close()
+		return err
+	}
+	_ = f.Sync()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		return err
+	}
+	Unlink(old)
+	return nil
 }

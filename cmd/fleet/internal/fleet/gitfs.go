@@ -85,11 +85,11 @@ func RepoID(start string) string {
 	if common == "" {
 		return ""
 	}
-	real, err := filepath.EvalSymlinks(common)
+	resolved, err := filepath.EvalSymlinks(common)
 	if err != nil {
-		real = common
+		resolved = common
 	}
-	lp := LongPath(real)
+	lp := LongPath(resolved)
 	root := lp
 	if strings.HasSuffix(lp, "/.git") {
 		root = lp[:len(lp)-len("/.git")]

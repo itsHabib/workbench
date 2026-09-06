@@ -57,10 +57,10 @@ func shellWords(text string) []string {
 		case r == '\\':
 			esc = true
 			inWord = true
-		case r == '\'' || r == '"':
+		case isQuote(r):
 			quote = r
 			inWord = true
-		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+		case isSpace(r):
 			if inWord {
 				out = append(out, string(cur))
 				cur, inWord = nil, false
@@ -78,6 +78,9 @@ func shellWords(text string) []string {
 	}
 	return out
 }
+
+func isQuote(r rune) bool { return r == '\'' || r == '"' }
+func isSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }
 
 func fieldsFallback(text string) []string {
 	var out []string
