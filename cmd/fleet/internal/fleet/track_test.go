@@ -3,6 +3,7 @@ package fleet
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -75,5 +76,32 @@ func TestAbsentWaitStoreAndUnboundSessionsAreQuiet(t *testing.T) {
 	}
 	if lines := waitLines("a", time.Now()); len(lines) != 0 {
 		t.Fatalf("unavailable store generated context: %v", lines)
+	}
+}
+
+func TestWaitContextCapIncludesEscaping(t *testing.T) {
+	for name, char := range map[string]string{"backslash": `\`, "quote": `"`, "non-graphic": "\u200b"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("FLEET_TRACK_DIR", dir)
+			now := time.Now()
+			for i := range 4 {
+				b := DumpJSON(Rec{"session": "a", "label": strings.Repeat(char, 160), "started_at": now.Add(-time.Hour).Format(time.RFC3339Nano)})
+				if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)+".json"), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			lines := waitLines("a", now)
+			text := strings.Join(lines, "\n")
+			if utf8.RuneCountInString(text) > 700 {
+				t.Fatalf("quoted context is %d runes", utf8.RuneCountInString(text))
+			}
+			for _, line := range lines[:3] {
+				_, label, _ := strings.Cut(line, " on: ")
+				if _, err := strconv.Unquote(label); err != nil {
+					t.Fatalf("truncated quote: %s: %v", label, err)
+				}
+			}
+		})
 	}
 }

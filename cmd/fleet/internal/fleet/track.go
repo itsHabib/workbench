@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type waitAnchor struct {
@@ -43,9 +45,28 @@ func waitLines(sid string, now time.Time) []string {
 			lines = append(lines, fmt.Sprintf("[fleet] +%d more active waits (track list shows their elapsed time)", len(waits)-i))
 			break
 		}
-		lines = append(lines, fmt.Sprintf("[fleet] waiting %s on: %q", FmtAge(now.Sub(w.start).Seconds()), w.label))
+		lines = append(lines, fmt.Sprintf("[fleet] waiting %s on: %s", FmtAge(now.Sub(w.start).Seconds()), quoteWaitLabel(w.label)))
 	}
 	return lines
+}
+
+// quoteWaitLabel bounds the rendered label, including escape expansion. Reserve
+// space for an ellipsis and only append whole escapes, keeping the quote valid.
+func quoteWaitLabel(label string) string {
+	var b strings.Builder
+	used := 0
+	for _, c := range label {
+		quoted := strconv.Quote(string(c))
+		part := quoted[1 : len(quoted)-1]
+		n := utf8.RuneCountInString(part)
+		if used+n > 159 {
+			b.WriteRune('…')
+			break
+		}
+		b.WriteString(part)
+		used += n
+	}
+	return `"` + b.String() + `"`
 }
 
 func readWait(path, sid string, now time.Time) (waitAnchor, bool) {
