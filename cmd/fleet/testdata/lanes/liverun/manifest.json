@@ -1,0 +1,13 @@
+{
+  "kind": "liverun",
+  "card": "card.md",
+  "denies": [
+    "Bash(gh pr merge:*)",
+    "Bash(gh pr edit *--add-reviewer*)",
+    "Bash(gh api *requested_reviewers*)"
+  ],
+  "requires": ["slot:hypermill", "slot:live-run"],
+  "produces": "live",
+  "slots": 1,
+  "cadence": "45m"
+}

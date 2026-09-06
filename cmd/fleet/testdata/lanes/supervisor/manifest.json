@@ -1,0 +1,14 @@
+{
+  "kind": "supervisor",
+  "card": "card.md",
+  "denies": [
+    "Bash(gh pr merge:*)",
+    "Bash(gh pr edit *--add-reviewer*)",
+    "Bash(gh api *requested_reviewers*)"
+  ],
+  "requires": [],
+  "produces": null,
+  "slots": 0,
+  "cadence": "30m",
+  "watch": true
+}
