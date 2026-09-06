@@ -296,7 +296,9 @@ func warmCommands(cfg map[string]any) []string {
 	return nil
 }
 
-func warmRecord(slot string) fleet.Rec { return fleet.ReadJSON(fleet.Path("warm", fleet.Safe(slot)+".json")) }
+func warmRecord(slot string) fleet.Rec {
+	return fleet.ReadJSON(fleet.Path("warm", fleet.Safe(slot)+".json"))
+}
 
 // warmSlot runs the repo's warm commands in a slot, logs to ~/.fleet/warm/<slot>.log,
 // and records the outcome. Synchronous and reported: a slot whose warm failed is

@@ -39,8 +39,8 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
-	"github.com/itsHabib/workbench/filelock"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
+	"github.com/itsHabib/workbench/filelock"
 )
 
 // DefaultInterval is one tick.

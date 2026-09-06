@@ -78,7 +78,7 @@ var tools = []schema{
 		"description": "Lease a machine resource (slot:<name>) for this session; refused if a live session holds it, orphaned needs takeover.",
 		"inputSchema": schema{"type": "object", "properties": schema{"resource": str("slot:<name>"), "why": str("one line, recorded on the lease"),
 			"takeover": schema{"type": "boolean", "description": "take an orphaned resource you have confirmed is quiet"},
-			"session": str("session id prefix when two live sessions share cwd"), "cwd": cwdArg},
+			"session":  str("session id prefix when two live sessions share cwd"), "cwd": cwdArg},
 			"required": []any{"resource", "cwd"}}},
 	{"name": "fleet_drop",
 		"description": "Release a machine resource this session holds, after it is quiet; only the holder may.",

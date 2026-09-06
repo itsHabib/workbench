@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	fr1Words   = regexp.MustCompile(`(?i)\b(pr|ci|review|hypermill|nx|finisher|author|liverun|supervisor|infra)\b`)
+	fr1Words = regexp.MustCompile(`(?i)\b(pr|ci|review|hypermill|nx|finisher|author|liverun|supervisor|infra)\b`)
 	// The token as a shell string (`gh pr`, or the regex literals `gh\s+pr`), and as Go
 	// argv (`"gh", "pr"`): one exemption, two spellings of the same command.
 	fr1GhToken = regexp.MustCompile(`gh(\\s\+|\\s\*|[[:space:]]+|",[[:space:]]*")pr([^A-Za-z0-9_]|$)`)

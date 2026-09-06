@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	roleBlockRe    = regexp.MustCompile(`(?ms)^# BEGIN fleet role\n.*?^# END fleet role\n?`)
-	denyPrefixRe   = regexp.MustCompile(`\ABash\(([A-Za-z0-9_.-]+(?: [A-Za-z0-9_.-]+)*):\*\)\z`)
+	roleBlockRe  = regexp.MustCompile(`(?ms)^# BEGIN fleet role\n.*?^# END fleet role\n?`)
+	denyPrefixRe = regexp.MustCompile(`\ABash\(([A-Za-z0-9_.-]+(?: [A-Za-z0-9_.-]+)*):\*\)\z`)
 	// A TOML key may be bare or quoted; `"developer_instructions" = "keep me"` is the same key.
 	devInstrTopRe  = regexp.MustCompile(`(?m)^\s*(?:developer_instructions|"developer_instructions"|'developer_instructions')\s*=`)
 	tomlTableRe    = regexp.MustCompile(`(?m)^\s*\[`)

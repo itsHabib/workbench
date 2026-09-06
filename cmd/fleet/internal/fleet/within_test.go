@@ -14,9 +14,9 @@ func TestWithinIsByComponentOnEitherSeparator(t *testing.T) {
 		{"/pool/slot/", "/pool/slot", true},
 		{"/pool/slot/src", "/pool/slot", true},
 		{"/pool/slot/src/deep", "/pool/slot/", true},
-		{"/pool/slot-1", "/pool/slot", false},   // a string prefix is not an ancestor
+		{"/pool/slot-1", "/pool/slot", false}, // a string prefix is not an ancestor
 		{"/pool/slotsrc", "/pool/slot", false},
-		{"/pool", "/pool/slot", false},          // the parent is not within the child
+		{"/pool", "/pool/slot", false}, // the parent is not within the child
 		{`c:\pool\slot\src`, `c:\pool\slot`, true},
 		{`c:\pool\slot`, `c:\pool\slot\`, true},
 		{`c:\pool\slot-1`, `c:\pool\slot`, false},
