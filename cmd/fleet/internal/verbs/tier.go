@@ -47,67 +47,16 @@ func cmdTier(base string, asJSON bool) error {
 	if cfg == nil {
 		return refuse("fleet tier: ~/.fleet/tier.json missing (see tier.example.json)")
 	}
-	// -z: NUL-delimited, so a path with whitespace stays one path.
-	raw, err := gitOut("diff", "--name-only", "-z", base+"...HEAD")
+	files, addedText, err := changedAgainst(base)
 	if err != nil {
 		return err
 	}
-	var files []string
-	for _, p := range strings.Split(raw, "\x00") {
-		if p != "" {
-			files = append(files, p)
-		}
-	}
-	diff, err := gitOut("diff", "--unified=0", base+"...HEAD")
-	if err != nil {
-		return err
-	}
-	var added []string
-	for _, l := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
-			added = append(added, l)
-		}
-	}
-	addedText := strings.Join(added, "\n")
-	type row struct {
-		p   string
-		cls []string
-	}
-	var rows []row
-	var unmatched []string
-	for _, p := range files {
-		cls := classify(p, cfg)
-		if cls == nil {
-			unmatched = append(unmatched, p)
-			continue
-		}
-		rows = append(rows, row{p, cls})
-	}
+	rows, unmatched := classifyAll(files, cfg)
 	if len(unmatched) > 0 {
 		return refuse("fleet tier: no rule matches %s — add it to tier.json; there is no default placement", strings.Join(unmatched, ", "))
 	}
-	runtime, critical, wire := false, false, false
-	for _, r := range rows {
-		if contains(r.cls, "runtime") {
-			runtime = true
-		}
-		if contains(r.cls, "critical") {
-			critical = true
-		}
-		if contains(r.cls, "wire") {
-			wire = true
-		}
-	}
-	failmode := false
-	if runtime {
-		pat := fleet.S(cfg, "failmode_diff")
-		if pat == "" {
-			pat = `$^`
-		}
-		if re, err := regexp.Compile("(?m)" + pat); err == nil && re.MatchString(addedText) {
-			failmode = true
-		}
-	}
+	runtime, critical, wire := hasClass(rows, "runtime"), hasClass(rows, "critical"), hasClass(rows, "wire")
+	failmode := runtime && failmodeIn(cfg, addedText)
 	tier := 0
 	if runtime {
 		tier = 1
@@ -138,6 +87,71 @@ func cmdTier(base string, asJSON bool) error {
 		say("  - %s", e)
 	}
 	return nil
+}
+
+type tierRow struct {
+	p   string
+	cls []string
+}
+
+// changedAgainst is the paths changed since base and the text of every added line.
+// -z: NUL-delimited, so a path with whitespace stays one path.
+func changedAgainst(base string) ([]string, string, error) {
+	raw, err := gitOut("diff", "--name-only", "-z", base+"...HEAD")
+	if err != nil {
+		return nil, "", err
+	}
+	var files []string
+	for _, p := range strings.Split(raw, "\x00") {
+		if p != "" {
+			files = append(files, p)
+		}
+	}
+	diff, err := gitOut("diff", "--unified=0", base+"...HEAD")
+	if err != nil {
+		return nil, "", err
+	}
+	var added []string
+	for _, l := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+			added = append(added, l)
+		}
+	}
+	return files, strings.Join(added, "\n"), nil
+}
+
+// classifyAll is every path with its classes, and the paths no rule matches.
+func classifyAll(files []string, cfg fleet.Rec) ([]tierRow, []string) {
+	var rows []tierRow
+	var unmatched []string
+	for _, p := range files {
+		cls := classify(p, cfg)
+		if cls == nil {
+			unmatched = append(unmatched, p)
+			continue
+		}
+		rows = append(rows, tierRow{p, cls})
+	}
+	return rows, unmatched
+}
+
+func hasClass(rows []tierRow, class string) bool {
+	for _, r := range rows {
+		if contains(r.cls, class) {
+			return true
+		}
+	}
+	return false
+}
+
+// failmodeIn reports whether the added lines match the config's failmode pattern.
+func failmodeIn(cfg fleet.Rec, addedText string) bool {
+	pat := fleet.S(cfg, "failmode_diff")
+	if pat == "" {
+		pat = `$^`
+	}
+	re, err := regexp.Compile("(?m)" + pat)
+	return err == nil && re.MatchString(addedText)
 }
 
 func pyBool(b bool) string {

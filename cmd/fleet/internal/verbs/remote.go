@@ -238,53 +238,66 @@ func CmdSync(repo string) error {
 	}
 	failed := 0
 	for _, slug := range slugs {
-		data, why := ghJSON("gh", "pr", "list", "-R", slug, "--state", "open", "--limit", "50", "--json", "number,headRefName,headRefOid,url,updatedAt")
-		list, _ := data.([]any)
-		if why != "" || list == nil {
-			if why == "" {
-				why = "gh returned no list"
-			}
+		n, why := syncRepo(slug)
+		if why != "" {
 			say("%s: not refreshed (%s)", slug, why)
 			failed++
 			continue
 		}
-		var prs []any
-		for i, x := range list {
-			if i >= 30 {
-				break
-			}
-			ch, _ := x.(map[string]any)
-			n := int(fleet.F(ch, "number"))
-			entry := map[string]any{"number": n, "branch": fleet.S(ch, "headRefName"), "head": fleet.S(ch, "headRefOid"), "url": fleet.S(ch, "url"),
-				"updated_at": fleet.S(ch, "updatedAt"), "rows": []any{}}
-			cdata, _ := ghJSON("gh", "api", fmt.Sprintf("repos/%s/issues/%d/comments", slug, n), "--paginate")
-			if comments, ok := cdata.([]any); ok {
-				for _, cx := range comments {
-					c, _ := cx.(map[string]any)
-					if rows := parseOwnership(fleet.S(c, "body")); rows != nil {
-						var rs []any
-						for _, r := range rows {
-							rs = append(rs, r)
-						}
-						entry["rows"] = rs
-						break
-					}
-				}
-			}
-			prs = append(prs, entry)
-		}
-		if prs == nil {
-			prs = []any{}
-		}
-		if err := fleet.WriteJSON(cacheFile(slug), map[string]any{"at": fleet.Now(), "repo": slug, "prs": prs}); err != nil {
-			return err
-		}
-		say("%s: %d open change(s) cached", slug, len(prs))
+		say("%s: %d open change(s) cached", slug, n)
 	}
 	if failed == len(slugs) {
 		return exitCode(1, "")
 	}
 	return nil
+}
+
+// syncRepo caches one repo's open changes and their rows; the count, or why not.
+func syncRepo(slug string) (int, string) {
+	data, why := ghJSON("gh", "pr", "list", "-R", slug, "--state", "open", "--limit", "50", "--json", "number,headRefName,headRefOid,url,updatedAt")
+	list, _ := data.([]any)
+	if why != "" || list == nil {
+		if why == "" {
+			why = "gh returned no list"
+		}
+		return 0, why
+	}
+	changes := make([]any, 0, len(list))
+	for i, x := range list {
+		if i >= 30 {
+			break
+		}
+		ch, _ := x.(map[string]any)
+		n := int(fleet.F(ch, "number"))
+		changes = append(changes, map[string]any{"number": n, "branch": fleet.S(ch, "headRefName"), "head": fleet.S(ch, "headRefOid"), "url": fleet.S(ch, "url"),
+			"updated_at": fleet.S(ch, "updatedAt"), "rows": ownershipRowsOn(slug, n)})
+	}
+	if err := fleet.WriteJSON(cacheFile(slug), map[string]any{"at": fleet.Now(), "repo": slug, "prs": changes}); err != nil {
+		return 0, err.Error()
+	}
+	return len(changes), ""
+}
+
+// ownershipRowsOn is the rows in a change's ownership comment, or none.
+func ownershipRowsOn(slug string, n int) []any {
+	rs := []any{}
+	cdata, _ := ghJSON("gh", "api", fmt.Sprintf("repos/%s/issues/%d/comments", slug, n), "--paginate")
+	comments, ok := cdata.([]any)
+	if !ok {
+		return rs
+	}
+	for _, cx := range comments {
+		c, _ := cx.(map[string]any)
+		rows := parseOwnership(fleet.S(c, "body"))
+		if rows == nil {
+			continue
+		}
+		for _, r := range rows {
+			rs = append(rs, r)
+		}
+		return rs
+	}
+	return rs
 }
 
 // remoteRows is the rows another machine declared, from the cache: state `remote`
@@ -300,35 +313,42 @@ func remoteRows(declared map[string]bool, now float64) []WorkRow {
 		if c == nil {
 			continue
 		}
-		slug, at := fleet.S(c, "repo"), fleet.F(c, "at")
 		for _, px := range fleet.L(c, "prs") {
 			ch, _ := px.(map[string]any)
-			branch := fleet.S(ch, "branch")
-			for _, rx := range fleet.L(ch, "rows") {
-				r, _ := rx.(map[string]any)
-				if r == nil || fleet.S(r, "machine") == host {
-					continue
-				}
-				local := false
-				for rid := range rids[slug] {
-					if declared[rid+"|"+branch+"|"+fleet.S(r, "relationship")] {
-						local = true
-					}
-				}
-				if local {
-					continue
-				}
-				state := "remote"
-				if due := fleet.F(r, "due"); due > 0 && now > due {
-					state = "late"
-				}
-				out = append(out, WorkRow{"change": branch, "repo": slug, "number": ch["number"], "relationship": r["relationship"], "for": r["for"], "by": r["by"],
-					"at": r["at"], "due": r["due"], "slot": r["slot"], "brief": r["brief"], "key": nil, "hands": nil, "state": state, "head": ch["head"],
-					"done_at": nil, "machine": r["machine"], "cache_at": at})
-			}
+			out = append(out, remoteRowsOf(ch, c, declared, rids[fleet.S(c, "repo")], host, now)...)
 		}
 	}
 	return out
+}
+
+// remoteRowsOf is one cached change's rows from other machines, skipping this
+// machine's own and any a local record already declares.
+func remoteRowsOf(ch, cache fleet.Rec, declared map[string]bool, rids map[string]bool, host string, now float64) []WorkRow {
+	branch := fleet.S(ch, "branch")
+	var out []WorkRow
+	for _, rx := range fleet.L(ch, "rows") {
+		r, _ := rx.(map[string]any)
+		if r == nil || fleet.S(r, "machine") == host || declaredLocally(declared, rids, branch, fleet.S(r, "relationship")) {
+			continue
+		}
+		state := "remote"
+		if due := fleet.F(r, "due"); due > 0 && now > due {
+			state = "late"
+		}
+		out = append(out, WorkRow{"change": branch, "repo": fleet.S(cache, "repo"), "number": ch["number"], "relationship": r["relationship"], "for": r["for"], "by": r["by"],
+			"at": r["at"], "due": r["due"], "slot": r["slot"], "brief": r["brief"], "key": nil, "hands": nil, "state": state, "head": ch["head"],
+			"done_at": nil, "machine": r["machine"], "cache_at": fleet.F(cache, "at")})
+	}
+	return out
+}
+
+func declaredLocally(declared map[string]bool, rids map[string]bool, branch, rel string) bool {
+	for rid := range rids {
+		if declared[rid+"|"+branch+"|"+rel] {
+			return true
+		}
+	}
+	return false
 }
 
 // cacheAges is the age of every GitHub cache file, oldest first, for a scope line.

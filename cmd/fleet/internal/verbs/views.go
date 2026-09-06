@@ -113,28 +113,10 @@ func BoardRows() []BoardRow {
 	var out []BoardRow
 	for _, mr := range rows {
 		at := sessionsAt(mr.Path, sessions)
-		var here, live []fleet.Rec
-		for _, r := range at {
-			if !fleet.B(r, "ended") {
-				here = append(here, r)
-				if fleet.SessionAlive(r) {
-					live = append(live, r)
-				}
-			}
-		}
-		// A LIVE one first, else the newest not-ended record (a dead one).
-		var rec fleet.Rec
-		if len(live) > 0 {
-			rec = live[0]
-		} else if len(here) > 0 {
-			rec = here[0]
-		}
-		var holds []string
+		here, rec := presentAt(at)
+		holds := []string{}
 		if rec != nil {
-			holds = bySession[fleet.S(rec, "session")]
-		}
-		if holds == nil {
-			holds = []string{}
+			holds = append(holds, bySession[fleet.S(rec, "session")]...)
 		}
 		// Work held by a DEAD session here is reported whichever occupant wins the
 		// row: a live tab beside a dead holder must not hide the holder.
@@ -152,19 +134,7 @@ func BoardRows() []BoardRow {
 		row := BoardRow{"path": mr.Path, "tenant": mr.Tenant, "role": mr.Role, "slot": nilIfEmpty(mr.Slot), "state": state,
 			"session": nil, "branch": nil, "holds": holds, "dead_holds": deadHolds, "last_event_at": nil, "last_event": nil, "turn_open_at": nil,
 			"cadence": nilIfZero(cadence), "others": 0, "left": 0}
-		if rec != nil {
-			row["session"] = fleet.S(rec, "session")
-			row["branch"] = nilIfEmpty(fleet.S(rec, "branch"))
-			row["last_event_at"] = fleet.F(rec, "last_event_at")
-			row["last_event"] = nilIfEmpty(fleet.S(rec, "last_event"))
-			if fleet.B(rec, "turn_open") {
-				opened := fleet.F(rec, "turn_open_at")
-				if opened == 0 {
-					opened = fleet.F(rec, "last_event_at")
-				}
-				row["turn_open_at"] = opened
-			}
-		}
+		fillOccupant(row, rec)
 		if len(here) > 0 {
 			row["others"] = len(here) - 1
 		}
@@ -174,6 +144,47 @@ func BoardRows() []BoardRow {
 		out = append(out, row)
 	}
 	return out
+}
+
+// presentAt is the not-ended sessions among those at a path, and the one the row
+// names: a LIVE one first, else the newest not-ended record (a dead one).
+func presentAt(at []fleet.Rec) ([]fleet.Rec, fleet.Rec) {
+	var here, live []fleet.Rec
+	for _, r := range at {
+		if fleet.B(r, "ended") {
+			continue
+		}
+		here = append(here, r)
+		if fleet.SessionAlive(r) {
+			live = append(live, r)
+		}
+	}
+	if len(live) > 0 {
+		return here, live[0]
+	}
+	if len(here) > 0 {
+		return here, here[0]
+	}
+	return here, nil
+}
+
+// fillOccupant copies the occupant's identity and timing onto the row.
+func fillOccupant(row BoardRow, rec fleet.Rec) {
+	if rec == nil {
+		return
+	}
+	row["session"] = fleet.S(rec, "session")
+	row["branch"] = nilIfEmpty(fleet.S(rec, "branch"))
+	row["last_event_at"] = fleet.F(rec, "last_event_at")
+	row["last_event"] = nilIfEmpty(fleet.S(rec, "last_event"))
+	if !fleet.B(rec, "turn_open") {
+		return
+	}
+	opened := fleet.F(rec, "turn_open_at")
+	if opened == 0 {
+		opened = fleet.F(rec, "last_event_at")
+	}
+	row["turn_open_at"] = opened
 }
 
 func nilIfZero(f float64) any {
@@ -378,77 +389,96 @@ func SlotRows(repo string) []SlotRow {
 			out = append(out, row)
 			continue
 		}
-		var here, live []fleet.Rec
-		for _, r := range sessionsAt(mr.Path, sessions) {
-			if !fleet.B(r, "ended") {
-				here = append(here, r)
-				if fleet.SessionAlive(r) {
-					live = append(live, r)
-				}
-			}
-		}
-		// The occupancy lease names the occupant — the same answer `fleet who` gives.
-		seat := fleet.Lease("slot:" + mr.Slot)
-		var occ fleet.Rec
-		if seat != nil && !fleet.IsMalformed(seat) {
-			for _, r := range live {
-				if fleet.S(r, "session") == fleet.S(seat, "session") {
-					occ = r
-					break
-				}
-			}
-		}
-		if occ == nil && len(live) > 0 {
-			occ = live[0]
-		}
-		if occ != nil {
-			var others []string
-			for _, r := range live {
-				if fleet.S(r, "session") != fleet.S(occ, "session") {
-					others = append(others, fleet.S(r, "session"))
-				}
-			}
-			if others == nil {
-				others = []string{}
-			}
-			row["state"], row["session"], row["branch"], row["others"] = "busy", fleet.S(occ, "session"), nilIfEmpty(fleet.S(occ, "branch")), others
-		} else if len(here) > 0 {
-			row["state"], row["session"], row["branch"] = "orphaned", fleet.S(here[0], "session"), nilIfEmpty(fleet.S(here[0], "branch"))
-		}
-		rc, status := gitTry(mr.Path, gitTimeout, "status", "--porcelain", "--untracked-files=normal")
-		if rc != 0 {
-			row["state"] = "broken"
-			if status == "" {
-				status = "git status failed"
-			}
-			row["dirty"] = []string{status}
-		} else if status != "" {
-			row["dirty"] = strings.Split(status, "\n")
-			if row["state"] == "free" {
-				row["state"] = "dirty"
-			}
-		}
-		if row["state"] == "free" {
-			rc, head := gitTry(mr.Path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD")
-			if rc == 0 && head != "HEAD" {
-				row["branch"] = head
-			}
-		}
+		slotOccupant(row, mr, sessions)
+		slotTree(row, mr.Path)
 		if am, ok := row["assigned"].(fleet.Rec); ok && fleet.S(row, "branch") != "" && fleet.S(am, "branch") != fleet.S(row, "branch") {
 			row["assigned"] = nil // the tree left the assigned branch: the assignment is spent
 		}
-		cfg, _ := poolsConfig()[rrepo].(map[string]any)
-		if len(warmCommands(cfg)) > 0 {
-			w := warmRecord(mr.Slot)
-			var cfgAt float64
-			if st, err := os.Stat(fleet.Path("pools.json")); err == nil {
-				cfgAt = float64(st.ModTime().UnixNano()) / 1e9
-			}
-			row["cold"] = !(w != nil && fleet.F(w, "exit") == 0 && fleet.F(w, "at") >= cfgAt)
-		}
+		row["cold"] = slotCold(rrepo, mr.Slot)
 		out = append(out, row)
 	}
 	return out
+}
+
+// slotOccupant marks the seat busy with its occupant, or orphaned with the newest
+// dead session there. The occupancy lease names the occupant — the same answer
+// `fleet who` gives.
+func slotOccupant(row SlotRow, mr fleet.MapRow, sessions []fleet.Rec) {
+	var here, live []fleet.Rec
+	for _, r := range sessionsAt(mr.Path, sessions) {
+		if fleet.B(r, "ended") {
+			continue
+		}
+		here = append(here, r)
+		if fleet.SessionAlive(r) {
+			live = append(live, r)
+		}
+	}
+	seat := fleet.Lease("slot:" + mr.Slot)
+	var occ fleet.Rec
+	if seat != nil && !fleet.IsMalformed(seat) {
+		for _, r := range live {
+			if fleet.S(r, "session") == fleet.S(seat, "session") {
+				occ = r
+				break
+			}
+		}
+	}
+	if occ == nil && len(live) > 0 {
+		occ = live[0]
+	}
+	if occ != nil {
+		others := []string{}
+		for _, r := range live {
+			if fleet.S(r, "session") != fleet.S(occ, "session") {
+				others = append(others, fleet.S(r, "session"))
+			}
+		}
+		row["state"], row["session"], row["branch"], row["others"] = "busy", fleet.S(occ, "session"), nilIfEmpty(fleet.S(occ, "branch")), others
+		return
+	}
+	if len(here) > 0 {
+		row["state"], row["session"], row["branch"] = "orphaned", fleet.S(here[0], "session"), nilIfEmpty(fleet.S(here[0], "branch"))
+	}
+}
+
+// slotTree reads the seat's git state: broken, dirty, and the branch a free seat is on.
+func slotTree(row SlotRow, path string) {
+	rc, status := gitTry(path, gitTimeout, "status", "--porcelain", "--untracked-files=normal")
+	if rc != 0 {
+		row["state"] = "broken"
+		if status == "" {
+			status = "git status failed"
+		}
+		row["dirty"] = []string{status}
+		return
+	}
+	if status != "" {
+		row["dirty"] = strings.Split(status, "\n")
+		if row["state"] == "free" {
+			row["state"] = "dirty"
+		}
+	}
+	if row["state"] != "free" {
+		return
+	}
+	if rc, head := gitTry(path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD"); rc == 0 && head != "HEAD" {
+		row["branch"] = head
+	}
+}
+
+// slotCold: a seat whose warm failed, or ran before pools.json last changed.
+func slotCold(rrepo, slot string) bool {
+	cfg, _ := poolsConfig()[rrepo].(map[string]any)
+	if len(warmCommands(cfg)) == 0 {
+		return false
+	}
+	w := warmRecord(slot)
+	var cfgAt float64
+	if st, err := os.Stat(fleet.Path("pools.json")); err == nil {
+		cfgAt = float64(st.ModTime().UnixNano()) / 1e9
+	}
+	return !(w != nil && fleet.F(w, "exit") == 0 && fleet.F(w, "at") >= cfgAt)
 }
 
 func cmdSlots(repo string, asJSON bool) error {
@@ -540,38 +570,104 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 		return refuse("fleet pool: %s is inside a git checkout, so slots placed beside %s would be nested; move the checkout to a directory that is not inside a repo", parent, base)
 	}
 	cfg, _ := poolsConfig()[base].(map[string]any)
-	wanted := map[string]int{}
-	var order []string
-	if kind != "" {
-		n, err := strconv.Atoi(nArg)
-		if nArg == "" || err != nil || !isDigits(nArg) {
-			return refuse("usage: fleet pool <checkout> <kind> <n> [--rewarm] [--tenant <t>]")
-		}
-		wanted[kind] = n
-		order = []string{kind}
-	} else {
-		slots, _ := cfg["slots"].(map[string]any)
-		var ks []string
-		for k := range slots {
-			ks = append(ks, k)
-		}
-		sort.Strings(ks)
-		for _, k := range ks {
-			if f, ok := slots[k].(float64); ok && f == float64(int64(f)) {
-				wanted[k] = int(f)
-				order = append(order, k)
-			}
-		}
-		if len(wanted) == 0 {
-			return refuse("fleet pool: no kind given and pools.json has no slots for %s; run `fleet pool %s <kind> <n>`", base, checkout)
-		}
+	wanted, order, err := poolWanted(kind, nArg, cfg, base, checkout)
+	if err != nil {
+		return err
 	}
 	for _, k := range order {
 		if _, _, err := loadManifest(k); err != nil {
 			return err
 		}
 	}
-	// The tenant is settled BEFORE any worktree exists.
+	tenant, err = poolTenant(tenant, checkout, base)
+	if err != nil {
+		return err
+	}
+	p := newPooler(checkout, base, parent, tenant, rewarm, cfg)
+	for _, k := range order {
+		for i := 1; i <= wanted[k]; i++ {
+			if err := p.one(k, i); err != nil {
+				return err
+			}
+		}
+	}
+	say("%s", p.summary(order, wanted))
+	return nil
+}
+
+func newPooler(checkout, base, parent, tenant string, rewarm bool, cfg map[string]any) *pooler {
+	p := &pooler{checkout: checkout, base: base, parent: parent, tenant: tenant, rewarm: rewarm, cmds: warmCommands(cfg),
+		named: map[string]string{}, worktrees: registeredWorktrees(checkout)}
+	_, rows := fleet.MapRows(fleet.RolesMap())
+	for _, r := range rows {
+		if r.Slot != "" {
+			p.named[r.Slot] = r.Path
+		}
+	}
+	for _, r := range sessionRows() {
+		if fleet.S(r, "cwd") != "" && !fleet.B(r, "ended") && fleet.SessionAlive(r) {
+			p.live = append(p.live, r)
+		}
+	}
+	return p
+}
+
+func (p *pooler) summary(order []string, wanted map[string]int) string {
+	var parts []string
+	for _, k := range order {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, wanted[k]))
+	}
+	line := fmt.Sprintf("pool %s: %s", p.base, strings.Join(parts, ", "))
+	if len(p.made) > 0 {
+		line += "; created " + strings.Join(p.made, ", ")
+	}
+	if len(p.kept) > 0 {
+		line += "; kept " + strings.Join(p.kept, ", ")
+	}
+	if len(p.warmed) > 0 {
+		line += "; warmed " + strings.Join(p.warmed, ", ")
+	} else if len(p.cmds) == 0 {
+		line += "; no warm command in pools.json"
+	}
+	return line
+}
+
+// poolWanted is how many seats of each kind: from the arguments, else pools.json.
+func poolWanted(kind, nArg string, cfg map[string]any, base, checkout string) (map[string]int, []string, error) {
+	wanted := map[string]int{}
+	if kind != "" {
+		n, err := strconv.Atoi(nArg)
+		if nArg == "" || err != nil || !isDigits(nArg) {
+			return nil, nil, refuse("usage: fleet pool <checkout> <kind> <n> [--rewarm] [--tenant <t>]")
+		}
+		wanted[kind] = n
+		return wanted, []string{kind}, nil
+	}
+	slots, _ := cfg["slots"].(map[string]any)
+	var order []string
+	for _, k := range sortedKeys(anyKeys(slots)) {
+		if f, ok := slots[k].(float64); ok && f == float64(int64(f)) {
+			wanted[k] = int(f)
+			order = append(order, k)
+		}
+	}
+	if len(wanted) == 0 {
+		return nil, nil, refuse("fleet pool: no kind given and pools.json has no slots for %s; run `fleet pool %s <kind> <n>`", base, checkout)
+	}
+	return wanted, order, nil
+}
+
+func anyKeys(m map[string]any) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[k] = true
+	}
+	return out
+}
+
+// poolTenant settles the tenant BEFORE any worktree exists: given, inherited from
+// the checkout's own map line, or ORG_TENANT.
+func poolTenant(tenant, checkout, base string) (string, error) {
 	if tenant == "" {
 		tenant = fleet.TenantOf(checkout)
 	}
@@ -579,89 +675,85 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 		tenant = os.Getenv("ORG_TENANT")
 	}
 	if tenant == "" {
-		return refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
+		return "", refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
 	}
-	_, rows := fleet.MapRows(fleet.RolesMap())
-	named := map[string]string{}
-	for _, r := range rows {
-		if r.Slot != "" {
-			named[r.Slot] = r.Path
+	return tenant, nil
+}
+
+// pooler is one `fleet pool` run: what it knows before the loop, what it did.
+type pooler struct {
+	checkout, base, parent, tenant string
+	rewarm                         bool
+	cmds                           []string
+	named                          map[string]string
+	worktrees                      map[string]bool
+	live                           []fleet.Rec
+	made, kept, warmed             []string
+}
+
+// one creates or keeps one seat: never disturbs an occupied one, refuses a name
+// collision or a foreign directory, roles it, and warms it when needed.
+func (p *pooler) one(k string, i int) error {
+	slot := fmt.Sprintf("%s-%s-%d", p.base, k, i)
+	path := filepath.Join(p.parent, slot)
+	if err := p.nameGuards(slot, path); err != nil {
+		return err
+	}
+	if isDir(path) && len(sessionsAt(path, p.live)) > 0 {
+		p.kept = append(p.kept, slot) // occupied: never disturbed, not even re-roled or warmed
+		return nil
+	}
+	fresh := !isDir(path)
+	if !fresh && !p.worktrees[canon(path)] {
+		return refuse("fleet pool: %s exists but is not a worktree of %s (git worktree list does not know it); move it aside, or `git worktree prune` if it was one, then retry", path, p.checkout)
+	}
+	if fresh {
+		if rc, out := gitTry(p.checkout, 300*time.Second, "worktree", "add", "--detach", "-q", path); rc != 0 {
+			return refuse("fleet pool: git worktree add %s failed: %s", path, out)
 		}
 	}
-	cmds := warmCommands(cfg)
-	var live []fleet.Rec
-	for _, r := range sessionRows() {
-		if fleet.S(r, "cwd") != "" && !fleet.B(r, "ended") && fleet.SessionAlive(r) {
-			live = append(live, r)
-		}
+	if err := cmdRole(path, k+":"+p.base, false, p.tenant, slot); err != nil {
+		return err
 	}
-	worktrees := registeredWorktrees(checkout)
-	var made, kept, warmed []string
-	for _, k := range order {
-		for i := 1; i <= wanted[k]; i++ {
-			slot := fmt.Sprintf("%s-%s-%d", base, k, i)
-			p := filepath.Join(parent, slot)
-			if other, ok := named[slot]; ok && canon(other) != canon(p) {
-				return refuse("fleet pool: slot name %s already names %s in roles.map; two checkouts share the basename %s. Rename or move one of them, then retry", slot, other, fleet.PyRepr(base))
-			}
-			if seat := fleet.Lease("slot:" + slot); seat != nil && !fleet.IsMalformed(seat) && !fleet.B(seat, "occupancy") {
-				s := fleet.S(seat, "session")
-				if s == "" {
-					s = "?"
-				}
-				return refuse("fleet pool: slot:%s is held as a machine resource (by %s); a seat cannot share a machine's name. Rename the checkout or the resource", slot, fleet.Short(s))
-			}
-			if isDir(p) && len(sessionsAt(p, live)) > 0 {
-				kept = append(kept, slot) // occupied: never disturbed, not even re-roled or warmed
-				continue
-			}
-			fresh := !isDir(p)
-			if !fresh && !worktrees[canon(p)] {
-				return refuse("fleet pool: %s exists but is not a worktree of %s (git worktree list does not know it); move it aside, or `git worktree prune` if it was one, then retry", p, checkout)
-			}
-			if fresh {
-				rc, out := gitTry(checkout, 300*time.Second, "worktree", "add", "--detach", "-q", p)
-				if rc != 0 {
-					return refuse("fleet pool: git worktree add %s failed: %s", p, out)
-				}
-			}
-			if err := cmdRole(p, k+":"+base, false, tenant, slot); err != nil {
-				return err
-			}
-			if fresh {
-				made = append(made, slot)
-			} else {
-				kept = append(kept, slot)
-			}
-			w := warmRecord(slot)
-			if len(cmds) > 0 && (fresh || rewarm || !(w != nil && fleet.F(w, "exit") == 0)) {
-				r := warmSlot(p, slot, cmds)
-				status := "ok"
-				if fleet.F(r, "exit") != 0 {
-					status = fmt.Sprintf("FAILED exit %d", int(fleet.F(r, "exit")))
-				}
-				warmed = append(warmed, fmt.Sprintf("%s (%s, %vs)", slot, status, fleet.F(r, "seconds")))
-			}
-		}
+	if fresh {
+		p.made = append(p.made, slot)
+	} else {
+		p.kept = append(p.kept, slot)
 	}
-	var parts []string
-	for _, k := range order {
-		parts = append(parts, fmt.Sprintf("%s=%d", k, wanted[k]))
-	}
-	line := fmt.Sprintf("pool %s: %s", base, strings.Join(parts, ", "))
-	if len(made) > 0 {
-		line += "; created " + strings.Join(made, ", ")
-	}
-	if len(kept) > 0 {
-		line += "; kept " + strings.Join(kept, ", ")
-	}
-	if len(warmed) > 0 {
-		line += "; warmed " + strings.Join(warmed, ", ")
-	} else if len(cmds) == 0 {
-		line += "; no warm command in pools.json"
-	}
-	say("%s", line)
+	p.warmIfNeeded(path, slot, fresh)
 	return nil
+}
+
+// nameGuards: a seat's name must not already name another checkout's seat, nor a
+// machine resource.
+func (p *pooler) nameGuards(slot, path string) error {
+	if other, ok := p.named[slot]; ok && canon(other) != canon(path) {
+		return refuse("fleet pool: slot name %s already names %s in roles.map; two checkouts share the basename %s. Rename or move one of them, then retry", slot, other, fleet.PyRepr(p.base))
+	}
+	seat := fleet.Lease("slot:" + slot)
+	if seat == nil || fleet.IsMalformed(seat) || fleet.B(seat, "occupancy") {
+		return nil
+	}
+	s := fleet.S(seat, "session")
+	if s == "" {
+		s = "?"
+	}
+	return refuse("fleet pool: slot:%s is held as a machine resource (by %s); a seat cannot share a machine's name. Rename the checkout or the resource", slot, fleet.Short(s))
+}
+
+// warmIfNeeded runs the warm commands for a fresh seat, on --rewarm, or after a
+// failed warm, and records the outcome.
+func (p *pooler) warmIfNeeded(path, slot string, fresh bool) {
+	w := warmRecord(slot)
+	if len(p.cmds) == 0 || !(fresh || p.rewarm || !(w != nil && fleet.F(w, "exit") == 0)) {
+		return
+	}
+	r := warmSlot(path, slot, p.cmds)
+	status := "ok"
+	if fleet.F(r, "exit") != 0 {
+		status = fmt.Sprintf("FAILED exit %d", int(fleet.F(r, "exit")))
+	}
+	p.warmed = append(p.warmed, fmt.Sprintf("%s (%s, %vs)", slot, status, fleet.F(r, "seconds")))
 }
 
 var branchNameRe = regexp.MustCompile(`\A[A-Za-z0-9._/@+-]+\z`)
@@ -694,36 +786,10 @@ func CmdAssign(slot, branch, brief, by, forRole string) error {
 	gitTry(path, 120*time.Second, "fetch", "--quiet", "origin", branch)
 	var out error
 	lerr := fleet.KeyLock("slot:"+slot, func() error {
-		r := slotRow(slot)
-		if r == nil {
-			out = refuse("fleet assign: no slot named %s", fleet.PyRepr(slot))
+		if out = assignGuards(slot, path, branch); out != nil {
 			return nil
 		}
-		if err := refuseUnlessFree(slot, r); err != nil {
-			out = err
-			return nil
-		}
-		key := fleet.Scope(path, branch)
-		cur := fleet.Lease(key)
-		if fleet.IsMalformed(cur) {
-			out = refuse("fleet assign: the lease file for %s is malformed (%s); inspect and remove it first", branch, fleet.S(cur, "malformed"))
-			return nil
-		}
-		if cur != nil && fleet.SessionAlive(fleet.ReadJSON(fleet.Path("sessions", fleet.S(cur, "session")+".json"))) {
-			out = refuse("fleet assign: %s is held by %s %s right now; assigning it to %s would put two sessions on one branch", branch, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), slot)
-			return nil
-		}
-		rc, txt := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
-		if rc != 0 {
-			rc, txt = gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch)
-		}
-		if rc != 0 {
-			out = refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, txt)
-			return nil
-		}
-		_, landed := gitTry(path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD")
-		if landed != branch {
-			out = refuse("fleet assign: after checkout %s is on %s, not %s; nothing was assigned", slot, fleet.PyRepr(landed), fleet.PyRepr(branch))
+		if out = assignCheckout(slot, path, branch); out != nil {
 			return nil
 		}
 		by = dispatcher(by)
@@ -751,6 +817,43 @@ func CmdAssign(slot, branch, brief, by, forRole string) error {
 		tail = " — " + strings.TrimSpace(brief)
 	}
 	say("%s: assigned %s%s; tree at %s is on it", slot, branch, tail, path)
+	return nil
+}
+
+// assignGuards, under the seat's lock: the seat exists and is free, and the branch is
+// not held by a live session (two sessions on one branch is the thing this prevents).
+func assignGuards(slot, path, branch string) error {
+	r := slotRow(slot)
+	if r == nil {
+		return refuse("fleet assign: no slot named %s", fleet.PyRepr(slot))
+	}
+	if err := refuseUnlessFree(slot, r); err != nil {
+		return err
+	}
+	cur := fleet.Lease(fleet.Scope(path, branch))
+	if fleet.IsMalformed(cur) {
+		return refuse("fleet assign: the lease file for %s is malformed (%s); inspect and remove it first", branch, fleet.S(cur, "malformed"))
+	}
+	if cur != nil && fleet.SessionAlive(fleet.ReadJSON(fleet.Path("sessions", fleet.S(cur, "session")+".json"))) {
+		return refuse("fleet assign: %s is held by %s %s right now; assigning it to %s would put two sessions on one branch", branch, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), slot)
+	}
+	return nil
+}
+
+// assignCheckout puts the seat's tree on the branch, creating it from origin when
+// it is not local, and confirms where the tree landed.
+func assignCheckout(slot, path, branch string) error {
+	rc, txt := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
+	if rc != 0 {
+		rc, txt = gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch)
+	}
+	if rc != 0 {
+		return refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, txt)
+	}
+	_, landed := gitTry(path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD")
+	if landed != branch {
+		return refuse("fleet assign: after checkout %s is on %s, not %s; nothing was assigned", slot, fleet.PyRepr(landed), fleet.PyRepr(branch))
+	}
 	return nil
 }
 
@@ -822,6 +925,41 @@ func describeHolder(cur fleet.Rec) (bool, string, fleet.Rec) {
 // session that holds it. The slot lease IS the name table; a slot whose lease is
 // absent or whose holder is dead resolves to nobody, loudly, rather than to the
 // nearest live session.
+// whoSlot answers for a seat or a machine resource: the occupant, the holder, or a
+// loud "nobody".
+func whoSlot(a string, slots map[string]bool, slotList string) (bool, string, map[string]any) {
+	key := a
+	if !strings.HasPrefix(a, "slot:") {
+		key = "slot:" + a
+	}
+	name := key[len("slot:"):]
+	cur := fleet.Lease(key)
+	if fleet.IsMalformed(cur) {
+		return false, fmt.Sprintf("%s: lease file malformed (%s); resolve by hand", a, fleet.S(cur, "malformed")), map[string]any{"key": key}
+	}
+	if cur == nil && slots[name] {
+		return false, fmt.Sprintf("%s is unoccupied (no session has started there)", name), map[string]any{"key": key}
+	}
+	if cur == nil {
+		return false, fmt.Sprintf("%s is not held and is not a pooled slot; slots: %s", a, slotList), map[string]any{"key": key}
+	}
+	if slots[name] && !fleet.B(cur, "occupancy") {
+		s := fleet.S(cur, "session")
+		if s == "" {
+			s = "?"
+		}
+		return false, fmt.Sprintf("%s: slot:%s is held as a machine resource by %s, not occupied; a seat's name is bound by the hook at SessionStart, never by `fleet take`", name, name, fleet.Short(s)), map[string]any{"key": key, "lease": cur}
+	}
+	ok, text, holder := describeHolder(cur)
+	if ok {
+		return true, fmt.Sprintf("%s -> %s", a, text), map[string]any{"key": key, "lease": cur, "session": holder}
+	}
+	return false, fmt.Sprintf("%s is unoccupied: %s", name, text), map[string]any{"key": key, "lease": cur, "session": holder}
+}
+
+// Who is the lookup plane's one question: which live session holds a slot, key,
+// change number or branch. One answer, or a loud reason there is none; never a
+// substitute.
 func Who(arg string) (bool, string, map[string]any) {
 	a := strings.TrimSpace(arg)
 	slots := fleet.PooledSlotNames()
@@ -830,33 +968,7 @@ func Who(arg string) (bool, string, map[string]any) {
 		slotList = "none"
 	}
 	if strings.HasPrefix(a, "slot:") || slots[a] {
-		key := a
-		if !strings.HasPrefix(a, "slot:") {
-			key = "slot:" + a
-		}
-		name := key[len("slot:"):]
-		cur := fleet.Lease(key)
-		if fleet.IsMalformed(cur) {
-			return false, fmt.Sprintf("%s: lease file malformed (%s); resolve by hand", a, fleet.S(cur, "malformed")), map[string]any{"key": key}
-		}
-		if cur == nil {
-			if slots[name] {
-				return false, fmt.Sprintf("%s is unoccupied (no session has started there)", name), map[string]any{"key": key}
-			}
-			return false, fmt.Sprintf("%s is not held and is not a pooled slot; slots: %s", a, slotList), map[string]any{"key": key}
-		}
-		if slots[name] && !fleet.B(cur, "occupancy") {
-			s := fleet.S(cur, "session")
-			if s == "" {
-				s = "?"
-			}
-			return false, fmt.Sprintf("%s: slot:%s is held as a machine resource by %s, not occupied; a seat's name is bound by the hook at SessionStart, never by `fleet take`", name, name, fleet.Short(s)), map[string]any{"key": key, "lease": cur}
-		}
-		ok, text, holder := describeHolder(cur)
-		if ok {
-			return true, fmt.Sprintf("%s -> %s", a, text), map[string]any{"key": key, "lease": cur, "session": holder}
-		}
-		return false, fmt.Sprintf("%s is unoccupied: %s", name, text), map[string]any{"key": key, "lease": cur, "session": holder}
+		return whoSlot(a, slots, slotList)
 	}
 	var key string
 	switch {
@@ -960,15 +1072,7 @@ func Unowned(repo string) map[string]any {
 		}
 		pairs = filtered
 	}
-	assigns := map[[2]string]fleet.Rec{}
-	d := fleet.Path("assign")
-	ents, _ := os.ReadDir(d)
-	for _, e := range ents {
-		a := fleet.ReadJSON(filepath.Join(d, e.Name()))
-		if a != nil && fleet.S(a, "branch") != "" {
-			assigns[[2]string{fleet.S(a, "repo"), fleet.S(a, "branch")}] = a
-		}
-	}
+	assigns := undeliveredAssigns()
 	host, _ := os.Hostname()
 	if host == "" {
 		host = "?"
@@ -977,60 +1081,16 @@ func Unowned(repo string) map[string]any {
 		"repos": map[string]any{}, "unowned": []map[string]any{}, "working": []map[string]any{}}
 	repos := out["repos"].(map[string]any)
 	var unowned, working []map[string]any
-	var ghs []string
-	for g := range pairs {
-		ghs = append(ghs, g)
-	}
-	sort.Strings(ghs)
-	for _, gh := range ghs {
+	for _, gh := range sortedKeys(mapKeys(pairs)) {
 		rids := pairs[gh]
-		data, why := ghJSON("gh", "pr", "list", "--repo", gh, "--state", "open", "--json", "number,headRefName,url,title", "--limit", "100")
-		list, _ := data.([]any)
-		var changes []map[string]any
-		if data == nil {
-			var cached []fleet.Rec
-			for rid := range rids {
-				cached = append(cached, pullRecords(0, false, rid)...)
-			}
-			repos[gh] = fmt.Sprintf("gh could not list open changes (%s); falling back to %d cached entries of unknown state", why, len(cached))
-			for _, c := range cached {
-				changes = append(changes, map[string]any{"number": fleet.F(c, "number"), "headRefName": fleet.S(c, "branch"), "url": c["url"], "title": nil, "cached": true})
-			}
-		} else {
-			repos[gh] = fmt.Sprintf("%d open", len(list))
-			for _, c := range list {
-				if cm, ok := c.(map[string]any); ok {
-					changes = append(changes, cm)
-				}
-			}
-		}
-		var ridList []string
-		for rid := range rids {
-			ridList = append(ridList, rid)
-		}
-		sort.Strings(ridList)
+		changes, note := openChanges(gh, rids)
+		repos[gh] = note
+		ridList := sortedKeys(rids)
 		for _, c := range changes {
 			branch := fleet.S(c, "headRefName")
-			var holders []fleet.Rec
-			last := ""
-			for _, rid := range ridList {
-				cur := fleet.Lease("repo:" + rid + ":" + branch)
-				if cur != nil && !fleet.IsMalformed(cur) && fleet.S(cur, "session") != "" {
-					last = fleet.S(cur, "session")
-					if h := fleet.ReadJSON(fleet.Path("sessions", last+".json")); fleet.SessionAlive(h) {
-						holders = append(holders, h)
-					}
-				}
-			}
-			var assigned any
-			for _, rid := range ridList {
-				if a, ok := assigns[[2]string{rid, branch}]; ok && fleet.S(a, "delivered_to") == "" {
-					assigned = a
-					break
-				}
-			}
+			holders, last := liveHolders(ridList, branch)
 			row := map[string]any{"repo": gh, "number": c["number"], "branch": branch, "url": c["url"], "title": c["title"],
-				"cached_only": fleet.B(c, "cached"), "assigned": assigned}
+				"cached_only": fleet.B(c, "cached"), "assigned": assignedFor(assigns, ridList, branch)}
 			if len(holders) > 0 {
 				row["session"], row["role"], row["slot"] = fleet.S(holders[0], "session"), holders[0]["role"], holders[0]["slot"]
 				working = append(working, row)
@@ -1047,6 +1107,79 @@ func Unowned(repo string) map[string]any {
 		out["working"] = working
 	}
 	return out
+}
+
+func mapKeys[V any](m map[string]V) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[k] = true
+	}
+	return out
+}
+
+// undeliveredAssigns is every assignment not yet read by a session, by (repo, branch).
+func undeliveredAssigns() map[[2]string]fleet.Rec {
+	assigns := map[[2]string]fleet.Rec{}
+	d := fleet.Path("assign")
+	ents, _ := os.ReadDir(d)
+	for _, e := range ents {
+		a := fleet.ReadJSON(filepath.Join(d, e.Name()))
+		if a != nil && fleet.S(a, "branch") != "" {
+			assigns[[2]string{fleet.S(a, "repo"), fleet.S(a, "branch")}] = a
+		}
+	}
+	return assigns
+}
+
+// openChanges is a repo's open changes from gh, else the local cache marked as
+// cached-only, with a note saying which.
+func openChanges(gh string, rids map[string]bool) ([]map[string]any, string) {
+	data, why := ghJSON("gh", "pr", "list", "--repo", gh, "--state", "open", "--json", "number,headRefName,url,title", "--limit", "100")
+	list, _ := data.([]any)
+	var changes []map[string]any
+	if data == nil {
+		var cached []fleet.Rec
+		for rid := range rids {
+			cached = append(cached, pullRecords(0, false, rid)...)
+		}
+		for _, c := range cached {
+			changes = append(changes, map[string]any{"number": fleet.F(c, "number"), "headRefName": fleet.S(c, "branch"), "url": c["url"], "title": nil, "cached": true})
+		}
+		return changes, fmt.Sprintf("gh could not list open changes (%s); falling back to %d cached entries of unknown state", why, len(cached))
+	}
+	for _, c := range list {
+		if cm, ok := c.(map[string]any); ok {
+			changes = append(changes, cm)
+		}
+	}
+	return changes, fmt.Sprintf("%d open", len(list))
+}
+
+// liveHolders is the live sessions holding a branch across a repo's local ids, and
+// the last holder seen whether alive or not.
+func liveHolders(ridList []string, branch string) ([]fleet.Rec, string) {
+	var holders []fleet.Rec
+	last := ""
+	for _, rid := range ridList {
+		cur := fleet.Lease("repo:" + rid + ":" + branch)
+		if cur == nil || fleet.IsMalformed(cur) || fleet.S(cur, "session") == "" {
+			continue
+		}
+		last = fleet.S(cur, "session")
+		if h := fleet.ReadJSON(fleet.Path("sessions", last+".json")); fleet.SessionAlive(h) {
+			holders = append(holders, h)
+		}
+	}
+	return holders, last
+}
+
+func assignedFor(assigns map[[2]string]fleet.Rec, ridList []string, branch string) any {
+	for _, rid := range ridList {
+		if a, ok := assigns[[2]string{rid, branch}]; ok && fleet.S(a, "delivered_to") == "" {
+			return a
+		}
+	}
+	return nil
 }
 
 func cmdUnowned(repo string, asJSON bool) error {

@@ -139,22 +139,8 @@ func CmdTake(key, why string, takeover bool, session string) error {
 			out = refuse("fleet take: %s is held by %s %s since %s ago. Wait for `fleet leases` to show it free, or ask the operator for `fleet revoke %s --to %s \"<reason>\"`.", key, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), ago(fleet.F(cur, "since")), key, fleet.Short(sid))
 			return nil
 		}
-		var note any
-		if state == fleet.HeldOrphaned {
-			w := why
-			if w == "" {
-				w = "no reason given"
-			}
-			s := fleet.S(cur, "session")
-			if s == "" {
-				s = "?"
-			}
-			note = fmt.Sprintf("takeover of dead session %s: %s", fleet.Short(s), w)
-		} else if why != "" {
-			note = why
-		}
 		taken = true
-		return fleet.WriteLease(key, fleet.LeaseRecord(key, sid, fleet.S(rec, "role"), fleet.S(rec, "cwd"), note))
+		return fleet.WriteLease(key, fleet.LeaseRecord(key, sid, fleet.S(rec, "role"), fleet.S(rec, "cwd"), takeNote(state, cur, why)))
 	})
 	if lerr == fleet.ErrKeyBusy {
 		return refuse("fleet take: %s is being handed over right now and this command could not take it in time; nothing was written. Next action: `fleet leases`, then retry.", key)
@@ -173,6 +159,25 @@ func CmdTake(key, why string, takeover bool, session string) error {
 		say("%s: taken by %s %s%s", key, roleOr(rec, "session"), fleet.Short(sid), tail)
 	}
 	return nil
+}
+
+// takeNote is what the lease records about why it was taken: the reason, and for a
+// takeover, whose dead session it was taken from.
+func takeNote(state fleet.HeldState, cur fleet.Rec, why string) any {
+	if state != fleet.HeldOrphaned {
+		if why == "" {
+			return nil
+		}
+		return why
+	}
+	if why == "" {
+		why = "no reason given"
+	}
+	s := fleet.S(cur, "session")
+	if s == "" {
+		s = "?"
+	}
+	return fmt.Sprintf("takeover of dead session %s: %s", fleet.Short(s), why)
 }
 
 // CmdDrop releases a resource this session holds.

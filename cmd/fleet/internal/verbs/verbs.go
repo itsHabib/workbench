@@ -131,54 +131,8 @@ func Dispatch(args []string) error {
 		}
 		return ""
 	}
-	switch verb {
-	case "stop":
-		reason := "no reason given"
-		if len(rest) > 1 {
-			reason = rest[1]
-		}
-		if arg(0) == "" {
-			return exitCode(2, `usage: fleet stop <branch|slot:name> "<reason>"`)
-		}
-		return cmdStop(arg(0), reason, "operator", "", "", "")
-	case "resume":
-		if arg(0) == "" {
-			return exitCode(2, "usage: fleet resume <branch|slot:name>")
-		}
-		return cmdResume(arg(0))
-	case "revoke":
-		m := regexp.MustCompile(`(\S+)\s+--to\s+(\S+)\s*(.*)`).FindStringSubmatch(strings.Join(rest, " "))
-		if m == nil {
-			return refuse(`usage: fleet revoke <branch> --to <session8> "<why>"`)
-		}
-		reason := m[3]
-		if reason == "" {
-			reason = "revoked"
-		}
-		return cmdRevoke(m[1], m[2], reason)
-	case "sessions":
-		return cmdSessions()
-	case "leases":
-		return cmdLeases()
-	case "costs":
-		return cmdCosts()
-	case "decide":
-		if len(rest) < 3 {
-			return refuse(`usage: fleet decide <drop|park|ignore|rule> <subject> "<text>"`)
-		}
-		return cmdDecide(rest[0], rest[1], strings.Join(rest[2:], " "))
-	case "undecide":
-		return cmdUndecide(arg(0))
-	case "decisions":
-		return cmdDecisions()
-	case "tier":
-		base := "origin/main"
-		if i := index(rest, "--base"); i >= 0 && i+1 < len(rest) {
-			base = rest[i+1]
-		}
-		return cmdTier(base, contains(rest, "--json"))
-	case "ready":
-		return cmdReady(arg(0), arg(1), arg(2))
+	if ok, err := dispatchControl(verb, rest, arg); ok {
+		return err
 	}
 	asJSON := contains(rest, "--json")
 	plain := without(rest, "--json")
@@ -188,157 +142,259 @@ func Dispatch(args []string) error {
 		}
 		return ""
 	}
+	if ok, err := dispatchViews(verb, plain, parg, asJSON); ok {
+		return err
+	}
+	if ok, err := dispatchSeats(verb, plain, parg); ok {
+		return err
+	}
+	if ok, err := dispatchWork(verb, plain, asJSON); ok {
+		return err
+	}
+	if ok, err := dispatchActs(verb, rest, arg); ok {
+		return err
+	}
+	return exitCode(2, usage)
+}
+
+// dispatchControl is the operator's control verbs: stop, resume, revoke, the ledgers, decisions, tier, ready.
+func dispatchControl(verb string, rest []string, arg func(int) string) (bool, error) {
+	switch verb {
+	case "stop":
+		reason := "no reason given"
+		if len(rest) > 1 {
+			reason = rest[1]
+		}
+		if arg(0) == "" {
+			return true, exitCode(2, `usage: fleet stop <branch|slot:name> "<reason>"`)
+		}
+		return true, cmdStop(arg(0), reason, "operator", "", "", "")
+	case "resume":
+		if arg(0) == "" {
+			return true, exitCode(2, "usage: fleet resume <branch|slot:name>")
+		}
+		return true, cmdResume(arg(0))
+	case "sessions":
+		return true, cmdSessions()
+	case "leases":
+		return true, cmdLeases()
+	case "costs":
+		return true, cmdCosts()
+	case "decide":
+		if len(rest) < 3 {
+			return true, refuse(`usage: fleet decide <drop|park|ignore|rule> <subject> "<text>"`)
+		}
+		return true, cmdDecide(rest[0], rest[1], strings.Join(rest[2:], " "))
+	case "undecide":
+		return true, cmdUndecide(arg(0))
+	case "decisions":
+		return true, cmdDecisions()
+	case "tier":
+		base := "origin/main"
+		if i := index(rest, "--base"); i >= 0 && i+1 < len(rest) {
+			base = rest[i+1]
+		}
+		return true, cmdTier(base, contains(rest, "--json"))
+	case "ready":
+		return true, cmdReady(arg(0), arg(1), arg(2))
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// dispatchViews is the lookup plane: every answer derived from records, nothing written.
+func dispatchViews(verb string, plain []string, parg func(int) string, asJSON bool) (bool, error) {
 	switch verb {
 	case "board":
-		return cmdBoard(asJSON)
+		return true, cmdBoard(asJSON)
 	case "slots":
-		return cmdSlots(parg(0), asJSON)
+		return true, cmdSlots(parg(0), asJSON)
 	case "who":
-		return cmdWho(parg(0), asJSON)
+		return true, cmdWho(parg(0), asJSON)
 	case "unowned":
 		repo, err := optValue(plain, "--repo", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
-		return cmdUnowned(repo, asJSON)
+		return true, cmdUnowned(repo, asJSON)
 	case "receipts":
 		since, err := optValue(plain, "--since", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		var secs float64
 		if since != "" {
 			secs = fleet.ParseDuration(since)
 			if secs == 0 {
-				return refuse("fleet receipts: --since wants a duration like 2h or 45m, got %s", fleet.PyRepr(since))
+				return true, refuse("fleet receipts: --since wants a duration like 2h or 45m, got %s", fleet.PyRepr(since))
 			}
 		}
 		kind, err := optValue(plain, "--kind", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		pos := positional(plain, "--kind", "--since")
-		return cmdReceipts(first(pos), kind, secs, since != "", asJSON)
+		return true, cmdReceipts(first(pos), kind, secs, since != "", asJSON)
 	case "done":
 		kind, err := optValue(plain, "--kind", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		pos := positional(plain, "--kind")
-		return CmdDone(first(pos), kind, asJSON)
+		return true, CmdDone(first(pos), kind, asJSON)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// dispatchSeats is the seats: pooled worktrees and what is placed in them.
+func dispatchSeats(verb string, plain []string, parg func(int) string) (bool, error) {
+	switch verb {
 	case "pool":
 		tenant, err := optValue(plain, "--tenant", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		pos := positional(without(plain, "--rewarm"), "--tenant")
 		if len(pos) == 0 {
-			return refuse("usage: fleet pool <checkout> [<kind> <n>] [--rewarm] [--tenant <t>]")
+			return true, refuse("usage: fleet pool <checkout> [<kind> <n>] [--rewarm] [--tenant <t>]")
 		}
-		return cmdPool(pos[0], at(pos, 1), at(pos, 2), contains(plain, "--rewarm"), tenant)
+		return true, cmdPool(pos[0], at(pos, 1), at(pos, 2), contains(plain, "--rewarm"), tenant)
 	case "assign":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		pos := positional(plain, "--for")
 		if len(pos) < 2 {
-			return refuse(`usage: fleet assign <slot> <branch> ["<brief>"] [--for <role>]`)
+			return true, refuse(`usage: fleet assign <slot> <branch> ["<brief>"] [--for <role>]`)
 		}
-		return CmdAssign(pos[0], pos[1], strings.Join(pos[2:], " "), "", forRole)
+		return true, CmdAssign(pos[0], pos[1], strings.Join(pos[2:], " "), "", forRole)
 	case "unassign":
 		if parg(0) == "" {
-			return refuse("usage: fleet unassign <slot>")
+			return true, refuse("usage: fleet unassign <slot>")
 		}
-		return cmdUnassign(parg(0))
+		return true, cmdUnassign(parg(0))
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// dispatchWork is the ownership row: the one declared act and its views.
+func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
+	switch verb {
 	case "dispatch":
 		vals := map[string]string{}
 		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief"} {
 			v, err := optValue(plain, f, verb)
 			if err != nil {
-				return err
+				return true, err
 			}
 			vals[f] = v
 		}
 		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief")
-		return CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", contains(plain, "--take"))
+		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", contains(plain, "--take"))
 	case "reassign":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
-		return CmdReassign(first(positional(plain, "--for")), forRole)
+		return true, CmdReassign(first(positional(plain, "--for")), forRole)
 	case "undispatch":
 		rel, err := optValue(plain, "--as", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
-		return cmdUndispatch(first(positional(plain, "--as")), rel)
+		return true, cmdUndispatch(first(positional(plain, "--as")), rel)
 	case "work":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
-		return cmdWork(forRole, asJSON)
+		return true, cmdWork(forRole, asJSON)
 	case "sync":
 		repo, err := optValue(plain, "--repo", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
-		return CmdSync(repo)
+		return true, CmdSync(repo)
 	case "shadow-report":
 		since, err := optValue(plain, "--since", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		var from float64
 		if since != "" {
 			secs := fleet.ParseDuration(since)
 			if secs == 0 {
-				return refuse("fleet shadow-report: --since wants a duration like 24h, got %s", fleet.PyRepr(since))
+				return true, refuse("fleet shadow-report: --since wants a duration like 24h, got %s", fleet.PyRepr(since))
 			}
 			from = fleet.Now() - secs
 		}
-		return cmdShadowReport(from, asJSON)
+		return true, cmdShadowReport(from, asJSON)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// dispatchActs is what a session does by hand: receipts, resources, handoff, role binding.
+func dispatchActs(verb string, rest []string, arg func(int) string) (bool, error) {
+	switch verb {
 	case "receipt", "take", "drop":
 		sess, err := optValue(rest, "--session", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		card, err := optValue(rest, "--card", verb)
 		if err != nil {
-			return err
+			return true, err
 		}
 		takeover := contains(rest, "--takeover")
 		a := positional(without(rest, "--takeover"), "--session", "--card")
 		if verb == "receipt" {
-			return cmdReceipt(at(a, 0), at(a, 1), at(a, 2), at(a, 3), sess, card, card != "")
+			return true, cmdReceipt(at(a, 0), at(a, 1), at(a, 2), at(a, 3), sess, card, card != "")
 		}
 		if len(a) == 0 {
-			return refuse("usage: fleet %s <slot:name>", verb)
+			return true, refuse("usage: fleet %s <slot:name>", verb)
 		}
 		if verb == "take" {
-			return CmdTake(a[0], strings.Join(a[1:], " "), takeover, sess)
+			return true, CmdTake(a[0], strings.Join(a[1:], " "), takeover, sess)
 		}
-		return CmdDrop(a[0], sess)
+		return true, CmdDrop(a[0], sess)
+	case "revoke":
+		m := regexp.MustCompile(`(\S+)\s+--to\s+(\S+)\s*(.*)`).FindStringSubmatch(strings.Join(rest, " "))
+		if m == nil {
+			return true, refuse(`usage: fleet revoke <branch> --to <session8> "<why>"`)
+		}
+		reason := m[3]
+		if reason == "" {
+			reason = "revoked"
+		}
+		return true, cmdRevoke(m[1], m[2], reason)
 	case "handoff":
-		return cmdHandoff(arg(0), arg(1), arg(2))
+		return true, cmdHandoff(arg(0), arg(1), arg(2))
 	case "role":
 		u := "usage: fleet role <checkout> <role> [--force] [--tenant <t>]   e.g. fleet role ~/dev/mono-wt-1 <kind>:mono"
 		tenant := ""
 		if i := index(rest, "--tenant"); i >= 0 {
 			if i+1 >= len(rest) || strings.HasPrefix(rest[i+1], "-") {
-				return refuse("%s\n  --tenant needs a value", u)
+				return true, refuse("%s\n  --tenant needs a value", u)
 			}
 			tenant = rest[i+1]
 		}
 		a := positional(without(rest, "--force"), "--tenant")
 		if len(a) != 2 {
-			return refuse("%s", u)
+			return true, refuse("%s", u)
 		}
-		return cmdRole(a[0], a[1], contains(rest, "--force"), tenant, "")
+		return true, cmdRole(a[0], a[1], contains(rest, "--force"), tenant, "")
+	default:
+		return false, nil
 	}
-	return exitCode(2, usage)
+	return true, nil
 }
 
 // ---------- argument helpers ----------

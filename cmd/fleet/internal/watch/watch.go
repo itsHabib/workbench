@@ -74,86 +74,19 @@ func Tick(interval time.Duration) (string, error) {
 	prevAt := fleet.F(prev, "at")
 	slept := prev != nil && prevAt > 0 && now-prevAt > 3*interval.Seconds()
 	prevRows := map[string]fleet.Rec{}
-	if pb := readRows(filepath.Join(dir(), "board.json")); pb != nil {
-		for _, r := range pb {
-			prevRows[fleet.S(r, "path")] = r
-		}
+	for _, r := range readRows(filepath.Join(dir(), "board.json")) {
+		prevRows[fleet.S(r, "path")] = r
 	}
-	// The read side of the remote record: every tenth tick, when gh is here.
 	ticks := fleet.F(prev, "ticks")
-	if os.Getenv("FLEET_GITHUB") != "off" && int(ticks)%10 == 0 {
-		if _, err := exec.LookPath("gh"); err == nil {
-			var sink strings.Builder
-			prevOut := verbs.Out
-			verbs.Out = &sink
-			_ = verbs.CmdSync("")
-			verbs.Out = prevOut
-		}
-	}
+	maybeSync(ticks)
 	prevStates := map[string]string{}
 	for p, r := range prevRows {
 		prevStates[p] = fleet.S(r, "state")
 	}
 	rows := fold(prevAt, slept, prevStates)
-	var transitions []fleet.Rec
-	for _, r := range rows {
-		from := fleet.S(prevRows[fleet.S(r, "path")], "state")
-		to := fleet.S(r, "state")
-		if from == to {
-			continue
-		}
-		t := fleet.Rec{"at": now, "path": r["path"], "role": r["role"], "slot": r["slot"], "from": nilIfEmpty(from), "to": to,
-			"session": r["session"], "branch": r["branch"]}
-		transitions = append(transitions, t)
-	}
-	// The ownership rows, diffed by (change, relationship). A row that disappears
-	// (undispatched, or an undeclared holder that let go) is a transition to "gone".
-	prevWork := map[string]fleet.Rec{}
-	for _, r := range readRows(filepath.Join(dir(), "work.json")) {
-		prevWork[workKey(r)] = r
-	}
-	work := make([]fleet.Rec, 0)
-	seen := map[string]bool{}
-	for _, w := range verbs.WorkRows("") {
-		r := fleet.Rec(w)
-		k := workKey(r)
-		seen[k] = true
-		work = append(work, r)
-		prev := prevWork[k]
-		from, to := fleet.S(prev, "state"), fleet.S(r, "state")
-		// The sleep rule for rows too: a NEW attention classification after a gap may
-		// be the gap's silence, not an observation.
-		if slept && verbs.WorkAttention[to] && from != to {
-			r["unknown_since"] = prevAt
-			r["state"] = "unknown"
-			to = "unknown"
-		}
-		if from != to {
-			transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
-				"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]})
-			continue
-		}
-		// Responsibility can change with the state unchanged: who is accountable, who
-		// has hands, when it is due. Each is a transition the hub must see.
-		if prev == nil {
-			continue
-		}
-		for _, col := range []string{"for", "hands", "due"} {
-			a, b := colText(prev[col]), colText(r[col])
-			if a == b {
-				continue
-			}
-			transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
-				"what": col, "from": nilIfEmpty(a), "to": b, "session": r["hands"], "branch": r["change"]})
-		}
-	}
-	for k, r := range prevWork {
-		if seen[k] || fleet.S(r, "state") == "gone" {
-			continue
-		}
-		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
-			"from": nilIfEmpty(fleet.S(r, "state")), "to": "gone", "session": r["hands"], "branch": r["change"]})
-	}
+	transitions := seatTransitions(rows, prevRows, now)
+	work, wt := workTransitions(now, prevAt, slept)
+	transitions = append(transitions, wt...)
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return "", err
 	}
@@ -161,20 +94,11 @@ func Tick(interval time.Duration) (string, error) {
 		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), t)
 	}
 	md := render(rows, work, now, prev, slept, transitions)
-	if err := fleet.WriteJSON(filepath.Join(dir(), "board.json"), rowsAny(rows)); err != nil {
-		return "", err
-	}
-	if err := fleet.WriteJSON(filepath.Join(dir(), "work.json"), rowsAny(work)); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(filepath.Join(dir(), "board.md"), []byte(md), 0o644); err != nil {
-		return "", err
-	}
 	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1}
 	if slept {
 		hb["gap_from"] = prevAt
 	}
-	if err := fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), hb); err != nil {
+	if err := publish(rows, work, md, hb); err != nil {
 		return "", err
 	}
 	// Notification AFTER publication: a slow notifier must not hold the board or the
@@ -188,6 +112,109 @@ func Tick(interval time.Duration) (string, error) {
 		}
 	}
 	return md, nil
+}
+
+// maybeSync is the read side of the remote record: every tenth tick, when gh is here.
+func maybeSync(ticks float64) {
+	if os.Getenv("FLEET_GITHUB") == "off" || int(ticks)%10 != 0 {
+		return
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return
+	}
+	var sink strings.Builder
+	prevOut := verbs.Out
+	verbs.Out = &sink
+	_ = verbs.CmdSync("")
+	verbs.Out = prevOut
+}
+
+// seatTransitions is every seat whose state differs from the previous board.
+func seatTransitions(rows []fleet.Rec, prevRows map[string]fleet.Rec, now float64) []fleet.Rec {
+	var transitions []fleet.Rec
+	for _, r := range rows {
+		from := fleet.S(prevRows[fleet.S(r, "path")], "state")
+		to := fleet.S(r, "state")
+		if from == to {
+			continue
+		}
+		transitions = append(transitions, fleet.Rec{"at": now, "path": r["path"], "role": r["role"], "slot": r["slot"], "from": nilIfEmpty(from), "to": to,
+			"session": r["session"], "branch": r["branch"]})
+	}
+	return transitions
+}
+
+// workTransitions folds the ownership rows and diffs them by (change, relationship)
+// against the previous work.json: state changes, changes of accountable / hands /
+// due with the state unchanged, and rows that disappeared ("gone").
+func workTransitions(now, prevAt float64, slept bool) ([]fleet.Rec, []fleet.Rec) {
+	prevWork := map[string]fleet.Rec{}
+	for _, r := range readRows(filepath.Join(dir(), "work.json")) {
+		prevWork[workKey(r)] = r
+	}
+	work := make([]fleet.Rec, 0)
+	var transitions []fleet.Rec
+	seen := map[string]bool{}
+	for _, w := range verbs.WorkRows("") {
+		r := fleet.Rec(w)
+		k := workKey(r)
+		seen[k] = true
+		work = append(work, r)
+		transitions = append(transitions, rowTransitions(r, prevWork[k], now, prevAt, slept)...)
+	}
+	for k, r := range prevWork {
+		if seen[k] || fleet.S(r, "state") == "gone" {
+			continue
+		}
+		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+			"from": nilIfEmpty(fleet.S(r, "state")), "to": "gone", "session": r["hands"], "branch": r["change"]})
+	}
+	return work, transitions
+}
+
+// rowTransitions is what changed on one row since the previous tick. The sleep rule
+// applies here too: a NEW attention classification after a gap may be the gap's
+// silence, not an observation, and reads unknown.
+func rowTransitions(r, prev fleet.Rec, now, prevAt float64, slept bool) []fleet.Rec {
+	from, to := fleet.S(prev, "state"), fleet.S(r, "state")
+	if slept && verbs.WorkAttention[to] && from != to {
+		r["unknown_since"] = prevAt
+		r["state"] = "unknown"
+		to = "unknown"
+	}
+	if from != to {
+		return []fleet.Rec{{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+			"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]}}
+	}
+	if prev == nil {
+		return nil
+	}
+	// Responsibility can change with the state unchanged: who is accountable, who
+	// has hands, when it is due. Each is a transition the hub must see.
+	var out []fleet.Rec
+	for _, col := range []string{"for", "hands", "due"} {
+		a, b := colText(prev[col]), colText(r[col])
+		if a == b {
+			continue
+		}
+		out = append(out, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+			"what": col, "from": nilIfEmpty(a), "to": b, "session": r["hands"], "branch": r["change"]})
+	}
+	return out
+}
+
+// publish writes the board, the work rows, the rendered markdown and the heartbeat.
+func publish(rows, work []fleet.Rec, md string, hb fleet.Rec) error {
+	if err := fleet.WriteJSON(filepath.Join(dir(), "board.json"), rowsAny(rows)); err != nil {
+		return err
+	}
+	if err := fleet.WriteJSON(filepath.Join(dir(), "work.json"), rowsAny(work)); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir(), "board.md"), []byte(md), 0o644); err != nil {
+		return err
+	}
+	return fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), hb)
 }
 
 // colText is a column's value as the text a transition records.
@@ -333,18 +360,7 @@ func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, tra
 	if slept {
 		fmt.Fprintf(&b, "machine slept: %s of silence; rows whose only evidence is that silence read `unknown`\n", fleet.FmtAge(now-fleet.F(prev, "at")))
 	}
-	var need, fine, unknown []fleet.Rec
-	for _, r := range rows {
-		switch st := fleet.S(r, "state"); {
-		case attention[st]:
-			need = append(need, r)
-		case st == "unknown":
-			unknown = append(unknown, r)
-		default:
-			fine = append(fine, r)
-		}
-	}
-	sort.SliceStable(need, func(i, j int) bool { return fleet.S(need[i], "role") < fleet.S(need[j], "role") })
+	need, unknown, fine := triage(rows)
 	if len(need) > 0 {
 		fmt.Fprintf(&b, "\n## Needs a decision (%d)\n", len(need))
 		for _, r := range need {
@@ -352,15 +368,7 @@ func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, tra
 		}
 	}
 	// Work first by accountable role: the rows a hub must decide something about.
-	var needWork, fineWork []fleet.Rec
-	for _, w := range work {
-		if verbs.WorkAttention[fleet.S(w, "state")] {
-			needWork = append(needWork, w)
-			continue
-		}
-		fineWork = append(fineWork, w)
-	}
-	sort.SliceStable(needWork, func(i, j int) bool { return fleet.S(needWork[i], "for") < fleet.S(needWork[j], "for") })
+	needWork, fineWork := triageWork(work)
 	if len(needWork) > 0 {
 		fmt.Fprintf(&b, "\n## Work needing a decision (%d)\n", len(needWork))
 		for _, w := range needWork {
@@ -376,22 +384,66 @@ func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, tra
 	if len(transitions) > 0 {
 		fmt.Fprintf(&b, "\n## Changed this tick (%d)\n", len(transitions))
 		for _, t := range transitions {
-			from := fleet.S(t, "from")
-			if from == "" {
-				from = "—"
-			}
-			if c := fleet.S(t, "change"); c != "" {
-				if what := fleet.S(t, "what"); what != "" {
-					fmt.Fprintf(&b, "- %s %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), what, from, fleet.S(t, "to"))
-					continue
-				}
-				fmt.Fprintf(&b, "- %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), from, fleet.S(t, "to"))
-				continue
-			}
-			fmt.Fprintf(&b, "- %s %s: %s → %s\n", fleet.S(t, "role"), nameOf(t), from, fleet.S(t, "to"))
+			b.WriteString(transitionLine(t))
 		}
 	}
-	// Everything fine is one line, with what it hides and how old the oldest observation is.
+	b.WriteString(fineLine(rows, fine, now))
+	b.WriteString(fineWorkLine(fineWork))
+	return b.String()
+}
+
+// triage splits seat rows into needing a decision (by role), unknown, and fine.
+func triage(rows []fleet.Rec) (need, unknown, fine []fleet.Rec) {
+	for _, r := range rows {
+		switch st := fleet.S(r, "state"); {
+		case attention[st]:
+			need = append(need, r)
+		case st == "unknown":
+			unknown = append(unknown, r)
+		default:
+			fine = append(fine, r)
+		}
+	}
+	sort.SliceStable(need, func(i, j int) bool { return fleet.S(need[i], "role") < fleet.S(need[j], "role") })
+	return need, unknown, fine
+}
+
+// triageWork splits ownership rows into needing a decision (by accountable role) and fine.
+func triageWork(work []fleet.Rec) (need, fine []fleet.Rec) {
+	for _, w := range work {
+		if verbs.WorkAttention[fleet.S(w, "state")] {
+			need = append(need, w)
+			continue
+		}
+		fine = append(fine, w)
+	}
+	sort.SliceStable(need, func(i, j int) bool { return fleet.S(need[i], "for") < fleet.S(need[j], "for") })
+	return need, fine
+}
+
+func transitionLine(t fleet.Rec) string {
+	from := fleet.S(t, "from")
+	if from == "" {
+		from = "—"
+	}
+	if c := fleet.S(t, "change"); c != "" {
+		if what := fleet.S(t, "what"); what != "" {
+			return fmt.Sprintf("- %s %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), what, from, fleet.S(t, "to"))
+		}
+		return fmt.Sprintf("- %s %s: %s → %s\n", orDash(fleet.S(t, "for")), workName(t), from, fleet.S(t, "to"))
+	}
+	return fmt.Sprintf("- %s %s: %s → %s\n", fleet.S(t, "role"), nameOf(t), from, fleet.S(t, "to"))
+}
+
+// fineLine: everything fine is one line, with what it hides and how old the oldest
+// observation is.
+func fineLine(rows, fine []fleet.Rec, now float64) string {
+	if len(fine) == 0 {
+		if len(rows) == 0 {
+			return "\nno roled paths\n"
+		}
+		return ""
+	}
 	counts := map[string]int{}
 	oldest := now
 	for _, r := range fine {
@@ -406,25 +458,24 @@ func render(rows, work []fleet.Rec, now float64, prev fleet.Rec, slept bool, tra
 			parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
 		}
 	}
-	if len(fine) > 0 {
-		fmt.Fprintf(&b, "\n%d fine (%s); oldest observation %s ago\n", len(fine), strings.Join(parts, ", "), fleet.FmtAge(now-oldest))
-	} else if len(rows) == 0 {
-		b.WriteString("\nno roled paths\n")
+	return fmt.Sprintf("\n%d fine (%s); oldest observation %s ago\n", len(fine), strings.Join(parts, ", "), fleet.FmtAge(now-oldest))
+}
+
+func fineWorkLine(fineWork []fleet.Rec) string {
+	if len(fineWork) == 0 {
+		return ""
 	}
-	if len(fineWork) > 0 {
-		wc := map[string]int{}
-		for _, w := range fineWork {
-			wc[fleet.S(w, "state")]++
-		}
-		var wp []string
-		for _, k := range []string{"working", "idle", "dispatched", "done"} {
-			if wc[k] > 0 {
-				wp = append(wp, fmt.Sprintf("%d %s", wc[k], k))
-			}
-		}
-		fmt.Fprintf(&b, "%d work rows fine (%s)\n", len(fineWork), strings.Join(wp, ", "))
+	wc := map[string]int{}
+	for _, w := range fineWork {
+		wc[fleet.S(w, "state")]++
 	}
-	return b.String()
+	var wp []string
+	for _, k := range []string{"working", "idle", "dispatched", "done"} {
+		if wc[k] > 0 {
+			wp = append(wp, fmt.Sprintf("%d %s", wc[k], k))
+		}
+	}
+	return fmt.Sprintf("%d work rows fine (%s)\n", len(fineWork), strings.Join(wp, ", "))
 }
 
 func orDash(s string) string {

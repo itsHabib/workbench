@@ -44,54 +44,24 @@ func cmdReady(sha, action, observable string) error {
 // tree must be at <sha> and clean. `card` is an optional URL to the human-readable
 // evidence; the receipt is the fact a reader polls, the card is what a person opens.
 func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bool) error {
-	if (verdict != "pass" && verdict != "fail") || !shaRe.MatchString(sha) || !kindRe.MatchString(kind) {
-		return refuse(`usage: fleet receipt <sha> <kind> pass|fail "<observable>" [--card <url>]`)
-	}
-	if strings.TrimSpace(observable) == "" {
-		return refuse("fleet receipt: the observable is what would have read differently had the claim been false; it cannot be empty")
-	}
-	if hasCard && !urlRe.MatchString(card) {
-		return refuse("fleet receipt: --card must be a URL, got %s", fleet.PyRepr(card))
+	if err := receiptArgs(sha, kind, verdict, observable, card, hasCard); err != nil {
+		return err
 	}
 	sid, err := currentSession(session)
 	if err != nil {
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
-	lane := fleet.M(rec, "lane")
-	if lane == nil {
-		return refuse("fleet receipt: session %s has no lane (role %s, no manifest); a receipt needs a lane that produces %s", fleet.Short(sid), roleOr(rec, "none"), fleet.PyRepr(kind))
+	if err := receiptLane(rec, sid, kind); err != nil {
+		return err
 	}
-	if fleet.S(lane, "produces") != kind {
-		return refuse("fleet receipt: lane %s produces %s, not %s; only a lane whose manifest produces %s may record it", fleet.S(lane, "kind"), pyReprOrNone(lane["produces"]), fleet.PyRepr(kind), fleet.PyRepr(kind))
-	}
-	root := fleet.RoledRoot(fleet.S(rec, "cwd"))
-	here := canon(cwd())
-	croot := ""
-	if root != "" {
-		croot = canon(root)
-	}
-	if croot == "" || !(here == croot || strings.HasPrefix(here, strings.TrimRight(croot, "/")+"/")) {
-		where := root
-		if where == "" {
-			where = fleet.S(rec, "cwd")
-		}
-		return refuse("fleet receipt: this must run inside the session's roled worktree %s, not %s; the receipt's HEAD and cleanliness are read from the tree it names", where, here)
-	}
-	head, err := gitOut("rev-parse", "HEAD")
+	root, here, err := receiptTree(rec)
 	if err != nil {
 		return err
 	}
-	head = strings.TrimSpace(head)
-	if !strings.HasPrefix(head, sha) {
-		return refuse("fleet receipt: the packet names %s but this tree is at %s; a receipt names the revision that ran, nothing else", sha, cut(head, 12))
-	}
-	dirty, err := gitOut("status", "--porcelain")
+	head, err := receiptHead(sha)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(dirty) != "" {
-		return refuse("fleet receipt: the tree is not clean (%d path(s) per git status --porcelain); a dirty tree is not revision %s", len(strings.Split(strings.TrimSpace(dirty), "\n")), sha)
 	}
 	var cardV any
 	if hasCard {
@@ -113,6 +83,69 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 	}
 	say("receipt: %s %s @ %s by %s %s%s", kind, verdict, sha, roleOr(rec, "session"), fleet.Short(sid), tail)
 	return nil
+}
+
+// receiptArgs is the packet's shape: a verdict, a sha, a kind, a non-empty
+// observable, and a card that is a URL when given.
+func receiptArgs(sha, kind, verdict, observable, card string, hasCard bool) error {
+	if (verdict != "pass" && verdict != "fail") || !shaRe.MatchString(sha) || !kindRe.MatchString(kind) {
+		return refuse(`usage: fleet receipt <sha> <kind> pass|fail "<observable>" [--card <url>]`)
+	}
+	if strings.TrimSpace(observable) == "" {
+		return refuse("fleet receipt: the observable is what would have read differently had the claim been false; it cannot be empty")
+	}
+	if hasCard && !urlRe.MatchString(card) {
+		return refuse("fleet receipt: --card must be a URL, got %s", fleet.PyRepr(card))
+	}
+	return nil
+}
+
+// receiptLane: only a lane whose manifest produces this kind may record it.
+func receiptLane(rec fleet.Rec, sid, kind string) error {
+	lane := fleet.M(rec, "lane")
+	if lane == nil {
+		return refuse("fleet receipt: session %s has no lane (role %s, no manifest); a receipt needs a lane that produces %s", fleet.Short(sid), roleOr(rec, "none"), fleet.PyRepr(kind))
+	}
+	if fleet.S(lane, "produces") != kind {
+		return refuse("fleet receipt: lane %s produces %s, not %s; only a lane whose manifest produces %s may record it", fleet.S(lane, "kind"), pyReprOrNone(lane["produces"]), fleet.PyRepr(kind), fleet.PyRepr(kind))
+	}
+	return nil
+}
+
+// receiptTree: the receipt is recorded from inside the session's roled worktree,
+// because its HEAD and cleanliness are read from the tree it names.
+func receiptTree(rec fleet.Rec) (root, here string, err error) {
+	root = fleet.RoledRoot(fleet.S(rec, "cwd"))
+	here = canon(cwd())
+	if root != "" && fleet.Within(here, root) {
+		return root, here, nil
+	}
+	where := root
+	if where == "" {
+		where = fleet.S(rec, "cwd")
+	}
+	return "", "", refuse("fleet receipt: this must run inside the session's roled worktree %s, not %s; the receipt's HEAD and cleanliness are read from the tree it names", where, here)
+}
+
+// receiptHead is the tree's HEAD, which must be the revision the packet names, from a
+// clean tree.
+func receiptHead(sha string) (string, error) {
+	head, err := gitOut("rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	head = strings.TrimSpace(head)
+	if !strings.HasPrefix(head, sha) {
+		return "", refuse("fleet receipt: the packet names %s but this tree is at %s; a receipt names the revision that ran, nothing else", sha, cut(head, 12))
+	}
+	dirty, err := gitOut("status", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(dirty) != "" {
+		return "", refuse("fleet receipt: the tree is not clean (%d path(s) per git status --porcelain); a dirty tree is not revision %s", len(strings.Split(strings.TrimSpace(dirty), "\n")), sha)
+	}
+	return head, nil
 }
 
 func pyReprOrNone(v any) string {
@@ -326,42 +359,45 @@ func resolveChange(arg string) (string, string, string, error) {
 	if !isChangeNumber(arg) && shaRe.MatchString(a) {
 		return a, "", "sha as given", nil
 	}
-	var branch, how string
 	if isChangeNumber(arg) {
-		n, _ := strconv.Atoi(a)
-		hits := pullRecords(n, true, rid)
-		if len(hits) > 1 {
-			var names []string
-			for _, h := range hits {
-				g := fleet.S(h, "github")
-				if g == "" {
-					g = fleet.S(h, "repo")
-				}
-				names = append(names, g)
+		return resolveChangeNumber(a, rid)
+	}
+	if rid == "" {
+		return "", "", "", refuse("fleet: %s is not inside a git repo, so `%s` names no branch here", cwd(), a)
+	}
+	return resolveBranchHead(rid, a, fmt.Sprintf("branch %s in the repo at this cwd", a))
+}
+
+// resolveChangeNumber is #n as a revision: the local cache first, else gh, and a
+// number cached for several repos is ambiguous rather than guessed.
+func resolveChangeNumber(a, rid string) (string, string, string, error) {
+	n, _ := strconv.Atoi(a)
+	hits := pullRecords(n, true, rid)
+	if len(hits) > 1 {
+		var names []string
+		for _, h := range hits {
+			g := fleet.S(h, "github")
+			if g == "" {
+				g = fleet.S(h, "repo")
 			}
-			return "", "", "", refuse("fleet: change #%s is cached for %d repos (%s); run this inside the repo you mean", a, len(hits), strings.Join(names, ", "))
+			names = append(names, g)
 		}
-		if len(hits) == 1 {
-			h := hits[0]
-			branch, rid = fleet.S(h, "branch"), fleet.S(h, "repo")
-			how = fmt.Sprintf("#%s -> %s (cached from a gh pr call %s ago)", a, branch, ago(fleet.F(h, "at")))
-		} else {
-			data, why := ghJSON("gh", "pr", "view", a, "--json", "headRefName,headRefOid,url")
-			dm, _ := data.(map[string]any)
-			if dm == nil {
-				return "", "", "", refuse("fleet: change #%s is not in the local cache and gh could not resolve it (%s); run `gh pr view %s` in its repo once and retry", a, why, a)
-			}
-			branch = fleet.S(dm, "headRefName")
-			how = fmt.Sprintf("#%s -> %s (via gh)", a, branch)
-			if oid := fleet.S(dm, "headRefOid"); oid != "" && rid == "" {
-				return oid, branch, how + ", head via gh", nil
-			}
-		}
-	} else {
-		branch, how = a, fmt.Sprintf("branch %s in the repo at this cwd", a)
-		if rid == "" {
-			return "", "", "", refuse("fleet: %s is not inside a git repo, so `%s` names no branch here", cwd(), a)
-		}
+		return "", "", "", refuse("fleet: change #%s is cached for %d repos (%s); run this inside the repo you mean", a, len(hits), strings.Join(names, ", "))
+	}
+	if len(hits) == 1 {
+		h := hits[0]
+		branch := fleet.S(h, "branch")
+		return resolveBranchHead(fleet.S(h, "repo"), branch, fmt.Sprintf("#%s -> %s (cached from a gh pr call %s ago)", a, branch, ago(fleet.F(h, "at"))))
+	}
+	data, why := ghJSON("gh", "pr", "view", a, "--json", "headRefName,headRefOid,url")
+	dm, _ := data.(map[string]any)
+	if dm == nil {
+		return "", "", "", refuse("fleet: change #%s is not in the local cache and gh could not resolve it (%s); run `gh pr view %s` in its repo once and retry", a, why, a)
+	}
+	branch := fleet.S(dm, "headRefName")
+	how := fmt.Sprintf("#%s -> %s (via gh)", a, branch)
+	if oid := fleet.S(dm, "headRefOid"); oid != "" && rid == "" {
+		return oid, branch, how + ", head via gh", nil
 	}
 	return resolveBranchHead(rid, branch, how)
 }
@@ -475,40 +511,9 @@ func CmdDone(arg, kind string, asJSON bool) error {
 		for k, r := range v.kinds {
 			kinds[k] = r
 		}
-		out := map[string]any{"sha": sha, "kinds": kinds, "wanted": v.wanted, "missing": orEmpty(v.missing), "failed": orEmpty(v.failed), "ok": v.ok, "resolution": how}
-		say("%s", jsonIndent(out))
+		say("%s", jsonIndent(map[string]any{"sha": sha, "kinds": kinds, "wanted": v.wanted, "missing": orEmpty(v.missing), "failed": orEmpty(v.failed), "ok": v.ok, "resolution": how}))
 	} else {
-		head := cut(sha, 10)
-		if branch != "" {
-			head += " (" + branch + ")"
-		}
-		if len(v.kinds) == 0 {
-			say("NOT DONE  %s: no receipt of any kind  [%s]", head, how)
-		}
-		var ks []string
-		for k := range v.kinds {
-			ks = append(ks, k)
-		}
-		sort.Strings(ks)
-		for _, k := range ks {
-			r := v.kinds[k]
-			label := "FAILED  "
-			if fleet.S(r, "verdict") == "pass" {
-				label = "DONE    "
-			}
-			s := fleet.S(r, "session")
-			if s == "" {
-				s = "?"
-			}
-			line := fmt.Sprintf("%s  %s  %s %s %s ago by %s %s — %s", label, head, k, fleet.S(r, "verdict"), ago(fleet.F(r, "at")), roleOr(r, "session"), fleet.Short(s), fleet.S(r, "observable"))
-			if c := fleet.S(r, "card"); c != "" {
-				line += "  [card " + c + "]"
-			}
-			say("%s", line)
-		}
-		if len(v.missing) > 0 && len(v.kinds) > 0 {
-			say("NOT DONE  %s: no receipt of kind %s", head, strings.Join(v.missing, ", "))
-		}
+		printDone(v, sha, branch, how)
 	}
 	switch {
 	case v.ok:
@@ -517,6 +522,41 @@ func CmdDone(arg, kind string, asJSON bool) error {
 		return exitCode(3, "")
 	default:
 		return exitCode(1, "")
+	}
+}
+
+// printDone is the verdict as text: one line per receipt kind, and what is missing.
+func printDone(v doneResult, sha, branch, how string) {
+	head := cut(sha, 10)
+	if branch != "" {
+		head += " (" + branch + ")"
+	}
+	if len(v.kinds) == 0 {
+		say("NOT DONE  %s: no receipt of any kind  [%s]", head, how)
+	}
+	var ks []string
+	for k := range v.kinds {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	for _, k := range ks {
+		r := v.kinds[k]
+		label := "FAILED  "
+		if fleet.S(r, "verdict") == "pass" {
+			label = "DONE    "
+		}
+		s := fleet.S(r, "session")
+		if s == "" {
+			s = "?"
+		}
+		line := fmt.Sprintf("%s  %s  %s %s %s ago by %s %s — %s", label, head, k, fleet.S(r, "verdict"), ago(fleet.F(r, "at")), roleOr(r, "session"), fleet.Short(s), fleet.S(r, "observable"))
+		if c := fleet.S(r, "card"); c != "" {
+			line += "  [card " + c + "]"
+		}
+		say("%s", line)
+	}
+	if len(v.missing) > 0 && len(v.kinds) > 0 {
+		say("NOT DONE  %s: no receipt of kind %s", head, strings.Join(v.missing, ", "))
 	}
 }
 

@@ -236,72 +236,11 @@ func WorkRows(forRole string) []WorkRow {
 	var rows []WorkRow
 	for _, d := range dispatchRows() {
 		rid, branch, rel := fleet.S(d, "repo"), fleet.S(d, "change"), fleet.S(d, "relationship")
-		key := "repo:" + rid + ":" + branch
-		declared[key] = true
+		declared["repo:"+rid+":"+branch] = true
 		declared[rid+"|"+branch+"|"+rel] = true
-		row := WorkRow{"change": branch, "repo": rid, "relationship": rel, "for": d["for"], "by": d["by"], "at": d["at"],
-			"due": d["due"], "slot": d["slot"], "brief": d["brief"], "key": key, "hands": nil, "state": "dispatched", "head": nil, "done_at": nil}
-		state := "dispatched"
-		if cur := fleet.Lease(key); cur != nil && !fleet.IsMalformed(cur) && !fleet.B(cur, "occupancy") {
-			sid := fleet.S(cur, "session")
-			row["hands"] = sid
-			srec := fleet.SessionRecord(sid)
-			switch {
-			case !fleet.SessionAlive(srec):
-				state = "dead"
-			case fleet.B(srec, "turn_open"):
-				state = "working"
-			default:
-				state = "idle"
-			}
-		}
-		if state == "dispatched" {
-			// No hands now. A session that left with the branch is not "never started".
-			for _, s := range sessions {
-				if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) {
-					state = "abandoned"
-					row["left"] = s["session"]
-					break
-				}
-			}
-		}
-		if head := branchHead(rid, branch); head != "" {
-			row["head"] = head
-			for _, r := range receiptRows(head, rel, 0, false) {
-				if fleet.S(r, "malformed") != "" {
-					continue
-				}
-				// Rows are newest first: the latest receipt of the kind decides.
-				if fleet.S(r, "verdict") == "pass" {
-					state = "done"
-					row["done_at"] = r["at"]
-				} else if state != "dead" {
-					state = "failed"
-					row["failed_at"] = r["at"]
-				}
-				break
-			}
-		}
-		if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle") {
-			state = "late"
-		}
-		row["state"] = state
-		rows = append(rows, row)
+		rows = append(rows, declaredRow(d, sessions, now))
 	}
-	for _, l := range leaseRows() {
-		key := fleet.S(l, "key")
-		if fleet.B(l, "occupancy") || fleet.IsResource(key) || declared[key] {
-			continue
-		}
-		sid := fleet.S(l, "session")
-		state := "undeclared"
-		if !fleet.SessionAlive(fleet.SessionRecord(sid)) {
-			state = "dead" // a dead holder nobody declared is still a dead holder
-		}
-		parts := fleet.KeyParts(key)
-		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
-			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil})
-	}
+	rows = append(rows, undeclaredRows(declared)...)
 	rows = append(rows, remoteRows(declared, now)...)
 	if forRole != "" {
 		var mine []WorkRow
@@ -320,6 +259,98 @@ func WorkRows(forRole string) []WorkRow {
 		}
 		return fleet.S(a, "change") < fleet.S(b, "change")
 	})
+	return rows
+}
+
+// declaredRow is one dispatched row with its observed state: hands from the branch
+// lease, done or failed from the latest receipt of its kind, late from its due.
+func declaredRow(d fleet.Rec, sessions []fleet.Rec, now float64) WorkRow {
+	rid, branch, rel := fleet.S(d, "repo"), fleet.S(d, "change"), fleet.S(d, "relationship")
+	key := "repo:" + rid + ":" + branch
+	row := WorkRow{"change": branch, "repo": rid, "relationship": rel, "for": d["for"], "by": d["by"], "at": d["at"],
+		"due": d["due"], "slot": d["slot"], "brief": d["brief"], "key": key, "hands": nil, "state": "dispatched", "head": nil, "done_at": nil}
+	state := handsState(row, key)
+	if state == "dispatched" {
+		// No hands now. A session that left with the branch is not "never started".
+		for _, s := range sessions {
+			if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) {
+				state = "abandoned"
+				row["left"] = s["session"]
+				break
+			}
+		}
+	}
+	state = evidenceState(row, rid, branch, rel, state)
+	if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle") {
+		state = "late"
+	}
+	row["state"] = state
+	return row
+}
+
+// handsState is who holds the branch and whether they are alive and mid-turn.
+func handsState(row WorkRow, key string) string {
+	cur := fleet.Lease(key)
+	if cur == nil || fleet.IsMalformed(cur) || fleet.B(cur, "occupancy") {
+		return "dispatched"
+	}
+	sid := fleet.S(cur, "session")
+	row["hands"] = sid
+	srec := fleet.SessionRecord(sid)
+	switch {
+	case !fleet.SessionAlive(srec):
+		return "dead"
+	case fleet.B(srec, "turn_open"):
+		return "working"
+	default:
+		return "idle"
+	}
+}
+
+// evidenceState applies the latest receipt of the relationship's kind at the head:
+// pass is done, fail is failed (unless the holder is dead, which comes first).
+func evidenceState(row WorkRow, rid, branch, rel, state string) string {
+	head := branchHead(rid, branch)
+	if head == "" {
+		return state
+	}
+	row["head"] = head
+	for _, r := range receiptRows(head, rel, 0, false) {
+		if fleet.S(r, "malformed") != "" {
+			continue
+		}
+		// Rows are newest first: the latest receipt of the kind decides.
+		if fleet.S(r, "verdict") == "pass" {
+			row["done_at"] = r["at"]
+			return "done"
+		}
+		if state != "dead" {
+			row["failed_at"] = r["at"]
+			return "failed"
+		}
+		return state
+	}
+	return state
+}
+
+// undeclaredRows is every branch a session holds that no row declares: undeclared
+// while the holder lives, dead once it does not.
+func undeclaredRows(declared map[string]bool) []WorkRow {
+	var rows []WorkRow
+	for _, l := range leaseRows() {
+		key := fleet.S(l, "key")
+		if fleet.B(l, "occupancy") || fleet.IsResource(key) || declared[key] {
+			continue
+		}
+		sid := fleet.S(l, "session")
+		state := "undeclared"
+		if !fleet.SessionAlive(fleet.SessionRecord(sid)) {
+			state = "dead" // a dead holder nobody declared is still a dead holder
+		}
+		parts := fleet.KeyParts(key)
+		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
+			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil})
+	}
 	return rows
 }
 

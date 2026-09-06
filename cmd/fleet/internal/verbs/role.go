@@ -398,6 +398,59 @@ func cmdRole(checkout, role string, force bool, tenant, slot string) error {
 	return out
 }
 
+// writeMapLine replaces or appends the checkout's roles.map line and publishes the
+// map whole, by temp-then-rename. Never CRLF: org's boot hook parses this with
+// `read -r`, and a trailing \r rides along on the role.
+func writeMapLine(lines []string, same []fleet.MapRow, mapfile, checkout, tenant, role, slot string) error {
+	line := fmt.Sprintf("%s %s %s", checkout, tenant, role)
+	if slot != "" {
+		line += " " + slot
+	}
+	if len(same) > 0 {
+		replaced := lines[same[0].Index]
+		lines[same[0].Index] = line
+		if strings.Fields(replaced)[2] != role {
+			say("fleet role: replaced `%s`", replaced)
+		}
+	} else {
+		lines = append(lines, line)
+	}
+	tmp := fmt.Sprintf("%s.%d.tmp", mapfile, os.Getpid())
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, mapfile)
+}
+
+// writeDenies merges the manifest's denies into the checkout's Claude settings and
+// writes them; returns the merged deny list. indent=2: a file a human maintains by
+// hand; do not collapse it.
+func writeDenies(existing, manifest map[string]any, settingsTarget string) ([]string, error) {
+	perms, _ := existing["permissions"].(map[string]any)
+	if perms == nil {
+		perms = map[string]any{}
+		existing["permissions"] = perms
+	}
+	denySet := map[string]bool{}
+	for _, d := range fleet.Strs(perms, "deny") {
+		denySet[d] = true
+	}
+	for _, d := range fleet.Strs(manifest, "denies") {
+		denySet[d] = true
+	}
+	deny := sortedKeys(denySet)
+	denyAny := make([]any, len(deny))
+	for i, d := range deny {
+		denyAny[i] = d
+	}
+	perms["deny"] = denyAny
+	sb, _ := json.MarshalIndent(existing, "", "  ")
+	if err := os.WriteFile(settingsTarget, append(sb, '\n'), 0o644); err != nil {
+		return nil, err
+	}
+	return deny, nil
+}
+
 func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string, manifest map[string]any, card, cfgTarget, cfgText, hooksTarget string, hooksData map[string]any, rulesTarget, settingsTarget string, existing map[string]any, mapfile string) error {
 	lines, rows := fleet.MapRows(mapfile)
 	var same []fleet.MapRow
@@ -422,26 +475,7 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	if slot == "" && len(same) > 0 {
 		slot = same[0].Slot
 	}
-	line := fmt.Sprintf("%s %s %s", checkout, tenant, role)
-	if slot != "" {
-		line += " " + slot
-	}
-	if len(same) > 0 {
-		replaced := lines[same[0].Index]
-		lines[same[0].Index] = line
-		if strings.Fields(replaced)[2] != role {
-			say("fleet role: replaced `%s`", replaced)
-		}
-	} else {
-		lines = append(lines, line)
-	}
-	// Never CRLF: org's boot hook parses this with `read -r`, and a trailing \r rides
-	// along on the role.
-	tmp := fmt.Sprintf("%s.%d.tmp", mapfile, os.Getpid())
-	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, mapfile); err != nil {
+	if err := writeMapLine(lines, same, mapfile, checkout, tenant, role, slot); err != nil {
 		return err
 	}
 	local := fmt.Sprintf("# Session role: %s\n\nThis checkout is one lane of the fleet. The role card below is the whole\nof what is specific to it; everything else is enforced by ~/.fleet hooks.\n\n@%s\n", role, card)
@@ -451,27 +485,8 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	if err := os.MkdirAll(filepath.Join(checkout, ".claude"), 0o755); err != nil {
 		return err
 	}
-	perms, _ := existing["permissions"].(map[string]any)
-	if perms == nil {
-		perms = map[string]any{}
-		existing["permissions"] = perms
-	}
-	denySet := map[string]bool{}
-	for _, d := range fleet.Strs(perms, "deny") {
-		denySet[d] = true
-	}
-	for _, d := range fleet.Strs(manifest, "denies") {
-		denySet[d] = true
-	}
-	deny := sortedKeys(denySet)
-	denyAny := make([]any, len(deny))
-	for i, d := range deny {
-		denyAny[i] = d
-	}
-	perms["deny"] = denyAny
-	// indent=2: a file a human maintains by hand; do not collapse it.
-	sb, _ := json.MarshalIndent(existing, "", "  ")
-	if err := os.WriteFile(settingsTarget, append(sb, '\n'), 0o644); err != nil {
+	deny, err := writeDenies(existing, manifest, settingsTarget)
+	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(rulesTarget), 0o755); err != nil {
