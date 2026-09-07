@@ -102,7 +102,11 @@ func leaseSnapshot(events []fleet.Event) map[string]fleet.Rec {
 
 func rollbackLeases(before map[string]fleet.Rec, sid string) {
 	for key, old := range before {
-		if _, err := fleet.RestoreLease(key, sid, old); err != nil {
+		restored, err := fleet.RestoreLease(key, sid, old)
+		if restored && err == nil {
+			fleet.ForgetTakeover(key)
+		}
+		if err != nil {
 			_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "rollback " + key + ": " + err.Error(), "session": sid})
 		}
 	}

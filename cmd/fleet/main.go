@@ -19,6 +19,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,7 +97,7 @@ func runWatch(args []string) {
 }
 
 // runShadow is the hook beside the installed one: the same verdict from the same
-// store, nothing written but one line of shadow.jsonl, exit 0 whatever the verdict.
+// store, nothing written but one line of events.jsonl, exit 0 whatever the verdict.
 // The harness never sees it. `fleet shadow-report` reads the day.
 func runShadow(which string, ev map[string]any) {
 	fleet.ReadOnly = true
@@ -110,18 +111,7 @@ func runShadow(which string, ev map[string]any) {
 	default:
 		v = fleet.Run(ev)
 	}
-	rec := map[string]any{"at": fleet.Now(), "harness": which, "event": ev["hook_event_name"], "session": ev["session_id"],
-		"tool": ev["tool_name"], "tool_use_id": ev["tool_use_id"], "code": 0.0, "reason": nil, "ms": float64(time.Since(t0).Microseconds()) / 1000}
-	if v != nil {
-		rec["code"] = float64(v.Code)
-		if v.Err != "" {
-			rec["reason"] = cut(v.Err, 300)
-		}
-		if v.Out != "" {
-			rec["out"] = cut(v.Out, 200)
-		}
-	}
-	_ = fleet.ShadowAppend(fleet.Path("shadow.jsonl"), rec)
+	logVerdict(which, ev, v, t0, true)
 }
 
 func cut(s string, n int) string {
@@ -155,17 +145,43 @@ func runHook(args []string) {
 		runShadow(which, ev)
 		return
 	}
+	t0 := time.Now()
 	switch which {
 	case "claude":
 		v := fleet.Run(ev)
+		logVerdict(which, ev, v, t0, false)
 		reviveWatcher(ev)
 		fleet.Exit(v)
 	case "codex":
 		v := codex.Run(ev)
+		logVerdict(which, ev, v, t0, false)
 		reviveWatcher(ev)
 		fleet.Exit(v)
 	default:
 		fmt.Fprintf(os.Stderr, "fleet hook: unknown harness %q (claude|codex)\n", which)
 		os.Exit(2)
 	}
+}
+
+// logVerdict observes the completed evaluation. Logging cannot change its outcome.
+func logVerdict(which string, ev fleet.Rec, v *fleet.Verdict, start time.Time, shadow bool) {
+	// The verdict is already decided; this runs before Exit. A panic here would leave
+	// the process with Go's own exit status 2 — which on PreToolUse IS the deny code —
+	// so observing an evaluation could deny the call it observed. Telemetry is not
+	// authority: swallow anything that escapes, exactly as reviveWatcher does.
+	defer func() { _ = recover() }()
+	rec := fleet.Rec{"at": fleet.Now(), "harness": which, "event": ev["hook_event_name"], "session": ev["session_id"],
+		"tool": ev["tool_name"], "tool_use_id": ev["tool_use_id"], "cwd": ev["cwd"], "code": 0, "reason": nil,
+		"ms": float64(time.Since(start).Microseconds()) / 1000, "shadow": shadow, "prompt_truncated": fleet.PromptTruncated}
+	if inp := ev["tool_input"]; inp != nil {
+		sum := sha256.Sum256(fleet.DumpJSON(fleet.Rec{"tool": ev["tool_name"], "input": inp, "cwd": ev["cwd"]}))
+		rec["fingerprint"] = fmt.Sprintf("%x", sum)
+	}
+	if v != nil {
+		rec["code"] = v.Code
+		rec["reason"] = cut(v.Err, 300)
+		rec["out"] = cut(v.Out, 200)
+		rec["takeovers"] = fleet.HookTakeovers
+	}
+	_ = fleet.ShadowAppend(fleet.Path("events.jsonl"), rec)
 }

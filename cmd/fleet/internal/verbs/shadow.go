@@ -11,6 +11,7 @@ package verbs
 // from a tool that errored; the installed hook's own refusals say so on stderr.
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"sort"
@@ -20,17 +21,34 @@ import (
 )
 
 func shadowRows(since float64) []fleet.Rec {
-	b, err := os.ReadFile(fleet.Path("shadow.jsonl"))
+	var rows []fleet.Rec
+	for _, name := range []string{"shadow.jsonl", "events.jsonl"} {
+		rows = append(rows, scanShadow(name, since)...)
+	}
+	return rows
+}
+
+func scanShadow(name string, since float64) []fleet.Rec {
+	f, err := os.Open(fleet.Path(name))
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
+	scan := bufio.NewScanner(f)
+	scan.Buffer(make([]byte, 4096), 4*1024*1024)
 	var rows []fleet.Rec
-	for _, l := range strings.Split(string(b), "\n") {
-		r := fleet.ReadJSONBytes([]byte(l))
+	for scan.Scan() {
+		r := fleet.ReadJSONBytes(scan.Bytes())
 		if r == nil || (since > 0 && fleet.F(r, "at") < since) {
 			continue
 		}
+		if name == "events.jsonl" && !fleet.B(r, "shadow") {
+			continue
+		}
 		rows = append(rows, r)
+	}
+	if err := scan.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "fleet shadow-report: %s: %v\n", name, err)
 	}
 	return rows
 }

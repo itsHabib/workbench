@@ -306,7 +306,11 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 		if reason = acquireGuards(key, sid, role, cwd); reason != "" {
 			return nil
 		}
-		return WriteLease(key, LeaseRecord(key, sid, role, cwd, "took over from dead session "+Short(S(cur, "session"))))
+		if err := WriteLease(key, LeaseRecord(key, sid, role, cwd, "took over from dead session "+Short(S(cur, "session")))); err != nil {
+			return err
+		}
+		HookTakeovers = append(HookTakeovers, Rec{"key": key, "from": S(cur, "session"), "to": sid})
+		return nil
 	})
 	if err == ErrKeyBusy {
 		return fmt.Sprintf("another fleet process has held the lock on %s for over a second, so nothing was written. Next action: `fleet leases` to see who holds it and retry; if it persists, `fleet sessions` for a hung session.", KeyLabel(key))

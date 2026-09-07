@@ -88,7 +88,7 @@ if [ "$mode" = "--shadow" ] || [ "$mode" = "dry" ]; then
   shadow_add "$codex_hooks" codex
 fi
 if [ "$mode" = "--shadow" ]; then
-  say "shadow installed. Nothing in the store changes; $FLEET_HOME/shadow.jsonl fills. Tomorrow: '$bin shadow-report --since 24h'. Undo: bash $here/install.sh --rollback"
+  say "shadow installed. Nothing in the store changes; $FLEET_HOME/events.jsonl fills. Tomorrow: '$bin shadow-report --since 24h'. Undo: bash $here/install.sh --rollback"
   exit 0
 fi
 
@@ -114,12 +114,22 @@ rewrite() {
   if [ "$mode" = "--apply" ]; then
     cp "$f" "$f.bak-$stamp"
     python3 - "$f" "$bin" <<'PY'
-import sys, io, re
+import sys, io, re, json, shlex
 f, bin = sys.argv[1:3]
 s = io.open(f, encoding="utf-8").read()
 s = re.sub(r'"[^"]*/hook\.py"', '"%s hook claude"' % bin, s)
 s = re.sub(r'"[^"]*/codex-adapter\.py"', '"%s hook codex"' % bin, s)
-io.open(f, "w", encoding="utf-8").write(s)
+d = json.loads(s)
+def is_shadow(h):
+    try:
+        args = shlex.split(h.get("command", ""))
+    except ValueError:
+        return False
+    return args in ([bin, "hook", "claude", "--shadow"], [bin, "hook", "codex", "--shadow"])
+for groups in (d.get("hooks") or {}).values():
+    for group in groups:
+        group["hooks"] = [h for h in group.get("hooks", []) if not is_shadow(h)]
+io.open(f, "w", encoding="utf-8").write(json.dumps(d, indent=2) + "\n")
 PY
   fi
 }
