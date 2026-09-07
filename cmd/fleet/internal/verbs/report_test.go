@@ -110,6 +110,52 @@ func TestObservationSnapshotDoesNotMigrateOrInitialize(t *testing.T) {
 	}
 }
 
+func TestObservationSnapshotReportsCompletedMigrationCollision(t *testing.T) {
+	oldState, oldOrg, oldOut := fleet.State, fleet.OrgState, Out
+	root := t.TempDir()
+	fleet.State, fleet.OrgState = filepath.Join(root, "fleet"), filepath.Join(root, "org")
+	var output bytes.Buffer
+	Out = &output
+	t.Cleanup(func() { fleet.State, fleet.OrgState, Out = oldState, oldOrg, oldOut })
+	key := "repo:example:main"
+	legacy := fleet.Path("leases", "legacy.json")
+	want := []byte(`{"repo":"example","branch":"main","session":"old-holder"}`)
+	fleet.WriteJSON(fleet.KeyFile("leases", key), fleet.Rec{"key": key, "session": "new-holder"})
+	if err := os.WriteFile(legacy, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fleet.MigrateLegacyKeys()
+	marker := fleet.Path("migrated-keys.v1")
+	before, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Make the marker unequivocally newer than the directory: only the retained
+	// collision, not timestamp movement, can explain pending reconciliation.
+	later := time.Now().Add(time.Second)
+	if err := os.Chtimes(marker, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := Dispatch([]string{"report", "--snapshot"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet map[string]any
+	if err := json.Unmarshal(output.Bytes(), &packet); err != nil {
+		t.Fatal(err)
+	}
+	if packet["migration_pending"] != true {
+		t.Fatalf("completed migration concealed collision: %v", packet)
+	}
+	got, err := os.ReadFile(legacy)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("snapshot modified collision: %s %v", got, err)
+	}
+	after, err := os.ReadFile(marker)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("snapshot changed migration marker: %v", err)
+	}
+}
+
 func TestReportBypassesMigrationAndRejectsInvalidWindow(t *testing.T) {
 	oldState, oldOut := fleet.State, Out
 	fleet.State = filepath.Join(t.TempDir(), "absent")
