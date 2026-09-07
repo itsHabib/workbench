@@ -36,6 +36,7 @@ func reportSnapshot() error {
 	defer func() { fleet.ReadOnly = before }()
 	pending := fleet.MigrationPending()
 	work, board, slots := WorkRows(""), BoardRows(), SlotRows("")
+	// Check both sides of the read window so directory movement cannot be hidden.
 	say("%s", jsonIndent(map[string]any{
 		"schema": "fleet-observation-v1", "at": fleet.Now(),
 		"org_state": fleet.OrgState, "fleet_state": fleet.State,

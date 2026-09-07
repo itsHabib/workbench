@@ -109,9 +109,10 @@ func readAny(p string) any {
 	return v
 }
 
-// ReadOnly is shadow mode: every verdict is computed from the live store and nothing
-// is written to it. The one exception is the shadow log itself, written by the
-// caller through ShadowAppend. Set once at process start, never toggled.
+// ReadOnly suppresses store writes for shadow hooks and observation snapshots.
+// Shadow hooks set it at startup. A serialized CLI verb may save and restore it;
+// never toggle it concurrently with other Fleet activity in the same process.
+// ShadowAppend is the exception: a caller can still write the shadow log explicitly.
 var ReadOnly bool
 
 // WriteJSON writes obj to p through a per-process temp and a rename, so a reader
