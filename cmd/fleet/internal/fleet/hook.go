@@ -23,6 +23,8 @@ func context(ev Event, text string) *Verdict {
 }
 
 // PromptTruncated counts capped board lines during this hook process.
+// Process start resets telemetry; a caller reusing the evaluator must reset both
+// accumulators before each outer event, not between mapped paths in one event.
 var PromptTruncated int
 
 // HookTakeovers records successful branch replacements during this evaluation.

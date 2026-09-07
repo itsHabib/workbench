@@ -31,22 +31,31 @@ func readLog(root, name string, now float64) source {
 	var out source
 	scan := bufio.NewScanner(f)
 	scan.Buffer(make([]byte, 4096), 4*1024*1024)
-	bad := 0
+	bad, future := 0, 0
 	for scan.Scan() {
 		r := fleet.ReadJSONBytes(scan.Bytes())
 		if r == nil || fleet.F(r, "at") <= 0 {
 			bad++
 			continue
 		}
-		if fleet.F(r, "at") <= now {
-			out.rows = append(out.rows, r)
+		if fleet.F(r, "at") > now {
+			future++
+			continue
 		}
+		out.rows = append(out.rows, r)
 	}
+	var problems []string
 	if bad > 0 {
-		out.problem = fmt.Sprintf("%s: %d malformed records skipped", name, bad)
+		problems = append(problems, fmt.Sprintf("%d malformed records skipped", bad))
+	}
+	if future > 0 {
+		problems = append(problems, fmt.Sprintf("%d records after report cutoff excluded", future))
 	}
 	if err := scan.Err(); err != nil {
-		out.problem += " " + name + ": " + err.Error()
+		problems = append(problems, "scan error: "+err.Error())
+	}
+	if len(problems) > 0 {
+		out.problem = name + ": " + strings.Join(problems, "; ")
 	}
 	sort.SliceStable(out.rows, func(i, j int) bool { return fleet.F(out.rows[i], "at") < fleet.F(out.rows[j], "at") })
 	return out
@@ -276,7 +285,7 @@ func lifecycle(b *strings.Builder, obs, acts records, since, now float64) {
 	if len(days) == 0 {
 		b.WriteString("No undeclared row snapshots recorded in this window.\n")
 	}
-	b.WriteString("\n## Dispatch → hands → done\n\nHands is first observed occupancy, an upper bound on acquisition time. Rows include those dispatched or observed in the window.\n\n| Row | Accountable | Dispatch | Hands observed | Done receipt | Late |\n|---|---|---|---|---|---|\n")
+	b.WriteString("\n## Dispatch → hands → done\n\nHands is first observed occupancy, an upper bound on acquisition time. Rows with repository and relationship identity are included when dispatched or observed in the window.\n\n| Row | Accountable | Dispatch | Hands observed | Done receipt | Late |\n|---|---|---|---|---|---|\n")
 	late := map[string]int{}
 	for _, k := range sortedKeys(ls) {
 		l := ls[k]

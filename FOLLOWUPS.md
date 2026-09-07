@@ -506,3 +506,14 @@ one tool-call away from an agent. What would change the calculus: session-state
 verbs emerging on the gate side (e.g. a park-inbox an agent polls, cross-run
 grant/cycle queries) where discovery + typed schemas beat re-shelling — the
 same bar workbench-mcp cleared. Evaluate then; not before.
+
+## Fleet report residuals (PR #286, 2026-09-07)
+
+- The installer predates this report and writes unquoted binary command paths.
+  A custom `FLEET_HOME` containing spaces needs a separate installer quoting pass
+  covering both installation and shadow cleanup. The operator's current absolute
+  path has no spaces; this report does not claim the broader installer case.
+- Keep legacy `shadow-report` percentile selection unchanged. The operational
+  report documents nearest-rank percentiles; historical shadow comparison uses
+  the previous floor-index method. Unifying these would change old comparison
+  numbers and is not required for the operational report.

@@ -110,7 +110,7 @@ func Tick(interval time.Duration) (string, error) {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(dir(), "report.md"), []byte(report.Render(fleet.Path(), now-86400, now)), 0o644); err != nil {
-		return "", err
+		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch report: " + err.Error()})
 	}
 	// Notification AFTER publication: a slow notifier must not hold the board or the
 	// heartbeat back, and never widens the window in which a second watcher could start.

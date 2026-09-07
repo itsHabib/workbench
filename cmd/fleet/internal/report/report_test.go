@@ -84,7 +84,7 @@ func TestMissingAndMalformedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := Render(root, 1, 10)
-	if !strings.Contains(out, "1 malformed records skipped") || !strings.Contains(out, "0 recorded refusals") {
+	if !strings.Contains(out, "1 malformed records skipped") || !strings.Contains(out, "1 records after report cutoff excluded") || !strings.Contains(out, "0 recorded refusals") {
 		t.Fatal(out)
 	}
 }
@@ -128,5 +128,16 @@ func TestNoActionAfterAttentionClearedAndNoGrowingRetiredLateness(t *testing.T) 
 	out := Render(root, 1, 10)
 	if !strings.Contains(out, "none before attention cleared | 4.0s") || strings.Contains(out, "| 3.0s |") {
 		t.Fatal(out)
+	}
+}
+
+func TestScanErrorCoverageHasOnePrefix(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "events.jsonl"), []byte(strings.Repeat("x", 4*1024*1024+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := readLog(root, "events.jsonl", 10).problem
+	if !strings.HasPrefix(got, "events.jsonl: scan error:") || strings.Count(got, "events.jsonl") != 1 {
+		t.Fatal(got)
 	}
 }
