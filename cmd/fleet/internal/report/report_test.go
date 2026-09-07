@@ -131,13 +131,57 @@ func TestNoActionAfterAttentionClearedAndNoGrowingRetiredLateness(t *testing.T) 
 	}
 }
 
-func TestScanErrorCoverageHasOnePrefix(t *testing.T) {
+func TestOversizedRecordCoverageHasOnePrefix(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "events.jsonl"), []byte(strings.Repeat("x", 4*1024*1024+1)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got := readLog(root, "events.jsonl", 10).problem
-	if !strings.HasPrefix(got, "events.jsonl: scan error:") || strings.Count(got, "events.jsonl") != 1 {
+	if !strings.HasPrefix(got, "events.jsonl: byte limit reached;") || strings.Count(got, "events.jsonl") != 1 {
 		t.Fatal(got)
+	}
+}
+
+func TestSparseLifetimeLogReadsOnlyTail(t *testing.T) {
+	root := t.TempDir()
+	f, err := os.Create(filepath.Join(root, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Seek(8*1024*1024*1024, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n{\"at\":9,\"code\":2}\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, notes, err := logTail(f)
+	if err != nil || len(data) > maxLogBytes || len(notes) != 1 {
+		t.Fatalf("bytes=%d notes=%v err=%v", len(data), notes, err)
+	}
+	got := readLog(root, "events.jsonl", 10)
+	if len(got.rows) != 1 || fleet.F(got.rows[0], "at") != 9 || !strings.Contains(got.problem, "report is partial") {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRecordLimitKeepsNewestPhysicalRecords(t *testing.T) {
+	root := t.TempDir()
+	var rows records
+	for i := 1; i <= maxLogRecords+10; i++ {
+		rows = append(rows, fleet.Rec{"at": i})
+	}
+	writeRows(t, root, "events.jsonl", rows)
+	got := readLog(root, "events.jsonl", float64(maxLogRecords+10))
+	if len(got.rows) != maxLogRecords || fleet.F(got.rows[0], "at") != 11 || !strings.Contains(got.problem, "record limit reached") {
+		t.Fatalf("count=%d problem=%s", len(got.rows), got.problem)
+	}
+}
+
+func TestMissingLogDiagnosticsExcludeAbsolutePath(t *testing.T) {
+	root := t.TempDir()
+	got := readLog(root, "events.jsonl", 10)
+	if strings.Contains(got.problem, root) || !strings.Contains(got.problem, "missing or unreadable") {
+		t.Fatal(got.problem)
 	}
 }

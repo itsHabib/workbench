@@ -57,3 +57,16 @@ exactly-once ledger. It contains local telemetry only.
 commands while retaining unrelated hooks. Config backups remain the rollback
 mechanism. An already-running watcher must be restarted to use a newly installed
 binary. Windows cross-compilation is not Windows runtime verification.
+
+### Bounded history
+
+Each render reads at most the final 1 MiB of each of the three log files and
+then decodes at most the final 4096 physical records per file. It reads a fixed
+file-size snapshot, so concurrent appends cannot extend the scan. A byte cutoff
+also discards the first boundary record, which may be incomplete. Records are
+sorted by event time only after these limits apply.
+
+Either limit produces an explicit partial-history coverage warning. Counts,
+correlations and latency samples then describe retained evidence only; even a
+large `--since` cannot recover excluded history. Logs are not rotated, deleted,
+or rewritten. Missing/unreadable-log diagnostics omit absolute store paths.

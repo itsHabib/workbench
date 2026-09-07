@@ -2,9 +2,10 @@
 package report
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -22,18 +23,58 @@ type source struct {
 	problem string
 }
 
+// Bound both input bytes and decoded records independently of store age.
+const maxLogBytes = 1024 * 1024
+const maxLogRecords = 4096
+
+func logTail(f *os.File) ([]byte, []string, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("not a regular file")
+	}
+	start := max(int64(0), info.Size()-maxLogBytes)
+	data, err := io.ReadAll(io.NewSectionReader(f, start, info.Size()-start))
+	if err != nil {
+		return nil, nil, err
+	}
+	var notes []string
+	if start > 0 {
+		notes = append(notes, "byte limit reached; older history and boundary record excluded; report is partial")
+		// The first line may have begun outside the retained byte window.
+		end := bytes.IndexByte(data, '\n')
+		if end < 0 {
+			return nil, notes, nil
+		}
+		data = data[end+1:]
+	}
+	return data, notes, nil
+}
+
 func readLog(root, name string, now float64) source {
 	f, err := os.Open(filepath.Join(root, name))
 	if err != nil {
-		return source{problem: name + ": " + err.Error()}
+		return source{problem: name + ": missing or unreadable"}
 	}
 	defer f.Close()
+	data, problems, err := logTail(f)
+	if err != nil {
+		return source{problem: name + ": unreadable regular-file snapshot"}
+	}
+	lines := bytes.Split(bytes.TrimSuffix(data, []byte("\n")), []byte("\n"))
+	if len(lines) > maxLogRecords {
+		problems = append(problems, "record limit reached; older history excluded; report is partial")
+		lines = lines[len(lines)-maxLogRecords:]
+	}
 	var out source
-	scan := bufio.NewScanner(f)
-	scan.Buffer(make([]byte, 4096), 4*1024*1024)
 	bad, future := 0, 0
-	for scan.Scan() {
-		r := fleet.ReadJSONBytes(scan.Bytes())
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		r := fleet.ReadJSONBytes(line)
 		if r == nil || fleet.F(r, "at") <= 0 {
 			bad++
 			continue
@@ -44,15 +85,11 @@ func readLog(root, name string, now float64) source {
 		}
 		out.rows = append(out.rows, r)
 	}
-	var problems []string
 	if bad > 0 {
 		problems = append(problems, fmt.Sprintf("%d malformed records skipped", bad))
 	}
 	if future > 0 {
 		problems = append(problems, fmt.Sprintf("%d records after report cutoff excluded", future))
-	}
-	if err := scan.Err(); err != nil {
-		problems = append(problems, "scan error: "+err.Error())
 	}
 	if len(problems) > 0 {
 		out.problem = name + ": " + strings.Join(problems, "; ")

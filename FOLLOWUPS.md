@@ -517,3 +517,9 @@ same bar workbench-mcp cleared. Evaluate then; not before.
   report documents nearest-rank percentiles; historical shadow comparison uses
   the previous floor-index method. Unifying these would change old comparison
   numbers and is not required for the operational report.
+
+- Fleet report PR #286: the Gate-blocking lifetime scan is now bounded to 1 MiB
+  and 4096 physical records per source, with explicit partial-history warnings.
+  A future indexed reader could preserve longer windows within the same resource
+  budget. Empty telemetry reason/out strings remain a compatibility deferral:
+  current consumers normalize them identically to null/absent fields.
