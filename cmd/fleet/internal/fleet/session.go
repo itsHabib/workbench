@@ -462,6 +462,7 @@ func BoardLines(sincePrompt float64) []string {
 
 func capLine(line string) string {
 	if len(line) > 700 {
+		PromptTruncated++
 		return line[:700] + "…"
 	}
 	return line
@@ -533,7 +534,7 @@ func changesSince(since float64) []string {
 	var changes []string
 	for _, l := range strings.Split(text, "\n") {
 		t := ReadJSONBytes([]byte(l))
-		if t == nil || F(t, "at") <= since {
+		if t == nil || F(t, "at") <= since || S(t, "what") == "snapshot" {
 			continue
 		}
 		changes = append(changes, transitionText(t))

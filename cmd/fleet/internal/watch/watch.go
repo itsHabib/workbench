@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/report"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
 	"github.com/itsHabib/workbench/filelock"
 )
@@ -93,12 +94,22 @@ func Tick(interval time.Duration) (string, error) {
 	for _, t := range transitions {
 		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), t)
 	}
+	// Seed existing rows on upgrade and retain one daily observation even when a
+	// row stays unchanged. This supplies daily counts without an agent declaration.
+	if fleet.F(prev, "report_schema") == 0 || int64(now)/86400 != int64(prevAt)/86400 {
+		for _, r := range work {
+			_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), fleet.Rec{"at": now, "repo": r["repo"], "change": r["change"], "relationship": r["relationship"], "row": r, "what": "snapshot"})
+		}
+	}
 	md := render(rows, work, now, prev, slept, transitions)
-	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1}
+	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1, "report_schema": 1}
 	if slept {
 		hb["gap_from"] = prevAt
 	}
 	if err := publish(rows, work, md, hb); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir(), "report.md"), []byte(report.Render(fleet.Path(), now-86400, now)), 0o644); err != nil {
 		return "", err
 	}
 	// Notification AFTER publication: a slow notifier must not hold the board or the
@@ -139,7 +150,7 @@ func seatTransitions(rows []fleet.Rec, prevRows map[string]fleet.Rec, now float6
 			continue
 		}
 		transitions = append(transitions, fleet.Rec{"at": now, "path": r["path"], "role": r["role"], "slot": r["slot"], "from": nilIfEmpty(from), "to": to,
-			"session": r["session"], "branch": r["branch"]})
+			"session": r["session"], "branch": r["branch"], "repo": fleet.RepoID(fleet.S(r, "path"))})
 	}
 	return transitions
 }
@@ -166,7 +177,7 @@ func workTransitions(now, prevAt float64, slept bool) ([]fleet.Rec, []fleet.Rec)
 		if seen[k] || fleet.S(r, "state") == "gone" {
 			continue
 		}
-		transitions = append(transitions, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+		transitions = append(transitions, fleet.Rec{"at": now, "repo": r["repo"], "row": r, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
 			"from": nilIfEmpty(fleet.S(r, "state")), "to": "gone", "session": r["hands"], "branch": r["change"]})
 	}
 	return work, transitions
@@ -183,7 +194,7 @@ func rowTransitions(r, prev fleet.Rec, now, prevAt float64, slept bool) []fleet.
 		to = "unknown"
 	}
 	if from != to {
-		return []fleet.Rec{{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+		return []fleet.Rec{{"at": now, "repo": r["repo"], "row": r, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
 			"from": nilIfEmpty(from), "to": to, "session": r["hands"], "branch": r["change"]}}
 	}
 	if prev == nil {
@@ -197,7 +208,7 @@ func rowTransitions(r, prev fleet.Rec, now, prevAt float64, slept bool) []fleet.
 		if a == b {
 			continue
 		}
-		out = append(out, fleet.Rec{"at": now, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
+		out = append(out, fleet.Rec{"at": now, "repo": r["repo"], "row": r, "change": r["change"], "relationship": r["relationship"], "for": r["for"],
 			"what": col, "from": nilIfEmpty(a), "to": b, "session": r["hands"], "branch": r["change"]})
 	}
 	return out

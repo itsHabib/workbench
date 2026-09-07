@@ -20,9 +20,12 @@ import (
 )
 
 func shadowRows(since float64) []fleet.Rec {
-	b, err := os.ReadFile(fleet.Path("shadow.jsonl"))
-	if err != nil {
-		return nil
+	b, _ := os.ReadFile(fleet.Path("shadow.jsonl"))
+	newer, _ := os.ReadFile(fleet.Path("events.jsonl"))
+	for _, line := range strings.Split(string(newer), "\n") {
+		if fleet.B(fleet.ReadJSONBytes([]byte(line)), "shadow") {
+			b = append(append(b, '\n'), []byte(line)...)
+		}
 	}
 	var rows []fleet.Rec
 	for _, l := range strings.Split(string(b), "\n") {

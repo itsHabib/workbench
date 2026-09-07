@@ -22,6 +22,13 @@ func context(ev Event, text string) *Verdict {
 	return &Verdict{Out: string(out) + "\n"}
 }
 
+// PromptTruncated counts capped board lines during this hook process.
+var PromptTruncated int
+
+// HookTakeovers records successful branch replacements during this evaluation.
+// The adapter removes any replacement it successfully unwinds.
+var HookTakeovers []Rec
+
 var allow = &Verdict{}
 
 // Run handles one event. It never panics out: the fail-open law says an internal

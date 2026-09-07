@@ -91,6 +91,8 @@ func cmdRevoke(arg, toPrefix, reason string) error {
 	if err != nil {
 		return err
 	}
+	parts := fleet.KeyParts(key)
+	fleet.ObserveAction("revoke", fleet.Rec{"repo": parts["repo"], "change": parts["branch"], "slot": parts["name"], "key": key, "session": sid})
 	displaced := ""
 	if s := fleet.S(was, "session"); s != "" && s != sid {
 		displaced = s

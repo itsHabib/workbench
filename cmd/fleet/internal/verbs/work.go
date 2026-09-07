@@ -142,6 +142,7 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 	if err := fleet.WriteJSON(dispatchFile(rid, branch, rel), rec); err != nil {
 		return err
 	}
+	fleet.ObserveAction("dispatch", rec)
 	tail := ""
 	if dueSecs > 0 {
 		tail += ", due in " + fleet.FmtAge(dueSecs)
@@ -186,6 +187,7 @@ func CmdReassign(change, forRole string) error {
 		if err := fleet.WriteJSON(dispatchFile(rid, branch, fleet.S(r, "relationship")), r); err != nil {
 			return err
 		}
+		fleet.ObserveAction("reassign", r)
 		n++
 	}
 	if n == 0 {
