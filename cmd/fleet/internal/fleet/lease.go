@@ -291,6 +291,12 @@ func MigrateLegacyKeys() {
 	migrateLegacyKeys()
 }
 
+// MigrationPending is a conservative read-only preflight. Directory movement
+// after the marker warrants reconciliation; it does not itself migrate records.
+func MigrationPending() bool {
+	return changedSince(Path("migrated-keys.v1"), "leases", "stop", "handoff")
+}
+
 // legacyHolder is a pre-migration lease record that names the same repo and branch
 // as key but was left in place by a collision, or nil.
 func legacyHolder(key string) Rec {
