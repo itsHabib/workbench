@@ -165,6 +165,11 @@ func runHook(args []string) {
 
 // logVerdict observes the completed evaluation. Logging cannot change its outcome.
 func logVerdict(which string, ev fleet.Rec, v *fleet.Verdict, start time.Time, shadow bool) {
+	// The verdict is already decided; this runs before Exit. A panic here would leave
+	// the process with Go's own exit status 2 — which on PreToolUse IS the deny code —
+	// so observing an evaluation could deny the call it observed. Telemetry is not
+	// authority: swallow anything that escapes, exactly as reviveWatcher does.
+	defer func() { _ = recover() }()
 	rec := fleet.Rec{"at": fleet.Now(), "harness": which, "event": ev["hook_event_name"], "session": ev["session_id"],
 		"tool": ev["tool_name"], "tool_use_id": ev["tool_use_id"], "cwd": ev["cwd"], "code": 0, "reason": nil,
 		"ms": float64(time.Since(start).Microseconds()) / 1000, "shadow": shadow, "prompt_truncated": fleet.PromptTruncated}
