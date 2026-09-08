@@ -190,7 +190,7 @@ func cmdReassign(change, forRole string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := strictDispatchRows()
+	rows, err := scopedDispatchRows(rid, branch, "")
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func undispatch(change, rel string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := strictDispatchRows()
+	rows, err := scopedDispatchRows(rid, branch, rel)
 	if err != nil {
 		return err
 	}
@@ -492,4 +492,39 @@ func replaceableDispatch(rid, branch, rel string) (fleet.Rec, error) {
 		return nil, refuse("fleet dispatch: this assignment is request-bound; inspect `fleet status` rather than replacing it")
 	}
 	return existing, nil
+}
+
+// scopedDispatchRows preserves unrelated legacy maintenance while refusing every
+// damaged target before any mutation. Filename candidates catch unreadable rows;
+// decoded identity also catches selected rows stored under an unexpected name.
+func scopedDispatchRows(rid, branch, rel string) ([]fleet.Rec, error) {
+	entries, err := os.ReadDir(dispatchDir())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var rows []fleet.Rec
+	prefix := fleet.Safe(rid + "__" + branch + "__")
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dispatchDir(), entry.Name())
+		candidate := strings.HasPrefix(entry.Name(), prefix)
+		if rel != "" {
+			candidate = path == dispatchFile(rid, branch, rel)
+		}
+		row := fleet.ReadJSON(path)
+		selected := fleet.S(row, "repo") == rid && fleet.S(row, "change") == branch && (rel == "" || fleet.S(row, "relationship") == rel)
+		if !candidate && !selected {
+			continue
+		}
+		if !selected || fleet.S(row, "relationship") == "" || path != dispatchFile(rid, branch, fleet.S(row, "relationship")) {
+			return nil, refuse("fleet: selected assignment is unreadable or has conflicting identity")
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }

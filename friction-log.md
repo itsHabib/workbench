@@ -384,3 +384,10 @@ Second occurrence of the `#214` entry above, one failure mode further in.
   Replay now survives branch/session cleanup, selective legacy retirement preserves
   request siblings, and status honors the revoke recipient exemption. These are
   regression-tested without taking over any live session.
+- **Second review:** one latest-write field let activity on another branch erase
+  observed task progress; observations now merge per branch under the existing
+  session lock. Added MultiEdit to generated subscriptions and scoped legacy
+  maintenance validation. Two reviewers reported raw apply_patch bypassing the
+  classifier; the actual Codex adapter already expands patches into per-file Edit
+  events. A direct adapter regression now proves foreign-holder refusal and
+  post-tool evidence, without duplicating parsing in the policy layer.

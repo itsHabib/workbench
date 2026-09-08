@@ -54,6 +54,10 @@ func requestStatus(d fleet.Rec, now float64) fleet.Rec {
 		"worker": sid, "lead": d["for"], "brief": d["brief"], "status": "Queued",
 		"needs": "Worker delivery and acceptance are unconfirmed", "next": "Deliver the brief through the worker's supported harness", "verified_at": now}
 	rec, lease := fleet.SessionRecord(sid), fleet.Lease(key)
+	write := fleet.M(fleet.M(rec, "last_writes"), key)
+	if write == nil {
+		write = fleet.M(rec, "last_write")
+	}
 	switch {
 	case rec == nil || fleet.IsMalformed(lease):
 		taskState(row, "Status needs checking", "Worker or ownership evidence is unavailable", "Inspect the evidence; do not redispatch")
@@ -63,8 +67,8 @@ func requestStatus(d fleet.Rec, now float64) fleet.Rec {
 		taskState(row, "Status needs checking", "A stop flag exists; process termination is unconfirmed", "Inspect the affected session before continuing")
 	case !fleet.SessionAlive(rec):
 		taskState(row, "Status needs checking", "Worker is no longer observably live", "Recover its work before choosing a replacement")
-	case fleet.S(fleet.M(rec, "last_write"), "key") == key && fleet.F(fleet.M(rec, "last_write"), "at") >= fleet.F(d, "at"):
-		row["activity_at"] = fleet.M(rec, "last_write")["at"]
+	case fleet.S(write, "key") == key && fleet.F(write, "at") >= fleet.F(d, "at"):
+		row["activity_at"] = write["at"]
 		taskState(row, "Activity observed", "Acceptance and completion remain unconfirmed", "Read the worker's result and current checks")
 	}
 	return row

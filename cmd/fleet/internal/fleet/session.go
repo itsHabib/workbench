@@ -62,6 +62,16 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 		pid, kind := HarnessPid(true)
 		rec["pid"], rec["pid_kind"] = float64(pid), kind
 	}
+	// Merge branch observations under the session lock so concurrent tools on
+	// different task branches cannot erase each other's evidence.
+	if write := M(fields, "last_write"); S(write, "key") != "" {
+		writes := M(rec, "last_writes")
+		if writes == nil {
+			writes = Rec{}
+		}
+		writes[S(write, "key")] = write
+		rec["last_writes"] = writes
+	}
 	for k, v := range fields {
 		rec[k] = v
 	}

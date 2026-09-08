@@ -26,6 +26,8 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 - `cmd/fleet/internal/verbs/status.go`: read-only plain-language request observations.
 - `cmd/fleet/internal/verbs/work.go`: protect request records from legacy mutations.
 - `cmd/fleet/internal/verbs/verbs.go`: command entrypoints before lazy migration.
+- `cmd/fleet/internal/fleet/session.go`: merge per-branch observations under the session lock.
+- `cmd/fleet/internal/codex/task_activity_test.go`: patch adapter lease and evidence proof.
 - `cmd/fleet/internal/fleet/hook.go`: completed write-tool observation in session record.
 - `cmd/fleet/internal/mcp/mcp.go`: equivalent request/status tool entrypoints.
 - `cmd/fleet/internal/verbs/request_test.go`: replay, conflicts, races and read-only proof.
@@ -55,5 +57,5 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 
 ## Handoff
 
-- Last: initial panel findings consolidated; retry, subscription and legacy-scope fixes added.
-- Next: verify and publish the fix round, then collect the configured panel.
+- Last: second panel consolidated; per-branch evidence, MultiEdit subscription and scoped legacy maintenance fixed.
+- Next: verify and publish final allowed fix round, collect final panel and report residuals without further review cycling.

@@ -16,7 +16,7 @@ func TestGeneratedCodexHooksSubscribeToWrites(t *testing.T) {
 		groups := hooks[event].([]any)
 		group := groups[len(groups)-1].(map[string]any)
 		matcher := regexp.MustCompile(group["matcher"].(string))
-		for _, tool := range []string{"Bash", "Edit", "Write", "NotebookEdit", "apply_patch"} {
+		for _, tool := range []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch"} {
 			if !matcher.MatchString(tool) {
 				t.Errorf("%s drops %s", event, tool)
 			}
@@ -40,7 +40,7 @@ func TestClaudeWriteHooksPreserveOtherHandlersOnRebind(t *testing.T) {
 		t.Fatalf("lost or duplicated handlers: %v", groups)
 	}
 	matcher := regexp.MustCompile(groups[1].(map[string]any)["matcher"].(string))
-	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+	for _, tool := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
 		if !matcher.MatchString(tool) {
 			t.Errorf("drops %s", tool)
 		}

@@ -137,7 +137,7 @@ func codexHooks(command string) (string, map[string]any, error) {
 		hooks = map[string]any{}
 		data["hooks"] = hooks
 	}
-	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write|NotebookEdit|apply_patch)$"}, {"PostToolUse", "^(Bash|Edit|Write|NotebookEdit|apply_patch)$"}, {"Stop", ""}, {"SessionEnd", ""}}
+	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit|apply_patch)$"}, {"PostToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit|apply_patch)$"}, {"Stop", ""}, {"SessionEnd", ""}}
 	for _, spec := range specs {
 		event, matcher := spec[0], spec[1]
 		groups, err := withoutFleetHandlers(hooks[event], target, event)
@@ -169,7 +169,7 @@ func claudeWriteHooks(data map[string]any, target, command string) error {
 		return err
 	}
 	hooks["PostToolUse"] = append(groups, map[string]any{
-		"matcher": "^(Edit|Write|NotebookEdit)$",
+		"matcher": "^(Edit|Write|MultiEdit|NotebookEdit)$",
 		"hooks":   []any{map[string]any{"type": "command", "command": command, "statusMessage": fleetHookMark}},
 	})
 	return nil

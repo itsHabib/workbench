@@ -408,3 +408,51 @@ func TestStatusExemptsRevokeRecipient(t *testing.T) {
 		t.Fatalf("recipient falsely stopped: %v", row)
 	}
 }
+
+func TestLegacyMaintenanceIgnoresUnrelatedDamage(t *testing.T) {
+	repo, _ := requestFixture(t)
+	rid := fleet.RepoID(repo)
+	path := dispatchFile(rid, "task", "verify")
+	if err := fleet.WriteJSON(path, fleet.Rec{"repo": rid, "change": "task", "relationship": "verify"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dispatchDir(), "unrelated.json"), []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CmdReassign("task", "new-lead"); err != nil {
+		t.Fatal(err)
+	}
+	if fleet.S(fleet.ReadJSON(path), "for") != "new-lead" {
+		t.Fatal("not reassigned")
+	}
+	if err := cmdUndispatch("task", "verify"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CmdReassign("task", "new-lead"); err == nil {
+		t.Fatal("damaged target accepted")
+	}
+	if err := cmdUndispatch("task", "verify"); err == nil {
+		t.Fatal("damaged target removed")
+	}
+}
+
+func TestActivitySurvivesWritesOnAnotherBranch(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "one", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	ev := fleet.Event{"session_id": sid, "cwd": repo, "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": fleet.Rec{"file_path": filepath.Join(repo, "file")}}
+	if v := fleet.Run(ev); v.Code != 0 {
+		t.Fatal(v)
+	}
+	runGit(t, repo, "checkout", "-b", "other")
+	if v := fleet.Run(ev); v.Code != 0 {
+		t.Fatal(v)
+	}
+	if row := requestStatus(fleet.ReadJSON(requestFile(repo)), fleet.Now()); row["status"] != "Activity observed" {
+		t.Fatalf("prior observation lost: %v", row)
+	}
+}

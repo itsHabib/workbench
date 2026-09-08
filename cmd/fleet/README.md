@@ -60,8 +60,9 @@ means the assignment sources were readable, not that every task is healthy.
 - **Status needs checking:** conflicting/unreadable ownership, stop flag or missing
   worker liveness. A stopped/dead session does not establish command quiescence.
 
-The existing hook-owned session record carries `last_write` with branch key, time
-and tool-use ID. Read-only commands, old activity and another branch do not count.
+The existing hook-owned session record carries `last_writes`, keyed by branch,
+with time and tool-use ID; `last_write` remains for compatibility. Writes on a
+second branch do not erase the first branch observation. Read-only commands, old activity and another branch do not count.
 JSON keeps IDs and evidence timestamps for debugging; terminal output does not
 require the operator to interpret internal session IDs. No new agent-written
 progress ledger, acceptance claim, done state or automatic takeover is introduced.
