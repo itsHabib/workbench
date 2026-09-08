@@ -332,3 +332,79 @@ func TestRequestHelperProcess(_ *testing.T) {
 	}
 	os.Exit(0)
 }
+
+func TestRequestReplayAfterBranchAndSessionRemoval(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "replay", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	before := readBytes(t, requestFile(repo))
+	runGit(t, repo, "checkout", "--detach")
+	runGit(t, repo, "branch", "-D", "task")
+	fleet.Unlink(fleet.Path("sessions", sid+".json"))
+	if err := CmdRequest("task", "replay", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, readBytes(t, requestFile(repo))) {
+		t.Fatal("replay changed record")
+	}
+	if err := CmdRequest("task", "replay", sid, "lead", "changed"); err == nil {
+		t.Fatal("conflicting replay accepted")
+	}
+}
+
+func TestLegacyDispatchIgnoresUnrelatedDamage(t *testing.T) {
+	repo, _ := requestFixture(t)
+	if err := os.MkdirAll(dispatchDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dispatchDir(), "unrelated.json"), []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rid := fleet.RepoID(repo)
+	if _, err := replaceableDispatch(rid, "task", "verify"); err != nil {
+		t.Fatal(err)
+	}
+	path := dispatchFile(rid, "task", "verify")
+	if err := os.WriteFile(path, []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replaceableDispatch(rid, "task", "verify"); err == nil {
+		t.Fatal("target damage ignored")
+	}
+}
+
+func TestUndispatchLegacySiblingPreservesRequest(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "one", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	before := readBytes(t, requestFile(repo))
+	path := dispatchFile(fleet.RepoID(repo), "task", "verify")
+	if err := fleet.WriteJSON(path, fleet.Rec{"repo": fleet.RepoID(repo), "change": "task", "relationship": "verify"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdUndispatch("task", "verify"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("sibling not removed")
+	}
+	if !bytes.Equal(before, readBytes(t, requestFile(repo))) {
+		t.Fatal("request changed")
+	}
+}
+
+func TestStatusExemptsRevokeRecipient(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "one", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	key := "repo:" + fleet.RepoID(repo) + ":task"
+	if err := fleet.WriteJSON(fleet.KeyFile("stop", key), fleet.Rec{"key": key, "except": sid}); err != nil {
+		t.Fatal(err)
+	}
+	if row := requestStatus(fleet.ReadJSON(requestFile(repo)), fleet.Now()); row["status"] != "Queued" {
+		t.Fatalf("recipient falsely stopped: %v", row)
+	}
+}

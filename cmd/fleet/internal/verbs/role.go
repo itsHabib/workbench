@@ -137,7 +137,7 @@ func codexHooks(command string) (string, map[string]any, error) {
 		hooks = map[string]any{}
 		data["hooks"] = hooks
 	}
-	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write)$"}, {"PostToolUse", "^Bash$"}, {"Stop", ""}, {"SessionEnd", ""}}
+	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write|NotebookEdit|apply_patch)$"}, {"PostToolUse", "^(Bash|Edit|Write|NotebookEdit|apply_patch)$"}, {"Stop", ""}, {"SessionEnd", ""}}
 	for _, spec := range specs {
 		event, matcher := spec[0], spec[1]
 		groups, err := withoutFleetHandlers(hooks[event], target, event)
@@ -151,6 +151,28 @@ func codexHooks(command string) (string, map[string]any, error) {
 		hooks[event] = append(groups, group)
 	}
 	return target, data, nil
+}
+
+// claudeWriteHooks supplements the global Bash hook with completed file writes.
+// Keep unrelated local hooks intact and replace our marked group on rebind.
+func claudeWriteHooks(data map[string]any, target, command string) error {
+	hooks, ok := data["hooks"].(map[string]any)
+	if data["hooks"] != nil && !ok {
+		return refuse("fleet role: %s hooks is not an object", target)
+	}
+	if hooks == nil {
+		hooks = map[string]any{}
+		data["hooks"] = hooks
+	}
+	groups, err := withoutFleetHandlers(hooks["PostToolUse"], target, "PostToolUse")
+	if err != nil {
+		return err
+	}
+	hooks["PostToolUse"] = append(groups, map[string]any{
+		"matcher": "^(Edit|Write|NotebookEdit)$",
+		"hooks":   []any{map[string]any{"type": "command", "command": command, "statusMessage": fleetHookMark}},
+	})
+	return nil
 }
 
 // codexRules is the Codex projection of a lane's denies: every `Bash(<words>:*)`
@@ -380,6 +402,9 @@ func cmdRole(checkout, role string, force bool, tenant, slot string) error {
 	settingsTarget := filepath.Join(checkout, ".claude", "settings.local.json")
 	existing, err := strictJSON(settingsTarget)
 	if err != nil {
+		return err
+	}
+	if err := claudeWriteHooks(existing, settingsTarget, strings.TrimSuffix(hookCommand(), " codex")); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(fleet.OrgState, 0o755); err != nil {

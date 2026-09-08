@@ -29,7 +29,9 @@ Equivalent MCP tools are `fleet_request` (requires caller cwd) and `fleet_status
 The supervisor chooses a stable request ID before calling. Same repo + same ID +
 same branch/worker/lead/brief returns the existing assignment without renewing its
 timestamp, resetting its initial head, posting a message or acquiring a lease.
-Changing the payload under that ID refuses. A second assignment for the same
+Full-ID retries remain valid after branch deletion or session-record cleanup; a
+short session prefix must still resolve uniquely. Supply a branch name, not a
+numbered change. Changing the payload under that ID refuses. A second assignment for the same
 branch refuses, as do unknown ownership, an unavailable worker and an applicable
 stop flag. A recorded assignment is not an execution reservation; the ordinary
 hook/lease guard still controls actual effects.
@@ -63,6 +65,11 @@ and tool-use ID. Read-only commands, old activity and another branch do not coun
 JSON keeps IDs and evidence timestamps for debugging; terminal output does not
 require the operator to interpret internal session IDs. No new agent-written
 progress ledger, acceptance claim, done state or automatic takeover is introduced.
+
+Generated role bindings subscribe Codex write events and supplement Claude
+file-write post-tool events alongside its global Bash hook. Existing bindings
+need regeneration and harness reload when this release is installed. This PR
+does not edit installed hooks. Terminal observations include the activity age.
 
 ## Verification
 

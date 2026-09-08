@@ -23,18 +23,18 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 	if !requestID.MatchString(id) || worker == "" || lead == "" || strings.TrimSpace(brief) == "" {
 		return refuse("fleet request: requires --id (1-96 letters/digits/._-), --worker, --for and --brief")
 	}
-	rid, branch, head, err := resolveDispatchTarget("request", change)
-	if err != nil {
-		return err
+	branch := strings.TrimSpace(change)
+	if branch == "" || strings.HasPrefix(branch, "#") {
+		return refuse("fleet request: provide a branch name rather than a numbered change")
 	}
-	sid, err := findSession(worker)
-	if err != nil {
-		return err
+	rid := fleet.RepoID(cwd())
+	if rid == "" {
+		return refuse("fleet request: run inside the target repository")
 	}
 	wanted := fleet.Rec{"request_id": id, "repo": rid, "change": branch,
-		"worker": sid, "for": lead, "brief": strings.TrimSpace(brief), "relationship": "implementation"}
+		"worker": worker, "for": lead, "brief": strings.TrimSpace(brief), "relationship": "implementation"}
 	replay := false
-	err = fleet.KeyLock("dispatch", func() error {
+	err := fleet.KeyLock("dispatch", func() error {
 		// Reconcile existing keys like legacy dispatch; a retained collision refuses.
 		fleet.MigrateLegacyKeys()
 		if fleet.MigrationPending() {
@@ -49,13 +49,22 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 				continue
 			}
 			if fleet.S(row, "request_id") == id {
-				if !sameRequest(row, wanted) {
-					return refuse("fleet request: request ID already has different work or recipient; inspect `fleet status`")
+				if err := validateReplay(row, wanted, worker); err != nil {
+					return err
 				}
 				replay = true
 				return nil
 			}
 		}
+		_, _, head, err := resolveDispatchTarget("request", branch)
+		if err != nil {
+			return err
+		}
+		sid, err := findSession(worker)
+		if err != nil {
+			return err
+		}
+		wanted["worker"] = sid
 		return createRequest(rows, wanted, head)
 	})
 	if err != nil {
@@ -66,6 +75,22 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 		return nil
 	}
 	say("Queued: %s. Assignment recorded; worker delivery and acceptance are not yet confirmed.", branch)
+	return nil
+}
+
+// A full retained ID survives session cleanup; prefixes must still resolve
+// uniquely. No live branch or worker is required for an identical replay.
+func validateReplay(row, wanted fleet.Rec, worker string) error {
+	if worker != fleet.S(row, "worker") {
+		sid, err := findSession(worker)
+		if err != nil {
+			return err
+		}
+		wanted["worker"] = sid
+	}
+	if !sameRequest(row, wanted) {
+		return refuse("fleet request: request ID already has different work or recipient; inspect `fleet status`")
+	}
 	return nil
 }
 

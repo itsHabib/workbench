@@ -21,6 +21,8 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 ## Change
 
 - `cmd/fleet/internal/verbs/request.go`: immutable request IDs and serialized replay.
+- `cmd/fleet/internal/verbs/role.go`: subscribe generated hooks to write events.
+- `cmd/fleet/internal/verbs/role_hooks_test.go`: generated subscription and rebind coverage.
 - `cmd/fleet/internal/verbs/status.go`: read-only plain-language request observations.
 - `cmd/fleet/internal/verbs/work.go`: protect request records from legacy mutations.
 - `cmd/fleet/internal/verbs/verbs.go`: command entrypoints before lazy migration.
@@ -48,9 +50,10 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 - Verified: focused Fleet race tests, root Go vet/lint, and Claude regression scenarios pass.
 - Verified: separate-process replay/conflict tests and Codex regression scenarios pass.
 - Verified: incomplete MCP status remains parseable JSON; compiled-binary fixture smoke passes for both adapter shapes.
-- Pending: exact-head PR review and full-module CI.
+- Verified: initial-head full-module CI and all three configured reviewers completed.
+- Pending: fix-round exact-head verification and panel re-review.
 
 ## Handoff
 
-- Last: CLI/MCP request and status paths implemented; initial existing package tests pass.
-- Next: add negative concurrency/read-only tests and run the documented checks.
+- Last: initial panel findings consolidated; retry, subscription and legacy-scope fixes added.
+- Next: verify and publish the fix round, then collect the configured panel.

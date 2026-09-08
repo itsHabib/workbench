@@ -204,9 +204,6 @@ func cmdReassign(change, forRole string) error {
 		if fleet.S(r, "repo") != rid || fleet.S(r, "change") != branch {
 			continue
 		}
-		if fleet.S(r, "request_id") != "" {
-			return refuse("fleet reassign: request-bound assignment cannot be changed by an unbound reassign; inspect `fleet status`")
-		}
 		r["for"] = forRole
 		r["reassigned_at"] = fleet.Now()
 		if err := fleet.WriteJSON(dispatchFile(rid, branch, fleet.S(r, "relationship")), r); err != nil {
@@ -240,7 +237,7 @@ func undispatch(change, rel string) error {
 		return err
 	}
 	for _, r := range rows {
-		if fleet.S(r, "repo") == rid && fleet.S(r, "change") == branch && fleet.S(r, "request_id") != "" {
+		if fleet.S(r, "repo") == rid && fleet.S(r, "change") == branch && (rel == "" || fleet.S(r, "relationship") == rel) && fleet.S(r, "request_id") != "" {
 			return refuse("fleet: request-bound assignments require a correlated lifecycle action; inspect `fleet status`")
 		}
 	}
@@ -248,9 +245,6 @@ func undispatch(change, rel string) error {
 	for _, r := range rows {
 		if fleet.S(r, "repo") != rid || fleet.S(r, "change") != branch || (rel != "" && fleet.S(r, "relationship") != rel) {
 			continue
-		}
-		if fleet.S(r, "request_id") != "" {
-			return refuse("fleet undispatch: request-bound assignment is retained for replay safety; inspect `fleet status`")
 		}
 		fleet.Unlink(dispatchFile(rid, branch, fleet.S(r, "relationship")))
 		n++
@@ -486,10 +480,14 @@ func cmdWork(forRole string, asJSON bool) error {
 }
 
 func replaceableDispatch(rid, branch, rel string) (fleet.Rec, error) {
-	if _, err := strictDispatchRows(); err != nil {
-		return nil, err
+	path := dispatchFile(rid, branch, rel)
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return nil, nil
 	}
-	existing := fleet.ReadJSON(dispatchFile(rid, branch, rel))
+	existing := fleet.ReadJSON(path)
+	if existing == nil || fleet.S(existing, "repo") != rid || fleet.S(existing, "change") != branch || fleet.S(existing, "relationship") != rel {
+		return nil, refuse("fleet dispatch: selected assignment is unreadable or has conflicting identity")
+	}
 	if fleet.S(existing, "request_id") != "" {
 		return nil, refuse("fleet dispatch: this assignment is request-bound; inspect `fleet status` rather than replacing it")
 	}

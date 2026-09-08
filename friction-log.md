@@ -377,3 +377,10 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - **Tooling:** full-module tests were cost-guarded; followed the requested focused
   Fleet test path and left the full suite to CI. Root vet/lint and both harness
   regression suites were run.
+- **Review integration gaps:** generated Codex hooks only subscribed to Bash
+  post-tool events; direct hook tests hid missing file-edit observations. Generated
+  subscriptions now cover writes, with Claude local file-write supplementation
+  and rebind tests. Existing installations still require regeneration/reload.
+  Replay now survives branch/session cleanup, selective legacy retirement preserves
+  request siblings, and status honors the revoke recipient exemption. These are
+  regression-tested without taking over any live session.

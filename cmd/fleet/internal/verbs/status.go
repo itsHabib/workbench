@@ -13,6 +13,7 @@ func CmdStatus(args []string) error {
 	if len(args) > 1 || (len(args) == 1 && args[0] != "--json") {
 		return refuse("usage: fleet status [--json]")
 	}
+	// CLI and MCP execute verbs serially; this scoped flag is not goroutine-local.
 	before := fleet.ReadOnly
 	fleet.ReadOnly = true
 	defer func() { fleet.ReadOnly = before }()
@@ -58,7 +59,7 @@ func requestStatus(d fleet.Rec, now float64) fleet.Rec {
 		taskState(row, "Status needs checking", "Worker or ownership evidence is unavailable", "Inspect the evidence; do not redispatch")
 	case lease != nil && fleet.S(lease, "session") != sid:
 		taskState(row, "Status needs checking", "Another session holds the branch", "Resolve the ownership conflict")
-	case fleet.StopFlag(key) != nil:
+	case fleet.CheckStop(key, branch, sid) != "":
 		taskState(row, "Status needs checking", "A stop flag exists; process termination is unconfirmed", "Inspect the affected session before continuing")
 	case !fleet.SessionAlive(rec):
 		taskState(row, "Status needs checking", "Worker is no longer observably live", "Recover its work before choosing a replacement")
@@ -83,6 +84,9 @@ func renderStatus(rows []fleet.Rec, gaps []string) {
 		return
 	}
 	for _, row := range rows {
+		if at := fleet.F(row, "activity_at"); at > 0 {
+			row["status"] = fleet.S(row, "status") + " (" + fleet.FmtAge(fleet.F(row, "verified_at")-at) + " ago)"
+		}
 		// IDs remain in JSON details. Do not guess a model/person name from a session.
 		say("%s — %s\n  Needs: %s\n  Next: %s", terminalText(fleet.S(row, "work")), fleet.S(row, "status"), terminalText(fleet.S(row, "needs")), terminalText(fleet.S(row, "next")))
 	}
