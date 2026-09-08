@@ -20,6 +20,7 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 
 ## Change
 
+- `FOLLOWUPS.md`: final-panel residuals and written deferral rationale.
 - `cmd/fleet/internal/verbs/request.go`: immutable request IDs and serialized replay.
 - `cmd/fleet/internal/verbs/role.go`: subscribe generated hooks to write events.
 - `cmd/fleet/internal/verbs/role_hooks_test.go`: generated subscription and rebind coverage.
@@ -53,9 +54,10 @@ inspect hook-observed activity without claiming delivery, acceptance or terminat
 - Verified: separate-process replay/conflict tests and Codex regression scenarios pass.
 - Verified: incomplete MCP status remains parseable JSON; compiled-binary fixture smoke passes for both adapter shapes.
 - Verified: initial-head full-module CI and all three configured reviewers completed.
-- Pending: fix-round exact-head verification and panel re-review.
+- Verified: final code head 9a243af has green CI and completed three-member panel.
+- Residual: FOLLOWUPS.md records Windows spelling, incomplete request evidence and lock diagnostics for judgment.
 
 ## Handoff
 
 - Last: second panel consolidated; per-branch evidence, MultiEdit subscription and scoped legacy maintenance fixed.
-- Next: verify and publish final allowed fix round, collect final panel and report residuals without further review cycling.
+- Next: judge recorded residuals; no more panel cycles, no merge or live installation. Broader adapter work remains open.

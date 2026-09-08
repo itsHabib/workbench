@@ -523,3 +523,36 @@ same bar workbench-mcp cleared. Evaluate then; not before.
   A future indexed reader could preserve longer windows within the same resource
   budget. Empty telemetry reason/out strings remain a compatibility deferral:
   current consumers normalize them identically to null/absent fields.
+
+## Fleet task coordination residuals (PR #288, 2026-09-08)
+
+Final panel reviewed code head `9a243af21bd7f72f94e5c5af0e7bad0e4d60b1fd`.
+Three cycles completed; AGENTS.md Review-cycle discipline requires residual P2s
+and nits to be recorded for judgment rather than another panel loop. These are
+proposed deferrals, not accepted risk or merge permission. No installation.
+
+- **P2, Windows branch spelling:** CmdRequest retains supplied spelling rather
+  than the canonical branch spelling resolved by Git. On case-insensitive Windows
+  ref lookup, Task can resolve task but compare ownership/activity under a different
+  key. Fix canonical identity while retaining deleted-branch replay behavior and
+  add Windows coverage before portability claims. Normal hook effects remain
+  subject to their own branch guard; request itself grants no lease or execution.
+  Source: Codex review comment 3954511775. Windows live parity remains unproved.
+- **P2, incomplete request evidence:** strictDispatchRows validates base dispatch
+  fields, not all request-specific types. Missing/invalid numeric at can default to
+  zero and admit old matching activity while complete remains true. Validate
+  request_id, worker and finite timestamps before deriving status/replaying.
+  Source: Codex review comment 3954511783. This is a status-integrity defect, not
+  evidence of acceptance or authority. Must be resolved or explicitly accepted
+  before treating the new board as operationally reliable.
+- **P2 assessment, busy-store diagnostics:** ErrKeyBusy bubbles up as generic exit
+  4 in request/dispatch/reassign/undispatch rather than an actionable refusal.
+  The lock callback does not execute, so no conflicting write is authorized.
+  Normalize error classification and test contention response in a follow-on.
+  Source: Copilot review comment 3954505362 and its suppressed sibling comments.
+- **Cosmetic:** scoped row loops retain redundant repo/branch/relationship tests.
+  Claude final review finds no blocking defects; leave this harmless redundancy.
+
+Code verification: Fleet race tests, lint/vet, both harness regression suites and
+full CI/fuzz/hygiene passed. Those checks do not cover or dismiss the residuals
+above. No additional panel request should be sent for this PR under the current cap.
