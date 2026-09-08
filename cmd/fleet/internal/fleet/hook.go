@@ -379,7 +379,7 @@ func recordInflight(ev Event, sid, cmd string) {
 }
 
 func onPostTool(ev Event, sid string) *Verdict {
-	rec := TouchSession(sid, ev, Rec{})
+	rec := TouchSession(sid, ev, postWriteEvidence(ev, sid))
 	cmd := S(M(ev, "tool_input"), "command")
 	if cmd != "" {
 		start := S(ev, "cwd")
@@ -451,4 +451,25 @@ func Exit(v *Verdict) {
 		_, _ = os.Stderr.WriteString(v.Err)
 	}
 	os.Exit(v.Code)
+}
+
+// postWriteEvidence records observed tool activity, not acceptance or success.
+// It is telemetry in the existing session record; missing evidence never permits
+// a tool and does not imply that a queued assignment started.
+func postWriteEvidence(ev Event, sid string) Rec {
+	tool := S(ev, "tool_name")
+	cmd := S(M(ev, "tool_input"), "command")
+	if !IsWrite(tool, cmd) {
+		return Rec{}
+	}
+	target := preToolTarget(ev, SessionRecord(sid), tool, cmd)
+	branch := BranchOf(target)
+	if branch == "" {
+		return Rec{}
+	}
+	key := Scope(target, branch)
+	if key == "" {
+		return Rec{}
+	}
+	return Rec{"last_write": Rec{"key": key, "at": Now(), "tool_use_id": ev["tool_use_id"]}}
 }

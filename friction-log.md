@@ -359,3 +359,21 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - **Workaround available today:** post the bare `@claude please review` as its
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
+
+## 2026-09-08 — Fleet assignment is not worker acceptance
+
+- **Observed:** dispatch stores accountability but exposes no retry identity; a
+  retry can rewrite queued work. Existing CLI helpers do not establish end-to-end
+  cross-harness acceptance or effect-safe stop. An operator should not infer those
+  from a successful command or copied session ID.
+- **Change:** request-bound rows, immutable payload checks, cross-process dispatch
+  serialization and non-migrating status output. Hook-owned post-tool evidence is
+  explicitly activity, not success or semantic acceptance. Legacy mutations cannot
+  replace a request record. No second editable ledger added.
+- **Validation boundary:** fixture and real-process tests prove these local
+  contracts, not live model delivery/replacement. This is the first build increment;
+  actual adapters and correlated lifecycle remain under the natural-coordination
+  Dossier task. No hooks installed or live agents controlled by this change.
+- **Tooling:** full-module tests were cost-guarded; followed the requested focused
+  Fleet test path and left the full suite to CI. Root vet/lint and both harness
+  regression suites were run.

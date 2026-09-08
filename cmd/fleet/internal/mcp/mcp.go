@@ -67,6 +67,11 @@ var tools = []schema{
 			"for": str("accountable role; default: the dispatcher"), "due": str("duration like 45m or 2h"), "slot": str("free slot to place the work in (fleet_slots)"),
 			"brief": str("one line the slot's session reads at start"), "reply_to": str("your session id, handed to the seat as its address for questions"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
 			"required": []any{"change", "as", "cwd"}}},
+	{"name": "fleet_request",
+		"description": "Record one retry-safe local assignment for a known worker; does not deliver, accept, launch or transfer a lease.",
+		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch"), "id": str("stable repo-scoped request ID"), "worker": str("known session ID or unique prefix"), "for": str("accountable lead"), "brief": str("bounded assignment"), "cwd": cwdArg}, "required": []any{"change", "id", "worker", "for", "brief", "cwd"}}},
+	{"name": "fleet_status", "description": "Read-only local request board; activity is not acceptance or completion.",
+		"inputSchema": schema{"type": "object", "properties": schema{}}},
 	{"name": "fleet_work",
 		"description": "Every ownership row on this machine with its observed state: dead, late, undeclared (need a decision); working, idle, dispatched, done.",
 		"inputSchema": schema{"type": "object", "properties": schema{"for": str("only rows this role is accountable for"), "cwd": cwdArg}}},
@@ -259,6 +264,10 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		return runVerb(func() error {
 			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take)
 		})
+	case "fleet_request":
+		return runVerb(func() error { return verbs.CmdRequest(s("change"), s("id"), s("worker"), s("for"), s("brief")) })
+	case "fleet_status":
+		return taskStatusJSON()
 	case "fleet_work":
 		return js(verbs.WorkRows(s("for"))), false
 	case "fleet_reassign":
@@ -299,7 +308,9 @@ func handle(msg map[string]any) map[string]any {
 	case "tools/call":
 		name, _ := params["name"].(string)
 		args, _ := params["arguments"].(map[string]any)
-		fleet.MigrateLegacyKeys()
+		if name != "fleet_status" && name != "fleet_request" {
+			fleet.MigrateLegacyKeys()
+		}
 		text, isErr, err := safeCall(name, args)
 		if errors.Is(err, errUnknownTool) {
 			return rpcError(id, -32602, fmt.Sprintf("unknown tool %s", fleet.PyRepr(name)))
@@ -363,4 +374,15 @@ func handleSafe(msg map[string]any) (resp map[string]any) {
 		}
 	}()
 	return handle(msg)
+}
+
+// Preserve a parseable packet even when its sources are incomplete. The tool's
+// isError flag carries the failure; appending prose would corrupt the JSON.
+func taskStatusJSON() (string, bool) {
+	var buf strings.Builder
+	previous := verbs.Out
+	verbs.Out = &buf
+	defer func() { verbs.Out = previous }()
+	err := verbs.CmdStatus([]string{"--json"})
+	return buf.String(), err != nil
 }
