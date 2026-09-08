@@ -665,33 +665,61 @@ func anyKeys(m map[string]any) map[string]bool {
 	return out
 }
 
-// poolTenant settles the tenant BEFORE any worktree exists: given, inherited from
-// the checkout's own map line, or ORG_TENANT.
+// sameRepoRow is an existing map row for a checkout of the same repo, or a zero row.
+//
+// The seam that lets a MAIN checkout stay unroled. Leaving one unroled is the right call
+// once people open ad-hoc sessions in it, since otherwise every such session boots
+// wearing a lane's card. But both the tenant and the label were inherited from that one
+// line, so removing it made `fleet pool` refuse for want of a tenant and fall back to the
+// directory name for the label — and because pool re-roles the seats it KEEPS, that
+// silently re-labels every existing seat. A sibling seat of the same repo knows both
+// answers, so ask it.
+func sameRepoRow(checkout string) fleet.MapRow {
+	want := fleet.RepoID(checkout)
+	if want == "" {
+		return fleet.MapRow{}
+	}
+	_, rows := fleet.MapRows(fleet.RolesMap())
+	for _, r := range rows {
+		if fleet.RepoID(r.Path) == want {
+			return r
+		}
+	}
+	return fleet.MapRow{}
+}
+
+// poolTenant settles the tenant BEFORE any worktree exists: given, inherited from the
+// checkout's own map line, from a sibling seat of the same repo, or ORG_TENANT.
 func poolTenant(tenant, checkout, base string) (string, error) {
 	if tenant == "" {
 		tenant = fleet.TenantOf(checkout)
 	}
 	if tenant == "" {
+		tenant = sameRepoRow(checkout).Tenant
+	}
+	if tenant == "" {
 		tenant = os.Getenv("ORG_TENANT")
 	}
 	if tenant == "" {
-		return "", refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
+		return "", refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from, no sibling seat of that repo has one, and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
 	}
 	return tenant, nil
 }
 
 // poolLabel is the repo label a seat's role carries, the `mono` in `<kind>:mono`.
 //
-// Inherited from the checkout's own map line, the way poolTenant inherits the tenant,
-// and derived from the directory name only when there is no line to inherit from. A
-// directory basename is not a repo identity: a checkout at `~/dev/Mono` produced
-// `<kind>:Mono` beside an existing `<kind>:mono`, which is two labels for one repo, so
-// `fleet work --for <kind>:mono` matched none of the new seats. Because pool re-roles
-// the seats it KEEPS and not only the ones it creates, deriving the label here also
-// overwrote a corrected value on every top-up, leaving no durable fix outside the tool.
+// Inherited from the checkout's own map line, then from a sibling seat of the same repo,
+// and derived from the directory name only when neither exists. A directory basename is
+// not a repo identity: a checkout at `~/dev/Mono` produced `<kind>:Mono` beside an
+// existing `<kind>:mono`, which is two labels for one repo, so `fleet work --for
+// <kind>:mono` matched none of the new seats. Because pool re-roles the seats it KEEPS
+// and not only the ones it creates, deriving the label here also overwrote a corrected
+// value on every top-up, leaving no durable fix outside the tool.
 func poolLabel(checkout, base string) string {
-	role := fleet.RoleOf(checkout)
-	if _, label, ok := strings.Cut(role, ":"); ok && label != "" {
+	if _, label, ok := strings.Cut(fleet.RoleOf(checkout), ":"); ok && label != "" {
+		return label
+	}
+	if _, label, ok := strings.Cut(sameRepoRow(checkout).Role, ":"); ok && label != "" {
 		return label
 	}
 	return base
