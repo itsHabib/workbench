@@ -1127,7 +1127,7 @@ func Unowned(repo string) map[string]any {
 		}
 		pairs = filtered
 	}
-	assigns := undeliveredAssigns()
+	assigns := assignsByChange()
 	host, _ := os.Hostname()
 	if host == "" {
 		host = "?"
@@ -1172,8 +1172,13 @@ func mapKeys[V any](m map[string]V) map[string]bool {
 	return out
 }
 
-// undeliveredAssigns is every assignment not yet read by a session, by (repo, branch).
-func undeliveredAssigns() map[[2]string]fleet.Rec {
+// assignsByChange is EVERY assignment record, keyed by (repo, branch).
+//
+// Named for what it returns. It was called undeliveredAssigns, whose comment claimed "not
+// yet read by a session" — but nothing here filters `delivered_to`; that filter lives in
+// the board's row builder. A caller trusting the old name would have silently dropped
+// every assignment a session had already picked up.
+func assignsByChange() map[[2]string]fleet.Rec {
 	assigns := map[[2]string]fleet.Rec{}
 	d := fleet.Path("assign")
 	ents, _ := os.ReadDir(d)

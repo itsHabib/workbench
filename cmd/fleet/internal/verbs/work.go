@@ -337,8 +337,17 @@ func evidenceState(row WorkRow, rid, branch, rel, state string) string {
 
 // undeclaredRows is every branch a session holds that no row declares: undeclared
 // while the holder lives, dead once it does not.
+//
+// `undeclared` means no ownership ROW exists, which is not the same as nobody being
+// accountable. `fleet assign --for <role>` records the accountable role, the dispatcher,
+// the seat and the brief in the assignment; reading none of that made the board print
+// "for no one accountable" about a change whose own assignment named the role — two
+// records fleet wrote, disagreeing. The STATE stays `undeclared`, which was right: a seat
+// assignment is not an ownership declaration. The columns now come from the assignment
+// when there is one.
 func undeclaredRows(declared map[string]bool) []WorkRow {
 	var rows []WorkRow
+	assigns := assignsByChange()
 	for _, l := range leaseRows() {
 		key := fleet.S(l, "key")
 		if fleet.B(l, "occupancy") || fleet.IsResource(key) || declared[key] {
@@ -350,8 +359,16 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 			state = "dead" // a dead holder nobody declared is still a dead holder
 		}
 		parts := fleet.KeyParts(key)
-		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
-			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil})
+		repo, branch := fleet.S(parts, "repo"), fleet.S(parts, "branch")
+		row := WorkRow{"change": branch, "repo": repo, "relationship": nil, "for": nil, "by": nil,
+			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil}
+		if a := assigns[[2]string{repo, branch}]; a != nil {
+			row["for"] = nilIfEmpty(fleet.S(a, "for"))
+			row["by"] = nilIfEmpty(fleet.S(a, "by"))
+			row["slot"] = nilIfEmpty(fleet.S(a, "slot"))
+			row["brief"] = nilIfEmpty(fleet.S(a, "brief"))
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
