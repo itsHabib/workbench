@@ -583,7 +583,7 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 	if err != nil {
 		return err
 	}
-	p := newPooler(checkout, base, parent, tenant, rewarm, cfg)
+	p := newPooler(checkout, base, parent, tenant, poolLabel(checkout, base), rewarm, cfg)
 	for _, k := range order {
 		for i := 1; i <= wanted[k]; i++ {
 			if err := p.one(k, i); err != nil {
@@ -595,8 +595,8 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 	return nil
 }
 
-func newPooler(checkout, base, parent, tenant string, rewarm bool, cfg map[string]any) *pooler {
-	p := &pooler{checkout: checkout, base: base, parent: parent, tenant: tenant, rewarm: rewarm, cmds: warmCommands(cfg),
+func newPooler(checkout, base, parent, tenant, label string, rewarm bool, cfg map[string]any) *pooler {
+	p := &pooler{checkout: checkout, base: base, parent: parent, tenant: tenant, label: label, rewarm: rewarm, cmds: warmCommands(cfg),
 		named: map[string]string{}, worktrees: registeredWorktrees(checkout)}
 	_, rows := fleet.MapRows(fleet.RolesMap())
 	for _, r := range rows {
@@ -680,15 +680,36 @@ func poolTenant(tenant, checkout, base string) (string, error) {
 	return tenant, nil
 }
 
+// poolLabel is the repo label a seat's role carries, the `mono` in `<kind>:mono`.
+//
+// Inherited from the checkout's own map line, the way poolTenant inherits the tenant,
+// and derived from the directory name only when there is no line to inherit from. A
+// directory basename is not a repo identity: a checkout at `~/dev/Mono` produced
+// `<kind>:Mono` beside an existing `<kind>:mono`, which is two labels for one repo, so
+// `fleet work --for <kind>:mono` matched none of the new seats. Because pool re-roles
+// the seats it KEEPS and not only the ones it creates, deriving the label here also
+// overwrote a corrected value on every top-up, leaving no durable fix outside the tool.
+func poolLabel(checkout, base string) string {
+	role := fleet.RoleOf(checkout)
+	if _, label, ok := strings.Cut(role, ":"); ok && label != "" {
+		return label
+	}
+	return base
+}
+
 // pooler is one `fleet pool` run: what it knows before the loop, what it did.
 type pooler struct {
 	checkout, base, parent, tenant string
-	rewarm                         bool
-	cmds                           []string
-	named                          map[string]string
-	worktrees                      map[string]bool
-	live                           []fleet.Rec
-	made, kept, warmed             []string
+	// label is the repo label in a seat's role. Distinct from base, which names the
+	// seat directory: the directory can be called anything, the label must match the
+	// rest of the repo's roles.map lines.
+	label              string
+	rewarm             bool
+	cmds               []string
+	named              map[string]string
+	worktrees          map[string]bool
+	live               []fleet.Rec
+	made, kept, warmed []string
 }
 
 // one creates or keeps one seat: never disturbs an occupied one, refuses a name
@@ -712,7 +733,7 @@ func (p *pooler) one(k string, i int) error {
 			return refuse("fleet pool: git worktree add %s failed: %s", path, out)
 		}
 	}
-	if err := cmdRole(path, k+":"+p.base, false, p.tenant, slot); err != nil {
+	if err := cmdRole(path, k+":"+p.label, false, p.tenant, slot); err != nil {
 		return err
 	}
 	if fresh {
@@ -843,12 +864,18 @@ func assignGuards(slot, path, branch string) error {
 // assignCheckout puts the seat's tree on the branch, creating it from origin when
 // it is not local, and confirms where the tree landed.
 func assignCheckout(slot, path, branch string) error {
-	rc, txt := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
+	rc, first := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
 	if rc != 0 {
-		rc, txt = gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch)
-	}
-	if rc != 0 {
-		return refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, txt)
+		// The -b fallback is only for a branch that is not local yet, so when it fails
+		// too, the first attempt's message is the one worth printing: it names the
+		// worktree already holding the branch. The fallback can only say the branch
+		// exists, which is what the first attempt just established, and reporting that
+		// instead sends the reader back to the checkout that already failed. This is the
+		// common case when a seat takes over an existing branch, because a branch already
+		// worked on this machine is local.
+		if rc2, _ := gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch); rc2 != 0 {
+			return refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, first)
+		}
 	}
 	_, landed := gitTry(path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD")
 	if landed != branch {
