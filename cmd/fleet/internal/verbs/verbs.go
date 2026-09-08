@@ -79,7 +79,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
   fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
-  fleet report [--since 24h]                   derived operational telemetry, without writing state
+  fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
@@ -562,7 +562,11 @@ func gitOut(args ...string) (string, error) {
 
 // gitTry is (rc, output) from git in dir; never refuses and never hangs.
 func gitTry(dir string, timeout time.Duration, args ...string) (int, string) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	prefix := []string{"-C", dir}
+	if fleet.ReadOnly {
+		prefix = append([]string{"--no-optional-locks"}, prefix...)
+	}
+	cmd := exec.Command("git", append(prefix, args...)...)
 	cmd.Stdin = nil
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

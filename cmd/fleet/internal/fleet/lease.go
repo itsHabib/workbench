@@ -291,6 +291,34 @@ func MigrateLegacyKeys() {
 	migrateLegacyKeys()
 }
 
+// MigrationPending is a conservative read-only preflight. A completed migration
+// pass can leave legacy collisions for an operator, so the marker alone cannot
+// establish that reconciliation is complete. This does not migrate records.
+func MigrationPending() bool {
+	if changedSince(Path("migrated-keys.v1"), "leases", "stop", "handoff") {
+		return true
+	}
+	for _, sub := range []string{"leases", "stop", "handoff"} {
+		if unresolvedLegacy(sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func unresolvedLegacy(sub string) bool {
+	for _, name := range listDir(Path(sub)) {
+		if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		r := ReadJSON(filepath.Join(Path(sub), name))
+		if r == nil || (S(r, "key") == "" && S(r, "repo") != "" && S(r, "branch") != "") {
+			return true
+		}
+	}
+	return false
+}
+
 // legacyHolder is a pre-migration lease record that names the same repo and branch
 // as key but was left in place by a collision, or nil.
 func legacyHolder(key string) Rec {
