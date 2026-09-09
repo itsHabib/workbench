@@ -146,7 +146,7 @@ var verbs = []verb{
 	},
 	{
 		name:        "org_status",
-		description: "The org board: every role's phase, active work, held count, open obligations, and liveness.",
+		description: "The org board for the configured tenant: each role's phase, active work, held count, open obligations, and liveness.",
 		schema:      json.RawMessage(`{"type":"object","properties":{}}`),
 		args: func(json.RawMessage) ([]string, error) {
 			return []string{"status", "-json"}, nil
