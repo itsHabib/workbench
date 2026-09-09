@@ -456,3 +456,51 @@ func TestActivitySurvivesWritesOnAnotherBranch(t *testing.T) {
 		t.Fatalf("prior observation lost: %v", row)
 	}
 }
+
+func TestRequestKeysByGitSpellingNotCallerSpelling(t *testing.T) {
+	repo, sid := requestFixture(t)
+	runGit(t, repo, "branch", "Nav-Fix")
+	if err := CmdRequest("nav-fix", "case-1", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dispatchFile(fleet.RepoID(repo), "Nav-Fix", "implementation")); err != nil {
+		t.Fatalf("assignment keyed by the caller's spelling, not git's: %v", err)
+	}
+	row := fleet.ReadJSON(dispatchFile(fleet.RepoID(repo), "Nav-Fix", "implementation"))
+	if fleet.S(row, "change") != "Nav-Fix" {
+		t.Fatalf("change recorded as %q, want git's spelling", fleet.S(row, "change"))
+	}
+	// A second spelling of the same branch is the same assignment, not a second one.
+	if err := CmdRequest("NAV-FIX", "case-2", sid, "lead", "fix it"); err == nil {
+		t.Fatal("second assignment for one branch under another spelling was accepted")
+	}
+}
+
+func TestStatusRefusesDamagedRequestEvidence(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "one", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	row := fleet.ReadJSON(requestFile(repo))
+	for _, damage := range []string{"worker", "at", "for"} {
+		broken := fleet.Rec{}
+		for k, v := range row {
+			broken[k] = v
+		}
+		delete(broken, damage)
+		if err := fleet.WriteJSON(requestFile(repo), broken); err != nil {
+			t.Fatal(err)
+		}
+		var b bytes.Buffer
+		Out = &b
+		err := Dispatch([]string{"status", "--json"})
+		var packet map[string]any
+		_ = json.Unmarshal(b.Bytes(), &packet)
+		if err == nil || packet["complete"] != false {
+			t.Fatalf("row missing %q reported complete: err=%v packet=%v", damage, err, packet)
+		}
+		if err := CmdRequest("task", "two", sid, "lead", "fix it"); err == nil {
+			t.Fatalf("request accepted beside damaged evidence (missing %q)", damage)
+		}
+	}
+}

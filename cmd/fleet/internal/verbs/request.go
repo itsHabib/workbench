@@ -31,6 +31,10 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 	if rid == "" {
 		return refuse("fleet request: run inside the target repository")
 	}
+	// Ownership and activity are keyed by the branch as git spells it, never by the
+	// caller's spelling: on a case-insensitive filesystem two spellings would
+	// otherwise key two assignments for one branch.
+	branch = canonicalBranch(cwd(), branch)
 	wanted := fleet.Rec{"request_id": id, "repo": rid, "change": branch,
 		"worker": worker, "for": lead, "brief": strings.TrimSpace(brief), "relationship": "implementation"}
 	replay := false
@@ -161,9 +165,41 @@ func strictDispatchRows() ([]fleet.Rec, error) {
 		if row == nil || fleet.S(row, "repo") == "" || fleet.S(row, "change") == "" || fleet.S(row, "relationship") == "" {
 			return nil, fmt.Errorf("assignment evidence unreadable: %s", entry.Name())
 		}
+		// A request-bound row carries who it went to and when; without either it is
+		// damaged evidence, and damaged evidence must not read as a complete status.
+		if fleet.S(row, "request_id") != "" && (fleet.S(row, "worker") == "" || fleet.S(row, "for") == "" || fleet.F(row, "at") <= 0) {
+			return nil, fmt.Errorf("assignment evidence damaged: %s", entry.Name())
+		}
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// canonicalBranch is the branch as git lists it. An exact match wins; else a
+// unique case-insensitive match is the same ref spelled differently; else the
+// caller's spelling stands (a branch that does not exist yet keeps its name).
+func canonicalBranch(dir, cand string) string {
+	rc, out := gitTry(dir, gitTimeout, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if rc != 0 {
+		return cand
+	}
+	match := ""
+	for _, name := range strings.Split(out, "\n") {
+		name = strings.TrimSpace(name)
+		if name == cand {
+			return cand
+		}
+		if name != "" && strings.EqualFold(name, cand) {
+			if match != "" {
+				return cand // two refs differ only by case: git itself is ambiguous here
+			}
+			match = name
+		}
+	}
+	if match != "" {
+		return match
+	}
+	return cand
 }
 
 func dispatchRequest(args []string) error {
