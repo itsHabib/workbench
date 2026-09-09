@@ -1889,7 +1889,7 @@ try:
 except subprocess.TimeoutExpired as e:
     b_rc, b_out = None, "second watcher kept running for 15s: " + str(e)
 pA.kill(); pA.wait()
-report(b_rc not in (None, 0) and "already" in b_out, "a second watcher is refused for the first's whole lifetime, not only after its first heartbeat", f"B rc={b_rc} {b_out[:160]!r}")
+report(b_rc == 1 and "watcher lock unavailable" in b_out and "already running" not in b_out, "a second watcher is refused for the first's whole lifetime, not only after its first heartbeat", f"B rc={b_rc} {b_out[:160]!r}")
 # 8. the last word in Codex's transcript shape, and the harness's own statement of it
 tp = os.path.join(work, "codex-transcript.jsonl")
 open(tp, "w").write(json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done: pushed the fix"}]}}) + "\n")
