@@ -395,3 +395,20 @@ unquoted parentheses and command substitution remain unknown. Added shadow-flag
 assertions and clarified unexpanded variables. JSON key-order/nil-slice cosmetic
 suggestions deferred: map order is not a protocol guarantee and empty inventory
 intentionally serializes as []. No migration or live configuration changes.
+
+
+### 2026-09-09 — Scoped Org status returned phantom roles
+
+- **What I tried:** collect the personal tenant with `org status -tenant mh -json`
+  for the Fleet supervisor board.
+- **What happened:** status scanned every tenant and emitted two all-empty role
+  rows from unrelated directories containing only a lock. Refused first writes
+  can leave those directories before a charter chain exists. The supervisor
+  correctly refused to treat the malformed source as a complete observation.
+- **Class:** `tool-gap`.
+- **Fix:** status enumerates only the configured tenant, omits zero-record
+  chains, and emits `[]` for an empty JSON board. Parse and kernel failures
+  inside that tenant remain visible. Tests cover the real refused-attach path,
+  empty chains, explicit/environment/default tenant selection, and broken chains.
+- **Boundary:** no live directory cleanup or custody changes; this does not
+  resolve Fleet work with unknown accountable roles or create roles or slots.
