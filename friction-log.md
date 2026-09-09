@@ -360,6 +360,24 @@ Second occurrence of the `#214` entry above, one failure mode further in.
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
 
+## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
+
+Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
+hint without a usable restart command. Both were present on current main.
+Missing/incomplete heartbeat now reports unknown; lock failure preserves the
+underlying error and only names a last recorded heartbeat when valid. It no
+longer claims an owner is actively ticking from lock contention alone. The
+opened lock descriptor is closed on both paths. Board hints name fleet watch in a separate persistent terminal. No new automatic
+spawn events. Tests exercise actual lock contention and absent/partial/fresh/
+stale heartbeat records; Fleet race tests, vet and lint pass. Windows desktop
+behavior and installed binary are not changed by the source fix.
+
+Review round 1: preserved attention rows when heartbeat time is unavailable and
+removed the one-shot recovery suggestion because that path bypasses owner.lock.
+Tests now require both seat/work decision rows under unknown freshness and isolate
+heartbeat files per case. Existing one-shot lock behavior remains outside this
+diagnostic fix; do not recommend it as recovery from a possibly active watcher.
+
 ## 2026-09-08 — Fleet assignment is not worker acceptance
 
 - **Observed:** dispatch stores accountability but exposes no retry identity; a
