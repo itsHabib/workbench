@@ -15,10 +15,10 @@ func TestLockedWatcherHeartbeatEvidence(t *testing.T) {
 	old := fleet.State
 	fleet.State = t.TempDir()
 	t.Cleanup(func() { fleet.State = old })
-	if err := os.MkdirAll(dir(), 0755); err != nil {
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	owner, err := os.OpenFile(filepath.Join(dir(), "owner.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	owner, err := os.OpenFile(filepath.Join(dir(), "owner.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +39,9 @@ func TestLockedWatcherHeartbeatEvidence(t *testing.T) {
 		{"recorded", fleet.Rec{"pid": 123, "at": fleet.Now() - 60}, "last recorded heartbeat pid 123"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if err := os.Remove(filepath.Join(dir(), "heartbeat.json")); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
 			if tc.heartbeat != nil {
 				if err := fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), tc.heartbeat); err != nil {
 					t.Fatal(err)
