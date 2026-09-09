@@ -583,7 +583,11 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 	if err != nil {
 		return err
 	}
-	p := newPooler(checkout, base, parent, tenant, rewarm, cfg)
+	label, err := poolLabel(checkout, base, tenant)
+	if err != nil {
+		return err
+	}
+	p := newPooler(checkout, base, parent, tenant, label, rewarm, cfg)
 	for _, k := range order {
 		for i := 1; i <= wanted[k]; i++ {
 			if err := p.one(k, i); err != nil {
@@ -595,8 +599,8 @@ func cmdPool(checkout, kind, nArg string, rewarm bool, tenant string) error {
 	return nil
 }
 
-func newPooler(checkout, base, parent, tenant string, rewarm bool, cfg map[string]any) *pooler {
-	p := &pooler{checkout: checkout, base: base, parent: parent, tenant: tenant, rewarm: rewarm, cmds: warmCommands(cfg),
+func newPooler(checkout, base, parent, tenant, label string, rewarm bool, cfg map[string]any) *pooler {
+	p := &pooler{checkout: checkout, base: base, parent: parent, tenant: tenant, label: label, rewarm: rewarm, cmds: warmCommands(cfg),
 		named: map[string]string{}, worktrees: registeredWorktrees(checkout)}
 	_, rows := fleet.MapRows(fleet.RolesMap())
 	for _, r := range rows {
@@ -665,30 +669,91 @@ func anyKeys(m map[string]any) map[string]bool {
 	return out
 }
 
-// poolTenant settles the tenant BEFORE any worktree exists: given, inherited from
-// the checkout's own map line, or ORG_TENANT.
+// sameRepoRows finds bindings that share the checkout's git common directory.
+// A repository may have several tenants or labels; file order is not authority.
+func sameRepoRows(checkout string) []fleet.MapRow {
+	want := fleet.RepoID(checkout)
+	if want == "" {
+		return nil
+	}
+	_, rows := fleet.MapRows(fleet.RolesMap())
+	var found []fleet.MapRow
+	for _, r := range rows {
+		if fleet.RepoID(r.Path) == want {
+			found = append(found, r)
+		}
+	}
+	return found
+}
+
+// poolTenant inherits a sibling tenant only when all candidates agree. Resolve
+// this before creating any seat; an explicit tenant can disambiguate the pool.
 func poolTenant(tenant, checkout, base string) (string, error) {
-	if tenant == "" {
-		tenant = fleet.TenantOf(checkout)
+	if tenant != "" {
+		return tenant, nil
 	}
-	if tenant == "" {
-		tenant = os.Getenv("ORG_TENANT")
+	role, inherited, _ := fleet.MapRowsFor(checkout)
+	if role != "" && inherited != "" {
+		return inherited, nil
 	}
-	if tenant == "" {
-		return "", refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
+	seen := map[string]bool{}
+	for _, r := range sameRepoRows(checkout) {
+		seen[r.Tenant] = true
 	}
-	return tenant, nil
+	if len(seen) > 1 {
+		return "", refuse("fleet pool: ambiguous tenants for %s in %s: %s; select --tenant <tenant> before creating seats", base, fleet.RolesMap(), strings.Join(sortedKeys(seen), ", "))
+	}
+	for t := range seen {
+		return t, nil
+	}
+	if inherited != "" {
+		return inherited, nil
+	}
+	if tenant = os.Getenv("ORG_TENANT"); tenant != "" {
+		return tenant, nil
+	}
+	return "", refuse("fleet pool: no tenant for slots of %s: %s has no roles.map line to inherit from, no sibling seat of that repo has one, and ORG_TENANT is unset. Next action: fleet pool %s ... --tenant <tenant>", base, checkout, checkout)
+}
+
+// poolLabel inherits only within the selected tenant. Conflicting labels require
+// reconciliation, not silently rewriting kept seats to the first row's spelling.
+func poolLabel(checkout, base, tenant string) (string, error) {
+	if fleet.TenantOf(checkout) == tenant {
+		if _, label, ok := strings.Cut(fleet.RoleOf(checkout), ":"); ok && label != "" {
+			return label, nil
+		}
+	}
+	labels := map[string]bool{}
+	for _, r := range sameRepoRows(checkout) {
+		if r.Tenant != tenant {
+			continue
+		}
+		if _, label, ok := strings.Cut(r.Role, ":"); ok && label != "" {
+			labels[label] = true
+		}
+	}
+	if len(labels) > 1 {
+		return "", refuse("fleet pool: ambiguous labels for tenant %s in %s: %s; reconcile the bindings before creating seats", tenant, fleet.RolesMap(), strings.Join(sortedKeys(labels), ", "))
+	}
+	for label := range labels {
+		return label, nil
+	}
+	return base, nil
 }
 
 // pooler is one `fleet pool` run: what it knows before the loop, what it did.
 type pooler struct {
 	checkout, base, parent, tenant string
-	rewarm                         bool
-	cmds                           []string
-	named                          map[string]string
-	worktrees                      map[string]bool
-	live                           []fleet.Rec
-	made, kept, warmed             []string
+	// label is the repo label in a seat's role. Distinct from base, which names the
+	// seat directory: the directory can be called anything, the label must match the
+	// rest of the repo's roles.map lines.
+	label              string
+	rewarm             bool
+	cmds               []string
+	named              map[string]string
+	worktrees          map[string]bool
+	live               []fleet.Rec
+	made, kept, warmed []string
 }
 
 // one creates or keeps one seat: never disturbs an occupied one, refuses a name
@@ -712,7 +777,7 @@ func (p *pooler) one(k string, i int) error {
 			return refuse("fleet pool: git worktree add %s failed: %s", path, out)
 		}
 	}
-	if err := cmdRole(path, k+":"+p.base, false, p.tenant, slot); err != nil {
+	if err := cmdRole(path, k+":"+p.label, false, p.tenant, slot); err != nil {
 		return err
 	}
 	if fresh {
@@ -843,12 +908,18 @@ func assignGuards(slot, path, branch string) error {
 // assignCheckout puts the seat's tree on the branch, creating it from origin when
 // it is not local, and confirms where the tree landed.
 func assignCheckout(slot, path, branch string) error {
-	rc, txt := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
+	rc, first := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
 	if rc != 0 {
-		rc, txt = gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch)
-	}
-	if rc != 0 {
-		return refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, txt)
+		// The -b fallback is only for a branch that is not local yet, so when it fails
+		// too, the first attempt's message is the one worth printing: it names the
+		// worktree already holding the branch. The fallback can only say the branch
+		// exists, which is what the first attempt just established, and reporting that
+		// instead sends the reader back to the checkout that already failed. This is the
+		// common case when a seat takes over an existing branch, because a branch already
+		// worked on this machine is local.
+		if rc2, _ := gitTry(path, gitTimeout, "checkout", "--quiet", "-b", branch, "origin/"+branch); rc2 != 0 {
+			return refuse("fleet assign: could not check out %s in %s: %s; nothing was assigned", branch, slot, first)
+		}
 	}
 	_, landed := gitTry(path, gitTimeout, "rev-parse", "--abbrev-ref", "HEAD")
 	if landed != branch {
@@ -1072,7 +1143,7 @@ func Unowned(repo string) map[string]any {
 		}
 		pairs = filtered
 	}
-	assigns := undeliveredAssigns()
+	assigns := assignsByChange()
 	host, _ := os.Hostname()
 	if host == "" {
 		host = "?"
@@ -1117,8 +1188,13 @@ func mapKeys[V any](m map[string]V) map[string]bool {
 	return out
 }
 
-// undeliveredAssigns is every assignment not yet read by a session, by (repo, branch).
-func undeliveredAssigns() map[[2]string]fleet.Rec {
+// assignsByChange is EVERY assignment record, keyed by (repo, branch).
+//
+// Named for what it returns. It was called undeliveredAssigns, whose comment claimed "not
+// yet read by a session" — but nothing here filters `delivered_to`; that filter lives in
+// the board's row builder. A caller trusting the old name would have silently dropped
+// every assignment a session had already picked up.
+func assignsByChange() map[[2]string]fleet.Rec {
 	assigns := map[[2]string]fleet.Rec{}
 	d := fleet.Path("assign")
 	ents, _ := os.ReadDir(d)

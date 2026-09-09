@@ -423,22 +423,39 @@ func writeMapLine(lines []string, same []fleet.MapRow, mapfile, checkout, tenant
 }
 
 // writeDenies merges the manifest's denies into the checkout's Claude settings and
-// writes them; returns the merged deny list. indent=2: a file a human maintains by
-// hand; do not collapse it.
-func writeDenies(existing, manifest map[string]any, settingsTarget string) ([]string, error) {
+// writes them; returns the merged deny list and the denies present in the file that the
+// manifest no longer declares. indent=2: a file a human maintains by hand; do not
+// collapse it.
+//
+// The merge is deliberate: it preserves denies a human added to settings.local.json.
+// The cost is that a deny can only ever be ADDED to a seat, so dropping one from a lane
+// manifest is a no-op against seats already roled, and a seat's permissions become a
+// high-water mark of every deny its lane ever declared. That silence produced two seats
+// of one kind, roled in one `fleet pool` run from one manifest, enforcing different
+// rules. Returning the extras does not change what is written; it lets the caller say
+// that a narrowing did not take.
+func writeDenies(existing, manifest map[string]any, settingsTarget string) (deny, extra []string, err error) {
 	perms, _ := existing["permissions"].(map[string]any)
 	if perms == nil {
 		perms = map[string]any{}
 		existing["permissions"] = perms
 	}
+	fromManifest := map[string]bool{}
+	for _, d := range fleet.Strs(manifest, "denies") {
+		fromManifest[d] = true
+	}
 	denySet := map[string]bool{}
 	for _, d := range fleet.Strs(perms, "deny") {
 		denySet[d] = true
+		if !fromManifest[d] {
+			extra = append(extra, d)
+		}
 	}
-	for _, d := range fleet.Strs(manifest, "denies") {
+	for d := range fromManifest {
 		denySet[d] = true
 	}
-	deny := sortedKeys(denySet)
+	sort.Strings(extra)
+	deny = sortedKeys(denySet)
 	denyAny := make([]any, len(deny))
 	for i, d := range deny {
 		denyAny[i] = d
@@ -446,9 +463,9 @@ func writeDenies(existing, manifest map[string]any, settingsTarget string) ([]st
 	perms["deny"] = denyAny
 	sb, _ := json.MarshalIndent(existing, "", "  ")
 	if err := os.WriteFile(settingsTarget, append(sb, '\n'), 0o644); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return deny, nil
+	return deny, extra, nil
 }
 
 func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string, manifest map[string]any, card, cfgTarget, cfgText, hooksTarget string, hooksData map[string]any, rulesTarget, settingsTarget string, existing map[string]any, mapfile string) error {
@@ -485,7 +502,7 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	if err := os.MkdirAll(filepath.Join(checkout, ".claude"), 0o755); err != nil {
 		return err
 	}
-	deny, err := writeDenies(existing, manifest, settingsTarget)
+	deny, extraDenies, err := writeDenies(existing, manifest, settingsTarget)
 	if err != nil {
 		return err
 	}
@@ -505,6 +522,12 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	note := " WARNING: no git dir found, so the generated files are NOT excluded - check before committing."
 	if excluded := excludeLocalArtifacts(checkout); excluded != "" {
 		note = " All generated files excluded via " + excluded + "."
+	}
+	// A deny the manifest dropped stays in the seat's settings, so say so: otherwise a
+	// narrowing looks applied and is not.
+	if len(extraDenies) > 0 {
+		note += fmt.Sprintf(" NOTE: %d deny(s) in this seat are not in the manifest and were kept: %s. Remove them from %s by hand to narrow this seat.",
+			len(extraDenies), strings.Join(extraDenies, ", "), fleet.LongPath(settingsTarget))
 	}
 	say("%s is now %s (manifest %s): Claude card + %d denies; Codex developer card + user hooks + %d exact command rules. Open a NEW Codex tab there, trust the project configuration, then trust the hook definitions.%s",
 		checkout, role, fleet.LongPath(filepath.Join(fleet.LanesDir(), kind, "manifest.json")), len(deny), strings.Count(rules, "prefix_rule("), note)
