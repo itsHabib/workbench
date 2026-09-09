@@ -359,3 +359,14 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - **Workaround available today:** post the bare `@claude please review` as its
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
+
+## 2026-09-09 — hook configuration was invisible to the setup check
+
+Added `fleet inspect-hooks --config <harness-json>` as an explicit, read-only
+inventory before the legacy migration dispatch boundary. Exact work-report quoted
+Claude and backslash Codex forms are recognized lexically; shell wrappers remain
+unknown. Config/command hashes and environment names allow comparison without raw
+command/credential output. No command execution, variable resolution or runtime
+claim. Regression verifies no config/state writes or command execution. Fleet race
+suite and vet pass; lint recorded with the PR. This does not repair migration or
+supply effective root/precedence/trust evidence. Full runtime proof stays separate.
