@@ -410,6 +410,24 @@ Tests now require both seat/work decision rows under unknown freshness and isola
 heartbeat files per case. Existing one-shot lock behavior remains outside this
 diagnostic fix; do not recommend it as recovery from a possibly active watcher.
 
+## 2026-09-09 — hook configuration was invisible to the setup check
+
+Added `fleet inspect-hooks --config <harness-json>` as an explicit, read-only
+inventory before the legacy migration dispatch boundary. Exact work-report quoted
+Claude and backslash Codex forms are recognized lexically; shell wrappers remain
+unknown. Config/command hashes and environment names allow comparison without raw
+command/credential output. No command execution, variable resolution or runtime
+claim. Regression verifies no config/state writes or command execution. Fleet race
+suite and vet pass; lint recorded with the PR. This does not repair migration or
+supply effective root/precedence/trust evidence. Full runtime proof stays separate.
+
+Hook inspector review round 1: null event hook arrays now refuse instead of
+looking empty; quoted Windows Program Files (x86) paths are recognized while
+unquoted parentheses and command substitution remain unknown. Added shadow-flag
+assertions and clarified unexpanded variables. JSON key-order/nil-slice cosmetic
+suggestions deferred: map order is not a protocol guarantee and empty inventory
+intentionally serializes as []. No migration or live configuration changes.
+
 
 ### 2026-09-09 — Scoped Org status returned phantom roles
 

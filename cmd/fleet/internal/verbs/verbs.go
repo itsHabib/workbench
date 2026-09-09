@@ -82,6 +82,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
                                                  record one retry-safe local assignment; does not launch a worker
   fleet status [--json]                         read-only request board; queued is not accepted or running
+  fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
@@ -132,6 +133,9 @@ func Dispatch(args []string) error {
 	}
 	if args[0] == "report" {
 		return cmdReport(args[1:])
+	}
+	if args[0] == "inspect-hooks" {
+		return cmdInspectHooks(args[1:])
 	}
 	fleet.MigrateLegacyKeys() // every entry into the substrate re-keys legacy state first
 	verb, rest := args[0], args[1:]
