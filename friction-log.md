@@ -372,3 +372,13 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - Status: fixed with real Git regression tests; the new tenant test failed on 0af6100.
   Mac Fleet race tests pass. Windows execution is delegated to the portability CI job;
   a visible-window check still needs the work machine's next real session start.
+
+### 2026-09-08 — Board accountability came from an older seat assignment
+
+- What I tried: fold Codex's review of #289 with a two-seat regression fixture.
+- What happened: a branch-wide map collapsed both assignments by filename order,
+  showing lead:old and z-old against the current holder in a-current.
+- Class: misleading-status.
+- Smallest fix: read the holder's recorded slot, verify repository/branch/slot, and
+  reject an assignment delivered to another session. Unknown holder context stays empty.
+- Status: fixed; regression failed on 925b785 before the change.

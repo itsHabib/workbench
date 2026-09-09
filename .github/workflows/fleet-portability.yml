@@ -36,6 +36,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Real Git seat identity and deny preservation
-        run: go test ./cmd/fleet/internal/verbs -run 'TestPool|TestWriteDenies' -count=1
+        run: go test ./cmd/fleet/internal/verbs -run 'TestPool|TestWriteDenies|TestAssignReports|TestUndeclaredUsesHolderAssignment' -count=1
       - name: Watcher tests (Windows includes process flags, not visual proof)
         run: go test ./cmd/fleet/internal/watch -count=1

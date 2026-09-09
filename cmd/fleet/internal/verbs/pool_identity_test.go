@@ -148,3 +148,12 @@ func TestAssignReportsHoldingWorktree(t *testing.T) {
 		t.Fatal("refused assignment changed seat branch")
 	}
 }
+
+func TestPoolAncestorDoesNotHideSiblingAmbiguity(t *testing.T) {
+	repo, a, b := poolFixture(t)
+	poolMap(t, filepath.Dir(repo)+" inherited lead:parent", a+" first worker:mono", b+" second worker:mono")
+	_, err := poolTenant("", repo, "Mono")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ancestor hid tenant ambiguity: %v", err)
+	}
+}

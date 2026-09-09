@@ -692,8 +692,9 @@ func poolTenant(tenant, checkout, base string) (string, error) {
 	if tenant != "" {
 		return tenant, nil
 	}
-	if tenant = fleet.TenantOf(checkout); tenant != "" {
-		return tenant, nil
+	role, inherited, _ := fleet.MapRowsFor(checkout)
+	if role != "" && inherited != "" {
+		return inherited, nil
 	}
 	seen := map[string]bool{}
 	for _, r := range sameRepoRows(checkout) {
@@ -704,6 +705,9 @@ func poolTenant(tenant, checkout, base string) (string, error) {
 	}
 	for t := range seen {
 		return t, nil
+	}
+	if inherited != "" {
+		return inherited, nil
 	}
 	if tenant = os.Getenv("ORG_TENANT"); tenant != "" {
 		return tenant, nil

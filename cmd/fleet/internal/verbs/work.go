@@ -347,7 +347,6 @@ func evidenceState(row WorkRow, rid, branch, rel, state string) string {
 // when there is one.
 func undeclaredRows(declared map[string]bool) []WorkRow {
 	var rows []WorkRow
-	assigns := assignsByChange()
 	for _, l := range leaseRows() {
 		key := fleet.S(l, "key")
 		if fleet.B(l, "occupancy") || fleet.IsResource(key) || declared[key] {
@@ -362,7 +361,7 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 		repo, branch := fleet.S(parts, "repo"), fleet.S(parts, "branch")
 		row := WorkRow{"change": branch, "repo": repo, "relationship": nil, "for": nil, "by": nil,
 			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil}
-		if a := assigns[[2]string{repo, branch}]; a != nil {
+		if a := holderAssignment(repo, branch, sid); a != nil {
 			row["for"] = nilIfEmpty(fleet.S(a, "for"))
 			row["by"] = nilIfEmpty(fleet.S(a, "by"))
 			row["slot"] = nilIfEmpty(fleet.S(a, "slot"))
@@ -371,6 +370,24 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// holderAssignment reads the holder's seat, never a branch-wide collapse of
+// assignments left behind in other seats. Another session's delivery is stale
+// context even when the seat and branch have since been reused.
+func holderAssignment(repo, branch, sid string) fleet.Rec {
+	slot := fleet.S(fleet.SessionRecord(sid), "slot")
+	if slot == "" {
+		return nil
+	}
+	a := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(slot)+".json"))
+	if fleet.S(a, "repo") != repo || fleet.S(a, "branch") != branch || fleet.S(a, "slot") != slot {
+		return nil
+	}
+	if recipient := fleet.S(a, "delivered_to"); recipient != "" && recipient != sid {
+		return nil
+	}
+	return a
 }
 
 // WorkAttention is the set of work states a hub must decide something about.

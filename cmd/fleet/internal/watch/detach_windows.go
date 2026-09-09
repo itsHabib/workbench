@@ -18,7 +18,6 @@ import (
 // that means "console application, no window"; it is documented as invalid combined
 // with DETACHED_PROCESS, so this replaces it rather than adding to it.
 func detach(cmd *exec.Cmd) {
-	const createNewProcessGroup = 0x00000200
 	const createNoWindow = 0x08000000
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | createNoWindow}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
 }
