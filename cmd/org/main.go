@@ -1144,6 +1144,7 @@ func cmdStatus(e *env, args []string) error {
 		return err
 	}
 	rows := make([]render.Row, 0, len(pairs))
+	now := time.Now()
 	for _, p := range pairs {
 		records, state, err := h.Load(p[0], p[1])
 		if err != nil {
@@ -1153,7 +1154,7 @@ func cmdStatus(e *env, args []string) error {
 		if len(records) == 0 {
 			continue
 		}
-		rows = append(rows, render.NewRow(state, time.Now()))
+		rows = append(rows, render.NewRow(state, now))
 	}
 	if s.asJSON {
 		return printJSON(e, rows)
