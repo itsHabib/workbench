@@ -40,8 +40,13 @@ plan() { say "  [$mode] $*"; }
 
 rollback() {
   for f in "$claude_settings" "$codex_hooks"; do
-    latest="$(ls -1t "$f".bak-* 2>/dev/null | head -1 || true)"
-    if [ -z "$latest" ]; then say "no backup for $f; nothing to restore"; continue; fi
+    # Only backups THIS script wrote, i.e. `.bak-` plus the $stamp shape. `.bak-*` also
+    # matches an unrelated sibling a person left beside the file — `settings.json.bak-env`
+    # is a real example — and restoring one of those over live harness config is a silent
+    # loss of whatever else it did not contain. A restore target should be a file the tool
+    # can prove it created.
+    latest="$(ls -1t "$f".bak-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9] 2>/dev/null | head -1 || true)"
+    if [ -z "$latest" ]; then say "no backup written by this script for $f; nothing to restore"; continue; fi
     say "restore $latest -> $f"
     cp "$latest" "$f"
   done

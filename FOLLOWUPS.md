@@ -524,6 +524,25 @@ same bar workbench-mcp cleared. Evaluate then; not before.
   budget. Empty telemetry reason/out strings remain a compatibility deferral:
   current consumers normalize them identically to null/absent fields.
 
+## Fleet #289 — residual after the capped review rounds
+
+Code head: `b16c52387fcaadf35a63065c36845ba3aa74e6ab`. The Mac review used the
+initial panel plus two fix rounds; do not start a fourth panel cycle for these nits.
+
+- **Diagnostic only: duplicate extra denies.** Copilot identified, and Claude confirmed,
+  that manually duplicated entries in settings.local.json can appear twice in the
+  retained-extra NOTE. `writeDenies` deduplicates the actual written permissions through
+  `denySet`, so enforcement is unchanged and the resulting file is normalized. A future
+  small change can deduplicate `extra` too, with a duplicate-input regression. Deferred
+  under the review cap rather than changing enforcement or claiming the finding vanished.
+- **Repeated roles.map reads.** Tenant and label resolution independently scan bindings.
+  Consolidating one validated snapshot may simplify a later pool transaction change;
+  this PR does not claim atomicity against concurrent edits to all role bindings.
+
+No residual acceptance or merge authority is recorded here. The merge decision still
+belongs to the operator's governed path. Windows visible-window acceptance and effective
+hook migration remain separate from the green portability tests.
+
 ## Fleet task coordination residuals (PR #288, 2026-09-08)
 
 Final panel reviewed code head `9a243af21bd7f72f94e5c5af0e7bad0e4d60b1fd`.

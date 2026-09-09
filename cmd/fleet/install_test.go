@@ -67,3 +67,30 @@ func TestInstallerRemovesOnlyFleetShadowHooks(t *testing.T) {
 		t.Fatal(first)
 	}
 }
+
+func TestInstallerRollbackIgnoresUnrelatedBackup(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "settings.json")
+	for name, body := range map[string]string{p: "current", p + ".bak-20260908-120000": "expected", p + ".bak-env": "unrelated"} {
+		if err := os.WriteFile(name, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := exec.Command(bash, "install.sh", "--rollback")
+	c.Env = append(os.Environ(), "HOME="+root, "FLEET_HOME="+filepath.Join(root, "fleet"))
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("rollback: %v %s", err, out)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil || string(got) != "expected" {
+		t.Fatalf("restored=%q err=%v", got, err)
+	}
+}

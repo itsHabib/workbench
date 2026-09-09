@@ -372,6 +372,14 @@ func evidenceState(row WorkRow, rid, branch, rel, state string) string {
 
 // undeclaredRows is every branch a session holds that no row declares: undeclared
 // while the holder lives, dead once it does not.
+//
+// `undeclared` means no ownership ROW exists, which is not the same as nobody being
+// accountable. `fleet assign --for <role>` records the accountable role, the dispatcher,
+// the seat and the brief in the assignment; reading none of that made the board print
+// "for no one accountable" about a change whose own assignment named the role — two
+// records fleet wrote, disagreeing. The STATE stays `undeclared`, which was right: a seat
+// assignment is not an ownership declaration. The columns now come from the assignment
+// when there is one.
 func undeclaredRows(declared map[string]bool) []WorkRow {
 	var rows []WorkRow
 	for _, l := range leaseRows() {
@@ -385,10 +393,36 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 			state = "dead" // a dead holder nobody declared is still a dead holder
 		}
 		parts := fleet.KeyParts(key)
-		rows = append(rows, WorkRow{"change": fleet.S(parts, "branch"), "repo": fleet.S(parts, "repo"), "relationship": nil, "for": nil, "by": nil,
-			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil})
+		repo, branch := fleet.S(parts, "repo"), fleet.S(parts, "branch")
+		row := WorkRow{"change": branch, "repo": repo, "relationship": nil, "for": nil, "by": nil,
+			"at": l["at"], "due": nil, "slot": nil, "brief": nil, "key": key, "hands": sid, "state": state, "head": nil, "done_at": nil}
+		if a := holderAssignment(repo, branch, sid); a != nil {
+			row["for"] = nilIfEmpty(fleet.S(a, "for"))
+			row["by"] = nilIfEmpty(fleet.S(a, "by"))
+			row["slot"] = nilIfEmpty(fleet.S(a, "slot"))
+			row["brief"] = nilIfEmpty(fleet.S(a, "brief"))
+		}
+		rows = append(rows, row)
 	}
 	return rows
+}
+
+// holderAssignment reads the holder's seat, never a branch-wide collapse of
+// assignments left behind in other seats. Another session's delivery is stale
+// context even when the seat and branch have since been reused.
+func holderAssignment(repo, branch, sid string) fleet.Rec {
+	slot := fleet.S(fleet.SessionRecord(sid), "slot")
+	if slot == "" {
+		return nil
+	}
+	a := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(slot)+".json"))
+	if fleet.S(a, "repo") != repo || fleet.S(a, "branch") != branch || fleet.S(a, "slot") != slot {
+		return nil
+	}
+	if recipient := fleet.S(a, "delivered_to"); recipient != "" && recipient != sid {
+		return nil
+	}
+	return a
 }
 
 // WorkAttention is the set of work states a hub must decide something about.
