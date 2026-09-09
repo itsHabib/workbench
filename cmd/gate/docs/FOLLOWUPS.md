@@ -86,10 +86,10 @@ wiring `gate` into the merge tail.
   it passes — the 3-cycle-cap-in-prose hole rebuilt one rung down. Persist block/park as sticky (a
   later pass can't silently overturn one without recording why); cap or record re-runs.
 
-- [ ] **Feed the auto-judge raw evidence, not just local headlines.**
-  `judge -auto` only sees the local model's extracted headlines, not the raw comment bodies already
-  recorded in state — so "premium judges from artifacts" is judging a lossy summary. Include the raw
-  bodies in `judgeContext`.
+- [x] **Feed the auto-judge raw evidence, not just local headlines.**
+  `judgeContext` now includes bounded, attributed source comments and uses unambiguous file
+  references to prioritize recorded diff context. Omitted comments and unavailable code are
+  explicit; raw prose does not supply panel authority or override a verifier block.
 
 - [ ] **Add a park notification channel.**
   5 of 7 real PRs park, with no notification, so they park silently. Emit something on park
