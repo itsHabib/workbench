@@ -359,3 +359,16 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - **Workaround available today:** post the bare `@claude please review` as its
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
+
+### 2026-09-08 — Pool inherited the first sibling's tenant and label
+
+- What I tried: review work-machine Fleet #289 on macOS using temporary Git worktrees.
+- What happened: two bindings of one repository in different tenants made poolTenant
+  silently select the first row. The same first-row lookup could supply a label from a
+  different tenant, or conceal conflicting labels before a pool top-up re-roled seats.
+- Class: wrong-default.
+- Smallest fix: inherit only an unambiguous tenant, filter sibling labels by the selected
+  tenant, and refuse conflicting labels before creating seats or rewriting roles.map.
+- Status: fixed with real Git regression tests; the new tenant test failed on 0af6100.
+  Mac Fleet race tests pass. Windows execution is delegated to the portability CI job;
+  a visible-window check still needs the work machine's next real session start.
