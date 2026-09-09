@@ -1139,24 +1139,29 @@ func cmdStatus(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
-	pairs, err := h.Roles()
+	pairs, err := h.RolesForTenant(s.tenant)
 	if err != nil {
 		return err
 	}
-	if len(pairs) == 0 {
-		fmt.Fprintln(e.stdout, "no roles chartered")
-		return nil
-	}
 	rows := make([]render.Row, 0, len(pairs))
+	now := time.Now()
 	for _, p := range pairs {
-		_, state, err := h.Load(p[0], p[1])
+		records, state, err := h.Load(p[0], p[1])
 		if err != nil {
 			return err
 		}
-		rows = append(rows, render.NewRow(state, time.Now()))
+		// A refused first write can leave a directory and lock, but no role.
+		if len(records) == 0 {
+			continue
+		}
+		rows = append(rows, render.NewRow(state, now))
 	}
 	if s.asJSON {
 		return printJSON(e, rows)
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(e.stdout, "no roles chartered")
+		return nil
 	}
 	fmt.Fprint(e.stdout, render.Board(rows))
 	return nil

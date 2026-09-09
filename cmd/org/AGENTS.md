@@ -72,6 +72,11 @@ system name there is Baton; this binary is its first runtime slice.
   already hold it (an out-of-scope hold is named as drift), and when nothing
   covers it, says so with the fix. Read-only; safe to run on sight of new
   work.
+- **`status`** lists roles only in the configured tenant (`-tenant`, then
+  `ORG_TENANT`, then `mh`). Directories with no chain records are not roles;
+  broken chains in that tenant still fail visibly. JSON always returns an
+  array, including `[]` when no roles are chartered. To inspect another tenant,
+  select it explicitly.
 - **`sweep`** is the continuity instrument: it REPLAYS every chain in the
   configured tenant through the kernel and counts what happened — claims
   opened vs closed, obligations
