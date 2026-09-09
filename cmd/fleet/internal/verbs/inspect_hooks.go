@@ -56,7 +56,7 @@ func cmdInspectHooks(args []string) error {
 func inspectHookConfig(raw []byte) ([]hookDescription, error) {
 	var config struct {
 		Hooks map[string][]struct {
-			Hooks []struct {
+			Hooks []*struct {
 				Type    string `json:"type"`
 				Command string `json:"command"`
 			} `json:"hooks"`
@@ -82,18 +82,25 @@ func inspectHookConfig(raw []byte) ([]hookDescription, error) {
 			if group.Hooks == nil {
 				return nil, refuse("inspect hooks: group missing hooks array")
 			}
-			rows = append(rows, describeHookGroup(event, gi, group.Hooks)...)
+			groupRows, err := describeHookGroup(event, gi, group.Hooks)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, groupRows...)
 		}
 	}
 	return rows, nil
 }
 
-func describeHookGroup(event string, gi int, hooks []struct {
+func describeHookGroup(event string, gi int, hooks []*struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
-}) []hookDescription {
+}) ([]hookDescription, error) {
 	rows := []hookDescription{}
 	for hi, hook := range hooks {
+		if hook == nil {
+			return nil, refuse("inspect hooks: null hook entry")
+		}
 		row := describeHookCommand(hook.Command)
 		row.Event, row.Group, row.Index = event, gi, hi
 		if hook.Type != "command" {
@@ -101,7 +108,7 @@ func describeHookGroup(event string, gi int, hooks []struct {
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
 }
 
 func describeHookCommand(command string) hookDescription {

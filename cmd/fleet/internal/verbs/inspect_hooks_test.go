@@ -89,7 +89,7 @@ func TestInspectHooksDoesNotMigrateOrExecute(t *testing.T) {
 }
 
 func TestInspectHookConfigRefusesInvalidShape(t *testing.T) {
-	for _, raw := range []string{`{`, `null`, `{}`, `{"hooks":[]}`, `{"hooks":{"Start":null}}`, `{"hooks":{"Start":[{}]}}`} {
+	for _, raw := range []string{`{`, `null`, `{}`, `{"hooks":[]}`, `{"hooks":{"Start":null}}`, `{"hooks":{"Start":[{}]}}`, `{"hooks":{"Start":[{"hooks":[null]}]}}`} {
 		if _, err := inspectHookConfig([]byte(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
