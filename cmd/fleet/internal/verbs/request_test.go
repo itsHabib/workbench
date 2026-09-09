@@ -536,3 +536,23 @@ func TestStatusRefusesNonStringRequestID(t *testing.T) {
 		t.Fatalf("non-string request_id read as complete: err=%v packet=%v", err, packet)
 	}
 }
+
+func TestReplayNeverMatchesADistinctRefByCase(t *testing.T) {
+	// The judge's counterexample: on a case-sensitive filesystem Nav-Fix and
+	// nav-fix are two branches. An ID recorded for one must not replay against
+	// the other. Exercised on sameRequest directly so it holds on every platform.
+	stored := fleet.Rec{"request_id": "x", "repo": "r", "change": "Nav-Fix", "requested": "Nav-Fix", "worker": "w", "for": "l", "brief": "b", "relationship": "implementation"}
+	other := fleet.Rec{"request_id": "x", "repo": "r", "change": "nav-fix", "requested": "nav-fix", "worker": "w", "for": "l", "brief": "b", "relationship": "implementation"}
+	if sameRequest(stored, other, true) {
+		t.Fatal("an ID for Nav-Fix replayed against the distinct branch nav-fix")
+	}
+	// The deleted-branch retry: the caller's spelling is compared exactly.
+	retry := fleet.Rec{"request_id": "x", "repo": "r", "change": "nav-fix", "requested": "nav-fix", "worker": "w", "for": "l", "brief": "b", "relationship": "implementation"}
+	recorded := fleet.Rec{"request_id": "x", "repo": "r", "change": "Nav-Fix", "requested": "nav-fix", "worker": "w", "for": "l", "brief": "b", "relationship": "implementation"}
+	if !sameRequest(recorded, retry, false) {
+		t.Fatal("identical retry after branch deletion refused")
+	}
+	if sameRequest(recorded, fleet.Rec{"request_id": "x", "repo": "r", "change": "Nav-Fix", "requested": "Nav-Fix", "worker": "w", "for": "l", "brief": "b", "relationship": "implementation"}, false) {
+		t.Fatal("a differently spelled retry after deletion was accepted as the same work")
+	}
+}

@@ -34,8 +34,9 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 	// Ownership and activity are keyed by the branch as git spells it, never by the
 	// caller's spelling: on a case-insensitive filesystem two spellings would
 	// otherwise key two assignments for one branch.
-	branch = canonicalBranch(cwd(), branch)
-	wanted := fleet.Rec{"request_id": id, "repo": rid, "change": branch,
+	requested := branch
+	branch, found := canonicalBranch(cwd(), branch)
+	wanted := fleet.Rec{"request_id": id, "repo": rid, "change": branch, "requested": requested,
 		"worker": worker, "for": lead, "brief": strings.TrimSpace(brief), "relationship": "implementation"}
 	replay := false
 	err := fleet.KeyLock("dispatch", func() error {
@@ -53,7 +54,7 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 				continue
 			}
 			if fleet.S(row, "request_id") == id {
-				if err := validateReplay(row, wanted, worker); err != nil {
+				if err := validateReplay(row, wanted, worker, found); err != nil {
 					return err
 				}
 				replay = true
@@ -84,7 +85,7 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 
 // A full retained ID survives session cleanup; prefixes must still resolve
 // uniquely. No live branch or worker is required for an identical replay.
-func validateReplay(row, wanted fleet.Rec, worker string) error {
+func validateReplay(row, wanted fleet.Rec, worker string, resolved bool) error {
 	if worker != fleet.S(row, "worker") {
 		sid, err := findSession(worker)
 		if err != nil {
@@ -92,22 +93,28 @@ func validateReplay(row, wanted fleet.Rec, worker string) error {
 		}
 		wanted["worker"] = sid
 	}
-	if !sameRequest(row, wanted) {
+	if !sameRequest(row, wanted, resolved) {
 		return refuse("fleet request: request ID already has different work or recipient; inspect `fleet status`")
 	}
 	return nil
 }
 
-func sameRequest(a, b fleet.Rec) bool {
+// sameRequest is identity for a replay. The change is compared by git's spelling
+// when the caller's name resolved to a ref now — two refs that differ only by
+// case are different work on a case-sensitive filesystem — and by the caller's
+// original spelling when it did not, which is the deleted-branch retry the
+// request contract promises. Never by a case-folded match, which would let an
+// ID recorded for Nav-Fix be replayed against a distinct nav-fix.
+func sameRequest(a, b fleet.Rec, resolved bool) bool {
 	for _, key := range []string{"request_id", "repo", "worker", "for", "brief", "relationship"} {
 		if fleet.S(a, key) != fleet.S(b, key) {
 			return false
 		}
 	}
-	// The stored change is git's spelling; a retry after the branch is gone can
-	// only offer the caller's, so the same branch spelled differently by case is
-	// the same work, as it would be on the filesystem that keyed it.
-	return strings.EqualFold(fleet.S(a, "change"), fleet.S(b, "change"))
+	if resolved {
+		return fleet.S(a, "change") == fleet.S(b, "change")
+	}
+	return fleet.S(a, "requested") == fleet.S(b, "requested")
 }
 
 func createRequest(rows []fleet.Rec, wanted fleet.Rec, head string) error {
@@ -184,28 +191,28 @@ func strictDispatchRows() ([]fleet.Rec, error) {
 // canonicalBranch is the branch as git lists it. An exact match wins; else a
 // unique case-insensitive match is the same ref spelled differently; else the
 // caller's spelling stands (a branch that does not exist yet keeps its name).
-func canonicalBranch(dir, cand string) string {
+func canonicalBranch(dir, cand string) (string, bool) {
 	rc, out := gitTry(dir, gitTimeout, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 	if rc != 0 {
-		return cand
+		return cand, false
 	}
 	match := ""
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
 		if name == cand {
-			return cand
+			return cand, true
 		}
 		if name != "" && strings.EqualFold(name, cand) {
 			if match != "" {
-				return cand // two refs differ only by case: git itself is ambiguous here
+				return cand, true // two refs differ only by case: the caller's exact name stands
 			}
 			match = name
 		}
 	}
 	if match != "" {
-		return match
+		return match, true
 	}
-	return cand
+	return cand, false
 }
 
 func dispatchRequest(args []string) error {
