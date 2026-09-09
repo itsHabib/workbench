@@ -211,3 +211,5 @@ autonomously would be smuggling a policy decision out of a proof; that call is t
   exit-3 contract over durability.
 - [ ] **`Project` / `Explain` can now fail on `st.List`** while projecting an awaiting escalation's
   budget (`parkedBudget`). Failing closed on a real I/O error is the chosen behaviour.
+
+- [ ] Gate review context: consider a bounded omitted-comment identity summary. The current whole-entry first-fit selection preserves source artifact IDs and original indices on every included comment, labels reverse recorded order, and explicitly counts omissions; gaps must not be read as resolved findings. Keep this within the existing comment budget.

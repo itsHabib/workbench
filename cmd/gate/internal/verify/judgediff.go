@@ -370,9 +370,7 @@ func renderJudgeDiffWithPaths(diff string, loci []locusRef, paths []string) stri
 		}
 	}
 
-	if !emitReviewFiles(w, paths, emitted) {
-		return w.result()
-	}
+	emitReviewFiles(w, paths, emitted)
 
 	// Tranche 2: the rest of the diff — hunks whole, and the preface alone for a
 	// file that carries none (binary, mode-only, rename-only, submodule), so
@@ -396,7 +394,7 @@ func renderJudgeDiffWithPaths(diff string, loci []locusRef, paths []string) stri
 	return w.result()
 }
 
-func emitReviewFiles(w *diffWriter, paths []string, emitted map[[2]int]bool) bool {
+func emitReviewFiles(w *diffWriter, paths []string, emitted map[[2]int]bool) {
 	indices := make(map[string]int)
 	for i, f := range w.files {
 		indices[f.path] = i
@@ -406,24 +404,20 @@ func emitReviewFiles(w *diffWriter, paths []string, emitted map[[2]int]bool) boo
 		if !ok {
 			continue
 		}
-		if !emitReviewHunks(w, fi, emitted) {
-			return false
-		}
+		emitReviewHunks(w, fi, emitted)
 	}
-	return true
 }
 
-func emitReviewHunks(w *diffWriter, fi int, emitted map[[2]int]bool) bool {
+func emitReviewHunks(w *diffWriter, fi int, emitted map[[2]int]bool) {
 	for hi, h := range w.files[fi].hunks {
 		if emitted[[2]int{fi, hi}] {
 			continue
 		}
 		if !w.emit(fi, h.render()) {
-			return false
+			continue
 		}
 		emitted[[2]int{fi, hi}] = true
 	}
-	return true
 }
 
 // citedWidth picks the per-side window width for the cited-locus tranche: full

@@ -2,6 +2,7 @@ package verify
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -99,5 +100,81 @@ func TestNewestReviewPathsPrecedeOlderOversizedContext(t *testing.T) {
 	ctx := renderJudgeDiffWithPaths(diff, nil, paths)
 	if !strings.Contains(ctx, "+preserve_authored_work()") || !strings.Contains(ctx, diffTruncated) {
 		t.Fatal("older context hid the latest reviewed code or its budget omission")
+	}
+}
+
+func TestReviewPathTokensAreExactAndDeduplicated(t *testing.T) {
+	comments := []recordedReview{{body: "`course.json` `component.tsx` `guard.py.backup` `course.json:12` `dir/course.json` `guard.py:43–51`"}}
+	files := []diffFile{{path: "dir/course.json"}, {path: "course.js"}, {path: "component.tsx"}, {path: "component.ts"}, {path: "guard.py"}}
+	paths, missing := reviewDiffPaths(comments, files)
+	if strings.Join(paths, ",") != "dir/course.json,component.tsx,guard.py" || len(missing) != 0 {
+		t.Fatalf("paths=%v missing=%v", paths, missing)
+	}
+	if hints := reviewPathHints([]recordedReview{{body: "`guard.py.backup`"}}); len(hints) != 0 {
+		t.Fatalf("arbitrary suffix accepted: %v", hints)
+	}
+}
+
+func TestOversizedRequestedHunkDoesNotHideLaterGuard(t *testing.T) {
+	diff := "diff --git a/large.py b/large.py\n--- /dev/null\n+++ b/large.py\n@@ -0,0 +1,2000 @@\n" + strings.Repeat("+oversized requested source padding\n", 2000)
+	diff += "diff --git a/guard.py b/guard.py\n--- /dev/null\n+++ b/guard.py\n@@ -0,0 +1,1 @@\n+preserve_authored_work()\n"
+	paths, _ := reviewDiffPaths([]recordedReview{{body: "`large.py` then `guard.py`"}}, parseUnifiedDiff(diff))
+	got := renderJudgeDiffWithPaths(diff, nil, paths)
+	if !strings.Contains(got, "+preserve_authored_work()") || !strings.Contains(got, diffTruncated) {
+		t.Fatal("oversized request hid a later guard or its omission marker")
+	}
+}
+
+func TestReviewPathDiagnosticsStayBounded(t *testing.T) {
+	var body strings.Builder
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(&body, "`missing%d.py` ", i)
+	}
+	diff := "diff --git a/guard.py b/guard.py\n--- /dev/null\n+++ b/guard.py\n@@ -0,0 +1,1 @@\n+preserve_authored_work()\n"
+	a := reviewEvidence(t, map[string]any{"diff": diff, "comments": []any{map[string]string{"body": body.String()}}})
+	ctx, err := judgeContext([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ctx) > reviewPathMetadataCap+2048 || !strings.Contains(ctx, "entries omitted") || !strings.Contains(ctx, "+preserve_authored_work()") {
+		t.Fatalf("diagnostic bound or substantive evidence lost: %d bytes", len(ctx))
+	}
+}
+
+func TestNonObjectEvidenceDoesNotBreakReviewDecoding(t *testing.T) {
+	for _, raw := range []string{`[]`, `null`, `"other evidence"`} {
+		_, err := recordedReviewComments([]state.Artifact{{Kind: state.KindEvidence, Body: json.RawMessage(raw)}})
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{`{"comments":5}`, `{"comments":[{"body":5}]}`, `{`} {
+		_, err := recordedReviewComments([]state.Artifact{{Kind: state.KindEvidence, Body: json.RawMessage(raw)}})
+		if err == nil {
+			t.Fatalf("invalid review evidence accepted: %s", raw)
+		}
+	}
+}
+
+func TestUnreadableDiffIsExplicit(t *testing.T) {
+	a := reviewEvidence(t, map[string]any{"diff": 42})
+	ctx, err := judgeContext([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ctx, "recorded diff unavailable (evd_reviews): decode error") {
+		t.Fatal("unreadable diff disappeared")
+	}
+}
+
+func TestExplicitReviewLineWindowsOversizedHunk(t *testing.T) {
+	diff := "diff --git a/guard.py b/guard.py\n--- /dev/null\n+++ b/guard.py\n@@ -0,0 +1,2001 @@\n" + strings.Repeat("+oversized requested source padding\n", 2000) + "+preserve_authored_work()\n"
+	a := reviewEvidence(t, map[string]any{"diff": diff, "comments": []any{map[string]string{"body": "Check `guard.py:2001`."}}})
+	ctx, err := judgeContext([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ctx, "+preserve_authored_work()") || !strings.Contains(ctx, diffElision) {
+		t.Fatal("explicit review line was lost inside oversized hunk")
 	}
 }
