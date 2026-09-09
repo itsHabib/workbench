@@ -432,8 +432,8 @@ func LastWordLine(key, branch, sid string) string {
 // decision (seats and ownership rows), and what changed since its last prompt.
 func BoardLines(sincePrompt float64) []string {
 	hb := ReadJSON(Path("watch", "heartbeat.json"))
-	if hb == nil {
-		return []string{"[fleet] no board: the watcher has never ticked here (`fleet watch --once` to see one now)"}
+	if hb == nil || F(hb, "at") <= 0 {
+		return []string{"[fleet] board freshness unknown: heartbeat missing or incomplete (`fleet watch --once` to refresh now; `fleet watch` in a separate persistent terminal for continuous updates)"}
 	}
 	age := Now() - F(hb, "at")
 	iv := F(hb, "interval")
@@ -442,7 +442,7 @@ func BoardLines(sincePrompt float64) []string {
 	}
 	var lines []string
 	if age > 2*iv {
-		lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: the watcher is not ticking (any SessionStart revives it)", FmtAge(age)))
+		lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: no recent watcher heartbeat (`fleet watch --once` to refresh now; `fleet watch` in a separate persistent terminal for continuous updates; SessionStart also attempts revival)", FmtAge(age)))
 	}
 	rows, _ := readAny(Path("watch", "board.json")).([]any)
 	need, fine := seatAttention(rows)
