@@ -16,6 +16,9 @@ func TestHookCommandRecognition(t *testing.T) {
 		{`ORG_STATE="$HOME/dev/org-work/state" python3 "$HOME/.fleet/hook.py"`, "legacy-python", "claude"},
 		{`C:\Tools\python.exe C:\Users\Example\.fleet\codex-adapter.py`, "legacy-python", "codex"},
 		{`"C:\Program Files\fleet.exe" hook codex --shadow`, "native-fleet", "codex"},
+		{`"C:\Program Files (x86)\fleet.exe" hook codex`, "native-fleet", "codex"},
+		{`(fleet hook codex)`, "unknown", ""},
+		{`"C:\$(touch marker)\fleet.exe" hook codex`, "unknown", ""},
 		{`TOKEN=do-not-print /opt/fleet hook claude`, "native-fleet", "claude"},
 		{`sh -c 'fleet hook claude'`, "unknown", ""},
 		{`fleet hook claude; touch /tmp/no`, "unknown", ""},
@@ -86,9 +89,22 @@ func TestInspectHooksDoesNotMigrateOrExecute(t *testing.T) {
 }
 
 func TestInspectHookConfigRefusesInvalidShape(t *testing.T) {
-	for _, raw := range []string{`{`, `null`, `{}`, `{"hooks":[]}`, `{"hooks":{"Start":[{}]}}`} {
+	for _, raw := range []string{`{`, `null`, `{}`, `{"hooks":[]}`, `{"hooks":{"Start":null}}`, `{"hooks":{"Start":[{}]}}`} {
 		if _, err := inspectHookConfig([]byte(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
+		}
+	}
+}
+
+func TestHookShadowFlag(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		command := `"C:\Program Files (x86)\fleet.exe" hook codex`
+		if shadow {
+			command += " --shadow"
+		}
+		got := describeHookCommand(command)
+		if got.Kind != "native-fleet" || got.Shadow != shadow {
+			t.Fatalf("shadow=%v: %+v", shadow, got)
 		}
 	}
 }

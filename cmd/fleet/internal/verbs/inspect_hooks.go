@@ -75,6 +75,9 @@ func inspectHookConfig(raw []byte) ([]hookDescription, error) {
 	sort.Strings(events)
 	rows := []hookDescription{}
 	for _, event := range events {
+		if config.Hooks[event] == nil {
+			return nil, refuse("inspect hooks: event missing hooks array")
+		}
 		for gi, group := range config.Hooks[event] {
 			if group.Hooks == nil {
 				return nil, refuse("inspect hooks: group missing hooks array")
@@ -147,17 +150,21 @@ func hookBase(s string) string {
 
 // A conservative literal-token recognizer, not a shell parser. Backslashes stay
 // literal for Windows paths; escapes and shell control syntax are unsupported.
+// Bare $VAR text remains unexpanded: recognition is lexical, not shell evaluation.
 func hookWords(command string) ([]string, bool) {
 	if strings.Contains(command, `\"`) || strings.Contains(command, `\'`) {
 		return nil, false
 	}
-	if strings.ContainsAny(command, "\n\r;&|<>`()") || strings.Contains(command, "${") || strings.Contains(command, "$'") {
+	if strings.ContainsAny(command, "\n\r;&|<>`") || strings.Contains(command, "$(") || strings.Contains(command, "${") || strings.Contains(command, "$'") {
 		return nil, false
 	}
 	words := []string{}
 	var word strings.Builder
 	var quote rune
 	for _, c := range command {
+		if quote == 0 && strings.ContainsRune("()", c) {
+			return nil, false
+		}
 		if c == '"' || c == '\'' {
 			if quote == 0 {
 				quote = c

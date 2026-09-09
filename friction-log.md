@@ -370,3 +370,10 @@ command/credential output. No command execution, variable resolution or runtime
 claim. Regression verifies no config/state writes or command execution. Fleet race
 suite and vet pass; lint recorded with the PR. This does not repair migration or
 supply effective root/precedence/trust evidence. Full runtime proof stays separate.
+
+Hook inspector review round 1: null event hook arrays now refuse instead of
+looking empty; quoted Windows Program Files (x86) paths are recognized while
+unquoted parentheses and command substitution remain unknown. Added shadow-flag
+assertions and clarified unexpanded variables. JSON key-order/nil-slice cosmetic
+suggestions deferred: map order is not a protocol guarantee and empty inventory
+intentionally serializes as []. No migration or live configuration changes.
