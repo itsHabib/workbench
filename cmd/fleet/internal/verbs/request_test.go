@@ -504,3 +504,35 @@ func TestStatusRefusesDamagedRequestEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestReplaySurvivesBranchDeletionUnderCallerSpelling(t *testing.T) {
+	repo, sid := requestFixture(t)
+	runGit(t, repo, "branch", "Nav-Fix")
+	if err := CmdRequest("nav-fix", "case-3", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "branch", "-D", "Nav-Fix")
+	if err := CmdRequest("nav-fix", "case-3", sid, "lead", "fix it"); err != nil {
+		t.Fatalf("identical retry after branch deletion refused: %v", err)
+	}
+}
+
+func TestStatusRefusesNonStringRequestID(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := CmdRequest("task", "one", sid, "lead", "fix it"); err != nil {
+		t.Fatal(err)
+	}
+	row := fleet.ReadJSON(requestFile(repo))
+	row["request_id"] = 7.0
+	if err := fleet.WriteJSON(requestFile(repo), row); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	Out = &b
+	err := Dispatch([]string{"status", "--json"})
+	var packet map[string]any
+	_ = json.Unmarshal(b.Bytes(), &packet)
+	if err == nil || packet["complete"] != false {
+		t.Fatalf("non-string request_id read as complete: err=%v packet=%v", err, packet)
+	}
+}

@@ -99,12 +99,15 @@ func validateReplay(row, wanted fleet.Rec, worker string) error {
 }
 
 func sameRequest(a, b fleet.Rec) bool {
-	for _, key := range []string{"request_id", "repo", "change", "worker", "for", "brief", "relationship"} {
+	for _, key := range []string{"request_id", "repo", "worker", "for", "brief", "relationship"} {
 		if fleet.S(a, key) != fleet.S(b, key) {
 			return false
 		}
 	}
-	return true
+	// The stored change is git's spelling; a retry after the branch is gone can
+	// only offer the caller's, so the same branch spelled differently by case is
+	// the same work, as it would be on the filesystem that keyed it.
+	return strings.EqualFold(fleet.S(a, "change"), fleet.S(b, "change"))
 }
 
 func createRequest(rows []fleet.Rec, wanted fleet.Rec, head string) error {
@@ -167,8 +170,11 @@ func strictDispatchRows() ([]fleet.Rec, error) {
 		}
 		// A request-bound row carries who it went to and when; without either it is
 		// damaged evidence, and damaged evidence must not read as a complete status.
-		if fleet.S(row, "request_id") != "" && (fleet.S(row, "worker") == "" || fleet.S(row, "for") == "" || fleet.F(row, "at") <= 0) {
-			return nil, fmt.Errorf("assignment evidence damaged: %s", entry.Name())
+		if id, present := row["request_id"]; present {
+			ids, ok := id.(string)
+			if !ok || !requestID.MatchString(ids) || fleet.S(row, "worker") == "" || fleet.S(row, "for") == "" || fleet.F(row, "at") <= 0 {
+				return nil, fmt.Errorf("assignment evidence damaged: %s", entry.Name())
+			}
 		}
 		rows = append(rows, row)
 	}
