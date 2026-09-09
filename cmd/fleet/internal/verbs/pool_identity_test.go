@@ -141,7 +141,7 @@ func TestAssignReportsHoldingWorktree(t *testing.T) {
 	repo, a, _ := poolFixture(t)
 	branch := fleet.BranchOf(repo)
 	err := assignCheckout("seat-a", a, branch)
-	if err == nil || !strings.Contains(strings.ReplaceAll(err.Error(), "\\", "/"), strings.ReplaceAll(repo, "\\", "/")) {
+	if err == nil || !strings.Contains(fleet.NormCase(strings.ReplaceAll(err.Error(), "\\", "/")), fleet.NormCase(fleet.LongPath(repo))) {
 		t.Fatalf("missing holding checkout %s: %v", repo, err)
 	}
 	if fleet.BranchOf(a) != "" {

@@ -1,8 +1,9 @@
 package verbs
 
 import (
-	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"testing"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
 func TestUndeclaredUsesHolderAssignment(t *testing.T) {
