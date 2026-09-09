@@ -394,3 +394,26 @@ diagnostic fix; do not recommend it as recovery from a possibly active watcher.
   empty chains, explicit/environment/default tenant selection, and broken chains.
 - **Boundary:** no live directory cleanup or custody changes; this does not
   resolve Fleet work with unknown accountable roles or create roles or slots.
+
+### 2026-09-08 — Pool inherited the first sibling's tenant and label
+
+- What I tried: review work-machine Fleet #289 on macOS using temporary Git worktrees.
+- What happened: two bindings of one repository in different tenants made poolTenant
+  silently select the first row. The same first-row lookup could supply a label from a
+  different tenant, or conceal conflicting labels before a pool top-up re-roled seats.
+- Class: wrong-default.
+- Smallest fix: inherit only an unambiguous tenant, filter sibling labels by the selected
+  tenant, and refuse conflicting labels before creating seats or rewriting roles.map.
+- Status: fixed with real Git regression tests; the new tenant test failed on 0af6100.
+  Mac Fleet race tests pass. Windows execution is delegated to the portability CI job;
+  a visible-window check still needs the work machine's next real session start.
+
+### 2026-09-08 — Board accountability came from an older seat assignment
+
+- What I tried: fold Codex's review of #289 with a two-seat regression fixture.
+- What happened: a branch-wide map collapsed both assignments by filename order,
+  showing lead:old and z-old against the current holder in a-current.
+- Class: misleading-status.
+- Smallest fix: read the holder's recorded slot, verify repository/branch/slot, and
+  reject an assignment delivered to another session. Unknown holder context stays empty.
+- Status: fixed; regression failed on 925b785 before the change.
