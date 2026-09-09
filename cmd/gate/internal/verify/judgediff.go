@@ -336,7 +336,14 @@ func filePreface(f diffFile) string {
 // are never the part truncated; the remaining budget carries the rest of the diff
 // so the judge still sees the change as a whole.
 func renderJudgeDiff(diff string, loci []locusRef) string {
-	files := parseUnifiedDiff(diff)
+	return renderJudgeDiffWithPaths(diff, loci, nil)
+}
+
+func renderJudgeDiffWithPaths(diff string, loci []locusRef, paths []string) string {
+	return renderParsedJudgeDiff(parseUnifiedDiff(diff), loci, paths)
+}
+
+func renderParsedJudgeDiff(files []diffFile, loci []locusRef, paths []string) string {
 	cited := make(map[string][]int)
 	for _, l := range loci {
 		cited[l.path] = append(cited[l.path], l.line)
@@ -366,6 +373,8 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 		}
 	}
 
+	emitReviewFiles(w, paths, emitted)
+
 	// Tranche 2: the rest of the diff — hunks whole, and the preface alone for a
 	// file that carries none (binary, mode-only, rename-only, submodule), so
 	// those changes stay visible to the judge — until the budget runs out.
@@ -386,6 +395,36 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 		}
 	}
 	return w.result()
+}
+
+func emitReviewFiles(w *diffWriter, paths []string, emitted map[[2]int]bool) {
+	indices := make(map[string]int)
+	for i, f := range w.files {
+		indices[f.path] = i
+	}
+	for _, path := range paths {
+		fi, ok := indices[path]
+		if !ok {
+			continue
+		}
+		emitReviewHunks(w, fi, emitted)
+	}
+}
+
+func emitReviewHunks(w *diffWriter, fi int, emitted map[[2]int]bool) {
+	if len(w.files[fi].hunks) == 0 && !w.written[fi] {
+		w.emit(fi, "")
+		return
+	}
+	for hi, h := range w.files[fi].hunks {
+		if emitted[[2]int{fi, hi}] {
+			continue
+		}
+		if !w.emit(fi, h.render()) {
+			continue
+		}
+		emitted[[2]int{fi, hi}] = true
+	}
 }
 
 // citedWidth picks the per-side window width for the cited-locus tranche: full

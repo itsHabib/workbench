@@ -49,12 +49,15 @@ type diffBody struct {
 
 // Comment is one review comment as verifiers will consume it.
 type Comment struct {
-	ID     int64  `json:"id,omitempty"`
-	Author string `json:"author"`
-	IsBot  bool   `json:"is_bot"`
-	Path   string `json:"path,omitempty"`
-	Line   int    `json:"line,omitempty"`
-	Body   string `json:"body"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+	SubmittedAt string `json:"submitted_at,omitempty"`
+	ID          int64  `json:"id,omitempty"`
+	Author      string `json:"author"`
+	IsBot       bool   `json:"is_bot"`
+	Path        string `json:"path,omitempty"`
+	Line        int    `json:"line,omitempty"`
+	Body        string `json:"body"`
 	// CommitID is the commit the comment currently targets (GitHub re-anchors
 	// live comments as the head moves). Empty for issue-level comments, which
 	// have no commit anchor. Verifiers use it to tell a finding about the
@@ -267,8 +270,11 @@ func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]C
 }
 
 type rawComment struct {
-	ID   int64 `json:"id"`
-	User struct {
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	SubmittedAt string `json:"submitted_at"`
+	ID          int64  `json:"id"`
+	User        struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -312,22 +318,28 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	var out []Comment
 	for _, rc := range inline {
 		out = append(out, Comment{
-			ID:       rc.ID,
-			Author:   rc.User.Login,
-			IsBot:    rc.User.Type == "Bot",
-			Path:     rc.Path,
-			Line:     lineOf(rc),
-			Body:     rc.Body,
-			CommitID: rc.CommitID,
-			Resolved: resolved[rc.ID],
+			ID:          rc.ID,
+			CreatedAt:   rc.CreatedAt,
+			UpdatedAt:   rc.UpdatedAt,
+			SubmittedAt: rc.SubmittedAt,
+			Author:      rc.User.Login,
+			IsBot:       rc.User.Type == "Bot",
+			Path:        rc.Path,
+			Line:        lineOf(rc),
+			Body:        rc.Body,
+			CommitID:    rc.CommitID,
+			Resolved:    resolved[rc.ID],
 		})
 	}
 	for _, rc := range issue {
 		out = append(out, Comment{
-			ID:     rc.ID,
-			Author: rc.User.Login,
-			IsBot:  rc.User.Type == "Bot",
-			Body:   rc.Body,
+			ID:          rc.ID,
+			CreatedAt:   rc.CreatedAt,
+			UpdatedAt:   rc.UpdatedAt,
+			SubmittedAt: rc.SubmittedAt,
+			Author:      rc.User.Login,
+			IsBot:       rc.User.Type == "Bot",
+			Body:        rc.Body,
 		})
 	}
 	out = append(out, reviewBodies(reviews)...)
@@ -409,11 +421,14 @@ func reviewBodies(reviews []rawComment) []Comment {
 			continue
 		}
 		out = append(out, Comment{
-			ID:       rv.ID,
-			Author:   rv.User.Login,
-			IsBot:    rv.User.Type == "Bot",
-			Body:     rv.Body,
-			CommitID: rv.CommitID,
+			ID:          rv.ID,
+			CreatedAt:   rv.CreatedAt,
+			UpdatedAt:   rv.UpdatedAt,
+			SubmittedAt: rv.SubmittedAt,
+			Author:      rv.User.Login,
+			IsBot:       rv.User.Type == "Bot",
+			Body:        rv.Body,
+			CommitID:    rv.CommitID,
 		})
 	}
 	return out
