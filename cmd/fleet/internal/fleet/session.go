@@ -432,17 +432,21 @@ func LastWordLine(key, branch, sid string) string {
 // decision (seats and ownership rows), and what changed since its last prompt.
 func BoardLines(sincePrompt float64) []string {
 	hb := ReadJSON(Path("watch", "heartbeat.json"))
-	if hb == nil {
-		return []string{"[fleet] no board: the watcher has never ticked here (`fleet watch --once` to see one now)"}
-	}
-	age := Now() - F(hb, "at")
-	iv := F(hb, "interval")
-	if iv <= 0 {
-		iv = 60
-	}
 	var lines []string
-	if age > 2*iv {
-		lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: the watcher is not ticking (any SessionStart revives it)", FmtAge(age)))
+	freshness := "freshness unknown"
+	if F(hb, "at") <= 0 {
+		lines = append(lines, "[fleet] board freshness unknown: heartbeat missing or incomplete (`fleet watch` in a separate persistent terminal; respects the watcher lock)")
+	}
+	if F(hb, "at") > 0 {
+		age := Now() - F(hb, "at")
+		freshness = FmtAge(age) + " ago"
+		iv := F(hb, "interval")
+		if iv <= 0 {
+			iv = 60
+		}
+		if age > 2*iv {
+			lines = append(lines, fmt.Sprintf("[fleet] board is %s stale: no recent watcher heartbeat (`fleet watch` in a separate persistent terminal; respects the watcher lock; SessionStart also attempts revival)", FmtAge(age)))
+		}
 	}
 	rows, _ := readAny(Path("watch", "board.json")).([]any)
 	need, fine := seatAttention(rows)
@@ -450,9 +454,9 @@ func BoardLines(sincePrompt float64) []string {
 	needWork, fineWork := workAttention(work)
 	need = append(need, needWork...)
 	if len(need) > 0 {
-		lines = append(lines, capLine(fmt.Sprintf("[fleet] board (%s ago): %d need a decision — %s", FmtAge(age), len(need), strings.Join(need, "; "))))
+		lines = append(lines, capLine(fmt.Sprintf("[fleet] board (%s): %d need a decision — %s", freshness, len(need), strings.Join(need, "; "))))
 	} else if len(rows) > 0 || fineWork > 0 {
-		lines = append(lines, fmt.Sprintf("[fleet] board (%s ago): nothing needs a decision; %d fine, %d work rows fine", FmtAge(age), fine, fineWork))
+		lines = append(lines, fmt.Sprintf("[fleet] board (%s): nothing needs a decision; %d fine, %d work rows fine", freshness, fine, fineWork))
 	}
 	if changes := changesSince(sincePrompt); len(changes) > 0 {
 		lines = append(lines, capLine("[fleet] since your last prompt: "+strings.Join(changes, "; ")))
