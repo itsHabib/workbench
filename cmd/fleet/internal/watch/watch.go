@@ -577,9 +577,13 @@ func Serve(interval time.Duration) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = owner.Close() }()
 	if err := filelock.TryLock(owner); err != nil {
 		hb := Heartbeat()
-		return fmt.Errorf("a watcher is already ticking here (owner.lock held; heartbeat pid %d, %s ago)", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")))
+		if fleet.F(hb, "pid") <= 0 || fleet.F(hb, "at") <= 0 {
+			return fmt.Errorf("watcher lock unavailable; heartbeat unknown (missing or incomplete): %w", err)
+		}
+		return fmt.Errorf("watcher lock unavailable; last recorded heartbeat pid %d, %s ago: %w", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")), err)
 	}
 	defer func() { _ = filelock.Unlock(owner) }()
 	for {
