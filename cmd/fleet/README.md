@@ -63,7 +63,7 @@ a store the Python wrote must still satisfy. The design record is cc-skills
 | hook | `fleet hook claude` / `fleet hook codex` | reads one harness event on stdin; exit 0 allow, exit 2 deny with the reason on stderr; injects `[fleet]` context lines |
 | CLI | `fleet <verb>` | the operator's side: stop, resume, revoke, take, drop, board, work, dispatch, … |
 | MCP | `fleet mcp` | the same verbs as tools over stdio, for a hub agent to call from inside a session |
-| watcher | `fleet watch` | one per machine, read-only: folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
+| watcher | `fleet watch` | one per machine; writes only under `watch/` (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
 
 Exit codes are a load-bearing seam. Hook: 0 allow, 2 deny. Verb: 0 ok, 1 refused
 with the reason on stderr (a refusal is the substrate doing its job), 2 usage;
@@ -132,12 +132,12 @@ what changed since its last prompt injected at every UserPromptSubmit.
 
 Run `fleet` with no arguments for the full list. The groups:
 
-- **control** — `stop`, `resume`, `revoke --to`, `decide`, `undecide`, `decisions`
+- **control** — `stop`, `resume`, `revoke --to`, `decide`, `undecide`, `decisions`, `handoff`
 - **resources** — `take [--takeover]`, `drop`
 - **seats** — `pool`, `slots`, `assign`, `unassign`, `role`
 - **ownership** — `dispatch`, `work`, `reassign`, `undispatch`, `sync`
 - **evidence** — `receipt`, `receipts`, `done`, `ready`, `tier`
-- **lookup** — `who`, `unowned`, `board`, `sessions`, `leases`, `costs`, `handoff`
+- **lookup** — `who`, `unowned`, `board`, `sessions`, `leases`, `costs`
 - **telemetry** — `report`, `shadow-report`, `inspect-hooks`
 
 `fleet who <thing>` gives one answer or a loud reason there is none, never a
@@ -165,7 +165,7 @@ an unreadable session record must not be read as death.
 
 ## What is deliberately not here
 
-- No daemon owns anything. The watcher is read-only; the hook is where facts
+- No daemon owns anything. The watcher writes only its own board files; the hook is where facts
   are written; leases live in files the kernel releases on death.
 - No agent ceremony. There is no check-in, heartbeat, or status an agent must
   send. If the board needs a fact, the hook derives it from an action the agent
