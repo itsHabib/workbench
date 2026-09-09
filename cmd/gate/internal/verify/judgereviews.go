@@ -87,7 +87,7 @@ func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
 	}
 }
 
-var reviewPathPattern = regexp.MustCompile("`([^`:\r\n]+)(?::([0-9]+)(?:[-–][0-9]+)?)?`")
+var reviewPathPattern = regexp.MustCompile("`([^`:\r\n]+)(?::([0-9]+)(?:[-–]([0-9]+))?)?`")
 
 // Prose paths only select recorded diff content; they never authorize anything.
 func reviewDiffPaths(comments []recordedReview, files []diffFile) ([]string, []string) {
@@ -193,7 +193,7 @@ func reviewLineHints(comments []recordedReview, files []diffFile) []locusRef {
 	var loci []locusRef
 	seen := make(map[locusRef]bool)
 	for i := len(comments) - 1; i >= 0; i-- {
-		for _, match := range reviewPathPattern.FindAllStringSubmatch(comments[i].body, -1) {
+		for _, match := range reviewLineMatches(comments[i].body) {
 			ref, ok := resolveReviewLine(match, files)
 			if !ok || seen[ref] {
 				continue
@@ -227,4 +227,19 @@ func latestReviewTime(values ...string) time.Time {
 		}
 	}
 	return latest
+}
+
+// Expand both endpoints before deduplication so a wide cited range cannot lose
+// its far endpoint when the whole hunk does not fit the diff budget.
+func reviewLineMatches(body string) [][]string {
+	matches := reviewPathPattern.FindAllStringSubmatch(body, -1)
+	var expanded [][]string
+	for _, match := range matches {
+		expanded = append(expanded, match)
+		if match[3] == "" {
+			continue
+		}
+		expanded = append(expanded, []string{match[0], match[1], match[3]})
+	}
+	return expanded
 }

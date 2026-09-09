@@ -242,3 +242,38 @@ func TestReviewReferencesResolveWithoutExtensionRestrictions(t *testing.T) {
 		t.Fatal("absent arbitrary extension not reported")
 	}
 }
+
+func TestWideReviewRangePreservesBothEndpoints(t *testing.T) {
+	for _, separator := range []string{"-", "–"} {
+		diff := "diff --git a/large.go b/large.go\n--- /dev/null\n+++ b/large.go\n@@ -0,0 +1,3000 @@\n"
+		for i := 1; i <= 3000; i++ {
+			diff += fmt.Sprintf("+line_%d_padding_to_exceed_the_total_budget\n", i)
+		}
+		a := reviewEvidence(t, map[string]any{"diff": diff, "comments": []any{map[string]string{"body": "`large.go:10" + separator + "2000`"}}})
+		ctx, err := judgeContext([]state.Artifact{a})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"+line_10_padding", "+line_2000_padding", diffElision} {
+			if !strings.Contains(ctx, want) {
+				t.Errorf("%s range lost %s", separator, want)
+			}
+		}
+	}
+}
+
+func TestReferencedMetadataPrecedesOversizedUnreferencedDiff(t *testing.T) {
+	cases := []struct{ name, metadata string }{
+		{"image.bin", "Binary files /dev/null and b/image.bin differ\n"},
+		{"run.sh", "old mode 100644\nnew mode 100755\n"},
+		{"renamed.txt", "similarity index 100%\nrename from original.txt\nrename to renamed.txt\n"},
+	}
+	for _, tc := range cases {
+		diff := "diff --git a/large.go b/large.go\n--- /dev/null\n+++ b/large.go\n@@ -0,0 +1,3000 @@\n" + strings.Repeat("+large unreferenced padding content\n", 3000)
+		diff += fmt.Sprintf("diff --git a/%s b/%s\n%s", tc.name, tc.name, tc.metadata)
+		got := renderJudgeDiffWithPaths(diff, nil, []string{tc.name})
+		if !strings.Contains(got, tc.metadata) || !strings.Contains(got, diffTruncated) {
+			t.Fatalf("lost referenced metadata for %s", tc.name)
+		}
+	}
+}

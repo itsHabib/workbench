@@ -412,6 +412,10 @@ func emitReviewFiles(w *diffWriter, paths []string, emitted map[[2]int]bool) {
 }
 
 func emitReviewHunks(w *diffWriter, fi int, emitted map[[2]int]bool) {
+	if len(w.files[fi].hunks) == 0 && !w.written[fi] {
+		w.emit(fi, "")
+		return
+	}
 	for hi, h := range w.files[fi].hunks {
 		if emitted[[2]int{fi, hi}] {
 			continue
