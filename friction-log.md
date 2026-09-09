@@ -360,24 +360,6 @@ Second occurrence of the `#214` entry above, one failure mode further in.
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
 
-## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
-
-Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
-hint without a usable restart command. Both were present on current main.
-Missing/incomplete heartbeat now reports unknown; lock failure preserves the
-underlying error and only names a last recorded heartbeat when valid. It no
-longer claims an owner is actively ticking from lock contention alone. The
-opened lock descriptor is closed on both paths. Board hints name fleet watch in a separate persistent terminal. No new automatic
-spawn events. Tests exercise actual lock contention and absent/partial/fresh/
-stale heartbeat records; Fleet race tests, vet and lint pass. Windows desktop
-behavior and installed binary are not changed by the source fix.
-
-Review round 1: preserved attention rows when heartbeat time is unavailable and
-removed the one-shot recovery suggestion because that path bypasses owner.lock.
-Tests now require both seat/work decision rows under unknown freshness and isolate
-heartbeat files per case. Existing one-shot lock behavior remains outside this
-diagnostic fix; do not recommend it as recovery from a possibly active watcher.
-
 ## 2026-09-08 — Fleet assignment is not worker acceptance
 
 - **Observed:** dispatch stores accountability but exposes no retry identity; a
@@ -409,3 +391,38 @@ diagnostic fix; do not recommend it as recovery from a possibly active watcher.
   classifier; the actual Codex adapter already expands patches into per-file Edit
   events. A direct adapter regression now proves foreign-holder refusal and
   post-tool evidence, without duplicating parsing in the policy layer.
+
+## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
+
+Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
+hint without a usable restart command. Both were present on current main.
+Missing/incomplete heartbeat now reports unknown; lock failure preserves the
+underlying error and only names a last recorded heartbeat when valid. It no
+longer claims an owner is actively ticking from lock contention alone. The
+opened lock descriptor is closed on both paths. Board hints name fleet watch in a separate persistent terminal. No new automatic
+spawn events. Tests exercise actual lock contention and absent/partial/fresh/
+stale heartbeat records; Fleet race tests, vet and lint pass. Windows desktop
+behavior and installed binary are not changed by the source fix.
+
+Review round 1: preserved attention rows when heartbeat time is unavailable and
+removed the one-shot recovery suggestion because that path bypasses owner.lock.
+Tests now require both seat/work decision rows under unknown freshness and isolate
+heartbeat files per case. Existing one-shot lock behavior remains outside this
+diagnostic fix; do not recommend it as recovery from a possibly active watcher.
+
+
+### 2026-09-09 — Scoped Org status returned phantom roles
+
+- **What I tried:** collect the personal tenant with `org status -tenant mh -json`
+  for the Fleet supervisor board.
+- **What happened:** status scanned every tenant and emitted two all-empty role
+  rows from unrelated directories containing only a lock. Refused first writes
+  can leave those directories before a charter chain exists. The supervisor
+  correctly refused to treat the malformed source as a complete observation.
+- **Class:** `tool-gap`.
+- **Fix:** status enumerates only the configured tenant, omits zero-record
+  chains, and emits `[]` for an empty JSON board. Parse and kernel failures
+  inside that tenant remain visible. Tests cover the real refused-attach path,
+  empty chains, explicit/environment/default tenant selection, and broken chains.
+- **Boundary:** no live directory cleanup or custody changes; this does not
+  resolve Fleet work with unknown accountable roles or create roles or slots.
