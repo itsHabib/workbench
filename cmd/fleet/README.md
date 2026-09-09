@@ -1,23 +1,39 @@
 # fleet
 
-The agent-fleet substrate: one Go binary that is the harness hook for Claude Code
-and Codex, the operator's CLI, an MCP server, and a read-only per-machine watcher,
-all over one store at `~/.fleet`. It exists so an operator running several agent
-sessions can answer one question truthfully at any moment: who is working what,
-what is stuck, and what is done.
+## What this is for
 
-It is a port of the Python reference in cc-skills
-(`docs/features/agent-fleet-rules/ref/`), kept byte-compatible on purpose: store
-shapes, filenames, exit codes and refusal texts are a contract the suite pins, and
-a store the Python wrote must still satisfy. The design record is cc-skills
-`docs/features/agent-fleet-rules/SECOND-LOOK-2026-09-04.md`.
+An operator running a team of coding agents wants one thing from the machinery
+underneath them: to always know **who is working what, what is stuck, and what
+is done** — and to be told that truthfully, at the moment it changes, without
+any agent having to stop and report it. `fleet` is that machinery. It is not a
+scheduler, not a chat bus, and not a workflow engine; it is the part that makes
+ownership visible and exclusive so that leads can lead.
 
-## The idea in four rules
+The shape it serves is a hub and spokes. The operator talks to a **lead** (a
+supervisor session); the lead dispatches work to **workers** in seats it
+controls; workers talk to their lead, never to the operator. A lead is
+accountable for every row it dispatched until each is done. When the lead has
+too much, the hierarchy grows by one command: bind a second directory to a
+second lead role and `fleet reassign --for` the rows that move. Accountability
+is a column on the row, not a tree in configuration, so two leads, or a lead
+of leads, cost nothing new.
 
-- **Facts come from the hook, never from an agent.** Every session's identity,
-  branch, liveness, turn state and last word are derived from harness events.
-  Nothing is declared. An agent does not know the substrate exists until it is
-  refused or handed a `[fleet]` line.
+## The idea in five rules
+
+- **Location is identity.** A session's role is decided by the directory it was
+  launched in, resolved against `roles.map` (path → tenant, role, seat name).
+  Nothing is registered and nothing is declared: open a tab in a roled directory
+  and you are that role. A **seat** (a pooled worktree with a name) is a roled
+  directory prepared in advance, so the lead can say "put this branch in
+  `mono-finisher-2`" and the next session that opens there reads the brief,
+  gets the seat's card and denies projected into its harness settings, and
+  simply is that worker. Behavior is driven by where the agent sits, not by
+  what it is told to remember.
+- **Facts come from the hook, never from an agent.** Identity, branch,
+  liveness, turn state and last word are derived from harness events. An
+  agent does not know the substrate exists until it is refused or handed a
+  `[fleet]` line. The day-one failure this design replaces was agents being
+  asked to check in and checkpoint; they didn't, and the board lied.
 - **One holder per key.** A branch (`repo:<id>:<branch>`) is leased on first
   write; a machine resource (`slot:<name>`) is taken on purpose. A rival is
   refused with the holder's name and the exact command that stands them down.
@@ -26,11 +42,19 @@ a store the Python wrote must still satisfy. The design record is cc-skills
   Unreadable evidence is never death.
 - **The substrate learns no domain word.** Roles are data: a lane is a
   `manifest.json` (what it requires, produces, denies; its cadence; whether it
-  watches the board) plus a prose `card.md`. `fr1_test.go` fails the build if a
-  domain word appears in the Go source.
+  watches the board) plus a prose `card.md` the agent reads. `fr1_test.go`
+  fails the build if a domain word appears in the Go source. Adding a kind of
+  agent is one directory in cc-skills, not a code change here.
 - **Done is evidence.** A receipt is recorded only by a lane that produces that
   kind, from its own roled worktree, at the exact head, from a clean tree.
-  `fleet done` answers from receipts and nothing else.
+  `fleet done` answers from receipts and nothing else; a message saying "done"
+  is not done.
+
+It is a port of the Python reference in cc-skills
+(`docs/features/agent-fleet-rules/ref/`), kept byte-compatible on purpose: store
+shapes, filenames, exit codes and refusal texts are a contract the suite pins, and
+a store the Python wrote must still satisfy. The design record is cc-skills
+`docs/features/agent-fleet-rules/SECOND-LOOK-2026-09-04.md`.
 
 ## The four faces
 
