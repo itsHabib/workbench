@@ -340,7 +340,10 @@ func renderJudgeDiff(diff string, loci []locusRef) string {
 }
 
 func renderJudgeDiffWithPaths(diff string, loci []locusRef, paths []string) string {
-	files := parseUnifiedDiff(diff)
+	return renderParsedJudgeDiff(parseUnifiedDiff(diff), loci, paths)
+}
+
+func renderParsedJudgeDiff(files []diffFile, loci []locusRef, paths []string) string {
 	cited := make(map[string][]int)
 	for _, l := range loci {
 		cited[l.path] = append(cited[l.path], l.line)

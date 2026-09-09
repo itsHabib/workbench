@@ -227,3 +227,15 @@ func TestWithPermissions(t *testing.T) {
 		t.Fatalf("expected one lookup per distinct human author, asked %v", asked)
 	}
 }
+
+func TestReviewBodiesRetainSourceActivity(t *testing.T) {
+	var in []rawComment
+	err := json.Unmarshal([]byte(`[{"id":1,"user":{"login":"reviewer","type":"Bot"},"body":"review","state":"COMMENTED","created_at":"2026-09-08T01:00:00Z","updated_at":"2026-09-09T01:00:00Z","submitted_at":"2026-09-08T02:00:00Z"}]`), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := reviewBodies(in)
+	if len(out) != 1 || out[0].CreatedAt != in[0].CreatedAt || out[0].UpdatedAt != in[0].UpdatedAt || out[0].SubmittedAt != in[0].SubmittedAt {
+		t.Fatalf("source activity lost: %+v", out)
+	}
+}

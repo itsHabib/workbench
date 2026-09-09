@@ -107,11 +107,11 @@ func TestReviewPathTokensAreExactAndDeduplicated(t *testing.T) {
 	comments := []recordedReview{{body: "`course.json` `component.tsx` `guard.py.backup` `course.json:12` `dir/course.json` `guard.py:43–51`"}}
 	files := []diffFile{{path: "dir/course.json"}, {path: "course.js"}, {path: "component.tsx"}, {path: "component.ts"}, {path: "guard.py"}}
 	paths, missing := reviewDiffPaths(comments, files)
-	if strings.Join(paths, ",") != "dir/course.json,component.tsx,guard.py" || len(missing) != 0 {
+	if strings.Join(paths, ",") != "dir/course.json,component.tsx,guard.py" || len(missing) != 1 || missing[0] != "guard.py.backup: absent from recorded diff" {
 		t.Fatalf("paths=%v missing=%v", paths, missing)
 	}
-	if hints := reviewPathHints([]recordedReview{{body: "`guard.py.backup`"}}); len(hints) != 0 {
-		t.Fatalf("arbitrary suffix accepted: %v", hints)
+	if hints := reviewPathHints([]recordedReview{{body: "`guard.py.backup`"}}); len(hints) != 1 || hints[0] != "guard.py.backup" {
+		t.Fatalf("path token truncated: %v", hints)
 	}
 }
 
@@ -176,5 +176,69 @@ func TestExplicitReviewLineWindowsOversizedHunk(t *testing.T) {
 	}
 	if !strings.Contains(ctx, "+preserve_authored_work()") || !strings.Contains(ctx, diffElision) {
 		t.Fatal("explicit review line was lost inside oversized hunk")
+	}
+}
+
+func TestReviewChronologyOverridesEndpointGrouping(t *testing.T) {
+	a := reviewEvidence(t, map[string]any{"comments": []any{
+		map[string]string{"body": "latest inline `guard.py`", "created_at": "2026-09-09T03:00:00Z"},
+		map[string]string{"body": "old issue `large.py` " + strings.Repeat("x", reviewContextCap-200), "created_at": "2026-09-08T01:00:00Z"},
+		map[string]string{"body": "old review `older.py`", "submitted_at": "2026-09-08T02:00:00Z"},
+		map[string]string{"body": "legacy unknown `legacy.py`"},
+	}})
+	comments, err := recordedReviewComments([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := reviewDiffPaths(comments, []diffFile{{path: "guard.py"}, {path: "large.py"}, {path: "older.py"}, {path: "legacy.py"}})
+	if strings.Join(paths, ",") != "guard.py,older.py,large.py,legacy.py" {
+		t.Fatalf("endpoint order displaced chronology: %v", paths)
+	}
+	var b strings.Builder
+	writeRecordedReviews(&b, comments)
+	got := b.String()
+	if !strings.Contains(got, "latest inline") || !strings.Contains(got, "comments omitted") {
+		t.Fatal("new inline review lost to old endpoint text")
+	}
+	if strings.Index(got, "latest inline") > strings.Index(got, "old review") {
+		t.Fatal("new review did not receive first priority")
+	}
+}
+
+func TestReviewActivityUsesUpdatesAndPreservesUnknown(t *testing.T) {
+	a := reviewEvidence(t, map[string]any{"comments": []any{
+		map[string]string{"body": "edited review", "created_at": "2026-09-08T01:00:00Z", "updated_at": "2026-09-09T03:00:00Z"},
+		map[string]string{"body": "newer creation", "created_at": "2026-09-09T02:00:00Z"},
+		map[string]string{"body": "unknown", "created_at": "invalid"},
+	}})
+	comments, err := recordedReviewComments([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comments[2].body != "edited review" || !comments[0].timestamp.IsZero() {
+		t.Fatal("source activity or unknown time misrepresented")
+	}
+}
+
+func TestReviewReferencesResolveWithoutExtensionRestrictions(t *testing.T) {
+	names := []string{"Dockerfile", "go.mod", "go.sum", "Cargo.toml", "Makefile", "schema.proto", "infra/main.tf", "docs/a file.custom"}
+	var body, diff strings.Builder
+	diff.WriteString("diff --git a/generated.txt b/generated.txt\n--- /dev/null\n+++ b/generated.txt\n@@ -0,0 +1,2000 @@\n" + strings.Repeat("+generated content padding padding padding\n", 2000))
+	for _, name := range names {
+		fmt.Fprintf(&body, "`%s` ", name)
+		fmt.Fprintf(&diff, "diff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1,1 @@\n+guard_%s\n", name, name, name, name)
+	}
+	a := reviewEvidence(t, map[string]any{"diff": diff.String(), "comments": []any{map[string]string{"body": body.String() + "`missing.config`"}}})
+	ctx, err := judgeContext([]state.Artifact{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if !strings.Contains(ctx, "+guard_"+name) {
+			t.Errorf("lost %s", name)
+		}
+	}
+	if !strings.Contains(ctx, "missing.config: absent from recorded diff") {
+		t.Fatal("absent arbitrary extension not reported")
 	}
 }

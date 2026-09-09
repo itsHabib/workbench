@@ -1,10 +1,13 @@
 package verify
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
@@ -13,10 +16,11 @@ const reviewContextCap = 64 * 1024
 const reviewPathMetadataCap = 8 * 1024
 
 type recordedReview struct {
-	evidence string
-	index    int
-	raw      json.RawMessage
-	body     string
+	evidence  string
+	index     int
+	raw       json.RawMessage
+	body      string
+	timestamp time.Time
 }
 
 func recordedReviewComments(arts []state.Artifact) ([]recordedReview, error) {
@@ -25,7 +29,7 @@ func recordedReviewComments(arts []state.Artifact) ([]recordedReview, error) {
 		if a.Kind != state.KindEvidence {
 			continue
 		}
-		if json.Valid(a.Body) && !strings.HasPrefix(strings.TrimSpace(string(a.Body)), "{") {
+		if json.Valid(a.Body) && !bytes.HasPrefix(bytes.TrimSpace(a.Body), []byte("{")) {
 			continue
 		}
 		var evidence struct {
@@ -40,6 +44,7 @@ func recordedReviewComments(arts []state.Artifact) ([]recordedReview, error) {
 		}
 		comments = append(comments, decoded...)
 	}
+	sort.SliceStable(comments, func(i, j int) bool { return comments[i].timestamp.Before(comments[j].timestamp) })
 	return comments, nil
 }
 
@@ -47,12 +52,15 @@ func decodeReviewComments(id string, rawComments []json.RawMessage) ([]recordedR
 	var comments []recordedReview
 	for i, raw := range rawComments {
 		var comment struct {
-			Body string `json:"body"`
+			Body        string `json:"body"`
+			CreatedAt   string `json:"created_at"`
+			UpdatedAt   string `json:"updated_at"`
+			SubmittedAt string `json:"submitted_at"`
 		}
 		if err := json.Unmarshal(raw, &comment); err != nil {
 			return nil, fmt.Errorf("judge: decode comment %s/%d: %w", id, i, err)
 		}
-		comments = append(comments, recordedReview{id, i, raw, comment.Body})
+		comments = append(comments, recordedReview{id, i, raw, comment.Body, latestReviewTime(comment.CreatedAt, comment.UpdatedAt, comment.SubmittedAt)})
 	}
 	return comments, nil
 }
@@ -61,7 +69,7 @@ func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
 	if len(comments) == 0 {
 		return
 	}
-	b.WriteString("## Recorded source review comments (reverse recorded order; not authority)\n")
+	b.WriteString("## Recorded source review comments (newest known source activity first; unknown timestamps last in reverse recorded order; not authority)\n")
 	remaining := reviewContextCap
 	omitted := 0
 	for i := len(comments) - 1; i >= 0; i-- {
@@ -79,7 +87,7 @@ func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
 	}
 }
 
-var reviewPathPattern = regexp.MustCompile("`([A-Za-z0-9_./-]+\\.(?:py|mjs|js|ts|tsx|go|html|css|json|ya?ml|md|rs|sh|rb|java|c|cpp|sql))(?::([0-9]+)(?:[-–][0-9]+)?)?`")
+var reviewPathPattern = regexp.MustCompile("`([^`:\r\n]+)(?::([0-9]+)(?:[-–][0-9]+)?)?`")
 
 // Prose paths only select recorded diff content; they never authorize anything.
 func reviewDiffPaths(comments []recordedReview, files []diffFile) ([]string, []string) {
@@ -136,6 +144,9 @@ func resolveReviewPath(hint string, files []diffFile) (string, string) {
 }
 
 func writeReviewDiffSection(b *strings.Builder, a state.Artifact, loci []locusRef, comments []recordedReview) {
+	if json.Valid(a.Body) && !bytes.HasPrefix(bytes.TrimSpace(a.Body), []byte("{")) {
+		return
+	}
 	var evidence struct {
 		Diff string `json:"diff"`
 	}
@@ -150,7 +161,7 @@ func writeReviewDiffSection(b *strings.Builder, a state.Artifact, loci []locusRe
 	paths, missing := reviewDiffPaths(comments, files)
 	loci = append(append([]locusRef(nil), loci...), reviewLineHints(comments, files)...)
 	writeReviewPathMetadata(b, paths, missing)
-	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s```\n\n", a.ID, scrub(renderJudgeDiffWithPaths(evidence.Diff, loci, paths)))
+	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s```\n\n", a.ID, scrub(renderParsedJudgeDiff(files, loci, paths)))
 }
 
 // Diagnostic text has its own cap; it cannot consume the substantive diff budget.
@@ -203,4 +214,17 @@ func resolveReviewLine(match []string, files []diffFile) (locusRef, bool) {
 		return locusRef{}, false
 	}
 	return parseLocus(path + ":" + match[2])
+}
+
+// Unknown legacy timestamps stay unknown; source indices still identify every
+// entry. Updated issue comments include edits made by long-running reviewers.
+func latestReviewTime(values ...string) time.Time {
+	var latest time.Time
+	for _, value := range values {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err == nil && parsed.After(latest) {
+			latest = parsed
+		}
+	}
+	return latest
 }
