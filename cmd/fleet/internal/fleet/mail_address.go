@@ -1,7 +1,7 @@
 package fleet
 
 import (
-	"encoding/base64"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,14 +9,17 @@ import (
 
 const mailAddressFile = ".address.json"
 
-func mailComponent(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+// Lowercase, fixed-width digests preserve distinct names on case-insensitive
+// filesystems without exceeding the per-component filename limit. The record
+// still validates the original tenant, address kind, and address on every read.
+func mailComponent(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 func (b Mailbox) dir() string {
 	return Path("mail", ".v2", mailComponent(b.Tenant), b.Kind, mailComponent(b.Address))
 }
 func (b Mailbox) path(id string) string { return filepath.Join(b.dir(), id+".json") }
 func (b Mailbox) legacyDir() string     { return Path("mail", Safe(b.Address)) }
 
-// MailPathFor returns the typed, collision-free filename for a resolved address.
+// MailPathFor returns the typed, case-safe filename for a resolved address.
 func MailPathFor(tenant, address, id string) (string, error) {
 	if err := MailAddress(address, id); err != nil {
 		return "", err

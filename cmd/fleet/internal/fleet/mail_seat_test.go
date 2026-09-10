@@ -267,3 +267,37 @@ func TestMailVersionNamespaceCannotAliasLegacyRole(t *testing.T) {
 		t.Fatal(rows, err)
 	}
 }
+
+func TestMailComponentsSeparateCaseFoldedBase64Aliases(t *testing.T) {
+	root := mailFixture(t)
+	pairs := [][2]string{{"one", "aaa"}, {"one", "aaG"}, {"aaa", "target"}, {"aaG", "target"}, {"one", strings.Repeat("a", 128)}}
+	for i, pair := range pairs {
+		addMailBindings(t, fmt.Sprintf("%s %s %s\n", filepath.Join(root, fmt.Sprintf("binding-%d", i)), pair[0], pair[1]))
+		p := mailPayload("same")
+		p["tenant"], p["to"], p["body"] = pair[0], pair[1], strings.Join(pair[:], "/")
+		mustPut(t, p)
+	}
+	paths := map[string]bool{}
+	for _, pair := range pairs {
+		path, err := MailPathFor(pair[0], pair[1], "same")
+		if err != nil {
+			t.Fatal(err)
+		}
+		folded := strings.ToLower(path)
+		if paths[folded] {
+			t.Fatal("case-insensitive mailbox collision", path)
+		}
+		paths[folded] = true
+		if len(filepath.Base(filepath.Dir(path))) != 64 {
+			t.Fatal("address key has unbounded length", path)
+		}
+		r, err := ReadMailFor(pair[0], pair[1], "same")
+		if err != nil || S(r, "body") != strings.Join(pair[:], "/") {
+			t.Fatal("mailbox was aliased or overwritten", r, err)
+		}
+		rows, err := MailFor(pair[0], pair[1], false)
+		if err != nil || len(rows) != 1 || S(rows[0], "to") != pair[1] {
+			t.Fatal(rows, err)
+		}
+	}
+}
