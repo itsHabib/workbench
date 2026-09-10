@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -23,10 +24,17 @@ func MailAddress(role, id string) error {
 	return nil
 }
 
-// MailPath is the record's filename. Callers validate its components first.
-func MailPath(role, id string) string { return Path("mail", Safe(role), id+".json") }
+// MailPath is a compatibility helper for globally unambiguous addresses.
+// Tenant-aware code uses MailPathFor; invalid addresses have no path.
+func MailPath(address, id string) string {
+	tenant, err := MailRoleTenant(address)
+	if err != nil {
+		return ""
+	}
+	path, _ := MailPathFor(tenant, address, id)
+	return path
+}
 
-// mailLock uses the substrate's existing lock for send and ack.
 func mailLock(fn func() error) error {
 	if ReadOnly {
 		return fmt.Errorf("mail: state is read-only")
@@ -34,96 +42,173 @@ func mailLock(fn func() error) error {
 	return KeyLock("mail", fn)
 }
 
-// ReadMail distinguishes absent from damaged records and refuses filename aliases.
-func ReadMail(role, id, tenant string) (Rec, error) {
-	if err := MailAddress(role, id); err != nil {
+// ReadMail reads the address in the tenant captured during authorization.
+func ReadMail(address, id, tenant string) (Rec, error) {
+	return ReadMailFor(tenant, address, id)
+}
+
+// ReadMailFor reads an exact tenant/address, including its pinned legacy record.
+func ReadMailFor(tenant, address, id string) (Rec, error) {
+	if err := MailAddress(address, id); err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(MailPath(role, id))
+	box, err := ResolveMailbox(tenant, address)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := box.read(id)
+	return r, err
+}
+
+func (b Mailbox) readRecord(path, id string, legacy bool) (Rec, error) {
+	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := checkMailAddress(role, false, tenant); err != nil {
-		return nil, err
-	}
 	var r Rec
-	if err = json.Unmarshal(b, &r); err != nil {
+	if err = json.Unmarshal(raw, &r); err != nil {
 		return nil, fmt.Errorf("mail %s: unreadable: %w", id, err)
 	}
-	if S(r, "to") != role || S(r, "id") != id || F(r, "at") <= 0 {
+	if S(r, "to") != b.Address || S(r, "id") != id || F(r, "at") <= 0 {
 		return nil, fmt.Errorf("mail %s: damaged record or address collision", id)
+	}
+	if !legacy && (S(r, "tenant") != b.Tenant || S(r, "to_kind") != b.Kind) {
+		return nil, fmt.Errorf("mail %s: damaged tenant or address kind", id)
 	}
 	return r, nil
 }
 
-// PutMail publishes once per role and id. A replacement sender session may
-// retry the same payload; the original from_session, timestamps and ack remain.
-func PutMail(payload Rec, tenant string) (Rec, error) {
-	role, id := S(payload, "to"), S(payload, "id")
-	if tenant == "" {
-		return nil, fmt.Errorf("mail: validated tenant is required")
+func (b Mailbox) read(id string) (Rec, string, error) {
+	r, err := b.readRecord(b.path(id), id, false)
+	if err != nil {
+		return nil, "", err
 	}
+	dir, err := b.legacyMailDir()
+	if err != nil {
+		return nil, "", err
+	}
+	if dir == "" {
+		return r, b.path(id), nil
+	}
+	path := filepath.Join(dir, id+".json")
+	old, err := b.readRecord(path, id, true)
+	if err != nil {
+		return nil, "", err
+	}
+	if old == nil {
+		return r, b.path(id), nil
+	}
+	if r != nil {
+		return nil, "", fmt.Errorf("mail %s: exists in both legacy and typed mailbox; reconcile before changing it", id)
+	}
+	return old, path, nil
+}
+
+func normalizeMail(payload Rec, tenant string) (Rec, Mailbox, error) {
+	if tenant == "" {
+		return nil, Mailbox{}, fmt.Errorf("mail: validated tenant is required")
+	}
+	if supplied := S(payload, "tenant"); supplied != "" && supplied != tenant {
+		return nil, Mailbox{}, fmt.Errorf("mail: payload tenant differs from authorized tenant")
+	}
+	box, err := ResolveMailbox(tenant, S(payload, "to"))
+	if err != nil {
+		return nil, Mailbox{}, err
+	}
+	p := Rec{}
+	for k, v := range payload {
+		p[k] = v
+	}
+	p["tenant"], p["to_kind"] = tenant, box.Kind
+	if S(p, "from_address") == "" {
+		p["from_address"], p["from_kind"] = S(p, "from_role"), "role"
+	}
+	return p, box, nil
+}
+
+func sameMail(old, p Rec) bool {
+	for _, k := range []string{"id", "to", "from_role", "kind", "subject", "head", "body"} {
+		if S(old, k) != S(p, k) {
+			return false
+		}
+	}
+	address, kind := S(old, "from_address"), S(old, "from_kind")
+	if address == "" {
+		address, kind = S(old, "from_role"), "role"
+	}
+	return address == S(p, "from_address") && kind == S(p, "from_kind")
+}
+
+// PutMail publishes once per tenant/address/id. Retry identity includes the
+// sender's address, so another seat of the same role cannot claim its send.
+func PutMail(payload Rec, tenant string) (Rec, error) {
 	if len(S(payload, "subject")) > MaxMailSubjectBytes {
 		return nil, fmt.Errorf("mail: subject exceeds %d bytes", MaxMailSubjectBytes)
 	}
-	if err := MailAddress(role, id); err != nil {
+	if err := MailAddress(S(payload, "to"), S(payload, "id")); err != nil {
 		return nil, err
 	}
+	p, box, err := normalizeMail(payload, tenant)
+	if err != nil {
+		return nil, err
+	}
+	id := S(p, "id")
 	var result Rec
-	err := mailLock(func() error {
-		if err := checkMailAddress(role, true, tenant); err != nil {
-			return err
-		}
-		old, err := ReadMail(role, id, tenant)
+	err = mailLock(func() error {
+		old, _, err := box.read(id)
 		if err != nil {
 			return err
 		}
 		if old != nil {
-			for _, k := range []string{"id", "to", "from_role", "kind", "subject", "head", "body"} {
-				if S(old, k) != S(payload, k) {
-					return fmt.Errorf("mail %s to %s: id already has a different payload", id, role)
-				}
+			if !sameMail(old, p) {
+				return fmt.Errorf("mail %s to %s: id already has a different payload or sender address", id, box.Address)
 			}
 			result = old
 			return nil
 		}
 		result = Rec{}
-		for _, k := range []string{"id", "to", "from_role", "from_session", "kind", "subject", "head", "body"} {
-			result[k] = S(payload, k)
+		for _, k := range []string{"id", "to", "tenant", "to_kind", "from_role", "from_address", "from_kind", "from_session", "kind", "subject", "head", "body"} {
+			result[k] = S(p, k)
 		}
 		result["at"] = Now()
-		return WriteJSON(MailPath(role, id), result)
+		return WriteJSON(box.path(id), result)
 	})
 	return result, err
 }
 
-// Mail lists records oldest first; an unreadable mailbox is not empty.
-func Mail(role string, unacked bool, tenant string) ([]Rec, error) {
-	if err := MailAddress(role, "list"); err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(Path("mail", Safe(role)))
-	if os.IsNotExist(err) {
-		return []Rec{}, nil
-	}
+// Mail lists the address in the tenant captured during authorization.
+func Mail(address string, unacked bool, tenant string) ([]Rec, error) {
+	return MailFor(tenant, address, unacked)
+}
+
+// MailFor lists the exact mailbox, or explicitly requested historical role mail.
+// A shared seat-kind mailbox is read-only history, never a seat's own inbox.
+func MailFor(tenant, address string, unacked bool) ([]Rec, error) {
+	box, legacyOnly, err := readMailbox(tenant, address)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkMailAddress(role, false, tenant); err != nil {
+	ids := map[string]bool{}
+	if !legacyOnly {
+		if err := mailIDs(box.dir(), ids); err != nil {
+			return nil, err
+		}
+	}
+	dir, err := box.legacyMailDir()
+	if err != nil {
 		return nil, err
 	}
+	if dir != "" {
+		if err := mailIDs(dir, ids); err != nil {
+			return nil, err
+		}
+	}
 	out := []Rec{}
-	for _, e := range entries {
-		if e.Name() == mailAddressFile {
-			continue
-		}
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		r, err := ReadMail(role, strings.TrimSuffix(e.Name(), ".json"), tenant)
+	for id := range ids {
+		r, _, err := box.read(id)
 		if err != nil {
 			return nil, err
 		}
@@ -140,23 +225,53 @@ func Mail(role string, unacked bool, tenant string) ([]Rec, error) {
 	return out, nil
 }
 
-// AckMail marks read, preserving payload. Caller verifies role ownership.
-func AckMail(role, id, sid, tenant string) (Rec, error) {
+func mailIDs(dir string, ids map[string]bool) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Name() != mailAddressFile && strings.HasSuffix(e.Name(), ".json") {
+			ids[strings.TrimSuffix(e.Name(), ".json")] = true
+		}
+	}
+	return nil
+}
+
+// AckMail acknowledges the address in the tenant captured during authorization.
+func AckMail(address, id, sid, tenant string) (Rec, error) {
+	return AckMailFor(tenant, address, id, sid)
+}
+
+// AckMailFor updates the exact mailbox. The command verifies caller ownership.
+// Pinned legacy role mail is acknowledged in place, preserving its provenance.
+func AckMailFor(tenant, address, id, sid string) (Rec, error) {
+	if err := MailAddress(address, id); err != nil {
+		return nil, err
+	}
+	box, err := ResolveMailbox(tenant, address)
+	if err != nil {
+		return nil, err
+	}
 	var r Rec
-	err := mailLock(func() error {
+	err = mailLock(func() error {
+		var path string
 		var err error
-		r, err = ReadMail(role, id, tenant)
+		r, path, err = box.read(id)
 		if err != nil {
 			return err
 		}
 		if r == nil {
-			return fmt.Errorf("mail %s: no message for %s", id, role)
+			return fmt.Errorf("mail %s: no message for %s", id, address)
 		}
 		if Has(r, "acked_at") {
 			return nil
 		}
 		r["acked_at"], r["acked_by"] = Now(), sid
-		return WriteJSON(MailPath(role, id), r)
+		return WriteJSON(path, r)
 	})
 	return r, err
 }
@@ -169,7 +284,7 @@ func MailLine(r Rec) string {
 		}
 		return strings.Join(strings.Fields(s), " ")
 	}
-	return fmt.Sprintf("[fleet] mail %s from %s (%s): %s", clean(S(r, "id")), clean(S(r, "from_role")), clean(S(r, "kind")), clean(S(r, "subject")))
+	return fmt.Sprintf("[fleet] mail %s from %s (%s): %s", clean(S(r, "id")), clean(mailFrom(r)), clean(S(r, "kind")), clean(S(r, "subject")))
 }
 
 // MailLines caps context without acknowledging messages.
@@ -203,4 +318,25 @@ func MailSummary(rows []Rec) []string {
 	return lines
 }
 
-func sessionMailLines(rec Rec) []string { role, _, _ := MailIdentity(rec); return MailLines(role) }
+func mailFrom(r Rec) string {
+	if address := S(r, "from_address"); address != "" {
+		return address
+	}
+	return S(r, "from_role")
+}
+
+func sessionMailLines(rec Rec) []string {
+	box, _, err := MailSender(rec)
+	if err != nil {
+		role, _, _ := MailIdentity(rec)
+		if role == "" {
+			return nil
+		}
+		return []string{"[fleet] mail unavailable; fleet mail"}
+	}
+	rows, err := MailFor(box.Tenant, box.Address, true)
+	if err != nil {
+		return []string{"[fleet] mail unavailable; fleet mail"}
+	}
+	return MailSummary(rows)
+}

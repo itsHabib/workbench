@@ -1,69 +1,90 @@
 # Fleet mail
 
-Mail is durable communication between identified roles in the same tenant.
-It grants no assignment, resource, or merge authority. This smaller contract
-supersedes the earlier contact-derivation and watcher-launch scope.
+Mail is durable communication between identified roles and seats in the same
+tenant. It grants no assignment, resource, or merge authority.
 
 ```sh
 fleet send hub:b --id unit-question-1 --kind question --subject 'Which unit?' \
   --head abc123 --body 'Use milliseconds or seconds?'
+fleet send worker-a --id unit-answer-1 --kind answer --subject 'Milliseconds' \
+  --body 'Use milliseconds.'
 fleet mail --unacked
-fleet mail --for hub:b --json
-fleet ack unit-question-1
+fleet mail --for worker-a --json
+fleet ack unit-answer-1
 ```
 
-The session's launch directory resolves through `$ORG_STATE/roles.map`. Any
-identified role may send to or read another identified role in its tenant,
-including seats without a dispatch row. There is no contact allowlist, charter
-traversal, or relationship inference. Unidentified or cross-tenant callers refuse.
-`--session <id8>` disambiguates live sessions at the caller's cwd. Ack requires
-that session to hold the addressed role or be in its bound directory, within the
-same tenant. Mail verbs do not acquire work or resource ownership.
+## Addresses
 
-Kinds are `question`, `answer`, `escalation`, `report`, `order`. Subjects are
-limited to 1024 UTF-8 bytes (oversized CLI/MCP input is usage); bodies remain full.
-Hook summaries also truncate oversized subjects retained from older versions. `--body -` reads
-stdin, preserving the full text. `mail` displays full bodies and optional heads;
-`--json` returns records. MCP `fleet_send`, `fleet_mail`, and `fleet_ack` require
-caller `cwd`; MCP bodies are literal text and mailbox output is JSON.
+The session's launch directory resolves through `$ORG_STATE/roles.map`. A row
+with a fourth column uses that seat name as its address. Otherwise it uses its
+role name. Two worker seats of the same role kind have separate inboxes. Sending
+to a pooled role kind refuses and lists the available seats; Fleet never guesses
+which worker should receive it. Duplicate seat bindings and role/seat name
+collisions must be resolved in the map.
 
-Records live at `$FLEET_STATE/mail/<role-safe>/<id>.json` (default state root
-`~/.fleet`). Fleet's existing `Safe` encoding maps `:` to `__`. IDs start with a
-letter or digit, followed by letters, digits, `.`, `_`, `-`, up to 128 characters.
-Fields are `id`, `to`, `from_role`, `from_session`, `kind`, `subject`, `head`,
-`body`, `at`, and optional `acked_at` / `acked_by`. Times are epoch seconds.
+Any identified session may send to or explicitly read another address in its
+tenant, including seats without a dispatch row. Default reads and hook context
+use its own address. Ack belongs only to the session's launch address; changing
+cwd cannot acknowledge a sibling's mail. `--session <id8>` disambiguates live
+sessions at the caller's cwd. There is no contact allowlist, charter traversal,
+relationship inference, or task-acceptance requirement.
 
-The retry key is recipient role + caller-chosen ID. The same sender role and
-same kind/subject/head/body return the original record even from a replacement
-sender session. `from_session` remains the original sender session as provenance;
-retry does not renew `at`, overwrite the body, or reset acknowledgement. Changed
-payload or a different sender role under that ID refuses. Send and ack serialize
-through the existing `keylocks/mail.lock` primitive and publish temp-then-rename.
-Acknowledged messages remain retained; repeated ack preserves the first reader.
+Kinds are `question`, `answer`, `escalation`, `report`, `order`. Subjects are limited
+to 1024 bytes. `--body -` reads stdin, preserving full text. `mail` displays full
+bodies and optional heads; `--json` returns records. MCP `fleet_send`, `fleet_mail`,
+and `fleet_ack` require caller `cwd`; MCP bodies are literal text.
 
-An immutable `.address.json` beside the messages pins the original role and
-tenant. Storage operations carry the tenant captured before authorization and
-refuse a changed binding; first publication never chooses a new tenant after
-authorization. Reads and acknowledgements use the same captured-tenant fence.
-Ambiguous role names across tenants, filename collisions, changed tenant
-bindings, or missing/unreadable metadata on retained mail refuse. Fleet never
-silently adopts an old tenant's mailbox into a new tenant. The operator must
-reconcile a changed binding; mail does not rewrite its own address metadata.
+## Storage and retries
 
-SessionStart and UserPromptSubmit inject up to five unacked mail lines:
-`[fleet] mail <id> from <from_role> (<kind>): <subject>`, then
-`[fleet] and N more; fleet mail`. Subjects are flattened to one line, and the
-current launch-directory role is resolved at each event. Hooks never auto-ack.
-An absent recipient simply has queued mail until a session starts and sees it.
-There is no process launch, delivery configuration, delivery stamp, or automatic
-resume. No installed hooks or live state are changed by this implementation.
+New records live under `$FLEET_STATE/mail/.v2/<tenant>/<kind>/<address>/<id>.json`
+(default state root `~/.fleet`). Tenant and address components use lowercase SHA-256 hex digests, avoiding
+case-folding aliases on macOS and Windows; kind distinguishes a role from a seat. IDs start with a letter or digit, followed
+by letters, digits, `.`, `_`, `-`, up to 128 characters. The resolved tenant is
+carried from authorization into storage, so a changed mapping cannot publish a
+message into a different tenant.
 
-Validation uses real CLI processes and hook adapters in isolated temporary state:
-a sender ends and its replacement retries the same ID, an absent recipient's
-replacement sees and reads the queued full body, acknowledgements remain intact,
-and cross-tenant sends/reads refuse. These events test the adapter boundary; they
-do not claim a live Claude/Codex session has been launched.
+Records retain `from_role` and the original `from_session` as provenance, with
+`tenant`, `from_address`, and `from_kind` identifying the sender. Other fields are
+`id`, `to`, `to_kind`, `kind`, `subject`, `head`, `body`, `at`, and optional `acked_at` /
+`acked_by`. Times are epoch seconds.
 
-Hook listing currently scans retained mail, so latency grows with mailbox history.
-An unacknowledged index or archive is deferred pending measured workload evidence;
-this slice makes no constant-time mailbox claim.
+The retry key is the typed recipient address within its tenant plus a
+caller-chosen ID. The same sender address and kind/subject/head/body return the
+original record even from a replacement session. Retry does not renew `at`,
+overwrite the body, or reset acknowledgement. Changed payload or a different
+sender under that ID refuses. IDs are recipient-scoped, so two senders choosing
+the same ID for one inbox conflict. Use lowercase IDs for portable naming:
+IDs differing only by case conflict on case-insensitive filesystems. Send and ack serialize through the existing
+mail lock and publish temp-then-rename. Repeated ack preserves the first reader.
+
+## Retained role mail
+
+Historical `mail/<role-safe>/<id>.json` records stay in place. Their immutable
+`.address.json` must identify the original role and tenant. Unambiguous dedicated
+role mail remains readable, acknowledgeable, and retryable by a replacement role
+session without rewriting provenance. Typed paths keep a new tenant or a former
+filename alias from adopting that history.
+
+Historical shared-role mail remains explicitly readable with `fleet mail --for
+<role>`, but it is never injected into a seat inbox or acknowledged as one. A
+historical send without individual seat provenance cannot become a replacement
+seat retry by inference. This preserves the record without guessing ownership.
+
+Acknowledged messages remain retained. Listing currently scans retained records;
+large mailboxes need measurement before indexing or retention machinery is added.
+
+## Startup context and validation
+
+SessionStart and UserPromptSubmit inject up to five unacked mail lines, then
+`[fleet] and N more; fleet mail`. Subjects are flattened to one line and bounded,
+including retained messages. The current launch-directory address is resolved at
+each event. Hooks never auto-ack. An absent recipient keeps queued mail until a
+session starts. There is no automatic launch or delivery stamp.
+
+Both adapter suites use real CLI processes and hooks in temporary state. They
+exercise replacement sender retries, queued recipients, distinct worker seats,
+full-body reads, acknowledgement ownership, and cross-tenant refusal. The
+continuity exchange also checks that the replacement worker sees its current
+assignment, a replacement lead sees its authored handoff, and reused seats do
+not receive a previous branch's brief. These are adapter-boundary checks, not
+proof of a live model conversation or unattended launcher safety.

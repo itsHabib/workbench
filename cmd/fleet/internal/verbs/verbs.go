@@ -91,6 +91,8 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
   fleet handoff <branch> "<conclusion>" ["<next>"]  one-line handoff, replaced not appended; injected at the next SessionStart
+  fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]
+                                                 authored context for your launch-bound role across branches
   fleet role <checkout> <role> [--force] [--tenant <t>]
                                                  make a checkout a role for Claude and Codex - session-specific
                                                  instructions, hooks, and permissions per directory;
@@ -174,7 +176,7 @@ func Dispatch(args []string) error {
 	if ok, err := dispatchWork(verb, plain, asJSON); ok {
 		return err
 	}
-	if ok, err := dispatchActs(verb, rest, arg); ok {
+	if ok, err := dispatchActs(verb, rest); ok {
 		return err
 	}
 	return exitCode(2, usage)
@@ -365,7 +367,7 @@ func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 }
 
 // dispatchActs is what a session does by hand: receipts, resources, handoff, role binding.
-func dispatchActs(verb string, rest []string, arg func(int) string) (bool, error) {
+func dispatchActs(verb string, rest []string) (bool, error) {
 	switch verb {
 	case "receipt", "take", "drop":
 		sess, err := optValue(rest, "--session", verb)
@@ -399,7 +401,7 @@ func dispatchActs(verb string, rest []string, arg func(int) string) (bool, error
 		}
 		return true, cmdRevoke(m[1], m[2], reason)
 	case "handoff":
-		return true, cmdHandoff(arg(0), arg(1), arg(2))
+		return true, dispatchHandoff(rest)
 	case "role":
 		u := "usage: fleet role <checkout> <role> [--force] [--tenant <t>]   e.g. fleet role ~/dev/mono-wt-1 <kind>:mono"
 		tenant := ""

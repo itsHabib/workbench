@@ -57,3 +57,40 @@ func TestMailMCPUsesCallerAndSameStore(t *testing.T) {
 		t.Fatal("MCP mail migrated store", err)
 	}
 }
+
+func TestMailMCPSeatAddressesAndTenantIsolation(t *testing.T) {
+	oldState, oldOrg := fleet.State, fleet.OrgState
+	fleet.State, fleet.OrgState = t.TempDir(), t.TempDir()
+	t.Cleanup(func() { fleet.State, fleet.OrgState = oldState, oldOrg })
+	a, b, foreign := t.TempDir(), t.TempDir(), t.TempDir()
+	_ = os.WriteFile(fleet.RolesMap(), []byte(fmt.Sprintf("%s one worker:demo seat-a\n%s one worker:demo seat-b\n%s two worker:other seat-b\n", a, b, foreign)), 0600)
+	for id, dir := range map[string]string{"a": a, "b": b, "foreign": foreign} {
+		_ = fleet.WriteJSON(fleet.Path("sessions", id+".json"), fleet.Rec{"session": id, "cwd": dir, "last_event_at": fleet.Now()})
+	}
+	args := map[string]any{"cwd": a, "to": "seat-b", "id": "same", "kind": "report", "subject": "Hi", "body": "one"}
+	if _, failed, err := call("fleet_send", args); err != nil || failed {
+		t.Fatal(err)
+	}
+	if _, failed, err := call("fleet_ack", map[string]any{"cwd": a, "id": "same"}); err == nil && !failed {
+		t.Fatal("MCP sibling ack")
+	}
+	if _, failed, err := call("fleet_ack", map[string]any{"cwd": foreign, "id": "same"}); err == nil && !failed {
+		t.Fatal("MCP foreign tenant ack")
+	}
+	if _, failed, err := call("fleet_ack", map[string]any{"cwd": b, "id": "same"}); err != nil || failed {
+		t.Fatal(err)
+	}
+	r, err := fleet.ReadMailFor("one", "seat-b", "same")
+	if err != nil || fleet.S(r, "acked_by") != "b" || fleet.S(r, "from_address") != "seat-a" {
+		t.Fatal(r, err)
+	}
+	// An identically named address in another tenant uses a separate mailbox.
+	args["cwd"], args["body"] = foreign, "two"
+	if _, failed, err := call("fleet_send", args); err != nil || failed {
+		t.Fatal(err)
+	}
+	r, err = fleet.ReadMailFor("two", "seat-b", "same")
+	if err != nil || fleet.Has(r, "acked_at") || fleet.S(r, "body") != "two" {
+		t.Fatal(r, err)
+	}
+}
