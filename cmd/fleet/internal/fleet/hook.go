@@ -313,8 +313,8 @@ func onPreTool(ev Event, sid string) *Verdict {
 }
 
 // preWriteVerdicts is every refusal that must be reached before this session's record
-// is written, in order: a stand-down on the branch, the branch's lease, the directory
-// the command would move into, and the branches a switch is headed for. It returns the
+// is written, in order: a stand-down on the branch, the directory the command would
+// move into, the branch's lease, and the branches a switch is headed for. It returns the
 // destination keys a switch claimed, or the verdict that stops the call.
 func preWriteVerdicts(ev Event, rec Rec, sid, tool, cmd, target, branch, key, evCwd string, writes bool) ([]string, *Verdict) {
 	if branch != "" {
@@ -323,13 +323,18 @@ func preWriteVerdicts(ev Event, rec Rec, sid, tool, cmd, target, branch, key, ev
 			return nil, deny(reason)
 		}
 	}
+	// The directory guard comes before the lease. `cd /other-seat && git commit` selects
+	// the other seat's branch as its target, so a lease check first would TAKE that
+	// branch's lease and only then refuse the call — and the refusal cleans up nothing,
+	// leaving this session holding a branch it was never allowed to touch and locking
+	// out the seat's real occupant. Nothing lease-mutating may run ahead of it.
+	if reason := cdDestinations(tool, cmd, evCwd); reason != "" {
+		return nil, deny(reason)
+	}
 	if branch != "" && writes {
 		if reason := CheckLease(key, branch, sid, S(rec, "role"), evCwd); reason != "" {
 			return nil, deny(reason)
 		}
-	}
-	if reason := cdDestinations(tool, cmd, evCwd); reason != "" {
-		return nil, deny(reason)
 	}
 	toKeys, reason := switchDestinations(tool, cmd, target, branch, sid, S(rec, "role"), evCwd)
 	if reason != "" {

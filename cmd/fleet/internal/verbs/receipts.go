@@ -104,9 +104,14 @@ func receiptPaths(sha, kind string) (latest, history string) {
 // never happened.
 func recordReceipt(sha, kind string, rec fleet.Rec) error {
 	latest, history := receiptPaths(sha, kind)
-	if _, err := os.Stat(history); err != nil {
+	// The seed must be durable BEFORE the latest file is overwritten. An ignored failure
+	// here (an unwritable .jsonl) followed by the write below erases the very legacy
+	// verdict this path exists to preserve, and nothing holds a second copy.
+	if fi, err := os.Stat(history); err != nil || !fi.Mode().IsRegular() {
 		if prev := fleet.ReadJSON(latest); prev != nil {
-			_ = fleet.AppendJSONL(history, prev)
+			if err := fleet.AppendJSONL(history, prev); err != nil {
+				return fmt.Errorf("seed receipt history %s with the verdict already recorded at this head: %w", history, err)
+			}
 		}
 	}
 	if err := fleet.WriteJSON(latest, rec); err != nil {

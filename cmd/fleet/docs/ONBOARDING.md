@@ -89,7 +89,8 @@ Files in, sessions out, records left behind.
 - One branch, one holder; only session end or an operator `fleet revoke` releases it.
 - `fleet done <sha> --kind verify`; without `--kind` it demands every kind in `tier.json`.
 - The hook's session id is not the desktop app's; the directory is the key both sides share.
-- Slow commands need `FLEET_ALLOW_SLOW='<why>'` after the cost gate has measured them.
+- Slow commands need `FLEET_ALLOW_SLOW=<rule-slug>` — the slug of the rule the gate measured
+  them under; the refusal prints the exact form, and no other token is accepted.
 
 ## 8. Prove it before trusting it
 

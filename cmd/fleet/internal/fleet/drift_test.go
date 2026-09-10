@@ -157,3 +157,26 @@ func TestBoundDirIsLongestPrefix(t *testing.T) {
 		t.Fatal("the parent of two seats is not bound by them")
 	}
 }
+
+// The order of the pre-write refusals is load-bearing, not cosmetic. `cd /other-seat &&
+// git commit` targets the other seat, so a lease check ahead of the directory guard
+// TAKES that seat's branch lease and only then refuses the call — and the refusal
+// releases nothing, so this session is left holding a branch it was never allowed to
+// touch, locking out the seat's real occupant.
+func TestTheDirectoryGuardRunsBeforeTheLeaseIsTaken(t *testing.T) {
+	_, one, two, _ := driftFixture(t)
+	cmd := "cd " + two + " && git commit -m x"
+	target := BashTarget(cmd, one)
+	branch := "feature/theirs"
+	key := Scope(target, branch)
+	_, v := preWriteVerdicts(Event{}, Rec{}, "sess-drifter", "Bash", cmd, target, branch, key, one, true)
+	if v == nil || v.Code != 2 {
+		t.Fatalf("the move into another seat must be refused: %v", v)
+	}
+	if !strings.Contains(v.Err, "bench-hand-2") {
+		t.Fatalf("refusal is not the directory guard's:\n%s", v.Err)
+	}
+	if lease := Lease(key); lease != nil {
+		t.Fatalf("a lease was taken on the other seat's branch before the guard refused: %v", lease)
+	}
+}

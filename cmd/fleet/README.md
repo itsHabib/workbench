@@ -181,14 +181,25 @@ session with no role of its own gets the same refusal. Naming a path moves nothi
 absolute paths as operands, `git -C`, and any `cd` inside the session's own tree stay
 allowed.
 
-**One shape for an accepted cost.** When the cost gate refuses a slow command it asks
-for one exact form — `FLEET_ALLOW_SLOW="<why>" <command>`, the override as the command's
-leading assignment — and accepts nothing else; a trailing `FLEET_ALLOW_SLOW=x` sets no
-variable and is not the override. `fleet role` and `fleet pool` project the matching
-allow rule, `Bash(FLEET_ALLOW_SLOW=*)`, into every roled directory's
-`.claude/settings.local.json`, so the gate and the harness describe the same command.
-Without that, a worker that had *won* the resource it needed was told to prefix the
-command and then refused by its own seat for doing so.
+**One shape for an accepted cost, one token per measured command.** When the cost gate
+refuses a slow command it asks for one exact form — `FLEET_ALLOW_SLOW=<rule-slug>
+<command>`, the override as the command's leading assignment — and accepts nothing else;
+a trailing `FLEET_ALLOW_SLOW=x` sets no variable and is not the override. The value is
+the slug of the expensive rule the command trips (`"full unit suite"` →
+`full-unit-suite`), never free text, and the command is reproduced whole so the printed
+remedy is a command you can run. `fleet role` and `fleet pool` project the matching allow
+rules — one per rule in `expensive.json`, `Bash(FLEET_ALLOW_SLOW=full-unit-suite:*)` —
+into every roled directory's `.claude/settings.local.json`, so the gate and the harness
+describe the same commands. Without that projection, a worker that had *won* the resource
+it needed was told to prefix the command and then refused by its own seat for doing so.
+
+The token is what keeps the projection narrow. A universal `Bash(FLEET_ALLOW_SLOW=*)`
+would be a lane escape: allow and deny are both prefix rules over the whole command
+string, so `FLEET_ALLOW_SLOW=x gh pr merge …` would match the seat's new allow and stop
+matching its `Bash(gh pr merge:*)` deny. With a per-rule token, the harness allows only
+the measured commands, and the hook closes the other half — an override whose token is
+not the rule the command actually trips, or that prefixes a command with no cost rule at
+all, is refused by the gate whatever the settings say.
 
 ## Testing
 

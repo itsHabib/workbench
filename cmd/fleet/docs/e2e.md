@@ -39,7 +39,8 @@ handoffs). Stand them up per `run-a-fleet.md`.
    prompt placed right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt)
    and a delivery process. Until the watcher's own launcher lands, use `e2e/mail-poll.sh`.
 7. The slow-command gate: after five 40-second runs, `bash scripts/bench.sh` needs the
-   `FLEET_ALLOW_SLOW='<reason>'` prefix and the seat's allow list needs `Bash(FLEET_ALLOW_SLOW=*)`.
+   `FLEET_ALLOW_SLOW=<rule-slug>` prefix (the slug of the rule it trips) and the seat's allow
+   list needs that rule's own `Bash(FLEET_ALLOW_SLOW=<rule-slug>:*)` — never a wildcard.
 
 ## Reset between runs
 

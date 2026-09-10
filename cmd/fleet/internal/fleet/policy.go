@@ -52,24 +52,84 @@ var (
 // gate ever sees it — which is what happened to a session that had won the resource it
 // needed and could not run it. The shape is a leading environment assignment, because
 // that is the only form a harness prefix rule can name.
+//
+// The value of that assignment is the SLUG of the expensive rule being overridden, not
+// free text. A free-text value would force the projected allow to be the universal
+// `Bash(FLEET_ALLOW_SLOW=*)`, and a universal allow is a lane escape: a worker whose
+// manifest denies `Bash(gh pr merge:*)` could type `FLEET_ALLOW_SLOW=x gh pr merge …`,
+// match the allow and miss the deny, because both are prefix rules over the whole
+// command string. Pinning the value to a slug makes the projection per-command —
+// `Bash(FLEET_ALLOW_SLOW=full-unit-suite:*)`, one per rule in expensive.json — and the
+// gate below refuses any override whose slug is not the rule the command actually
+// trips, so the two halves cannot drift into a hole.
 const (
 	// AllowSlowVar prefixes a command whose cost the operator has accepted.
 	AllowSlowVar = "FLEET_ALLOW_SLOW"
-	// AllowSlowPattern is that shape as a harness allow rule, projected into every
-	// roled directory by `fleet role`.
-	AllowSlowPattern = "Bash(" + AllowSlowVar + "=*)"
 )
 
-var allowSlowRe = regexp.MustCompile(`\A[^\S\r\n]*` + AllowSlowVar + `=`)
+var (
+	allowSlowRe    = regexp.MustCompile(`\A[^\S\r\n]*` + AllowSlowVar + `=("[^"]*"|'[^']*'|\S*)`)
+	allowSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
+	allowSlugTrimR = regexp.MustCompile(`\A-+|-+\z`)
+)
 
 // AllowSlowPrefixed reports whether a command carries the override in the one accepted
 // shape: as its leading assignment. `npx vitest run FLEET_ALLOW_SLOW=x` mentions the
 // variable and sets nothing.
 func AllowSlowPrefixed(cmd string) bool { return allowSlowRe.MatchString(cmd) }
 
-// AllowSlowForm is the command as it must be typed to carry the override.
-func AllowSlowForm(cmd string) string {
-	return AllowSlowVar + `="<why>" ` + cut(strings.TrimSpace(cmd), 120)
+// AllowSlowValue is the value the override assignment carries, unquoted, and whether
+// the command carries the assignment at all.
+func AllowSlowValue(cmd string) (string, bool) {
+	m := allowSlowRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return "", false
+	}
+	return strings.Trim(m[1], `'"`), true
+}
+
+// AllowSlowSlug is an expensive rule's name as the one token its override must carry:
+// lowercase, every other run of characters a single dash.
+func AllowSlowSlug(name string) string {
+	s := allowSlugTrimR.ReplaceAllString(allowSlugRe.ReplaceAllString(strings.ToLower(name), "-"), "")
+	if s == "" {
+		return "slow-command"
+	}
+	return s
+}
+
+// AllowSlowForm is the command as it must be typed to carry the override for rule
+// `name`. The command is reproduced whole: this string is meant to be run, and a
+// truncated one either fails to parse or runs something broader than what was refused.
+func AllowSlowForm(name, cmd string) string {
+	// A command that already wears a wrong token is re-tokened, never double-prefixed.
+	cmd = strings.TrimSpace(allowSlowRe.ReplaceAllString(cmd, ""))
+	return AllowSlowVar + "=" + AllowSlowSlug(name) + " " + cmd
+}
+
+// AllowSlowPattern is rule `name`'s override as a harness allow rule. `fleet role`
+// projects one of these per rule — never a wildcard over the variable.
+func AllowSlowPattern(name string) string {
+	return "Bash(" + AllowSlowVar + "=" + AllowSlowSlug(name) + ":*)"
+}
+
+// AllowSlowPatterns is the allow rule for every named rule in expensive.json.
+func AllowSlowPatterns() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range expensiveRules() {
+		name := S(r, "name")
+		if name == "" || S(r, "pattern") == "" {
+			continue
+		}
+		p := AllowSlowPattern(name)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
 }
 
 // IsWrite reports whether a tool call writes to the tree.
@@ -140,10 +200,8 @@ func MatchedRule(cmd string) Rec {
 	if head == "" {
 		return nil
 	}
-	rules, _ := readAny(Path("expensive.json")).([]any)
-	for _, raw := range rules {
-		r, ok := raw.(map[string]any)
-		if !ok || S(r, "pattern") == "" {
+	for _, r := range expensiveRules() {
+		if S(r, "pattern") == "" {
 			continue
 		}
 		pat, err := regexp.Compile(S(r, "pattern"))
@@ -158,6 +216,19 @@ func MatchedRule(cmd string) Rec {
 		return r
 	}
 	return nil
+}
+
+// expensiveRules is expensive.json as records; a malformed entry is skipped, never
+// raised.
+func expensiveRules() []Rec {
+	raws, _ := readAny(Path("expensive.json")).([]any)
+	out := make([]Rec, 0, len(raws))
+	for _, raw := range raws {
+		if r, ok := raw.(map[string]any); ok {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // ---------- policy: the checks, in order ----------
@@ -442,7 +513,13 @@ func CheckRequires(rec Rec, sid, tool, cmd string) string {
 // CheckCost is the refusal for an expensive command, or "".
 func CheckCost(cmd, sid string) string {
 	r := MatchedRule(cmd)
+	val, override := AllowSlowValue(cmd)
 	if r == nil {
+		if override {
+			// A roled directory allows this prefix, so an unmeasured command carrying it
+			// would reach the shell having matched an allow and missed the lane's denies.
+			return fmt.Sprintf("`%s=%s` prefixes a command the cost gate has no expensive rule for, so the override authorizes nothing and only hides the command from this seat's own permission rules. Next action: drop the prefix and run the command as itself.", AllowSlowVar, val)
+		}
 		return ""
 	}
 	name := S(r, "name")
@@ -460,9 +537,13 @@ func CheckCost(cmd, sid string) string {
 	if lock != nil && S(lock, "session") != sid && SessionAlive(ReadJSON(Path("sessions", S(lock, "session")+".json"))) {
 		return fmt.Sprintf("`%s` is already running in session %s (started %s ago). Do not run it again in parallel; do the targeted check instead: %s", name, Short(S(lock, "session")), FmtAge(Now()-F(lock, "at")), instead)
 	}
-	if AllowSlowPrefixed(cmd) {
-		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "cmd": cut(cmd, 200)})
+	if override && val == AllowSlowSlug(name) {
+		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "rule": name, "cmd": cut(cmd, 200)})
 		return ""
+	}
+	if override {
+		return fmt.Sprintf("`%s=%s` is not this command's override: `%s` is measured as `%s`, whose override token is `%s`. One token per measured command is what lets a seat allow exactly the expensive commands it has measured instead of every command with the prefix. Next action: run it as %s",
+			AllowSlowVar, val, CommandHead(cmd), name, AllowSlowSlug(name), AllowSlowForm(name, cmd))
 	}
 	secs := "?"
 	if s, ok := r["seconds"]; ok && s != nil {
@@ -472,7 +553,7 @@ func CheckCost(cmd, sid string) string {
 		}
 	}
 	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, run it in exactly this form so the override is recorded: %s. That one shape is what a roled directory allows as %s; no other spelling of the override is permitted there.",
-		name, secs, instead, AllowSlowForm(cmd), AllowSlowPattern)
+		name, secs, instead, AllowSlowForm(name, cmd), AllowSlowPattern(name))
 }
 
 func cut(s string, n int) string {

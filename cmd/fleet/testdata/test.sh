@@ -145,10 +145,10 @@ cp "$work/expensive.keep" "$FLEET_STATE/expensive.json"
 run "vitest on one test file → allowed"                                     0 "$(tool PreToolUse $S2 $REPO Bash t8 '{"command":"npx vitest run src/a.test.ts"}')"
 run "Whole-project tsc → denied"                                            2 "$(tool PreToolUse $S2 $REPO Bash t9 '{"command":"npx tsc --noEmit"}')"
 run "tsc -p <package> → allowed"                                            0 "$(tool PreToolUse $S2 $REPO Bash t10 '{"command":"npx tsc --noEmit -p apps/web"}')"
-run "FLEET_ALLOW_SLOW override → allowed, logged, suite lock taken"         0 "$(tool PreToolUse $S2 $REPO Bash t11 '{"command":"FLEET_ALLOW_SLOW=\"wire contract\" npx vitest run"}')"
-run "Second session starts the same suite while it runs → denied (lock)"    2 "$(tool PreToolUse $S3 $REPO Bash t12 '{"command":"FLEET_ALLOW_SLOW=x npx vitest run"}')"
+run "FLEET_ALLOW_SLOW override → allowed, logged, suite lock taken"         0 "$(tool PreToolUse $S2 $REPO Bash t11 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
+run "Second session starts the same suite while it runs → denied (lock)"    2 "$(tool PreToolUse $S3 $REPO Bash t12 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
 age "$FLEET_STATE/inflight/t11.json" at 1403
-run "PostToolUse: elapsed lands in the ledger, lock released"               0 "$(tool PostToolUse $S2 $REPO Bash t11 '{"command":"FLEET_ALLOW_SLOW=\"wire contract\" npx vitest run"}')"
+run "PostToolUse: elapsed lands in the ledger, lock released"               0 "$(tool PostToolUse $S2 $REPO Bash t11 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
 # The row's seconds is 1403 of back-dating plus however long this box really took between the two
 # events — ~2s of interpreter startup on Windows. Assert the signature and the order of magnitude,
 # never the exact number: a slower machine is not a policy failure.
@@ -157,7 +157,11 @@ import json,sys
 rows=[json.loads(l) for l in open(sys.argv[1],encoding="utf-8")]
 sys.exit(0 if any(r["sig"]=="npx vitest" and 1403 <= r["seconds"] < 1463 for r in rows) else 1)
 PY
-run "Same suite after the lock cleared → allowed"                           0 "$(tool PreToolUse $S3 $REPO Bash t13 '{"command":"FLEET_ALLOW_SLOW=x npx vitest run"}')"
+run "Same suite after the lock cleared → allowed"                           0 "$(tool PreToolUse $S3 $REPO Bash t13 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
+# The override token names the measured command, so a seat allows exactly the expensive
+# commands it has measured rather than every command wearing the prefix.
+run "wrong override token for the measured command → denied"              2 "$(tool PreToolUse $S3 $REPO Bash t13a '{"command":"FLEET_ALLOW_SLOW=\"wire contract\" npx vitest run"}')"
+run "the prefix on a command with no cost rule → denied"                   2 "$(tool PreToolUse $S3 $REPO Bash t13b '{"command":"FLEET_ALLOW_SLOW=full-unit-suite gh pr merge 12 --squash"}')"
 run "Stop: turn closes"                                                     0 "$(ev hook_event_name=Stop session_id=$S2 cwd=$REPO)"
 age "$FLEET_STATE/sessions/$S2.json" last_stop_at 2900
 run "UserPromptSubmit: the gap since the last turn is injected"             0 "$(ev hook_event_name=UserPromptSubmit session_id=$S2 cwd=$REPO prompt=hi)"
@@ -382,22 +386,22 @@ run "a plain stop still refuses"                                             2 "
 # session that ended mid-command left its lock behind for good.
 S7=local_7777aaaa
 noid() { "$PY" -c "import json,sys; print(json.dumps({'hook_event_name':sys.argv[1],'session_id':sys.argv[2],'cwd':sys.argv[3],'tool_name':'Bash','tool_input':{'command':sys.argv[4]},'tool_response':{}}))" "$@"; }
-run "a command with no tool_use_id starts (fallback key)"                    0 "$(noid PreToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=codex npx vitest run')"
+run "a command with no tool_use_id starts (fallback key)"                    0 "$(noid PreToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=full-unit-suite npx vitest run')"
 s7_inflight() { ls "$FLEET_STATE/inflight"/${S7}-*.json 2>/dev/null; }   # only this session's; an earlier allowed-but-never-closed scenario leaves its own record behind
 [ -n "$(s7_inflight)" ] && echo "  ok    inflight record written under the fallback key" || { echo "  FAIL  no inflight record"; fails=$((fails+1)); }
 age "$(s7_inflight | head -1)" at 700
-run "its PostToolUse finds the same record without a tool_use_id"            0 "$(noid PostToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=codex npx vitest run')"
+run "its PostToolUse finds the same record without a tool_use_id"            0 "$(noid PostToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=full-unit-suite npx vitest run')"
 [ -z "$(s7_inflight)" ] && echo "  ok    the fallback key is stable across the two hook processes (inflight consumed)" || { echo "  FAIL  PostToolUse computed a different fallback key; inflight leaked"; fails=$((fails+1)); }
 "$PY" - "$FLEET_STATE/costs.jsonl" <<'PY' && echo "  ok    the no-id command still lands in the ledger (~700s)" || { echo "  FAIL  no ledger row for the no-id command"; fails=$((fails+1)); }
 import json,sys
 rows=[json.loads(l) for l in open(sys.argv[1],encoding="utf-8")]
 sys.exit(0 if any(r["sig"]=="npx vitest" and 700 <= r["seconds"] < 760 for r in rows) else 1)
 PY
-run "a suite starts and its session dies mid-run"                           0 "$(noid PreToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=x npx vitest run')"
+run "a suite starts and its session dies mid-run"                           0 "$(noid PreToolUse $S7 $REPO2 'FLEET_ALLOW_SLOW=full-unit-suite npx vitest run')"
 run "SessionEnd of the runner"                                              0 "$(ev hook_event_name=SessionEnd session_id=$S7 cwd=$REPO2 reason=exit)"
 [ -z "$(grep -l "$S7" "$FLEET_STATE/locks"/*.json 2>/dev/null)" ] && [ -z "$(s7_inflight)" ] && echo "  ok    a session's suite lock and inflight records die with it" || { echo "  FAIL  lock or inflight outlived the session: $(ls "$FLEET_STATE/locks" "$FLEET_STATE/inflight")"; fails=$((fails+1)); }
-run "another session may now run the suite"                                 0 "$(tool PreToolUse $S4 $REPO2 Bash t33 '{"command":"FLEET_ALLOW_SLOW=x npx vitest run"}')"
-run "and closes it cleanly"                                                 0 "$(tool PostToolUse $S4 $REPO2 Bash t33 '{"command":"FLEET_ALLOW_SLOW=x npx vitest run"}')"
+run "another session may now run the suite"                                 0 "$(tool PreToolUse $S4 $REPO2 Bash t33 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
+run "and closes it cleanly"                                                 0 "$(tool PostToolUse $S4 $REPO2 Bash t33 '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run"}')"
 
 # Defect 4: the two files `fleet role` writes into a checkout were not ignored anywhere, so they sat
 # untracked one `git add -A` from being committed into a shared repo. Ask git, not the exclude file:

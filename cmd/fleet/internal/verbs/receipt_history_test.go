@@ -135,3 +135,26 @@ func capture(t *testing.T, f func()) string {
 	Out = prev
 	return buf.String()
 }
+
+// Seeding a legacy store must be durable before the latest file is overwritten. An
+// unwritable history plus an ignored error erases the only copy of the verdict this
+// path exists to preserve.
+func TestASeedFailureLeavesTheLegacyVerdictIntact(t *testing.T) {
+	historyFixture(t)
+	latest, history := receiptPaths(historySha, "check")
+	legacy := fleet.Rec{"sha": historySha, "kind": "check", "verdict": "fail", "session": "sess-legacy", "at": float64(100)}
+	if err := fleet.WriteJSON(latest, legacy); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the history file belongs: every append to it fails.
+	if err := os.MkdirAll(history, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := recordReceipt(historySha, "check", fleet.Rec{"sha": historySha, "kind": "check", "verdict": "pass", "session": "sess-new", "at": float64(200)})
+	if err == nil {
+		t.Fatal("a seed that cannot be appended must fail the record, not proceed")
+	}
+	if v := fleet.S(fleet.ReadJSON(latest), "verdict"); v != "fail" {
+		t.Fatalf("the legacy verdict was overwritten anyway: verdict=%q", v)
+	}
+}
