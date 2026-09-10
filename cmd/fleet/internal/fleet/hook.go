@@ -261,21 +261,10 @@ func onPreTool(ev Event, sid string) *Verdict {
 	if evCwd == "" {
 		evCwd = S(rec, "cwd")
 	}
-	if branch != "" {
-		if reason := CheckStop(key, branch, sid); reason != "" {
-			denyStopped(ev, sid, key, branch)
-			return deny(reason)
-		}
-	}
 	writes := IsWrite(tool, cmd)
-	if branch != "" && writes {
-		if reason := CheckLease(key, branch, sid, S(rec, "role"), evCwd); reason != "" {
-			return deny(reason)
-		}
-	}
-	toKeys, reason := switchDestinations(tool, cmd, target, branch, sid, S(rec, "role"), evCwd)
-	if reason != "" {
-		return deny(reason)
+	toKeys, v := preWriteVerdicts(ev, rec, sid, tool, cmd, target, branch, key, evCwd, writes)
+	if v != nil {
+		return v
 	}
 	// The verdicts above are in. Now the record may be written.
 	fields := Rec{"turn_open": true}
@@ -316,6 +305,32 @@ func onPreTool(ev Event, sid string) *Verdict {
 	return allow
 }
 
+// preWriteVerdicts is every refusal that must be reached before this session's record
+// is written, in order: a stand-down on the branch, the branch's lease, the directory
+// the command would move into, and the branches a switch is headed for. It returns the
+// destination keys a switch claimed, or the verdict that stops the call.
+func preWriteVerdicts(ev Event, rec Rec, sid, tool, cmd, target, branch, key, evCwd string, writes bool) ([]string, *Verdict) {
+	if branch != "" {
+		if reason := CheckStop(key, branch, sid); reason != "" {
+			denyStopped(ev, sid, key, branch)
+			return nil, deny(reason)
+		}
+	}
+	if branch != "" && writes {
+		if reason := CheckLease(key, branch, sid, S(rec, "role"), evCwd); reason != "" {
+			return nil, deny(reason)
+		}
+	}
+	if reason := cdDestinations(tool, cmd, evCwd); reason != "" {
+		return nil, deny(reason)
+	}
+	toKeys, reason := switchDestinations(tool, cmd, target, branch, sid, S(rec, "role"), evCwd)
+	if reason != "" {
+		return nil, deny(reason)
+	}
+	return toKeys, nil
+}
+
 // preToolTarget is the path the tool call acts on: the event's file, else its cwd,
 // exactly as TouchSession would have recorded it; a Bash command may name its own.
 func preToolTarget(ev Event, rec Rec, tool, cmd string) string {
@@ -345,6 +360,44 @@ func denyStopped(ev Event, sid, key, branch string) {
 	flag := StopFlag(key)
 	TouchSession(sid, ev, Rec{"last_denied": Rec{"kind": "stop", "branch": branch, "key": key, "at": Now(), "revoke": S(flag, "except") != ""}})
 	RetireDeliveredStop(key, sid)
+}
+
+// cdDestinations refuses a Bash command that would move this session into a bound
+// directory other than its own, BEFORE the shell runs it. The launch directory is
+// what decides a session's identity, so a session that cd's into someone else's
+// directory becomes that occupant on its next tool call and leases their branch out
+// from under them. Naming a path (an absolute path, `git -C`) moves nothing and stays
+// allowed; so does moving anywhere inside this session's own bound tree.
+func cdDestinations(tool, cmd, evCwd string) string {
+	if tool != "Bash" || cmd == "" {
+		return ""
+	}
+	own, haveOwn := BoundDir(evCwd)
+	for _, to := range uniq(CdTargets(cmd, evCwd)) {
+		row, ok := BoundDir(to)
+		if !ok || (haveOwn && canonPath(row.Path) == canonPath(own.Path)) {
+			continue
+		}
+		return driftRefusal(to, row, own, haveOwn)
+	}
+	return ""
+}
+
+// driftRefusal names whose directory it is and the two ways to do the work without
+// moving into it.
+func driftRefusal(to string, row, own MapRow, haveOwn bool) string {
+	whose := "the " + row.Role + " it is bound to"
+	if row.Slot != "" {
+		whose = row.Slot + " (" + row.Role + ")"
+	}
+	mine := "this session holds no bound directory of its own"
+	if haveOwn {
+		mine = "this session's own directory is " + LongPath(own.Path)
+	}
+	return fmt.Sprintf("`cd %s` would move this session into %s, and the launch directory is what decides a session's identity — "+
+		"the next tool call would record this session there, take that directory's branch lease, and refuse its real occupant on their own work. "+
+		"%s. Do not cd there. Instead: act on that tree without moving, `git -C %s <args>`; or run the whole command in a subshell, `(cd %s && <command>)`, which returns here; or start a session in that directory and let it be that occupant.",
+		to, whose, mine, LongPath(row.Path), LongPath(row.Path))
 }
 
 // switchDestinations leases every branch a Bash command switches to BEFORE git runs:

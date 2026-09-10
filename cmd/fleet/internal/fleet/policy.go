@@ -47,6 +47,31 @@ var (
 	switchDetach = map[string]bool{"--detach": true, "-d": true}
 )
 
+// The cost gate and the permissions a roled directory projects have to describe ONE
+// command shape, or an override the gate accepts is refused by the harness before the
+// gate ever sees it — which is what happened to a session that had won the resource it
+// needed and could not run it. The shape is a leading environment assignment, because
+// that is the only form a harness prefix rule can name.
+const (
+	// AllowSlowVar prefixes a command whose cost the operator has accepted.
+	AllowSlowVar = "FLEET_ALLOW_SLOW"
+	// AllowSlowPattern is that shape as a harness allow rule, projected into every
+	// roled directory by `fleet role`.
+	AllowSlowPattern = "Bash(" + AllowSlowVar + "=*)"
+)
+
+var allowSlowRe = regexp.MustCompile(`\A[^\S\r\n]*` + AllowSlowVar + `=`)
+
+// AllowSlowPrefixed reports whether a command carries the override in the one accepted
+// shape: as its leading assignment. `npx vitest run FLEET_ALLOW_SLOW=x` mentions the
+// variable and sets nothing.
+func AllowSlowPrefixed(cmd string) bool { return allowSlowRe.MatchString(cmd) }
+
+// AllowSlowForm is the command as it must be typed to carry the override.
+func AllowSlowForm(cmd string) string {
+	return AllowSlowVar + `="<why>" ` + cut(strings.TrimSpace(cmd), 120)
+}
+
 // IsWrite reports whether a tool call writes to the tree.
 func IsWrite(tool, cmd string) bool {
 	if FileTools[tool] {
@@ -435,7 +460,7 @@ func CheckCost(cmd, sid string) string {
 	if lock != nil && S(lock, "session") != sid && SessionAlive(ReadJSON(Path("sessions", S(lock, "session")+".json"))) {
 		return fmt.Sprintf("`%s` is already running in session %s (started %s ago). Do not run it again in parallel; do the targeted check instead: %s", name, Short(S(lock, "session")), FmtAge(Now()-F(lock, "at")), instead)
 	}
-	if strings.Contains(cmd, "FLEET_ALLOW_SLOW=") {
+	if AllowSlowPrefixed(cmd) {
 		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "cmd": cut(cmd, 200)})
 		return ""
 	}
@@ -446,7 +471,8 @@ func CheckCost(cmd, sid string) string {
 			secs = strconv.FormatInt(int64(f), 10)
 		}
 	}
-	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, prefix the command with FLEET_ALLOW_SLOW=\"<why>\" so the override is recorded.", name, secs, instead)
+	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, run it in exactly this form so the override is recorded: %s. That one shape is what a roled directory allows as %s; no other spelling of the override is permitted there.",
+		name, secs, instead, AllowSlowForm(cmd), AllowSlowPattern)
 }
 
 func cut(s string, n int) string {
@@ -493,6 +519,76 @@ func SwitchTargets(cmd, start string) []string {
 		}
 	}
 	return out
+}
+
+// cdRe is a `cd`/`pushd` at command position and the words that follow it, up to the
+// next operator.
+var cdRe = regexp.MustCompile(cmdPos + `(?:cd|pushd)\b([^&|;\n\r]*)`)
+
+// CdTargets is every directory a Bash command moves THIS session into, resolved
+// against its cwd. A `cd` inside parentheses — a subshell or a command substitution —
+// is not one: the parent's cwd is where the next tool call still runs. `cd` with no
+// operand, or `cd -`, names nothing this guard can resolve and is left alone.
+func CdTargets(cmd, cwd string) []string {
+	var out []string
+	for _, m := range cdRe.FindAllStringSubmatchIndex(cmd, -1) {
+		if parenDepth(cmd[:m[2]]) > 0 {
+			continue
+		}
+		word := firstOperand(shellWords(cmd[m[2]:m[3]]))
+		if word == "" {
+			continue
+		}
+		t := expand(word)
+		if !filepath.IsAbs(t) {
+			if cwd == "" {
+				continue
+			}
+			t = filepath.Join(cwd, t)
+		}
+		out = append(out, filepath.Clean(t))
+	}
+	return out
+}
+
+// firstOperand is the first non-option word, or "".
+func firstOperand(toks []string) string {
+	for _, t := range toks {
+		if t == "" || strings.HasPrefix(t, "-") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// parenDepth is how many unclosed, unquoted `(` the text carries — the depth a
+// command at its end would run at.
+func parenDepth(text string) int {
+	depth := 0
+	quote := rune(0)
+	esc := false
+	for _, r := range text {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '(':
+			depth++
+		case r == ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
 }
 
 func isDetachedSwitch(toks []string) bool {

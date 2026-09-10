@@ -28,7 +28,9 @@ of leads, cost nothing new.
   `mono-finisher-2`" and the next session that opens there reads the brief,
   gets the seat's card and denies projected into its harness settings, and
   simply is that worker. Behavior is driven by where the agent sits, not by
-  what it is told to remember.
+  what it is told to remember. Because cwd *is* the identity, the hook refuses a
+  Bash command that would `cd` (or `pushd`) this session into a bound directory that
+  is not its own — see below.
 - **Facts come from the hook, never from an agent.** Identity, branch,
   liveness, turn state and last word are derived from harness events. An
   agent does not know the substrate exists until it is refused or handed a
@@ -48,7 +50,8 @@ of leads, cost nothing new.
 - **Done is evidence.** A receipt is recorded only by a lane that produces that
   kind, from its own roled worktree, at the exact head, from a clean tree.
   `fleet done` answers from receipts and nothing else; a message saying "done"
-  is not done.
+  is not done. The latest verdict of a kind is the answer, and it no longer erases
+  the one before it: every verdict at a head is kept, and `--all` shows them.
 
 It is a port of the Python reference in cc-skills
 (`docs/features/agent-fleet-rules/ref/`), kept byte-compatible on purpose: store
@@ -78,7 +81,8 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 |---|---|---|
 | `sessions/<sid>.json` | hook | identity, role, branch, liveness, turn state |
 | `leases/<key>.json` | hook, `take`, `drop` | one holder per key |
-| `receipts/<sha>.<kind>.json` | `fleet receipt` | evidence of done at an exact head |
+| `receipts/<sha>.<kind>.json` | `fleet receipt` | the latest evidence of done at an exact head |
+| `receipts/<sha>.<kind>.jsonl` | `fleet receipt` | every verdict recorded at that head, oldest first |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
 | `assign/<slot>.json` | `assign`, `dispatch --slot` | what a seat's next session reads at start |
 | `mail/<role-safe>/<id>.json` | `send`, `ack` | role-addressed messages, retained after acknowledgement |
@@ -144,6 +148,47 @@ Run `fleet` with no arguments for the full list. The groups:
 `fleet who <thing>` gives one answer or a loud reason there is none, never a
 substitute. See `docs/report.md` and `docs/hook-inspection.md` for the two verbs
 with their own notes.
+
+## Receipts keep their history
+
+A second verdict of one kind at one head used to overwrite the first: a `verify fail`
+that a later pass replaced survived only in whatever a human had copied onto the pull
+request. Each verdict is now also appended to `receipts/<sha>.<kind>.jsonl` beside the
+latest file, which keeps its name and its exact shape — a reader that knows only the
+`.json` reads what it always did, and a store written before this keeps its first
+verdict, seeded into the history by the next receipt.
+
+```sh
+fleet receipts <sha> --all        # each verdict with the ones it replaced under it
+fleet done <sha> --kind verify --all
+```
+
+`fleet done` and `fleet receipts` still report the LATEST verdict of each kind and no
+exit code changes; `--all` only adds what it replaced.
+
+## Two guards on a Bash command
+
+**The directory guard.** A session that runs `cd <another bound directory>` becomes
+that directory's occupant at its next tool call — the hook resolves identity from cwd —
+and then leases that directory's branch away from the session that actually lives
+there. It happened twice in one rehearsal evening, and there is no holder-side release
+of a branch lease short of `SessionEnd` or an operator `fleet revoke`. So the PreToolUse
+Bash handler resolves every `cd`/`pushd` target the way identity is resolved
+(longest-prefix over `roles.map`) and denies the move when the target's bound directory
+is not the session's own, naming the seat or role and the ways to do the work without
+moving: `git -C <dir> …`, or `(cd <dir> && …)` in a subshell, which returns here. A
+session with no role of its own gets the same refusal. Naming a path moves nothing:
+absolute paths as operands, `git -C`, and any `cd` inside the session's own tree stay
+allowed.
+
+**One shape for an accepted cost.** When the cost gate refuses a slow command it asks
+for one exact form — `FLEET_ALLOW_SLOW="<why>" <command>`, the override as the command's
+leading assignment — and accepts nothing else; a trailing `FLEET_ALLOW_SLOW=x` sets no
+variable and is not the override. `fleet role` and `fleet pool` project the matching
+allow rule, `Bash(FLEET_ALLOW_SLOW=*)`, into every roled directory's
+`.claude/settings.local.json`, so the gate and the harness describe the same command.
+Without that, a worker that had *won* the resource it needed was told to prefix the
+command and then refused by its own seat for doing so.
 
 ## Testing
 

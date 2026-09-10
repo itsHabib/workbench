@@ -67,7 +67,7 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 	if hasCard {
 		cardV = card
 	}
-	err = fleet.WriteJSON(fleet.Path("receipts", sha+"."+kind+".json"), fleet.Rec{
+	err = recordReceipt(sha, kind, fleet.Rec{
 		"sha": sha, "head": head, "kind": kind, "verdict": verdict, "observable": observable,
 		"session": sid, "role": nilIfEmpty(fleet.S(rec, "role")), "slot": nilIfEmpty(fleet.S(rec, "slot")), "repo": nilIfEmpty(fleet.RepoID(here)),
 		"worktree": nilIfEmpty(root), "dirty": false, "card": cardV, "at": fleet.Now()})
@@ -87,6 +87,69 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 		"observable": observable, "session": sid, "role": nilIfEmpty(fleet.S(rec, "role")), "card": cardV, "at": fleet.Now()})
 	say("receipt: %s %s @ %s by %s %s%s; %s", kind, verdict, sha, roleOr(rec, "session"), fleet.Short(sid), tail, note)
 	return nil
+}
+
+// receiptPaths are the two files a verdict at one head lives in: the latest file every
+// reader already knows, and the history beside it.
+func receiptPaths(sha, kind string) (latest, history string) {
+	return fleet.Path("receipts", sha+"."+kind+".json"), fleet.Path("receipts", sha+"."+kind+".jsonl")
+}
+
+// recordReceipt publishes the latest verdict and appends it to the per-head history.
+// A second verdict of one kind at one head used to overwrite the first, so a failure
+// that a later pass replaced survived only in whatever a human had copied elsewhere.
+// The latest file keeps its exact shape and name — a reader that knows only it reads
+// what it always did — and a store written before this existed is seeded with its own
+// latest record first, so the history never starts by claiming the earlier verdict
+// never happened.
+func recordReceipt(sha, kind string, rec fleet.Rec) error {
+	latest, history := receiptPaths(sha, kind)
+	if _, err := os.Stat(history); err != nil {
+		if prev := fleet.ReadJSON(latest); prev != nil {
+			_ = fleet.AppendJSONL(history, prev)
+		}
+	}
+	if err := fleet.WriteJSON(latest, rec); err != nil {
+		return err
+	}
+	return fleet.AppendJSONL(history, rec)
+}
+
+// receiptHistory is every verdict recorded for a revision and kind, oldest first.
+// Absent history is no history, never an error: the store may predate it.
+func receiptHistory(sha, kind string) []fleet.Rec {
+	_, history := receiptPaths(sha, kind)
+	b, err := os.ReadFile(history)
+	if err != nil {
+		return nil
+	}
+	var rows []fleet.Rec
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var r fleet.Rec
+		if strings.TrimSpace(line) == "" || json.Unmarshal([]byte(line), &r) != nil {
+			continue
+		}
+		rows = append(rows, r)
+	}
+	return rows
+}
+
+// supersededBy is the history of a latest record minus that record itself — the
+// verdicts it replaced. Identity is the timestamp and the session that wrote it, not
+// the line's position: an older binary can publish a latest file without appending.
+func supersededBy(latest fleet.Rec) []fleet.Rec {
+	sha, kind := fleet.S(latest, "sha"), fleet.S(latest, "kind")
+	if sha == "" || kind == "" {
+		return nil
+	}
+	var out []fleet.Rec
+	for _, r := range receiptHistory(sha, kind) {
+		if fleet.F(r, "at") == fleet.F(latest, "at") && fleet.S(r, "session") == fleet.S(latest, "session") {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // receiptArgs is the packet's shape: a verdict, a sha, a kind, a non-empty
@@ -206,9 +269,13 @@ func receiptRows(sha, kind string, since float64, hasSince bool) []fleet.Rec {
 	return rows
 }
 
-func cmdReceipts(sha, kind string, since float64, hasSince, asJSON bool) error {
+func cmdReceipts(sha, kind string, since float64, hasSince, asJSON, all bool) error {
 	rows := receiptRows(sha, kind, since, hasSince)
 	if asJSON {
+		if all {
+			say("%s", jsonIndent(withHistory(rows)))
+			return nil
+		}
 		say("%s", jsonIndent(rows))
 		return nil
 	}
@@ -228,21 +295,64 @@ func cmdReceipts(sha, kind string, since float64, hasSince, asJSON bool) error {
 			say("MALFORMED  %s", m)
 			continue
 		}
-		s := fleet.S(r, "session")
-		if s == "" {
-			s = "?"
-		}
-		tail := ""
-		if sl := fleet.S(r, "slot"); sl != "" {
-			tail += "  slot " + sl
-		}
-		tail += "  — " + fleet.S(r, "observable")
-		if c := fleet.S(r, "card"); c != "" {
-			tail += "  [card " + c + "]"
-		}
-		say("%s  %-8s %-4s  %6s ago  %s %s%s", cut(fleet.S(r, "head"), 10), fleet.S(r, "kind"), fleet.S(r, "verdict"), ago(fleet.F(r, "at")), roleOr(r, "session"), fleet.Short(s), tail)
+		say("%s", receiptLine(r))
+		sayHistory(r, all)
 	}
 	return nil
+}
+
+// receiptLine is one verdict as a reader sees it.
+func receiptLine(r fleet.Rec) string {
+	s := fleet.S(r, "session")
+	if s == "" {
+		s = "?"
+	}
+	tail := ""
+	if sl := fleet.S(r, "slot"); sl != "" {
+		tail += "  slot " + sl
+	}
+	tail += "  — " + fleet.S(r, "observable")
+	if c := fleet.S(r, "card"); c != "" {
+		tail += "  [card " + c + "]"
+	}
+	return fmt.Sprintf("%s  %-8s %-4s  %6s ago  %s %s%s", cut(fleet.S(r, "head"), 10), fleet.S(r, "kind"), fleet.S(r, "verdict"), ago(fleet.F(r, "at")), roleOr(r, "session"), fleet.Short(s), tail)
+}
+
+// sayHistory prints the verdicts this one replaced, newest first, indented under it.
+func sayHistory(latest fleet.Rec, all bool) {
+	if !all {
+		return
+	}
+	prior := supersededBy(latest)
+	for i := len(prior) - 1; i >= 0; i-- {
+		say("  superseded  %s", receiptLine(prior[i]))
+	}
+}
+
+// withHistory is each latest record carrying the verdicts it replaced, oldest first,
+// under `superseded`. The record itself keeps every field it had.
+func withHistory(rows []fleet.Rec) []fleet.Rec {
+	out := make([]fleet.Rec, 0, len(rows))
+	for _, r := range rows {
+		if fleet.S(r, "malformed") != "" {
+			out = append(out, r)
+			continue
+		}
+		copied := fleet.Rec{}
+		for k, v := range r {
+			copied[k] = v
+		}
+		copied["superseded"] = orEmptyRecs(supersededBy(r))
+		out = append(out, copied)
+	}
+	return out
+}
+
+func orEmptyRecs(xs []fleet.Rec) []fleet.Rec {
+	if xs == nil {
+		return []fleet.Rec{}
+	}
+	return xs
 }
 
 func jsonIndent(v any) string {
@@ -495,7 +605,9 @@ func doneVerdict(sha, kind string) doneResult {
 // CmdDone exits 0 when a passing receipt of every expected kind exists for the
 // revision; 1 when one is still missing (pending); 3 when the latest receipt of an
 // expected kind FAILED; 2 when the revision cannot be resolved or nothing is expected.
-func CmdDone(arg, kind string, asJSON bool) error {
+// The verdict is always the LATEST receipt of each kind; --all shows what it replaced
+// and changes no exit code.
+func CmdDone(arg, kind string, asJSON, all bool) error {
 	if arg == "" {
 		return exitCode(2, "")
 	}
@@ -514,10 +626,13 @@ func CmdDone(arg, kind string, asJSON bool) error {
 		kinds := map[string]any{}
 		for k, r := range v.kinds {
 			kinds[k] = r
+			if all {
+				kinds[k] = withHistory([]fleet.Rec{r})[0]
+			}
 		}
 		say("%s", jsonIndent(map[string]any{"sha": sha, "kinds": kinds, "wanted": v.wanted, "missing": orEmpty(v.missing), "failed": orEmpty(v.failed), "ok": v.ok, "resolution": how}))
 	} else {
-		printDone(v, sha, branch, how)
+		printDone(v, sha, branch, how, all)
 	}
 	switch {
 	case v.ok:
@@ -530,7 +645,7 @@ func CmdDone(arg, kind string, asJSON bool) error {
 }
 
 // printDone is the verdict as text: one line per receipt kind, and what is missing.
-func printDone(v doneResult, sha, branch, how string) {
+func printDone(v doneResult, sha, branch, how string, all bool) {
 	head := cut(sha, 10)
 	if branch != "" {
 		head += " (" + branch + ")"
@@ -558,6 +673,7 @@ func printDone(v doneResult, sha, branch, how string) {
 			line += "  [card " + c + "]"
 		}
 		say("%s", line)
+		sayHistory(r, all)
 	}
 	if len(v.missing) > 0 && len(v.kinds) > 0 {
 		say("NOT DONE  %s: no receipt of kind %s", head, strings.Join(v.missing, ", "))

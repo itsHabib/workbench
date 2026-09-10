@@ -480,6 +480,7 @@ func writeDenies(existing, manifest map[string]any, settingsTarget string) (deny
 		denySet[d] = true
 	}
 	sort.Strings(extra)
+	allowSlow(perms)
 	deny = sortedKeys(denySet)
 	denyAny := make([]any, len(deny))
 	for i, d := range deny {
@@ -491,6 +492,19 @@ func writeDenies(existing, manifest map[string]any, settingsTarget string) (deny
 		return nil, nil, err
 	}
 	return deny, extra, nil
+}
+
+// allowSlow projects the one command shape the cost gate accepts as an override into
+// the directory's allow list, so a command the gate would let through is not refused by
+// the harness first. Added, never removed: the allow list is a human's file too.
+func allowSlow(perms map[string]any) {
+	for _, a := range fleet.Strs(perms, "allow") {
+		if a == fleet.AllowSlowPattern {
+			return
+		}
+	}
+	allow, _ := perms["allow"].([]any)
+	perms["allow"] = append(allow, fleet.AllowSlowPattern)
 }
 
 func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string, manifest map[string]any, card, cfgTarget, cfgText, hooksTarget string, hooksData map[string]any, rulesTarget, settingsTarget string, existing map[string]any, mapfile string) error {

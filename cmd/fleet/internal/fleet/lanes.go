@@ -166,6 +166,45 @@ func MapRowsFor(cwd string) (role, tenant, slot string) {
 	return role, tenant, slot
 }
 
+// BoundDir is the roles.map row whose path is p itself or its nearest bound
+// ancestor — longest prefix, the same resolution a session's tenant comes from. An
+// unbound path has no row.
+func BoundDir(p string) (MapRow, bool) {
+	_, rows := MapRows(RolesMap())
+	want := canonUnborn(p)
+	var best MapRow
+	found := false
+	for _, r := range rows {
+		entry := canonPath(r.Path)
+		if entry != want && !strings.HasPrefix(want, entry+"/") && !strings.HasPrefix(want, entry+`\`) {
+			continue
+		}
+		if !found || len(entry) > len(canonPath(best.Path)) {
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
+// canonUnborn is canonPath for a path that need not exist: the deepest ancestor that
+// does is canonicalised, and the rest is appended. A directory a command is about to
+// enter compares as the same identity whether or not it has been created yet.
+func canonUnborn(p string) string {
+	cur, tail := p, []string(nil)
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			break
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return NormCase(LongPath(p))
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = parent
+	}
+	return NormCase(filepath.Join(append([]string{canonPath(cur)}, tail...)...))
+}
+
 // RoleOf is the role bound to exactly this checkout, or "".
 func RoleOf(cwd string) string { r, _, _ := MapRowsFor(cwd); return r }
 

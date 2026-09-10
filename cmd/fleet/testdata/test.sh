@@ -987,6 +987,21 @@ hook.take_lease(key, "feat/r", "local_2222cccc", "r", sys.argv[2], "held elsewhe
 PY
 run "'git checkout feat/r' while a live session holds feat/r → denied"        2 "$(tool PreToolUse $S20 $SL1 Bash t86 '{"command":"git checkout feat/r"}')"
 "$PY" -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if not r.get('handoff') else 1)" "$FLEET_STATE/sessions/$S20.json" && [ -e "$lq" ] && echo "  ok    a refused switch records no handoff and the origin stays held" || { echo "  FAIL  refused switch left state behind"; fails=$((fails+1)); }
+# Directory drift: cwd IS identity, so a session that cd's into another bound directory becomes its
+# occupant on the next tool call and leases that directory's branch away from the session that lives
+# there. The hook refuses the move itself, before the shell runs, and names the ways to do the work
+# without moving. Naming a path moves nothing and stays allowed.
+mkdir -p "$SL1/sub"
+S24=local_2424dddd
+run "'cd <another seat>' is refused: the launch directory is the identity"    2 "$(tool PreToolUse $S20 $SL1 Bash t87 "{\"command\":\"cd $SL2 && git status\"}")"
+grep -q "repo3-finisher-2" "$work/err" && grep -q "git -C" "$work/err" && echo "  ok    the refusal names the seat and the alternatives (git -C, a subshell)" || { echo "  FAIL  drift refusal text: $(cat "$work/err")"; fails=$((fails+1)); }
+run "'cd <a directory inside its own seat>' is allowed"                      0 "$(tool PreToolUse $S20 $SL1 Bash t88 "{\"command\":\"cd $SL1/sub && ls\"}")"
+run "'(cd <another seat> && …)' is a subshell: the session does not move"     0 "$(tool PreToolUse $S20 $SL1 Bash t89 "{\"command\":\"(cd $SL2 && git status)\"}")"
+run "'git -C <another seat> status' names a path and moves nothing"          0 "$(tool PreToolUse $S20 $SL1 Bash t90 "{\"command\":\"git -C $SL2 status\"}")"
+run "a session with no role of its own is refused a seat just the same"      2 "$(tool PreToolUse $S24 $REPO3 Bash t91 "{\"command\":\"cd $SL1\"}")"
+grep -q "repo3-finisher-1" "$work/err" && echo "  ok    an unroled session's refusal names the seat it tried to enter" || { echo "  FAIL  unroled drift refusal: $(cat "$work/err")"; fails=$((fails+1)); }
+run "that session ends"                                                      0 "$(ev hook_event_name=SessionEnd session_id=$S24 cwd=$REPO3 reason=exit)"
+
 # A settle that cannot complete must not reach main's catch-all (exit 0 = the lease check skipped).
 # The destination key's lock is held by another process; the session has a handoff in flight and
 # tries to write on a branch a live rival holds. Denied, and the handoff stays in flight.
