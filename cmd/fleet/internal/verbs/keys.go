@@ -1,6 +1,7 @@
 package verbs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -366,6 +367,21 @@ func cmdDecisions() error {
 	return nil
 }
 
+func dispatchHandoff(args []string) error {
+	if !contains(args, "--role") {
+		return cmdHandoff(at(args, 0), at(args, 1), at(args, 2))
+	}
+	session, err := optValue(args, "--session", "handoff")
+	if err != nil {
+		return err
+	}
+	a := positional(without(args, "--role"), "--session")
+	if len(a) < 1 || len(a) > 2 {
+		return exitCode(2, `usage: fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]`)
+	}
+	return CmdRoleHandoff(at(a, 0), at(a, 1), session)
+}
+
 func cmdHandoff(branch, conclusion, nxt string) error {
 	if branch == "" || strings.TrimSpace(conclusion) == "" {
 		return refuse(`usage: fleet handoff <branch> "<conclusion>" ["<next>"]`)
@@ -389,6 +405,30 @@ func cmdHandoff(branch, conclusion, nxt string) error {
 	}
 	say("handoff on %s @ %s: %s", branch, fleet.Short(sha), strings.TrimSpace(conclusion))
 	return nil
+}
+
+// CmdRoleHandoff records context for the caller's own role across branches.
+func CmdRoleHandoff(conclusion, next, session string) error {
+	sid, err := currentSession(session)
+	if err != nil {
+		return err
+	}
+	if err := fleet.WriteRoleHandoff(fleet.SessionRecord(sid), conclusion, next); err != nil {
+		return roleHandoffError(err)
+	}
+	say("role handoff recorded")
+	return nil
+}
+
+func roleHandoffError(err error) error {
+	var validation *fleet.RoleHandoffValidationError
+	if !errors.As(err, &validation) {
+		return err
+	}
+	if validation.Usage {
+		return exitCode(2, validation.Error())
+	}
+	return refuse("%s", validation.Error())
 }
 
 func sortBy[T any](xs []T, less func(a, b T) bool) {

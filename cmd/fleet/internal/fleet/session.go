@@ -262,23 +262,15 @@ func CostRows() []CostRow {
 }
 
 // AssignmentLine is what `fleet assign` placed into this slot, for the session that
-// just opened in it. Delivery is stamped on the record by this read, which is the one
-// action that consumes an assignment.
+// just opened in it. A delivery stamp is historical evidence, not consumption:
+// replacement sessions need the current assignment too.
 func AssignmentLine(slot, sid string) string {
-	if slot == "" {
+	a := currentStartupAssignment(slot, sid)
+	if a == nil {
 		return ""
 	}
-	p := Path("assign", Safe(slot)+".json")
-	a := ReadJSON(p)
-	if a == nil || S(a, "branch") == "" {
-		return ""
-	}
-	if d := S(a, "delivered_to"); d != "" && d != sid {
-		return ""
-	}
-	if sid != "" && S(a, "delivered_to") == "" {
-		a["delivered_to"], a["delivered_at"] = sid, Now()
-		_ = WriteJSON(p, a)
+	if notice := S(a, "startup_notice"); notice != "" {
+		return notice
 	}
 	brief := strings.Join(strings.Fields(S(a, "brief")), " ")
 	if len(brief) > 300 {
@@ -296,7 +288,11 @@ func AssignmentLine(slot, sid string) string {
 	if r := S(a, "reply_to"); r != "" {
 		tail += fmt.Sprintf(". Reply to: %s", r)
 	}
-	return fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
+	line := fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
+	if notice := S(a, "delivery_notice"); notice != "" {
+		line += "\n" + notice
+	}
+	return line
 }
 
 // RecordLastWord captures the session's conclusion at Stop with no act by the agent:

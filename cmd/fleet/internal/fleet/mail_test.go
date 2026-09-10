@@ -36,7 +36,11 @@ func mailPayload(id string) Rec {
 }
 func mustPut(t *testing.T, r Rec) Rec {
 	t.Helper()
-	out, err := PutMail(r, "one")
+	tenant := S(r, "tenant")
+	if tenant == "" {
+		tenant = "one"
+	}
+	out, err := PutMail(r, tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +130,7 @@ func TestMailDamagedAndUnsafePaths(t *testing.T) {
 		t.Fatal("aliased role accepted for write")
 	}
 	p["at"] = Now()
-	_ = WriteJSON(MailPath("hub__a", "alias"), p)
+	_ = WriteJSON(MailPath("hub:a", "alias"), p)
 	if _, err := ReadMail("hub:a", "alias", "one"); err == nil {
 		t.Fatal("aliased role accepted")
 	}
@@ -188,31 +192,34 @@ func TestMailPeerTenantBoundaries(t *testing.T) {
 	}
 }
 
-func TestMailTenantPinSurvivesRebinding(t *testing.T) {
+func TestMailTenantRebindingSeparatesTypedMail(t *testing.T) {
 	mailFixture(t)
 	mustPut(t, mailPayload("m1"))
-	pin, _ := os.ReadFile(Path("mail", Safe("hub:a"), mailAddressFile))
+	oldPath, err := MailPathFor("one", "hub:a", "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(oldPath)
 	rows, _ := os.ReadFile(RolesMap())
 	_ = os.WriteFile(RolesMap(), []byte(strings.ReplaceAll(string(rows), " one hub:a", " two hub:a")), 0600)
-	if _, err := ReadMail("hub:a", "m1", "two"); err == nil {
-		t.Fatal("new tenant read retained mail")
+	if r, err := ReadMail("hub:a", "m1", "two"); err != nil || r != nil {
+		t.Fatal("new tenant read retained mail", r, err)
 	}
-	if _, err := Mail("hub:a", false, "two"); err == nil {
-		t.Fatal("new tenant listed retained mail")
+	if rows, err := Mail("hub:a", false, "two"); err != nil || len(rows) != 0 {
+		t.Fatal(rows, err)
 	}
 	if _, err := AckMail("hub:a", "m1", "new-tenant", "two"); err == nil {
 		t.Fatal("new tenant acked retained mail")
 	}
-	if _, err := PutMail(mailPayload("m2"), "two"); err == nil {
-		t.Fatal("new tenant reused pinned mailbox")
+	p := mailPayload("m1")
+	p["tenant"] = "two"
+	mustPut(t, p)
+	if oldPath == MailPath("hub:a", "m1") {
+		t.Fatal("tenant path reused")
 	}
-	after, _ := os.ReadFile(Path("mail", Safe("hub:a"), mailAddressFile))
-	if !bytes.Equal(pin, after) {
-		t.Fatal("mailbox pin changed")
-	}
-	_ = os.Remove(Path("mail", Safe("hub:a"), mailAddressFile))
-	if _, err := PutMail(mailPayload("m2"), "two"); err == nil {
-		t.Fatal("retained mailbox adopted without pin")
+	after, _ := os.ReadFile(oldPath)
+	if !bytes.Equal(before, after) {
+		t.Fatal("old tenant mail changed")
 	}
 }
 

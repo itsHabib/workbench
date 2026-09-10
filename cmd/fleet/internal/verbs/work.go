@@ -408,18 +408,35 @@ func undeclaredRows(declared map[string]bool) []WorkRow {
 }
 
 // holderAssignment reads the holder's seat, never a branch-wide collapse of
-// assignments left behind in other seats. Another session's delivery is stale
-// context even when the seat and branch have since been reused.
+// assignments left behind in other seats. Delivery stamps record the first reader;
+// replacement sessions inherit the still-current placement, not that reader's ID.
 func holderAssignment(repo, branch, sid string) fleet.Rec {
-	slot := fleet.S(fleet.SessionRecord(sid), "slot")
-	if slot == "" {
+	rec := fleet.SessionRecord(sid)
+	slot := fleet.S(rec, "slot")
+	launch := fleet.S(rec, "launch_dir")
+	if launch == "" {
+		launch = fleet.S(rec, "cwd")
+	}
+	role, tenant, boundSlot := fleet.MapRowsFor(launch)
+	if slot == "" || boundSlot != slot || fleet.RepoID(launch) != repo || fleet.BranchOf(launch) != branch {
+		return nil
+	}
+	if fleet.S(rec, "repo") != repo || fleet.S(rec, "branch") != branch {
 		return nil
 	}
 	a := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(slot)+".json"))
+	if role == "" || tenant == "" || fleet.S(a, "role") != role || fleet.S(a, "tenant") != tenant {
+		return nil
+	}
 	if fleet.S(a, "repo") != repo || fleet.S(a, "branch") != branch || fleet.S(a, "slot") != slot {
 		return nil
 	}
-	if recipient := fleet.S(a, "delivered_to"); recipient != "" && recipient != sid {
+	if fleet.S(a, "path") == "" || canon(fleet.S(a, "path")) != canon(launch) {
+		return nil
+	}
+	// A new assignment can reuse the same branch and seat after the old session
+	// dies. It cannot establish accountability for that session's earlier work.
+	if fleet.F(a, "at") > fleet.F(rec, "last_event_at") {
 		return nil
 	}
 	return a

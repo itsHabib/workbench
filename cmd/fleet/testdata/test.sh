@@ -1065,7 +1065,7 @@ PY
 out=$("$PY" "$F" slots repo3); case "$out" in *"repo3-finisher-2 "*"assigned(feat/p)"*) echo "  ok    fleet slots shows the free slot as assigned(<branch>)";; *) echo "  FAIL  slots assigned: $out"; fails=$((fails+1));; esac
 out=$(printf '%s' "$(ev hook_event_name=SessionStart session_id=$S21 cwd=$SL2 source=startup)" | "$PY" "$H")
 case "$out" in *"assigned"*"feat/p"*"fix the flake"*) echo "  ok    the session that opens in the slot is told its assignment at SessionStart";; *) echo "  FAIL  assignment not injected: $out"; fails=$((fails+1));; esac
-out=$("$PY" "$F" slots repo3); case "$out" in *"assigned(feat/p)"*) echo "  FAIL  a delivered assignment still shows on fleet slots: $out"; fails=$((fails+1));; *) echo "  ok    once a session has been told, the assignment is spent: fleet slots no longer shows it";; esac
+out=$("$PY" "$F" slots repo3); case "$out" in *"assigned(feat/p)"*) echo "  FAIL  a delivered assignment still shows on fleet slots: $out"; fails=$((fails+1));; *) echo "  ok    once a session has been told, the assignment delivery is no longer pending: fleet slots no longer shows it";; esac
 "$PY" -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if r.get('delivered_to')==sys.argv[2] else 1)" "$FLEET_STATE/assign/repo3-finisher-2.json" "$S21" && echo "  ok    the record names the session it was delivered to" || { echo "  FAIL  delivery not stamped: $(cat "$FLEET_STATE/assign/repo3-finisher-2.json")"; fails=$((fails+1)); }
 "$PY" "$F" unassign repo3-finisher-2 >/dev/null && [ ! -e "$FLEET_STATE/assign/repo3-finisher-2.json" ] && echo "  ok    fleet unassign clears it" || { echo "  FAIL  unassign"; fails=$((fails+1)); }
 # Change-number -> branch is derived from `gh pr` calls the session ran anyway, never declared.
@@ -1139,7 +1139,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_who\",\"arguments\":{\"name\":\"feat/q\",\"cwd\":\"$SL1\"}}}" \
   | (cd "$work" && "$PY" "$here/fleet-mcp.py") > "$work/mcp.out" 2>"$work/mcp.err"
-"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 16 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
+"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 17 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
 import json, sys
 by = {}
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -1147,7 +1147,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
 bad = []
 if by[1]["result"]["serverInfo"]["name"] != "fleet": bad.append("initialize")
 tools = by[2]["result"]["tools"]
-if len(tools) != 16 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
+if len(tools) != 17 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
 if sys.argv[2] not in by[3]["result"]["content"][0]["text"] or by[3]["result"]["isError"]: bad.append("who")
 if not by[4]["result"]["isError"] or "busy" not in by[4]["result"]["content"][0]["text"]: bad.append("assign refusal")
 if by[5]["result"]["isError"] or '"ok": false' not in by[5]["result"]["content"][0]["text"]: bad.append("done")
@@ -2140,6 +2140,7 @@ sys.exit(1 if bad else 0)
 PY
 
 "$PY" "$here/mail-scenario.py" || fails=$((fails+1))
+"$PY" "$here/continuity-scenario.py" || fails=$((fails+1))
 
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
