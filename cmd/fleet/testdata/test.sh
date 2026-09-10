@@ -2125,6 +2125,7 @@ sys.exit(1 if bad else 0)
 PY
 
 "$PY" "$here/mail-scenario.py" || fails=$((fails+1))
+"$PY" "$here/delivery-scenario.py" || fails=$((fails+1))
 
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"
