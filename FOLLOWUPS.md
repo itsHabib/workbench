@@ -598,3 +598,29 @@ Occupancy and assignment identity checks remain in force. A deterministic
 session temporary-path collision regression verifies the warning, diagnostic,
 exit 0 and byte-identical assignment preservation. This fix returns directly to
 Gate judgment without another review-panel trigger.
+
+## Fleet watch delivery residuals (2026-09-10, PR #301)
+
+Two Codex P2 findings are deferred rather than fixed; both are design work, not
+defects in the delivery fix that landed.
+
+- **P2, reservation recovery across a crash.** `launch` stamps
+  `delivered_at`/`delivered_by` before it starts the command, and a start that does
+  not happen gives the stamps back. A kill or host restart between the two loses the
+  in-memory list, so the mail stays stamped and no later fold carries it. Closing this
+  needs a durable pending state distinguishable from a confirmed delivery, plus
+  startup reconciliation — a reservation record with an owning pid, reclaimed when
+  that pid is gone. Deferred so the recovery contract is designed once rather than
+  approximated inside the fold. Source: Codex thread on `deliver.go:236`.
+- **P2, duplicate addresses across tenants are invisible to the watcher.**
+  `MailAddressTenant` refuses an address bound in two tenants, so delivery cannot
+  target either mailbox and `lateReplies` skips it. Fixing it means carrying the
+  tenant in `deliver.json` and in the fold's own row identity rather than resolving
+  an address to one global tenant — a configuration change, and one that should land
+  with the tenant-qualified delivery entry, not ahead of it. Duplicate addresses stay
+  legal in `roles.map`; only substrate-initiated delivery declines them, and it
+  declines rather than guessing. Source: Codex thread on `mail_store.go:65`.
+
+Code verification at this head: `go test -race ./cmd/fleet/...`, `go vet`,
+`golangci-lint`, and both `testdata/run-suite.sh` variants pass. Those checks do not
+dismiss the residuals above. No further review-panel request goes out for this PR.

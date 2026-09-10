@@ -342,9 +342,6 @@ func TestDeliverRecorder(_ *testing.T) {
 // message with nothing on disk to say so, and a second process next fold holding it
 // too, because the record it was handed never stopped being eligible.
 func TestDeliverReservesBeforeStartingAndNeverLaunchesUnstampableMail(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the directory mode this test relies on")
-	}
 	_, sink := deliverEnv(t)
 	now := fleet.Now()
 	putStoreMail(t, "hub:lead", "q1", now-60, nil)
@@ -353,6 +350,7 @@ func TestDeliverReservesBeforeStartingAndNeverLaunchesUnstampableMail(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(box, 0o755) })
+	sealed(t, box)
 	observed := deliver(now)
 	if got := len(observedWhat(observed, "mail-delivery-started")); got != 0 {
 		t.Fatalf("launched with an unreserved message: %v", observed)
@@ -371,6 +369,22 @@ func TestDeliverReservesBeforeStartingAndNeverLaunchesUnstampableMail(t *testing
 		t.Fatalf("the retained message was not delivered on the next fold: %d", got)
 	}
 	launched(t, sink)
+}
+
+// sealed skips the test unless the directory mode actually refuses a write. The
+// caller's premise is an unstampable mailbox, and a read-only mode is not that
+// everywhere: Windows ignores it on directories, and so does root. Probing is the
+// honest check — it asks the filesystem instead of guessing from the platform.
+func sealed(t *testing.T, dir string) {
+	t.Helper()
+	probe := filepath.Join(dir, ".sealed-probe")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	t.Skip("this filesystem does not enforce the directory mode this test relies on")
 }
 
 // A start that never happened gives the reservation back, so the message is neither

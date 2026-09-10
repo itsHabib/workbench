@@ -193,7 +193,7 @@ func putSeatMail(t *testing.T, address, id string, at float64, kind string) {
 	t.Helper()
 	r := fleet.Rec{"id": id, "to": address, "tenant": "t1", "to_kind": "seat", "from_role": "hub:lead",
 		"from_address": "hub:lead", "from_kind": "role", "kind": kind, "subject": "unit?", "body": "ms or s", "at": at}
-	if err := fleet.WriteJSON(filepath.Join(storeDirs(t, "t1", address)[1], id+".json"), r); err != nil {
+	if err := fleet.WriteJSON(filepath.Join(storeDirs(t, "t1", address)[0], id+".json"), r); err != nil {
 		t.Fatal(err)
 	}
 }
