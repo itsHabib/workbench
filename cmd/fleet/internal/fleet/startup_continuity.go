@@ -47,10 +47,10 @@ func currentStartupAssignment(slot, sid string) Rec {
 
 func assignmentIdentityNotice(a Rec, role, tenant string) string {
 	if S(a, "role") == "" || S(a, "tenant") == "" {
-		return "[fleet] assignment identity is unknown; ask the lead to run fleet assign again before replaying its brief"
+		return "[fleet] assignment identity is unknown; ask the lead to reassign when the seat is free"
 	}
 	if role == "" || tenant == "" || S(a, "role") != role || S(a, "tenant") != tenant {
-		return "[fleet] assignment belongs to a different role or tenant; ask the lead to assign current work again"
+		return "[fleet] assignment belongs to a different role or tenant; ask the lead to reassign when the seat is free"
 	}
 	return ""
 }
