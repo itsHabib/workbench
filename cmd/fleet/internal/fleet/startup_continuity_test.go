@@ -30,7 +30,7 @@ func continuityFixture(t *testing.T) string {
 func TestStartupAssignmentSurvivesReplacementButNotSeatReuse(t *testing.T) {
 	root := continuityFixture(t)
 	p := Path("assign", "seat-a.json")
-	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "finish this work", "at": Now()}
+	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "finish this work", "at": Now(), "role": "lead:demo", "tenant": "one"}
 	if err := WriteJSON(p, a); err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +63,46 @@ func TestStartupAssignmentSurvivesReplacementButNotSeatReuse(t *testing.T) {
 			t.Fatalf("replayed stale %s assignment", key)
 		}
 		a[key] = saved
+	}
+}
+
+func TestStartupAssignmentRefusesReboundAndLegacyIdentity(t *testing.T) {
+	root := continuityFixture(t)
+	path := Path("assign", "seat-a.json")
+	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "private old brief", "at": Now(), "role": "lead:demo", "tenant": "one"}
+	for _, binding := range []string{"two lead:demo", "one lead:other"} {
+		if err := WriteJSON(path, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(RolesMap(), []byte(root+" "+binding+" seat-a\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		assertStartupAssignmentHidden(t, root, path, "different role or tenant")
+	}
+	if err := os.WriteFile(RolesMap(), []byte(root+" one lead:demo seat-a\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	delete(a, "role")
+	delete(a, "tenant")
+	if err := WriteJSON(path, a); err != nil {
+		t.Fatal(err)
+	}
+	assertStartupAssignmentHidden(t, root, path, "identity is unknown")
+}
+
+func assertStartupAssignmentHidden(t *testing.T, root, path, notice string) {
+	t.Helper()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Run(Event{"session_id": "replacement", "cwd": root, "hook_event_name": "SessionStart"})
+	if strings.Contains(v.Out, "private old brief") || !strings.Contains(v.Out, notice) {
+		t.Fatal("assignment content replayed or recovery guidance missing", v.Out)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("rejected assignment changed", err)
 	}
 }
 

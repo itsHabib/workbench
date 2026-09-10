@@ -22,13 +22,17 @@ func currentStartupAssignment(slot, sid string) Rec {
 		if launch == "" {
 			launch = S(rec, "cwd")
 		}
-		_, _, boundSlot := MapRowsFor(launch)
+		role, tenant, boundSlot := MapRowsFor(launch)
 		if S(rec, "slot") != slot || boundSlot != slot {
 			return nil
 		}
 		path := Path("assign", Safe(slot)+".json")
 		a := ReadJSON(path)
 		if !assignmentMatchesLaunch(a, rec, launch, slot) {
+			return nil
+		}
+		if notice := assignmentIdentityNotice(a, role, tenant); notice != "" {
+			assignment = Rec{"startup_notice": notice}
 			return nil
 		}
 		if S(a, "delivered_to") == "" {
@@ -39,6 +43,16 @@ func currentStartupAssignment(slot, sid string) Rec {
 		return nil
 	})
 	return assignment
+}
+
+func assignmentIdentityNotice(a Rec, role, tenant string) string {
+	if S(a, "role") == "" || S(a, "tenant") == "" {
+		return "[fleet] assignment identity is unknown; ask the lead to run fleet assign again before replaying its brief"
+	}
+	if role == "" || tenant == "" || S(a, "role") != role || S(a, "tenant") != tenant {
+		return "[fleet] assignment belongs to a different role or tenant; ask the lead to assign current work again"
+	}
+	return ""
 }
 
 func assignmentMatchesLaunch(a, rec Rec, launch, slot string) bool {

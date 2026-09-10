@@ -417,7 +417,7 @@ func holderAssignment(repo, branch, sid string) fleet.Rec {
 	if launch == "" {
 		launch = fleet.S(rec, "cwd")
 	}
-	_, _, boundSlot := fleet.MapRowsFor(launch)
+	role, tenant, boundSlot := fleet.MapRowsFor(launch)
 	if slot == "" || boundSlot != slot || fleet.RepoID(launch) != repo || fleet.BranchOf(launch) != branch {
 		return nil
 	}
@@ -425,6 +425,9 @@ func holderAssignment(repo, branch, sid string) fleet.Rec {
 		return nil
 	}
 	a := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(slot)+".json"))
+	if role == "" || tenant == "" || fleet.S(a, "role") != role || fleet.S(a, "tenant") != tenant {
+		return nil
+	}
 	if fleet.S(a, "repo") != repo || fleet.S(a, "branch") != branch || fleet.S(a, "slot") != slot {
 		return nil
 	}

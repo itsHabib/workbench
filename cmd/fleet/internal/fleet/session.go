@@ -269,6 +269,9 @@ func AssignmentLine(slot, sid string) string {
 	if a == nil {
 		return ""
 	}
+	if notice := S(a, "startup_notice"); notice != "" {
+		return notice
+	}
 	brief := strings.Join(strings.Fields(S(a, "brief")), " ")
 	if len(brief) > 300 {
 		brief = brief[:300]
