@@ -27,7 +27,8 @@ Every decision cites these by the tag in brackets.
   comment is quoted its URL is given.
 - [TS] cc-skills `docs/features/agent-fleet-rules/TWO-SYSTEMS.md`, [V]
   `docs/features/agent-fleet-rules/VISION.md`, [P62] <https://github.com/itsHabib/cc-skills/pull/62>
-  (the substrate/policy boundary), and [P65] <https://github.com/itsHabib/cc-skills/pull/65> at
+  (the substrate/policy boundary), and [P65] <https://github.com/itsHabib/cc-skills/pull/65>
+  (both cc-skills PR numbers; [P295] and [P296] are workbench PR numbers) at
   `48c60849d402231fb09fd967532d31685e224e9d`: `skills/task-supervisor/SKILL.md`,
   `references/coordination.md`, `references/native-messaging.md`, `scripts/board.py`, and the
   lead and author cards under `tools/fleet-work-setup/cards/`.
@@ -63,10 +64,11 @@ disagreement showed up as concrete cost, in five places.
    `chain.jsonl` itself. [P295] declared contacts in a Fleet-side `contacts.json`. Four sources for
    one tree, and the bakeoff's final verdict was that the one thing that cannot be retrofitted is
    which of them is true (<https://github.com/itsHabib/workbench/pull/295#issuecomment-5613272865>).
-2. **The lead's tick is mostly ceremony.** Every tick ran attach, assign (a pinned placeholder),
-   claim, intent, one effect, resolution, checkpoint, yield, release [R]. In the live loop run the
-   overall lead's chain gained 8 attach, 8 claim, 8 checkpoint, 8 yield and 8 release records
-   around one intent, one message and one resolution [S, run-1b]. Lead ticks cost 18 to 33 turns
+2. **The lead's tick is mostly ceremony.** The tick procedure was attach, assign (a pinned
+   placeholder), claim, intent, one effect, resolution, checkpoint, yield, release [R]. The
+   lifecycle part ran on every tick whether or not an effect was eligible: in the live loop run
+   the overall lead's chain gained 8 attach, 8 claim, 8 checkpoint, 8 yield and 8 release records
+   while only one tick produced an intent, a message and a resolution [S, run-1b]. Lead ticks cost 18 to 33 turns
    and $1.85 to $3.39 each [R]. The kernel forces the shape: `intent-ref` is admissible only from
    an active claim ([K], `phaseLaw`), so a lead with no real held work must assign and claim
    something before it may record an intent.
@@ -104,7 +106,9 @@ has one writer; a reader consumes the owner's validated output, never its storag
   is the role whose charter scope names `role:<child>` ([P65] `SKILL.md`, "Reporting edges derive
   from parent charter scopes `role:<child>`"). `terms.supervisors` is takeover authority only and is
   never read for topology. Multiple parents, cycles and a `role:` scope naming a role that is not
-  chartered are errors, not guesses.
+  chartered are errors that `org tree` detects and refuses, not guesses. The kernel has no
+  cross-charter check ([K]: `Terms.Scope` and `Terms.Supervisors` are plain lists), and this
+  document does not add one; the check lives in the read verb.
 - *Identity* (which directory is which role) lives in `roles.map` under `$ORG_STATE`, with the
   columns it has today: path, tenant, role, optional seat name. Fleet is its only writer
   (`fleet role`, `fleet pool`). It is a machine-local artifact, because directories are.
@@ -140,7 +144,8 @@ has one writer; a reader consumes the owner's validated output, never its storag
 - *Declare a Fleet-side contacts file* ([P295]). A second copy of the tree, written by hand, that
   "will drift from the real hierarchy the day after it is written"
   (<https://github.com/itsHabib/workbench/pull/296#issuecomment-5613218342>). [P295]'s own docs
-  chose it only because "Org has no cheap published contacts relation"; D1 supplies that relation.
+  chose it only because "Org has no cheap published contacts relation"; D1 supplies that relation,
+  so it completes what [P295] deferred rather than choosing against it.
 - *Add parent columns to `roles.map`.* The map is per machine and per directory; the tree is per
   tenant and must be the same on a second machine that shares only the git remote [F, "no
   cross-machine store"].
@@ -161,7 +166,24 @@ of that verb rather than a second fold.
   the session as the role's incarnation (with `next_due` from the lane manifest's cadence, or
   none) and the SessionEnd hook releases it. Both stay fail-open: a refused attach (the role is
   held by a live session) leaves the session able to read but not write, and the boot output says
-  so.
+  so. Three rules make the hook safe:
+  - *Seats never attach.* The hook attaches only for a `roles.map` line with no seat column. A
+    seat's identity is its seat name (D7), and two author seats must not contend for one
+    `author:<repo>` holder ([P65] `SKILL.md`: concurrent seats do not attach a shared exclusive
+    role).
+  - *Yield before release.* The phase law admits `release` only from `Held` ([K] `phaseLaw`), so
+    a role left `Active` by a session that claimed durable work would refuse a bare release. The
+    SessionEnd hook reads the active claim from `org boot -json` and writes `yield` for it before
+    `release`; the work stays held for the next incarnation, which is what yield means.
+  - *A missed release is written late by the same machinery.* A crash, a hook timeout or a
+    missing binary can leave the role held after its session is gone. At the next SessionStart,
+    when attach is refused as already held, the hook asks Fleet's session store about the holder
+    incarnation. If Fleet proves that session ended (a SessionEnd event, or a recorded pid that is
+    gone; an unreadable record is unknown, never dead [F]), the hook writes the `yield` and
+    `release` the dead session could not, as that incarnation, and attaches. This is a mechanical
+    record at the same trust level as the SessionEnd release, not a takeover, and it needs no
+    kernel change. If liveness is unknown the attach stays refused and the boot output names the
+    holder and the operator's `org takeover`.
 - The kernel relaxes one phase law: `intent-ref` becomes admissible from `Held` as well as
   `Active` ([K] `phaseLaw`). `assign` and `claim` are reserved for durable work a role actually
   holds across sessions, which a lead may or may not have; they are no longer a precondition for
@@ -210,9 +232,12 @@ hook's `mark` stays; a tick that ends without a checkpoint still renders `degrad
 - Every agent-to-agent message travels as `fleet send` and is read with `fleet mail`/`fleet ack`,
   as in [C3]. Mail is a Fleet verb because delivery is an observed fact: a record exists, it was
   delivered, it was acknowledged, and none of those is an agent's claim.
-- A send is an effect. On the sender's chain it is wrapped as any effect is: `intent-ref` naming
-  the recipient role and the message id, `resolution` carrying the mail record's id and `at` as
-  read-back. The message body lives in the mail record only.
+- A send is an effect. On the sender's chain it is wrapped as any effect is: an `intent-ref`
+  whose effect id is `mail:<address>:<message id>`, and a `resolution` carrying the mail record's
+  `at` as read-back. The effect id is on the record spine (`Subject.Effect`, [K]), which the
+  kernel treats as opaque, so a successor incarnation sees the addressee and the message id in
+  `boot`'s open intents without reading the erasable body. The message body lives in the mail
+  record only.
 - A question that goes up is additionally an `escalation` on the asker's chain, closed by a
   `resolution` that names the answer's mail id. The chain therefore shows a pending question as a
   dangling obligation, which `boot` and `sweep` already render; the mail record carries the words.
@@ -250,11 +275,15 @@ hook's `mark` stays; a tick that ends without a checkpoint still renders `degrad
 
 **Decision.**
 
-- A chartered role's contacts are its parent and its children, from `org tree` (D1). No siblings
-  by default: escalation "travels up exactly one hop" and "nothing sideways" ([P65] `SKILL.md`).
+- A chartered role's contacts are its parent and its children, from `org tree` (D1), plus every
+  seat named on a dispatch row whose accountable role (`for`) is this role, subject to the same
+  row identity check as below. No siblings by default: escalation "travels up exactly one hop"
+  and "nothing sideways" ([P65] `SKILL.md`).
 - A seat's only contact is the accountable role (`for`) on the dispatch row that matches its seat
   name, repository and checked-out branch, as [P295] does. Two rows disagreeing on `for` refuse as
-  ambiguous accountability. A seat with no current row has no contact and cannot send.
+  ambiguous accountability. A seat with no current row has no contact and cannot send. The
+  relation is symmetric by construction: the row that makes the lead the seat's contact is the
+  row that makes the seat the lead's.
 - `contacts.json` is removed, not demoted. The two rules above cover every sender that may send;
   any other sender is refused with the allowed set, which is empty.
 - Unknown parentage (a chain that will not fold, a `role:` scope naming an unchartered role)
@@ -303,11 +332,16 @@ hook's `mark` stays; a tick that ends without a checkpoint still renders `degrad
   and `SessionAlive` already decide it [F]. An unreadable session record is unknown, never death;
   the watcher does not launch on unknown ([P295]'s rule, ported from
   <https://github.com/itsHabib/workbench/pull/296#issuecomment-5613218342> item 1).
-- The watcher launches a session for a role when the role has unacknowledged, undelivered mail
-  older than the grace window and no live session. That launch goes through the same admission as
-  any other Fleet launch: it takes the directory's lease (the same key the hook would lease for a
-  session starting there) before it stamps and starts, so a watcher tick and a chip opened by the
-  operator cannot both occupy the directory. This is the FOLLOWUPS item the bakeoff deferred
+- The watcher will launch a session for a role when the role has unacknowledged, undelivered
+  mail older than the grace window and no live session (today's watcher writes only under
+  `watch/` [F]; the launch is [P295]'s addition, and it stays a run-contract feature until step 4
+  lands). That launch goes through the same admission as any other Fleet launch: it takes a
+  directory lease before it stamps and starts. Today only seat bindings take such a key (the hook
+  calls `occupySlot` only for a `roles.map` line with a seat column), so a lead directory has
+  nothing for two launch paths to contend on. Step 4 therefore adds the other half: the
+  SessionStart hook takes, and SessionEnd releases, a `dir:<path>` lease for every roled
+  directory, and the watcher takes the same key. A watcher tick and a chip opened by the operator
+  then cannot both occupy the directory. This is the FOLLOWUPS item the bakeoff deferred
   ("route watcher launches through the same fleet admission path as any other launch",
   <https://github.com/itsHabib/workbench/pull/295#issuecomment-5613272865>), promoted to a
   precondition of automatic launch.
@@ -318,9 +352,11 @@ hook's `mark` stays; a tick that ends without a checkpoint still renders `degrad
 - Takeover and revoke stay Org operations against a held role, for the one case that needs them:
   a live session that holds the role and is not producing (wedged loop, runaway). Fleet's
   `stop`/`revoke --to` stay the branch-level stand-down. Neither is needed for a headless tick that
-  ended; its release was written by the hook.
-- Nothing needs a long-lived holder. Sessions are disposable; leases end with sessions; a role's
-  continuity is its chain and its mailbox, not a process.
+  ended; its release was written by the hook, or written late at the next SessionStart when
+  Fleet proves the session dead (D2).
+- Nothing requires a long-lived holder. Sessions are disposable; leases end with sessions; a
+  role's continuity is its chain and its mailbox, not a process. A long-lived desktop session is
+  allowed, and is the only case in which `next_due` is read.
 
 **Evidence that forced it.**
 
@@ -423,9 +459,13 @@ hook's `mark` stays; a tick that ends without a checkpoint still renders `degrad
 with:
 
 > At most one outbound send per addressee per tick. Any number of independent local effects
-> (dispatch, seat assignment, verify row, launch, correlated answer), each preceded by
-> `org intent` and followed by `org resolve` with its read-back. The tick ends when the reconciled
-> view has no eligible effect left.
+> (dispatch, seat assignment, verify row, launch, correlated answer), taken one at a time, each
+> preceded by `org intent` and followed by `org resolve` with its read-back before the next is
+> opened. The tick ends when the reconciled view has no eligible effect left.
+
+"One at a time" is the kernel's rule, not a new one: a role has at most one outstanding effect
+([K] `checkIntent`), so the effects are independent in what they touch and sequential in how they
+are recorded. That bound is what makes recovery after a crash a fixed procedure over one record.
 
 "One send per addressee" rather than "one send per tick" because the two-effect case that forced
 the change had two addressees (answer the worker, escalate to the parent), and [C3] already runs
@@ -504,18 +544,24 @@ A message is never an assignment; a row is never an acknowledgement; a receipt i
    fold; refuses multiple parents, cycles and unchartered `role:` targets. No kernel change.
 2. **Land [P295] as the mail base** with the ports the bakeoff agreed: [P296]'s retry identity
    (sender role plus content, original session kept as provenance); contacts from `org tree`
-   plus the dispatch row (D4), `contacts.json` removed; `(tenant, address)` mailbox keys and seat
-   addresses (D7). Keep [P295]'s watcher liveness rule. Close [P296] with credit once these are
-   reviewable, as its thread recorded.
-3. **Kernel and hooks** (workbench, one PR): `intent-ref` admissible from `Held` ([K]
-   `phaseLaw`); SessionStart hook attaches and SessionEnd hook releases, fail-open (D2, D5).
-   Conformance test updated; `sweep` unchanged.
-4. **Watcher launch through Fleet admission** (workbench, one PR): the launch takes the
-   directory lease before stamping (D5). Until it lands, automatic launch is a run-contract
+   plus the dispatch row in both directions (D4), `contacts.json` removed; `(tenant, address)`
+   mailbox keys, seat addresses, and the hook's mail lines keyed by the session's address (the
+   role for a lead directory, the seat name for a seat) (D7). Keep [P295]'s watcher liveness
+   rule. Close [P296] with credit once these are reviewable, as its thread recorded.
+3. **`fleet role` refusals and projection blocks** (workbench, one PR): refuse repository roots
+   and paths with nested worktrees; marked projection block; unbind removes it (D6). The operator
+   unbinds the roots still bound before step 4, because the Org hook matches by longest prefix
+   and an automatic attach under a bound root would attach every nested worktree's session as
+   the root role.
+4. **Kernel and hooks** (workbench, one PR): `intent-ref` admissible from `Held` ([K]
+   `phaseLaw`); the SessionStart hook attaches for non-seat bindings and the SessionEnd hook
+   yields then releases, with the late release for a Fleet-proven-dead holder, all fail-open
+   (D2, D5); the `cmd/org` guide pair updated so `message` is documented as a dormant kind
+   rather than a lead verb (D3). Conformance test updated; `sweep` unchanged.
+5. **Directory admission and watcher launch** (workbench, one PR): SessionStart takes and
+   SessionEnd releases a `dir:<path>` lease for every roled directory; the watcher's launch
+   takes the same key before stamping (D5). Until it lands, automatic launch is a run-contract
    feature, not a default.
-5. **`fleet role` refusals and projection blocks** (workbench, one PR): refuse repository roots
-   and paths with nested worktrees; marked projection block; unbind removes it (D6). Operator
-   unbinds the roots still bound.
 6. **[P65] revised** (cc-skills): the tick rule (D8); the record shape (D2); mail as the
    transport with `escalation`/`resolution` around a send (D3); contacts from the tree and the
    row (D4); the lead and author cards updated to match; `native-messaging.md` reduced to the
@@ -525,8 +571,8 @@ A message is never an assignment; a row is never an acknowledgement; a receipt i
    criterion: every relay in the scorecard joins by id, zero sends to the operator, and lead
    ticks whose chain gains only intent, resolution, escalation and checkpoint records.
 
-Steps 1, 3, 4 and 5 are independent of each other; 2 depends on 1; 6 depends on 2 and 3; 7 on
-all of them.
+Order of dependence: 2 needs 1; 4 needs 3 (the root unbind); 5 needs 2 (it launches on mail) and
+4 (the hook it extends); 6 needs 2 and 4; 7 needs all of them. 1 and 3 can start now.
 
 ## Open questions that remain
 
