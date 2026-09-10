@@ -60,6 +60,11 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: coverage.out
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Codex rule checker for adapter regressions
+        run: npm install --global @openai/codex@0.153.4
       - name: Fleet CLI and hook adapter regressions
         run: |
           bash cmd/fleet/testdata/run-suite.sh

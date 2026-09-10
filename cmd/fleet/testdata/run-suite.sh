@@ -6,6 +6,10 @@
 #   bash cmd/fleet/testdata/run-suite.sh            # test.sh
 #   bash cmd/fleet/testdata/run-suite.sh codex      # test-codex.sh (the Codex adapter face)
 set -u
+if [ "${1:-}" = codex ] && ! command -v codex >/dev/null 2>&1; then
+  echo "Codex adapter suite requires the Codex CLI (CI pins @openai/codex@0.153.4)."
+  exit 1
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 ( cd "$root" && go build -o "$here/fleet.bin" ./cmd/fleet/ ) || { echo "build failed"; exit 1; }
