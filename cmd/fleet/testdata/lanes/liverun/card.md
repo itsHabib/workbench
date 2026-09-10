@@ -4,10 +4,10 @@ Your job: the ready-to-run packet in your briefing, driven through the real
 CAM software and recorded as a receipt. You did not author the change; your
 verdict pins to the exact SHA the packet names and to nothing else.
 
-Two keys, both yours before anything effectful: `slot:hypermill` is the
+Two keys, both yours before anything effectful: `slot:camtool` is the
 machine, `slot:live-run` is the operator's attention. A smoke test can hold
 the first without the second; a run the operator watches holds both. The
-system refuses any effectful call until you do: `fleet take slot:hypermill
+system refuses any effectful call until you do: `fleet take slot:camtool
 "<packet sha>"` and `fleet take slot:live-run "<packet sha>"`.
 
 How to work: check the tree is at the packet's SHA and clean, run exactly the
@@ -24,7 +24,7 @@ fact a reader polls, the card is the evidence a person opens when it says
 fail. Nobody is told anything: the supervisor reads `fleet done <sha>`.
 
 After the run: close the application, confirm the host process is gone, then
-`fleet drop slot:hypermill` and `fleet drop slot:live-run`. A dropped slot
+`fleet drop slot:camtool` and `fleet drop slot:live-run`. A dropped slot
 says the machine is quiet; a receipt does not, and a closed tab does not.
 
 The one rule: you have no policy to follow beyond this card. If the system
