@@ -281,3 +281,31 @@ func TestRoleHandoffDoesNotSharePooledSeatContext(t *testing.T) {
 		t.Fatal("pooled seat inherited shared role context", got)
 	}
 }
+
+func TestStartupSessionPublicationFailureIsVisible(t *testing.T) {
+	root := continuityFixture(t)
+	p := Path("assign", "seat-a.json")
+	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "pending residual brief", "at": Now(), "role": "lead:demo", "tenant": "one"}
+	if err := WriteJSON(p, a); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(fmt.Sprintf("%s.%d.tmp", Path("sessions", "reader.json"), os.Getpid()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	v := Run(Event{"session_id": "reader", "cwd": root, "hook_event_name": "SessionStart"})
+	if v.Code != 0 || strings.Contains(v.Out, "pending residual brief") || !strings.Contains(v.Out, "session record was not saved") || !strings.Contains(v.Out, "fleet work --json") || !strings.Contains(v.Out, "repair session storage and restart") {
+		t.Fatal("session publication error hidden or startup blocked", v)
+	}
+	after, err := os.ReadFile(p)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("assignment changed", err)
+	}
+	logged, err := os.ReadFile(Path("hook-errors.jsonl"))
+	if err != nil || !strings.Contains(string(logged), "startup session publication") {
+		t.Fatal("session publication diagnostic missing", err)
+	}
+}
