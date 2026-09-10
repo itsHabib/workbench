@@ -162,6 +162,12 @@ run "Same suite after the lock cleared → allowed"                           0 
 # commands it has measured rather than every command wearing the prefix.
 run "wrong override token for the measured command → denied"              2 "$(tool PreToolUse $S3 $REPO Bash t13a '{"command":"FLEET_ALLOW_SLOW=\"wire contract\" npx vitest run"}')"
 run "the prefix on a command with no cost rule → denied"                   2 "$(tool PreToolUse $S3 $REPO Bash t13b '{"command":"FLEET_ALLOW_SLOW=full-unit-suite gh pr merge 12 --squash"}')"
+# The override covers exactly ONE command. The allow it projects is a prefix rule over the
+# whole command string, so a command appended to the measured one would match the allow and
+# miss this seat's denies.
+run "a command appended to a valid override → denied"                      2 "$(tool PreToolUse $S3 $REPO Bash t13c '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run; gh pr merge 12"}')"
+run "and the same with && → denied"                                        2 "$(tool PreToolUse $S3 $REPO Bash t13d '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run && gh pr merge 12"}')"
+run "and piped into another command → denied"                              2 "$(tool PreToolUse $S3 $REPO Bash t13e '{"command":"FLEET_ALLOW_SLOW=full-unit-suite npx vitest run | tee out.txt"}')"
 run "Stop: turn closes"                                                     0 "$(ev hook_event_name=Stop session_id=$S2 cwd=$REPO)"
 age "$FLEET_STATE/sessions/$S2.json" last_stop_at 2900
 run "UserPromptSubmit: the gap since the last turn is injected"             0 "$(ev hook_event_name=UserPromptSubmit session_id=$S2 cwd=$REPO prompt=hi)"

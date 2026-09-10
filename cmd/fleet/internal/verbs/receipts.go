@@ -90,9 +90,17 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 }
 
 // receiptPaths are the two files a verdict at one head lives in: the latest file every
-// reader already knows, and the history beside it.
-func receiptPaths(sha, kind string) (latest, history string) {
-	return fleet.Path("receipts", sha+"."+kind+".json"), fleet.Path("receipts", sha+"."+kind+".jsonl")
+// reader already knows, keyed by the revision as the packet spelled it, and the history
+// beside it, keyed by the CANONICAL full head. Two spellings of one commit are one
+// commit: keying the history by the spelling would give a seven-character failure and a
+// full-sha pass two independent histories, and neither would show the other as
+// superseded.
+func receiptPaths(sha, head, kind string) (latest, history string) {
+	id := strings.ToLower(head)
+	if id == "" {
+		id = sha
+	}
+	return fleet.Path("receipts", sha+"."+kind+".json"), fleet.Path("receipts", id+"."+kind+".jsonl")
 }
 
 // recordReceipt publishes the latest verdict and appends it to the per-head history.
@@ -103,7 +111,7 @@ func receiptPaths(sha, kind string) (latest, history string) {
 // latest record first, so the history never starts by claiming the earlier verdict
 // never happened.
 func recordReceipt(sha, kind string, rec fleet.Rec) error {
-	latest, history := receiptPaths(sha, kind)
+	latest, history := receiptPaths(sha, fleet.S(rec, "head"), kind)
 	// The seed must be durable BEFORE the latest file is overwritten. An ignored failure
 	// here (an unwritable .jsonl) followed by the write below erases the very legacy
 	// verdict this path exists to preserve, and nothing holds a second copy.
@@ -114,16 +122,21 @@ func recordReceipt(sha, kind string, rec fleet.Rec) error {
 			}
 		}
 	}
-	if err := fleet.WriteJSON(latest, rec); err != nil {
-		return err
+	// The history append comes BEFORE the latest file is published. Publishing first and
+	// failing here tells the caller the receipt was not recorded while `fleet done`
+	// already consumes the new verdict and `--all` has no record of it — a passing
+	// receipt that decides completion and is durable nowhere. In this order a failure
+	// leaves the previous verdict standing as latest, which is what the caller is told.
+	if err := fleet.AppendJSONL(history, rec); err != nil {
+		return fmt.Errorf("append receipt history %s: %w", history, err)
 	}
-	return fleet.AppendJSONL(history, rec)
+	return fleet.WriteJSON(latest, rec)
 }
 
 // receiptHistory is every verdict recorded for a revision and kind, oldest first.
 // Absent history is no history, never an error: the store may predate it.
-func receiptHistory(sha, kind string) []fleet.Rec {
-	_, history := receiptPaths(sha, kind)
+func receiptHistory(sha, head, kind string) []fleet.Rec {
+	_, history := receiptPaths(sha, head, kind)
 	b, err := os.ReadFile(history)
 	if err != nil {
 		return nil
@@ -143,12 +156,12 @@ func receiptHistory(sha, kind string) []fleet.Rec {
 // verdicts it replaced. Identity is the timestamp and the session that wrote it, not
 // the line's position: an older binary can publish a latest file without appending.
 func supersededBy(latest fleet.Rec) []fleet.Rec {
-	sha, kind := fleet.S(latest, "sha"), fleet.S(latest, "kind")
-	if sha == "" || kind == "" {
+	sha, head, kind := fleet.S(latest, "sha"), fleet.S(latest, "head"), fleet.S(latest, "kind")
+	if (sha == "" && head == "") || kind == "" {
 		return nil
 	}
 	var out []fleet.Rec
-	for _, r := range receiptHistory(sha, kind) {
+	for _, r := range receiptHistory(sha, head, kind) {
 		if fleet.F(r, "at") == fleet.F(latest, "at") && fleet.S(r, "session") == fleet.S(latest, "session") {
 			continue
 		}

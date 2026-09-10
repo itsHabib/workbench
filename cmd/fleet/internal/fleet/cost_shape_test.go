@@ -87,6 +87,43 @@ func TestTheOverrideIsScopedToTheMeasuredCommand(t *testing.T) {
 	}
 }
 
+// The override covers exactly one command. The projected allow is a prefix rule over
+// the whole command string, so a valid token followed by a second command would match
+// that allow and miss the lane's denies — `FLEET_ALLOW_SLOW=the-suite bash
+// scripts/bench.sh; gh pr merge 12` must not authorize the merge.
+func TestTheOverrideCoversExactlyOneCommand(t *testing.T) {
+	costFixture(t)
+	trailing := []string{
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh; gh pr merge 12`,
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh && gh pr merge 12`,
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh || gh pr merge 12`,
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh | tee out.txt`,
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh & gh pr merge 12`,
+		"FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh\ngh pr merge 12",
+		`FLEET_ALLOW_SLOW=the-suite bash scripts/bench.sh $(gh pr merge 12)`,
+	}
+	for _, cmd := range trailing {
+		reason := CheckCost(cmd, "sess1")
+		if reason == "" {
+			t.Fatalf("a command appended to the override must be refused: %s", cmd)
+		}
+		if !strings.Contains(reason, "exactly one command") {
+			t.Fatalf("the refusal must say why:\n%s", reason)
+		}
+	}
+	// The one compound shape the cost gate already normalises away stays runnable: the
+	// leading `cd` is what CommandHead reads past, and the directory it names is
+	// refused by the drift guard, not here.
+	if reason := CheckCost(`FLEET_ALLOW_SLOW=the-suite cd sub && bash scripts/bench.sh`, "sess1"); reason != "" {
+		t.Fatalf("a leading cd is not a second command: %s", reason)
+	}
+	// Nothing was logged as an accepted override for the refused shapes.
+	rows, _ := os.ReadFile(Path("overrides.jsonl"))
+	if strings.Contains(string(rows), "gh pr merge") {
+		t.Fatalf("a refused compound command was recorded as an override:\n%s", rows)
+	}
+}
+
 func TestAllowSlowPatternsAreOnePerNamedRule(t *testing.T) {
 	costFixture(t)
 	got := AllowSlowPatterns()

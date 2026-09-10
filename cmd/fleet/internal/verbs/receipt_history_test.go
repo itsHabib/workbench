@@ -82,7 +82,7 @@ func TestReceiptsAllRendersHistoryUnderItsVerdict(t *testing.T) {
 // the next receipt seeds the history with what was already on disk.
 func TestASingleFileStoreStaysReadableAndItsVerdictSurvives(t *testing.T) {
 	historyFixture(t)
-	latestPath, historyPath := receiptPaths(historySha, "check")
+	latestPath, historyPath := receiptPaths(historySha, historySha+"def", "check")
 	legacy := fleet.Rec{"sha": historySha, "head": historySha + "def", "kind": "check", "verdict": "fail",
 		"observable": "written by an older build", "session": "sess-old", "at": float64(50)}
 	if err := fleet.WriteJSON(latestPath, legacy); err != nil {
@@ -141,7 +141,7 @@ func capture(t *testing.T, f func()) string {
 // path exists to preserve.
 func TestASeedFailureLeavesTheLegacyVerdictIntact(t *testing.T) {
 	historyFixture(t)
-	latest, history := receiptPaths(historySha, "check")
+	latest, history := receiptPaths(historySha, "", "check")
 	legacy := fleet.Rec{"sha": historySha, "kind": "check", "verdict": "fail", "session": "sess-legacy", "at": float64(100)}
 	if err := fleet.WriteJSON(latest, legacy); err != nil {
 		t.Fatal(err)
@@ -156,5 +156,71 @@ func TestASeedFailureLeavesTheLegacyVerdictIntact(t *testing.T) {
 	}
 	if v := fleet.S(fleet.ReadJSON(latest), "verdict"); v != "fail" {
 		t.Fatalf("the legacy verdict was overwritten anyway: verdict=%q", v)
+	}
+}
+
+// Two spellings of one commit are one commit: the history is keyed by the canonical
+// full head, so a short-sha failure and a long-sha pass share one history and the pass
+// shows the failure as superseded.
+func TestHistoryIsKeyedByTheCanonicalHeadNotTheSpelling(t *testing.T) {
+	historyFixture(t)
+	const head = "abc1234def5678"
+	short := fleet.Rec{"sha": "abc1234", "head": head, "kind": "check", "verdict": "fail",
+		"observable": "the short-sha look", "session": "sess-short", "at": float64(100)}
+	if err := recordReceipt("abc1234", "check", short); err != nil {
+		t.Fatal(err)
+	}
+	long := fleet.Rec{"sha": "abc1234def", "head": head, "kind": "check", "verdict": "pass",
+		"observable": "the long-sha look", "session": "sess-long", "at": float64(200)}
+	if err := recordReceipt("abc1234def", "check", long); err != nil {
+		t.Fatal(err)
+	}
+	if _, history := receiptPaths("abc1234def", head, "check"); !strings.Contains(history, head+".check.jsonl") {
+		t.Fatalf("the history is not named by the canonical head: %s", history)
+	}
+	prior := supersededBy(long)
+	if len(prior) != 1 || fleet.S(prior[0], "session") != "sess-short" {
+		t.Fatalf("the two spellings wrote independent histories: %v", prior)
+	}
+	// The head's case is not part of its identity either.
+	upper := fleet.Rec{"sha": "abc1234", "head": strings.ToUpper(head), "kind": "check", "verdict": "pass",
+		"observable": "the upper-case look", "session": "sess-upper", "at": float64(300)}
+	if err := recordReceipt("abc1234", "check", upper); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(supersededBy(upper)); got != 2 {
+		t.Fatalf("an upper-case head forked the history: %d prior verdicts", got)
+	}
+}
+
+// A verdict that cannot be appended to the history is not published as latest: `fleet
+// done` must never consume a receipt the promised history has no record of.
+func TestAFailedHistoryAppendDoesNotPublishTheVerdict(t *testing.T) {
+	historyFixture(t)
+	const head = "abc1234def5678"
+	first := fleet.Rec{"sha": historySha, "head": head, "kind": "check", "verdict": "fail",
+		"observable": "first look", "session": "sess-one", "at": float64(100)}
+	if err := recordReceipt(historySha, "check", first); err != nil {
+		t.Fatal(err)
+	}
+	latest, history := receiptPaths(historySha, head, "check")
+	// A directory where the history file belongs: every append to it fails, while the
+	// receipts directory itself stays writable.
+	if err := os.RemoveAll(history); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(history, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := recordReceipt(historySha, "check", fleet.Rec{"sha": historySha, "head": head, "kind": "check",
+		"verdict": "pass", "observable": "second look", "session": "sess-two", "at": float64(200)})
+	if err == nil {
+		t.Fatal("an append that fails must fail the record")
+	}
+	if v := fleet.S(fleet.ReadJSON(latest), "verdict"); v != "fail" {
+		t.Fatalf("the unrecordable pass was published anyway: verdict=%q", v)
+	}
+	if doneVerdict(historySha, "check").ok {
+		t.Fatal("fleet done consumed a verdict the history has no record of")
 	}
 }

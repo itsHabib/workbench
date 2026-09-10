@@ -385,7 +385,11 @@ func cdDestinations(tool, cmd, evCwd string) string {
 		return ""
 	}
 	own, haveOwn := BoundDir(evCwd)
-	for _, to := range uniq(CdTargets(cmd, evCwd)) {
+	targets, unresolved := CdChain(cmd, evCwd)
+	if unresolved {
+		return "this command hops through a directory the guard cannot resolve (`cd` or `cd -`) and then moves again relative to it, so where the shell ends up — and whose seat that is — cannot be read from the command. Next action: name each destination as an absolute path, or run the moves as separate calls."
+	}
+	for _, to := range uniq(targets) {
 		row, ok := BoundDir(to)
 		if !ok || (haveOwn && canonPath(row.Path) == canonPath(own.Path)) {
 			continue

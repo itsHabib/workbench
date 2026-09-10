@@ -181,6 +181,36 @@ func CommandHead(cmd string) string {
 	return strings.Join(head, " ")
 }
 
+// OneCommand reports whether the invocation runs a single command — the unit the
+// slow override is allowed to cover. The leading env assignments and a leading
+// `cd <dir> &&` are the shape the cost gate already normalises away (CommandHead
+// reads the head past them, and the directory itself is guarded before this), so
+// they are not a second command. Anything else at top level — `&&`, `||`, `;`,
+// `|`, `&`, a newline, a subshell or a substitution — is.
+func OneCommand(cmd string) bool {
+	cmd = envAssignRe.ReplaceAllString(cmd, "")
+	cmd = leadingCdRe.ReplaceAllString(cmd, "")
+	quote := rune(0)
+	esc := false
+	for _, r := range cmd {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case strings.ContainsRune("&|;()\n\r`", r):
+			return false
+		}
+	}
+	return true
+}
+
 // Signature normalises a shell command to a cost-ledger key: two tokens.
 func Signature(cmd string) string {
 	cmd = envAssignRe.ReplaceAllString(cmd, "")
@@ -538,6 +568,10 @@ func CheckCost(cmd, sid string) string {
 		return fmt.Sprintf("`%s` is already running in session %s (started %s ago). Do not run it again in parallel; do the targeted check instead: %s", name, Short(S(lock, "session")), FmtAge(Now()-F(lock, "at")), instead)
 	}
 	if override && val == AllowSlowSlug(name) {
+		if !OneCommand(cmd) {
+			return fmt.Sprintf("`%s=%s` covers exactly one command, and this invocation runs more than one. The projected allow `%s` is a prefix rule over the whole command string, so anything appended to `%s` would reach the shell having matched that allow and missed this seat's own denies. Next action: run the measured command by itself, then run the rest as its own call.",
+				AllowSlowVar, val, AllowSlowPattern(name), name)
+		}
 		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "rule": name, "cmd": cut(cmd, 200)})
 		return ""
 	}
@@ -611,25 +645,43 @@ var cdRe = regexp.MustCompile(cmdPos + `(?:cd|pushd)\b([^&|;\n\r]*)`)
 // is not one: the parent's cwd is where the next tool call still runs. `cd` with no
 // operand, or `cd -`, names nothing this guard can resolve and is left alone.
 func CdTargets(cmd, cwd string) []string {
+	out, _ := CdChain(cmd, cwd)
+	return out
+}
+
+// CdChain is CdTargets plus whether the command contains a move this guard could not
+// resolve. Each top-level `cd` is resolved against the directory the PRECEDING one
+// left the shell in, not against the event's cwd: from seat one, `cd /tmp && cd
+// seat2` ends in /tmp/seat2, and resolving that second hop against the event cwd
+// would name a directory the shell never enters and clear a seat it does. A hop the
+// guard cannot follow — `cd` or `cd -`, whose destination is not in the command —
+// makes the base unknown; a relative hop measured from an unknown base is reported
+// unresolved rather than guessed.
+func CdChain(cmd, cwd string) ([]string, bool) {
 	var out []string
+	cur, known, unresolved := cwd, cwd != "", false
 	for _, m := range cdRe.FindAllStringSubmatchIndex(cmd, -1) {
 		if parenDepth(cmd[:m[2]]) > 0 {
 			continue
 		}
 		word := firstOperand(shellWords(cmd[m[2]:m[3]]))
 		if word == "" {
+			known = false
 			continue
 		}
 		t := expand(word)
 		if !filepath.IsAbs(t) {
-			if cwd == "" {
+			if !known {
+				unresolved = true
 				continue
 			}
-			t = filepath.Join(cwd, t)
+			t = filepath.Join(cur, t)
 		}
-		out = append(out, filepath.Clean(t))
+		t = filepath.Clean(t)
+		out = append(out, t)
+		cur, known = t, true
 	}
-	return out
+	return out, unresolved
 }
 
 // firstOperand is the first non-option word, or "".

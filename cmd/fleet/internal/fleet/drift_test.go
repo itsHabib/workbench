@@ -144,6 +144,60 @@ func TestCdTargetsResolution(t *testing.T) {
 	}
 }
 
+// Each top-level cd is resolved against where the preceding one left the shell, not
+// against the event's cwd: `cd /tmp && cd seat2` ends in the other seat.
+func TestChainedCdIsResolvedAgainstThePrecedingHop(t *testing.T) {
+	parent, one, two, loose := driftFixture(t)
+	cases := []struct {
+		cmd  string
+		want []string
+	}{
+		{"cd " + parent + " && cd " + filepath.Base(two), []string{parent, two}},
+		{"cd " + loose + " && cd ../" + filepath.Base(two) + " && git commit", []string{loose, two}},
+		{"cd src && cd ..", []string{filepath.Join(one, "src"), one}},
+	}
+	for _, c := range cases {
+		got := CdTargets(c.cmd, one)
+		if len(got) != len(c.want) {
+			t.Fatalf("%q resolved to %v, wanted %v", c.cmd, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("%q resolved to %v, wanted %v", c.cmd, got, c.want)
+			}
+		}
+	}
+	// And the guard sees the seat the chain actually ends in.
+	if reason := cdDestinations("Bash", "cd "+parent+" && cd "+filepath.Base(two)+" && git commit -m x", one); reason == "" {
+		t.Fatal("a chained cd into another seat must be refused")
+	}
+	// A chain that stays inside this session's own tree is still allowed.
+	if reason := cdDestinations("Bash", "cd src && cd .. && go test ./...", one); reason != "" {
+		t.Fatalf("a chain that ends in its own seat must be allowed: %s", reason)
+	}
+}
+
+// A hop whose destination is not in the command makes every later relative hop
+// unreadable. The guard refuses rather than measuring it from the wrong base.
+func TestARelativeHopFromAnUnresolvableBaseIsRefused(t *testing.T) {
+	_, one, two, _ := driftFixture(t)
+	if _, unresolved := CdChain("cd - && cd "+filepath.Base(two), one); !unresolved {
+		t.Fatal("a relative hop after `cd -` cannot be resolved")
+	}
+	reason := cdDestinations("Bash", "cd - && cd "+filepath.Base(two)+" && git commit -m x", one)
+	if reason == "" || !strings.Contains(reason, "cannot resolve") {
+		t.Fatalf("an unresolvable chain must be refused:\n%s", reason)
+	}
+	// `cd -` on its own names no destination and is left alone, as it always was.
+	if reason := cdDestinations("Bash", "cd - && ls", one); reason != "" {
+		t.Fatalf("a lone `cd -` moves nowhere this guard can name: %s", reason)
+	}
+	// An absolute hop after it is still readable: the base does not matter.
+	if _, unresolved := CdChain("cd - && cd "+two, one); unresolved {
+		t.Fatal("an absolute destination needs no base")
+	}
+}
+
 func TestBoundDirIsLongestPrefix(t *testing.T) {
 	parent, one, _, loose := driftFixture(t)
 	row, ok := BoundDir(filepath.Join(one, "src", "deep"))
