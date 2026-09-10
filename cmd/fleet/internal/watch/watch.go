@@ -112,6 +112,9 @@ func Tick(interval time.Duration) (string, error) {
 	if err := os.WriteFile(filepath.Join(dir(), "report.md"), []byte(report.Render(fleet.Path(), now-86400, now)), 0o644); err != nil {
 		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch report: " + err.Error()})
 	}
+	// Mail with nobody to read it: launch a session for the role, after publication
+	// for the same reason notification waits.
+	deliverMail(now)
 	// Notification AFTER publication: a slow notifier must not hold the board or the
 	// heartbeat back, and never widens the window in which a second watcher could start.
 	for _, t := range transitions {

@@ -87,6 +87,7 @@ func onSessionStart(ev Event, sid string) *Verdict {
 		lines = append(lines, fmt.Sprintf("[fleet] role %s has no manifest under lanes/; requires and produces unchecked", strings.SplitN(S(rec, "role"), ":", 2)[0]))
 	}
 	lines = append(lines, requiresLines(lane, sid)...)
+	lines = append(lines, MailLines(S(rec, "role"))...)
 	if cl := costLine(); cl != "" {
 		lines = append(lines, cl)
 	}
@@ -204,6 +205,7 @@ func onPrompt(ev Event, sid string) *Verdict {
 	if B(M(rec, "lane"), "watch") {
 		lines = append(lines, BoardLines(F(prev, "last_prompt_at"))...)
 	}
+	lines = append(lines, MailLines(S(rec, "role"))...)
 	if dl := DecisionsLine(); dl != "" {
 		lines = append(lines, dl)
 	}

@@ -561,6 +561,9 @@ func changesSince(since float64) []string {
 
 // transitionText is one observed transition as a hub reads it.
 func transitionText(t Rec) string {
+	if S(t, "what") == "deliver" {
+		return fmt.Sprintf("mail %s delivered to %s by launching a session", strings.Join(Strs(t, "mail"), ", "), S(t, "role"))
+	}
 	from := S(t, "from")
 	if from == "" {
 		from = "—"

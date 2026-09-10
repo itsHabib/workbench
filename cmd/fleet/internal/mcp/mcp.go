@@ -89,6 +89,18 @@ var tools = []schema{
 		"description": "Release a machine resource this session holds, after it is quiet; only the holder may.",
 		"inputSchema": schema{"type": "object", "properties": schema{"resource": str("slot:<name>"), "session": str("session id prefix when two live sessions share cwd"), "cwd": cwdArg},
 			"required": []any{"resource", "cwd"}}},
+	{"name": "fleet_send",
+		"description": "Mail a role this session may address (parent, children, siblings; a seat: its accountable role). Same id + payload is a no-op; a changed payload is refused.",
+		"inputSchema": schema{"type": "object", "properties": schema{"to": str("the addressed role"), "id": str("stable caller-chosen message id"), "kind": str("question | answer | escalation | report | order"),
+			"subject": str("one line"), "head": str("commit the message is about"), "body": str("the message"), "session": str("session id prefix when two live sessions share cwd"), "cwd": cwdArg},
+			"required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
+	{"name": "fleet_mail",
+		"description": "The mailbox: the named role's, else the calling session's, else every role's on this machine.",
+		"inputSchema": schema{"type": "object", "properties": schema{"for": str("the role whose mailbox to list"), "unacked": schema{"type": "boolean", "description": "only unread messages"}, "cwd": cwdArg}}},
+	{"name": "fleet_ack",
+		"description": "Mark a message read by this session; only a session in the addressed role may.",
+		"inputSchema": schema{"type": "object", "properties": schema{"id": str("message id"), "session": str("session id prefix when two live sessions share cwd"), "cwd": cwdArg},
+			"required": []any{"id", "cwd"}}},
 }
 
 var byName = func() map[string]schema {
@@ -277,6 +289,23 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		return runVerb(func() error { return verbs.CmdTake(s("resource"), s("why"), takeover, s("session")) })
 	case "fleet_drop":
 		return runVerb(func() error { return verbs.CmdDrop(s("resource"), s("session")) })
+	}
+	return dispatchMail(name, a)
+}
+
+// dispatchMail is the mail tools: send, list, ack.
+func dispatchMail(name string, a map[string]any) (string, bool) {
+	s := func(k string) string { v, _ := a[k].(string); return v }
+	switch name {
+	case "fleet_send":
+		return runVerb(func() error {
+			return verbs.CmdSend(s("to"), s("id"), s("kind"), s("subject"), s("head"), s("body"), s("session"))
+		})
+	case "fleet_mail":
+		unacked, _ := a["unacked"].(bool)
+		return runVerb(func() error { return verbs.CmdMail(s("for"), unacked, true) })
+	case "fleet_ack":
+		return runVerb(func() error { return verbs.CmdAck(s("id"), s("session")) })
 	}
 	return "", true
 }

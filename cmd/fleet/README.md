@@ -245,6 +245,52 @@ conflicts, immutable payloads, legacy-writer protection, damaged evidence,
 post-tool provenance and non-migrating JSON-RPC observation. Harness event
 fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
+## Mail
+
+Agents could only reach each other through the desktop app's messaging, which
+needs a desktop session id the hook never sees, and a headless `claude -p`
+session could not be reached at all. Mail fixes the address: **the phone number
+is the role.** A message is written to `mail/<role>/<id>.json` and read by
+whichever session wears that role next, so sessions stay disposable.
+
+```
+fleet send <role> --id <id> --kind <question|answer|escalation|report|order> \
+           --subject <text> [--head <sha>] --body <text|-> [--session <id8>]
+fleet mail [--for <role>] [--unacked] [--json]
+fleet ack <id> [--session <id8>]
+```
+
+- **Sender identity** is the caller's session, from its cwd like every other
+  verb; `--session` disambiguates when two live sessions share a directory. A
+  session with no role has no address to send from.
+- **Retry-safe by id.** The id is caller-chosen and stable. A second send with
+  the same recipient, id and payload is a no-op that reports the existing
+  record; a different payload under that id is refused.
+- **Contact scoping.** A role may write only to its parent, its children and its
+  siblings. That relation is read from the org charters under `$ORG_STATE`
+  (`<tenant>/<role>/chain.jsonl`, `terms.supervisors` on the charter or the last
+  recharter): the hierarchy already lives there and the read is one line of
+  JSONL, so nothing is declared twice. `contacts.json` in the state root
+  (`{"<role>": ["<role>", ...]}`, read symmetrically) adds contacts for roles
+  chartered nowhere. A **seat** (a roled directory with a slot name) has one
+  contact: the accountable role (`--for`) on the dispatch row that placed work
+  in it. A recipient outside the set is refused with the allowed set named.
+- **The hook delivers.** At SessionStart and every UserPromptSubmit a roled
+  session reads one line per unread message —
+  `[fleet] mail <id> from <from_role> (<kind>): <subject>` — five at most, then
+  `and N more; fleet mail`. Reading is not acking; the lines repeat until
+  `fleet ack`, which only a session in the addressed role may run.
+- **The watcher launches.** On each fold, an unread message older than the
+  grace (`fleet watch --grace 10s`) whose role has **no** live session runs that
+  role's command from `deliver.json` in the state root:
+  `{"<role>": {"cwd": "<dir>", "cmd": ["claude", "-p", "--model", "opus", "{{prompt}}"]}}`,
+  with `{{prompt}}` replaced by the mail lines. The launch is recorded in
+  `watch/observed.jsonl` and stamped on the record (`delivered_at`,
+  `delivered_by`), so no message is launched for twice. A role with a live
+  session is left alone: the hook line is its delivery. The watcher still
+  writes only under `watch/` plus that one stamp.
+- **MCP:** `fleet_send`, `fleet_mail`, `fleet_ack`, thin over the same verbs.
+
 ## What is deliberately not here
 
 - No daemon owns anything. The watcher writes only its own board files; the hook is where facts

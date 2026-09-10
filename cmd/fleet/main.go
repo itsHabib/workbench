@@ -64,7 +64,8 @@ func reviveWatcher(ev map[string]any) {
 }
 
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
-// board; `--interval 30s` sets the tick.
+// board; `--interval 30s` sets the tick; `--grace 10s` is how long unread mail waits for
+// a live session before the watcher launches one.
 func runWatch(args []string) {
 	interval := watch.DefaultInterval
 	once := false
@@ -76,6 +77,13 @@ func runWatch(args []string) {
 			if i+1 < len(args) {
 				if d, err := time.ParseDuration(args[i+1]); err == nil && d > 0 {
 					interval = d
+				}
+				i++
+			}
+		case "--grace":
+			if i+1 < len(args) {
+				if d, err := time.ParseDuration(args[i+1]); err == nil && d >= 0 {
+					watch.MailGrace = d
 				}
 				i++
 			}

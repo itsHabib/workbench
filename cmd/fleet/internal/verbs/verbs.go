@@ -82,6 +82,10 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
                                                  record one retry-safe local assignment; does not launch a worker
   fleet status [--json]                         read-only request board; queued is not accepted or running
+  fleet send <role> --id <id> --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]
+                                                 mail a role you may address (parent, children, siblings; a seat: its accountable role); same id + same payload is a no-op
+  fleet mail [--for <role>] [--unacked] [--json]  the mailbox: the named role's, else this session's, else every role's
+  fleet ack <id> [--session <id8>]              mark a message read; only a session in the addressed role may
   fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
@@ -166,6 +170,9 @@ func Dispatch(args []string) error {
 		return err
 	}
 	if ok, err := dispatchWork(verb, plain, asJSON); ok {
+		return err
+	}
+	if ok, err := dispatchMail(verb, rest, asJSON); ok {
 		return err
 	}
 	if ok, err := dispatchActs(verb, rest, arg); ok {

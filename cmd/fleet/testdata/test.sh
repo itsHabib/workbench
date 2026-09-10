@@ -1124,7 +1124,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_who\",\"arguments\":{\"name\":\"feat/q\",\"cwd\":\"$SL1\"}}}" \
   | (cd "$work" && "$PY" "$here/fleet-mcp.py") > "$work/mcp.out" 2>"$work/mcp.err"
-"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 13 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
+"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 16 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
 import json, sys
 by = {}
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -1132,7 +1132,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
 bad = []
 if by[1]["result"]["serverInfo"]["name"] != "fleet": bad.append("initialize")
 tools = by[2]["result"]["tools"]
-if len(tools) != 13 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
+if len(tools) != 16 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
 if sys.argv[2] not in by[3]["result"]["content"][0]["text"] or by[3]["result"]["isError"]: bad.append("who")
 if not by[4]["result"]["isError"] or "busy" not in by[4]["result"]["content"][0]["text"]: bad.append("assign refusal")
 if by[5]["result"]["isError"] or '"ok": false' not in by[5]["result"]["content"][0]["text"]: bad.append("done")
@@ -2121,6 +2121,85 @@ hook.acquire_lease(key, hook.lease_record(key, "nl_hold", "x:watchrepo", r, "hel
 nl = hookrun({"hook_event_name": "PreToolUse", "session_id": "nl_rival", "cwd": r, "tool_name": "Bash", "tool_use_id": "t9", "tool_input": {"command": "echo reading only\ngit push origin " + br}})
 report(nl.returncode == 2 and "held by" in nl.stderr, "a git write on the second line of a Bash command is a write: refused on a held branch", f"rc={nl.returncode} err={nl.stderr[:160]!r}")
 clear(); hook._unlink(hook.path("sessions", "nl_hold.json")); hook._unlink(hook.path("sessions", "nl_rival.json"))
+sys.exit(1 if bad else 0)
+PY
+
+# ---- Mail: a role is the address. send is scoped to the caller's parent/children/siblings (from the
+# org charters), retry-safe by id; the hook injects unread lines at SessionStart and every prompt; ack
+# is the addressee's alone; the watcher launches the operator's deliver command for a role nobody holds.
+"$PY" - "$FLEET_STATE" "$H" "$F" "$work" <<'PY' || fails=$((fails+1))
+import json, os, subprocess, sys, time
+state, hookpy, fleetpy, work = sys.argv[1:5]
+os.environ["FLEET_STATE"] = state; sys.path.insert(0, os.environ["FLEET_HOOK_DIR"]); import xlib as hook
+bad = 0
+def report(ok, good, badtext):
+    global bad
+    print("  ok    " + good if ok else "  FAIL  " + badtext); bad += 0 if ok else 1
+REPO = os.environ["FLEET_TEST_REPO"]; WT = os.path.join(work, "wt"); ORG = os.environ["ORG_STATE"]
+def hookrun(ev): return subprocess.run([sys.executable, hookpy], input=json.dumps(ev), capture_output=True, text=True)
+def fleet(*a, cwd=REPO, inp=None): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=cwd, input=inp)
+def charter(role, *sup):
+    d = os.path.join(ORG, "work", role.replace(":", "--")); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "chain.jsonl"), "w").write(json.dumps({"v": 1, "role": role, "kind": "charter", "terms": {"supervisors": list(sup)}}) + "\n")
+# The hierarchy: finisher:cam and courier:cam report to supervisor:cam. courier:cam's directory never opens a session.
+courier = os.path.join(work, "courier"); os.makedirs(courier, exist_ok=True)
+rmap = os.path.join(ORG, "roles.map"); saved = open(rmap).read(); open(rmap, "a").write(f"{courier} work courier:cam\n")
+charter("supervisor:cam", "human:mh"); charter("courier:cam", "human:mh", "supervisor:cam")
+SUP, FIN = "mail_sup1", "mail_fin1"
+hookrun({"hook_event_name": "SessionStart", "session_id": SUP, "cwd": REPO, "source": "startup"})
+hookrun({"hook_event_name": "SessionStart", "session_id": FIN, "cwd": WT, "source": "startup"})
+# Whatever role the worktree wears by now (earlier scenarios rebind it) is the child; several live
+# sessions share that directory, so the worktree's verbs name theirs with --session.
+FROLE = hook.read_json(hook.path("sessions", FIN + ".json"))["role"]
+charter(FROLE, "human:mh", "supervisor:cam")
+def wt(*a, inp=None): return fleet(*a, "--session", FIN, cwd=WT, inp=inp)
+# 1. send, scoped and retry-safe.
+s1 = wt("send", "supervisor:cam", "--id", "mq1", "--kind", "question", "--subject", "which base?", "--body", "-", inp="main or release?\n")
+rec = hook.read_json(hook.path("mail", hook.safe("supervisor:cam"), "mq1.json")) or {}
+report(s1.returncode == 0 and rec.get("from_role") == FROLE and rec.get("from_session") == FIN and rec.get("body") == "main or release?" and rec.get("to") == "supervisor:cam",
+       "fleet send writes mail/<role>/<id>.json from the caller's session (body from stdin), addressed to the role", f"rc={s1.returncode} err={s1.stderr[:160]!r} rec={rec}")
+before = open(hook.path("mail", hook.safe("supervisor:cam"), "mq1.json")).read()
+s2 = wt("send", "supervisor:cam", "--id", "mq1", "--kind", "question", "--subject", "which base?", "--body", "main or release?")
+s3 = wt("send", "supervisor:cam", "--id", "mq1", "--kind", "question", "--subject", "which base?", "--body", "something else")
+after = open(hook.path("mail", hook.safe("supervisor:cam"), "mq1.json")).read()
+report(s2.returncode == 0 and "already sent" in s2.stdout and s3.returncode == 1 and "different message" in s3.stderr and before == after,
+       "a second send with the same id and payload is a no-op; a different payload under that id is refused; the record is untouched",
+       f"replay rc={s2.returncode} {s2.stdout[:80]!r}; changed rc={s3.returncode} {s3.stderr[:120]!r}; same={before == after}")
+s4 = wt("send", "nobody:cam", "--id", "mq0", "--kind", "report", "--subject", "x", "--body", "y")
+report(s4.returncode == 1 and f"not a contact of {FROLE}" in s4.stderr and "allowed: courier:cam, supervisor:cam" in s4.stderr,
+       "a recipient outside the caller's contact set is refused with the allowed set named", f"rc={s4.returncode} {s4.stderr[:160]!r}")
+# 2. The hook names unread mail at SessionStart and at the prompt; reading is not acking.
+line = f"[fleet] mail mq1 from {FROLE} (question): which base?"
+st = hookrun({"hook_event_name": "SessionStart", "session_id": SUP, "cwd": REPO, "source": "resume"}).stdout
+pr = hookrun({"hook_event_name": "UserPromptSubmit", "session_id": SUP, "cwd": REPO, "prompt": "hi"}).stdout
+lst = fleet("mail", "--unacked", "--json", cwd=REPO)
+report(line in st and line in pr and any(m.get("id") == "mq1" and not m.get("acked_by") for m in json.loads(lst.stdout or "[]")),
+       "SessionStart and UserPromptSubmit inject the unread line; `fleet mail --unacked` still lists it (no auto-ack)", f"start={line in st} prompt={line in pr} list={lst.stdout[:160]!r}")
+# 3. ack: the sender cannot; the addressee can; the line is gone afterwards.
+a1 = wt("ack", "mq1"); a2 = fleet("ack", "mq1", cwd=REPO)
+rec = hook.read_json(hook.path("mail", hook.safe("supervisor:cam"), "mq1.json")) or {}
+pr2 = hookrun({"hook_event_name": "UserPromptSubmit", "session_id": SUP, "cwd": REPO, "prompt": "hi"}).stdout
+report(a1.returncode == 1 and a2.returncode == 0 and rec.get("acked_by") == SUP and rec.get("acked_at") and line not in pr2,
+       "only a session in the addressed role may ack; after the ack the prompt no longer names it", f"sender rc={a1.returncode} {a1.stderr[:100]!r}; addressee rc={a2.returncode} {a2.stderr[:100]!r}; acked_by={rec.get('acked_by')}")
+# 4. The watcher delivers to a role nobody holds: stub command `true`, launched once, stamped on the record.
+s5 = fleet("send", "courier:cam", "--id", "mo1", "--kind", "order", "--subject", "collect the packet", "--body", "go", cwd=REPO)
+mp = hook.path("mail", hook.safe("courier:cam"), "mo1.json"); m = hook.read_json(mp); m["at"] -= 60; hook.write_json(mp, m)
+hook.write_json(hook.path("deliver.json"), {"courier:cam": {"cwd": courier, "cmd": ["true"]}})
+obsp = hook.path("watch", "observed.jsonl")
+def deliveries(): return [json.loads(l) for l in open(obsp) if l.strip() and json.loads(l).get("what") == "deliver"] if os.path.exists(obsp) else []
+w1 = fleet("watch", "--once", "--interval", "60s"); d1 = deliveries(); m1 = hook.read_json(mp) or {}
+w2 = fleet("watch", "--once", "--interval", "60s"); d2 = deliveries()
+report(s5.returncode == 0 and w1.returncode == 0 and str(m1.get("delivered_by", "")).startswith("watch:") and m1.get("delivered_at") and len(d1) == 1 and d1[0].get("role") == "courier:cam" and d1[0].get("mail") == ["mo1"] and d1[0].get("cmd") == "true" and len(d2) == 1,
+       "fleet watch runs the role's deliver command once for unread mail past the grace with no live session, stamps delivered_at/delivered_by, records it in observed.jsonl, and never launches twice",
+       f"send rc={s5.returncode} {s5.stderr[:100]!r}; tick rc={w1.returncode} {w1.stderr[:100]!r}; rec={m1.get('delivered_by')} deliveries={d1} then {len(d2)}")
+# 5. A live session in the role: the watcher does nothing; the line reaches it at its next prompt.
+s6 = wt("send", "supervisor:cam", "--id", "mq2", "--kind", "report", "--subject", "packet collected", "--body", "done")
+mp2 = hook.path("mail", hook.safe("supervisor:cam"), "mq2.json"); m = hook.read_json(mp2); m["at"] -= 60; hook.write_json(mp2, m)
+hook.write_json(hook.path("deliver.json"), {"supervisor:cam": {"cwd": REPO, "cmd": ["true"]}})
+fleet("watch", "--once", "--interval", "60s"); m2 = hook.read_json(mp2) or {}
+report(s6.returncode == 0 and not m2.get("delivered_by") and len(deliveries()) == 1, "a role with a live session is not launched for; the hook line is its delivery", f"rec={m2.get('delivered_by')} deliveries={len(deliveries())}")
+for sid, cwd in ((SUP, REPO), (FIN, WT)): hookrun({"hook_event_name": "SessionEnd", "session_id": sid, "cwd": cwd, "reason": "exit"})
+open(rmap, "w").write(saved); hook._unlink(hook.path("deliver.json"))
 sys.exit(1 if bad else 0)
 PY
 
