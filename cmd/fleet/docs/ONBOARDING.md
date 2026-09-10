@@ -24,12 +24,12 @@ configs and skips missing files and a missing lane source; on a fresh machine it
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`:
 
 ```json
-"SessionStart": [{"hooks": [{"type": "command", "command": "/Users/<you>/.fleet/bin/fleet hook claude", "timeout": 5}]}]
+"SessionStart": [{"hooks": [{"type": "command", "command": "$HOME/.fleet/bin/fleet hook claude", "timeout": 5}]}]
 ```
 
 (`PreToolUse` and `PostToolUse` take a `"matcher"` covering `Bash` and the file-writing tools, for
 example `"Bash|Edit|Write"`; copy the exact matchers from an installed machine's settings when you have one.)
-Codex registrations are written per directory by `fleet role`, not here. Then
+Codex registrations are user-level: `fleet role` writes the six events to `$CODEX_HOME/hooks.json` the first time it binds a directory, so they run for every Codex session on the machine; only the card and rules are per directory. Then
 `fleet inspect-hooks --config ~/.claude/settings.json` must list all six, then run `--apply` for
 the lanes and backups, then open a fresh session and look for the `[fleet]` line. Stop if the
 installer says a config or the lane source was skipped. State lives in `~/.fleet` (`FLEET_STATE`
