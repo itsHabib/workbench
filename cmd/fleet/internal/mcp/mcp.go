@@ -40,11 +40,13 @@ func str(desc string) schema { return schema{"type": "string", "description": de
 var cwdArg = str("the calling session's working directory (its worktree); identity and branch names resolve relative to it, never to this server's own cwd")
 
 var tools = []schema{
-	{"name": "fleet_send", "description": "Send retry-safe mail to any identified role in the caller's tenant.",
-		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
-	{"name": "fleet_mail", "description": "List mail for a role, defaulting to the caller's role; returns JSON, no acknowledgement.",
-		"inputSchema": schema{"type": "object", "properties": schema{"for": str("addressed role"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
-	{"name": "fleet_ack", "description": "Mark mail read by the session in the addressed role.",
+	{"name": "fleet_handoff", "description": "Leave an advisory handoff for the caller's role; the replacement session receives it at startup.",
+		"inputSchema": schema{"type": "object", "properties": schema{"conclusion": str("useful conclusion for the next session"), "next": str("optional remaining work"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"conclusion", "cwd"}}},
+	{"name": "fleet_send", "description": "Send retry-safe mail to a role or individual seat in the caller's tenant.",
+		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role or seat address"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
+	{"name": "fleet_mail", "description": "List mail for an address, defaulting to the caller's role or seat; returns JSON, no acknowledgement.",
+		"inputSchema": schema{"type": "object", "properties": schema{"for": str("role or seat address"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
+	{"name": "fleet_ack", "description": "Mark mail read by a session at the recipient address.",
 		"inputSchema": schema{"type": "object", "properties": schema{"id": str("message ID"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"id", "cwd"}}},
 	{"name": "fleet_who",
 		"description": "Which live session holds a slot, lease key, change number (#n) or branch; says loudly when nobody does.",
@@ -233,6 +235,8 @@ func dispatch(name string, a map[string]any) (string, bool) {
 	}
 	s := func(k string) string { v, _ := a[k].(string); return v }
 	switch name {
+	case "fleet_handoff":
+		return runVerb(func() error { return verbs.CmdRoleHandoff(s("conclusion"), s("next"), s("session")) })
 	case "fleet_who":
 		ok, text, detail := verbs.Who(s("name"))
 		out := map[string]any{"resolved": ok, "text": text}
@@ -317,7 +321,7 @@ func handle(msg map[string]any) map[string]any {
 	case "tools/call":
 		name, _ := params["name"].(string)
 		args, _ := params["arguments"].(map[string]any)
-		if name != "fleet_status" && name != "fleet_request" && !isMailTool(name) {
+		if name != "fleet_status" && name != "fleet_request" && name != "fleet_handoff" && !isMailTool(name) {
 			fleet.MigrateLegacyKeys()
 		}
 		text, isErr, err := safeCall(name, args)

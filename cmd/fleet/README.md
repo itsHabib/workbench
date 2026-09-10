@@ -297,3 +297,34 @@ model/              the Quint model and its judge
 testdata/           the reference suite, shims, lanes and fixtures
 docs/               notes for report and hook inspection
 ```
+
+## Continue after a session changes
+
+A replacement session receives the seat's current assignment at SessionStart,
+including a brief already shown to its predecessor. The assignment is checked
+against the seat's current checkout, repository and branch; a reused seat does
+not receive an old branch's brief. The original delivery stamp remains historical
+notification evidence, not a claim that the replacement accepted or finished work.
+
+A dedicated lead can leave context that follows its role across branches:
+
+```sh
+fleet handoff --role "The parser expects milliseconds" "Answer the worker's units question"
+```
+
+The next session launched in that tenant/role receives an authored, advisory
+excerpt. `fleet_handoff` exposes the same operation through MCP, with `conclusion`,
+optional `next` and `session`, and required caller `cwd`. No Org attach, claim,
+checkpoint or release is involved. A handoff is context, not completion evidence.
+The stored text is limited to 16 KiB and the startup excerpt to 1,024 UTF-8 bytes.
+
+Pooled worker seats use the existing branch handoff instead:
+
+```sh
+fleet handoff work-one "Parser fixed; integration check remains" "Run the integration check"
+```
+
+This avoids sharing one role handoff between different worker seats of the same
+kind. Captured last assistant text remains separate from the intentional handoff.
+No old Org records, installed hooks, or live assignments are migrated by these
+commands. The longer-term single-work-record migration remains separate work.

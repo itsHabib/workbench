@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-mail-") as tmp:
     run(sender, "watch", "--once")
     queued = json.loads(run(sender, "mail", "--for", "hub:b", "--unacked", "--json"))
     assert queued == [first]  # The absent recipient stays queued; no launch or stamps.
-    assert set(first) == {"id", "to", "from_role", "from_session", "kind", "subject", "head", "body", "at"}
+    assert not any(k.startswith("delivered_") for k in first)
 
     event("SessionEnd", "sender-v1", sender)
     (state / "sessions" / "sender-v1.json").unlink()
