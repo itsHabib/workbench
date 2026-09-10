@@ -8,7 +8,7 @@ fleet over one repository; read [OVERVIEW.md](OVERVIEW.md) first if the words ar
 ```sh
 bash cmd/fleet/install.sh             # dry run: prints every change
 bash cmd/fleet/install.sh --shadow    # optional: run beside the existing hook, write only telemetry
-bash cmd/fleet/install.sh --apply     # build, back up harness configs, wire the hook, install lanes
+bash cmd/fleet/install.sh --apply     # build, back up harness configs, swap the hook lines it finds, install lanes
 ```
 
 State lives in `~/.fleet` (`FLEET_STATE` to move it). The installer edits harness configuration,
@@ -20,7 +20,9 @@ line at start. `?` is correct for a directory with no role.
 - One overall lead. One lead per bucket of work (an epic, a repository, a team). One accountable
   lead per task, never two.
 - Worker kinds you need: usually `author` (task to draft PR) and `verifier` (judges the exact
-  head); `finisher` if drafts get carried through checks and reviews by someone else.
+  head); `finisher` if drafts get carried through checks and reviews by someone else. Lanes are
+  installed from cc-skills; check `~/.fleet/lanes/` has the kinds you name (a fresh install may
+  lack `verifier`; copy it from the cc-skills lanes directory).
 - One exclusive resource if the work has one (a device, a test bench, a deploy slot).
 - Names: `supervisor:<name>` for leads, `<kind>:<repo>` for worker kinds.
 
@@ -34,7 +36,8 @@ git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main     # and -le
 org charter -role supervisor:<name>-a -tier T1 -scope github:<owner>/<repo> -supervisor human:<you> -supervisor supervisor:<name> -retire-when "<when>"
 org charter -role supervisor:<name>   -tier T1 -scope role:supervisor:<name>-a -scope role:supervisor:<name>-b -scope github:<owner>/<repo> -supervisor human:<you> -retire-when "<when>"
 
-# seats: pooled worktrees with names (pool before binding the leads, or unbind them while pooling)
+# seats: pooled worktrees with names (pool before binding the leads; there is no unbind verb, so
+# if leads are already bound, remove their roles.map lines while pooling and re-run fleet role)
 fleet pool ~/dev/<repo> author 2 --tenant <t>
 fleet pool ~/dev/<repo> verifier 1 --tenant <t>
 
@@ -52,7 +55,7 @@ What the leads read for authority. Outcome; roles and who each may talk to; task
 and a stopping boundary; message ids; tick rules (one send per addressee per tick, any number of
 local effects, end the turn); what nobody may do (merge, ready flip, revoke, other repositories);
 the stop condition. The lead card and the `task-supervisor` skill supply the procedure; the
-contract supplies the authority. A sample: `RUN-CONTRACT-v4.md` in `itsHabib/fleet-demo-sandbox`.
+contract supplies the authority. A sample: `docs/RUN-CONTRACT-v4.md` in `itsHabib/fleet-demo-sandbox`.
 
 ## 5. Choose how sessions get made
 
@@ -72,9 +75,9 @@ watcher's own launcher lands, `e2e/mail-poll.sh` is the delivery process, or a d
 The overall lead's first tick sends one `order` per child. Then:
 
 ```sh
-fleet work            # rows and their observed state: dispatched · working · idle · late · done
+fleet work            # rows and their observed state: dispatched · working · idle · late · abandoned · dead · failed · undeclared · remote · done
 fleet leases          # who holds which branch or resource
-fleet mail --for <address>
+fleet mail --for <address>   # from a session that has a role; the verb refuses an unroled caller
 fleet receipts
 org log -role supervisor:<name>-a
 ```
@@ -83,15 +86,18 @@ Files in, sessions out, records left behind.
 
 ## 7. The rules that cost hours
 
-- A repository root carries no role.
+- A repository root carries no role. Nothing refuses it; it is a rule, because a root's projected
+  denies apply to every worktree under it.
 - Never `cd` into a roled directory that is not yours; launch from a subshell, use `git -C`.
 - No idle desktop session in a roled directory; it reads as live and blocks delivery.
 - One branch, one holder; only session end or an operator `fleet revoke` releases it.
-- `fleet done <sha> --kind verify`; without `--kind` it demands every kind in `tier.json`.
+- `fleet done <sha> --kind verify`; without `--kind` it demands a passing receipt of every kind the
+  installed lane manifests produce.
 - The hook's session id is not the desktop app's; the directory is the key both sides share.
-- Slow commands need `FLEET_ALLOW_SLOW='<why>'` after the cost gate has measured them.
+- A command matching a rule in `~/.fleet/expensive.json` (hand-written thresholds) needs the
+  `FLEET_ALLOW_SLOW='<why>'` prefix, and the seat's allow list must accept that form.
 
 ## 8. Prove it before trusting it
 
-Run [e2e.md](e2e.md) once on the machine. Twelve minutes, a scorecard from records, and a
-friction list with owners. Then run real work.
+Run [e2e.md](e2e.md) once on the machine: a scorecard from records and a friction list with
+owners. The reference run took twelve minutes. Then run real work.
