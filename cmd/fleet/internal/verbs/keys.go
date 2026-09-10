@@ -1,6 +1,7 @@
 package verbs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -376,7 +377,7 @@ func dispatchHandoff(args []string) error {
 	}
 	a := positional(without(args, "--role"), "--session")
 	if len(a) < 1 || len(a) > 2 {
-		return refuse(`usage: fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]`)
+		return exitCode(2, `usage: fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]`)
 	}
 	return CmdRoleHandoff(at(a, 0), at(a, 1), session)
 }
@@ -413,10 +414,21 @@ func CmdRoleHandoff(conclusion, next, session string) error {
 		return err
 	}
 	if err := fleet.WriteRoleHandoff(fleet.SessionRecord(sid), conclusion, next); err != nil {
-		return err
+		return roleHandoffError(err)
 	}
 	say("role handoff recorded")
 	return nil
+}
+
+func roleHandoffError(err error) error {
+	var validation *fleet.RoleHandoffValidationError
+	if !errors.As(err, &validation) {
+		return err
+	}
+	if validation.Usage {
+		return exitCode(2, validation.Error())
+	}
+	return refuse("%s", validation.Error())
 }
 
 func sortBy[T any](xs []T, less func(a, b T) bool) {

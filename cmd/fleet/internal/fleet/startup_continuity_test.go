@@ -2,12 +2,57 @@ package fleet
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestStartupAssignmentLockContentionIsVisibleAndNonblocking(t *testing.T) {
+	root := continuityFixture(t)
+	var v *Verdict
+	if err := KeyLock("slot:seat-a", func() error {
+		v = Run(Event{"session_id": "reader", "cwd": root, "hook_event_name": "SessionStart"})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if v.Code != 0 || !strings.Contains(v.Out, "seat lock is busy") || !strings.Contains(v.Out, "fleet work --json") {
+		t.Fatal("lock contention was hidden or blocked startup", v)
+	}
+}
+
+func TestStartupAssignmentReceiptFailureIsVisible(t *testing.T) {
+	root := continuityFixture(t)
+	path := Path("assign", "seat-a.json")
+	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "pending assignment", "at": Now(), "role": "lead:demo", "tenant": "one"}
+	if err := WriteJSON(path, a); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory at the per-process temporary filename deterministically refuses
+	// the receipt write on both platforms, without permissions or timing tricks.
+	if err := os.Mkdir(fmt.Sprintf("%s.%d.tmp", path, os.Getpid()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	v := Run(Event{"session_id": "reader", "cwd": root, "hook_event_name": "SessionStart"})
+	if v.Code != 0 || !strings.Contains(v.Out, "delivery receipt was not saved") || !strings.Contains(v.Out, "pending assignment") || !strings.Contains(v.Out, "fleet work --json") {
+		t.Fatal("receipt error was hidden or blocked startup", v)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("failed receipt changed assignment", err)
+	}
+	logged, err := os.ReadFile(Path("hook-errors.jsonl"))
+	if err != nil || !strings.Contains(string(logged), "startup assignment error") {
+		t.Fatal("receipt failure diagnostic missing", err)
+	}
+}
 
 func continuityFixture(t *testing.T) string {
 	t.Helper()

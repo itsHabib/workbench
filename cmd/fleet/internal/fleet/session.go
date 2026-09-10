@@ -288,7 +288,11 @@ func AssignmentLine(slot, sid string) string {
 	if r := S(a, "reply_to"); r != "" {
 		tail += fmt.Sprintf(". Reply to: %s", r)
 	}
-	return fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
+	line := fmt.Sprintf("[fleet] this slot was assigned %s ago: branch %s%s", FmtAge(Now()-F(a, "at")), S(a, "branch"), tail)
+	if notice := S(a, "delivery_notice"); notice != "" {
+		line += "\n" + notice
+	}
+	return line
 }
 
 // RecordLastWord captures the session's conclusion at Stop with no act by the agent:
