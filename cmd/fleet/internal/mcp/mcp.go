@@ -40,6 +40,12 @@ func str(desc string) schema { return schema{"type": "string", "description": de
 var cwdArg = str("the calling session's working directory (its worktree); identity and branch names resolve relative to it, never to this server's own cwd")
 
 var tools = []schema{
+	{"name": "fleet_send", "description": "Send retry-safe mail to any identified role in the caller's tenant.",
+		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
+	{"name": "fleet_mail", "description": "List mail for a role, defaulting to the caller's role; returns JSON, no acknowledgement.",
+		"inputSchema": schema{"type": "object", "properties": schema{"for": str("addressed role"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
+	{"name": "fleet_ack", "description": "Mark mail read by the session in the addressed role.",
+		"inputSchema": schema{"type": "object", "properties": schema{"id": str("message ID"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"id", "cwd"}}},
 	{"name": "fleet_who",
 		"description": "Which live session holds a slot, lease key, change number (#n) or branch; says loudly when nobody does.",
 		"inputSchema": schema{"type": "object", "properties": schema{"name": str("slot name, slot:<name>, repo:<id>:<branch>, #<n>, or a branch in cwd's repo"), "cwd": cwdArg},
@@ -222,6 +228,9 @@ func js(v any) string {
 }
 
 func dispatch(name string, a map[string]any) (string, bool) {
+	if isMailTool(name) {
+		return dispatchMail(name, a)
+	}
 	s := func(k string) string { v, _ := a[k].(string); return v }
 	switch name {
 	case "fleet_who":
@@ -308,7 +317,7 @@ func handle(msg map[string]any) map[string]any {
 	case "tools/call":
 		name, _ := params["name"].(string)
 		args, _ := params["arguments"].(map[string]any)
-		if name != "fleet_status" && name != "fleet_request" {
+		if name != "fleet_status" && name != "fleet_request" && !isMailTool(name) {
 			fleet.MigrateLegacyKeys()
 		}
 		text, isErr, err := safeCall(name, args)
@@ -385,4 +394,25 @@ func taskStatusJSON() (string, bool) {
 	defer func() { verbs.Out = previous }()
 	err := verbs.CmdStatus([]string{"--json"})
 	return buf.String(), err != nil
+}
+
+func dispatchMail(name string, a map[string]any) (string, bool) {
+	s := func(k string) string { v, _ := a[k].(string); return v }
+	switch name {
+	case "fleet_send":
+		return runVerb(func() error {
+			return verbs.CmdSend(s("to"), s("id"), s("kind"), s("subject"), s("head"), s("body"), s("session"))
+		})
+	case "fleet_mail":
+		unacked, _ := a["unacked"].(bool)
+		return runVerb(func() error { return verbs.CmdMail(s("for"), s("session"), unacked, true) })
+	case "fleet_ack":
+		return runVerb(func() error { return verbs.CmdAck(s("id"), s("session")) })
+
+	}
+	return "", true
+}
+
+func isMailTool(name string) bool {
+	return name == "fleet_send" || name == "fleet_mail" || name == "fleet_ack"
 }

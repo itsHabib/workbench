@@ -575,3 +575,14 @@ proposed deferrals, not accepted risk or merge permission. No installation.
 Code verification: Fleet race tests, lint/vet, both harness regression suites and
 full CI/fuzz/hygiene passed. Those checks do not cover or dismiss the residuals
 above. No additional panel request should be sent for this PR under the current cap.
+
+
+## Fleet retained-mail scan (2026-09-10, PR #295)
+
+Hook mail listing currently decodes retained records before filtering acknowledgements,
+so latency grows with lifetime mailbox history. Codex flagged this as a P2 scaling
+concern in the final review. Defer indexing/archival in the standalone mail slice:
+measure hook latency against a representative retained mailbox first, then choose
+an unacknowledged index or archive with tested atomic send/ack consistency and
+recovery behavior. Owner: Fleet mail maintainer. This is a known limitation, not
+a claim of constant-time hook delivery.

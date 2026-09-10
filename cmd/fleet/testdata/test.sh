@@ -1124,7 +1124,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_who\",\"arguments\":{\"name\":\"feat/q\",\"cwd\":\"$SL1\"}}}" \
   | (cd "$work" && "$PY" "$here/fleet-mcp.py") > "$work/mcp.out" 2>"$work/mcp.err"
-"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 13 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
+"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 16 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
 import json, sys
 by = {}
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -1132,7 +1132,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
 bad = []
 if by[1]["result"]["serverInfo"]["name"] != "fleet": bad.append("initialize")
 tools = by[2]["result"]["tools"]
-if len(tools) != 13 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
+if len(tools) != 16 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
 if sys.argv[2] not in by[3]["result"]["content"][0]["text"] or by[3]["result"]["isError"]: bad.append("who")
 if not by[4]["result"]["isError"] or "busy" not in by[4]["result"]["content"][0]["text"]: bad.append("assign refusal")
 if by[5]["result"]["isError"] or '"ok": false' not in by[5]["result"]["content"][0]["text"]: bad.append("done")
@@ -2123,6 +2123,8 @@ report(nl.returncode == 2 and "held by" in nl.stderr, "a git write on the second
 clear(); hook._unlink(hook.path("sessions", "nl_hold.json")); hook._unlink(hook.path("sessions", "nl_rival.json"))
 sys.exit(1 if bad else 0)
 PY
+
+"$PY" "$here/mail-scenario.py" || fails=$((fails+1))
 
 echo; "$PY" "$F" sessions; echo; "$PY" "$F" leases; echo; "$PY" "$F" decisions
 echo; echo "python invocation for the six matchers: $(hook_invocation)"

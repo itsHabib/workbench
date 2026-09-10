@@ -6,7 +6,7 @@ An operator running a team of coding agents wants one thing from the machinery
 underneath them: to always know **who is working what, what is stuck, and what
 is done** — and to be told that truthfully, at the moment it changes, without
 any agent having to stop and report it. `fleet` is that machinery. It is not a
-scheduler, not a chat bus, and not a workflow engine; it is the part that makes
+scheduler or a workflow engine; it is the part that makes
 ownership visible and exclusive so that leads can lead.
 
 The shape it serves is a hub and spokes. The operator talks to a **lead** (a
@@ -81,6 +81,7 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | evidence of done at an exact head |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
 | `assign/<slot>.json` | `assign`, `dispatch --slot` | what a seat's next session reads at start |
+| `mail/<role-safe>/<id>.json` | `send`, `ack` | role-addressed messages, retained after acknowledgement |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
 | `lanes/<kind>/` | `install.sh` | manifests and cards, copied from cc-skills |
@@ -163,11 +164,35 @@ an unreadable session record must not be read as death.
 
 `fr1_test.go` is the domain-word tripwire over the Go source.
 
+## Mail
+
+Durable communication between identified roles in the same tenant:
+
+Subjects are limited to 1024 bytes; bodies remain full.
+
+```sh
+fleet send hub:b --id unit-question-1 --kind question --subject 'Which unit?' \
+  --head abc123 --body 'Use milliseconds or seconds?'
+fleet mail --unacked                 # full bodies; --for <role> selects a mailbox
+fleet ack unit-question-1
+```
+
+`--body -` reads stdin. `--session <id8>` disambiguates callers; `mail --json`
+returns records. MCP exposes `fleet_send`, `fleet_mail`, `fleet_ack`. A replacement
+sender session can retry the same role/ID/payload without rewriting the original
+record. Changed payloads and cross-tenant access refuse. Mail grants no assignment,
+resource, or merge authority; it has no relationship allowlist or launch machinery.
+
+Hooks inject up to five unacked lines at SessionStart and UserPromptSubmit, without
+auto-ack. Absent recipients keep queued mail until a session starts. This smaller
+contract supersedes the earlier contact-derivation and watcher-launch scope.
+See [Mail semantics and validation](docs/mail.md) for identity, storage and retry rules.
+
 ## Task coordination: first implementation increment
 
 This adds retry-safe local assignments and a read-only observation view. It does
-not yet implement the four-interaction product: launch/delivery, semantic worker
-acceptance, correlated questions, safe stop and replacement remain adapter work.
+not yet implement the four-interaction product: task launch/acceptance, correlated questions, safe stop and replacement remain adapter work.
+Role-addressed mail is independent of task acceptance.
 Do not activate a live trial or present this as cross-harness lifecycle parity.
 
 The approved direction is [cc-skills PR #60](https://github.com/itsHabib/cc-skills/pull/60):
