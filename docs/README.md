@@ -21,6 +21,8 @@ New here: [plain-language-overview.md](plain-language-overview.md) →
 | [projects.md](projects.md) | The public project family around this repo. |
 | [mutation-audit-2026-07-20.md](mutation-audit-2026-07-20.md) | Dated audit record. Evidence, not guidance. |
 | [features/](features/) | One directory per feature: spec, evidence, runbooks. Trust `Status:` headers over titles. |
+| [features/org-fleet-boundary/spec.md](features/org-fleet-boundary/spec.md) | The decision that settles what `org` owns and what `fleet` owns; nine rulings, a who-owns-what table, the migration order. |
 
-Per-tool docs live with the tools, not here: `cmd/<tool>/CLAUDE.md` +
-`cmd/<tool>/docs/DESIGN.md`, a CI-required pair.
+Per-tool docs live with the tools, not here: `cmd/<tool>/README.md`, plus the `CLAUDE.md` +
+`AGENTS.md` pair CI keeps identical where a tool has one. The fleet guides for people and
+agents (overview, onboarding, the minimum, run a fleet, e2e) are under `cmd/fleet/docs/`.
