@@ -586,3 +586,23 @@ measure hook latency against a representative retained mailbox first, then choos
 an unacknowledged index or archive with tested atomic send/ack consistency and
 recovery behavior. Owner: Fleet mail maintainer. This is a known limitation, not
 a claim of constant-time hook delivery.
+
+## Fleet startup publication diagnostic (2026-09-10, PR #298)
+
+Final Codex review of `176f61a589b63877d8fd9f1de44b5073efdc5902` reported P2
+comment 3980707982: if SessionStart cannot publish its session record,
+TouchSession still returns the in-memory record, but assignment replay rereads
+missing/stale disk state and may silently omit a valid brief. A deterministic
+session temporary-path collision reproduces exit 0 with no brief or storage
+notice; the assignment file remains byte-identical. The occupancy and assignment
+identity checks still refuse replay rather than granting work or merge authority.
+
+Proposed deferral under the completed two-fix-round cap: this affects advisory
+startup context during storage failure, leaves the durable assignment intact,
+and does not bypass an authorization check. Owner: Fleet continuity maintainer.
+Use the just-touched session record or surface its publication failure; preserve
+occupancy and role/tenant/path checks. Add a publication-failure regression that
+requires the validated brief or an actionable warning, with unchanged assignment
+bytes. Recovery is to repair session storage and start the session again; inspect
+`fleet work --json` for the retained assignment meanwhile. Gate must explicitly
+accept this residual before merge; green CI does not cover or dismiss it.
