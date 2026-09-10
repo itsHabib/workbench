@@ -27,7 +27,8 @@ configs and skips missing files and a missing lane source; on a fresh machine it
 "SessionStart": [{"hooks": [{"type": "command", "command": "/Users/<you>/.fleet/bin/fleet hook claude", "timeout": 5}]}]
 ```
 
-(`PreToolUse` and `PostToolUse` take a `"matcher"` of `"Bash|Edit|Write|MultiEdit|NotebookEdit"`.)
+(`PreToolUse` and `PostToolUse` take a `"matcher"` covering `Bash` and the file-writing tools, for
+example `"Bash|Edit|Write"`; copy the exact matchers from an installed machine's settings when you have one.)
 Codex registrations are written per directory by `fleet role`, not here. Then
 `fleet inspect-hooks --config ~/.claude/settings.json` must list all six, then run `--apply` for
 the lanes and backups, then open a fresh session and look for the `[fleet]` line. Stop if the
