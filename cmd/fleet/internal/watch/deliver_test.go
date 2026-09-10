@@ -336,3 +336,128 @@ func TestDeliverRecorder(_ *testing.T) {
 	}
 	os.Exit(0)
 }
+
+// The reservation is durable before anything starts. A mailbox that cannot be
+// stamped is a fold that does not launch — the alternative is a process holding the
+// message with nothing on disk to say so, and a second process next fold holding it
+// too, because the record it was handed never stopped being eligible.
+func TestDeliverReservesBeforeStartingAndNeverLaunchesUnstampableMail(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the directory mode this test relies on")
+	}
+	_, sink := deliverEnv(t)
+	now := fleet.Now()
+	putStoreMail(t, "hub:lead", "q1", now-60, nil)
+	box := storeDirs(t, "t1", "hub:lead")[0]
+	if err := os.Chmod(box, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(box, 0o755) })
+	observed := deliver(now)
+	if got := len(observedWhat(observed, "mail-delivery-started")); got != 0 {
+		t.Fatalf("launched with an unreserved message: %v", observed)
+	}
+	if len(observedWhat(observed, "mail-delivery-failed")) != 1 {
+		t.Fatalf("the reservation failure was not recorded: %v", observed)
+	}
+	if _, err := os.Stat(sink); err == nil {
+		t.Fatal("a process was started for a message that could not be reserved")
+	}
+	// Nothing was consumed: the next fold, with the mailbox writable again, delivers it.
+	if err := os.Chmod(box, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(observedWhat(deliver(fleet.Now()), "mail-delivery-started")); got != 1 {
+		t.Fatalf("the retained message was not delivered on the next fold: %d", got)
+	}
+	launched(t, sink)
+}
+
+// A start that never happened gives the reservation back, so the message is neither
+// consumed nor stranded: the next fold carries it.
+func TestDeliverReleasesTheReservationWhenTheStartFails(t *testing.T) {
+	home, sink := deliverEnv(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{filepath.Join(home, "no-such-command"), "{{prompt}}"}}}
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), broken); err != nil {
+		t.Fatal(err)
+	}
+	now := fleet.Now()
+	putStoreMail(t, "hub:lead", "q1", now-60, nil)
+	observed := deliver(now)
+	if len(observedWhat(observed, "mail-delivery-failed")) != 1 || len(observedWhat(observed, "mail-reservation-stranded")) != 0 {
+		t.Fatalf("failed launch: %v", observed)
+	}
+	r := fleet.ReadJSON(filepath.Join(storeDirs(t, "t1", "hub:lead")[0], "q1.json"))
+	if fleet.Has(r, "delivered_at") || fleet.Has(r, "delivered_by") {
+		t.Fatalf("the reservation was not released: %v", r)
+	}
+	working := map[string]any{"hub:lead": map[string]any{"cwd": home,
+		"cmd": []any{exe, "-test.run=^TestDeliverRecorder$", "{{prompt}}"}}}
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), working); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(observedWhat(deliver(fleet.Now()), "mail-delivery-started")); got != 1 {
+		t.Fatalf("the released message was not delivered on the next fold: %d", got)
+	}
+	prompt, _ := launched(t, sink)["prompt"].(string)
+	if !strings.Contains(prompt, "q1") {
+		t.Fatalf("the next fold carried something else: %q", prompt)
+	}
+}
+
+// The launch directory must be the address's own checkout, in the same tenant. Mail
+// identity comes from the exact directory, so a stale cwd starts a process that
+// cannot read what the fold would otherwise have stamped as delivered.
+func TestDeliverRefusesALaunchDirectoryThatIsNotTheAddressOwn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pick  func(home, seat, foreign string) string
+		start int
+	}{
+		{"the address's own checkout", func(home, _, _ string) string { return home }, 1},
+		{"another address in the same tenant", func(_, seat, _ string) string { return seat }, 0},
+		{"a directory bound in another tenant", func(_, _, foreign string) string { return foreign }, 0},
+		{"a directory bound to nothing", func(home, _, _ string) string { return filepath.Join(home, "stale") }, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, sink := deliverEnv(t)
+			seat, foreign := filepath.Join(home, "seat"), t.TempDir()
+			if err := os.MkdirAll(filepath.Join(home, "stale"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			rows := home + " t1 hub:lead\n" + seat + " t1 hub:b seat-1\n" + foreign + " t2 other:lead\n"
+			if err := os.WriteFile(fleet.RolesMap(), []byte(rows), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := map[string]any{"hub:lead": map[string]any{"cwd": tc.pick(home, seat, foreign),
+				"cmd": []any{exe, "-test.run=^TestDeliverRecorder$", "{{prompt}}"}}}
+			if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
+				t.Fatal(err)
+			}
+			now := fleet.Now()
+			putStoreMail(t, "hub:lead", "q1", now-60, nil)
+			observed := deliver(now)
+			if got := len(observedWhat(observed, "mail-delivery-started")); got != tc.start {
+				t.Fatalf("launches: %d, want %d (%v)", got, tc.start, observed)
+			}
+			if tc.start == 1 {
+				launched(t, sink)
+				return
+			}
+			if len(observedWhat(observed, "mail-delivery-unbound")) != 1 {
+				t.Fatalf("the refusal was not recorded: %v", observed)
+			}
+			if r := fleet.ReadJSON(filepath.Join(storeDirs(t, "t1", "hub:lead")[0], "q1.json")); fleet.Has(r, "delivered_at") {
+				t.Fatalf("a refused launch consumed the message: %v", r)
+			}
+		})
+	}
+}

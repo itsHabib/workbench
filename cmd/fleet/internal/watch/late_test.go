@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +195,63 @@ func putSeatMail(t *testing.T, address, id string, at float64, kind string) {
 		"from_address": "hub:lead", "from_kind": "role", "kind": kind, "subject": "unit?", "body": "ms or s", "at": at}
 	if err := fleet.WriteJSON(filepath.Join(storeDirs(t, "t1", address)[1], id+".json"), r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A LATE_TO naming an address in another tenant is refused, logged, and never sent:
+// the report carries tenant A's sender, subject and standing.
+func TestLateReportNeverCrossesTheTenantBoundary(t *testing.T) {
+	home, _ := deliverEnv(t)
+	other := filepath.Join(t.TempDir(), "t2-lead")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" t1 hub:lead\n"+other+" t2 other:lead\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": "other:lead"}}
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	now := fleet.Now()
+	putStoreMail(t, "hub:lead", "e1", now-3600, fleet.Rec{"kind": "escalation"})
+	observed := lateMail(now, nil)
+	if len(observedWhat(observed, "late-mail")) != 0 {
+		t.Fatalf("a cross-tenant report was sent: %v", observed)
+	}
+	if len(observedWhat(observed, "late-mail-refused")) != 1 {
+		t.Fatalf("the refusal was not recorded: %v", observed)
+	}
+	rows, err := fleet.MailboxRecords("t2", "other:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("tenant t2 received tenant t1's metadata: %v", rows)
+	}
+}
+
+// A remote row is another machine's cached declaration: it carries no hands because
+// none were cached, not because nobody is working. That is not evidence of silence.
+func TestRemoteRowsAreNeverReportedLate(t *testing.T) {
+	deliverEnv(t)
+	now := fleet.Now()
+	remote := fleet.Rec{"repo": "r1", "change": "topic", "relationship": "check", "for": "hub:lead",
+		"state": "late", "hands": nil, "due": now - 300, "at": now - 900, "machine": "other-host", "cache_at": now - 120}
+	if observed := lateMail(now, []fleet.Rec{remote}); len(observedWhat(observed, "late-mail")) != 0 {
+		t.Fatalf("a remote row was reported unattended: %v", observed)
+	}
+	if rows := lateBox(t, "hub:lead"); len(rows) != 0 {
+		t.Fatalf("mailbox: %v", rows)
+	}
+	// The same row declared locally is still reported: only the cached one is mute.
+	local := fleet.Rec{}
+	for k, v := range remote {
+		local[k] = v
+	}
+	delete(local, "cache_at")
+	delete(local, "machine")
+	if observed := lateMail(now, []fleet.Rec{local}); len(observedWhat(observed, "late-mail")) != 1 {
+		t.Fatalf("a local row stopped being reported: %v", observed)
 	}
 }

@@ -170,3 +170,31 @@ func StampMail(tenant, address, id string, fields Rec) (Rec, error) {
 	})
 	return out, err
 }
+
+// UnstampMail removes substrate-side fields a stamp wrote. It is the other half of
+// StampMail: a reservation taken before an act that did not happen has to be given
+// back, or the message is stamped with nothing running and no fold ever carries it
+// again. It never touches the recipient's own fields.
+func UnstampMail(tenant, address, id string, keys ...string) error {
+	if err := MailAddress(address, id); err != nil {
+		return err
+	}
+	return mailLock(func() error {
+		dirs, err := MailStoreDirs(tenant, address)
+		if err != nil {
+			return err
+		}
+		for _, dir := range dirs {
+			path := filepath.Join(dir, id+".json")
+			r := mailRecordAt(path, tenant, address, id)
+			if r == nil {
+				continue
+			}
+			for _, k := range keys {
+				delete(r, k)
+			}
+			return WriteJSON(path, r)
+		}
+		return fmt.Errorf("mail %s: no record for %s", id, address)
+	})
+}

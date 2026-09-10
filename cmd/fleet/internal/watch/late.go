@@ -15,7 +15,9 @@ package watch
 //   - a question or escalation nobody acknowledged past FLEET_REPLY_GRACE, addressed
 //     to the addressee's parent — for a seat, the role the seat's row is for; for a
 //     lead, the LATE_TO in its delivery entry. With no parent recorded, the fold logs
-//     that it had nowhere to send it rather than inventing a recipient.
+//     that it had nowhere to send it rather than inventing a recipient. A parent
+//     outside the originating tenant is refused and logged, never sent: a LATE_TO is
+//     the operator's string, and a report carries the work's sender and subject.
 //
 // The mail is a report, from `fleet:watch`. It carries evidence, not instructions:
 // what was due, when, who had hands, what the head was. It grants nothing, it
@@ -29,6 +31,7 @@ package watch
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,14 +44,22 @@ import (
 // watchAddress is the sender of everything the fold writes as mail.
 const watchAddress = "fleet:watch"
 
-// lateness is one derived fact: who hears about it, when it came due, and why.
+// lateness is one derived fact: who hears about it, the tenant it came from, when it
+// came due, and why. The tenant travels with the fact because the recipient is
+// configuration — a LATE_TO an operator can point anywhere — and a report carries the
+// sender, subject and standing of another tenant's work.
 type lateness struct {
 	key      string
 	to       string
+	tenant   string
 	deadline float64
 	subject  string
 	body     string
 }
+
+// errCrossTenant is a report whose recipient lives outside the tenant it came from.
+// Fleet's mail boundary is per-tenant; a report is mail, so it obeys the boundary.
+var errCrossTenant = errors.New("late: recipient is outside the originating tenant")
 
 // lateMail derives the fold's lateness, sends what has not been sent for this
 // deadline, and returns what it observed.
@@ -68,7 +79,7 @@ func lateMail(now float64, work []fleet.Rec) []fleet.Rec {
 		}
 		r, err := sendLate(f)
 		if err != nil {
-			observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "late-mail-failed", "to": f.to, "subject": f.subject, "error": err.Error()})
+			observed = append(observed, lateFailure(f, err))
 			continue
 		}
 		sent[f.key] = f.deadline
@@ -81,12 +92,27 @@ func lateMail(now float64, work []fleet.Rec) []fleet.Rec {
 	return observed
 }
 
-// sendLate publishes one report. The id is derived from the fact and its deadline,
-// so a retry after a failed fold republishes the same record rather than a second one.
+// lateFailure is what the fold records when a report did not go out. A refusal is
+// named apart from a failure: nothing is wrong with the substrate, the configuration
+// asked for something the mail boundary does not allow.
+func lateFailure(f lateness, err error) fleet.Rec {
+	what := "late-mail-failed"
+	if errors.Is(err, errCrossTenant) {
+		what = "late-mail-refused"
+	}
+	return fleet.Rec{"at": fleet.Now(), "what": what, "to": f.to, "tenant": f.tenant, "subject": f.subject, "error": err.Error()}
+}
+
+// sendLate publishes one report, inside the tenant the fact came from. The id is
+// derived from the fact and its deadline, so a retry after a failed fold republishes
+// the same record rather than a second one.
 func sendLate(f lateness) (fleet.Rec, error) {
 	tenant, err := fleet.MailAddressTenant(f.to)
 	if err != nil {
 		return nil, err
+	}
+	if f.tenant == "" || tenant != f.tenant {
+		return nil, fmt.Errorf("%w: %s is in tenant %q, the report is from tenant %q", errCrossTenant, f.to, tenant, f.tenant)
 	}
 	payload := fleet.Rec{"id": lateID(f), "to": f.to, "from_role": watchAddress, "from_address": watchAddress, "from_kind": "role",
 		"from_session": "", "kind": "report", "subject": f.subject, "head": "", "body": f.body}
@@ -111,8 +137,8 @@ func lateSent() map[string]float64 {
 	return out
 }
 
-// lateRows is every ownership row past due that nobody live is holding and nothing
-// has passed. A row with no accountable role has no recipient and is left to the board.
+// lateRows is every locally-declared ownership row past due that nobody live is
+// holding and nothing has passed. A row with no accountable role has no recipient and is left to the board.
 //
 // The gate is the evidence, not the state name. Past its due date the board renames
 // `working` and `idle` to `late` while keeping the holder in `hands`, so excluding
@@ -130,13 +156,16 @@ func lateRows(now float64, work []fleet.Rec) []lateness {
 		if liveHands(w) != "" {
 			continue // late, but held: someone is on it, and the board already says so
 		}
+		if fleet.Has(w, "cache_at") {
+			continue // another machine's cached row: no hands here is no evidence at all
+		}
 		to := fleet.S(w, "for")
 		if to == "" {
 			continue
 		}
 		name := workName(w)
 		out = append(out, lateness{
-			key: "row|" + workKey(w), to: to, deadline: due,
+			key: "row|" + workKey(w), to: to, tenant: rowTenant(w, to), deadline: due,
 			subject: "late: " + name,
 			body: strings.Join([]string{
 				fmt.Sprintf("%s in %s was due %s ago and has no passing receipt at its head.", name, fleet.S(w, "repo"), fleet.FmtAge(now-due)),
@@ -150,6 +179,18 @@ func lateRows(now float64, work []fleet.Rec) []lateness {
 		})
 	}
 	return out
+}
+
+// rowTenant is the tenant a row's report comes from: the seat's when the row names
+// one, else the accountable role's.
+func rowTenant(w fleet.Rec, to string) string {
+	if slot := fleet.S(w, "slot"); slot != "" {
+		if tenant, err := fleet.MailAddressTenant(slot); err == nil {
+			return tenant
+		}
+	}
+	tenant, _ := fleet.MailAddressTenant(to)
+	return tenant
 }
 
 // liveHands is the session holding a row when that session is still alive, else "".
@@ -189,7 +230,7 @@ func lateReplies(now float64, work []fleet.Rec) ([]lateness, []fleet.Rec) {
 		if err != nil {
 			continue
 		}
-		facts, seen := unanswered(rows, a, now, replyGrace, work)
+		facts, seen := unanswered(rows, a, tenant, now, replyGrace, work)
 		out = append(out, facts...)
 		observed = append(observed, seen...)
 	}
@@ -197,7 +238,7 @@ func lateReplies(now float64, work []fleet.Rec) ([]lateness, []fleet.Rec) {
 }
 
 // unanswered is one mailbox's overdue questions and escalations.
-func unanswered(rows []fleet.Rec, address string, now, replyGrace float64, work []fleet.Rec) ([]lateness, []fleet.Rec) {
+func unanswered(rows []fleet.Rec, address, tenant string, now, replyGrace float64, work []fleet.Rec) ([]lateness, []fleet.Rec) {
 	var out []lateness
 	var observed []fleet.Rec
 	for _, r := range rows {
@@ -215,7 +256,7 @@ func unanswered(rows []fleet.Rec, address string, now, replyGrace float64, work 
 			continue
 		}
 		out = append(out, lateness{
-			key: "mail|" + address + "|" + id, to: to, deadline: at + replyGrace,
+			key: "mail|" + address + "|" + id, to: to, tenant: tenant, deadline: at + replyGrace,
 			subject: "late: " + kind + " " + id + " to " + address,
 			body: strings.Join([]string{
 				fmt.Sprintf("%s %s from %s has been unacknowledged for %s.", kind, id, senderOf(r), fleet.FmtAge(now-at)),

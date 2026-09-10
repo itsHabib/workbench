@@ -18,8 +18,11 @@ package watch
 //   - Live, no open turn, and untouched past FLEET_IDLE_GRACE reads absent. An idle
 //     holder is worse than a dead one: it blocks delivery and answers nothing.
 //   - A message is handed over once. Each is stamped delivered_at/delivered_by before
-//     the fold ends, and a stamped message is never carried again — not on the next
-//     fold, not by the next watcher.
+//     the process starts — the stamp is the reservation, and a start that does not
+//     happen gives it back — and a stamped message is never carried again, not on the
+//     next fold and not by the next watcher.
+//   - The launch directory must be the address's own, in roles.map, in the same tenant.
+//     Mail identity comes from the exact directory, so a wrong one delivers to nobody.
 //   - Deciding and launching happen inside one lock every fold in every process takes,
 //     so a `fleet watch --once` beside the running watcher cannot double-launch: the
 //     stamps are the reservation, and the next holder of the lock re-reads them.
@@ -37,6 +40,7 @@ package watch
 // address — an address with no entry keeps its mail until a session starts.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,6 +147,10 @@ func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec
 	var observed []fleet.Rec
 	launched := false
 	err := fleet.KeyLock(deliverLockKey, func() error {
+		if err := bound(t); err != nil {
+			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-unbound", "address": t.address, "cwd": t.cwd, "error": err.Error()})
+			return nil
+		}
 		rows, err := eligibleMail(t.address, now, mailGrace)
 		if err != nil {
 			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-failed", "address": t.address, "error": err.Error()})
@@ -159,6 +167,29 @@ func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec
 		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-deferred", "address": t.address, "cwd": t.cwd, "error": err.Error()})
 	}
 	return observed, launched
+}
+
+// bound is whether the configured launch directory is the mailbox address's own
+// checkout, in the same tenant.
+//
+// Mail identity is resolved from the exact launch directory, so a stale or wrong
+// `cwd` starts a process wearing a different role — or none — while the fold stamps
+// the intended mailbox delivered. That process cannot read or acknowledge what it was
+// handed, and no later fold retries it: the messages are gone. The binding is cheap
+// to check and the only thing that makes the stamp true, so it is checked first.
+func bound(t deliverTarget) error {
+	tenant, err := fleet.MailAddressTenant(t.address)
+	if err != nil {
+		return err
+	}
+	role, cwdTenant, slot := fleet.MapRowsFor(t.cwd)
+	if cwdTenant != tenant {
+		return fmt.Errorf("cwd %s is in tenant %q, address %s is in tenant %q", t.cwd, cwdTenant, t.address, tenant)
+	}
+	if role != t.address && slot != t.address {
+		return fmt.Errorf("cwd %s is bound to role %q seat %q, not to %s", t.cwd, role, slot, t.address)
+	}
+	return nil
 }
 
 // eligibleMail is one address's unacked, never-delivered mail, older than the grace.
@@ -181,39 +212,75 @@ func eligibleMail(address string, now, mailGrace float64) ([]fleet.Rec, error) {
 	return out, nil
 }
 
-// launch starts the configured command once, then stamps every message it carried.
-// The stamp follows the start so a command that cannot run keeps its mail for the
-// next fold, and precedes anything else so a started session is never sent twice.
+// launch reserves every message it is about to carry, starts the configured command
+// once, and reconciles the reservation against what actually happened.
+//
+// The reservation is the stamp, and it has to be durable before the start. Stamping
+// afterwards loses a message the other way round: the process has already been handed
+// it, and a stamp that fails — an unwritable mailbox, a mid-fold crash — leaves the
+// record eligible, so the next fold launches a second process carrying the same mail.
+// Taking the reservation first inverts the failure: nothing starts until every message
+// is marked, and a start that never happens gives the marks back. A give-back that
+// itself fails is the one remaining hole, and it is recorded rather than left silent.
 func launch(t deliverTarget, rows []fleet.Rec, now float64) []fleet.Rec {
 	ids := make([]string, len(rows))
 	for i, r := range rows {
 		ids[i] = fleet.S(r, "id")
 	}
-	attempt := fleet.Rec{"at": now, "what": "mail-delivery-attempt", "address": t.address, "cwd": t.cwd, "ids": ids}
+	observed := []fleet.Rec{{"at": now, "what": "mail-delivery-attempt", "address": t.address, "cwd": t.cwd, "ids": ids}}
+	reserved, err := reserve(t.address, rows)
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
+		return append(observed, release(t.address, reserved)...)
+	}
 	pid, err := run(t, prompt(t.address, rows))
 	if err != nil {
-		return []fleet.Rec{attempt, {"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()}}
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
+		return append(observed, release(t.address, reserved)...)
 	}
-	stamped := stamp(t.address, rows)
-	return []fleet.Rec{attempt, {"at": fleet.Now(), "what": "mail-delivery-started", "address": t.address, "cwd": t.cwd, "ids": ids,
-		"pid": float64(pid), "stamped": float64(stamped)}}
+	return append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-started", "address": t.address, "cwd": t.cwd, "ids": ids,
+		"pid": float64(pid), "stamped": float64(len(reserved))})
 }
 
-// stamp marks each carried message delivered. A message the stamp cannot reach is
-// counted, not retried: the launch already happened, and the count says so.
-func stamp(address string, rows []fleet.Rec) int {
+// reserve stamps every message delivered before anything starts, and stops at the
+// first one it cannot reach — returning what it did take so the caller can give it
+// back. A partial reservation is never launched against: all of the mail travels, or
+// none of it does.
+func reserve(address string, rows []fleet.Rec) ([]string, error) {
 	tenant, err := fleet.MailAddressTenant(address)
 	if err != nil {
-		return 0
+		return nil, err
 	}
-	n := 0
+	var taken []string
 	for _, r := range rows {
+		id := fleet.S(r, "id")
 		fields := fleet.Rec{"delivered_at": fleet.Now(), "delivered_by": watchAddress}
-		if _, err := fleet.StampMail(tenant, address, fleet.S(r, "id"), fields); err == nil {
-			n++
+		if _, err := fleet.StampMail(tenant, address, id, fields); err != nil {
+			return taken, fmt.Errorf("reserve %s: %w", id, err)
+		}
+		taken = append(taken, id)
+	}
+	return taken, nil
+}
+
+// release gives back reservations no process received. A message it cannot reach is
+// stranded — stamped delivered with nothing running — and says so, once per message,
+// because that is the only trace an operator has to go on.
+func release(address string, ids []string) []fleet.Rec {
+	if len(ids) == 0 {
+		return nil
+	}
+	tenant, err := fleet.MailAddressTenant(address)
+	if err != nil {
+		return []fleet.Rec{{"at": fleet.Now(), "what": "mail-reservation-stranded", "address": address, "ids": ids, "error": err.Error()}}
+	}
+	var out []fleet.Rec
+	for _, id := range ids {
+		if err := fleet.UnstampMail(tenant, address, id, "delivered_at", "delivered_by"); err != nil {
+			out = append(out, fleet.Rec{"at": fleet.Now(), "what": "mail-reservation-stranded", "address": address, "id": id, "error": err.Error()})
 		}
 	}
-	return n
+	return out
 }
 
 // prompt is what the started process is told: which address it is answering for, and
