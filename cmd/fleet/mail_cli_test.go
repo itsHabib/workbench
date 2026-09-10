@@ -59,7 +59,7 @@ func testMailWatchFailure(t *testing.T, mode string) {
 	cmd := exec.Command(exe, "-test.run=^TestMailWatchProcess$")
 	if mode == "once" {
 		out, err := cmd.CombinedOutput()
-		if err == nil || cmd.ProcessState.ExitCode() != 1 || !strings.Contains(string(out), "missing-command") {
+		if err == nil || cmd.ProcessState.ExitCode() != 1 || (!strings.Contains(string(out), "missing-command") || !strings.Contains(string(out), "# fleet board")) {
 			t.Fatalf("exit=%v output=%s", err, out)
 		}
 		return

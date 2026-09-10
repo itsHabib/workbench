@@ -119,8 +119,11 @@ func mailRoleLive(role string) (bool, error) {
 		if r == nil || fleet.S(r, "session") == "" {
 			return false, fmt.Errorf("session liveness unknown: %s", e.Name())
 		}
+		if !fleet.B(r, "ended") && fleet.S(r, "launch_dir") == "" && fleet.S(r, "cwd") == "" {
+			return false, fmt.Errorf("session identity unknown: %s", e.Name())
+		}
 		resolved, _, _ := fleet.MailIdentity(r)
-		if resolved != role && fleet.S(r, "role") != role {
+		if resolved != role {
 			continue
 		}
 		if !fleet.B(r, "ended") && fleet.S(r, "pid_kind") == "harness" && fleet.F(r, "pid") <= 0 {

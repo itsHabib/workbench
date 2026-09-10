@@ -230,3 +230,50 @@ func TestMailConcurrentDeliveryAndAckPreserveBothStamps(t *testing.T) {
 		t.Fatal("lost delivery stamp", r, string(log))
 	}
 }
+
+func TestMailDeliveryUsesResolvedRoleAfterRebinding(t *testing.T) {
+	for _, binding := range []string{"hub:b", ""} {
+		t.Run("new-role-"+binding, func(t *testing.T) {
+			oldCwd, _ := deliveryFixture(t)
+			nextCwd := t.TempDir()
+			bindings := fmt.Sprintf("%s tenant hub:a\n", nextCwd)
+			if binding != "" {
+				bindings += fmt.Sprintf("%s tenant %s\n", oldCwd, binding)
+			}
+			_ = os.WriteFile(fleet.RolesMap(), []byte(bindings), 0600)
+			_ = fleet.WriteJSON(fleet.Path("sessions", "s.json"), fleet.Rec{"session": "s", "cwd": oldCwd, "launch_dir": oldCwd, "role": "hub:a", "last_event_at": fleet.Now()})
+			live, err := mailRoleLive("hub:a")
+			if err != nil || live {
+				t.Fatal("cached role suppressed old role delivery", live, err)
+			}
+			if binding != "" {
+				live, err = mailRoleLive(binding)
+				if err != nil || !live {
+					t.Fatal("resolved role lost live session", live, err)
+				}
+			}
+			config := fleet.ReadJSON(fleet.Path("deliver.json"))
+			fleet.M(config, "hub:a")["cwd"] = nextCwd
+			_ = fleet.WriteJSON(fleet.Path("deliver.json"), config)
+			if err := DeliverMail(); err != nil {
+				t.Fatal(err)
+			}
+			r, _ := fleet.ReadMail("hub:a", "m1")
+			if !fleet.Has(r, "delivered_at") {
+				t.Fatal("absent role not delivered", r)
+			}
+		})
+	}
+}
+
+func TestMailDeliveryMissingDirectoryIdentityIsUnknown(t *testing.T) {
+	_, _ = deliveryFixture(t)
+	_ = fleet.WriteJSON(fleet.Path("sessions", "s.json"), fleet.Rec{"session": "s", "role": "hub:a", "last_event_at": fleet.Now()})
+	if err := DeliverMail(); err == nil {
+		t.Fatal("missing identity became permission to launch")
+	}
+	r, _ := fleet.ReadMail("hub:a", "m1")
+	if fleet.Has(r, "delivered_at") {
+		t.Fatal("unknown session stamped mail", r)
+	}
+}
