@@ -81,7 +81,7 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | evidence of done at an exact head |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
 | `assign/<slot>.json` | `assign`, `dispatch --slot` | what a seat's next session reads at start |
-| `mail/<role-safe>/<id>.json` | `send`, `ack` | role-addressed messages, retained after acknowledgement |
+| `mail/.v2/<tenant>/<kind>/<address>/<id>.json` | `send`, `ack` | role/seat messages, retained after acknowledgement |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
 | `lanes/<kind>/` | `install.sh` | manifests and cards, copied from cc-skills |
@@ -166,20 +166,22 @@ an unreadable session record must not be read as death.
 
 ## Mail
 
-Durable communication between identified roles in the same tenant:
+Durable communication between identified roles and individual worker seats in the same tenant.
+A `roles.map` row with a fourth column uses that seat name as its address; a
+dedicated role uses its role name. Two seats of the same kind have separate inboxes.
 
 Subjects are limited to 1024 bytes; bodies remain full.
 
 ```sh
 fleet send hub:b --id unit-question-1 --kind question --subject 'Which unit?' \
   --head abc123 --body 'Use milliseconds or seconds?'
-fleet mail --unacked                 # full bodies; --for <role> selects a mailbox
+fleet mail --unacked                 # full bodies; --for <address> selects a mailbox
 fleet ack unit-question-1
 ```
 
 `--body -` reads stdin. `--session <id8>` disambiguates callers; `mail --json`
 returns records. MCP exposes `fleet_send`, `fleet_mail`, `fleet_ack`. A replacement
-sender session can retry the same role/ID/payload without rewriting the original
+sender session can retry the same sender address, recipient, ID and payload without rewriting the original
 record. Changed payloads and cross-tenant access refuse. Mail grants no assignment,
 resource, or merge authority; it has no relationship allowlist or launch machinery.
 
@@ -238,7 +240,7 @@ The watcher writes only under `watch/` plus those stamps on mail records.
 
 This adds retry-safe local assignments and a read-only observation view. It does
 not yet implement the four-interaction product: task launch/acceptance, correlated questions, safe stop and replacement remain adapter work.
-Role-addressed mail is independent of task acceptance.
+Mail is independent of task acceptance.
 Do not activate a live trial or present this as cross-harness lifecycle parity.
 
 The approved direction is [cc-skills PR #60](https://github.com/itsHabib/cc-skills/pull/60):
@@ -316,6 +318,17 @@ conflicts, immutable payloads, legacy-writer protection, damaged evidence,
 post-tool provenance and non-migrating JSON-RPC observation. Harness event
 fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
+## Guides
+
+- [docs/OVERVIEW.md](docs/OVERVIEW.md): the problem, the four rules, the shape, what it has proved.
+- [docs/ONBOARDING.md](docs/ONBOARDING.md): a working fleet over one repository in thirty minutes.
+- [docs/MINIMUM.md](docs/MINIMUM.md): the five habits and two files that carry most of the value with none of the machinery.
+- [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
+  lead, worker or verifier, read the fleet.
+- [docs/e2e.md](docs/e2e.md): prove a build end to end with real sessions in a sandbox of your
+  choosing; `e2e/mail-poll.sh` (delivery stand-in until the watcher launcher lands) and
+  `e2e/run-metrics.py` (the scorecard, from records only).
+
 ## What is deliberately not here
 
 - No daemon owns anything. The watcher writes only its own board files; the hook is where facts
@@ -343,3 +356,36 @@ model/              the Quint model and its judge
 testdata/           the reference suite, shims, lanes and fixtures
 docs/               notes for report and hook inspection
 ```
+
+## Continue after a session changes
+
+A replacement session receives the seat's current assignment at SessionStart,
+including a brief already shown to its predecessor. The assignment is checked
+against its recorded role and tenant and the seat's current directory, repository
+and branch; rebinding or reusing a seat does not replay the previous assignment.
+Legacy assignments without recorded identity remain retained but need a fresh
+assignment before Fleet can safely replay their context. The original delivery stamp remains historical
+notification evidence, not a claim that the replacement accepted or finished work.
+
+A dedicated lead can leave context that follows its role across branches:
+
+```sh
+fleet handoff --role "The parser expects milliseconds" "Answer the worker's units question"
+```
+
+The next session launched in that tenant/role receives an authored, advisory
+excerpt. `fleet_handoff` exposes the same operation through MCP, with `conclusion`,
+optional `next` and `session`, and required caller `cwd`. No Org attach, claim,
+checkpoint or release is involved. A handoff is context, not completion evidence.
+The stored text is limited to 16 KiB and the startup excerpt to 1,024 UTF-8 bytes.
+
+Pooled worker seats use the existing branch handoff instead:
+
+```sh
+fleet handoff work-one "Parser fixed; integration check remains" "Run the integration check"
+```
+
+This avoids sharing one role handoff between different worker seats of the same
+kind. Captured last assistant text remains separate from the intentional handoff.
+No old Org records, installed hooks, or live assignments are migrated by these
+commands. The longer-term single-work-record migration remains separate work.

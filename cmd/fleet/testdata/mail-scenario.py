@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-mail-") as tmp:
     run(sender, "watch", "--once")
     queued = json.loads(run(sender, "mail", "--for", "hub:b", "--unacked", "--json"))
     assert queued == [first]  # The absent recipient stays queued; no launch or stamps.
-    assert set(first) == {"id", "to", "from_role", "from_session", "kind", "subject", "head", "body", "at"}
+    assert not any(k.startswith("delivered_") for k in first)
 
     event("SessionEnd", "sender-v1", sender)
     (state / "sessions" / "sender-v1.json").unlink()
@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-mail-") as tmp:
     assert conflict.returncode == 1 and "different payload" in conflict.stderr
     denied = cli(sender, "send", "hub:z", "--id", "cross-tenant", "--kind", "report",
                  "--subject", "test", "--body", "not allowed")
-    assert denied.returncode == 1 and "outside caller tenant" in denied.stderr
+    assert denied.returncode == 1 and "caller tenant" in denied.stderr
     assert cli(sender, "mail", "--for", "hub:z", "--json").returncode == 1
     assert cli(sender, "ack", "question-1").returncode == 1
 

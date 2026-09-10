@@ -67,8 +67,15 @@ func Run(ev Event) (v *Verdict) {
 }
 
 func onSessionStart(ev Event, sid string) *Verdict {
-	rec := TouchSession(sid, ev, Rec{"turn_open": false, "ended": false})
+	rec, err := TouchErr(sid, ev, Rec{"turn_open": false, "ended": false})
 	lines := []string{identityLine(sid, rec)}
+	if err != nil {
+		logError(Rec{"session": sid, "error": "startup session publication: " + err.Error()})
+		lines = append(lines, "[fleet] session record was not saved; startup assignment context may be unavailable. Inspect fleet work --json; repair session storage and restart")
+	}
+	if handoff := RoleHandoffLine(rec); handoff != "" {
+		lines = append(lines, handoff)
+	}
 	lines = append(lines, sessionMailLines(rec)...)
 	if slot := S(rec, "slot"); slot != "" {
 		if contested := occupySlot(sid, slot, S(rec, "role"), S(rec, "cwd")); contested != "" {

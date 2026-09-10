@@ -586,3 +586,15 @@ measure hook latency against a representative retained mailbox first, then choos
 an unacknowledged index or archive with tested atomic send/ack consistency and
 recovery behavior. Owner: Fleet mail maintainer. This is a known limitation, not
 a claim of constant-time hook delivery.
+
+## Fleet startup publication diagnostic (2026-09-10, PR #298; resolved)
+
+Final Codex comment 3980707982 identified silent assignment-context loss when
+SessionStart could not publish its session record. Gate rejected deferral in run
+`run_b228a92996f00d0e`. SessionStart now handles the publication error explicitly:
+startup stays nonblocking, prints an actionable warning to inspect `fleet work
+--json`, repair session storage and restart, and logs the underlying I/O error.
+Occupancy and assignment identity checks remain in force. A deterministic
+session temporary-path collision regression verifies the warning, diagnostic,
+exit 0 and byte-identical assignment preservation. This fix returns directly to
+Gate judgment without another review-panel trigger.

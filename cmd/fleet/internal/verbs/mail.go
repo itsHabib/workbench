@@ -9,7 +9,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
-const sendUsage = "usage: fleet send <role> --id <id> --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]"
+const sendUsage = "usage: fleet send <address> --id <id> --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]"
 
 // CmdSend records mail with session-derived identity; it never launches a process.
 func CmdSend(to, id, kind, subject, head, body, session string) error {
@@ -30,15 +30,15 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
-	role, tenant, _ := fleet.MailIdentity(rec)
-	if role == "" {
-		return refuse("fleet send: sender has no role in its launch directory; ask the operator to bind it with fleet role")
+	sender, role, err := fleet.MailSender(rec)
+	if err != nil {
+		return refuse("fleet send: %s", err)
 	}
 	if err := fleet.MailPeer(rec, to); err != nil {
 		return refuse("fleet send: %s", err)
 	}
-	payload := fleet.Rec{"id": id, "to": to, "from_role": role, "from_session": sid, "kind": kind, "subject": subject, "head": head, "body": body}
-	return publishMail(payload, tenant)
+	payload := fleet.Rec{"id": id, "to": to, "from_role": role, "from_address": sender.Address, "from_kind": sender.Kind, "tenant": sender.Tenant, "from_session": sid, "kind": kind, "subject": subject, "head": head, "body": body}
+	return publishMail(payload, sender.Tenant)
 }
 
 func publishMail(payload fleet.Rec, tenant string) error {
@@ -57,14 +57,14 @@ func CmdMail(role, session string, unacked, asJSON bool) error {
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
-	_, tenant, _ := fleet.MailIdentity(rec)
-	if role == "" {
-		role, _, _ = fleet.MailIdentity(rec)
-	}
-	if err := fleet.MailPeer(rec, role); err != nil {
+	sender, _, err := fleet.MailSender(rec)
+	if err != nil {
 		return refuse("fleet mail: %s", err)
 	}
-	rows, err := fleet.Mail(role, unacked, tenant)
+	if role == "" {
+		role = sender.Address
+	}
+	rows, err := fleet.MailFor(sender.Tenant, role, unacked)
 	if err != nil {
 		return refuse("fleet mail: %s", err)
 	}
@@ -86,7 +86,7 @@ func CmdMail(role, session string, unacked, asJSON bool) error {
 	return nil
 }
 
-// CmdAck only searches roles held by the caller or bound to its directory.
+// CmdAck acknowledges only the caller's launch address, never a cd destination.
 func CmdAck(id, session string) error {
 	if id == "" {
 		return exitCode(2, "usage: fleet ack <id> [--session <id8>]")
@@ -95,35 +95,11 @@ func CmdAck(id, session string) error {
 	if err != nil {
 		return err
 	}
-	role, tenant, _ := fleet.MailIdentity(fleet.SessionRecord(sid))
-	roles := []string{role}
-	if here := fleet.RoleOf(cwd()); here != "" && here != role {
-		roles = append(roles, here)
+	sender, _, err := fleet.MailSender(fleet.SessionRecord(sid))
+	if err != nil {
+		return refuse("fleet ack: %s", err)
 	}
-	target := ""
-	for _, r := range roles {
-		if r == "" {
-			continue
-		}
-		if err := fleet.MailPeer(fleet.SessionRecord(sid), r); err != nil {
-			return refuse("fleet ack: %s", err)
-		}
-		rec, err := fleet.ReadMail(r, id, tenant)
-		if err != nil {
-			return refuse("fleet ack: %s", err)
-		}
-		if rec == nil {
-			continue
-		}
-		if target != "" {
-			return refuse("fleet ack: %s is ambiguous between held and directory roles", id)
-		}
-		target = r
-	}
-	if target == "" {
-		return refuse("fleet ack: no message %s addressed to the caller's role or directory", id)
-	}
-	r, err := fleet.AckMail(target, id, sid, tenant)
+	r, err := fleet.AckMailFor(sender.Tenant, sender.Address, id, sid)
 	if err != nil {
 		return refuse("fleet ack: %s", err)
 	}
@@ -173,7 +149,7 @@ func dispatchMail(verb string, args []string) error {
 	}
 	if verb == "mail" {
 		if len(pos) != 0 {
-			return exitCode(2, "usage: fleet mail [--for <role>] [--unacked] [--json] [--session <id8>]")
+			return exitCode(2, "usage: fleet mail [--for <address>] [--unacked] [--json] [--session <id8>]")
 		}
 		return CmdMail(o["--for"], o["--session"], o["--unacked"] != "", o["--json"] != "")
 	}

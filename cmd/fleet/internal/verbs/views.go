@@ -854,6 +854,11 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 		if out = assignGuards(slot, path, branch); out != nil {
 			return nil
 		}
+		role, tenant, identityErr := assignmentIdentity(path, slot)
+		if identityErr != nil {
+			out = identityErr
+			return nil
+		}
 		if out = assignCheckout(slot, path, branch); out != nil {
 			return nil
 		}
@@ -866,7 +871,7 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 		}
 		return fleet.WriteJSON(fleet.Path("assign", fleet.Safe(slot)+".json"), fleet.Rec{
 			"slot": slot, "branch": branch, "brief": nilIfEmpty(strings.TrimSpace(brief)), "reply_to": nilIfEmpty(replyTo), "at": fleet.Now(),
-			"by": by, "for": forRole, "repo": nilIfEmpty(fleet.RepoID(path)), "path": path})
+			"by": by, "for": forRole, "repo": nilIfEmpty(fleet.RepoID(path)), "path": path, "role": role, "tenant": tenant})
 	})
 	if lerr == fleet.ErrKeyBusy {
 		return refuse("fleet assign: %s is being occupied or assigned right now and this command could not take its lock in time; nothing was assigned. `fleet slots`, then retry.", slot)
@@ -883,6 +888,14 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 	}
 	say("%s: assigned %s%s; tree at %s is on it", slot, branch, tail, path)
 	return nil
+}
+
+func assignmentIdentity(path, slot string) (string, string, error) {
+	role, tenant, boundSlot := fleet.MapRowsFor(path)
+	if role == "" || tenant == "" || boundSlot != slot {
+		return "", "", refuse("fleet assign: seat %s has no current role and tenant binding; inspect fleet slots and bind it with fleet role", slot)
+	}
+	return role, tenant, nil
 }
 
 // assignGuards, under the seat's lock: the seat exists and is free, and the branch is
