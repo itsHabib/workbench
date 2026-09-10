@@ -31,22 +31,10 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 	if role == "" {
 		return refuse("fleet send: sender has no role in its launch directory; ask the operator to bind it with fleet role")
 	}
+	if err := fleet.MailPeer(rec, to); err != nil {
+		return refuse("fleet send: %s", err)
+	}
 	payload := fleet.Rec{"id": id, "to": to, "from_role": role, "from_session": sid, "kind": kind, "subject": subject, "head": head, "body": body}
-	// A retained retry is not a new send; changed contacts cannot invalidate it.
-	old, err := fleet.ReadMail(to, id)
-	if err != nil {
-		return refuse("fleet send: %s", err)
-	}
-	if old != nil {
-		return publishMail(payload)
-	}
-	allowed, err := fleet.MailContacts(rec)
-	if err != nil {
-		return refuse("fleet send: %s", err)
-	}
-	if !contains(allowed, to) {
-		return refuse("fleet send: %s is outside contacts for %s; allowed: [%s]", to, role, strings.Join(allowed, ", "))
-	}
 	return publishMail(payload)
 }
 
@@ -61,17 +49,15 @@ func publishMail(payload fleet.Rec) error {
 
 // CmdMail lists a named role, or the caller's role. This observation never migrates.
 func CmdMail(role, session string, unacked, asJSON bool) error {
-	if role == "" {
-		sid, err := currentSession(session)
-		if err != nil {
-			return err
-		}
-		role, _, _ = fleet.MailIdentity(fleet.SessionRecord(sid))
-		if role == "" {
-			role = fleet.RoleOf(cwd())
-		}
+	sid, err := currentSession(session)
+	if err != nil {
+		return err
 	}
-	if _, err := fleet.MailRoleTenant(role); err != nil {
+	rec := fleet.SessionRecord(sid)
+	if role == "" {
+		role, _, _ = fleet.MailIdentity(rec)
+	}
+	if err := fleet.MailPeer(rec, role); err != nil {
 		return refuse("fleet mail: %s", err)
 	}
 	rows, err := fleet.Mail(role, unacked)
@@ -115,7 +101,7 @@ func CmdAck(id, session string) error {
 		if r == "" {
 			continue
 		}
-		if _, err := fleet.MailRoleTenant(r); err != nil {
+		if err := fleet.MailPeer(fleet.SessionRecord(sid), r); err != nil {
 			return refuse("fleet ack: %s", err)
 		}
 		rec, err := fleet.ReadMail(r, id)

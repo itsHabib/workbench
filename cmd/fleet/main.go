@@ -83,11 +83,11 @@ func runWatch(args []string) {
 	}
 	if once {
 		md, err := watch.Tick(interval)
-		fmt.Print(md)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fleet watch: "+err.Error())
-			os.Exit(1)
+			os.Exit(4)
 		}
+		fmt.Print(md)
 		return
 	}
 	if err := watch.Serve(interval); err != nil {

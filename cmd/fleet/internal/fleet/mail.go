@@ -4,13 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-	"time"
-
-	"github.com/itsHabib/workbench/filelock"
 )
 
 var mailID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -27,28 +23,12 @@ func MailAddress(role, id string) error {
 // MailPath is the record's filename. Callers validate its components first.
 func MailPath(role, id string) string { return Path("mail", Safe(role), id+".json") }
 
-// MailLock serializes send, ack and delivery under watch/.
-func MailLock(fn func() error) error {
+// mailLock uses the substrate's existing lock for send and ack.
+func mailLock(fn func() error) error {
 	if ReadOnly {
 		return fmt.Errorf("mail: state is read-only")
 	}
-	p := Path("watch", "mail.lock")
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for i := 0; i < 60; i++ {
-		if err := filelock.TryLock(f); err == nil {
-			defer func() { _ = filelock.Unlock(f) }()
-			return fn()
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return ErrKeyBusy
+	return KeyLock("mail", fn)
 }
 
 // ReadMail distinguishes absent from damaged records and refuses filename aliases.
@@ -76,14 +56,15 @@ func ReadMail(role, id string) (Rec, error) {
 	return r, nil
 }
 
-// PutMail publishes once, retaining original timestamps and stamps on retries.
+// PutMail publishes once per role and id. A replacement sender session may
+// retry the same payload; the original from_session, timestamps and ack remain.
 func PutMail(payload Rec) (Rec, error) {
 	role, id := S(payload, "to"), S(payload, "id")
 	if err := MailAddress(role, id); err != nil {
 		return nil, err
 	}
 	var result Rec
-	err := MailLock(func() error {
+	err := mailLock(func() error {
 		if err := checkMailAddress(role, true); err != nil {
 			return err
 		}
@@ -92,7 +73,7 @@ func PutMail(payload Rec) (Rec, error) {
 			return err
 		}
 		if old != nil {
-			for _, k := range []string{"id", "to", "from_role", "from_session", "kind", "subject", "head", "body"} {
+			for _, k := range []string{"id", "to", "from_role", "kind", "subject", "head", "body"} {
 				if S(old, k) != S(payload, k) {
 					return fmt.Errorf("mail %s to %s: id already has a different payload", id, role)
 				}
@@ -150,10 +131,10 @@ func Mail(role string, unacked bool) ([]Rec, error) {
 	return out, nil
 }
 
-// AckMail marks read, preserving delivery and payload. Caller verifies role ownership.
+// AckMail marks read, preserving payload. Caller verifies role ownership.
 func AckMail(role, id, sid string) (Rec, error) {
 	var r Rec
-	err := MailLock(func() error {
+	err := mailLock(func() error {
 		var err error
 		r, err = ReadMail(role, id)
 		if err != nil {
@@ -192,7 +173,7 @@ func MailLines(role string) []string {
 	return MailSummary(rows)
 }
 
-// MailSummary is shared by prompt injection and detached delivery.
+// MailSummary bounds prompt injection.
 func MailSummary(rows []Rec) []string {
 	var lines []string
 	for i, r := range rows {

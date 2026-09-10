@@ -53,7 +53,9 @@ func TestMailReplayAckAndConflict(t *testing.T) {
 		t.Fatal(ack, err)
 	}
 	before, _ := os.ReadFile(MailPath("hub:a", "same"))
-	mustPut(t, mailPayload("same"))
+	retry := mailPayload("same")
+	retry["from_session"] = "replacement"
+	mustPut(t, retry)
 	_, err = AckMail("hub:a", "same", "other")
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +64,7 @@ func TestMailReplayAckAndConflict(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("replay changed record")
 	}
-	for _, k := range []string{"from_role", "from_session", "kind", "subject", "head", "body"} {
+	for _, k := range []string{"from_role", "kind", "subject", "head", "body"} {
 		p := mailPayload("same")
 		p[k] = "changed"
 		if _, err := PutMail(p); err == nil {
@@ -155,22 +157,18 @@ func TestMailHookLinesAndNoAutoAck(t *testing.T) {
 	}
 }
 
-func TestMailContactsAndTenantBoundaries(t *testing.T) {
+func TestMailPeerTenantBoundaries(t *testing.T) {
 	root := mailFixture(t)
 	rec := Rec{"cwd": filepath.Join(root, Safe("hub:a"))}
-	contacts := map[string][]string{"hub:a": {"hub:root", "hub:b", "hub:child"}, "hub:root": {"hub:stranger"}}
-	if err := WriteJSON(Path("contacts.json"), contacts); err != nil {
-		t.Fatal(err)
-	}
-	got, err := MailContacts(rec)
-	if err != nil || strings.Join(got, ",") != "hub:b,hub:child,hub:root" {
-		t.Fatal(got, err)
+	for _, to := range []string{"hub:root", "hub:b", "hub:child", "hub:stranger", "hub:a"} {
+		if err := MailPeer(rec, to); err != nil {
+			t.Fatal(to, err)
+		}
 	}
 	rec["launch_dir"] = rec["cwd"]
-	rec["cwd"] = filepath.Join(root, Safe("hub:root"))
-	got, err = MailContacts(rec)
-	if err != nil || len(got) != 3 {
-		t.Fatal("cd changed contacts", got, err)
+	rec["cwd"] = filepath.Join(root, "unroled")
+	if err := MailPeer(rec, "hub:b"); err != nil {
+		t.Fatal("cd changed identity", err)
 	}
 	f, err := os.OpenFile(RolesMap(), os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -178,51 +176,14 @@ func TestMailContactsAndTenantBoundaries(t *testing.T) {
 	}
 	_, _ = fmt.Fprintf(f, "%s two hub:foreign\n", filepath.Join(root, "foreign"))
 	_ = f.Close()
-	contacts["hub:a"] = []string{"hub:foreign"}
-	_ = WriteJSON(Path("contacts.json"), contacts)
-	if _, err := MailContacts(rec); err == nil {
-		t.Fatal("cross-tenant contact allowed")
+	if err := MailPeer(rec, "hub:foreign"); err == nil {
+		t.Fatal("cross-tenant message allowed")
 	}
 	f, _ = os.OpenFile(RolesMap(), os.O_APPEND|os.O_WRONLY, 0600)
 	_, _ = fmt.Fprintf(f, "%s two hub:a\n", filepath.Join(root, "duplicate"))
 	_ = f.Close()
 	if _, err := MailRoleTenant("hub:a"); err == nil {
 		t.Fatal("ambiguous tenant accepted")
-	}
-}
-
-func TestSeatContactsUseCurrentDispatchOnly(t *testing.T) {
-	root := mailFixture(t)
-	seat := filepath.Join(root, "seat")
-	_ = os.MkdirAll(filepath.Join(seat, ".git"), 0700)
-	_ = os.WriteFile(filepath.Join(seat, ".git", "HEAD"), []byte("ref: refs/heads/task\n"), 0600)
-	f, _ := os.OpenFile(RolesMap(), os.O_APPEND|os.O_WRONLY, 0600)
-	_, _ = fmt.Fprintf(f, "%s one worker:a seat-a\n", seat)
-	_ = f.Close()
-	rec := Rec{"cwd": seat}
-	_ = WriteJSON(Path("contacts.json"), map[string][]string{"worker:a": {"hub:stranger"}})
-	got, err := MailContacts(rec)
-	if err != nil || len(got) != 0 {
-		t.Fatal("undispatched seat got static contacts", got, err)
-	}
-	row := Rec{"slot": "seat-a", "repo": RepoID(seat), "change": "task", "for": "hub:a"}
-	_ = WriteJSON(Path("dispatch", "current.json"), row)
-	old := Rec{"slot": "seat-a", "repo": RepoID(seat), "change": "old", "for": "hub:stranger"}
-	_ = WriteJSON(Path("dispatch", "old.json"), old)
-	got, err = MailContacts(rec)
-	if err != nil || strings.Join(got, ",") != "hub:a" {
-		t.Fatal(got, err)
-	}
-	row["for"] = "hub:b"
-	_ = WriteJSON(Path("dispatch", "current.json"), row)
-	got, err = MailContacts(rec)
-	if err != nil || strings.Join(got, ",") != "hub:b" {
-		t.Fatal("reassignment ignored", got, err)
-	}
-	row["for"] = "hub:a"
-	_ = WriteJSON(Path("dispatch", "conflict.json"), row)
-	if _, err := MailContacts(rec); err == nil {
-		t.Fatal("ambiguous accountability accepted")
 	}
 }
 

@@ -40,7 +40,7 @@ func str(desc string) schema { return schema{"type": "string", "description": de
 var cwdArg = str("the calling session's working directory (its worktree); identity and branch names resolve relative to it, never to this server's own cwd")
 
 var tools = []schema{
-	{"name": "fleet_send", "description": "Send retry-safe mail to a role in the caller's contacts.",
+	{"name": "fleet_send", "description": "Send retry-safe mail to any identified role in the caller's tenant.",
 		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
 	{"name": "fleet_mail", "description": "List mail for a role, defaulting to the caller's role; returns JSON, no acknowledgement.",
 		"inputSchema": schema{"type": "object", "properties": schema{"for": str("addressed role"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},

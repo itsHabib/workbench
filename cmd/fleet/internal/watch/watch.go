@@ -110,7 +110,7 @@ func Tick(interval time.Duration) (string, error) {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(dir(), "report.md"), []byte(report.Render(fleet.Path(), now-86400, now)), 0o644); err != nil {
-		_ = fleet.AppendJSONL(fleet.Path("watch", "observed.jsonl"), fleet.Rec{"what": "watch-error", "at": fleet.Now(), "error": "watch report: " + err.Error()})
+		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch report: " + err.Error()})
 	}
 	// Notification AFTER publication: a slow notifier must not hold the board or the
 	// heartbeat back, and never widens the window in which a second watcher could start.
@@ -121,9 +121,6 @@ func Tick(interval time.Duration) (string, error) {
 		if attention[fleet.S(t, "to")] || (fleet.S(t, "change") != "" && (verbs.WorkAttention[fleet.S(t, "to")] || fleet.S(t, "to") == "done")) {
 			notify(t)
 		}
-	}
-	if err := DeliverMail(); err != nil {
-		return md, err
 	}
 	return md, nil
 }
@@ -591,7 +588,7 @@ func Serve(interval time.Duration) error {
 	defer func() { _ = filelock.Unlock(owner) }()
 	for {
 		if _, err := Tick(interval); err != nil {
-			_ = fleet.AppendJSONL(fleet.Path("watch", "observed.jsonl"), fleet.Rec{"what": "watch-error", "at": fleet.Now(), "error": "watch tick: " + err.Error()})
+			_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch tick: " + err.Error()})
 		}
 		time.Sleep(interval)
 	}
@@ -621,7 +618,7 @@ func EnsureRunning() {
 	cmd.Stdin = nil
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
-		_ = fleet.AppendJSONL(fleet.Path("watch", "observed.jsonl"), fleet.Rec{"what": "watch-error", "at": fleet.Now(), "error": "watch start: " + err.Error()})
+		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch start: " + err.Error()})
 		return
 	}
 	_ = cmd.Process.Release()

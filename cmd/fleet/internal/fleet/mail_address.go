@@ -9,7 +9,7 @@ import (
 const mailAddressFile = ".address.json"
 
 // checkMailAddress pins the original tenant without changing message payloads.
-// Only send may initialize an empty mailbox, while holding MailLock. Retained
+// Only send may initialize an empty mailbox, while holding mailLock. Retained
 // messages without a readable pin are unknown, never assigned to today's tenant.
 func checkMailAddress(role string, create bool) error {
 	tenant, err := MailRoleTenant(role)

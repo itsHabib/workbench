@@ -16,7 +16,6 @@ func TestMailMCPUsesCallerAndSameStore(t *testing.T) {
 	t.Cleanup(func() { fleet.State, fleet.OrgState = oldState, oldOrg })
 	a, b := t.TempDir(), t.TempDir()
 	_ = os.WriteFile(fleet.RolesMap(), []byte(fmt.Sprintf("%s t hub:a\n%s t hub:b\n", a, b)), 0600)
-	_ = fleet.WriteJSON(fleet.Path("contacts.json"), map[string][]string{"hub:a": {"hub:b"}})
 	for id, cwd := range map[string]string{"sender": a, "reader": b} {
 		_ = fleet.WriteJSON(fleet.Path("sessions", id+".json"), fleet.Rec{"session": id, "cwd": cwd, "last_event_at": fleet.Now()})
 	}
@@ -37,6 +36,13 @@ func TestMailMCPUsesCallerAndSameStore(t *testing.T) {
 	if err != nil || fleet.S(r, "from_session") != "sender" || fleet.S(r, "body") != "-" {
 		t.Fatal(r, err)
 	}
+	_ = os.Remove(fleet.Path("sessions", "sender.json"))
+	_ = fleet.WriteJSON(fleet.Path("sessions", "replacement.json"), fleet.Rec{"session": "replacement", "cwd": a, "last_event_at": fleet.Now()})
+	invoke("fleet_send", args)
+	r, _ = fleet.ReadMail("hub:b", "m1")
+	if fleet.S(r, "from_session") != "sender" {
+		t.Fatal("replacement MCP retry rewrote original session", r)
+	}
 	invoke("fleet_mail", map[string]any{"cwd": b, "unacked": true})
 	invoke("fleet_ack", map[string]any{"id": "m1", "cwd": b})
 	r, _ = fleet.ReadMail("hub:b", "m1")
@@ -47,7 +53,7 @@ func TestMailMCPUsesCallerAndSameStore(t *testing.T) {
 	if _, _, err := call("fleet_send", args); err == nil {
 		t.Fatal("MCP accepted missing caller cwd")
 	}
-	if _, err := os.Stat(fleet.Path("keylocks")); !os.IsNotExist(err) {
+	if _, err := os.Stat(fleet.Path("migrated-keys.v1")); !os.IsNotExist(err) {
 		t.Fatal("MCP mail migrated store", err)
 	}
 }

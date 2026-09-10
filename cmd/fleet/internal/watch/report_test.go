@@ -62,7 +62,7 @@ func TestReportFailureDoesNotSuppressNotification(t *testing.T) {
 	if !strings.Contains(string(b), "undeclared") {
 		t.Fatal(string(b))
 	}
-	b, err = os.ReadFile(fleet.Path("watch", "observed.jsonl"))
+	b, err = os.ReadFile(fleet.Path("hook-errors.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
