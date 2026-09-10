@@ -270,6 +270,14 @@ conflicts, immutable payloads, legacy-writer protection, damaged evidence,
 post-tool provenance and non-migrating JSON-RPC observation. Harness event
 fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
+## Agent guides
+
+- [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
+  lead, worker or verifier, read the fleet.
+- [docs/e2e.md](docs/e2e.md): prove a build end to end with real sessions in a sandbox of your
+  choosing; `e2e/mail-poll.sh` (delivery stand-in until the watcher launcher lands) and
+  `e2e/run-metrics.py` (the scorecard, from records only).
+
 ## What is deliberately not here
 
 - No daemon owns anything. The watcher writes only its own board files; the hook is where facts
