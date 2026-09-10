@@ -186,8 +186,8 @@ fleet status
 fleet status --json
 ```
 
-Use the discovered executable path if Fleet is not on PATH. The installed Mac
-entrypoint during this build was `/Users/mh/.fleet/bin/fleet`; the new commands
+Use the discovered executable path if Fleet is not on PATH; the installed
+binary lives under `$FLEET_HOME/bin` (default `~/.fleet/bin/fleet`).
 
 Equivalent MCP tools are `fleet_request` (requires caller cwd) and `fleet_status`.
 The supervisor chooses a stable request ID before calling. Same repo + same ID +
