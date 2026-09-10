@@ -262,23 +262,12 @@ func CostRows() []CostRow {
 }
 
 // AssignmentLine is what `fleet assign` placed into this slot, for the session that
-// just opened in it. Delivery is stamped on the record by this read, which is the one
-// action that consumes an assignment.
+// just opened in it. A delivery stamp is historical evidence, not consumption:
+// replacement sessions need the current assignment too.
 func AssignmentLine(slot, sid string) string {
-	if slot == "" {
+	a := currentStartupAssignment(slot, sid)
+	if a == nil {
 		return ""
-	}
-	p := Path("assign", Safe(slot)+".json")
-	a := ReadJSON(p)
-	if a == nil || S(a, "branch") == "" {
-		return ""
-	}
-	if d := S(a, "delivered_to"); d != "" && d != sid {
-		return ""
-	}
-	if sid != "" && S(a, "delivered_to") == "" {
-		a["delivered_to"], a["delivered_at"] = sid, Now()
-		_ = WriteJSON(p, a)
 	}
 	brief := strings.Join(strings.Fields(S(a, "brief")), " ")
 	if len(brief) > 300 {
