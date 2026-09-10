@@ -55,7 +55,7 @@ operator should neither relay messages nor repair bookkeeping.
 | Work, accountable lead, intended result | Fleet assignment/dispatch record | Reference the record; never create a second claim |
 | Session identity and liveness | Fleet harness observations | Identify the author of a handoff |
 | Branch and resource ownership | Fleet leases | Display ownership; never acquire it by writing prose |
-| Role instructions and scope | One role definition, initially existing Org charter where present | Present the definition without copying it into another editable source |
+| Role instructions and scope | Fleet per-role definition after cutover; existing Org charter before it | Read the selected authority; never maintain two editable definitions |
 | Handoff conclusion and remaining questions | One continuity record per handoff | Preserve authored text, evidence references and session provenance |
 | Message and acknowledgement | Fleet mail | Reference the message; do not mirror each send into a second ledger |
 | Evidence of completion | Existing exact-head receipts | Link the evidence; never turn a claim of success into a passing receipt |
@@ -109,13 +109,52 @@ explicit, repeatable migration must map old identities to new ones or report an
 ambiguity without moving data. Do not silently reinterpret a role mailbox as a
 seat mailbox or transfer retained mail between tenants.
 
+### Role definitions
+
+Fleet's destination for a role-specific charter is one versioned definition at
+`$FLEET_STATE/roles/<tenant-sha256>/<role-sha256>.json`, with lowercase SHA-256
+hex path components and the full tenant/role identity checked in the record.
+This is a proposed Fleet schema, not an already implemented store:
+
+- `schema: fleet-role.v1`, `tenant`, `role`, and `kind` identify the definition.
+- `instructions` contains the role-specific instruction text; `terms` preserves
+  the effective scope, supervisors, and other operational terms from the
+  validated source, including accepted recharters rather than just genesis.
+- `source` records the legacy role identity and validated source revision/digest
+  used for migration. It is provenance, not an alternate writable charter.
+
+Fleet role configuration owns this record after cutover. Kind-wide lane manifests
+remain reusable defaults; they are not a substitute for role-specific scope or
+terms. `roles.map` remains a directory/seat binding to the tenant and role, not
+another definition. Startup reads the selected per-role definition and references
+its kind defaults. It must not separately inject a conflicting Org charter or
+silently widen role terms through a kind default. Role terms do not mint Gate
+merge authority.
+
+Before a cohort switches, obtain its effective charter and retained instructions
+through Org's validated output, stage the Fleet definition, and compare every
+consumed term and instruction against that source. Each operational term must
+have an explicit Fleet consumer/enforcement mapping; storing an ignored term as
+metadata is not preservation. Unknown, missing, conflicting, or unsupported
+terms keep that cohort on Org until resolved. This does not block mail or other
+cohorts. Verify startup and the cohort's actual callers against the staged record
+in scratch state before changing the live authority selection.
+
+The migration report records one selected definition owner per tenant/role and
+the source/destination revisions. Quiesce the cohort's definition writers, make
+the verified Fleet record authoritative, switch its readers and writers, and
+make the retained Org definition read-only history. Do not retire that Org
+consumer until the readback matches and its old writer is disabled. Repeating
+the cutover is a no-op; rollback disables Fleet writes before restoring the Org
+writer. There is no steady-state synchronization between these definitions.
+
 ### Continuity
 
 Reuse existing startup context and last-word mechanisms before adding new
 commands. The existing seams are `internal/fleet/hook.go` SessionStart,
 `internal/fleet/session.go` handoff/last-word/assignment rendering, and
-`internal/verbs/keys.go`'s `fleet handoff`. Today assignment notification is stamped
-as delivered and can disappear for a replacement session. Current assignment
+`internal/verbs/keys.go`'s `fleet handoff`. The `fleet assign` → `AssignmentLine`
+seat notification is stamped as delivered and can disappear for a replacement session. Current assignment
 visibility must not be consumed by the first session that reads it, and must be
 checked against the seat's current work before display. The useful surface is the context a session receives and a way to leave
 an intentional handoff. A captured final response is identified as captured text;
@@ -189,7 +228,8 @@ reader is temporary and does not synchronize two writable authorities.
    Existing Org-held work stays authoritative there until its explicit cutover;
    do not create a competing Fleet assignment during the transition.
 4. **Cut over one bounded cohort.** In a scratch copy first, map the cohort's
-   definitions and obligations to the chosen Fleet records, preserve legacy
+   definitions to `fleet-role.v1` and obligations to the defined work/continuity
+   records, preserve legacy
    source references and history, and verify before/after counts and contents.
    Quiesce the cohort's writers for the migration; after cutover only Fleet writes
    its migrated facts. Re-running the migration is a no-op. Unmapped or conflicting

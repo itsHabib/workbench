@@ -44,3 +44,15 @@ The earlier [advance-to-Gate opinion](https://github.com/itsHabib/workbench/pull
 was superseded by the one-Fleet direction. Prior reviews do not approve this
 rewrite. Future implementation still needs its own checks and review; history is
 not marked resolved merely because a migration is planned.
+
+## Final rewritten-head finding
+
+The late [Codex P1 on role-definition ownership](https://github.com/itsHabib/workbench/pull/297#discussion_r3979380652)
+identified an unspecified destination for per-role charters. The final fix names
+`fleet-role.v1`, its per-tenant/role store, instruction/term/provenance fields,
+and Fleet role configuration as the sole post-cutover writer. Lane defaults and
+directory bindings cannot stand in for per-role terms. Cutover requires validated
+effective-term readback, consumer/enforcement coverage, and disabling the old
+writer; unknown or unsupported terms keep that cohort on Org. No runtime
+migration is claimed. This final-review finding is fixed without reopening the
+review loop; judgment must assess the changed head and this disposition.
