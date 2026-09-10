@@ -72,6 +72,21 @@ Then `e2e/mail-poll.sh <deliver.json> <fleet binary> <state dir> 10 45 <tenant>`
 background, and watch `fleet mail --for <address>`, `fleet leases`, the PR list, and the poll
 log. A loop printing each new file under `mail/` is the live view.
 
+
+## Desktop `/loop` as the delivery process
+
+If you would rather watch one visible session than run a background poller, make a desktop
+session the launcher. Open it in a directory that carries no role (never a seat or a lead
+directory), and give it `/loop 2m` over this instruction: read every configured address's
+unread, not-yet-launched mail from the v2 store (`e2e/mail-poll.sh` is the reference; the
+`launched.txt` set is the memory), and for each address with such mail and no live session in its
+directory, start one headless `claude -p` from a subshell in that directory with the mail lines
+in the prompt, log the launch, and end the turn. It sends no mail and takes no seat. Leads,
+workers and the verifier stay headless and disposable; the loop session is the only long-lived
+one, and it is not a role. On Windows the launch commands need a shell that runs
+`scripts/bench.sh` (Git Bash), the hook path is the installed one, and paths in `deliver.json`
+are that machine's; nothing from another machine's state applies.
+
 ## Stop and score
 
 Stop when both tasks carry `verify pass`. Then:
