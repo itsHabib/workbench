@@ -233,7 +233,7 @@ progress ledger, acceptance claim, done state or automatic takeover is introduce
 
 Generated role bindings subscribe Codex write events and supplement Claude
 file-write post-tool events alongside its global Bash hook. Existing bindings
-need regeneration and harness reload when this release is installed. This PR
+need regeneration and harness reload when this release is installed. This increment
 does not edit installed hooks. Terminal observations include the activity age.
 
 ### Verification of this increment
