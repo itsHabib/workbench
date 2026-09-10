@@ -3,12 +3,13 @@ package watch
 import (
 	"bytes"
 	"fmt"
-	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
 func deliveryFixture(t *testing.T) (string, string) {
@@ -163,5 +164,69 @@ func TestMailDeliveryAckAndWrongDirectory(t *testing.T) {
 	r, _ = fleet.ReadMail("hub:a", "m2")
 	if fleet.Has(r, "delivered_at") {
 		t.Fatal("stamped invalid config")
+	}
+}
+
+func TestMailDeliveryRefusesReboundTenant(t *testing.T) {
+	cwd, _ := deliveryFixture(t)
+	_ = os.WriteFile(fleet.RolesMap(), []byte(fmt.Sprintf("%s changed hub:a\n", cwd)), 0600)
+	if err := DeliverMail(); err == nil {
+		t.Fatal("delivered old tenant mail")
+	}
+	r := fleet.ReadJSON(fleet.MailPath("hub:a", "m1"))
+	if fleet.Has(r, "delivered_at") {
+		t.Fatal("stamped old tenant mail")
+	}
+}
+
+func TestMailDeliveryLaterStampFailureDoesNotStrandEarlierMail(t *testing.T) {
+	_, _ = deliveryFixture(t)
+	_, err := fleet.PutMail(fleet.Rec{"id": "m2", "to": "hub:a", "from_role": "hub:b", "from_session": "sender", "kind": "order", "subject": "second", "body": "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fail only m2's publication; m1's reservation must already have its own launch.
+	temp := fmt.Sprintf("%s.%d.tmp", fleet.MailPath("hub:a", "m2"), os.Getpid())
+	if err := os.Mkdir(temp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverMail(); err == nil {
+		t.Fatal("failed publication ignored")
+	}
+	r1, _ := fleet.ReadMail("hub:a", "m1")
+	r2, _ := fleet.ReadMail("hub:a", "m2")
+	if !fleet.Has(r1, "delivered_at") || fleet.Has(r2, "delivered_at") {
+		t.Fatal(r1, r2)
+	}
+	log, _ := os.ReadFile(fleet.Path("watch", "observed.jsonl"))
+	if !strings.Contains(string(log), "mail-delivery-started") || !strings.Contains(string(log), "m1") {
+		t.Fatal("first stamp stranded without launch", string(log))
+	}
+}
+
+func TestMailConcurrentDeliveryAndAckPreserveBothStamps(t *testing.T) {
+	_, _ = deliveryFixture(t)
+	const n = 6
+	errs := make(chan error, n+1)
+	for i := 0; i < n; i++ {
+		go func() { errs <- DeliverMail() }()
+	}
+	go func() { _, err := fleet.AckMail("hub:a", "m1", "reader"); errs <- err }()
+	for i := 0; i < n+1; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, _ := fleet.ReadMail("hub:a", "m1")
+	if fleet.S(r, "acked_by") != "reader" {
+		t.Fatal("lost ack", r)
+	}
+	log, _ := os.ReadFile(fleet.Path("watch", "observed.jsonl"))
+	starts := strings.Count(string(log), "mail-delivery-started")
+	if starts > 1 {
+		t.Fatal("duplicate launch", string(log))
+	}
+	if (starts == 1) != fleet.Has(r, "delivered_at") {
+		t.Fatal("lost delivery stamp", r, string(log))
 	}
 }

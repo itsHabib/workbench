@@ -63,7 +63,7 @@ a store the Python wrote must still satisfy. The design record is cc-skills
 | hook | `fleet hook claude` / `fleet hook codex` | reads one harness event on stdin; exit 0 allow, exit 2 deny with the reason on stderr; injects `[fleet]` context lines |
 | CLI | `fleet <verb>` | the operator's side: stop, resume, revoke, take, drop, board, work, dispatch, … |
 | MCP | `fleet mcp` | the same verbs as tools over stdio, for a hub agent to call from inside a session |
-| watcher | `fleet watch` | one per machine; writes under `watch/` plus mail delivery stamps (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
+| watcher | `fleet watch` | one per machine; writes under `watch/` plus delivery stamps in `mail/<role-safe>/<id>.json` (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
 
 Exit codes are a load-bearing seam. Hook: 0 allow, 2 deny. Verb: 0 ok, 1 refused
 with the reason on stderr (a refusal is the substrate doing its job), 2 usage;

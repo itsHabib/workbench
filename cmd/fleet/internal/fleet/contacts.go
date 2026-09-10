@@ -52,6 +52,9 @@ func MailRoleTenant(role string) (string, error) {
 // closure or name inference. Seats follow current dispatch, never static contacts.
 func MailContacts(rec Rec) ([]string, error) {
 	role, tenant, slot := MailIdentity(rec)
+	if role == "" {
+		return nil, fmt.Errorf("mail: sender has no role in its launch directory; ask the operator to bind it with fleet role")
+	}
 	actual, err := MailRoleTenant(role)
 	if err != nil {
 		return nil, err

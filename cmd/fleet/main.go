@@ -85,7 +85,7 @@ func runWatch(args []string) {
 		md, err := watch.Tick(interval)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fleet watch: "+err.Error())
-			os.Exit(4)
+			os.Exit(1)
 		}
 		fmt.Print(md)
 		return

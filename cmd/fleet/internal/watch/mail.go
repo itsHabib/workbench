@@ -3,13 +3,14 @@ package watch
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
 type mailCommand struct {
@@ -38,8 +39,11 @@ func DeliverMail() error {
 	grace := 10 * time.Second
 	if value := os.Getenv("FLEET_MAIL_GRACE"); value != "" {
 		grace, err = time.ParseDuration(value)
-		if err != nil || grace < 0 {
-			return fmt.Errorf("FLEET_MAIL_GRACE must be a nonnegative duration")
+		if err != nil {
+			return fmt.Errorf("FLEET_MAIL_GRACE %q: %w", value, err)
+		}
+		if grace < 0 {
+			return fmt.Errorf("FLEET_MAIL_GRACE %q must be nonnegative", value)
 		}
 	}
 	roles := make([]string, 0, len(commands))
@@ -66,25 +70,36 @@ func deliverRole(role string, config mailCommand, grace time.Duration) error {
 	if config.Cwd == "" || fleet.RoleOf(config.Cwd) != role || len(config.Cmd) == 0 || config.Cmd[0] == "" {
 		return fmt.Errorf("deliver.json needs a cmd and cwd bound to %s", role)
 	}
+	rows, err := fleet.Mail(role, true)
+	if err != nil {
+		return err
+	}
+	var failures []string
+	for _, r := range rows {
+		if err := deliverMessage(role, fleet.S(r, "id"), config, grace); err != nil {
+			failures = append(failures, err.Error())
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func deliverMessage(role, id string, config mailCommand, grace time.Duration) error {
 	return fleet.MailLock(func() error {
-		rows, err := fleet.Mail(role, true)
+		r, err := fleet.ReadMail(role, id)
 		if err != nil {
 			return err
 		}
-		eligible := []fleet.Rec{}
-		for _, r := range rows {
-			if !fleet.Has(r, "delivered_at") && fleet.Now()-fleet.F(r, "at") >= grace.Seconds() {
-				eligible = append(eligible, r)
-			}
-		}
-		if len(eligible) == 0 {
+		if r == nil || fleet.Has(r, "acked_at") || fleet.Has(r, "delivered_at") || fleet.Now()-fleet.F(r, "at") < grace.Seconds() {
 			return nil
 		}
 		live, err := mailRoleLive(role)
 		if err != nil || live {
 			return err
 		}
-		return launchMail(role, config, eligible)
+		return launchMail(role, config, r)
 	})
 }
 
@@ -121,10 +136,10 @@ func mailRoleLive(role string) (bool, error) {
 	return false, nil
 }
 
-func launchMail(role string, config mailCommand, rows []fleet.Rec) error {
+func launchMail(role string, config mailCommand, r fleet.Rec) error {
 	now := fleet.Now()
 	token := fmt.Sprintf("watch-%d-%d", os.Getpid(), time.Now().UnixNano())
-	prompt := "Mail for " + role + ". Run fleet mail --unacked to read the bodies; acknowledge with fleet ack <id> after reading.\n" + strings.Join(fleet.MailSummary(rows), "\n")
+	prompt := "Mail for " + role + ". Run fleet mail --unacked to read the bodies; acknowledge with fleet ack <id> after reading.\n" + strings.Join(fleet.MailSummary([]fleet.Rec{r}), "\n")
 	args := make([]string, len(config.Cmd))
 	for i, a := range config.Cmd {
 		args[i] = strings.ReplaceAll(a, "{{prompt}}", prompt)
@@ -134,14 +149,11 @@ func launchMail(role string, config mailCommand, rows []fleet.Rec) error {
 		return err
 	}
 	defer log.Close()
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		r["delivered_at"], r["delivered_by"] = now, token
-		if err := fleet.WriteJSON(fleet.MailPath(role, fleet.S(r, "id")), r); err != nil {
-			return err
-		}
-		ids = append(ids, fleet.S(r, "id"))
+	r["delivered_at"], r["delivered_by"] = now, token
+	if err := fleet.WriteJSON(fleet.MailPath(role, fleet.S(r, "id")), r); err != nil {
+		return err
 	}
+	ids := []string{fleet.S(r, "id")}
 	event := fleet.Rec{"at": now, "what": "mail-delivery-attempt", "role": role, "ids": ids, "delivered_by": token}
 	if err := fleet.AppendJSONL(fleet.Path("watch", "observed.jsonl"), event); err != nil {
 		return err

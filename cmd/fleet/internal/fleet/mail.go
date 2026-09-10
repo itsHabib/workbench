@@ -3,13 +3,14 @@ package fleet
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/itsHabib/workbench/filelock"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/itsHabib/workbench/filelock"
 )
 
 var mailID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -62,6 +63,9 @@ func ReadMail(role, id string) (Rec, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkMailAddress(role, false); err != nil {
+		return nil, err
+	}
 	var r Rec
 	if err = json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("mail %s: unreadable: %w", id, err)
@@ -75,8 +79,14 @@ func ReadMail(role, id string) (Rec, error) {
 // PutMail publishes once, retaining original timestamps and stamps on retries.
 func PutMail(payload Rec) (Rec, error) {
 	role, id := S(payload, "to"), S(payload, "id")
+	if err := MailAddress(role, id); err != nil {
+		return nil, err
+	}
 	var result Rec
 	err := MailLock(func() error {
+		if err := checkMailAddress(role, true); err != nil {
+			return err
+		}
 		old, err := ReadMail(role, id)
 		if err != nil {
 			return err
@@ -112,8 +122,14 @@ func Mail(role string, unacked bool) ([]Rec, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkMailAddress(role, false); err != nil {
+		return nil, err
+	}
 	out := []Rec{}
 	for _, e := range entries {
+		if e.Name() == mailAddressFile {
+			continue
+		}
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
@@ -190,3 +206,5 @@ func MailSummary(rows []Rec) []string {
 	}
 	return lines
 }
+
+func sessionMailLines(rec Rec) []string { role, _, _ := MailIdentity(rec); return MailLines(role) }

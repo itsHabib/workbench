@@ -42,7 +42,7 @@ var cwdArg = str("the calling session's working directory (its worktree); identi
 var tools = []schema{
 	{"name": "fleet_send", "description": "Send retry-safe mail to a role in the caller's contacts.",
 		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
-	{"name": "fleet_mail", "description": "List mail for a role, defaulting to the caller's role; no acknowledgement.",
+	{"name": "fleet_mail", "description": "List mail for a role, defaulting to the caller's role; returns JSON, no acknowledgement.",
 		"inputSchema": schema{"type": "object", "properties": schema{"for": str("addressed role"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
 	{"name": "fleet_ack", "description": "Mark mail read by the session in the addressed role.",
 		"inputSchema": schema{"type": "object", "properties": schema{"id": str("message ID"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"id", "cwd"}}},

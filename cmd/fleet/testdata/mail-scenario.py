@@ -49,9 +49,9 @@ with tempfile.TemporaryDirectory(prefix="fleet-mail-") as tmp:
     event("SessionEnd", "mail-recipient", recipient)
     args[3] = "question-2"
     run(sender, *args)
-    true = shutil.which("true")
-    assert true, "reference scenario needs true on PATH"
-    (state / "deliver.json").write_text(json.dumps({"hub:b": {"cwd": str(recipient), "cmd": [true]}}))
+    true_cmd = shutil.which("true")
+    assert true_cmd, "reference scenario needs true on PATH"
+    (state / "deliver.json").write_text(json.dumps({"hub:b": {"cwd": str(recipient), "cmd": [true_cmd]}}))
     run(sender, "watch", "--once")
     records = {r["id"]: r for r in json.loads(run(sender, "mail", "--for", "hub:b", "--json"))}
     assert "delivered_at" not in records["question-1"]

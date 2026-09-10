@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
 func TestMailVerbsIdentityScopeAndUsage(t *testing.T) {

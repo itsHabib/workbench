@@ -119,7 +119,11 @@ func TestMailDamagedAndUnsafePaths(t *testing.T) {
 	}
 	p := mailPayload("alias")
 	p["to"] = "hub__a"
-	mustPut(t, p)
+	if _, err := PutMail(p); err == nil {
+		t.Fatal("aliased role accepted for write")
+	}
+	p["at"] = Now()
+	_ = WriteJSON(MailPath("hub__a", "alias"), p)
 	if _, err := ReadMail("hub:a", "alias"); err == nil {
 		t.Fatal("aliased role accepted")
 	}
@@ -219,5 +223,52 @@ func TestSeatContactsUseCurrentDispatchOnly(t *testing.T) {
 	_ = WriteJSON(Path("dispatch", "conflict.json"), row)
 	if _, err := MailContacts(rec); err == nil {
 		t.Fatal("ambiguous accountability accepted")
+	}
+}
+
+func TestMailTenantPinSurvivesRebinding(t *testing.T) {
+	mailFixture(t)
+	mustPut(t, mailPayload("m1"))
+	pin, _ := os.ReadFile(Path("mail", Safe("hub:a"), mailAddressFile))
+	rows, _ := os.ReadFile(RolesMap())
+	_ = os.WriteFile(RolesMap(), []byte(strings.ReplaceAll(string(rows), " one hub:a", " two hub:a")), 0600)
+	if _, err := ReadMail("hub:a", "m1"); err == nil {
+		t.Fatal("new tenant read retained mail")
+	}
+	if _, err := Mail("hub:a", false); err == nil {
+		t.Fatal("new tenant listed retained mail")
+	}
+	if _, err := AckMail("hub:a", "m1", "new-tenant"); err == nil {
+		t.Fatal("new tenant acked retained mail")
+	}
+	if _, err := PutMail(mailPayload("m2")); err == nil {
+		t.Fatal("new tenant reused pinned mailbox")
+	}
+	after, _ := os.ReadFile(Path("mail", Safe("hub:a"), mailAddressFile))
+	if !bytes.Equal(pin, after) {
+		t.Fatal("mailbox pin changed")
+	}
+	_ = os.Remove(Path("mail", Safe("hub:a"), mailAddressFile))
+	if _, err := PutMail(mailPayload("m2")); err == nil {
+		t.Fatal("retained mailbox adopted without pin")
+	}
+}
+
+func TestMailPromptUsesCurrentLaunchRole(t *testing.T) {
+	root := mailFixture(t)
+	old := mailPayload("old")
+	mustPut(t, old)
+	fresh := mailPayload("fresh")
+	fresh["to"] = "hub:b"
+	mustPut(t, fresh)
+	cwd := filepath.Join(root, Safe("hub:a"))
+	ev := Event{"hook_event_name": "SessionStart", "session_id": "reader", "cwd": cwd}
+	Run(ev)
+	rows, _ := os.ReadFile(RolesMap())
+	_ = os.WriteFile(RolesMap(), []byte(strings.ReplaceAll(string(rows), " one hub:a", " one hub:b")), 0600)
+	ev["hook_event_name"] = "UserPromptSubmit"
+	v := Run(ev)
+	if !strings.Contains(v.Out, "mail fresh ") || strings.Contains(v.Out, "mail old ") {
+		t.Fatal(v.Out)
 	}
 }

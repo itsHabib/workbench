@@ -2,10 +2,11 @@ package verbs
 
 import (
 	"fmt"
-	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
 const sendUsage = "usage: fleet send <role> --id <id> --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]"
@@ -27,6 +28,9 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 	}
 	rec := fleet.SessionRecord(sid)
 	role, _, _ := fleet.MailIdentity(rec)
+	if role == "" {
+		return refuse("fleet send: sender has no role in its launch directory; ask the operator to bind it with fleet role")
+	}
 	payload := fleet.Rec{"id": id, "to": to, "from_role": role, "from_session": sid, "kind": kind, "subject": subject, "head": head, "body": body}
 	// A retained retry is not a new send; changed contacts cannot invalidate it.
 	old, err := fleet.ReadMail(to, id)

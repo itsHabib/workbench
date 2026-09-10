@@ -31,8 +31,11 @@ chain validation and folding. Contacts are directed and not transitively expande
 `roles.map` must bind every address to the caller's tenant. An unlisted recipient
 is refused with the allowed set. Since the requested mailbox path has no tenant
 component, names reused across tenants (or colliding after filename sanitizing)
-refuse. Seat senders ignore the static list: their only contact is `for` on the
-current dispatch matching their seat, repo and checked-out branch. Missing or
+refuse. Each mailbox also has immutable `.address.json` metadata pinning its
+original role and tenant. A changed binding or unreadable/missing pin on retained
+mail refuses reads, sends, ack and delivery until the operator reconciles it;
+mail is never silently adopted by a new tenant. Seat senders ignore the static
+list: their only contact is `for` on the current dispatch matching their seat, repo and checked-out branch. Missing or
 conflicting accountability refuses. Reassignment changes that contact immediately.
 
 Mail lives at `mail/<role-safe>/<id>.json`; role-safe uses Fleet's existing `Safe`
@@ -55,13 +58,20 @@ Configure `deliver.json` to enable watcher delivery for otherwise absent roles:
 {"hub:parent": {"cwd": "/path/to/parent", "cmd": ["claude", "-p", "--model", "opus", "{{prompt}}"]}}
 ```
 
-The cwd must be bound to that role. Each fold launches one command per configured
-role with eligible mail and no live session. `FLEET_MAIL_GRACE=10s` is the default;
+The cwd must be bound to that role. Each fold considers every eligible message
+for configured roles. It reserves and launches one message at a time, rechecking acknowledgement and role liveness under
+the shared lock before each attempt. A later stamp failure cannot strand an
+earlier message without its own attempted launch. `FLEET_MAIL_GRACE=10s` is the
+default;
 set another duration (or `0s` for tests). Delivery occurs on a watcher tick, whose
 default interval is 60s. Arguments substitute `{{prompt}}` directly, without a
 shell; the prompt carries the mail summary and instructions to read/ack. Child
 output goes to `watch/watch-<pid>-<time>.log`. Unreadable liveness evidence suppresses
-launches. A live session receives mail at its next hook event instead.
+launches. Diagnostics name the damaged file under `sessions/`; the operator must
+inspect the actual harness process and restore its record (or archive stale
+evidence only after confirming it has ended). Absence of evidence is not death.
+Watcher diagnostics remain in `watch/observed.jsonl`, and a failed `watch --once`
+returns refusal exit 1. A live session receives mail at its next hook event instead.
 
 `delivered_at`/`delivered_by` reserve an **at-most-once launch attempt** before
 starting the process. `watch/observed.jsonl` records attempt and started/failed
