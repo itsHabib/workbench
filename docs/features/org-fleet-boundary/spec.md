@@ -145,8 +145,11 @@ the source/destination revisions. Quiesce the cohort's definition writers, make
 the verified Fleet record authoritative, switch its readers and writers, and
 make the retained Org definition read-only history. Do not retire that Org
 consumer until the readback matches and its old writer is disabled. Repeating
-the cutover is a no-op; rollback disables Fleet writes before restoring the Org
-writer. There is no steady-state synchronization between these definitions.
+the cutover is a no-op. Rollback quiesces both writers and verifies that the latest
+effective Fleet definition, including post-cutover edits, can be restored with
+compatible Org consumer mappings before restoring its writer. If those changes
+cannot be represented, rollback refuses rather than reverting to a stale charter.
+There is no steady-state synchronization between these definitions.
 
 ### Continuity
 
