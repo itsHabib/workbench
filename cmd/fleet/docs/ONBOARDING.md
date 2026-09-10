@@ -6,8 +6,10 @@ first if the words are new. Everything measured so far was measured on a Mac wit
 
 ## 1. Install the hook (operator, once per machine)
 
-Prerequisites: Go, Git, Bash (Git Bash on Windows) and Python 3; a cc-skills checkout for the
-lane cards (`LANES_SRC` pointing at its lanes directory); the built `fleet` binary on `PATH`.
+Mac or Linux. (Windows harness configs with escaped backslash paths are unsafe for `--apply`,
+see [hook-inspection.md](hook-inspection.md); register the hooks by hand there and skip the
+installer.) Prerequisites: Go, Git, Bash and Python 3; a cc-skills checkout for the lane cards
+(`LANES_SRC` pointing at its lanes directory); the built `fleet` binary on `PATH`.
 
 ```sh
 bash cmd/fleet/install.sh             # dry run: prints every change
@@ -16,11 +18,21 @@ bash cmd/fleet/install.sh --apply     # build, back up harness configs, swap the
 ```
 
 `--apply` is an upgrade path: it replaces hook registrations that already exist in the harness
-configs and skips missing files and a missing lane source. On a fresh machine, register the
-harness events first (`fleet inspect-hooks --config <harness json>` shows what is wired), then
-run `--apply`, then open a fresh session. Stop if the output says a config or the lane source was
-skipped. State lives in `~/.fleet` (`FLEET_STATE` to move it). The installer edits harness
-configuration, so a person runs it. Check: open any session and look for a `[fleet] session … · role ? · …`
+configs and skips missing files and a missing lane source; on a fresh machine it prints
+`installed` and wires nothing. Bootstrap by hand first: in `~/.claude/settings.json`, under
+`hooks`, register the same command for each of the six events `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`:
+
+```json
+"SessionStart": [{"hooks": [{"type": "command", "command": "/Users/<you>/.fleet/bin/fleet hook claude", "timeout": 5}]}]
+```
+
+(`PreToolUse` and `PostToolUse` take a `"matcher"` of `"Bash|Edit|Write|MultiEdit|NotebookEdit"`.)
+Codex registrations are written per directory by `fleet role`, not here. Then
+`fleet inspect-hooks --config ~/.claude/settings.json` must list all six, then run `--apply` for
+the lanes and backups, then open a fresh session and look for the `[fleet]` line. Stop if the
+installer says a config or the lane source was skipped. State lives in `~/.fleet` (`FLEET_STATE`
+to move it). The installer edits harness configuration, so a person runs it. Check: open any session and look for a `[fleet] session … · role ? · …`
 line at start. `?` is correct for a directory with no role.
 
 ## 2. Decide the tree (five minutes of thinking, no commands)
