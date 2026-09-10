@@ -119,16 +119,19 @@ func TestTheGuardOnlyLooksAtBashAndOnlyAtCd(t *testing.T) {
 }
 
 func TestCdTargetsResolution(t *testing.T) {
+	// Absolute paths are the platform's own: a bare /abs is a relative path on Windows.
+	here := t.TempDir()
+	there := filepath.Join(here, "there")
 	cases := []struct {
 		cmd, cwd, want string
 	}{
-		{"cd /abs/there", "/here", "/abs/there"},
-		{"cd sub && ls", "/here", "/here/sub"},
-		{"cd '/quoted/there'", "/here", "/quoted/there"},
-		{"ls && cd /later/there", "/here", "/later/there"},
-		{"cd -", "/here", ""},
-		{"cd", "/here", ""},
-		{"cd ../sibling", "/here/deep", "/here/sibling"},
+		{"cd " + there, here, there},
+		{"cd sub && ls", here, filepath.Join(here, "sub")},
+		{"cd '" + there + "'", here, there},
+		{"ls && cd " + there, here, there},
+		{"cd -", here, ""},
+		{"cd", here, ""},
+		{"cd ../sibling", filepath.Join(here, "deep"), filepath.Join(here, "sibling")},
 	}
 	for _, c := range cases {
 		got := CdTargets(c.cmd, c.cwd)
