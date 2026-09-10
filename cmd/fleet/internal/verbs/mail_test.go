@@ -105,3 +105,11 @@ func TestMailReplacementSenderAndFlatSeatAccess(t *testing.T) {
 		t.Fatal("mail acquired authority", err)
 	}
 }
+
+func TestMailSubjectUsageLimit(t *testing.T) {
+	var refusal *Refusal
+	err := CmdSend("hub:b", "large", "report", strings.Repeat("a", fleet.MaxMailSubjectBytes+1), "", "body", "")
+	if !errors.As(err, &refusal) || refusal.Code != 2 {
+		t.Fatal("subject limit is not usage", err)
+	}
+}

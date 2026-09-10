@@ -20,7 +20,9 @@ traversal, or relationship inference. Unidentified or cross-tenant callers refus
 that session to hold the addressed role or be in its bound directory, within the
 same tenant. Mail verbs do not acquire work or resource ownership.
 
-Kinds are `question`, `answer`, `escalation`, `report`, `order`. `--body -` reads
+Kinds are `question`, `answer`, `escalation`, `report`, `order`. Subjects are
+limited to 1024 UTF-8 bytes (oversized CLI/MCP input is usage); bodies remain full.
+Hook summaries also truncate oversized subjects retained from older versions. `--body -` reads
 stdin, preserving the full text. `mail` displays full bodies and optional heads;
 `--json` returns records. MCP `fleet_send`, `fleet_mail`, and `fleet_ack` require
 caller `cwd`; MCP bodies are literal text and mailbox output is JSON.
@@ -40,7 +42,10 @@ through the existing `keylocks/mail.lock` primitive and publish temp-then-rename
 Acknowledged messages remain retained; repeated ack preserves the first reader.
 
 An immutable `.address.json` beside the messages pins the original role and
-tenant. Ambiguous role names across tenants, filename collisions, changed tenant
+tenant. Storage operations carry the tenant captured before authorization and
+refuse a changed binding; first publication never chooses a new tenant after
+authorization. Reads and acknowledgements use the same captured-tenant fence.
+Ambiguous role names across tenants, filename collisions, changed tenant
 bindings, or missing/unreadable metadata on retained mail refuse. Fleet never
 silently adopts an old tenant's mailbox into a new tenant. The operator must
 reconcile a changed binding; mail does not rewrite its own address metadata.
@@ -58,3 +63,7 @@ a sender ends and its replacement retries the same ID, an absent recipient's
 replacement sees and reads the queued full body, acknowledgements remain intact,
 and cross-tenant sends/reads refuse. These events test the adapter boundary; they
 do not claim a live Claude/Codex session has been launched.
+
+Hook listing currently scans retained mail, so latency grows with mailbox history.
+An unacknowledged index or archive is deferred pending measured workload evidence;
+this slice makes no constant-time mailbox claim.

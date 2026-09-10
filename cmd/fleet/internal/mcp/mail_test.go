@@ -32,20 +32,20 @@ func TestMailMCPUsesCallerAndSameStore(t *testing.T) {
 	}
 	args := map[string]any{"to": "hub:b", "id": "m1", "kind": "report", "subject": "hello", "body": "-", "cwd": a}
 	invoke("fleet_send", args)
-	r, err := fleet.ReadMail("hub:b", "m1")
+	r, err := fleet.ReadMail("hub:b", "m1", "t")
 	if err != nil || fleet.S(r, "from_session") != "sender" || fleet.S(r, "body") != "-" {
 		t.Fatal(r, err)
 	}
 	_ = os.Remove(fleet.Path("sessions", "sender.json"))
 	_ = fleet.WriteJSON(fleet.Path("sessions", "replacement.json"), fleet.Rec{"session": "replacement", "cwd": a, "last_event_at": fleet.Now()})
 	invoke("fleet_send", args)
-	r, _ = fleet.ReadMail("hub:b", "m1")
+	r, _ = fleet.ReadMail("hub:b", "m1", "t")
 	if fleet.S(r, "from_session") != "sender" {
 		t.Fatal("replacement MCP retry rewrote original session", r)
 	}
 	invoke("fleet_mail", map[string]any{"cwd": b, "unacked": true})
 	invoke("fleet_ack", map[string]any{"id": "m1", "cwd": b})
-	r, _ = fleet.ReadMail("hub:b", "m1")
+	r, _ = fleet.ReadMail("hub:b", "m1", "t")
 	if fleet.S(r, "acked_by") != "reader" {
 		t.Fatal(r)
 	}

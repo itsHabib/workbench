@@ -11,10 +11,13 @@ const mailAddressFile = ".address.json"
 // checkMailAddress pins the original tenant without changing message payloads.
 // Only send may initialize an empty mailbox, while holding mailLock. Retained
 // messages without a readable pin are unknown, never assigned to today's tenant.
-func checkMailAddress(role string, create bool) error {
+func checkMailAddress(role string, create bool, expectedTenant string) error {
 	tenant, err := MailRoleTenant(role)
 	if err != nil {
 		return err
+	}
+	if expectedTenant == "" || tenant != expectedTenant {
+		return fmt.Errorf("mail: recipient tenant changed since authorization")
 	}
 	p := Path("mail", Safe(role), mailAddressFile)
 	pin := ReadJSON(p)

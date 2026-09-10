@@ -16,6 +16,9 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 	if to == "" || id == "" || subject == "" || body == "" {
 		return exitCode(2, sendUsage)
 	}
+	if len(subject) > fleet.MaxMailSubjectBytes {
+		return exitCode(2, fmt.Sprintf("mail: subject exceeds %d bytes", fleet.MaxMailSubjectBytes))
+	}
 	if !contains([]string{"question", "answer", "escalation", "report", "order"}, kind) {
 		return exitCode(2, sendUsage)
 	}
@@ -27,7 +30,7 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
-	role, _, _ := fleet.MailIdentity(rec)
+	role, tenant, _ := fleet.MailIdentity(rec)
 	if role == "" {
 		return refuse("fleet send: sender has no role in its launch directory; ask the operator to bind it with fleet role")
 	}
@@ -35,11 +38,11 @@ func CmdSend(to, id, kind, subject, head, body, session string) error {
 		return refuse("fleet send: %s", err)
 	}
 	payload := fleet.Rec{"id": id, "to": to, "from_role": role, "from_session": sid, "kind": kind, "subject": subject, "head": head, "body": body}
-	return publishMail(payload)
+	return publishMail(payload, tenant)
 }
 
-func publishMail(payload fleet.Rec) error {
-	r, err := fleet.PutMail(payload)
+func publishMail(payload fleet.Rec, tenant string) error {
+	r, err := fleet.PutMail(payload, tenant)
 	if err != nil {
 		return refuse("fleet send: %s", err)
 	}
@@ -54,13 +57,14 @@ func CmdMail(role, session string, unacked, asJSON bool) error {
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
+	_, tenant, _ := fleet.MailIdentity(rec)
 	if role == "" {
 		role, _, _ = fleet.MailIdentity(rec)
 	}
 	if err := fleet.MailPeer(rec, role); err != nil {
 		return refuse("fleet mail: %s", err)
 	}
-	rows, err := fleet.Mail(role, unacked)
+	rows, err := fleet.Mail(role, unacked, tenant)
 	if err != nil {
 		return refuse("fleet mail: %s", err)
 	}
@@ -91,7 +95,7 @@ func CmdAck(id, session string) error {
 	if err != nil {
 		return err
 	}
-	role, _, _ := fleet.MailIdentity(fleet.SessionRecord(sid))
+	role, tenant, _ := fleet.MailIdentity(fleet.SessionRecord(sid))
 	roles := []string{role}
 	if here := fleet.RoleOf(cwd()); here != "" && here != role {
 		roles = append(roles, here)
@@ -104,7 +108,7 @@ func CmdAck(id, session string) error {
 		if err := fleet.MailPeer(fleet.SessionRecord(sid), r); err != nil {
 			return refuse("fleet ack: %s", err)
 		}
-		rec, err := fleet.ReadMail(r, id)
+		rec, err := fleet.ReadMail(r, id, tenant)
 		if err != nil {
 			return refuse("fleet ack: %s", err)
 		}
@@ -119,7 +123,7 @@ func CmdAck(id, session string) error {
 	if target == "" {
 		return refuse("fleet ack: no message %s addressed to the caller's role or directory", id)
 	}
-	r, err := fleet.AckMail(target, id, sid)
+	r, err := fleet.AckMail(target, id, sid, tenant)
 	if err != nil {
 		return refuse("fleet ack: %s", err)
 	}

@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// MaxMailSubjectBytes bounds subject text carried into hook context.
+const MaxMailSubjectBytes = 1024
+
 var mailID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var mailRole = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
@@ -32,7 +35,7 @@ func mailLock(fn func() error) error {
 }
 
 // ReadMail distinguishes absent from damaged records and refuses filename aliases.
-func ReadMail(role, id string) (Rec, error) {
+func ReadMail(role, id, tenant string) (Rec, error) {
 	if err := MailAddress(role, id); err != nil {
 		return nil, err
 	}
@@ -43,7 +46,7 @@ func ReadMail(role, id string) (Rec, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkMailAddress(role, false); err != nil {
+	if err := checkMailAddress(role, false, tenant); err != nil {
 		return nil, err
 	}
 	var r Rec
@@ -58,17 +61,23 @@ func ReadMail(role, id string) (Rec, error) {
 
 // PutMail publishes once per role and id. A replacement sender session may
 // retry the same payload; the original from_session, timestamps and ack remain.
-func PutMail(payload Rec) (Rec, error) {
+func PutMail(payload Rec, tenant string) (Rec, error) {
 	role, id := S(payload, "to"), S(payload, "id")
+	if tenant == "" {
+		return nil, fmt.Errorf("mail: validated tenant is required")
+	}
+	if len(S(payload, "subject")) > MaxMailSubjectBytes {
+		return nil, fmt.Errorf("mail: subject exceeds %d bytes", MaxMailSubjectBytes)
+	}
 	if err := MailAddress(role, id); err != nil {
 		return nil, err
 	}
 	var result Rec
 	err := mailLock(func() error {
-		if err := checkMailAddress(role, true); err != nil {
+		if err := checkMailAddress(role, true, tenant); err != nil {
 			return err
 		}
-		old, err := ReadMail(role, id)
+		old, err := ReadMail(role, id, tenant)
 		if err != nil {
 			return err
 		}
@@ -92,7 +101,7 @@ func PutMail(payload Rec) (Rec, error) {
 }
 
 // Mail lists records oldest first; an unreadable mailbox is not empty.
-func Mail(role string, unacked bool) ([]Rec, error) {
+func Mail(role string, unacked bool, tenant string) ([]Rec, error) {
 	if err := MailAddress(role, "list"); err != nil {
 		return nil, err
 	}
@@ -103,7 +112,7 @@ func Mail(role string, unacked bool) ([]Rec, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkMailAddress(role, false); err != nil {
+	if err := checkMailAddress(role, false, tenant); err != nil {
 		return nil, err
 	}
 	out := []Rec{}
@@ -114,7 +123,7 @@ func Mail(role string, unacked bool) ([]Rec, error) {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		r, err := ReadMail(role, strings.TrimSuffix(e.Name(), ".json"))
+		r, err := ReadMail(role, strings.TrimSuffix(e.Name(), ".json"), tenant)
 		if err != nil {
 			return nil, err
 		}
@@ -132,11 +141,11 @@ func Mail(role string, unacked bool) ([]Rec, error) {
 }
 
 // AckMail marks read, preserving payload. Caller verifies role ownership.
-func AckMail(role, id, sid string) (Rec, error) {
+func AckMail(role, id, sid, tenant string) (Rec, error) {
 	var r Rec
 	err := mailLock(func() error {
 		var err error
-		r, err = ReadMail(role, id)
+		r, err = ReadMail(role, id, tenant)
 		if err != nil {
 			return err
 		}
@@ -154,7 +163,12 @@ func AckMail(role, id, sid string) (Rec, error) {
 
 // MailLine remains one line even when a subject contains control characters.
 func MailLine(r Rec) string {
-	clean := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	clean := func(s string) string {
+		if len(s) > MaxMailSubjectBytes {
+			s = strings.ToValidUTF8(s[:MaxMailSubjectBytes], "") + "…"
+		}
+		return strings.Join(strings.Fields(s), " ")
+	}
 	return fmt.Sprintf("[fleet] mail %s from %s (%s): %s", clean(S(r, "id")), clean(S(r, "from_role")), clean(S(r, "kind")), clean(S(r, "subject")))
 }
 
@@ -163,10 +177,11 @@ func MailLines(role string) []string {
 	if role == "" {
 		return nil
 	}
-	if _, err := MailRoleTenant(role); err != nil {
+	tenant, err := MailRoleTenant(role)
+	if err != nil {
 		return []string{"[fleet] mail unavailable; fleet mail"}
 	}
-	rows, err := Mail(role, true)
+	rows, err := Mail(role, true, tenant)
 	if err != nil {
 		return []string{"[fleet] mail unavailable; fleet mail"}
 	}

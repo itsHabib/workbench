@@ -168,6 +168,8 @@ an unreadable session record must not be read as death.
 
 Durable communication between identified roles in the same tenant:
 
+Subjects are limited to 1024 bytes; bodies remain full.
+
 ```sh
 fleet send hub:b --id unit-question-1 --kind question --subject 'Which unit?' \
   --head abc123 --body 'Use milliseconds or seconds?'
