@@ -1124,7 +1124,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fleet_take","arguments":{"resource":"slot:hyper"}}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_who\",\"arguments\":{\"name\":\"feat/q\",\"cwd\":\"$SL1\"}}}" \
   | (cd "$work" && "$PY" "$here/fleet-mcp.py") > "$work/mcp.out" 2>"$work/mcp.err"
-"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 11 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
+"$PY" - "$work/mcp.out" "$S20" <<'PY' && echo "  ok    fleet-mcp: initialize, 13 one-line tools, who resolves in the caller's cwd, refusal is isError with the CLI's text, not-done is an answer, missing arg is -32602, acting tools need cwd" || { echo "  FAIL  fleet-mcp: $(cat "$work/mcp.out" "$work/mcp.err")"; fails=$((fails+1)); }
 import json, sys
 by = {}
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -1132,7 +1132,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
 bad = []
 if by[1]["result"]["serverInfo"]["name"] != "fleet": bad.append("initialize")
 tools = by[2]["result"]["tools"]
-if len(tools) != 11 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
+if len(tools) != 13 or any("\n" in t["description"] or len(t["description"]) > 160 for t in tools): bad.append("tools: %d, long or multi-line description" % len(tools))
 if sys.argv[2] not in by[3]["result"]["content"][0]["text"] or by[3]["result"]["isError"]: bad.append("who")
 if not by[4]["result"]["isError"] or "busy" not in by[4]["result"]["content"][0]["text"]: bad.append("assign refusal")
 if by[5]["result"]["isError"] or '"ok": false' not in by[5]["result"]["content"][0]["text"]: bad.append("done")
@@ -1889,7 +1889,7 @@ try:
 except subprocess.TimeoutExpired as e:
     b_rc, b_out = None, "second watcher kept running for 15s: " + str(e)
 pA.kill(); pA.wait()
-report(b_rc not in (None, 0) and "already" in b_out, "a second watcher is refused for the first's whole lifetime, not only after its first heartbeat", f"B rc={b_rc} {b_out[:160]!r}")
+report(b_rc == 1 and "watcher lock unavailable" in b_out and "already running" not in b_out, "a second watcher is refused for the first's whole lifetime, not only after its first heartbeat", f"B rc={b_rc} {b_out[:160]!r}")
 # 8. the last word in Codex's transcript shape, and the harness's own statement of it
 tp = os.path.join(work, "codex-transcript.jsonl")
 open(tp, "w").write(json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done: pushed the fix"}]}}) + "\n")

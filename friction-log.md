@@ -360,6 +360,38 @@ Second occurrence of the `#214` entry above, one failure mode further in.
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
 
+## 2026-09-08 — Fleet assignment is not worker acceptance
+
+- **Observed:** dispatch stores accountability but exposes no retry identity; a
+  retry can rewrite queued work. Existing CLI helpers do not establish end-to-end
+  cross-harness acceptance or effect-safe stop. An operator should not infer those
+  from a successful command or copied session ID.
+- **Change:** request-bound rows, immutable payload checks, cross-process dispatch
+  serialization and non-migrating status output. Hook-owned post-tool evidence is
+  explicitly activity, not success or semantic acceptance. Legacy mutations cannot
+  replace a request record. No second editable ledger added.
+- **Validation boundary:** fixture and real-process tests prove these local
+  contracts, not live model delivery/replacement. This is the first build increment;
+  actual adapters and correlated lifecycle remain under the natural-coordination
+  Dossier task. No hooks installed or live agents controlled by this change.
+- **Tooling:** full-module tests were cost-guarded; followed the requested focused
+  Fleet test path and left the full suite to CI. Root vet/lint and both harness
+  regression suites were run.
+- **Review integration gaps:** generated Codex hooks only subscribed to Bash
+  post-tool events; direct hook tests hid missing file-edit observations. Generated
+  subscriptions now cover writes, with Claude local file-write supplementation
+  and rebind tests. Existing installations still require regeneration/reload.
+  Replay now survives branch/session cleanup, selective legacy retirement preserves
+  request siblings, and status honors the revoke recipient exemption. These are
+  regression-tested without taking over any live session.
+- **Second review:** one latest-write field let activity on another branch erase
+  observed task progress; observations now merge per branch under the existing
+  session lock. Added MultiEdit to generated subscriptions and scoped legacy
+  maintenance validation. Two reviewers reported raw apply_patch bypassing the
+  classifier; the actual Codex adapter already expands patches into per-file Edit
+  events. A direct adapter regression now proves foreign-holder refusal and
+  post-tool evidence, without duplicating parsing in the policy layer.
+
 ## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
 
 Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
