@@ -18,6 +18,10 @@ func currentStartupAssignment(slot, sid string) Rec {
 	}
 	var assignment Rec
 	err := KeyLock("slot:"+slot, func() error {
+		occupant := Lease("slot:" + slot)
+		if IsMalformed(occupant) || !B(occupant, "occupancy") || S(occupant, "session") != sid {
+			return nil
+		}
 		rec := SessionRecord(sid)
 		launch := S(rec, "launch_dir")
 		if launch == "" {

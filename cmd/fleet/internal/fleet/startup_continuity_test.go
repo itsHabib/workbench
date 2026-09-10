@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +92,7 @@ func TestStartupAssignmentSurvivesReplacementButNotSeatReuse(t *testing.T) {
 		t.Fatal("original session did not see assignment")
 	}
 	before, _ := os.ReadFile(p)
+	Run(Event{"session_id": "original", "cwd": root, "hook_event_name": "SessionEnd"})
 	if !strings.Contains(start("replacement"), "finish this work") {
 		t.Fatal("replacement session did not see current assignment")
 	}
@@ -98,6 +100,7 @@ func TestStartupAssignmentSurvivesReplacementButNotSeatReuse(t *testing.T) {
 	if !bytes.Equal(before, after) || S(ReadJSON(p), "delivered_to") != "original" {
 		t.Fatal("replacement changed historical delivery stamp")
 	}
+	Run(Event{"session_id": "replacement", "cwd": root, "hook_event_name": "SessionEnd"})
 	for _, key := range []string{"repo", "branch", "path", "slot"} {
 		saved := a[key]
 		a[key] = "different"
@@ -109,6 +112,67 @@ func TestStartupAssignmentSurvivesReplacementButNotSeatReuse(t *testing.T) {
 		}
 		a[key] = saved
 	}
+}
+
+func TestStartupAssignmentOnlyConcurrentOccupantGetsBrief(t *testing.T) {
+	root := continuityFixture(t)
+	path := Path("assign", "seat-a.json")
+	a := Rec{"slot": "seat-a", "path": root, "repo": RepoID(root), "branch": "task", "brief": "only the occupant should execute this", "at": Now(), "role": "lead:demo", "tenant": "one"}
+	if err := WriteJSON(path, a); err != nil {
+		t.Fatal(err)
+	}
+	MigrateLegacyKeys()
+	commands := make([]*exec.Cmd, 2)
+	outputs := make([]bytes.Buffer, 2)
+	for i, sid := range []string{"first", "second"} {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestStartupAssignmentProcess$")
+		cmd.Env = append(os.Environ(), "FLEET_STARTUP_ASSIGNMENT_PROCESS=1", "FLEET_STARTUP_SESSION="+sid,
+			"FLEET_STARTUP_CWD="+root, "FLEET_STATE="+State, "ORG_STATE="+OrgState)
+		cmd.Stdout, cmd.Stderr = &outputs[i], &outputs[i]
+		commands[i] = cmd
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("concurrent startup: %v: %s", err, outputs[i].String())
+		}
+	}
+	winner := S(Lease("slot:seat-a"), "session")
+	for i, sid := range []string{"first", "second"} {
+		got := outputs[i].String()
+		if strings.Contains(got, "only the occupant should execute this") != (sid == winner) {
+			t.Fatalf("assignment visibility differs from occupancy winner %s: %s: %s", winner, sid, got)
+		}
+		if sid != winner && !strings.Contains(got, "already occupied") {
+			t.Fatal("loser did not receive occupancy explanation", got)
+		}
+	}
+	if S(ReadJSON(path), "delivered_to") != winner {
+		t.Fatal("loser stamped assignment delivery", ReadJSON(path))
+	}
+	// A dead process does not need a SessionEnd event to permit legitimate pickup.
+	rec := SessionRecord(winner)
+	rec["pid"], rec["pid_kind"] = -1, "harness"
+	if err := WriteJSON(Path("sessions", winner+".json"), rec); err != nil {
+		t.Fatal(err)
+	}
+	v := Run(Event{"session_id": "replacement", "cwd": root, "hook_event_name": "SessionStart"})
+	if v.Code != 0 || !strings.Contains(v.Out, "only the occupant should execute this") || S(Lease("slot:seat-a"), "session") != "replacement" {
+		t.Fatal("replacement of dead occupant did not receive work", v)
+	}
+}
+
+func TestStartupAssignmentProcess(t *testing.T) {
+	if os.Getenv("FLEET_STARTUP_ASSIGNMENT_PROCESS") != "1" {
+		return
+	}
+	v := Run(Event{"session_id": os.Getenv("FLEET_STARTUP_SESSION"), "cwd": os.Getenv("FLEET_STARTUP_CWD"), "hook_event_name": "SessionStart"})
+	if v.Code != 0 {
+		t.Fatal(v)
+	}
+	fmt.Print(v.Out)
 }
 
 func TestStartupAssignmentRefusesReboundAndLegacyIdentity(t *testing.T) {
