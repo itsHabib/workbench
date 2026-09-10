@@ -94,11 +94,13 @@ with tempfile.TemporaryDirectory(prefix="fleet-continuity-") as tmp:
     reused_context = event("SessionStart", "worker-a-v3", a)
     assert "Keep milliseconds" not in reused_context, reused_context
     assert "Parser expects milliseconds" not in reused_context, reused_context
+    event("SessionEnd", "worker-a-v3", a)
     git(a, "checkout", "-q", "work-one")
     bindings = (org / "roles.map").read_text()
     (org / "roles.map").write_text(bindings.replace(f"{a} one author:sample seat-a", f"{a} two author:sample seat-a"))
     rebound_context = event("SessionStart", "worker-a-rebound", a)
     assert "Keep milliseconds" not in rebound_context, rebound_context
     assert "units-answer" not in rebound_context, rebound_context
+    assert "different role or tenant" in rebound_context, rebound_context
     assert not (org / "one").exists(), "ordinary workflow created Org chains"
 print("  ok    continuity: distinct seat inboxes, replacement assignment and lead handoff, retry, isolation, reused-seat context")
