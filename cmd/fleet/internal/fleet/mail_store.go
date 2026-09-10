@@ -26,14 +26,27 @@ import (
 // stay distinct on a case-insensitive filesystem and no component exceeds the limit.
 func mailDigest(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 
-// MailStoreDirs is every directory that may hold records for one address: the typed
-// mailbox under each address kind, then the retained flat one.
-func MailStoreDirs(tenant, address string) []string {
+// MailStoreDirs is every directory that may hold records for one address in one
+// tenant: the typed mailbox under each address kind, then the retained flat one —
+// and the flat one only when its own pin still names this tenant and this address.
+//
+// The pin is the only tenant evidence a flat mailbox has. Its records predate the
+// tenant field, so the directory is their whole claim; when roles.map later rebinds
+// the name to another tenant, an unpinned directory would hand that tenant the
+// previous one's mail. An unreadable pin is an error, not an empty result.
+func MailStoreDirs(tenant, address string) ([]string, error) {
 	var dirs []string
 	for _, kind := range []string{"role", "seat"} {
 		dirs = append(dirs, Path("mail", ".v2", mailDigest(tenant), kind, mailDigest(address)))
 	}
-	return append(dirs, Path("mail", Safe(address)))
+	flat, err := Mailbox{Tenant: tenant, Kind: "role", Address: address}.legacyMailDir()
+	if err != nil {
+		return nil, err
+	}
+	if flat == "" {
+		return dirs, nil
+	}
+	return append(dirs, flat), nil
 }
 
 // MailAddressTenant is the tenant owning an address named as a role or as a seat.
@@ -70,9 +83,13 @@ func MailboxRecords(tenant, address string) ([]Rec, error) {
 	if tenant == "" {
 		return nil, fmt.Errorf("mail: tenant is required")
 	}
+	dirs, err := MailStoreDirs(tenant, address)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	var out []Rec
-	for _, dir := range MailStoreDirs(tenant, address) {
+	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if os.IsNotExist(err) {
 			continue
@@ -104,7 +121,8 @@ func MailboxRecords(tenant, address string) ([]Rec, error) {
 
 // mailRecordAt is the record at a path when it claims exactly this address, id and
 // tenant, else nil. A record written before tenants were stored carries none, and
-// its directory is the only claim it has.
+// its directory is the only claim it has — which is why MailStoreDirs admits a flat
+// directory only when its pin still names this tenant and address.
 func mailRecordAt(path, tenant, address, id string) Rec {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -132,7 +150,11 @@ func StampMail(tenant, address, id string, fields Rec) (Rec, error) {
 	}
 	var out Rec
 	err := mailLock(func() error {
-		for _, dir := range MailStoreDirs(tenant, address) {
+		dirs, err := MailStoreDirs(tenant, address)
+		if err != nil {
+			return err
+		}
+		for _, dir := range dirs {
 			path := filepath.Join(dir, id+".json")
 			r := mailRecordAt(path, tenant, address, id)
 			if r == nil {

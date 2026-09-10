@@ -53,22 +53,29 @@ func TestLateRowBecomesMailToTheAccountableRole(t *testing.T) {
 	}
 }
 
-// Live hands, a passing receipt, or no accountable role: nothing to say.
+// Live hands, a passing receipt, or no accountable role: nothing to say. Past its
+// due date the board renames a held row to `late` too, so the hands cases here are
+// the ones a state-name predicate would have reported.
 func TestLateRowDerivationIsSilentWhenItShouldBe(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		row  fleet.Rec
+		live bool
 	}{
-		{"live hands", fleet.Rec{"state": "working", "hands": "s1"}},
-		{"idle hands", fleet.Rec{"state": "idle", "hands": "s1"}},
-		{"passing receipt", fleet.Rec{"state": "done"}},
-		{"no accountable role", fleet.Rec{"state": "dispatched", "for": ""}},
-		{"not yet due", fleet.Rec{"state": "dispatched", "due": 600.0}},
-		{"unknown after a sleep", fleet.Rec{"state": "unknown"}},
+		{"live hands mid-turn", fleet.Rec{"state": "late", "hands": "s1"}, true},
+		{"live hands idle", fleet.Rec{"state": "late", "hands": "s1"}, true},
+		{"passing receipt", fleet.Rec{"state": "done"}, false},
+		{"passing receipt under another state name", fleet.Rec{"state": "late", "done_at": -60.0}, false},
+		{"no accountable role", fleet.Rec{"state": "dispatched", "for": ""}, false},
+		{"not yet due", fleet.Rec{"state": "dispatched", "due": 600.0}, false},
+		{"unknown after a sleep", fleet.Rec{"state": "unknown"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deliverEnv(t)
 			now := fleet.Now()
+			if tc.live {
+				putSession(t, "s1", now)
+			}
 			row := fleet.Rec{"repo": "r1", "change": "topic", "relationship": "check", "for": "hub:lead", "due": now - 300, "at": now - 900}
 			for k, v := range tc.row {
 				if f, ok := v.(float64); ok {
@@ -80,6 +87,32 @@ func TestLateRowDerivationIsSilentWhenItShouldBe(t *testing.T) {
 				t.Fatalf("reported anyway: %v", observed)
 			}
 		})
+	}
+}
+
+// The same row, once its holder is no longer alive, is exactly what the report is
+// for — and the report says which silence it found.
+func TestLateRowWithADeadHolderIsReportedAndNamesTheStanding(t *testing.T) {
+	deliverEnv(t)
+	now := fleet.Now()
+	putSession(t, "s1", now-float64(fleet.StaleS)-600)
+	work := []fleet.Rec{{"repo": "r1", "change": "topic", "relationship": "check", "for": "hub:lead",
+		"state": "late", "hands": "s1", "due": now - 300, "at": now - 900}}
+	if observed := lateMail(now, work); len(observedWhat(observed, "late-mail")) != 1 {
+		t.Fatalf("a dead holder was not reported: %v", observed)
+	}
+	rows := lateBox(t, "hub:lead")
+	if len(rows) != 1 || !strings.Contains(fleet.S(rows[0], "body"), "no longer alive") {
+		t.Fatalf("body does not say which silence it found: %v", rows)
+	}
+}
+
+// putSession writes one session record whose last event is at the given time.
+func putSession(t *testing.T, sid string, at float64) {
+	t.Helper()
+	rec := fleet.Rec{"session": sid, "pid_kind": "parent-unverified", "last_event_at": at}
+	if err := fleet.WriteJSON(fleet.Path("sessions", sid+".json"), rec); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -112,7 +145,7 @@ func TestUnansweredLeadEscalationUsesTheRecordedParent(t *testing.T) {
 		want    string
 		reports int
 	}{
-		{"parent recorded", "hub:b", "late-mail", 1},
+		{"parent recorded", "seat-1", "late-mail", 1},
 		{"no parent", "", "late-no-recipient", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,7 +160,7 @@ func TestUnansweredLeadEscalationUsesTheRecordedParent(t *testing.T) {
 			if len(observedWhat(observed, tc.want)) != 1 {
 				t.Fatalf("want one %s: %v", tc.want, observed)
 			}
-			if got := len(lateBox(t, "hub:b")); got != tc.reports {
+			if got := len(lateBox(t, "seat-1")); got != tc.reports {
 				t.Fatalf("parent mailbox: %d, want %d", got, tc.reports)
 			}
 		})
@@ -137,7 +170,7 @@ func TestUnansweredLeadEscalationUsesTheRecordedParent(t *testing.T) {
 // Inside the grace, or already acknowledged, nothing is said.
 func TestUnansweredMailWaitsForTheReplyGrace(t *testing.T) {
 	home, _ := deliverEnv(t)
-	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": "hub:b"}}
+	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": "seat-1"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +192,7 @@ func putSeatMail(t *testing.T, address, id string, at float64, kind string) {
 	t.Helper()
 	r := fleet.Rec{"id": id, "to": address, "tenant": "t1", "to_kind": "seat", "from_role": "hub:lead",
 		"from_address": "hub:lead", "from_kind": "role", "kind": kind, "subject": "unit?", "body": "ms or s", "at": at}
-	if err := fleet.WriteJSON(filepath.Join(fleet.MailStoreDirs("t1", address)[1], id+".json"), r); err != nil {
+	if err := fleet.WriteJSON(filepath.Join(storeDirs(t, "t1", address)[1], id+".json"), r); err != nil {
 		t.Fatal(err)
 	}
 }

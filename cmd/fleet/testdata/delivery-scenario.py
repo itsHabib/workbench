@@ -82,6 +82,20 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
     time.sleep(0.5)
     assert len(recorded()) == 1, recorded()
 
+    # Two folds that overlap are two processes reading the same unstamped row. The
+    # supported `fleet watch --once` beside a running watcher must not double-launch:
+    # reserve-and-launch is serialised, and the stamp is the reservation.
+    run(seat, "send", "hub:lead", "--id", "q-2", "--kind", "report",
+        "--subject", "Second message", "--body", "nothing to answer", "--session", "seat-v1")
+    both = [subprocess.Popen([binary, "watch", "--once"], cwd=seat, env=env,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for _ in range(2)]
+    for p in both:
+        assert p.wait(timeout=30) == 0, p.stderr.read()
+    time.sleep(0.5)
+    carried = [l for l in recorded() if "q-2" in l["prompt"]]
+    assert len(carried) == 1, carried
+
     # Past the reply grace the unanswered question is mail to the recorded parent, once.
     run(seat, "watch", "--once", extra={"FLEET_REPLY_GRACE": "0"})
     reports = mailbox("hub:boss")

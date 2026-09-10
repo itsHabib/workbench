@@ -20,6 +20,9 @@ package watch
 //   - A message is handed over once. Each is stamped delivered_at/delivered_by before
 //     the fold ends, and a stamped message is never carried again — not on the next
 //     fold, not by the next watcher.
+//   - Deciding and launching happen inside one lock every fold in every process takes,
+//     so a `fleet watch --once` beside the running watcher cannot double-launch: the
+//     stamps are the reservation, and the next holder of the lock re-reads them.
 //
 // Latency is bounded by the fold interval: a message that arrives just after a fold
 // waits for the next one, so worst-case delivery is one interval plus the grace.
@@ -98,6 +101,10 @@ func deliverTargets() []deliverTarget {
 	return out
 }
 
+// deliverLockKey is the one serialisation point for delivery, taken by every fold in
+// every process — the scheduled watcher and each `fleet watch --once` alike.
+const deliverLockKey = "watch-delivery"
+
 // deliver hands each configured address's waiting mail to one new process, and
 // returns what it observed. Nothing here is fatal to a fold.
 func deliver(now float64) []fleet.Rec {
@@ -106,22 +113,52 @@ func deliver(now float64) []fleet.Rec {
 		return nil
 	}
 	mailGrace, idleGrace := grace("FLEET_MAIL_GRACE", defaultMailGrace), grace("FLEET_IDLE_GRACE", defaultIdleGrace)
-	sessions := sessionRecords()
 	started := map[string]bool{} // a launch counts as present for the rest of the fold
 	var observed []fleet.Rec
 	for _, t := range targets {
+		if started[fleet.CanonPath(t.cwd)] {
+			continue
+		}
+		obs, launched := deliverOne(t, now, mailGrace, idleGrace)
+		observed = append(observed, obs...)
+		if launched {
+			started[fleet.CanonPath(t.cwd)] = true
+		}
+	}
+	return observed
+}
+
+// deliverOne decides and launches for one address inside the delivery lock.
+//
+// The decision and the act have to be one step. The lifetime owner lock is taken by
+// Serve alone, so a supported `fleet watch --once` beside the running watcher — or two
+// overlapping one-shot folds — is a second process reading the same unstamped rows; the
+// mail lock comes far too late, at stamping, after both have already started a session.
+// Under this lock the stamps a launch writes are the reservation: the next fold to take
+// the lock re-reads the mailbox and finds nothing eligible, so it does not launch.
+//
+// A lock it cannot take in time is a refusal to deliver this fold, recorded and left
+// for the next one. Mail is never lost by waiting; it is lost by being delivered twice.
+func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec, bool) {
+	var observed []fleet.Rec
+	launched := false
+	err := fleet.KeyLock(deliverLockKey, func() error {
 		rows, err := eligibleMail(t.address, now, mailGrace)
 		if err != nil {
 			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-failed", "address": t.address, "error": err.Error()})
-			continue
+			return nil
 		}
-		if len(rows) == 0 || started[fleet.CanonPath(t.cwd)] || present(sessions, t.cwd, now, idleGrace) {
-			continue
+		if len(rows) == 0 || present(sessionRecords(), t.cwd, now, idleGrace) {
+			return nil
 		}
-		started[fleet.CanonPath(t.cwd)] = true
+		launched = true
 		observed = append(observed, launch(t, rows, now)...)
+		return nil
+	})
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-deferred", "address": t.address, "cwd": t.cwd, "error": err.Error()})
 	}
-	return observed
+	return observed, launched
 }
 
 // eligibleMail is one address's unacked, never-delivered mail, older than the grace.

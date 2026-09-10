@@ -9,8 +9,9 @@ package watch
 //
 // So the fold derives two facts and writes each as ordinary mail, once per deadline:
 //
-//   - a row past its due date with no live hands and no passing receipt at its head,
-//     addressed to the role accountable for it;
+//   - a row past its due date with no LIVE hands and no passing receipt at its head,
+//     addressed to the role accountable for it. Live is asked of the session record,
+//     not of the state name: past due, a held row reads `late` too;
 //   - a question or escalation nobody acknowledged past FLEET_REPLY_GRACE, addressed
 //     to the addressee's parent — for a seat, the role the seat's row is for; for a
 //     lead, the LATE_TO in its delivery entry. With no parent recorded, the fold logs
@@ -110,14 +111,24 @@ func lateSent() map[string]float64 {
 	return out
 }
 
-// lateRows is every ownership row past due that nobody is working and nothing has
-// passed. A row with no accountable role has no recipient and is left to the board.
+// lateRows is every ownership row past due that nobody live is holding and nothing
+// has passed. A row with no accountable role has no recipient and is left to the board.
+//
+// The gate is the evidence, not the state name. Past its due date the board renames
+// `working` and `idle` to `late` while keeping the holder in `hands`, so excluding
+// the pre-deadline names excludes nothing: a row someone is actively working would be
+// reported as unattended. So the fold asks the two questions the report claims to
+// answer — is a live session holding this, and did a receipt pass at its head — and
+// says which silence it found for the rows that survive.
 func lateRows(now float64, work []fleet.Rec) []lateness {
 	var out []lateness
 	for _, w := range work {
 		due, state := fleet.F(w, "due"), fleet.S(w, "state")
-		if due <= 0 || now <= due || state == "done" || state == "working" || state == "idle" || state == "unknown" {
+		if due <= 0 || now <= due || state == "done" || state == "unknown" || fleet.F(w, "done_at") > 0 {
 			continue
+		}
+		if liveHands(w) != "" {
+			continue // late, but held: someone is on it, and the board already says so
 		}
 		to := fleet.S(w, "for")
 		if to == "" {
@@ -129,6 +140,7 @@ func lateRows(now float64, work []fleet.Rec) []lateness {
 			subject: "late: " + name,
 			body: strings.Join([]string{
 				fmt.Sprintf("%s in %s was due %s ago and has no passing receipt at its head.", name, fleet.S(w, "repo"), fleet.FmtAge(now-due)),
+				"standing: " + standingOf(w),
 				"state: " + state,
 				"hands: " + orNobody(fleet.S(w, "hands")),
 				"head: " + orNobody(fleet.S(w, "head")),
@@ -138,6 +150,28 @@ func lateRows(now float64, work []fleet.Rec) []lateness {
 		})
 	}
 	return out
+}
+
+// liveHands is the session holding a row when that session is still alive, else "".
+// A named holder that is gone is not hands; that is the whole point of asking.
+func liveHands(w fleet.Rec) string {
+	sid := fleet.S(w, "hands")
+	if sid == "" || !fleet.SessionAlive(fleet.SessionRecord(sid)) {
+		return ""
+	}
+	return sid
+}
+
+// standingOf names the silence a report is about, so the parent reading it can tell
+// a deadline nobody started from one whose holder is gone.
+func standingOf(w fleet.Rec) string {
+	if sid := fleet.S(w, "hands"); sid != "" {
+		return "its holder " + fleet.Short(sid) + " is no longer alive"
+	}
+	if left := fleet.S(w, "left"); left != "" {
+		return "the session " + fleet.Short(left) + " left the change after it was dispatched"
+	}
+	return "no session has held it since it was dispatched"
 }
 
 // lateReplies is every question or escalation nobody acknowledged past the grace,

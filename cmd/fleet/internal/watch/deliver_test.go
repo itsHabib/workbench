@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +42,16 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	return home, sink
 }
 
+// storeDirs is the store's directories for one address, or a failed test.
+func storeDirs(t *testing.T, tenant, address string) []string {
+	t.Helper()
+	dirs, err := fleet.MailStoreDirs(tenant, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dirs
+}
+
 // putStoreMail writes one record straight into the typed mailbox, which is where the
 // substrate's own reader looks.
 func putStoreMail(t *testing.T, address, id string, at float64, fields fleet.Rec) {
@@ -50,8 +61,7 @@ func putStoreMail(t *testing.T, address, id string, at float64, fields fleet.Rec
 	for k, v := range fields {
 		r[k] = v
 	}
-	dirs := fleet.MailStoreDirs("t1", address)
-	if err := fleet.WriteJSON(filepath.Join(dirs[0], id+".json"), r); err != nil {
+	if err := fleet.WriteJSON(filepath.Join(storeDirs(t, "t1", address)[0], id+".json"), r); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -101,7 +111,7 @@ func TestDeliverStormIsOneLaunchCarryingEveryMessage(t *testing.T) {
 		if !strings.Contains(prompt, id) {
 			t.Fatalf("%s missing from the launch prompt: %q", id, prompt)
 		}
-		r := fleet.ReadJSON(filepath.Join(fleet.MailStoreDirs("t1", "hub:lead")[0], id+".json"))
+		r := fleet.ReadJSON(filepath.Join(storeDirs(t, "t1", "hub:lead")[0], id+".json"))
 		if !fleet.Has(r, "delivered_at") || fleet.S(r, "delivered_by") != watchAddress {
 			t.Fatalf("%s not stamped: %v", id, r)
 		}
@@ -201,8 +211,110 @@ func TestDeliverRecordsAFailedLaunch(t *testing.T) {
 	if len(observedWhat(observed, "mail-delivery-failed")) != 1 {
 		t.Fatalf("failure not recorded: %v", observed)
 	}
-	if r := fleet.ReadJSON(filepath.Join(fleet.MailStoreDirs("t1", "hub:lead")[0], "q1.json")); fleet.Has(r, "delivered_at") {
+	if r := fleet.ReadJSON(filepath.Join(storeDirs(t, "t1", "hub:lead")[0], "q1.json")); fleet.Has(r, "delivered_at") {
 		t.Fatal("a failed launch consumed the message")
+	}
+}
+
+// Two folds that overlap — the scheduled watcher and a supported `fleet watch --once`
+// — reach launch with the same unstamped rows. Only one of them may start a session.
+func TestConcurrentFoldsLaunchOnce(t *testing.T) {
+	_, sink := deliverEnv(t)
+	now := fleet.Now()
+	putStoreMail(t, "hub:lead", "q1", now-60, nil)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	starts := 0
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n := len(observedWhat(deliver(now), "mail-delivery-started"))
+			mu.Lock()
+			starts += n
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if starts != 1 {
+		t.Fatalf("overlapping folds launched %d times, want 1", starts)
+	}
+	launched(t, sink)
+}
+
+// A flat mailbox rebound to another tenant is not this tenant's mail. Its records
+// predate the tenant field, so the pin is the only evidence there is.
+func TestFlatMailboxIsAdmittedOnlyByItsOwnPin(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pin   fleet.Rec
+		rows  int
+		fails bool
+	}{
+		{"pinned to this tenant", fleet.Rec{"role": "hub:lead", "tenant": "t1"}, 1, false},
+		{"rebound from another tenant", fleet.Rec{"role": "hub:lead", "tenant": "t0"}, 0, false},
+		{"pinned to another address", fleet.Rec{"role": "hub:other", "tenant": "t1"}, 0, false},
+		{"unpinned", nil, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _ = deliverEnv(t)
+			now := putFlatMail(t, "hub:lead", tc.pin)
+			rows, err := fleet.MailboxRecords("t1", "hub:lead")
+			if tc.fails {
+				assertUnreadable(t, rows, err, now)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != tc.rows {
+				t.Fatalf("rows: %v, want %d", rows, tc.rows)
+			}
+			if tc.rows == 0 {
+				assertNotThisTenants(t, now)
+			}
+		})
+	}
+}
+
+// putFlatMail writes one pre-tenant record, and the pin when there is one, into the
+// retained flat mailbox. It returns the fold time the record is old enough for.
+func putFlatMail(t *testing.T, address string, pin fleet.Rec) float64 {
+	t.Helper()
+	now := fleet.Now()
+	flat := fleet.Path("mail", fleet.Safe(address))
+	// A record written before tenants were stored carries none of its own.
+	legacy := fleet.Rec{"id": "old1", "to": address, "from_role": "hub:b", "kind": "question",
+		"subject": "unit?", "body": "ms or s", "at": now - 600}
+	if err := fleet.WriteJSON(filepath.Join(flat, "old1.json"), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if pin == nil {
+		return now
+	}
+	if err := fleet.WriteJSON(filepath.Join(flat, ".address.json"), pin); err != nil {
+		t.Fatal(err)
+	}
+	return now
+}
+
+func assertUnreadable(t *testing.T, rows []fleet.Rec, err error, now float64) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("an unpinned flat mailbox was read anyway: %v", rows)
+	}
+	if observed := deliver(now); len(observedWhat(observed, "mail-delivery-started")) != 0 {
+		t.Fatalf("launched on an unpinned mailbox: %v", observed)
+	}
+}
+
+func assertNotThisTenants(t *testing.T, now float64) {
+	t.Helper()
+	if observed := deliver(now); len(observedWhat(observed, "mail-delivery-started")) != 0 {
+		t.Fatalf("launched with another tenant's mail: %v", observed)
+	}
+	if _, err := fleet.StampMail("t1", "hub:lead", "old1", fleet.Rec{"delivered_at": now}); err == nil {
+		t.Fatal("stamped a foreign tenant's record as delivered")
 	}
 }
 
