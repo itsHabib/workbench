@@ -1,33 +1,73 @@
 package verbs
 
 import (
+	"os"
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
-func TestUndeclaredUsesHolderAssignment(t *testing.T) {
-	old := fleet.State
-	fleet.State = t.TempDir()
-	t.Cleanup(func() { fleet.State = old })
+func TestUndeclaredUsesCurrentPlacementAcrossReplacement(t *testing.T) {
+	repo, sid := requestFixture(t)
+	if err := os.MkdirAll(fleet.OrgState, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.RolesMap(), []byte(repo+" one worker:demo a-current\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	write := func(p string, r fleet.Rec) {
 		t.Helper()
 		if err := fleet.WriteJSON(p, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(fleet.Path("sessions", "current.json"), fleet.Rec{"session": "current", "slot": "a-current", "last": fleet.Now()})
-	write(fleet.KeyFile("leases", "repo:fixture:topic"), fleet.Rec{"key": "repo:fixture:topic", "session": "current", "at": fleet.Now()})
-	write(fleet.Path("assign", "a-current.json"), fleet.Rec{"repo": "fixture", "branch": "topic", "slot": "a-current", "delivered_to": "current", "for": "lead:current"})
-	write(fleet.Path("assign", "z-old.json"), fleet.Rec{"repo": "fixture", "branch": "topic", "slot": "z-old", "delivered_to": "old", "for": "lead:old"})
+	rec := fleet.SessionRecord(sid)
+	rec["slot"], rec["launch_dir"] = "a-current", repo
+	write(fleet.Path("sessions", sid+".json"), rec)
+	rid, key := fleet.RepoID(repo), fleet.Scope(repo, "task")
+	write(fleet.KeyFile("leases", key), fleet.Rec{"key": key, "session": sid, "at": fleet.Now()})
+	a := fleet.Rec{"repo": rid, "branch": "task", "slot": "a-current", "path": repo,
+		"delivered_to": "predecessor", "for": "lead:current", "at": fleet.F(rec, "last_event_at") - 1}
+	path := fleet.Path("assign", "a-current.json")
+	write(path, a)
+	write(fleet.Path("assign", "z-old.json"), fleet.Rec{"repo": rid, "branch": "task", "slot": "z-old", "delivered_to": "old", "for": "lead:old"})
+	before := readBytes(t, path)
 	rows := undeclaredRows(map[string]bool{})
 	if len(rows) != 1 || fleet.S(rows[0], "for") != "lead:current" || fleet.S(rows[0], "slot") != "a-current" {
-		t.Fatalf("wrong assignment attached: %v", rows)
+		t.Fatalf("replacement lost current placement: %v", rows)
 	}
-	// A reused seat's record delivered to another session is not the holder's work.
-	write(fleet.Path("assign", "a-current.json"), fleet.Rec{"repo": "fixture", "branch": "topic", "slot": "a-current", "delivered_to": "other", "for": "lead:other"})
-	rows = undeclaredRows(map[string]bool{})
+	if string(readBytes(t, path)) != string(before) {
+		t.Fatal("board changed assignment while reading")
+	}
+	// A reused name must not associate another path, repository or branch.
+	for _, field := range []string{"repo", "branch", "slot", "path"} {
+		value := a[field]
+		a[field] = "other"
+		write(path, a)
+		assertNoHolderAssignment(t)
+		a[field] = value
+	}
+	write(path, a)
+	// Current filesystem state also matters when persisted session facts are old.
+	runGit(t, repo, "checkout", "-b", "reused-branch")
+	assertNoHolderAssignment(t)
+	runGit(t, repo, "checkout", "task")
+	// A later placement on the same branch cannot rename a predecessor's owner.
+	a["at"] = fleet.F(rec, "last_event_at") + 1
+	write(path, a)
+	assertNoHolderAssignment(t)
+	a["at"] = fleet.F(rec, "last_event_at") - 1
+	write(path, a)
+	if err := os.WriteFile(fleet.RolesMap(), []byte(repo+" one worker:demo new-seat\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	assertNoHolderAssignment(t)
+}
+
+func assertNoHolderAssignment(t *testing.T) {
+	t.Helper()
+	rows := undeclaredRows(map[string]bool{})
 	if len(rows) != 1 || rows[0]["for"] != nil {
-		t.Fatalf("foreign delivery attached: %v", rows)
+		t.Fatalf("stale placement attached to holder: %v", rows)
 	}
 }
