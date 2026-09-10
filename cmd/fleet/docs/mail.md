@@ -53,7 +53,8 @@ caller-chosen ID. The same sender address and kind/subject/head/body return the
 original record even from a replacement session. Retry does not renew `at`,
 overwrite the body, or reset acknowledgement. Changed payload or a different
 sender under that ID refuses. IDs are recipient-scoped, so two senders choosing
-the same ID for one inbox conflict. Send and ack serialize through the existing
+the same ID for one inbox conflict. Use lowercase IDs for portable naming:
+IDs differing only by case conflict on case-insensitive filesystems. Send and ack serialize through the existing
 mail lock and publish temp-then-rename. Repeated ack preserves the first reader.
 
 ## Retained role mail

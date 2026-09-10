@@ -304,8 +304,10 @@ docs/               notes for report and hook inspection
 
 A replacement session receives the seat's current assignment at SessionStart,
 including a brief already shown to its predecessor. The assignment is checked
-against the seat's current checkout, repository and branch; a reused seat does
-not receive an old branch's brief. The original delivery stamp remains historical
+against its recorded role and tenant and the seat's current directory, repository
+and branch; rebinding or reusing a seat does not replay the previous assignment.
+Legacy assignments without recorded identity remain retained but need a fresh
+assignment before Fleet can safely replay their context. The original delivery stamp remains historical
 notification evidence, not a claim that the replacement accepted or finished work.
 
 A dedicated lead can leave context that follows its role across branches:

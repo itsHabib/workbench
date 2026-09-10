@@ -230,13 +230,11 @@ func js(v any) string {
 }
 
 func dispatch(name string, a map[string]any) (string, bool) {
-	if isMailTool(name) {
-		return dispatchMail(name, a)
+	if isContextTool(name) {
+		return dispatchContext(name, a)
 	}
 	s := func(k string) string { v, _ := a[k].(string); return v }
 	switch name {
-	case "fleet_handoff":
-		return runVerb(func() error { return verbs.CmdRoleHandoff(s("conclusion"), s("next"), s("session")) })
 	case "fleet_who":
 		ok, text, detail := verbs.Who(s("name"))
 		out := map[string]any{"resolved": ok, "text": text}
@@ -321,7 +319,7 @@ func handle(msg map[string]any) map[string]any {
 	case "tools/call":
 		name, _ := params["name"].(string)
 		args, _ := params["arguments"].(map[string]any)
-		if name != "fleet_status" && name != "fleet_request" && name != "fleet_handoff" && !isMailTool(name) {
+		if name != "fleet_status" && name != "fleet_request" && !isContextTool(name) {
 			fleet.MigrateLegacyKeys()
 		}
 		text, isErr, err := safeCall(name, args)
@@ -400,9 +398,11 @@ func taskStatusJSON() (string, bool) {
 	return buf.String(), err != nil
 }
 
-func dispatchMail(name string, a map[string]any) (string, bool) {
+func dispatchContext(name string, a map[string]any) (string, bool) {
 	s := func(k string) string { v, _ := a[k].(string); return v }
 	switch name {
+	case "fleet_handoff":
+		return runVerb(func() error { return verbs.CmdRoleHandoff(s("conclusion"), s("next"), s("session")) })
 	case "fleet_send":
 		return runVerb(func() error {
 			return verbs.CmdSend(s("to"), s("id"), s("kind"), s("subject"), s("head"), s("body"), s("session"))
@@ -417,6 +417,6 @@ func dispatchMail(name string, a map[string]any) (string, bool) {
 	return "", true
 }
 
-func isMailTool(name string) bool {
-	return name == "fleet_send" || name == "fleet_mail" || name == "fleet_ack"
+func isContextTool(name string) bool {
+	return name == "fleet_handoff" || name == "fleet_send" || name == "fleet_mail" || name == "fleet_ack"
 }
