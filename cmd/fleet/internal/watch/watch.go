@@ -122,6 +122,9 @@ func Tick(interval time.Duration) (string, error) {
 			notify(t)
 		}
 	}
+	if err := DeliverMail(); err != nil {
+		return md, err
+	}
 	return md, nil
 }
 

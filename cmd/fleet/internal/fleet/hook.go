@@ -69,6 +69,7 @@ func Run(ev Event) (v *Verdict) {
 func onSessionStart(ev Event, sid string) *Verdict {
 	rec := TouchSession(sid, ev, Rec{"turn_open": false, "ended": false})
 	lines := []string{identityLine(sid, rec)}
+	lines = append(lines, MailLines(S(rec, "role"))...)
 	if slot := S(rec, "slot"); slot != "" {
 		if contested := occupySlot(sid, slot, S(rec, "role"), S(rec, "cwd")); contested != "" {
 			lines = append(lines, contested)
@@ -195,6 +196,7 @@ func onPrompt(ev Event, sid string) *Verdict {
 	// `last_prompt_at` is what the board delta below is measured since.
 	rec := TouchSession(sid, ev, Rec{"turn_open": true, "turn_open_at": Now(), "last_prompt_at": Now()})
 	lines := waitLines(sid, time.Now())
+	lines = append(lines, MailLines(S(rec, "role"))...)
 	if last := F(prev, "last_stop_at"); last > 0 {
 		if gap := Now() - last; gap > 60 {
 			lines = append(lines, fmt.Sprintf("[fleet] %s passed since your last turn ended.", FmtAge(gap)))

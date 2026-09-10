@@ -81,6 +81,9 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
   fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
                                                  record one retry-safe local assignment; does not launch a worker
+  fleet send <role> --id <id> --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
+  fleet mail [--for <role>] [--unacked] [--json] [--session <id8>]
+  fleet ack <id> [--session <id8>]
   fleet status [--json]                         read-only request board; queued is not accepted or running
   fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
@@ -124,6 +127,9 @@ func Run(args []string) {
 func Dispatch(args []string) error {
 	if len(args) == 0 {
 		return exitCode(2, usage)
+	}
+	if args[0] == "send" || args[0] == "mail" || args[0] == "ack" {
+		return dispatchMail(args[0], args[1:])
 	}
 	if args[0] == "status" {
 		return CmdStatus(args[1:])

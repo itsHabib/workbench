@@ -6,7 +6,7 @@ An operator running a team of coding agents wants one thing from the machinery
 underneath them: to always know **who is working what, what is stuck, and what
 is done** — and to be told that truthfully, at the moment it changes, without
 any agent having to stop and report it. `fleet` is that machinery. It is not a
-scheduler, not a chat bus, and not a workflow engine; it is the part that makes
+scheduler or a workflow engine; it is the part that makes
 ownership visible and exclusive so that leads can lead.
 
 The shape it serves is a hub and spokes. The operator talks to a **lead** (a
@@ -63,7 +63,7 @@ a store the Python wrote must still satisfy. The design record is cc-skills
 | hook | `fleet hook claude` / `fleet hook codex` | reads one harness event on stdin; exit 0 allow, exit 2 deny with the reason on stderr; injects `[fleet]` context lines |
 | CLI | `fleet <verb>` | the operator's side: stop, resume, revoke, take, drop, board, work, dispatch, … |
 | MCP | `fleet mcp` | the same verbs as tools over stdio, for a hub agent to call from inside a session |
-| watcher | `fleet watch` | one per machine; writes only under `watch/` (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
+| watcher | `fleet watch` | one per machine; writes under `watch/` plus mail delivery stamps (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
 
 Exit codes are a load-bearing seam. Hook: 0 allow, 2 deny. Verb: 0 ok, 1 refused
 with the reason on stderr (a refusal is the substrate doing its job), 2 usage;
@@ -81,6 +81,8 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | evidence of done at an exact head |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
 | `assign/<slot>.json` | `assign`, `dispatch --slot` | what a seat's next session reads at start |
+| `mail/<role-safe>/<id>.json` | `send`, `ack`, watcher delivery stamp | role-addressed messages, retained after acknowledgement |
+| `contacts.json`, `deliver.json` | operator | permitted contacts and role launch commands |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
 | `lanes/<kind>/` | `install.sh` | manifests and cards, copied from cc-skills |
@@ -163,11 +165,36 @@ an unreadable session record must not be read as death.
 
 `fr1_test.go` is the domain-word tripwire over the Go source.
 
+## Mail
+
+Send to a role, read the mailbox, then acknowledge explicitly:
+
+```sh
+fleet send hub:parent --id unit-question-1 --kind question --subject 'Which unit?' \
+  --head abc123 --body 'Use milliseconds or seconds?'
+fleet mail --unacked                 # full bodies; --for <role> selects a mailbox
+fleet ack unit-question-1
+```
+
+`--body -` reads stdin. `--session <id8>` disambiguates callers; `mail --json`
+returns records. MCP exposes `fleet_send`, `fleet_mail`, `fleet_ack`. Identical
+retries return the original record; changed payloads refuse. Hooks inject up to
+five unacked mail lines at SessionStart and UserPromptSubmit, without auto-ack.
+
+The operator supplies `contacts.json` (parent/children/siblings per role) and
+`deliver.json` (role → cwd/command) under `FLEET_STATE`. Contacts stay in the
+`roles.map` tenant; seats contact only their current dispatch's accountable role.
+Org has no cheap published contacts relation, so this uses the explicit fallback.
+The watcher launches for absent roles after `FLEET_MAIL_GRACE` (default `10s`),
+with delivery stamps and launch records. Attempts are at most once: a stamp made
+before launch prevents duplicates, but a crash in that gap can lose the launch.
+See [Mail configuration and delivery semantics](docs/mail.md) for formats and limits.
+
 ## Task coordination: first implementation increment
 
 This adds retry-safe local assignments and a read-only observation view. It does
-not yet implement the four-interaction product: launch/delivery, semantic worker
-acceptance, correlated questions, safe stop and replacement remain adapter work.
+not yet implement the four-interaction product: task launch/acceptance, correlated questions, safe stop and replacement remain adapter work.
+Role-addressed mail delivery below is independent of task acceptance.
 Do not activate a live trial or present this as cross-harness lifecycle parity.
 
 The approved direction is [cc-skills PR #60](https://github.com/itsHabib/cc-skills/pull/60):
@@ -247,7 +274,7 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
 ## What is deliberately not here
 
-- No daemon owns anything. The watcher writes only its own board files; the hook is where facts
+- No daemon owns work. The watcher writes its board files and mail delivery stamps; the hook is where session facts
   are written; leases live in files the kernel releases on death.
 - No agent ceremony. There is no check-in, heartbeat, or status an agent must
   send. If the board needs a fact, the hook derives it from an action the agent
