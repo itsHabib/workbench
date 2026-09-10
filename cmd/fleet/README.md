@@ -270,8 +270,11 @@ conflicts, immutable payloads, legacy-writer protection, damaged evidence,
 post-tool provenance and non-migrating JSON-RPC observation. Harness event
 fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
-## Agent guides
+## Guides
 
+- [docs/OVERVIEW.md](docs/OVERVIEW.md): the problem, the four rules, the shape, what it has proved.
+- [docs/ONBOARDING.md](docs/ONBOARDING.md): a working fleet over one repository in thirty minutes.
+- [docs/MINIMUM.md](docs/MINIMUM.md): the five habits and two files that carry most of the value with none of the machinery.
 - [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
   lead, worker or verifier, read the fleet.
 - [docs/e2e.md](docs/e2e.md): prove a build end to end with real sessions in a sandbox of your
