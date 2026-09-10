@@ -24,9 +24,10 @@ check in, post status, or remember rules fails the same way: they don't, and the
    mail-driven shape a session for that role is started when a message arrives and ends when it
    has reported: no loops, no long-lived sessions. The launcher that does the starting is PR
    #301, in review; until it lands a small poller does that job (`e2e/mail-poll.sh`).
-4. **Done is evidence.** A receipt at an exact commit, from a clean tree, by a session in a
-   verifier seat, is what "done" means; that it is a *different* session from the implementer
-   is a rule on the verifier card. A message saying "done" is not done.
+4. **Done is evidence.** A passing receipt at the exact commit, from a clean tree, by a session
+   whose lane produces that kind, is what "done" means. That the session differs from the
+   implementer is a rule on the verifier card that the lead checks; the verb does not. A
+   message saying "done" is not done.
 
 ## The shape
 
@@ -52,7 +53,7 @@ substrate makes.
 | row | a declared assignment: change, relationship, accountable role, due, seat |
 | mail | one file per message under `mail/.v2/<tenant>/<role or seat>/<address>/<id>.json` (hashed names); send, read, ack; retry-safe by id |
 | receipt | `receipts/<sha>.<kind>.json`; the only source of "done" |
-| watcher | one per machine; folds the store into a board; delivering mail by starting sessions is PR #301 |
+| watcher | one per machine; folds the store into a board and reports observed changes. On main a separate delivery process starts sessions from mail; built-in delivery is proposed in #301 |
 | lane | a kind of agent: a manifest (requires, produces, denies) plus a prose card |
 
 Roles are data. Adding a kind of agent is a directory of two files, not a code change.
@@ -61,9 +62,11 @@ Roles are data. Adding a kind of agent is a directory of two files, not a code c
 
 Four live runs on 2026-09-09/10 (`itsHabib/fleet-demo-sandbox`, `docs/REHEARSAL-2026-09-09.md`,
 scorecards under `runs/`): two leads under one, two workers contending for one resource, a
-verifier, real refusals, real receipts. The last run: one kickoff session, then 18 sessions
-created from 19 messages, both tasks verified in 12 minutes, zero messages to the operator, about
-4x fewer output tokens than the same run with long-lived sessions (133k against 516k). Every
+verifier, real refusals, real receipts. All four were Mac and Claude. The last: one kickoff
+session, then 18 poller launches; 19 sessions, 19 messages, both tasks verified in a reported 12
+minutes, no message to the operator. It recorded 133,480 output tokens against run 2's 515,729,
+about 3.9x fewer, with the build, contract and delivery all changed between them, so that is an
+observation, not a controlled comparison. Every
 mistake the orchestration made was caught and became a numbered finding with an owner: a session
 drifting into a seat was refused by the hook, a launcher starting four sessions for one role was
 absorbed by Org's one-holder rule, a stale order was refused by the lead on the row's evidence.

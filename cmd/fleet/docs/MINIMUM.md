@@ -23,9 +23,10 @@ written shape hold surprisingly well, because the agents read the shape at start
 ## The five habits
 
 1. **One directory per agent, one branch per directory.** A lead gets a directory; each worker
-   gets a worktree with its own branch; nobody shares. Put a short `CLAUDE.local.md` (or the
-   Codex equivalent) in each: "You are the worker for task X on branch Y. Your lead is Z."
-   That file is the whole identity. An agent that opens there knows who it is.
+   gets a worktree with its own branch; nobody shares. Put "You are the worker for task X on
+   branch Y. Your lead is Z." in the directory's `CLAUDE.local.md` for Claude, or in its
+   `.codex/config.toml` under `developer_instructions` for Codex. That file is the whole
+   identity. Start a fresh session there and have it say its role and parent before giving it work.
 2. **One page of contract, in the repository.** Outcome, tasks with acceptance, who talks to
    whom, what nobody may do, when to stop. Leads read it before acting. Authority comes from
    the page, not from the conversation.
@@ -42,7 +43,8 @@ written shape hold surprisingly well, because the agents read the shape at start
 
 ## The two files
 
-- **`CLAUDE.local.md` per directory** (identity and the rules above in a few lines).
+- **`CLAUDE.local.md` (Claude) or `.codex/config.toml` (Codex) per directory** (identity and the
+  rules above in a few lines).
 - **`docs/RUN-CONTRACT.md` in the repository** (authority and the stop condition in one page; the
   sandbox keeps versioned copies, `docs/RUN-CONTRACT-v4.md` is the latest).
 
@@ -63,9 +65,3 @@ person makes a mistake in the setup. Those are the reasons the substrate exists,
 to add its pieces if the habits hold and the team grows: leases first (one writer per branch),
 receipts second (done as evidence), mail third (roles as addresses), the watcher last (sessions
 started by messages, lateness raised by the system).
-
-## The sentence
-
-Give each agent a place that says who it is, give the team a page that says what is allowed,
-make every message carry an id and go one hop up, and let "done" be another agent's written
-observation of a commit. That is most of the value; the rest is making it impossible to forget.

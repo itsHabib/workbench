@@ -1,9 +1,13 @@
 # Fleet: onboarding
 
-For a person setting Fleet up on a machine, or an agent asked to. Thirty minutes to a working
-fleet over one repository; read [OVERVIEW.md](OVERVIEW.md) first if the words are new.
+For a person setting Fleet up on a machine, or an agent asked to. Set up one repository, then
+rehearse on this machine and record elapsed time and friction; read [OVERVIEW.md](OVERVIEW.md)
+first if the words are new. Everything measured so far was measured on a Mac with Claude.
 
 ## 1. Install the hook (operator, once per machine)
+
+Prerequisites: Go, Git, Bash (Git Bash on Windows) and Python 3; a cc-skills checkout for the
+lane cards (`LANES_SRC` pointing at its lanes directory); the built `fleet` binary on `PATH`.
 
 ```sh
 bash cmd/fleet/install.sh             # dry run: prints every change
@@ -11,8 +15,12 @@ bash cmd/fleet/install.sh --shadow    # optional: run beside the existing hook, 
 bash cmd/fleet/install.sh --apply     # build, back up harness configs, swap the hook lines it finds, install lanes
 ```
 
-State lives in `~/.fleet` (`FLEET_STATE` to move it). The installer edits harness configuration,
-so a person runs it. Check: open any session and look for a `[fleet] session … · role ? · …`
+`--apply` is an upgrade path: it replaces hook registrations that already exist in the harness
+configs and skips missing files and a missing lane source. On a fresh machine, register the
+harness events first (`fleet inspect-hooks --config <harness json>` shows what is wired), then
+run `--apply`, then open a fresh session. Stop if the output says a config or the lane source was
+skipped. State lives in `~/.fleet` (`FLEET_STATE` to move it). The installer edits harness
+configuration, so a person runs it. Check: open any session and look for a `[fleet] session … · role ? · …`
 line at start. `?` is correct for a directory with no role.
 
 ## 2. Decide the tree (five minutes of thinking, no commands)
@@ -77,22 +85,21 @@ The overall lead's first tick sends one `order` per child. Then:
 ```sh
 fleet work            # rows and their observed state: dispatched · working · idle · late · abandoned · dead · failed · undeclared · remote · done
 fleet leases          # who holds which branch or resource
-fleet mail --for <address>   # from a session that has a role; the verb refuses an unroled caller
+fleet mail --for <address>   # only inside a live roled session; from an operator shell use board/work/leases/receipts
 fleet receipts
 org log -role supervisor:<name>-a
 ```
 
 Files in, sessions out, records left behind.
 
-## 7. The rules that cost hours
+## 7. Before kickoff
 
-- A repository root carries no role. Nothing refuses it; it is a rule, because a root's projected
-  denies apply to every worktree under it.
-- Never `cd` into a roled directory that is not yours; launch from a subshell, use `git -C`.
-- No idle desktop session in a roled directory; it reads as live and blocks delivery.
-- One branch, one holder; only session end or an operator `fleet revoke` releases it.
-- `fleet done <sha> --kind verify`; without `--kind` it demands a passing receipt of every kind the
-  installed lane manifests produce.
+Check the operating rules in [run-a-fleet.md](run-a-fleet.md): keep the repository root unbound,
+stay in your own directory, inspect holders, clear idle sessions from delivery addresses. Three
+that are only here:
+
+- `fleet done <sha> --kind verify`; without `--kind`, done expects every receipt kind the installed
+  lane manifests produce.
 - The hook's session id is not the desktop app's; the directory is the key both sides share.
 - A command matching a rule in `~/.fleet/expensive.json` (hand-written thresholds) needs the
   `FLEET_ALLOW_SLOW='<why>'` prefix, and the seat's allow list must accept that form.
@@ -100,4 +107,4 @@ Files in, sessions out, records left behind.
 ## 8. Prove it before trusting it
 
 Run [e2e.md](e2e.md) once on the machine: a scorecard from records and a friction list with
-owners. The reference run took twelve minutes. Then run real work.
+owners. Then run real work.

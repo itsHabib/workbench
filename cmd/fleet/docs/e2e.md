@@ -68,9 +68,13 @@ One headless overall-lead tick that sends one `order` per child:
    --allowedTools 'Read,Skill,Bash(org *),Bash(<fleet binary> *),Bash(gh *),Bash(git *),Bash(cat *),Bash(ls *)' < /dev/null)
 ```
 
-Then `e2e/mail-poll.sh <deliver.json> <fleet binary> <state dir> 10 45 <tenant>` in the
-background, and watch `fleet mail --for <address>`, `fleet leases`, the PR list, and the poll
-log. A loop printing each new file under `mail/` is the live view.
+Then `bash cmd/fleet/e2e/mail-poll.sh <deliver.json> <fleet binary> <log dir> 10 45 <tenant>` in
+the background. Know what that stand-in does: it reads mail and sessions from `~/.fleet` only
+(not `FLEET_STATE`), its log-dir argument holds `poll.log` and the launched-id set, its binary
+argument is unused (put the real executable in each config entry's `cmd`), and it records ids
+before starting the process, so a failed launch is not retried on its own; inspect `poll.log`.
+Watch `fleet leases`, the PR list and the poll log; `fleet mail --for <address>` works only
+inside a live roled session. A loop printing each new file under `mail/.v2/` is the live view.
 
 
 ## Desktop `/loop` as the delivery process
@@ -102,10 +106,12 @@ reproducer, expected, actual, owner.
 
 ## Codex variant
 
-Same contract, same directories, same scorecard. Change the launch commands in `deliver.json`
-to the Codex launcher, and the hook path is `fleet hook codex`; `fleet role` already projected the
-Codex config into each seat. Diff the two scorecards; differences in edges, relay depth or
-refusals are the finding.
+Keep the contract and directories, put the Codex launch command in `deliver.json` (the hook
+path is `fleet hook codex`; `fleet role` already projected the Codex config into each seat), and
+verify a fresh session there sees its role and hooks before dispatching. The scorecard's mail,
+receipt and launch counts apply as they are; its session and token reader is Claude-only and it
+counts no refusals, so collect Codex sessions, usage and refusals separately before comparing.
+This is an unproved variant until it has run: nothing so far is Windows or Codex acceptance.
 
 ## Chaos layer
 
