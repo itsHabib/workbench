@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-mail-") as tmp:
     assert conflict.returncode == 1 and "different payload" in conflict.stderr
     denied = cli(sender, "send", "hub:z", "--id", "cross-tenant", "--kind", "report",
                  "--subject", "test", "--body", "not allowed")
-    assert denied.returncode == 1 and "outside caller tenant" in denied.stderr
+    assert denied.returncode == 1 and "caller tenant" in denied.stderr
     assert cli(sender, "mail", "--for", "hub:z", "--json").returncode == 1
     assert cli(sender, "ack", "question-1").returncode == 1
 

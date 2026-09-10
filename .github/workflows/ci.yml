@@ -60,6 +60,10 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: coverage.out
+      - name: Fleet CLI and hook adapter regressions
+        run: |
+          bash cmd/fleet/testdata/run-suite.sh
+          bash cmd/fleet/testdata/run-suite.sh codex
       - name: go build
         run: go build ./...
       # The tracelens corpus gate: a detector regression against the labeled

@@ -40,10 +40,10 @@ func str(desc string) schema { return schema{"type": "string", "description": de
 var cwdArg = str("the calling session's working directory (its worktree); identity and branch names resolve relative to it, never to this server's own cwd")
 
 var tools = []schema{
-	{"name": "fleet_handoff", "description": "Leave an advisory handoff for the caller's role; the replacement session receives it at startup.",
+	{"name": "fleet_handoff", "description": "Leave an advisory handoff for the caller's dedicated role; its replacement session receives it at startup. Pooled seats use branch handoffs.",
 		"inputSchema": schema{"type": "object", "properties": schema{"conclusion": str("useful conclusion for the next session"), "next": str("optional remaining work"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"conclusion", "cwd"}}},
 	{"name": "fleet_send", "description": "Send retry-safe mail to a role or individual seat in the caller's tenant.",
-		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role or seat address"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("short subject"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
+		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role or seat address"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("subject, at most 1024 bytes"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
 	{"name": "fleet_mail", "description": "List mail for an address, defaulting to the caller's role or seat; returns JSON, no acknowledgement.",
 		"inputSchema": schema{"type": "object", "properties": schema{"for": str("role or seat address"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
 	{"name": "fleet_ack", "description": "Mark mail read by a session at the recipient address.",

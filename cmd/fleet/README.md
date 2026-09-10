@@ -81,7 +81,7 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | evidence of done at an exact head |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
 | `assign/<slot>.json` | `assign`, `dispatch --slot` | what a seat's next session reads at start |
-| `mail/<role-safe>/<id>.json` | `send`, `ack` | role-addressed messages, retained after acknowledgement |
+| `mail/.v2/<tenant>/<kind>/<address>/<id>.json` | `send`, `ack` | role/seat messages, retained after acknowledgement |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
 | `lanes/<kind>/` | `install.sh` | manifests and cards, copied from cc-skills |
@@ -166,20 +166,22 @@ an unreadable session record must not be read as death.
 
 ## Mail
 
-Durable communication between identified roles in the same tenant:
+Durable communication between identified roles and individual worker seats in the same tenant.
+A `roles.map` row with a fourth column uses that seat name as its address; a
+dedicated role uses its role name. Two seats of the same kind have separate inboxes.
 
 Subjects are limited to 1024 bytes; bodies remain full.
 
 ```sh
 fleet send hub:b --id unit-question-1 --kind question --subject 'Which unit?' \
   --head abc123 --body 'Use milliseconds or seconds?'
-fleet mail --unacked                 # full bodies; --for <role> selects a mailbox
+fleet mail --unacked                 # full bodies; --for <address> selects a mailbox
 fleet ack unit-question-1
 ```
 
 `--body -` reads stdin. `--session <id8>` disambiguates callers; `mail --json`
 returns records. MCP exposes `fleet_send`, `fleet_mail`, `fleet_ack`. A replacement
-sender session can retry the same role/ID/payload without rewriting the original
+sender session can retry the same sender address, recipient, ID and payload without rewriting the original
 record. Changed payloads and cross-tenant access refuse. Mail grants no assignment,
 resource, or merge authority; it has no relationship allowlist or launch machinery.
 
@@ -192,7 +194,7 @@ See [Mail semantics and validation](docs/mail.md) for identity, storage and retr
 
 This adds retry-safe local assignments and a read-only observation view. It does
 not yet implement the four-interaction product: task launch/acceptance, correlated questions, safe stop and replacement remain adapter work.
-Role-addressed mail is independent of task acceptance.
+Mail is independent of task acceptance.
 Do not activate a live trial or present this as cross-harness lifecycle parity.
 
 The approved direction is [cc-skills PR #60](https://github.com/itsHabib/cc-skills/pull/60):
