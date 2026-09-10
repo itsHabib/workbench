@@ -97,6 +97,12 @@ func liveHands(key string) string {
 // slot is named. Placement is `assign`, under the slot's lock, before the row is
 // written, so a refused placement leaves no row behind.
 func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
+	return fleet.KeyLock("dispatch", func() error {
+		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take)
+	})
+}
+
+func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
 	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <session>] [--take]`
 	if change == "" || rel == "" {
 		return refuse("%s", usage)
@@ -123,7 +129,10 @@ func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		forRole = by
 	}
 	key := "repo:" + rid + ":" + branch
-	existing := fleet.ReadJSON(dispatchFile(rid, branch, rel))
+	existing, err := replaceableDispatch(rid, branch, rel)
+	if err != nil {
+		return err
+	}
 	if hands := liveHands(key); hands != "" && existing != nil && !take {
 		return refuse("fleet dispatch: %s/%s already has live hands (%s, for %s); `--take` rewrites the row, or `fleet work` to see it",
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
@@ -170,6 +179,10 @@ func dispatcher(by string) string {
 // CmdReassign moves every row of a change to another accountable role. Two
 // commands split a hub: bind the second role's directory, then reassign its rows.
 func CmdReassign(change, forRole string) error {
+	return fleet.KeyLock("dispatch", func() error { return cmdReassign(change, forRole) })
+}
+
+func cmdReassign(change, forRole string) error {
 	if change == "" || forRole == "" {
 		return refuse("usage: fleet reassign <branch|#n> --for <role>")
 	}
@@ -177,8 +190,17 @@ func CmdReassign(change, forRole string) error {
 	if err != nil {
 		return err
 	}
+	rows, err := scopedDispatchRows(rid, branch, "")
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if fleet.S(r, "repo") == rid && fleet.S(r, "change") == branch && fleet.S(r, "request_id") != "" {
+			return refuse("fleet: request-bound assignments require a correlated lifecycle action; inspect `fleet status`")
+		}
+	}
 	n := 0
-	for _, r := range dispatchRows() {
+	for _, r := range rows {
 		if fleet.S(r, "repo") != rid || fleet.S(r, "change") != branch {
 			continue
 		}
@@ -199,6 +221,10 @@ func CmdReassign(change, forRole string) error {
 
 // cmdUndispatch retires a change's rows (one relationship, or all of them).
 func cmdUndispatch(change, rel string) error {
+	return fleet.KeyLock("dispatch", func() error { return undispatch(change, rel) })
+}
+
+func undispatch(change, rel string) error {
 	if change == "" {
 		return refuse("usage: fleet undispatch <branch|#n> [--as <relationship>]")
 	}
@@ -206,8 +232,17 @@ func cmdUndispatch(change, rel string) error {
 	if err != nil {
 		return err
 	}
+	rows, err := scopedDispatchRows(rid, branch, rel)
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if fleet.S(r, "repo") == rid && fleet.S(r, "change") == branch && (rel == "" || fleet.S(r, "relationship") == rel) && fleet.S(r, "request_id") != "" {
+			return refuse("fleet: request-bound assignments require a correlated lifecycle action; inspect `fleet status`")
+		}
+	}
 	n := 0
-	for _, r := range dispatchRows() {
+	for _, r := range rows {
 		if fleet.S(r, "repo") != rid || fleet.S(r, "change") != branch || (rel != "" && fleet.S(r, "relationship") != rel) {
 			continue
 		}
@@ -476,4 +511,54 @@ func cmdWork(forRole string, asJSON bool) error {
 	}
 	say("%s", scope)
 	return nil
+}
+
+func replaceableDispatch(rid, branch, rel string) (fleet.Rec, error) {
+	path := dispatchFile(rid, branch, rel)
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return nil, nil
+	}
+	existing := fleet.ReadJSON(path)
+	if existing == nil || fleet.S(existing, "repo") != rid || fleet.S(existing, "change") != branch || fleet.S(existing, "relationship") != rel {
+		return nil, refuse("fleet dispatch: selected assignment is unreadable or has conflicting identity")
+	}
+	if fleet.S(existing, "request_id") != "" {
+		return nil, refuse("fleet dispatch: this assignment is request-bound; inspect `fleet status` rather than replacing it")
+	}
+	return existing, nil
+}
+
+// scopedDispatchRows preserves unrelated legacy maintenance while refusing every
+// damaged target before any mutation. Filename candidates catch unreadable rows;
+// decoded identity also catches selected rows stored under an unexpected name.
+func scopedDispatchRows(rid, branch, rel string) ([]fleet.Rec, error) {
+	entries, err := os.ReadDir(dispatchDir())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var rows []fleet.Rec
+	prefix := fleet.Safe(rid + "__" + branch + "__")
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dispatchDir(), entry.Name())
+		candidate := strings.HasPrefix(entry.Name(), prefix)
+		if rel != "" {
+			candidate = path == dispatchFile(rid, branch, rel)
+		}
+		row := fleet.ReadJSON(path)
+		selected := fleet.S(row, "repo") == rid && fleet.S(row, "change") == branch && (rel == "" || fleet.S(row, "relationship") == rel)
+		if !candidate && !selected {
+			continue
+		}
+		if !selected || fleet.S(row, "relationship") == "" || path != dispatchFile(rid, branch, fleet.S(row, "relationship")) {
+			return nil, refuse("fleet: selected assignment is unreadable or has conflicting identity")
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
