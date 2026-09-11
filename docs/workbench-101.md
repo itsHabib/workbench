@@ -217,7 +217,7 @@ The layout, top level down:
   plus sub-domains - `contracts/driverstate`, `contracts/execution`,
   `contracts/authority` (the room-authority receipt v1 + the `custody:`
   secret-ref grammar, PR #104), and the newer `automode`, `escalation`,
-  `gateauthorization`, `org`, `reviewfindings`, `reviewpanel`, and
+  `gateauthorization`, `grantrequest`, `reviewfindings`, `reviewpanel`, and
   `reviewroute` - each carrying types, JSON schemas, and pure validation. The
   carve-out that keeps this honest:
   *contract-law validation* (pure, stdlib-only, I/O-free "is this a valid
@@ -802,7 +802,7 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   exit codes are a load-bearing seam here too (`verified`,
   `cmd/fleet/README.md`; guides under `cmd/fleet/docs/`).
 - **org / org-mcp** - the role-card registry, deliberately small after the
-  2026-09-10 boundary decision: three operations (register/update, read, list)
+  2026-09-10 boundary decision: three operations (`charter`, `boot`, `status`)
   over `{tenant, role, card, parent?}` rows; the prose stays in its Markdown
   file, and neither a card nor a parent reference grants authority. `org-mcp`
   is its stdio MCP surface, shelling the binary (`verified`,
