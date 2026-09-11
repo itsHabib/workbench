@@ -170,6 +170,14 @@ func lastResult(path string) fleet.Rec {
 		return nil
 	}
 	start := max(0, st.Size()-traceWindow)
+	partial := false
+	if start > 0 {
+		previous := make([]byte, 1)
+		if _, err := f.ReadAt(previous, start-1); err != nil {
+			return nil
+		}
+		partial = previous[0] != '\n'
+	}
 	if _, err = f.Seek(start, io.SeekStart); err != nil {
 		return nil
 	}
@@ -178,7 +186,7 @@ func lastResult(path string) fleet.Rec {
 		return nil
 	}
 	lines := strings.Split(string(b), "\n")
-	if start > 0 && len(lines) > 0 {
+	if partial && len(lines) > 0 {
 		lines = lines[1:]
 	}
 	for i := len(lines) - 1; i >= 0; i-- {

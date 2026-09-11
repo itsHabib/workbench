@@ -70,3 +70,21 @@ Either limit produces an explicit partial-history coverage warning. Counts,
 correlations and latency samples then describe retained evidence only; even a
 large `--since` cannot recover excluded history. Logs are not rotated, deleted,
 or rewritten. Missing/unreadable-log diagnostics omit absolute store paths.
+
+## Headless run totals
+
+`fleet run-report --since 24h [--json]` reads retained Go watcher attempt logs and
+matching exit files. It prints each address/session, exit status, provider reason,
+turns and cost, then totals only reported numeric fields. The totals include the
+number of attempts with known values; absent provider fields are unknown.
+
+The window uses output-file modification time. Each result lookup reads at most
+the final 1 MiB; a missing or oversized result is reported as unavailable, with
+the raw output path. This report neither infers task completion from exit 0 nor
+reconstructs deleted attempts. It needs no live session or running watcher.
+
+Provider metrics currently require Claude-style JSONL `type: result` records.
+Codex-native transcript records are not parsed for these totals; their metrics
+remain unknown. Exit evidence and attempt metadata remain available independently.
+JSON aggregate totals are null when no attempt reported that field. Numeric zero
+means at least one reported value was zero, with known counts showing coverage.

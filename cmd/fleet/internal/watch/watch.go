@@ -121,7 +121,7 @@ func tick(interval time.Duration) (string, error) {
 		}
 	}
 	md := render(rows, work, now, prev, slept, transitions)
-	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1, "report_schema": 1}
+	hb := fleet.Rec{"at": now, "pid": float64(os.Getpid()), "interval": interval.Seconds(), "slept": slept, "rows": float64(len(rows)), "work": float64(len(work)), "transitions": float64(len(transitions)), "ticks": ticks + 1, "report_schema": 1, "notification_configured": os.Getenv("FLEET_NOTIFY") != ""}
 	if slept {
 		hb["gap_from"] = prevAt
 	}
@@ -648,20 +648,20 @@ func serveOwned(ctx context.Context, interval time.Duration) error {
 // EnsureRunning starts a detached watcher if none has ticked recently. Called from
 // SessionStart — the one event where a spawn is permitted — so there is no install
 // step: any session on the machine revives a dead watcher. Off when FLEET_WATCH=off.
-func EnsureRunning() {
+func EnsureRunning() bool {
 	if os.Getenv("FLEET_WATCH") == "off" || !Stale(2) {
-		return
+		return false
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return false
 	}
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
-		return
+		return false
 	}
 	log, err := os.OpenFile(filepath.Join(dir(), "watch.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return
+		return false
 	}
 	defer log.Close()
 	cmd := exec.Command(exe, "watch")
@@ -670,7 +670,8 @@ func EnsureRunning() {
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch start: " + err.Error()})
-		return
+		return false
 	}
 	_ = cmd.Process.Release()
+	return true
 }

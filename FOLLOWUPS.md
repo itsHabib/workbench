@@ -582,3 +582,13 @@ defects in the delivery fix that landed.
 Code verification at this head: `go test -race ./cmd/fleet/...`, `go vet`,
 `golangci-lint`, and both `testdata/run-suite.sh` variants pass. Those checks do not
 dismiss the residuals above. No further review-panel request goes out for this PR.
+
+
+## Fleet status identity findings (2026-09-11, PR #313)
+
+Gate rejected deferring two final-panel P2 findings. Both are now addressed:
+status rejects a retained launch with a different address/cwd before attaching
+process/output evidence, and suppresses checkout-derived joins when the directory
+is missing. Regression tests cover both cases and confirm the display rejection
+does not change directory-level launch exclusion. No fourth panel is requested;
+the corrected head goes through fresh CI and independent Gate judgment.

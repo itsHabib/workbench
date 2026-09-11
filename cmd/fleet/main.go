@@ -47,6 +47,14 @@ func main() {
 		runHook(args[1:])
 	case "mcp":
 		mcp.Serve(os.Stdin, os.Stdout)
+	case "status":
+		if len(args) > 1 && args[1] == "--all" {
+			runAllStatus(args[2:])
+			return
+		}
+		verbs.Run(args)
+	case "run-report":
+		runReport(args[1:])
 	case "tail":
 		runTail(args[1:])
 	case "watch":
@@ -61,12 +69,12 @@ func main() {
 // what makes the watcher need no install step: any session revives it. It lives here
 // rather than in the hook package because the watcher folds through the verbs, and
 // the hook package cannot import what imports it.
-func reviveWatcher(ev map[string]any) {
+func reviveWatcher(ev map[string]any) (started bool) {
 	if ev["hook_event_name"] != "SessionStart" {
-		return
+		return false
 	}
 	defer func() { _ = recover() }() // never a reason for a hook to fail
-	watch.EnsureRunning()
+	return watch.EnsureRunning()
 }
 
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
@@ -168,13 +176,13 @@ func runHook(args []string) {
 	case "claude":
 		v := fleet.Run(ev)
 		logVerdict(which, ev, v, t0, false)
-		reviveWatcher(ev)
-		fleet.Exit(v)
+		started := reviveWatcher(ev)
+		fleet.Exit(withWatcherHealth(ev, v, started))
 	case "codex":
 		v := codex.Run(ev)
 		logVerdict(which, ev, v, t0, false)
-		reviveWatcher(ev)
-		fleet.Exit(v)
+		started := reviveWatcher(ev)
+		fleet.Exit(withWatcherHealth(ev, v, started))
 	default:
 		fmt.Fprintf(os.Stderr, "fleet hook: unknown harness %q (claude|codex)\n", which)
 		os.Exit(2)
@@ -221,4 +229,69 @@ func runTail(args []string) {
 		fmt.Fprintln(os.Stderr, "fleet tail:", err)
 		os.Exit(1)
 	}
+}
+
+func runAllStatus(args []string) {
+	fs := flag.NewFlagSet("status --all", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "emit JSON")
+	_ = fs.Parse(args)
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet status --all [--json]")
+		os.Exit(2)
+	}
+	status := watch.AllStatus()
+	if *asJSON {
+		fmt.Printf("%s\n", fleet.DumpJSON(status))
+		return
+	}
+	fmt.Print(watch.AllStatusText(status))
+}
+
+func runReport(args []string) {
+	fs := flag.NewFlagSet("run-report", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "emit JSON")
+	since := fs.Duration("since", 24*time.Hour, "output modification window")
+	_ = fs.Parse(args)
+	if fs.NArg() != 0 || *since <= 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet run-report [--since 24h] [--json]")
+		os.Exit(2)
+	}
+	report := watch.RunReport(fleet.Now() - since.Seconds())
+	if *asJSON {
+		fmt.Printf("%s\n", fleet.DumpJSON(report))
+		return
+	}
+	fmt.Print(watch.RunReportText(report))
+}
+
+// withWatcherHealth adds startup context without changing the hook verdict.
+func withWatcherHealth(ev fleet.Rec, v *fleet.Verdict, started bool) *fleet.Verdict {
+	if fleet.S(ev, "hook_event_name") != "SessionStart" {
+		return v
+	}
+	state, hb := watch.WatcherHealth()
+	if started && state != "running" {
+		state = "revival requested; last observed " + state
+	}
+	line := fmt.Sprintf("[fleet] watcher: %s; inspect workers with fleet status --all; trace with fleet tail <address>", state)
+	if at := fleet.F(hb, "at"); at > 0 {
+		line += fmt.Sprintf("; last tick %s ago", fleet.FmtAge(fleet.Now()-at))
+	}
+	out := fleet.ReadJSONBytes([]byte(v.Out))
+	if out == nil {
+		out = fleet.Rec{}
+	}
+	specific := fleet.M(out, "hookSpecificOutput")
+	if specific == nil {
+		specific = fleet.Rec{"hookEventName": "SessionStart"}
+		out["hookSpecificOutput"] = specific
+	}
+	context := fleet.S(specific, "additionalContext")
+	if context != "" {
+		context += "\n"
+	}
+	specific["additionalContext"] = context + line
+	updated := *v
+	updated.Out = string(fleet.DumpJSON(out)) + "\n"
+	return &updated
 }
