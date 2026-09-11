@@ -1,12 +1,14 @@
 # Auto-mode defaults — making autonomy deterministic
 
-**Status:** v1 (2026-07-31) — refreshed the merge-boundary paragraph after the executor
-App's bootstrap merge landed, and added custody to the rulebooks.
+**Status:** v1.1 (2026-09-11) — merge-boundary paragraph updated for the executor App's
+suspension, branch-protection table re-verified, codexguard and the fleet hook added to
+the rulebooks. (v1, 2026-07-31, followed the bootstrap merge and added custody.)
 **The executable half** — literal settings, the guard script, hook registrations,
 install + verify — is [`auto-mode-rulebook.md`](auto-mode-rulebook.md).
 **Scope:** the auto-classifiers in the portfolio — the merge gate, triage, ship dispatch
-policy, and the Claude Code harness config (permissions + hooks). One set of defaults,
-many rulebooks.
+policy, the Claude Code harness config (permissions + hooks), the Codex-harness policy
+owner (`cmd/codexguard`), and the fleet occupancy hook. One set of defaults, many
+rulebooks.
 
 **How to read this:** these are working defaults distilled from what gate and triage got
 right, not law. Each one names the failure mode it guards; if the trade-off behind a rule
@@ -143,6 +145,19 @@ injected upstream by the broker so the caller never holds it; one receipt line p
 request, pass or refuse. Proven in a single-operator run against a real corporate Jira:
 reads passed, writes and unlisted API versions refused before forwarding.
 
+**Codex-harness tool calls** (`cmd/codexguard`): the same contract for the other
+harness — a deterministic policy owner for authority-bearing Codex tool calls that
+emits the shared `contracts/automode` AutoDecisionV1 artifact on every valid request
+(parks, blocks, and refusals included) and never executes the candidate action. Exit
+codes mirror gate's: 0 pass / 1 block / 2 park / 3 refuse / 4 operational error, with
+malformed request JSON refused without an artifact because no replayable input exists.
+
+**Session occupancy** (the fleet hook): `fleet hook claude|codex` is a deterministic
+reflex over harness events — exit 0 allow, exit 2 deny with the reason on stderr —
+enforcing directory-bound identity and one-holder-per-key leases, appending every
+evaluation's verdict and latency to an events log as passive telemetry. It decides
+occupancy only; merge authority stays gate's.
+
 **Harness tool calls** (what a session may do): three settings layers with distinct jobs —
 
 1. global `~/.claude/settings.json`: the personal defaults — universal tier-1 read-only
@@ -162,16 +177,19 @@ and gate-state touches) and refuses them with a remedy, in every permission mode
 **Merge, specifically:** merge *policy* belongs to gate, and the guard does not duplicate
 it. The guard enforces *shape*, not policy: it passes merge commands that carry
 `--match-head-commit` (the form gate emits) and refuses bare merges with the remedy
-pointing at gate. The structural close this paragraph used to wait on has started landing:
-merge credentials are moving behind the dedicated GitHub App executor
-(`docs/features/trusted-gate-judgment-bridge/`), which performed one real exact-head
-bootstrap merge (workbench PR #169, merged by the App identity, five-layer rulesets
-installed). Hosted execution remains unarmed pending activation and adversarial canaries,
-so the honest boundary today is: shape-guard + discipline + the harness self-merge
-classifier carry merge authority, with the executor path proven once but not yet armed.
-Revisit this paragraph when `GATE_EXECUTOR_ARMED` lands and the canaries pass — at that
-point the bare-merge hole closes structurally and the guard's merge rule becomes
-defense-in-depth rather than the boundary.
+pointing at gate. The structural close this paragraph used to wait on ran once and is
+now deliberately parked: the dedicated GitHub App executor
+(`docs/features/trusted-gate-judgment-bridge/`) performed one real exact-head bootstrap
+merge (workbench PR #169, merged by the App identity) and proved fail-closed behavior in
+bounded canaries — and is **currently suspended** pending a reliability and operator-UX
+review. The `main-required-gate` ruleset on workbench exists but is disabled, and no
+repo's branch protection currently requires a gate status (verified 2026-09-11). So the
+honest boundary today is: shape-guard + operator discipline + local gate emitting the
+exact commit-pinned merge command carry merge authority — gate is advisory in auto mode,
+and becomes enforcement only where a repo deliberately requires the check. Revisit this
+paragraph when the App is deliberately reactivated after its review — at that point the
+bare-merge hole closes structurally and the guard's merge rule becomes defense-in-depth
+rather than the boundary.
 
 ## Branch protection per repo
 
@@ -182,14 +200,14 @@ is necessary**; on a strict repo it is, and the cost is real (refresh → CI re-
 gate judgment, because the judged run binds to the head it was made against). Each sweep was
 rediscovering this per repo, so the facts live here.
 
-Verified 2026-08-14 against `gh api repos/itsHabib/<repo>/branches/main/protection`.
+Verified 2026-09-11 against `gh api repos/itsHabib/<repo>/branches/main/protection`.
 
 | Repo | Strict (up-to-date required) | Required contexts | Notes |
 |---|---|---|---|
 | `ship` | **yes** | `ubuntu-latest`, `windows-latest` | The expensive one. Any BEHIND PR costs refresh + full CI re-run + a fresh gate judgment; a refresh also resets panel attestations, so reviewed-and-green has to be re-established. Conversation resolution required. |
-| `dossier` | **yes** | `fmt`, `clippy`, `test` | **Drifted:** the job actually reports as the matrix pair `test (ubuntu-latest)` / `test (windows-latest)`, so the bare `test` context never arrives and sits pending forever. Being closed by `sweep-ci-test-aggregator` (an aggregator job named `test`); until it lands, expect a permanently-pending required check. Conversation resolution required. |
+| `dossier` | **yes** | `fmt`, `clippy`, `test` | The aggregator job named `test` (over the `test-matrix` pair) has landed, so all three required contexts now report. Conversation resolution required. |
 | `drive` | no protection | — | `main` unprotected (HTTP 404 on the protection endpoint). Gate + the guard are the only boundary. |
-| `workbench` | no protection | — | `main` unprotected. Note the five-layer *rulesets* installed for the GitHub App executor bootstrap are a separate mechanism from classic branch protection and do not show up on this endpoint. |
+| `workbench` | no protection | — | `main` unprotected. The *rulesets* installed for the GitHub App executor bootstrap are a separate mechanism from classic branch protection and do not show up on this endpoint; as of 2026-09-11 `gate-state-integrity`, `gate-state-updates`, and `main-updates` are active while `main-required-gate` is disabled. |
 | `roxiq` | no | `deploy-secret-lint`, `Go`, `Frontend`, `Playwright` | Protected but **not** strict — a BEHIND PR merges without a refresh. Conversation resolution not required. |
 | `rooms` | no protection | — | `main` unprotected. |
 
