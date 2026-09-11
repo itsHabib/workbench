@@ -27,7 +27,7 @@ where the lead session runs. Binaries and state come from the environment:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FLEET_BIN`, `ORG_BIN`, `GH_BIN` | `fleet`, `org`, `gh` | the tools it reads and drives |
+| `FLEET_BIN`, `ORG_BIN`, `GH_BIN` | `$FLEET_STATE/bin/fleet` when installed, else `fleet`; `org`; `gh` | the tools it reads and drives |
 | `FLEET_STATE` | `~/.fleet` | lanes live at `$FLEET_STATE/lanes/<kind>/` |
 | `STANDUP_DIR` | `$FLEET_STATE/standup` | `config.json`, `agenda/`, `records/` |
 | `ORG_STATE` | `~/dev/org/state` | `roles.map` (seat name → directory) |
@@ -42,8 +42,8 @@ where the lead session runs. Binaries and state come from the environment:
 
 `standup agenda` reads six things and refuses none of them: `fleet work --json`,
 `fleet receipts --since 24h --json`, `fleet mail --for <lead> --unacked --json`,
-`org status -json`, `gh pr list` per configured repository, and the previous
-record's deferrals. A source that cannot be read is recorded as unavailable with
+`org status -json` (the registered role cards: role, parent, card), `gh pr list`
+per configured repository, and the previous record's deferrals. A source that cannot be read is recorded as unavailable with
 the tool's own words. The file carries every row; the text render is bounded.
 
 The agenda's **projection** is the stable view of those sources (what exists and
@@ -69,7 +69,9 @@ labels every step with what happened to it: `plan`, `done` (on the ledger from a
 earlier apply), `skip`, `ran`, `failed`, or `not reached`.
 
 Launch is not a verb here. `fleet watch` delivers the card's mail to an absent
-seat by running that seat's `deliver.json` command once; delivery is the launcher.
+seat by starting that seat's configured provider session (`deliver.json`:
+`cwd`, `provider`, optional `permission_mode`, `every` and `prompt`); delivery
+is the launcher.
 
 ## Checks
 

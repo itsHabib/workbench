@@ -120,8 +120,8 @@ func (e Env) jsonSource(name, dir, bin string, args ...string) Source {
 	return s
 }
 
-// orgSource is `org status -json` with the rows that are not a lane dropped: the
-// tool prints placeholders with an empty tenant for lines it could not read.
+// orgSource is `org status -json`: the registered role cards (tenant, role, card,
+// parent). Rows with no role are placeholders and dropped.
 func (e Env) orgSource() Source {
 	s := e.jsonSource("org status", e.LeadDir, e.Org, "status", "-json")
 	if !s.OK {
@@ -129,7 +129,7 @@ func (e Env) orgSource() Source {
 	}
 	kept := s.Rows[:0]
 	for _, r := range s.Rows {
-		if str(r, "tenant") != "" && str(r, "phase") != "retired" {
+		if str(r, "role") != "" {
 			kept = append(kept, r)
 		}
 	}
@@ -198,7 +198,7 @@ func projectRow(source string, r map[string]any) (string, bool) {
 	case source == "fleet mail":
 		return fmt.Sprintf("mail %s %s from=%s", str(r, "id"), str(r, "kind"), str(r, "from")), true
 	case source == "org status":
-		return fmt.Sprintf("lane %s %s held=%s open=%s", str(r, "role"), str(r, "phase"), str(r, "held"), str(r, "open")), true
+		return fmt.Sprintf("role %s parent=%s", str(r, "role"), str(r, "parent")), true
 	case strings.HasPrefix(source, "gh pr list "):
 		repo := strings.TrimPrefix(source, "gh pr list ")
 		return fmt.Sprintf("pr %s#%s %s draft=%s mergeable=%s review=%s", repo, str(r, "number"), str(r, "headRefName"), str(r, "isDraft"), str(r, "mergeable"), str(r, "reviewDecision")), true
@@ -289,7 +289,7 @@ func rowLine(source string, r map[string]any) string {
 	case source == "fleet mail":
 		return fmt.Sprintf("- %s %s from %s: %s\n", str(r, "id"), str(r, "kind"), str(r, "from"), str(r, "subject"))
 	case source == "org status":
-		return fmt.Sprintf("- %s %s held=%s open=%s active=%s\n", str(r, "role"), str(r, "phase"), str(r, "held"), str(r, "open"), str(r, "active"))
+		return fmt.Sprintf("- %s parent=%s card=%s\n", str(r, "role"), orDash(str(r, "parent")), orDash(str(r, "card")))
 	case strings.HasPrefix(source, "gh pr list "):
 		draft := ""
 		if str(r, "isDraft") == "true" {

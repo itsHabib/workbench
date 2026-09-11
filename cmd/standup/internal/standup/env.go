@@ -123,7 +123,7 @@ func EnvFromOS() (Env, error) {
 	orgState := expand(envOr("ORG_STATE", "~/dev/org/state"))
 	return Env{
 		Dir:      expand(envOr("STANDUP_DIR", filepath.Join(fleetState, "standup"))),
-		Fleet:    envOr("FLEET_BIN", "fleet"),
+		Fleet:    envOr("FLEET_BIN", installedFleet(fleetState)),
 		Org:      envOr("ORG_BIN", "org"),
 		GH:       envOr("GH_BIN", "gh"),
 		LeadDir:  cwd,
@@ -132,6 +132,17 @@ func EnvFromOS() (Env, error) {
 		Run:      ExecRunner{},
 		Now:      time.Now,
 	}, nil
+}
+
+// installedFleet is the binary the hooks run, $FLEET_STATE/bin/fleet, when it is
+// there; else whatever "fleet" resolves to on PATH. The two can differ on a machine
+// where an older build was installed with go install.
+func installedFleet(fleetState string) string {
+	p := filepath.Join(fleetState, "bin", "fleet")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return "fleet"
 }
 
 // LoadConfig reads config.json and says exactly what to write when it is missing.

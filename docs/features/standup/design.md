@@ -22,7 +22,7 @@ standup record  (one JSON file, fail-closed until the operator confirms)
    ↓
 apply  (fleet role/pool · fleet dispatch · fleet send · fleet decide)
    ↓
-fleet watch delivers mail → launches `claude -p` in the seat
+fleet watch delivers mail → starts the seat's provider session
    ↓
 next agenda  (rows late/done, receipts, reports, unanswered questions)
 ```
@@ -134,20 +134,20 @@ The lead itself is a Fleet role, not a new Org lane:
 fleet role ~/dev/lead-mh lead:mh          # binds the directory; kind `lead`
 ```
 
-with a `deliver.json` entry so mail can wake it:
+with a `deliver.json` entry so mail can wake it, and optionally a recurring
+tick (the ladder's level 2, one field away):
 
 ```json
-{"lead:mh": {"cwd": "/Users/mh/dev/lead-mh",
-             "cmd": ["claude", "-p", "{{prompt}}", "--model", "opus"],
-             "LATE_TO": "human:mh"}}
+{"lead:mh": {"cwd": "/Users/mh/dev/lead-mh", "provider": "claude",
+             "permission_mode": "auto", "LATE_TO": "human:mh",
+             "every": "2h", "prompt": "One follow-through tick per your card, then end the turn."}}
 ```
 
-Why not an Org charter for the lead: the boundary spec says new work takes the
-Fleet continuity path and routine writes must not depend on holding an Org
-incarnation. The record above is the continuity artifact. The existing Org
-lanes (the ivy stewards, `supervisor:mh`, `lead:agentic-development`) stay
-where they are and appear in the agenda through `org status`; the standup
-reads them and dispatches to them, it never appends to their chains.
+Org, after the 2026-09-11 cutover, is a registry of editable role cards
+(`org charter -role lead:mh -file <card> -parent human:mh`); it has no
+lifecycle, no chain, no incarnation. The lead's card is registered there so
+`org boot` and the agenda can read it; the record above is the continuity
+artifact. The agenda's org source lists the registered roles and their parents.
 
 ## The `lead` kind card
 
@@ -299,8 +299,8 @@ What landed the same day the design was written, and what did not.
 | `lead` kind | `~/.fleet/lanes/lead/{manifest.json,card.md}`; canonical copy in cc-skills `docs/features/agent-fleet-rules/lanes/lead/`. Denies the gate write verbs, the merge verb and repository edits. |
 | `lead:mh` | `~/dev/lead-mh`, a git checkout bound with `fleet role`; `roles.map` carries the line. |
 | `/standup` skill | cc-skills `skills/standup/SKILL.md`, in both catalogs; the Lead row and card in `ROLES.md`. |
-| Watcher | the stray `fleet watch` from the 2026-09-09 build had no delivery support (zero references to `deliver.json` in the binary); it was stopped and `~/.fleet/bin/fleet.main watch`, built from origin/main, runs in its place. |
-| Delivery entries | staged at `~/dev/lead-mh/deliver.standup.json` for `lead:mh`, `ivy-author-1` and `fleet-demo-sandbox-author-1`. `~/.fleet/deliver.json` is operator-owned launch configuration and the harness refuses agent writes to it; the README there has the one merge command. Until it lands, the mail `apply` sends waits, which is the contract. |
+| Watcher | the 2026-09-11 cutover installed the Go runtime (`~/.fleet/bin/fleet`, one watcher, provider sessions instead of `claude -p`); the stopgap `fleet.main` binary from the day before is gone. `standup` defaults to `$FLEET_STATE/bin/fleet`. |
+| Delivery entries | staged at `~/dev/lead-mh/deliver.standup.json` in the provider format for `lead:mh` (with a recurring tick), `ivy-author-1` and `fleet-demo-sandbox-author-1`. `~/.fleet/deliver.json` is operator-owned launch configuration and the harness refuses agent writes to it; the README there has the one command. Until it lands, the mail `apply` sends waits, which is the contract. |
 | Config | `~/.fleet/standup/config.json`: lead `lead:mh`, phrase `ship it`, five repositories. |
 | Real agenda | runs against live state from `~/dev/lead-mh`: 16 rows, 8 receipts, 15 lanes, 24 open PRs across five repositories; `fleet mail` reads as unavailable from a directory with no live session, which is the expected shape outside the lead's own session. |
 

@@ -73,7 +73,7 @@ esac`)
   "remote get-url") cat "$FAKE/origin.txt" ;;
   *) echo "fake git: $*" >&2; exit 2 ;;
 esac`)
-	script("org", `echo '[{"tenant":"","role":"","phase":""},{"tenant":"acme","role":"steward:ivy","phase":"active","held":2,"open":0}]'`)
+	script("org", `echo '[{"tenant":"","role":"","card":""},{"tenant":"acme","role":"steward:ivy","card":"/cards/steward-ivy.md","parent":"lead:acme"}]'`)
 	script("gh", `case "$1 $2" in
   "pr list") cat "$FAKE/prs.json" ;;
   "pr view") cat "$FAKE/pr7.txt" ;;
@@ -184,12 +184,12 @@ func TestAgendaIsStableAcrossRuns(t *testing.T) {
 		t.Fatalf("same world, different digests:\n%v\n%v", a1.Projection, a2.Projection)
 	}
 	text := r.must(0, "agenda")
-	for _, want := range []string{"## fleet mail (1)", "which unit?", "## org status (1)", "steward:ivy active", "## gh pr list acme/ivy (1)", "#7 feat/seven"} {
+	for _, want := range []string{"## fleet mail (1)", "which unit?", "## org status (1)", "steward:ivy parent=lead:acme card=/cards/steward-ivy.md", "## gh pr list acme/ivy (1)", "#7 feat/seven"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("agenda text lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, `"tenant":""`) {
+	if strings.Contains(text, "parent=- card=-") {
 		t.Error("placeholder org rows must be dropped")
 	}
 }
