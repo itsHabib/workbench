@@ -255,7 +255,7 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		var buf strings.Builder
 		prev := verbs.Out
 		verbs.Out = &buf
-		err := verbs.CmdDone(s("revision"), s("kind"), true)
+		err := verbs.CmdDone(s("revision"), s("kind"), true, false)
 		verbs.Out = prev
 		var r *verbs.Refusal
 		if errors.As(err, &r) && r.Code == 2 {

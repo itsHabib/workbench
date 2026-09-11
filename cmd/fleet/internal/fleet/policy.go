@@ -47,6 +47,91 @@ var (
 	switchDetach = map[string]bool{"--detach": true, "-d": true}
 )
 
+// The cost gate and the permissions a roled directory projects have to describe ONE
+// command shape, or an override the gate accepts is refused by the harness before the
+// gate ever sees it — which is what happened to a session that had won the resource it
+// needed and could not run it. The shape is a leading environment assignment, because
+// that is the only form a harness prefix rule can name.
+//
+// The value of that assignment is the SLUG of the expensive rule being overridden, not
+// free text. A free-text value would force the projected allow to be the universal
+// `Bash(FLEET_ALLOW_SLOW=*)`, and a universal allow is a lane escape: a worker whose
+// manifest denies `Bash(gh pr merge:*)` could type `FLEET_ALLOW_SLOW=x gh pr merge …`,
+// match the allow and miss the deny, because both are prefix rules over the whole
+// command string. Pinning the value to a slug makes the projection per-command —
+// `Bash(FLEET_ALLOW_SLOW=full-unit-suite:*)`, one per rule in expensive.json — and the
+// gate below refuses any override whose slug is not the rule the command actually
+// trips, so the two halves cannot drift into a hole.
+const (
+	// AllowSlowVar prefixes a command whose cost the operator has accepted.
+	AllowSlowVar = "FLEET_ALLOW_SLOW"
+)
+
+var (
+	allowSlowRe    = regexp.MustCompile(`\A[^\S\r\n]*` + AllowSlowVar + `=("[^"]*"|'[^']*'|\S*)`)
+	allowSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
+	allowSlugTrimR = regexp.MustCompile(`\A-+|-+\z`)
+)
+
+// AllowSlowPrefixed reports whether a command carries the override in the one accepted
+// shape: as its leading assignment. `npx vitest run FLEET_ALLOW_SLOW=x` mentions the
+// variable and sets nothing.
+func AllowSlowPrefixed(cmd string) bool { return allowSlowRe.MatchString(cmd) }
+
+// AllowSlowValue is the value the override assignment carries, unquoted, and whether
+// the command carries the assignment at all.
+func AllowSlowValue(cmd string) (string, bool) {
+	m := allowSlowRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return "", false
+	}
+	return strings.Trim(m[1], `'"`), true
+}
+
+// AllowSlowSlug is an expensive rule's name as the one token its override must carry:
+// lowercase, every other run of characters a single dash.
+func AllowSlowSlug(name string) string {
+	s := allowSlugTrimR.ReplaceAllString(allowSlugRe.ReplaceAllString(strings.ToLower(name), "-"), "")
+	if s == "" {
+		return "slow-command"
+	}
+	return s
+}
+
+// AllowSlowForm is the command as it must be typed to carry the override for rule
+// `name`. The command is reproduced whole: this string is meant to be run, and a
+// truncated one either fails to parse or runs something broader than what was refused.
+func AllowSlowForm(name, cmd string) string {
+	// A command that already wears a wrong token is re-tokened, never double-prefixed.
+	cmd = strings.TrimSpace(allowSlowRe.ReplaceAllString(cmd, ""))
+	return AllowSlowVar + "=" + AllowSlowSlug(name) + " " + cmd
+}
+
+// AllowSlowPattern is rule `name`'s override as a harness allow rule. `fleet role`
+// projects one of these per rule — never a wildcard over the variable.
+func AllowSlowPattern(name string) string {
+	return "Bash(" + AllowSlowVar + "=" + AllowSlowSlug(name) + ":*)"
+}
+
+// AllowSlowPatterns is the allow rule for every named rule in expensive.json.
+func AllowSlowPatterns() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range expensiveRules() {
+		name := S(r, "name")
+		if name == "" || S(r, "pattern") == "" {
+			continue
+		}
+		p := AllowSlowPattern(name)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
 // IsWrite reports whether a tool call writes to the tree.
 func IsWrite(tool, cmd string) bool {
 	if FileTools[tool] {
@@ -96,6 +181,36 @@ func CommandHead(cmd string) string {
 	return strings.Join(head, " ")
 }
 
+// OneCommand reports whether the invocation runs a single command — the unit the
+// slow override is allowed to cover. The leading env assignments and a leading
+// `cd <dir> &&` are the shape the cost gate already normalises away (CommandHead
+// reads the head past them, and the directory itself is guarded before this), so
+// they are not a second command. Anything else at top level — `&&`, `||`, `;`,
+// `|`, `&`, a newline, a subshell or a substitution — is.
+func OneCommand(cmd string) bool {
+	cmd = envAssignRe.ReplaceAllString(cmd, "")
+	cmd = leadingCdRe.ReplaceAllString(cmd, "")
+	quote := rune(0)
+	esc := false
+	for _, r := range cmd {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case strings.ContainsRune("&|;()\n\r`", r):
+			return false
+		}
+	}
+	return true
+}
+
 // Signature normalises a shell command to a cost-ledger key: two tokens.
 func Signature(cmd string) string {
 	cmd = envAssignRe.ReplaceAllString(cmd, "")
@@ -115,10 +230,8 @@ func MatchedRule(cmd string) Rec {
 	if head == "" {
 		return nil
 	}
-	rules, _ := readAny(Path("expensive.json")).([]any)
-	for _, raw := range rules {
-		r, ok := raw.(map[string]any)
-		if !ok || S(r, "pattern") == "" {
+	for _, r := range expensiveRules() {
+		if S(r, "pattern") == "" {
 			continue
 		}
 		pat, err := regexp.Compile(S(r, "pattern"))
@@ -133,6 +246,19 @@ func MatchedRule(cmd string) Rec {
 		return r
 	}
 	return nil
+}
+
+// expensiveRules is expensive.json as records; a malformed entry is skipped, never
+// raised.
+func expensiveRules() []Rec {
+	raws, _ := readAny(Path("expensive.json")).([]any)
+	out := make([]Rec, 0, len(raws))
+	for _, raw := range raws {
+		if r, ok := raw.(map[string]any); ok {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // ---------- policy: the checks, in order ----------
@@ -417,7 +543,13 @@ func CheckRequires(rec Rec, sid, tool, cmd string) string {
 // CheckCost is the refusal for an expensive command, or "".
 func CheckCost(cmd, sid string) string {
 	r := MatchedRule(cmd)
+	val, override := AllowSlowValue(cmd)
 	if r == nil {
+		if override {
+			// A roled directory allows this prefix, so an unmeasured command carrying it
+			// would reach the shell having matched an allow and missed the lane's denies.
+			return fmt.Sprintf("`%s=%s` prefixes a command the cost gate has no expensive rule for, so the override authorizes nothing and only hides the command from this seat's own permission rules. Next action: drop the prefix and run the command as itself.", AllowSlowVar, val)
+		}
 		return ""
 	}
 	name := S(r, "name")
@@ -435,9 +567,17 @@ func CheckCost(cmd, sid string) string {
 	if lock != nil && S(lock, "session") != sid && SessionAlive(ReadJSON(Path("sessions", S(lock, "session")+".json"))) {
 		return fmt.Sprintf("`%s` is already running in session %s (started %s ago). Do not run it again in parallel; do the targeted check instead: %s", name, Short(S(lock, "session")), FmtAge(Now()-F(lock, "at")), instead)
 	}
-	if strings.Contains(cmd, "FLEET_ALLOW_SLOW=") {
-		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "cmd": cut(cmd, 200)})
+	if override && val == AllowSlowSlug(name) {
+		if !OneCommand(cmd) {
+			return fmt.Sprintf("`%s=%s` covers exactly one command, and this invocation runs more than one. The projected allow `%s` is a prefix rule over the whole command string, so anything appended to `%s` would reach the shell having matched that allow and missed this seat's own denies. Next action: run the measured command by itself, then run the rest as its own call.",
+				AllowSlowVar, val, AllowSlowPattern(name), name)
+		}
+		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "rule": name, "cmd": cut(cmd, 200)})
 		return ""
+	}
+	if override {
+		return fmt.Sprintf("`%s=%s` is not this command's override: `%s` is measured as `%s`, whose override token is `%s`. One token per measured command is what lets a seat allow exactly the expensive commands it has measured instead of every command with the prefix. Next action: run it as %s",
+			AllowSlowVar, val, CommandHead(cmd), name, AllowSlowSlug(name), AllowSlowForm(name, cmd))
 	}
 	secs := "?"
 	if s, ok := r["seconds"]; ok && s != nil {
@@ -446,7 +586,8 @@ func CheckCost(cmd, sid string) string {
 			secs = strconv.FormatInt(int64(f), 10)
 		}
 	}
-	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, prefix the command with FLEET_ALLOW_SLOW=\"<why>\" so the override is recorded.", name, secs, instead)
+	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, run it in exactly this form so the override is recorded: %s. That one shape is what a roled directory allows as %s; no other spelling of the override is permitted there.",
+		name, secs, instead, AllowSlowForm(name, cmd), AllowSlowPattern(name))
 }
 
 func cut(s string, n int) string {
@@ -493,6 +634,94 @@ func SwitchTargets(cmd, start string) []string {
 		}
 	}
 	return out
+}
+
+// cdRe is a `cd`/`pushd` at command position and the words that follow it, up to the
+// next operator.
+var cdRe = regexp.MustCompile(cmdPos + `(?:cd|pushd)\b([^&|;\n\r]*)`)
+
+// CdTargets is every directory a Bash command moves THIS session into, resolved
+// against its cwd. A `cd` inside parentheses — a subshell or a command substitution —
+// is not one: the parent's cwd is where the next tool call still runs. `cd` with no
+// operand, or `cd -`, names nothing this guard can resolve and is left alone.
+func CdTargets(cmd, cwd string) []string {
+	out, _ := CdChain(cmd, cwd)
+	return out
+}
+
+// CdChain is CdTargets plus whether the command contains a move this guard could not
+// resolve. Each top-level `cd` is resolved against the directory the PRECEDING one
+// left the shell in, not against the event's cwd: from seat one, `cd /tmp && cd
+// seat2` ends in /tmp/seat2, and resolving that second hop against the event cwd
+// would name a directory the shell never enters and clear a seat it does. A hop the
+// guard cannot follow — `cd` or `cd -`, whose destination is not in the command —
+// makes the base unknown; a relative hop measured from an unknown base is reported
+// unresolved rather than guessed.
+func CdChain(cmd, cwd string) ([]string, bool) {
+	var out []string
+	cur, known, unresolved := cwd, cwd != "", false
+	for _, m := range cdRe.FindAllStringSubmatchIndex(cmd, -1) {
+		if parenDepth(cmd[:m[2]]) > 0 {
+			continue
+		}
+		word := firstOperand(shellWords(cmd[m[2]:m[3]]))
+		if word == "" {
+			known = false
+			continue
+		}
+		t := expand(word)
+		if !filepath.IsAbs(t) {
+			if !known {
+				unresolved = true
+				continue
+			}
+			t = filepath.Join(cur, t)
+		}
+		t = filepath.Clean(t)
+		out = append(out, t)
+		cur, known = t, true
+	}
+	return out, unresolved
+}
+
+// firstOperand is the first non-option word, or "".
+func firstOperand(toks []string) string {
+	for _, t := range toks {
+		if t == "" || strings.HasPrefix(t, "-") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// parenDepth is how many unclosed, unquoted `(` the text carries — the depth a
+// command at its end would run at.
+func parenDepth(text string) int {
+	depth := 0
+	quote := rune(0)
+	esc := false
+	for _, r := range text {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '(':
+			depth++
+		case r == ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
 }
 
 func isDetachedSwitch(toks []string) bool {

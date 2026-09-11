@@ -63,10 +63,11 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet ready <sha> "<action>" "<observable>"     print the ready-to-run packet, or refuse an incomplete one
   fleet receipt <sha> <kind> pass|fail "<observable>" [--session <id8>] [--card <url>]
                                                  record a receipt: this session's lane must produce <kind>; tree at <sha>, clean
-  fleet receipts [<sha>] [--kind <k>] [--since <2h>] [--json]
-                                                 list receipts, newest first
-  fleet done <sha|#n|branch> [--kind <k>] [--json]
+  fleet receipts [<sha>] [--kind <k>] [--since <2h>] [--all] [--json]
+                                                 list receipts, newest first; --all adds the verdicts each one replaced at that head
+  fleet done <sha|#n|branch> [--kind <k>] [--all] [--json]
                                                  exit 0 if a passing receipt (of <kind>, else of every kind seen) exists for that revision; 1 if not; 2 unresolvable
+                                                 the verdict is always the latest receipt of a kind; --all shows what it replaced
   fleet board [--json]                           every roled path with observed state: vacant · dead · idle · idle-holding-work · busy · busy-and-overdue
   fleet pool <checkout> [<kind> <n>] [--rewarm] [--tenant <t>]
                                                  create/top up N slots beside <checkout> (<basename>-<kind>-<i>), roled, named, warmed per pools.json
@@ -258,15 +259,15 @@ func dispatchViews(verb string, plain []string, parg func(int) string, asJSON bo
 		if err != nil {
 			return true, err
 		}
-		pos := positional(plain, "--kind", "--since")
-		return true, cmdReceipts(first(pos), kind, secs, since != "", asJSON)
+		pos := positional(without(plain, "--all"), "--kind", "--since")
+		return true, cmdReceipts(first(pos), kind, secs, since != "", asJSON, contains(plain, "--all"))
 	case "done":
 		kind, err := optValue(plain, "--kind", verb)
 		if err != nil {
 			return true, err
 		}
-		pos := positional(plain, "--kind")
-		return true, CmdDone(first(pos), kind, asJSON)
+		pos := positional(without(plain, "--all"), "--kind")
+		return true, CmdDone(first(pos), kind, asJSON, contains(plain, "--all"))
 	default:
 		return false, nil
 	}

@@ -115,7 +115,9 @@ that are only here:
   lane manifests produce.
 - The hook's session id is not the desktop app's; the directory is the key both sides share.
 - A command matching a rule in `~/.fleet/expensive.json` (hand-written thresholds) needs the
-  `FLEET_ALLOW_SLOW='<why>'` prefix, and the seat's allow list must accept that form.
+  `FLEET_ALLOW_SLOW=<rule-slug>` prefix — the slug of the rule the gate matched it under, and no
+  other token is accepted; the refusal prints the exact form, and the seat's allow list must
+  accept it. The override covers that one command only.
 
 ## 8. Prove it before trusting it
 

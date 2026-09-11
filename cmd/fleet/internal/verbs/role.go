@@ -480,6 +480,7 @@ func writeDenies(existing, manifest map[string]any, settingsTarget string) (deny
 		denySet[d] = true
 	}
 	sort.Strings(extra)
+	allowSlow(perms)
 	deny = sortedKeys(denySet)
 	denyAny := make([]any, len(deny))
 	for i, d := range deny {
@@ -491,6 +492,29 @@ func writeDenies(existing, manifest map[string]any, settingsTarget string) (deny
 		return nil, nil, err
 	}
 	return deny, extra, nil
+}
+
+// allowSlow projects the override shape the cost gate accepts into the directory's
+// allow list, so a command the gate would let through is not refused by the harness
+// first. One rule per measured command — `Bash(FLEET_ALLOW_SLOW=<slug>:*)` — never a
+// wildcard over the variable: a wildcard would let any command wear the prefix, match
+// the allow, and miss the lane's own `Bash(gh pr merge:*)`-shaped denies, since both
+// are prefix rules over the whole command string. Added, never removed: the allow list
+// is a human's file too.
+func allowSlow(perms map[string]any) {
+	have := map[string]bool{}
+	for _, a := range fleet.Strs(perms, "allow") {
+		have[a] = true
+	}
+	allow, _ := perms["allow"].([]any)
+	for _, p := range fleet.AllowSlowPatterns() {
+		if have[p] {
+			continue
+		}
+		have[p] = true
+		allow = append(allow, p)
+	}
+	perms["allow"] = allow
 }
 
 func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string, manifest map[string]any, card, cfgTarget, cfgText, hooksTarget string, hooksData map[string]any, rulesTarget, settingsTarget string, existing map[string]any, mapfile string) error {
