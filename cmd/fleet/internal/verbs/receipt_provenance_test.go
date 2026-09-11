@@ -75,3 +75,15 @@ func TestUnseatedReceiptStillRequiresExactCleanHeadAndLiveSession(t *testing.T) 
 		t.Fatal("refusal published receipt")
 	}
 }
+
+func TestReceiptRefusesSessionWithoutRecordedDirectory(t *testing.T) {
+	_, sid := requestFixture(t)
+	rec := fleet.SessionRecord(sid)
+	delete(rec, "cwd")
+	if err := fleet.WriteJSON(fleet.Path("sessions", sid+".json"), rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdReceipt("abcdef0", "verify", "pass", "checks", sid, "", false); err == nil {
+		t.Fatal("borrowed current directory for an unbound session")
+	}
+}

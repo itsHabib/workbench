@@ -640,7 +640,7 @@ func currentSession(explicit string) (string, error) {
 		if !fleet.SessionAlive(rec) {
 			return "", refuse("fleet: session %s is not live; --session names the tab you are running in, not a past one", fleet.Short(sid))
 		}
-		if canon(fleet.S(rec, "cwd")) != canon(cwd()) {
+		if fleet.S(rec, "cwd") == "" || canon(fleet.S(rec, "cwd")) != canon(cwd()) {
 			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), fleet.S(rec, "cwd"), cwd())
 		}
 		return sid, nil

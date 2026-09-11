@@ -186,7 +186,7 @@ func receiptTree() (root, here string, err error) {
 	here = canon(cwd())
 	root, err = gitOut("rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", "", err
+		return "", "", refuse("fleet receipt: run from the live session in a Git checkout; this directory has no readable worktree")
 	}
 	return canon(strings.TrimSpace(root)), here, nil
 }

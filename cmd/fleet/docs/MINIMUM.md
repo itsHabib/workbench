@@ -12,12 +12,12 @@ Every piece of Fleet exists because one of these went wrong without it:
 |---|---|
 | two agents write the same branch | one branch per agent, decided before anyone starts |
 | "done" that is not done | done means a named check at a named commit; that the checker is a different agent is a rule the lead holds |
-| the person becomes the message bus | questions go to a named parent, in a fixed shape, with an id |
+| the person becomes the message bus | questions go to the relevant peer at a named address |
 | nobody knows who decided what | every decision written where the next agent reads it |
 | agents forget the rules | the rules live where the agent starts, not in its memory |
 
 Fleet's hook enforces the first (one writer per branch); `fleet receipt` and `fleet done` give
-the second a verb that checks lane, head and clean tree but not the checker's independence;
+the second a verb that checks a live session, head and clean tree but not the checker's independence;
 mail gives the third a shape; the fourth and fifth are cards the agent reads at start. Without
 Fleet, all five are conventions. Conventions with a
 written shape hold surprisingly well, because the agents read the shape at start.

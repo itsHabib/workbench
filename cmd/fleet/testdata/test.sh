@@ -2028,9 +2028,7 @@ subprocess.run(["git", "checkout", "-q", "-b", "feat/w3"], cwd=r)
 head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
 gh_env = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "on", "FAKE_GH_STORE": store, "PATH": os.path.join(work, "fakegh") + os.pathsep + os.environ["PATH"]}
 def fleet(*a, env=gh_env, cwd=r): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=cwd, env=env)
-fleet("role", r, "liverun:rcptrepo", "--tenant", "work")
-hook.write_json(hook.path("sessions", "rcpt5.json"), {"session": "rcpt5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "liverun:rcptrepo", "branch": "feat/w3", "turn_open": True,
-                                                       "lane": {"kind": "liverun", "produces": "live", "requires": [], "denies": []}})
+hook.write_json(hook.path("sessions", "rcpt5.json"), {"session": "rcpt5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "branch": "feat/w3", "turn_open": True})
 rid = hook.repo_id(r)
 hook.write_json(hook.path("prs", "seed2.json"), {"github": "o/r", "repo": rid, "branch": "feat/w3", "number": 7, "at": hook.now()})
 rc1 = fleet("receipt", head[:10], "live", "pass", "guard fired", "--session", "rcpt5")
@@ -2040,6 +2038,9 @@ def rjson(body):
 report(rc1.returncode == 0 and "record: o/r#7" in rc1.stdout and len(receipts) == 1 and rjson(receipts[0]["body"]) .get("head") == head and rjson(receipts[0]["body"]).get("kind") == "live" and rjson(receipts[0]["body"]).get("verdict") == "pass",
        "fleet receipt posts one marked comment on the change carrying the exact head, kind and verdict",
        f"rc={rc1.returncode} out={(rc1.stdout+rc1.stderr)[:200]!r} receipts={len(receipts)}")
+provenance = rjson(receipts[0]["body"])
+report(all(k in provenance for k in ("cwd", "worktree", "repo", "role", "slot", "lane")) and os.path.realpath(provenance["cwd"]) == os.path.realpath(r) and os.path.realpath(provenance["worktree"]) == os.path.realpath(r) and provenance["repo"] == rid and not provenance["role"] and not provenance["slot"] and not provenance["lane"],
+       "unseated receipt publishes actual checkout and null role/lane/seat provenance", str(provenance))
 # another machine's row for live on this change; the fake's pr list reports head abc123, so first the receipt is for an OLDER head: not evidence
 db["comments"].insert(0, {"id": 50, "body": "<!-- fleet:ownership v1 -->\n```json\n" + json.dumps({"v": 1, "change": "feat/w3", "rows": [{"relationship": "live", "for": "hub:win", "by": "operator", "at": hook.now(), "due": None, "slot": None, "brief": None, "machine": "work-win"}]}) + "\n```\n"})
 json.dump(db, open(store, "w"))
