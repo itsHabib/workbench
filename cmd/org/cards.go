@@ -210,7 +210,7 @@ func readCard(e *env, args []string) error {
 		}
 		return showCard(e, c, *budget, s.asJSON)
 	}
-	return fmt.Errorf("no registered card for %s @ %s; use org charter -role %s -file <card.md>. Existing chain context: org legacy boot -role %s (with the same -state and -tenant)", s.role, s.tenant, s.role, s.role)
+	return fmt.Errorf("no registered card for %s @ %s; use org charter -role %s -file <card.md>", s.role, s.tenant, s.role)
 }
 
 func showCard(e *env, c roleCard, budget int, asJSON bool) error {
@@ -264,6 +264,6 @@ func listCards(e *env, args []string) error {
 	for _, c := range rows {
 		fmt.Fprintf(e.stdout, "%s\t%s\t%s\n", c.Role, c.Parent, c.Card)
 	}
-	fmt.Fprintln(e.stdout, "Registered role cards only. Historical chains: org legacy status.")
+	fmt.Fprintln(e.stdout, "Registered role cards.")
 	return nil
 }

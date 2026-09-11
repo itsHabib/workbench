@@ -164,14 +164,14 @@ func TestDeliverNeverLaunchesAMessageTwice(t *testing.T) {
 	}
 }
 
-// Liveness: an idle session past the grace is absent; a fresh or working one is not.
-func TestDeliverTreatsAnIdleHolderAsAbsent(t *testing.T) {
+// Idle sessions still occupy their directory; only ended sessions release it.
+func TestDeliverProtectsIdleOccupants(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		session fleet.Rec
 		want    int
 	}{
-		{"idle past the grace", fleet.Rec{"last_event_at": -600.0}, 1},
+		{"idle past the grace", fleet.Rec{"last_event_at": -600.0}, 0},
 		{"recently touched", fleet.Rec{"last_event_at": -10.0}, 0},
 		{"turn open", fleet.Rec{"last_event_at": -600.0, "turn_open": true}, 0},
 		{"ended", fleet.Rec{"last_event_at": -10.0, "ended": true}, 1},

@@ -94,6 +94,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
   fleet who <slot|key|#n|branch> [--json]        the live session holding it, or exit 1 saying who does not (never a substitute)
   fleet unowned [--repo <r>] [--json]            open changes whose head branch no live session here holds — scoped to this machine
+  fleet stop address:<mailbox> "<reason>" / fleet resume address:<mailbox>  pause/resume headless launches
   fleet handoff <branch> "<conclusion>" ["<next>"]  one-line handoff, replaced not appended; injected at the next SessionStart
   fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]
                                                  authored context for your launch-bound role across branches
@@ -543,6 +544,9 @@ func keyFor(arg string) (string, error) {
 }
 
 func describeKey(key string) string {
+	if strings.HasPrefix(key, "address:") {
+		return key
+	}
 	parts := fleet.KeyParts(key)
 	if fleet.S(parts, "kind") == "resource" {
 		return key

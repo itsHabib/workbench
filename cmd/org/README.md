@@ -32,28 +32,21 @@ Mail belongs to mail. Useful handoffs belong with the work. Neither requires an
 Org claim, incarnation or checkpoint. Actual resource leases and merge authority
 remain with their existing owners.
 
-## Upgrading existing installations
+## Clean cutover
 
-Normal CLI and MCP usage changes in this release. Install matching `org` and
-`org-mcp` builds and replace old operating instructions with the card workflow.
-The MCP server now exposes only `org_charter`, `org_boot` and `org_status`.
+This release removes the Baton CLI and its Stop shim. There is no fallback or legacy
+command. Install matching `org` and `org-mcp`; the only operations are charter, boot,
+and status. Existing journal files are inert historical data, not inputs to this runtime.
 
-Existing chains stay on disk, readable and recoverable through `org legacy`:
+Before activating the new binaries, stop the old watchers and remove the old Org hook
+entries, including installed copies of `sessionstart-boot.sh`, `pretool-lane-guard.sh`,
+`lane-resolve.sh` and `stop-mark.sh` under `~/dev/org/hooks/`. Remove attach, intent,
+claim, chain and incarnation instructions from global harness guidance, installed
+supervisor/worker cards, task-owner/verifier/supervisor skills and deliver.json prompts.
+Replace the Org MCP entry with the matching three-tool build and start fresh sessions.
+Register the role prose you intend to use and bind directories in roles.map as needed.
 
-```sh
-org legacy status
-org legacy boot -role lead:existing
-org legacy verify -role lead:existing
-```
-
-Inspect existing held work and unresolved questions during cutover; registering
-a card does not claim that this work was completed or moved. Preserve useful
-conclusions in the existing work/handoff path and keep history available. Existing
-Baton callers can explicitly use `org legacy <verb>` while migrating. Normal
-`org boot` does not silently fall back to injecting the old lifecycle protocol.
-See [LEGACY.md](LEGACY.md) for the preserved commands and [the boundary decision](../../docs/features/org-fleet-boundary/spec.md).
-
-The SessionStart hook now reads the card. Remove the old Stop mark hook during
-installation; its checked-in script is a no-op so older hook references do not
-keep appending a journal. No installed binaries, mappings, hooks or live state
-are changed merely by building this code.
+Use the optional checked-in SessionStart card reader for new sessions; no Org write guard
+or Stop hook belongs in the new setup. Fleet owns runtime occupancy and authored handoffs.
+Old files need not be deleted or migrated to start this workflow. Installing this build
+does not assert that historical work completed. See [the boundary decision](../../docs/features/org-fleet-boundary/spec.md).

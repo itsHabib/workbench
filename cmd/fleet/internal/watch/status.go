@@ -69,7 +69,7 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 	if result := lastResult(fleet.S(row, "output")); result != nil {
 		row["result"] = result
 	}
-	row["starts_paused"] = (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil)
+	row["starts_paused"] = addressStopped(t.address) || (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil)
 	return row
 }
 
@@ -89,6 +89,13 @@ func processState(last fleet.Rec) (string, string) {
 	}
 	if !fleet.PidAlive(pid) {
 		return "unknown", "process inspection did not establish presence or absence"
+	}
+	identity, err := processIdentity(pid)
+	if err != nil || fleet.S(last, "process_identity") == "" {
+		return "unknown", "process start identity is unavailable; inspect the launch before retrying"
+	}
+	if identity != fleet.S(last, "process_identity") {
+		return "gone_exit_unknown", "PID belongs to a different process; original exit was not collected"
 	}
 	return "running", ""
 }

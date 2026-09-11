@@ -142,3 +142,51 @@ func TestNonzeroChildExitIsRecordedWithoutReplayingMail(t *testing.T) {
 		t.Fatalf("failed work was automatically replayed: %v", got)
 	}
 }
+
+func TestLaunchIdentityRejectsRecycledPID(t *testing.T) {
+	identity, err := processIdentity(os.Getpid())
+	if err != nil || identity == "" {
+		t.Fatalf("current process identity: %q %v", identity, err)
+	}
+	r := fleet.Rec{"status": "running", "pid": os.Getpid(), "process_identity": identity}
+	if !launchPresent(r) {
+		t.Fatal("current process lost")
+	}
+	r["process_identity"] = "another-process"
+	if launchPresent(r) {
+		t.Fatal("recycled PID blocks launch")
+	}
+	if state, _ := processState(r); state != "gone_exit_unknown" {
+		t.Fatal(state)
+	}
+	delete(r, "process_identity")
+	if state, _ := processState(r); state != "unknown" {
+		t.Fatal("unproven identity reported as running", state)
+	}
+}
+
+func TestAddressStopPausesDetachedLead(t *testing.T) {
+	home, sink := deliverEnv(t)
+	key, err := fleet.MailStopKey("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteJSON(fleet.KeyFile("stop", key), fleet.Rec{"key": key, "reason": "run complete"}); err != nil {
+		t.Fatal(err)
+	}
+	config := fleet.ReadJSON(fleet.Path("deliver.json"))
+	target := fleet.M(config, "hub:lead")
+	target["every"], target["prompt"] = "1s", "advance the run"
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), config); err != nil {
+		t.Fatal(err)
+	}
+	if obs := observedWhat(deliver(fleet.Now()), "mail-delivery-started"); len(obs) != 0 {
+		t.Fatal(obs)
+	}
+	if row := runtimeRow(deliverTarget{address: "hub:lead", cwd: home}, nil); !fleet.B(row, "starts_paused") {
+		t.Fatal(row)
+	}
+	fleet.Unlink(fleet.KeyFile("stop", key))
+	deliver(fleet.Now())
+	launched(t, sink)
+}

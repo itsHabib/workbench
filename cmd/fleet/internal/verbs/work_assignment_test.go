@@ -138,3 +138,27 @@ func TestDepartedWorkIsUnoccupiedUntilDueOrReceipt(t *testing.T) {
 		t.Fatalf("passing receipt did not establish completion: %v", row)
 	}
 }
+
+func TestStopAndResumeAddressWithoutBranch(t *testing.T) {
+	repo, _ := requestFixture(t)
+	if err := os.MkdirAll(fleet.OrgState, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.RolesMap(), []byte(repo+" one supervisor:demo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "--detach")
+	if err := Dispatch([]string{"stop", "address:supervisor:demo", "run complete"}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := fleet.MailStopKey("supervisor:demo")
+	if err != nil || fleet.StopFlag(key) == nil {
+		t.Fatalf("stop missing: %s %v", key, err)
+	}
+	if err := Dispatch([]string{"resume", "address:supervisor:demo"}); err != nil {
+		t.Fatal(err)
+	}
+	if fleet.StopFlag(key) != nil {
+		t.Fatal("stop retained")
+	}
+}

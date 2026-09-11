@@ -3,9 +3,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
@@ -14,9 +16,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		usage(stderr)
 		return codeUsage
-	}
-	if args[0] == "legacy" {
-		return runLegacy(args[1:], stdin, stdout, stderr)
 	}
 	e := &env{stdin: stdin, stdout: stdout, stderr: stderr}
 	var err error
@@ -28,7 +27,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "status":
 		err = listCards(e, args[1:])
 	default:
-		fmt.Fprintf(stderr, "org: %q is not a role-card command. Work, mail and handoffs belong to their runtime. For an existing Baton chain use org legacy %s.\n", args[0], args[0])
+		fmt.Fprintf(stderr, "org: %q is not a role-card command. Work, mail and handoffs belong to their runtime. Only charter, boot and status are supported.\n", args[0])
 		usage(stderr)
 		return codeUsage
 	}
@@ -51,5 +50,33 @@ org status
 
 All commands accept -state <dir>, -tenant <id> and -json.
 Parent references describe the directory; they grant no authority or messaging rights.
-Existing journal records and recovery commands remain under org legacy <verb>.`)
+Old lifecycle commands are removed; update callers to role cards and runtime handoffs.`)
+}
+
+const (
+	codeOK    = 0
+	codeUsage = 2
+	codeError = 4
+)
+
+type env struct {
+	stdin          io.Reader
+	stdout, stderr io.Writer
+}
+
+func defaultState() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "org-state"
+	}
+	return filepath.Join(home, "dev", "org", "state")
+}
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+func printJSON(e *env, v any) error {
+	return json.NewEncoder(e.stdout).Encode(v)
 }

@@ -22,19 +22,10 @@ startup hook. Registering prose does not rebind a checkout or create a mailbox.
 Parents are descriptive references. No recursive admission, inheritance,
 mandatory hierarchy, or scope enforcement is inferred from prose.
 
-## Compatibility
+## Clean cutover
 
-`org legacy <verb>` retains the Baton CLI for existing chains, held work and
-obligations. Its kernel and journal format are unchanged. Default commands never
-fold or append those chains. See [LEGACY.md](LEGACY.md) for that protocol.
-Do not put legacy attach/claim/checkpoint requirements into new role cards.
-Existing history is not silently migrated, completed, deleted or granted new
-permissions by registering a card. Retire remaining callers deliberately.
-
-`hooks/sessionstart-boot.sh` optionally injects the selected role's card.
-`hooks/stop-mark.sh` is a no-op compatibility shim; remove it from installed hook
-configuration when upgrading. Role definitions do not need activity records.
-The MCP surface exposes just charter, boot and status over the same CLI.
+Only role-card commands are supported. Remove old hook and caller instructions;
+do not add fallbacks or a parallel lifecycle. See README.md for the consumer inventory.
 
 ## Checks
 

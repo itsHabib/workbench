@@ -90,27 +90,24 @@ observations without running a tick. `--json` exposes the same facts to a future
 UI. Watcher health and worker activity are separate. A process exit is not task
 completion, and a quiet or present process is not proof of progress.
 
-## Existing installations and history
+## Clean cutover
 
-The old Baton journal is retained under `org legacy <verb>`. Its kernel, records,
-held work and open obligations are not rewritten. Default `org boot` reads a card
-and never silently injects the old lifecycle protocol. The default MCP surface
-no longer exposes work/journal verbs. The old Stop mark hook becomes a no-op;
-the SessionStart hook can supply registered prose.
+Operator decision: role definitions are editable Org prose cards with optional parent
+mapping, independent of Fleet. This revises the earlier Fleet registry destination.
+There is zero backward-compatibility requirement. The old Org CLI, internal Baton
+packages and Stop shim are removed, not wrapped or migrated. Remove installed old
+hooks and instructions before activating the new binaries; the concrete consumer
+inventory is in `cmd/org/README.md`. Historical files are inert and need not be deleted.
 
-This is an explicit CLI/MCP cutover, not an in-place change to a running process.
-Install matching Org and MCP binaries, update operating instructions, register
-cards, and inspect legacy held work and unresolved questions before retiring
-those callers. Put useful conclusions in the existing work/handoff path. Do not
-claim that registering a card completed or migrated an old assignment. Retain
-history and explicit legacy access until the remaining consumers are retired.
-Do not automatically convert old authority terms into ignored metadata or delete
-old leases/grants as part of role configuration.
+Fleet's watcher coordinates launches with existing live occupants, including idle
+ones. A launch is identified by PID plus process start identity. A recycled PID cannot
+keep an address occupied. Unverifiable process identity is visible as unknown, never
+quietly called running or used to justify a duplicate launch.
 
-No installed binaries, hook settings, live mappings, live state or merge controls
-are changed by this patch. The working desktop loop/native-message baseline
-remains available. Installation and a measured headless rerun remain separate
-from unit and subprocess tests.
+An address stop pauses new launches for a lead independently of branch or seat. Agents
+can stop their recurrence at the requested outcome. No arbitrary turn cap or default
+lifetime is imposed on otherwise authorized work. Handoffs retain the latest authored
+context; runtime events and receipts are separate records, not checkpoint history.
 
 ## Next runtime step, after this pass
 

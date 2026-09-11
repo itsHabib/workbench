@@ -29,7 +29,7 @@ cwd="$(jq -r '.cwd // empty' <<<"$input" 2>/dev/null)" || exit 0
 [ -n "$cwd" ] || exit 0
 
 tenant="" role="" best=0
-while read -r prefix map_tenant map_role; do
+while read -r prefix map_tenant map_role _; do
   case "$prefix" in ''|'#'*) continue ;; esac
   case "$cwd" in "$prefix"|"${prefix%/}"/*) ;; *) continue ;; esac
   if [ "${#prefix}" -gt "$best" ]; then

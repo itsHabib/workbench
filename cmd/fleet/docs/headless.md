@@ -158,12 +158,12 @@ desktop loop/native-message setup.
 | Desktop lead has a different address shape | Assignment `reply_to` defaults to the actual caller mailbox; replies use `from_address`. Distinct seats keep distinct addresses; Fleet does not guess between them. |
 | Reused reply ID conflicts | New messages can omit the ID. Reuse a returned ID only for the same-message retry; a reply gets its own ID. No mailbox migration or weaker overwrite protection. |
 | Unassign leaves another row | Clear the placement and its matching dispatch rows in one operation, retaining files and leases. |
-| Org bootstrap and immutable scope interrupt new Fleet work | Org now registers editable prose cards with an optional parent. The normal CLI/MCP has three operations, and no work or chain ceremony. Existing journal recovery is explicit under `org legacy`. |
+| Org bootstrap and immutable scope interrupt new Fleet work | Org now registers editable prose cards with an optional parent. The normal CLI/MCP has three operations, and no work or chain ceremony. Old lifecycle callers are removed during cutover. |
 | Too much coordination procedure | Remove universal one-action, upward-only and message-quota instructions; handoffs contain useful conclusions. |
 | Cannot see headless activity between ticks | Read `fleet watch status [--json]` for worker/process/hook/exit evidence and output paths, separately from watcher health. |
 | Need run metrics | Use existing `fleet report`, runtime observations and offline scorecard analysis. A new reporting service is unnecessary. |
 
-Existing Baton history and unfinished obligations remain available through `org legacy`.
+Old Baton journals are inert historical files; the new runtime does not read them.
 Registering or editing a card does not rewrite those records, migrate held work, or alter
 resource/merge authority. Deployment and retiring installed legacy callers remain explicit
 follow-through; the runtime provider replacement is the separate next step described above.
@@ -188,3 +188,16 @@ To finish a run, remove its delivery entries first, let active sessions settle w
 watcher captures their exits, then stop the watcher. Removing an entry prevents new launches
 and does not kill its active process. Stopping the watcher before children exit loses OS exit
 observation; `gone_exit_unknown` is honest even if a later model result says success.
+
+## Stop an address
+
+At the run's stop condition, a lead can run `fleet stop address:supervisor:<run> "run complete"`.
+This pauses new mail, assignment and recurring launches for that address, even in a detached
+lead worktree. `fleet resume address:supervisor:<run>` clears the stop. Status reports further
+starts paused. Running sessions continue, so the watcher can capture their exits.
+
+A live idle session still occupies its launch directory; end it before allowing a replacement.
+Each watcher launch records process start identity as well as PID. A recycled PID is a departed
+launch, and uninspectable identity is reported as unknown for inspection. Neither is silently
+reported as healthy work. The watcher adds no default turn budget or runtime lifetime; keep
+explicit spending limits in the harness/run brief and stop the address when the outcome is met.

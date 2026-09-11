@@ -22,8 +22,8 @@ assignments, mail, handoffs, ownership and evidence. Agents decide how to do the
 Org is optional role prose, independent of Fleet. Register a card with
 `org charter -role <name> -file ./role.md [-parent <name>]`, then read it with `org boot`.
 Edit that file to add another repo or responsibility; no attach, claim or checkpoint is
-needed. Existing Baton history and recovery use `org legacy`; inspect unfinished work
-when migrating rather than treating a new card as proof that old work disappeared.
+needed. Remove old lifecycle commands and hooks during clean cutover; there is no
+legacy fallback. See [Org's cutover inventory](../../org/README.md#clean-cutover).
 
 ## Choose execution
 

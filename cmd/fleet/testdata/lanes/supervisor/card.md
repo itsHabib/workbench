@@ -45,3 +45,7 @@ idle tick has nothing new to add. Read workers' branch handoffs alongside fresh
 work and runtime evidence; a checkpoint is authored context, not proof of completion
 or liveness. Send messages when someone needs to act or receive an important update.
 Neither checkpointing nor direct peer communication requires Org's chain protocol.
+
+When a headless run reaches its requested stop condition, pause your address with
+`fleet stop address:<your mailbox> "run complete"`, then record the final checkpoint
+and end the turn. This stops future wakeups while the current process finishes.

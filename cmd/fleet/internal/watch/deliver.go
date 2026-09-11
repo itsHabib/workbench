@@ -15,8 +15,8 @@ package watch
 //     per message started four sessions of one role in a single fold, each checking
 //     liveness before the previous had written a session record.
 //   - A launch counts as present for the rest of the fold, for the same reason.
-//   - Live, no open turn, and untouched past FLEET_IDLE_GRACE reads absent. An idle
-//     holder is worse than a dead one: it blocks delivery and answers nothing.
+//   - A live occupant remains present while idle. End it before starting another
+//     session in that directory; silence does not authorize a competing launch.
 //   - A message is handed over once. Each is stamped delivered_at/delivered_by before
 //     the process starts — the stamp is the reservation, and a start that does not
 //     happen gives it back — and a stamped message is never carried again, not on the
@@ -54,7 +54,6 @@ import (
 // Grace defaults. Both are durations, read once per fold.
 const (
 	defaultMailGrace  = 10.0
-	defaultIdleGrace  = 300.0
 	defaultReplyGrace = 900.0
 )
 
@@ -153,14 +152,14 @@ func deliver(now float64) []fleet.Rec {
 	if len(targets) == 0 {
 		return nil
 	}
-	mailGrace, idleGrace := grace("FLEET_MAIL_GRACE", defaultMailGrace), grace("FLEET_IDLE_GRACE", defaultIdleGrace)
+	mailGrace := grace("FLEET_MAIL_GRACE", defaultMailGrace)
 	started := map[string]bool{} // a launch counts as present for the rest of the fold
 	var observed []fleet.Rec
 	for _, t := range targets {
 		if started[fleet.CanonPath(t.cwd)] {
 			continue
 		}
-		obs, launched := deliverOne(t, now, mailGrace, idleGrace)
+		obs, launched := deliverOne(t, now, mailGrace)
 		observed = append(observed, obs...)
 		if launched {
 			started[fleet.CanonPath(t.cwd)] = true
@@ -177,7 +176,7 @@ func deliver(now float64) []fleet.Rec {
 //
 // A lock it cannot take in time is a refusal to deliver this fold, recorded and left
 // for the next one. Mail is never lost by waiting; it is lost by being delivered twice.
-func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec, bool) {
+func deliverOne(t deliverTarget, now, mailGrace float64) ([]fleet.Rec, bool) {
 	var observed []fleet.Rec
 	launched := false
 	err := fleet.KeyLock(deliverLockKey, func() error {
@@ -185,12 +184,12 @@ func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec
 		if slot != "" {
 			return fleet.KeyLock("slot:"+slot, func() error {
 				var err error
-				observed, launched, err = deliverLocked(t, now, mailGrace, idleGrace)
+				observed, launched, err = deliverLocked(t, now, mailGrace)
 				return err
 			})
 		}
 		var err error
-		observed, launched, err = deliverLocked(t, now, mailGrace, idleGrace)
+		observed, launched, err = deliverLocked(t, now, mailGrace)
 		return err
 	})
 	if err != nil {
@@ -199,7 +198,7 @@ func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec
 	return observed, launched
 }
 
-func deliverLocked(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec, bool, error) {
+func deliverLocked(t deliverTarget, now, mailGrace float64) ([]fleet.Rec, bool, error) {
 	var observed []fleet.Rec
 	launched := false
 
@@ -209,7 +208,7 @@ func deliverLocked(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.
 	}
 	_, _, slot := fleet.MapRowsFor(t.cwd)
 	branch := fleet.BranchOf(t.cwd)
-	if (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil) {
+	if addressStopped(t.address) || (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil) {
 		return observed, launched, nil
 	}
 	rows, err := eligibleMail(t.address, now, mailGrace)
@@ -225,7 +224,13 @@ func deliverLocked(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.
 	if err != nil {
 		return observed, launched, err
 	}
-	if launchPresent(last) || present(sessionRecords(), t.cwd, now, idleGrace) {
+	if launchPresent(last) {
+		if state, reason := processState(last); state == "unknown" {
+			observed = append(observed, fleet.Rec{"at": now, "what": "launch-unresolved", "address": t.address, "error": reason})
+		}
+		return observed, launched, nil
+	}
+	if present(sessionRecords(), t.cwd) {
 		return observed, launched, nil
 	}
 	assignment := pendingAssignment(t, last)
@@ -360,10 +365,8 @@ func prompt(address string, rows []fleet.Rec) string {
 	return strings.Join(lines, "\n")
 }
 
-// present is whether someone in this directory would read the mail. A session that
-// has ended is gone; one with an open turn is working; one that is neither, and
-// untouched past the idle grace, is a window nobody is looking at.
-func present(sessions []fleet.Rec, cwd string, now, idleGrace float64) bool {
+// present protects an existing occupant even while it is idle. Silence is not exit.
+func present(sessions []fleet.Rec, cwd string) bool {
 	want := fleet.CanonPath(cwd)
 	for _, s := range sessions {
 		if fleet.B(s, "ended") {
@@ -372,10 +375,11 @@ func present(sessions []fleet.Rec, cwd string, now, idleGrace float64) bool {
 		if fleet.S(s, "pid_kind") == "harness" && !processPresent(int(fleet.F(s, "pid"))) {
 			continue
 		}
-		if fleet.CanonPath(fleet.S(s, "cwd")) != want && fleet.CanonPath(fleet.S(s, "launch_dir")) != want {
-			continue
+		path := fleet.S(s, "launch_dir")
+		if path == "" {
+			path = fleet.S(s, "cwd")
 		}
-		if fleet.B(s, "turn_open") || now-fleet.F(s, "last_event_at") < idleGrace {
+		if fleet.CanonPath(path) == want {
 			return true
 		}
 	}
@@ -395,4 +399,9 @@ func sessionRecords() []fleet.Rec {
 		}
 	}
 	return out
+}
+
+func addressStopped(address string) bool {
+	key, err := fleet.MailStopKey(address)
+	return err == nil && fleet.StopFlag(key) != nil
 }

@@ -51,8 +51,7 @@ Use the Go `fleet watch` for persistent polling, recurring lead wakeups, deliver
 The Bash/Python runtime poller is retired. See `cmd/fleet/docs/headless.md` and
 `cmd/fleet/docs/run-a-fleet.md`. Desktop loops and native messaging remain a valid desktop
 workflow. New Fleet work does not need duplicate Org bootstrap or a per-tick action/message
-quota. Org registers editable prose cards; existing Baton history and recovery stay behind
-`org legacy`. Use `fleet watch status [--json]` for worker evidence between ticks.
+quota. Org registers editable prose cards; old lifecycle callers are removed during clean cutover. Use `fleet watch status [--json]` for worker evidence between ticks.
 
 ## The one rule
 

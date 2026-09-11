@@ -45,13 +45,11 @@ func readLaunch(t deliverTarget) (fleet.Rec, error) {
 func processPresent(pid int) bool { return !fleet.PidGone(pid) }
 
 func launchPresent(r fleet.Rec) bool {
-	if r == nil || fleet.S(r, "status") == "failed" {
+	if r == nil {
 		return false
 	}
-	if fleet.ReadJSON(fleet.S(r, "exit_file")) != nil {
-		return false
-	}
-	return processPresent(int(fleet.F(r, "pid")))
+	state, _ := processState(r)
+	return state == "running" || state == "unknown"
 }
 
 // Placement already carries the work. Waking its worker does not require a second
@@ -128,6 +126,7 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 		return 0, err
 	}
 	r["status"], r["pid"] = "running", cmd.Process.Pid
+	r["process_identity"], _ = processIdentity(cmd.Process.Pid)
 	observed := filepath.Join(dir(), "observed.jsonl")
 	if err := fleet.WriteJSON(path, r); err != nil {
 		_ = fleet.AppendJSONL(observed, fleet.Rec{"at": fleet.Now(), "what": "launch-state-unknown", "address": t.address, "pid": cmd.Process.Pid, "error": err.Error()})

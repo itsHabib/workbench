@@ -55,16 +55,8 @@ func TestEditableRoleHasNoLifecycle(t *testing.T) {
 	}
 }
 
-func TestCardRegistryRetainsLegacyAndConcurrentRoles(t *testing.T) {
+func TestCardRegistryRetainsConcurrentRoles(t *testing.T) {
 	state := t.TempDir()
-	if code, _, err := exec(t, state, "charter", "-role", "lead:old", "-tenant", "mh", "-scope", "github:acme/api"); code != 0 {
-		t.Fatal(err)
-	}
-	chain := filepath.Join(state, "mh", "lead--old", "chain.jsonl")
-	before, err := os.ReadFile(chain)
-	if err != nil {
-		t.Fatal(err)
-	}
 	file := filepath.Join(t.TempDir(), "card.md")
 	if err := os.WriteFile(file, []byte("A role."), 0600); err != nil {
 		t.Fatal(err)
@@ -83,14 +75,7 @@ func TestCardRegistryRetainsLegacyAndConcurrentRoles(t *testing.T) {
 	if err != nil || len(cards) != 2 {
 		t.Fatalf("lost registry write: %+v %v", cards, err)
 	}
-	after, err := os.ReadFile(chain)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatalf("legacy history changed: %v", err)
-	}
-	code, out, errText := cardCommand(t, state, "legacy", "boot", "-role", "lead:old")
-	if code != 0 || !strings.Contains(out, "baton boot") {
-		t.Fatalf("legacy reader unavailable: %d %s %s", code, out, errText)
-	}
+
 }
 
 func TestBrokenRegistryIsNeverOverwritten(t *testing.T) {

@@ -5,8 +5,8 @@ and `org_status`. This server shells `org` (`ORG_BIN` override) and inherits
 `ORG_STATE` and `ORG_TENANT`. It owns transport, not another registry.
 
 Registering or editing a card is configuration, not an authority grant. Journal,
-work and messaging operations are absent from this surface. Legacy Baton recovery
-is explicitly available through `org legacy` at the CLI. Upgrade both binaries
+work and messaging operations are absent from this surface. Old lifecycle callers
+are removed during cutover. Upgrade both binaries
 together; see [the Org guide](../org/README.md).
 
 Argument translation stays here; card storage and validation stay in Org.
