@@ -30,26 +30,16 @@ Orientation block you can point an agent at to ground it fast.
   `cmd/<tool>/CLAUDE.md` and `cmd/<tool>/AGENTS.md`, plus `docs/DESIGN.md`.
   CI requires the guide pair to stay synchronized so either harness discovers
   the same exit codes, invariants, and checks.
-  Today: `flare` (the escalation/block routing sink — an Observability tool, not
-  a plane), `tracelens` (agent trace
-  diagnostics — consumed via its CLI exit-code seam, never as a Go import),
-  `triage` (PR risk floor + escalate-only advisory; two binaries,
-  `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),
-  `gate` (the merge-authorization boundary — grants, the verifier ladder, the
-  hash-chained decision log; exit codes 0 pass / 1 blocked / 2 parked /
-  3 refused / 4 error are a load-bearing seam),
-  `console` (a local, read-only web view of gate's inbox — parked runs + the
-  grant ledger — that shells the gate binary for its data and never imports it),
-  `escalate` (the escalation resolution back-channel — ingests a human's
-  decision for a parked escalation and drives `gate resolve` to close the
-  agent→human→agent loop, shelling gate and never importing it; a contract+seam,
-  not a plane — see `docs/features/escalation-plane/spec.md`),
-  `org` (the Baton home — role continuity chains over `contracts/org`:
-  attach/claim/yield lifecycle, the byte-capped `org boot` re-entry index,
-  the SessionStart/Stop hook scripts that wire sessions to roles, and
-  operator context.d boot sources; `org-mcp` is its stdio MCP surface,
-  shelling the binary),
-  plus `local`'s CLIs (`local`, `eval`).
+  Nineteen today, grouped by what they own. Running agents: `fleet` (the substrate:
+  hook-derived identity and liveness, seats, rows, receipts, role-addressed mail, the
+  watcher), `org` and `org-mcp` (role continuity: charters, the tree, each lead's own
+  record), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
+  (the merge-authorization boundary; exit codes 0 pass / 1 blocked / 2 parked / 3 refused /
+  4 error are a load-bearing seam), `triage` (`triage-floor`, `triage-advisory`), `review`,
+  `reviewfindings`, `escalate` (the agent→human→agent back-channel for parked runs). Seeing
+  and being told: `console`, `flare`, `tracelens`, `workbench-mcp`. Local models and secrets:
+  `local`, `eval`, `custody`. The cross-tool decision on what `org` owns versus `fleet` is
+  `docs/features/org-fleet-boundary/spec.md`.
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions (the engineering debt this codebase owes).
   `friction-log.md` — where this repo's tooling and docs failed an agent working
