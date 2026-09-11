@@ -146,6 +146,9 @@ func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 // a seat copied from another card would push and dispatch in the wrong place while
 // the record claimed this one.
 func cardDir(e Env, c Card, world *World) (string, error) {
+	if c.Seat != "" && c.Checkout != "" {
+		return "", refuse("card %s: names both seat %q and checkout %q; Fleet places the row in the seat, so name one", c.ID, c.Seat, c.Checkout)
+	}
 	dir, probe := c.Checkout, c.Checkout
 	if dir == "" {
 		p, ok := world.Seats[c.Seat]
@@ -250,32 +253,38 @@ func (w *World) BranchOf(e Env, c Card) (string, error) {
 
 // rowFor is the existing row a card would collide with, or nil. Fleet's repository
 // id is a basename plus a hash of the checkout's git directory, which this tool
-// does not recompute. When the card's seat already carries a row, that row's id
-// is the seat's, and the match is exact. Otherwise a lone same-named row is taken
-// as this repository's, and two same-named repositories both carrying the row
-// refuse as ambiguous rather than guess. The exact match for a fresh seat needs
-// a Fleet read verb for a path's id (FOLLOWUPS.md).
+// does not recompute. A seat's id is learned from any row or receipt Fleet has
+// already recorded in that seat, and then the match is exact. With no id on
+// record and no same-named row, there is nothing to collide with; with no id and
+// a same-named row, the row cannot be proven to be this repository's, and an
+// unproven match is refused rather than guessed. The verb that would close this
+// is a Fleet read of a path's id (FOLLOWUPS.md).
 func (w *World) rowFor(c Card, key string) (*Row, error) {
 	rows := w.Rows[key]
-	if id, known := w.SeatRepo[c.Seat]; known && c.Seat != "" {
-		for i := range rows {
-			if rows[i].Repo == id {
-				return &rows[i], nil
-			}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	id, known := w.SeatRepo[c.Seat]
+	if !known || c.Seat == "" {
+		ids := make([]string, len(rows))
+		for i, r := range rows {
+			ids[i] = r.Repo + " (accountable " + r.For + ")"
 		}
-		return nil, nil
+		return nil, refuse("card %s: a row for %s/%s exists in %s, and %s has no Fleet repository identity on record yet, so it cannot be proven to be %s's row. Name a seat Fleet has already placed work in, or reassign or retire that row first", c.ID, strings.SplitN(key, " ", 2)[1], c.As, strings.Join(ids, " and "), seatOrCheckout(c), c.Repo)
 	}
-	switch len(rows) {
-	case 0:
-		return nil, nil
-	case 1:
-		return &rows[0], nil
+	for i := range rows {
+		if rows[i].Repo == id {
+			return &rows[i], nil
+		}
 	}
-	ids := make([]string, len(rows))
-	for i, r := range rows {
-		ids[i] = r.Repo
+	return nil, nil
+}
+
+func seatOrCheckout(c Card) string {
+	if c.Seat != "" {
+		return "seat " + c.Seat
 	}
-	return nil, refuse("card %s: rows exist in %s for the same branch and relationship; cannot tell which is %s's. Reassign or retire the stray row first", c.ID, strings.Join(ids, " and "), c.Repo)
+	return "checkout " + c.Checkout
 }
 
 // BranchOnOrigin asks the remote, from the seat's checkout, whether the branch exists.
@@ -341,8 +350,18 @@ func ReadWorld(e Env, cfg Config) (*World, error) {
 	for _, r := range rows {
 		key := repoBase(str(r, "repo")) + " " + str(r, "change") + " " + str(r, "relationship")
 		w.Rows[key] = append(w.Rows[key], Row{Repo: str(r, "repo"), For: str(r, "for")})
-		if slot := str(r, "slot"); slot != "" && str(r, "repo") != "" {
-			w.SeatRepo[slot] = str(r, "repo")
+		w.learnSeat(r)
+	}
+	// Receipts carry the seat and repository id of the session that wrote them:
+	// a second source of a seat's identity, for seats whose rows are done and gone.
+	res = e.Run.Run(e.LeadDir, e.Fleet, "receipts", "--json")
+	if res.Err == nil && res.Code == 0 {
+		receipts, err := parseRows(res.Stdout)
+		if err != nil {
+			return nil, fmt.Errorf("fleet receipts --json: %w", err)
+		}
+		for _, r := range receipts {
+			w.learnSeat(r)
 		}
 	}
 	res = e.Run.Run(e.LeadDir, e.Fleet, "decisions")
@@ -355,6 +374,13 @@ func ReadWorld(e Env, cfg Config) (*World, error) {
 		}
 	}
 	return w, nil
+}
+
+// learnSeat records a seat's Fleet repository id from a row or receipt placed in it.
+func (w *World) learnSeat(r map[string]any) {
+	if slot, repo := str(r, "slot"), str(r, "repo"); slot != "" && repo != "" {
+		w.SeatRepo[slot] = repo
+	}
 }
 
 // repoName is the name half of owner/name: what a Fleet row carries as its repo.

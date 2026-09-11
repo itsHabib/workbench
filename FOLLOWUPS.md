@@ -702,12 +702,12 @@ continues through fresh CI and Gate judgment without a fourth panel.
 Fleet keys a dispatch row by its repository id, a basename plus a hash of the
 checkout's git directory (`fleet.RepoID`). `standup apply` matches a card
 against existing rows to refuse replacing a row another role holds. It learns
-a seat's id from any row already placed in that seat and then matches exactly;
-for a seat with no row yet it falls back to the basename, so a lone row from a
-different repository of the same name would be taken as this one's. Two
-same-named repositories both carrying the row already refuse as ambiguous.
+a seat's id from any row or receipt Fleet has already recorded in that seat
+and then matches exactly. A seat with no identity on record and a same-named
+row for the card's branch and relationship is refused as unproven rather than
+matched by basename.
 
 The exact fix is a Fleet read verb that prints a path's repository id (the
 hash is Fleet's to compute, not a second implementation here); `fleet slots
---json` prints the basename only. Until then the residual is the lone-row,
-fresh-seat, same-basename case, and the refusal text says to name a seat.
+--json` prints the basename only. Until then the cost is one refusal in the
+fresh-seat, same-basename case, and the refusal text says what clears it.

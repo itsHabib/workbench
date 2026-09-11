@@ -57,7 +57,7 @@ func newRig(t *testing.T) *rig {
 	write(filepath.Join(r.fake, "decisions.txt"), "")
 	script("fleet", `case "$1" in
   work) if [ -e "$FAKE/work-fail" ]; then echo "fleet: state unavailable" >&2; exit 1; fi; cat "$FAKE/work.json" ;;
-  receipts) echo '[]' ;;
+  receipts) if [ -e "$FAKE/receipts.json" ]; then cat "$FAKE/receipts.json"; else echo '[]'; fi ;;
   mail) echo '[{"id":"q1","kind":"question","from":"ivy-author-1","subject":"which unit?"}]' ;;
   decisions) cat "$FAKE/decisions.txt" ;;
   dispatch) printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/calls.log"; if [ -e "$FAKE/dispatch-fail" ]; then echo "fleet dispatch: seat occupied" >&2; exit 1; fi; echo ok ;;
@@ -297,7 +297,7 @@ func TestApplyLedgerIsIdempotentAndGuarded(t *testing.T) {
 	path, _ := planAndApply(t, r)
 
 	// The world now carries the row; a second apply repeats nothing.
-	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"dispatched","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"dispatched","slot":"ivy-author-1","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	r.setFile("decisions.txt", "d1 rule ivy: two fix-rounds then the judge\n")
 	r.must(1, "apply", path) // the world moved (a new row): the agenda is stale
 	r.must(0, "apply", path, "--force-stale")
@@ -361,8 +361,15 @@ func TestApplyRefusesBeforeWriting(t *testing.T) {
 	}
 	r.setFile("origin.txt", "git@github.com:acme/ivy.git\n")
 
-	// The same row already accountable to someone else: a changed payload.
+	// A same-named row with no identity on record for the seat: unproven, refused.
 	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:other","state":"working","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
+	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "cannot be proven to be acme/ivy's row") || r.callLog() != "" {
+		t.Fatalf("unproven row: %s", out)
+	}
+
+	// The same row, once the seat's identity is on record: a changed payload.
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:other","state":"working","slot":"ivy-author-1","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
 	if out := r.must(1, "apply", path); !strings.Contains(out, "already names author:other accountable") || r.callLog() != "" {
 		t.Fatalf("changed payload: %s", out)
@@ -380,7 +387,7 @@ func TestApplyRefusesBeforeWriting(t *testing.T) {
 	// Two repositories named ivy both carry the row: ambiguous, so refused.
 	r.setFile("work.json", `[{"repo":"ivy-11111111","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-11111111:feat/seven"},{"repo":"ivy-22222222","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-22222222:feat/seven"}]`)
 	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
-	if out := r.must(1, "apply", path); !strings.Contains(out, "rows exist in ivy-11111111 and ivy-22222222") || r.callLog() != "" {
+	if out := r.must(1, "apply", path); !strings.Contains(out, "ivy-11111111 (accountable author:ivy) and ivy-22222222 (accountable author:ivy)") || r.callLog() != "" {
 		t.Fatalf("ambiguous rows: %s", out)
 	}
 	r.setFile("work.json", "[]")
@@ -638,5 +645,20 @@ func TestSeatRepoIsLearnedFromItsRows(t *testing.T) {
 	out := r.must(0, "apply", path)
 	if !strings.Contains(out, "ran         card c1 dispatch") || !strings.Contains(r.callLog(), "dispatch #7") {
 		t.Fatalf("the other repository's row must not block this seat:\n%s\n%s", out, r.callLog())
+	}
+}
+
+func TestSeatRepoIsLearnedFromReceipts(t *testing.T) {
+	r := newRig(t)
+	// The seat's only trace is a receipt; the row for this branch carries no slot.
+	r.setFile("receipts.json", `[{"head":"abc","kind":"draft","verdict":"pass","slot":"ivy-author-1","repo":"ivy-5ab57ce6","role":"author:ivy","observable":"x","at":1}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	out := r.must(0, "apply", path)
+	if !strings.Contains(out, "skip        card c1 dispatch") || strings.Contains(r.callLog(), "dispatch") {
+		t.Fatalf("a proven own row must skip dispatch:\n%s\n%s", out, r.callLog())
 	}
 }

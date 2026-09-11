@@ -23,8 +23,9 @@ conversation. Design: `docs/features/standup/design.md`.
   repository, a row already accountable to another role, two cards for one
   row, rows in two same-named repositories, and a ledger step whose arguments
   no longer match the plan are all found in planning, before any verb runs. A
-  seat's Fleet repository id is learned from rows already placed in it; the
-  fresh-seat case is in FOLLOWUPS.md. A `#<n>` change is resolved to its head branch first, because
+  seat's Fleet repository id is learned from rows and receipts already recorded
+  in it and matched exactly; a same-named row with no identity on record is
+  refused as unproven, never matched by basename (FOLLOWUPS.md). A `#<n>` change is resolved to its head branch first, because
   that is how Fleet keys the row. An unreadable `fleet work` is an error, never
   an empty world.
 - **`applied[]` is the only ledger.** One entry per step, saved after each, so a
