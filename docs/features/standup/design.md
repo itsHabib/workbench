@@ -330,6 +330,16 @@ Details the design under-specified and the build settled:
 - **A seat must be a clone of the card's repository.** Fleet and git take the
   repository from the directory, so `apply` reads the seat's origin and
   refuses a card whose `repo` names anything else.
+- **Fleet keys rows by branch, even for a `#<n>` card.** `apply` resolves the
+  pull request to its head branch before the ownership check, so a card for
+  `#7` sees the row Fleet wrote as `feat/seven`. Fleet's repository id is a
+  basename plus a hash of the checkout's git directory; the standup does not
+  recompute it, so two same-named repositories both carrying the row refuse as
+  ambiguous rather than guess. (`fleet slots --json` exposes a seat's id, which
+  a later rung can use for an exact match.)
+- **An unreadable Fleet is an error, not an empty world.** A failed
+  `fleet work` at apply time stops planning; nothing is dispatched against a
+  view nobody could read.
 - **A stale refusal costs one readback.** `standup new --agenda <fresh id>
   --from <stale record>` carries roles, cards, decisions, deferrals and next
   into an unconfirmed record against the fresh agenda, re-keying card ids.

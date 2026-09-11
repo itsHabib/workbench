@@ -226,14 +226,7 @@ func cmdApply(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	}
 	steps, err := standup.Apply(env, cfg, r, path, *dryRun, *forceStale)
 	for _, s := range steps {
-		mark := "ran "
-		switch {
-		case *dryRun:
-			mark = "plan"
-		case s.Skip != "":
-			mark = "skip"
-		}
-		fmt.Fprintf(stdout, "%s %s: %s %s", mark, s.Name, s.Bin, strings.Join(quoteAll(s.Args), " "))
+		fmt.Fprintf(stdout, "%-11s %s: %s %s", s.Status, s.Name, s.Bin, strings.Join(quoteAll(s.Args), " "))
 		if s.Skip != "" {
 			fmt.Fprintf(stdout, "  (%s)", s.Skip)
 		}

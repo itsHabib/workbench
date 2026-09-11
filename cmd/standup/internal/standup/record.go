@@ -257,16 +257,20 @@ func (r *Record) Save(path string) error {
 	return writeJSON(path, r)
 }
 
-// PlanDigest hashes what the operator hears in the readback: roles, cards,
-// decisions, deferrals and next. Confirm stores it; apply recomputes it.
+// PlanDigest hashes what the operator hears in the readback: the agenda the plan
+// was made against, roles, cards, decisions, deferrals and next. Confirm stores
+// it; apply recomputes it. Re-pointing a confirmed record at a fresh agenda is an
+// edit like any other.
 func (r *Record) PlanDigest() string {
 	b, _ := json.Marshal(struct {
-		Roles     []Role     `json:"roles"`
-		Cards     []Card     `json:"cards"`
-		Decisions []Decision `json:"decisions"`
-		Deferred  []Deferred `json:"deferred"`
-		Next      string     `json:"next"`
-	}{r.Roles, r.Cards, r.Decisions, r.Deferred, r.Next})
+		Agenda       string     `json:"agenda"`
+		AgendaDigest string     `json:"agenda_digest"`
+		Roles        []Role     `json:"roles"`
+		Cards        []Card     `json:"cards"`
+		Decisions    []Decision `json:"decisions"`
+		Deferred     []Deferred `json:"deferred"`
+		Next         string     `json:"next"`
+	}{r.Agenda, r.AgendaDigest, r.Roles, r.Cards, r.Decisions, r.Deferred, r.Next})
 	return Digest([]string{string(b)})
 }
 
@@ -286,8 +290,9 @@ func (r *Record) CarryOver(prev *Record) {
 	r.Next = prev.Next
 }
 
-// LatestRecord returns the newest record by id order, or nil when there is none.
-// Ids sort by date then sequence, so lexical order is chronological.
+// LatestRecord returns the newest record, or nil when there is none. Newest is by
+// date then numeric sequence, so an unpadded id from before zero-padding still
+// orders correctly beside a padded one.
 func (e Env) LatestRecord() (*Record, error) {
 	ents, err := os.ReadDir(filepath.Join(e.Dir, "records"))
 	if err != nil {
@@ -299,14 +304,14 @@ func (e Env) LatestRecord() (*Record, error) {
 	var names []string
 	for _, ent := range ents {
 		if strings.HasSuffix(ent.Name(), ".json") {
-			names = append(names, ent.Name())
+			names = append(names, strings.TrimSuffix(ent.Name(), ".json"))
 		}
 	}
 	if len(names) == 0 {
 		return nil, nil
 	}
-	sort.Strings(names)
-	b, err := os.ReadFile(filepath.Join(e.Dir, "records", names[len(names)-1]))
+	sort.Slice(names, func(i, j int) bool { return idLess(names[i], names[j]) })
+	b, err := os.ReadFile(filepath.Join(e.Dir, "records", names[len(names)-1]+".json"))
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +320,35 @@ func (e Env) LatestRecord() (*Record, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// idLess orders standup ids by date, then by numeric sequence; anything that is
+// not of that shape sorts lexically before everything that is.
+func idLess(a, b string) bool {
+	da, na, oka := splitID(a)
+	db, nb, okb := splitID(b)
+	switch {
+	case oka != okb:
+		return !oka
+	case !oka:
+		return a < b
+	case da != db:
+		return da < db
+	}
+	return na < nb
+}
+
+func splitID(id string) (string, int, bool) {
+	rest, ok := strings.CutPrefix(id, "standup-")
+	if !ok || len(rest) < 12 {
+		return "", 0, false
+	}
+	date, seq := rest[:10], strings.TrimPrefix(rest[10:], "-")
+	var n int
+	if _, err := fmt.Sscanf(seq, "%d", &n); err != nil {
+		return "", 0, false
+	}
+	return date, n, true
 }
 
 // Readback renders the draft as the prose the lead reads back before confirm. It

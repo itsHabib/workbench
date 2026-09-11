@@ -56,11 +56,13 @@ func newRig(t *testing.T) *rig {
 	write(filepath.Join(r.fake, "prs.json"), `[{"number":7,"title":"Seven","headRefName":"feat/seven","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"","updatedAt":"2026-09-10T00:00:00Z","url":"u"}]`)
 	write(filepath.Join(r.fake, "decisions.txt"), "")
 	script("fleet", `case "$1" in
-  work) cat "$FAKE/work.json" ;;
+  work) if [ -e "$FAKE/work-fail" ]; then echo "fleet: state unavailable" >&2; exit 1; fi; cat "$FAKE/work.json" ;;
   receipts) echo '[]' ;;
   mail) echo '[{"id":"q1","kind":"question","from":"ivy-author-1","subject":"which unit?"}]' ;;
   decisions) cat "$FAKE/decisions.txt" ;;
-  dispatch|send|decide|pool) printf '%s|%s\n' "$PWD" "$(printf '%s' "$*" | tr '\n' ' ')" >> "$FAKE/calls.log"; echo ok ;;
+  dispatch) printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/calls.log"; if [ -e "$FAKE/dispatch-fail" ]; then echo "fleet dispatch: seat occupied" >&2; exit 1; fi; echo ok ;;
+  pool) printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/calls.log"; mkdir -p "$(dirname "$2")/$(basename "$2")-$3-1"; echo ok ;;
+  send|decide) printf '%s|%s\n' "$PWD" "$(printf '%s' "$*" | tr '\n' ' ')" >> "$FAKE/calls.log"; echo ok ;;
   *) echo "fake fleet: $1" >&2; exit 2 ;;
 esac`)
 	script("git", `case "$1 $2" in
@@ -72,8 +74,13 @@ esac`)
   *) echo "fake git: $*" >&2; exit 2 ;;
 esac`)
 	script("org", `echo '[{"tenant":"","role":"","phase":""},{"tenant":"acme","role":"steward:ivy","phase":"active","held":2,"open":0}]'`)
-	script("gh", `cat "$FAKE/prs.json"`)
+	script("gh", `case "$1 $2" in
+  "pr list") cat "$FAKE/prs.json" ;;
+  "pr view") cat "$FAKE/pr7.txt" ;;
+  *) echo "fake gh: $*" >&2; exit 2 ;;
+esac`)
 	write(filepath.Join(r.fake, "branches.txt"), "")
+	write(filepath.Join(r.fake, "pr7.txt"), "feat/seven\n")
 	write(filepath.Join(r.fake, "origin.txt"), "git@github.com:acme/ivy.git\n")
 	t.Setenv("FAKE", r.fake)
 	t.Setenv("PATH", r.fake+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -214,6 +221,14 @@ func TestConfirmIsCodeNotModel(t *testing.T) {
 	if out := r.must(1, "apply", path); !strings.Contains(out, "edited after it was confirmed") || r.callLog() != "" {
 		t.Fatalf("edited-after-confirm: %s", out)
 	}
+	// Re-pointing a confirmed record at a fresh agenda is an edit like any other.
+	r.edit(path, func(rec *standup.Record) { rec.Cards, rec.Confirm = nil, nil })
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	fresh := agendaID(t, r.must(0, "agenda"))
+	r.edit(path, func(rec *standup.Record) { rec.Agenda = fresh })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "edited after it was confirmed") {
+		t.Fatalf("re-pointed agenda: %s", out)
+	}
 	// A confirm typed in by hand with the wrong phrase is not a confirm.
 	r.edit(path, func(rec *standup.Record) {
 		rec.Confirm = &standup.Confirm{By: "model", Phrase: "sounds good", At: "now", PlanDigest: rec.PlanDigest()}
@@ -241,7 +256,7 @@ func planAndApply(t *testing.T, r *rig) (string, string) {
 	if r.callLog() != "" {
 		t.Fatal("dry run wrote")
 	}
-	for _, want := range []string{"plan card c1 dispatch", "plan card c1 send", "plan decision 1"} {
+	for _, want := range []string{"plan        card c1 dispatch", "plan        card c1 send", "plan        decision 1"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan lacks %q:\n%s", want, plan)
 		}
@@ -282,7 +297,7 @@ func TestApplyLedgerIsIdempotentAndGuarded(t *testing.T) {
 	path, _ := planAndApply(t, r)
 
 	// The world now carries the row; a second apply repeats nothing.
-	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:ivy","state":"dispatched","key":"repo:ivy-5ab57ce6:#7"}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"dispatched","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	r.setFile("decisions.txt", "d1 rule ivy: two fix-rounds then the judge\n")
 	r.must(1, "apply", path) // the world moved (a new row): the agenda is stale
 	r.must(0, "apply", path, "--force-stale")
@@ -290,7 +305,7 @@ func TestApplyLedgerIsIdempotentAndGuarded(t *testing.T) {
 		t.Fatalf("second apply repeated verbs: %d calls", n)
 	}
 	forced := r.load(path).Applied
-	if len(forced) != 4 || forced[3].Step != "apply --force-stale" || !strings.Contains(forced[3].Output, "+ row repo:ivy-5ab57ce6:#7") {
+	if len(forced) != 4 || forced[3].Step != "apply --force-stale" || !strings.Contains(forced[3].Output, "+ row repo:ivy-5ab57ce6:feat/seven draft open for=author:ivy") {
 		t.Fatalf("a forced apply must be on the ledger: %+v", forced)
 	}
 
@@ -347,11 +362,28 @@ func TestApplyRefusesBeforeWriting(t *testing.T) {
 	r.setFile("origin.txt", "git@github.com:acme/ivy.git\n")
 
 	// The same row already accountable to someone else: a changed payload.
-	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:other","state":"working","key":"k"}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:other","state":"working","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
 	if out := r.must(1, "apply", path); !strings.Contains(out, "already names author:other accountable") || r.callLog() != "" {
 		t.Fatalf("changed payload: %s", out)
 	}
+
+	// Two cards for one row.
+	r.setFile("work.json", "[]")
+	twin := card
+	twin.ID = "c2"
+	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card, twin} })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "cards c1 and c2 both name acme/ivy feat/seven/draft") || r.callLog() != "" {
+		t.Fatalf("duplicate cards: %s", out)
+	}
+
+	// Two repositories named ivy both carry the row: ambiguous, so refused.
+	r.setFile("work.json", `[{"repo":"ivy-11111111","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-11111111:feat/seven"},{"repo":"ivy-22222222","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-22222222:feat/seven"}]`)
+	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "rows exist in ivy-11111111 and ivy-22222222") || r.callLog() != "" {
+		t.Fatalf("ambiguous rows: %s", out)
+	}
+	r.setFile("work.json", "[]")
 
 	// The world moved between agenda and apply: refused with the diff.
 	r.setFile("work.json", "[]")
@@ -419,7 +451,7 @@ func TestApplyCreatesTheBranchForNewWork(t *testing.T) {
 	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{c} })
 	r.must(0, "confirm", path, "--phrase", "ship it")
 	out := r.must(0, "apply", path)
-	if !strings.Contains(out, "skip card c2 branch") || strings.Contains(r.callLog(), "git push") {
+	if !strings.Contains(out, "skip        card c2 branch") || strings.Contains(r.callLog(), "git push") {
 		t.Fatalf("existing branch must skip create:\n%s\n%s", out, r.callLog())
 	}
 }
@@ -460,9 +492,9 @@ func TestIdsSortChronologicallyAndRowsCarryTheirRelationship(t *testing.T) {
 	if !strings.HasSuffix(first, "-001") {
 		t.Fatalf("ids are zero-padded: %s", first)
 	}
-	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:#7"}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	asDraft := agendaID(t, r.must(0, "agenda"))
-	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"reviews","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:#7"}]`)
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"reviews","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
 	asReviews := agendaID(t, r.must(0, "agenda"))
 	a, err := standup.LoadAgenda(filepath.Join(r.standup, "agenda", asDraft+".json"))
 	if err != nil {
@@ -474,5 +506,93 @@ func TestIdsSortChronologicallyAndRowsCarryTheirRelationship(t *testing.T) {
 	}
 	if a.Digest == b.Digest {
 		t.Fatalf("a row replaced by another relationship must project differently:\n%v", a.Projection)
+	}
+}
+
+func TestUnreadableFleetIsAnErrorNotAnEmptyWorld(t *testing.T) {
+	r := newRig(t)
+	r.setFile("work-fail", "")
+	id := agendaID(t, r.must(0, "agenda")) // the agenda records the source as unavailable
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	out := r.must(4, "apply", path)
+	if !strings.Contains(out, "fleet work --json exited 1: fleet: state unavailable") || r.callLog() != "" {
+		t.Fatalf("unreadable fleet: %s (calls %q)", out, r.callLog())
+	}
+}
+
+func TestReadoutSaysWhatHappenedToEachStep(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) {
+		rec.Cards = []standup.Card{card}
+		rec.Decisions = []standup.Decision{{Kind: "rule", Subject: "ivy", Text: "one"}}
+	})
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	r.setFile("dispatch-fail", "")
+	out := r.must(4, "apply", path)
+	for _, want := range []string{"failed      card c1 dispatch", "not reached card c1 send", "not reached decision 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("readout lacks %q:\n%s", want, out)
+		}
+	}
+	if applied := r.load(path).Applied; len(applied) != 1 || applied[0].Code != 1 {
+		t.Fatalf("ledger after a failed dispatch = %+v", applied)
+	}
+	if err := os.Remove(filepath.Join(r.fake, "dispatch-fail")); err != nil {
+		t.Fatal(err)
+	}
+	out = r.must(0, "apply", path)
+	for _, want := range []string{"ran         card c1 dispatch", "ran         card c1 send", "ran         decision 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("retry readout lacks %q:\n%s", want, out)
+		}
+	}
+	if out = r.must(0, "apply", path); !strings.Contains(out, "done        card c1 send") {
+		t.Errorf("third apply must read the ledger:\n%s", out)
+	}
+}
+
+func TestLatestRecordOrdersNumerically(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	a, err := standup.LoadAgenda(filepath.Join(r.standup, "agenda", id+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []string{"9", "10"} {
+		rec := &standup.Record{Schema: standup.SchemaRecord, ID: "standup-2026-09-10-" + seq, Tenant: "acme", Lead: "lead:acme", At: "x",
+			Agenda: a.ID, AgendaDigest: a.Digest, Deferred: []standup.Deferred{{Subject: "seq " + seq, Why: "w"}}}
+		if err := rec.Save(filepath.Join(r.standup, "records", rec.ID+".json")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := r.must(0, "agenda")
+	if !strings.Contains(next, "deferred from standup-2026-09-10-10") || strings.Contains(next, "seq 9:") {
+		t.Fatalf("latest record must be sequence 10:\n%s", next)
+	}
+}
+
+func TestPlannedPoolSeatsAreDispatchable(t *testing.T) {
+	r := newRig(t)
+	checkout := filepath.Join(filepath.Dir(r.seatDir), "ivy2")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	c := card
+	c.Seat = "ivy2-author-1"
+	r.edit(path, func(rec *standup.Record) {
+		rec.Roles = []standup.Role{{Role: "author:ivy2", Kind: "author", Checkout: checkout, Seats: 1}}
+		rec.Cards = []standup.Card{c}
+	})
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	r.must(0, "apply", path)
+	calls := strings.Split(strings.TrimSpace(r.callLog()), "\n")
+	if len(calls) != 3 || !strings.HasSuffix(calls[0], "|pool "+checkout+" author 1 --tenant acme") || !strings.HasPrefix(calls[1], checkout+"-author-1|dispatch #7 ") || !strings.Contains(calls[2], "|send ivy2-author-1 ") {
+		t.Fatalf("calls:\n%s", r.callLog())
 	}
 }
