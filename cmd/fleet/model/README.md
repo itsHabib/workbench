@@ -21,9 +21,9 @@ holder.
 ```
 
 The judge typechecks every module, exhausts the reference graph to twelve
-steps with TLC for both key kinds, then reproduces three counterexamples with
-Apalache and compares each normalized trace byte-for-byte with the checked-in
-one under `artifacts/`.
+steps with TLC for both key kinds, then reproduces four counterexamples with
+Apalache (the three lease mutants below plus crash/replacement). It compares
+each normalized trace byte-for-byte with the checked-in one under `artifacts/`.
 
 ## What is modeled
 

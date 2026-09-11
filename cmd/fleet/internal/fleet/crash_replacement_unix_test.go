@@ -32,6 +32,9 @@ type crashState struct {
 // trace reproduced against Fleet, NOT that orphan effects are prevented. The
 // resource control must refuse replacement under the same process schedule.
 func TestCrashReplacementModelTrace(t *testing.T) {
+	if isolateCrashReplay(t) {
+		return
+	}
 	b, err := os.ReadFile("../../model/artifacts/crash-replacement.trace.json")
 	if err != nil {
 		t.Fatal(err)

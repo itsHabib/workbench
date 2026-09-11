@@ -33,6 +33,11 @@ consumes that exact fixture; it runs in ordinary repository CI on Linux without
 requiring Quint. Regenerating/checking the models remains a local judge step.
 The Go process test is Unix-only; Windows runtime behavior is unverified.
 
+The original discovery used unrestricted `step`. Fixture regeneration uses
+`witnessStep`, which selects that fixed schedule through the same guarded
+transitions, avoiding solver-dependent choice among equivalent counterexamples.
+Positive safety checks still use unrestricted `step`.
+
 Green here means **the unsafe branch behavior was reproduced**, and the resource
 control refused replacement. If branch recovery is hardened later, replace this
 negative-result expectation with the new contract and regenerate the model
@@ -51,8 +56,17 @@ trace; do not keep unsafe behavior merely to satisfy this test.
 
 The test controls ordering through a local socket, not timing sleeps. Every file
 is under a test temporary directory. The helpers have timeouts, and closing the
-socket makes the surviving child exit. It does not use installed Fleet state,
+socket makes the surviving child exit. On Linux the replay runs alone in a
+subreaper process that adopts both orphaned test children and explicitly waits
+for them; it asserts that both were reaped and no children remain. This does
+not depend on a container's PID 1. Other Unix hosts rely on their system init
+for orphan reaping. It does not use installed Fleet state,
 kill an agent session, run Git writes, or touch a real resource.
+
+The subreaper cleanup was exercised in ten consecutive runs with the test binary
+as PID 1 in an Alpine 3.22 container, networking disabled and a 64-PID limit.
+Every run asserted two adopted children reaped and `wait4` reporting no children
+remaining. This is Linux test-harness evidence, not Fleet process containment.
 
 ## What the models say
 

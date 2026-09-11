@@ -36,7 +36,8 @@ clears in-flight work.
 
 ## Replayed executable fixtures
 
-`./judge.sh` regenerates the three traces and compares each with the
+`./judge.sh` regenerates all four traces (these three lease mutants plus the
+crash/replacement extension) and compares each with the
 checked-in JSON under `artifacts/` byte-for-byte, then asserts the salient
 failure is still in the last state of each.
 

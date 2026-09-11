@@ -1,22 +1,23 @@
 #!/bin/sh
 # The lease protocol, bounded and machine-checked. Needs quint 0.32, jq, java, Go.
 #   ./judge.sh
-# Exhausts the reference for both key kinds (TLC), then reproduces three
+# Exhausts the reference for both key kinds (TLC), then reproduces four
 # counterexamples byte-for-byte against the frozen traces (Apalache):
 # unreadable-is-dead (the review's finding), silent resource takeover, and a
-# check-then-write with no lock. Also checks independent parent/child lifetimes
+# check-then-write with no lock, and crash/replacement with a surviving child.
+# Also checks independent parent/child lifetimes
 # and replays the crash/replacement counterexample against Go on Unix.
 set -eu
 cd "$(dirname "$0")"
+export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 
-for tool in quint jq cmp mktemp go; do
+for tool in quint jq cmp mktemp go java; do
   command -v "$tool" >/dev/null 2>&1 || { echo "missing required local tool: $tool" >&2; exit 2; }
 done
 case "$(quint --version)" in
   0.32.*) ;;
   *) echo "Quint 0.32.x required" >&2; exit 2 ;;
 esac
-export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 
 work_dir="$(mktemp -d /tmp/fleet-lease-model.XXXXXX)"
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
@@ -27,6 +28,8 @@ done
 echo "PASS typecheck: all Quint modules"
 
 for main in CrashResource QuiescentBranch; do
+  # resourceRetained applies only to the resource variant; noStaleChildWrite
+  # is the substantive safety property for both variants.
   quint verify model/crash_replacement.qnt \
     --main="$main" --invariants=noStaleChildWrite resourceRetained \
     --backend=tlc --max-steps=12 --verbosity=0 >"$work_dir/$main.log" 2>&1
@@ -45,9 +48,11 @@ done
 
 expect_counterexample() {
   name="$1"; source="$2"; module="$3"; invariant="$4"; steps="$5"; frozen="$6"
+  model_step="${7:-step}"
   set +e
   quint verify "$source" \
     --main="$module" \
+    --step="$model_step" \
     --invariant="$invariant" \
     --max-steps="$steps" \
     --out-itf="$work_dir/$name.itf.json" \
@@ -69,7 +74,7 @@ expect_counterexample() {
 expect_counterexample unreadable-is-dead model/mutant_unreadable_is_dead.qnt UnreadableIsDeadMutantBranch evidenceNotDeath 6 artifacts/unreadable-is-dead.trace.json
 expect_counterexample silent-resource-takeover model/mutant_silent_resource_takeover.qnt SilentResourceTakeoverMutantResource noSilentResourceTakeover 6 artifacts/silent-resource-takeover.trace.json
 expect_counterexample unlocked-check model/mutant_unlocked_check.qnt UnlockedCheckMutantBranch exclusion 6 artifacts/unlocked-check.trace.json
-expect_counterexample crash-replacement model/crash_replacement.qnt CrashBranch noConflictingEffects 6 artifacts/crash-replacement.trace.json
+expect_counterexample crash-replacement model/crash_replacement.qnt CrashBranch noConflictingEffects 6 artifacts/crash-replacement.trace.json witnessStep
 
 # Frozen traces must retain the salient failures, not merely parse as JSON.
 jq -e 'last | (.inFlightA or .inFlightB) and ((.liveA == "Unreadable") or (.liveB == "Unreadable"))' artifacts/unreadable-is-dead.trace.json >/dev/null

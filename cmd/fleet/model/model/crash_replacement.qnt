@@ -61,6 +61,18 @@ module CrashReplacement {
   action idle = state(owner, parentAlive, childAlive, childStarted, staleWrite, replacementWrote, "idle")
   action step = any { claim, spawnChild, crashParent, replace, childWrite, replacementWrite, childExit, idle }
 
+  // Re-export the discovered witness through the SAME guarded transitions in a
+  // fixed order. Safety checks above use unrestricted step; the frozen fixture
+  // must not depend on the solver choosing among equivalent unsafe schedules.
+  action witnessStep = any {
+    all { lastAction == "init", claim },
+    all { lastAction == "claim", spawnChild },
+    all { lastAction == "spawnChild", crashParent },
+    all { lastAction == "crashParent", replace },
+    all { lastAction == "replace", replacementWrite },
+    all { lastAction == "replacementWrite", childWrite },
+  }
+
   val noStaleChildWrite = not(staleWrite)
   // Stronger witness: the replacement has also performed a write.
   val noConflictingEffects = not(staleWrite and replacementWrote)
