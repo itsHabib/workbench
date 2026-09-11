@@ -95,7 +95,7 @@ completion, and a quiet or present process is not proof of progress.
 Operator decision: role definitions are editable Org prose cards with optional parent
 mapping, independent of Fleet. This revises the earlier Fleet registry destination.
 There is zero backward-compatibility requirement. The old Org CLI, internal Baton
-packages and Stop shim are removed, not wrapped or migrated. Remove installed old
+packages, unused contract/kernel package and Stop shim are removed, not wrapped or migrated. Remove installed old
 hooks and instructions before activating the new binaries; the concrete consumer
 inventory is in `cmd/org/README.md`. Historical files are inert and need not be deleted.
 
