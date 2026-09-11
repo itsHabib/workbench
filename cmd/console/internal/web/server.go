@@ -133,7 +133,7 @@ func (s *Server) handleApp(w http.ResponseWriter, _ *http.Request) {
 	// page can neither pull nor exfiltrate. There are no dependencies to pull —
 	// the header makes that a rule rather than a hope.
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'")
+		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// The page is embedded and changes only on a rebuild+restart; never let a
 	// browser serve a stale copy across a redeploy (the JSON routes already do this).
@@ -215,10 +215,10 @@ func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
 	var raw []byte
 	var err error
 	view := r.PathValue("view")
-	if view == "diagnostics" {
+	switch view {
+	case "diagnostics":
 		raw, err = s.fleet.Diagnose(r.Context(), r.URL.Query().Get("address"))
-	}
-	if view != "diagnostics" {
+	default:
 		raw, err = s.fleet.Read(r.Context(), view, r.URL.Query().Get("address"))
 	}
 	if err != nil {

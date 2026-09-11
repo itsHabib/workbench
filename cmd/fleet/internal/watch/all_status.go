@@ -82,12 +82,21 @@ func enrichStatus(row fleet.Rec, work []verbs.WorkRow) {
 	if tenant == "" {
 		tenant, _ = fleet.MailRoleTenant(fleet.S(row, "address"))
 	}
-	mail, err := fleet.MailFor(tenant, fleet.S(row, "address"), true)
+	mail, partial, err := fleet.MailSnapshot(tenant, fleet.S(row, "address"))
 	if err != nil {
 		row["mail_error"] = err.Error()
 	}
-	if err == nil {
-		row["unacked_mail"] = len(mail)
+	if partial {
+		row["mail_error"] = "bounded mailbox scan is partial; unacknowledged count unknown"
+	}
+	if err == nil && !partial {
+		unacked := 0
+		for _, m := range mail {
+			if !fleet.Has(m, "acked_at") {
+				unacked++
+			}
+		}
+		row["unacked_mail"] = unacked
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

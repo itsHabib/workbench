@@ -70,10 +70,11 @@ func (c *Client) Diagnose(ctx context.Context, address string) ([]byte, error) {
 		return nil, err
 	}
 	var trace struct {
-		Data     string `json:"data"`
-		Source   string `json:"source"`
-		Partial  bool   `json:"partial"`
-		Coverage string `json:"coverage"`
+		Data        string `json:"data"`
+		Source      string `json:"source"`
+		Partial     bool   `json:"partial"`
+		Coverage    string `json:"coverage"`
+		Fingerprint string `json:"fingerprint"`
 	}
 	if err := json.Unmarshal(raw, &trace); err != nil {
 		return nil, err
@@ -87,7 +88,7 @@ func (c *Client) Diagnose(ctx context.Context, address string) ([]byte, error) {
 	if !json.Valid(verdict) {
 		return nil, fmt.Errorf("TraceLens returned invalid JSON")
 	}
-	return json.Marshal(map[string]any{"verdict": json.RawMessage(verdict), "source": trace.Source, "partial": trace.Partial, "coverage": trace.Coverage, "note": "Diagnostics describe retained trace evidence, not verified task completion."})
+	return json.Marshal(map[string]any{"verdict": json.RawMessage(verdict), "source": trace.Source, "fingerprint": trace.Fingerprint, "partial": trace.Partial, "coverage": trace.Coverage, "note": "Diagnostics describe retained trace evidence, not verified task completion."})
 }
 
 type limitedBuffer struct{ bytes.Buffer }

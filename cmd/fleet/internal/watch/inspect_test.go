@@ -70,3 +70,42 @@ func TestTraceBoundsWindowAndMarksCoverage(t *testing.T) {
 		t.Fatal("invalid bounded trace", got["coverage"], len(raw))
 	}
 }
+
+func TestTracePreservesCompleteLeadingBoundary(t *testing.T) {
+	home, _ := deliverEnv(t)
+	path := strings.TrimSuffix(launchPath(deliverTarget{address: "hub:lead", cwd: home}), ".json") + ".log"
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	first := "{\"type\":\"result\",\"result\":\"boundary survives\"}\n"
+	window := first + strings.Repeat("{\"type\":\"system\"}\n", (traceWindow-len(first))/18)
+	window += strings.Repeat("\n", traceWindow-len(window))
+	prefix := "{\"type\":\"system\"}\n"
+	if err := os.WriteFile(path, []byte(prefix+window), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Trace("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(fleet.S(got, "data"), first) || !fleet.B(got, "partial") {
+		t.Fatal("complete boundary dropped", got["coverage"])
+	}
+}
+
+func TestInspectionOversizedMailboxIsPartialNotEmpty(t *testing.T) {
+	deliverEnv(t)
+	putStoreMail(t, "hub:lead", "huge", fleet.Now(), fleet.Rec{"body": strings.Repeat("x", 100000)})
+	putStoreMail(t, "hub:lead", "small", fleet.Now(), fleet.Rec{"body": strings.Repeat("界", 1100)})
+	got, err := Inspect("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fleet.B(got, "mail_partial") || got["message_count"] != nil || fleet.M(got, "agent")["unacked_mail"] != nil {
+		t.Fatal("incomplete counts presented as complete", got)
+	}
+	messages := got["messages"].([]fleet.Rec)
+	if len(messages) != 1 || !strings.HasSuffix(fleet.S(messages[0], "body"), "[excerpt]") {
+		t.Fatal(messages)
+	}
+}

@@ -615,6 +615,7 @@
           );
         }
         function renderBoard() {
+          const focusedAddress = document.activeElement?.dataset?.address;
           if (!board) return;
           const rows = [...(board.workers || [])].sort(
               (a, b) =>
@@ -725,6 +726,10 @@
           $("agents")
             .querySelectorAll("[data-address]")
             .forEach((el) => (el.onclick = () => choose(el.dataset.address)));
+          if (focusedAddress)
+            [...$("agents").querySelectorAll("[data-address]")]
+              .find((e) => e.dataset.address === focusedAddress)
+              ?.focus({ preventScroll: true });
         }
         function fact(label, value) {
           return (
@@ -872,6 +877,9 @@
             " of " +
             (d.message_count ?? "unknown") +
             " received messages. Delivery does not prove acceptance.</p>" +
+            (d.mail_partial
+              ? '<div class="notice">Partial mailbox scan; totals and newest-message coverage are unknown.</div>'
+              : "") +
             (d.mail_error
               ? '<div class="notice error">' + esc(d.mail_error) + "</div>"
               : "") +
@@ -1007,7 +1015,8 @@
                   esc(f.code || f.kind || f.title || "Finding") +
                   "</strong><p>" +
                   esc(
-                    f.message ||
+                    f.title ||
+                      f.message ||
                       f.detail ||
                       f.why ||
                       f.description ||
@@ -1061,6 +1070,10 @@
                   (tab === t ? "active" : "") +
                   '" role="tab" aria-selected="' +
                   (tab === t) +
+                  '" aria-controls="agent-panel" id="tab-' +
+                  t +
+                  '" tabindex="' +
+                  (tab === t ? "0" : "-1") +
                   '" data-tab="' +
                   t +
                   '">' +
@@ -1069,7 +1082,9 @@
                   "</button>",
               )
               .join("") +
-            '</div><div class="detailbody">' +
+            '</div><div class="detailbody" role="tabpanel" id="agent-panel" aria-labelledby="tab-' +
+            tab +
+            '" tabindex="0">' +
             (detailError
               ? '<div class="notice error">Refresh failed; showing older evidence. ' +
                 esc(detailError) +
@@ -1079,13 +1094,27 @@
             "</div>";
           $("detail")
             .querySelectorAll("[data-tab]")
-            .forEach(
-              (b) =>
-                (b.onclick = () => {
-                  tab = b.dataset.tab;
-                  renderDetail();
-                }),
-            );
+            .forEach((button) => {
+              button.onclick = () => {
+                tab = button.dataset.tab;
+                renderDetail();
+                $("tab-" + tab).focus({ preventScroll: true });
+              };
+              button.onkeydown = (event) => {
+                const index = tabs.indexOf(tab);
+                const moves = {
+                  ArrowRight: (index + 1) % tabs.length,
+                  ArrowLeft: (index + tabs.length - 1) % tabs.length,
+                  Home: 0,
+                  End: tabs.length - 1,
+                };
+                if (!(event.key in moves)) return;
+                event.preventDefault();
+                tab = tabs[moves[event.key]];
+                renderDetail();
+                $("tab-" + tab).focus({ preventScroll: true });
+              };
+            });
           if ($("diagnose")) $("diagnose").onclick = analyze;
           const outputEl = $("detail").querySelector(".output");
           if (outputEl) outputEl.scrollTop = scroll;
@@ -1117,6 +1146,18 @@
             }
           }
         }
+        function evidenceIdentity(x) {
+          return JSON.stringify([
+            x?.agent?.started_at,
+            x?.agent?.provider_session,
+            x?.agent?.provider_turn,
+            x?.agent?.session,
+            x?.trace?.source,
+            x?.trace?.fingerprint,
+            x?.trace?.modified_at,
+            x?.trace?.file_bytes,
+          ]);
+        }
         async function loadDetail() {
           const address = selected,
             token = generation;
@@ -1124,14 +1165,7 @@
           try {
             const d = await api("inspect", address);
             if (token !== generation || address !== selected) return;
-            const identity = (x) =>
-              [
-                x?.agent?.started_at,
-                x?.agent?.provider_session,
-                x?.agent?.provider_turn,
-                x?.agent?.session,
-              ].join("/");
-            if (detail && identity(detail) !== identity(d)) {
+            if (detail && evidenceIdentity(detail) !== evidenceIdentity(d)) {
               diagnostic = null;
               diagnosticVersion++;
               diagnosing = false;
@@ -1181,6 +1215,7 @@
             if (b.status === "rejected") throw b.reason;
             board = b.value;
             report = r.status === "fulfilled" ? r.value : null;
+            $("error").className = "notice";
             $("error").hidden = r.status === "fulfilled";
             $("error").textContent =
               r.status === "rejected"
@@ -1190,6 +1225,7 @@
             renderBoard();
             await loadDetail();
           } catch (e) {
+            $("error").className = "notice error";
             $("error").hidden = false;
             $("error").textContent =
               "Fleet refresh failed. " +

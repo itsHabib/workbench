@@ -2,10 +2,10 @@ package watch
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
@@ -49,25 +49,41 @@ func inspectMail(out, row fleet.Rec) {
 		out["mail_error"] = err.Error()
 		return
 	}
-	mail, err := fleet.MailFor(tenant, fleet.S(row, "address"), false)
+	mail, partial, err := fleet.MailSnapshot(tenant, fleet.S(row, "address"))
 	if err != nil {
 		out["mail_error"] = err.Error()
 		return
 	}
-	sort.SliceStable(mail, func(i, j int) bool { return fleet.F(mail[i], "at") > fleet.F(mail[j], "at") })
-	out["message_count"] = len(mail)
+	out["message_count"] = nil
+	if !partial {
+		out["message_count"] = len(mail)
+	}
+	out["mail_partial"] = partial
 	messages := []fleet.Rec{}
 	for _, m := range mail[:min(len(mail), 30)] {
-		item := fleet.Rec{}
-		for _, key := range []string{"id", "at", "from_address", "kind", "subject", "body", "acked_at", "reply_to"} {
-			item[key] = m[key]
-			if s, ok := m[key].(string); ok && len(s) > 4000 {
-				item[key] = string([]rune(s)[:min(len([]rune(s)), 1000)]) + " … [excerpt]"
-			}
-		}
-		messages = append(messages, item)
+		messages = append(messages, excerptMailItem(m))
 	}
 	out["messages"] = messages
+}
+
+func excerptMailItem(m fleet.Rec) fleet.Rec {
+	item := fleet.Rec{}
+	for _, key := range []string{"id", "at", "from_address", "kind", "subject", "body", "acked_at", "reply_to"} {
+		value := m[key]
+		if text, ok := value.(string); ok {
+			value = excerptMailText(text)
+		}
+		item[key] = value
+	}
+	return item
+}
+
+func excerptMailText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= 1000 {
+		return text
+	}
+	return string(runes[:1000]) + " … [excerpt]"
 }
 
 // Trace exports the last bounded window of an observed trace as JSON data.
@@ -131,7 +147,13 @@ func traceForRow(row fleet.Rec) (fleet.Rec, error) {
 		return nil, err
 	}
 	partial := start > 0
+	var previous [1]byte
 	if start > 0 {
+		if _, err := f.ReadAt(previous[:], start-1); err != nil {
+			return nil, err
+		}
+	}
+	if start > 0 && previous[0] != '\n' {
 		cut := bytes.IndexByte(data, '\n')
 		if cut < 0 {
 			return nil, fmt.Errorf("no complete record in trace window")
@@ -150,5 +172,5 @@ func traceForRow(row fleet.Rec) (fleet.Rec, error) {
 	if partial {
 		coverage = "partial window; earlier or incomplete records excluded"
 	}
-	return fleet.Rec{"address": address, "source": path, "at": fleet.Now(), "modified_at": float64(info.ModTime().UnixNano()) / 1e9, "file_bytes": info.Size(), "partial": partial, "coverage": coverage, "data": string(data), "lines": lines, "note": strings.TrimSpace("Observed activity is not task completion. Display shows at most 100 recent events.")}, nil
+	return fleet.Rec{"address": address, "source": path, "at": fleet.Now(), "modified_at": float64(info.ModTime().UnixNano()) / 1e9, "file_bytes": info.Size(), "partial": partial, "coverage": coverage, "data": string(data), "fingerprint": fmt.Sprintf("%x", sha256.Sum256(data)), "lines": lines, "note": strings.TrimSpace("Observed activity is not task completion. Display shows at most 100 recent events.")}, nil
 }

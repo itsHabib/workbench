@@ -90,6 +90,8 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet ack <id> [--session <id8>]
   fleet status [--json]                         read-only request board; queued is not accepted or running
   fleet status --all [--json]                     live watcher, seats, work, mail and terminal results
+  fleet inspect <address> [--json]               current agent, handoffs, bounded mail and visible output
+  fleet trace <address> [--json]                 bounded observed native trace envelope
   fleet run-report [--since 24h] [--json]          attempts, provider-reported turns/cost and exit reasons
   fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
