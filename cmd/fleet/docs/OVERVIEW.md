@@ -53,7 +53,7 @@ substrate makes.
 | row | a declared assignment: change, relationship, accountable role, due, seat |
 | mail | one file per message under `mail/.v2/<tenant>/<role or seat>/<address>/<id>.json` (hashed names); send, read, ack; retry-safe by id |
 | receipt | `receipts/<sha>.<kind>.json`; the only source of "done" |
-| watcher | one per machine; folds the store into a board and reports observed changes. On main a separate delivery process starts sessions from mail; built-in delivery is proposed in #301 |
+| watcher | one per machine; folds the store into a board and reports observed changes. It also starts sessions for waiting mail and sends lateness as mail, both as folds (#301); a separate delivery process is only needed against a binary predating it |
 | lane | a kind of agent: a manifest (requires, produces, denies) plus a prose card |
 
 Roles are data. Adding a kind of agent is a directory of two files, not a code change.
