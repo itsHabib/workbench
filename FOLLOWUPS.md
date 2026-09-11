@@ -24,6 +24,14 @@ PR #310 also retains two reviewed style choices: `RuntimeText()` builds its own
 worker slice and asserts that internal type; `tailDirectory` has a compiler-required
 return after its single-entry map traversal. Neither is a known behavioral defect.
 
+## fleet: completed plain text without a newline in tail
+
+PR #310's final Codex review reproduced a completed `/usr/bin/printf` output without
+its trailing newline being omitted by `fleet tail`. The raw per-launch log retains
+those bytes and `fleet watch status` points to it. Deferred at the two-fix-round cap;
+fix terminal-fragment handling without displaying partial live records as complete.
+The live Claude JSON/transcript sandbox does not exercise or resolve this case.
+
 ## org: transfer's last orphan window needs a cross-chain transaction
 
 `org transfer` writes to two chains under two locks. It assigns to the

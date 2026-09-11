@@ -1875,7 +1875,7 @@ report(brow.get("state") == "dead-holding-work" and brow.get("session") == "live
        "a dead holder beside a live occupant still reads dead-holding-work on the board; work shows the dead undeclared holder as dead",
        f"board={brow.get('state')} occupant={brow.get('session')} holds={brow.get('holds')} work={drow}")
 hook.drop_lease(k2, "deadA"); hook._unlink(hook.path("sessions", "deadA.json")); hook._unlink(hook.path("sessions", "liveB.json"))
-# 5. hands that left, and failed evidence, are attention states
+# 5. departed hands are occupancy evidence; failed receipts still need a decision
 fleet("dispatch", "feat/r2", "--as", "build", "--for", "hub:alpha")
 wt_r2 = os.path.join(work, "wt-r2"); subprocess.run(["git", "worktree", "add", "-q", wt_r2, "feat/r2"], cwd=r, capture_output=True)
 live("workerC", wt_r2, "feat/r2"); hook.acquire_lease(k2, hook.lease_record(k2, "workerC", "finisher:watchrepo", wt_r2, "held"))
@@ -1886,8 +1886,8 @@ head2 = subprocess.run(["git", "rev-parse", "refs/heads/feat/r2"], cwd=r, captur
 hook.write_json(hook.path("receipts", head2 + ".build.json"), {"sha": head2[:10], "head": head2, "kind": "build", "verdict": "fail", "at": hook.now(), "session": "workerC", "observable": "x"})
 s_fail = wstate("feat/r2", "build")
 t5 = fleet("watch", "--once", "--interval", "60s").stdout
-report(s_idle == "idle" and s_left == "abandoned" and s_fail == "failed" and "Work needing a decision" in t5 and "failed feat/r2/build" in t5,
-       "declared work whose hands left is abandoned, and failed evidence is failed; both are in the board's decision section, never under fine",
+report(s_idle == "idle" and s_left == "unoccupied" and s_fail == "failed" and "Work needing a decision" in t5 and "failed feat/r2/build" in t5,
+       "departed hands are unoccupied; failed evidence still needs a decision",
        f"idle={s_idle} left={s_left} failed={s_fail} board={t5[:240]!r}")
 hook._unlink(hook.path("receipts", head2 + ".build.json")); fleet("undispatch", "feat/r2")
 # 6. a deadline that expired during a sleep gap is unknown, not overdue

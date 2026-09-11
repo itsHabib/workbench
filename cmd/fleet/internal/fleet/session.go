@@ -508,7 +508,7 @@ func workAttention(work []any) ([]string, int) {
 	for _, raw := range work {
 		r, _ := raw.(map[string]any)
 		st := S(r, "state")
-		if st != "dead" && st != "late" && st != "undeclared" && st != "abandoned" && st != "failed" && st != "unknown" {
+		if st != "dead" && st != "late" && st != "undeclared" && st != "failed" && st != "unknown" {
 			fine++
 			continue
 		}

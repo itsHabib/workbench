@@ -108,3 +108,33 @@ func TestAssignCapturesDestinationIdentity(t *testing.T) {
 		t.Fatal("new assignment needed additional setup", v.Out)
 	}
 }
+
+func TestDepartedWorkIsUnoccupiedUntilDueOrReceipt(t *testing.T) {
+	repo, _ := requestFixture(t)
+	rid, now := fleet.RepoID(repo), fleet.Now()
+	d := fleet.Rec{"repo": rid, "change": "task", "relationship": "verify", "at": now - 30}
+	sessions := []fleet.Rec{
+		{"session": "first", "repo": rid, "branch": "task", "ended": true, "last_event_at": now - 20},
+		{"session": "replacement", "repo": rid, "branch": "task", "ended": true, "last_event_at": now - 10},
+	}
+	for range 2 {
+		row := declaredRow(d, sessions, now)
+		if fleet.S(row, "state") != "unoccupied" || fleet.S(row, "left") != "replacement" || WorkAttention[fleet.S(row, "state")] {
+			t.Fatalf("normal yield misreported: %v", row)
+		}
+		sessions[0], sessions[1] = sessions[1], sessions[0]
+	}
+	d["due"] = now - 1
+	if row := declaredRow(d, sessions, now); fleet.S(row, "state") != "late" {
+		t.Fatalf("unoccupied overdue work hidden: %v", row)
+	}
+	head := branchHead(rid, "task")
+	if err := fleet.WriteJSON(fleet.Path("receipts", head+".verify.json"), fleet.Rec{
+		"head": head, "sha": head, "kind": "verify", "verdict": "pass", "at": now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if row := declaredRow(d, sessions, now); fleet.S(row, "state") != "done" {
+		t.Fatalf("passing receipt did not establish completion: %v", row)
+	}
+}

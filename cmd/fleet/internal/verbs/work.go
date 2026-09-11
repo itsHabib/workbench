@@ -299,7 +299,7 @@ func WorkRows(forRole string) []WorkRow {
 		}
 		rows = mine
 	}
-	order := map[string]int{"dead": 0, "failed": 1, "abandoned": 2, "late": 3, "undeclared": 4, "working": 5, "idle": 6, "dispatched": 7, "remote": 8, "done": 9}
+	order := map[string]int{"dead": 0, "failed": 1, "late": 2, "undeclared": 3, "working": 4, "idle": 5, "unoccupied": 6, "dispatched": 7, "remote": 8, "done": 9}
 	sortBy(rows, func(a, b WorkRow) bool {
 		oa, ob := order[fleet.S(a, "state")], order[fleet.S(b, "state")]
 		if oa != ob {
@@ -319,21 +319,33 @@ func declaredRow(d fleet.Rec, sessions []fleet.Rec, now float64) WorkRow {
 		"due": d["due"], "slot": d["slot"], "brief": d["brief"], "key": key, "hands": nil, "state": "dispatched", "head": nil, "done_at": nil}
 	state := handsState(row, key)
 	if state == "dispatched" {
-		// No hands now. A session that left with the branch is not "never started".
-		for _, s := range sessions {
-			if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) && fleet.F(s, "last_event_at") > fleet.F(d, "at") {
-				state = "abandoned"
-				row["left"] = s["session"]
-				break
-			}
+		// A departed session establishes prior occupancy, not abandonment.
+		if left := latestDeparted(sessions, rid, branch, fleet.F(d, "at")); left != nil {
+			state = "unoccupied"
+			row["left"] = left["session"]
 		}
 	}
 	state = evidenceState(row, rid, branch, rel, state)
-	if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle") {
+	if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle" || state == "unoccupied") {
 		state = "late"
 	}
 	row["state"] = state
 	return row
+}
+
+// latestDeparted identifies the most recent occupant after this dispatch.
+func latestDeparted(sessions []fleet.Rec, rid, branch string, after float64) fleet.Rec {
+	var latest fleet.Rec
+	for _, s := range sessions {
+		if fleet.S(s, "branch") != branch || fleet.S(s, "repo") != rid || fleet.SessionAlive(s) {
+			continue
+		}
+		at := fleet.F(s, "last_event_at")
+		if at > after {
+			latest, after = s, at
+		}
+	}
+	return latest
 }
 
 // handsState is who holds the branch and whether they are alive and mid-turn.
@@ -454,7 +466,7 @@ func holderAssignment(repo, branch, sid string) fleet.Rec {
 }
 
 // WorkAttention is the set of work states a hub must decide something about.
-var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true, "unknown": true}
+var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "failed": true, "unknown": true}
 
 // WorkLine is one row as a hub reads it.
 func WorkLine(r WorkRow, now float64) string {

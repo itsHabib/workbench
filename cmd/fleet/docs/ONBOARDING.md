@@ -89,7 +89,7 @@ completed work and coordination cost with the same acceptance.
 The lead dispatches work with a brief; configured seats start on the next watcher fold. Then:
 
 ```sh
-fleet work            # rows and their observed state: dispatched · working · idle · late · abandoned · dead · failed · undeclared · remote · done
+fleet work            # rows and their observed state: dispatched · working · idle · late · unoccupied · dead · failed · undeclared · remote · done
 fleet leases          # who holds which branch or resource
 fleet mail --for <address>   # only inside a live roled session; from an operator shell use board/work/leases/receipts
 fleet receipts

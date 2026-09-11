@@ -192,7 +192,7 @@ func refusals(b *strings.Builder, es records, since, now float64) {
 	fmt.Fprintf(b, "\n%d recorded refusals. A retry is evidence of repetition, not proof of the session's understanding.\n\n", len(lines))
 }
 
-var needs = map[string]bool{"busy-and-overdue": true, "dead-holding-work": true, "assigned-no-occupant": true, "dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true, "unknown": true}
+var needs = map[string]bool{"busy-and-overdue": true, "dead-holding-work": true, "assigned-no-occupant": true, "dead": true, "late": true, "undeclared": true, "failed": true, "unknown": true}
 
 func matches(t, r fleet.Rec) bool {
 	if slot := fleet.S(t, "slot"); slot != "" && slot == fleet.S(r, "slot") {

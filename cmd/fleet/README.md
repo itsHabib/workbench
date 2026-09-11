@@ -124,7 +124,7 @@ seat, and the dispatcher's address. Everything else on the row is observed at re
 time: hands from the branch lease and its holder's liveness, done from a passing
 receipt whose kind is the relationship at the branch head. `fleet work` shows the
 rows grouped by accountable role with computed states — `dispatched`, `working`,
-`idle`, `late`, `abandoned`, `dead`, `failed`, `undeclared`, `remote`, `done` — and states are
+`idle`, `late`, `unoccupied`, `dead`, `failed`, `undeclared`, `remote`, `done` — and states are
 never set by anyone. `reassign --for` moves accountability as a column, which is how
 one hub becomes two. The row and its receipts are mirrored to the change's pull
 request as marked comments, so another machine reads the same ownership; `fleet

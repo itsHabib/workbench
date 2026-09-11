@@ -6,6 +6,26 @@ from records. It generalizes the four runs recorded in `itsHabib/fleet-demo-sand
 repository is one sandbox; any small private repository with a 40-second "bench" script works).
 The scripts under `cmd/fleet/e2e/` are the ones those runs used.
 
+## Start with one complete path
+
+For a runtime or continuity change, begin with one lead, one worker and one verifier in
+private state and fresh worktrees. A useful bounded task is:
+
+1. The lead dispatches a brief once, then checkpoints and yields.
+2. The worker leaves a dirty draft and a handoff, asks for a missing fact, then yields.
+3. The lead answers and yields. Mail wakes a replacement worker, which preserves the draft,
+   completes the task and opens a draft PR.
+4. The lead forwards the exact commit to the verifier and yields. The verifier checks that
+   head in its own worktree, correlates retained draft/session evidence, and emits a receipt.
+5. Remove delivery entries to stop new launches; let active sessions finish, then stop the
+   Go watcher. Record wall time, reported model cost, manual rescues and any shell polling.
+
+Use [run-a-fleet.md](run-a-fleet.md) for roles, messages and checkpoints, and
+[headless.md](headless.md) for the runtime. Save the first handoff/draft before replacement
+updates them: handoffs retain the latest context, not a history. A deliberate yield/resume
+proves continuity across sessions; it is not a crash-recovery or contention test. Expand to
+the multi-lead/resource scenario below only when testing those behaviors.
+
 ## What a passing run shows
 
 | observation | evidence |

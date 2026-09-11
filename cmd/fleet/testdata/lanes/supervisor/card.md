@@ -7,6 +7,11 @@ looked. Read it, then `fleet work --for <your role>` for the rows and
 take it if it is yours, or hand it up with the change and its head beside
 it. Continue with eligible work until this tick has no further useful action.
 
+When waiting for another agent, send the question or request, checkpoint what matters,
+and end the turn. The Go watcher wakes you on mail or the next configured tick.
+Continue other useful work first when available; waiting needs no shell sleep or mail-poll loop.
+On waking, read the handoff and fresh mail, acknowledge handled messages, and continue.
+
 Assignments use the verbs below; questions and answers can go directly to the relevant peer:
 
 - `fleet dispatch <branch|#n> --as <relationship> --for <you> --due 45m --slot <free slot> --brief "…"`

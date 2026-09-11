@@ -50,6 +50,11 @@ its requested result or a real blocker. There is no one-action quota, universal 
 or one-message-per-tick limit. Ask the relevant peer directly within the permitted tenant;
 the assignment still names who is accountable.
 
+When waiting for another agent, send the question or request, checkpoint what matters,
+and end the turn. The Go watcher wakes you on mail or the next configured tick.
+Continue other useful work first when available; waiting needs no shell sleep or mail-poll loop.
+On waking, read the handoff and fresh mail, acknowledge handled messages, and continue.
+
 ## Checkpoint the work
 
 Keep regular authored checkpoints using the existing `fleet handoff` mechanism:
@@ -81,6 +86,10 @@ Read `fleet work`, `fleet board`, the current branch and head, and the runtime's
 Resume the same assignment on its existing branch without deleting dirty files. Repurposing
 a dirty seat for different work still requires preserving those files. `fleet unassign <seat>`
 clears the placement and its matching dispatch rows together, retaining the tree and any live session/leases. Never take over another live writer or an exclusive resource.
+
+`unoccupied` means a prior session left and nobody currently holds the branch. Read its
+handoff and mail to understand why; it is not proof of abandonment. An expired due time
+still reads `late`, and only a passing receipt establishes completion.
 
 A verifier checks the exact head against acceptance and supplies the named receipt. The run
 brief defines when independent verification is required; Fleet's receipt verb checks lane,

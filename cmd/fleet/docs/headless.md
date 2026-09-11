@@ -177,3 +177,14 @@ Provider waiting states, uniform Claude/Codex terminal semantics, a unified all-
 table and a new operator push channel remain open. Existing `FLEET_NOTIFY` handles configured
 watcher notifications; this patch does not configure a new external destination. Existing
 `fleet report` and offline metrics remain the reporting tools.
+
+## Yield and stop
+
+An agent waiting for a peer records its handoff and ends the turn. Mail or the configured
+recurrence wakes a fresh session with the retained context. Keep shell polling out of role
+cards: the Go watcher already owns that wait.
+
+To finish a run, remove its delivery entries first, let active sessions settle while the
+watcher captures their exits, then stop the watcher. Removing an entry prevents new launches
+and does not kill its active process. Stopping the watcher before children exit loses OS exit
+observation; `gone_exit_unknown` is honest even if a later model result says success.
