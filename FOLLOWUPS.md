@@ -7,8 +7,9 @@ Tracked in-repo per portfolio convention (status doc, not issues).
 The two permitted fix rounds ended at code head `3a36614`. The final Copilot
 panel's P1 browser/diagnostic deadline mismatch was fixed by allowing 45 seconds
 for the bounded 30-second Fleet read plus 10-second TraceLens call and response
-margin. Native Output rendering is a merge dependency on runtime PR #318 and
-was tested with the combined source. No fourth panel is requested. Remaining
+margin. Native Output rendering was moved unchanged from runtime PR #318 into
+this PR, with a direct Inspect regression, removing that merge dependency.
+It was also tested with combined source and real provider traces. No fourth panel is requested. Remaining
 P2/P3 items are recorded for judgment:
 
 - **P2, TraceLens terminal outcomes:** app-server `declined` tool statuses stay

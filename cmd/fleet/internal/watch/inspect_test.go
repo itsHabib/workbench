@@ -109,3 +109,32 @@ func TestInspectionOversizedMailboxIsPartialNotEmpty(t *testing.T) {
 		t.Fatal(messages)
 	}
 }
+
+func TestInspectRendersNativeAppServerOutput(t *testing.T) {
+	home, _ := deliverEnv(t)
+	path := strings.TrimSuffix(launchPath(deliverTarget{address: "hub:lead", cwd: home}), ".json") + ".log"
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	input := `{"method":"item/started","params":{"item":{"id":"one","type":"commandExecution","command":"go test ./..."}}}
+{"method":"item/started","params":{"item":{"id":"two","type":"fileChange"}}}
+{"method":"item/completed","params":{"item":{"id":"three","type":"agentMessage","text":"Checks passed; ready for review."}}}
+`
+	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Inspect("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := fleet.M(got, "trace")
+	visible := string(fleet.DumpJSON(trace["lines"]))
+	for _, text := range []string{"go test ./...", "fileChange", "Checks passed; ready for review."} {
+		if !strings.Contains(visible, text) {
+			t.Fatalf("missing %q in visible output: %s", text, visible)
+		}
+	}
+	if trace["data"] != nil || Heartbeat() != nil {
+		t.Fatal("inspect exposed raw data or scheduled work")
+	}
+}

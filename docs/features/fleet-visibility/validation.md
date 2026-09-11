@@ -15,6 +15,10 @@ traces, prompts and credentials are not published.
   JavaScript syntax and the three state regressions were rechecked; the Go
   binaries were unchanged. This record and deferrals accompany that bounded
   post-cap P1 repair; no fourth panel was requested.
+- The unchanged native Output renderer was subsequently moved from PR #318
+  into PR #319, with `TestInspectRendersNativeAppServerOutput` proving command,
+  file-change and assistant text reach Inspect's visible tail without raw data
+  or watcher mutation. This removes the runtime merge dependency.
 
 ## Automated checks
 
