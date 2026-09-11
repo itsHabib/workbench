@@ -78,8 +78,18 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
         "--subject", "Which unit?", "--body", "ms or s", "--session", "seat-v1")
 
     # One fold: one launch, carrying the message, stamped delivered but not acknowledged.
-    run(seat, "watch", "--once")
-    launch = wait_for_launch(1)[0]
+    watcher = subprocess.Popen([binary, "watch", "--interval", "20ms"], cwd=seat, env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        launch = wait_for_launch(1)[0]
+        for _ in range(200):
+            if list((state / "watch/delivery").glob("*.exit.json")):
+                break
+            time.sleep(0.05)
+        assert list((state / "watch/delivery").glob("*.exit.json")), "persistent watcher did not collect exit"
+    finally:
+        watcher.terminate()
+        watcher.wait(timeout=10)
     assert launch["cwd"] == str(lead) or os.path.realpath(launch["cwd"]) == os.path.realpath(lead), launch
     assert "q-1" in launch["prompt"] and "hub:lead" in launch["prompt"], launch
     queued = mailbox("hub:lead")
