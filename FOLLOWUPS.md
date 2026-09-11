@@ -582,3 +582,27 @@ defects in the delivery fix that landed.
 Code verification at this head: `go test -race ./cmd/fleet/...`, `go vet`,
 `golangci-lint`, and both `testdata/run-suite.sh` variants pass. Those checks do not
 dismiss the residuals above. No further review-panel request goes out for this PR.
+
+
+## Fleet status identity residuals (2026-09-11, PR #313)
+
+The final panel surfaced two P2 read-only display cases after the two-fix-round
+cap. They are submitted to the judge for acceptance, not represented as fixed:
+
+- A retained launch is keyed by checkout path. Rebinding that path to another
+  address can label the prior attempt's process/output evidence with the current
+  address, or show it twice when configuration and role bindings disagree. Match
+  stored launch address/cwd before joining it into a synthetic status row. Keep
+  directory-level process exclusion intact: a new address must not bypass an old
+  live process. Until then inspect the launch record and run-report attempt metadata
+  after rebinding; the tested sandbox kept address/path bindings stable.
+- A deleted mapped directory can inherit branch/repository discovery from its
+  parent. Status reports a HEAD error but can join the parent's branch/work rows.
+  Require an existing checkout before that join. Until then the HEAD error means
+  the branch/work association is not reliable; remove obsolete directory bindings.
+
+These do not change runtime scheduling, ownership, receipts or merge authority.
+Final code at 469aba2 passed Fleet race tests, vet/lint, both CLI suites and CI;
+its retained live-run replay returned seven attempts, 89 turns and $2.633753.
+No fourth panel cycle is requested. This entry does not claim the residuals passed
+independent judgment; see the exact-head Gate result on the PR.
