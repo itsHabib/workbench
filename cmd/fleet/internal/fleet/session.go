@@ -76,6 +76,12 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 		rec[k] = v
 	}
 	rec["last_event"], rec["last_event_at"] = name, Now()
+	if transcript := S(ev, "transcript_path"); transcript != "" {
+		rec["transcript_path"] = transcript
+	}
+	if tool := S(ev, "tool_name"); tool != "" {
+		rec["last_tool"] = tool
+	}
 	if cwd := S(ev, "cwd"); cwd != "" {
 		rec["cwd"] = cwd
 	} else if !Has(rec, "cwd") {
@@ -502,7 +508,7 @@ func workAttention(work []any) ([]string, int) {
 	for _, raw := range work {
 		r, _ := raw.(map[string]any)
 		st := S(r, "state")
-		if st != "dead" && st != "late" && st != "undeclared" && st != "abandoned" && st != "failed" && st != "unknown" {
+		if st != "dead" && st != "late" && st != "undeclared" && st != "failed" && st != "unknown" {
 			fine++
 			continue
 		}

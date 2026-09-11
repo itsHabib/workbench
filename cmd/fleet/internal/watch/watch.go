@@ -1,6 +1,6 @@
-// Package watch is the one standing process the fleet has, and it owns nothing.
+// Package watch is Fleet's Go scheduler, delivery launcher and observer.
 //
-// Every fact it shows is a fold over records the hooks already wrote — sessions,
+// Board facts are folded from records the hooks already wrote — sessions,
 // leases, roles.map — plus what `unowned` can learn from the network. It ticks a
 // clock nobody else has (a stopped worker is indistinguishable from a slow one until
 // something measures time when no one is looking), classifies every roled path,
@@ -15,7 +15,7 @@
 //	watch/board.md         the same rows, attention-budgeted for a person — replaced every tick
 //	watch/observed.jsonl   one line per state transition — appended, the recording of a day
 //	watch/late.json        the deadlines already said out loud — so each is said once
-//	watch/delivery/        the output of the commands delivery started — appended
+//	watch/delivery/        launch records, per-attempt output and collected process exits
 //
 // It also stamps delivered_at/delivered_by on the mail records it hands to a process.
 // That is the whole of what it writes outside watch/, and it is a stamp, not an ack.
@@ -34,13 +34,16 @@
 package watch
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
@@ -74,7 +77,18 @@ func Stale(intervals float64) bool {
 }
 
 // Tick folds once and writes the board. It returns the rendered board.
+// A diagnostic fold must not replace a persistent watcher's heartbeat.
 func Tick(interval time.Duration) (string, error) {
+	var md string
+	err := withOwner(func() error {
+		var err error
+		md, err = tick(interval)
+		return err
+	})
+	return md, err
+}
+
+func tick(interval time.Duration) (string, error) {
 	now := fleet.Now()
 	prev := Heartbeat()
 	prevAt := fleet.F(prev, "at")
@@ -578,6 +592,16 @@ func notify(t fleet.Rec) {
 // Serve ticks forever. One per machine: a second watcher finding a fresh heartbeat
 // from a live pid exits rather than compete.
 func Serve(interval time.Duration) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, interval)
+}
+
+func serve(ctx context.Context, interval time.Duration) error {
+	return withOwner(func() error { return serveOwned(ctx, interval) })
+}
+
+func withOwner(run func() error) error {
 	// One writer of one board: an advisory lock held for the process's lifetime, so a
 	// second watcher started inside the first's tick — before any heartbeat exists —
 	// is refused too. Kernel-released on death, like every lock here.
@@ -597,11 +621,27 @@ func Serve(interval time.Duration) error {
 		return fmt.Errorf("watcher lock unavailable; last recorded heartbeat pid %d, %s ago: %w", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")), err)
 	}
 	defer func() { _ = filelock.Unlock(owner) }()
+	return run()
+}
+
+func serveOwned(ctx context.Context, interval time.Duration) error {
+	defer func() {
+		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), fleet.Rec{"at": fleet.Now(), "what": "watcher-stopped", "pid": os.Getpid()})
+	}()
 	for {
-		if _, err := Tick(interval); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if _, err := tick(interval); err != nil {
 			_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch tick: " + err.Error()})
 		}
-		time.Sleep(interval)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
 	}
 }
 

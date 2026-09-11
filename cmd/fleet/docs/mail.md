@@ -38,7 +38,10 @@ and `fleet_ack` require caller `cwd`; MCP bodies are literal text.
 
 New records live under `$FLEET_STATE/mail/.v2/<tenant>/<kind>/<address>/<id>.json`
 (default state root `~/.fleet`). Tenant and address components use lowercase SHA-256 hex digests, avoiding
-case-folding aliases on macOS and Windows; kind distinguishes a role from a seat. IDs start with a letter or digit, followed
+case-folding aliases on macOS and Windows; kind distinguishes a role from a seat. For a new CLI/MCP message, omit `--id`/`id` and Fleet generates and returns one.
+For an intentional retry, use the returned ID and the same payload. A reply is a new
+message; reference the question or work in its body and send to `from_address`.
+Explicit IDs start with a letter or digit, followed
 by letters, digits, `.`, `_`, `-`, up to 128 characters. The resolved tenant is
 carried from authorization into storage, so a changed mapping cannot publish a
 message into a different tenant.
@@ -79,7 +82,9 @@ SessionStart and UserPromptSubmit inject up to five unacked mail lines, then
 `[fleet] and N more; fleet mail`. Subjects are flattened to one line and bounded,
 including retained messages. The current launch-directory address is resolved at
 each event. Hooks never auto-ack. An absent recipient keeps queued mail until a
-session starts. There is no automatic launch or delivery stamp.
+session starts. The mail verbs do not launch processes. The Go watcher can deliver
+mail to configured headless addresses and stamps delivery separately from acknowledgment;
+see [headless.md](headless.md).
 
 Both adapter suites use real CLI processes and hooks in temporary state. They
 exercise replacement sender retries, queued recipients, distinct worker seats,

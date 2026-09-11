@@ -845,7 +845,7 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 	if !branchNameRe.MatchString(branch) || strings.HasPrefix(branch, "-") || rc != 0 || shaRe.MatchString(branch) {
 		return refuse("fleet assign: %s is not a branch name (a revision or a path is not assignable)", fleet.PyRepr(branch))
 	}
-	if err := refuseUnlessFree(slot, r); err != nil {
+	if err := refuseUnlessAssignable(slot, r, branch); err != nil {
 		return err
 	}
 	gitTry(path, 120*time.Second, "fetch", "--quiet", "origin", branch)
@@ -862,6 +862,7 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 		if out = assignCheckout(slot, path, branch); out != nil {
 			return nil
 		}
+		replyTo = assignmentReplyTo(replyTo)
 		by = dispatcher(by)
 		// `by` is who dispatched; `for` is the role accountable until the work is done. The
 		// same session today, and they diverge the moment there are two hubs — a column on
@@ -898,6 +899,17 @@ func assignmentIdentity(path, slot string) (string, string, error) {
 	return role, tenant, nil
 }
 
+func assignmentReplyTo(address string) string {
+	if address != "" {
+		return address
+	}
+	role, _, slot := fleet.MapRowsFor(cwd())
+	if slot != "" {
+		return slot
+	}
+	return role
+}
+
 // assignGuards, under the seat's lock: the seat exists and is free, and the branch is
 // not held by a live session (two sessions on one branch is the thing this prevents).
 func assignGuards(slot, path, branch string) error {
@@ -905,7 +917,7 @@ func assignGuards(slot, path, branch string) error {
 	if r == nil {
 		return refuse("fleet assign: no slot named %s", fleet.PyRepr(slot))
 	}
-	if err := refuseUnlessFree(slot, r); err != nil {
+	if err := refuseUnlessAssignable(slot, r, branch); err != nil {
 		return err
 	}
 	cur := fleet.Lease(fleet.Scope(path, branch))
@@ -921,6 +933,9 @@ func assignGuards(slot, path, branch string) error {
 // assignCheckout puts the seat's tree on the branch, creating it from origin when
 // it is not local, and confirms where the tree landed.
 func assignCheckout(slot, path, branch string) error {
+	if fleet.BranchOf(path) == branch {
+		return nil
+	}
 	rc, first := gitTry(path, gitTimeout, "checkout", "--quiet", branch)
 	if rc != 0 {
 		// The -b fallback is only for a branch that is not local yet, so when it fails
@@ -950,6 +965,22 @@ func slotRow(slot string) SlotRow {
 	return nil
 }
 
+// Resuming the same work never checks out another branch or discards files.
+// A scratch file or uncommitted edits should not force a lead to rescue the tree.
+func refuseUnlessAssignable(slot string, r SlotRow, branch string) error {
+	state := fleet.S(r, "state")
+	if (state == "dirty" || state == "orphaned") && fleet.BranchOf(fleet.S(r, "path")) == branch {
+		if sid := fleet.S(r, "session"); sid != "" {
+			rec := fleet.SessionRecord(sid)
+			if rec == nil || (!fleet.B(rec, "ended") && !(fleet.S(rec, "pid_kind") == "harness" && fleet.PidGone(int(fleet.F(rec, "pid"))))) {
+				return refuseUnlessFree(slot, r)
+			}
+		}
+		return nil
+	}
+	return refuseUnlessFree(slot, r)
+}
+
 func refuseUnlessFree(slot string, r SlotRow) error {
 	if fleet.S(r, "state") == "free" {
 		return nil
@@ -962,12 +993,42 @@ func refuseUnlessFree(slot string, r SlotRow) error {
 }
 
 func cmdUnassign(slot string) error {
+	return fleet.KeyLock("dispatch", func() error {
+		return fleet.KeyLock("slot:"+slot, func() error { return unassignLocked(slot) })
+	})
+}
+
+func unassignLocked(slot string) error {
 	p := fleet.Path("assign", fleet.Safe(slot)+".json")
-	if _, err := os.Stat(p); err != nil {
-		return refuse("fleet unassign: %s has no assignment", slot)
+	a := fleet.ReadJSON(p)
+	if a == nil {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			return refuse("fleet unassign: %s has an unreadable assignment; inspect %s", slot, p)
+		}
 	}
-	fleet.Unlink(p)
-	say("%s: assignment cleared", slot)
+	var paths []string
+	for _, r := range dispatchRows() {
+		if fleet.S(r, "slot") != slot {
+			continue
+		}
+		if a != nil && (fleet.S(r, "repo") != fleet.S(a, "repo") || fleet.S(r, "change") != fleet.S(a, "branch")) {
+			continue
+		}
+		if fleet.S(r, "request_id") != "" {
+			return refuse("fleet unassign: request-bound work needs its correlated lifecycle action; inspect fleet status")
+		}
+		paths = append(paths, dispatchFile(fleet.S(r, "repo"), fleet.S(r, "change"), fleet.S(r, "relationship")))
+	}
+	// Keep the placement until its rows are gone; a retry can finish a partial clear.
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	say("%s: assignment and %d matching dispatch rows cleared; working files retained", slot, len(paths))
 	return nil
 }
 

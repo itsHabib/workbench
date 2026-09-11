@@ -467,3 +467,17 @@ intentionally serializes as []. No migration or live configuration changes.
 - Smallest fix: read the holder's recorded slot, verify repository/branch/slot, and
   reject an assignment delivered to another session. Unknown holder context stays empty.
 - Status: fixed; regression failed on 925b785 before the change.
+
+### 2026-09-11 — Headless sandbox waiting looked abandoned and encouraged shell polling
+
+- What I tried: real lead/worker/replacement/verifier runs r6 and r7 on PR #310.
+- What happened: r6's lead used Bash mail polling, and normal departures became
+  `abandoned` on the work board. r7's worker and lead guessed handoff read flags,
+  which replaced the checkpoint with `--list` or `--show`.
+- Class: misleading-status / unclear-guidance.
+- Smallest fix: role prose says checkpoint and end the turn while waiting; Go owns
+  wakeups. Work now reports `unoccupied` and the latest departed session, with
+  expired due times still `late`. Document that handoff writes; read injected
+  context or stored JSON. Unknown-option rejection is recorded in FOLLOWUPS.md.
+- Boundary: deliberate yield/resume, not crash recovery; no SDK replacement,
+  global installation or merge. Tests and live evidence are recorded in the PR.

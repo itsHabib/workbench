@@ -108,3 +108,57 @@ func TestAssignCapturesDestinationIdentity(t *testing.T) {
 		t.Fatal("new assignment needed additional setup", v.Out)
 	}
 }
+
+func TestDepartedWorkIsUnoccupiedUntilDueOrReceipt(t *testing.T) {
+	repo, _ := requestFixture(t)
+	rid, now := fleet.RepoID(repo), fleet.Now()
+	d := fleet.Rec{"repo": rid, "change": "task", "relationship": "verify", "at": now - 30}
+	sessions := []fleet.Rec{
+		{"session": "first", "repo": rid, "branch": "task", "ended": true, "last_event_at": now - 20},
+		{"session": "replacement", "repo": rid, "branch": "task", "ended": true, "last_event_at": now - 10},
+	}
+	for range 2 {
+		row := declaredRow(d, sessions, now)
+		if fleet.S(row, "state") != "unoccupied" || fleet.S(row, "left") != "replacement" || WorkAttention[fleet.S(row, "state")] {
+			t.Fatalf("normal yield misreported: %v", row)
+		}
+		sessions[0], sessions[1] = sessions[1], sessions[0]
+	}
+	d["due"] = now - 1
+	if row := declaredRow(d, sessions, now); fleet.S(row, "state") != "late" {
+		t.Fatalf("unoccupied overdue work hidden: %v", row)
+	}
+	head := branchHead(rid, "task")
+	if err := fleet.WriteJSON(fleet.Path("receipts", head+".verify.json"), fleet.Rec{
+		"head": head, "sha": head, "kind": "verify", "verdict": "pass", "at": now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if row := declaredRow(d, sessions, now); fleet.S(row, "state") != "done" {
+		t.Fatalf("passing receipt did not establish completion: %v", row)
+	}
+}
+
+func TestStopAndResumeAddressWithoutBranch(t *testing.T) {
+	repo, _ := requestFixture(t)
+	if err := os.MkdirAll(fleet.OrgState, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.RolesMap(), []byte(repo+" one supervisor:demo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "--detach")
+	if err := Dispatch([]string{"stop", "address:supervisor:demo", "run complete"}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := fleet.MailStopKey("supervisor:demo")
+	if err != nil || fleet.StopFlag(key) == nil {
+		t.Fatalf("stop missing: %s %v", key, err)
+	}
+	if err := Dispatch([]string{"resume", "address:supervisor:demo"}); err != nil {
+		t.Fatal(err)
+	}
+	if fleet.StopFlag(key) != nil {
+		t.Fatal("stop retained")
+	}
+}

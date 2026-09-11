@@ -96,14 +96,14 @@ func liveHands(key string) string {
 // CmdDispatch is the one declared act: write the row, and place the work when a
 // slot is named. Placement is `assign`, under the slot's lock, before the row is
 // written, so a refused placement leaves no row behind.
-func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
+func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo ...string) error {
 	return fleet.KeyLock("dispatch", func() error {
-		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take)
+		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take, first(repo))
 	})
 }
 
-func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
-	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <session>] [--take]`
+func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo string) error {
+	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <address>] [--repo <owner/repo|path>] [--take]`
 	if change == "" || rel == "" {
 		return refuse("%s", usage)
 	}
@@ -117,7 +117,7 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 			return refuse("fleet dispatch: --due wants a duration like 45m or 2h, got %s", fleet.PyRepr(due))
 		}
 	}
-	rid, branch, sha, err := resolveDispatchTarget("dispatch", change)
+	rid, branch, sha, err := dispatchTarget(change, repo, slot)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,11 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		return refuse("fleet dispatch: %s/%s already has live hands (%s, for %s); `--take` rewrites the row, or `fleet work` to see it",
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
 	}
+	replyTo = assignmentReplyTo(replyTo)
 	if slot != "" {
+		if row := slotRow(slot); row != nil && fleet.RepoID(fleet.S(row, "path")) != rid {
+			return refuse("fleet dispatch: slot %s belongs to a different repository", slot)
+		}
 		if err := CmdAssign(slot, branch, brief, by, forRole, replyTo); err != nil {
 			return err
 		}
@@ -152,15 +156,22 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		return err
 	}
 	fleet.ObserveAction("dispatch", rec)
+	reportDispatch(branch, rel, forRole, slot, brief, rid, dueSecs)
+	return nil
+}
+
+func reportDispatch(branch, rel, forRole, slot, brief, rid string, dueSecs float64) {
 	tail := ""
 	if dueSecs > 0 {
 		tail += ", due in " + fleet.FmtAge(dueSecs)
 	}
 	if slot != "" {
 		tail += ", in " + slot
+		if strings.TrimSpace(brief) != "" {
+			tail += "; configured Go watcher starts the worker from this assignment"
+		}
 	}
 	say("dispatched %s/%s for %s%s; %s", branch, rel, forRole, tail, upsertOwnership(rid, branch))
-	return nil
 }
 
 // dispatcher is who is acting: the role bound to the cwd when there is one; else the
@@ -288,7 +299,7 @@ func WorkRows(forRole string) []WorkRow {
 		}
 		rows = mine
 	}
-	order := map[string]int{"dead": 0, "failed": 1, "abandoned": 2, "late": 3, "undeclared": 4, "working": 5, "idle": 6, "dispatched": 7, "remote": 8, "done": 9}
+	order := map[string]int{"dead": 0, "failed": 1, "late": 2, "undeclared": 3, "working": 4, "idle": 5, "unoccupied": 6, "dispatched": 7, "remote": 8, "done": 9}
 	sortBy(rows, func(a, b WorkRow) bool {
 		oa, ob := order[fleet.S(a, "state")], order[fleet.S(b, "state")]
 		if oa != ob {
@@ -308,21 +319,33 @@ func declaredRow(d fleet.Rec, sessions []fleet.Rec, now float64) WorkRow {
 		"due": d["due"], "slot": d["slot"], "brief": d["brief"], "key": key, "hands": nil, "state": "dispatched", "head": nil, "done_at": nil}
 	state := handsState(row, key)
 	if state == "dispatched" {
-		// No hands now. A session that left with the branch is not "never started".
-		for _, s := range sessions {
-			if fleet.S(s, "branch") == branch && fleet.S(s, "repo") == rid && !fleet.SessionAlive(s) && fleet.F(s, "last_event_at") > fleet.F(d, "at") {
-				state = "abandoned"
-				row["left"] = s["session"]
-				break
-			}
+		// A departed session establishes prior occupancy, not abandonment.
+		if left := latestDeparted(sessions, rid, branch, fleet.F(d, "at")); left != nil {
+			state = "unoccupied"
+			row["left"] = left["session"]
 		}
 	}
 	state = evidenceState(row, rid, branch, rel, state)
-	if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle") {
+	if due := fleet.F(d, "due"); due > 0 && now > due && (state == "dispatched" || state == "working" || state == "idle" || state == "unoccupied") {
 		state = "late"
 	}
 	row["state"] = state
 	return row
+}
+
+// latestDeparted identifies the most recent occupant after this dispatch.
+func latestDeparted(sessions []fleet.Rec, rid, branch string, after float64) fleet.Rec {
+	var latest fleet.Rec
+	for _, s := range sessions {
+		if fleet.S(s, "branch") != branch || fleet.S(s, "repo") != rid || fleet.SessionAlive(s) {
+			continue
+		}
+		at := fleet.F(s, "last_event_at")
+		if at > after {
+			latest, after = s, at
+		}
+	}
+	return latest
 }
 
 // handsState is who holds the branch and whether they are alive and mid-turn.
@@ -443,7 +466,7 @@ func holderAssignment(repo, branch, sid string) fleet.Rec {
 }
 
 // WorkAttention is the set of work states a hub must decide something about.
-var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "abandoned": true, "failed": true, "unknown": true}
+var WorkAttention = map[string]bool{"dead": true, "late": true, "undeclared": true, "failed": true, "unknown": true}
 
 // WorkLine is one row as a hub reads it.
 func WorkLine(r WorkRow, now float64) string {

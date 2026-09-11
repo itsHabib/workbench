@@ -43,7 +43,7 @@ var tools = []schema{
 	{"name": "fleet_handoff", "description": "Leave an advisory handoff for the caller's dedicated role; its replacement session receives it at startup. Pooled seats use branch handoffs.",
 		"inputSchema": schema{"type": "object", "properties": schema{"conclusion": str("useful conclusion for the next session"), "next": str("optional remaining work"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"conclusion", "cwd"}}},
 	{"name": "fleet_send", "description": "Send retry-safe mail to a role or individual seat in the caller's tenant.",
-		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role or seat address"), "id": str("stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("subject, at most 1024 bytes"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "id", "kind", "subject", "body", "cwd"}}},
+		"inputSchema": schema{"type": "object", "properties": schema{"to": str("recipient role or seat address"), "id": str("optional stable message ID"), "kind": str("question, answer, escalation, report or order"), "subject": str("subject, at most 1024 bytes"), "head": str("optional revision"), "body": str("message body (literal text)"), "session": str("session prefix to disambiguate cwd"), "cwd": cwdArg}, "required": []any{"to", "kind", "subject", "body", "cwd"}}},
 	{"name": "fleet_mail", "description": "List mail for an address, defaulting to the caller's role or seat; returns JSON, no acknowledgement.",
 		"inputSchema": schema{"type": "object", "properties": schema{"for": str("role or seat address"), "session": str("session prefix to disambiguate cwd"), "unacked": schema{"type": "boolean"}, "cwd": cwdArg}, "required": []any{"cwd"}}},
 	{"name": "fleet_ack", "description": "Mark mail read by a session at the recipient address.",
@@ -67,13 +67,13 @@ var tools = []schema{
 			"required": []any{"revision"}}},
 	{"name": "fleet_assign",
 		"description": "Place work into a free slot: check the branch out there and record the assignment the slot's next session reads.",
-		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "reply_to": str("your session id, handed to the seat as its address for questions"), "cwd": cwdArg},
+		"inputSchema": schema{"type": "object", "properties": schema{"slot": str("slot name from fleet_slots"), "branch": str("branch to check out"), "brief": str("one line the session reads at start"), "for": str("the role accountable for this work until done; default: the dispatcher"), "reply_to": str("optional reply mailbox address; defaults to the caller's concrete address"), "cwd": cwdArg},
 			"required": []any{"slot", "branch", "cwd"}}},
 	{"name": "fleet_dispatch",
 		"description": "The one declared act: write a change's ownership row (relationship, accountable role, due), placed in a slot when named; refused over live hands unless take.",
-		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),
+		"inputSchema": schema{"type": "object", "properties": schema{"repo": str("target owner/repo or checkout path; defaults to the selected slot repository, then caller cwd"), "change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),
 			"for": str("accountable role; default: the dispatcher"), "due": str("duration like 45m or 2h"), "slot": str("free slot to place the work in (fleet_slots)"),
-			"brief": str("one line the slot's session reads at start"), "reply_to": str("your session id, handed to the seat as its address for questions"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
+			"brief": str("one line the slot's session reads at start"), "reply_to": str("optional reply mailbox address; defaults to the caller's concrete address"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
 			"required": []any{"change", "as", "cwd"}}},
 	{"name": "fleet_request",
 		"description": "Record one retry-safe local assignment for a known worker; does not deliver, accept, launch or transfer a lease.",
@@ -273,7 +273,7 @@ func dispatch(name string, a map[string]any) (string, bool) {
 	case "fleet_dispatch":
 		take, _ := a["take"].(bool)
 		return runVerb(func() error {
-			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take)
+			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take, s("repo"))
 		})
 	case "fleet_request":
 		return runVerb(func() error { return verbs.CmdRequest(s("change"), s("id"), s("worker"), s("for"), s("brief")) })

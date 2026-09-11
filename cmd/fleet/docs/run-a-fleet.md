@@ -1,107 +1,105 @@
-# Run a fleet on any repository
+# Run a fleet on a repository
 
-An agent guide. Read it when you are asked to stand up leads and workers over a repository, or to
-act as one of them. It assumes the installed hook (`~/.fleet/bin/fleet hook claude`, or the Codex
-variant) and a state root at `$FLEET_STATE` (default `~/.fleet`) with Org state at `$ORG_STATE`.
-It says what to create, in which order, and what each session will see; it does not restate the
-verbs (run `fleet` for those) or the design (`../README.md`).
+Give each agent a directory, a clear result and a useful way to reach its peers. Fleet keeps
+assignments, mail, handoffs, ownership and evidence. Agents decide how to do the work.
 
-Evidence for everything here: four live runs recorded in `itsHabib/fleet-demo-sandbox`,
-`docs/REHEARSAL-2026-09-09.md`, and the merged decisions in
-`docs/features/org-fleet-boundary/spec.md`.
+## Set up the workspace
 
-## The five things a fleet is made of
-
-| thing | what it is | created by |
-|---|---|---|
-| a **role** | a name like `supervisor:<name>` (a lead) or `<kind>:<repo>` (a worker kind) | `org charter` for leads; lanes under `~/.fleet/lanes/<kind>/` for worker kinds |
-| a **roled directory** | a directory bound to one role in `roles.map`; a session opened there *is* that role | `fleet role <dir> <role> --tenant <t>` |
-| a **seat** | a roled directory that is also a pooled worktree with a name; the name is its mail address | `fleet pool <checkout> <kind> <n> --tenant <t>` |
-| a **row** | a declared assignment: change, relationship, accountable role, due, seat | `fleet dispatch <branch> --as <kind> --for <lead> --slot <seat> --brief ... --reply-to <sid>` |
-| a **message** | a file addressed to a role or seat; the only way roles talk | `fleet send <address> --id <id> --kind <kind> --subject ... --body ...` |
-
-Rules that follow from the code, not from politeness:
-
-- **A repository root carries no role.** Roled directories are seats and lead directories made for
-  the purpose. Roling a root projects that role's denies onto every worktree under it.
-- **Never `cd` into another roled directory.** The session that does becomes that directory's
-  occupant and leases its branch. Launch workers from a subshell (`(cd <seat> && ...)`) or use
-  `git -C <seat>`.
-- **A branch has one live holder.** The hook leases it to the first writer; a rival is refused
-  with the holder's name. Session end releases it; the next guarded writer takes over a
-  known-dead holder; unreadable evidence is not death; resources need an explicit drop or a
-  checked takeover; `fleet revoke` is the operator's.
-- **A seat's address is its seat name; a lead's address is its role.** Sending to a pooled kind
-  (`author:<repo>`) refuses and lists the seats.
-- **Done requires a passing receipt at the exact head.** The verb checks the producing lane, the
-  roled worktree, HEAD and a clean tree. The run contract additionally requires a verifier session
-  different from the implementer, and the lead checks that. `fleet receipt <sha> verify pass
-  "<observable>"`, then `fleet done <sha> --kind verify`.
-
-## Stand it up, in order
-
-Given a repository checkout `~/dev/<repo>` (never inside another repo), a tenant `<t>`, and the
-lead names you want:
-
-1. **Charter the leads** (Org). One overall lead scoping its children by `role:` and the repo;
-   each bucket lead scoping the repo:
+1. Create a detached worktree for the lead and pool worker seats from the repository:
    ```sh
-   org charter -role supervisor:<name>-a -tier T1 -scope github:<owner>/<repo> -supervisor human:<you> -supervisor supervisor:<name> -retire-when "<condition>"
-   org charter -role supervisor:<name>   -tier T1 -scope role:supervisor:<name>-a -scope role:supervisor:<name>-b -scope github:<owner>/<repo> -supervisor human:<you> -retire-when "<condition>"
+   git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead main
+   fleet pool ~/dev/<repo> author 2 --tenant <tenant>
+   fleet pool ~/dev/<repo> verifier 1 --tenant <tenant>
+   fleet role ~/dev/<repo>-lead supervisor:<run> --tenant <tenant>
    ```
-2. **Create the lead worktrees, unbound, then pool the seats.**
-   ```sh
-   git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main    # and -lead-a, -lead-b
-   fleet pool ~/dev/<repo> author 2 --tenant <t>
-   fleet pool ~/dev/<repo> verifier 1 --tenant <t>
-   ```
-   Each seat gets `CLAUDE.local.md` (the card), `.claude/settings.local.json` (denies and the
-   write hook), a Codex config, and a `roles.map` line with its name. Pool first: `fleet pool`
-   refuses when worktrees of the same repo already carry other labels, and there is no unbind verb.
-3. **Bind the lead directories only after pooling succeeds.**
-   ```sh
-   fleet role ~/dev/<repo>-lead supervisor:<name> --tenant <t>     # repeat for -lead-a, -lead-b
-   ```
-   Then check bindings and seat names with `fleet board`.
-4. **Check what a fresh session sees** before trusting anything: open a headless session in a
-   seat and ask it to print its `[fleet]` lines. It should name its session, role, branch and
-   seat, with no prompt text about roles.
-5. **Write the run contract**, one page in the repository the leads can read: outcome, roles and
-   their contacts, tasks with acceptance and boundary (`draft`, `checks`, `reviews`, `ready`),
-   message ids, tick rules, authority and the stop condition. The lead card and the
-   `task-supervisor` skill supply the procedure; the contract supplies the authority.
-6. **Decide how sessions are made.** Three shapes have run:
-   - *Desktop chips* with cwd set to a roled directory, leads on `/loop`, workers as chips.
-     Native messaging works between desktop sessions; the hook's session id is not the desktop's,
-     so agents find each other by directory.
-   - *Headless on a clock*: `claude -p "/task-supervisor"` from each lead directory on a cadence.
-   - *Headless on mail*: one kickoff tick, then a delivery process starts a session for an address
-     when it has unread mail and no live session — `fleet watch` does this itself, one launch per
-     address per fold, and sends lateness as mail on the same fold (see `e2e.md`). This is the cheapest and the one that keeps sessions disposable.
-7. **Kick off**: the overall lead's first tick sends one `order` per child. From then on, files in,
-   sessions out.
+   Pool before binding the lead. A repository root carries no role: binding it projects
+   permissions onto nested worktrees. Keep the main checkout clean and on `main`.
+2. Write a short run brief: outcome, task acceptance, accountable lead, known peers, spending
+   boundary, requested result (`draft`, `checks`, `reviews`, `ready`) and stop condition.
+3. Start a fresh session in each kind of directory and verify the startup context identifies
+   the actual role, seat and assignment. Use the installed build you intend to run.
 
-## Acting as a role
+Org is optional role prose, independent of Fleet. Register a card with
+`org charter -role <name> -file ./role.md [-parent <name>]`, then read it with `org boot`.
+Edit that file to add another repo or responsibility; no attach, claim or checkpoint is
+needed. Remove old lifecycle commands and hooks during clean cutover; there is no
+legacy fallback. See [Org's cutover inventory](../../org/README.md#clean-cutover).
 
-- **A lead tick**: read your mail (`fleet mail --unacked`), your chain, your rows (`fleet work
-  --for <you>`), the PRs; act on every eligible effect (dispatch, assignment, verify row, an
-  answer); one send per addressee; ack what you handled; checkpoint, yield, release; end the turn.
-  Escalate one hop up, never sideways, never to the operator unless you are the overall lead.
-- **A worker step**: read your mail and your assignment line; do the next step the contract
-  allows; report or ask by mail with the contract's id; end the turn. Never wait for a reply in
-  a session. If a take is refused, report the refusal verbatim; never retry or `--takeover`.
-- **A verifier**: confirm exact head and clean tree, confirm your session differs from the
-  implementer's, check the acceptance, emit the receipt, comment the PR, report by mail.
+## Choose execution
 
-## Reading the fleet
+- **Desktop:** keep the working desktop loop and native messaging arrangement. Use actual
+  native session addresses for native messages and Fleet addresses for Fleet mail.
+- **Headless:** configure and run the existing Go watcher as described in
+  [headless.md](headless.md). It supplies optional recurring lead ticks, assignment wakeups,
+  mail delivery and child exit observation. No Bash/Python runtime poller or desktop session
+  emulating one is required. Use one runtime owner per headless address.
 
-`fleet board` (who is where), `fleet work` (rows and their observed state), `fleet leases`,
-`fleet receipts`, `fleet mail --for <address>`, `org status` and `org log -role <lead>` for the
-leads' records, `~/.fleet/watch/observed.jsonl` for what the watcher saw change. A message
-saying "done" is not done; a row reads `done` only from a receipt.
+## Assign and act
 
-## What to record
+```sh
+fleet dispatch <branch> --as implementation --for supervisor:<run>   --slot <repo>-author-1 --brief '<task and acceptance through a draft PR>'
+```
 
-Friction goes in a record with reproducer, expected, actual and owner, never in chat. The
-rehearsal record's friction list is the template. Before the next run, reset rows and seats
-from a subshell in the checkout and refresh every worktree to `main`.
+The seat identifies the target repo; `--repo <owner/repo|checkout-path>` selects it explicitly.
+Dispatch with a brief makes a configured headless seat eligible to start. No second order
+message is needed. The caller stays in its own directory. Do not enter another roled directory
+as its occupant; read its tree with `git -C`, or let its worker perform the work.
+
+A lead advances eligible rows, answers questions and checks results. A worker continues until
+its requested result or a real blocker. There is no one-action quota, universal one-hop rule,
+or one-message-per-tick limit. Ask the relevant peer directly within the permitted tenant;
+the assignment still names who is accountable.
+
+When waiting for another agent, send the question or request, checkpoint what matters,
+and end the turn. The Go watcher wakes you on mail or the next configured tick.
+Continue other useful work first when available; waiting needs no shell sleep or mail-poll loop.
+On waking, read the handoff and fresh mail, acknowledge handled messages, and continue.
+
+## Checkpoint the work
+
+Keep regular authored checkpoints using the existing `fleet handoff` mechanism:
+after meaningful progress or a changed approach, before yielding or handing work over,
+and at useful intervals during long work. A run brief can set the cadence in prose.
+An idle tick with nothing new to record does not need another copy of the same checkpoint.
+
+`fleet handoff` writes and replaces a checkpoint; it has no `--show` or `--list` read flag.
+Read the context injected at SessionStart or inspect the JSON under `$FLEET_STATE/handoff/`
+(worker branches) and `$FLEET_STATE/role-handoff/` (leads).
+
+Record what changed or was learned, the evidence or file/PR pointers, any blocker,
+and the next step. A pooled worker uses its branch handoff; a dedicated lead can use
+`fleet handoff --role` for its cross-repository summary. This preserves authored context
+for the next session; it does not introduce a checkpoint history or an Org lifecycle.
+
+Runtime events record activity. Checkpoints explain the agent's understanding. Messages
+address another agent: send one when someone needs to act, answer a question, or learn
+about an important milestone. A routine checkpoint need not generate a message.
+
+## Send messages
+
+`fleet send` returns the message ID. Omit `--id` for a new message; retain the returned ID and
+same payload for an intentional retry. Reply to `from_address`, with a new message ID and the
+question/work reference in the body. Assignment startup supplies the dispatcher's actual
+mailbox as `reply_to` by default, whether that dispatcher is a desktop seat or a headless role.
+A role shared by several seats is not a unique mailbox: use the concrete address. See
+[mail.md](mail.md) for storage and retry semantics.
+
+## Recover and finish
+
+Read `fleet work`, `fleet board`, the current branch and head, and the runtime's observations.
+Resume the same assignment on its existing branch without deleting dirty files. Repurposing
+a dirty seat for different work still requires preserving those files. `fleet unassign <seat>`
+clears the placement and its matching dispatch rows together, retaining the tree and any live session/leases. Never take over another live writer or an exclusive resource.
+
+`unoccupied` means a prior session left and nobody currently holds the branch. Read its
+handoff and mail to understand why; it is not proof of abandonment. An expired due time
+still reads `late`, and only a passing receipt establishes completion.
+
+A verifier checks the exact head against acceptance and supplies the named receipt. The run
+brief defines when independent verification is required; Fleet's receipt verb checks lane,
+head and clean tree, not independence. A message or child exit saying done is insufficient.
+Gate remains the separate merge-authority boundary.
+
+For validation and measurement, use [e2e.md](e2e.md). The desktop run is a useful baseline:
+compare completed work, coordination cost, idle assigned time and operator rescues, keeping
+work acceptance and model/settings comparable. Record the actual binary and launch commands.

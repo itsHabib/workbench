@@ -1,6 +1,7 @@
 package verbs
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -9,12 +10,15 @@ import (
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
-const sendUsage = "usage: fleet send <address> --id <id> --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]"
+const sendUsage = "usage: fleet send <address> [--id <id>] --kind <question|answer|escalation|report|order> --subject <text> [--head <sha>] --body <text|-> [--session <id8>]"
 
 // CmdSend records mail with session-derived identity; it never launches a process.
 func CmdSend(to, id, kind, subject, head, body, session string) error {
-	if to == "" || id == "" || subject == "" || body == "" {
+	if to == "" || subject == "" || body == "" {
 		return exitCode(2, sendUsage)
+	}
+	if id == "" {
+		id = "m-" + strings.ToLower(rand.Text())
 	}
 	if len(subject) > fleet.MaxMailSubjectBytes {
 		return exitCode(2, fmt.Sprintf("mail: subject exceeds %d bytes", fleet.MaxMailSubjectBytes))

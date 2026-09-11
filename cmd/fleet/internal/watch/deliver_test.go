@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,22 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	oldState, oldOrg := fleet.State, fleet.OrgState
 	fleet.State, fleet.OrgState = t.TempDir(), t.TempDir()
 	t.Cleanup(func() { fleet.State, fleet.OrgState = oldState, oldOrg })
+	t.Cleanup(func() {
+		records, _ := filepath.Glob(fleet.Path("watch", "delivery", "*.json"))
+		for _, path := range records {
+			rec := fleet.ReadJSON(path)
+			if fleet.S(rec, "status") != "running" {
+				continue
+			}
+			exit := fleet.S(rec, "exit_file")
+			for i := 0; i < 500 && fleet.ReadJSON(exit) == nil; i++ {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if fleet.ReadJSON(exit) == nil {
+				t.Errorf("child did not finish before fixture cleanup: %s", path)
+			}
+		}
+	})
 	t.Setenv("FLEET_GITHUB", "off")
 	home = t.TempDir()
 	seat := filepath.Join(home, "seat")
@@ -40,6 +57,21 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 		t.Fatal(err)
 	}
 	return home, sink
+}
+
+func TestReservationRechecksAcknowledgement(t *testing.T) {
+	deliverEnv(t)
+	putStoreMail(t, "hub:lead", "ack-race", fleet.Now()-60, nil)
+	rows, err := eligibleMail("hub:lead", fleet.Now(), 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("fixture mail not eligible: %v %v", rows, err)
+	}
+	if _, err := fleet.StampMail("t1", "hub:lead", "ack-race", fleet.Rec{"acked_at": fleet.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if taken, err := reserve("hub:lead", rows); err == nil || len(taken) != 0 {
+		t.Fatalf("reserved already acknowledged mail: %v %v", taken, err)
+	}
 }
 
 // storeDirs is the store's directories for one address, or a failed test.
@@ -132,14 +164,14 @@ func TestDeliverNeverLaunchesAMessageTwice(t *testing.T) {
 	}
 }
 
-// Liveness: an idle session past the grace is absent; a fresh or working one is not.
-func TestDeliverTreatsAnIdleHolderAsAbsent(t *testing.T) {
+// Idle sessions still occupy their directory; only ended sessions release it.
+func TestDeliverProtectsIdleOccupants(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		session fleet.Rec
 		want    int
 	}{
-		{"idle past the grace", fleet.Rec{"last_event_at": -600.0}, 1},
+		{"idle past the grace", fleet.Rec{"last_event_at": -600.0}, 0},
 		{"recently touched", fleet.Rec{"last_event_at": -10.0}, 0},
 		{"turn open", fleet.Rec{"last_event_at": -600.0, "turn_open": true}, 0},
 		{"ended", fleet.Rec{"last_event_at": -10.0, "ended": true}, 1},
@@ -334,7 +366,16 @@ func TestDeliverRecorder(_ *testing.T) {
 	if err := os.WriteFile(p, b, 0o600); err != nil {
 		os.Exit(3)
 	}
-	os.Exit(0)
+	if stop := os.Getenv("FLEET_TEST_WAIT_FILE"); stop != "" {
+		for i := 0; i < 1000; i++ {
+			if _, err := os.Stat(stop); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	code, _ := strconv.Atoi(os.Getenv("FLEET_TEST_EXIT_CODE"))
+	os.Exit(code)
 }
 
 // The reservation is durable before anything starts. A mailbox that cannot be

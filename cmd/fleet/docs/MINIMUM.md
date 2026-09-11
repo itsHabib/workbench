@@ -33,12 +33,12 @@ written shape hold surprisingly well, because the agents read the shape at start
    whom, what nobody may do, when to stop. Leads read it before acting. Authority comes from
    the page, not from the conversation.
 3. **A message shape with an id.** Every question or report is one paragraph: task, commit,
-   kind (question, answer, report, escalation, order), id, body. Replies reuse the id. Put them where
+   kind (question, answer, report, escalation, order), id, body. Each new message has its own id; only retries reuse it. Replies name the question or work in their body. Put them where
    the reader will look: a PR comment, a file in a `mail/` directory, a chat message. The id is
    what lets anyone reconstruct the conversation later.
-4. **One hop up.** A worker asks its lead. A lead asks the overall lead. Only the overall lead
-   asks the person. Siblings never settle ordering between themselves. This single rule is what
-   keeps the person out of the loop and keeps decisions attributable.
+4. **Named accountability, direct questions.** The assignment names the accountable lead.
+   Ask the relevant peer directly when that resolves a factual question; escalate decisions
+   beyond your authority to the accountable lead. No universal routing tree or message quota.
 5. **Done is a named check by someone else.** Before "done" means anything, a different agent
    checks the exact commit against the acceptance and writes one line: commit, pass or fail,
    what it observed. Draft is the default boundary; going past it needs explicit permission.
@@ -54,9 +54,10 @@ written shape hold surprisingly well, because the agents read the shape at start
 
 A lead session, on a `/loop` or by hand, does one tick: read the contract, the messages
 addressed to it, and the state of its tasks; act on everything eligible (start a worker, answer
-a question, ask a verifier); send at most one message per addressee; write one line of what it
-concluded; stop. Workers do one step and stop. Nothing waits inside a session; waiting is a
-message that has not been answered yet.
+a question, ask a verifier); send the messages needed to advance the work; leave a useful handoff when something changes.
+Workers continue to their requested result or a real blocker. Desktop leads can return on their
+normal loop. Headless recurrence and mail delivery belong in the existing Go watcher
+([headless.md](headless.md)), with one owner of launches and no shell polling process.
 
 ## What you give up without Fleet
 

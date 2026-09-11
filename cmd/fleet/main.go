@@ -19,11 +19,15 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/codex"
@@ -43,6 +47,8 @@ func main() {
 		runHook(args[1:])
 	case "mcp":
 		mcp.Serve(os.Stdin, os.Stdout)
+	case "tail":
+		runTail(args[1:])
 	case "watch":
 		runWatch(args[1:])
 	default:
@@ -66,6 +72,18 @@ func reviveWatcher(ev map[string]any) {
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
 // board; `--interval 30s` sets the tick.
 func runWatch(args []string) {
+	if len(args) > 0 && args[0] == "status" {
+		if len(args) > 2 || (len(args) == 2 && args[1] != "--json") {
+			fmt.Fprintln(os.Stderr, "usage: fleet watch status [--json]")
+			os.Exit(2)
+		}
+		if len(args) == 2 {
+			fmt.Printf("%s\n", fleet.DumpJSON(watch.RuntimeStatus()))
+			return
+		}
+		fmt.Print(watch.RuntimeText())
+		return
+	}
 	interval := watch.DefaultInterval
 	once := false
 	for i := 0; i < len(args); i++ {
@@ -184,4 +202,23 @@ func logVerdict(which string, ev fleet.Rec, v *fleet.Verdict, start time.Time, s
 		rec["takeovers"] = fleet.HookTakeovers
 	}
 	_ = fleet.ShadowAppend(fleet.Path("events.jsonl"), rec)
+}
+
+func runTail(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet tail <seat|role> [-n 20] [-f]")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
+	count := fs.Int("n", 20, "recent text/tool events")
+	follow := fs.Bool("f", false, "follow new events until interrupted")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *count < 1 || *count > 1000 {
+		os.Exit(2)
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := watch.Tail(ctx, os.Stdout, args[0], *count, *follow); err != nil {
+		fmt.Fprintln(os.Stderr, "fleet tail:", err)
+		os.Exit(1)
+	}
 }

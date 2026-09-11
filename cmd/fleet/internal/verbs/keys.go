@@ -11,9 +11,17 @@ import (
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
 
+// Address stops pause new launches independently of a branch or seat.
+func stopKeyFor(arg string) (string, error) {
+	if strings.HasPrefix(arg, "address:") {
+		return fleet.MailStopKey(strings.TrimPrefix(arg, "address:"))
+	}
+	return keyFor(arg)
+}
+
 func cmdStop(arg, reason, by, exc, key, holder string) error {
 	if key == "" {
-		k, err := keyFor(arg)
+		k, err := stopKeyFor(arg)
 		if err != nil {
 			return err
 		}
@@ -45,7 +53,7 @@ func nilIfEmpty(s string) any {
 }
 
 func cmdResume(arg string) error {
-	key, err := keyFor(arg)
+	key, err := stopKeyFor(arg)
 	if err != nil {
 		return err
 	}

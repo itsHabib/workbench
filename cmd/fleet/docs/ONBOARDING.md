@@ -54,8 +54,6 @@ Everything beside the repository checkout, never inside it, never the checkout i
 ```sh
 # leads: detached worktrees, then bound
 git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main     # and -lead-a, -lead-b
-org charter -role supervisor:<name>-a -tier T1 -scope github:<owner>/<repo> -supervisor human:<you> -supervisor supervisor:<name> -retire-when "<when>"
-org charter -role supervisor:<name>   -tier T1 -scope role:supervisor:<name>-a -scope role:supervisor:<name>-b -scope github:<owner>/<repo> -supervisor human:<you> -retire-when "<when>"
 
 # seats: pooled worktrees with names (pool before binding the leads; there is no unbind verb, so
 # if leads are already bound, remove their roles.map lines while pooling and re-run fleet role)
@@ -72,36 +70,30 @@ seat without being told.
 
 ## 4. Write the run contract (one page, in the repository)
 
-What the leads read for authority. Outcome; roles and who each may talk to; tasks with acceptance
-and a stopping boundary; message ids; tick rules (one send per addressee per tick, any number of
-local effects, end the turn); what nobody may do (merge, ready flip, revoke, other repositories);
-the stop condition. The lead card and the `task-supervisor` skill supply the procedure; the
-contract supplies the authority. A sample: `docs/RUN-CONTRACT-v4.md` in `itsHabib/fleet-demo-sandbox`.
+Record the outcome, accountable lead and useful contacts, task acceptance, requested result,
+spending boundary and stop condition. Agents can communicate directly and continue eligible
+work; there is no message quota. New Fleet work uses its assignment and handoff without an
+Org charter or claim sequence. Existing Org-held work and terms keep their original owner
+until an explicit migration. The run brief supplies task authority. A sample: `docs/RUN-CONTRACT-v4.md` in `itsHabib/fleet-demo-sandbox`.
 
 ## 5. Choose how sessions get made
 
-| shape | when | cost |
-|---|---|---|
-| desktop sessions in the lead directories on `/loop`, workers as chips into seats | you want to watch | highest; leads reconcile on a clock |
-| headless ticks on a clock | unattended, simple | medium |
-| headless on mail: one kickoff, then a delivery process starts a session for any address with unread mail and no live session | unattended, cheapest, sessions disposable | lowest; latency is the delivery interval |
-
-For the third shape, `deliver.json` maps each address to a directory and a launch command
-(prompt right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt). `fleet watch`
-is itself the delivery process: each fold it launches configured addresses that have unacked,
-never-delivered mail and nobody present. Against a binary predating that, `e2e/mail-poll.sh` is the
-stand-in, or a desktop session on `/loop 2m` doing the same job from an unroled directory.
+Desktop loops and native messaging are the working desktop baseline. Headless execution uses
+one Go `fleet watch`: [headless.md](headless.md) covers configuration, optional recurring lead
+ticks, assignment-triggered starts, mail and exit observation. There is no supported shell
+poller. Historical runs do not establish a cost ranking between these choices; compare actual
+completed work and coordination cost with the same acceptance.
 
 ## 6. Kick off and watch
 
-The overall lead's first tick sends one `order` per child. Then:
+The lead dispatches work with a brief; configured seats start on the next watcher fold. Then:
 
 ```sh
-fleet work            # rows and their observed state: dispatched · working · idle · late · abandoned · dead · failed · undeclared · remote · done
+fleet work            # rows and their observed state: dispatched · working · idle · late · unoccupied · dead · failed · undeclared · remote · done
 fleet leases          # who holds which branch or resource
 fleet mail --for <address>   # only inside a live roled session; from an operator shell use board/work/leases/receipts
 fleet receipts
-org log -role supervisor:<name>-a
+fleet report
 ```
 
 Files in, sessions out, records left behind.

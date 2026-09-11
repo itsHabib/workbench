@@ -3,6 +3,7 @@
 package fleet
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"regexp"
@@ -27,6 +28,11 @@ func PidAlive(pid int) bool {
 		return false
 	}
 	return syscall.Kill(pid, 0) == nil
+}
+
+// PidGone reports only proven process absence; an inspection error is unknown.
+func PidGone(pid int) bool {
+	return pid > 0 && errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
 // harnessRe matches the processes a hook can hang beneath: Claude Code (claude, or

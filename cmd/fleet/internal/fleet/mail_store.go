@@ -209,6 +209,9 @@ func StampMail(tenant, address, id string, fields Rec) (Rec, error) {
 			if r == nil {
 				continue
 			}
+			if Has(fields, "delivered_at") && (Has(r, "acked_at") || Has(r, "delivered_at")) {
+				return fmt.Errorf("mail %s: already acknowledged or reserved", id)
+			}
 			for k, v := range fields {
 				r[k] = v
 			}

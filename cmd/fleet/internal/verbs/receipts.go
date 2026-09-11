@@ -425,7 +425,12 @@ func isDir(p string) bool {
 
 // ghJSON is the parsed output of a `gh ... --json` command line, or (nil, why).
 func ghJSON(args ...string) (any, string) {
+	return ghJSONAt("", args...)
+}
+
+func ghJSONAt(dir string, args ...string) (any, string) {
 	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Dir = dir
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
@@ -542,6 +547,10 @@ func resolveBranchHead(rid, branch, how string) (string, string, string, error) 
 	if rid != "" {
 		co = checkoutFor(rid)
 	}
+	return resolveBranchHeadAt(co, rid, branch, how)
+}
+
+func resolveBranchHeadAt(co, rid, branch, how string) (string, string, string, error) {
 	if co == "" {
 		r := rid
 		if r == "" {
