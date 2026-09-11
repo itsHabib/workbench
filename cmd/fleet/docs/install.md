@@ -22,7 +22,7 @@ export PATH="$HOME/.fleet/bin:$PATH"
 Add that PATH entry to your shell startup file if desired. The shell installer only
 builds `fleet` and copies this repository's `cmd/fleet/examples/lanes` assets. It neither
 registers hooks nor runs a background service. `FLEET_HOME` changes the install
-location; `FLEET_STATE` changes runtime state (default `~/.fleet`). For a separate
+location (independently of runtime state); `FLEET_STATE` changes runtime state (default `~/.fleet`). For a separate
 state directory, set `FLEET_LANES` explicitly to your installed lanes directory.
 Use the same environment in your shell, desktop harness and headless runtime.
 
@@ -52,7 +52,7 @@ fleet role /absolute/path/to/repo-lead supervisor:demo --tenant demo
 ```
 
 `fleet pool` creates seats and calls the same role projection. `fleet role` writes
-`roles.map` under `ORG_STATE` (default `~/.org`), `CLAUDE.local.md`, project-local
+`roles.map` under `ORG_STATE` (default `~/dev/org/state`), `CLAUDE.local.md`, project-local
 Claude lifecycle hooks, project-local Codex instructions/rules, and the six global
 Codex hooks in `CODEX_HOME/hooks.json` (default `~/.codex`). It preserves unrelated
 hook groups. Generated local files are excluded through Git's common-dir exclude

@@ -357,8 +357,9 @@ JSON keeps IDs and evidence timestamps for debugging; terminal output does not
 require the operator to interpret internal session IDs. No new agent-written
 progress ledger, acceptance claim, done state or automatic takeover is introduced.
 
-Generated role bindings subscribe Codex write events and supplement Claude
-file-write post-tool events alongside its global Bash hook. Existing bindings
+Generated role bindings install the complete Claude lifecycle in project-local
+settings and the Codex lifecycle in user-level hooks. Tool events cover Bash and
+file writes; no prior global Claude Fleet hook is needed. Existing bindings
 need regeneration and harness reload when this release is installed. This increment
 does not edit installed hooks. Terminal observations include the activity age.
 

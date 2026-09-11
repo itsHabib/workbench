@@ -14,7 +14,7 @@ for source in "$here"/examples/lanes/*/*; do
   target="$install_home/lanes/${source#"$here/examples/lanes/"}"
   if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
     echo "refusing to replace different asset: $target; preserve it separately before installing" >&2
-    exit 1
+    if [ "$mode" = --apply ]; then exit 1; fi
   fi
 done
 printf 'Build fleet in %s/bin; copy example lanes into %s/lanes\n' "$install_home" "$install_home"
@@ -24,5 +24,9 @@ if [ "$mode" = dry ]; then
 fi
 mkdir -p "$install_home/bin" "$install_home/lanes"
 (cd "$root" && go build -o "$install_home/bin/fleet" ./cmd/fleet)
-cp -R "$here/examples/lanes"/. "$install_home/lanes/"
+for source in "$here"/examples/lanes/*/*; do
+  target="$install_home/lanes/${source#"$here/examples/lanes/"}"
+  mkdir -p "$(dirname "$target")"
+  cp "$source" "$target"
+done
 printf 'Installed. Add %s/bin to PATH. See cmd/fleet/docs/install.md for role setup.\n' "$install_home"

@@ -163,7 +163,7 @@ func claudeHooks(data map[string]any, target, command string) error {
 		hooks = map[string]any{}
 		data["hooks"] = hooks
 	}
-	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", ""}, {"PostToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit)$"}, {"Stop", ""}, {"SessionEnd", ""}}
+	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit)$"}, {"PostToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit)$"}, {"Stop", ""}, {"SessionEnd", ""}}
 	for _, spec := range specs {
 		groups, err := withoutFleetHandlers(hooks[spec[0]], target, spec[0])
 		if err != nil {
@@ -547,7 +547,7 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	if err := writeMapLine(lines, same, mapfile, checkout, tenant, role, slot); err != nil {
 		return err
 	}
-	local := fmt.Sprintf("# Session role: %s\n\nThis checkout is one lane of the fleet. The role card below is the whole\nof what is specific to it; everything else is enforced by ~/.fleet hooks.\n\n@%s\n", role, card)
+	local := fmt.Sprintf("# Session role: %s\n\nThis checkout is one lane of the fleet. The role card below is the whole\nof what is specific to it; Fleet hooks provide runtime context and ownership checks.\n\n@%s\n", role, card)
 	if err := os.WriteFile(filepath.Join(checkout, "CLAUDE.local.md"), []byte(local), 0o644); err != nil {
 		return err
 	}

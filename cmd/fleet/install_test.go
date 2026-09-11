@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,6 +78,7 @@ func TestPublicInstall(t *testing.T) {
 	if err := os.WriteFile(card, []byte("custom card"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	run("", "bash", "install.sh") // An edited card is advisory in a dry run.
 	c := exec.Command("bash", "install.sh", "--apply")
 	c.Env = env
 	if out, err := c.CombinedOutput(); err == nil || !strings.Contains(string(out), "refusing to replace") {
@@ -92,7 +94,8 @@ func assertLifecycle(t *testing.T, path, command string) {
 	}
 	var config struct {
 		Hooks map[string][]struct {
-			Hooks []struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
 				Command string `json:"command"`
 			} `json:"hooks"`
 		} `json:"hooks"`
@@ -102,6 +105,12 @@ func assertLifecycle(t *testing.T, path, command string) {
 	}
 	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"} {
 		groups := config.Hooks[event]
+		if len(groups) == 1 && (event == "PreToolUse" || event == "PostToolUse") {
+			matcher := regexp.MustCompile(groups[0].Matcher)
+			if groups[0].Matcher == "" || matcher.MatchString("Read") || !matcher.MatchString("Bash") || !matcher.MatchString("Write") {
+				t.Errorf("%s: wrong %s matcher: %q", path, event, groups[0].Matcher)
+			}
+		}
 		if len(groups) != 1 || len(groups[0].Hooks) != 1 || !strings.Contains(groups[0].Hooks[0].Command, command) {
 			t.Errorf("%s: wrong %s registration: %v", path, event, groups)
 		}
