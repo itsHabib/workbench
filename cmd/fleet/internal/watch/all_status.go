@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -56,6 +57,13 @@ func AllStatus() fleet.Rec {
 
 func enrichStatus(row fleet.Rec, work []verbs.WorkRow) {
 	path := fleet.S(row, "cwd")
+	row["work"] = []verbs.WorkRow{}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		row["branch"], row["head"], row["assignment"] = nil, nil, nil
+		row["head_error"] = "checkout directory is missing or unreadable; no checkout-derived joins"
+		return
+	}
 	row["branch"] = fleet.BranchOf(path)
 	assignment := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(fleet.S(row, "slot"))+".json"))
 	if currentAssignment(row, assignment) {

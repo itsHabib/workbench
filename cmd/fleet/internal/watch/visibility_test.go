@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
 )
 
 func TestRunReportSeparatesUnknownFromReportedZero(t *testing.T) {
@@ -158,5 +159,45 @@ func TestLastResultAtWindowBoundary(t *testing.T) {
 	}
 	if lastResult(path) != nil {
 		t.Fatal("accepted partial boundary record")
+	}
+}
+
+func TestStatusRejectsPreviousBindingLaunch(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home}
+	t.Cleanup(func() { _ = os.Remove(launchPath(target)) }) // synthetic record, no child to collect
+	for _, identity := range []fleet.Rec{{"address": "old-address", "cwd": home}, {"address": "hub:lead", "cwd": filepath.Join(home, "other")}} {
+		rec := fleet.Rec{"at": fleet.Now(), "status": "running", "address": identity["address"], "cwd": identity["cwd"], "pid": os.Getpid(), "output": "old-worker.log"}
+		if err := fleet.WriteJSON(launchPath(target), rec); err != nil {
+			t.Fatal(err)
+		}
+		row := runtimeRow(target, nil)
+		if fleet.S(row, "state") != "unknown" || !strings.Contains(fleet.S(row, "error"), "another binding") {
+			t.Fatal(row)
+		}
+		for _, key := range []string{"pid", "output", "result", "exit_code", "session"} {
+			if fleet.Has(row, key) {
+				t.Fatalf("attached old %s: %v", key, row)
+			}
+		}
+		// Display rejection must not change directory-level launch exclusion.
+		retained, err := readLaunch(target)
+		if err != nil || fleet.F(retained, "pid") != float64(os.Getpid()) {
+			t.Fatal(retained, err)
+		}
+	}
+}
+
+func TestStatusMissingCheckoutDoesNotJoinParent(t *testing.T) {
+	home, _ := deliverEnv(t)
+	if out, err := exec.Command("git", "-C", home, "init", "-b", "parent").CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	missing := filepath.Join(home, "deleted")
+	row := fleet.Rec{"cwd": missing, "slot": "seat-1", "branch": "stale"}
+	work := []verbs.WorkRow{{"slot": "seat-1", "repo": fleet.RepoID(home), "change": "parent"}}
+	enrichStatus(row, work)
+	if fleet.S(row, "branch") != "" || fleet.M(row, "assignment") != nil || len(row["work"].([]verbs.WorkRow)) != 0 || fleet.S(row, "head_error") == "" {
+		t.Fatal(row)
 	}
 }

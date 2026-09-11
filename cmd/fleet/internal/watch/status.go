@@ -31,6 +31,11 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 		row["state"], row["error"] = "unknown", err.Error()
 		return row
 	}
+	if last != nil && (fleet.S(last, "address") != t.address || fleet.S(last, "cwd") == "" || fleet.CanonPath(fleet.S(last, "cwd")) != fleet.CanonPath(t.cwd)) {
+		row["state"], row["error"] = "unknown", "retained launch belongs to another binding; inspect the launch record"
+		delete(row, "output")
+		return row
+	}
 	if last != nil {
 		row["started_at"], row["pid"], row["exit_file"] = last["at"], last["pid"], last["exit_file"]
 		if output := fleet.S(last, "output"); output != "" {
