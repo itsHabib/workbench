@@ -19,17 +19,7 @@ func RuntimeStatus() fleet.Rec {
 	for _, t := range targets {
 		rows = append(rows, runtimeRow(t, sessions))
 	}
-	hb := Heartbeat()
-	watcher := "never_seen"
-	if hb != nil {
-		watcher = "running"
-		switch {
-		case fleet.PidGone(int(fleet.F(hb, "pid"))):
-			watcher = "stopped"
-		case Stale(3):
-			watcher = "stale"
-		}
-	}
+	watcher, hb := WatcherHealth()
 	return fleet.Rec{"at": now, "watcher": watcher, "heartbeat": hb, "workers": rows, "observations": filepath.Join(dir(), "observed.jsonl"), "configuration_error": configError}
 }
 
@@ -169,4 +159,20 @@ func renderRuntimeRow(b *strings.Builder, row fleet.Rec, now float64) {
 		fmt.Fprintf(b, " · %.0f bytes · modified %s ago", fleet.F(row, "output_bytes"), fleet.FmtAge(now-at))
 	}
 	fmt.Fprintln(b)
+}
+
+// WatcherHealth reads the watcher process and heartbeat without inspecting workers.
+func WatcherHealth() (string, fleet.Rec) {
+	hb := Heartbeat()
+	watcher := "never_seen"
+	if hb != nil {
+		watcher = "running"
+		switch {
+		case fleet.PidGone(int(fleet.F(hb, "pid"))):
+			watcher = "stopped"
+		case Stale(3):
+			watcher = "stale"
+		}
+	}
+	return watcher, hb
 }

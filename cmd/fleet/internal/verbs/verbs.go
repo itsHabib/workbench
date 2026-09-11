@@ -88,7 +88,9 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet send <address> [--id <id>] --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
   fleet mail [--for <role>] [--unacked] [--json] [--session <id8>]
   fleet ack <id> [--session <id8>]
-  fleet status [--json]                         read-only request board; queued is not accepted or running
+  fleet status [--json]
+  fleet status --all [--json]                     live watcher, seats, work, mail and terminal results
+  fleet run-report [--since 24h] [--json]          attempts, provider-reported turns/cost and exit reasons                         read-only request board; queued is not accepted or running
   fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook

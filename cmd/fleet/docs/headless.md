@@ -113,11 +113,18 @@ score runs; offline analysis scripts may summarize them without owning schedulin
 ## See what is happening between ticks
 
 ```sh
-fleet watch status
+fleet status --all
+fleet status --all --json
+fleet run-report --since 24h
 fleet watch status --json
 fleet tail project-author-1 -n 20
 fleet tail project-author-1 -f
 ```
+
+`status --all` joins every local role binding and configured headless target with current
+process/hook/exit evidence, the checkout head, assignment, work rows and unacknowledged mail.
+SessionStart includes watcher health and the commands to inspect activity. The view reads
+live records even when the watcher heartbeat is stale; it never schedules a tick.
 
 `watch status` is read-only: it neither folds a scheduler tick nor launches work. It shows the watcher's
 last heartbeat separately from each configured worker's process state, launch time, latest
@@ -161,7 +168,7 @@ desktop loop/native-message setup.
 | Org bootstrap and immutable scope interrupt new Fleet work | Org now registers editable prose cards with an optional parent. The normal CLI/MCP has three operations, and no work or chain ceremony. Old lifecycle callers are removed during cutover. |
 | Too much coordination procedure | Remove universal one-action, upward-only and message-quota instructions; handoffs contain useful conclusions. |
 | Cannot see headless activity between ticks | Read `fleet watch status [--json]` for worker/process/hook/exit evidence and output paths, separately from watcher health. |
-| Need run metrics | Use existing `fleet report`, runtime observations and offline scorecard analysis. A new reporting service is unnecessary. |
+| Need run metrics | `fleet run-report --since 24h [--json]` reads retained per-attempt outputs and exit records in Go. It shows session, address, turns, reported cost and terminal reason, with unknown fields explicit. |
 
 Old Baton journals are inert historical files; the new runtime does not read them.
 Registering or editing a card does not rewrite those records, migrate held work, or alter
@@ -172,11 +179,19 @@ Tests use real child processes, Git worktrees and scratch stores. They qualify t
 mechanics and refusal boundaries; a repeated real-task headless run is still needed to measure
 PR throughput, coordination spend and operator rescues against the desktop baseline.
 
-For #308, this pass supplies live process/hook/exit inspection and transcript tailing.
-Provider waiting states, uniform Claude/Codex terminal semantics, a unified all-seat/work/mail
-table and a new operator push channel remain open. Existing `FLEET_NOTIFY` handles configured
-watcher notifications; this patch does not configure a new external destination. Existing
-`fleet report` and offline metrics remain the reporting tools.
+For #308, `status --all` supplies one live view and `tail` supplies text/tool inspection.
+The owner lock prevents duplicate Go watchers; startup health and the status header expose
+stopped/stale watchers. `run-report` supplies provider-reported costs/turns from retained
+attempt outputs; its time window is output modification time, not inferred session start.
+Missing results are unknown, and totals state how many attempts reported each field.
+Provider-specific approval/waiting states remain unknown unless the harness reports them.
+
+The existing push interface is `FLEET_NOTIFY`: configure a command that accepts one JSON
+transition on stdin. It runs after publication for attention/completion changes; an operator
+UI may instead watch `watch/observed.jsonl`, which also records launches and exits. The status
+header reports whether a notifier command is configured. No webhook or external service is
+required, and this change does not invent a notification destination. `fleet report` remains
+the separate report for refusals, latency and ownership observations.
 
 ## Yield and stop
 
