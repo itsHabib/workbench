@@ -42,12 +42,31 @@ func TestDispatchAcrossRepositoriesKeepsCallerAndReplyAddress(t *testing.T) {
 		t.Fatalf("caller %s (want %s), branch %s", cwd(), lead, fleet.BranchOf(seat))
 	}
 	r := fleet.ReadJSON(dispatchFile(fleet.RepoID(repo), "work", "implementation"))
-	if fleet.S(r, "by") != "supervisor:lead" || fleet.S(r, "for") != "supervisor:lead" {
+	if fleet.S(r, "by") != "supervisor:lead" || fleet.S(r, "for") != "supervisor:lead" || fleet.S(r, "reply_to") != "desktop-lead" {
 		t.Fatal("caller identity changed", r)
 	}
 	a := fleet.ReadJSON(fleet.Path("assign", "worker-seat.json"))
 	if fleet.S(a, "reply_to") != "desktop-lead" {
 		t.Fatal("worker was handed a role kind or session ID instead of its lead's mailbox", a)
+	}
+}
+
+func TestUnassignRepairsMissingPlacementButPreservesRequestRows(t *testing.T) {
+	_, repo, _ := crossRepoSeat(t)
+	path := dispatchFile(fleet.RepoID(repo), "work", "implementation")
+	row := fleet.Rec{"repo": fleet.RepoID(repo), "change": "work", "relationship": "implementation", "slot": "worker-seat", "request_id": "owned-request"}
+	if err := fleet.WriteJSON(path, row); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdUnassign("worker-seat"); err == nil || fleet.ReadJSON(path) == nil {
+		t.Fatal("cleared request-bound work without its lifecycle action")
+	}
+	delete(row, "request_id")
+	if err := fleet.WriteJSON(path, row); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdUnassign("worker-seat"); err != nil || fleet.ReadJSON(path) != nil {
+		t.Fatalf("could not clear orphan dispatch row: %v", err)
 	}
 }
 

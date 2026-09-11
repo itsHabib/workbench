@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,14 @@ func TestLockedWatcherHeartbeatEvidence(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "already ticking") || strings.Contains(err.Error(), "pid 0") {
 				t.Fatalf("invented liveness: %v", err)
+			}
+			before, _ := os.ReadFile(filepath.Join(dir(), "heartbeat.json"))
+			if _, err := Tick(time.Minute); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("one-shot fold ignored watcher owner: %v", err)
+			}
+			after, _ := os.ReadFile(filepath.Join(dir(), "heartbeat.json"))
+			if !bytes.Equal(before, after) {
+				t.Fatal("one-shot fold replaced the live owner's heartbeat")
 			}
 		})
 	}

@@ -137,6 +137,7 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		return refuse("fleet dispatch: %s/%s already has live hands (%s, for %s); `--take` rewrites the row, or `fleet work` to see it",
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
 	}
+	replyTo = assignmentReplyTo(replyTo)
 	if slot != "" {
 		if row := slotRow(slot); row != nil && fleet.RepoID(fleet.S(row, "path")) != rid {
 			return refuse("fleet dispatch: slot %s belongs to a different repository", slot)

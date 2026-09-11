@@ -23,9 +23,9 @@ package watch
 //     next fold and not by the next watcher.
 //   - The launch directory must be the address's own, in roles.map, in the same tenant.
 //     Mail identity comes from the exact directory, so a wrong one delivers to nobody.
-//   - Deciding and launching happen inside one lock every fold in every process takes,
-//     so a `fleet watch --once` beside the running watcher cannot double-launch: the
-//     stamps are the reservation, and the next holder of the lock re-reads them.
+//   - Deciding and launching happen inside one delivery lock. The stamps are the
+//     reservation, and the next holder of the lock re-reads them. Board ownership
+//     separately excludes overlapping persistent and one-shot watcher processes.
 //
 // Latency is bounded by the fold interval: a message that arrives just after a fold
 // waits for the next one, so worst-case delivery is one interval plus the grace.
@@ -171,12 +171,9 @@ func deliver(now float64) []fleet.Rec {
 
 // deliverOne decides and launches for one address inside the delivery lock.
 //
-// The decision and the act have to be one step. The lifetime owner lock is taken by
-// Serve alone, so a supported `fleet watch --once` beside the running watcher — or two
-// overlapping one-shot folds — is a second process reading the same unstamped rows; the
-// mail lock comes far too late, at stamping, after both have already started a session.
-// Under this lock the stamps a launch writes are the reservation: the next fold to take
-// the lock re-reads the mailbox and finds nothing eligible, so it does not launch.
+// The decision and the act have to be one step, independently of board ownership.
+// Under this lock the stamps a launch writes are the reservation: the next delivery
+// attempt re-reads them before deciding whether another process is needed.
 //
 // A lock it cannot take in time is a refusal to deliver this fold, recorded and left
 // for the next one. Mail is never lost by waiting; it is lost by being delivered twice.

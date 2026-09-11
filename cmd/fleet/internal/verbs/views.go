@@ -862,13 +862,7 @@ func CmdAssign(slot, branch, brief, by, forRole, replyTo string) error {
 		if out = assignCheckout(slot, path, branch); out != nil {
 			return nil
 		}
-		if replyTo == "" {
-			callerRole, _, callerSlot := fleet.MapRowsFor(cwd())
-			replyTo = callerRole
-			if callerSlot != "" {
-				replyTo = callerSlot
-			}
-		}
+		replyTo = assignmentReplyTo(replyTo)
 		by = dispatcher(by)
 		// `by` is who dispatched; `for` is the role accountable until the work is done. The
 		// same session today, and they diverge the moment there are two hubs — a column on
@@ -903,6 +897,17 @@ func assignmentIdentity(path, slot string) (string, string, error) {
 		return "", "", refuse("fleet assign: seat %s has no current role and tenant binding; inspect fleet slots and bind it with fleet role", slot)
 	}
 	return role, tenant, nil
+}
+
+func assignmentReplyTo(address string) string {
+	if address != "" {
+		return address
+	}
+	role, _, slot := fleet.MapRowsFor(cwd())
+	if slot != "" {
+		return slot
+	}
+	return role
 }
 
 // assignGuards, under the seat's lock: the seat exists and is free, and the branch is
@@ -997,11 +1002,16 @@ func unassignLocked(slot string) error {
 	p := fleet.Path("assign", fleet.Safe(slot)+".json")
 	a := fleet.ReadJSON(p)
 	if a == nil {
-		return refuse("fleet unassign: %s has no readable assignment", slot)
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			return refuse("fleet unassign: %s has an unreadable assignment; inspect %s", slot, p)
+		}
 	}
 	var paths []string
 	for _, r := range dispatchRows() {
-		if fleet.S(r, "slot") != slot || fleet.S(r, "repo") != fleet.S(a, "repo") || fleet.S(r, "change") != fleet.S(a, "branch") {
+		if fleet.S(r, "slot") != slot {
+			continue
+		}
+		if a != nil && (fleet.S(r, "repo") != fleet.S(a, "repo") || fleet.S(r, "change") != fleet.S(a, "branch")) {
 			continue
 		}
 		if fleet.S(r, "request_id") != "" {
@@ -1015,7 +1025,7 @@ func unassignLocked(slot string) error {
 			return err
 		}
 	}
-	if err := os.Remove(p); err != nil {
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	say("%s: assignment and %d matching dispatch rows cleared; working files retained", slot, len(paths))

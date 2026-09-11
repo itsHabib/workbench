@@ -100,18 +100,18 @@ system name there is Baton; this binary is its first runtime slice.
   that folded yesterday (see FOLLOWUPS). The file-home scan is sequential, not
   an atomic snapshot across chains; rerun after reconciliation to confirm it
   converged.
-- **Hooks** (`hooks/`): `sessionstart-boot.sh` injects `org boot` output into
-  a session whose cwd maps to a role (`$ORG_STATE/roles.map`);
-  `stop-mark.sh` appends a mechanical `mark` when a session stops. Both
-  fail-open: no mapping, no binary, no chain — exit 0, empty output.
+- **Current hooks** (`hooks/`): `sessionstart-boot.sh` injects a registered role
+  card into a session whose cwd maps to that role (`$ORG_STATE/roles.map`).
+  `stop-mark.sh` is a no-op compatibility shim; it no longer appends marks.
+  Read historical chain context explicitly with `org legacy boot -role <role>`.
 
 ## Invariants
 
 - The home adds no judgment. A record refused by the kernel is refused here
   with the kernel's reason on stderr; the chain does not grow.
-- Checkpoints are distilled by a host, never demanded of the working agent.
-  The Stop hook writes a `mark`; a mark at the tip renders the boot index
-  `degraded`, which is the honest state.
+- Historical checkpoints were distilled by a host. An existing `mark` at the
+  tip still renders the legacy boot index `degraded`; current hooks do not
+  append marks or checkpoints.
 - The boot index is an index: pointers plus hooks, byte-budgeted
   (`-max-bytes`, default 2048), shedding depth (last-word excerpt, held list)
   but never the headline, the charter line, or a dangling obligation.

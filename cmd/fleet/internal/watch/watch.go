@@ -77,7 +77,18 @@ func Stale(intervals float64) bool {
 }
 
 // Tick folds once and writes the board. It returns the rendered board.
+// A diagnostic fold must not replace a persistent watcher's heartbeat.
 func Tick(interval time.Duration) (string, error) {
+	var md string
+	err := withOwner(func() error {
+		var err error
+		md, err = tick(interval)
+		return err
+	})
+	return md, err
+}
+
+func tick(interval time.Duration) (string, error) {
 	now := fleet.Now()
 	prev := Heartbeat()
 	prevAt := fleet.F(prev, "at")
@@ -587,6 +598,10 @@ func Serve(interval time.Duration) error {
 }
 
 func serve(ctx context.Context, interval time.Duration) error {
+	return withOwner(func() error { return serveOwned(ctx, interval) })
+}
+
+func withOwner(run func() error) error {
 	// One writer of one board: an advisory lock held for the process's lifetime, so a
 	// second watcher started inside the first's tick — before any heartbeat exists —
 	// is refused too. Kernel-released on death, like every lock here.
@@ -606,6 +621,10 @@ func serve(ctx context.Context, interval time.Duration) error {
 		return fmt.Errorf("watcher lock unavailable; last recorded heartbeat pid %d, %s ago: %w", int(fleet.F(hb, "pid")), fleet.FmtAge(fleet.Now()-fleet.F(hb, "at")), err)
 	}
 	defer func() { _ = filelock.Unlock(owner) }()
+	return run()
+}
+
+func serveOwned(ctx context.Context, interval time.Duration) error {
 	defer func() {
 		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), fleet.Rec{"at": fleet.Now(), "what": "watcher-stopped", "pid": os.Getpid()})
 	}()
@@ -613,7 +632,7 @@ func serve(ctx context.Context, interval time.Duration) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if _, err := Tick(interval); err != nil {
+		if _, err := tick(interval); err != nil {
 			_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch tick: " + err.Error()})
 		}
 		timer := time.NewTimer(interval)

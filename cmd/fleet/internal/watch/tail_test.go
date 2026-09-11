@@ -139,3 +139,72 @@ func TestRuntimeReportsRejectedDeliveryEntries(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestTailFallsBackWhenRecordedTranscriptIsUnavailable(t *testing.T) {
+	home, sink := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home}
+	putStoreMail(t, "hub:lead", "fallback", fleet.Now()-60, nil)
+	deliver(fleet.Now())
+	launched(t, sink)
+	waitExit(t, target)
+	launch, err := readLaunch(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(home, "removed.jsonl"), home} {
+		if err := fleet.WriteJSON(fleet.Path("sessions", "worker.json"), fleet.Rec{"session": "worker", "launch_dir": home, "last_event_at": fleet.Now(), "transcript_path": path}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := tailSource("hub:lead")
+		if err != nil || got != fleet.S(launch, "output") {
+			t.Fatalf("did not fall back from %s: %s %v", path, got, err)
+		}
+	}
+}
+
+func TestFollowWaitsForFirstObservedTrace(t *testing.T) {
+	home, _ := deliverEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- Tail(ctx, &out, "hub:lead", 20, true) }()
+	select {
+	case err := <-done:
+		t.Fatalf("follow ended before a source arrived: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	path := filepath.Join(home, "arrived.jsonl")
+	if err := os.WriteFile(path, []byte("worker has started\n"), 0600); err != nil {
+		cancel()
+		<-done
+		t.Fatal(err)
+	}
+	if err := fleet.WriteJSON(fleet.Path("sessions", "worker.json"), fleet.Rec{"session": "worker", "launch_dir": home, "last_event_at": fleet.Now(), "transcript_path": path}); err != nil {
+		cancel()
+		<-done
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil || !strings.Contains(out.String(), "worker has started") {
+		t.Fatalf("follow missed arriving source: %v %s", err, &out)
+	}
+	if err := Tail(ctx, &out, "hub:unknown", 20, true); err == nil {
+		t.Fatal("follow hid an invalid address")
+	}
+}
+
+func TestTailSkipsPartialFirstLineInLargeFile(t *testing.T) {
+	home, _ := deliverEnv(t)
+	path := filepath.Join(home, "large.jsonl")
+	data := strings.Repeat("x", traceWindow+100) + "\n" + `{"type":"assistant","message":{"content":"Recent answer"}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteJSON(fleet.Path("sessions", "worker.json"), fleet.Rec{"session": "worker", "launch_dir": home, "last_event_at": fleet.Now(), "transcript_path": path}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Tail(context.Background(), &out, "hub:lead", 20, false); err != nil || !strings.Contains(out.String(), "Recent answer") {
+		t.Fatalf("large trace lost complete final record: %v %s", err, &out)
+	}
+}

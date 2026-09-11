@@ -82,16 +82,20 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
     time.sleep(0.5)
     assert len(recorded()) == 1, recorded()
 
-    # Two folds that overlap are two processes reading the same unstamped row. The
-    # supported `fleet watch --once` beside a running watcher must not double-launch:
-    # reserve-and-launch is serialised, and the stamp is the reservation.
+    # Overlapping one-shot folds share board ownership. A contender either gets
+    # the lock after the first finishes or refuses without replacing its state.
     run(seat, "send", "hub:lead", "--id", "q-2", "--kind", "report",
         "--subject", "Second message", "--body", "nothing to answer", "--session", "seat-v1")
     both = [subprocess.Popen([binary, "watch", "--once"], cwd=seat, env=env,
                              text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             for _ in range(2)]
+    completed = 0
     for p in both:
-        assert p.wait(timeout=30) == 0, p.stderr.read()
+        rc = p.wait(timeout=30)
+        error = p.stderr.read()
+        assert rc == 0 or (rc == 4 and "watcher lock unavailable" in error), error
+        completed += rc == 0
+    assert completed >= 1
     time.sleep(0.5)
     carried = [l for l in recorded() if "q-2" in l["prompt"]]
     assert len(carried) == 1, carried

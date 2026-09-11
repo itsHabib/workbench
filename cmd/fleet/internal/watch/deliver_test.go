@@ -59,6 +59,21 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	return home, sink
 }
 
+func TestReservationRechecksAcknowledgement(t *testing.T) {
+	deliverEnv(t)
+	putStoreMail(t, "hub:lead", "ack-race", fleet.Now()-60, nil)
+	rows, err := eligibleMail("hub:lead", fleet.Now(), 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("fixture mail not eligible: %v %v", rows, err)
+	}
+	if _, err := fleet.StampMail("t1", "hub:lead", "ack-race", fleet.Rec{"acked_at": fleet.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if taken, err := reserve("hub:lead", rows); err == nil || len(taken) != 0 {
+		t.Fatalf("reserved already acknowledged mail: %v %v", taken, err)
+	}
+}
+
 // storeDirs is the store's directories for one address, or a failed test.
 func storeDirs(t *testing.T, tenant, address string) []string {
 	t.Helper()

@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,8 @@ import (
 )
 
 const traceWindow = 1 << 20
+
+var errNoTrace = errors.New("no observed transcript or output")
 
 // tailSource uses observed paths, never a guessed transcript directory or session.
 func tailSource(address string) (string, error) {
@@ -24,15 +27,49 @@ func tailSource(address string) (string, error) {
 		return "", err
 	}
 	row := runtimeRow(deliverTarget{address: address, cwd: directory}, sessionRecords())
-	if path := fleet.S(row, "transcript_path"); path != "" {
+	if path := fleet.S(row, "transcript_path"); readableTrace(path) {
 		return path, nil
 	}
-	if path := fleet.S(row, "output"); path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+	if path := fleet.S(row, "output"); readableTrace(path) {
+		return path, nil
+	}
+	return "", fmt.Errorf("%w for %s; inspect fleet watch status", errNoTrace, address)
+}
+
+func readableTrace(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+func awaitTrace(ctx context.Context, address string, follow bool) (string, error) {
+	for {
+		path, err := tailSource(address)
+		if !follow || !errors.Is(err, errNoTrace) {
+			return path, err
+		}
+		if !tailWait(ctx) {
+			return "", nil
 		}
 	}
-	return "", fmt.Errorf("no observed transcript or output for %s; inspect fleet watch status", address)
+}
+
+func tailWait(ctx context.Context) bool {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // Tail reads visible events without a scheduler tick. Follow polls only this
@@ -42,8 +79,8 @@ func Tail(ctx context.Context, out io.Writer, address string, n int, follow bool
 	var offset int64
 	var prior os.FileInfo
 	for {
-		path, err := tailSource(address)
-		if err != nil {
+		path, err := awaitTrace(ctx, address, follow)
+		if err != nil || path == "" {
 			return err
 		}
 		f, err := os.Open(path)
@@ -87,12 +124,8 @@ func Tail(ctx context.Context, out io.Writer, address string, n int, follow bool
 		if !follow {
 			return nil
 		}
-		timer := time.NewTimer(time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !tailWait(ctx) {
 			return nil
-		case <-timer.C:
 		}
 	}
 }

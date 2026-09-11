@@ -104,7 +104,9 @@ A failed process start returns its mail reservations for retry. Delivered mail i
 never automatically replayed; acknowledgment records reading, not completion. Receipts and
 Git/CI evidence establish the requested result. A completed process is not a completed task.
 
-`fleet watch --once` is useful for a diagnostic fold. Use the persistent watcher for normal
+`fleet watch --once` is useful for a diagnostic fold when no watcher is running; it refuses
+while the persistent watcher owns the board. Use `watch status` to inspect a live watcher.
+Use the persistent watcher for normal
 headless work and exit collection. Use `fleet report` and the existing observation logs to
 score runs; offline analysis scripts may summarize them without owning scheduling or state.
 

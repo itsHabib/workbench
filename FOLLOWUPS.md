@@ -2,6 +2,28 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## fleet: dispatch still publishes two records
+
+PR #310 review identified a failure window in `cmdDispatch`: `CmdAssign` can
+publish placement, then writing the dispatch row can fail. The command reports
+the error, but the assignment survives and can wake its configured worker. This
+does not authorize different work; it does mean a failed command can leave work
+running without the corresponding ownership row. Inspect both records after a
+dispatch persistence error; do not blindly retry it.
+
+Remove the duplicated work declaration by making placement reference one
+authoritative assignment, as the earlier Fleet boundary decision intended.
+Do not add a second transaction journal just to coordinate these two files.
+A bounded follow-up must cover write failures, watcher visibility during publish,
+and replacement of existing assignments. Deferred from this simplification pass
+because an isolated rollback after releasing the seat lock can race a live worker
+or overwrite a subsequent assignment; fixing that requires changing the shared
+assignment/dispatch publication boundary, including direct assign callers.
+
+PR #310 also retains two reviewed style choices: `RuntimeText()` builds its own
+worker slice and asserts that internal type; `tailDirectory` has a compiler-required
+return after its single-entry map traversal. Neither is a known behavioral defect.
+
 ## org: transfer's last orphan window needs a cross-chain transaction
 
 `org transfer` writes to two chains under two locks. It assigns to the
