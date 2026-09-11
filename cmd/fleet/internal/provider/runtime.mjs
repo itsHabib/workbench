@@ -61,7 +61,7 @@ async function claude() {
     } };
   // Streaming input enables the SDK control channel; no token streaming needed.
   async function* input() {
-    yield { type: 'user', message: { role: 'user', content: request.prompt }, parent_tool_use_id: null, session_id: request.resume || '' };
+    yield { type: 'user', message: { role: 'user', content: request.prompt }, parent_tool_use_id: null, ...(request.resume ? { session_id: request.resume } : {}) };
   }
   const q = query({ prompt: input(), options });
   interrupt = () => q.interrupt();

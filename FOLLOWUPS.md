@@ -592,3 +592,17 @@ process/output evidence, and suppresses checkout-derived joins when the director
 is missing. Regression tests cover both cases and confirm the display rejection
 does not change directory-level launch exclusion. No fourth panel is requested;
 the corrected head goes through fresh CI and independent Gate judgment.
+
+## Fleet provider cleanup qualification (PR #318)
+
+The initial review suggested forcing the Node bridge to exit after an interrupt
+that cannot be acknowledged. That is deliberately deferred: a collected bridge
+exit could permit a new worker while a provider descendant still runs. Codex's
+transport close already escalates to SIGKILL after five seconds and awaits close;
+Claude's SDK owns its synchronous `close()` operation. A live stuck bridge keeps
+the directory reserved, and a bridge that disappears without a collected exit
+also keeps its reservation. Do not substitute `process.exit` for evidence of
+provider cleanup. Full descendant-quiescence proof is outside this transport
+slice; a future execution-scope change needs failure injection and measured
+process-tree evidence. Normal Codex turn interruption passed a real foreground
+command test, but forced cleanup and real Claude cancellation remain unqualified.

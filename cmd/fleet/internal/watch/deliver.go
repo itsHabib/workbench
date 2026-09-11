@@ -117,10 +117,10 @@ func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 	var out []deliverTarget
 	for address := range cfg {
 		entry := fleet.M(cfg, address)
-		provider := fleet.S(entry, "provider")
 		if entry == nil || fleet.S(entry, "cwd") == "" {
 			continue
 		}
+		provider := fleet.S(entry, "provider")
 		if err := fleet.MailAddress(address, "address"); err != nil {
 			continue
 		}

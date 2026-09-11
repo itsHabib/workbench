@@ -22,7 +22,12 @@ storage. Raw provider records and credentials are private and are not committed 
 
 Codex CLI `app-server` completed a fresh smoke turn and then resumed the same actual thread
 with a distinct turn ID. Both transport exits were zero. The test used an isolated CODEX_HOME.
-This proves connection and session continuation, not task throughput or cancellation.
+This proves connection and session continuation, not task throughput.
+A separate real interruption test reached a foreground shell command, requested cancellation,
+received an `interrupted` turn, collected bridge exit 130 and app-server exit 0, and observed
+that the post-sleep marker was still absent after the command's original duration had elapsed.
+The first cancellation probe attempted a write outside its configured workspace and did not
+reach the command; the successful probe used its own working directory.
 
 The full Codex sandbox workflow completed: author dependency question, authored handoff,
 retained dirty task file, resumed author, draft PR and independent exact-head receipt.
@@ -45,6 +50,13 @@ Claude's initial isolated-home smoke produced an actual SDK session and an authe
 failure (`is_error: true` despite `subtype: success`). Fleet correctly recorded failure and a
 nonzero exit. That is failure-path evidence, not live Claude task qualification. Earlier
 rehearsals used the configured default Claude login rather than an isolated provider home.
+
+The workflow binary SHA-256 was
+`184f706a7266361825470c816349d82f15ed8db5d7fd435ca6f9c8d04fe1c325`.
+It was built during development before the final native-trace split and conservative orphan
+reservation change. The later Codex interruption test exercised the committed bridge; protocol
+and Go checks cover the final changes. This is mechanism-specific evidence, not a claim that
+one full live workflow ran on the final reviewed Workbench head.
 
 No claim of general production readiness, Windows provider qualification, controlled cost
 advantage or both-provider full workflow success is established by these observations.

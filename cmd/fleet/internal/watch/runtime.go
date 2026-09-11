@@ -113,10 +113,6 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 		return 0, err
 	}
 	if assignment == "" {
-		last, err := readLaunch(t)
-		if err != nil {
-			return 0, err
-		}
 		assignment = fleet.S(last, "assignment")
 	}
 	r := fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "status": "starting", "assignment": assignment, "exit_file": exitFile, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "work_identity": workIdentity(t), "resume": resume}
