@@ -128,7 +128,7 @@ func TestRuntimeReportsRejectedDeliveryEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := RuntimeStatus()
-	if len(got["workers"].([]fleet.Rec)) != 1 || !strings.Contains(fleet.S(got, "configuration_error"), "1 entries omitted") {
+	if len(got["workers"].([]fleet.Rec)) != 2 || fleet.S(got["workers"].([]fleet.Rec)[1], "configuration_error") == "" {
 		t.Fatal(got)
 	}
 	if err := os.WriteFile(fleet.Path("deliver.json"), []byte("null"), 0600); err != nil {

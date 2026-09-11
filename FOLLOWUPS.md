@@ -650,3 +650,50 @@ process/output evidence, and suppresses checkout-derived joins when the director
 is missing. Regression tests cover both cases and confirm the display rejection
 does not change directory-level launch exclusion. No fourth panel is requested;
 the corrected head goes through fresh CI and independent Gate judgment.
+
+## Fleet provider cleanup qualification (PR #318)
+
+The initial review suggested forcing the Node bridge to exit after an interrupt
+that cannot be acknowledged. That is deliberately deferred: a collected bridge
+exit could permit a new worker while a provider descendant still runs. Codex's
+transport close already escalates to SIGKILL after five seconds and awaits close;
+Claude's SDK owns its synchronous `close()` operation. A live stuck bridge keeps
+the directory reserved. A bridge that disappears without matching provider-terminal
+or proven never-started evidence also keeps its reservation, whether or not its exit
+was collected. Do not substitute `process.exit` for evidence of
+provider cleanup. General descendant cleanup is outside this transport
+slice; a future execution-scope change needs failure injection and measured
+process-tree evidence. Normal Codex turn interruption passed a real foreground
+command test. Normal real Claude SDK interruption has also passed; forced cleanup
+remains unqualified.
+
+Final-panel residuals at the two-fix-round cap: the README's later status paragraph
+still calls session integration future work; use the provider guide and PR #318's
+evidence instead. `fresh: true` starts a new session only after the prior reservation
+can safely release. A failed resume without provider-terminal, never-started or the bounded macOS
+pre-turn quiescence proof below retains its reservation; fresh does not bypass
+that safety check. General descendant cleanup remains deferred with execution scopes.
+Provider delivery now refuses relative FLEET_STATE or ORG_STATE roots before
+launching, because a child working directory would otherwise change their meaning.
+Use absolute state roots. Final identity and state-root fixes go to the judge with
+tests; no fourth panel is requested.
+
+Gate's subsequent block required a bounded recovery repair. Matching terminal or
+never-started evidence now releases a known-absent bridge even after watcher loss.
+Both providers observe native process creation; an actual no-process spawn error
+restores never-started evidence, allowing the next eligible wake to retry the
+original requested session. This does not release an ambiguous started provider.
+Regressions cover missing/stale evidence and both provider startup failures. The
+substantive repair goes to a new exact-head Gate judgment without another panel.
+
+A second Gate block required a distinct started-but-pre-turn recovery contract.
+On macOS only, the Go owner now arms fork/exec/exit observation behind a pre-exec
+barrier. Explicit Codex initialize/thread-start/resume rejection plus a definitely
+unsent turn and matching no-fork/exit proof releases the attempt without claiming
+a completed turn. The ordinary installed official npm wrapper resolves automatically
+to its matching native payload. Arbitrary wrappers, any observed fork, observer
+failure, missing phase and possibly sent turns retain the reservation. No descendant
+registry or general process cleanup policy is introduced. A real Go-watcher probe
+removed only its own disposable session history, received a native resume rejection,
+then completed an explicit fresh retry with the dirty file preserved. This repair
+continues through fresh CI and Gate judgment without a fourth panel.

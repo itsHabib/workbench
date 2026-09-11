@@ -46,6 +46,7 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 			row["exit_code"], row["exited_at"] = exit["exit_code"], exit["at"]
 		}
 	}
+	providerActivity(row, last)
 	lastActivity(row, last, sessions)
 	if last == nil && fleet.S(row, "session") != "" {
 		row["state"] = "observed_session"
@@ -180,4 +181,25 @@ func WatcherHealth() (string, fleet.Rec) {
 		}
 	}
 	return watcher, hb
+}
+
+func providerActivity(row, last fleet.Rec) {
+	if last == nil || fleet.S(last, "state_file") == "" {
+		return
+	}
+	if last != nil && fleet.S(last, "provider") != "" && (fleet.S(row, "state") == "exited" || fleet.S(row, "state") == "failed") && !providerTerminal(last) {
+		row["provider_cleanup_pending"] = true
+		row["error"] = "bridge exited without safe provider cleanup evidence; directory remains reserved"
+	}
+	row["state_file"] = last["state_file"]
+	state := fleet.ReadJSON(fleet.S(last, "state_file"))
+	if fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != fleet.S(last, "provider") {
+		row["provider_error"] = "provider state missing or belongs to another attempt"
+		return
+	}
+	for _, key := range []string{"trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "provider_started", "provider_terminal", "provider_quiescent", "turn_may_have_been_sent", "pre_turn_rejection", "process_proof", "provider_executable", "provider_exit_code", "provider_exit_signal", "last_provider_event", "last_provider_event_at", "reason", "error"} {
+		if value, ok := state[key]; ok {
+			row[key] = value
+		}
+	}
 }

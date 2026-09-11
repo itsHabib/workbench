@@ -245,22 +245,18 @@ See [the headless guide](docs/headless.md) for the supported Go runtime and reco
 
 ```json
 {"hub:lead": {"cwd": "/path/to/dir",
-              "cmd": ["claude", "-p", "{{prompt}}"],
+              "provider": "claude",
               "LATE_TO": "hub:above"}}
 ```
 
-`{{prompt}}` is substituted wherever the operator placed it — the substrate learns no
-harness flags. Each fold, for every configured address with mail that is unacked and
-never delivered, and with nobody present in its directory, the watcher runs the
-command **once**, carrying every eligible message, and stamps each one
+The watcher uses the configured provider session interface. Each fold, for every configured address with mail that is unacked and
+never delivered, and with nobody present in its directory, the watcher starts a turn **once**, carrying every eligible message, and stamps each one
 `delivered_at`/`delivered_by`. A stamped message is never carried again; a started
 launch counts as present for the rest of the fold; a launch that fails to start leaves
 its mail for the next fold. `attempt`, `started`, `failed` and child exits are recorded in
-`watch/observed.jsonl`, with the command's output under `watch/delivery/`.
+`watch/observed.jsonl`, with provider output under `watch/delivery/`.
 
-*Present* means a session record in that directory that has not ended and either has
-an open turn or was touched within `FLEET_IDLE_GRACE` (default 5m) — an idle window
-nobody is looking at counts as absent, which is what a stalled rehearsal cost.
+A live occupant remains present while idle; silence does not allow a competing launch.
 `FLEET_MAIL_GRACE` (default 10s) holds a just-arrived message back so a burst travels
 together. **Delivery latency is bounded by the fold interval** (`--interval`, default
 60s): a message arriving just after a fold waits for the next one, so worst case is

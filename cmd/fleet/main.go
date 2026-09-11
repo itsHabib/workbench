@@ -33,6 +33,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/fleet/internal/codex"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/mcp"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/provider"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/watch"
 )
@@ -43,6 +44,17 @@ func main() {
 		verbs.Usage(2)
 	}
 	switch args[0] {
+	case "_provider-exec":
+		if err := provider.ExecBarrier(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(127)
+		}
+	case "_provider-process":
+		code, err := provider.ObserveCommand(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(code)
 	case "hook":
 		runHook(args[1:])
 	case "mcp":
@@ -82,6 +94,18 @@ func reviveWatcher(ev map[string]any) (started bool) {
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
 // board; `--interval 30s` sets the tick.
 func runWatch(args []string) {
+	if len(args) > 0 && args[0] == "cancel" {
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: fleet watch cancel <address>")
+			os.Exit(2)
+		}
+		if err := watch.Cancel(args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("interrupt requested; inspect watch status for the terminal result")
+		return
+	}
 	if len(args) > 0 && args[0] == "status" {
 		if len(args) > 2 || (len(args) == 2 && args[1] != "--json") {
 			fmt.Fprintln(os.Stderr, "usage: fleet watch status [--json]")

@@ -55,8 +55,8 @@ handoffs). Stand them up per `run-a-fleet.md`.
 4. **No idle holders**: `fleet sessions` shows no live session in any lead directory or seat.
    A desktop session idle in a roled directory reads as live and blocks delivery.
 5. Exactly one `fleet watch` on the machine.
-6. If sessions are made by mail: a delivery config (`deliver.json`: `{"<address>": {"cwd", "cmd"}}`,
-   prompt placed right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt)
+6. If sessions are made by mail: a delivery config (`deliver.json`: `{"<address>": {"cwd", "provider"}}`,
+   optional `model`, `prompt` and positive `every` duration per the provider guide)
    in `$FLEET_STATE`. Use the current Go watcher; see [headless.md](headless.md).
 7. The slow-command gate: after five 40-second runs, `bash scripts/bench.sh` needs the
    `FLEET_ALLOW_SLOW=<rule-slug>` prefix (the slug of the rule it trips) and the seat's allow
@@ -116,7 +116,7 @@ reproducer, expected, actual, owner.
 
 ## Codex variant
 
-Keep the contract and directories, put the Codex launch command in `deliver.json` (the hook
+Keep the contract and directories, set `provider: "codex"` in `deliver.json` (the hook
 path is `fleet hook codex`; `fleet role` already projected the Codex config into each seat), and
 verify a fresh session there sees its role and hooks before dispatching. The scorecard's mail,
 receipt and launch counts apply as they are; its session and token reader is Claude-only and it

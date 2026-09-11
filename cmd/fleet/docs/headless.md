@@ -1,218 +1,196 @@
-# Headless Fleet: one Go runtime
+# Headless Fleet
 
-`fleet watch` owns polling, recurring wakeups, mail delivery and process launches. Run the
-current Go binary. The old Bash/Python mail poller is retired; desktop loops and native
-messaging remain a supported desktop workflow, not a second headless launcher.
+`fleet watch` owns mail delivery, assignment wakeups and recurring ticks. A wake starts one
+provider turn; the next eligible wake resumes its recorded conversation. Desktop sessions
+and native messaging remain supported. Fleet never infers completion from a process exit.
 
-This pass keeps the existing command launcher while fixing scheduling and visibility.
-`claude -p` below is the transitional batch interface, not the final session architecture.
-The next runtime change covers Claude and Codex session continuation and structured lifecycle
-observation; token-by-token text streaming is not a prerequisite. See the
-[boundary decision](../../../docs/features/org-fleet-boundary/spec.md).
+## Provider prerequisites
 
-## Configure what runs
+Install Node.js 22 or later. For Claude, install and authenticate the `claude` CLI, then install the official Agent SDK in a dedicated directory:
 
-Bind each directory with `fleet role` or `fleet pool`, then put its actual mailbox address in
-`$FLEET_STATE/deliver.json` (default `~/.fleet/deliver.json`):
+```sh
+npm install --prefix "${FLEET_RUNTIME_HOME:-$HOME/.local/share/fleet/runtime}" \
+  --no-audit --no-fund @anthropic-ai/claude-agent-sdk@0.3.183
+```
+
+For Codex, install and authenticate the `codex` CLI. Fleet uses `codex app-server` over local
+stdio, with its initialize, thread/start, thread/resume, turn/start and turn/interrupt API.
+Claude uses the SDK's streaming-input control channel, explicit `resume`, `interrupt()` and
+`close()`. Token streaming is not required. The bridge is embedded in the Go binary; there is
+no separate script to install and no second scheduler.
+
+Both providers use their configured authentication and project settings. Claude loads user,
+project and local settings, including the projected Fleet hooks. Codex reads its normal
+configuration. Set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when deliberately isolating provider
+homes. Neither Fleet nor its installer copies credentials or chooses another account.
+
+This integration reuses the supported mechanism already used by Ship's Claude runner; it does
+not import Ship's policies or its runner (which does not support attach). Codex app-server
+supplies explicit turn cancellation and identities beyond the batch CLI. Its API is versioned
+with the installed CLI; verify a new version against the protocol and live tests before rollout.
+See the official [Claude SDK](https://platform.claude.com/docs/en/agent-sdk/typescript) and
+[Codex app-server](https://developers.openai.com/codex/app-server) references. Codex documents
+app-server as experimental; this slice does not establish production qualification.
+
+## Codex hook trust
+
+Projecting `hooks.json` is not proof that Codex will execute it. Trust the exact Fleet hooks
+in the target provider home before starting headless work. Through the installed app-server,
+initialize with `experimentalApi: true`, then call `hooks/list` with the intended `cwds`.
+Inspect each returned hook's source path, command, event and `currentHash`. For a hook you
+intend to enable, `config/value/write` writes the object
+`{enabled: true, trusted_hash: <that currentHash>}` at
+`hooks.state.<quoted returned hook key>`, with `mergeStrategy: "replace"` and the intended
+config file path. Do not generate a hash yourself or trust unrelated discovered hooks.
+Alternatively use the Codex UI to enable them. Confirm an actual fresh session emits Fleet
+SessionStart and tool events before dispatch. Changed hook commands require fresh trust.
+
+## Configure a run
+
+Bind directories with `fleet role` or `fleet pool`, then configure their actual mailbox
+addresses in `$FLEET_STATE/deliver.json` (default `~/.fleet/deliver.json`):
 
 ```json
 {
   "supervisor:project": {
     "cwd": "/absolute/path/project-lead",
-    "cmd": ["claude", "-p", "{{prompt}}", "--output-format", "json"],
+    "provider": "claude",
+    "permission_mode": "auto",
     "every": "2m",
-    "prompt": "Read the run brief, current Fleet work and unread mail. Advance eligible work, answer questions, and leave a useful handoff when something changes. Stop when this tick has no more useful work."
+    "prompt": "Read current Fleet work, mail and handoffs. Advance eligible work, leave a useful handoff, then end this turn when waiting. Stop this address when the run is complete."
   },
   "project-author-1": {
     "cwd": "/absolute/path/project-author-1",
-    "cmd": ["claude", "-p", "{{prompt}}", "--output-format", "json"]
+    "provider": "codex"
   }
 }
 ```
 
-Use the configured harness and its actual flags on this machine. `cmd` is an argument array,
-not a shell expression; `{{prompt}}` is replaced in each argument. The runtime adds no turn
-limit. Retain the operator's explicit spending and stop limits in the run and harness
-configuration; do not introduce guessed author/lead turn profiles. An explicit low turn cap
-can still kill a configured worker, so inspect the actual command before launching real work.
+`provider` is required (`claude` or `codex`). `model` is optional; omission preserves the
+provider default. Claude's optional `permission_mode` accepts `default`, `acceptEdits`,
+`auto`, `plan` or `dontAsk`. Omission preserves its default. Fleet never supplies an operator
+approval: an unhandled approval/input request is recorded and refused. Provider sandbox,
+permissions, repository hooks, review and Gate still apply.
 
-`every` is optional. It requires a positive Go duration and a nonempty `prompt`. A lead with
-`every` gets a tick when the interval since its last launch has passed, even without mail.
-Removing `every` removes future periodic wakeups; removing an entry prevents future launches
-for that address. A running worker is not killed by changing the config. Keep recurring
-entries only while the run is active; the brief's stop condition tells the lead when to report
-completion, and the operator removes or disables its recurrence. No hidden 45-minute lifetime.
+`every` requires a positive Go duration and a nonempty `prompt`. It schedules from the previous
+launch time. Mail and assignments can wake sooner; a running attempt still excludes another
+launch in the same directory. No default turn cap, lifetime or guessed budget is added. Keep
+explicit run limits in the operator's run contract and provider configuration.
 
-## Run it
+The old `cmd` array and `{{prompt}}` substitution are removed. Old entries are visibly invalid
+and never launched. There is no compatibility launcher or automatic rewrite of installed homes.
+
+## Start and continue
 
 ```sh
 fleet watch --interval 10s
+fleet dispatch task/example --as implementation --for supervisor:project \
+  --slot project-author-1 --brief 'Implement the ticket through a tested draft PR.'
 ```
 
-One watcher owns the runtime. SessionStart can revive a stale watcher automatically; inspect
-`$FLEET_STATE/watch/heartbeat.json` before starting another foreground watcher. An existing
-watcher keeps the binary it started with: after building a replacement, stop the old watcher
-and run the new binary. First stop any old script poller or desktop session acting as a
-headless launcher so two different runtimes do not compete.
+One Go watcher owns a state root. `watch --once` refuses while that watcher is running.
+SessionStart can revive a stale watcher; `FLEET_WATCH=off` disables automatic revival for an
+isolated test. Replacing a binary does not replace an already-running watcher.
 
-The watcher responds to interrupt/termination and records `watcher-stopped`. Set
-`FLEET_WATCH=off` in the launching harness environment when automatic revival is unwanted.
-Stopping the watcher stops new launches; existing workers retain their files and continue.
-Use the existing work stop/lease controls and the harness's cancellation mechanism when the
-intent is to stop the work itself.
+An unread assignment with a brief wakes its seat without a second order. A worker awaiting a
+peer writes a handoff, sends its request and ends its turn. Mail or recurrence supplies the next
+turn in the same provider session. Hooks and provider observations retain the actual identity.
+Continuation keeps the working directory and its dirty files; Fleet does not commit, stash,
+reset or clean them. Branch changes remain subject to the existing assignment/lease checks.
 
-## Assignment starts work
+A changed provider, tenant, address, repository, branch or assignment starts a fresh conversation.
+Set `fresh: true` explicitly when each wake should start fresh or an unrecoverable session must
+be replaced. Remove it to resume the newly recorded session on subsequent wakes. Unreadable or
+mismatched retained provider state and failed resumes are errors, never silent fresh starts.
+Once the bridge is known absent, matching provider-terminal or proven never-started evidence
+releases the reservation even if a lost watcher could not collect its exit. A spawn failure
+before a process exists preserves the originally requested session for the next eligible wake.
+A live or uncertain bridge remains reserved. A provider child may still be running even when
+the bridge exit was collected; without terminal or never-started evidence Fleet keeps the reservation.
+An ended process alone does not prove all of its descendants have stopped.
 
-```sh
-fleet dispatch task/example --as implementation --for supervisor:project   --slot project-author-1 --brief 'Implement the ticket through a tested draft PR.'
-```
-
-A matching configured seat with a current, unread assignment and a brief becomes eligible on
-the next watcher tick. No second `fleet send --kind order` is necessary. The seat determines
-the target repository; `--repo owner/repo` or `--repo /path/to/checkout` selects it explicitly.
-The caller stays in its own directory and retains its identity.
-
-The startup hook presents the current assignment. Agents continue authorized work until the
-requested result or a real blocker. A failed or interrupted worker can be resumed on the same
-branch with its dirty files intact; assigning a different branch still requires protecting
-those files. `fleet unassign <seat>` removes its placement and matching dispatch rows together,
-retains working files and leaves any live session and its leases intact. It removes the
-declaration, not execution ownership.
-
-## Delivery and recovery
-
-Mail, new assignments, and recurring lead ticks share one serialized launch path. One launch
-carries the pending mail and assignment together. The runtime records a child before its
-first harness hook, so another message cannot start a second worker in that gap. Existing
-live sessions still suppress launches, including native desktop sessions actively working in
-the directory. Configure each headless address for one directory.
-
-Launches and output live under `watch/delivery/`; the directory's hashed `.json` file records
-the latest launch and each attempt has an `.exit.json` result. `watch/observed.jsonl` records
-attempts, starts, failed starts, child exits and watcher shutdown. A nonzero exit is observable;
-it does not cause an automatic replay or an automatic commit of the worker's files. Inspect
-the retained assignment, mail and working tree, then explicitly resume the same work.
-
-The persistent watcher reaps the children it starts and records their exit codes. A child can
-outlive a stopped watcher or a `watch --once` invocation. After that, a later watcher checks the
-recorded process; the exact exit code is unknown if the original parent did not collect it.
-A PID reused by an unrelated process can conservatively delay a launch. A crash around process
-start or unreadable launch state is ambiguous and requires inspection rather than guessing
-that it is safe to duplicate work. This is process observation, not exactly-once execution.
-
-A failed process start returns its mail reservations for retry. Delivered mail is retained and
-never automatically replayed; acknowledgment records reading, not completion. Receipts and
-Git/CI evidence establish the requested result. A completed process is not a completed task.
-
-`fleet watch --once` is useful for a diagnostic fold when no watcher is running; it refuses
-while the persistent watcher owns the board. Use `watch status` to inspect a live watcher.
-Use the persistent watcher for normal
-headless work and exit collection. Use `fleet report` and the existing observation logs to
-score runs; offline analysis scripts may summarize them without owning scheduling or state.
-
-## See what is happening between ticks
+## Observe and interrupt
 
 ```sh
-fleet status --all
 fleet status --all --json
-fleet run-report --since 24h
 fleet watch status --json
 fleet tail project-author-1 -n 20
-fleet tail project-author-1 -f
+fleet run-report --since 24h --json
+fleet watch cancel project-author-1
 ```
 
-`status --all` joins every local role binding and configured headless target with current
-process/hook/exit evidence, the checkout head, assignment, work rows and unacknowledged mail.
-SessionStart includes watcher health and the commands to inspect activity. The view reads
-live records even when the watcher heartbeat is stale; it never schedules a tick.
+`watch cancel` requests interruption of the exact current attempt through its unique control
+file. It first verifies the retained process identity. The bridge calls the provider's interrupt
+API, waits for a terminal response, then closes the transport. If no response arrives within ten
+seconds, it closes the transport and reports the missing acknowledgment as failure. Inspect
+status and exit evidence; a request is not proof of cancellation. Cancellation does not erase
+mail, handoffs, assignments or working files and does not replay delivered work.
 
-`watch status` is read-only: it neither folds a scheduler tick nor launches work. It shows the watcher's
-last heartbeat separately from each configured worker's process state, launch time, latest
-observed hook/tool/session, output path and modification time, and collected exit result.
-Configuration/binding problems and explicit stops are visible. `watch/observed.jsonl` is the
-runtime trace; each row points to the worker output and launch/exit files for investigation.
+To stop future launches too, use `fleet stop address:project-author-1 "run complete"` before
+cancelling. `fleet resume address:project-author-1` permits future starts. Removing a config entry
+prevents future launches but leaves a current turn running; `watch cancel` still finds that
+retained attempt independently of the current configuration. Stopping the watcher stops scheduling;
+children continue and a replacement watcher may know their exit only as `gone_exit_unknown`.
+Allow the watcher to collect all exits before stopping it when exact exit codes matter.
 
-A missing hook is shown as missing. A PID without an exit result is not called successful.
-Output timestamps show writes, not semantic progress. With batch JSON output, model text may
-remain buffered until exit; hook activity can still arrive while it runs. This view does not
-yet identify provider-specific waiting/approval states; that needs the later session interface.
-`fleet tail <seat|role> [-n N] [-f]` reads recent visible assistant text and tool calls from
-the transcript path recorded by hooks, falling back to that launch's output. It follows file
-replacement and newly observed sessions in Go. It skips reasoning blocks, retains partial
-JSONL records for the next read, and bounds each read to 1 MiB; exceptionally large records
-report the raw source for inspection. Result records show provider reason/cost/turns only when
-those fields are present. No transcript is guessed when the harness supplied no path.
+## Evidence contract
 
-Use `--json` for an operator UI instead of teaching a UI to infer worker state from tick logs.
+`watch/delivery/<cwd-hash>.json` points to the latest launch. Every attempt retains separate
+`.meta.json`, `.log`, `.trace.jsonl`, `.state.json`, `.cancel` (only when requested) and `.exit.json` files.
+`.trace.jsonl` contains native provider records; `.log` also includes normalized terminal results and transport diagnostics; `.exit.json` is the collected transport-process exit, not a task receipt.
+No per-attempt file is reused by a later launch. `watch/observed.jsonl` records launch/exit and
+scheduler observations. Private run output may contain task text and tool data; publish a
+sanitized evidence summary rather than copying raw logs into a public PR.
 
-## September 10 issue dispositions
+The launch/meta record's `state_file` references this small provider summary:
 
-The reported failures were in the headless run. These changes address
-[workbench #304](https://github.com/itsHabib/workbench/issues/304) ,
-[workbench #306](https://github.com/itsHabib/workbench/issues/306), and
-[workbench #308](https://github.com/itsHabib/workbench/issues/308) without replacing the working
-desktop loop/native-message setup.
+```json
+{
+  "attempt": "/private/run/watch/delivery/unique-attempt",
+  "provider": "codex",
+  "provider_session": "actual-thread-id",
+  "provider_turn": "actual-turn-id",
+  "provider_state": "running",
+  "last_provider_event": "item/started",
+  "last_provider_event_at": 1789138635.02,
+  "trace": "/private/run/watch/delivery/unique-attempt.trace.jsonl"
+}
+```
 
-| Reported friction | Treatment |
-|---|---|
-| Worker killed at 60 turns | No cap added by Fleet; remove the blanket cap from supported examples and use explicit operator budget settings. Existing installed commands must be updated deliberately. |
-| Poller expires after 45 minutes | Retire the Bash/Python runtime poller; the Go watcher runs until stopped and records shutdown. |
-| Dispatch leaves a worker asleep | The Go watcher reads the current seat assignment directly; a brief is enough to make a configured seat eligible. |
-| Lead never gets another turn | Optional `every` and `prompt` provide recurring ticks in the same Go runtime. |
-| Failed worker leaves silence and dirty files | Record process exits and retain the tree. Resume the same branch; do not automatically commit or discard untracked files. |
-| Scratch file blocks continuation | Same-branch continuation is allowed when the seat is free or its previous process is known to have ended. Different work still requires preserving the dirty tree. |
-| Cross-repo lead must change cwd | Select the target through the seat or `--repo`; caller identity stays where it started. |
-| Desktop lead has a different address shape | Assignment `reply_to` defaults to the actual caller mailbox; replies use `from_address`. Distinct seats keep distinct addresses; Fleet does not guess between them. |
-| Reused reply ID conflicts | New messages can omit the ID. Reuse a returned ID only for the same-message retry; a reply gets its own ID. No mailbox migration or weaker overwrite protection. |
-| Unassign leaves another row | Clear the placement and its matching dispatch rows in one operation, retaining files and leases. |
-| Org bootstrap and immutable scope interrupt new Fleet work | Org now registers editable prose cards with an optional parent. The normal CLI/MCP has three operations, and no work or chain ceremony. Old lifecycle callers are removed during cutover. |
-| Too much coordination procedure | Remove universal one-action, upward-only and message-quota instructions; handoffs contain useful conclusions. |
-| Cannot see headless activity between ticks | Read `fleet watch status [--json]` for worker/process/hook/exit evidence and output paths, separately from watcher health. |
-| Need run metrics | `fleet run-report --since 24h [--json]` reads retained per-attempt outputs and exit records in Go. It shows session, address, turns, reported cost and terminal reason, with unknown fields explicit. |
+`provider_state` is `starting`, `running`, `blocked`, `interrupting`, `completed`, `interrupted`
+or `failed`. `blocked` means the provider requested input/approval Fleet cannot supply; later
+terminal evidence supersedes it. Times are Unix seconds, with fractions. Activity means an event
+was observed, never inferred progress. Session/turn fields are absent until reported; Claude
+reports session identity but has no matching app-server turn ID. `reason`, `error` and Codex
+transport exit fields are included when known. `provider_started` records whether launch was
+attempted and `provider_terminal` is true only after an actual provider terminal message.
+A synthetic runtime error is not provider-terminal evidence. `provider_cleanup_pending` in
+status identifies a collected bridge exit whose provider reservation remains held. Summary files contain no prompt or tool payloads.
+Status joins a summary only when its attempt and provider match the current launch.
 
-Old Baton journals are inert historical files; the new runtime does not read them.
-Registering or editing a card does not rewrite those records, migrate held work, or alter
-resource/merge authority. Deployment and retiring installed legacy callers remain explicit
-follow-through; the runtime provider replacement is the separate next step described above.
+On macOS, a separate `provider_quiescent` proof can release a Codex attempt after an explicit
+`initialize`, `thread/start` or `thread/resume` RPC rejection. Before dispatch, the bridge
+persists `turn_may_have_been_sent`; it must be exactly false. The owned Go helper holds the
+native process behind a pre-exec barrier, arms kernel fork/exec/exit observation, and writes
+an attempt-bound `.state.json.process.json` proof only after exit. Release requires a complete
+no-fork lifetime, observed native exec and exit, and no observer error. This is cleanup evidence,
+not `provider_terminal` or successful work. The original resume target remains available for
+retry; an explicit `fresh: true` can select a new session after safe release.
 
-Tests use real child processes, Git worktrees and scratch stores. They qualify the runtime
-mechanics and refusal boundaries; a repeated real-task headless run is still needed to measure
-PR throughput, coordination spend and operator rescues against the desktop baseline.
+The installed official npm entrypoint is automatically resolved through its matching platform
+package to the same native payload; native macOS installs run directly. No executable-path
+setting is required. Unknown wrappers remain intact and cannot earn this proof. Any observed
+fork, missing observation, possibly dispatched turn or ambiguous shutdown keeps the reservation.
+This does not track descendants, force cleanup, or qualify Windows/Linux startup recovery.
 
-For #308, `status --all` supplies one live view and `tail` supplies text/tool inspection.
-The owner lock prevents duplicate Go watchers; startup health and the status header expose
-stopped/stale watchers. `run-report` supplies provider-reported costs/turns from retained
-attempt outputs; its time window is output modification time, not inferred session start.
-Missing results are unknown, and totals state how many attempts reported each field.
-Provider-specific approval/waiting states remain unknown unless the harness reports them.
+The existing normalized terminal `result` shape is retained for `run-report`. Claude's SDK
+reports cost and model turn count. Codex does not report matching cost/turn totals here, so they
+remain unknown. A terminal success is not an independent receipt or proof of task completion.
 
-The existing push interface is `FLEET_NOTIFY`: configure a command that accepts one JSON
-transition on stdin. It runs after publication for attention/completion changes; an operator
-UI may instead watch `watch/observed.jsonl`, which also records launches and exits. The status
-header reports whether a notifier command is configured. No webhook or external service is
-required, and this change does not invent a notification destination. `fleet report` remains
-the separate report for refusals, latency and ownership observations.
+## Validation
 
-## Yield and stop
-
-An agent waiting for a peer records its handoff and ends the turn. Mail or the configured
-recurrence wakes a fresh session with the retained context. Keep shell polling out of role
-cards: the Go watcher already owns that wait.
-
-To finish a run, remove its delivery entries first, let active sessions settle while the
-watcher captures their exits, then stop the watcher. Removing an entry prevents new launches
-and does not kill its active process. Stopping the watcher before children exit loses OS exit
-observation; `gone_exit_unknown` is honest even if a later model result says success.
-
-## Stop an address
-
-At the run's stop condition, a lead can run `fleet stop address:supervisor:<run> "run complete"`.
-This pauses new mail, assignment and recurring launches for that address, even in a detached
-lead worktree. `fleet resume address:supervisor:<run>` clears the stop. Status reports further
-starts paused. Running sessions continue, so the watcher can capture their exits.
-
-A live idle session still occupies its launch directory; end it before allowing a replacement.
-Each watcher launch records process start identity as well as PID. A recycled PID is a departed
-launch, and uninspectable identity is reported as unknown for inspection. Neither is silently
-reported as healthy work. The watcher adds no default turn budget or runtime lifetime; keep
-explicit spending limits in the harness/run brief and stop the address when the outcome is met.
+`go test ./cmd/fleet/...` exercises launch serialization and provider protocol fixtures (Node
+required for the latter). Fixtures check fresh/resume identity, failed resume without fallback,
+premature exit, cancellation and stale state. They establish mechanism behavior, not successful
+provider authentication or useful agent work. The isolated real run evidence is recorded in
+[provider-runtime-validation.md](provider-runtime-validation.md).

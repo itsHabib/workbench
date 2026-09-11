@@ -7,7 +7,7 @@ package watch
 // had been open and untouched for two hours, because a live process is not the same
 // as a process that will read anything. So: per fold, per configured address, if
 // there is mail nobody has been handed and no one is there to read it, run the
-// operator's command once, carrying every eligible message.
+// configured provider turn once, carrying every eligible message.
 //
 // The rules the rehearsal paid for:
 //
@@ -31,13 +31,7 @@ package watch
 // waits for the next one, so worst-case delivery is one interval plus the grace.
 // FLEET_MAIL_GRACE holds a message back briefly so a burst arrives together.
 //
-// Delivery is configuration, not policy: $FLEET_STATE/deliver.json says what to run.
-//
-//	{"hub:b": {"cwd": "/path/to/dir", "cmd": ["harness", "-p", "{{prompt}}"]}}
-//
-// `{{prompt}}` is substituted wherever the operator put it. The substrate never
-// learns the harness's flags, and never invents a command for an unconfigured
-// address — an address with no entry keeps its mail until a session starts.
+// Delivery uses explicit Claude or Codex session configuration in deliver.json.
 
 import (
 	"encoding/json"
@@ -59,13 +53,16 @@ const (
 
 // deliverTarget is one configured address.
 type deliverTarget struct {
-	address     string
-	cwd         string
-	cmd         []string
-	lateTo      string
-	every       time.Duration
-	instruction string
-	configError string
+	address        string
+	cwd            string
+	provider       string
+	model          string
+	permissionMode string
+	fresh          bool
+	lateTo         string
+	every          time.Duration
+	instruction    string
+	configError    string
 }
 
 // grace reads a duration from the environment, falling back to the default. An
@@ -97,7 +94,7 @@ func readDeliverTargets() ([]deliverTarget, string) {
 	path := fleet.Path("deliver.json")
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, "no deliver.json; no headless commands configured"
+		return nil, "no deliver.json; no headless providers configured"
 	}
 	if err != nil {
 		return nil, err.Error()
@@ -111,7 +108,7 @@ func readDeliverTargets() ([]deliverTarget, string) {
 	}
 	targets := parseDeliverTargets(cfg)
 	if len(cfg) != len(targets) {
-		return targets, fmt.Sprintf("%d entries omitted due to an invalid address or command; inspect %s", len(cfg)-len(targets), path)
+		return targets, fmt.Sprintf("%d entries omitted due to an invalid address or directory; inspect %s", len(cfg)-len(targets), path)
 	}
 	return targets, ""
 }
@@ -120,20 +117,29 @@ func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 	var out []deliverTarget
 	for address := range cfg {
 		entry := fleet.M(cfg, address)
-		cmd := fleet.Strs(entry, "cmd")
-		if entry == nil || fleet.S(entry, "cwd") == "" || len(cmd) == 0 {
+		if entry == nil || fleet.S(entry, "cwd") == "" {
 			continue
 		}
+		provider := fleet.S(entry, "provider")
 		if err := fleet.MailAddress(address, "address"); err != nil {
 			continue
 		}
-		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), cmd: cmd, lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt")}
+		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), provider: provider, model: fleet.S(entry, "model"), permissionMode: fleet.S(entry, "permission_mode"), fresh: fleet.B(entry, "fresh"), lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt")}
 		if raw := fleet.S(entry, "every"); raw != "" {
 			var err error
 			t.every, err = time.ParseDuration(raw)
 			if err != nil || t.every <= 0 || strings.TrimSpace(t.instruction) == "" {
 				t.configError = "every requires a positive duration and a nonempty prompt"
 			}
+		}
+		if provider != "claude" && provider != "codex" {
+			t.configError = "provider must be claude or codex; command launchers have been removed"
+		}
+		if fleet.Has(entry, "cmd") {
+			t.configError = "cmd is unsupported; configure provider instead"
+		}
+		if mode := t.permissionMode; mode != "" && (provider != "claude" || (mode != "default" && mode != "acceptEdits" && mode != "auto" && mode != "plan" && mode != "dontAsk")) {
+			t.configError = "unsupported permission_mode"
 		}
 		out = append(out, t)
 	}
@@ -286,7 +292,7 @@ func eligibleMail(address string, now, mailGrace float64) ([]fleet.Rec, error) {
 	return out, nil
 }
 
-// launch reserves every message it is about to carry, starts the configured command
+// launch reserves every message it is about to carry, starts the configured provider turn
 // once, and reconciles the reservation against what actually happened.
 //
 // The reservation is the stamp, and it has to be durable before the start. Stamping
