@@ -31,7 +31,7 @@ func TestClaudeWriteHooksPreserveOtherHandlersOnRebind(t *testing.T) {
 	other := map[string]any{"matcher": "Read", "hooks": []any{map[string]any{"type": "command", "command": "other"}}}
 	data := map[string]any{"hooks": map[string]any{"PostToolUse": []any{other}}}
 	for range 2 {
-		if err := claudeWriteHooks(data, "fixture", "fleet hook"); err != nil {
+		if err := claudeHooks(data, "fixture", "fleet hook"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -45,8 +45,8 @@ func TestClaudeWriteHooksPreserveOtherHandlersOnRebind(t *testing.T) {
 			t.Errorf("drops %s", tool)
 		}
 	}
-	if matcher.MatchString("Bash") {
-		t.Fatal("duplicates global Bash hook")
+	if !matcher.MatchString("Bash") {
+		t.Fatal("missing Bash hook")
 	}
 	if groups[0].(map[string]any)["matcher"] != "Read" {
 		t.Fatal("unrelated hook changed")

@@ -12,7 +12,7 @@ go install github.com/itsHabib/workbench/cmd/<tool>@latest
 ## Start here
 
 - **Run several agents at once and always know who is doing what:** [`cmd/fleet`](cmd/fleet/README.md).
-  Read [the overview](cmd/fleet/docs/OVERVIEW.md), then [onboarding](cmd/fleet/docs/ONBOARDING.md);
+  Read [the overview](cmd/fleet/docs/OVERVIEW.md), then [install](cmd/fleet/docs/install.md) and [onboarding](cmd/fleet/docs/ONBOARDING.md);
   if you want the habits without the machinery, [the minimum](cmd/fleet/docs/MINIMUM.md).
 - **Decide whether an exact pull-request head may merge, with a record:** [`cmd/gate`](cmd/gate/README.md).
 - **What is this whole system?** [`docs/workbench-101.md`](docs/workbench-101.md), the teaching
