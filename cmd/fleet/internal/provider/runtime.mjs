@@ -42,6 +42,42 @@ function spawnProvider(command, args, options) {
   });
   return child;
 }
+// Resolve only the official npm entrypoint using its same platform package.
+// Other wrappers remain intact; their forks cannot earn a no-fork proof.
+function codexExecutable() {
+  if (process.platform !== 'darwin') return { path: 'codex', native: false };
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    let exe;
+    try { exe = fs.realpathSync(path.join(dir, 'codex')); fs.accessSync(exe, fs.constants.X_OK); }
+    catch { continue; }
+    if (isMachO(exe)) return { path: exe, native: true };
+    try {
+      const root = path.dirname(path.dirname(exe));
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+      if (pkg.name !== '@openai/codex' || fs.realpathSync(path.join(root, pkg.bin.codex)) !== exe) return { path: exe, native: false };
+      const require = createRequire(path.join(root, 'package.json'));
+      const platformPackage = require.resolve(`@openai/codex-darwin-${process.arch}/package.json`);
+      const platform = JSON.parse(fs.readFileSync(platformPackage, 'utf8'));
+      if (platform.version !== `${pkg.version}-darwin-${process.arch}`) return { path: exe, native: false };
+      const arch = { arm64: 'aarch64', x64: 'x86_64' }[process.arch];
+      const native = path.join(path.dirname(platformPackage), 'vendor', `${arch}-apple-darwin`, 'bin', 'codex');
+      fs.accessSync(native, fs.constants.X_OK);
+      if (!isMachO(native)) return { path: exe, native: false };
+      return { path: native, native: true };
+    } catch { return { path: exe, native: false }; }
+  }
+  return { path: 'codex', native: false };
+}
+function isMachO(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const magic = Buffer.alloc(4);
+    fs.readSync(fd, magic, 0, 4, 0);
+    return ['cffaedfe', 'cefaedfe', 'feedfacf', 'feedface', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca'].includes(magic.toString('hex'));
+  } catch { return false; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
 async function cancel() {
   if (interrupted) return;
   interrupted = true;
@@ -108,7 +144,14 @@ async function claude() {
 }
 
 async function codex() {
-  const child = spawnProvider('codex', ['app-server'], { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+  const selected = codexExecutable();
+  const executable = selected.path;
+  const proofFile = request.state_file + '.process.json';
+  const observer = selected.native ? request.process_observer : undefined;
+  publish({ turn_may_have_been_sent: false, provider_executable: executable });
+  const command = observer || executable;
+  const args = observer ? ['_provider-process', request.attempt, proofFile, executable, 'app-server'] : ['app-server'];
+  const child = spawnProvider(command, args, { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
   const pending = new Map();
   let sequence = 0;
   let finish, fail;
@@ -131,7 +174,7 @@ async function codex() {
   function call(method, params) {
     const id = ++sequence;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, method });
       send({ id, method, params });
     });
   }
@@ -152,7 +195,7 @@ async function codex() {
         const waiter = pending.get(msg.id);
         if (!waiter) return;
         pending.delete(msg.id);
-        if (msg.error) { waiter.reject(new Error(msg.error.message)); return; }
+        if (msg.error) { waiter.reject(Object.assign(new Error(msg.error.message), { rejectedMethod: waiter.method })); return; }
         waiter.resolve(msg.result);
         return;
       }
@@ -167,7 +210,7 @@ async function codex() {
       event(msg);
       activity(msg.method);
       if (msg.method === 'turn/started') {
-        publish({ provider_turn: p.turn.id, provider_state: interrupted ? 'interrupting' : 'running' });
+        publish({ turn_may_have_been_sent: true, provider_turn: p.turn.id, provider_state: interrupted ? 'interrupting' : 'running' });
         if (interrupted) void interrupt().catch(rejectAll);
       }
       if (msg.method === 'turn/completed') finish(p.turn);
@@ -183,6 +226,7 @@ async function codex() {
     if (request.resume && result.thread.id !== request.resume) throw new Error('provider resumed a different thread');
     publish({ provider_session: result.thread.id, provider_state: interrupted ? 'interrupting' : 'running' });
     if (interrupted) throw new Error('interrupted before turn start');
+    publish({ turn_may_have_been_sent: true });
     const turn = await call('turn/start', { threadId: result.thread.id, input: [{ type: 'text', text: request.prompt }] });
     publish({ provider_turn: turn.turn.id });
     const terminal = await completed;
@@ -193,7 +237,21 @@ async function codex() {
     output({ type: 'result', session_id: state.provider_session, subtype: status,
       is_error: status !== 'completed' });
     process.exitCode = status === 'completed' ? 0 : status === 'interrupted' ? 130 : 1;
-  } finally { await close(); }
+  } catch (e) {
+    if (state.turn_may_have_been_sent === false && ['initialize', 'thread/start', 'thread/resume'].includes(e.rejectedMethod)) {
+      publish({ pre_turn_rejection: e.rejectedMethod });
+    }
+    throw e;
+  } finally {
+    await close();
+    if (observer) {
+      let proof;
+      try { proof = JSON.parse(fs.readFileSync(proofFile, 'utf8')); } catch { /* Unknown cleanup keeps the reservation. */ }
+      const matching = proof?.schema === 'fleet.process-proof.v1' && proof.attempt === request.attempt && proof.provider === 'codex';
+      if (matching && proof.never_started === true) publish({ provider_started: false });
+      publish({ process_proof: proofFile, provider_quiescent: !!(matching && proof.quiescent === true && state.pre_turn_rejection && state.turn_may_have_been_sent === false) });
+    }
+  }
 }
 
 try {

@@ -12,12 +12,17 @@ const readline = require('node:readline');
 const send = x => process.stdout.write(JSON.stringify(x)+'\\n');
 readline.createInterface({input:process.stdin}).on('line',line=>{
  const m=JSON.parse(line), p=m.params;
- if(m.method==='initialize') return send({id:m.id,result:{}});
+ if(m.method==='initialize') {
+  if(process.env.CASE==='init-fail')return send({id:m.id,error:{message:'initialize rejected'}});
+  return send({id:m.id,result:{}});
+ }
  if(m.method==='thread/start'||m.method==='thread/resume') {
+  if(process.env.CASE==='start-fail') return send({id:m.id,error:{message:'thread start rejected'}});
   if(process.env.CASE==='resume-fail') return send({id:m.id,error:{message:'no such thread'}});
   return send({id:m.id,result:{thread:{id:process.env.CASE==='mismatch'?'wrong':p.threadId||'real-thread'}}});
  }
  if(m.method==='turn/start') {
+  if(process.env.CASE==='turn-fail')return send({id:m.id,error:{message:'turn rejected'}});
   send({method:'turn/started',params:{threadId:p.threadId,turn:{id:'turn-1'}}});
   send({id:m.id,result:{turn:{id:'turn-1'}}});
   if(process.env.CASE==='early-exit') return process.exit(7);
@@ -48,13 +53,17 @@ const fakeClaude = `export function query({options}) {
 }`;
 async function run(provider, scenario, resume) {
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'fleet-provider-test-'));
- const req={provider,cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume};
+ const req={provider,cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume,process_observer:process.env.FLEET_TEST_OBSERVER};
  const bin=path.join(home,'bin');fs.mkdirSync(bin);
- if(scenario!=='spawn-fail')fs.writeFileSync(path.join(bin,'codex'),fakeCodex,{mode:0o700});
+ if(scenario!=='spawn-fail') {
+  if(process.env.FLEET_TEST_OBSERVER && scenario!=='wrapped-init-fail')fs.symlinkSync(process.env.FLEET_TEST_OBSERVER,path.join(bin,'codex'));
+  else fs.writeFileSync(path.join(bin,'codex'),fakeCodex,{mode:0o700});
+ }
+ const script=path.join(home,'fake-codex.cjs');fs.writeFileSync(script,fakeCodex);
  const mod=path.join(home,'node_modules/@anthropic-ai/claude-agent-sdk');fs.mkdirSync(mod,{recursive:true});
  fs.writeFileSync(path.join(mod,'package.json'),JSON.stringify({type:'module',exports:'./index.mjs'}));
  fs.writeFileSync(path.join(mod,'index.mjs'),fakeClaude);
- const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,CASE:scenario}});
+ const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,FLEET_TEST_CODEX_SCRIPT:script,FLEET_TEST_NODE:process.execPath,CASE:scenario==='wrapped-init-fail'?'init-fail':scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
  proc.stdin.end(JSON.stringify(req));
  const deadline=setTimeout(()=>proc.kill('SIGKILL'),scenario==='timeout'?19000:5000);
@@ -87,7 +96,7 @@ for(const provider of ['claude','codex']) {
  test(provider+' spawn failure proves no provider started',async()=>{
   const r=await run(provider,'spawn-fail');assert.equal(r.code,1,r.err);
   assert.equal(r.state.provider_started,false);assert.equal(r.state.provider_terminal,false);
-  assert.equal(r.state.provider_state,'failed');assert.match(r.state.error,/ENOENT/);
+  assert.equal(r.state.provider_state,'failed');assert.match(r.state.error,/ENOENT|app-server closed/);
  });
 }
 test('Claude query failure before spawn retains never-started evidence',async()=>{
@@ -105,3 +114,20 @@ for (const resume of [undefined, 'requested-only']) {
 }
 
 test('interrupt timeout preserves its cause and is not provider-terminal evidence',async()=>{const r=await run('codex','timeout');assert.equal(r.code,130,r.err);assert.equal(r.state.provider_state,'failed');assert.equal(r.state.provider_terminal,false);assert.match(r.state.error,/did not acknowledge interrupt/)});
+
+for (const scenario of ['init-fail','start-fail','resume-fail']) {
+ test('Codex '+scenario+' has separate pre-turn quiescence proof',{skip:!process.env.FLEET_TEST_OBSERVER},async()=>{
+  const r=await run('codex',scenario,scenario==='start-fail'?'':'missing');assert.equal(r.code,1,r.err);
+  assert.equal(r.state.provider_terminal,false);assert.equal(r.state.provider_quiescent,true);
+  assert.equal(r.state.turn_may_have_been_sent,false);assert.ok(r.state.pre_turn_rejection);
+ });
+}
+test('Codex persists possible turn dispatch before a rejected turn',{skip:!process.env.FLEET_TEST_OBSERVER},async()=>{
+ const r=await run('codex','turn-fail');assert.equal(r.code,1);
+ assert.equal(r.state.turn_may_have_been_sent,true);assert.equal(r.state.provider_quiescent,false);
+});
+
+test('arbitrary Codex wrapper stays unknown after rejection',{skip:!process.env.FLEET_TEST_OBSERVER},async()=>{
+ const r=await run('codex','wrapped-init-fail');assert.equal(r.code,1);
+ assert.notEqual(r.state.provider_quiescent,true);assert.equal(r.state.provider_started,true);
+});

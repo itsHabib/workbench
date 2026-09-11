@@ -4,7 +4,9 @@ package provider
 import (
 	_ "embed"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -13,6 +15,13 @@ var bridge string
 
 // Command runs one durable provider turn. The request goes over stdin, not argv.
 func Command(request map[string]any) (*exec.Cmd, error) {
+	if runtime.GOOS == "darwin" {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		request["process_observer"] = exe
+	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, err

@@ -377,3 +377,52 @@ func TestCollectedBridgeExitDoesNotReleaseAnUnfinishedProvider(t *testing.T) {
 		t.Fatal("a stale provider result released the replacement")
 	}
 }
+
+func TestPreTurnQuiescenceRequiresCompleteBoundEvidence(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home, provider: "codex"}
+	cases := []struct {
+		name    string
+		change  func(fleet.Rec, fleet.Rec)
+		release bool
+	}{
+		{"complete", func(fleet.Rec, fleet.Rec) {}, true},
+		{"possibly dispatched", func(s, _ fleet.Rec) { s["turn_may_have_been_sent"] = true }, false},
+		{"missing phase", func(s, _ fleet.Rec) { delete(s, "turn_may_have_been_sent") }, false},
+		{"ambiguous phase", func(s, _ fleet.Rec) { s["turn_may_have_been_sent"] = nil }, false},
+		{"fork survived", func(_, p fleet.Rec) { p["fork_observed"] = true }, false},
+		{"missing fork observation", func(_, p fleet.Rec) { delete(p, "fork_observed") }, false},
+		{"observer unavailable", func(_, p fleet.Rec) { p["armed"] = false }, false},
+		{"missing exit", func(_, p fleet.Rec) { delete(p, "exit_observed") }, false},
+		{"stale attempt", func(_, p fleet.Rec) { p["attempt"] = "old" }, false},
+		{"wrong provider", func(_, p fleet.Rec) { p["provider"] = "claude" }, false},
+		{"observer error", func(_, p fleet.Rec) { p["error"] = "lost events" }, false},
+		{"missing rejection", func(s, _ fleet.Rec) { delete(s, "pre_turn_rejection") }, false},
+		{"fake never started", func(s, _ fleet.Rec) { s["provider_started"] = nil; delete(s, "pre_turn_rejection") }, false},
+		{"fake terminal", func(s, _ fleet.Rec) { s["provider_terminal"] = "true"; delete(s, "pre_turn_rejection") }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateFile := filepath.Join(t.TempDir(), "state.json")
+			last := fleet.Rec{"provider": "codex", "attempt": "one", "state_file": stateFile, "status": "running", "pid": os.Getpid(), "process_identity": "previous-process", "resume": "requested", "work_identity": workIdentity(target)}
+			state := fleet.Rec{"provider": "codex", "attempt": "one", "provider_started": true, "provider_terminal": false, "provider_quiescent": true, "turn_may_have_been_sent": false, "pre_turn_rejection": "thread/resume"}
+			proof := fleet.Rec{"schema": "fleet.process-proof.v1", "method": "darwin-no-fork-v1", "provider": "codex", "attempt": "one", "pid": 123, "armed": true, "exec_observed": true, "exit_observed": true, "fork_observed": false, "quiescent": true}
+			tc.change(state, proof)
+			if err := fleet.WriteJSON(stateFile, state); err != nil {
+				t.Fatal(err)
+			}
+			if err := fleet.WriteJSON(stateFile+".process.json", proof); err != nil {
+				t.Fatal(err)
+			}
+			if got := !launchPresent(last); got != tc.release {
+				t.Fatalf("released=%v want %v", got, tc.release)
+			}
+			if !tc.release {
+				return
+			}
+			if got, err := resumeSession(target, last); err != nil || got != "requested" {
+				t.Fatalf("retry lost requested session: %q %v", got, err)
+			}
+		})
+	}
+}

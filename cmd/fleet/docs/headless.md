@@ -168,6 +168,21 @@ A synthetic runtime error is not provider-terminal evidence. `provider_cleanup_p
 status identifies a collected bridge exit whose provider reservation remains held. Summary files contain no prompt or tool payloads.
 Status joins a summary only when its attempt and provider match the current launch.
 
+On macOS, a separate `provider_quiescent` proof can release a Codex attempt after an explicit
+`initialize`, `thread/start` or `thread/resume` RPC rejection. Before dispatch, the bridge
+persists `turn_may_have_been_sent`; it must be exactly false. The owned Go helper holds the
+native process behind a pre-exec barrier, arms kernel fork/exec/exit observation, and writes
+an attempt-bound `.state.json.process.json` proof only after exit. Release requires a complete
+no-fork lifetime, observed native exec and exit, and no observer error. This is cleanup evidence,
+not `provider_terminal` or successful work. The original resume target remains available for
+retry; an explicit `fresh: true` can select a new session after safe release.
+
+The installed official npm entrypoint is automatically resolved through its matching platform
+package to the same native payload; native macOS installs run directly. No executable-path
+setting is required. Unknown wrappers remain intact and cannot earn this proof. Any observed
+fork, missing observation, possibly dispatched turn or ambiguous shutdown keeps the reservation.
+This does not track descendants, force cleanup, or qualify Windows/Linux startup recovery.
+
 The existing normalized terminal `result` shape is retained for `run-report`. Claude's SDK
 reports cost and model turn count. Codex does not report matching cost/turn totals here, so they
 remain unknown. A terminal success is not an independent receipt or proof of task completion.

@@ -199,7 +199,7 @@ func resumeSession(t deliverTarget, last fleet.Rec) (string, error) {
 	if fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != t.provider {
 		return "", fmt.Errorf("previous provider state belongs to another attempt")
 	}
-	if fleet.Has(state, "provider_started") && !fleet.B(state, "provider_started") {
+	if state["provider_started"] == false || providerQuiescent(last, state) {
 		return fleet.S(last, "resume"), nil
 	}
 	session := fleet.S(state, "provider_session")
@@ -218,7 +218,27 @@ func providerTerminal(last fleet.Rec) bool {
 	if state == nil || fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != fleet.S(last, "provider") {
 		return false
 	}
-	return fleet.B(state, "provider_terminal") || (fleet.Has(state, "provider_started") && !fleet.B(state, "provider_started"))
+	return state["provider_terminal"] == true || state["provider_started"] == false || providerQuiescent(last, state)
+}
+
+// Quiescence is a separate proof, never a synthetic completed turn.
+func providerQuiescent(last, state fleet.Rec) bool {
+	if fleet.S(state, "provider") != "codex" || state["provider_quiescent"] != true || state["turn_may_have_been_sent"] != false {
+		return false
+	}
+	switch fleet.S(state, "pre_turn_rejection") {
+	case "initialize", "thread/start", "thread/resume":
+	default:
+		return false
+	}
+	proof := fleet.ReadJSON(fleet.S(last, "state_file") + ".process.json")
+	if value, exists := proof["error"]; exists && value != "" {
+		return false
+	}
+	return fleet.S(proof, "schema") == "fleet.process-proof.v1" && fleet.S(proof, "method") == "darwin-no-fork-v1" &&
+		fleet.S(proof, "attempt") == fleet.S(last, "attempt") && fleet.S(proof, "provider") == "codex" &&
+		proof["armed"] == true && proof["exec_observed"] == true && proof["exit_observed"] == true &&
+		proof["fork_observed"] == false && fleet.F(proof, "pid") > 0 && proof["quiescent"] == true
 }
 
 // Cancel uses retained launches, even when their delivery configuration was removed.

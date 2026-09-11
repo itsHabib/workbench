@@ -33,6 +33,7 @@ import (
 	"github.com/itsHabib/workbench/cmd/fleet/internal/codex"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/mcp"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/provider"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/verbs"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/watch"
 )
@@ -43,6 +44,17 @@ func main() {
 		verbs.Usage(2)
 	}
 	switch args[0] {
+	case "_provider-exec":
+		if err := provider.ExecBarrier(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(127)
+		}
+	case "_provider-process":
+		code, err := provider.ObserveCommand(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(code)
 	case "hook":
 		runHook(args[1:])
 	case "mcp":

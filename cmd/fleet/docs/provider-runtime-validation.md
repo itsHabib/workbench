@@ -97,3 +97,24 @@ panel round. Remaining review deferrals are in FOLLOWUPS.md.
 
 No general production readiness, Windows provider qualification or controlled cost advantage
 is established by these bounded document/Git/session-identity workflows.
+
+## Bounded pre-turn recovery
+
+A subsequent macOS probe used the ordinary `/opt/homebrew/bin/codex` npm installation
+(Codex 0.153.4) without selecting a native executable manually. The Go watcher ran a
+fresh turn, then the controller temporarily moved only that probe's private rollout
+file. The next watcher attempt resumed the actual ID and received native
+`thread/resume` rejection. Its state retained `provider_terminal: false`, recorded
+`turn_may_have_been_sent: false`, and joined the owner's armed, no-fork, exec/exit proof.
+An explicit fresh retry completed with a different actual session and preserved a
+dirty marker file. The rollout was restored and the address/watcher stopped. This is
+controlled failure injection, not a zero-intervention workload. Private evidence is
+under `provider-20260911/quiescence-live`; the exact published-head repeats are on #318.
+
+Kernel regressions include a detached child that survives its parent: observation
+records the fork and refuses quiescence. Failed observation also refuses proof.
+Protocol/watcher fixtures reject missing/ambiguous phase, possibly dispatched turns,
+stale attempt evidence and arbitrary wrappers. The proof only establishes that an
+observed native process exited without forking. Arbitrary wrappers, observed forks,
+unsupported platforms and ambiguous process/turn evidence remain reserved; no general
+descendant cleanup or Windows provider qualification is claimed.
