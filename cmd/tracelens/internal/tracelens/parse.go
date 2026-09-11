@@ -18,6 +18,7 @@ type rawStep struct {
 	Args        map[string]any `json:"args"`
 	Observation string         `json:"observation"`
 	OK          *bool          `json:"ok"`
+	Declined    bool           `json:"declined"`
 	Error       string         `json:"error"`
 	TokensIn    int            `json:"tokens_in"`
 	TokensOut   int            `json:"tokens_out"`
@@ -72,6 +73,7 @@ func toStep(rs rawStep, seq int) Step {
 		Args:        rs.Args,
 		Observation: rs.Observation,
 		OK:          rs.OK,
+		Declined:    rs.Declined,
 		Error:       rs.Error,
 		TokensIn:    rs.TokensIn,
 		TokensOut:   rs.TokensOut,

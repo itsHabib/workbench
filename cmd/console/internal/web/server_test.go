@@ -39,7 +39,7 @@ func do(t *testing.T, s *Server, method, target, host string) *httptest.Response
 }
 
 func TestNextProxiesGateJSON(t *testing.T) {
-	s := New(clientReturning(map[string]string{"next": `{"parked":[],"grants":[]}`}), testHost)
+	s := New(clientReturning(map[string]string{"next": `{"parked":[],"grants":[]}`}), testHost, nil)
 	rec := do(t, s, "GET", "/api/next", testHost)
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
@@ -62,7 +62,7 @@ func TestNextProxiesGateJSON(t *testing.T) {
 }
 
 func TestRunProxiesExplain(t *testing.T) {
-	s := New(clientReturning(map[string]string{"explain": `{"run":"run_9f3a41c2","artifacts":[]}`}), testHost)
+	s := New(clientReturning(map[string]string{"explain": `{"run":"run_9f3a41c2","artifacts":[]}`}), testHost, nil)
 	rec := do(t, s, "GET", "/api/run/run_9f3a41c2", testHost)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "run_9f3a41c2") {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body)
@@ -70,7 +70,7 @@ func TestRunProxiesExplain(t *testing.T) {
 }
 
 func TestRunBadIDIsGatewayError(t *testing.T) {
-	s := New(clientReturning(map[string]string{"explain": `{}`}), testHost)
+	s := New(clientReturning(map[string]string{"explain": `{}`}), testHost, nil)
 	rec := do(t, s, "GET", "/api/run/notarun", testHost)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("bad run id should be a 502, got %d", rec.Code)
@@ -81,7 +81,7 @@ func TestRunBadIDIsGatewayError(t *testing.T) {
 }
 
 func TestAuditEndpoint(t *testing.T) {
-	s := New(clientReturning(map[string]string{"audit": "chain intact\n"}), testHost)
+	s := New(clientReturning(map[string]string{"audit": "chain intact\n"}), testHost, nil)
 	rec := do(t, s, "GET", "/api/audit", testHost)
 	var st gatecli.AuditStatus
 	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
@@ -93,7 +93,7 @@ func TestAuditEndpoint(t *testing.T) {
 }
 
 func TestHostPinRejectsForeignHost(t *testing.T) {
-	s := New(clientReturning(map[string]string{"next": "{}"}), testHost)
+	s := New(clientReturning(map[string]string{"next": "{}"}), testHost, nil)
 	rec := do(t, s, "GET", "/api/next", "evil.example.com:7788")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a foreign Host must be refused (DNS-rebinding guard), got %d", rec.Code)
@@ -101,7 +101,7 @@ func TestHostPinRejectsForeignHost(t *testing.T) {
 }
 
 func TestHostPinAcceptsLoopbackAliases(t *testing.T) {
-	s := New(clientReturning(map[string]string{"next": `{"parked":[],"grants":[]}`}), testHost)
+	s := New(clientReturning(map[string]string{"next": `{"parked":[],"grants":[]}`}), testHost, nil)
 	for _, host := range []string{testHost, "localhost:7788", "[::1]:7788"} {
 		if rec := do(t, s, "GET", "/api/next", host); rec.Code != 200 {
 			t.Fatalf("host %q should be allowed on the same port, got %d", host, rec.Code)
@@ -114,7 +114,7 @@ func TestHostPinAcceptsLoopbackAliases(t *testing.T) {
 }
 
 func TestAppServesHTMLWithCSP(t *testing.T) {
-	s := New(clientReturning(nil), testHost)
+	s := New(clientReturning(nil), testHost, nil)
 	for _, path := range []string{"/", "/run/run_9f3a41c2"} {
 		rec := do(t, s, "GET", path, testHost)
 		if rec.Code != 200 {
@@ -135,7 +135,7 @@ func TestAppServesHTMLWithCSP(t *testing.T) {
 func TestGateFailureIsGatewayError(t *testing.T) {
 	// A gate that errors (no canned response) surfaces as a 502 with the message,
 	// never a 200 with a broken body.
-	s := New(clientReturning(map[string]string{}), testHost)
+	s := New(clientReturning(map[string]string{}), testHost, nil)
 	rec := do(t, s, "GET", "/api/next", testHost)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("gate failure should be a 502, got %d", rec.Code)

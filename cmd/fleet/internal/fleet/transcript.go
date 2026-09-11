@@ -9,6 +9,9 @@ import (
 // TranscriptLine renders visible assistant text, tool calls or a terminal result.
 // It deliberately skips reasoning blocks and does not infer task success.
 func TranscriptLine(r Rec) string {
+	if S(r, "method") == "item/completed" || S(r, "method") == "item/started" {
+		return providerItem(r)
+	}
 	var parts []string
 	if text := assistantText(r); text != "" {
 		parts = append(parts, "assistant: "+text)
@@ -57,4 +60,21 @@ func clipTranscript(s string, limit int) string {
 		limit--
 	}
 	return s[:limit] + "…"
+}
+
+func providerItem(r Rec) string {
+	item := M(M(r, "params"), "item")
+	if S(item, "type") == "agentMessage" && S(r, "method") == "item/completed" {
+		return "assistant: " + clipTranscript(S(item, "text"), 8000)
+	}
+	if S(r, "method") != "item/started" {
+		return ""
+	}
+	switch S(item, "type") {
+	case "commandExecution":
+		return "tool: commandExecution " + clipTranscript(S(item, "command"), 1000)
+	case "fileChange", "mcpToolCall", "dynamicToolCall":
+		return "tool: " + S(item, "type") + " " + clipTranscript(S(item, "tool"), 1000)
+	}
+	return ""
 }

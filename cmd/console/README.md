@@ -91,3 +91,37 @@ browsing) are planned, not built.
 `docs/DESIGN.md` is the charter — the boundary, the security posture, and what
 is deliberately out of this version. `CLAUDE.md` carries the scoped agent
 guidance and the UI test tiers; `e2e/README.md` documents the fixtures.
+
+## See agent activity
+
+Build matching binaries from the same checkout:
+
+```sh
+go build -o /tmp/fleet ./cmd/fleet
+go build -o /tmp/tracelens ./cmd/tracelens
+go build -o /tmp/console ./cmd/console
+/tmp/console serve -fleet /tmp/fleet -tracelens /tmp/tracelens
+```
+
+Open `http://127.0.0.1:7788/fleet`. On Windows, use local `.exe` output paths.
+Use `-fleet-state <dir>` to inspect a different Fleet store and set `ORG_STATE`
+to its matching role directory before starting Console. Existing Fleet/Org
+environment defaults apply. Gate is not queried by the Fleet page.
+
+The board refreshes every five seconds while visible. Choose an agent for its
+latest handoff, work/receipt evidence, messages, output and attempts. Diagnostics
+runs TraceLens on demand, using only the trace that Fleet observed for that
+address. There are no launch, stop, acknowledge or judgment buttons.
+
+Spend covers provider-reported values in retained outputs modified within the
+last 24 hours, with known/total coverage. It is not account billing. No reported
+cost means unknown. A running process or recent event means activity, not
+progress; a zero exit does not replace a task receipt. A successful refresh says
+only that the projection was read, even when the watcher itself is stopped.
+
+Output shows up to 100 visible events from the final 1 MiB of the observed file.
+A partial/torn window is labelled. TraceLens understands Claude stream events,
+Codex exec events and Codex app-server notifications. App-server diagnostics
+currently cover command execution, file changes, final agent text and explicit
+turn failure; unsupported/no-step traces show unavailable, never a made-up pass.
+Keep native provider trace records separate from normalized terminal summaries.

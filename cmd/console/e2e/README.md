@@ -23,6 +23,16 @@ npx playwright test
 `globalSetup` builds `gate` + `console` from source into `.bin/` (gitignored)
 before any spec, so a stale binary can never be silently reused.
 
+The Fleet diagnostic identity regression runs without installing dependencies:
+
+```
+node --test visibility-state.test.mjs
+```
+
+It checks that trace changes within the same session invalidate diagnostics.
+The Go HTTP integration test builds real Fleet and TraceLens binaries; visual
+Fleet checks use the local `/fleet` page.
+
 ## What it asserts
 
 | spec | guards |

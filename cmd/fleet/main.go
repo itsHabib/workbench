@@ -55,6 +55,8 @@ func main() {
 		verbs.Run(args)
 	case "run-report":
 		runReport(args[1:])
+	case "inspect", "trace":
+		runInspect(args)
 	case "tail":
 		runTail(args[1:])
 	case "watch":
@@ -294,4 +296,25 @@ func withWatcherHealth(ev fleet.Rec, v *fleet.Verdict, started bool) *fleet.Verd
 	updated := *v
 	updated.Out = string(fleet.DumpJSON(out)) + "\n"
 	return &updated
+}
+
+// runInspect is a read-only projection for operator UIs and trace consumers.
+func runInspect(args []string) {
+	if len(args) < 2 || len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
+		fmt.Fprintln(os.Stderr, "usage: fleet inspect|trace <address> [--json]")
+		os.Exit(2)
+	}
+	var result fleet.Rec
+	var err error
+	if args[0] == "trace" {
+		result, err = watch.Trace(args[1])
+	}
+	if args[0] == "inspect" {
+		result, err = watch.Inspect(args[1])
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s\n", fleet.DumpJSON(result))
 }
