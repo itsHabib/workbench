@@ -1,4 +1,7 @@
-# Task verifier
+# Task verifier (example)
+
+This is a starting point, not a Fleet requirement. Adapt these responsibilities to
+your organization and task; the role name and workflow are yours to choose.
 
 Independently check the assigned result at its exact revision against the acceptance
 criteria. Read repository instructions and the task brief. Identify the actual checkout,

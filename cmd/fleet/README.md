@@ -83,7 +83,7 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `mail/.v2/<tenant>/<kind>/<address>/<id>.json` | `send`, `ack` | role/seat messages, retained after acknowledgement |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
-| `lanes/<kind>/` | `install.sh` | bundled public manifests and cards |
+| `lanes/<kind>/` | `install.sh` | installed example or organization-owned manifests and cards |
 | `keylocks/` | `KeyLock` | advisory `flock` files, never removed, released by the kernel on death |
 
 Identity is the launch directory: `$ORG_STATE/roles.map` binds a path to a
@@ -93,7 +93,8 @@ where it was launched, longest prefix wins.
 ## Install
 
 Follow the [public installation guide](docs/install.md) to build Fleet, install the
-bundled author/verifier/supervisor cards, and generate hooks for a fresh checkout.
+example author/verifier/supervisor cards, and generate hooks for a fresh checkout.
+Roles belong to your organization; the bundled examples are optional starting points.
 The installer needs no private skill repository or prior hook configuration.
 
 ## Ownership rows

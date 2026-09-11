@@ -8,15 +8,16 @@ first if the words are new. Everything measured so far was measured on a Mac wit
 
 Follow [install.md](install.md) for the public checkout, prerequisites, complete
 fresh-install commands and a disposable packaging check. The installer builds Fleet
-and installs bundled cards; `fleet role` projects both harnesses' instructions and
+and installs example cards; `fleet role` projects both harnesses' instructions and
 hooks. A private skill checkout and old Python hook installation are not required.
 
 ## 2. Decide the tree (five minutes of thinking, no commands)
 
 - One overall lead. One lead per bucket of work (an epic, a repository, a team). One accountable
   lead per task, never two.
-- Worker kinds: bundled `author` (task owner), `verifier` (exact-head checks) and
-  `supervisor` (coordination). Add custom lane manifests/cards only when needed.
+- Example worker kinds: `author` (task owner), `verifier` (exact-head checks) and
+  `supervisor` (coordination). These are starting points; choose roles and edit
+  manifests/cards around your organization rather than adopting this structure by default.
 - One exclusive resource if the work has one (a device, a test bench, a deploy slot).
 - Names: `supervisor:<name>` for leads, `<kind>:<repo>` for worker kinds.
 

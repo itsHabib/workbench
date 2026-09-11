@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Exercise the real installer, bundled assets, role projections and both hook faces
+// Exercise the real installer, example assets, role projections and both hook faces
 // with no prior harness configuration or private lanes in a disposable home.
 func TestPublicInstall(t *testing.T) {
 	if runtime.GOOS == "windows" {

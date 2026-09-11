@@ -1,7 +1,9 @@
 # Install Fleet from a public checkout
 
-The repository contains the binary source, generic task-owner (`author`), verifier
-and supervisor cards, and the setup instructions. No private skill repository or
+The repository contains the binary source, example task-owner (`author`), verifier
+and supervisor cards, and the setup instructions. These roles are optional examples,
+not an organizational model imposed by Fleet. Adapt their names, responsibilities
+and acceptance criteria to your own organization. No private skill repository or
 Python runtime is needed for installation.
 
 ## Build and install
@@ -18,7 +20,7 @@ export PATH="$HOME/.fleet/bin:$PATH"
 ```
 
 Add that PATH entry to your shell startup file if desired. The shell installer only
-builds `fleet` and copies this repository's `cmd/fleet/lanes` assets. It neither
+builds `fleet` and copies this repository's `cmd/fleet/examples/lanes` assets. It neither
 registers hooks nor runs a background service. `FLEET_HOME` changes the install
 location; `FLEET_STATE` changes runtime state (default `~/.fleet`). For a separate
 state directory, set `FLEET_LANES` explicitly to your installed lanes directory.
@@ -34,7 +36,7 @@ roles. Preserve unrelated hooks and existing state; this installer does not clea
 `go install github.com/itsHabib/workbench/cmd/fleet@latest` installs only the binary;
 you still need the public lane assets, or your own `FLEET_LANES` directory. The shell
 installer is the complete source-checkout path. Windows users can build with Go and
-copy `cmd/fleet/lanes` to their Fleet state directory; the Bash installer smoke test
+copy `cmd/fleet/examples/lanes` to their Fleet state directory; the Bash installer smoke test
 covers macOS/Linux only.
 
 ## Configure one repository
@@ -57,7 +59,7 @@ hook groups. Generated local files are excluded through Git's common-dir exclude
 file. The root repository needs no role. Paths bound in `roles.map` cannot contain
 whitespace. Org's executable and registry are optional.
 
-The bundled cards contain responsibilities, evidence boundaries and handoff guidance;
+The example cards contain responsibilities, evidence boundaries and handoff guidance;
 the manifests impose no extra command denies, cadence or required receipt kinds.
 Choose receipt kinds in your task brief and query `fleet done SHA --kind KIND`.
 Repository instructions and explicit authorization still govern effects.

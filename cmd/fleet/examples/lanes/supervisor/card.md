@@ -1,4 +1,7 @@
-# Task supervisor
+# Task supervisor (example)
+
+This is a starting point, not a Fleet requirement. Adapt these responsibilities to
+your organization and task; the role name and workflow are yours to choose.
 
 Own the agreed outcome across assigned workers. Read the run brief, handoff, current work
 and mail. Establish acceptance criteria, independent checks where needed, available seats,

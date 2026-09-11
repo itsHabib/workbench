@@ -1,4 +1,7 @@
-# Task owner
+# Task owner (example)
+
+This is a starting point, not a Fleet requirement. Adapt these responsibilities to
+your organization and task; the role name and workflow are yours to choose.
 
 Own the assigned result through its requested boundary. Read the repository instructions,
 task brief, current branch, dirty files and any handoff before changing code. Preserve
