@@ -328,7 +328,8 @@ stay private; counts rot, shapes don't):
   closes the task; ship dispatch and terminal reads link run evidence back
   to project state.
 - **Whole-lifecycle:** the fleet hook — one binary registered on every
-  harness event (session start and end, prompt submit, tool use) that
+  harness event (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse,
+  Stop, SessionEnd) that
   derives identity, occupancy, and liveness for the fleet board, injects
   `[fleet]` context lines, and refuses a command that would move a session
   into another role's directory. The same rule as the post hooks, taken

@@ -183,9 +183,9 @@ it. The guard enforces *shape*, not policy: it passes merge commands that carry
 pointing at gate. The structural close this paragraph used to wait on ran once and is
 now deliberately parked: the dedicated GitHub App executor
 (`docs/features/trusted-gate-judgment-bridge/`) performed one real exact-head bootstrap
-merge (workbench PR #169, merged by the App identity) and proved fail-closed behavior in
-bounded canaries — and is **currently suspended** pending a reliability and operator-UX
-review. The `main-required-gate` ruleset on workbench exists but is disabled, and no
+merge (workbench PR #169, merged by the App identity); its one ordinary preparation
+canary refused fail-closed before token creation, the positive canary never completed,
+and the App is **currently suspended** pending a reliability and operator-UX review. The `main-required-gate` ruleset on workbench exists but is disabled, and no
 repo's branch protection currently requires a gate status (verified 2026-09-11). So the
 honest boundary today is: shape-guard + operator discipline + local gate emitting the
 exact commit-pinned merge command carry merge authority — gate is advisory in auto mode,

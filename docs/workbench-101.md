@@ -50,8 +50,9 @@ and 6 (gate) hold the load-bearing detail.
   operator-minted grant followed by Gate's exact commit-pinned merge command.
   The separate exact-action Gate App
   [`itshabib-workbench-gate-executor`](https://github.com/apps/itshabib-workbench-gate-executor)
-  completed bounded bootstrap and fail-closed canaries, but is **currently
-  suspended**. Treat its two-approval path as a documented experiment and
+  completed its bounded bootstrap merge, and the one ordinary preparation
+  canary that ran refused fail-closed before any token was created - the
+  positive canary never completed. The App is **currently suspended**. Treat its two-approval path as a documented experiment and
   security model, not as today's production merge route. Reactivation needs a
   deliberate reliability and operator-UX review. On the maintenance side (the
   roxiq loop, external repo): three rehearsal gauntlet runs have completed end
@@ -1050,8 +1051,9 @@ Answers in parentheses; every one is derivable from the sections above.
 7. What made `markMerged` the motivating bug? *(a State write that dodged
    Verification - hence Amendment 2.)*
 8. Has Gate performed a live merge? *(Ordinary `gate -live` is still dry-run.
-   The separate App executor performed bounded bootstrap and fail-closed canaries,
-   but is currently suspended; local Gate remains the active operator path.)*
+   The separate App executor performed the bounded bootstrap merge and one
+   fail-closed preparation canary - the positive canary never completed -
+   and is currently suspended; local Gate remains the active operator path.)*
 9. What's the known reducer wart? *(last-judgment-wins on multiple judgments; held
    deliberately, fail-closed reject is the planned fix.)*
 10. Workbench vs platform? *(independent binaries composing through artifacts and
@@ -1150,7 +1152,7 @@ docs ahead of code (intent not yet delivered). Both are listed.
 | `cmd/driverstate/CLAUDE.md` verb list | Behind code: the verb block omits `render` and `rollup` (the prose now mentions `render`) |
 | `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job leaf-checks only `contracts/` and `local/` - the later mechanism leaves (`driverstate/`, `filelock/`, `slackauth/`) are compliant in fact but unenforced |
 | `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; nineteen tenants live under `cmd/` |
-| Live merge | Ordinary `gate -live` still records `merge_not_implemented`. The separate one-App executor completed bounded bootstrap and fail-closed canaries, but is currently suspended pending a reliability and operator-UX review. |
+| Live merge | Ordinary `gate -live` still records `merge_not_implemented`. The separate one-App executor completed the bootstrap merge and one fail-closed preparation canary (the positive canary never completed), and is currently suspended pending a reliability and operator-UX review. |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
