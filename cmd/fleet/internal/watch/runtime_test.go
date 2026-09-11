@@ -190,3 +190,73 @@ func TestAddressStopPausesDetachedLead(t *testing.T) {
 	deliver(fleet.Now())
 	launched(t, sink)
 }
+
+func TestResumeBoundToWorkProviderAndAttempt(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home, provider: "codex"}
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	state := fleet.Rec{"provider": "codex", "attempt": "one", "provider_session": "actual-session"}
+	if err := fleet.WriteJSON(stateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	last := fleet.Rec{"provider": "codex", "attempt": "one", "work_identity": workIdentity(target), "state_file": stateFile}
+	if got, err := resumeSession(target, last); err != nil || got != "actual-session" {
+		t.Fatal(got, err)
+	}
+	last["attempt"] = "replacement"
+	if _, err := resumeSession(target, last); err == nil {
+		t.Fatal("resumed stale attempt evidence")
+	}
+	target.fresh = true
+	if got, err := resumeSession(target, last); err != nil || got != "" {
+		t.Fatal(got, err)
+	}
+	target.fresh = false
+	last["work_identity"] = "different-work"
+	if got, err := resumeSession(target, last); err != nil || got != "" {
+		t.Fatal(got, err)
+	}
+	last["work_identity"] = workIdentity(target)
+	last["provider"] = "claude"
+	if got, err := resumeSession(target, last); err != nil || got != "" {
+		t.Fatal(got, err)
+	}
+}
+
+func TestCancelUsesExactAttemptFile(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home}
+	identity, err := processIdentity(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel := filepath.Join(t.TempDir(), "attempt.cancel")
+	launch := fleet.Rec{"at": fleet.Now(), "status": "running", "pid": os.Getpid(), "process_identity": identity, "attempt": "one", "cancel_file": cancel}
+	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cancel("hub:lead"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fleet.ReadJSON(cancel); fleet.S(got, "attempt") != "one" {
+		t.Fatal(got)
+	}
+	launch["process_identity"] = "recycled"
+	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cancel("hub:lead"); err == nil {
+		t.Fatal("cancelled an unverified PID")
+	}
+	launch["status"] = "failed" // fixture cleanup must not wait for this test process
+	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderWithoutCollectedExitKeepsReservation(t *testing.T) {
+	r := fleet.Rec{"status": "running", "provider": "codex", "pid": -1}
+	if !launchPresent(r) {
+		t.Fatal("absent bridge allowed replacement despite unknown provider descendants")
+	}
+}

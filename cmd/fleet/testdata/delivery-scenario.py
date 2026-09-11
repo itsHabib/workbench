@@ -16,9 +16,15 @@ here = Path(__file__).resolve().parent
 binary = os.environ["FLEET_BIN"]
 hook = os.environ.get("FLEET_HOOK", str(here / "hook.py"))
 
-STUB = """import json, os, sys
-with open(sys.argv[1], "a") as f:
-    f.write(json.dumps({"cwd": os.getcwd(), "prompt": sys.argv[2]}) + "\\n")
+STUB = """import fs from 'node:fs';
+export function query({prompt,options}) {
+ return {interrupt:async()=>{},close(){},async *[Symbol.asyncIterator](){
+  for await (const item of prompt) fs.appendFileSync(process.env.FLEET_TEST_LAUNCHES,
+    JSON.stringify({cwd:process.cwd(),prompt:item.message.content})+'\\n');
+  yield {type:'system',subtype:'init',session_id:options.resume||'delivery-fixture'};
+  yield {type:'result',subtype:'success',session_id:options.resume||'delivery-fixture',is_error:false};
+ }};
+}
 """
 
 with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
@@ -27,14 +33,18 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
     for path in (state, org, lead, seat, boss):
         path.mkdir()
     (org / "roles.map").write_text(f"{lead} one hub:lead\n{seat} one hub:b seat-1\n{boss} one hub:boss\n")
-    stub, launches = root / "stub.py", root / "launches.jsonl"
-    stub.write_text(STUB)
+    launches = root / "launches.jsonl"
+    sdk = root / "node_modules/@anthropic-ai/claude-agent-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({"type":"module", "exports":"./index.mjs"}))
+    (sdk / "index.mjs").write_text(STUB)
     (state / "deliver.json").write_text(json.dumps({
-        "hub:lead": {"cwd": str(lead), "cmd": [sys.executable, str(stub), str(launches), "{{prompt}}"],
+        "hub:lead": {"cwd": str(lead), "provider": "claude",
                      "LATE_TO": "hub:boss"}}))
     env = {**os.environ, "FLEET_STATE": str(state), "ORG_STATE": str(org),
            "FLEET_WATCH": "off", "FLEET_GITHUB": "off", "FLEET_MAIL_GRACE": "0",
-           "CODEX_HOME": str(root / "codex-home")}
+           "CODEX_HOME": str(root / "codex-home"), "FLEET_RUNTIME_HOME": str(root),
+           "FLEET_TEST_LAUNCHES": str(launches)}
 
     def run(cwd, *args, **kw):
         result = subprocess.run([binary, *args], cwd=cwd, env={**env, **kw.pop("extra", {})},

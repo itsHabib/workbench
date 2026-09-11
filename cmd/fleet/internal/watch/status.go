@@ -46,6 +46,7 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 			row["exit_code"], row["exited_at"] = exit["exit_code"], exit["at"]
 		}
 	}
+	providerActivity(row, last)
 	lastActivity(row, last, sessions)
 	if last == nil && fleet.S(row, "session") != "" {
 		row["state"] = "observed_session"
@@ -180,4 +181,21 @@ func WatcherHealth() (string, fleet.Rec) {
 		}
 	}
 	return watcher, hb
+}
+
+func providerActivity(row, last fleet.Rec) {
+	if last == nil || fleet.S(last, "state_file") == "" {
+		return
+	}
+	row["state_file"] = last["state_file"]
+	state := fleet.ReadJSON(fleet.S(last, "state_file"))
+	if fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != fleet.S(last, "provider") {
+		row["provider_error"] = "provider state missing or belongs to another attempt"
+		return
+	}
+	for _, key := range []string{"trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "last_provider_event", "last_provider_event_at", "reason", "error"} {
+		if value, ok := state[key]; ok {
+			row[key] = value
+		}
+	}
 }

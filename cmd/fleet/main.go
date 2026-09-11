@@ -80,6 +80,14 @@ func reviveWatcher(ev map[string]any) (started bool) {
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
 // board; `--interval 30s` sets the tick.
 func runWatch(args []string) {
+	if len(args) == 2 && args[0] == "cancel" {
+		if err := watch.Cancel(args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("interrupt requested; inspect watch status for the terminal result")
+		return
+	}
 	if len(args) > 0 && args[0] == "status" {
 		if len(args) > 2 || (len(args) == 2 && args[1] != "--json") {
 			fmt.Fprintln(os.Stderr, "usage: fleet watch status [--json]")

@@ -3,6 +3,7 @@ package watch
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -47,12 +48,25 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	}
 	sink = filepath.Join(t.TempDir(), "launch.json")
 	t.Setenv("FLEET_TEST_LAUNCH_PATH", sink)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
+	original := providerCommand
+	providerCommand = func(request map[string]any) (*exec.Cmd, error) {
+		if os.Getenv("FLEET_TEST_BAD_START") != "" {
+			return exec.Command(filepath.Join(home, "no-such-command")), nil
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		state := fleet.Rec{"attempt": request["attempt"], "provider": request["provider"], "provider_session": "fixture-session"}
+		if err := fleet.WriteJSON(request["state_file"].(string), state); err != nil {
+			return nil, err
+		}
+		return exec.Command(exe, "-test.run=^TestDeliverRecorder$", request["prompt"].(string)), nil
 	}
+	t.Cleanup(func() { providerCommand = original })
+
 	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home,
-		"cmd": []any{exe, "-test.run=^TestDeliverRecorder$", "{{prompt}}"}}}
+		"provider": "codex"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +247,8 @@ func TestMailboxRecordsReadsTheStoreDirectly(t *testing.T) {
 // A configured command that cannot run is recorded, and its mail stays undelivered.
 func TestDeliverRecordsAFailedLaunch(t *testing.T) {
 	home, _ := deliverEnv(t)
-	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{filepath.Join(home, "no-such-command"), "{{prompt}}"}}}
+	t.Setenv("FLEET_TEST_BAD_START", "1")
+	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "provider": "codex"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -432,11 +447,8 @@ func sealed(t *testing.T, dir string) {
 // consumed nor stranded: the next fold carries it.
 func TestDeliverReleasesTheReservationWhenTheStartFails(t *testing.T) {
 	home, sink := deliverEnv(t)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	broken := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{filepath.Join(home, "no-such-command"), "{{prompt}}"}}}
+	t.Setenv("FLEET_TEST_BAD_START", "1")
+	broken := map[string]any{"hub:lead": map[string]any{"cwd": home, "provider": "codex"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), broken); err != nil {
 		t.Fatal(err)
 	}
@@ -450,8 +462,9 @@ func TestDeliverReleasesTheReservationWhenTheStartFails(t *testing.T) {
 	if fleet.Has(r, "delivered_at") || fleet.Has(r, "delivered_by") {
 		t.Fatalf("the reservation was not released: %v", r)
 	}
+	t.Setenv("FLEET_TEST_BAD_START", "")
 	working := map[string]any{"hub:lead": map[string]any{"cwd": home,
-		"cmd": []any{exe, "-test.run=^TestDeliverRecorder$", "{{prompt}}"}}}
+		"provider": "codex"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), working); err != nil {
 		t.Fatal(err)
 	}
@@ -488,12 +501,9 @@ func TestDeliverRefusesALaunchDirectoryThatIsNotTheAddressOwn(t *testing.T) {
 			if err := os.WriteFile(fleet.RolesMap(), []byte(rows), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			exe, err := os.Executable()
-			if err != nil {
-				t.Fatal(err)
-			}
+
 			cfg := map[string]any{"hub:lead": map[string]any{"cwd": tc.pick(home, seat, foreign),
-				"cmd": []any{exe, "-test.run=^TestDeliverRecorder$", "{{prompt}}"}}}
+				"provider": "codex"}}
 			if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 				t.Fatal(err)
 			}

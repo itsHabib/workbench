@@ -151,7 +151,7 @@ func TestUnansweredLeadEscalationUsesTheRecordedParent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, _ := deliverEnv(t)
-			cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": tc.lateTo}}
+			cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "provider": "codex", "LATE_TO": tc.lateTo}}
 			if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +171,7 @@ func TestUnansweredLeadEscalationUsesTheRecordedParent(t *testing.T) {
 // Inside the grace, or already acknowledged, nothing is said.
 func TestUnansweredMailWaitsForTheReplyGrace(t *testing.T) {
 	home, _ := deliverEnv(t)
-	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": "seat-1"}}
+	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "provider": "codex", "LATE_TO": "seat-1"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestLateReportNeverCrossesTheTenantBoundary(t *testing.T) {
 	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" t1 hub:lead\n"+other+" t2 other:lead\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "cmd": []any{"true"}, "LATE_TO": "other:lead"}}
+	cfg := map[string]any{"hub:lead": map[string]any{"cwd": home, "provider": "codex", "LATE_TO": "other:lead"}}
 	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
 		t.Fatal(err)
 	}
