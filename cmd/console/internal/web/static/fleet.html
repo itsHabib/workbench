@@ -1,0 +1,1266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Fleet · Workbench</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f6f4;
+        --paper: #fff;
+        --ink: #18231e;
+        --muted: #647169;
+        --line: #dfe5df;
+        --green: #206548;
+        --red: #ae3f35;
+        --amber: #94630d;
+        --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.5 system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button,
+      a {
+        touch-action: manipulation;
+      }
+      button {
+        cursor: pointer;
+      }
+      a {
+        color: var(--green);
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #78b49a;
+        outline-offset: 3px;
+      }
+      header {
+        padding: 22px 36px;
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+      }
+      header nav {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+      }
+      header a {
+        text-decoration: none;
+        color: var(--muted);
+      }
+      .brand {
+        font-weight: 650;
+        letter-spacing: -0.4px;
+        font-size: 18px;
+      }
+      .brand span {
+        color: var(--muted);
+        font-weight: 400;
+        margin-left: 9px;
+      }
+      .live {
+        font: 11px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+      main {
+        max-width: 1600px;
+        margin: auto;
+        padding: 34px 36px;
+      }
+      .eyebrow {
+        font: 11px var(--mono);
+        letter-spacing: 1.6px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        font-size: 32px;
+        font-weight: 550;
+        letter-spacing: -1px;
+        margin: 6px 0 8px;
+      }
+      h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+      }
+      h3 {
+        font-size: 13px;
+        font-weight: 650;
+        margin: 0 0 10px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .intro {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 20px;
+        margin-bottom: 26px;
+      }
+      .intro p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .btn {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--paper);
+        color: var(--ink);
+        padding: 8px 12px;
+      }
+      .btn:hover {
+        background: var(--bg);
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-bottom: 22px;
+      }
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px 20px;
+        background: var(--paper);
+      }
+      .metric strong {
+        display: block;
+        font-size: 25px;
+        font-weight: 550;
+        letter-spacing: -0.5px;
+        margin: 5px 0;
+      }
+      .metric small {
+        color: var(--muted);
+      }
+      .notice {
+        border-left: 3px solid var(--amber);
+        background: #fff6e6;
+        padding: 12px 15px;
+        margin-bottom: 18px;
+        color: #6b4a12;
+        border-radius: 0 6px 6px 0;
+      }
+      .notice.error {
+        border-color: var(--red);
+        background: #fff0ee;
+        color: var(--red);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(360px, 1fr);
+        gap: 20px;
+        align-items: start;
+      }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: var(--paper);
+        overflow: hidden;
+      }
+      .paneltop {
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .search {
+        width: 190px;
+        max-width: 48%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 7px 10px;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      .columns,
+      .agent {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 105px;
+        gap: 14px;
+        align-items: center;
+        padding: 12px 20px;
+      }
+      .columns {
+        color: var(--muted);
+        font: 10px var(--mono);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: #fafbf9;
+      }
+      .agent {
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--paper);
+        text-align: left;
+        color: var(--ink);
+        padding-top: 17px;
+        padding-bottom: 17px;
+      }
+      .agent:last-child {
+        border-bottom: 0;
+      }
+      .agent:hover {
+        background: #f7faf7;
+      }
+      .agent.selected {
+        background: #eef5ef;
+        box-shadow: inset 3px 0 var(--green);
+      }
+      .name {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .small {
+        font-size: 12px;
+      }
+      .truncate {
+        display: block;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+      .badge {
+        display: inline-block;
+        border-radius: 5px;
+        padding: 3px 7px;
+        font: 11px var(--mono);
+        background: #edf0ed;
+        color: #57645a;
+        white-space: normal;
+      }
+      .badge.running {
+        background: #e6f3eb;
+        color: var(--green);
+      }
+      .badge.failed,
+      .badge.launch_failed,
+      .badge.gone_exit_unknown {
+        background: #fbece8;
+        color: var(--red);
+      }
+      .badge.unknown {
+        background: #fff2d8;
+        color: var(--amber);
+      }
+      .empty {
+        padding: 48px 24px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .detailhead {
+        padding: 22px 22px 15px;
+      }
+      .detailhead h2 {
+        overflow-wrap: anywhere;
+        margin: 7px 0;
+      }
+      .detailhead .path {
+        font: 11px/1.6 var(--mono);
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid var(--line);
+        padding: 0 15px;
+        gap: 10px;
+      }
+      .tab {
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 11px 7px;
+        background: none;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .tab.active {
+        border-color: var(--green);
+        color: var(--green);
+        font-weight: 600;
+      }
+      .detailbody {
+        padding: 20px 22px;
+      }
+      .section {
+        padding-bottom: 20px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+      }
+      .section:last-child {
+        border: 0;
+        margin: 0;
+      }
+      .factgrid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+      }
+      .factgrid dt {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .factgrid dd {
+        margin: 3px 0 0;
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .handoff {
+        background: #f5f7f3;
+        border-radius: 7px;
+        padding: 14px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .timeline {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .timeline li {
+        padding: 0 0 17px 19px;
+        border-left: 1px solid var(--line);
+        position: relative;
+      }
+      .timeline li:before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border: 2px solid var(--paper);
+        background: #8ca08f;
+        border-radius: 50%;
+        position: absolute;
+        left: -5px;
+        top: 5px;
+      }
+      .timeline time {
+        font: 10px var(--mono);
+        color: var(--muted);
+        display: block;
+        margin-top: 4px;
+      }
+      .mail {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+        overflow-wrap: anywhere;
+      }
+      .mail p {
+        margin: 6px 0;
+        white-space: pre-wrap;
+      }
+      .output {
+        background: #17231f;
+        color: #d9e7df;
+        border-radius: 8px;
+        padding: 16px;
+        max-height: 560px;
+        overflow: auto;
+        font: 11px/1.65 var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .attempt {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .foot {
+        margin-top: 20px;
+        color: var(--muted);
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+      }
+      .evidence {
+        font: 11px var(--mono);
+        overflow-wrap: anywhere;
+      }
+      details {
+        margin-top: 12px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .findings {
+        padding-left: 18px;
+      }
+      .findings li {
+        margin: 12px 0;
+      }
+      .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 1000px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .metrics {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 560px) {
+        header {
+          padding: 16px;
+        }
+        main {
+          padding: 22px 14px;
+        }
+        .brand span {
+          display: none;
+        }
+        .intro {
+          align-items: start;
+        }
+        h1 {
+          font-size: 27px;
+        }
+        .metrics {
+          gap: 8px;
+        }
+        .metric {
+          padding: 13px;
+        }
+        .columns,
+        .agent {
+          grid-template-columns: minmax(0, 1fr) 90px;
+        }
+        .activitycol {
+          display: none;
+        }
+        .foot {
+          display: block;
+        }
+        .paneltop {
+          padding: 15px;
+        }
+        .detailbody {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">Workbench <span>/ Fleet</span></div>
+      <nav>
+        <a href="/">Gate decisions</a
+        ><span class="live" id="live"><i class="dot"></i>Connecting</span>
+      </nav>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <div class="eyebrow">Agent operations</div>
+          <h1>Work in motion.</h1>
+          <p>
+            Current agents, their latest evidence, and what needs a closer look.
+          </p>
+        </div>
+        <button class="btn" id="refresh">Refresh now</button>
+      </div>
+      <div id="error" class="notice error" role="alert" hidden></div>
+      <div id="config" class="notice" hidden></div>
+      <div class="metrics" id="metrics">
+        <div class="metric muted">Loading Fleet observations…</div>
+      </div>
+      <div class="layout">
+        <section class="panel">
+          <div class="paneltop">
+            <h2>Agents <span id="count" class="muted small"></span></h2>
+            <label class="sr" for="search">Filter agents</label
+            ><input
+              id="search"
+              class="search"
+              type="search"
+              placeholder="Filter agents or tasks"
+            />
+          </div>
+          <div class="columns">
+            <span>Agent / task</span
+            ><span class="activitycol">Latest activity</span
+            ><span>Process</span>
+          </div>
+          <div id="agents"></div>
+        </section>
+        <section class="panel" id="detail">
+          <div class="empty">Choose an agent to inspect its work.</div>
+        </section>
+      </div>
+      <footer class="foot">
+        <span id="observed">No snapshot received yet.</span
+        ><span>Activity ≠ progress. Process exit ≠ verified completion.</span>
+      </footer>
+    </main>
+    <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id),
+          esc = (x) =>
+            String(x ?? "").replace(
+              /[&<>"']/g,
+              (c) =>
+                ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  '"': "&quot;",
+                  "'": "&#39;",
+                })[c],
+            );
+        let board = null,
+          report = null,
+          selected = new URLSearchParams(location.search).get("agent") || "",
+          detail = null,
+          tab = "overview",
+          diagnostic = null,
+          detailError = "",
+          busy = false,
+          generation = 0,
+          diagnosing = false,
+          diagnosticVersion = 0;
+        const known = (x) => x !== null && x !== undefined && x !== "";
+        const val = (x) =>
+          known(x) ? esc(x) : '<span class="muted">Unknown</span>';
+        const number = (x) => typeof x === "number" && Number.isFinite(x);
+        const when = (x) =>
+          number(x) && x > 0
+            ? new Date(x * 1000).toLocaleString()
+            : "Unknown time";
+        function age(x) {
+          if (!number(x) || x <= 0) return "not observed";
+          const d = Date.now() / 1000 - x;
+          if (d < 0) return "clock ahead";
+          if (d < 60) return Math.floor(d) + "s ago";
+          if (d < 3600) return Math.floor(d / 60) + "m ago";
+          if (d < 86400) return Math.floor(d / 3600) + "h ago";
+          return Math.floor(d / 86400) + "d ago";
+        }
+        function badge(state) {
+          const s = state || "unknown";
+          return (
+            '<span class="badge ' +
+            esc(s.replace(/[^a-z_]/g, "")) +
+            '">' +
+            esc(s.replaceAll("_", " ")) +
+            "</span>"
+          );
+        }
+        async function api(view, address) {
+          const response = await fetch(
+            "/api/fleet/" +
+              view +
+              (address ? "?address=" + encodeURIComponent(address) : ""),
+            // Fleet may take 30s, followed by 10s for TraceLens; allow response margin.
+            { cache: "no-store", signal: AbortSignal.timeout(45000) },
+          );
+          const data = await response.json();
+          if (!response.ok) throw Error(data.error || "Unable to read " + view);
+          return data;
+        }
+        function metric(label, value, note) {
+          return (
+            '<div class="metric"><span class="eyebrow">' +
+            esc(label) +
+            "</span><strong>" +
+            esc(value) +
+            "</strong><small>" +
+            esc(note) +
+            "</small></div>"
+          );
+        }
+        function renderBoard() {
+          const focusedAddress = document.activeElement?.dataset?.address;
+          if (!board) return;
+          const rows = [...(board.workers || [])].sort(
+              (a, b) =>
+                Number(
+                  ["failed", "launch_failed", "gone_exit_unknown"].includes(
+                    b.state,
+                  ),
+                ) -
+                  Number(
+                    ["failed", "launch_failed", "gone_exit_unknown"].includes(
+                      a.state,
+                    ),
+                  ) ||
+                (b.last_provider_event_at || b.last_event_at || 0) -
+                  (a.last_provider_event_at || a.last_event_at || 0),
+            ),
+            running = rows.filter((r) => r.state === "running").length,
+            failed = rows.filter((r) =>
+              ["failed", "launch_failed", "gone_exit_unknown"].includes(
+                r.state,
+              ),
+            ).length;
+          const cost =
+            report && number(report.reported_cost_usd)
+              ? "$" + report.reported_cost_usd.toFixed(2)
+              : "Unknown";
+          $("metrics").innerHTML =
+            metric(
+              "Processes",
+              running + " running",
+              rows.length + " registered agents",
+            ) +
+            metric(
+              "Exit problems",
+              failed,
+              "Inspect failures and missing exits",
+            ) +
+            metric(
+              "Watcher",
+              board.watcher || "Unknown",
+              board.heartbeat?.at
+                ? "Last tick " + age(board.heartbeat.at)
+                : "No heartbeat observed",
+            ) +
+            metric(
+              "Reported spend · 24h",
+              cost,
+              report
+                ? `${report.cost_known || 0} / ${report.attempt_count || 0} attempts report cost`
+                : "Run totals unavailable",
+            );
+          $("observed").textContent =
+            "Snapshot " +
+            when(board.at) +
+            " · " +
+            (board.scope || "local observations");
+          $("config").hidden = !board.configuration_error;
+          $("config").textContent = board.configuration_error || "";
+          const q = $("search").value.toLowerCase();
+          const filtered = rows.filter((r) =>
+            [r.address, r.cwd, r.branch, r.assignment?.brief]
+              .join(" ")
+              .toLowerCase()
+              .includes(q),
+          );
+          $("count").textContent = filtered.length;
+          $("agents").innerHTML =
+            filtered
+              .map(
+                (r) =>
+                  '<button class="agent ' +
+                  (selected === r.address ? "selected" : "") +
+                  '" data-address="' +
+                  esc(r.address) +
+                  '" aria-pressed="' +
+                  (selected === r.address) +
+                  '"><span><span class="name">' +
+                  esc(r.address || "Unnamed agent") +
+                  '</span><span class="truncate small muted">' +
+                  esc(r.assignment?.brief || r.branch || r.role || r.cwd) +
+                  '</span></span><span class="activitycol small"><span class="truncate">' +
+                  esc(
+                    r.last_provider_event ||
+                      r.last_tool ||
+                      r.last_event ||
+                      "No activity observed",
+                  ) +
+                  '</span><span class="muted">' +
+                  esc(age(r.last_provider_event_at || r.last_event_at)) +
+                  "</span></span><span>" +
+                  badge(r.state) +
+                  (r.provider_state
+                    ? '<span class="small muted">' +
+                      esc(r.provider_state) +
+                      "</span>"
+                    : "") +
+                  (r.starts_paused
+                    ? '<span class="small muted">Starts paused</span>'
+                    : "") +
+                  "</span></button>",
+              )
+              .join("") ||
+            '<div class="empty">' +
+              (rows.length
+                ? "No agents match this filter."
+                : "No agents are registered in this Fleet state. Configure a role or headless target to see it here.") +
+              "</div>";
+          $("agents")
+            .querySelectorAll("[data-address]")
+            .forEach((el) => (el.onclick = () => choose(el.dataset.address)));
+          if (focusedAddress)
+            [...$("agents").querySelectorAll("[data-address]")]
+              .find((e) => e.dataset.address === focusedAddress)
+              ?.focus({ preventScroll: true });
+        }
+        function fact(label, value) {
+          return (
+            "<div><dt>" + esc(label) + "</dt><dd>" + val(value) + "</dd></div>"
+          );
+        }
+        function section(title, body) {
+          return (
+            '<section class="section"><h3>' +
+            esc(title) +
+            "</h3>" +
+            body +
+            "</section>"
+          );
+        }
+        function notices(r) {
+          return [
+            "error",
+            "configuration_error",
+            "binding_error",
+            "head_error",
+            "mail_error",
+          ]
+            .filter((k) => r[k])
+            .map((k) => '<div class="notice error">' + esc(r[k]) + "</div>")
+            .join("");
+        }
+        function prose(text) {
+          text = String(text || "");
+          if (text.length < 400)
+            return '<div class="handoff">' + esc(text) + "</div>";
+          return (
+            '<div class="handoff">' +
+            esc(text.slice(0, 320)) +
+            '…</div><details><summary>Read full handoff</summary><div class="handoff">' +
+            esc(text) +
+            "</div></details>"
+          );
+        }
+        function overview(d) {
+          const r = d.agent;
+          let html = notices(r);
+          const h = d.handoff;
+          html += section(
+            "Latest handoff · authored by the agent",
+            h
+              ? prose(h.conclusion) +
+                  (h.next
+                    ? "<p><strong>Next:</strong> " + esc(h.next) + "</p>"
+                    : "") +
+                  '<p class="muted small">' +
+                  esc(when(h.at)) +
+                  " · recorded head " +
+                  esc(h.sha || "unknown") +
+                  "</p>"
+              : '<p class="muted">No branch handoff recorded.</p>',
+          );
+          if (d.role_handoff)
+            html += section(
+              "Role context",
+              '<div class="handoff">' + esc(d.role_handoff) + "</div>",
+            );
+          html += section(
+            "Current evidence",
+            '<dl class="factgrid">' +
+              fact("Assignment", r.assignment?.brief) +
+              fact("Session", r.provider_session || r.session) +
+              fact("Provider state", r.provider_state) +
+              fact(
+                "Last provider activity",
+                r.last_provider_event_at
+                  ? when(r.last_provider_event_at)
+                  : null,
+              ) +
+              fact("Git head", r.head) +
+              fact("Branch", r.branch) +
+              fact("Unacknowledged messages", r.unacked_mail) +
+              fact("Exit code", r.exit_code) +
+              "</dl>",
+          );
+          const events = [
+            [r.started_at, "Process started"],
+            [
+              r.last_event_at,
+              [r.last_event, r.last_tool].filter(Boolean).join(" · "),
+            ],
+            [r.last_provider_event_at, "Provider event observed"],
+            [h?.at, "Agent recorded a handoff"],
+            [r.output_at, "Output file changed"],
+            [
+              r.exited_at,
+              "Process exited" +
+                (known(r.exit_code) ? " · code " + r.exit_code : ""),
+            ],
+          ]
+            .filter((e) => number(e[0]) && e[0] > 0)
+            .sort((a, b) => b[0] - a[0]);
+          html += section(
+            "Recent evidence timestamps",
+            events.length
+              ? '<ul class="timeline">' +
+                  events
+                    .map(
+                      (e) =>
+                        "<li>" +
+                        esc(e[1]) +
+                        "<time>" +
+                        esc(when(e[0])) +
+                        "</time></li>",
+                    )
+                    .join("") +
+                  '</ul><p class="small muted">Latest observations from each source; not a complete event history.</p>'
+              : '<p class="muted">No timestamps observed.</p>',
+          );
+          html += section(
+            "Work and receipts",
+            (r.work || [])
+              .map(
+                (w) =>
+                  '<div class="mail"><strong>' +
+                  esc(w.change || w.task || "Work") +
+                  "</strong> " +
+                  badge(w.state) +
+                  '<dl class="factgrid">' +
+                  fact("Required evidence", w.relationship) +
+                  fact(
+                    "Recorded completion",
+                    w.done_at ? when(w.done_at) : null,
+                  ) +
+                  fact("Evidence head", w.head) +
+                  fact("Responsible role", w.for) +
+                  '</dl><details><summary>Full work record</summary><pre class="small">' +
+                  esc(JSON.stringify(w, null, 2)) +
+                  "</pre></details></div>",
+              )
+              .join("") ||
+              '<p class="muted">No work or receipt records joined to this checkout.</p>',
+          );
+          return html;
+        }
+        function messages(d) {
+          return (
+            '<p class="muted small">Latest ' +
+            (d.messages || []).length +
+            " of " +
+            (d.message_count ?? "unknown") +
+            " received messages. Delivery does not prove acceptance.</p>" +
+            (d.mail_partial
+              ? '<div class="notice">Partial mailbox scan; totals and newest-message coverage are unknown.</div>'
+              : "") +
+            (d.mail_error
+              ? '<div class="notice error">' + esc(d.mail_error) + "</div>"
+              : "") +
+            ((d.messages || [])
+              .map(
+                (m) =>
+                  '<article class="mail"><div class="small muted">' +
+                  esc(m.from_address || "Unknown sender") +
+                  " · " +
+                  esc(m.kind || "message") +
+                  " · " +
+                  esc(when(m.at)) +
+                  "</div><strong>" +
+                  esc(m.subject) +
+                  "</strong><p>" +
+                  esc(m.body) +
+                  '</p><span class="small muted">' +
+                  (m.acked_at
+                    ? "Acknowledged " + esc(when(m.acked_at))
+                    : "No acknowledgment observed") +
+                  "</span></article>",
+              )
+              .join("") || '<div class="empty">No messages recorded.</div>')
+          );
+        }
+        function output(d) {
+          if (d.trace_error)
+            return '<div class="notice">' + esc(d.trace_error) + "</div>";
+          const t = d.trace || {};
+          return (
+            '<p class="small muted">' +
+            esc(t.coverage || "Coverage unknown") +
+            " · modified " +
+            esc(age(t.modified_at)) +
+            '</p><pre class="output">' +
+            esc(
+              (t.lines || []).join("\n") ||
+                "No visible text or tool events in the observed window.",
+            ) +
+            '</pre><details><summary>Trace source</summary><p class="evidence">' +
+            esc(t.source) +
+            "</p></details>"
+          );
+        }
+        function attempts(d) {
+          const rows = (report?.attempts || [])
+            .filter((a) => a.address === d.agent.address)
+            .sort(
+              (a, b) =>
+                (b.started_at || b.output_at) - (a.started_at || a.output_at),
+            );
+          return (
+            '<p class="small muted">Retained outputs modified in the last 24 hours. Process exits are not task receipts.</p>' +
+            rows
+              .map(
+                (a) =>
+                  '<article class="attempt">' +
+                  (!a.cwd
+                    ? '<p class="small muted">Workspace not recorded; matched by address only.</p>'
+                    : a.cwd !== d.agent.cwd
+                      ? '<p class="small muted">Earlier binding: ' +
+                        esc(a.cwd) +
+                        "</p>"
+                      : "") +
+                  badge(a.state) +
+                  ' <span class="small">Exit ' +
+                  val(a.exit_code) +
+                  " · " +
+                  esc(when(a.started_at || a.output_at)) +
+                  '</span><p class="small">' +
+                  esc(
+                    a.reason || a.result_error || "No terminal reason recorded",
+                  ) +
+                  '</p><div class="small muted">Session ' +
+                  esc(a.session || "unknown") +
+                  " · " +
+                  (number(a.cost_usd)
+                    ? "$" + a.cost_usd.toFixed(4)
+                    : "cost unknown") +
+                  " · " +
+                  (number(a.turns) ? a.turns : "unknown") +
+                  " turns</div></article>",
+              )
+              .join("") +
+            (!rows.length
+              ? '<div class="empty">No matching attempts in this window.</div>'
+              : "")
+          );
+        }
+        function diagnostics() {
+          let html =
+            '<p class="muted small">Analyze the observed trace for repetition, retry storms and stalled activity. Findings describe evidence, not task completion.</p><button class="btn" id="diagnose" ' +
+            (diagnosing ? "disabled" : "") +
+            ">" +
+            (diagnosing ? "Analyzing…" : "Analyze current trace") +
+            "</button>";
+          if (!diagnostic) return html;
+          if (diagnostic.error)
+            return (
+              html +
+              '<div class="notice" style="margin-top:16px">' +
+              esc(diagnostic.error) +
+              "</div>"
+            );
+          const v = diagnostic.verdict || {};
+          html +=
+            '<p class="small muted">' +
+            esc(diagnostic.coverage) +
+            " · analysis requested " +
+            esc(when(diagnostic.at)) +
+            "</p>";
+          if (diagnostic.partial)
+            html +=
+              '<div class="notice">Partial trace: these findings cannot establish whole-run health.</div>';
+          html +=
+            "<h3>" +
+            esc(
+              v.decision === "pass"
+                ? "No supported patterns detected"
+                : v.decision || "Diagnostic result",
+            ) +
+            "</h3><p>" +
+            esc(
+              v.decision === "pass"
+                ? "No diagnostic findings in the observed steps. This does not verify the task result."
+                : v.why || v.reason || "",
+            ) +
+            '</p><p class="small muted">Per-step cost may be unavailable. Zero attributed waste is not zero provider spend.</p><ul class="findings">' +
+            (v.findings || [])
+              .map(
+                (f) =>
+                  "<li><strong>" +
+                  esc(f.code || f.kind || f.title || "Finding") +
+                  "</strong><p>" +
+                  esc(
+                    f.title ||
+                      f.message ||
+                      f.detail ||
+                      f.why ||
+                      f.description ||
+                      JSON.stringify(f),
+                  ) +
+                  "</p></li>",
+              )
+              .join("") +
+            '</ul><details><summary>Diagnostic evidence</summary><pre class="small">' +
+            esc(JSON.stringify(v, null, 2)) +
+            "</pre></details>";
+          return html;
+        }
+        function renderDetail() {
+          const scroll = $("detail").querySelector(".output")?.scrollTop || 0;
+          const open = [...$("detail").querySelectorAll("details")].map(
+            (e) => e.open,
+          );
+          if (!detail) {
+            $("detail").innerHTML =
+              '<div class="empty">' +
+              esc(
+                detailError ||
+                  (selected
+                    ? "Loading agent evidence…"
+                    : "Choose an agent to inspect its work."),
+              ) +
+              "</div>";
+            return;
+          }
+          const r = detail.agent;
+          const tabs = [
+            "overview",
+            "output",
+            "messages",
+            "attempts",
+            "diagnostics",
+          ];
+          $("detail").innerHTML =
+            '<div class="detailhead"><span class="eyebrow">Agent detail</span><h2>' +
+            esc(r.address) +
+            "</h2>" +
+            badge(r.state) +
+            '<p class="path">' +
+            esc(r.cwd) +
+            '</p></div><div class="tabs" role="tablist">' +
+            tabs
+              .map(
+                (t) =>
+                  '<button class="tab ' +
+                  (tab === t ? "active" : "") +
+                  '" role="tab" aria-selected="' +
+                  (tab === t) +
+                  '" aria-controls="agent-panel" id="tab-' +
+                  t +
+                  '" tabindex="' +
+                  (tab === t ? "0" : "-1") +
+                  '" data-tab="' +
+                  t +
+                  '">' +
+                  t[0].toUpperCase() +
+                  t.slice(1) +
+                  "</button>",
+              )
+              .join("") +
+            '</div><div class="detailbody" role="tabpanel" id="agent-panel" aria-labelledby="tab-' +
+            tab +
+            '" tabindex="0">' +
+            (detailError
+              ? '<div class="notice error">Refresh failed; showing older evidence. ' +
+                esc(detailError) +
+                "</div>"
+              : "") +
+            { overview, messages, output, attempts, diagnostics }[tab](detail) +
+            "</div>";
+          $("detail")
+            .querySelectorAll("[data-tab]")
+            .forEach((button) => {
+              button.onclick = () => {
+                tab = button.dataset.tab;
+                renderDetail();
+                $("tab-" + tab).focus({ preventScroll: true });
+              };
+              button.onkeydown = (event) => {
+                const index = tabs.indexOf(tab);
+                const moves = {
+                  ArrowRight: (index + 1) % tabs.length,
+                  ArrowLeft: (index + tabs.length - 1) % tabs.length,
+                  Home: 0,
+                  End: tabs.length - 1,
+                };
+                if (!(event.key in moves)) return;
+                event.preventDefault();
+                tab = tabs[moves[event.key]];
+                renderDetail();
+                $("tab-" + tab).focus({ preventScroll: true });
+              };
+            });
+          if ($("diagnose")) $("diagnose").onclick = analyze;
+          const outputEl = $("detail").querySelector(".output");
+          if (outputEl) outputEl.scrollTop = scroll;
+          $("detail")
+            .querySelectorAll("details")
+            .forEach((e, i) => (e.open = !!open[i]));
+        }
+        async function analyze() {
+          const address = selected,
+            token = generation,
+            version = diagnosticVersion;
+          diagnosing = true;
+          renderDetail();
+          try {
+            const d = await api("diagnostics", address);
+            if (
+              token !== generation ||
+              version !== diagnosticVersion ||
+              address !== selected
+            )
+              return;
+            if (!diagnosticMatches(detail, d))
+              throw Error(
+                "Trace changed during analysis. Refresh and analyze again.",
+              );
+            diagnostic = { ...d, at: Date.now() / 1000 };
+          } catch (e) {
+            if (token === generation && version === diagnosticVersion)
+              diagnostic = { error: e.message };
+          } finally {
+            if (token === generation && version === diagnosticVersion) {
+              diagnosing = false;
+              renderDetail();
+            }
+          }
+        }
+        function diagnosticMatches(snapshot, result) {
+          return (
+            !!result.fingerprint &&
+            snapshot?.trace?.source === result.source &&
+            snapshot?.trace?.fingerprint === result.fingerprint
+          );
+        }
+        // Identity fields must also participate in loadDetail's changed comparison.
+        function evidenceIdentity(x) {
+          return JSON.stringify([
+            x?.agent?.started_at,
+            x?.agent?.provider_session,
+            x?.agent?.provider_turn,
+            x?.agent?.session,
+            x?.trace?.source,
+            x?.trace?.fingerprint,
+            x?.trace?.modified_at,
+            x?.trace?.file_bytes,
+          ]);
+        }
+        async function loadDetail(reportChanged = false) {
+          const address = selected,
+            token = generation;
+          if (!address) return;
+          try {
+            const d = await api("inspect", address);
+            if (token !== generation || address !== selected) return;
+            if (detail && evidenceIdentity(detail) !== evidenceIdentity(d)) {
+              diagnostic = null;
+              diagnosticVersion++;
+              diagnosing = false;
+            }
+            const changed =
+              JSON.stringify({
+                ...detail,
+                at: 0,
+                trace: detail?.trace ? { ...detail.trace, at: 0 } : null,
+              }) !==
+                JSON.stringify({
+                  ...d,
+                  at: 0,
+                  trace: d.trace ? { ...d.trace, at: 0 } : null,
+                }) || !!detailError;
+            detail = d;
+            detailError = "";
+            if (!changed && !(tab === "attempts" && reportChanged)) return;
+          } catch (e) {
+            if (token === generation) detailError = e.message;
+          }
+          if (token === generation) renderDetail();
+        }
+        function choose(address) {
+          selected = address;
+          generation++;
+          detail = null;
+          diagnostic = null;
+          diagnosing = false;
+          detailError = "";
+          const u = new URL(location);
+          u.searchParams.set("agent", address);
+          history.replaceState(null, "", u);
+          renderBoard();
+          renderDetail();
+          loadDetail();
+        }
+        async function refresh() {
+          if (busy) return;
+          busy = true;
+          $("refresh").disabled = true;
+          try {
+            const [b, r] = await Promise.allSettled([
+              api("status"),
+              api("report"),
+            ]);
+            if (b.status === "rejected") throw b.reason;
+            board = b.value;
+            const reportChanged =
+              JSON.stringify(report) !==
+              JSON.stringify(r.status === "fulfilled" ? r.value : null);
+            report = r.status === "fulfilled" ? r.value : null;
+            $("error").className = "notice";
+            $("error").hidden = r.status === "fulfilled";
+            $("error").textContent =
+              r.status === "rejected"
+                ? "Run totals unavailable: " + r.reason.message
+                : "";
+            $("live").innerHTML = '<i class="dot"></i>Snapshot current';
+            renderBoard();
+            await loadDetail(reportChanged);
+          } catch (e) {
+            $("error").className = "notice error";
+            $("error").hidden = false;
+            $("error").textContent =
+              "Fleet refresh failed. " +
+              e.message +
+              (board ? " Showing the last successful snapshot." : "");
+            $("live").textContent = "Disconnected";
+          } finally {
+            busy = false;
+            $("refresh").disabled = false;
+          }
+        }
+        $("refresh").onclick = refresh;
+        $("search").oninput = renderBoard;
+        refresh();
+        setInterval(() => {
+          if (!document.hidden) refresh();
+        }, 5000);
+      })();
+    </script>
+  </body>
+</html>

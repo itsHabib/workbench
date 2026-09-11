@@ -53,10 +53,10 @@ mutable current files. Process death between mutation and telemetry append can
 also leave a gap. The report describes retained observations, not an audit-grade
 exactly-once ledger. It contains local telemetry only.
 
-`install.sh --apply` removes the exact installed binary's Claude/Codex shadow
-commands while retaining unrelated hooks. Config backups remain the rollback
-mechanism. An already-running watcher must be restarted to use a newly installed
-binary. Windows cross-compilation is not Windows runtime verification.
+`install.sh --apply` builds the binary and copies example roles; it does not edit
+hook registrations. Remove old shadow/Python Fleet registrations during the
+[clean cutover](install.md), then regenerate role bindings. An already-running
+watcher must be restarted to use a newly installed binary. Windows cross-compilation is not Windows runtime verification.
 
 ### Bounded history
 

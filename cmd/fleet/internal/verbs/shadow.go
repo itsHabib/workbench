@@ -104,7 +104,7 @@ func cmdShadowReport(since float64, asJSON bool) error {
 	}
 	n := rep["events"].(int)
 	if n == 0 {
-		say("no shadow events recorded (is `fleet hook claude --shadow` wired beside the installed hook? `install.sh --shadow`)")
+		say("no shadow events recorded; shadow installation is retired (see docs/install.md)")
 		return nil
 	}
 	by := rep["by_event"].(map[string]int)

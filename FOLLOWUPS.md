@@ -2,6 +2,64 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## fleet visibility: final-review residuals on PR #319
+
+The two permitted fix rounds ended at code head `3a36614`. The final Copilot
+panel's P1 browser/diagnostic deadline mismatch was fixed by allowing 45 seconds
+for the bounded 30-second Fleet read plus 10-second TraceLens call and response
+margin. Native Output rendering was moved unchanged from runtime PR #318 into
+this PR, with a direct Inspect regression, removing that merge dependency.
+It was also tested with combined source and real provider traces. No fourth panel is requested. Remaining
+P2/P3 items are recorded for judgment:
+
+- **P2, bare TraceLens contract documentation:** bare `tracelens <file>` now
+  requires neutral JSONL containing an analyzable step. Provider streams need
+  `-dialect auto`; rejecting empty/wrong-dialect input replaces an old fabricated
+  pass. Existing in-repo provider callers select a dialect, including Console.
+  Add the explicit default contract to the README usage block and a CLI-level
+  regression. No backwards-compatibility path is intended.
+- **P3, display/context:** identify the Fleet state root on the page, make the
+  work join independent of Console's starting cwd, and omit unrendered full
+  result bodies from board JSON so many long answers cannot exhaust its cap.
+- **P3, trace/mail edges:** name an oversized single trace record rather than
+  showing an empty partial window; document that observed trace paths are
+  same-user files and may follow symlinks. A duplicate mail id across retained
+  directories currently makes that mailbox unavailable rather than choosing a
+  record; retain explicit ambiguity until a duplicate policy is chosen.
+- **P3, coverage/hardening:** add direct CLI-output-size/deadline, ambiguous
+  address and `/fleet` foreign-Host regressions. Existing API Host/read-only
+  tests and an independent scratch-browser probe passed. Escape the numeric
+  `message_count` consistently even though its producer is currently integer or
+  null. None of these is evidence of script execution or a writable route.
+- **P2, consistency:** partial mailbox rows are labeled "Latest" above their
+  explicit warning that newest coverage is unknown; use neutral wording for
+  partial scans. Register `codex-app-server` in the evaluator's separate dialect
+  allowlist and corpus completeness checks. Console's direct auto-detection
+  path is covered and does not use that evaluator allowlist.
+
+Review evidence: [independent design/runtime review](https://github.com/itsHabib/workbench/pull/319#issuecomment-5636954062).
+Recorded validation: [Fleet visibility checks](docs/features/fleet-visibility/validation.md).
+
+Gate run `run_695619a145b7ddbe` rejected the earlier terminal-outcome deferral.
+The resulting bounded correctness repair recognizes interrupted turns as
+failures and explicit declined actions as warning findings, retaining the
+refusal without inventing a producer-declared failure of the whole run.
+Regressions prove later successful activity cannot turn either into a clean
+diagnostic. This is a substantive repair submitted for new judgment, without
+another panel cycle; the original block remains in the record.
+
+## fleet: avoid repeating all-agent joins during detail refresh
+
+PR #319 retains one address-resolution path: `inspect` and `trace` resolve the
+current agent through `AllStatus`. Console therefore repeats bounded mailbox and
+checkout joins after fetching the board. Real three-agent provider runs pass,
+but this work grows with fleet size and can approach the 30-second CLI deadline.
+Measure board-plus-detail latency on larger fleets; before a normal refresh
+exceeds five seconds, extract a detail lookup that enriches only the uniquely
+resolved address while preserving binding and ambiguity checks. Do not add a
+second state store or a stale identity cache. This P2 scaling suggestion is
+deferred from the final correctness fix round; current timeouts fail visibly.
+
 ## fleet: dispatch still publishes two records
 
 PR #310 review identified a failure window in `cmdDispatch`: `CmdAssign` can
