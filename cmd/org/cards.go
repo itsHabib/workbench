@@ -210,7 +210,7 @@ func readCard(e *env, args []string) error {
 		}
 		return showCard(e, c, *budget, s.asJSON)
 	}
-	return fmt.Errorf("no registered card for %s @ %s; use org charter -role %s -file <card.md>. Existing chain context is available through org legacy boot", s.role, s.tenant, s.role)
+	return fmt.Errorf("no registered card for %s @ %s; use org charter -role %s -file <card.md>. Existing chain context: org legacy boot -role %s (with the same -state and -tenant)", s.role, s.tenant, s.role, s.role)
 }
 
 func showCard(e *env, c roleCard, budget int, asJSON bool) error {

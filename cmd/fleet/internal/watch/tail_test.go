@@ -90,3 +90,52 @@ func TestEachLaunchHasItsOwnOutputAndResult(t *testing.T) {
 		t.Fatal("old result leaked into replacement", second)
 	}
 }
+
+func TestTailAndStatusShowFinalAnswerWithoutHooks(t *testing.T) {
+	home, sink := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home}
+	putStoreMail(t, "hub:lead", "final-answer", fleet.Now()-60, nil)
+	deliver(fleet.Now())
+	launched(t, sink)
+	waitExit(t, target)
+	launch, err := readLaunch(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := fleet.Rec{"type": "result", "subtype": "success", "result": "The regression is fixed.", "is_error": false}
+	if err := os.WriteFile(fleet.S(launch, "output"), append(fleet.DumpJSON(result), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Tail(context.Background(), &out, "hub:lead", 20, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range []string{out.String(), RuntimeText()} {
+		if !strings.Contains(got, "assistant: The regression is fixed.") || !strings.Contains(got, "result: success") {
+			t.Fatalf("missing final answer or result: %s", got)
+		}
+	}
+	if Heartbeat() != nil {
+		t.Fatal("inspection ticked the watcher")
+	}
+}
+
+func TestRuntimeReportsRejectedDeliveryEntries(t *testing.T) {
+	deliverEnv(t)
+	cfg := fleet.ReadJSON(fleet.Path("deliver.json"))
+	cfg["invalid"] = fleet.Rec{"cwd": "/unused"}
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := RuntimeStatus()
+	if len(got["workers"].([]fleet.Rec)) != 1 || !strings.Contains(fleet.S(got, "configuration_error"), "1 entries omitted") {
+		t.Fatal(got)
+	}
+	if err := os.WriteFile(fleet.Path("deliver.json"), []byte("null"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got = RuntimeStatus()
+	if len(got["workers"].([]fleet.Rec)) != 0 || fleet.S(got, "configuration_error") != "deliver.json must be an object" {
+		t.Fatal(got)
+	}
+}

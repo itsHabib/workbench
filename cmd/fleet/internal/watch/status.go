@@ -1,7 +1,6 @@
 package watch
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +15,8 @@ func RuntimeStatus() fleet.Rec {
 	now := fleet.Now()
 	rows := []fleet.Rec{}
 	sessions := sessionRecords()
-	for _, t := range deliverTargets() {
+	targets, configError := readDeliverTargets()
+	for _, t := range targets {
 		rows = append(rows, runtimeRow(t, sessions))
 	}
 	hb := Heartbeat()
@@ -30,7 +30,7 @@ func RuntimeStatus() fleet.Rec {
 			watcher = "stale"
 		}
 	}
-	return fleet.Rec{"at": now, "watcher": watcher, "heartbeat": hb, "workers": rows, "observations": filepath.Join(dir(), "observed.jsonl"), "configuration_error": deliveryConfigError(len(rows))}
+	return fleet.Rec{"at": now, "watcher": watcher, "heartbeat": hb, "workers": rows, "observations": filepath.Join(dir(), "observed.jsonl"), "configuration_error": configError}
 }
 
 func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
@@ -144,11 +144,11 @@ func renderRuntimeRow(b *strings.Builder, row fleet.Rec, now float64) {
 	if result := fleet.M(row, "result"); result != nil {
 		fmt.Fprintf(b, "  %s\n", fleet.TranscriptLine(result))
 	}
+	lastHook := "none observed for this launch"
 	if at := fleet.F(row, "last_event_at"); at > 0 {
-		fmt.Fprintf(b, "  Last hook: %s %s · %s ago · session %s\n", fleet.S(row, "last_event"), fleet.S(row, "last_tool"), fleet.FmtAge(now-at), fleet.S(row, "session"))
-	} else {
-		fmt.Fprintln(b, "  Last hook: none observed for this launch")
+		lastHook = fmt.Sprintf("%s %s · %s ago · session %s", fleet.S(row, "last_event"), fleet.S(row, "last_tool"), fleet.FmtAge(now-at), fleet.S(row, "session"))
 	}
+	fmt.Fprintf(b, "  Last hook: %s\n", lastHook)
 	for _, k := range []string{"error", "configuration_error", "binding_error"} {
 		if message := fleet.S(row, k); message != "" {
 			fmt.Fprintf(b, "  %s: %s\n", k, message)
@@ -162,26 +162,4 @@ func renderRuntimeRow(b *strings.Builder, row fleet.Rec, now float64) {
 		fmt.Fprintf(b, " · %.0f bytes · modified %s ago", fleet.F(row, "output_bytes"), fleet.FmtAge(now-at))
 	}
 	fmt.Fprintln(b)
-}
-
-func deliveryConfigError(accepted int) string {
-	path := fleet.Path("deliver.json")
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return "no deliver.json; no headless commands configured"
-	}
-	if err != nil {
-		return err.Error()
-	}
-	var entries map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return err.Error()
-	}
-	if entries == nil {
-		return "deliver.json must be an object"
-	}
-	if len(entries) != accepted {
-		return fmt.Sprintf("%d entries omitted due to an invalid address or command; inspect %s", len(entries)-accepted, path)
-	}
-	return ""
 }

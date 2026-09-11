@@ -10,7 +10,11 @@ import (
 // A named seat already identifies a checkout, so the common path needs no flag.
 func dispatchCheckout(repo, slot string) (string, error) {
 	if slot != "" {
-		if r := slotRow(slot); r != nil && repo == "" {
+		r := slotRow(slot)
+		if r == nil {
+			return "", refuse("fleet dispatch: no slot named %s; use fleet slots to list them", fleet.PyRepr(slot))
+		}
+		if repo == "" {
 			return fleet.S(r, "path"), nil
 		}
 	}

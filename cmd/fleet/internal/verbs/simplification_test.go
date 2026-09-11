@@ -61,6 +61,19 @@ func TestExplicitRepoRejectsSeatFromAnotherRepository(t *testing.T) {
 	}
 }
 
+func TestUnknownDispatchSeatRefusesBeforeResolvingWork(t *testing.T) {
+	lead, _, seat := crossRepoSeat(t)
+	for _, repo := range []string{"", lead} {
+		err := CmdDispatch("missing-branch", "implementation", "lead", "", "missing-seat", "do work", "", "", false, repo)
+		if err == nil || !strings.Contains(err.Error(), "no slot named 'missing-seat'") {
+			t.Fatalf("did not report the unknown seat: %v", err)
+		}
+	}
+	if fleet.BranchOf(seat) != "" || len(dispatchRows()) != 0 {
+		t.Fatal("unknown-seat refusal mutated work")
+	}
+}
+
 func TestDirtySameBranchResumeAndUnassignPreserveFiles(t *testing.T) {
 	_, repo, seat := crossRepoSeat(t)
 	if err := CmdDispatch("work", "implementation", "lead", "", "worker-seat", "do work", "", "", false); err != nil {

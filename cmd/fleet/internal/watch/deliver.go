@@ -40,6 +40,7 @@ package watch
 // address — an address with no entry keeps its mail until a session starts.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,10 +89,35 @@ func grace(key string, fallback float64) float64 {
 // An unreadable or malformed entry is skipped: delivery configuration is the
 // operator's, and a typo in it must not stop the fold.
 func deliverTargets() []deliverTarget {
-	cfg := fleet.ReadJSON(fleet.Path("deliver.json"))
-	if cfg == nil {
-		return nil
+	targets, _ := readDeliverTargets()
+	return targets
+}
+
+// Read once so status describes the same configuration it used for worker rows.
+func readDeliverTargets() ([]deliverTarget, string) {
+	path := fleet.Path("deliver.json")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, "no deliver.json; no headless commands configured"
 	}
+	if err != nil {
+		return nil, err.Error()
+	}
+	var cfg fleet.Rec
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err.Error()
+	}
+	if cfg == nil {
+		return nil, "deliver.json must be an object"
+	}
+	targets := parseDeliverTargets(cfg)
+	if len(cfg) != len(targets) {
+		return targets, fmt.Sprintf("%d entries omitted due to an invalid address or command; inspect %s", len(cfg)-len(targets), path)
+	}
+	return targets, ""
+}
+
+func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 	var out []deliverTarget
 	for address := range cfg {
 		entry := fleet.M(cfg, address)
