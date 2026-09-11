@@ -606,4 +606,16 @@ evidence now keeps the reservation too (second-panel bridge-kill finding). Do no
 provider cleanup. Full descendant-quiescence proof is outside this transport
 slice; a future execution-scope change needs failure injection and measured
 process-tree evidence. Normal Codex turn interruption passed a real foreground
-command test, but forced cleanup and real Claude cancellation remain unqualified.
+command test. Normal real Claude SDK interruption has also passed; forced cleanup
+remains unqualified.
+
+Final-panel residuals at the two-fix-round cap: the README's later status paragraph
+still calls session integration future work; use the provider guide and PR #318's
+evidence instead. `fresh: true` starts a new session only after the prior reservation
+can safely release. A failed resume without provider-terminal evidence retains its
+reservation and has no automatic recovery path; fresh does not bypass that safety
+check. Explicit descendant-safe recovery remains deferred with execution scopes.
+Provider delivery now refuses relative FLEET_STATE or ORG_STATE roots before
+launching, because a child working directory would otherwise change their meaning.
+Use absolute state roots. Final identity and state-root fixes go to the judge with
+tests; no fourth panel is requested.

@@ -34,7 +34,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
 const fakeClaude = `export function query({options}) {
  let interrupted=false;
  return { interrupt:async()=>{interrupted=true},close(){},async *[Symbol.asyncIterator](){
-  const session_id=process.env.CASE==='mismatch'?'wrong':options.resume||'real-session';
+  const session_id=process.env.CASE==='missing-identity'?undefined:process.env.CASE==='mismatch'?'wrong':options.resume||'real-session';
   yield {type:'system',subtype:'init',session_id};
   if(process.env.CASE==='early-exit')return;
   if(process.env.CASE==='cancel')while(!interrupted)await new Promise(r=>setTimeout(r,10));
@@ -79,5 +79,13 @@ for(const provider of ['claude','codex']) {
  });
 }
 test('Codex failed resume does not start fresh',async()=>{const r=await run('codex','resume-fail','missing');assert.equal(r.code,1);assert.match(r.state.error,/no such thread/)});
+
+for (const resume of [undefined, 'requested-only']) {
+ test('Claude requires observed identity on '+(resume?'resume':'start'),async()=>{
+  const r=await run('claude','missing-identity',resume);
+  assert.equal(r.code,1);assert.equal(r.state.provider_session,undefined);
+  assert.equal(r.state.provider_terminal,false);assert.match(r.state.error,/no observed session identity/);
+ });
+}
 
 test('interrupt timeout preserves its cause and is not provider-terminal evidence',async()=>{const r=await run('codex','timeout');assert.equal(r.code,130,r.err);assert.equal(r.state.provider_state,'failed');assert.equal(r.state.provider_terminal,false);assert.match(r.state.error,/did not acknowledge interrupt/)});

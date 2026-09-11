@@ -98,6 +98,9 @@ func wakePrompt(t deliverTarget, rows []fleet.Rec, assignment string) string {
 }
 
 func run(t deliverTarget, text, assignment string, now float64) (int, error) {
+	if !filepath.IsAbs(fleet.State) || !filepath.IsAbs(fleet.OrgState) {
+		return 0, fmt.Errorf("provider delivery requires absolute FLEET_STATE and ORG_STATE roots")
+	}
 	last, err := readLaunch(t)
 	if err != nil {
 		return 0, err

@@ -28,6 +28,31 @@ func waitExit(t *testing.T, target deliverTarget) fleet.Rec {
 	return nil
 }
 
+func TestRelativeStateCannotLaunchProviderInAnotherDirectory(t *testing.T) {
+	home, _ := deliverEnv(t)
+	original := providerCommand
+	providerCommand = func(map[string]any) (*exec.Cmd, error) {
+		t.Fatal("relative state must be refused before invoking a provider")
+		return nil, nil
+	}
+	t.Cleanup(func() { providerCommand = original })
+	state, org := fleet.State, fleet.OrgState
+	defer func() { fleet.State, fleet.OrgState = state, org }()
+	for _, root := range []string{"fleet", "org"} {
+		fleet.State, fleet.OrgState = state, org
+		if root == "fleet" {
+			fleet.State = "relative-fleet"
+		}
+		if root == "org" {
+			fleet.OrgState = "relative-org"
+		}
+		_, err := run(deliverTarget{address: "hub:lead", cwd: home, provider: "claude"}, "test", "", fleet.Now())
+		if err == nil || !strings.Contains(err.Error(), "absolute FLEET_STATE and ORG_STATE") {
+			t.Fatalf("relative %s root: %v", root, err)
+		}
+	}
+}
+
 func TestPeriodicWakeWithoutMailUsesOneRuntime(t *testing.T) {
 	home, sink := deliverEnv(t)
 	cfg := fleet.ReadJSON(fleet.Path("deliver.json"))

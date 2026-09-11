@@ -58,5 +58,42 @@ reservation change. The later Codex interruption test exercised the committed br
 and Go checks cover the final changes. This is mechanism-specific evidence, not a claim that
 one full live workflow ran on the final reviewed Workbench head.
 
-No claim of general production readiness, Windows provider qualification, controlled cost
-advantage or both-provider full workflow success is established by these observations.
+## Frozen-build follow-up
+
+Both full workflows subsequently passed using a clean build of Workbench
+`5b96aa0b9b7ffdbd6f71945028c0c71a202ac911`, binary SHA256
+`b1fdc153f71d7a5e89c8a5d8326781f5542ec02dae6f61d06bbc89c3b7ef69d7`:
+
+- Codex: [draft sandbox PR #18](https://github.com/itsHabib/fleet-demo-sandbox/pull/18),
+  exact head `b35cdd5d5ea2bb43be6dbf41c1935a4850921238`, with
+  [independent verification](https://github.com/itsHabib/fleet-demo-sandbox/pull/18#issuecomment-5636832461).
+- Claude: [draft sandbox PR #19](https://github.com/itsHabib/fleet-demo-sandbox/pull/19),
+  exact head `1de2da1dfd1ae6662e2f481acc1006448a2bfaaa`, with
+  [independent verification](https://github.com/itsHabib/fleet-demo-sandbox/pull/19#issuecomment-5636972870).
+
+Each run completed the dependency question, handoff, retained dirty document, resumed
+author session, draft PR and independent clean-checkout Fleet verify/pass receipt.
+Each used six Go-watcher-scheduled attempts without post-start intervention. All addresses
+were stopped by the lead, provider terminal results and bridge exits collected, then the
+watcher stopped. Codex hook trust was configured before startup using the exact sandbox
+definitions. Claude used the existing provider login normally with disposable worktrees,
+Fleet and Org roots. A test-only PATH adapter executed the installed Claude CLI with
+`--setting-sources project,local`, empty strict MCP config and bounded tools. No credentials
+were copied and no global settings were edited. The SDK control protocol was unchanged.
+
+Normal foreground-command interruption passed for both providers on that bridge: actual
+command start, provider terminal interruption, bridge exit 130 and no delayed finish marker
+after the original command deadline. Codex also recorded app-server exit 0. Claude reported
+`result/error_during_execution` on interruption; the bridge correctly retained the interrupted
+state. This does not prove forced descendant quiescence.
+
+The final panel then exposed two additional invariant gaps: a requested Claude resume ID
+could stand in for missing observed identity, and relative state roots changed meaning in a
+provider's working directory. The subsequent patch requires observed Claude identity and
+refuses relative Fleet/Org roots before provider invocation. Fourteen protocol fixtures and
+the state-root launch regression cover those changes; the full workflows above predate them.
+Final-head live smoke/cancellation and CI evidence is recorded on PR #318 without another
+panel round. Remaining review deferrals are in FOLLOWUPS.md.
+
+No general production readiness, Windows provider qualification or controlled cost advantage
+is established by these bounded document/Git/session-identity workflows.

@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 
 const request = JSON.parse(fs.readFileSync(0, 'utf8'));
 const state = { attempt: request.attempt, provider: request.provider,
-  provider_state: 'starting', provider_started: false, provider_terminal: false, provider_session: request.resume || undefined,
+  provider_state: 'starting', provider_started: false, provider_terminal: false,
   trace: request.trace || request.output + ".trace.jsonl" };
 let interrupted = false;
 let interrupt = async () => {};
@@ -82,6 +82,7 @@ async function claude() {
       if (typeof message.error === 'string') state.error = message.error;
       event(message);
       if (message.type !== 'result') continue;
+      if (!state.provider_session) throw new Error('Claude returned no observed session identity');
       terminal = true;
       publish({provider_terminal: true});
       publish({ provider_state: interrupted ? 'interrupted' : message.is_error ? 'failed' : 'completed',
