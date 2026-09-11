@@ -48,7 +48,8 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 	if err != nil {
 		return Packet{}, err
 	}
-	files, paths, loci := packetRequirements(arts, actionablePacketComments(comments))
+	active := actionablePacketComments(comments)
+	files, paths, loci := packetRequirements(arts, active)
 	var b strings.Builder
 	b.WriteString(ctx)
 	remaining := SourceBudget
@@ -72,10 +73,15 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 			p.Missing = append(p.Missing, fmt.Sprintf("%s:%d: cited line absent; collect exact-head source", ref.path, ref.line))
 		}
 	}
-	for _, c := range comments {
-		if !strings.Contains(ctx, scrub(string(c.raw))) {
-			p.Missing = append(p.Missing, fmt.Sprintf("review %s/%d: omitted by context budget", c.evidence, c.index))
+	reviewRemaining := reviewContextCap
+	for _, c := range active {
+		entry := fmt.Sprintf("\n## Required source review (%s/%d; not authority)\n%s\n", c.evidence, c.index, scrub(string(c.raw)))
+		if len(entry) > reviewRemaining {
+			p.Missing = append(p.Missing, fmt.Sprintf("review %s/%d: exceeds required review budget", c.evidence, c.index))
+			continue
 		}
+		b.WriteString(entry)
+		reviewRemaining -= len(entry)
 	}
 	for _, a := range arts {
 		var s SourceEvidence

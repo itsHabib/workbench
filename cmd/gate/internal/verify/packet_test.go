@@ -20,7 +20,7 @@ func packetArtifact(t *testing.T, body any) state.Artifact {
 
 func TestPacketIncludesEveryAmbiguousREADMEAfterLargeDiff(t *testing.T) {
 	diff := "diff --git a/huge b/huge\n--- a/huge\n+++ b/huge\n@@ -0,0 +1,9000 @@\n" + strings.Repeat("+irrelevant text\n", 9000)
-	for _, path := range []string{"a/README.md", "b/README.md", "c/README.md"} {
+	for _, path := range []string{"README.md", "a/README.md", "b/README.md", "c/README.md"} {
 		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+complete %s\n", path, path, path, path, path)
 	}
 	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `README.md`"}}})}
@@ -28,7 +28,7 @@ func TestPacketIncludesEveryAmbiguousREADMEAfterLargeDiff(t *testing.T) {
 	if err != nil || !p.Complete {
 		t.Fatalf("%+v %v", p, err)
 	}
-	for _, path := range []string{"a/README.md", "b/README.md", "c/README.md"} {
+	for _, path := range []string{"README.md", "a/README.md", "b/README.md", "c/README.md"} {
 		if !strings.Contains(p.Context, "complete "+path) {
 			t.Fatalf("missing %s", path)
 		}
@@ -52,5 +52,24 @@ func TestPacketBudgetAndExactHeadRepair(t *testing.T) {
 	subject.HeadSHA = "changed"
 	if _, err := JudgmentPacket(arts, subject); err == nil {
 		t.Fatal("cross-head repair accepted")
+	}
+}
+
+func TestPacketPreservesRequiredReviewWhenAuthorCommentsFillOldBudget(t *testing.T) {
+	review := "Check `guide.md`"
+	comments := []map[string]any{{"is_bot": true, "body": review}, {"author": "author", "body": strings.Repeat("author chatter ", 6000)}}
+	diff := "diff --git a/guide.md b/guide.md\n--- a/guide.md\n+++ b/guide.md\n@@ -1 +1 @@\n-old\n+fixed\n"
+	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}, Subject{})
+	if err != nil || !p.Complete || !strings.Contains(p.Context, "Required source review") {
+		t.Fatalf("%+v %v", p.Missing, err)
+	}
+}
+
+func TestPacketRequiresStructuredAnchorOutsideDiff(t *testing.T) {
+	diff := "diff --git a/guide.md b/guide.md\n--- a/guide.md\n+++ b/guide.md\n@@ -1 +1 @@\n-old\n+fixed\n"
+	comments := []map[string]any{{"is_bot": true, "path": "guide.md", "line": 500, "body": "This code needs review."}}
+	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}, Subject{})
+	if err != nil || p.Complete || !strings.Contains(strings.Join(p.Missing, " "), "guide.md:500") {
+		t.Fatalf("%+v %v", p.Missing, err)
 	}
 }

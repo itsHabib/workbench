@@ -12,16 +12,24 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 )
 
+// buildRevision is set explicitly for local builds because Go can stamp the
+// enclosing repository when building from a nested Git worktree.
+var buildRevision string
+
 func gateVersion() map[string]any {
-	result := map[string]any{"revision": "unknown", "modified": false}
+	revision := buildRevision
+	if revision == "" {
+		revision = "unknown (unstamped local build)"
+	}
+	result := map[string]any{"revision": revision}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		result["module_version"] = info.Main.Version
 		for _, setting := range info.Settings {
 			switch setting.Key {
 			case "vcs.revision":
-				result["revision"] = setting.Value
+				result["go_vcs_revision"] = setting.Value
 			case "vcs.modified":
-				result["modified"] = setting.Value == "true"
+				result["go_vcs_modified"] = setting.Value == "true"
 			}
 		}
 	}

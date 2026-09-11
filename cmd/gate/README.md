@@ -43,8 +43,18 @@ The path is installed but unarmed until the operator completes the runbook. See
 
 ## Inspect and repair judgment evidence
 
-Run `gate version` to see the actual binary's revision, module version and dirty
-build flag. Update an installed binary with
+Run `gate version` to see the binary's stamped revision and Go build metadata.
+The `go_vcs_*` fields are diagnostic: Go 1.26 can stamp a nested Git worktree
+with its enclosing checkout's revision. An unstamped local build therefore
+reports its revision as unknown rather than presenting that metadata as proof.
+For a local build, stamp the source revision explicitly:
+
+```sh
+go build -ldflags "-X main.buildRevision=$(git rev-parse HEAD)" -o gate.exe ./cmd/gate
+./gate.exe version
+```
+
+Build from a clean checkout; the revision identifies committed source. Update an installed binary with
 `go install github.com/itsHabib/workbench/cmd/gate@latest`, then check
 `command -v gate` and `gate version` again. An older binary does not acquire
 merged fixes just because its checkout was updated.

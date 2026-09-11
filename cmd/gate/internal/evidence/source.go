@@ -21,7 +21,11 @@ func ExactSource(repo, head, name string) (string, string, error) {
 	if _, err := hex.DecodeString(head); err != nil {
 		return "", "", fmt.Errorf("evidence_source_invalid: head")
 	}
-	raw, err := gh("api", "repos/"+repo+"/contents/"+url.PathEscape(name)+"?ref="+head)
+	segments := strings.Split(name, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	raw, err := gh("api", "repos/"+repo+"/contents/"+strings.Join(segments, "/")+"?ref="+head)
 	if err != nil {
 		return "", "", err
 	}

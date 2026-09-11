@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func packetCLIFixture(t *testing.T) (env, verify.Subject, string, string, func(i
 	content := "complete companion source\n"
 	sum := sha1.Sum(append([]byte(fmt.Sprintf("blob %d%c", len(content), 0)), []byte(content)...))
 	raw, _ := json.Marshal(map[string]any{"type": "file", "path": "docs/companion.md", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
-	script := "#!/bin/sh\ncase \"$2\" in\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\n*/contents/*) printf '%s' '" + string(raw) + "';;\n*) exit 99;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$2\" in\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\nrepos/o/r/contents/docs/companion.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(raw) + "';;\n*) exit 99;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -166,4 +167,39 @@ func packetCLIFixture(t *testing.T) (env, verify.Subject, string, string, func(i
 		return string(out)
 	}
 	return e, subject, grant.ID, run, call
+}
+
+func TestEvidenceRepairConcurrentBound(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	source := func(string, string, string) (string, string, error) { return "text", "blob", nil }
+	var wg sync.WaitGroup
+	results := make(chan error, 6)
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := supplementEvidence(e, run, grant, []string{"x"}, head, source)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+			continue
+		}
+		if !strings.Contains(err.Error(), "evidence_repair_limit") {
+			t.Fatal(err)
+		}
+	}
+	if successes != 3 {
+		t.Fatalf("%d accepted supplements, want 3", successes)
+	}
+	audit, err := e.st.Audit()
+	if err != nil || !audit.OK {
+		t.Fatalf("%+v %v", audit, err)
+	}
 }
