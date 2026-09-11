@@ -17,9 +17,9 @@
     "\\.cs$"
   ],
   "critical": [
-    "^apps/web/src/api/cam_firewall",
+    "^apps/web/src/api/cam_guard",
     "^apps/desktop/src/.*(upload|gate|verdict|engine)",
-    "hypermill",
+    "camtool",
     "featureFlag|flagService"
   ],
   "wire": [

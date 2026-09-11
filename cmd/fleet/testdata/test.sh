@@ -189,12 +189,12 @@ out=$( (cd "$work/wt" && "$PY" "$F" tier --base feat/x --json) 2>&1 )
 case "$out" in *'"tier": 0'*) echo "  ok    the step-1 starter tier.json (critical/wire empty) lets the verb answer";; *) echo "  FAIL  starter tier.json did not answer: $out"; fails=$((fails+1));; esac
 cp "$here/tier.example.json" "$FLEET_STATE/tier.json"
 mkdir -p "$work/wt/apps/web/src/api" "$work/wt/apps/desktop/src" "$work/wt/docs"
-printf 'export function config(){ const degraded = false; return { webDisplay: false }; }\n' > "$work/wt/apps/web/src/api/cam_firewall.ts"
+printf 'export function config(){ const degraded = false; return { webDisplay: false }; }\n' > "$work/wt/apps/web/src/api/cam_guard.ts"
 printf 'notes\n' > "$work/wt/docs/notes.md"
 git -C "$work/wt" add -A && git -C "$work/wt" -c user.email=t@t -c user.name=t commit -qm "flag read"
 tier=$(cd "$work/wt" && "$PY" "$F" tier --base feat/x --json | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["tier"])')
 [ "$tier" = "3" ] && echo "  ok    fleet tier: flag read on a critical path with a fail-mode default → T3" || { echo "  FAIL  tier=$tier wanted 3"; fails=$((fails+1)); }
-git -C "$work/wt" rm -q --cached apps/web/src/api/cam_firewall.ts && rm "$work/wt/apps/web/src/api/cam_firewall.ts" && git -C "$work/wt" -c user.email=t@t -c user.name=t commit -qam "docs only"
+git -C "$work/wt" rm -q --cached apps/web/src/api/cam_guard.ts && rm "$work/wt/apps/web/src/api/cam_guard.ts" && git -C "$work/wt" -c user.email=t@t -c user.name=t commit -qam "docs only"
 tier=$(cd "$work/wt" && "$PY" "$F" tier --base feat/x --json | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["tier"])')
 [ "$tier" = "0" ] && echo "  ok    fleet tier: docs-only diff → T0" || { echo "  FAIL  tier=$tier wanted 0"; fails=$((fails+1)); }
 # Defect 21: `fleet tier` decoded git's output with the locale encoding, so a diff containing any
@@ -258,7 +258,7 @@ out=$(FLEET_LANES="$work/lanes-bad" "$PY" "$F" role "$REPO" shaped:cam 2>&1); rc
 # substrate parses the way it parses `git`, is shell surface rather than domain vocabulary.
 # The exemption removes only the `gh pr` token span from each line before the grep runs, so a domain
 # word elsewhere on a line that also says `gh pr` is still caught (the old line-wide -v hid it).
-hits=$(for f in "$here/hook.py" "$here/fleet.py" "$here/codex-adapter.py" "$here/fleet-mcp.py"; do sed -E 's/gh(\\s\+|\\s\*|[[:space:]]+)pr([^A-Za-z0-9_]|$)/gh_pull\2/g' "$f" | grep -niE '\b(pr|ci|review|hypermill|nx|finisher|author|liverun|supervisor|infra)\b' | sed "s#^#$(basename "$f"):#"; done || true)
+hits=$(for f in "$here/hook.py" "$here/fleet.py" "$here/codex-adapter.py" "$here/fleet-mcp.py"; do sed -E 's/gh(\\s\+|\\s\*|[[:space:]]+)pr([^A-Za-z0-9_]|$)/gh_pull\2/g' "$f" | grep -niE '\b(pr|ci|review|camtool|nx|finisher|author|liverun|supervisor|infra)\b' | sed "s#^#$(basename "$f"):#"; done || true)
 [ -z "$hits" ] && echo "  ok    FR1: no lane name or domain word in hook.py, fleet.py, codex-adapter.py, fleet-mcp.py" || { echo "  FAIL  FR1: domain words in the substrate:"; printf '%s\n' "$hits" | sed 's/^/      /'; fails=$((fails+1)); }
 [ -z "${FLEET_CODEX_EVENTS:-}" ] || { out=$(codex execpolicy check --rules "$work/wt/.codex/rules/fleet-role.rules" gh pr merge topic 2>/dev/null); printf '%s' "$out" | "$PY" -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('decision')=='forbidden' else 1)" && echo "  ok    Codex execpolicy loads the generated rule and forbids gh pr merge" || { echo "  FAIL  Codex execpolicy did not enforce the generated rule"; fails=$((fails+1)); }; }
 # Defect 3: the harness loads <checkout>/.claude/settings.local.json for a worktree nested at
@@ -434,16 +434,16 @@ PY
 
 # Defect 15: `fleet role` rewrote the line endings of the WHOLE roles.map, because Python text mode
 # translates \n to \r\n on Windows. org's boot hook parses with `while read -r prefix tenant role`,
-# so the \r rides along on the role, `org boot` gets `supervisor:sidebar\r`, finds nothing and exits
+# so the \r rides along on the role, `org boot` gets `supervisor:panel\r`, finds nothing and exits
 # 0 — org's lanes stop booting with no error. Assert we touch only the line we were asked to touch.
 cp "$ORG_STATE/roles.map" "$ORG_STATE/roles.map.d15"
-printf 'C:/x work steward:sidebar\nC:/y work verifier:sidebar\n' > "$ORG_STATE/roles.map"
+printf 'C:/x work steward:panel\nC:/y work verifier:panel\n' > "$ORG_STATE/roles.map"
 "$PY" "$F" role "$WORK" author:cam >/dev/null 2>&1
 "$PY" - "$ORG_STATE/roles.map" <<'PY' && echo "  ok    fleet role leaves the rest of roles.map byte-identical (no CRLF rewrite)" || { echo "  FAIL  fleet role rewrote line endings or existing lines"; fails=$((fails+1)); }
 import sys
 d = open(sys.argv[1], "rb").read()
 crlf = d.count(b"\r\n")
-kept = b"C:/x work steward:sidebar\nC:/y work verifier:sidebar\n" in d
+kept = b"C:/x work steward:panel\nC:/y work verifier:panel\n" in d
 if crlf:
     print("    %d CRLF line endings written into an LF file" % crlf)
 if not kept:
@@ -1110,7 +1110,7 @@ hook.drop_lease(hook.scope(sl2, "feat/p"), "bd_idlework"); hook._unlink(hook.pat
 sys.exit(1 if bad else 0)
 PY
 # The shipped live-run lane: two keys (the machine and the operator's attention), a receipt kind, a cadence.
-"$PY" -c "import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m['produces']=='live' and set(m['requires'])=={'slot:hypermill','slot:live-run'} and m.get('cadence') else 1)" "$here/lanes/liverun/manifest.json" && echo "  ok    lanes/liverun requires slot:hypermill AND slot:live-run, produces live, states a cadence" || { echo "  FAIL  shipped liverun manifest"; fails=$((fails+1)); }
+"$PY" -c "import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m['produces']=='live' and set(m['requires'])=={'slot:camtool','slot:live-run'} and m.get('cadence') else 1)" "$here/lanes/liverun/manifest.json" && echo "  ok    lanes/liverun requires slot:camtool AND slot:live-run, produces live, states a cadence" || { echo "  FAIL  shipped liverun manifest"; fails=$((fails+1)); }
 mkdir -p "$work/lanes-bad/cad"; printf '{"kind":"cad","card":"card.md","denies":[],"requires":[],"produces":null,"slots":0,"cadence":"soon"}\n' > "$work/lanes-bad/cad/manifest.json"; printf 'card\n' > "$work/lanes-bad/cad/card.md"
 out=$(FLEET_LANES="$work/lanes-bad" "$PY" "$F" role "$REPO" cad:cam 2>&1); rc=$?
 [ "$rc" != 0 ] && case "$out" in *cadence*) echo "  ok    a manifest cadence that is not a duration is refused, naming the key";; *) echo "  FAIL  bad cadence text: $out"; fails=$((fails+1));; esac || { echo "  FAIL  bad cadence accepted"; fails=$((fails+1)); }
