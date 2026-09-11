@@ -27,8 +27,8 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 
 | tool | what it does |
 |---|---|
-| [`fleet`](cmd/fleet/README.md) | the substrate for a team of agents: a hook that derives identity, liveness and leases from harness events; seats, assignment rows, receipts, role-addressed mail, a watcher that folds it into a board |
-| [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | role continuity: charters, the role tree, and each lead's own append-only record (intent, effect, resolution, escalation); the MCP face exposes the working verbs only, and keeps charter, recharter, retire, delegate, takeover and revoke operator-only |
+| [`fleet`](cmd/fleet/README.md) | the substrate for a team of agents: a hook that derives identity, liveness and leases from harness events; seats, assignment rows, receipts, role-addressed mail, one Go watcher for the board, headless polling, assignment/mail wakeups and recurring lead ticks |
+| [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | editable Markdown role cards and an optional parent directory; register, read, list. Work, messaging and checkpoints need no Org lifecycle; old journal recovery is explicit under `org legacy` |
 | [`runway`](cmd/runway/README.md) | foreground execution-runtime controller: one admitted request at a time |
 | [`dispatch`](cmd/dispatch/README.md) | placement: which engine and where a task runs |
 | [`driverstate`](cmd/driverstate/README.md) | the human and cron CLI over the driver-state event ledger |

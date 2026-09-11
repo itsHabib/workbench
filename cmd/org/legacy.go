@@ -1,26 +1,5 @@
-// Command org is the Baton home: the runtime that keeps role continuity
-// chains on disk and lets sessions act as roles.
-//
-// The kernel — what a role is, which record may extend a chain, what the fold
-// means — lives in contracts/org and is imported as types and laws, never
-// wrapped or re-decided here. This binary owns the three things a pure kernel
-// cannot: WHERE chains live (a state directory of JSONL files + content-
-// addressed blobs), WHEN a record is stamped (the home's clock, the home's
-// lock), and HOW a fresh session re-enters (the boot index, byte-capped for
-// injection).
-//
-// Verbs map one-to-one onto record kinds; a session's lifecycle is:
-//
-//	org attach -role lead:x        # become the incarnation (refused if held)
-//	org boot   -role lead:x        # the index a session starts from
-//	org claim  -role lead:x -work dossier:org/p1/t3
-//	org note   -role lead:x -body "found the bug in ..."
-//	org yield  -role lead:x -work dossier:org/p1/t3 -body "..."
-//	org release -role lead:x       # hand the role back cleanly
-//
-// Exit codes are a load-bearing seam: 0 ok · 1 the kernel refused the record
-// (stderr carries the reason id) · 2 usage · 4 error. A refusal is not an
-// error: it is the substrate doing its one job.
+// Legacy Baton CLI, retained for existing records and unfinished migrations.
+// Normal Org usage does not enter this protocol.
 package main
 
 import (
@@ -46,8 +25,6 @@ const (
 	codeUsage   = 2
 	codeError   = 4
 )
-
-func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
 // verbs maps each verb to its handler. Write verbs append exactly one record;
 // read verbs never take the lock.
@@ -87,15 +64,15 @@ var verbs = map[string]func(*env, []string) error{
 	"blob":       cmdBlob,
 }
 
-func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runLegacy(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		usage(stderr)
+		legacyUsage(stderr)
 		return codeUsage
 	}
 	cmd, ok := verbs[args[0]]
 	if !ok {
 		fmt.Fprintf(stderr, "org: unknown verb %q\n", args[0])
-		usage(stderr)
+		legacyUsage(stderr)
 		return codeUsage
 	}
 	e := &env{stdin: stdin, stdout: stdout, stderr: stderr}
@@ -113,8 +90,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return codeError
 }
 
-func usage(w io.Writer) {
-	fmt.Fprintln(w, `usage: org <verb> [flags]
+func legacyUsage(w io.Writer) {
+	fmt.Fprintln(w, `usage: org legacy <verb> [flags]
 
 lifecycle   charter · attach · release · retire · takeover · revoke · delegate
 correction  annul (repudiate the tip; corrects forward, does not revert)
@@ -124,8 +101,8 @@ obligations intent · resolve · escalate · seal
 narrative   note · mark · checkpoint · report · message   (-body "…" | -body -)
 read        boot · intake · status · sweep · log · verify · blob
 
-shape: org <verb> -state <dir> -tenant <id> -role <id> [verb flags]
-       flags follow the verb — org -state … <verb> is an unknown verb, and any
+shape: org legacy <verb> -state <dir> -tenant <id> -role <id> [verb flags]
+       flags follow the verb — org legacy -state … <verb> is an unknown verb, and any
        flag after a positional argument is silently ignored
        -state defaults to ORG_STATE, -tenant to ORG_TENANT`)
 }
@@ -300,7 +277,7 @@ func nameTheMissingAttach(h *home.Home, tenant, role string, err error) error {
 		return err
 	}
 	return &org.Refusal{Reason: org.ReasonIncarnationMissing, Seq: int64(len(records)) + 1, Detail: fmt.Sprintf(
-		"%s has never been attached, so no incarnation exists to name — run org attach -role %s first (or org begin, which attaches for you). Do not present a digest from an earlier session",
+		"%s has never been attached, so no incarnation exists to name — run org legacy attach -role %s first (or org legacy begin, which attaches for you). Do not present a digest from an earlier session",
 		role, role)}
 }
 
@@ -499,7 +476,7 @@ func doneTarget(state org.RoleState, work string) (string, error) {
 func claimable(state org.RoleState, work string) error {
 	if state.Dangling != "" {
 		return preflight(org.ReasonDanglingClaim,
-			"a predecessor's claim on %s is unresolved; finish it (org done -work %s) before beginning %s",
+			"a predecessor's claim on %s is unresolved; finish it (org legacy done -work %s) before beginning %s",
 			state.Dangling, state.Dangling, work)
 	}
 	if len(state.OpenIntents) > 0 {
@@ -629,7 +606,7 @@ func cmdCharter(e *env, args []string) error {
 // documented two-command recipe:
 //
 //   - ASSIGN FIRST, then unassign. A crash between the two leaves the item
-//     held twice — which `org sweep` reports as an assign_conflict — instead
+//     held twice — which `org legacy sweep` reports as an assign_conflict — instead
 //     of held by nobody, which nothing can see. A visible conflict is a
 //     recoverable state; a silent orphan is lost work.
 //   - Each APPEND is fenced to the tip it was decided from, so a chain that
@@ -736,11 +713,11 @@ func cmdTransfer(e *env, args []string) error {
 		ExpectTip: src.Tip,
 	})
 	if err != nil {
-		return fmt.Errorf("unassign from %s — %s now holds %s TWICE, which org sweep reports as an assign_conflict; re-run this command to finish: %w", s.role, *to, *work, err)
+		return fmt.Errorf("unassign from %s — %s now holds %s TWICE, which org legacy sweep reports as an assign_conflict; re-run this command to finish: %w", s.role, *to, *work, err)
 	}
 	steps = append(steps, r)
 	if _, ok := org.MatchScope(dst.Terms.Scope, *work); !ok {
-		fmt.Fprintf(e.stderr, "warning: %s is outside %s's charter scope %v; org sweep will report it as scope_drift\n",
+		fmt.Fprintf(e.stderr, "warning: %s is outside %s's charter scope %v; org legacy sweep will report it as scope_drift\n",
 			*work, *to, dst.Terms.Scope)
 	}
 	return reportSteps(e, s, steps)
@@ -790,10 +767,10 @@ func shortDigest(d string) string {
 // and it will not mint either one.
 func transferable(src, dst org.RoleState, srcRole, dstRole, work string) error {
 	if src.Holder == "" {
-		return fmt.Errorf("%s is not held; attach it before transferring out of it (org attach -role %s)", srcRole, srcRole)
+		return fmt.Errorf("%s is not held; attach it before transferring out of it (org legacy attach -role %s)", srcRole, srcRole)
 	}
 	if dst.Holder == "" {
-		return fmt.Errorf("%s is not held; attach it before transferring into it (org attach -role %s), then pass -to-incarnation", dstRole, dstRole)
+		return fmt.Errorf("%s is not held; attach it before transferring into it (org legacy attach -role %s), then pass -to-incarnation", dstRole, dstRole)
 	}
 	if src.Active == work {
 		return fmt.Errorf("%s is the active claim on %s; end it (yield or done) before transferring it", work, srcRole)
@@ -1248,7 +1225,7 @@ func cmdVerify(e *env, args []string) error {
 // cmdBlob reads one body out of the store. It is the only verb taking a
 // positional argument, and that makes it the only one where a trailing flag is
 // silently dropped: Go's flag package stops parsing at the first non-flag
-// argument, so `org blob <digest> -state /tmp/x` reads the DEFAULT state root
+// argument, so `org legacy blob <digest> -state /tmp/x` reads the DEFAULT state root
 // and reports the blob missing from a home the caller never named. Refusing the
 // leftovers turns a wrong answer into a usage error, and -digest gives the
 // order-independent form.
@@ -1268,7 +1245,7 @@ func cmdBlob(e *env, args []string) error {
 		*digest = s.fs.Arg(0)
 	}
 	if *digest == "" {
-		return fmt.Errorf("usage: org blob -digest <sha256:…>  (or: org blob [flags] <sha256:…>)")
+		return fmt.Errorf("usage: org legacy blob -digest <sha256:…>  (or: org legacy blob [flags] <sha256:…>)")
 	}
 	if n := s.fs.NArg(); n > 1 {
 		return fmt.Errorf("%q follows a positional argument and was not parsed as a flag; put every flag before the digest, or use -digest", s.fs.Arg(1))

@@ -42,10 +42,10 @@ package watch
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
@@ -59,10 +59,13 @@ const (
 
 // deliverTarget is one configured address.
 type deliverTarget struct {
-	address string
-	cwd     string
-	cmd     []string
-	lateTo  string
+	address     string
+	cwd         string
+	cmd         []string
+	lateTo      string
+	every       time.Duration
+	instruction string
+	configError string
 }
 
 // grace reads a duration from the environment, falling back to the default. An
@@ -99,7 +102,15 @@ func deliverTargets() []deliverTarget {
 		if err := fleet.MailAddress(address, "address"); err != nil {
 			continue
 		}
-		out = append(out, deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), cmd: cmd, lateTo: fleet.S(entry, "LATE_TO")})
+		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), cmd: cmd, lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt")}
+		if raw := fleet.S(entry, "every"); raw != "" {
+			var err error
+			t.every, err = time.ParseDuration(raw)
+			if err != nil || t.every <= 0 || strings.TrimSpace(t.instruction) == "" {
+				t.configError = "every requires a positive duration and a nonempty prompt"
+			}
+		}
+		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].address < out[j].address })
 	return out
@@ -147,26 +158,61 @@ func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec
 	var observed []fleet.Rec
 	launched := false
 	err := fleet.KeyLock(deliverLockKey, func() error {
-		if err := bound(t); err != nil {
-			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-unbound", "address": t.address, "cwd": t.cwd, "error": err.Error()})
-			return nil
+		_, _, slot := fleet.MapRowsFor(t.cwd)
+		if slot != "" {
+			return fleet.KeyLock("slot:"+slot, func() error {
+				var err error
+				observed, launched, err = deliverLocked(t, now, mailGrace, idleGrace)
+				return err
+			})
 		}
-		rows, err := eligibleMail(t.address, now, mailGrace)
-		if err != nil {
-			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-failed", "address": t.address, "error": err.Error()})
-			return nil
-		}
-		if len(rows) == 0 || present(sessionRecords(), t.cwd, now, idleGrace) {
-			return nil
-		}
-		launched = true
-		observed = append(observed, launch(t, rows, now)...)
-		return nil
+		var err error
+		observed, launched, err = deliverLocked(t, now, mailGrace, idleGrace)
+		return err
 	})
 	if err != nil {
 		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-deferred", "address": t.address, "cwd": t.cwd, "error": err.Error()})
 	}
 	return observed, launched
+}
+
+func deliverLocked(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec, bool, error) {
+	var observed []fleet.Rec
+	launched := false
+
+	if err := bound(t); err != nil {
+		observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-unbound", "address": t.address, "cwd": t.cwd, "error": err.Error()})
+		return observed, launched, nil
+	}
+	_, _, slot := fleet.MapRowsFor(t.cwd)
+	branch := fleet.BranchOf(t.cwd)
+	if (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil) {
+		return observed, launched, nil
+	}
+	rows, err := eligibleMail(t.address, now, mailGrace)
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-failed", "address": t.address, "error": err.Error()})
+		return observed, launched, nil
+	}
+	if t.configError != "" {
+		observed = append(observed, fleet.Rec{"at": now, "what": "delivery-config-invalid", "address": t.address, "error": t.configError})
+		return observed, launched, nil
+	}
+	last, err := readLaunch(t)
+	if err != nil {
+		return observed, launched, err
+	}
+	if launchPresent(last) || present(sessionRecords(), t.cwd, now, idleGrace) {
+		return observed, launched, nil
+	}
+	assignment := pendingAssignment(t, last)
+	periodic := t.every > 0 && now-fleet.F(last, "at") >= t.every.Seconds()
+	if len(rows) == 0 && assignment == "" && !periodic {
+		return observed, launched, nil
+	}
+	launched = true
+	observed = append(observed, launch(t, rows, now, assignment)...)
+	return observed, launched, nil
 }
 
 // bound is whether the configured launch directory is the mailbox address's own
@@ -222,7 +268,7 @@ func eligibleMail(address string, now, mailGrace float64) ([]fleet.Rec, error) {
 // Taking the reservation first inverts the failure: nothing starts until every message
 // is marked, and a start that never happens gives the marks back. A give-back that
 // itself fails is the one remaining hole, and it is recorded rather than left silent.
-func launch(t deliverTarget, rows []fleet.Rec, now float64) []fleet.Rec {
+func launch(t deliverTarget, rows []fleet.Rec, now float64, assignment string) []fleet.Rec {
 	ids := make([]string, len(rows))
 	for i, r := range rows {
 		ids[i] = fleet.S(r, "id")
@@ -233,7 +279,7 @@ func launch(t deliverTarget, rows []fleet.Rec, now float64) []fleet.Rec {
 		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
 		return append(observed, release(t.address, reserved)...)
 	}
-	pid, err := run(t, prompt(t.address, rows))
+	pid, err := run(t, wakePrompt(t, rows, assignment), assignment, now)
 	if err != nil {
 		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
 		return append(observed, release(t.address, reserved)...)
@@ -291,33 +337,6 @@ func prompt(address string, rows []fleet.Rec) string {
 	return strings.Join(lines, "\n")
 }
 
-// run starts the operator's command detached, with its output in the watcher's own
-// directory. The watcher does not wait for it: the process it starts outlives the fold.
-func run(t deliverTarget, text string) (int, error) {
-	argv := make([]string, len(t.cmd))
-	for i, a := range t.cmd {
-		argv[i] = strings.ReplaceAll(a, "{{prompt}}", text)
-	}
-	logs := filepath.Join(dir(), "delivery")
-	if err := os.MkdirAll(logs, 0o755); err != nil {
-		return 0, err
-	}
-	log, err := os.OpenFile(filepath.Join(logs, fleet.Safe(t.address)+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = log.Close() }()
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Stdin = t.cwd, log, log, nil
-	detach(cmd)
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
-	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
-	return pid, nil
-}
-
 // present is whether someone in this directory would read the mail. A session that
 // has ended is gone; one with an open turn is working; one that is neither, and
 // untouched past the idle grace, is a window nobody is looking at.
@@ -325,6 +344,9 @@ func present(sessions []fleet.Rec, cwd string, now, idleGrace float64) bool {
 	want := fleet.CanonPath(cwd)
 	for _, s := range sessions {
 		if fleet.B(s, "ended") {
+			continue
+		}
+		if fleet.S(s, "pid_kind") == "harness" && !processPresent(int(fleet.F(s, "pid"))) {
 			continue
 		}
 		if fleet.CanonPath(fleet.S(s, "cwd")) != want && fleet.CanonPath(fleet.S(s, "launch_dir")) != want {

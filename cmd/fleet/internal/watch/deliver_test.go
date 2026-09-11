@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,22 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	oldState, oldOrg := fleet.State, fleet.OrgState
 	fleet.State, fleet.OrgState = t.TempDir(), t.TempDir()
 	t.Cleanup(func() { fleet.State, fleet.OrgState = oldState, oldOrg })
+	t.Cleanup(func() {
+		records, _ := filepath.Glob(fleet.Path("watch", "delivery", "*.json"))
+		for _, path := range records {
+			rec := fleet.ReadJSON(path)
+			if fleet.S(rec, "status") != "running" {
+				continue
+			}
+			exit := fleet.S(rec, "exit_file")
+			for i := 0; i < 500 && fleet.ReadJSON(exit) == nil; i++ {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if fleet.ReadJSON(exit) == nil {
+				t.Errorf("child did not finish before fixture cleanup: %s", path)
+			}
+		}
+	})
 	t.Setenv("FLEET_GITHUB", "off")
 	home = t.TempDir()
 	seat := filepath.Join(home, "seat")
@@ -334,7 +351,16 @@ func TestDeliverRecorder(_ *testing.T) {
 	if err := os.WriteFile(p, b, 0o600); err != nil {
 		os.Exit(3)
 	}
-	os.Exit(0)
+	if stop := os.Getenv("FLEET_TEST_WAIT_FILE"); stop != "" {
+		for i := 0; i < 1000; i++ {
+			if _, err := os.Stat(stop); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	code, _ := strconv.Atoi(os.Getenv("FLEET_TEST_EXIT_CODE"))
+	os.Exit(code)
 }
 
 // The reservation is durable before anything starts. A mailbox that cannot be

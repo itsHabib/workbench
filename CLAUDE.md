@@ -32,8 +32,7 @@ Orientation block you can point an agent at to ground it fast.
   the same exit codes, invariants, and checks.
   Nineteen today, grouped by what they own. Running agents: `fleet` (the substrate:
   hook-derived identity and liveness, seats, rows, receipts, role-addressed mail, the
-  watcher), `org` and `org-mcp` (role continuity: charters, the tree, each lead's own
-  record), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
+  watcher), `org` and `org-mcp` (editable role cards and an optional parent directory), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
   (the merge-authorization boundary; exit codes 0 pass / 1 blocked / 2 parked / 3 refused /
   4 error are a load-bearing seam), `triage` (`triage-floor`, `triage-advisory`), `review`,
   `reviewfindings`, `escalate` (the agent→human→agent back-channel for parked runs). Seeing
@@ -45,6 +44,15 @@ Orientation block you can point an agent at to ground it fast.
   `friction-log.md` — where this repo's tooling and docs failed an agent working
   in it; `/health` reads it for the cross-repo rollup, so tooling friction goes
   there, not in FOLLOWUPS.
+
+## Fleet headless runtime
+
+Use the Go `fleet watch` for persistent polling, recurring lead wakeups, delivery and launches.
+The Bash/Python runtime poller is retired. See `cmd/fleet/docs/headless.md` and
+`cmd/fleet/docs/run-a-fleet.md`. Desktop loops and native messaging remain a valid desktop
+workflow. New Fleet work does not need duplicate Org bootstrap or a per-tick action/message
+quota. Org registers editable prose cards; existing Baton history and recovery stay behind
+`org legacy`. Use `fleet watch status [--json]` for worker evidence between ticks.
 
 ## The one rule
 

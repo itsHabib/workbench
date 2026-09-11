@@ -3,6 +3,7 @@
 package fleet
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -47,6 +48,20 @@ func PidAlive(pid int) bool {
 		return false
 	}
 	return code == 259 // STILL_ACTIVE
+}
+
+// PidGone reports only proven process absence; an inspection error is unknown.
+func PidGone(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return errors.Is(err, windows.ERROR_INVALID_PARAMETER)
+	}
+	defer windows.CloseHandle(h)
+	var code uint32
+	return windows.GetExitCodeProcess(h, &code) == nil && code != 259
 }
 
 // HarnessPid on Windows records the parent and says so, as the Python does without

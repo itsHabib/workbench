@@ -14,7 +14,7 @@ The scripts under `cmd/fleet/e2e/` are the ones those runs used.
 | a worker asks its lead and a later session resumes with the answer, no operator | mail records with matching ids |
 | two workers contend for one resource; the refused one reports up; the overall lead orders; no overlap | `fleet leases` over time; the refusal text in the report; the order and its relay |
 | a verifier at the exact head emits a receipt; the row reads `done` | `receipts/<sha>.verify.json`; `fleet work` |
-| escalation goes one hop up; nothing sideways; nothing to the operator | the scorecard's edge counts |
+| questions reach the relevant peer without operator relay | message edges and operator rescues |
 | a stale order is refused on the evidence of the row | the lead's report back |
 
 ## Choose the sandbox
@@ -37,8 +37,7 @@ handoffs). Stand them up per `run-a-fleet.md`.
 5. Exactly one `fleet watch` on the machine.
 6. If sessions are made by mail: a delivery config (`deliver.json`: `{"<address>": {"cwd", "cmd"}}`,
    prompt placed right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt)
-   in `$FLEET_STATE`. `fleet watch` delivers from it itself; against a binary predating that,
-   run `e2e/mail-poll.sh` as the delivery process instead.
+   in `$FLEET_STATE`. Use the current Go watcher; see [headless.md](headless.md).
 7. The slow-command gate: after five 40-second runs, `bash scripts/bench.sh` needs the
    `FLEET_ALLOW_SLOW=<rule-slug>` prefix (the slug of the rule it trips) and the seat's allow
    list needs that rule's own `Bash(FLEET_ALLOW_SLOW=<rule-slug>:*)` — never a wildcard.
@@ -62,38 +61,25 @@ touch the bench.
 
 ## Kick off and watch
 
-One headless overall-lead tick that sends one `order` per child:
+Use the Go runtime from [headless.md](headless.md). Configure a recurring lead `every` and
+`prompt` when reproducing the desktop loop behavior. Workers wake from their current
+assignment with a brief or from mail; no second order after dispatch is required. One Go
+watcher handles both paths, with no default lifetime or worker turn cap. Keep the operator's
+explicit budget in the selected harness/run configuration.
 
-```sh
-(cd ~/dev/<repo>-lead && claude -p "<attach, claim the run item, send <run>-a-start-1 to supervisor:<name>-a and <run>-b-start-1 to supervisor:<name>-b, checkpoint, release; do not loop>" \
-   --model opus --max-turns 40 --output-format json \
-   --allowedTools 'Read,Skill,Bash(org *),Bash(<fleet binary> *),Bash(gh *),Bash(git *),Bash(cat *),Bash(ls *)' < /dev/null)
-```
+Watch `fleet work`, `fleet leases`, the PR list, `watch/observed.jsonl` and the per-attempt exit
+records in `watch/delivery/`. A process start is not proof that its task progressed; an exit
+is not a receipt. Exercise a worker that exits before emitting hooks, one that exits nonzero,
+and two overlapping folds receiving work for the same address. Verify retained files and
+that a lead gets its next periodic tick without an operator wakeup.
 
-With a current binary the running `fleet watch` already delivers and nothing further is needed; the
-poller below is for a binary predating in-watcher delivery, and running both at once double-launches.
-Then `bash cmd/fleet/e2e/mail-poll.sh <deliver.json> <fleet binary> <log dir> 10 45 <tenant>` in
-the background. Know what that stand-in does: it reads mail and sessions from `~/.fleet` only
-(not `FLEET_STATE`), its log-dir argument holds `poll.log` and the launched-id set, its binary
-argument is unused (put the real executable in each config entry's `cmd`), and it records ids
-before starting the process, so a failed launch is not retried on its own; inspect `poll.log`.
-Watch `fleet leases`, the PR list and the poll log; `fleet mail --for <address>` works only
-inside a live roled session. A loop printing each new file under `mail/.v2/` is the live view.
+## Desktop comparison
 
-
-## Desktop `/loop` as the delivery process
-
-If you would rather watch one visible session than run a background poller, make a desktop
-session the launcher. Open it in a directory that carries no role (never a seat or a lead
-directory), and give it `/loop 2m` over this instruction: read every configured address's
-unread, not-yet-launched mail from the v2 store (`e2e/mail-poll.sh` is the reference; the
-`launched.txt` set is the memory), and for each address with such mail and no live session in its
-directory, start one headless `claude -p` from a subshell in that directory with the mail lines
-in the prompt, log the launch, and end the turn. It sends no mail and takes no seat. Leads,
-workers and the verifier stay headless and disposable; the loop session is the only long-lived
-one, and it is not a role. On Windows the launch commands need a shell that runs
-`scripts/bench.sh` (Git Bash), the hook path is the installed one, and paths in `deliver.json`
-are that machine's; nothing from another machine's state applies.
+Keep desktop loops and native messaging as the desktop baseline. Do not make a desktop agent
+scan mailbox files or maintain a `launched.txt` set to emulate the headless runtime. Compare
+that baseline with periodic lead wakeups in Go, then with mail-only wakeups in the same Go
+runtime. Use comparable real work and acceptance. Historical sandbox runs changed several
+variables at once and do not establish that mail-only execution is cheaper or more reliable.
 
 ## Stop and score
 
@@ -104,7 +90,7 @@ python3 cmd/fleet/e2e/run-metrics.py <run-id> <since-iso-utc> --repo <owner>/<re
 ```
 
 The scorecard counts mail by kind and edge, joins relays by id with per-hop latency, counts
-watcher or poller launches and their latency, and sums sessions and tokens from the transcripts.
+watcher launches and their latency (retained historical poller logs are still readable), and sums sessions and tokens from the transcripts.
 Commit it under `runs/` in the sandbox and append a section to its record with every friction:
 reproducer, expected, actual, owner.
 

@@ -66,7 +66,7 @@ a store the Python wrote must still satisfy. The design record is cc-skills
 | hook | `fleet hook claude` / `fleet hook codex` | reads one harness event on stdin; exit 0 allow, exit 2 deny with the reason on stderr; injects `[fleet]` context lines |
 | CLI | `fleet <verb>` | the operator's side: stop, resume, revoke, take, drop, board, work, dispatch, … |
 | MCP | `fleet mcp` | the same verbs as tools over stdio, for a hub agent to call from inside a session |
-| watcher | `fleet watch` | one per machine; writes only under `watch/` (never a lease, session or row): folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
+| watcher | `fleet watch` | one Go runtime per machine; owns polling and configured launches, writes board/runtime records under `watch/` and delivery stamps on mail: folds the store into `board.json`, `work.json`, `board.md`, records transitions in `observed.jsonl`, revived by any SessionStart |
 
 Exit codes are a load-bearing seam. Hook: 0 allow, 2 deny. Verb: 0 ok, 1 refused
 with the reason on stderr (a refusal is the substrate doing its job), 2 usage;
@@ -252,11 +252,13 @@ See [Mail semantics and validation](docs/mail.md) for identity, storage and retr
 out loud what the board already knew. Both are folds: derived every tick, written as
 records, never held by the thing they start.
 
+See [the headless guide](docs/headless.md) for the supported Go runtime and recovery behavior.
+
 **Delivery.** `$FLEET_STATE/deliver.json` maps an address to what to run for it:
 
 ```json
 {"hub:lead": {"cwd": "/path/to/dir",
-              "cmd": ["claude", "-p", "{{prompt}}", "--model", "opus"],
+              "cmd": ["claude", "-p", "{{prompt}}"],
               "LATE_TO": "hub:above"}}
 ```
 
@@ -266,7 +268,7 @@ never delivered, and with nobody present in its directory, the watcher runs the
 command **once**, carrying every eligible message, and stamps each one
 `delivered_at`/`delivered_by`. A stamped message is never carried again; a started
 launch counts as present for the rest of the fold; a launch that fails to start leaves
-its mail for the next fold. `attempt`, `started` and `failed` are recorded in
+its mail for the next fold. `attempt`, `started`, `failed` and child exits are recorded in
 `watch/observed.jsonl`, with the command's output under `watch/delivery/`.
 
 *Present* means a session record in that directory that has not ended and either has
@@ -277,6 +279,14 @@ together. **Delivery latency is bounded by the fold interval** (`--interval`, de
 60s): a message arriving just after a fold waits for the next one, so worst case is
 one interval plus the grace. An address with no entry is never launched for; its mail
 waits for a session, as before.
+
+**Assignments and recurring ticks.** A configured seat with a new, current assignment and
+brief can start without a separate order message. Optional `every: "2m"` plus `prompt` in a
+lead entry supplies recurring turns through the same Go launch path. A durable child record
+prevents another launch before the child emits its first hook. Launch records and per-attempt
+exit results live in `watch/delivery/`; a dead original watcher means the eventual exit code
+may be unknown. There is no implicit turn cap or default watcher lifetime. See the headless
+guide for cancellation, ambiguous starts and retained work.
 
 **Lateness as mail.** Each fold also derives, and sends once per deadline, a `report`
 from `fleet:watch`:
@@ -382,13 +392,14 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 - [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
   lead, worker or verifier, read the fleet.
 - [docs/e2e.md](docs/e2e.md): prove a build end to end with real sessions in a sandbox of your
-  choosing; `e2e/mail-poll.sh` (delivery stand-in until the watcher launcher lands) and
-  `e2e/run-metrics.py` (the scorecard, from records only).
+  choosing; `e2e/run-metrics.py` is offline scorecard analysis, from records only.
+- [docs/headless.md](docs/headless.md): one Go runtime for polling, recurring lead ticks,
+  assignment wakeups, mail delivery and child exit observation.
 
 ## What is deliberately not here
 
-- No daemon owns anything. The watcher writes only its own board files; the hook is where facts
-  are written; leases live in files the kernel releases on death.
+- The Go watcher owns headless polling and launches. Work ownership remains in assignments
+  and leases, and merge authority remains in Gate. No Bash/Python runtime poller.
 - No agent ceremony. There is no check-in, heartbeat, or status an agent must
   send. If the board needs a fact, the hook derives it from an action the agent
   was going to take anyway.
@@ -445,3 +456,9 @@ This avoids sharing one role handoff between different worker seats of the same
 kind. Captured last assistant text remains separate from the intentional handoff.
 No old Org records, installed hooks, or live assignments are migrated by these
 commands. The longer-term single-work-record migration remains separate work.
+
+For headless activity between ticks, use `fleet watch status` (or `--json`): current process
+state, last observed hook/tool, output path and recorded exit. The command launcher is a
+transitional interface; durable Claude/Codex session integration is the next runtime step.
+Use `fleet tail <seat|role> [-n 20] [-f]` for recent visible assistant text, tool calls and
+available result details from the observed transcript or launch output.

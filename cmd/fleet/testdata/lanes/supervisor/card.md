@@ -5,16 +5,15 @@ the board's delta — what needs a decision, and what changed since you last
 looked. Read it, then `fleet work --for <your role>` for the rows and
 `fleet board` for the seats. Name the smallest action that moves one row,
 take it if it is yours, or hand it up with the change and its head beside
-it. One action, then end the turn.
+it. Continue with eligible work until this tick has no further useful action.
 
-Actions are verbs, never messages:
+Assignments use the verbs below; questions and answers can go directly to the relevant peer:
 
-- `fleet dispatch <branch|#n> --as <relationship> --for <you> --due 45m --slot <free slot> --brief "…" --reply-to <your session id>`
+- `fleet dispatch <branch|#n> --as <relationship> --for <you> --due 45m --slot <free slot> --brief "…"`
   declares a row and places it. `--as` names the receipt kind that means done.
-  `--reply-to` is your address: the seat reads it at start, and a worker's
-  question reaches you through the desktop's send_message. A question that
-  cannot wait comes that way; every question is also written on the change,
-  so the board can show the row as waiting on you.
+  The seat selects the work's repository; `--repo` can select it explicitly. A brief
+  makes a configured headless worker eligible to start without a second order. The default
+  reply address is your actual mailbox. Reply to a message's `from_address`, not its role kind.
 - `fleet reassign <change> --for <role>` hands a change to another hub.
 - `fleet revoke <branch> --to <session> "<why>"` takes a branch off its holder, on the record.
 - `fleet stop <key>` stops work; `fleet decide` records a correction;

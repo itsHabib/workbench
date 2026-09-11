@@ -1,76 +1,59 @@
 # org
 
-The Baton home: role continuity chains for agent sessions. A **role** is a
-durable office (`lead:agentic-development`) with an append-only hash chain; a
-**session** is a disposable incarnation that attaches to it, acts, and leaves
-a record. The next session starts where the last one stopped, and two
-sessions cannot silently reach different conclusions about the same thing —
-the chain's compare-and-swap refuses the second writer.
-
-The kernel (record spine, state machine, admission laws, the fold) is
-[`contracts/org`](../../contracts/org); this binary is its runtime.
-
-## Quickstart
+Editable role cards and a small registry. Give a role a name, write its prose,
+and optionally name a parent. There is no role lifecycle to perform before work.
 
 ```sh
-go install ./cmd/org
-
-# the operator charters a role once
-org charter -role lead:agentic-development \
-  -scope dossier:org -scope github:itsHabib/workbench \
-  -supervisor human:mh -cycle-ceiling 3 \
-  -retire-when "org loop merged into steward"
-
-# new work arrives: ask where it belongs before anything is written
-org intake  -work github:itsHabib/workbench#88
-
-# move work between two attached lanes (assign-first, both tips fenced)
-org transfer -role steward:a -work github:itsHabib/workbench#88 \
-  -to steward:b -to-incarnation "$B_INC" -incarnation "$A_INC"
-
-# a record written in error is repudiated (tip only; corrects forward, not back)
-org annul   -role lead:agentic-development -body "written against the wrong lane"
-
-# small work, bracketed by the composites: same records, two commands
-org begin -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
-org done  -role lead:agentic-development -body "where it ended up"
-
-# a session becomes the incarnation, works, and leaves a record
-org attach  -role lead:agentic-development -next-due 4h
-org assign  -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
-org claim   -role lead:agentic-development -work dossier:org/p1/t3
-org yield   -role lead:agentic-development -work dossier:org/p1/t3 -body "where I stopped"
-org checkpoint -role lead:agentic-development -body "SESSION END: …"
-
-# the next session reads the index the last one left
-org boot    -role lead:agentic-development
+# Write lead.md in your editor: purpose, responsibilities, repos and useful context.
+org charter -role lead:project -file ./lead.md -parent human:mh
+org boot -role lead:project
 org status
+
+# A second repo or child is ordinary configuration.
+# Edit lead.md; the next boot reads the change under the same role name.
+org charter -role researcher:project -file ./researcher.md -parent lead:project
 ```
 
-`org boot` is the re-entry surface: a byte-capped index (default 2048) of the
-role's charter, held work, obligations, liveness, and the last incarnation's
-final word — pointers with hooks, not a context dump. Depth is read lazily
-(`org blob <digest>`, `org log`).
+`charter` registers or updates the file reference. Omit `-parent` on an update to
+retain it; use `-parent ""` to clear it. The Markdown file stays where you wrote it.
+The registry is `$ORG_STATE/roles.json` (default `~/dev/org/state/roles.json`), a
+JSON array of `tenant`, `role`, `card` and optional `parent`. Commands accept
+`-state`, `-tenant` and `-json`. `boot -max-bytes N` optionally limits prose and
+points to the full card when truncated.
 
-Refusals are the substrate working: claim work you don't hold → exit 1,
-`work_not_held`. A supervisor `takeover` mid-claim leaves a **dangling
-obligation** the successor must discharge before claiming anything — silent
-disappearance of work is not representable.
+Parent references help discovery. Scope, expectations and repo lists belong in
+the prose; they do not become permission gates. Registering a role does not bind
+a directory, launch a worker, or create a messaging protocol. `roles.map` retains
+the existing directory/seat bindings. Fleet can work without this registry; Org
+can describe roles without Fleet. Read a card directly or use the optional startup
+hook to supply it to a session.
 
-## Harness wiring
+Mail belongs to mail. Useful handoffs belong with the work. Neither requires an
+Org claim, incarnation or checkpoint. Actual resource leases and merge authority
+remain with their existing owners.
 
-Two hooks close the loop for Claude Code sessions (both fail-open):
+## Upgrading existing installations
 
-- `hooks/sessionstart-boot.sh` — injects `org boot` into a fresh session when
-  its cwd maps to a role in `$ORG_STATE/roles.map`
-  (`<path-prefix> <tenant> <role>`, longest prefix wins).
-- `hooks/stop-mark.sh` — appends a mechanical `mark` when a session stops;
-  the next boot renders `degraded` until someone distills a checkpoint.
+Normal CLI and MCP usage changes in this release. Install matching `org` and
+`org-mcp` builds and replace old operating instructions with the card workflow.
+The MCP server now exposes only `org_charter`, `org_boot` and `org_status`.
 
-Install snippets are in each script's header. State lives at `$ORG_STATE`
-(default `~/dev/org/state`).
+Existing chains stay on disk, readable and recoverable through `org legacy`:
 
-## Exit codes
+```sh
+org legacy status
+org legacy boot -role lead:existing
+org legacy verify -role lead:existing
+```
 
-`0` ok · `1` the kernel refused the record (stderr names the reason) ·
-`2` usage · `4` error.
+Inspect existing held work and unresolved questions during cutover; registering
+a card does not claim that this work was completed or moved. Preserve useful
+conclusions in the existing work/handoff path and keep history available. Existing
+Baton callers can explicitly use `org legacy <verb>` while migrating. Normal
+`org boot` does not silently fall back to injecting the old lifecycle protocol.
+See [LEGACY.md](LEGACY.md) for the preserved commands and [the boundary decision](../../docs/features/org-fleet-boundary/spec.md).
+
+The SessionStart hook now reads the card. Remove the old Stop mark hook during
+installation; its checked-in script is a no-op so older hook references do not
+keep appending a journal. No installed binaries, mappings, hooks or live state
+are changed merely by building this code.

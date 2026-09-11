@@ -1,8 +1,7 @@
 # Fleet: overview
 
 Fleet lets one person run several coding agents at once and always know who is doing what and
-what is done, without any agent having to stop and report it. Knowing what is late, raised by
-the system rather than noticed, is the open PR #301.
+what is done, without any agent having to stop and report it. The Go watcher reports late work and starts configured headless sessions.
 
 ## The problem it solves
 
@@ -20,10 +19,10 @@ check in, post status, or remember rules fails the same way: they don't, and the
    binding is a line in `roles.map`. Nothing is remembered.
 2. **Facts come from the hook.** Who is alive, who holds which branch or resource, what was
    written where, what a session said last: derived from harness events, never from an agent.
-3. **The phone number is the role.** A message is a file addressed to a role or a seat. In the
-   mail-driven shape a session for that role is started when a message arrives and ends when it
-   has reported: no loops, no long-lived sessions. The launcher that does the starting is PR
-   #301, in review; until it lands a small poller does that job (`e2e/mail-poll.sh`).
+3. **Addresses survive sessions.** Mail targets a dedicated role or a concrete seat.
+   Desktop agents can keep their loops and native messages. The Go watcher supplies headless
+   mail delivery, assignment-triggered starts and optional recurring lead ticks. See
+   [headless.md](headless.md); no script poller owns the runtime.
 4. **Done is evidence.** A passing receipt at the exact commit, from a clean tree, by a session
    whose lane produces that kind, is what "done" means. That the session differs from the
    implementer is a rule on the verifier card that the lead checks; the verb does not. A
@@ -38,10 +37,9 @@ operator ─▶ overall lead ─┬─▶ lead A ─▶ worker seat A ─┐
 ```
 
 Leads decide and dispatch. Workers implement to a named boundary (draft, checks, reviews,
-ready). A verifier judges the exact head. Escalation goes one hop up, never sideways, and only
-the overall lead speaks to the operator; ordering between siblings is the overall lead's call.
-Those three are rules on the lead and worker cards, held in every run so far, not refusals the
-substrate makes.
+ready). A verifier judges the exact head. Agents ask the relevant peer directly and escalate decisions beyond their authority to the
+accountable lead. Historical run contracts used upward-only routing; it is not a universal
+requirement of Fleet.
 
 ## What it is made of
 
@@ -53,7 +51,7 @@ substrate makes.
 | row | a declared assignment: change, relationship, accountable role, due, seat |
 | mail | one file per message under `mail/.v2/<tenant>/<role or seat>/<address>/<id>.json` (hashed names); send, read, ack; retry-safe by id |
 | receipt | `receipts/<sha>.<kind>.json`; the only source of "done" |
-| watcher | one per machine; folds the store into a board and reports observed changes. It also starts sessions for waiting mail and sends lateness as mail, both as folds (#301); a separate delivery process is only needed against a binary predating it |
+| watcher | one per machine; folds the store into a board and reports observed changes. It starts sessions for mail, new assignments and configured recurring ticks, and sends lateness as mail; upgrade the Go binary instead of adding a script poller |
 | lane | a kind of agent: a manifest (requires, produces, denies) plus a prose card |
 
 Roles are data. Adding a kind of agent is a directory of two files, not a code change.

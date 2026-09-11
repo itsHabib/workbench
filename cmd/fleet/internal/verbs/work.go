@@ -96,14 +96,14 @@ func liveHands(key string) string {
 // CmdDispatch is the one declared act: write the row, and place the work when a
 // slot is named. Placement is `assign`, under the slot's lock, before the row is
 // written, so a refused placement leaves no row behind.
-func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
+func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo ...string) error {
 	return fleet.KeyLock("dispatch", func() error {
-		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take)
+		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take, first(repo))
 	})
 }
 
-func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool) error {
-	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <session>] [--take]`
+func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo string) error {
+	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <address>] [--repo <owner/repo|path>] [--take]`
 	if change == "" || rel == "" {
 		return refuse("%s", usage)
 	}
@@ -117,7 +117,7 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 			return refuse("fleet dispatch: --due wants a duration like 45m or 2h, got %s", fleet.PyRepr(due))
 		}
 	}
-	rid, branch, sha, err := resolveDispatchTarget("dispatch", change)
+	rid, branch, sha, err := dispatchTarget(change, repo, slot)
 	if err != nil {
 		return err
 	}
@@ -138,6 +138,9 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
 	}
 	if slot != "" {
+		if row := slotRow(slot); row != nil && fleet.RepoID(fleet.S(row, "path")) != rid {
+			return refuse("fleet dispatch: slot %s belongs to a different repository", slot)
+		}
 		if err := CmdAssign(slot, branch, brief, by, forRole, replyTo); err != nil {
 			return err
 		}
@@ -152,15 +155,22 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		return err
 	}
 	fleet.ObserveAction("dispatch", rec)
+	reportDispatch(branch, rel, forRole, slot, brief, rid, dueSecs)
+	return nil
+}
+
+func reportDispatch(branch, rel, forRole, slot, brief, rid string, dueSecs float64) {
 	tail := ""
 	if dueSecs > 0 {
 		tail += ", due in " + fleet.FmtAge(dueSecs)
 	}
 	if slot != "" {
 		tail += ", in " + slot
+		if strings.TrimSpace(brief) != "" {
+			tail += "; configured Go watcher starts the worker from this assignment"
+		}
 	}
 	say("dispatched %s/%s for %s%s; %s", branch, rel, forRole, tail, upsertOwnership(rid, branch))
-	return nil
 }
 
 // dispatcher is who is acting: the role bound to the cwd when there is one; else the

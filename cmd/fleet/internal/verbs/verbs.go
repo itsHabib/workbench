@@ -68,13 +68,16 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet done <sha|#n|branch> [--kind <k>] [--all] [--json]
                                                  exit 0 if a passing receipt (of <kind>, else of every kind seen) exists for that revision; 1 if not; 2 unresolvable
                                                  the verdict is always the latest receipt of a kind; --all shows what it replaced
+  fleet watch [--interval 10s] [--once]          Go scheduler and observer; runs until stopped
+  fleet watch status [--json]                    inspect workers and watcher now, without a tick
+  fleet tail <seat|role> [-n 20] [-f]             observed transcript/output text, tools and results
   fleet board [--json]                           every roled path with observed state: vacant · dead · idle · idle-holding-work · busy · busy-and-overdue
   fleet pool <checkout> [<kind> <n>] [--rewarm] [--tenant <t>]
                                                  create/top up N slots beside <checkout> (<basename>-<kind>-<i>), roled, named, warmed per pools.json
   fleet slots [<repo>] [--json]                  one line per slot: free · busy(<sid8>, <branch>) · dirty · orphaned(<sid8>) · missing [cold] [assigned(<branch>)]
   fleet assign <slot> <branch> ["<brief>"]       check <branch> out in a free slot and record the assignment (read at the slot's next SessionStart)
-  fleet unassign <slot>                          clear it
-  fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--reply-to <session>] [--take]
+  fleet unassign <slot>                          clear placement and matching rows; retain files and leases
+  fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--reply-to <address>] [--repo <owner/repo|path>] [--take]
                                                  the one declared act: an ownership row (change, relationship, accountable, due), placed in a slot when named
   fleet work [--for <role>] [--json]             every row with its observed state: dead · late · undeclared · working · idle · dispatched · done
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
@@ -82,7 +85,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
   fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
                                                  record one retry-safe local assignment; does not launch a worker
-  fleet send <role> --id <id> --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
+  fleet send <address> [--id <id>] --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
   fleet mail [--for <role>] [--unacked] [--json] [--session <id8>]
   fleet ack <id> [--session <id8>]
   fleet status [--json]                         read-only request board; queued is not accepted or running
@@ -315,15 +318,15 @@ func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 	switch verb {
 	case "dispatch":
 		vals := map[string]string{}
-		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief", "--reply-to"} {
+		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief", "--reply-to", "--repo"} {
 			v, err := optValue(plain, f, verb)
 			if err != nil {
 				return true, err
 			}
 			vals[f] = v
 		}
-		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief", "--reply-to")
-		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", vals["--reply-to"], contains(plain, "--take"))
+		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief", "--reply-to", "--repo")
+		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", vals["--reply-to"], contains(plain, "--take"), vals["--repo"])
 	case "reassign":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {

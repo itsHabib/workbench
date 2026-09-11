@@ -18,7 +18,7 @@ func exec(t *testing.T, state string, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	full := append(args, "-state", state)
-	code := run(full, strings.NewReader(""), &stdout, &stderr)
+	code := runLegacy(full, strings.NewReader(""), &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
 

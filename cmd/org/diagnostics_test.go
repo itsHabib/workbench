@@ -100,7 +100,7 @@ func TestNeverAttachedNamesTheAttach(t *testing.T) {
 	if !strings.Contains(errOut, org.ReasonIncarnationMissing) {
 		t.Fatalf("reason changed: %s", errOut)
 	}
-	for _, want := range []string{"has never been attached", "org attach", "org begin"} {
+	for _, want := range []string{"has never been attached", "org legacy attach", "org legacy begin"} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("refusal missing %q: %s", want, errOut)
 		}
@@ -178,7 +178,7 @@ func TestBlobRefusesSilentlyDroppedFlags(t *testing.T) {
 	// Flags before the positional still work — run directly, since the exec
 	// helper appends -state and would itself trip the check below.
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"blob", "-state", state, digest}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+	if code := runLegacy([]string{"blob", "-state", state, digest}, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("blob [flags] <digest>: exit %d: %s", code, stderr.String())
 	}
 	if stdout.String() != "the body" {
