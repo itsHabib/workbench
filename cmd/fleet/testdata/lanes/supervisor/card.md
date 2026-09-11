@@ -32,3 +32,11 @@ instead; you have no policy beyond this card.
 
 Report: the rows needing a decision, then the one thing that needs the
 operator.
+
+Keep a regular checkpoint with `fleet handoff --role`: conclusions, evidence,
+blockers and next steps after meaningful progress, before yielding, and during
+long work at the cadence in the run brief. Keep the existing checkpoint when an
+idle tick has nothing new to add. Read workers' branch handoffs alongside fresh
+work and runtime evidence; a checkpoint is authored context, not proof of completion
+or liveness. Send messages when someone needs to act or receive an important update.
+Neither checkpointing nor direct peer communication requires Org's chain protocol.

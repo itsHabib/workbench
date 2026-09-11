@@ -48,8 +48,25 @@ as its occupant; read its tree with `git -C`, or let its worker perform the work
 A lead advances eligible rows, answers questions and checks results. A worker continues until
 its requested result or a real blocker. There is no one-action quota, universal one-hop rule,
 or one-message-per-tick limit. Ask the relevant peer directly within the permitted tenant;
-the assignment still names who is accountable. Leave a handoff when it contains a useful
-conclusion or remaining work, not merely to satisfy a tick ritual.
+the assignment still names who is accountable.
+
+## Checkpoint the work
+
+Keep regular authored checkpoints using the existing `fleet handoff` mechanism:
+after meaningful progress or a changed approach, before yielding or handing work over,
+and at useful intervals during long work. A run brief can set the cadence in prose.
+An idle tick with nothing new to record does not need another copy of the same checkpoint.
+
+Record what changed or was learned, the evidence or file/PR pointers, any blocker,
+and the next step. A pooled worker uses its branch handoff; a dedicated lead can use
+`fleet handoff --role` for its cross-repository summary. This preserves authored context
+for the next session; it does not introduce a checkpoint history or an Org lifecycle.
+
+Runtime events record activity. Checkpoints explain the agent's understanding. Messages
+address another agent: send one when someone needs to act, answer a question, or learn
+about an important milestone. A routine checkpoint need not generate a message.
+
+## Send messages
 
 `fleet send` returns the message ID. Omit `--id` for a new message; retain the returned ID and
 same payload for an intentional retry. Reply to `from_address`, with a new message ID and the

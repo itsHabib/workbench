@@ -49,6 +49,21 @@ Neither a parent link nor prose grants authority. A message does not require
 charter traversal. A handoff does not require a chain checkpoint. Use the existing
 mail and handoff mechanisms before inventing a new continuity product.
 
+## Regular checkpoints remain useful
+
+Removing Org's checkpoint protocol does not remove authored progress summaries.
+Use the existing work handoff for regular checkpoints after meaningful progress,
+before yielding, and during long work at a cadence described in the run brief.
+Keep conclusions, evidence pointers, blockers and next steps together. An unchanged
+idle tick does not need to manufacture a new summary.
+
+These have separate meanings: runtime events record what happened; a checkpoint
+records what the agent understands; a message addresses another agent. A checkpoint
+could later be persisted as an event and referenced from a message, but routine
+checkpointing must not require delivery or Org enrollment. This pass reuses the
+existing handoff storage and startup context; it adds no checkpoint history,
+automatic cadence enforcement or separate service.
+
 ## The implementation stays small
 
 Org has three normal CLI and MCP operations: register/update, read, list. Its

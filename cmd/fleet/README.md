@@ -454,6 +454,12 @@ fleet handoff work-one "Parser fixed; integration check remains" "Run the integr
 
 This avoids sharing one role handoff between different worker seats of the same
 kind. Captured last assistant text remains separate from the intentional handoff.
+Use these handoffs for regular work checkpoints: after meaningful progress, before
+yielding, and at useful intervals during long work. Include conclusions, evidence,
+blockers and next steps. The run brief can describe the cadence; an unchanged idle
+tick needs no duplicate entry. This uses the existing handoff storage, not a new
+checkpoint history. Send a separate message when another agent needs to act or
+receive an important update; routine checkpointing does not require mail or Org.
 No old Org records, installed hooks, or live assignments are migrated by these
 commands. The longer-term single-work-record migration remains separate work.
 
