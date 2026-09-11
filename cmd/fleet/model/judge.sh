@@ -1,14 +1,15 @@
 #!/bin/sh
-# The lease protocol, bounded and machine-checked. Offline; needs quint 0.32, jq, java.
+# The lease protocol, bounded and machine-checked. Needs quint 0.32, jq, java, Go.
 #   ./judge.sh
 # Exhausts the reference for both key kinds (TLC), then reproduces three
 # counterexamples byte-for-byte against the frozen traces (Apalache):
 # unreadable-is-dead (the review's finding), silent resource takeover, and a
-# check-then-write with no lock.
+# check-then-write with no lock. Also checks independent parent/child lifetimes
+# and replays the crash/replacement counterexample against Go on Unix.
 set -eu
 cd "$(dirname "$0")"
 
-for tool in quint jq cmp mktemp; do
+for tool in quint jq cmp mktemp go; do
   command -v "$tool" >/dev/null 2>&1 || { echo "missing required local tool: $tool" >&2; exit 2; }
 done
 case "$(quint --version)" in
@@ -20,10 +21,17 @@ export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 work_dir="$(mktemp -d /tmp/fleet-lease-model.XXXXXX)"
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 
-for source in model/common.qnt model/reference.qnt model/mutant_unreadable_is_dead.qnt model/mutant_silent_resource_takeover.qnt model/mutant_unlocked_check.qnt; do
+for source in model/common.qnt model/reference.qnt model/mutant_unreadable_is_dead.qnt model/mutant_silent_resource_takeover.qnt model/mutant_unlocked_check.qnt model/crash_replacement.qnt; do
   quint typecheck "$source" >"$work_dir/typecheck.log" 2>&1
 done
 echo "PASS typecheck: all Quint modules"
+
+for main in CrashResource QuiescentBranch; do
+  quint verify model/crash_replacement.qnt \
+    --main="$main" --invariants=noStaleChildWrite resourceRetained \
+    --backend=tlc --max-steps=12 --verbosity=0 >"$work_dir/$main.log" 2>&1
+  echo "PASS $main: no stale child write in the finite model (12-step configuration)"
+done
 
 for main in ReferenceBranch ReferenceResource; do
   quint verify model/reference.qnt \
@@ -61,11 +69,20 @@ expect_counterexample() {
 expect_counterexample unreadable-is-dead model/mutant_unreadable_is_dead.qnt UnreadableIsDeadMutantBranch evidenceNotDeath 6 artifacts/unreadable-is-dead.trace.json
 expect_counterexample silent-resource-takeover model/mutant_silent_resource_takeover.qnt SilentResourceTakeoverMutantResource noSilentResourceTakeover 6 artifacts/silent-resource-takeover.trace.json
 expect_counterexample unlocked-check model/mutant_unlocked_check.qnt UnlockedCheckMutantBranch exclusion 6 artifacts/unlocked-check.trace.json
+expect_counterexample crash-replacement model/crash_replacement.qnt CrashBranch noConflictingEffects 6 artifacts/crash-replacement.trace.json
 
 # Frozen traces must retain the salient failures, not merely parse as JSON.
 jq -e 'last | (.inFlightA or .inFlightB) and ((.liveA == "Unreadable") or (.liveB == "Unreadable"))' artifacts/unreadable-is-dead.trace.json >/dev/null
 jq -e 'last.facts | index("SilentA") or index("SilentB")' artifacts/silent-resource-takeover.trace.json >/dev/null
 jq -e 'last | .inFlightA and .inFlightB' artifacts/unlocked-check.trace.json >/dev/null
+jq -e 'last | .owner == "B" and (.parentAlive | not) and .childAlive and .staleWrite and .replacementWrote' artifacts/crash-replacement.trace.json >/dev/null
+
+if [ "$(go env GOOS)" = windows ]; then
+  echo "SKIP crash/replacement process replay: Unix-only; no Windows runtime claim"
+else
+  go test ../internal/fleet -run '^TestCrashReplacementModelTrace$' -count=1 -v
+  echo "PASS crash/replacement replay: branch limitation reproduced; resource refused"
+fi
 
 for required in README.md SOURCE_MAP.md CLAIMS.md; do
   test -s "$required" || { echo "missing required artifact: $required" >&2; exit 1; }

@@ -1,5 +1,13 @@
 # The lease protocol, bounded and machine-checked
 
+The [crash/replacement experiment](CRASH-REPLACEMENT.md) extends this work with
+independent parent/child lifetimes and replays a model-generated counterexample
+against Fleet's real Go lease code and subprocesses. It demonstrates that branch
+takeover after parent death does not stop an already running child. A passing
+replay preserves this negative result; it is not evidence of process containment.
+
+## Original lease model
+
 A Quint model of `CheckLease` (`../internal/fleet/policy.go`) and the lease
 mutations around it: two sessions, one key, the holder's liveness as a rival
 reads it, and what a write is allowed to do. It exists because the switch
@@ -53,7 +61,8 @@ the shape the code had before the review at workbench #282.
 
 ## What is not modeled
 
-Malformed lease files, migration, the codex adapter's rollback, the stop flag,
+In the original lease model: malformed lease files, migration, the codex
+adapter's rollback, the stop flag,
 revoke, and `KeyLock` itself: the lock is a model assumption (atomicity of
 `write`), and `UnlockedCheckMutant` is what its absence looks like. The Go is an
 anchor for the abstraction, not a conformance oracle; see `SOURCE_MAP.md`.

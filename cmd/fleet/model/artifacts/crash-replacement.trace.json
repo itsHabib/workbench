@@ -1,0 +1,65 @@
+[
+  {
+    "childAlive": false,
+    "childStarted": false,
+    "lastAction": "init",
+    "owner": "none",
+    "parentAlive": true,
+    "replacementWrote": false,
+    "staleWrite": false
+  },
+  {
+    "childAlive": false,
+    "childStarted": false,
+    "lastAction": "claim",
+    "owner": "A",
+    "parentAlive": true,
+    "replacementWrote": false,
+    "staleWrite": false
+  },
+  {
+    "childAlive": true,
+    "childStarted": true,
+    "lastAction": "spawnChild",
+    "owner": "A",
+    "parentAlive": true,
+    "replacementWrote": false,
+    "staleWrite": false
+  },
+  {
+    "childAlive": true,
+    "childStarted": true,
+    "lastAction": "crashParent",
+    "owner": "A",
+    "parentAlive": false,
+    "replacementWrote": false,
+    "staleWrite": false
+  },
+  {
+    "childAlive": true,
+    "childStarted": true,
+    "lastAction": "replace",
+    "owner": "B",
+    "parentAlive": false,
+    "replacementWrote": false,
+    "staleWrite": false
+  },
+  {
+    "childAlive": true,
+    "childStarted": true,
+    "lastAction": "replacementWrite",
+    "owner": "B",
+    "parentAlive": false,
+    "replacementWrote": true,
+    "staleWrite": false
+  },
+  {
+    "childAlive": true,
+    "childStarted": true,
+    "lastAction": "childWrite",
+    "owner": "B",
+    "parentAlive": false,
+    "replacementWrote": true,
+    "staleWrite": true
+  }
+]
