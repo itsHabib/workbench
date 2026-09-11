@@ -2,6 +2,7 @@ package watch
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,5 +72,91 @@ func TestAllStatusReadsHooksWhenWatcherIsStale(t *testing.T) {
 	}
 	if !strings.Contains(AllStatusText(got), "status-session") {
 		t.Fatal("session not visible")
+	}
+}
+
+func TestAllStatusIncludesNestedUnconfiguredOccupant(t *testing.T) {
+	home, _ := deliverEnv(t)
+	nested := filepath.Join(home, "seat", "subdir")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteJSON(fleet.Path("sessions", "nested.json"), fleet.Rec{"session": "nested", "cwd": nested, "launch_dir": nested, "last_event_at": fleet.Now(), "last_event": "PostToolUse", "last_tool": "Edit", "pid_kind": "harness", "pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range AllStatus()["workers"].([]fleet.Rec) {
+		if fleet.S(row, "slot") != "seat-1" {
+			continue
+		}
+		if fleet.S(row, "session") != "nested" || fleet.S(row, "state") != "observed_session" || fleet.S(row, "last_tool") != "Edit" {
+			t.Fatal(row)
+		}
+		return
+	}
+	t.Fatal("missing seat")
+}
+
+func TestStatusRejectsStaleAssignment(t *testing.T) {
+	home, _ := deliverEnv(t)
+	for _, args := range [][]string{{"init", "-b", "task"}, {"remote", "add", "origin", "https://github.com/example/demo.git"}} {
+		if out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v", out, err)
+		}
+	}
+	row := fleet.Rec{"cwd": home, "slot": "seat-1", "role": "hub:b", "tenant": "t1", "branch": "task"}
+	a := fleet.Rec{"path": home, "slot": "seat-1", "role": "hub:b", "tenant": "t1", "branch": "task", "repo": fleet.RepoID(home)}
+	if !currentAssignment(row, a) {
+		t.Fatal("rejected current assignment", a)
+	}
+	for _, key := range []string{"path", "slot", "role", "tenant", "branch", "repo"} {
+		old := a[key]
+		a[key] = "stale"
+		if currentAssignment(row, a) {
+			t.Fatal("accepted stale", key)
+		}
+		a[key] = old
+	}
+}
+
+func TestRunReportUnknownTotalsAndFields(t *testing.T) {
+	deliverEnv(t)
+	d := filepath.Join(dir(), "delivery")
+	if err := os.MkdirAll(d, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "unknown.log"), []byte(`{"type":"result"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := RunReport(0)
+	if r["reported_cost_usd"] != nil || r["reported_turns"] != nil {
+		t.Fatal(r)
+	}
+	text := RunReportText(r)
+	for _, want := range []string{"cost unknown", "turns unknown", "session unknown", "exit unknown"} {
+		if !strings.Contains(text, want) {
+			t.Fatal(text)
+		}
+	}
+	if strings.Contains(text, "<nil>") || strings.Contains(text, "$0.0000") {
+		t.Fatal(text)
+	}
+}
+
+func TestLastResultAtWindowBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "boundary.log")
+	result := `{"type":"result","num_turns":3}` + "\n"
+	data := "prefix\n" + result + strings.Repeat(" ", int(traceWindow)-len(result))
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if fleet.F(lastResult(path), "num_turns") != 3 {
+		t.Fatal("lost complete boundary result")
+	}
+	data = "prefixX" + result + strings.Repeat(" ", int(traceWindow)-len(result))
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if lastResult(path) != nil {
+		t.Fatal("accepted partial boundary record")
 	}
 }

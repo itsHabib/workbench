@@ -82,3 +82,9 @@ The window uses output-file modification time. Each result lookup reads at most
 the final 1 MiB; a missing or oversized result is reported as unavailable, with
 the raw output path. This report neither infers task completion from exit 0 nor
 reconstructs deleted attempts. It needs no live session or running watcher.
+
+Provider metrics currently require Claude-style JSONL `type: result` records.
+Codex-native transcript records are not parsed for these totals; their metrics
+remain unknown. Exit evidence and attempt metadata remain available independently.
+JSON aggregate totals are null when no attempt reported that field. Numeric zero
+means at least one reported value was zero, with known counts showing coverage.

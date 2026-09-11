@@ -34,6 +34,7 @@ func AllStatus() fleet.Rec {
 		row := configured[path+"\x00"+address]
 		if row == nil {
 			row = runtimeRow(deliverTarget{address: address, cwd: path}, sessions)
+			boardActivity(row, board, sessions)
 		}
 		row["role"], row["slot"], row["tenant"], row["occupancy"] = board["role"], board["slot"], board["tenant"], board["state"]
 		enrichStatus(row, work)
@@ -57,7 +58,7 @@ func enrichStatus(row fleet.Rec, work []verbs.WorkRow) {
 	path := fleet.S(row, "cwd")
 	row["branch"] = fleet.BranchOf(path)
 	assignment := fleet.ReadJSON(fleet.Path("assign", fleet.Safe(fleet.S(row, "slot"))+".json"))
-	if fleet.S(row, "slot") != "" {
+	if currentAssignment(row, assignment) {
 		row["assignment"] = assignment
 	}
 	rows := []verbs.WorkRow{}
@@ -121,4 +122,36 @@ func AllStatusText(status fleet.Rec) string {
 
 func statusKey(row fleet.Rec) string {
 	return fleet.CanonPath(fleet.S(row, "cwd")) + "\x00" + fleet.S(row, "address")
+}
+
+// BoardRows selects the observed occupant, including sessions in subdirectories.
+// Only fill an unconfigured row with no launch history; keep process evidence separate.
+func boardActivity(row fleet.Rec, board verbs.BoardRow, sessions []fleet.Rec) {
+	if fleet.S(row, "state") != "not_started" || fleet.S(board, "session") == "" {
+		return
+	}
+	for _, s := range sessions {
+		if fleet.S(s, "session") != fleet.S(board, "session") {
+			continue
+		}
+		for _, k := range []string{"session", "last_event", "last_event_at", "last_tool", "turn_open", "transcript_path", "branch"} {
+			row[k] = s[k]
+		}
+		row["state"] = "observed_session"
+		return
+	}
+}
+
+func currentAssignment(row, a fleet.Rec) bool {
+	path := fleet.S(row, "cwd")
+	if a == nil || fleet.S(row, "slot") == "" || fleet.S(a, "path") == "" || fleet.CanonPath(fleet.S(a, "path")) != fleet.CanonPath(path) {
+		return false
+	}
+	for _, key := range []string{"slot", "role", "tenant", "branch"} {
+		if fleet.S(row, key) == "" || fleet.S(row, key) != fleet.S(a, key) {
+			return false
+		}
+	}
+	repo := fleet.RepoID(path)
+	return repo != "" && fleet.S(a, "repo") == repo
 }

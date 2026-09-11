@@ -45,7 +45,14 @@ func RunReport(since float64) fleet.Rec {
 			knownTurns++
 		}
 	}
-	return fleet.Rec{"since": since, "at": fleet.Now(), "window": "output modification time", "attempts": rows, "attempt_count": len(rows), "reported_cost_usd": cost, "reported_turns": turns, "cost_known": knownCost, "turns_known": knownTurns, "gaps": gaps}
+	report := fleet.Rec{"since": since, "at": fleet.Now(), "window": "output modification time", "attempts": rows, "attempt_count": len(rows), "reported_cost_usd": cost, "reported_turns": turns, "cost_known": knownCost, "turns_known": knownTurns, "gaps": gaps}
+	if knownCost == 0 {
+		report["reported_cost_usd"] = nil
+	}
+	if knownTurns == 0 {
+		report["reported_turns"] = nil
+	}
+	return report
 }
 
 func attemptReport(path string, at float64) fleet.Rec {
@@ -75,7 +82,14 @@ func attemptReport(path string, at float64) fleet.Rec {
 // RunReportText prints totals only for fields actually reported by the provider.
 func RunReportText(report fleet.Rec) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%v attempts · reported $%.4f (%v costs known) · %.0f turns (%v counts known)\n", report["attempt_count"], fleet.F(report, "reported_cost_usd"), report["cost_known"], fleet.F(report, "reported_turns"), report["turns_known"])
+	costTotal, turnsTotal := "unknown", "unknown"
+	if fleet.F(report, "cost_known") > 0 {
+		costTotal = fmt.Sprintf("$%.4f", fleet.F(report, "reported_cost_usd"))
+	}
+	if fleet.F(report, "turns_known") > 0 {
+		turnsTotal = fmt.Sprintf("%.0f", fleet.F(report, "reported_turns"))
+	}
+	fmt.Fprintf(&b, "%v attempts · reported cost %s (%v costs known) · turns %s (%v counts known)\n", report["attempt_count"], costTotal, report["cost_known"], turnsTotal, report["turns_known"])
 	for _, row := range report["attempts"].([]fleet.Rec) {
 		cost, turns := "unknown", "unknown"
 		if fleet.Has(row, "cost_usd") {
@@ -84,7 +98,7 @@ func RunReportText(report fleet.Rec) string {
 		if fleet.Has(row, "turns") {
 			turns = fmt.Sprintf("%.0f", fleet.F(row, "turns"))
 		}
-		fmt.Fprintf(&b, "%s · session %s · %s exit %v · %s · %s · turns %s\n  %s\n", fleet.S(row, "address"), fleet.S(row, "session"), fleet.S(row, "state"), row["exit_code"], fleet.S(row, "reason"), cost, turns, fleet.S(row, "output"))
+		fmt.Fprintf(&b, "%s · session %s · %s exit %v · %s · %s · turns %s\n  %s\n", reportValue(row, "address"), reportValue(row, "session"), fleet.S(row, "state"), reportValue(row, "exit_code"), reportValue(row, "reason"), cost, turns, fleet.S(row, "output"))
 		if e := fleet.S(row, "result_error"); e != "" {
 			fmt.Fprintf(&b, "  %s\n", e)
 		}
@@ -94,4 +108,12 @@ func RunReportText(report fleet.Rec) string {
 	}
 	fmt.Fprintln(&b, "Window: output modification time. Missing provider totals are unknown, not zero. Exits are not task receipts.")
 	return b.String()
+}
+
+func reportValue(row fleet.Rec, key string) string {
+	value := row[key]
+	if value == nil || value == "" {
+		return "unknown"
+	}
+	return fmt.Sprint(value)
 }
