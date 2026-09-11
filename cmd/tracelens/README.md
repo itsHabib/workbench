@@ -68,3 +68,14 @@ The guard test `TestAnalyze_LoopMakesRunPathological` fails if the detector core
 ## Docs
 
 `docs/PITCH.md` explains why this exists, `docs/DECODING.md` documents normalization, `docs/EVALUATION.md` defines the corpus gate, and `docs/NEXT.md` parks remaining scope. Provenance: built in the 2026-06-30 agent build-hackathon; graduated as the top-ranked project.
+
+## Fleet and Codex app-server
+
+Console feeds Fleet's observed native trace to `tracelens -json -dialect auto`
+over stdin. `auto` detects provider streams, including `codex-app-server`
+notifications (`item/started`, `item/completed`, `turn/completed`). Command and
+file-change items pair by thread, turn and item identity. Incomplete or unknown
+outcomes remain unknown; explicit failed turns remain failures. Final agent text
+is supported; other app-server item kinds are not yet analyzed. Mixed provider
+formats and unsupported/no-step streams error instead of yielding a clean report.
+No per-step usage is invented from aggregate provider totals.
