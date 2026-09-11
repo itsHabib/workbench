@@ -32,8 +32,13 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
 });
 `;
 const fakeClaude = `export function query({options}) {
+ if(process.env.CASE==='query-fail')throw new Error('SDK rejected options before spawn');
+ const child=options.spawnClaudeCodeProcess({command:process.env.CASE==='spawn-fail'?process.execPath+'-missing':process.execPath,args:['-e','process.stdin.resume()'],env:process.env});
+ const ready=new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject)});
+ ready.catch(()=>{});child.stdin.on('error',()=>{});
  let interrupted=false;
- return { interrupt:async()=>{interrupted=true},close(){},async *[Symbol.asyncIterator](){
+ return { interrupt:async()=>{interrupted=true},close(){child.stdin.end()},async *[Symbol.asyncIterator](){
+  await ready;
   const session_id=process.env.CASE==='missing-identity'?undefined:process.env.CASE==='mismatch'?'wrong':options.resume||'real-session';
   yield {type:'system',subtype:'init',session_id};
   if(process.env.CASE==='early-exit')return;
@@ -45,11 +50,11 @@ async function run(provider, scenario, resume) {
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'fleet-provider-test-'));
  const req={provider,cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume};
  const bin=path.join(home,'bin');fs.mkdirSync(bin);
- fs.writeFileSync(path.join(bin,'codex'),fakeCodex,{mode:0o700});
+ if(scenario!=='spawn-fail')fs.writeFileSync(path.join(bin,'codex'),fakeCodex,{mode:0o700});
  const mod=path.join(home,'node_modules/@anthropic-ai/claude-agent-sdk');fs.mkdirSync(mod,{recursive:true});
  fs.writeFileSync(path.join(mod,'package.json'),JSON.stringify({type:'module',exports:'./index.mjs'}));
  fs.writeFileSync(path.join(mod,'index.mjs'),fakeClaude);
- const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,CASE:scenario}});
+ const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,CASE:scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
  proc.stdin.end(JSON.stringify(req));
  const deadline=setTimeout(()=>proc.kill('SIGKILL'),scenario==='timeout'?19000:5000);
@@ -64,6 +69,7 @@ async function run(provider, scenario, resume) {
 for(const provider of ['claude','codex']) {
  test(provider+' starts, retains actual identity and reports terminal state',async()=>{
   const r=await run(provider,'ok');assert.equal(r.code,0,r.err);assert.equal(r.state.provider_state,'completed');assert.equal(r.state.attempt,'attempt-1');assert.ok(r.state.provider_session);assert.match(r.out,/"type":"result"/);
+  assert.equal(r.state.provider_started,true);
  });
  test(provider+' resumes the explicit identity',async()=>{
   const r=await run(provider,'ok','retained-id');assert.equal(r.code,0,r.err);assert.equal(r.state.provider_session,'retained-id');
@@ -73,11 +79,21 @@ for(const provider of ['claude','codex']) {
  });
  test(provider+' premature EOF is failure',async()=>{
   const r=await run(provider,'early-exit');assert.equal(r.code,1);assert.equal(r.state.provider_state,'failed');
+  assert.equal(r.state.provider_started,true);assert.equal(r.state.provider_terminal,false);
  });
  test(provider+' interrupts a running turn',async()=>{
   const r=await run(provider,'cancel');assert.equal(r.code,130,r.err);assert.equal(r.state.provider_state,'interrupted');
  });
+ test(provider+' spawn failure proves no provider started',async()=>{
+  const r=await run(provider,'spawn-fail');assert.equal(r.code,1,r.err);
+  assert.equal(r.state.provider_started,false);assert.equal(r.state.provider_terminal,false);
+  assert.equal(r.state.provider_state,'failed');assert.match(r.state.error,/ENOENT/);
+ });
 }
+test('Claude query failure before spawn retains never-started evidence',async()=>{
+ const r=await run('claude','query-fail');assert.equal(r.code,1);
+ assert.equal(r.state.provider_started,false);assert.equal(r.state.provider_terminal,false);
+});
 test('Codex failed resume does not start fresh',async()=>{const r=await run('codex','resume-fail','missing');assert.equal(r.code,1);assert.match(r.state.error,/no such thread/)});
 
 for (const resume of [undefined, 'requested-only']) {

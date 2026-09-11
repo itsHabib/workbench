@@ -56,9 +56,6 @@ func launchPresent(r fleet.Rec) bool {
 	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" {
 		return false
 	}
-	if state == "gone_exit_unknown" {
-		return true
-	}
 	return !providerTerminal(r)
 }
 
@@ -201,6 +198,9 @@ func resumeSession(t deliverTarget, last fleet.Rec) (string, error) {
 	}
 	if fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != t.provider {
 		return "", fmt.Errorf("previous provider state belongs to another attempt")
+	}
+	if fleet.Has(state, "provider_started") && !fleet.B(state, "provider_started") {
+		return fleet.S(last, "resume"), nil
 	}
 	session := fleet.S(state, "provider_session")
 	if session == "" {

@@ -291,9 +291,60 @@ func TestCancelUsesExactAttemptFile(t *testing.T) {
 }
 
 func TestProviderWithoutCollectedExitKeepsReservation(t *testing.T) {
-	r := fleet.Rec{"status": "running", "provider": "codex", "pid": -1}
+	r := fleet.Rec{"status": "running", "provider": "codex", "pid": os.Getpid(), "process_identity": "previous-process"}
 	if !launchPresent(r) {
 		t.Fatal("absent bridge allowed replacement despite unknown provider descendants")
+	}
+}
+
+func TestWatcherLossUsesMatchingProviderEvidence(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	launch := fleet.Rec{"provider": "codex", "attempt": "one", "status": "running", "pid": os.Getpid(), "process_identity": "previous-process", "state_file": stateFile}
+	if state, _ := processState(launch); state != "gone_exit_unknown" {
+		t.Fatalf("fixture must have no collected bridge exit: %s", state)
+	}
+	for _, state := range []fleet.Rec{
+		{"provider": "codex", "attempt": "one", "provider_started": true, "provider_terminal": true},
+		{"provider": "codex", "attempt": "one", "provider_started": false, "provider_terminal": false},
+	} {
+		if err := fleet.WriteJSON(stateFile, state); err != nil {
+			t.Fatal(err)
+		}
+		if launchPresent(launch) {
+			t.Fatalf("lost watcher retained a finished or never-started provider: %v", state)
+		}
+		identity, err := processIdentity(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		launch["process_identity"] = identity
+		if !launchPresent(launch) {
+			t.Fatal("terminal evidence released a live bridge")
+		}
+		launch["process_identity"] = "previous-process"
+		state["attempt"] = "old"
+		if err := fleet.WriteJSON(stateFile, state); err != nil {
+			t.Fatal(err)
+		}
+		if !launchPresent(launch) {
+			t.Fatal("stale evidence released the reservation")
+		}
+	}
+}
+
+func TestNeverStartedProviderRetriesRequestedSession(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home, provider: "claude"}
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	last := fleet.Rec{"provider": "claude", "attempt": "one", "status": "running", "state_file": stateFile, "work_identity": workIdentity(target)}
+	if err := fleet.WriteJSON(stateFile, fleet.Rec{"provider": "claude", "attempt": "one", "provider_started": false}); err != nil {
+		t.Fatal(err)
+	}
+	for _, requested := range []string{"", "retained-session"} {
+		last["resume"] = requested
+		if got, err := resumeSession(target, last); err != nil || got != requested {
+			t.Fatalf("never-started attempt lost requested identity: got %q, err %v", got, err)
+		}
 	}
 }
 

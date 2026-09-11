@@ -600,9 +600,9 @@ that cannot be acknowledged. That is deliberately deferred: a collected bridge
 exit could permit a new worker while a provider descendant still runs. Codex's
 transport close already escalates to SIGKILL after five seconds and awaits close;
 Claude's SDK owns its synchronous `close()` operation. A live stuck bridge keeps
-the directory reserved, and a bridge that disappears without a collected exit
-also keeps its reservation. A collected bridge exit without matching provider-terminal
-evidence now keeps the reservation too (second-panel bridge-kill finding). Do not substitute `process.exit` for evidence of
+the directory reserved. A bridge that disappears without matching provider-terminal
+or proven never-started evidence also keeps its reservation, whether or not its exit
+was collected. Do not substitute `process.exit` for evidence of
 provider cleanup. Full descendant-quiescence proof is outside this transport
 slice; a future execution-scope change needs failure injection and measured
 process-tree evidence. Normal Codex turn interruption passed a real foreground
@@ -619,3 +619,11 @@ Provider delivery now refuses relative FLEET_STATE or ORG_STATE roots before
 launching, because a child working directory would otherwise change their meaning.
 Use absolute state roots. Final identity and state-root fixes go to the judge with
 tests; no fourth panel is requested.
+
+Gate's subsequent block required a bounded recovery repair. Matching terminal or
+never-started evidence now releases a known-absent bridge even after watcher loss.
+Both providers observe native process creation; an actual no-process spawn error
+restores never-started evidence, allowing the next eligible wake to retry the
+original requested session. This does not release an ambiguous started provider.
+Regressions cover missing/stale evidence and both provider startup failures. The
+substantive repair goes to a new exact-head Gate judgment without another panel.

@@ -102,9 +102,11 @@ A changed provider, tenant, address, repository, branch or assignment starts a f
 Set `fresh: true` explicitly when each wake should start fresh or an unrecoverable session must
 be replaced. Remove it to resume the newly recorded session on subsequent wakes. Unreadable or
 mismatched retained provider state and failed resumes are errors, never silent fresh starts.
-An absent bridge remains reserved for inspection unless both its exit and the provider
-terminal result are recorded (or the provider was never started). Its provider child may still
-be running even when the bridge exit was collected. Fleet does not automatically replace such an ambiguous attempt.
+Once the bridge is known absent, matching provider-terminal or proven never-started evidence
+releases the reservation even if a lost watcher could not collect its exit. A spawn failure
+before a process exists preserves the originally requested session for the next eligible wake.
+A live or uncertain bridge remains reserved. A provider child may still be running even when
+the bridge exit was collected; without terminal or never-started evidence Fleet keeps the reservation.
 An ended process alone does not prove all of its descendants have stopped.
 
 ## Observe and interrupt

@@ -30,6 +30,18 @@ function event(record) {
 function activity(name, fields = {}) {
   publish({ last_provider_event: name, last_provider_event_at: Date.now() / 1000, ...fields });
 }
+function spawnProvider(command, args, options) {
+  // Persist uncertainty before spawning: a killed bridge must not hide a child.
+  publish({ provider_started: true });
+  const child = spawn(command, args, options);
+  let spawned = false;
+  child.once('spawn', () => { spawned = true; });
+  child.once('error', () => {
+    // Node failed to create a process. Errors after spawn/abort are not this proof.
+    if (!spawned && child.pid === undefined) publish({ provider_started: false });
+  });
+  return child;
+}
 async function cancel() {
   if (interrupted) return;
   interrupted = true;
@@ -53,6 +65,8 @@ async function claude() {
   const require = createRequire(path.join(root, 'package.json'));
   const { query } = await import(pathToFileURL(require.resolve('@anthropic-ai/claude-agent-sdk')));
   const options = { cwd: request.cwd, pathToClaudeCodeExecutable: 'claude', settingSources: ['user', 'project', 'local'],
+    spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) =>
+      spawnProvider(command, args, { cwd, env, signal, stdio: ['pipe', 'pipe', 'inherit'] }),
     systemPrompt: { type: 'preset', preset: 'claude_code' },
     ...(request.model ? { model: request.model } : {}),
     ...(request.resume ? { resume: request.resume } : {}),
@@ -65,7 +79,6 @@ async function claude() {
   async function* input() {
     yield { type: 'user', message: { role: 'user', content: request.prompt }, parent_tool_use_id: null, ...(request.resume ? { session_id: request.resume } : {}) };
   }
-  publish({provider_started: true});
   const q = query({ prompt: input(), options });
   interrupt = () => q.interrupt();
   close = async () => q.close();
@@ -95,8 +108,7 @@ async function claude() {
 }
 
 async function codex() {
-  publish({provider_started: true});
-  const child = spawn('codex', ['app-server'], { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawnProvider('codex', ['app-server'], { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
   const pending = new Map();
   let sequence = 0;
   let finish, fail;
