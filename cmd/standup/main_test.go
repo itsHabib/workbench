@@ -596,3 +596,47 @@ func TestPlannedPoolSeatsAreDispatchable(t *testing.T) {
 		t.Fatalf("calls:\n%s", r.callLog())
 	}
 }
+
+func TestFinalRoundRefusals(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+
+	// A card naming both a seat and a checkout is not a valid record.
+	both := card
+	both.Checkout = r.seatDir
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{both} })
+	if out := r.must(4, "show", path); !strings.Contains(out, "names both a seat and a checkout") {
+		t.Fatalf("both fields: %s", out)
+	}
+
+	// Terms are read back, not only bound.
+	r.edit(path, func(rec *standup.Record) {
+		rec.Cards = []standup.Card{card}
+		rec.Roles = []standup.Role{{Role: "author:ivy", Kind: "author", Checkout: r.seatDir, Terms: map[string]any{"scope": []string{"github:acme/ivy"}}},
+			{Role: "author:ivy", Kind: "author", Checkout: r.seatDir, Seats: 1}}
+	})
+	if out := r.must(0, "show", path); !strings.Contains(out, `terms: {"scope":["github:acme/ivy"]}`) {
+		t.Fatalf("readback lacks terms:\n%s", out)
+	}
+	// The same role twice refuses before any write.
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	if out := r.must(1, "apply", path); !strings.Contains(out, "author:ivy appears twice") || r.callLog() != "" {
+		t.Fatalf("duplicate roles: %s", out)
+	}
+}
+
+func TestSeatRepoIsLearnedFromItsRows(t *testing.T) {
+	r := newRig(t)
+	// The seat already carries a row, so its Fleet id is known; a same-named
+	// repository's row for this branch is not ours and must not be matched.
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"other","relationship":"draft","for":"author:ivy","state":"working","slot":"ivy-author-1","key":"k1"},{"repo":"ivy-22222222","change":"feat/seven","relationship":"draft","for":"author:other","state":"working","key":"k2"}]`)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	out := r.must(0, "apply", path)
+	if !strings.Contains(out, "ran         card c1 dispatch") || !strings.Contains(r.callLog(), "dispatch #7") {
+		t.Fatalf("the other repository's row must not block this seat:\n%s\n%s", out, r.callLog())
+	}
+}

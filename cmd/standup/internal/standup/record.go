@@ -159,8 +159,11 @@ func (r *Record) validateCards(bad func(string, ...any)) {
 		if !roleRe.MatchString(c.For) {
 			bad("%s for %q: an accountable role like author:ivy", at, c.For)
 		}
-		if c.Seat == "" && c.Checkout == "" {
+		switch {
+		case c.Seat == "" && c.Checkout == "":
 			bad("%s needs a seat (from roles.map) or a checkout to dispatch from", at)
+		case c.Seat != "" && c.Checkout != "":
+			bad("%s names both a seat and a checkout; Fleet places the row in the seat, so name one", at)
 		}
 		if !dueRe.MatchString(c.Due) {
 			bad("%s due %q: <n>m, <n>h or <n>d", at, c.Due)
@@ -364,6 +367,10 @@ func (r *Record) Readback() string {
 		fmt.Fprintf(&b, "role %s: kind %s, %d seat(s) beside %s\n", ro.Role, ro.Kind, ro.Seats, ro.Checkout)
 		if ro.Instructions != "" {
 			fmt.Fprintf(&b, "  instructions: %s\n", ro.Instructions)
+		}
+		if len(ro.Terms) > 0 {
+			t, _ := json.Marshal(ro.Terms)
+			fmt.Fprintf(&b, "  terms: %s\n", t)
 		}
 	}
 	if len(r.Cards) == 0 {

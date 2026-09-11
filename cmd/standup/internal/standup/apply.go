@@ -81,6 +81,9 @@ func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 		if !e.KindExists(ro.Kind) {
 			return nil, refuse("roles: kind %q has no manifest under %s; write %s/manifest.json and card.md first", ro.Kind, e.Lanes, ro.Kind)
 		}
+		if _, dup := roles[ro.Role]; dup {
+			return nil, refuse("roles: %s appears twice; one entry per role", ro.Role)
+		}
 		roles[ro.Role] = ro
 		if ro.Seats == 0 {
 			continue
@@ -200,10 +203,11 @@ func branchSteps(e Env, c Card, dir string, world *World) []Step {
 
 // World is the part of live state apply plans against.
 type World struct {
-	Rows    map[string][]Row // "repo-name branch relationship" → rows (one per Fleet repo id)
-	Seats   map[string]string
-	Planned map[string]string // seat → the checkout a planned pool creates it beside
-	Decided map[string]bool
+	Rows     map[string][]Row  // "repo-name branch relationship" → rows (one per Fleet repo id)
+	Seats    map[string]string // seat → directory, from roles.map
+	SeatRepo map[string]string // seat → Fleet repo id, learned from rows placed in it
+	Planned  map[string]string // seat → the checkout a planned pool creates it beside
+	Decided  map[string]bool
 }
 
 // Row is the declared part of a dispatch row, with Fleet's own repository id.
@@ -246,11 +250,21 @@ func (w *World) BranchOf(e Env, c Card) (string, error) {
 
 // rowFor is the existing row a card would collide with, or nil. Fleet's repository
 // id is a basename plus a hash of the checkout's git directory, which this tool
-// does not recompute; when two repositories with the same name both carry a row
-// for this branch and relationship, the match is ambiguous and refused rather
-// than guessed.
+// does not recompute. When the card's seat already carries a row, that row's id
+// is the seat's, and the match is exact. Otherwise a lone same-named row is taken
+// as this repository's, and two same-named repositories both carrying the row
+// refuse as ambiguous rather than guess. The exact match for a fresh seat needs
+// a Fleet read verb for a path's id (FOLLOWUPS.md).
 func (w *World) rowFor(c Card, key string) (*Row, error) {
 	rows := w.Rows[key]
+	if id, known := w.SeatRepo[c.Seat]; known && c.Seat != "" {
+		for i := range rows {
+			if rows[i].Repo == id {
+				return &rows[i], nil
+			}
+		}
+		return nil, nil
+	}
 	switch len(rows) {
 	case 0:
 		return nil, nil
@@ -305,7 +319,7 @@ func (w *World) OriginRepo(e Env, dir string) string {
 // ReadWorld gathers rows, seats and decisions. Rows are keyed the way the record
 // names them; fleet's repo id carries a hash suffix, so the match is on basename.
 func ReadWorld(e Env, cfg Config) (*World, error) {
-	w := &World{Rows: map[string][]Row{}, Planned: map[string]string{}, Decided: map[string]bool{}}
+	w := &World{Rows: map[string][]Row{}, SeatRepo: map[string]string{}, Planned: map[string]string{}, Decided: map[string]bool{}}
 	seats, err := e.Seats(cfg.Tenant)
 	if err != nil {
 		return nil, fmt.Errorf("roles.map: %w", err)
@@ -327,6 +341,9 @@ func ReadWorld(e Env, cfg Config) (*World, error) {
 	for _, r := range rows {
 		key := repoBase(str(r, "repo")) + " " + str(r, "change") + " " + str(r, "relationship")
 		w.Rows[key] = append(w.Rows[key], Row{Repo: str(r, "repo"), For: str(r, "for")})
+		if slot := str(r, "slot"); slot != "" && str(r, "repo") != "" {
+			w.SeatRepo[slot] = str(r, "repo")
+		}
 	}
 	res = e.Run.Run(e.LeadDir, e.Fleet, "decisions")
 	if res.Err == nil && res.Code == 0 {

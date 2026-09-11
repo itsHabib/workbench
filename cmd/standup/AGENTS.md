@@ -18,11 +18,13 @@ conversation. Design: `docs/features/standup/design.md`.
   agenda's projection (identity and outcome, never timestamps or liveness).
   `apply` rebuilds the projection live and refuses with a diff when the world
   moved; `--force-stale` is the operator's override and is recorded.
-- **Refuse before writing.** Unknown kind, unknown seat, a seat that is a
-  clone of another repository, a row already accountable to another role, two
-  cards for one row, rows in two same-named repositories, and a ledger step
-  whose arguments no longer match the plan are all found in planning, before
-  any verb runs. A `#<n>` change is resolved to its head branch first, because
+- **Refuse before writing.** Unknown kind, unknown seat, a card naming both a
+  seat and a checkout, the same role twice, a seat that is a clone of another
+  repository, a row already accountable to another role, two cards for one
+  row, rows in two same-named repositories, and a ledger step whose arguments
+  no longer match the plan are all found in planning, before any verb runs. A
+  seat's Fleet repository id is learned from rows already placed in it; the
+  fresh-seat case is in FOLLOWUPS.md. A `#<n>` change is resolved to its head branch first, because
   that is how Fleet keys the row. An unreadable `fleet work` is an error, never
   an empty world.
 - **`applied[]` is the only ledger.** One entry per step, saved after each, so a
