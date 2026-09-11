@@ -23,8 +23,8 @@ check in, post status, or remember rules fails the same way: they don't, and the
    Desktop agents can keep their loops and native messages. The Go watcher supplies headless
    mail delivery, assignment-triggered starts and optional recurring lead ticks. See
    [headless.md](headless.md); no script poller owns the runtime.
-4. **Done is evidence.** A passing receipt at the exact commit, from a clean tree, by a session
-   whose lane produces that kind, is what "done" means. That the session differs from the
+4. **Done is evidence.** A passing receipt at the exact commit, from a clean tree, by a live session
+   in any checkout, is what "done" means. Role, lane, cwd and seat are recorded as provenance. That the session differs from the
    implementer is a rule on the verifier card that the lead checks; the verb does not. A
    message saying "done" is not done.
 

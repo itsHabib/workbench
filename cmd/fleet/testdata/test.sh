@@ -868,15 +868,15 @@ err=$(printf '%s' "$(tool PreToolUse $S12 $REPO Edit t68 "{\"file_path\":\"$REPO
 case "$rc:$err" in 2:*"STAND DOWN on slot:hyper"*) echo "  ok    a stop on a resource stands its holder down at the next effectful call";; *) echo "  FAIL  slot stop: rc=$rc $err"; fails=$((fails+1));; esac
 (cd "$work/repo" && "$PY" "$F" resume slot:hyper) >/dev/null
 (cd "$work/repo" && "$PY" "$F" drop slot:hyper >/dev/null) && [ ! -e "$FLEET_STATE/leases/slot__hyper.json" ] && echo "  ok    the holder drops the resource and the lease is gone" || { echo "  FAIL  drop by holder"; fails=$((fails+1)); }
-# Receipts (§5, §7.2): bound to the lane's produces, the session's own worktree, the exact HEAD, a clean tree.
+# Receipts: any live session and kind, its actual checkout, exact HEAD and clean tree.
 "$PY" -c "import json,sys; p=sys.argv[1]; r=json.load(open(p)); r['pid_kind']='parent-unverified'; json.dump(r,open(p,'w'))" "$FLEET_STATE/sessions/$S11.json"
 run "the liverun session is live again and touches its record"              0 "$(ev hook_event_name=UserPromptSubmit session_id=$S11 cwd=$WT2 prompt=hi)"
 (cd "$work/wt2" && "$PY" "$F" take slot:hyper "packet" >/dev/null)
 git -C "$work/wt2" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "run head"
 HEAD2=$(git -C "$work/wt2" rev-parse HEAD); SHA2=${HEAD2:0:10}
 (cd "$work/wt2" && "$PY" "$F" receipt "$SHA2" live pass "gate blocked as expected" >/dev/null) && "$PY" -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if r['session']==sys.argv[2] and r['head']==sys.argv[3] and r['kind']=='live' and r['dirty'] is False else 1)" "$FLEET_STATE/receipts/$SHA2.live.json" "$S11" "$HEAD2" && echo "  ok    a receipt from the producing lane records session, full head and kind" || { echo "  FAIL  receipt: $(cd "$work/wt2" && "$PY" "$F" receipt "$SHA2" live pass x 2>&1)"; fails=$((fails+1)); }
-out=$( (cd "$work/wt2" && "$PY" "$F" receipt "$SHA2" author pass "x") 2>&1 ); [ $? != 0 ] && case "$out" in *"produces"*) echo "  ok    a receipt of a kind the lane does not produce is refused";; *) echo "  FAIL  wrong-kind text: $out"; fails=$((fails+1));; esac || { echo "  FAIL  wrong-kind receipt accepted"; fails=$((fails+1)); }
-out=$( (cd "$work/wt" && "$PY" "$F" receipt "$SHA2" live pass "x") 2>&1 ); [ $? != 0 ] && echo "  ok    a lane that produces nothing cannot record a receipt" || { echo "  FAIL  a non-producing lane recorded a receipt"; fails=$((fails+1)); }
+(cd "$work/wt2" && "$PY" "$F" receipt "$SHA2" custom pass "x" >/dev/null) && echo "  ok    a lane may record any receipt kind" || { echo "  FAIL  custom receipt kind refused"; fails=$((fails+1)); }
+# Role-free and non-producing sessions are covered by the Go receipt provenance tests.
 out=$( (cd "$work/wt2" && "$PY" "$F" receipt deadbeef00 live pass "x") 2>&1 ); [ $? != 0 ] && case "$out" in *"deadbeef00"*"$SHA2"*|*"deadbeef00"*"tree is at"*) echo "  ok    a receipt for a revision the tree is not at is refused, naming both";; *) echo "  FAIL  sha mismatch text: $out"; fails=$((fails+1));; esac || { echo "  FAIL  receipt for the wrong revision accepted"; fails=$((fails+1)); }
 printf 'dirt\n' > "$work/wt2/dirt.txt"
 out=$( (cd "$work/wt2" && "$PY" "$F" receipt "$SHA2" live pass "x") 2>&1 ); [ $? != 0 ] && case "$out" in *"not clean"*) echo "  ok    a receipt from a dirty tree is refused";; *) echo "  FAIL  dirty text: $out"; fails=$((fails+1));; esac || { echo "  FAIL  receipt from a dirty tree accepted"; fails=$((fails+1)); }
@@ -2028,9 +2028,7 @@ subprocess.run(["git", "checkout", "-q", "-b", "feat/w3"], cwd=r)
 head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True).stdout.strip()
 gh_env = {**os.environ, "ORG_TENANT": "work", "FLEET_GITHUB": "on", "FAKE_GH_STORE": store, "PATH": os.path.join(work, "fakegh") + os.pathsep + os.environ["PATH"]}
 def fleet(*a, env=gh_env, cwd=r): return subprocess.run([sys.executable, fleetpy, *a], capture_output=True, text=True, cwd=cwd, env=env)
-fleet("role", r, "liverun:rcptrepo", "--tenant", "work")
-hook.write_json(hook.path("sessions", "rcpt5.json"), {"session": "rcpt5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "role": "liverun:rcptrepo", "branch": "feat/w3", "turn_open": True,
-                                                       "lane": {"kind": "liverun", "produces": "live", "requires": [], "denies": []}})
+hook.write_json(hook.path("sessions", "rcpt5.json"), {"session": "rcpt5", "cwd": r, "pid_kind": "parent-unverified", "last_event_at": hook.now(), "branch": "feat/w3", "turn_open": True})
 rid = hook.repo_id(r)
 hook.write_json(hook.path("prs", "seed2.json"), {"github": "o/r", "repo": rid, "branch": "feat/w3", "number": 7, "at": hook.now()})
 rc1 = fleet("receipt", head[:10], "live", "pass", "guard fired", "--session", "rcpt5")
@@ -2040,6 +2038,9 @@ def rjson(body):
 report(rc1.returncode == 0 and "record: o/r#7" in rc1.stdout and len(receipts) == 1 and rjson(receipts[0]["body"]) .get("head") == head and rjson(receipts[0]["body"]).get("kind") == "live" and rjson(receipts[0]["body"]).get("verdict") == "pass",
        "fleet receipt posts one marked comment on the change carrying the exact head, kind and verdict",
        f"rc={rc1.returncode} out={(rc1.stdout+rc1.stderr)[:200]!r} receipts={len(receipts)}")
+provenance = rjson(receipts[0]["body"])
+report(all(k in provenance for k in ("cwd", "worktree", "repo", "role", "slot", "lane")) and os.path.realpath(provenance["cwd"]) == os.path.realpath(r) and os.path.realpath(provenance["worktree"]) == os.path.realpath(r) and provenance["repo"] == rid and not provenance["role"] and not provenance["slot"] and not provenance["lane"],
+       "unseated receipt publishes actual checkout and null role/lane/seat provenance", str(provenance))
 # another machine's row for live on this change; the fake's pr list reports head abc123, so first the receipt is for an OLDER head: not evidence
 db["comments"].insert(0, {"id": 50, "body": "<!-- fleet:ownership v1 -->\n```json\n" + json.dumps({"v": 1, "change": "feat/w3", "rows": [{"relationship": "live", "for": "hub:win", "by": "operator", "at": hook.now(), "due": None, "slot": None, "brief": None, "machine": "work-win"}]}) + "\n```\n"})
 json.dump(db, open(store, "w"))

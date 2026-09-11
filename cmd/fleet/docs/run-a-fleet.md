@@ -96,8 +96,11 @@ handoff and mail to understand why; it is not proof of abandonment. An expired d
 still reads `late`, and only a passing receipt establishes completion.
 
 A verifier checks the exact head against acceptance and supplies the named receipt. The run
-brief defines when independent verification is required; Fleet's receipt verb checks lane,
-head and clean tree, not independence. A message or child exit saying done is insufficient.
+brief defines when independent verification is required; Fleet's receipt verb checks a live session,
+head and clean tree, not independence. Any session may record any receipt kind, including
+an ad-hoc checkout with no role or seat; the receipt records its actual provenance. A message or child exit saying done is insufficient.
+For an ad-hoc kind, use `fleet done <sha> --kind <kind>`; without `--kind`, expected kinds
+come from the configured lane manifests, not whatever receipts happen to exist.
 Gate remains the separate merge-authority boundary.
 
 For validation and measurement, use [e2e.md](e2e.md). The desktop run is a useful baseline:

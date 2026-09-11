@@ -208,15 +208,6 @@ func canonUnborn(p string) string {
 // RoleOf is the role bound to exactly this checkout, or "".
 func RoleOf(cwd string) string { r, _, _ := MapRowsFor(cwd); return r }
 
-// RoledRoot is the roled checkout that cwd is exactly, or "". A session's receipts
-// must come from inside its own roled worktree.
-func RoledRoot(cwd string) string {
-	if RoleOf(cwd) == "" {
-		return ""
-	}
-	return LongPath(cwd)
-}
-
 // TenantOf is the tenant owning this path — longest prefix.
 func TenantOf(cwd string) string { _, t, _ := MapRowsFor(cwd); return t }
 
