@@ -165,6 +165,7 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview) ([]dif
 		}
 	}
 	paths, _ := reviewDiffPaths(comments, files)
+	loci := append(findingLoci(arts), reviewLineHints(comments, files)...)
 	for _, c := range comments {
 		var anchor struct {
 			Path string
@@ -172,6 +173,9 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview) ([]dif
 		}
 		if json.Unmarshal(c.raw, &anchor) == nil && anchor.Path != "" {
 			paths = append(paths, anchor.Path)
+			if anchor.Line > 0 {
+				loci = append(loci, locusRef{path: anchor.Path, line: anchor.Line})
+			}
 		}
 	}
 	for _, hint := range reviewPathHints(comments) {
@@ -194,7 +198,6 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview) ([]dif
 			}
 		}
 	}
-	loci := append(findingLoci(arts), reviewLineHints(comments, files)...)
 	for _, ref := range loci {
 		paths = append(paths, ref.path)
 	}
