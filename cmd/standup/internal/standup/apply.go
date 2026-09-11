@@ -1,0 +1,289 @@
+package standup
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// Refusal is apply saying no with the reason. It is exit 1 at the CLI: the record
+// is not ready, and the message says exactly what would make it ready.
+type Refusal struct{ Reason string }
+
+func (r *Refusal) Error() string { return r.Reason }
+
+func refuse(f string, a ...any) error { return &Refusal{Reason: fmt.Sprintf(f, a...)} }
+
+// IsRefusal reports whether err is apply declining rather than failing.
+func IsRefusal(err error) bool {
+	var r *Refusal
+	return errors.As(err, &r)
+}
+
+// ConfirmRecord sets confirm when phrase matches the configured one. The comparison
+// is code: trimmed, case-folded, exact. Anything else leaves confirm nil and is a
+// refusal, so a model relaying "sounds good" cannot commit the operator.
+func ConfirmRecord(e Env, cfg Config, r *Record, phrase, by, surface string) error {
+	if r.Confirm != nil {
+		return refuse("record %s is already confirmed by %s at %s", r.ID, r.Confirm.By, r.Confirm.At)
+	}
+	if !strings.EqualFold(strings.TrimSpace(phrase), strings.TrimSpace(cfg.Phrase)) {
+		return refuse("phrase did not match; confirm stays null")
+	}
+	if by == "" {
+		by = "human:" + cfg.Tenant
+	}
+	if surface == "" {
+		surface = "text"
+	}
+	r.Confirm = &Confirm{By: by, Phrase: cfg.Phrase, At: e.Now().UTC().Format("2006-01-02T15:04:05Z"), Surface: surface}
+	return nil
+}
+
+// Step is one verb apply will run, in order.
+type Step struct {
+	Name string   // stable step id, e.g. card standup-…-c1 dispatch
+	Dir  string   // where the verb runs
+	Bin  string   // fleet
+	Args []string // the verb and its flags
+	Skip string   // set when the world already carries this step's effect
+}
+
+// Plan turns the record into steps against the live world: pools for roles, then
+// per card a dispatch and a send, then decisions. It refuses before any write when
+// a kind has no manifest, a seat is not in roles.map, or a card's row already exists
+// under a different accountable role — a changed payload under the same identity.
+func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
+	var steps []Step
+	for _, ro := range r.Roles {
+		if !e.KindExists(ro.Kind) {
+			return nil, refuse("roles: kind %q has no manifest under %s; write %s/manifest.json and card.md first", ro.Kind, e.Lanes, ro.Kind)
+		}
+		if ro.Seats == 0 {
+			continue
+		}
+		steps = append(steps, Step{Name: "role " + ro.Role + " pool", Dir: ro.Checkout, Bin: e.Fleet,
+			Args: []string{"pool", ro.Checkout, ro.Kind, fmt.Sprint(ro.Seats), "--tenant", cfg.Tenant}})
+	}
+	for _, c := range r.Cards {
+		dir := c.Checkout
+		if dir == "" {
+			p, ok := world.Seats[c.Seat]
+			if !ok {
+				return nil, refuse("card %s: seat %q is not in %s; pool it first or name a checkout", c.ID, c.Seat, e.RolesMap)
+			}
+			dir = p
+		}
+		steps = append(steps, branchSteps(e, c, dir, world)...)
+		key := repoName(c.Repo) + " " + c.Change + " " + c.As
+		dispatch := Step{Name: "card " + c.ID + " dispatch", Dir: dir, Bin: e.Fleet,
+			Args: []string{"dispatch", c.Change, "--as", c.As, "--for", c.For, "--due", c.Due, "--brief", c.Brief}}
+		if c.Seat != "" {
+			dispatch.Args = append(dispatch.Args, "--slot", c.Seat)
+		}
+		if row, ok := world.Rows[key]; ok {
+			if row.For != c.For {
+				return nil, refuse("card %s: a row for %s %s/%s already names %s accountable, not %s; reassign it or change the card", c.ID, c.Repo, c.Change, c.As, row.For, c.For)
+			}
+			dispatch.Skip = "row exists for " + row.For
+		}
+		steps = append(steps, dispatch)
+		if c.Seat != "" {
+			body := fmt.Sprintf("%s\n\nrepo %s · change %s · done when a passing %s receipt exists at the head · due %s · card %s of %s", c.Brief, c.Repo, c.Change, c.As, c.Due, c.ID, r.ID)
+			steps = append(steps, Step{Name: "card " + c.ID + " send", Dir: e.LeadDir, Bin: e.Fleet,
+				Args: []string{"send", c.Seat, "--id", c.ID, "--kind", "order", "--subject", c.Repo + " " + c.Change, "--body", body}})
+		}
+	}
+	for i, d := range r.Decisions {
+		step := Step{Name: fmt.Sprintf("decision %d", i+1), Dir: e.LeadDir, Bin: e.Fleet, Args: []string{"decide", d.Kind, d.Subject, d.Text}}
+		if world.Decided[d.Kind+" "+d.Subject+": "+d.Text] {
+			step.Skip = "already decided"
+		}
+		steps = append(steps, step)
+	}
+	return steps, nil
+}
+
+// branchSteps makes a card's change exist before dispatch. A pull request number
+// already has a branch; a branch name may be new work, and Fleet refuses to declare
+// a row for a branch it cannot see. So: fetch, then create the branch on origin from
+// the repository's default branch when it is not there. The seat's checkout is never
+// switched; the worker checks the branch out itself when its order arrives.
+func branchSteps(e Env, c Card, dir string, world *World) []Step {
+	if strings.HasPrefix(c.Change, "#") {
+		return nil
+	}
+	fetch := Step{Name: "card " + c.ID + " fetch", Dir: dir, Bin: "git", Args: []string{"fetch", "origin", "--quiet"}}
+	create := Step{Name: "card " + c.ID + " branch", Dir: dir, Bin: "git",
+		Args: []string{"push", "origin", "refs/remotes/origin/" + world.DefaultBranch(e, dir) + ":refs/heads/" + c.Change}}
+	if world.BranchOnOrigin(e, dir, c.Change) {
+		create.Skip = "branch exists on origin"
+	}
+	return []Step{fetch, create}
+}
+
+// World is the part of live state apply plans against.
+type World struct {
+	Rows    map[string]Row // "repo change relationship" → row
+	Seats   map[string]string
+	Decided map[string]bool
+}
+
+// Row is the declared part of a dispatch row.
+type Row struct{ For string }
+
+// BranchOnOrigin asks the remote, from the seat's checkout, whether the branch exists.
+// A remote that cannot be reached reads as absent, and the create step then says why.
+func (w *World) BranchOnOrigin(e Env, dir, branch string) bool {
+	res := e.Run.Run(dir, "git", "ls-remote", "--heads", "origin", branch)
+	return res.Err == nil && res.Code == 0 && strings.Contains(res.Stdout, "refs/heads/"+branch)
+}
+
+// DefaultBranch is what origin's HEAD points at, or main when it does not say.
+func (w *World) DefaultBranch(e Env, dir string) string {
+	res := e.Run.Run(dir, "git", "ls-remote", "--symref", "origin", "HEAD")
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			return strings.Fields(rest)[0]
+		}
+	}
+	return "main"
+}
+
+// ReadWorld gathers rows, seats and decisions. Rows are keyed the way the record
+// names them; fleet's repo id carries a hash suffix, so the match is on basename.
+func ReadWorld(e Env, cfg Config) (*World, error) {
+	w := &World{Rows: map[string]Row{}, Decided: map[string]bool{}}
+	seats, err := e.Seats(cfg.Tenant)
+	if err != nil {
+		return nil, fmt.Errorf("roles.map: %w", err)
+	}
+	w.Seats = seats
+	res := e.Run.Run(e.LeadDir, e.Fleet, "work", "--json")
+	if res.Err != nil {
+		return nil, res.Err
+	}
+	if res.Code == 0 {
+		rows, err := parseRows(res.Stdout)
+		if err != nil {
+			return nil, fmt.Errorf("fleet work --json: %w", err)
+		}
+		for _, r := range rows {
+			w.Rows[repoBase(str(r, "repo"))+" "+str(r, "change")+" "+str(r, "relationship")] = Row{For: str(r, "for")}
+		}
+	}
+	res = e.Run.Run(e.LeadDir, e.Fleet, "decisions")
+	if res.Err == nil && res.Code == 0 {
+		for _, line := range strings.Split(res.Stdout, "\n") {
+			// "d3 rule ivy: two fix-rounds" → "rule ivy: two fix-rounds"
+			if i := strings.IndexByte(line, ' '); i > 0 {
+				w.Decided[strings.TrimSpace(line[i+1:])] = true
+			}
+		}
+	}
+	return w, nil
+}
+
+// repoName is the name half of owner/name: what a Fleet row carries as its repo.
+func repoName(repo string) string {
+	if i := strings.IndexByte(repo, '/'); i >= 0 {
+		return repo[i+1:]
+	}
+	return repo
+}
+
+// repoBase strips fleet's hash suffix: "ivy-5ab57ce6" → "ivy". A card's repo is
+// owner/name; rows match on name because that is all the local record carries.
+func repoBase(repo string) string {
+	if i := strings.LastIndexByte(repo, '-'); i > 0 && len(repo)-i-1 == 8 {
+		return repo[:i]
+	}
+	return repo
+}
+
+// Apply refuses an unconfirmed or stale record, plans, then runs each step not
+// already in applied[], saving the record after every one so a crash leaves a
+// truthful ledger. A step that exits non-zero stops the run; the next apply resumes
+// after the last step that succeeded.
+func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) ([]Step, error) {
+	if r.Confirm == nil {
+		return nil, refuse("record %s is not confirmed; nothing is written until the phrase sets confirm", r.ID)
+	}
+	agenda, err := LoadAgenda(e.AgendaPath(r.Agenda))
+	if err != nil {
+		return nil, fmt.Errorf("agenda %s: %w", r.Agenda, err)
+	}
+	if agenda.Digest != r.AgendaDigest {
+		return nil, refuse("record %s was made against agenda digest %s but %s carries %s", r.ID, short(r.AgendaDigest), r.Agenda, short(agenda.Digest))
+	}
+	live, err := e.Build(cfg, agenda.ID)
+	if err != nil {
+		return nil, err
+	}
+	if live.Digest != agenda.Digest && !forceStale {
+		return nil, refuse("the world moved since agenda %s:\n%s\nre-run standup agenda and re-plan, or apply --force-stale to proceed anyway", agenda.ID, diffLines(agenda.Projection, live.Projection))
+	}
+	world, err := ReadWorld(e, cfg)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := Plan(e, cfg, r, world)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		return steps, nil
+	}
+	done := map[string]bool{}
+	for _, a := range r.Applied {
+		if a.Code == 0 {
+			done[a.Step] = true
+		}
+	}
+	for _, s := range steps {
+		if done[s.Name] {
+			continue
+		}
+		rec := Applied{Step: s.Name, Verb: s.Bin, Dir: s.Dir, Args: s.Args, At: e.Now().UTC().Format("2006-01-02T15:04:05Z"), Skip: s.Skip}
+		if s.Skip == "" {
+			res := e.Run.Run(s.Dir, s.Bin, s.Args...)
+			rec.Code = res.Code
+			rec.Output = strings.TrimSpace(res.Stdout + res.Stderr)
+			if res.Err != nil {
+				rec.Code = 4
+				rec.Output = res.Err.Error()
+			}
+		}
+		r.Applied = append(r.Applied, rec)
+		if err := r.Save(path); err != nil {
+			return steps, err
+		}
+		if rec.Code != 0 {
+			return steps, fmt.Errorf("%s exited %d: %s\nfix the cause and re-run apply; steps before it are recorded and will not repeat", s.Name, rec.Code, rec.Output)
+		}
+	}
+	return steps, nil
+}
+
+func diffLines(before, after []string) string {
+	was := map[string]bool{}
+	for _, l := range before {
+		was[l] = true
+	}
+	is := map[string]bool{}
+	for _, l := range after {
+		is[l] = true
+	}
+	var b strings.Builder
+	for _, l := range before {
+		if !is[l] {
+			b.WriteString("- " + l + "\n")
+		}
+	}
+	for _, l := range after {
+		if !was[l] {
+			b.WriteString("+ " + l + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}

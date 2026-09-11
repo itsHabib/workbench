@@ -30,9 +30,9 @@ Orientation block you can point an agent at to ground it fast.
   `cmd/<tool>/CLAUDE.md` and `cmd/<tool>/AGENTS.md`, plus `docs/DESIGN.md`.
   CI requires the guide pair to stay synchronized so either harness discovers
   the same exit codes, invariants, and checks.
-  Nineteen today, grouped by what they own. Running agents: `fleet` (the substrate:
+  Twenty today, grouped by what they own. Running agents: `fleet` (the substrate:
   hook-derived identity and liveness, seats, rows, receipts, role-addressed mail, the
-  watcher), `org` and `org-mcp` (editable role cards and an optional parent directory), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
+  watcher), `org` and `org-mcp` (editable role cards and an optional parent directory), `standup` (the agenda, the record the lead proposes, the operator's confirm, and the apply that compiles cards into fleet rows and mail), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
   (the merge-authorization boundary; exit codes 0 pass / 1 blocked / 2 parked / 3 refused /
   4 error are a load-bearing seam), `triage` (`triage-floor`, `triage-advisory`), `review`,
   `reviewfindings`, `escalate` (the agent→human→agent back-channel for parked runs). Seeing

@@ -1,6 +1,6 @@
 # workbench
 
-The home for the Go agentic-infra family: one repo, one Go module, nineteen tools (twenty
+The home for the Go agentic-infra family: one repo, one Go module, twenty tools (twenty-one
 binaries) that let one person run a team of coding agents and trust what comes back. Tools live side by
 side and **share contracts, not call stacks**: they compose at runtime through artifacts (exit
 codes and JSONL on disk), never by importing each other's decision code.
@@ -29,6 +29,7 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 |---|---|
 | [`fleet`](cmd/fleet/README.md) | the substrate for a team of agents: a hook that derives identity, liveness and leases from harness events; seats, assignment rows, receipts, role-addressed mail, one Go watcher for the board, headless polling, assignment/mail wakeups and recurring lead ticks |
 | [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | editable Markdown role cards and an optional parent directory; register, read, list. Work, messaging and checkpoints need no Org lifecycle; old lifecycle callers are removed during cutover |
+| [`standup`](cmd/standup/README.md) | the record and the compiler behind the standup: an agenda derived from records, one `standup.v1` record the lead lane proposes, a confirm that only the operator's phrase can set, and an apply that turns cards into `fleet dispatch` rows and mail |
 | [`runway`](cmd/runway/README.md) | foreground execution-runtime controller: one admitted request at a time |
 | [`dispatch`](cmd/dispatch/README.md) | placement: which engine and where a task runs |
 | [`driverstate`](cmd/driverstate/README.md) | the human and cron CLI over the driver-state event ledger |
