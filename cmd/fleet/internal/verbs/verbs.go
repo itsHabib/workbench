@@ -62,11 +62,11 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet tier [--base <ref>] [--json]             verification tier of the diff against <ref> (default origin/main)
   fleet ready <sha> "<action>" "<observable>"     print the ready-to-run packet, or refuse an incomplete one
   fleet receipt <sha> <kind> pass|fail "<observable>" [--session <id8>] [--card <url>]
-                                                 record a receipt: this session's lane must produce <kind>; tree at <sha>, clean
+                                                 record evidence from this live session and checkout; any kind; tree at <sha>, clean
   fleet receipts [<sha>] [--kind <k>] [--since <2h>] [--all] [--json]
                                                  list receipts, newest first; --all adds the verdicts each one replaced at that head
   fleet done <sha|#n|branch> [--kind <k>] [--all] [--json]
-                                                 exit 0 if a passing receipt (of <kind>, else of every kind seen) exists for that revision; 1 if not; 2 unresolvable
+                                                 exit 0 if a passing receipt (of <kind>, else of every configured expected kind) exists for that revision; 1 if not; 2 unresolvable
                                                  the verdict is always the latest receipt of a kind; --all shows what it replaced
   fleet watch [--interval 10s] [--once]          Go scheduler and observer; runs until stopped
   fleet watch status [--json]                    inspect workers and watcher now, without a tick
