@@ -23,12 +23,15 @@ func TestRunReportSeparatesUnknownFromReportedZero(t *testing.T) {
 	if err := fleet.WriteJSON(filepath.Join(d, "one.exit.json"), fleet.Rec{"address": "hub:lead", "at": fleet.Now(), "exit_code": 0}); err != nil {
 		t.Fatal(err)
 	}
+	if err := fleet.WriteJSON(filepath.Join(d, "three.meta.json"), fleet.Rec{"address": "hub:missing-exit", "cwd": "/observed", "at": fleet.Now()}); err != nil {
+		t.Fatal(err)
+	}
 	got := RunReport(fleet.Now() - 60)
 	if got["attempt_count"] != 3 || got["cost_known"] != 2 || got["turns_known"] != 2 || fleet.F(got, "reported_cost_usd") != 0.25 || fleet.F(got, "reported_turns") != 3 {
 		t.Fatal(got)
 	}
 	text := RunReportText(got)
-	for _, want := range []string{"error_api", "exit_unknown", "unknown", "hub:lead"} {
+	for _, want := range []string{"error_api", "exit_unknown", "unknown", "hub:lead", "hub:missing-exit"} {
 		if !strings.Contains(text, want) {
 			t.Fatal(text)
 		}
@@ -43,14 +46,18 @@ func TestAllStatusReadsHooksWhenWatcherIsStale(t *testing.T) {
 	if err := fleet.WriteJSON(fleet.Path("sessions", "status-session.json"), fleet.Rec{"session": "status-session", "cwd": home, "launch_dir": home, "last_event_at": fleet.Now(), "last_event": "PostToolUse", "last_tool": "Edit", "branch": "task", "pid_kind": "harness", "pid": os.Getpid()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), fleet.Rec{"pid": os.Getpid(), "at": fleet.Now() - 3600, "interval": 1}); err != nil {
+	if err := fleet.WriteJSON(filepath.Join(dir(), "heartbeat.json"), fleet.Rec{"pid": os.Getpid(), "at": fleet.Now() - 3600, "interval": 1, "notification_configured": true}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(filepath.Join(dir(), "heartbeat.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("FLEET_NOTIFY", "")
 	got := AllStatus()
+	if !fleet.B(got, "notification_configured") {
+		t.Fatal("read observer environment instead of watcher", got)
+	}
 	if fleet.S(got, "watcher") != "stale" {
 		t.Fatal(got)
 	}

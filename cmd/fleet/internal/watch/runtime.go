@@ -104,6 +104,9 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	}
 	defer func() { _ = log.Close() }()
 	exitFile := attempt + ".exit.json"
+	if err := fleet.WriteJSON(attempt+".meta.json", fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "output": logPath}); err != nil {
+		return 0, err
+	}
 	if assignment == "" {
 		last, err := readLaunch(t)
 		if err != nil {

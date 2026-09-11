@@ -3,7 +3,6 @@ package watch
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -50,7 +49,7 @@ func AllStatus() fleet.Rec {
 	}
 	status["workers"] = rows
 	status["scope"] = "local role bindings and configured headless targets"
-	status["notification_configured"] = os.Getenv("FLEET_NOTIFY") != ""
+	status["notification_configured"] = fleet.M(status, "heartbeat")["notification_configured"]
 	return status
 }
 
@@ -83,7 +82,7 @@ func enrichStatus(row fleet.Rec, work []verbs.WorkRow) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "HEAD").Output()
+	out, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", path, "rev-parse", "HEAD").Output()
 	if err != nil {
 		row["head_error"] = "could not read checkout HEAD"
 		return
@@ -94,7 +93,11 @@ func enrichStatus(row fleet.Rec, work []verbs.WorkRow) {
 // AllStatusText keeps process, hook activity and receipt completion separate.
 func AllStatusText(status fleet.Rec) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Watcher: %s; notifications configured: %t\n", fleet.S(status, "watcher"), fleet.B(status, "notification_configured"))
+	notifier := "unknown"
+	if configured, ok := status["notification_configured"].(bool); ok {
+		notifier = fmt.Sprintf("%t", configured)
+	}
+	fmt.Fprintf(&b, "Watcher: %s; notifications configured: %s\n", fleet.S(status, "watcher"), notifier)
 	if err := fleet.S(status, "configuration_error"); err != "" {
 		fmt.Fprintf(&b, "Configuration: %s\n", err)
 	}

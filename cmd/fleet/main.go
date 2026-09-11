@@ -69,12 +69,12 @@ func main() {
 // what makes the watcher need no install step: any session revives it. It lives here
 // rather than in the hook package because the watcher folds through the verbs, and
 // the hook package cannot import what imports it.
-func reviveWatcher(ev map[string]any) {
+func reviveWatcher(ev map[string]any) (started bool) {
 	if ev["hook_event_name"] != "SessionStart" {
-		return
+		return false
 	}
 	defer func() { _ = recover() }() // never a reason for a hook to fail
-	watch.EnsureRunning()
+	return watch.EnsureRunning()
 }
 
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
@@ -176,13 +176,13 @@ func runHook(args []string) {
 	case "claude":
 		v := fleet.Run(ev)
 		logVerdict(which, ev, v, t0, false)
-		reviveWatcher(ev)
-		fleet.Exit(withWatcherHealth(ev, v))
+		started := reviveWatcher(ev)
+		fleet.Exit(withWatcherHealth(ev, v, started))
 	case "codex":
 		v := codex.Run(ev)
 		logVerdict(which, ev, v, t0, false)
-		reviveWatcher(ev)
-		fleet.Exit(withWatcherHealth(ev, v))
+		started := reviveWatcher(ev)
+		fleet.Exit(withWatcherHealth(ev, v, started))
 	default:
 		fmt.Fprintf(os.Stderr, "fleet hook: unknown harness %q (claude|codex)\n", which)
 		os.Exit(2)
@@ -265,11 +265,14 @@ func runReport(args []string) {
 }
 
 // withWatcherHealth adds startup context without changing the hook verdict.
-func withWatcherHealth(ev fleet.Rec, v *fleet.Verdict) *fleet.Verdict {
+func withWatcherHealth(ev fleet.Rec, v *fleet.Verdict, started bool) *fleet.Verdict {
 	if fleet.S(ev, "hook_event_name") != "SessionStart" {
 		return v
 	}
 	state, hb := watch.WatcherHealth()
+	if started && state != "running" {
+		state = "revival requested; last observed " + state
+	}
 	line := fmt.Sprintf("[fleet] watcher: %s; inspect workers with fleet status --all; trace with fleet tail <address>", state)
 	if at := fleet.F(hb, "at"); at > 0 {
 		line += fmt.Sprintf("; last tick %s ago", fleet.FmtAge(fleet.Now()-at))
