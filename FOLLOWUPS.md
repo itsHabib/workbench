@@ -2,6 +2,18 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## fleet: avoid repeating all-agent joins during detail refresh
+
+PR #319 retains one address-resolution path: `inspect` and `trace` resolve the
+current agent through `AllStatus`. Console therefore repeats bounded mailbox and
+checkout joins after fetching the board. Real three-agent provider runs pass,
+but this work grows with fleet size and can approach the 30-second CLI deadline.
+Measure board-plus-detail latency on larger fleets; before a normal refresh
+exceeds five seconds, extract a detail lookup that enriches only the uniquely
+resolved address while preserving binding and ambiguity checks. Do not add a
+second state store or a stale identity cache. This P2 scaling suggestion is
+deferred from the final correctness fix round; current timeouts fail visibly.
+
 ## fleet: dispatch still publishes two records
 
 PR #310 review identified a failure window in `cmdDispatch`: `CmdAssign` can

@@ -1131,11 +1131,16 @@
           try {
             const d = await api("diagnostics", address);
             if (
-              token === generation &&
-              version === diagnosticVersion &&
-              address === selected
+              token !== generation ||
+              version !== diagnosticVersion ||
+              address !== selected
             )
-              diagnostic = { ...d, at: Date.now() / 1000 };
+              return;
+            if (!diagnosticMatches(detail, d))
+              throw Error(
+                "Trace changed during analysis. Refresh and analyze again.",
+              );
+            diagnostic = { ...d, at: Date.now() / 1000 };
           } catch (e) {
             if (token === generation && version === diagnosticVersion)
               diagnostic = { error: e.message };
@@ -1146,6 +1151,14 @@
             }
           }
         }
+        function diagnosticMatches(snapshot, result) {
+          return (
+            !!result.fingerprint &&
+            snapshot?.trace?.source === result.source &&
+            snapshot?.trace?.fingerprint === result.fingerprint
+          );
+        }
+        // Identity fields must also participate in loadDetail's changed comparison.
         function evidenceIdentity(x) {
           return JSON.stringify([
             x?.agent?.started_at,
@@ -1158,7 +1171,7 @@
             x?.trace?.file_bytes,
           ]);
         }
-        async function loadDetail() {
+        async function loadDetail(reportChanged = false) {
           const address = selected,
             token = generation;
           if (!address) return;
@@ -1183,7 +1196,7 @@
                 }) || !!detailError;
             detail = d;
             detailError = "";
-            if (!changed) return;
+            if (!changed && !(tab === "attempts" && reportChanged)) return;
           } catch (e) {
             if (token === generation) detailError = e.message;
           }
@@ -1214,6 +1227,9 @@
             ]);
             if (b.status === "rejected") throw b.reason;
             board = b.value;
+            const reportChanged =
+              JSON.stringify(report) !==
+              JSON.stringify(r.status === "fulfilled" ? r.value : null);
             report = r.status === "fulfilled" ? r.value : null;
             $("error").className = "notice";
             $("error").hidden = r.status === "fulfilled";
@@ -1223,7 +1239,7 @@
                 : "";
             $("live").innerHTML = '<i class="dot"></i>Snapshot current';
             renderBoard();
-            await loadDetail();
+            await loadDetail(reportChanged);
           } catch (e) {
             $("error").className = "notice error";
             $("error").hidden = false;

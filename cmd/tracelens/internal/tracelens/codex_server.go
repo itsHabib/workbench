@@ -49,7 +49,9 @@ func ParseCodexServerEvents(r io.Reader) (Trajectory, error) {
 		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
 			return Trajectory{}, fmt.Errorf("line %d: %w", line, err)
 		}
-		addServerEvent(&b, e)
+		if err := addServerEvent(&b, e); err != nil {
+			return Trajectory{}, fmt.Errorf("line %d: %w", line, err)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return Trajectory{}, err
@@ -57,19 +59,23 @@ func ParseCodexServerEvents(r io.Reader) (Trajectory, error) {
 	return b.finish()
 }
 
-func addServerEvent(b *codexBuilder, e serverEvent) {
+func addServerEvent(b *codexBuilder, e serverEvent) error {
 	if e.Method == "turn/completed" && e.Params.Turn.Status == "failed" {
 		b.addTurnFailure(e.Params.Turn.Error)
-		return
+		return nil
 	}
 	if e.Method != "item/started" && e.Method != "item/completed" {
-		return
+		return nil
 	}
 	i := e.Params.Item
+	// Input and reasoning are not tool outcomes or final agent observations.
+	if i.Type == "userMessage" || i.Type == "reasoning" {
+		return nil
+	}
 	types := map[string]string{"commandExecution": "command_execution", "fileChange": "file_change", "agentMessage": "agent_message"}
 	kind := types[i.Type]
 	if kind == "" {
-		return
+		return fmt.Errorf("unsupported app-server item type %q", i.Type)
 	}
 	key := i.ID
 	if key != "" {
@@ -80,4 +86,5 @@ func addServerEvent(b *codexBuilder, e serverEvent) {
 		typ = "item.completed"
 	}
 	b.add(codexEvent{Type: typ, Item: codexItem{ID: key, Type: kind, Text: i.Text, Command: i.Command, AggregatedOutput: i.Output, ExitCode: i.ExitCode, Status: i.Status, Changes: i.Changes}})
+	return nil
 }

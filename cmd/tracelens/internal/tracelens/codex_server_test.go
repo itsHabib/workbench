@@ -30,3 +30,39 @@ func TestCodexServerFailureAndMixedTrace(t *testing.T) {
 		t.Fatal("mixed producer trace accepted")
 	}
 }
+
+func TestCodexServerFileChangeAndFinalAgentText(t *testing.T) {
+	input := `{"method":"item/started","params":{"threadId":"t","turnId":"a","item":{"id":"edit","type":"fileChange","status":"inProgress","changes":[{"path":"main.go","kind":"update"}]}}}
+{"method":"item/completed","params":{"threadId":"t","turnId":"a","item":{"id":"edit","type":"fileChange","status":"completed","changes":[{"path":"main.go","kind":"update"}]}}}
+{"method":"item/started","params":{"threadId":"t","turnId":"a","item":{"id":"answer","type":"agentMessage","text":"partial"}}}
+{"method":"item/completed","params":{"threadId":"t","turnId":"a","item":{"id":"answer","type":"agentMessage","text":"finished edit"}}}
+`
+	got, err := ParseCodexServerEvents(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Steps) != 2 {
+		t.Fatal(got)
+	}
+	edit, answer := got.Steps[0], got.Steps[1]
+	if edit.Tool != "file_change" || edit.OK == nil || !*edit.OK || !strings.Contains(edit.Observation, "main.go") || edit.Args["changes"] == nil {
+		t.Fatal(edit)
+	}
+	if answer.Thought != "finished edit" || answer.Tool != "" || answer.OK != nil {
+		t.Fatal(answer)
+	}
+}
+
+func TestCodexServerRejectsUnsupportedActivityAlongsideSupportedSteps(t *testing.T) {
+	step := `{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"one","command":"check","exitCode":0}}}`
+	for _, kind := range []string{"mcpToolCall", "dynamicToolCall", "futureTool"} {
+		input := step + "\n" + `{"method":"item/completed","params":{"item":{"type":"` + kind + `","id":"two"}}}`
+		if _, err := ParseCodexServerEvents(strings.NewReader(input)); err == nil || !strings.Contains(err.Error(), "unsupported app-server item") {
+			t.Fatal(kind, err)
+		}
+	}
+	input := step + "\n" + `{"method":"item/completed","params":{"item":{"type":"userMessage"}}}` + "\n" + `{"method":"item/completed","params":{"item":{"type":"reasoning"}}}`
+	if got, err := ParseCodexServerEvents(strings.NewReader(input)); err != nil || len(got.Steps) != 1 {
+		t.Fatal(got, err)
+	}
+}

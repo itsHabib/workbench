@@ -76,6 +76,8 @@ over stdin. `auto` detects provider streams, including `codex-app-server`
 notifications (`item/started`, `item/completed`, `turn/completed`). Command and
 file-change items pair by thread, turn and item identity. Incomplete or unknown
 outcomes remain unknown; explicit failed turns remain failures. Final agent text
-is supported; other app-server item kinds are not yet analyzed. Mixed provider
-formats and unsupported/no-step streams error instead of yielding a clean report.
+is supported. User input and reasoning records are excluded from tool analysis.
+Other app-server item kinds make analysis unavailable, even alongside supported
+steps. Mixed provider formats and unsupported/no-step streams error instead of
+yielding a clean report.
 No per-step usage is invented from aggregate provider totals.
