@@ -20,9 +20,23 @@ Claude uses the SDK's streaming-input control channel, explicit `resume`, `inter
 no separate script to install and no second scheduler.
 
 Both providers use their configured authentication and project settings. Claude loads user,
-project and local settings, including the projected Fleet hooks. Codex reads its normal
-configuration. Set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when deliberately isolating provider
-homes. Neither Fleet nor its installer copies credentials or chooses another account.
+project and local settings, including the projected Fleet hooks: settings-file command hooks
+do run in SDK-spawned sessions (verified on macOS with SDK 0.3.183; SessionStart,
+UserPromptSubmit, Stop and SessionEnd wrote the session record and its events). A hook
+command the platform cannot exec fails silently and leaves the session with no identity, so
+the projected binary path must be runnable outside a POSIX shell; on Windows that means the
+`.exe` extension, which `install.sh` now emits and `fleet role` now checks. Codex reads its
+normal configuration. Set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when deliberately isolating
+provider homes. Neither Fleet nor its installer copies credentials or chooses another account.
+
+When `ANTHROPIC_BASE_URL` points at a custom endpoint (a gateway or proxy), the headless
+session needs an explicit API key in the environment the watcher launches from; an
+interactive `claude` login is not picked up, and the attempt records
+`error: authentication_failed` with `provider_terminal: true`. Set the key for the watcher
+process rather than in a shell profile: a global `ANTHROPIC_API_KEY` can override a credential
+helper the interactive harness relies on. A gateway may also reject a dated model name where
+the unversioned one (`claude-sonnet-5`) is accepted; that rejection reads like a permissions
+error. `deliver.json`'s `model` is optional, and the provider default may be a dated name.
 
 This integration reuses the supported mechanism already used by Ship's Claude runner; it does
 not import Ship's policies or its runner (which does not support attach). Codex app-server

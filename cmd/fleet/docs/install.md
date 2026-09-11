@@ -35,9 +35,12 @@ roles. Preserve unrelated hooks and existing state; this installer does not clea
 
 `go install github.com/itsHabib/workbench/cmd/fleet@latest` installs only the binary;
 you still need the public lane assets, or your own `FLEET_LANES` directory. The shell
-installer is the complete source-checkout path. Windows users can build with Go and
-copy `cmd/fleet/examples/lanes` to their Fleet state directory; the Bash installer smoke test
-covers macOS/Linux only.
+installer is the complete source-checkout path. On Windows, run it from Git Bash: it emits
+`bin\fleet.exe`, and the extension matters, because Console and the harness exec the binary
+rather than running it from a shell, and an extensionless `fleet` makes every projected hook
+fail silently. Building by hand, keep the name: `go build -o %USERPROFILE%\.fleet\bin\fleet.exe
+./cmd/fleet`, then copy `cmd/fleet/examples/lanes`. `fleet role` refuses to project a hook
+command from an extensionless binary. The packaging test runs wherever `bash` is on PATH.
 
 ## Configure one repository
 

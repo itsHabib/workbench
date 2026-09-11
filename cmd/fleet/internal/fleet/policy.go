@@ -664,12 +664,19 @@ func CdChain(cmd, cwd string) ([]string, bool) {
 		if parenDepth(cmd[:m[2]]) > 0 {
 			continue
 		}
-		word := firstOperand(shellWords(cmd[m[2]:m[3]]))
+		word := firstOperand(cdWords(cmd[m[2]:m[3]]))
 		if word == "" {
 			known = false
 			continue
 		}
 		t := expand(word)
+		if driveRelative(t) {
+			// `C:seat` is relative to that drive's own current directory, which this
+			// guard cannot know; joining it to cwd would name a path nothing is bound
+			// to and wave the move through (#320). Unresolved refuses instead.
+			unresolved, known = true, false
+			continue
+		}
 		if !filepath.IsAbs(t) {
 			if !known {
 				unresolved = true
@@ -682,6 +689,17 @@ func CdChain(cmd, cwd string) ([]string, bool) {
 		cur, known = t, true
 	}
 	return out, unresolved
+}
+
+// driveRelative is a Windows path with a volume but no separator after it (`C:seat`,
+// `C:`): neither absolute nor relative to the cwd. Always false where there are no
+// volumes.
+func driveRelative(p string) bool {
+	v := filepath.VolumeName(p)
+	if v == "" {
+		return false
+	}
+	return len(p) == len(v) || !os.IsPathSeparator(p[len(v)])
 }
 
 // firstOperand is the first non-option word, or "".

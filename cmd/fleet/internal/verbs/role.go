@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -380,7 +381,28 @@ func hookCommand() string {
 // cmdRole roles one checkout. `slot` is the map's optional fourth column and is
 // written only by `fleet pool`; a hand-roled checkout has none, and an existing slot
 // column survives a re-role.
+// hookBinaryUsable refuses to project a hook command the harness cannot execute. On
+// Windows an extensionless binary runs from a POSIX shell but not through exec, so a
+// `fleet role` run from one writes a hook path that every harness event then fails on,
+// silently, in every roled directory: no session record, no identity (#322, #324).
+func hookBinaryUsable() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if filepath.Ext(exe) == "" {
+		return refuse("fleet role: %s has no .exe extension, so the harness cannot run it as a hook; install with cmd/fleet/install.sh --apply or rename the binary, then rerun from it", exe)
+	}
+	return nil
+}
+
 func cmdRole(checkout, role string, force bool, tenant, slot string) error {
+	if err := hookBinaryUsable(); err != nil {
+		return err
+	}
 	checkout = mapPath(checkout)
 	if !isDir(checkout) {
 		return refuse("fleet role: %s is not a directory", checkout)
@@ -516,6 +538,11 @@ func allowSlow(perms map[string]any) {
 		}
 		have[p] = true
 		allow = append(allow, p)
+	}
+	if allow == nil {
+		// Claude Code rejects `"allow": null`, and a schema error drops the whole local
+		// settings file, hooks included. A public install measures no slow commands.
+		allow = []any{}
 	}
 	perms["allow"] = allow
 }
