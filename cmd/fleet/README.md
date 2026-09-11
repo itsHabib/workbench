@@ -47,17 +47,17 @@ of leads, cost nothing new.
   watches the board) plus a prose `card.md` the agent reads. `fr1_test.go`
   fails the build if a domain word appears in the Go source. Adding a kind of
   agent is one directory in cc-skills, not a code change here.
-- **Done is evidence.** A receipt is recorded only by a lane that produces that
-  kind, from its own roled worktree, at the exact head, from a clean tree.
+- **Done is evidence.** Any live session can record any receipt kind from its own
+  checkout, at the exact head, from a clean tree. Role, lane, seat and cwd are
+  provenance; independence is checked by the verifier instructions and lead.
   `fleet done` answers from receipts and nothing else; a message saying "done"
   is not done. The latest verdict of a kind is the answer, and it no longer erases
   the one before it: every verdict at a head is kept, and `--all` shows them.
 
-It is a port of the Python reference in cc-skills
-(`docs/features/agent-fleet-rules/ref/`), kept byte-compatible on purpose: store
-shapes, filenames, exit codes and refusal texts are a contract the suite pins, and
-a store the Python wrote must still satisfy. The design record is cc-skills
-`docs/features/agent-fleet-rules/SECOND-LOOK-2026-09-04.md`.
+Fleet originated from the Python reference in cc-skills
+(`docs/features/agent-fleet-rules/ref/`). The Go implementation is the current
+runtime; its tests track the current behavior. The historical design record is
+cc-skills `docs/features/agent-fleet-rules/SECOND-LOOK-2026-09-04.md`.
 
 ## The four faces
 

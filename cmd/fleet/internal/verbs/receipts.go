@@ -39,10 +39,9 @@ func cmdReady(sha, action, observable string) error {
 	return nil
 }
 
-// cmdReceipt records evidence bound to its provenance: the emitting session's lane
-// must produce this kind; the cwd must be inside that session's roled worktree; the
-// tree must be at <sha> and clean. `card` is an optional URL to the human-readable
-// evidence; the receipt is the fact a reader polls, the card is what a person opens.
+// cmdReceipt records evidence from any live session in its actual checkout.
+// The tree must be at <sha> and clean. Role and lane are provenance, not authority.
+// `card` optionally links to the human-readable evidence.
 func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bool) error {
 	if err := receiptArgs(sha, kind, verdict, observable, card, hasCard); err != nil {
 		return err
@@ -52,10 +51,7 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 		return err
 	}
 	rec := fleet.SessionRecord(sid)
-	if err := receiptLane(rec, sid, kind); err != nil {
-		return err
-	}
-	root, here, err := receiptTree(rec)
+	root, here, err := receiptTree()
 	if err != nil {
 		return err
 	}
@@ -67,11 +63,11 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 	if hasCard {
 		cardV = card
 	}
-	err = recordReceipt(sha, kind, fleet.Rec{
+	evidence := fleet.Rec{
 		"sha": sha, "head": head, "kind": kind, "verdict": verdict, "observable": observable,
 		"session": sid, "role": nilIfEmpty(fleet.S(rec, "role")), "slot": nilIfEmpty(fleet.S(rec, "slot")), "repo": nilIfEmpty(fleet.RepoID(here)),
-		"worktree": nilIfEmpty(root), "dirty": false, "card": cardV, "at": fleet.Now()})
-	if err != nil {
+		"worktree": root, "cwd": here, "lane": rec["lane"], "dirty": false, "card": cardV, "at": fleet.Now()}
+	if err := recordReceipt(sha, kind, evidence); err != nil {
 		return err
 	}
 	tail := ""
@@ -83,8 +79,7 @@ func cmdReceipt(sha, kind, verdict, observable, session, card string, hasCard bo
 	}
 	// The receipt is local evidence; its copy on the change's pull request is what
 	// another machine's `done` reads. Best effort, and the note says which happened.
-	note := postReceipt(fleet.RepoID(here), fleet.S(rec, "branch"), fleet.Rec{"kind": kind, "verdict": verdict, "sha": sha, "head": head,
-		"observable": observable, "session": sid, "role": nilIfEmpty(fleet.S(rec, "role")), "card": cardV, "at": fleet.Now()})
+	note := postReceipt(fleet.RepoID(here), fleet.S(rec, "branch"), evidence)
 	say("receipt: %s %s @ %s by %s %s%s; %s", kind, verdict, sha, roleOr(rec, "session"), fleet.Short(sid), tail, note)
 	return nil
 }
@@ -185,31 +180,15 @@ func receiptArgs(sha, kind, verdict, observable, card string, hasCard bool) erro
 	return nil
 }
 
-// receiptLane: only a lane whose manifest produces this kind may record it.
-func receiptLane(rec fleet.Rec, sid, kind string) error {
-	lane := fleet.M(rec, "lane")
-	if lane == nil {
-		return refuse("fleet receipt: session %s has no lane (role %s, no manifest); a receipt needs a lane that produces %s", fleet.Short(sid), roleOr(rec, "none"), fleet.PyRepr(kind))
-	}
-	if fleet.S(lane, "produces") != kind {
-		return refuse("fleet receipt: lane %s produces %s, not %s; only a lane whose manifest produces %s may record it", fleet.S(lane, "kind"), pyReprOrNone(lane["produces"]), fleet.PyRepr(kind), fleet.PyRepr(kind))
-	}
-	return nil
-}
-
-// receiptTree: the receipt is recorded from inside the session's roled worktree,
-// because its HEAD and cleanliness are read from the tree it names.
-func receiptTree(rec fleet.Rec) (root, here string, err error) {
-	root = fleet.RoledRoot(fleet.S(rec, "cwd"))
+// receiptTree names the actual Git checkout. currentSession has already bound the
+// caller to this directory; a roles.map entry is not needed to observe evidence.
+func receiptTree() (root, here string, err error) {
 	here = canon(cwd())
-	if root != "" && fleet.Within(here, root) {
-		return root, here, nil
+	root, err = gitOut("rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", "", err
 	}
-	where := root
-	if where == "" {
-		where = fleet.S(rec, "cwd")
-	}
-	return "", "", refuse("fleet receipt: this must run inside the session's roled worktree %s, not %s; the receipt's HEAD and cleanliness are read from the tree it names", where, here)
+	return canon(strings.TrimSpace(root)), here, nil
 }
 
 // receiptHead is the tree's HEAD, which must be the revision the packet names, from a
