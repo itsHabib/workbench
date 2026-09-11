@@ -597,7 +597,8 @@
             "/api/fleet/" +
               view +
               (address ? "?address=" + encodeURIComponent(address) : ""),
-            { cache: "no-store", signal: AbortSignal.timeout(35000) },
+            // Fleet may take 30s, followed by 10s for TraceLens; allow response margin.
+            { cache: "no-store", signal: AbortSignal.timeout(45000) },
           );
           const data = await response.json();
           if (!response.ok) throw Error(data.error || "Unable to read " + view);
