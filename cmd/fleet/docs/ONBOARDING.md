@@ -87,9 +87,10 @@ contract supplies the authority. A sample: `docs/RUN-CONTRACT-v4.md` in `itsHabi
 | headless on mail: one kickoff, then a delivery process starts a session for any address with unread mail and no live session | unattended, cheapest, sessions disposable | lowest; latency is the delivery interval |
 
 For the third shape, `deliver.json` maps each address to a directory and a launch command
-(prompt right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt). Until the
-watcher's own launcher lands, `e2e/mail-poll.sh` is the delivery process, or a desktop session on
-`/loop 2m` doing the same job from an unroled directory.
+(prompt right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt). `fleet watch`
+is itself the delivery process: each fold it launches configured addresses that have unacked,
+never-delivered mail and nobody present. Against a binary predating that, `e2e/mail-poll.sh` is the
+stand-in, or a desktop session on `/loop 2m` doing the same job from an unroled directory.
 
 ## 6. Kick off and watch
 

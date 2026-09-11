@@ -1,0 +1,353 @@
+package watch
+
+// Delivery: the fold's third duty, and the first one that starts anything.
+//
+// Mail waits for a session. When nobody ever starts one, it waits forever — the
+// rehearsal watched three unread messages sit for fifteen minutes behind a chip that
+// had been open and untouched for two hours, because a live process is not the same
+// as a process that will read anything. So: per fold, per configured address, if
+// there is mail nobody has been handed and no one is there to read it, run the
+// operator's command once, carrying every eligible message.
+//
+// The rules the rehearsal paid for:
+//
+//   - One launch per address per fold, carrying all of its eligible mail. Launching
+//     per message started four sessions of one role in a single fold, each checking
+//     liveness before the previous had written a session record.
+//   - A launch counts as present for the rest of the fold, for the same reason.
+//   - Live, no open turn, and untouched past FLEET_IDLE_GRACE reads absent. An idle
+//     holder is worse than a dead one: it blocks delivery and answers nothing.
+//   - A message is handed over once. Each is stamped delivered_at/delivered_by before
+//     the process starts — the stamp is the reservation, and a start that does not
+//     happen gives it back — and a stamped message is never carried again, not on the
+//     next fold and not by the next watcher.
+//   - The launch directory must be the address's own, in roles.map, in the same tenant.
+//     Mail identity comes from the exact directory, so a wrong one delivers to nobody.
+//   - Deciding and launching happen inside one lock every fold in every process takes,
+//     so a `fleet watch --once` beside the running watcher cannot double-launch: the
+//     stamps are the reservation, and the next holder of the lock re-reads them.
+//
+// Latency is bounded by the fold interval: a message that arrives just after a fold
+// waits for the next one, so worst-case delivery is one interval plus the grace.
+// FLEET_MAIL_GRACE holds a message back briefly so a burst arrives together.
+//
+// Delivery is configuration, not policy: $FLEET_STATE/deliver.json says what to run.
+//
+//	{"hub:b": {"cwd": "/path/to/dir", "cmd": ["harness", "-p", "{{prompt}}"]}}
+//
+// `{{prompt}}` is substituted wherever the operator put it. The substrate never
+// learns the harness's flags, and never invents a command for an unconfigured
+// address — an address with no entry keeps its mail until a session starts.
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
+)
+
+// Grace defaults. Both are durations, read once per fold.
+const (
+	defaultMailGrace  = 10.0
+	defaultIdleGrace  = 300.0
+	defaultReplyGrace = 900.0
+)
+
+// deliverTarget is one configured address.
+type deliverTarget struct {
+	address string
+	cwd     string
+	cmd     []string
+	lateTo  string
+}
+
+// grace reads a duration from the environment, falling back to the default. An
+// explicit zero is a choice — no grace at all — and is not the same as unparseable.
+func grace(key string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	if s := fleet.ParseDuration(v); s > 0 {
+		return s
+	}
+	if v == "0" || v == "0s" {
+		return 0
+	}
+	return fallback
+}
+
+// deliverTargets is the configured addresses, ordered so a fold is reproducible.
+// An unreadable or malformed entry is skipped: delivery configuration is the
+// operator's, and a typo in it must not stop the fold.
+func deliverTargets() []deliverTarget {
+	cfg := fleet.ReadJSON(fleet.Path("deliver.json"))
+	if cfg == nil {
+		return nil
+	}
+	var out []deliverTarget
+	for address := range cfg {
+		entry := fleet.M(cfg, address)
+		cmd := fleet.Strs(entry, "cmd")
+		if entry == nil || fleet.S(entry, "cwd") == "" || len(cmd) == 0 {
+			continue
+		}
+		if err := fleet.MailAddress(address, "address"); err != nil {
+			continue
+		}
+		out = append(out, deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), cmd: cmd, lateTo: fleet.S(entry, "LATE_TO")})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].address < out[j].address })
+	return out
+}
+
+// deliverLockKey is the one serialisation point for delivery, taken by every fold in
+// every process — the scheduled watcher and each `fleet watch --once` alike.
+const deliverLockKey = "watch-delivery"
+
+// deliver hands each configured address's waiting mail to one new process, and
+// returns what it observed. Nothing here is fatal to a fold.
+func deliver(now float64) []fleet.Rec {
+	targets := deliverTargets()
+	if len(targets) == 0 {
+		return nil
+	}
+	mailGrace, idleGrace := grace("FLEET_MAIL_GRACE", defaultMailGrace), grace("FLEET_IDLE_GRACE", defaultIdleGrace)
+	started := map[string]bool{} // a launch counts as present for the rest of the fold
+	var observed []fleet.Rec
+	for _, t := range targets {
+		if started[fleet.CanonPath(t.cwd)] {
+			continue
+		}
+		obs, launched := deliverOne(t, now, mailGrace, idleGrace)
+		observed = append(observed, obs...)
+		if launched {
+			started[fleet.CanonPath(t.cwd)] = true
+		}
+	}
+	return observed
+}
+
+// deliverOne decides and launches for one address inside the delivery lock.
+//
+// The decision and the act have to be one step. The lifetime owner lock is taken by
+// Serve alone, so a supported `fleet watch --once` beside the running watcher — or two
+// overlapping one-shot folds — is a second process reading the same unstamped rows; the
+// mail lock comes far too late, at stamping, after both have already started a session.
+// Under this lock the stamps a launch writes are the reservation: the next fold to take
+// the lock re-reads the mailbox and finds nothing eligible, so it does not launch.
+//
+// A lock it cannot take in time is a refusal to deliver this fold, recorded and left
+// for the next one. Mail is never lost by waiting; it is lost by being delivered twice.
+func deliverOne(t deliverTarget, now, mailGrace, idleGrace float64) ([]fleet.Rec, bool) {
+	var observed []fleet.Rec
+	launched := false
+	err := fleet.KeyLock(deliverLockKey, func() error {
+		if err := bound(t); err != nil {
+			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-unbound", "address": t.address, "cwd": t.cwd, "error": err.Error()})
+			return nil
+		}
+		rows, err := eligibleMail(t.address, now, mailGrace)
+		if err != nil {
+			observed = append(observed, fleet.Rec{"at": now, "what": "mail-delivery-failed", "address": t.address, "error": err.Error()})
+			return nil
+		}
+		if len(rows) == 0 || present(sessionRecords(), t.cwd, now, idleGrace) {
+			return nil
+		}
+		launched = true
+		observed = append(observed, launch(t, rows, now)...)
+		return nil
+	})
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-deferred", "address": t.address, "cwd": t.cwd, "error": err.Error()})
+	}
+	return observed, launched
+}
+
+// bound is whether the configured launch directory is the mailbox address's own
+// checkout, in the same tenant.
+//
+// Mail identity is resolved from the exact launch directory, so a stale or wrong
+// `cwd` starts a process wearing a different role — or none — while the fold stamps
+// the intended mailbox delivered. That process cannot read or acknowledge what it was
+// handed, and no later fold retries it: the messages are gone. The binding is cheap
+// to check and the only thing that makes the stamp true, so it is checked first.
+func bound(t deliverTarget) error {
+	tenant, err := fleet.MailAddressTenant(t.address)
+	if err != nil {
+		return err
+	}
+	role, cwdTenant, slot := fleet.MapRowsFor(t.cwd)
+	if cwdTenant != tenant {
+		return fmt.Errorf("cwd %s is in tenant %q, address %s is in tenant %q", t.cwd, cwdTenant, t.address, tenant)
+	}
+	if role != t.address && slot != t.address {
+		return fmt.Errorf("cwd %s is bound to role %q seat %q, not to %s", t.cwd, role, slot, t.address)
+	}
+	return nil
+}
+
+// eligibleMail is one address's unacked, never-delivered mail, older than the grace.
+func eligibleMail(address string, now, mailGrace float64) ([]fleet.Rec, error) {
+	tenant, err := fleet.MailAddressTenant(address)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := fleet.MailboxRecords(tenant, address)
+	if err != nil {
+		return nil, err
+	}
+	var out []fleet.Rec
+	for _, r := range rows {
+		if fleet.Has(r, "acked_at") || fleet.Has(r, "delivered_at") || now-fleet.F(r, "at") < mailGrace {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// launch reserves every message it is about to carry, starts the configured command
+// once, and reconciles the reservation against what actually happened.
+//
+// The reservation is the stamp, and it has to be durable before the start. Stamping
+// afterwards loses a message the other way round: the process has already been handed
+// it, and a stamp that fails — an unwritable mailbox, a mid-fold crash — leaves the
+// record eligible, so the next fold launches a second process carrying the same mail.
+// Taking the reservation first inverts the failure: nothing starts until every message
+// is marked, and a start that never happens gives the marks back. A give-back that
+// itself fails is the one remaining hole, and it is recorded rather than left silent.
+func launch(t deliverTarget, rows []fleet.Rec, now float64) []fleet.Rec {
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = fleet.S(r, "id")
+	}
+	observed := []fleet.Rec{{"at": now, "what": "mail-delivery-attempt", "address": t.address, "cwd": t.cwd, "ids": ids}}
+	reserved, err := reserve(t.address, rows)
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
+		return append(observed, release(t.address, reserved)...)
+	}
+	pid, err := run(t, prompt(t.address, rows))
+	if err != nil {
+		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
+		return append(observed, release(t.address, reserved)...)
+	}
+	return append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-started", "address": t.address, "cwd": t.cwd, "ids": ids,
+		"pid": float64(pid), "stamped": float64(len(reserved))})
+}
+
+// reserve stamps every message delivered before anything starts, and stops at the
+// first one it cannot reach — returning what it did take so the caller can give it
+// back. A partial reservation is never launched against: all of the mail travels, or
+// none of it does.
+func reserve(address string, rows []fleet.Rec) ([]string, error) {
+	tenant, err := fleet.MailAddressTenant(address)
+	if err != nil {
+		return nil, err
+	}
+	var taken []string
+	for _, r := range rows {
+		id := fleet.S(r, "id")
+		fields := fleet.Rec{"delivered_at": fleet.Now(), "delivered_by": watchAddress}
+		if _, err := fleet.StampMail(tenant, address, id, fields); err != nil {
+			return taken, fmt.Errorf("reserve %s: %w", id, err)
+		}
+		taken = append(taken, id)
+	}
+	return taken, nil
+}
+
+// release gives back reservations no process received. A message it cannot reach is
+// stranded — stamped delivered with nothing running — and says so, once per message,
+// because that is the only trace an operator has to go on.
+func release(address string, ids []string) []fleet.Rec {
+	if len(ids) == 0 {
+		return nil
+	}
+	tenant, err := fleet.MailAddressTenant(address)
+	if err != nil {
+		return []fleet.Rec{{"at": fleet.Now(), "what": "mail-reservation-stranded", "address": address, "ids": ids, "error": err.Error()}}
+	}
+	var out []fleet.Rec
+	for _, id := range ids {
+		if err := fleet.UnstampMail(tenant, address, id, "delivered_at", "delivered_by"); err != nil {
+			out = append(out, fleet.Rec{"at": fleet.Now(), "what": "mail-reservation-stranded", "address": address, "id": id, "error": err.Error()})
+		}
+	}
+	return out
+}
+
+// prompt is what the started process is told: which address it is answering for, and
+// the same bounded summary a session's own hook would have been given.
+func prompt(address string, rows []fleet.Rec) string {
+	lines := append([]string{"[fleet] mail for " + address + "; read the bodies with `fleet mail --unacked` and `fleet ack <id>` once read."},
+		fleet.MailSummary(rows)...)
+	return strings.Join(lines, "\n")
+}
+
+// run starts the operator's command detached, with its output in the watcher's own
+// directory. The watcher does not wait for it: the process it starts outlives the fold.
+func run(t deliverTarget, text string) (int, error) {
+	argv := make([]string, len(t.cmd))
+	for i, a := range t.cmd {
+		argv[i] = strings.ReplaceAll(a, "{{prompt}}", text)
+	}
+	logs := filepath.Join(dir(), "delivery")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		return 0, err
+	}
+	log, err := os.OpenFile(filepath.Join(logs, fleet.Safe(t.address)+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = log.Close() }()
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Stdin = t.cwd, log, log, nil
+	detach(cmd)
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	return pid, nil
+}
+
+// present is whether someone in this directory would read the mail. A session that
+// has ended is gone; one with an open turn is working; one that is neither, and
+// untouched past the idle grace, is a window nobody is looking at.
+func present(sessions []fleet.Rec, cwd string, now, idleGrace float64) bool {
+	want := fleet.CanonPath(cwd)
+	for _, s := range sessions {
+		if fleet.B(s, "ended") {
+			continue
+		}
+		if fleet.CanonPath(fleet.S(s, "cwd")) != want && fleet.CanonPath(fleet.S(s, "launch_dir")) != want {
+			continue
+		}
+		if fleet.B(s, "turn_open") || now-fleet.F(s, "last_event_at") < idleGrace {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionRecords is every session record on this machine.
+func sessionRecords() []fleet.Rec {
+	entries, _ := os.ReadDir(fleet.Path("sessions"))
+	var out []fleet.Rec
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if r := fleet.ReadJSON(filepath.Join(fleet.Path("sessions"), e.Name())); fleet.S(r, "session") != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}

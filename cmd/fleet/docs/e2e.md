@@ -37,7 +37,8 @@ handoffs). Stand them up per `run-a-fleet.md`.
 5. Exactly one `fleet watch` on the machine.
 6. If sessions are made by mail: a delivery config (`deliver.json`: `{"<address>": {"cwd", "cmd"}}`,
    prompt placed right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt)
-   and a delivery process. Until the watcher's own launcher lands, use `e2e/mail-poll.sh`.
+   in `$FLEET_STATE`. `fleet watch` delivers from it itself; against a binary predating that,
+   run `e2e/mail-poll.sh` as the delivery process instead.
 7. The slow-command gate: after five 40-second runs, `bash scripts/bench.sh` needs the
    `FLEET_ALLOW_SLOW=<rule-slug>` prefix (the slug of the rule it trips) and the seat's allow
    list needs that rule's own `Bash(FLEET_ALLOW_SLOW=<rule-slug>:*)` — never a wildcard.
@@ -69,6 +70,8 @@ One headless overall-lead tick that sends one `order` per child:
    --allowedTools 'Read,Skill,Bash(org *),Bash(<fleet binary> *),Bash(gh *),Bash(git *),Bash(cat *),Bash(ls *)' < /dev/null)
 ```
 
+With a current binary the running `fleet watch` already delivers and nothing further is needed; the
+poller below is for a binary predating in-watcher delivery, and running both at once double-launches.
 Then `bash cmd/fleet/e2e/mail-poll.sh <deliver.json> <fleet binary> <log dir> 10 45 <tenant>` in
 the background. Know what that stand-in does: it reads mail and sessions from `~/.fleet` only
 (not `FLEET_STATE`), its log-dir argument holds `poll.log` and the launched-id set, its binary

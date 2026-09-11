@@ -301,3 +301,36 @@ func TestMailComponentsSeparateCaseFoldedBase64Aliases(t *testing.T) {
 		}
 	}
 }
+
+// A name that was a role and is now a seat does not inherit the role's inbox. The
+// role's typed directory is still on disk; reading both kinds would hand the seat the
+// previous identity's mail, stamp it delivered on the seat's behalf, and shadow the
+// seat's own record of the same id.
+func TestMailStoreReadsOnlyTheResolvedAddressKind(t *testing.T) {
+	root := mailFixture(t)
+	p := mailPayload("same")
+	p["to"], p["body"] = "hub:a", "the role's"
+	mustPut(t, p)
+	// hub:a is re-bound as a seat of hub:root; nothing moves the old records.
+	if err := os.WriteFile(RolesMap(), fmt.Appendf(nil, "%s one hub:root hub:a\n", filepath.Join(root, "seat-a")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := MailboxRecords("one", "hub:a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("the seat read the role's inbox: %v", rows)
+	}
+	if _, err := StampMail("one", "hub:a", "same", Rec{"delivered_at": Now()}); err == nil {
+		t.Fatal("the seat stamped the role's record delivered")
+	}
+	// The seat's own mail, at the same id, is its own and is the only thing it reads.
+	q := mailPayload("same")
+	q["to"], q["body"] = "hub:a", "the seat's"
+	mustPut(t, q)
+	rows, err = MailboxRecords("one", "hub:a")
+	if err != nil || len(rows) != 1 || S(rows[0], "body") != "the seat's" {
+		t.Fatalf("rows: %v, err: %v", rows, err)
+	}
+}

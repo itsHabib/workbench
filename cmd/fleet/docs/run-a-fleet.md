@@ -76,8 +76,8 @@ lead names you want:
      so agents find each other by directory.
    - *Headless on a clock*: `claude -p "/task-supervisor"` from each lead directory on a cadence.
    - *Headless on mail*: one kickoff tick, then a delivery process starts a session for an address
-     when it has unread mail and no live session (see `e2e.md`; the in-watcher launcher is the
-     follow-up to #297 D5). This is the cheapest and the one that keeps sessions disposable.
+     when it has unread mail and no live session — `fleet watch` does this itself, one launch per
+     address per fold, and sends lateness as mail on the same fold (see `e2e.md`). This is the cheapest and the one that keeps sessions disposable.
 7. **Kick off**: the overall lead's first tick sends one `order` per child. From then on, files in,
    sessions out.
 

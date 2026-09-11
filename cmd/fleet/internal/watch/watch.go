@@ -14,6 +14,11 @@
 //	watch/board.json       the rows as of the last tick — replaced every tick
 //	watch/board.md         the same rows, attention-budgeted for a person — replaced every tick
 //	watch/observed.jsonl   one line per state transition — appended, the recording of a day
+//	watch/late.json        the deadlines already said out loud — so each is said once
+//	watch/delivery/        the output of the commands delivery started — appended
+//
+// It also stamps delivered_at/delivered_by on the mail records it hands to a process.
+// That is the whole of what it writes outside watch/, and it is a stamp, not an ack.
 //
 // The board is attention-budgeted. A board with forty green rows and two red should
 // show the two; "everything is fine" is one line that carries the count it hides and
@@ -111,6 +116,12 @@ func Tick(interval time.Duration) (string, error) {
 	}
 	if err := os.WriteFile(filepath.Join(dir(), "report.md"), []byte(report.Render(fleet.Path(), now-86400, now)), 0o644); err != nil {
 		_ = fleet.AppendJSONL(fleet.Path("hook-errors.jsonl"), fleet.Rec{"at": fleet.Now(), "error": "watch report: " + err.Error()})
+	}
+	// Lateness first, then delivery: a report derived this fold is carried by the same
+	// fold rather than waiting for the next one. Both run AFTER publication, for the
+	// reason the notifier does — neither may hold the board back.
+	for _, o := range append(lateMail(now, work), deliver(fleet.Now())...) {
+		_ = fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), o)
 	}
 	// Notification AFTER publication: a slow notifier must not hold the board or the
 	// heartbeat back, and never widens the window in which a second watcher could start.

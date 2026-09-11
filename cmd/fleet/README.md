@@ -246,6 +246,52 @@ auto-ack. Absent recipients keep queued mail until a session starts. This smalle
 contract supersedes the earlier contact-derivation and watcher-launch scope.
 See [Mail semantics and validation](docs/mail.md) for identity, storage and retry rules.
 
+### Delivery and lateness
+
+`fleet watch` — never the hook — can start a session for waiting mail, and can say
+out loud what the board already knew. Both are folds: derived every tick, written as
+records, never held by the thing they start.
+
+**Delivery.** `$FLEET_STATE/deliver.json` maps an address to what to run for it:
+
+```json
+{"hub:lead": {"cwd": "/path/to/dir",
+              "cmd": ["claude", "-p", "{{prompt}}", "--model", "opus"],
+              "LATE_TO": "hub:above"}}
+```
+
+`{{prompt}}` is substituted wherever the operator placed it — the substrate learns no
+harness flags. Each fold, for every configured address with mail that is unacked and
+never delivered, and with nobody present in its directory, the watcher runs the
+command **once**, carrying every eligible message, and stamps each one
+`delivered_at`/`delivered_by`. A stamped message is never carried again; a started
+launch counts as present for the rest of the fold; a launch that fails to start leaves
+its mail for the next fold. `attempt`, `started` and `failed` are recorded in
+`watch/observed.jsonl`, with the command's output under `watch/delivery/`.
+
+*Present* means a session record in that directory that has not ended and either has
+an open turn or was touched within `FLEET_IDLE_GRACE` (default 5m) — an idle window
+nobody is looking at counts as absent, which is what a stalled rehearsal cost.
+`FLEET_MAIL_GRACE` (default 10s) holds a just-arrived message back so a burst travels
+together. **Delivery latency is bounded by the fold interval** (`--interval`, default
+60s): a message arriving just after a fold waits for the next one, so worst case is
+one interval plus the grace. An address with no entry is never launched for; its mail
+waits for a session, as before.
+
+**Lateness as mail.** Each fold also derives, and sends once per deadline, a `report`
+from `fleet:watch`:
+
+- a row past its due date with no live hands and no passing receipt at its head →
+  to the role accountable for it;
+- a question or escalation unacked past `FLEET_REPLY_GRACE` (default 15m) → to the
+  addressee's parent: for a seat, the `--for` role on its dispatch row; for a lead,
+  the `LATE_TO` in its delivery entry. With no parent recorded the fold logs
+  `late-no-recipient` rather than inventing one.
+
+The report carries evidence — what was due, when, who had hands, what the head was —
+and is delivered like any other mail. It grants nothing and acknowledges nothing.
+The watcher writes only under `watch/` plus those stamps on mail records.
+
 ## Task coordination: first implementation increment
 
 This adds retry-safe local assignments and a read-only observation view. It does
