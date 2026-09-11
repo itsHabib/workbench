@@ -27,12 +27,16 @@ Rules that follow from the code, not from politeness:
 - **Never `cd` into another roled directory.** The session that does becomes that directory's
   occupant and leases its branch. Launch workers from a subshell (`(cd <seat> && ...)`) or use
   `git -C <seat>`.
-- **A branch has one holder.** The hook leases it to the first writer; a rival is refused with the
-  holder's name. Only that session's end, or an operator `fleet revoke`, releases it.
+- **A branch has one live holder.** The hook leases it to the first writer; a rival is refused
+  with the holder's name. Session end releases it; the next guarded writer takes over a
+  known-dead holder; unreadable evidence is not death; resources need an explicit drop or a
+  checked takeover; `fleet revoke` is the operator's.
 - **A seat's address is its seat name; a lead's address is its role.** Sending to a pooled kind
   (`author:<repo>`) refuses and lists the seats.
-- **Done is a receipt** from a *different* session, in a verifier seat, at the exact head, from a
-  clean tree: `fleet receipt <sha> verify pass "<observable>"`, then `fleet done <sha> --kind verify`.
+- **Done requires a passing receipt at the exact head.** The verb checks the producing lane, the
+  roled worktree, HEAD and a clean tree. The run contract additionally requires a verifier session
+  different from the implementer, and the lead checks that. `fleet receipt <sha> verify pass
+  "<observable>"`, then `fleet done <sha> --kind verify`.
 
 ## Stand it up, in order
 
@@ -45,16 +49,20 @@ lead names you want:
    org charter -role supervisor:<name>-a -tier T1 -scope github:<owner>/<repo> -supervisor human:<you> -supervisor supervisor:<name> -retire-when "<condition>"
    org charter -role supervisor:<name>   -tier T1 -scope role:supervisor:<name>-a -scope role:supervisor:<name>-b -scope github:<owner>/<repo> -supervisor human:<you> -retire-when "<condition>"
    ```
-2. **Make lead directories** as detached worktrees beside the checkout, then role them:
+2. **Create the lead worktrees, unbound, then pool the seats.**
    ```sh
-   git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main
+   git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main    # and -lead-a, -lead-b
+   fleet pool ~/dev/<repo> author 2 --tenant <t>
+   fleet pool ~/dev/<repo> verifier 1 --tenant <t>
+   ```
+   Each seat gets `CLAUDE.local.md` (the card), `.claude/settings.local.json` (denies and the
+   write hook), a Codex config, and a `roles.map` line with its name. Pool first: `fleet pool`
+   refuses when worktrees of the same repo already carry other labels, and there is no unbind verb.
+3. **Bind the lead directories only after pooling succeeds.**
+   ```sh
    fleet role ~/dev/<repo>-lead supervisor:<name> --tenant <t>     # repeat for -lead-a, -lead-b
    ```
-   Do this *after* pooling seats, or unbind the leads while pooling: `fleet pool` refuses when
-   worktrees of the same repo carry other labels.
-3. **Pool the seats.** `fleet pool ~/dev/<repo> author 2 --tenant <t>`, `... verifier 1 ...`.
-   Each seat gets `CLAUDE.local.md` (the card), `.claude/settings.local.json` (denies and the
-   write hook), a Codex config, and a `roles.map` line with its name.
+   Then check bindings and seat names with `fleet board`.
 4. **Check what a fresh session sees** before trusting anything: open a headless session in a
    seat and ask it to print its `[fleet]` lines. It should name its session, role, branch and
    seat, with no prompt text about roles.
