@@ -1,7 +1,7 @@
 # workbench
 
-The home for the Go agentic-infra family: one repo, one Go module, nineteen small binaries
-that let one person run a team of coding agents and trust what comes back. Tools live side by
+The home for the Go agentic-infra family: one repo, one Go module, nineteen tools (twenty
+binaries) that let one person run a team of coding agents and trust what comes back. Tools live side by
 side and **share contracts, not call stacks**: they compose at runtime through artifacts (exit
 codes and JSONL on disk), never by importing each other's decision code.
 
@@ -28,7 +28,7 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 | tool | what it does |
 |---|---|
 | [`fleet`](cmd/fleet/README.md) | the substrate for a team of agents: a hook that derives identity, liveness and leases from harness events; seats, assignment rows, receipts, role-addressed mail, a watcher that folds it into a board |
-| [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | role continuity: charters, the role tree, and each lead's own append-only record (intent, effect, resolution, escalation); the MCP face of the same verbs |
+| [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | role continuity: charters, the role tree, and each lead's own append-only record (intent, effect, resolution, escalation); the MCP face exposes the working verbs only, and keeps charter, recharter, retire, delegate, takeover and revoke operator-only |
 | [`runway`](cmd/runway/README.md) | foreground execution-runtime controller: one admitted request at a time |
 | [`dispatch`](cmd/dispatch/README.md) | placement: which engine and where a task runs |
 | [`driverstate`](cmd/driverstate/README.md) | the human and cron CLI over the driver-state event ledger |
@@ -41,7 +41,7 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 | [`gate`](cmd/gate/README.md) | the merge-authorization boundary: scoped, tiered, time-boxed grants; a verifier ladder; a hash-chained decision log; exit codes `0` pass, `1` blocked, `2` parked, `3` refused, `4` error |
 | [`triage`](cmd/triage/README.md) | PR risk classification: a deterministic floor plus an escalate-only advisory (`triage-floor`, `triage-advisory`) |
 | [`review`](cmd/review/README.md) | who has to review an exact head, and whether they have |
-| [`reviewfindings`](cmd/reviewfindings/README.md) | one artifact over the reviewers' findings: a producer that reads GitHub, a consumer that judges |
+| [`reviewfindings`](cmd/reviewfindings/README.md) | one artifact over the reviewers' findings: a producer that reads GitHub, and an address verb that records each finding's lifecycle in the driver-state ledger; it records, it does not judge |
 | [`escalate`](cmd/escalate/README.md) | the agent → human → agent back-channel: ingests a human's decision for a parked gate run and closes it |
 
 **Seeing and being told**
