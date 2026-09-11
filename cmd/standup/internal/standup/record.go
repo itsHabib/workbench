@@ -77,11 +77,14 @@ type Deferred struct {
 }
 
 // Confirm is set by code when the operator's phrase matched, never by the model.
+// PlanDigest binds it to the plan that was read back: an edit after confirm is a
+// different plan, and apply refuses it until the operator confirms again.
 type Confirm struct {
-	By      string `json:"by"`
-	Phrase  string `json:"phrase"`
-	At      string `json:"at"`
-	Surface string `json:"surface"`
+	By         string `json:"by"`
+	Phrase     string `json:"phrase"`
+	At         string `json:"at"`
+	Surface    string `json:"surface"`
+	PlanDigest string `json:"plan_digest"`
 }
 
 // Applied is one verb's receipt: what ran, where, and what it said.
@@ -124,8 +127,8 @@ func (r *Record) Validate() error {
 	r.validateCards(bad)
 	r.validateRoles(bad)
 	r.validateDecisions(bad)
-	if c := r.Confirm; c != nil && (c.By == "" || c.Phrase == "" || c.At == "") {
-		bad("confirm, when set, needs by, phrase and at")
+	if c := r.Confirm; c != nil && (c.By == "" || c.Phrase == "" || c.At == "" || c.PlanDigest == "") {
+		bad("confirm, when set, needs by, phrase, at and plan_digest")
 	}
 	if len(errs) == 0 {
 		return nil
@@ -252,6 +255,19 @@ func (r *Record) Save(path string) error {
 		r.Applied = []Applied{}
 	}
 	return writeJSON(path, r)
+}
+
+// PlanDigest hashes what the operator hears in the readback: roles, cards,
+// decisions, deferrals and next. Confirm stores it; apply recomputes it.
+func (r *Record) PlanDigest() string {
+	b, _ := json.Marshal(struct {
+		Roles     []Role     `json:"roles"`
+		Cards     []Card     `json:"cards"`
+		Decisions []Decision `json:"decisions"`
+		Deferred  []Deferred `json:"deferred"`
+		Next      string     `json:"next"`
+	}{r.Roles, r.Cards, r.Decisions, r.Deferred, r.Next})
+	return Digest([]string{string(b)})
 }
 
 // CarryOver copies the plan (roles, cards, decisions, deferrals, next) from a

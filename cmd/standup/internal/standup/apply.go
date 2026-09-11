@@ -1,8 +1,10 @@
 package standup
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -36,7 +38,22 @@ func ConfirmRecord(e Env, cfg Config, r *Record, phrase, by, surface string) err
 	if surface == "" {
 		surface = "text"
 	}
-	r.Confirm = &Confirm{By: by, Phrase: cfg.Phrase, At: e.Now().UTC().Format("2006-01-02T15:04:05Z"), Surface: surface}
+	r.Confirm = &Confirm{By: by, Phrase: cfg.Phrase, At: e.Now().UTC().Format("2006-01-02T15:04:05Z"), Surface: surface, PlanDigest: r.PlanDigest()}
+	return nil
+}
+
+// checkConfirm is apply's first gate: a confirm exists, carries the configured
+// phrase, and binds the plan as it stands now. A record edited after the readback
+// is a different plan and goes back to the operator.
+func checkConfirm(cfg Config, r *Record) error {
+	switch {
+	case r.Confirm == nil:
+		return refuse("record %s is not confirmed; nothing is written until the phrase sets confirm", r.ID)
+	case r.Confirm.Phrase != cfg.Phrase:
+		return refuse("record %s carries a confirm for a phrase that is not the configured one; confirm it again", r.ID)
+	case r.Confirm.PlanDigest != r.PlanDigest():
+		return refuse("record %s was edited after it was confirmed (plan %s, confirmed %s); read it back and confirm again", r.ID, short(r.PlanDigest()), short(r.Confirm.PlanDigest))
+	}
 	return nil
 }
 
@@ -55,10 +72,12 @@ type Step struct {
 // under a different accountable role — a changed payload under the same identity.
 func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 	var steps []Step
+	roles := map[string]Role{}
 	for _, ro := range r.Roles {
 		if !e.KindExists(ro.Kind) {
 			return nil, refuse("roles: kind %q has no manifest under %s; write %s/manifest.json and card.md first", ro.Kind, e.Lanes, ro.Kind)
 		}
+		roles[ro.Role] = ro
 		if ro.Seats == 0 {
 			continue
 		}
@@ -66,13 +85,9 @@ func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 			Args: []string{"pool", ro.Checkout, ro.Kind, fmt.Sprint(ro.Seats), "--tenant", cfg.Tenant}})
 	}
 	for _, c := range r.Cards {
-		dir := c.Checkout
-		if dir == "" {
-			p, ok := world.Seats[c.Seat]
-			if !ok {
-				return nil, refuse("card %s: seat %q is not in %s; pool it first or name a checkout", c.ID, c.Seat, e.RolesMap)
-			}
-			dir = p
+		dir, err := cardDir(e, c, world)
+		if err != nil {
+			return nil, err
 		}
 		steps = append(steps, branchSteps(e, c, dir, world)...)
 		key := repoName(c.Repo) + " " + c.Change + " " + c.As
@@ -90,6 +105,7 @@ func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 		steps = append(steps, dispatch)
 		if c.Seat != "" {
 			body := fmt.Sprintf("%s\n\nrepo %s · change %s · done when a passing %s receipt exists at the head · due %s · card %s of %s", c.Brief, c.Repo, c.Change, c.As, c.Due, c.ID, r.ID)
+			body += roleTerms(roles[c.For])
 			steps = append(steps, Step{Name: "card " + c.ID + " send", Dir: e.LeadDir, Bin: e.Fleet,
 				Args: []string{"send", c.Seat, "--id", c.ID, "--kind", "order", "--subject", c.Repo + " " + c.Change, "--body", body}})
 		}
@@ -102,6 +118,43 @@ func Plan(e Env, cfg Config, r *Record, world *World) ([]Step, error) {
 		steps = append(steps, step)
 	}
 	return steps, nil
+}
+
+// cardDir resolves where a card's verbs run and proves the checkout is a clone of
+// the card's repository. Fleet and git take the repository from the directory, so
+// a seat copied from another card would push and dispatch in the wrong place while
+// the record claimed this one.
+func cardDir(e Env, c Card, world *World) (string, error) {
+	dir := c.Checkout
+	if dir == "" {
+		p, ok := world.Seats[c.Seat]
+		if !ok {
+			return "", refuse("card %s: seat %q is not in %s; pool it first or name a checkout", c.ID, c.Seat, e.RolesMap)
+		}
+		dir = p
+	}
+	origin := world.OriginRepo(e, dir)
+	if origin == "" {
+		return "", refuse("card %s: cannot read the origin of %s; is it a clone with a remote?", c.ID, dir)
+	}
+	if !strings.EqualFold(origin, c.Repo) {
+		return "", refuse("card %s: %s is a clone of %s, not %s; name the right seat or fix the card", c.ID, dir, origin, c.Repo)
+	}
+	return dir, nil
+}
+
+// roleTerms renders a role's instructions and terms for the mail body, so the
+// worker receives them until Fleet's per-role definition store has a reader.
+func roleTerms(ro Role) string {
+	var b strings.Builder
+	if ro.Instructions != "" {
+		b.WriteString("\n\nrole instructions: " + ro.Instructions)
+	}
+	if len(ro.Terms) > 0 {
+		t, _ := json.Marshal(ro.Terms)
+		b.WriteString("\nrole terms: " + string(t))
+	}
+	return b.String()
 }
 
 // branchSteps makes a card's change exist before dispatch. A pull request number
@@ -143,11 +196,31 @@ func (w *World) BranchOnOrigin(e Env, dir, branch string) bool {
 func (w *World) DefaultBranch(e Env, dir string) string {
 	res := e.Run.Run(dir, "git", "ls-remote", "--symref", "origin", "HEAD")
 	for _, line := range strings.Split(res.Stdout, "\n") {
-		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
-			return strings.Fields(rest)[0]
+		rest, ok := strings.CutPrefix(line, "ref: refs/heads/")
+		if !ok {
+			continue
+		}
+		if f := strings.Fields(rest); len(f) > 0 {
+			return f[0]
 		}
 	}
 	return "main"
+}
+
+// OriginRepo is the owner/name of a checkout's origin, from its URL in either the
+// https or the ssh form, or empty when there is no readable origin.
+func (w *World) OriginRepo(e Env, dir string) string {
+	res := e.Run.Run(dir, "git", "remote", "get-url", "origin")
+	if res.Err != nil || res.Code != 0 {
+		return ""
+	}
+	u := strings.TrimSuffix(strings.TrimSpace(res.Stdout), ".git")
+	u = strings.ReplaceAll(u, ":", "/")
+	parts := strings.Split(strings.Trim(u, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 }
 
 // ReadWorld gathers rows, seats and decisions. Rows are keyed the way the record
@@ -206,8 +279,8 @@ func repoBase(repo string) string {
 // truthful ledger. A step that exits non-zero stops the run; the next apply resumes
 // after the last step that succeeded.
 func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) ([]Step, error) {
-	if r.Confirm == nil {
-		return nil, refuse("record %s is not confirmed; nothing is written until the phrase sets confirm", r.ID)
+	if err := checkConfirm(cfg, r); err != nil {
+		return nil, err
 	}
 	agenda, err := LoadAgenda(e.AgendaPath(r.Agenda))
 	if err != nil {
@@ -220,8 +293,12 @@ func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) (
 	if err != nil {
 		return nil, err
 	}
-	if live.Digest != agenda.Digest && !forceStale {
-		return nil, refuse("the world moved since agenda %s:\n%s\nre-run standup agenda and re-plan, or apply --force-stale to proceed anyway", agenda.ID, diffLines(agenda.Projection, live.Projection))
+	moved := ""
+	if live.Digest != agenda.Digest {
+		moved = diffLines(agenda.Projection, live.Projection)
+	}
+	if moved != "" && !forceStale {
+		return nil, refuse("the world moved since agenda %s:\n%s\nre-run standup agenda and re-plan, or apply --force-stale to proceed anyway", agenda.ID, moved)
 	}
 	world, err := ReadWorld(e, cfg)
 	if err != nil {
@@ -231,13 +308,20 @@ func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) (
 	if err != nil {
 		return nil, err
 	}
+	done, err := alreadyDone(r, steps)
+	if err != nil {
+		return nil, err
+	}
 	if dryRun {
 		return steps, nil
 	}
-	done := map[string]bool{}
-	for _, a := range r.Applied {
-		if a.Code == 0 {
-			done[a.Step] = true
+	if moved != "" {
+		// A forced apply is on the record before anything runs, so a ledger read
+		// later says the world had moved and the operator went ahead anyway.
+		r.Applied = append(r.Applied, Applied{Step: "apply --force-stale", Verb: "standup", Args: []string{"apply", "--force-stale"},
+			Output: moved, At: e.Now().UTC().Format("2006-01-02T15:04:05Z"), Skip: "forced past a world that moved since agenda " + agenda.ID})
+		if err := r.Save(path); err != nil {
+			return steps, err
 		}
 	}
 	for _, s := range steps {
@@ -263,6 +347,31 @@ func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) (
 		}
 	}
 	return steps, nil
+}
+
+// alreadyDone is the set of planned steps the ledger already carries with exit 0.
+// A ledger entry whose directory or arguments differ from the plan is a refusal:
+// the record was edited after that step ran, and repeating or skipping it would
+// both leave the ledger claiming something that did not happen.
+func alreadyDone(r *Record, steps []Step) (map[string]bool, error) {
+	ledger := map[string]Applied{}
+	for _, a := range r.Applied {
+		if a.Code == 0 {
+			ledger[a.Step] = a
+		}
+	}
+	done := map[string]bool{}
+	for _, s := range steps {
+		a, ok := ledger[s.Name]
+		if !ok {
+			continue
+		}
+		if a.Dir != s.Dir || !slices.Equal(a.Args, s.Args) {
+			return nil, refuse("step %q already ran with different arguments; the record or roles.map changed after apply. Start a fresh record (standup new --from) instead of editing this one", s.Name)
+		}
+		done[s.Name] = true
+	}
+	return done, nil
 }
 
 func diffLines(before, after []string) string {

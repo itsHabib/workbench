@@ -149,6 +149,8 @@ func (e Env) LoadConfig() (Config, error) {
 	switch {
 	case c.Lead == "":
 		return Config{}, fmt.Errorf("%s: lead is required (the address fleet mail is read for)", p)
+	case c.Tenant == "":
+		return Config{}, fmt.Errorf("%s: tenant is required (seats are looked up in roles.map by tenant)", p)
 	case strings.TrimSpace(c.Phrase) == "":
 		return Config{}, fmt.Errorf("%s: phrase is required (the words that set confirm)", p)
 	}

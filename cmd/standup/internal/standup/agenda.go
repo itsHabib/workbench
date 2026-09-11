@@ -45,23 +45,27 @@ func (e Env) AgendaPath(id string) string {
 	return filepath.Join(e.Dir, "agenda", id+".json")
 }
 
-// NextID mints the next id for today: standup-<date>-<n>, n counting agendas
-// already written for that date. Ids sort chronologically.
-func (e Env) NextID() string {
+// NextID mints the next id for today: standup-<date>-<nnn>, n counting agendas
+// already written for that date, zero-padded so lexical order is chronological.
+func (e Env) NextID() (string, error) {
 	date := e.Now().UTC().Format("2006-01-02")
 	prefix := "standup-" + date + "-"
 	n := 1
-	ents, _ := os.ReadDir(filepath.Join(e.Dir, "agenda"))
+	ents, err := os.ReadDir(filepath.Join(e.Dir, "agenda"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("agenda directory: %w", err)
+	}
 	for _, ent := range ents {
 		name := strings.TrimSuffix(ent.Name(), ".json")
-		if strings.HasPrefix(name, prefix) {
-			var k int
-			if _, err := fmt.Sscanf(strings.TrimPrefix(name, prefix), "%d", &k); err == nil && k >= n {
-				n = k + 1
-			}
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		var k int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(name, prefix), "%d", &k); err == nil && k >= n {
+			n = k + 1
 		}
 	}
-	return fmt.Sprintf("%s%d", prefix, n)
+	return fmt.Sprintf("%s%03d", prefix, n), nil
 }
 
 // Build reads every source once and returns the agenda, digested. It never fails
@@ -175,21 +179,31 @@ func Project(a *Agenda) []string {
 			continue
 		}
 		for _, r := range s.Rows {
-			switch {
-			case s.Name == "fleet work":
-				lines = append(lines, fmt.Sprintf("row %s %s for=%s", str(r, "key"), outcome(str(r, "state")), str(r, "for")))
-			case s.Name == "fleet mail":
-				lines = append(lines, fmt.Sprintf("mail %s %s from=%s", str(r, "id"), str(r, "kind"), str(r, "from")))
-			case s.Name == "org status":
-				lines = append(lines, fmt.Sprintf("lane %s %s held=%s open=%s", str(r, "role"), str(r, "phase"), str(r, "held"), str(r, "open")))
-			case strings.HasPrefix(s.Name, "gh pr list "):
-				repo := strings.TrimPrefix(s.Name, "gh pr list ")
-				lines = append(lines, fmt.Sprintf("pr %s#%s %s draft=%s mergeable=%s review=%s", repo, str(r, "number"), str(r, "headRefName"), str(r, "isDraft"), str(r, "mergeable"), str(r, "reviewDecision")))
+			if line, ok := projectRow(s.Name, r); ok {
+				lines = append(lines, line)
 			}
 		}
 	}
 	sort.Strings(lines)
 	return lines
+}
+
+// projectRow is one row's identity and outcome. A Fleet row is (repo, change,
+// relationship): the relationship is part of the identity, so a row replaced by
+// another relationship for the same change projects differently.
+func projectRow(source string, r map[string]any) (string, bool) {
+	switch {
+	case source == "fleet work":
+		return fmt.Sprintf("row %s %s %s for=%s", str(r, "key"), str(r, "relationship"), outcome(str(r, "state")), str(r, "for")), true
+	case source == "fleet mail":
+		return fmt.Sprintf("mail %s %s from=%s", str(r, "id"), str(r, "kind"), str(r, "from")), true
+	case source == "org status":
+		return fmt.Sprintf("lane %s %s held=%s open=%s", str(r, "role"), str(r, "phase"), str(r, "held"), str(r, "open")), true
+	case strings.HasPrefix(source, "gh pr list "):
+		repo := strings.TrimPrefix(source, "gh pr list ")
+		return fmt.Sprintf("pr %s#%s %s draft=%s mergeable=%s review=%s", repo, str(r, "number"), str(r, "headRefName"), str(r, "isDraft"), str(r, "mergeable"), str(r, "reviewDecision")), true
+	}
+	return "", false
 }
 
 // outcome folds the observed row states into what a plan cares about: a row that is
@@ -289,11 +303,15 @@ func rowLine(source string, r map[string]any) string {
 
 // when renders an epoch-seconds number as a UTC timestamp; anything else as itself.
 func when(v any) string {
-	f, ok := v.(float64)
-	if !ok || f <= 0 {
-		return orDash(str(map[string]any{"v": v}, "v"))
+	switch t := v.(type) {
+	case float64:
+		if t > 0 {
+			return time.Unix(int64(t), 0).UTC().Format("2006-01-02T15:04Z")
+		}
+	case string:
+		return orDash(t)
 	}
-	return time.Unix(int64(f), 0).UTC().Format("2006-01-02T15:04Z")
+	return "-"
 }
 
 func orDash(s string) string {

@@ -10,15 +10,21 @@ conversation. Design: `docs/features/standup/design.md`.
 - **Confirm is code, never the model.** `confirm` stays `null` until
   `standup confirm` matches the configured phrase (trimmed, case-folded,
   exact). `apply` refuses a record with `confirm: null` before reading anything
-  else. A model relaying "sounds good" cannot commit the operator.
+  else, refuses a confirm whose stored phrase is not the configured one, and
+  refuses a plan whose digest no longer matches the one confirm bound. A model
+  relaying "sounds good" cannot commit the operator, and neither can an edit
+  after the readback.
 - **A record is pinned to one agenda.** `agenda_digest` is the hash of the
   agenda's projection (identity and outcome, never timestamps or liveness).
   `apply` rebuilds the projection live and refuses with a diff when the world
   moved; `--force-stale` is the operator's override and is recorded.
-- **Refuse before writing.** Unknown kind, unknown seat, and a row already
-  accountable to another role are all found in planning, before any verb runs.
+- **Refuse before writing.** Unknown kind, unknown seat, a seat that is a
+  clone of another repository, a row already accountable to another role, and
+  a ledger step whose arguments no longer match the plan are all found in
+  planning, before any verb runs.
 - **`applied[]` is the only ledger.** One entry per step, saved after each, so a
-  crash leaves a truthful record and a re-run repeats nothing that exited 0.
+  crash leaves a truthful record and a re-run repeats nothing that exited 0. A
+  forced apply writes its own entry, carrying the diff, before any verb runs.
 - **Every verb is another tool read as an artifact.** `fleet`, `org` and `gh`
   are named by `FLEET_BIN`, `ORG_BIN`, `GH_BIN`; their JSON and exit codes are
   the contract. Nothing here imports their decision logic.

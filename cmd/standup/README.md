@@ -60,8 +60,8 @@ proceeds anyway and says so in `applied[]`.
 | `cards[]` | `fleet dispatch <change> --as --for --due --brief --slot` in the seat's checkout, then `fleet send <seat> --id <card id> --kind order` from the lead's directory | a row already declared for the same change and relationship is skipped when it names the same accountable role and refused when it names another; mail is retry-safe by id |
 | `decisions[]` | `fleet decide <kind> <subject> "<text>"` | skipped when `fleet decisions` already lists it |
 | `deferred[]` | nothing | re-raised verbatim in the next agenda |
-| `confirm` | precondition | `null` until `standup confirm` matches the phrase; the model cannot fill it in |
-| `applied[]` | written by apply | one entry per step; a re-run repeats nothing that exited 0 |
+| `confirm` | precondition | `null` until `standup confirm` matches the phrase; the model cannot fill it in. It binds a digest of the plan as read back, so an edit after confirm is refused until confirmed again |
+| `applied[]` | written by apply | one entry per step; a re-run repeats nothing that exited 0, and refuses when a recorded step's directory or arguments no longer match the plan. `--force-stale` writes its own entry carrying the diff |
 
 Launch is not a verb here. `fleet watch` delivers the card's mail to an absent
 seat by running that seat's `deliver.json` command once; delivery is the launcher.

@@ -47,11 +47,11 @@ Lead with the format. Every field maps to exactly one verb (next section).
 ```json
 {
   "schema": "standup.v1",
-  "id": "standup-2026-09-10-1",
+  "id": "standup-2026-09-10-001",
   "tenant": "mh",
   "lead": "lead:mh",
   "at": "2026-09-10T15:00:00Z",
-  "agenda": "standup-2026-09-10-1",
+  "agenda": "standup-2026-09-10-001",
   "agenda_digest": "sha256:…",
   "roles": [
     {
@@ -65,7 +65,7 @@ Lead with the format. Every field maps to exactly one verb (next section).
   ],
   "cards": [
     {
-      "id": "standup-2026-09-10-1-c1",
+      "id": "standup-2026-09-10-001-c1",
       "repo": "itsHabib/ivy",
       "change": "#62",
       "as": "draft",
@@ -91,7 +91,11 @@ Rules the record enforces:
 
 - `confirm` is `null` until the operator says the phrase. `apply` refuses a
   record with `confirm: null`. The phrase is matched by code against the
-  transcript or the typed line; the model cannot fill it in.
+  transcript or the typed line; the model cannot fill it in. Confirm also
+  stores a digest of the plan as read back (roles, cards, decisions,
+  deferrals, next), so an edit after the readback is a different plan and
+  `apply` sends it back for another confirm. A hand-typed confirm with the
+  wrong phrase is refused the same way.
 - `agenda` and `agenda_digest` pin the plan to the agenda it was made against.
   The digest is over the agenda's *projection*: what exists and how it ended
   (rows as open/done/dead, receipts, unacked mail ids, lanes, PRs with draft
@@ -122,7 +126,7 @@ Rules the record enforces:
 | `decisions[]` | `fleet decide <rule\|park\|drop\|ignore> <subject> "<text>"` | Every session sees it at its next turn. |
 | `deferred[]` | nothing | Re-raised verbatim in the next agenda until decided or dropped. |
 | `confirm` | precondition | No write happens without it. |
-| `next` | `fleet send lead:mh --id <id>/next --kind agenda --body "standup"` scheduled for that time | The lead's own delivery entry wakes it headless to build the agenda. |
+| `next` | `fleet send lead:mh --id <id>-next --kind agenda --body "standup"` scheduled for that time | The lead's own delivery entry wakes it headless to build the agenda. Not built in rung 1. |
 
 The lead itself is a Fleet role, not a new Org lane:
 
@@ -320,11 +324,17 @@ Details the design under-specified and the build settled:
 - **Receipts are not projected.** They are a sliding 24-hour window, so an
   agenda would go stale by the clock alone; a row's done state already carries
   what a receipt proved. Rows, unacked mail, lanes and open PRs are projected.
+- **A forced apply is on the ledger.** `--force-stale` writes an `applied[]`
+  entry carrying the diff before any verb runs, so a later reader can see the
+  world had moved and the operator went ahead.
+- **A seat must be a clone of the card's repository.** Fleet and git take the
+  repository from the directory, so `apply` reads the seat's origin and
+  refuses a card whose `repo` names anything else.
 - **A stale refusal costs one readback.** `standup new --agenda <fresh id>
   --from <stale record>` carries roles, cards, decisions, deferrals and next
   into an unconfirmed record against the fresh agenda, re-keying card ids.
 
-- **Card ids carry no slash** (`standup-2026-09-10-1-c1`), because the id is
+- **Card ids carry no slash** (`standup-2026-09-10-001-c1`), because the id is
   also the mail id and the dispatch file name.
 - **The agenda must be built by the identity that applies.** `fleet mail`
   refuses a caller with no live session in its directory, so an agenda built

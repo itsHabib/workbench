@@ -68,11 +68,13 @@ esac`)
   "ls-remote --symref") printf 'ref: refs/heads/trunk\tHEAD\n' ;;
   "ls-remote --heads") grep -qx "$4" "$FAKE/branches.txt" 2>/dev/null && printf 'abc\trefs/heads/%s\n' "$4" ;;
   "push origin") printf '%s|git %s\n' "$PWD" "$*" >> "$FAKE/calls.log" ;;
+  "remote get-url") cat "$FAKE/origin.txt" ;;
   *) echo "fake git: $*" >&2; exit 2 ;;
 esac`)
 	script("org", `echo '[{"tenant":"","role":"","phase":""},{"tenant":"acme","role":"steward:ivy","phase":"active","held":2,"open":0}]'`)
 	script("gh", `cat "$FAKE/prs.json"`)
 	write(filepath.Join(r.fake, "branches.txt"), "")
+	write(filepath.Join(r.fake, "origin.txt"), "git@github.com:acme/ivy.git\n")
 	t.Setenv("FAKE", r.fake)
 	t.Setenv("PATH", r.fake+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FLEET_BIN", filepath.Join(r.fake, "fleet"))
@@ -202,23 +204,39 @@ func TestConfirmIsCodeNotModel(t *testing.T) {
 	}
 	r.must(0, "confirm", path, "--phrase", "  Ship It ")
 	c := r.load(path).Confirm
-	if c == nil || c.By != "human:acme" || c.Surface != "text" {
+	if c == nil || c.By != "human:acme" || c.Surface != "text" || c.PlanDigest == "" {
 		t.Fatalf("confirm = %+v", c)
 	}
 	r.must(1, "confirm", path, "--phrase", "ship it")
+
+	// An edit after the readback is a different plan: apply sends it back.
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "edited after it was confirmed") || r.callLog() != "" {
+		t.Fatalf("edited-after-confirm: %s", out)
+	}
+	// A confirm typed in by hand with the wrong phrase is not a confirm.
+	r.edit(path, func(rec *standup.Record) {
+		rec.Confirm = &standup.Confirm{By: "model", Phrase: "sounds good", At: "now", PlanDigest: rec.PlanDigest()}
+	})
+	if out := r.must(1, "apply", path); !strings.Contains(out, "not the configured one") || r.callLog() != "" {
+		t.Fatalf("forged confirm: %s", out)
+	}
 }
 
-func TestApplyCompilesCardsAndIsIdempotent(t *testing.T) {
-	r := newRig(t)
+// planAndApply runs one full standup with the standard card, a role with
+// instructions, a decision and a deferral, confirmed and applied. It returns the
+// record path and the agenda id.
+func planAndApply(t *testing.T, r *rig) (string, string) {
+	t.Helper()
 	id := agendaID(t, r.must(0, "agenda"))
 	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
 	r.edit(path, func(rec *standup.Record) {
+		rec.Roles = []standup.Role{{Role: "author:ivy", Kind: "author", Checkout: r.seatDir, Instructions: "no force pushes", Terms: map[string]any{"scope": []string{"github:acme/ivy"}}}}
 		rec.Cards = []standup.Card{card}
 		rec.Decisions = []standup.Decision{{Kind: "rule", Subject: "ivy", Text: "two fix-rounds then the judge"}}
 		rec.Deferred = []standup.Deferred{{Subject: "billing", Why: "product direction"}}
 	})
 	r.must(0, "confirm", path, "--phrase", "ship it")
-
 	plan := r.must(0, "apply", path, "--dry-run")
 	if r.callLog() != "" {
 		t.Fatal("dry run wrote")
@@ -228,8 +246,13 @@ func TestApplyCompilesCardsAndIsIdempotent(t *testing.T) {
 			t.Errorf("plan lacks %q:\n%s", want, plan)
 		}
 	}
-
 	r.must(0, "apply", path)
+	return path, id
+}
+
+func TestApplyCompilesCards(t *testing.T) {
+	r := newRig(t)
+	path, id := planAndApply(t, r)
 	calls := strings.Split(strings.TrimSpace(r.callLog()), "\n")
 	if len(calls) != 3 {
 		t.Fatalf("want 3 calls, got %d:\n%s", len(calls), r.callLog())
@@ -237,7 +260,7 @@ func TestApplyCompilesCardsAndIsIdempotent(t *testing.T) {
 	if dir, args, _ := strings.Cut(calls[0], "|"); dir != r.seatDir || !strings.HasPrefix(args, "dispatch #7 --as draft --for author:ivy --due 2h --brief ") || !strings.HasSuffix(args, "--slot ivy-author-1") {
 		t.Errorf("dispatch ran as %q in %q", args, dir)
 	}
-	if dir, args, _ := strings.Cut(calls[1], "|"); dir != r.leadDir || !strings.HasPrefix(args, "send ivy-author-1 --id c1 --kind order --subject acme/ivy #7 --body ") {
+	if dir, args, _ := strings.Cut(calls[1], "|"); dir != r.leadDir || !strings.HasPrefix(args, "send ivy-author-1 --id c1 --kind order --subject acme/ivy #7 --body ") || !strings.Contains(args, "role instructions: no force pushes") || !strings.Contains(args, `role terms: {"scope":["github:acme/ivy"]}`) {
 		t.Errorf("send ran as %q in %q", args, dir)
 	}
 	if _, args, _ := strings.Cut(calls[2], "|"); args != "decide rule ivy two fix-rounds then the judge" {
@@ -247,6 +270,16 @@ func TestApplyCompilesCardsAndIsIdempotent(t *testing.T) {
 	if len(rec.Applied) != 3 || rec.Applied[0].Code != 0 || rec.Applied[1].Step != "card c1 send" {
 		t.Fatalf("applied = %+v", rec.Applied)
 	}
+	// The deferral rides into the next agenda.
+	next := r.must(0, "agenda")
+	if !strings.Contains(next, "deferred from "+id) || !strings.Contains(next, "billing: product direction") {
+		t.Errorf("next agenda lacks the deferral:\n%s", next)
+	}
+}
+
+func TestApplyLedgerIsIdempotentAndGuarded(t *testing.T) {
+	r := newRig(t)
+	path, _ := planAndApply(t, r)
 
 	// The world now carries the row; a second apply repeats nothing.
 	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:ivy","state":"dispatched","key":"repo:ivy-5ab57ce6:#7"}]`)
@@ -256,11 +289,23 @@ func TestApplyCompilesCardsAndIsIdempotent(t *testing.T) {
 	if n := len(strings.Split(strings.TrimSpace(r.callLog()), "\n")); n != 3 {
 		t.Fatalf("second apply repeated verbs: %d calls", n)
 	}
+	forced := r.load(path).Applied
+	if len(forced) != 4 || forced[3].Step != "apply --force-stale" || !strings.Contains(forced[3].Output, "+ row repo:ivy-5ab57ce6:#7") {
+		t.Fatalf("a forced apply must be on the ledger: %+v", forced)
+	}
 
-	// The deferral rides into the next agenda.
-	next := r.must(0, "agenda")
-	if !strings.Contains(next, "deferred from "+id) || !strings.Contains(next, "billing: product direction") {
-		t.Errorf("next agenda lacks the deferral:\n%s", next)
+	// The seat moved in roles.map: the ledger's dispatch ran elsewhere, so the plan
+	// no longer matches what was applied. Refused, not silently skipped.
+	moved := r.leadDir + "-moved"
+	if err := os.MkdirAll(moved, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rolesMap := filepath.Join(filepath.Dir(r.standup), "org", "roles.map")
+	if err := os.WriteFile(rolesMap, []byte(r.leadDir+" acme lead:acme\n"+moved+" acme author:ivy ivy-author-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := r.must(1, "apply", path, "--force-stale"); !strings.Contains(out, "already ran with different arguments") {
+		t.Fatalf("moved seat: %s", out)
 	}
 }
 
@@ -292,6 +337,14 @@ func TestApplyRefusesBeforeWriting(t *testing.T) {
 	if out := r.must(1, "apply", path); !strings.Contains(out, "ivy-author-9") || r.callLog() != "" {
 		t.Fatalf("unknown seat: %s", out)
 	}
+
+	// The seat is a clone of another repository.
+	r.setFile("origin.txt", "https://github.com/acme/other.git\n")
+	path = fresh(func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	if out := r.must(1, "apply", path); !strings.Contains(out, "is a clone of acme/other, not acme/ivy") || r.callLog() != "" {
+		t.Fatalf("wrong origin: %s", out)
+	}
+	r.setFile("origin.txt", "git@github.com:acme/ivy.git\n")
 
 	// The same row already accountable to someone else: a changed payload.
 	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:other","state":"working","key":"k"}]`)
@@ -398,5 +451,28 @@ func TestNewFromCarriesAStaleDraftOver(t *testing.T) {
 	r.must(0, "apply", path2)
 	if !strings.Contains(r.callLog(), "dispatch #7") {
 		t.Fatalf("carried card did not apply:\n%s", r.callLog())
+	}
+}
+
+func TestIdsSortChronologicallyAndRowsCarryTheirRelationship(t *testing.T) {
+	r := newRig(t)
+	first := agendaID(t, r.must(0, "agenda"))
+	if !strings.HasSuffix(first, "-001") {
+		t.Fatalf("ids are zero-padded: %s", first)
+	}
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"draft","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:#7"}]`)
+	asDraft := agendaID(t, r.must(0, "agenda"))
+	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"#7","relationship":"reviews","for":"author:ivy","state":"working","key":"repo:ivy-5ab57ce6:#7"}]`)
+	asReviews := agendaID(t, r.must(0, "agenda"))
+	a, err := standup.LoadAgenda(filepath.Join(r.standup, "agenda", asDraft+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := standup.LoadAgenda(filepath.Join(r.standup, "agenda", asReviews+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Digest == b.Digest {
+		t.Fatalf("a row replaced by another relationship must project differently:\n%v", a.Projection)
 	}
 }

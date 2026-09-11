@@ -100,7 +100,11 @@ func cmdAgenda(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	a, err := env.Build(cfg, env.NextID())
+	id, err := env.NextID()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	a, err := env.Build(cfg, id)
 	if err != nil {
 		return fail(stderr, err)
 	}
