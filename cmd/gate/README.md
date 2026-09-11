@@ -61,28 +61,36 @@ merged fixes just because its checkout was updated.
 
 Before invoking a judge, Gate checks the recorded packet. Required reviewer
 file sections are included completely within a 256 KiB budget; ambiguous
-basenames include all matching changed files. Missing files, cited lines, and
-omitted review comments are listed together. Coverage means the bytes are
-present, not that a finding is fixed.
+basenames include all matching changed files. An exact-head Git file index
+separates real unchanged companions (including extensionless filenames) from
+hypothetical examples and code symbols in review prose. If the index is absent,
+Gate reports that before judgment. Missing source and omitted reviews are
+listed together; full current source or indexed absence also covers a stale
+line reference. Coverage is evidence availability, not proof a finding is fixed.
 
 ```sh
 gate packet -run run_... -state ~/dev/gate/state
-gate evidence -run run_... -grant grt_... -path docs/guide.md -path docs/companion.md -state ~/dev/gate/state
+gate evidence -run run_... -grant grt_... -state ~/dev/gate/state
 gate packet -run run_... -state ~/dev/gate/state
 gate judge -run run_... -grant grt_... -auto -provider codex -state ~/dev/gate/state
 ```
 
 `packet` is read-only JSON, including `complete`, every `missing` requirement,
-the context, and the running Gate version. `judge` returns exit 4 with
+the context, `required_sources`, and the running Gate version. `judge` returns exit 4 with
 `judgment_evidence_incomplete` before invoking a provider or recording a
 judgment when required context is missing. Repair that existing run; creating
 another `gate gate` run spends another review cycle.
 
-`evidence` fetches regular text files directly from GitHub at the recorded full
-head SHA, verifies their Git blob hashes, and appends the content to that run.
+`evidence` fetches the complete Git file index at the recorded head, discovers
+all required source, and collects it in one call. A truncated index is an error,
+never proof a file is absent. It fetches regular text files directly from GitHub
+at that full head SHA, verifies their Git blob hashes, and appends the index and
+content to the run. With explicit `-path docs/guide.md -path docs/companion.md`,
+it collects only those paths alongside the index; values are preserved exactly.
 It rechecks the live PR head and grant, allows at most three supplements and
-256 KiB of source across the run, and accepts at most 32 paths per call. It does
-not load arbitrary local source or give author comments review authority.
+256 KiB of source across the run, and accepts at most 32 source paths per call.
+The required-diff and required-review sections have separate 256 KiB and 64 KiB
+budgets; exceeding either reports the missing evidence before provider invocation. It does not load arbitrary local source or give author comments review authority.
 Unchanged companion files can be supplied this way; supply exact repository
 paths. Packet source limits are explicit, never silent truncation. If a required
 file or the reviews exceed those bounds, split the change or escalate the

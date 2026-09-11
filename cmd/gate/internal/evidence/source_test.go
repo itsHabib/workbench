@@ -32,3 +32,16 @@ func TestExactSourceValidatesBlob(t *testing.T) {
 		})
 	}
 }
+
+func TestExactPathsRequiresCompleteTree(t *testing.T) {
+	good := `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","truncated":false,"tree":[{"path":"Dockerfile","type":"blob"},{"path":"docs/a,b.md","type":"blob"},{"path":"docs","type":"tree"}]}`
+	paths, err := decodeExactPaths([]byte(good))
+	if err != nil || len(paths) != 2 || paths[1] != "docs/a,b.md" {
+		t.Fatalf("%v %v", paths, err)
+	}
+	for _, raw := range []string{`{}`, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","truncated":true,"tree":[]}`, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tree":[]}`} {
+		if _, err := decodeExactPaths([]byte(raw)); err == nil {
+			t.Fatal("incomplete tree accepted")
+		}
+	}
+}

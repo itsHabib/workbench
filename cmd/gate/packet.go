@@ -75,20 +75,20 @@ func cmdEvidence(args []string) error {
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	run := fs.String("run", "", "unjudged run to supplement")
 	grant := fs.String("grant", "", "live grant id")
-	var paths repeatedFlag
-	fs.Var(&paths, "path", "exact repository path; repeat to repair all omissions together")
+	var paths []string
+	fs.Func("path", "exact repository path; repeat, or omit to collect all required source", func(value string) error { paths = append(paths, value); return nil })
 	help, err := parseFlags(fs, args)
 	if err != nil || help {
 		return err
 	}
-	if *run == "" || *grant == "" || len(paths) == 0 || len(paths) > 32 {
-		return errors.New("evidence: -run, -grant, and 1..32 -path required")
+	if *run == "" || *grant == "" || len(paths) > 32 {
+		return errors.New("evidence: -run and -grant required; at most 32 -path values")
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
 		return err
 	}
-	id, err := supplementEvidence(e, *run, *grant, paths, evidence.CurrentHead, evidence.ExactSource)
+	id, err := supplementEvidence(e, *run, *grant, paths, evidence.CurrentHead, evidence.ExactSource, evidence.ExactPaths)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func cmdEvidence(args []string) error {
 
 type sourceReader func(repo, head, path string) (string, string, error)
 
-func supplementEvidence(e env, run, grant string, paths []string, head func(string, int) (string, error), read sourceReader) (string, error) {
+func supplementEvidence(e env, run, grant string, paths []string, head func(string, int) (string, error), read sourceReader, index func(string, string) ([]string, error)) (string, error) {
 	arts, err := e.st.Run(run)
 	if err != nil {
 		return "", err
@@ -121,9 +121,30 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 	if current != subject.HeadSHA {
 		return "", errors.New("evidence_head_changed: start a new review run")
 	}
-	body := verify.SourceEvidence{Subject: subject}
+	fileIndex, err := index(subject.Repo, subject.HeadSHA)
+	if err != nil {
+		return "", err
+	}
+	body := verify.SourceEvidence{Subject: subject, FileIndex: fileIndex, IndexComplete: true}
+	if len(paths) == 0 {
+		raw, _ := json.Marshal(body)
+		augmented := append(append([]state.Artifact(nil), arts...), state.Artifact{Kind: state.KindEvidence, Body: raw})
+		packet, err := verify.JudgmentPacket(augmented, subject)
+		if err != nil {
+			return "", err
+		}
+		paths = packet.RequiredSources
+	}
+	if len(paths) > 32 {
+		return "", fmt.Errorf("evidence_path_limit: %d required paths; select at most 32 with -path", len(paths))
+	}
 	bytes := 0
-	for _, path := range uniqueStrings(paths) {
+	seen := make(map[string]bool)
+	for _, path := range paths {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
 		content, blob, err := read(subject.Repo, subject.HeadSHA, path)
 		if err != nil {
 			return "", err
@@ -164,7 +185,7 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) erro
 			return errors.New("evidence_repair_closed: judgment is one-shot; substantive outcomes require a new run")
 		}
 		var s verify.SourceEvidence
-		if a.Kind != state.KindEvidence || json.Unmarshal(a.Body, &s) != nil || len(s.Sources) == 0 {
+		if a.Kind != state.KindEvidence || json.Unmarshal(a.Body, &s) != nil || (len(s.Sources) == 0 && !s.IndexComplete) {
 			continue
 		}
 		count++

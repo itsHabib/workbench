@@ -67,3 +67,40 @@ func CurrentHead(repo string, number int) (string, error) {
 	}
 	return pr.Head.SHA, nil
 }
+
+// ExactPaths returns Git's complete blob-path index at an immutable head. It
+// distinguishes real unchanged companions from hypothetical examples in prose.
+func ExactPaths(repo, head string) ([]string, error) {
+	if len(head) != 40 {
+		return nil, fmt.Errorf("evidence_source_invalid: head")
+	}
+	if _, err := hex.DecodeString(head); err != nil {
+		return nil, fmt.Errorf("evidence_source_invalid: head")
+	}
+	raw, err := gh("api", "repos/"+repo+"/git/trees/"+head+"?recursive=1")
+	if err != nil {
+		return nil, err
+	}
+	return decodeExactPaths(raw)
+}
+
+func decodeExactPaths(raw []byte) ([]string, error) {
+	var tree struct {
+		SHA       string
+		Truncated *bool
+		Tree      []struct{ Path, Type string }
+	}
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return nil, fmt.Errorf("evidence_index_invalid: %w", err)
+	}
+	if len(tree.SHA) != 40 || tree.Truncated == nil || *tree.Truncated || tree.Tree == nil {
+		return nil, fmt.Errorf("evidence_index_incomplete: GitHub did not return a complete tree")
+	}
+	paths := []string{}
+	for _, entry := range tree.Tree {
+		if entry.Type == "blob" {
+			paths = append(paths, entry.Path)
+		}
+	}
+	return paths, nil
+}

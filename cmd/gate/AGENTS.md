@@ -159,8 +159,10 @@ Constraints that are design decisions, not omissions:
 - **Check packet completeness before judgment.** `gate packet -run R` exposes
   required source coverage and the running revision. `judge` fails with
   `judgment_evidence_incomplete` before provider invocation when required
-  context is omitted. `gate evidence -run R -grant G -path P` collects exact-head
-  GitHub source into the existing unjudged run: at most three supplements,
+  context is omitted. `gate evidence -run R -grant G` indexes the exact Git head
+  and collects required source in one call; optional repeated `-path P` values
+  select explicit files. Prose examples do not become mandatory files. It appends
+  to the existing unjudged run: at most three supplements,
   32 paths per call and 256 KiB total. Repairs spend no new cycle, never reopen
   a substantive judgment, and refuse changed heads. Inspect every missing item
   together; do not start another run merely to repair packet construction.

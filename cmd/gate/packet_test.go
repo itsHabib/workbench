@@ -45,7 +45,8 @@ func testPacketJudgmentCLI(t *testing.T, decision string) {
 		t.Fatal(failed)
 	}
 	before, _ := cycleCount(e.st, subject, "")
-	call(0, "evidence", "-run", run, "-grant", grantID, "-path", "docs/companion.md")
+	call(0, "evidence", "-run", run, "-grant", grantID)
+	call(0, "evidence", "-run", run, "-grant", grantID, "-path", "docs/a,b.md")
 	after, _ := cycleCount(e.st, subject, "")
 	if before != 1 || after != before {
 		t.Fatalf("repair cycles %d -> %d", before, after)
@@ -96,17 +97,22 @@ func TestEvidenceRepairBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
-	source := func(string, string, string) (string, string, error) { return "text", "blob", nil }
+	source := func(_, _, path string) (string, string, error) {
+		if path != "docs/companion.md" {
+			return "", "", fmt.Errorf("repository path changed: %q", path)
+		}
+		return "text", "blob", nil
+	}
 	moved := func(string, int) (string, error) { return strings.Repeat("b", 40), nil }
-	if _, err := supplementEvidence(e, run, grant.ID, []string{"x"}, moved, source); err == nil || !strings.Contains(err.Error(), "evidence_head_changed") {
+	if _, err := supplementEvidence(e, run, grant.ID, []string{"docs/companion.md"}, moved, source, packetTestIndex); err == nil || !strings.Contains(err.Error(), "evidence_head_changed") {
 		t.Fatalf("changed head: %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if _, err := supplementEvidence(e, run, grant.ID, []string{"x"}, head, source); err != nil {
+		if _, err := supplementEvidence(e, run, grant.ID, []string{"docs/companion.md"}, head, source, packetTestIndex); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := supplementEvidence(e, run, grant.ID, []string{"x"}, head, source); err == nil || !strings.Contains(err.Error(), "evidence_repair_limit") {
+	if _, err := supplementEvidence(e, run, grant.ID, []string{"docs/companion.md"}, head, source, packetTestIndex); err == nil || !strings.Contains(err.Error(), "evidence_repair_limit") {
 		t.Fatalf("bound: %v", err)
 	}
 }
@@ -143,7 +149,9 @@ func packetCLIFixture(t *testing.T) (env, verify.Subject, string, string, func(i
 	content := "complete companion source\n"
 	sum := sha1.Sum(append([]byte(fmt.Sprintf("blob %d%c", len(content), 0)), []byte(content)...))
 	raw, _ := json.Marshal(map[string]any{"type": "file", "path": "docs/companion.md", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
-	script := "#!/bin/sh\ncase \"$2\" in\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\nrepos/o/r/contents/docs/companion.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(raw) + "';;\n*) exit 99;;\nesac\n"
+	commaRaw, _ := json.Marshal(map[string]any{"type": "file", "path": "docs/a,b.md", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
+	indexRaw, _ := json.Marshal(map[string]any{"sha": subject.HeadSHA, "tree": []map[string]string{{"path": "docs/companion.md", "type": "blob"}, {"path": "docs/a,b.md", "type": "blob"}}, "truncated": false})
+	script := "#!/bin/sh\ncase \"$2\" in\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\nrepos/o/r/contents/docs/companion.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(raw) + "';;\nrepos/o/r/contents/docs/a%2Cb.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(commaRaw) + "';;\nrepos/o/r/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1) printf '%s' '" + string(indexRaw) + "';;\n*) exit 99;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +187,7 @@ func TestEvidenceRepairConcurrentBound(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := supplementEvidence(e, run, grant, []string{"x"}, head, source)
+			_, err := supplementEvidence(e, run, grant, []string{"x"}, head, source, packetTestIndex)
 			results <- err
 		}()
 	}
@@ -202,4 +210,8 @@ func TestEvidenceRepairConcurrentBound(t *testing.T) {
 	if err != nil || !audit.OK {
 		t.Fatalf("%+v %v", audit, err)
 	}
+}
+
+func packetTestIndex(string, string) ([]string, error) {
+	return []string{"docs/companion.md", "x"}, nil
 }
