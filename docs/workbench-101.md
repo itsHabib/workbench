@@ -182,7 +182,7 @@ polling and launches. Its facts - identity, liveness, who holds what - derive
 from harness hook events, never from an agent's self-report (`verified`,
 `cmd/fleet/README.md`; the guides for people and agents are under
 `cmd/fleet/docs/`). **org** (`cmd/org`) is its deliberately small counterpart:
-a registry of editable prose role cards - register/update, read, list - with
+a registry of editable prose role cards - `charter`, `boot`, `status` - with
 optional parent references. The boundary between them is a decided contract:
 role prose and parent links grant no authority; work, mail, and handoffs stand
 on their own in fleet; merge permission stays gate's (`verified`,

@@ -3,8 +3,11 @@
 **Status:** v1.1 (2026-09-11) — merge-boundary paragraph updated for the executor App's
 suspension, branch-protection table re-verified, codexguard and the fleet hook added to
 the rulebooks. (v1, 2026-07-31, followed the bootstrap merge and added custody.)
-**The executable half** — literal settings, the guard script, hook registrations,
-install + verify — is [`auto-mode-rulebook.md`](auto-mode-rulebook.md).
+**The executable half** for the Claude-harness rulebook — literal settings, the guard
+script, hook registrations, install + verify — is
+[`auto-mode-rulebook.md`](auto-mode-rulebook.md). The newer rulebooks carry their own:
+codexguard's install/projection is `cmd/codexguard/docs/install.md`, and the fleet
+hook's install-shadow-switch path is in `cmd/fleet/README.md`.
 **Scope:** the auto-classifiers in the portfolio — the merge gate, triage, ship dispatch
 policy, the Claude Code harness config (permissions + hooks), the Codex-harness policy
 owner (`cmd/codexguard`), and the fleet occupancy hook. One set of defaults, many
