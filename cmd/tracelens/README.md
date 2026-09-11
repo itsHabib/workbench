@@ -75,8 +75,13 @@ Console feeds Fleet's observed native trace to `tracelens -json -dialect auto`
 over stdin. `auto` detects provider streams, including `codex-app-server`
 notifications (`item/started`, `item/completed`, `turn/completed`). Command and
 file-change items pair by thread, turn and item identity. Incomplete or unknown
-outcomes remain unknown; explicit failed turns remain failures. Final agent text
-is supported. User input and reasoning records are excluded from tool analysis.
+outcomes remain unknown; failed and interrupted turns remain failures. Declined
+command or file-change actions produce warning findings even when later actions
+succeed. A tool refusal
+does not by itself mean the producer declared the entire run failed. Neutral
+JSONL can retain that evidence with `declined: true` on the affected step.
+Final agent text is supported. User input and reasoning records are excluded
+from tool analysis.
 Other app-server item kinds make analysis unavailable, even alongside supported
 steps. Mixed provider formats and unsupported/no-step streams error instead of
 yielding a clean report.

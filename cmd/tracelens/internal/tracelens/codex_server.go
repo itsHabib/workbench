@@ -60,8 +60,13 @@ func ParseCodexServerEvents(r io.Reader) (Trajectory, error) {
 }
 
 func addServerEvent(b *codexBuilder, e serverEvent) error {
-	if e.Method == "turn/completed" && e.Params.Turn.Status == "failed" {
-		b.addTurnFailure(e.Params.Turn.Error)
+	if e.Method == "turn/completed" {
+		switch e.Params.Turn.Status {
+		case "failed":
+			b.addTurnFailure(e.Params.Turn.Error)
+		case "interrupted":
+			b.addTurnFailure(codexError{Message: "turn interrupted"})
+		}
 		return nil
 	}
 	if e.Method != "item/started" && e.Method != "item/completed" {
@@ -82,7 +87,7 @@ func addServerEvent(b *codexBuilder, e serverEvent) error {
 		key = e.Params.Thread + "/" + e.Params.TurnID + "/" + key
 	}
 	typ := "item.started"
-	if e.Method == "item/completed" && (i.ExitCode != nil || i.Status == "completed" || i.Status == "failed" || kind == "agent_message") {
+	if e.Method == "item/completed" && (i.ExitCode != nil || i.Status == "completed" || i.Status == "failed" || i.Status == "declined" || kind == "agent_message") {
 		typ = "item.completed"
 	}
 	b.add(codexEvent{Type: typ, Item: codexItem{ID: key, Type: kind, Text: i.Text, Command: i.Command, AggregatedOutput: i.Output, ExitCode: i.ExitCode, Status: i.Status, Changes: i.Changes}})

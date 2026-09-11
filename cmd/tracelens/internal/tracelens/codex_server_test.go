@@ -66,3 +66,41 @@ func TestCodexServerRejectsUnsupportedActivityAlongsideSupportedSteps(t *testing
 		t.Fatal(got, err)
 	}
 }
+
+func TestCodexServerTerminalOutcomesCannotBecomeCleanAfterSuccess(t *testing.T) {
+	success := `{"method":"item/completed","params":{"threadId":"t","turnId":"later","item":{"id":"ok","type":"commandExecution","command":"check","exitCode":0,"status":"completed"}}}`
+	cases := []struct{ name, event, decision, finding string }{
+		{"declined command", `{"method":"item/completed","params":{"item":{"id":"no","type":"commandExecution","command":"refused","status":"declined"}}}`, "escalate", "tool_refusal"},
+		{"declined patch", `{"method":"item/completed","params":{"item":{"id":"no","type":"fileChange","status":"declined"}}}`, "escalate", "tool_refusal"},
+		{"declined beats contradictory exit", `{"method":"item/completed","params":{"item":{"id":"no","type":"commandExecution","command":"refused","status":"declined","exitCode":0}}}`, "escalate", "tool_refusal"},
+		{"interrupted turn", `{"method":"turn/completed","params":{"turn":{"status":"interrupted"}}}`, "block", "run_failure"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, err := ParseCodexServerEvents(strings.NewReader(tc.event + "\n" + success))
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := Analyze(tr, DefaultConfig())
+			if report.Decision != tc.decision || len(report.Findings) != 1 || report.Findings[0].Kind != tc.finding {
+				t.Fatal(report)
+			}
+			if !tr.Steps[0].Failed() || !*tr.Steps[len(tr.Steps)-1].OK {
+				t.Fatal("terminal failure or later success lost", tr)
+			}
+			if tc.finding == "tool_refusal" && tr.DeclaredFailure != "" {
+				t.Fatal("tool refusal invented a whole-run failure", tr)
+			}
+		})
+	}
+}
+
+func TestNeutralTracePreservesExplicitToolRefusal(t *testing.T) {
+	tr, err := ParseJSONL(strings.NewReader(`{"tool":"check","ok":false,"declined":true,"error":"declined"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report := Analyze(tr, DefaultConfig()); report.Decision != "escalate" || report.Findings[0].Kind != "tool_refusal" {
+		t.Fatal(report)
+	}
+}

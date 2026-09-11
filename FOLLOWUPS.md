@@ -12,13 +12,6 @@ this PR, with a direct Inspect regression, removing that merge dependency.
 It was also tested with combined source and real provider traces. No fourth panel is requested. Remaining
 P2/P3 items are recorded for judgment:
 
-- **P2, TraceLens terminal outcomes:** app-server `declined` tool statuses stay
-  unknown and an `interrupted` turn does not become a declared failure. A
-  declined item followed by a successful item can therefore receive a clean
-  diagnostic. Reproduced with the actual CLI. Recognize these terminal outcomes
-  with direct regressions in a follow-up. Console displays provider/process
-  state separately and says diagnostics do not verify completion; this limits
-  the impact but does not make the diagnostic interpretation correct.
 - **P2, bare TraceLens contract documentation:** bare `tracelens <file>` now
   requires neutral JSONL containing an analyzable step. Provider streams need
   `-dialect auto`; rejecting empty/wrong-dialect input replaces an old fabricated
@@ -46,6 +39,14 @@ P2/P3 items are recorded for judgment:
 
 Review evidence: [independent design/runtime review](https://github.com/itsHabib/workbench/pull/319#issuecomment-5636954062).
 Recorded validation: [Fleet visibility checks](docs/features/fleet-visibility/validation.md).
+
+Gate run `run_695619a145b7ddbe` rejected the earlier terminal-outcome deferral.
+The resulting bounded correctness repair recognizes interrupted turns as
+failures and explicit declined actions as warning findings, retaining the
+refusal without inventing a producer-declared failure of the whole run.
+Regressions prove later successful activity cannot turn either into a clean
+diagnostic. This is a substantive repair submitted for new judgment, without
+another panel cycle; the original block remains in the record.
 
 ## fleet: avoid repeating all-agent joins during detail refresh
 

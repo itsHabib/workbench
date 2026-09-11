@@ -76,6 +76,14 @@ The runtime owner records execution and verifier evidence separately:
 
 ## Limits
 
+Gate's first judgment blocked a false-clean case involving declined actions and
+interrupted turns. The subsequent repair has direct decoder-to-analyzer
+regressions: declined command and patch actions escalate with a tool-refusal
+finding; an interrupted turn blocks; later successful activity cannot erase
+either. A contradictory success exit code cannot erase an explicit refusal.
+The refusal remains an action-level warning rather than a fabricated whole-run
+failure. Neutral JSONL retains explicit refusal evidence as well.
+
 No narrow-viewport visual test or large-fleet performance benchmark was run.
 The timestamp view contains latest source observations, not a complete event
 journal. Provider execution is tested by the runtime owner; these browser checks

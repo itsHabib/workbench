@@ -33,6 +33,28 @@ func (RunFailureDetector) Detect(t Trajectory) []Finding {
 	}}
 }
 
+// ToolRefusalDetector preserves explicit refusals as warnings, without claiming
+// that a declined action means the producer declared the entire run failed.
+type ToolRefusalDetector struct{}
+
+// Detect implements Detector.
+func (ToolRefusalDetector) Detect(t Trajectory) []Finding {
+	var steps []int
+	for _, step := range t.Steps {
+		if step.Declined {
+			steps = append(steps, step.Index)
+		}
+	}
+	if len(steps) == 0 {
+		return nil
+	}
+	return []Finding{{
+		Kind: "tool_refusal", Severity: Warn, Steps: steps,
+		Summary: fmt.Sprintf("provider declined %d tool action(s)", len(steps)),
+		Repair:  "inspect the refused actions and any later recovery; subsequent success does not erase the refusal",
+	}}
+}
+
 // LoopDetector finds a repeating cycle of tool-call signatures — the agent
 // mechanically re-executing the same sequence (the classic non-terminating
 // loop) — and reports the strongest tandem repeat.
