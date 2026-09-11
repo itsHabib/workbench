@@ -186,7 +186,7 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview) ([]dif
 	}
 	for _, hint := range reviewPathHints(comments) {
 		// Only file-shaped prose is a dependency. Commands, symbols and flags are not paths.
-		if path.Ext(hint) != "" && !strings.ContainsAny(hint, " \t") && !strings.Contains(hint, "://") {
+		if missingFileHint(hint) {
 			resolved, reason := resolveReviewPath(hint, files)
 			if reason == "absent from recorded diff" {
 				paths = append(paths, hint)
@@ -224,4 +224,21 @@ func actionablePacketComments(comments []recordedReview) []recordedReview {
 		}
 	}
 	return result
+}
+
+// A dot also separates symbols such as url.PathEscape. Resolve any existing
+// diff path first; only explicit paths or common file extensions can imply an
+// absent companion. Structured finding anchors do not use this prose heuristic.
+func missingFileHint(hint string) bool {
+	if strings.ContainsAny(hint, " \t(){}=\\") || strings.Contains(hint, "://") {
+		return false
+	}
+	if strings.Contains(hint, "/") {
+		return path.Clean(hint) == hint && !strings.HasPrefix(hint, "/") && !strings.HasPrefix(hint, "../")
+	}
+	switch path.Ext(hint) {
+	case ".md", ".txt", ".go", ".mod", ".sum", ".json", ".yaml", ".yml", ".toml", ".xml", ".lock", ".py", ".js", ".jsx", ".ts", ".tsx", ".rs", ".sh", ".c", ".h", ".cpp", ".hpp", ".html", ".css", ".sql", ".proto", ".java", ".cs", ".rb", ".ex", ".exs":
+		return true
+	}
+	return false
 }

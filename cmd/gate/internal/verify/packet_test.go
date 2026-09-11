@@ -73,3 +73,14 @@ func TestPacketRequiresStructuredAnchorOutsideDiff(t *testing.T) {
 		t.Fatalf("%+v %v", p.Missing, err)
 	}
 }
+
+func TestPacketDoesNotMistakeGoSymbolsForMissingFiles(t *testing.T) {
+	comments := []map[string]any{{"is_bot": true, "body": "Check `url.PathEscape`, `strings.Join` and `companion.md`."}}
+	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"comments": comments})}, Subject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Missing) != 1 || !strings.Contains(p.Missing[0], "companion.md:") {
+		t.Fatalf("symbols became required source files: %v", p.Missing)
+	}
+}
