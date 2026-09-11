@@ -57,7 +57,7 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 		if err != nil {
 			return nil, err
 		}
-		state := fleet.Rec{"attempt": request["attempt"], "provider": request["provider"], "provider_session": "fixture-session"}
+		state := fleet.Rec{"attempt": request["attempt"], "provider": request["provider"], "provider_session": "fixture-session", "provider_terminal": true}
 		if err := fleet.WriteJSON(request["state_file"].(string), state); err != nil {
 			return nil, err
 		}

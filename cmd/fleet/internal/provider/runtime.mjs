@@ -9,12 +9,13 @@ import { createInterface } from 'node:readline';
 
 const request = JSON.parse(fs.readFileSync(0, 'utf8'));
 const state = { attempt: request.attempt, provider: request.provider,
-  provider_state: 'starting', provider_session: request.resume || undefined,
+  provider_state: 'starting', provider_started: false, provider_terminal: false, provider_session: request.resume || undefined,
   trace: request.trace || request.output + ".trace.jsonl" };
 let interrupted = false;
 let interrupt = async () => {};
 let close = async () => {};
 let timer;
+let interruptTimeout;
 function publish(fields = {}) {
   Object.assign(state, fields);
   const tmp = request.state_file + '.tmp';
@@ -34,8 +35,9 @@ async function cancel() {
   interrupted = true;
   publish({ provider_state: 'interrupting' });
   timer = setTimeout(() => {
-    publish({ provider_state: 'failed', error: 'provider did not acknowledge interrupt within 10 seconds' });
-    void close();
+    interruptTimeout = 'provider did not acknowledge interrupt within 10 seconds';
+    publish({ provider_state: 'failed', error: interruptTimeout });
+    void close().catch(e => publish({error: interruptTimeout, close_error: e.message}));
   }, 10000);
   try { await interrupt(); }
   catch (e) { publish({ error: `interrupt: ${e.message}` }); }
@@ -63,6 +65,7 @@ async function claude() {
   async function* input() {
     yield { type: 'user', message: { role: 'user', content: request.prompt }, parent_tool_use_id: null, ...(request.resume ? { session_id: request.resume } : {}) };
   }
+  publish({provider_started: true});
   const q = query({ prompt: input(), options });
   interrupt = () => q.interrupt();
   close = async () => q.close();
@@ -80,6 +83,7 @@ async function claude() {
       event(message);
       if (message.type !== 'result') continue;
       terminal = true;
+      publish({provider_terminal: true});
       publish({ provider_state: interrupted ? 'interrupted' : message.is_error ? 'failed' : 'completed',
         reason: message.subtype });
       process.exitCode = interrupted ? 130 : message.is_error ? 1 : 0;
@@ -90,6 +94,7 @@ async function claude() {
 }
 
 async function codex() {
+  publish({provider_started: true});
   const child = spawn('codex', ['app-server'], { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
   const pending = new Map();
   let sequence = 0;
@@ -171,7 +176,7 @@ async function codex() {
     if (terminal.id !== state.provider_turn) throw new Error('terminal result belongs to another turn');
     const status = terminal.status;
     if (!['completed', 'interrupted', 'failed'].includes(status)) throw new Error(`unknown terminal state: ${status}`);
-    publish({ provider_state: status, reason: status, ...(terminal.error ? { error: terminal.error.message } : {}) });
+    publish({ provider_terminal: true, provider_state: status, reason: status, ...(terminal.error ? { error: terminal.error.message } : {}) });
     output({ type: 'result', session_id: state.provider_session, subtype: status,
       is_error: status !== 'completed' });
     process.exitCode = status === 'completed' ? 0 : status === 'interrupted' ? 130 : 1;
@@ -184,7 +189,7 @@ try {
   if (request.provider === 'claude') await claude();
   if (request.provider === 'codex') await codex();
 } catch (e) {
-  publish({ provider_state: 'failed', error: e.message });
+  publish({ provider_state: 'failed', error: interruptTimeout || e.message });
   output({ type: 'result', session_id: state.provider_session, subtype: 'runtime_error', is_error: true, error: e.message });
   process.exitCode = interrupted ? 130 : 1;
 } finally {

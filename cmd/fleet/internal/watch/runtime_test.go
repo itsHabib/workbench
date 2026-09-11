@@ -203,6 +203,11 @@ func TestResumeBoundToWorkProviderAndAttempt(t *testing.T) {
 	if got, err := resumeSession(target, last); err != nil || got != "actual-session" {
 		t.Fatal(got, err)
 	}
+	last["resume"] = "different-session"
+	if _, err := resumeSession(target, last); err == nil {
+		t.Fatal("accepted a changed resumed session")
+	}
+	delete(last, "resume")
 	last["attempt"] = "replacement"
 	if _, err := resumeSession(target, last); err == nil {
 		t.Fatal("resumed stale attempt evidence")
@@ -231,7 +236,7 @@ func TestCancelUsesExactAttemptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel := filepath.Join(t.TempDir(), "attempt.cancel")
-	launch := fleet.Rec{"at": fleet.Now(), "status": "running", "pid": os.Getpid(), "process_identity": identity, "attempt": "one", "cancel_file": cancel}
+	launch := fleet.Rec{"address": "hub:lead", "cwd": home, "at": fleet.Now(), "status": "running", "pid": os.Getpid(), "process_identity": identity, "attempt": "one", "cancel_file": cancel}
 	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +245,12 @@ func TestCancelUsesExactAttemptFile(t *testing.T) {
 	}
 	if got := fleet.ReadJSON(cancel); fleet.S(got, "attempt") != "one" {
 		t.Fatal(got)
+	}
+	if err := os.Remove(fleet.Path("deliver.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cancel("hub:lead"); err != nil {
+		t.Fatalf("removing config lost cancellation: %v", err)
 	}
 	launch["process_identity"] = "recycled"
 	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
@@ -258,5 +269,35 @@ func TestProviderWithoutCollectedExitKeepsReservation(t *testing.T) {
 	r := fleet.Rec{"status": "running", "provider": "codex", "pid": -1}
 	if !launchPresent(r) {
 		t.Fatal("absent bridge allowed replacement despite unknown provider descendants")
+	}
+}
+
+func TestCollectedBridgeExitDoesNotReleaseAnUnfinishedProvider(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	exitFile := filepath.Join(t.TempDir(), "exit.json")
+	if err := fleet.WriteJSON(exitFile, fleet.Rec{"exit_code": 137}); err != nil {
+		t.Fatal(err)
+	}
+	launch := fleet.Rec{"provider": "codex", "attempt": "one", "status": "running", "exit_file": exitFile, "state_file": stateFile}
+	state := fleet.Rec{"provider": "codex", "attempt": "one", "provider_started": true, "provider_terminal": false}
+	if err := fleet.WriteJSON(stateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	if !launchPresent(launch) {
+		t.Fatal("a collected killed-bridge exit released the provider reservation")
+	}
+	state["provider_terminal"] = true
+	if err := fleet.WriteJSON(stateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	if launchPresent(launch) {
+		t.Fatal("provider terminal result plus collected bridge exit did not release")
+	}
+	state["attempt"] = "old"
+	if err := fleet.WriteJSON(stateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	if !launchPresent(launch) {
+		t.Fatal("a stale provider result released the replacement")
 	}
 }

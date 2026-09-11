@@ -102,8 +102,9 @@ A changed provider, tenant, address, repository, branch or assignment starts a f
 Set `fresh: true` explicitly when each wake should start fresh or an unrecoverable session must
 be replaced. Remove it to resume the newly recorded session on subsequent wakes. Unreadable or
 mismatched retained provider state and failed resumes are errors, never silent fresh starts.
-An absent bridge without a collected exit remains reserved for inspection: its provider child
-may still be running. Fleet does not automatically replace such an ambiguous attempt.
+An absent bridge remains reserved for inspection unless both its exit and the provider
+terminal result are recorded (or the provider was never started). Its provider child may still
+be running even when the bridge exit was collected. Fleet does not automatically replace such an ambiguous attempt.
 An ended process alone does not prove all of its descendants have stopped.
 
 ## Observe and interrupt
@@ -125,7 +126,8 @@ mail, handoffs, assignments or working files and does not replay delivered work.
 
 To stop future launches too, use `fleet stop address:project-author-1 "run complete"` before
 cancelling. `fleet resume address:project-author-1` permits future starts. Removing a config entry
-prevents future launches but leaves a current turn running. Stopping the watcher stops scheduling;
+prevents future launches but leaves a current turn running; `watch cancel` still finds that
+retained attempt independently of the current configuration. Stopping the watcher stops scheduling;
 children continue and a replacement watcher may know their exit only as `gone_exit_unknown`.
 Allow the watcher to collect all exits before stopping it when exact exit codes matter.
 
@@ -158,7 +160,10 @@ or `failed`. `blocked` means the provider requested input/approval Fleet cannot 
 terminal evidence supersedes it. Times are Unix seconds, with fractions. Activity means an event
 was observed, never inferred progress. Session/turn fields are absent until reported; Claude
 reports session identity but has no matching app-server turn ID. `reason`, `error` and Codex
-transport exit fields are included when known. Summary files contain no prompt or tool payloads.
+transport exit fields are included when known. `provider_started` records whether launch was
+attempted and `provider_terminal` is true only after an actual provider terminal message.
+A synthetic runtime error is not provider-terminal evidence. `provider_cleanup_pending` in
+status identifies a collected bridge exit whose provider reservation remains held. Summary files contain no prompt or tool payloads.
 Status joins a summary only when its attempt and provider match the current launch.
 
 The existing normalized terminal `result` shape is retained for `run-report`. Claude's SDK

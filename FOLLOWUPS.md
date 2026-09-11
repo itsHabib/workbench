@@ -601,7 +601,8 @@ exit could permit a new worker while a provider descendant still runs. Codex's
 transport close already escalates to SIGKILL after five seconds and awaits close;
 Claude's SDK owns its synchronous `close()` operation. A live stuck bridge keeps
 the directory reserved, and a bridge that disappears without a collected exit
-also keeps its reservation. Do not substitute `process.exit` for evidence of
+also keeps its reservation. A collected bridge exit without matching provider-terminal
+evidence now keeps the reservation too (second-panel bridge-kill finding). Do not substitute `process.exit` for evidence of
 provider cleanup. Full descendant-quiescence proof is outside this transport
 slice; a future execution-scope change needs failure injection and measured
 process-tree evidence. Normal Codex turn interruption passed a real foreground

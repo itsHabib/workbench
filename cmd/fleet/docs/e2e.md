@@ -56,7 +56,7 @@ handoffs). Stand them up per `run-a-fleet.md`.
    A desktop session idle in a roled directory reads as live and blocks delivery.
 5. Exactly one `fleet watch` on the machine.
 6. If sessions are made by mail: a delivery config (`deliver.json`: `{"<address>": {"cwd", "provider"}}`,
-   prompt placed right after `-p`; `--allowedTools` is variadic and swallows a trailing prompt)
+   optional `model`, `prompt` and positive `every` duration per the provider guide)
    in `$FLEET_STATE`. Use the current Go watcher; see [headless.md](headless.md).
 7. The slow-command gate: after five 40-second runs, `bash scripts/bench.sh` needs the
    `FLEET_ALLOW_SLOW=<rule-slug>` prefix (the slug of the rule it trips) and the seat's allow

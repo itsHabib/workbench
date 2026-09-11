@@ -7,7 +7,7 @@ package watch
 // had been open and untouched for two hours, because a live process is not the same
 // as a process that will read anything. So: per fold, per configured address, if
 // there is mail nobody has been handed and no one is there to read it, run the
-// operator's command once, carrying every eligible message.
+// configured provider turn once, carrying every eligible message.
 //
 // The rules the rehearsal paid for:
 //
@@ -94,7 +94,7 @@ func readDeliverTargets() ([]deliverTarget, string) {
 	path := fleet.Path("deliver.json")
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, "no deliver.json; no headless commands configured"
+		return nil, "no deliver.json; no headless providers configured"
 	}
 	if err != nil {
 		return nil, err.Error()
@@ -292,7 +292,7 @@ func eligibleMail(address string, now, mailGrace float64) ([]fleet.Rec, error) {
 	return out, nil
 }
 
-// launch reserves every message it is about to carry, starts the configured command
+// launch reserves every message it is about to carry, starts the configured provider turn
 // once, and reconciles the reservation against what actually happened.
 //
 // The reservation is the stamp, and it has to be durable before the start. Stamping

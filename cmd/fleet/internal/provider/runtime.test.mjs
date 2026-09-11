@@ -21,10 +21,11 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
   send({method:'turn/started',params:{threadId:p.threadId,turn:{id:'turn-1'}}});
   send({id:m.id,result:{turn:{id:'turn-1'}}});
   if(process.env.CASE==='early-exit') return process.exit(7);
-  if(process.env.CASE==='cancel') return;
+  if(['cancel','timeout'].includes(process.env.CASE)) return;
   send({method:'turn/completed',params:{threadId:p.threadId,turn:{id:'turn-1',status:'completed'}}});
  }
  if(m.method==='turn/interrupt') {
+  if(process.env.CASE==='timeout')return;
   send({id:m.id,result:{}});
   send({method:'turn/completed',params:{threadId:p.threadId,turn:{id:p.turnId,status:'interrupted'}}});
  }
@@ -51,9 +52,9 @@ async function run(provider, scenario, resume) {
  const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,CASE:scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
  proc.stdin.end(JSON.stringify(req));
- const deadline=setTimeout(()=>proc.kill('SIGKILL'),5000);
+ const deadline=setTimeout(()=>proc.kill('SIGKILL'),scenario==='timeout'?19000:5000);
  let control;
- if(scenario==='cancel')control=setInterval(()=>{if(fs.existsSync(req.state_file)&&JSON.parse(fs.readFileSync(req.state_file)).provider_state==='running')fs.writeFileSync(req.cancel_file,'{}')},10);
+ if(['cancel','timeout'].includes(scenario))control=setInterval(()=>{if(fs.existsSync(req.state_file)&&JSON.parse(fs.readFileSync(req.state_file)).provider_state==='running')fs.writeFileSync(req.cancel_file,'{}')},10);
  const code=await new Promise(resolve=>proc.on('close',resolve));
  clearTimeout(deadline);clearInterval(control);
  const state=JSON.parse(fs.readFileSync(req.state_file));
@@ -78,3 +79,5 @@ for(const provider of ['claude','codex']) {
  });
 }
 test('Codex failed resume does not start fresh',async()=>{const r=await run('codex','resume-fail','missing');assert.equal(r.code,1);assert.match(r.state.error,/no such thread/)});
+
+test('interrupt timeout preserves its cause and is not provider-terminal evidence',async()=>{const r=await run('codex','timeout');assert.equal(r.code,130,r.err);assert.equal(r.state.provider_state,'failed');assert.equal(r.state.provider_terminal,false);assert.match(r.state.error,/did not acknowledge interrupt/)});

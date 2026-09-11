@@ -50,7 +50,16 @@ func launchPresent(r fleet.Rec) bool {
 		return false
 	}
 	state, _ := processState(r)
-	return state == "running" || state == "unknown" || (fleet.S(r, "provider") != "" && state == "gone_exit_unknown")
+	if state == "running" || state == "unknown" {
+		return true
+	}
+	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" {
+		return false
+	}
+	if state == "gone_exit_unknown" {
+		return true
+	}
+	return !providerTerminal(r)
 }
 
 // Placement already carries the work. Waking its worker does not require a second
@@ -99,6 +108,9 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	}
 	path := launchPath(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return 0, err
+	}
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
 	}
 	attempt := strings.TrimSuffix(path, ".json") + fmt.Sprintf("-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -191,29 +203,70 @@ func resumeSession(t deliverTarget, last fleet.Rec) (string, error) {
 	if session == "" {
 		return "", fmt.Errorf("previous attempt has no provider session; inspect it and explicitly set fresh to restart")
 	}
+	if requested := fleet.S(last, "resume"); requested != "" && requested != session {
+		return "", fmt.Errorf("provider session does not match the recorded resume identity")
+	}
 	return session, nil
 }
 
-// Cancel requests interruption of one exact attempt; it never signals an unverified PID.
+// A collected bridge exit alone cannot release a live provider's reservation.
+func providerTerminal(last fleet.Rec) bool {
+	state := fleet.ReadJSON(fleet.S(last, "state_file"))
+	if state == nil || fleet.S(state, "attempt") != fleet.S(last, "attempt") || fleet.S(state, "provider") != fleet.S(last, "provider") {
+		return false
+	}
+	return fleet.B(state, "provider_terminal") || (fleet.Has(state, "provider_started") && !fleet.B(state, "provider_started"))
+}
+
+// Cancel uses retained launches, even when their delivery configuration was removed.
 func Cancel(address string) error {
 	return fleet.KeyLock(deliverLockKey, func() error {
-		for _, t := range deliverTargets() {
-			if t.address != address {
-				continue
-			}
-			r, err := readLaunch(t)
+		records, err := os.ReadDir(filepath.Join(dir(), "delivery"))
+		if err != nil {
+			return err
+		}
+		var found fleet.Rec
+		for _, entry := range records {
+			r, err := cancelCandidate(entry.Name(), address)
 			if err != nil {
 				return err
 			}
-			if state, reason := processState(r); state != "running" {
-				return fmt.Errorf("cannot interrupt %s: %s %s", address, state, reason)
+			if r == nil {
+				continue
 			}
-			cancel := fleet.S(r, "cancel_file")
-			if cancel == "" {
-				return fmt.Errorf("attempt has no cancellation endpoint")
+			if found != nil {
+				return fmt.Errorf("multiple active attempts for %s; inspect them before cancellation", address)
 			}
-			return fleet.WriteJSON(cancel, fleet.Rec{"at": fleet.Now(), "attempt": r["attempt"]})
+			found = r
 		}
-		return fmt.Errorf("address is not configured: %s", address)
+		if found == nil {
+			return fmt.Errorf("no running attempt for %s", address)
+		}
+		return fleet.WriteJSON(fleet.S(found, "cancel_file"), fleet.Rec{"at": fleet.Now(), "attempt": found["attempt"]})
 	})
+}
+
+func cancelCandidate(name, address string) (fleet.Rec, error) {
+	if len(name) != 64+len(".json") || !strings.HasSuffix(name, ".json") {
+		return nil, nil
+	}
+	path := filepath.Join(dir(), "delivery", name)
+	r := fleet.ReadJSON(path)
+	if fleet.S(r, "address") != address {
+		return nil, nil
+	}
+	if fleet.S(r, "cwd") == "" || launchPath(deliverTarget{cwd: fleet.S(r, "cwd")}) != path {
+		return nil, fmt.Errorf("invalid retained launch binding")
+	}
+	state, reason := processState(r)
+	if state == "exited" || state == "failed" || state == "launch_failed" {
+		return nil, nil
+	}
+	if state != "running" {
+		return nil, fmt.Errorf("cannot interrupt %s: %s %s", address, state, reason)
+	}
+	if fleet.S(r, "cancel_file") == "" {
+		return nil, fmt.Errorf("attempt has no cancellation endpoint")
+	}
+	return r, nil
 }
