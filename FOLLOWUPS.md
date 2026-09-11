@@ -32,6 +32,27 @@ those bytes and `fleet watch status` points to it. Deferred at the two-fix-round
 fix terminal-fragment handling without displaying partial live records as complete.
 The live Claude JSON/transcript sandbox does not exercise or resolve this case.
 
+## fleet: guessed handoff read flags replace the checkpoint
+
+Live sandbox r7 on PR #310 saw both a worker try `handoff <branch> --list` and a
+lead try `handoff <branch> --show`. The positional parser accepted each as a new
+conclusion and replaced the latest checkpoint. The lead noticed and corrected
+its stray write, and saved first-session evidence survived outside the handoff.
+The guide now names the actual read paths. A focused CLI fix should reject unknown
+options before mutation and prove the old checkpoint bytes remain intact; do not
+add an Org lifecycle or checkpoint history to solve argument parsing.
+
+## fleet: PR cache mistakes a number in create-body prose for the PR operand
+
+Live sandbox r7 on PR #310 created draft PR #15, but `CachePullRequest` recorded
+#42 from the benchmark result inside `gh pr create --body` text. `explicitPull`
+scans shell words without distinguishing option values from positional operands;
+create has no PR-number operand. The verifier independently checked GitHub and the
+reported full SHA, so the receipt remained bound to the correct commit. Fix this
+by using the single returned PR URL for create and parsing operands only for verbs
+that accept them; cover multiline bodies with numbers and other PR URLs. Do not
+infer task completion or merge authority from this cache.
+
 ## org: transfer's last orphan window needs a cross-chain transaction
 
 `org transfer` writes to two chains under two locks. It assigns to the

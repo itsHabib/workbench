@@ -62,6 +62,10 @@ after meaningful progress or a changed approach, before yielding or handing work
 and at useful intervals during long work. A run brief can set the cadence in prose.
 An idle tick with nothing new to record does not need another copy of the same checkpoint.
 
+`fleet handoff` writes and replaces a checkpoint; it has no `--show` or `--list` read flag.
+Read the context injected at SessionStart or inspect the JSON under `$FLEET_STATE/handoff/`
+(worker branches) and `$FLEET_STATE/role-handoff/` (leads).
+
 Record what changed or was learned, the evidence or file/PR pointers, any blocker,
 and the next step. A pooled worker uses its branch handoff; a dedicated lead can use
 `fleet handoff --role` for its cross-repository summary. This preserves authored context
