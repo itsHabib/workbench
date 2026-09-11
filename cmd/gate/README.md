@@ -41,6 +41,49 @@ stored command, then CAS-publishes one result. It never promotes commit status.
 The path is installed but unarmed until the operator completes the runbook. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
+## Inspect and repair judgment evidence
+
+Run `gate version` to see the actual binary's revision, module version and dirty
+build flag. Update an installed binary with
+`go install github.com/itsHabib/workbench/cmd/gate@latest`, then check
+`command -v gate` and `gate version` again. An older binary does not acquire
+merged fixes just because its checkout was updated.
+
+Before invoking a judge, Gate checks the recorded packet. Required reviewer
+file sections are included completely within a 256 KiB budget; ambiguous
+basenames include all matching changed files. Missing files, cited lines, and
+omitted review comments are listed together. Coverage means the bytes are
+present, not that a finding is fixed.
+
+```sh
+gate packet -run run_... -state ~/dev/gate/state
+gate evidence -run run_... -grant grt_... -path docs/guide.md -path docs/companion.md -state ~/dev/gate/state
+gate packet -run run_... -state ~/dev/gate/state
+gate judge -run run_... -grant grt_... -auto -provider codex -state ~/dev/gate/state
+```
+
+`packet` is read-only JSON, including `complete`, every `missing` requirement,
+the context, and the running Gate version. `judge` returns exit 4 with
+`judgment_evidence_incomplete` before invoking a provider or recording a
+judgment when required context is missing. Repair that existing run; creating
+another `gate gate` run spends another review cycle.
+
+`evidence` fetches regular text files directly from GitHub at the recorded full
+head SHA, verifies their Git blob hashes, and appends the content to that run.
+It rechecks the live PR head and grant, allows at most three supplements and
+256 KiB of source across the run, and accepts at most 32 paths per call. It does
+not load arbitrary local source or give author comments review authority.
+Unchanged companion files can be supplied this way; supply exact repository
+paths. Packet source limits are explicit, never silent truncation. If a required
+file or the reviews exceed those bounds, split the change or escalate the
+packet limitation; repeatedly invoking judgment cannot fix it.
+
+A repair is available only before the run's first judgment. Changed heads need
+a new run, and a substantive blocked judgment remains final for its escalation.
+There is no retry mode that relabels a code rejection as missing evidence or
+widens a grant. Existing review cycles, independent judgment and exact-head
+merge authorization stay in force.
+
 ## Run it
 
 ```
