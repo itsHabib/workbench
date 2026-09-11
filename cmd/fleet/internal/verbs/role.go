@@ -153,9 +153,8 @@ func codexHooks(command string) (string, map[string]any, error) {
 	return target, data, nil
 }
 
-// claudeWriteHooks supplements the global Bash hook with completed file writes.
-// Keep unrelated local hooks intact and replace our marked group on rebind.
-func claudeWriteHooks(data map[string]any, target, command string) error {
+// claudeHooks installs the complete lifecycle in the checkout, preserving unrelated hooks.
+func claudeHooks(data map[string]any, target, command string) error {
 	hooks, ok := data["hooks"].(map[string]any)
 	if data["hooks"] != nil && !ok {
 		return refuse("fleet role: %s hooks is not an object", target)
@@ -164,14 +163,18 @@ func claudeWriteHooks(data map[string]any, target, command string) error {
 		hooks = map[string]any{}
 		data["hooks"] = hooks
 	}
-	groups, err := withoutFleetHandlers(hooks["PostToolUse"], target, "PostToolUse")
-	if err != nil {
-		return err
+	specs := [][2]string{{"SessionStart", ""}, {"UserPromptSubmit", ""}, {"PreToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit)$"}, {"PostToolUse", "^(Bash|Edit|Write|MultiEdit|NotebookEdit)$"}, {"Stop", ""}, {"SessionEnd", ""}}
+	for _, spec := range specs {
+		groups, err := withoutFleetHandlers(hooks[spec[0]], target, spec[0])
+		if err != nil {
+			return err
+		}
+		group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command, "statusMessage": fleetHookMark}}}
+		if spec[1] != "" {
+			group["matcher"] = spec[1]
+		}
+		hooks[spec[0]] = append(groups, group)
 	}
-	hooks["PostToolUse"] = append(groups, map[string]any{
-		"matcher": "^(Edit|Write|MultiEdit|NotebookEdit)$",
-		"hooks":   []any{map[string]any{"type": "command", "command": command, "statusMessage": fleetHookMark}},
-	})
 	return nil
 }
 
@@ -404,7 +407,7 @@ func cmdRole(checkout, role string, force bool, tenant, slot string) error {
 	if err != nil {
 		return err
 	}
-	if err := claudeWriteHooks(existing, settingsTarget, strings.TrimSuffix(hookCommand(), " codex")); err != nil {
+	if err := claudeHooks(existing, settingsTarget, strings.TrimSuffix(hookCommand(), " codex")+" claude"); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(fleet.OrgState, 0o755); err != nil {
@@ -544,7 +547,7 @@ func roleUnderLock(checkout, role string, force bool, tenant, slot, kind string,
 	if err := writeMapLine(lines, same, mapfile, checkout, tenant, role, slot); err != nil {
 		return err
 	}
-	local := fmt.Sprintf("# Session role: %s\n\nThis checkout is one lane of the fleet. The role card below is the whole\nof what is specific to it; everything else is enforced by ~/.fleet hooks.\n\n@%s\n", role, card)
+	local := fmt.Sprintf("# Session role: %s\n\nThis checkout is one lane of the fleet. The role card below is the whole\nof what is specific to it; Fleet hooks provide runtime context and ownership checks.\n\n@%s\n", role, card)
 	if err := os.WriteFile(filepath.Join(checkout, "CLAUDE.local.md"), []byte(local), 0o644); err != nil {
 		return err
 	}

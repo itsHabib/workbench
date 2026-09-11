@@ -46,18 +46,13 @@ of leads, cost nothing new.
   `manifest.json` (what it requires, produces, denies; its cadence; whether it
   watches the board) plus a prose `card.md` the agent reads. `fr1_test.go`
   fails the build if a domain word appears in the Go source. Adding a kind of
-  agent is one directory in cc-skills, not a code change here.
+  agent is one directory under `lanes/`, not a code change here.
 - **Done is evidence.** Any live session can record any receipt kind from its own
   checkout, at the exact head, from a clean tree. Role, lane, seat and cwd are
   provenance; independence is checked by the verifier instructions and lead.
   `fleet done` answers from receipts and nothing else; a message saying "done"
   is not done. The latest verdict of a kind is the answer, and it no longer erases
   the one before it: every verdict at a head is kept, and `--all` shows them.
-
-Fleet originated from the Python reference in cc-skills
-(`docs/features/agent-fleet-rules/ref/`). The Go implementation is the current
-runtime; its tests track the current behavior. The historical design record is
-cc-skills `docs/features/agent-fleet-rules/SECOND-LOOK-2026-09-04.md`.
 
 ## The four faces
 
@@ -88,27 +83,19 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 | `mail/.v2/<tenant>/<kind>/<address>/<id>.json` | `send`, `ack` | role/seat messages, retained after acknowledgement |
 | `watch/` | watcher | `board.json`, `work.json`, `board.md`, `observed.jsonl`, `heartbeat.json`, `report.md` |
 | `events.jsonl` | hook | every evaluation's verdict and latency (passive telemetry) |
-| `lanes/<kind>/` | `install.sh` | manifests and cards, copied from cc-skills |
+| `lanes/<kind>/` | `install.sh` | installed example or organization-owned manifests and cards |
 | `keylocks/` | `KeyLock` | advisory `flock` files, never removed, released by the kernel on death |
 
 Identity is the launch directory: `$ORG_STATE/roles.map` binds a path to a
 tenant, a role, and optionally a seat name; the hook resolves a session's role from
 where it was launched, longest prefix wins.
 
-## Install, shadow, switch
+## Install
 
-```sh
-bash cmd/fleet/install.sh             # dry run: every change it would make
-bash cmd/fleet/install.sh --shadow    # run the Go hook beside the installed one, writing only events.jsonl
-fleet shadow-report --since 24h       # a day later: events, latency, would-refuse, proven divergences
-bash cmd/fleet/install.sh --apply     # build, back up both hook configs, swap the hook lines, install lanes
-bash cmd/fleet/install.sh --rollback  # put the previous configs back
-```
-
-The installer edits harness configuration; the operator runs it, not an agent.
-Shadow mode is how a switch is earned: the same verdict from the same store, exit 0
-whatever it decides, and a report that names every case where the two hooks would
-have disagreed.
+Follow the [public installation guide](docs/install.md) to build Fleet, install the
+example author/verifier/supervisor cards, and generate hooks for a fresh checkout.
+Roles belong to your organization; the bundled examples are optional starting points.
+The installer needs no private skill repository or prior hook configuration.
 
 ## Ownership rows
 
@@ -309,7 +296,7 @@ not yet implement the four-interaction product: task launch/acceptance, correlat
 Mail is independent of task acceptance.
 Do not activate a live trial or present this as cross-harness lifecycle parity.
 
-The approved direction is [cc-skills PR #60](https://github.com/itsHabib/cc-skills/pull/60):
+The interaction direction is:
 one lead, one active worker, task-owned workspace and natural interaction through
 the supervisor skill. The interfaces below are for the supervisor/adapter, not a
 set of commands the operator should have to learn.
@@ -370,8 +357,9 @@ JSON keeps IDs and evidence timestamps for debugging; terminal output does not
 require the operator to interpret internal session IDs. No new agent-written
 progress ledger, acceptance claim, done state or automatic takeover is introduced.
 
-Generated role bindings subscribe Codex write events and supplement Claude
-file-write post-tool events alongside its global Bash hook. Existing bindings
+Generated role bindings install the complete Claude lifecycle in project-local
+settings and the Codex lifecycle in user-level hooks. Tool events cover Bash and
+file writes; no prior global Claude Fleet hook is needed. Existing bindings
 need regeneration and harness reload when this release is installed. This increment
 does not edit installed hooks. Terminal observations include the activity age.
 
@@ -404,7 +392,7 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
   send. If the board needs a fact, the hook derives it from an action the agent
   was going to take anyway.
 - No domain vocabulary. Kinds of agent, what they require and produce, and what
-  "done" means for a relationship all live in lane data and cards in cc-skills.
+  "done" means for a relationship all live in public lane data and cards.
 - No cross-machine store. Two machines share nothing but the git remote; the
   pull request is the record both read.
 
@@ -412,7 +400,7 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
 ```
 main.go             dispatch: hook | mcp | watch | <verb>; the fail-open law for the hook
-install.sh          dry run / --shadow / --apply / --rollback
+install.sh          dry run / --apply: build binary and copy public lanes
 internal/fleet      the store, keys, leases, liveness, policy, the hook handlers
 internal/verbs      every CLI verb; Out is swappable so MCP captures it
 internal/mcp        the verbs as MCP tools over stdio

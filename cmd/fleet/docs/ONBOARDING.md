@@ -4,46 +4,20 @@ For a person setting Fleet up on a machine, or an agent asked to. Set up one rep
 rehearse on this machine and record elapsed time and friction; read [OVERVIEW.md](OVERVIEW.md)
 first if the words are new. Everything measured so far was measured on a Mac with Claude.
 
-## 1. Install the hook (operator, once per machine)
+## 1. Install and bind roles
 
-Mac or Linux. (Windows harness configs with escaped backslash paths are unsafe for `--apply`,
-see [hook-inspection.md](hook-inspection.md); register the hooks by hand there and skip the
-installer.) Prerequisites: Go, Git, Bash and Python 3; a cc-skills checkout for the lane cards
-(`LANES_SRC` pointing at its lanes directory); the built `fleet` binary on `PATH`.
-
-```sh
-bash cmd/fleet/install.sh             # dry run: prints every change
-bash cmd/fleet/install.sh --shadow    # optional: run beside the existing hook, write only telemetry
-bash cmd/fleet/install.sh --apply     # build, back up harness configs, swap the hook lines it finds, install lanes
-```
-
-`--apply` is an upgrade path: it replaces hook registrations that already exist in the harness
-configs and skips missing files and a missing lane source; on a fresh machine it prints
-`installed` and wires nothing. Bootstrap by hand first: in `~/.claude/settings.json`, under
-`hooks`, register the same command for each of the six events `SessionStart`,
-`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`:
-
-```json
-"SessionStart": [{"hooks": [{"type": "command", "command": "$HOME/.fleet/bin/fleet hook claude", "timeout": 5}]}]
-```
-
-(`PreToolUse` and `PostToolUse` take a `"matcher"` covering `Bash` and the file-writing tools, for
-example `"Bash|Edit|Write"`; copy the exact matchers from an installed machine's settings when you have one.)
-Codex registrations are user-level: `fleet role` writes the six events to `$CODEX_HOME/hooks.json` the first time it binds a directory, so they run for every Codex session on the machine; only the card and rules are per directory. Then
-`fleet inspect-hooks --config ~/.claude/settings.json` must list all six, then run `--apply` for
-the lanes and backups, then open a fresh session and look for the `[fleet]` line. Stop if the
-installer says a config or the lane source was skipped. State lives in `~/.fleet` (`FLEET_STATE`
-to move it). The installer edits harness configuration, so a person runs it. Check: open any session and look for a `[fleet] session … · role ? · …`
-line at start. `?` is correct for a directory with no role.
+Follow [install.md](install.md) for the public checkout, prerequisites, complete
+fresh-install commands and a disposable packaging check. The installer builds Fleet
+and installs example cards; `fleet role` projects both harnesses' instructions and
+hooks. A private skill checkout and old Python hook installation are not required.
 
 ## 2. Decide the tree (five minutes of thinking, no commands)
 
 - One overall lead. One lead per bucket of work (an epic, a repository, a team). One accountable
   lead per task, never two.
-- Worker kinds you need: usually `author` (task to draft PR) and `verifier` (judges the exact
-  head); `finisher` if drafts get carried through checks and reviews by someone else. Lanes are
-  installed from cc-skills; check `~/.fleet/lanes/` has the kinds you name (a fresh install may
-  lack `verifier`; copy it from the cc-skills lanes directory).
+- Example worker kinds: `author` (task owner), `verifier` (exact-head checks) and
+  `supervisor` (coordination). These are starting points; choose roles and edit
+  manifests/cards around your organization rather than adopting this structure by default.
 - One exclusive resource if the work has one (a device, a test bench, a deploy slot).
 - Names: `supervisor:<name>` for leads, `<kind>:<repo>` for worker kinds.
 
@@ -74,7 +48,13 @@ Record the outcome, accountable lead and useful contacts, task acceptance, reque
 spending boundary and stop condition. Agents can communicate directly and continue eligible
 work; there is no message quota. New Fleet work uses its assignment and handoff without an
 Org charter or claim sequence. Existing Org-held work and terms keep their original owner
-until an explicit migration. The run brief supplies task authority. A sample: `docs/RUN-CONTRACT-v4.md` in `itsHabib/fleet-demo-sandbox`.
+until an explicit migration. The run brief records the authorized scope. For example:
+
+> Outcome: repair the parser failure and open a draft PR. Lead: supervisor:demo.
+> Owner: repo-author-1; checker: repo-verifier-1. Acceptance: reproduce the failure,
+> add a focused regression check, and pass repository checks at the reviewed head.
+> Use only the configured model budget. Stop at the reviewed draft or a concrete blocker;
+> merging and deployment require separate authorization.
 
 ## 5. Choose how sessions get made
 
