@@ -95,16 +95,17 @@ wiring `gate` into the merge tail.
   5 of 7 real PRs park, with no notification, so they park silently. Emit something on park
   (stdout/file/console to start) so a parked run surfaces instead of waiting to be noticed.
 
-- [ ] **Pin the primary diff path to the evaluated head.**
+- [x] **Pin the primary diff path to the evaluated head.**
   Surfaced by the evidence-local-diff skeptic panel (2026-07-16). The oversized-PR fallback
   refuses unless `pulls.head == view.headRefOid`, but the primary path (`gh pr diff <n>`) fetches
   by PR number with no head pin: a force-push to an innocent head between the view read and the
   diff read records that head's diff, and a force-push back before merge still satisfies
   `--match-head-commit`. Window is a sub-call race needing push access + green CI on the decoy, but
-  gate's threat model includes adversarial agents with push access. Fix: after a successful
-  `gh pr diff`, re-read `pulls/<n>` and refuse unless `head.sha == view.headRefOid` (shrinks the
-  window to a sub-call race); airtight variant fetches the under-cap diff SHA-pinned via the
-  `compare` endpoint. The fallback path already has this property.
+  gate's threat model includes adversarial agents with push access. **Landed:** the primary path
+  reads `pulls/<n>`, refuses unless `head.sha == view.headRefOid`, then fetches the merge-base diff
+  through the SHA-pinned `compare/<base>...<head>` endpoint; the recorded evidence carries that
+  verified head. Deterministic moved-head and A→B→A mutants prove that mismatched or substituted diff
+  bytes never become recordable evidence. The fallback path already had this property.
 
 - [x] **Refuse to reseal a mismatched anchor as crash recovery.**
   Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17); the gate judge blocked
