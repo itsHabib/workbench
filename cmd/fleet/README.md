@@ -42,6 +42,9 @@ of leads, cost nothing new.
   A dead holder's branch is taken over; a dead holder's resource is orphaned
   and needs `--takeover`, because the machine it drives may still be running.
   Unreadable evidence is never death.
+  These leases gate future tool admissions; they do not terminate an already
+  running child when its harness dies. The [crash/replacement experiment](model/CRASH-REPLACEMENT.md)
+  reproduces an old child's write after a new branch holder's write.
 - **The substrate learns no domain word.** Roles are data: a lane is a
   `manifest.json` (what it requires, produces, denies; its cadence; whether it
   watches the board) plus a prose `card.md` the agent reads. `fr1_test.go`

@@ -1,7 +1,20 @@
 # Source map
 
-The Go is an anchor for the abstraction, not an executable conformance oracle.
+The original model uses Go as an abstraction anchor. The crash extension adds
+a scoped executable replay; neither establishes general implementation refinement.
 Paths are relative to `cmd/fleet/internal/fleet/`.
+
+## Crash/replacement extension
+
+| Anchor | Model/test mapping |
+|---|---|
+| `policy.go` `CheckLease` | `claim` and `replace` call the real decision and persistence path in the process replay. Dead branches transfer; dead resources refuse. |
+| `lease.go` `SessionAlive`, `policy.go` `Liveness` | `parentAlive` is observed from a synthetic harness record naming a real helper PID, which is killed and reaped by `crashParent`. The session record is retained. |
+| `policy.go` `CheckLease` lock lifetime | The key lock ends when admission returns. It is not held over `spawnChild`, `childWrite`, or `replacementWrite`. |
+| `crash_replacement_unix_test.go` | Replays the exported branch actions with the real lease store and process tree. `childAlive` is observed by PID; file bytes confirm both effects. Resource refusal is a control using the same attempted schedule. |
+| `../../model/model/crash_replacement.qnt` `QuiescentBranch` | No production counterpart. Assumes a quiescence oracle before handing ownership to B. |
+
+## Original lease model
 
 | Anchor | Observed behavior | Model abstraction |
 |---|---|---|

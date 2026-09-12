@@ -1,5 +1,24 @@
 # Claims ledger
 
+## Crash/replacement extension
+
+`model/crash_replacement.qnt` separates parent death from child termination.
+The branch variant admits a six-step counterexample with effects from both the
+replacement and the surviving old child. The resource and hypothetical
+quiescence-guarded branch variants satisfy the checked safety properties under
+the stated finite model and 12-step configuration. The quiescence guard is an
+assumption, not a Fleet implementation or progress guarantee.
+
+`TestCrashReplacementModelTrace` consumes the frozen branch trace and compares
+state after each step with real Go policy/store observations and a real Unix
+process tree. It also tests the same attempted schedule with a resource key:
+replacement refuses and only the original child writes. This is executable
+evidence of a branch guarantee limitation, not implementation refinement or
+proof of safety. See [the result and scope](CRASH-REPLACEMENT.md).
+
+The sections below describe the original lease model, which assumes crash
+clears in-flight work.
+
 ## Proved about the bounded models
 
 - TLC exhausts the reference graph to twelve steps for a `Branch` key and for
@@ -17,7 +36,8 @@
 
 ## Replayed executable fixtures
 
-`./judge.sh` regenerates the three traces and compares each with the
+`./judge.sh` regenerates all four traces (these three lease mutants plus the
+crash/replacement extension) and compares each with the
 checked-in JSON under `artifacts/` byte-for-byte, then asserts the salient
 failure is still in the last state of each.
 
