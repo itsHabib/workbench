@@ -239,7 +239,7 @@ async function codex() {
     if (terminal.id !== state.provider_turn) throw new Error('terminal result belongs to another turn');
     const status = terminal.status;
     if (!['completed', 'interrupted', 'failed'].includes(status)) throw new Error(`unknown terminal state: ${status}`);
-    publish({ provider_terminal: true, provider_state: status, reason: status, ...(terminal.error ? { error: terminal.error.message } : status === 'completed' ? settledError() : {}) });
+    publish({ provider_terminal: true, provider_state: status, reason: status, ...(terminal.error ? { error: terminal.error.message } : status === 'failed' ? {} : settledError()) });
     output({ type: 'result', session_id: state.provider_session, subtype: status,
       is_error: status !== 'completed' });
     process.exitCode = status === 'completed' ? 0 : status === 'interrupted' ? 130 : 1;
