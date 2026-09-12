@@ -93,6 +93,65 @@ Handler outline (one Slack interactive-action POST):
 > work. The serve unit tests cover the ack-before-resolve + card vocabulary; the
 > e2e drives the async ack→background-resolve→journal path through the real binary.
 
+### Burst behaviour — one queue, and a retry for the one unspent failure
+
+**Measured (2026-09-05).** Six taps landed inside ~10s. serve ran every resolve in
+its own goroutine, so they all shelled `gate` at once and contended for gate's
+single state lock: one resolved, four died on `state_lock_timeout after 10s`, one
+was killed by the 25s attempt timeout (exit -1) after waiting on the lock twice —
+once for the `gate next` lookup, once for the resolve. Each failure line even said
+"no judgment is recorded … the one judgment is unspent and a retry is legal", and
+nothing retried; the cards said the decisions had failed. The same thing happens
+with a single tap when a long `gate gate` run holds the lock.
+
+Two mechanisms close it, both inside serve, neither touching gate's lock
+semantics or its 10s timeout:
+
+1. **One queue, for park resolutions.** Every background park resolution passes
+   through a single slot, so a burst never runs two of them against one state dir
+   at once. Taps stop contending with each other; they wait their turn. This
+   subsumes the per-escalation lock it replaces — a double-tap is still
+   serialized, and now so are different escalations. A T0 grant callback is
+   deliberately NOT queued: it carries a signature gate re-verifies on arrival, so
+   a queue deep enough to outlast the signature would consume the operator's tap
+   and apply nothing, and its own effect is one single-use append gate excludes
+   atomically. It keeps the immediate forward it had before the queue existed.
+2. **Retry the lock, and only when gate says nothing was recorded.** A resolve is
+   several appends — judgment, verdict, action, then the resolution stamp — each
+   taking the lock separately, so "lost the lock" does not by itself mean "wrote
+   nothing": lose it between appends and the decision is already in the log with
+   only its stamp missing, and a retry would find the park closed and read as a
+   benign "already resolved". gate answers that question itself and says *"a retry
+   is legal"* in exactly two places, both meaning nothing was recorded: the reads
+   that precede any append (`preAppendFailure` — where the answer is structural,
+   which matters because the usual cause is a lock this process could not take)
+   and an unspent judgment slot it re-read (`judgeSlotState`). serve requires BOTH
+   that phrase and the lock timeout — read off gate's own output, never imported —
+   before naming the failure `ErrStateBusy` and retrying it four times over ~90s. Everything
+   else, including every landed decision (0..3), is reported on the first try. A
+   grant callback needs no such annotation: its whole effect is one single-use
+   append gate excludes atomically, so a lost lock wrote nothing and a retry that
+   raced a winner is answered "already resolved", never applied twice.
+
+The card stays honest throughout: a queued tap says queued, a retrying tap says
+gate is busy, and only a tap that spends all four attempts says the decision was
+NOT recorded (naming that nothing was spent, so it can be decided again). The
+attempt timeout is now 45s so a contended attempt fails *cleanly* as a retryable
+lock timeout instead of being killed mid-run, and a tap's whole background life is
+bounded at 3 minutes from its ack — a budget that stops the next attempt but never
+interrupts one in flight, so a graceful drain stays bounded.
+
+A grant callback gets a smaller budget still, and it bounds retries rather than a
+queue wait: the life left on the Slack signature, less one attempt. gate
+re-verifies that same signature independently, so a retry that arrives outside
+Slack's ±5-min window is refused however long serve waited. A budget of zero
+still buys the first attempt; gate, not serve, is the authority on whether a
+signature is still good.
+
+Residual, in `FOLLOWUPS.md`: a lock held longer than the budget still ends with a
+failed card and a CLI resolve. The durable answer is the same accept-before-ack
+log the hard-crash entry needs.
+
 Where does the **grant** come from? The escalation body carries its `grant` id
 (`escalation.V1.Grant`), so `serve` can read it from the parked escalation rather
 than requiring the operator to paste it. (Resolve still re-checks the grant is
