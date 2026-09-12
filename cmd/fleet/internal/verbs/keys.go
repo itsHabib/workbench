@@ -386,18 +386,40 @@ func cmdDecisions(asJSON bool) error {
 }
 
 func dispatchHandoff(args []string) error {
-	if !contains(args, "--role") {
-		return cmdHandoff(at(args, 0), at(args, 1), at(args, 2))
+	var literal []string
+	if i := index(args, "--"); i >= 0 {
+		literal, args = args[i+1:], args[:i]
 	}
-	session, err := optValue(args, "--session", "handoff")
+	a, opts, err := parseMailArgs(args, []string{"--session"}, []string{"--role"})
 	if err != nil {
-		return err
+		return handoffUsage()
 	}
-	a := positional(without(args, "--role"), "--session")
+	for _, arg := range a {
+		if strings.HasPrefix(arg, "-") {
+			return handoffUsage()
+		}
+	}
+	a = append(a, literal...)
+	if opts["--role"] == "" {
+		_, sessionSupplied := opts["--session"]
+		if len(a) < 2 || len(a) > 3 || sessionSupplied {
+			return handoffUsage()
+		}
+		fleet.MigrateLegacyKeys()
+		return cmdHandoff(a[0], a[1], at(a, 2))
+	}
 	if len(a) < 1 || len(a) > 2 {
-		return exitCode(2, `usage: fleet handoff --role "<conclusion>" ["<next>"] [--session <id8>]`)
+		return handoffUsage()
 	}
-	return CmdRoleHandoff(at(a, 0), at(a, 1), session)
+	if session, supplied := opts["--session"]; supplied && (session == "" || strings.HasPrefix(session, "-")) {
+		return handoffUsage()
+	}
+	fleet.MigrateLegacyKeys()
+	return CmdRoleHandoff(a[0], at(a, 1), opts["--session"])
+}
+
+func handoffUsage() error {
+	return exitCode(2, "usage: fleet handoff <branch> \"<conclusion>\" [\"<next>\"] or fleet handoff --role \"<conclusion>\" [\"<next>\"] [--session <id8>]; use -- before literal text beginning with -; handoff writes a checkpoint; read with fleet inspect <address>")
 }
 
 func cmdHandoff(branch, conclusion, nxt string) error {
