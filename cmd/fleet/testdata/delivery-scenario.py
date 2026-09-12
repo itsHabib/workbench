@@ -70,6 +70,28 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
             time.sleep(0.05)
         raise AssertionError(f"expected {n} launch(es), saw {recorded()}")
 
+    def settled():
+        """Wait until every started bridge has published a terminal state.
+
+        Once the folds that launched them have exited, no further launch can start,
+        so every launch the stub will ever record is recorded.
+        """
+        pending = []
+        for _ in range(200):
+            metas = [json.loads(p.read_text()) for p in (state / "watch/delivery").glob("*.meta.json")]
+            pending = [m for m in metas if not terminal(Path(m["state_file"]))]
+            if not pending:
+                return
+            time.sleep(0.05)
+        logs = {m["attempt"]: Path(m["output"]).read_text()[-1000:] for m in pending if Path(m["output"]).exists()}
+        raise AssertionError(f"bridge never reached a terminal state: {logs}")
+
+    def terminal(state_file):
+        try:
+            return json.loads(state_file.read_text()).get("provider_terminal") is True
+        except FileNotFoundError:
+            return False
+
     def mailbox(address):
         return json.loads(run(seat, "mail", "--for", address, "--json", "--session", "seat-v1"))
 
@@ -99,7 +121,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
 
     # A second fold hands the same message to nobody.
     run(seat, "watch", "--once")
-    time.sleep(0.5)
+    settled()
     assert len(recorded()) == 1, recorded()
 
     # Overlapping one-shot folds share board ownership. A contender either gets
@@ -116,7 +138,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-delivery-") as tmp:
         assert rc == 0 or (rc == 4 and "watcher lock unavailable" in error), error
         completed += rc == 0
     assert completed >= 1
-    time.sleep(0.5)
+    settled()
     carried = [l for l in recorded() if "q-2" in l["prompt"]]
     assert len(carried) == 1, carried
 

@@ -6,7 +6,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const bridge = fileURLToPath(new URL('./runtime.mjs', import.meta.url));
+// Run the bridge the way provider.Command does: its source via -e, the request file in argv.
+const bridge = fs.readFileSync(fileURLToPath(new URL('./runtime.mjs', import.meta.url)), 'utf8');
 const fakeCodex = `#!/usr/bin/env node
 const readline = require('node:readline');
 const send = x => process.stdout.write(JSON.stringify(x)+'\\n');
@@ -64,9 +65,9 @@ async function run(provider, scenario, resume) {
  const mod=path.join(home,'node_modules/@anthropic-ai/claude-agent-sdk');fs.mkdirSync(mod,{recursive:true});
  fs.writeFileSync(path.join(mod,'package.json'),JSON.stringify({type:'module',exports:'./index.mjs'}));
  fs.writeFileSync(path.join(mod,'index.mjs'),fakeClaude);
- const proc=spawn(process.execPath,[bridge],{env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,FLEET_TEST_CODEX_SCRIPT:script,FLEET_TEST_NODE:process.execPath,CASE:scenario==='wrapped-init-fail'?'init-fail':scenario}});
+ const requestFile=path.join(home,'request.json');fs.writeFileSync(requestFile,JSON.stringify(req),{mode:0o600});
+ const proc=spawn(process.execPath,['--input-type=module','-e',bridge,requestFile],{stdio:['ignore','pipe','pipe'],env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,FLEET_TEST_CODEX_SCRIPT:script,FLEET_TEST_NODE:process.execPath,CASE:scenario==='wrapped-init-fail'?'init-fail':scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
- proc.stdin.end(JSON.stringify(req));
  const deadline=setTimeout(()=>proc.kill('SIGKILL'),scenario==='timeout'?19000:5000);
  let control;
  if(['cancel','timeout'].includes(scenario))control=setInterval(()=>{if(fs.existsSync(req.state_file)&&JSON.parse(fs.readFileSync(req.state_file)).provider_state==='running')fs.writeFileSync(req.cancel_file,'{}')},10);

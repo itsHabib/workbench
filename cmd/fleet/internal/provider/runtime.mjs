@@ -7,7 +7,8 @@ import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-const request = JSON.parse(fs.readFileSync(0, 'utf8'));
+// The request file is complete before this process exists; argv holds only its path.
+const request = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
 const state = { attempt: request.attempt, provider: request.provider,
   provider_state: 'starting', provider_started: false, provider_terminal: false,
   trace: request.trace || request.output + ".trace.jsonl" };
