@@ -378,8 +378,11 @@ func ReadWorld(e Env, cfg Config) (*World, error) {
 // skip could not fire, and a carried-over decision was appended a second time.
 func (e Env) decisions() (map[string]bool, error) {
 	res := e.Run.Run(e.LeadDir, e.Fleet, "decisions", "--json")
-	if res.Err != nil || res.Code != 0 {
-		return nil, fmt.Errorf("fleet decisions --json: exit %d %s: %v", res.Code, strings.TrimSpace(res.Stderr), res.Err)
+	if res.Err != nil {
+		return nil, fmt.Errorf("fleet decisions --json: %w", res.Err)
+	}
+	if res.Code != 0 {
+		return nil, fmt.Errorf("fleet decisions --json: exit %d: %s", res.Code, strings.TrimSpace(res.Stderr))
 	}
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(res.Stdout), &rows); err != nil {

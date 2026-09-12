@@ -30,10 +30,10 @@ const (
 	// resolveBudget bounds a tap's whole background life, measured from the ack:
 	// queue wait plus backoff. It never cuts an attempt short — an attempt runs
 	// under its own per-phase limits (grantTimeout, decideTimeout) — it only stops
-	// new ones from starting, so a
-	// budget expiry can never kill `gate resolve` mid-append. Because every
-	// budget starts at its own ack, a graceful drain is bounded by roughly one
-	// window plus a final attempt rather than by the number of queued taps.
+	// new ones from starting, so a budget expiry can never kill `gate resolve`
+	// mid-append. Because every budget starts at its own ack, a graceful drain is
+	// bounded by roughly one window plus a final attempt rather than by the number
+	// of queued taps.
 	resolveBudget = 3 * time.Minute
 
 	// queueNotice is how long a tap may wait for its turn before the operator is
