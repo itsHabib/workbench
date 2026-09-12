@@ -156,6 +156,14 @@ func Dispatch(args []string) error {
 	if args[0] == "inspect-hooks" {
 		return cmdInspectHooks(args[1:])
 	}
+	if observational(args[0]) {
+		before := fleet.ReadOnly
+		fleet.ReadOnly = true
+		defer func() { fleet.ReadOnly = before }()
+		if fleet.LegacyKeysPresent() {
+			return refuse("legacy ownership needs reconciliation before reading this view")
+		}
+	}
 	fleet.MigrateLegacyKeys() // every entry into the substrate re-keys legacy state first
 	verb, rest := args[0], args[1:]
 	if strings.HasPrefix(verb, "x-") {
@@ -699,4 +707,12 @@ func leaseRows() []fleet.Rec {
 		}
 	}
 	return out
+}
+
+func observational(verb string) bool {
+	switch verb {
+	case "work", "receipts", "decisions", "done":
+		return true
+	}
+	return false
 }

@@ -27,6 +27,9 @@ func IsRefusal(err error) bool {
 // is code: trimmed, case-folded, exact. Anything else leaves confirm nil and is a
 // refusal, so a model relaying "sounds good" cannot commit the operator.
 func ConfirmRecord(e Env, cfg Config, r *Record, phrase, by, surface string) error {
+	if err := CheckIdentity(cfg, r); err != nil {
+		return err
+	}
 	if r.Confirm != nil {
 		return refuse("record %s is already confirmed by %s at %s", r.ID, r.Confirm.By, r.Confirm.At)
 	}
@@ -547,8 +550,8 @@ func prepareSteps(e Env, cfg Config, r *Record, forceStale bool) ([]Step, map[st
 	if err := r.Validate(); err != nil {
 		return nil, nil, "", err
 	}
-	if r.Tenant != cfg.Tenant || r.Lead != cfg.Lead {
-		return nil, nil, "", refuse("record identity differs from configured tenant/lead")
+	if err := CheckIdentity(cfg, r); err != nil {
+		return nil, nil, "", err
 	}
 	agenda, err := LoadAgenda(e.AgendaPath(r.Agenda))
 	if err != nil {
@@ -581,4 +584,12 @@ func prepareSteps(e Env, cfg Config, r *Record, forceStale bool) ([]Step, map[st
 		return nil, nil, "", err
 	}
 	return steps, done, moved, nil
+}
+
+// CheckIdentity confines record mutations to the configured tenant and lead.
+func CheckIdentity(cfg Config, r *Record) error {
+	if r.Tenant != cfg.Tenant || r.Lead != cfg.Lead {
+		return refuse("record identity differs from configured tenant/lead")
+	}
+	return nil
 }

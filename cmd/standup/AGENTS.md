@@ -74,6 +74,7 @@ transport here. See README.md for the manual voice trial and installation.
 
 - Prepare shares apply's planning checks without manufacturing confirmation or
   writing Fleet effects. Compiler validity and launch availability are separate.
+- Draft and confirmation refuse records for a different configured tenant or lead.
 - Draft accepts only editable fields, requires the previous plan digest, clears
   confirmation after changes, and refuses records with execution history.
 - MCP confirmation/apply require the digest of the displayed plan. The desktop

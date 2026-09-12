@@ -18,17 +18,20 @@ type Draft struct {
 
 // DecodeDraft rejects misspellings and protected fields, including nested ones.
 func DecodeDraft(in io.Reader) (Draft, error) {
-	var d Draft
+	var d *Draft
 	dec := json.NewDecoder(io.LimitReader(in, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&d); err != nil {
-		return d, err
+		return Draft{}, err
+	}
+	if d == nil {
+		return Draft{}, fmt.Errorf("draft must be a JSON object")
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
-		return d, fmt.Errorf("draft must contain exactly one JSON object")
+		return Draft{}, fmt.Errorf("draft must contain exactly one JSON object")
 	}
-	return d, nil
+	return *d, nil
 }
 
 // UpdateDraft replaces the editable fields against the version last shown. The

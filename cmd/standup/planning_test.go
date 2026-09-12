@@ -290,3 +290,76 @@ func TestPrepareRepeatsUnavailableAgendaSources(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestForeignRecordMutationRefused(t *testing.T) {
+	for _, field := range []string{"tenant", "lead"} {
+		t.Run(field, func(t *testing.T) {
+			r := newRig(t)
+			id := agendaID(t, r.must(0, "agenda"))
+			path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+			r.edit(path, func(rec *standup.Record) {
+				rec.Cards = []standup.Card{card}
+				if field == "tenant" {
+					rec.Tenant = "foreign"
+					return
+				}
+				rec.Lead = "lead:foreign"
+			})
+			before, _ := os.ReadFile(path)
+			digest := r.load(path).PlanDigest()
+			if draftCall(t, id, digest, draftPlan(card)) != 1 {
+				t.Fatal("foreign draft accepted")
+			}
+			r.must(1, "confirm", id, "--expect", digest, "--phrase", "ship it")
+			assertForeignMCPRefused(t, id, digest)
+			after, _ := os.ReadFile(path)
+			if !bytes.Equal(before, after) {
+				t.Fatal("foreign record changed")
+			}
+		})
+	}
+}
+
+func TestNullDraftPreservesRecord(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	before, _ := os.ReadFile(path)
+	var out bytes.Buffer
+	code := runInput([]string{"draft", id, "--expect", r.load(path).PlanDigest(), "--file", "-"}, strings.NewReader("null"), &out, &out)
+	if code == 0 {
+		t.Fatal("null accepted")
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("null cleared record")
+	}
+}
+
+func assertForeignMCPRefused(t *testing.T, id, digest string) {
+	t.Helper()
+	for _, name := range []string{"standup_draft", "standup_confirm"} {
+		args := map[string]any{"record": id, "expect": digest}
+		if name == "standup_draft" {
+			args["plan"] = draftPlan(card)
+		}
+		if name == "standup_confirm" {
+			args["phrase"] = "ship it"
+			args["surface"] = "text"
+		}
+		raw, _ := json.Marshal(args)
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		result, err := callTool(toolCall{Name: name, Arguments: fields})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.(map[string]any)["isError"] != true {
+			t.Fatalf("%s accepted foreign record", name)
+		}
+	}
+
+}

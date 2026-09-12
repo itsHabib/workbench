@@ -78,6 +78,13 @@ func cmdDraft(env standup.Env, args []string, in io.Reader, out, errOut io.Write
 	if err != nil {
 		return fail(errOut, err)
 	}
+	cfg, err := env.LoadConfig()
+	if err != nil {
+		return fail(errOut, err)
+	}
+	if err := standup.CheckIdentity(cfg, r); err != nil {
+		return fail(errOut, err)
+	}
 	if err := standup.UpdateDraft(r, d, *expected); err != nil {
 		return fail(errOut, err)
 	}
@@ -99,8 +106,8 @@ func cmdInspect(env standup.Env, verb string, args []string, out, errOut io.Writ
 	if err != nil {
 		return fail(errOut, err)
 	}
-	if r.Tenant != cfg.Tenant || r.Lead != cfg.Lead {
-		return fail(errOut, &standup.Refusal{Reason: "record identity differs from configured tenant/lead"})
+	if err := standup.CheckIdentity(cfg, r); err != nil {
+		return fail(errOut, err)
 	}
 	if verb == "prepare" {
 		result, err := standup.Prepare(env, cfg, r)
