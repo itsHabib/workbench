@@ -26,13 +26,18 @@ func Prepare(e Env, cfg Config, r *Record) (Preparation, error) {
 		p.Problem = err.Error()
 	}
 	if err == nil {
-		markStatus(steps, done, true)
+		markStatus(steps, done, false)
+		for i := range steps {
+			if steps[i].Status == "not reached" {
+				steps[i].Status = "plan"
+			}
+		}
 		p.Steps, p.PlanValid = steps, true
 	}
 	p.Runtime = Runtime(e, r)
 	p.Delivery = observe(e, e.LeadDir, "watch", "status", "--json")
 	scopeWorkers(e, r, &p.Delivery, false)
-	p.Warnings = runtimeWarnings(p.Delivery, r)
+	p.Warnings = append(runtimeWarnings(p.Delivery, r), agendaWarnings(e, r)...)
 	if r.Next != "" {
 		p.Warnings = append(p.Warnings, "next is recorded only; scheduling the next standup is not implemented")
 	}
@@ -59,7 +64,7 @@ func observe(e Env, dir string, args ...string) Observation {
 		return o
 	}
 	if err := json.Unmarshal([]byte(res.Stdout), &o.Data); err != nil || o.Data == nil {
-		o.Error = fmt.Sprintf("unreadable Fleet output (exit %d): %s", res.Code, strings.TrimSpace(res.Stderr+res.Stdout))
+		o.Error = fmt.Sprintf("expected a Fleet JSON object (exit %d): %s", res.Code, strings.TrimSpace(res.Stderr+res.Stdout))
 		return o
 	}
 	if res.Code != 0 {
@@ -81,7 +86,7 @@ func scopeWorkers(e Env, r *Record, o *Observation, tenantRequired bool) {
 	if !ok && o.Error == "" {
 		o.Error = "Fleet status has no workers array"
 	}
-	seats, err := e.Seats(r.Tenant)
+	seats, err := planSeats(e, r)
 	if err != nil {
 		o.Error = err.Error()
 	}
@@ -97,7 +102,10 @@ func scopeWorkers(e Env, r *Record, o *Observation, tenantRequired bool) {
 		if !ok || wanted[str(row, "address")] == "" || wanted[str(row, "address")] != str(row, "cwd") {
 			continue
 		}
-		if tenantRequired && str(row, "tenant") != r.Tenant {
+		// watch status omits tenant; its address+cwd is checked against this
+		// tenant's roles.map. Reject an explicit mismatch on either surface.
+		tenant := str(row, "tenant")
+		if (tenantRequired || tenant != "") && tenant != r.Tenant {
 			continue
 		}
 		keep = append(keep, row)
@@ -167,12 +175,13 @@ type Status struct {
 // ReadStatus asks Fleet for each card's required receipt at its resolved revision.
 func ReadStatus(e Env, cfg Config, r *Record) (Status, error) {
 	s := Status{PlanDigest: r.PlanDigest(), Confirmed: checkConfirm(cfg, r) == nil, Applied: r.Applied, Cards: []CardStatus{}, Runtime: Runtime(e, r)}
-	seats, err := e.Seats(cfg.Tenant)
-	if err != nil {
-		return s, err
-	}
+	seats, err := planSeats(e, r)
 	world := &World{Seats: seats}
 	for _, c := range r.Cards {
+		if err != nil && c.Seat != "" {
+			s.Cards = append(s.Cards, CardStatus{ID: c.ID, State: "unknown", Receipt: Observation{Error: "seat lookup unavailable: " + err.Error()}})
+			continue
+		}
 		s.Cards = append(s.Cards, cardStatus(e, c, world))
 	}
 	return s, nil
@@ -202,4 +211,27 @@ func cardStatus(e Env, c Card, w *World) CardStatus {
 		s.State = "failed"
 	}
 	return s
+}
+
+func planSeats(e Env, r *Record) (map[string]string, error) {
+	for _, c := range r.Cards {
+		if c.Seat != "" {
+			return e.Seats(r.Tenant)
+		}
+	}
+	return map[string]string{}, nil
+}
+
+func agendaWarnings(e Env, r *Record) []string {
+	a, err := LoadAgenda(e.AgendaPath(r.Agenda))
+	if err != nil {
+		return []string{"agenda unavailable: " + err.Error()}
+	}
+	warnings := []string{}
+	for _, source := range a.Sources {
+		if !source.OK {
+			warnings = append(warnings, source.Name+" unavailable in pinned agenda: "+source.Error)
+		}
+	}
+	return warnings
 }

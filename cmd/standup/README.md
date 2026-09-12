@@ -154,3 +154,12 @@ inspect apply's results and `standup_status`. If delivery is absent, expect
 waiting mail and a warning, not a launch claim. Capture the record id and the
 receipt SHA if work completes. No live voice or production dispatch is covered
 by the automated fixture tests.
+
+Preparation repeats unavailable sources from the pinned agenda and distinguishes
+steps already recorded (`done`), effects already present (`skip`), and remaining
+steps (`plan`). A refused prepare still returns useful JSON alongside its nonzero
+exit. Missing role maps preserve structured status: seat-backed cards become
+unknown while checkout-only cards and collected runtime evidence remain visible.
+Delivery status currently has no tenant field in Fleet; the adapter scopes it by
+address and directory from the plan tenant's role map and rejects any explicit
+mismatched tenant. Runtime status requires an explicit matching tenant.

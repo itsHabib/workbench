@@ -173,8 +173,9 @@ func TestMCPConversation(t *testing.T) {
 	if !strings.Contains(r.callLog(), "send ivy-author-1") {
 		t.Fatal(r.callLog())
 	}
-	if r.load(filepath.Join(r.standup, "records", id+".json")).Confirm.Surface != "voice" {
-		t.Fatal("lost surface")
+	confirmation := r.load(filepath.Join(r.standup, "records", id+".json")).Confirm
+	if confirmation.Surface != "voice" || confirmation.By != "human:acme" {
+		t.Fatal("lost surface or incorrect attribution")
 	}
 }
 
@@ -237,5 +238,55 @@ func TestMCPRejectsFileReferences(t *testing.T) {
 		if err == nil {
 			t.Fatal("accepted path-like record", id)
 		}
+	}
+}
+
+func TestStatusSurvivesMissingRoleMap(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	checkout := card
+	checkout.ID = "checkout"
+	checkout.Seat = ""
+	checkout.Checkout = r.seatDir
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card, checkout} })
+	if err := os.Remove(filepath.Join(os.Getenv("ORG_STATE"), "roles.map")); err != nil {
+		t.Fatal(err)
+	}
+	out := r.must(0, "status", id)
+	if !strings.Contains(out, "seat lookup unavailable") || !strings.Contains(out, `"receipt_state": "pending"`) || !strings.Contains(out, `"runtime"`) {
+		t.Fatal(out)
+	}
+	r.edit(path, func(rec *standup.Record) { rec.Cards = nil })
+	r.must(0, "status", id)
+}
+
+func TestPreparePreservesLedgerAndScopesDelivery(t *testing.T) {
+	r := newRig(t)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) { rec.Cards = []standup.Card{card} })
+	r.must(0, "confirm", id, "--phrase", "ship it")
+	r.must(0, "apply", id)
+	r.setFile("runtime.json", fmt.Sprintf(`{"watcher":"running","workers":[{"address":"ivy-author-1","tenant":"other","cwd":%q,"configuration_error":"private-other-tenant"},{"address":"ivy-author-1","cwd":%q,"starts_paused":true}]}`, r.seatDir, r.seatDir))
+	out := r.must(0, "prepare", id)
+	if !strings.Contains(out, `"status": "done"`) || !strings.Contains(out, "starts are paused") || strings.Contains(out, "private-other-tenant") {
+		t.Fatal(out)
+	}
+	if by := r.load(path).Confirm.By; by != "human:acme" {
+		t.Fatal(by)
+	}
+}
+
+func TestPrepareRepeatsUnavailableAgendaSources(t *testing.T) {
+	r := newRig(t)
+	script := filepath.Join(r.fake, "org")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho source-offline >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := agendaID(t, r.must(0, "agenda"))
+	r.must(0, "new", "--agenda", id)
+	if out := r.must(0, "prepare", id); !strings.Contains(out, "org status unavailable in pinned agenda: source-offline") {
+		t.Fatal(out)
 	}
 }
