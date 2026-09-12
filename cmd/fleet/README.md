@@ -373,6 +373,9 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
 ## Guides
 
+- [docs/fleet-101.md](docs/fleet-101.md): Fleet and its formal models top to bottom, with a file:line
+  citation for every claim: the five rules, who writes each store file, leases, mail, one delivery
+  end to end, what the Quint models prove, open gaps, and a drift log.
 - [docs/OVERVIEW.md](docs/OVERVIEW.md): the problem, the four rules, the shape, what it has proved.
 - [docs/ONBOARDING.md](docs/ONBOARDING.md): a working fleet over one repository in thirty minutes.
 - [docs/MINIMUM.md](docs/MINIMUM.md): the five habits and two files that carry most of the value with none of the machinery.
