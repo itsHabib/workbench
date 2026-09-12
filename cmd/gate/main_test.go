@@ -1772,6 +1772,34 @@ func TestDuplicateJudgmentRefusesWithoutStateMutation(t *testing.T) {
 	}
 }
 
+// The reads BEFORE any append can fail on the same store lock, and a caller
+// driving `resolve` needs those told apart from a lock lost while stamping the
+// resolution — where the decision is already recorded and a retry would report a
+// benign "already resolved" over a missing stamp. Both directions are pinned: a
+// lock failure from the pre-append reads says a retry is legal, and any other
+// failure is passed through untouched, so a mistyped id is not made retryable by
+// annotation.
+func TestPreAppendFailureNamesWhatWasNotRecorded(t *testing.T) {
+	locked := preAppendFailure(fmt.Errorf("state: read log: %w", state.ErrLockTimeout))
+	if !errors.Is(locked, state.ErrLockTimeout) {
+		t.Fatalf("annotation dropped the cause it wraps: %v", locked)
+	}
+	for _, want := range []string{"before any append", "nothing was recorded", "a retry is legal"} {
+		if !strings.Contains(locked.Error(), want) {
+			t.Fatalf("pre-append lock failure = %v\nwant it to name %q", locked, want)
+		}
+	}
+	// It must not claim the one judgment is unspent: an earlier invocation may
+	// have spent it, and the replay guard — not this sentence — settles that.
+	if strings.Contains(locked.Error(), "unspent") {
+		t.Fatalf("pre-append annotation claims more than it knows: %v", locked)
+	}
+	other := errors.New("resolve: artifact art_x is a verdict, not an escalation")
+	if got := preAppendFailure(other); got != other {
+		t.Fatalf("a non-lock failure must pass through untouched, got %v", got)
+	}
+}
+
 // `judge` is one-shot and irreversible, so the operator's first question on any
 // failure is whether the shot was spent — and answering it used to mean
 // grepping log.jsonl for a judgment artifact on the run. Both sides of the

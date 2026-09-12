@@ -192,7 +192,7 @@ option; `judge` does not — a probability trade-off, not immunity, recorded as
 The unlocked `escalationIsOpen` pre-check in `cmdResolve` stays, now explicitly
 advisory — it gives a replayed tap a friendly message without a store round-trip,
 and the authoritative test is the one under the lock. This covers what the
-process-local `escLocks` in `cmd/escalate/internal/serve` could not: a second
+process-local resolve queue in `cmd/escalate/internal/serve` could not: a second
 serve process on the same `-state`, and a CLI resolve racing an HTTP callback.
 
 Note the uniqueness guard was never sufficient here on its own: it is keyed on
@@ -300,6 +300,22 @@ replay any unfinished entries on startup — an at-least-once accept log in fron
 `gate resolve` (whose `escalationIsOpen` guard already makes replay idempotent).
 Owner: `escalate serve`. Warranted once the ingress is always-on / multi-operator
 rather than a phone-tap POC behind an off-by-default toggle.
+
+## `escalate serve`: a state lock held longer than the retry budget still lands on the operator
+
+A tap now queues behind this process's other resolves and retries gate's
+`state_lock_timeout` four times over ~90s, which covers a burst of taps and a
+short-lived writer. A `gate gate` consolidation run holding the log lock for ten
+minutes still outlasts the budget: the card then says the decision was NOT
+recorded and nothing was spent, and the operator has to decide it again — from a
+terminal (`escalate resolve`) since the buttons went with the ack.
+
+Two things would close it, neither proportionate yet. Wait longer, which trades
+the operator's certainty for a card that sits "queued" past Slack's
+`response_url` window. Or accept the decision durably before acking and replay it
+when the lock frees — the same at-least-once accept log the hard-crash entry
+above already needs, which is the one worth building if either becomes real.
+Owner: `escalate serve`.
 
 ## gate: the inbox's moot class depends on producers that are not all landed
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -39,15 +40,29 @@ func GateGrantFinder(gateBin, state string) GrantFinder {
 		if state != "" {
 			args = append(args, "-state", state)
 		}
-		var out bytes.Buffer
+		var out, errOut bytes.Buffer
 		cmd := exec.CommandContext(ctx, gateBin, args...)
 		cmd.Stdout = &out
-		cmd.Stderr = os.Stderr
+		// gate's stderr still streams to the operator's log; the copy is only so a
+		// failed read can be CLASSIFIED — gate names its lock timeout there as well
+		// as in the JSON on stdout, and one of the two is enough.
+		cmd.Stderr = io.MultiWriter(os.Stderr, &errOut)
 		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("serve: run gate next: %w", err)
+			return "", nextError(err, out.Bytes(), errOut.Bytes())
 		}
 		return grantForEscalation(out.Bytes(), escID)
 	}
+}
+
+// nextError classifies a failed `gate next`. A read that lost gate's state lock
+// is named ErrStateBusy so the caller retries it: the lookup wrote nothing, and
+// a park whose grant could not be READ is not a park that resolved. Anything else
+// is the failure it was.
+func nextError(err error, stdout, stderr []byte) error {
+	if stateBusy(stdout) || stateBusy(stderr) {
+		return fmt.Errorf("%w: gate next could not read the log: %v", ErrStateBusy, err)
+	}
+	return fmt.Errorf("serve: run gate next: %w", err)
 }
 
 // inboxFeed is the slice of `gate next -json` serve reads: the parked runs, each
