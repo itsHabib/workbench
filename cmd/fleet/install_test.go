@@ -34,7 +34,7 @@ func TestPublicInstall(t *testing.T) {
 		// Go, git and the harness resolve the home and temp dirs from these on Windows.
 		exe = ".exe"
 		env = append(env, "USERPROFILE="+home)
-		for _, key := range []string{"SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LOCALAPPDATA"} {
+		for _, key := range []string{"SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA"} {
 			if v := os.Getenv(key); v != "" {
 				env = append(env, key+"="+v)
 			}
@@ -148,7 +148,8 @@ func assertAllowIsList(t *testing.T, path string) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	if allow := strings.TrimSpace(string(config.Permissions.Allow)); allow != "" && !strings.HasPrefix(allow, "[") {
+	// Absent is a regression too: the role projection always writes the list.
+	if allow := strings.TrimSpace(string(config.Permissions.Allow)); !strings.HasPrefix(allow, "[") {
 		t.Fatalf("%s: permissions.allow must be a list, got %s", path, allow)
 	}
 }

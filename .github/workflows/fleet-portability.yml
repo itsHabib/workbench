@@ -40,7 +40,9 @@ jobs:
       - name: Watcher tests (Windows includes process flags, not visual proof)
         run: go test ./cmd/fleet/internal/watch -count=1
       - name: Directory guard on native paths (backslash operands, drive-relative refusal)
+        if: ${{ !cancelled() }}
         run: go test ./cmd/fleet/internal/fleet -run 'Cd|Drift|Guard|Hop|Unroled|Backslash|DriveRelative' -count=1
       - name: Public install through the real installer (Git Bash on Windows)
+        if: ${{ !cancelled() }}
         shell: bash
         run: go test ./cmd/fleet -run '^TestPublicInstall$' -count=1 -v

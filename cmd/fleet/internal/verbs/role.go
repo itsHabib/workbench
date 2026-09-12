@@ -378,9 +378,6 @@ func hookCommand() string {
 	return exe + " hook codex"
 }
 
-// cmdRole roles one checkout. `slot` is the map's optional fourth column and is
-// written only by `fleet pool`; a hand-roled checkout has none, and an existing slot
-// column survives a re-role.
 // hookBinaryUsable refuses to project a hook command the harness cannot execute. On
 // Windows an extensionless binary runs from a POSIX shell but not through exec, so a
 // `fleet role` run from one writes a hook path that every harness event then fails on,
@@ -399,6 +396,9 @@ func hookBinaryUsable() error {
 	return nil
 }
 
+// cmdRole roles one checkout. `slot` is the map's optional fourth column and is
+// written only by `fleet pool`; a hand-roled checkout has none, and an existing slot
+// column survives a re-role.
 func cmdRole(checkout, role string, force bool, tenant, slot string) error {
 	if err := hookBinaryUsable(); err != nil {
 		return err
