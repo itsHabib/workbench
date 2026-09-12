@@ -156,6 +156,9 @@ func Dispatch(args []string) error {
 	if args[0] == "inspect-hooks" {
 		return cmdInspectHooks(args[1:])
 	}
+	if args[0] == "handoff" {
+		return dispatchHandoff(args[1:])
+	}
 	if observational(args[0]) {
 		before := fleet.ReadOnly
 		fleet.ReadOnly = true
@@ -419,8 +422,6 @@ func dispatchActs(verb string, rest []string) (bool, error) {
 			reason = "revoked"
 		}
 		return true, cmdRevoke(m[1], m[2], reason)
-	case "handoff":
-		return true, dispatchHandoff(rest)
 	case "role":
 		u := "usage: fleet role <checkout> <role> [--force] [--tenant <t>]   e.g. fleet role ~/dev/mono-wt-1 <kind>:mono"
 		tenant := ""

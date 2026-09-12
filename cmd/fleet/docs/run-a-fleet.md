@@ -63,6 +63,8 @@ and at useful intervals during long work. A run brief can set the cadence in pro
 An idle tick with nothing new to record does not need another copy of the same checkpoint.
 
 `fleet handoff` writes and replaces a checkpoint; it has no `--show` or `--list` read flag.
+Unknown options and surplus arguments are refused before replacing the checkpoint. Use
+`fleet inspect <address>` to read it. Put `--` before literal text beginning with `-`.
 Read the context injected at SessionStart or inspect the JSON under `$FLEET_STATE/handoff/`
 (worker branches) and `$FLEET_STATE/role-handoff/` (leads).
 

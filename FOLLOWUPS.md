@@ -90,16 +90,6 @@ those bytes and `fleet watch status` points to it. Deferred at the two-fix-round
 fix terminal-fragment handling without displaying partial live records as complete.
 The live Claude JSON/transcript sandbox does not exercise or resolve this case.
 
-## fleet: guessed handoff read flags replace the checkpoint
-
-Live sandbox r7 on PR #310 saw both a worker try `handoff <branch> --list` and a
-lead try `handoff <branch> --show`. The positional parser accepted each as a new
-conclusion and replaced the latest checkpoint. The lead noticed and corrected
-its stray write, and saved first-session evidence survived outside the handoff.
-The guide now names the actual read paths. A focused CLI fix should reject unknown
-options before mutation and prove the old checkpoint bytes remain intact; do not
-add an Org lifecycle or checkpoint history to solve argument parsing.
-
 ## fleet: PR cache mistakes a number in create-body prose for the PR operand
 
 Live sandbox r7 on PR #310 created draft PR #15, but `CachePullRequest` recorded
