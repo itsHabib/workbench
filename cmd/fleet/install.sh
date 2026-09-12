@@ -23,7 +23,11 @@ if [ "$mode" = dry ]; then
   exit 0
 fi
 mkdir -p "$install_home/bin" "$install_home/lanes"
-(cd "$root" && go build -o "$install_home/bin/fleet" ./cmd/fleet)
+# Windows execs a binary by extension: an extensionless fleet runs from Git Bash but
+# not from Console, and every projected hook command silently fails (#322).
+exe=""
+case "$(cd "$root" && go env GOOS)" in windows) exe=".exe" ;; esac
+(cd "$root" && go build -o "$install_home/bin/fleet$exe" ./cmd/fleet)
 for source in "$here"/examples/lanes/*/*; do
   target="$install_home/lanes/${source#"$here/examples/lanes/"}"
   mkdir -p "$(dirname "$target")"

@@ -2,7 +2,9 @@ package fleet
 
 import (
 	"encoding/json"
+	"runtime"
 	"sort"
+	"strings"
 )
 
 // ReadJSONBytes decodes one JSON object from bytes, or nil.
@@ -24,16 +26,32 @@ func stableSort[T any](xs []T, less func(a, b T) bool) {
 	sort.SliceStable(xs, func(i, j int) bool { return less(xs[i], xs[j]) })
 }
 
+// backslashIsSeparator: on Windows an unquoted backslash in a cd operand is a path
+// separator the agent meant, not a shell escape. Lexing it as an escape turned
+// `C:\Users\seat` into the drive-relative `C:Usersseat`, which matched nothing bound,
+// and the directory guard failed open (#320). Only cd operands read it this way; the
+// other guards keep POSIX lexing so their deny matching does not move.
+var backslashIsSeparator = runtime.GOOS == "windows"
+
+// cdWords lexes a cd operand the way this platform's paths are written.
+func cdWords(text string) []string { return lexWords(text, backslashIsSeparator) }
+
 // shellWords is the tokens of one simple command: a small POSIX lexer handling
-// double quotes, single quotes and backslashes. If the fragment is not lexable — an
-// unbalanced quote — it falls back to whitespace splitting so a switch is still seen.
-func shellWords(text string) []string {
+// double quotes, single quotes and backslashes. Inside double quotes a backslash
+// escapes only $ ` " \ and newline, as the shell does, so a quoted Windows path keeps
+// its separators everywhere. If the fragment is not lexable — an unbalanced quote —
+// it falls back to whitespace splitting so a switch is still seen.
+func shellWords(text string) []string { return lexWords(text, false) }
+
+func lexWords(text string, backslashSeparator bool) []string {
 	var out []string
 	var cur []rune
 	inWord := false
 	quote := rune(0)
 	esc := false
-	for _, r := range text {
+	rs := []rune(text)
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
 		switch {
 		case esc:
 			cur = append(cur, r)
@@ -46,15 +64,15 @@ func shellWords(text string) []string {
 				cur = append(cur, r)
 			}
 		case quote == '"':
-			switch r {
-			case '"':
+			switch {
+			case r == '"':
 				quote = 0
-			case '\\':
+			case r == '\\' && i+1 < len(rs) && strings.ContainsRune("$`\"\\\n", rs[i+1]):
 				esc = true
 			default:
 				cur = append(cur, r)
 			}
-		case r == '\\':
+		case r == '\\' && !backslashSeparator:
 			esc = true
 			inWord = true
 		case isQuote(r):

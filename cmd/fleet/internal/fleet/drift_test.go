@@ -36,7 +36,10 @@ func TestCdIntoAnotherBoundDirectoryIsRefused(t *testing.T) {
 	if reason == "" {
 		t.Fatal("a session in one seat may not cd into another")
 	}
-	for _, want := range []string{"bench-hand-2", "hand:bench", "git -C " + two, "(cd " + two + " &&"} {
+	// The suggestions name the bound path in its long, forward-slash form, which Git
+	// Bash and cmd both accept; on Windows that differs from the native temp path.
+	shown := LongPath(two)
+	for _, want := range []string{"bench-hand-2", "hand:bench", "git -C " + shown, "(cd " + shown + " &&"} {
 		if !strings.Contains(reason, want) {
 			t.Fatalf("refusal does not carry %q:\n%s", want, reason)
 		}

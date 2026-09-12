@@ -14,8 +14,9 @@ import (
 // Exercise the real installer, example assets, role projections and both hook faces
 // with no prior harness configuration or private lanes in a disposable home.
 func TestPublicInstall(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Bash installer is for macOS/Linux")
+	// The installer needs a POSIX shell, not a POSIX OS: Git Bash on Windows runs it.
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash on PATH; the installer needs a POSIX shell (Git Bash on Windows)")
 	}
 	home := t.TempDir()
 	// Keep Go's build cache, never the user's Fleet/harness configuration.
@@ -28,6 +29,17 @@ func TestPublicInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GOCACHE=" + strings.TrimSpace(string(cache)), "GOMODCACHE=" + strings.TrimSpace(string(modCache)), "FLEET_WATCH=off", "GIT_CONFIG_NOSYSTEM=1"}
+	exe := ""
+	if runtime.GOOS == "windows" {
+		// Go, git and the harness resolve the home and temp dirs from these on Windows.
+		exe = ".exe"
+		env = append(env, "USERPROFILE="+home)
+		for _, key := range []string{"SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA"} {
+			if v := os.Getenv(key); v != "" {
+				env = append(env, key+"="+v)
+			}
+		}
+	}
 	run := func(input, name string, args ...string) string {
 		t.Helper()
 		c := exec.Command(name, args...)
@@ -45,7 +57,10 @@ func TestPublicInstall(t *testing.T) {
 	}
 	run("", "bash", "install.sh", "--apply")
 	run("", "bash", "install.sh", "--apply")
-	bin := filepath.Join(home, ".fleet", "bin", "fleet")
+	bin := filepath.Join(home, ".fleet", "bin", "fleet"+exe)
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatalf("installer did not emit the platform binary name: %v", err)
+	}
 	for _, kind := range []string{"author", "verifier", "supervisor"} {
 		checkout := filepath.Join(home, kind)
 		run("", "git", "init", "-q", checkout)
@@ -57,6 +72,7 @@ func TestPublicInstall(t *testing.T) {
 			}
 		}
 		assertLifecycle(t, filepath.Join(checkout, ".claude/settings.local.json"), "hook claude")
+		assertAllowIsList(t, filepath.Join(checkout, ".claude/settings.local.json"))
 		assertLifecycle(t, filepath.Join(home, ".codex/hooks.json"), "hook codex")
 		for _, harness := range []string{"claude", "codex"} {
 			event := map[string]any{"hook_event_name": "SessionStart", "session_id": kind + "-" + harness, "cwd": checkout}
@@ -114,5 +130,26 @@ func assertLifecycle(t *testing.T, path, command string) {
 		if len(groups) != 1 || len(groups[0].Hooks) != 1 || !strings.Contains(groups[0].Hooks[0].Command, command) {
 			t.Errorf("%s: wrong %s registration: %v", path, event, groups)
 		}
+	}
+}
+
+// Claude Code types permissions.allow as an array and rejects the whole file on null.
+func assertAllowIsList(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Permissions struct {
+			Allow json.RawMessage `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	// Absent is a regression too: the role projection always writes the list.
+	if allow := strings.TrimSpace(string(config.Permissions.Allow)); !strings.HasPrefix(allow, "[") {
+		t.Fatalf("%s: permissions.allow must be a list, got %s", path, allow)
 	}
 }
