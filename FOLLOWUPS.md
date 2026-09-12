@@ -317,6 +317,19 @@ when the lock frees — the same at-least-once accept log the hard-crash entry
 above already needs, which is the one worth building if either becomes real.
 Owner: `escalate serve`.
 
+## `escalate serve`: a lock timeout inside `applyJudgment` is not retried
+
+Accepted when #283 was judged (run `run_01bbe817dbcc96a0`). Serve retries only a
+`state_lock_timeout` that gate marks retry-legal, and gate marks the pre-append
+reads in `runOfEscalation` / `escalationIsOpen` (`preAppendFailure`). A lock
+timeout in `applyJudgment`'s own reads before its first append is not marked, so
+serve reports it after one attempt. That is the pre-#283 behaviour and it fails
+safe: nothing is appended, the card says the decision was not recorded, and the
+park can be decided again. The measured 2026-09-05 burst never hit this path.
+Close it by wrapping `applyJudgment`'s pre-first-append reads in
+`preAppendFailure`, or by letting `judgeSlotState` report without the lock.
+Owner: `gate judge` / `escalate serve`.
+
 ## gate: the inbox's moot class depends on producers that are not all landed
 
 `observe/closure.go` sources "this PR is finished" from four artifact kinds: an

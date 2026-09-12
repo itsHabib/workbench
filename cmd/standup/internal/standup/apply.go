@@ -364,16 +364,35 @@ func ReadWorld(e Env, cfg Config) (*World, error) {
 			w.learnSeat(r)
 		}
 	}
-	res = e.Run.Run(e.LeadDir, e.Fleet, "decisions")
-	if res.Err == nil && res.Code == 0 {
-		for _, line := range strings.Split(res.Stdout, "\n") {
-			// "d3 rule ivy: two fix-rounds" → "rule ivy: two fix-rounds"
-			if i := strings.IndexByte(line, ' '); i > 0 {
-				w.Decided[strings.TrimSpace(line[i+1:])] = true
-			}
-		}
+	decided, err := e.decisions()
+	if err != nil {
+		return nil, err
 	}
+	w.Decided = decided
 	return w, nil
+}
+
+// decisions is the ledger of decisions in force, keyed the way Plan names a
+// decision step. It reads `fleet decisions --json`: the human table pads its
+// columns, so a line never equals "kind subject: text" and the already-decided
+// skip could not fire, and a carried-over decision was appended a second time.
+func (e Env) decisions() (map[string]bool, error) {
+	res := e.Run.Run(e.LeadDir, e.Fleet, "decisions", "--json")
+	if res.Err != nil {
+		return nil, fmt.Errorf("fleet decisions --json: %w", res.Err)
+	}
+	if res.Code != 0 {
+		return nil, fmt.Errorf("fleet decisions --json: exit %d: %s", res.Code, strings.TrimSpace(res.Stderr))
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(res.Stdout), &rows); err != nil {
+		return nil, fmt.Errorf("fleet decisions --json: %w (is fleet from the same checkout?)", err)
+	}
+	out := map[string]bool{}
+	for _, d := range rows {
+		out[str(d, "kind")+" "+str(d, "subject")+": "+str(d, "text")] = true
+	}
+	return out, nil
 }
 
 // learnSeat records a seat's Fleet repository id from a row or receipt placed in it.

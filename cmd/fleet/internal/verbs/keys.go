@@ -364,7 +364,17 @@ func cmdUndecide(did string) error {
 	return nil
 }
 
-func cmdDecisions() error {
+// cmdDecisions prints the decisions in force. The table is for people; --json is
+// the contract for tools, which must not parse a padded column layout.
+func cmdDecisions(asJSON bool) error {
+	if asJSON {
+		out := []fleet.Rec{}
+		for _, d := range fleet.OpenDecisions() {
+			out = append(out, fleet.Rec{"id": d["id"], "kind": d["kind"], "subject": d["subject"], "text": d["text"], "at": d["at"]})
+		}
+		say("%s", fleet.DumpJSON(out))
+		return nil
+	}
 	for _, d := range fleet.OpenDecisions() {
 		subject := fleet.S(d, "subject")
 		if subject == "" {

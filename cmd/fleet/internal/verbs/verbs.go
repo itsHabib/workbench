@@ -57,7 +57,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet decide <drop|park|ignore|rule> <subject> "<text>"
                                                  record an operator decision; every session sees it at its next turn
   fleet undecide <id>                            retire a decision
-  fleet decisions                                the decisions in force
+  fleet decisions [--json]                       the decisions in force
   fleet costs                                    measured command costs on this machine (median, n)
   fleet tier [--base <ref>] [--json]             verification tier of the diff against <ref> (default origin/main)
   fleet ready <sha> "<action>" "<observable>"     print the ready-to-run packet, or refuse an incomplete one
@@ -224,7 +224,7 @@ func dispatchControl(verb string, rest []string, arg func(int) string) (bool, er
 	case "undecide":
 		return true, cmdUndecide(arg(0))
 	case "decisions":
-		return true, cmdDecisions()
+		return true, cmdDecisions(contains(rest, "--json"))
 	case "tier":
 		base := "origin/main"
 		if i := index(rest, "--base"); i >= 0 && i+1 < len(rest) {

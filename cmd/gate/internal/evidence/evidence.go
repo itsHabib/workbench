@@ -45,6 +45,9 @@ type diffBody struct {
 	Method    string `json:"method,omitempty"`
 	Head      string `json:"head,omitempty"`
 	MergeBase string `json:"merge_base,omitempty"`
+	// Base is the compared base commit for method "api": the diff is GitHub's
+	// base...head compare over exactly this pair.
+	Base string `json:"base,omitempty"`
 }
 
 // Comment is one review comment as verifiers will consume it.
@@ -181,7 +184,7 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	if err != nil {
 		return b, err
 	}
-	body.Diff, body.MergeBase, body.Head = r.Diff, r.MergeBase, r.Head
+	body.Diff, body.MergeBase, body.Head, body.Base = r.Diff, r.MergeBase, r.Head, r.Base
 	a, err := st.Append(state.KindEvidence, run, nil, body)
 	if err != nil {
 		return b, err
@@ -254,7 +257,7 @@ func fetchPrimaryDiff(pr PRRef, viewHead string, fetchers primaryDiffFetchers) (
 	if len(diff) == 0 {
 		return diffResult{}, fmt.Errorf("evidence: empty diff at head %s", head)
 	}
-	return diffResult{Diff: string(diff), Head: head}, nil
+	return diffResult{Diff: string(diff), Head: head, Base: base}, nil
 }
 
 // decisiveReviewState reports whether a submission state states a position on

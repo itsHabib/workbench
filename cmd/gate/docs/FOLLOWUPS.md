@@ -214,3 +214,10 @@ autonomously would be smuggling a policy decision out of a proof; that call is t
   budget (`parkedBudget`). Failing closed on a real I/O error is the chosen behaviour.
 
 - [ ] Gate review context: consider a bounded omitted-comment identity summary. The current whole-entry first-fit selection preserves source artifact IDs and original indices on every included comment, prioritizes known source activity and labels unknown timestamps, and explicitly counts omissions; gaps must not be read as resolved findings. Keep this within the existing comment budget.
+
+- [ ] **The local merge-base fallback is dormant.** It triggers on GitHub's HTTP 406 "exceeded the
+  maximum number of lines" for a diff, but a measured compare of 1,086 files and ~228k lines
+  (2026-09-12, while judging #281) returned the whole diff with no 406. So the fallback no longer
+  fires in practice, and a compare 5xx on a huge PR aborts the gather fail-closed (exit 4) rather
+  than falling back. Not an authorization defect. Revisit if a real PR hits the 5xx path: either
+  fall back on it too, or delete the fallback.
