@@ -131,7 +131,7 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	if err := fleet.WriteJSON(path, r); err != nil {
 		return 0, err
 	}
-	cmd, err := providerCommand(map[string]any{"provider": t.provider, "cwd": t.cwd, "model": t.model, "permission_mode": t.permissionMode, "resume": resume, "prompt": text, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "output": logPath, "trace": attempt + ".trace.jsonl"})
+	cmd, err := providerCommand(attempt+".request.json", map[string]any{"provider": t.provider, "cwd": t.cwd, "model": t.model, "permission_mode": t.permissionMode, "resume": resume, "prompt": text, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "output": logPath, "trace": attempt + ".trace.jsonl"})
 	if err != nil {
 		return 0, err
 	}

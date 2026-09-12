@@ -169,8 +169,10 @@ Allow the watcher to collect all exits before stopping it when exact exit codes 
 ## Evidence contract
 
 `watch/delivery/<cwd-hash>.json` points to the latest launch. Every attempt retains separate
-`.meta.json`, `.log`, `.trace.jsonl`, `.state.json`, `.cancel` (only when requested) and `.exit.json` files.
-`.trace.jsonl` contains native provider records; `.log` also includes normalized terminal results and transport diagnostics; `.exit.json` is the collected transport-process exit, not a task receipt.
+`.request.json`, `.meta.json`, `.log`, `.trace.jsonl`, `.state.json`, `.cancel` (only when requested) and `.exit.json` files.
+`.request.json` is the bridge's whole request, prompt included, created private (0600) before the
+bridge starts; the bridge reads it by path, so a launcher that exits the moment it has started the
+bridge (`fleet watch --once`) cannot cut it short. `.trace.jsonl` contains native provider records; `.log` also includes normalized terminal results and transport diagnostics; `.exit.json` is the collected transport-process exit, not a task receipt.
 No per-attempt file is reused by a later launch. `watch/observed.jsonl` records launch/exit and
 scheduler observations. Private run output may contain task text and tool data; publish a
 sanitized evidence summary rather than copying raw logs into a public PR.

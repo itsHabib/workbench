@@ -49,7 +49,7 @@ func deliverEnv(t *testing.T) (home string, sink string) {
 	sink = filepath.Join(t.TempDir(), "launch.json")
 	t.Setenv("FLEET_TEST_LAUNCH_PATH", sink)
 	original := providerCommand
-	providerCommand = func(request map[string]any) (*exec.Cmd, error) {
+	providerCommand = func(_ string, request map[string]any) (*exec.Cmd, error) {
 		if os.Getenv("FLEET_TEST_BAD_START") != "" {
 			return exec.Command(filepath.Join(home, "no-such-command")), nil
 		}

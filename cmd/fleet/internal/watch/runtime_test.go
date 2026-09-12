@@ -28,10 +28,99 @@ func waitExit(t *testing.T, target deliverTarget) fleet.Rec {
 	return nil
 }
 
+// oneShotSDK stands in for the Claude Agent SDK behind the real bridge: it records the
+// prompt the bridge was handed and ends the turn.
+const oneShotSDK = `import fs from 'node:fs';
+export function query({prompt}) {
+ return {interrupt:async()=>{},close(){},async *[Symbol.asyncIterator](){
+  for await (const item of prompt) fs.writeFileSync(process.env.FLEET_TEST_PROMPT_FILE, item.message.content);
+  yield {type:'system',subtype:'init',session_id:'one-shot'};
+  yield {type:'result',subtype:'success',session_id:'one-shot',is_error:false};
+ }};
+}
+`
+
+// A one-shot fold (`fleet watch --once`) exits as soon as its fold returns. The bridge
+// it started must still get its whole request: a request copied in by the launcher
+// arrives truncated or not at all, the bridge dies before publishing any state, and the
+// mail it was stamped for is never carried again. The instruction is larger than any
+// pipe buffer, so a launcher that has to stay alive to finish the copy always loses it.
+func TestOneShotFoldHandsTheBridgeItsWholeRequest(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("Node is a provider prerequisite")
+	}
+	oldState, oldOrg := fleet.State, fleet.OrgState
+	fleet.State, fleet.OrgState = t.TempDir(), t.TempDir()
+	t.Cleanup(func() { fleet.State, fleet.OrgState = oldState, oldOrg })
+	home, runtimeHome := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" t1 hub:lead\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instruction := "Advance the run.\n" + strings.Repeat("x", 1<<20)
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), fleet.Rec{"hub:lead": fleet.Rec{"cwd": home, "provider": "claude", "prompt": instruction}}); err != nil {
+		t.Fatal(err)
+	}
+	putStoreMail(t, "hub:lead", "q1", fleet.Now()-60, nil)
+	sdk := filepath.Join(runtimeHome, "node_modules", "@anthropic-ai", "claude-agent-sdk")
+	if err := os.MkdirAll(sdk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sdk, "package.json"), []byte(`{"type":"module","exports":"./index.mjs"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sdk, "index.mjs"), []byte(oneShotSDK), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	received := filepath.Join(t.TempDir(), "prompt.txt")
+
+	fold := exec.Command(os.Args[0], "-test.run=^TestOneShotFoldExitsAfterLaunch$")
+	fold.Env = append(os.Environ(), "FLEET_TEST_ONE_SHOT=1", "FLEET_STATE="+fleet.State, "ORG_STATE="+fleet.OrgState,
+		"FLEET_GITHUB=off", "FLEET_MAIL_GRACE=0", "FLEET_RUNTIME_HOME="+runtimeHome, "FLEET_TEST_PROMPT_FILE="+received)
+	if out, err := fold.CombinedOutput(); err != nil {
+		t.Fatalf("one-shot fold: %v\n%s", err, out)
+	}
+	target := deliverTarget{address: "hub:lead", cwd: home}
+	launch, err := readLaunch(target)
+	if err != nil || fleet.S(launch, "status") != "running" {
+		t.Fatalf("the fold did not start a bridge: %v %v", launch, err)
+	}
+	waitGone(t, int(fleet.F(launch, "pid")))
+	got, _ := os.ReadFile(received)
+	state := fleet.ReadJSON(fleet.S(launch, "state_file"))
+	if state["provider_terminal"] != true || !strings.HasPrefix(string(got), instruction) || !strings.Contains(string(got), "q1") {
+		log, _ := os.ReadFile(fleet.S(launch, "output"))
+		t.Fatalf("the bridge did not receive the whole request (%d of at least %d bytes, state %v); end of bridge log:\n%s", len(got), len(instruction), state, log[max(0, len(log)-1000):])
+	}
+}
+
+// TestOneShotFoldExitsAfterLaunch is the one-shot fold: it delivers once with the real
+// provider command and exits the moment the fold returns, as `fleet watch --once` does.
+func TestOneShotFoldExitsAfterLaunch(_ *testing.T) {
+	if os.Getenv("FLEET_TEST_ONE_SHOT") == "" {
+		return
+	}
+	if len(observedWhat(deliver(fleet.Now()), "mail-delivery-started")) != 1 {
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+// waitGone gives a detached child that no Wait collects time to finish before the
+// test's directories are removed under it.
+func waitGone(t *testing.T, pid int) {
+	t.Helper()
+	for i := 0; i < 1000 && processPresent(pid); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if processPresent(pid) {
+		t.Errorf("bridge %d still running at cleanup", pid)
+	}
+}
+
 func TestRelativeStateCannotLaunchProviderInAnotherDirectory(t *testing.T) {
 	home, _ := deliverEnv(t)
 	original := providerCommand
-	providerCommand = func(map[string]any) (*exec.Cmd, error) {
+	providerCommand = func(string, map[string]any) (*exec.Cmd, error) {
 		t.Fatal("relative state must be refused before invoking a provider")
 		return nil, nil
 	}
