@@ -481,3 +481,14 @@ intentionally serializes as []. No migration or live configuration changes.
   context or stored JSON. Unknown-option rejection is recorded in FOLLOWUPS.md.
 - Boundary: deliberate yield/resume, not crash recovery; no SDK replacement,
   global installation or merge. Tests and live evidence are recorded in the PR.
+
+### 2026-09-12 — Guessed handoff read flags overwrite continuity
+
+- Reproduced on main 3c3ced6 in private Fleet state: `handoff investigation-only --show`
+  returned success and replaced a useful conclusion with `--show`.
+- The CLI now rejects unknown/duplicate options, missing option values and invalid
+  argument counts before legacy migration or checkpoint writes. Its usage points to
+  `fleet inspect <address>`; `--` permits literal text beginning with a dash.
+- Regression snapshots branch, role and legacy checkpoint bytes. It fails with the
+  original parser and passes with the fix; independent local review found no blocker.
+- This is argument parsing repair, not checkpoint history or process recovery.

@@ -156,6 +156,9 @@ func Dispatch(args []string) error {
 	if args[0] == "inspect-hooks" {
 		return cmdInspectHooks(args[1:])
 	}
+	if args[0] == "handoff" {
+		return dispatchHandoff(args[1:])
+	}
 	fleet.MigrateLegacyKeys() // every entry into the substrate re-keys legacy state first
 	verb, rest := args[0], args[1:]
 	if strings.HasPrefix(verb, "x-") {
@@ -411,8 +414,6 @@ func dispatchActs(verb string, rest []string) (bool, error) {
 			reason = "revoked"
 		}
 		return true, cmdRevoke(m[1], m[2], reason)
-	case "handoff":
-		return true, dispatchHandoff(rest)
 	case "role":
 		u := "usage: fleet role <checkout> <role> [--force] [--tenant <t>]   e.g. fleet role ~/dev/mono-wt-1 <kind>:mono"
 		tenant := ""
