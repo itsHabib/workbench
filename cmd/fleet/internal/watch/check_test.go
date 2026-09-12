@@ -1,10 +1,12 @@
 package watch
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
@@ -16,25 +18,26 @@ func TestCheckDoesNotReserveDeliverOrMigrate(t *testing.T) {
 	}
 	home, _ := deliverEnv(t)
 	bin := t.TempDir()
-	// Reject every RPC except discovery, even if it would be harmless in a fixture.
-	script := `#!/usr/bin/env node
-const rl=require('node:readline').createInterface({input:process.stdin});
-rl.on('line',line=>{
- const m=JSON.parse(line), send=result=>process.stdout.write(JSON.stringify({id:m.id,result})+'\n');
- switch(m.method) {
- case 'initialize': return send({});
- case 'initialized': return;
- case 'config/read': return send({config:{sandbox_mode:null,approval_policy:null}});
- case 'hooks/list': return send({data:[{cwd:m.params.cwds[0],hooks:[],errors:[],warnings:[]}]});
- default: process.exit(42);
- }
-});
-`
-	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(script), 0700); err != nil {
+	// Use a native executable on every platform, including Windows. The helper
+	// rejects every RPC except discovery, even if harmless in a fixture.
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
+	raw, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "codex"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(bin, name), raw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_TEST_CHECK_PROVIDER", "1")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := fleet.WriteJSON(fleet.Path("deliver.json"), fleet.Rec{"hub:lead": fleet.Rec{"cwd": home, "provider": "codex"}}); err != nil {
+	if err := fleet.WriteJSON(fleet.Path("deliver.json"), fleet.Rec{"hub:lead": fleet.Rec{"cwd": home, "provider": "codex"}, "broken": fleet.Rec{}}); err != nil {
 		t.Fatal(err)
 	}
 	before := checkFiles(t, fleet.State, fleet.OrgState)
@@ -42,7 +45,7 @@ rl.on('line',line=>{
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["address"] != "hub:lead" || result["effective_permissions"] != "unknown until thread start" {
+	if result["configuration_warning"] == nil || result["address"] != "hub:lead" || result["effective_permissions"] != "unknown until thread start" {
 		t.Fatal(result)
 	}
 	if after := checkFiles(t, fleet.State, fleet.OrgState); !reflect.DeepEqual(before, after) {
@@ -70,4 +73,43 @@ func checkFiles(t *testing.T, roots ...string) map[string]string {
 		}
 	}
 	return out
+}
+
+func TestMain(m *testing.M) {
+	if os.Getenv("FLEET_TEST_CHECK_PROVIDER") == "1" {
+		os.Exit(checkProviderFixture())
+	}
+	os.Exit(m.Run())
+}
+
+func checkProviderFixture() int {
+	in, out := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
+	for {
+		var msg struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Cwds []string `json:"cwds"`
+			} `json:"params"`
+		}
+		if err := in.Decode(&msg); err != nil {
+			return 0
+		}
+		var result any
+		switch msg.Method {
+		case "initialize":
+			result = fleet.Rec{}
+		case "initialized":
+			continue
+		case "config/read":
+			result = fleet.Rec{"config": fleet.Rec{"sandbox_mode": nil, "approval_policy": nil}}
+		case "hooks/list":
+			result = fleet.Rec{"data": []fleet.Rec{{"cwd": msg.Params.Cwds[0], "hooks": []any{}, "errors": []any{}, "warnings": []any{}}}}
+		default:
+			return 42
+		}
+		if err := out.Encode(fleet.Rec{"id": msg.ID, "result": result}); err != nil {
+			return 43
+		}
+	}
 }

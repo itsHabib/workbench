@@ -153,17 +153,21 @@ async function claude() {
 
 // A configured policy is not the effective policy of a future thread. Discovery
 // never starts a thread, executes hooks, or turns missing defaults into readiness.
+function object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 async function checkCodex(call) {
   const config = await call('config/read', { cwd: request.cwd, includeLayers: false });
   const inventory = await call('hooks/list', { cwds: [request.cwd] });
   const entry = inventory?.data?.find(row => row.cwd === request.cwd);
-  if (!config?.config || !Array.isArray(entry?.hooks) || !Array.isArray(entry.errors) || !Array.isArray(entry.warnings)) {
+  if (!object(config?.config) || !object(entry) || !Array.isArray(entry.hooks) || !Array.isArray(entry.errors) || !Array.isArray(entry.warnings)) {
     throw new Error('unsupported Codex setup response');
   }
-  const hooks = entry.hooks.map(hook => ({
-    event: hook.eventName ?? null, enabled: hook.enabled ?? null,
-    trust: hook.trustStatus ?? null, source: hook.sourcePath ?? null,
-  }));
+  const hooks = entry.hooks.map(hook => {
+    if (!object(hook) || typeof hook.eventName !== 'string' || typeof hook.enabled !== 'boolean' ||
+        typeof hook.trustStatus !== 'string' || typeof hook.sourcePath !== 'string') {
+      throw new Error('unsupported Codex hook response');
+    }
+    return { event: hook.eventName, enabled: hook.enabled, trust: hook.trustStatus, source: hook.sourcePath };
+  });
   return { type: 'setup', provider: 'codex', cwd: request.cwd,
     configured_sandbox: config.config.sandbox_mode ?? null,
     configured_approval: config.config.approval_policy ?? null,

@@ -128,6 +128,9 @@ values are omitted. Discovery errors and warnings are counted without printing
 potentially sensitive messages.
 
 Exit 0 means discovery succeeded, not that the address is ready for every workload.
+Exit 1 refuses an invalid target/provider configuration, 2 reports usage, and 4
+reports a provider or protocol failure. Usable targets can still be inspected when
+unrelated entries are malformed; their omission is reported as a configuration warning.
 No permissions are widened and no hooks are trusted automatically. Unsupported
 providers or protocol responses fail explicitly; Claude currently has only the
 static `fleet inspect-hooks --config <harness-json>` inventory.

@@ -1624,7 +1624,8 @@ def rows():
 def state_of(change, rel): return rows().get((change, rel), {}).get("state")
 subprocess.run(["git", "branch", "feat/w3"], cwd=r, capture_output=True)
 bad_as = fleet("dispatch", "feat/w3", "--as", "Not A Word")
-d = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:alpha", "--due", "1s", "--brief", "verify the thing")
+# Keep idle/working assertions independent of machine load; the later --take sets a short due date.
+d = fleet("dispatch", "feat/w3", "--as", "verify", "--for", "hub:alpha", "--due", "1h", "--brief", "verify the thing")
 rec = hook.read_json(hook.path("dispatch", hook.safe(hook.repo_id(r) + "__feat/w3__verify") + ".json")) or {}
 report(bad_as.returncode != 0 and d.returncode == 0 and rec.get("for") == "hub:alpha" and rec.get("by") == "finisher:watchrepo" and rec.get("relationship") == "verify"
        and rec.get("due", 0) > rec.get("at", 1) and state_of("feat/w3", "verify") == "dispatched",

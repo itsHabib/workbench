@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -89,7 +90,11 @@ func runCheck(args []string) {
 	result, err := watch.Check(args[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		var refusal *verbs.Refusal
+		if errors.As(err, &refusal) {
+			os.Exit(refusal.Code)
+		}
+		os.Exit(4)
 	}
 	fmt.Printf("%s\n", fleet.DumpJSON(result))
 }

@@ -22,10 +22,12 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
  if(m.method==='config/read') {
   if(process.env.CASE==='check-timeout')return;
   send({method:'config/notification',params:{secret:'DO-NOT-PRINT'}});
+  if(process.env.CASE==='check-config-array') return send({id:m.id,result:{config:[]}});
+  if(process.env.CASE==='check-config-string') return send({id:m.id,result:{config:'unexpected'}});
   if(process.env.CASE==='check-error') return send({id:m.id,error:{message:'DO-NOT-PRINT'}});
   return send({id:m.id,result:{config:{sandbox_mode:null,approval_policy:null,secret:'DO-NOT-PRINT'}}});
  }
- if(m.method==='hooks/list') return send({id:m.id,result:process.env.CASE==='check-malformed'?{}:{data:[{cwd:p.cwds[0],hooks:[{eventName:'sessionStart',enabled:true,trustStatus:'modified',sourcePath:'hooks.json',command:'DO-NOT-PRINT'}],errors:[],warnings:[]}]}});
+ if(m.method==='hooks/list') return send({id:m.id,result:process.env.CASE==='check-malformed'?{}:{data:[{cwd:p.cwds[0],hooks:process.env.CASE==='check-hook-string'?['not-a-hook']:process.env.CASE==='check-hook-empty'?[{}]:[{eventName:'sessionStart',enabled:true,trustStatus:'modified',sourcePath:'hooks.json',command:'DO-NOT-PRINT'}],errors:[],warnings:[]}]}});
  if(m.method==='thread/start'||m.method==='thread/resume') {
   if(process.env.CASE==='start-fail') return send({id:m.id,error:{message:'thread start rejected'}});
   if(process.env.CASE==='resume-fail') return send({id:m.id,error:{message:'no such thread'}});
@@ -159,7 +161,7 @@ test('Codex setup discovery never starts a thread or exposes unrelated configura
  assert.equal(r.state.turn_may_have_been_sent,false);assert.equal(r.state.provider_terminal,false);
  assert.equal(r.state.provider_exit_code,0);
 });
-for(const scenario of ['check-error','check-malformed']) {
+for(const scenario of ['check-error','check-malformed','check-config-array','check-config-string','check-hook-string','check-hook-empty']) {
  test('Codex '+scenario+' is explicit failure without a model fallback',async()=>{
   const r=await run('codex',scenario);assert.equal(r.code,1,r.err);
   assert.doesNotMatch(r.out+r.err,/DO-NOT-PRINT/);
