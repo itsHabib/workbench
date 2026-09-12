@@ -184,6 +184,16 @@ Constraints that are design decisions, not omissions:
   eighth time: a false "this was fixed" buries a live finding, and nothing in
   the output distinguishes a wrong verdict from a right one. Like `explain` and
   `next` it is read-only — no artifact, no state write, exit 0 or 4 only.
+- **Check packet completeness before judgment.** `gate packet -run R` exposes
+  required source coverage and the running revision. `judge` fails with
+  `judgment_evidence_incomplete` before provider invocation when required
+  context is omitted. `gate evidence -run R -grant G` indexes the exact Git head
+  and collects required source in one call; optional repeated `-path P` values
+  select explicit files. Prose examples do not become mandatory files. It appends
+  to the existing unjudged run: at most three supplements,
+  32 paths per call and 256 KiB total. Repairs spend no new cycle, never reopen
+  a substantive judgment, and refuse changed heads. Inspect every missing item
+  together; do not start another run merely to repair packet construction.
 - **The cycle ceiling is a pre-flight, not a post-mortem.** `gate gate` counts
   the PR's consumed review cycles from the log before it gathers any evidence
   and, when the run would land over the grant's `-max-cycles`, refuses at once

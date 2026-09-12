@@ -1,0 +1,8 @@
+{
+  "kind": "supervisor",
+  "card": "card.md",
+  "denies": [],
+  "requires": [],
+  "produces": null,
+  "slots": 0
+}

@@ -1,0 +1,252 @@
+package fleet
+
+// The substrate's own reader of the mail store.
+//
+// The mail verb resolves a mailbox through the caller's identity: a live session in a
+// roled directory. That rule is right for an agent — it is what keeps one role from
+// reading another's inbox — and wrong for the substrate itself. The watcher has no
+// session and no directory; it is the thing that starts sessions. So it reads the
+// store: the typed mailbox for a tenant and address, plus the retained flat mailbox
+// that predates it, with every record re-validating the address it claims.
+//
+// One function, used by every duty that needs a mailbox without an identity. The
+// verb's rule is unchanged; nothing here grants a caller anything.
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// MailStoreDirs is every directory that may hold records for one address in one
+// tenant: the typed mailbox of the address's *current* kind, then the retained flat
+// one — and the flat one only when its own pin still names this tenant and address.
+//
+// Only the resolved kind is read. A name that was a role and is now a seat still has
+// the role's typed directory on disk, and scanning both would hand the seat the
+// previous identity's mail — stamped delivered, and shadowing the seat's own record
+// of the same id. The mail contract keeps role and seat inboxes separate; the
+// substrate's reader keeps them separate too, and legacy storage is admitted only
+// for a resolved role because that is the only identity it ever held.
+//
+// The pin is the only tenant evidence a flat mailbox has. Its records predate the
+// tenant field, so the directory is their whole claim; when roles.map later rebinds
+// the name to another tenant, an unpinned directory would hand that tenant the
+// previous one's mail. An unreadable pin is an error, not an empty result.
+func MailStoreDirs(tenant, address string) ([]string, error) {
+	_, dirs, err := mailStore(tenant, address)
+	return dirs, err
+}
+
+// mailStore is MailStoreDirs plus the resolved mailbox, so a caller that reads a
+// record can also check the kind it claims. An address roles.map no longer binds has
+// no typed mailbox and is not an error: the substrate observes, and an empty result
+// is what an address with nothing waiting for it looks like.
+func mailStore(tenant, address string) (Mailbox, []string, error) {
+	kind, err := mailStoreKind(tenant, address)
+	if err != nil {
+		return Mailbox{}, nil, err
+	}
+	box := Mailbox{Tenant: tenant, Kind: kind, Address: address}
+	var dirs []string
+	if kind != "" {
+		dirs = append(dirs, box.dir())
+	}
+	if kind == "seat" {
+		return box, dirs, nil // the flat mailbox only ever held a role's mail
+	}
+	flat, err := Mailbox{Tenant: tenant, Kind: "role", Address: address}.legacyMailDir()
+	if err != nil {
+		return Mailbox{}, nil, err
+	}
+	if flat == "" {
+		return box, dirs, nil
+	}
+	return box, append(dirs, flat), nil
+}
+
+// mailStoreKind is the kind roles.map binds an address to in one tenant — "role",
+// "seat", or "" when it binds it to neither any more. A role that has seats is not
+// itself a mailbox, which is the same rule ResolveMailbox applies to a caller.
+func mailStoreKind(tenant, address string) (string, error) {
+	_, rows := MapRows(RolesMap())
+	kinds := map[string]bool{}
+	for _, r := range rows {
+		if r.Tenant != tenant {
+			continue
+		}
+		if r.Slot == address {
+			kinds["seat"] = true
+		}
+		if r.Role == address && r.Slot == "" {
+			kinds["role"] = true
+		}
+	}
+	if len(kinds) > 1 {
+		return "", fmt.Errorf("mail: address %s is ambiguous between a role and a seat in tenant %s", address, tenant)
+	}
+	for kind := range kinds {
+		return kind, nil
+	}
+	return "", nil
+}
+
+// MailAddressTenant is the tenant owning an address named as a role or as a seat.
+// An address that names neither, or names both in different tenants, has no tenant.
+func MailAddressTenant(address string) (string, error) {
+	if err := MailAddress(address, "address"); err != nil {
+		return "", err
+	}
+	_, rows := MapRows(RolesMap())
+	tenant := ""
+	for _, r := range rows {
+		if r.Role != address && r.Slot != address {
+			continue
+		}
+		if tenant != "" && tenant != r.Tenant {
+			return "", fmt.Errorf("mail: address %s is ambiguous across tenants", address)
+		}
+		tenant = r.Tenant
+	}
+	if tenant == "" {
+		return "", fmt.Errorf("mail: address %s is not bound in roles.map", address)
+	}
+	return tenant, nil
+}
+
+// MailboxRecords is every record addressed to one address in one tenant, oldest
+// first. A record whose own fields disagree with the mailbox it sits in is not that
+// address's mail and is skipped rather than reported: the reader observes, and a
+// damaged record is the verb's problem to refuse.
+func MailboxRecords(tenant, address string) ([]Rec, error) {
+	if err := MailAddress(address, "address"); err != nil {
+		return nil, err
+	}
+	if tenant == "" {
+		return nil, fmt.Errorf("mail: tenant is required")
+	}
+	box, dirs, err := mailStore(tenant, address)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []Rec
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			id := strings.TrimSuffix(e.Name(), ".json")
+			if e.IsDir() || e.Name() == mailAddressFile || !strings.HasSuffix(e.Name(), ".json") || seen[id] {
+				continue
+			}
+			r := mailRecordAt(filepath.Join(dir, e.Name()), box, id)
+			if r == nil {
+				continue
+			}
+			seen[id] = true
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if F(out[i], "at") == F(out[j], "at") {
+			return S(out[i], "id") < S(out[j], "id")
+		}
+		return F(out[i], "at") < F(out[j], "at")
+	})
+	return out, nil
+}
+
+// mailRecordAt is the record at a path when it claims exactly this mailbox's address,
+// kind and tenant, and this id — else nil. A record written before tenants were stored
+// carries neither tenant nor kind, and its directory is the only claim it has — which
+// is why MailStoreDirs admits a flat directory only when its pin still names this
+// tenant and address, and only for a role.
+func mailRecordAt(path string, box Mailbox, id string) Rec {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var r Rec
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil
+	}
+	if S(r, "to") != box.Address || S(r, "id") != id || F(r, "at") <= 0 {
+		return nil
+	}
+	if t := S(r, "tenant"); t != "" && t != box.Tenant {
+		return nil
+	}
+	if k := S(r, "to_kind"); k != "" && box.Kind != "" && k != box.Kind {
+		return nil
+	}
+	return r
+}
+
+// StampMail records a substrate-side fact on one record — that it was handed to a
+// process, and by whom — without acknowledging it. Acknowledgement stays the
+// recipient's act; a stamp only stops the substrate doing the same thing twice.
+func StampMail(tenant, address, id string, fields Rec) (Rec, error) {
+	if err := MailAddress(address, id); err != nil {
+		return nil, err
+	}
+	var out Rec
+	err := mailLock(func() error {
+		box, dirs, err := mailStore(tenant, address)
+		if err != nil {
+			return err
+		}
+		for _, dir := range dirs {
+			path := filepath.Join(dir, id+".json")
+			r := mailRecordAt(path, box, id)
+			if r == nil {
+				continue
+			}
+			if Has(fields, "delivered_at") && (Has(r, "acked_at") || Has(r, "delivered_at")) {
+				return fmt.Errorf("mail %s: already acknowledged or reserved", id)
+			}
+			for k, v := range fields {
+				r[k] = v
+			}
+			out = r
+			return WriteJSON(path, r)
+		}
+		return fmt.Errorf("mail %s: no record for %s", id, address)
+	})
+	return out, err
+}
+
+// UnstampMail removes substrate-side fields a stamp wrote. It is the other half of
+// StampMail: a reservation taken before an act that did not happen has to be given
+// back, or the message is stamped with nothing running and no fold ever carries it
+// again. It never touches the recipient's own fields.
+func UnstampMail(tenant, address, id string, keys ...string) error {
+	if err := MailAddress(address, id); err != nil {
+		return err
+	}
+	return mailLock(func() error {
+		box, dirs, err := mailStore(tenant, address)
+		if err != nil {
+			return err
+		}
+		for _, dir := range dirs {
+			path := filepath.Join(dir, id+".json")
+			r := mailRecordAt(path, box, id)
+			if r == nil {
+				continue
+			}
+			for _, k := range keys {
+				delete(r, k)
+			}
+			return WriteJSON(path, r)
+		}
+		return fmt.Errorf("mail %s: no record for %s", id, address)
+	})
+}

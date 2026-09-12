@@ -13,25 +13,32 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/console/internal/fleetcli"
 	"github.com/itsHabib/workbench/cmd/console/internal/gatecli"
 )
 
 //go:embed static/app.html
 var appPage []byte
 
+//go:embed static/fleet.html
+var fleetPage []byte
+
 // Server routes the read-only console. Construct it with New; it is an
 // http.Handler that pins the Host header before dispatching.
 type Server struct {
-	gate *gatecli.Client
-	host string
-	mux  *http.ServeMux
+	gate  *gatecli.Client
+	fleet *fleetcli.Client
+	host  string
+	mux   *http.ServeMux
 }
 
 // New builds a server serving gate's data on the given host:port (used for the
 // Host-header allowlist).
-func New(gate *gatecli.Client, host string) *Server {
-	s := &Server{gate: gate, host: host, mux: http.NewServeMux()}
+func New(gate *gatecli.Client, host string, fleetClient *fleetcli.Client) *Server {
+	s := &Server{gate: gate, fleet: fleetClient, host: host, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/next", s.handleNext)
+	s.mux.HandleFunc("GET /fleet", s.handleFleetPage)
+	s.mux.HandleFunc("GET /api/fleet/{view}", s.handleFleet)
 	s.mux.HandleFunc("GET /api/run/{id}", s.handleRun)
 	s.mux.HandleFunc("GET /api/audit", s.handleAudit)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
@@ -126,7 +133,7 @@ func (s *Server) handleApp(w http.ResponseWriter, _ *http.Request) {
 	// page can neither pull nor exfiltrate. There are no dependencies to pull —
 	// the header makes that a rule rather than a hope.
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'")
+		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// The page is embedded and changes only on a rebuild+restart; never let a
 	// browser serve a stale copy across a redeploy (the JSON routes already do this).
@@ -152,7 +159,7 @@ func (s *Server) gateError(w http.ResponseWriter, err error) {
 // any non-loopback address: the console has no authentication, so it must never
 // be reachable off the machine. Returns the bound address via addrFn (called
 // once the listener is up) so a caller can print the real port for addr ":0".
-func Serve(ctx context.Context, addr string, gate *gatecli.Client, addrFn func(string)) error {
+func Serve(ctx context.Context, addr string, gate *gatecli.Client, addrFn func(string), fleetClient *fleetcli.Client) error {
 	if err := requireLoopback(addr); err != nil {
 		return err
 	}
@@ -163,7 +170,7 @@ func Serve(ctx context.Context, addr string, gate *gatecli.Client, addrFn func(s
 	if addrFn != nil {
 		addrFn(ln.Addr().String())
 	}
-	srv := &http.Server{Handler: New(gate, ln.Addr().String()), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: New(gate, ln.Addr().String(), fleetClient), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sh, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -191,4 +198,32 @@ func requireLoopback(addr string) error {
 		return fmt.Errorf("web: refusing non-loopback bind %q — the console has no auth and must stay on this machine", addr)
 	}
 	return nil
+}
+
+func (s *Server) handleFleetPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(fleetPage)
+}
+
+func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
+	if s.fleet == nil {
+		s.gateError(w, fmt.Errorf("Fleet is not configured"))
+		return
+	}
+	var raw []byte
+	var err error
+	view := r.PathValue("view")
+	switch view {
+	case "diagnostics":
+		raw, err = s.fleet.Diagnose(r.Context(), r.URL.Query().Get("address"))
+	default:
+		raw, err = s.fleet.Read(r.Context(), view, r.URL.Query().Get("address"))
+	}
+	if err != nil {
+		s.gateError(w, err)
+		return
+	}
+	writeJSON(w, raw)
 }

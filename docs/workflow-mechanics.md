@@ -8,7 +8,7 @@ how behavior migrates from prose to code. Everything here cites the public
 [skills repo](https://github.com/itsHabib/skills) or this repo; the private
 skill catalog behind it is described only by shape.
 
-Status honesty: this describes practiced workflow as of 2026-07-31. Where a
+Status honesty: this describes practiced workflow as of 2026-09-11. Where a
 piece is proposal or measurement-gated (tier-routed review, for one), it
 says so.
 
@@ -256,9 +256,29 @@ classifies each (task, cwd, last action, done vs. interrupted), and
 resumes the interrupted one deliberately instead of re-deriving it from
 memory.
 
+**Fleet — when the sessions multiply.** The mechanics above assume one
+session at a time; the practiced texture now is several at once,
+coordinated by `fleet` (a workbench tenant, `cmd/fleet`). Standing roles
+bind to directories — location is identity, resolved from `roles.map`; a
+lead dispatches work to workers in pooled seats — with one-holder-per-key
+leases on branches and machine resources, role/seat mail with
+acknowledgement, and authored handoffs the next session on a role or
+branch reads at start. Identity, liveness, and occupancy facts derive from
+the harness hook, never from an agent's self-report — the day-one failure
+this replaced was asking agents to check in and checkpoint; they didn't,
+and the board lied. A Go watcher (`fleet watch`) owns headless polling and
+launches; `fleet board`, `fleet work`, and `fleet tail` are the operator's
+live views, and `fleet done` answers "is it done" from exact-head receipts
+and nothing else. Org's role cards carry the prose describing each role;
+neither a card nor a parent reference grants authority
+(`docs/features/org-fleet-boundary/spec.md`; guides under
+`cmd/fleet/docs/`).
+
 The common thread: sessions are cattle, work is durable. Worktrees keep
 the work isolated, dossier and the ledgers keep it resumable, and chips,
 briefs, the clocks, and recovery make the *session* the disposable part.
+Fleet extends the same law across a team of sessions: leases keep them
+from colliding, and handoffs make replacing any one of them cheap.
 
 ## 8. Prose → code
 
@@ -294,8 +314,8 @@ or, eventually, part of an engine.
 
 ## 9. Hooks: reflexes, not workflows
 
-Two pre-tool hooks and five post-tool hooks currently run (the exact
-rules are machine-local and stay private; the shapes are what matter):
+Three hook shapes currently run (the exact rules are machine-local and
+stay private; counts rot, shapes don't):
 
 - **Pre:** a command guard — the harness's deterministic tier-3 floor,
   refusing force pushes, destructive repo operations, credential and
@@ -307,6 +327,13 @@ rules are machine-local and stay private; the shapes are what matter):
   decision records its verdict artifact; a merge records the receipt and
   closes the task; ship dispatch and terminal reads link run evidence back
   to project state.
+- **Whole-lifecycle:** the fleet hook — one binary registered on every
+  harness event (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse,
+  Stop, SessionEnd) that
+  derives identity, occupancy, and liveness for the fleet board, injects
+  `[fleet]` context lines, and refuses a command that would move a session
+  into another role's directory. The same rule as the post hooks, taken
+  further: facts come from the reflex, never from agent self-report.
 
 The design rule: hooks capture reliable local facts; choreography and
 cross-tool judgment stay in skills and engines. A hook that starts making

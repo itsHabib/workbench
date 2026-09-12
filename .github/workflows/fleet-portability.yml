@@ -1,0 +1,48 @@
+name: Fleet portability
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/fleet/**'
+      - '.github/workflows/fleet-portability.yml'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/fleet/**'
+      - '.github/workflows/fleet-portability.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  seats:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Real Git seat identity and deny preservation
+        run: go test ./cmd/fleet/internal/verbs -run 'TestPool|TestWriteDenies|TestAssignReports|TestUndeclaredUsesHolderAssignment' -count=1
+      - name: Watcher tests (Windows includes process flags, not visual proof)
+        run: go test ./cmd/fleet/internal/watch -count=1
+      - name: Directory guard on native paths (backslash operands, drive-relative refusal)
+        if: ${{ !cancelled() }}
+        run: go test ./cmd/fleet/internal/fleet -run 'Cd|Drift|Guard|Hop|Unroled|Backslash|DriveRelative' -count=1
+      - name: Public install through the real installer (Git Bash on Windows)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test ./cmd/fleet -run '^TestPublicInstall$' -count=1 -v

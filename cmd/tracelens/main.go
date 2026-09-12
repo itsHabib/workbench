@@ -33,6 +33,7 @@ func main() {
 }
 
 func run() error {
+	dialect := flag.String("dialect", "neutral-jsonl", "trace dialect; auto detects provider event streams")
 	asJSON := flag.Bool("json", false, "emit the report as JSON")
 	quiet := flag.Bool("quiet", false, "skip the trace listing, print only the verdict")
 	flag.Parse()
@@ -43,7 +44,14 @@ func run() error {
 	}
 	defer closeFn()
 
-	tr, err := tracelens.ParseJSONL(src)
+	var decoded tracelens.DecodedTrace
+	if *dialect == "auto" {
+		decoded, err = tracelens.DecodeShipEvents(src)
+	}
+	if *dialect != "auto" {
+		decoded, err = tracelens.DecodeTrace(src, tracelens.Dialect(*dialect))
+	}
+	tr := decoded.Trajectory
 	if err != nil {
 		return err
 	}

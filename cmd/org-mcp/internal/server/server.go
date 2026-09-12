@@ -1,17 +1,5 @@
-// Package server is the org-mcp stdio server: a JSON-RPC 2.0 / MCP surface
-// over the org CLI, so an agent session gets the Baton verbs as native tools.
-//
-// It composes through org's CLI seam — shelling the binary, reading its JSON
-// receipts and its exit codes — and never imports the home. That is the
-// workbench boundary law doing its job: this package is transport + verb
-// allowlist, org owns the append protocol, contracts/org owns the law. A
-// kernel refusal (exit 1) comes back as an isError tool result carrying the
-// refusal reason, so the driving agent sees `dangling_claim` and corrects,
-// exactly as it would on the command line.
-//
-// The verb table IS the allowlist. Role-structure verbs — charter, takeover,
-// revoke, retire, recharter, delegate — have no entry, so they cannot be
-// reached over MCP; reshaping the org stays a deliberate operator act.
+// Package server translates MCP role-card operations to the org CLI.
+// It owns transport, not role definitions, work state, or a journal protocol.
 package server
 
 import (

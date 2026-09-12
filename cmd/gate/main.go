@@ -133,6 +133,9 @@ func main() {
 // row and no branch — dispatch stays mechanism, each handler keeps its policy.
 func commands() map[string]func([]string) error {
 	return map[string]func([]string) error{
+		"version":        func(args []string) error { return cmdPacketTools("version", args) },
+		"packet":         func(args []string) error { return cmdPacketTools("packet", args) },
+		"evidence":       func(args []string) error { return cmdPacketTools("evidence", args) },
 		"grant":          cmdGrant,
 		"grant-callback": cmdGrantCallback,
 		"gate":           cmdGate,
@@ -164,9 +167,12 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <version|packet|evidence|grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
+  version  (running binary revision and module version)
+  packet   -run run_x (inspect judgment context and missing evidence)
+  evidence -run run_x -grant grt_x -path repo/path (repeat -path for companions)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N (-grant grt_x | -slack) [-live]
   grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
@@ -1607,6 +1613,9 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 			return gateResult{}, 0, "", err
 		}
 		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted, opts)
+	}
+	if _, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, grant.MaxTier); err != nil {
+		return gateResult{}, 0, "", err
 	}
 	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {

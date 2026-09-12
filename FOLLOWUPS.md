@@ -2,99 +2,115 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
-## org: transfer's last orphan window needs a cross-chain transaction
+## fleet visibility: final-review residuals on PR #319
 
-`org transfer` writes to two chains under two locks. It assigns to the
-destination first so a crash leaves a *visible* double-hold rather than a
-silent orphan, fences each append to the tip it read, and re-reads the
-destination immediately before unassigning the source. One window survives
-that: if the destination holder drops the work between that re-read and the
-source's append, the source's unassign still succeeds — its own tip has not
-moved — and the item ends up held by nobody.
+The two permitted fix rounds ended at code head `3a36614`. The final Copilot
+panel's P1 browser/diagnostic deadline mismatch was fixed by allowing 45 seconds
+for the bounded 30-second Fleet read plus 10-second TraceLens call and response
+margin. Native Output rendering was moved unchanged from runtime PR #318 into
+this PR, with a direct Inspect regression, removing that merge dependency.
+It was also tested with combined source and real provider traces. No fourth panel is requested. Remaining
+P2/P3 items are recorded for judgment:
 
-It cannot be closed at this layer. `Draft.ExpectTip` fences a chain against
-ITS own movement; there is no way to make one chain's append conditional on
-another chain's state, because there is no lock ordering across homes and no
-two-phase commit. The options, when it matters:
+- **P2, bare TraceLens contract documentation:** bare `tracelens <file>` now
+  requires neutral JSONL containing an analyzable step. Provider streams need
+  `-dialect auto`; rejecting empty/wrong-dialect input replaces an old fabricated
+  pass. Existing in-repo provider callers select a dialect, including Console.
+  Add the explicit default contract to the README usage block and a CLI-level
+  regression. No backwards-compatibility path is intended.
+- **P3, display/context:** identify the Fleet state root on the page, make the
+  work join independent of Console's starting cwd, and omit unrendered full
+  result bodies from board JSON so many long answers cannot exhaust its cap.
+- **P3, trace/mail edges:** name an oversized single trace record rather than
+  showing an empty partial window; document that observed trace paths are
+  same-user files and may follow symlinks. A duplicate mail id across retained
+  directories currently makes that mailbox unavailable rather than choosing a
+  record; retain explicit ambiguity until a duplicate policy is chosen.
+- **P3, coverage/hardening:** add direct CLI-output-size/deadline, ambiguous
+  address and `/fleet` foreign-Host regressions. Existing API Host/read-only
+  tests and an independent scratch-browser probe passed. Escape the numeric
+  `message_count` consistently even though its producer is currently integer or
+  null. None of these is evidence of script execution or a writable route.
+- **P2, consistency:** partial mailbox rows are labeled "Latest" above their
+  explicit warning that newest coverage is unknown; use neutral wording for
+  partial scans. Register `codex-app-server` in the evaluator's separate dialect
+  allowlist and corpus completeness checks. Console's direct auto-detection
+  path is covered and does not use that evaluator allowlist.
 
-- A tenant-level lock taken for the duration of a multi-chain verb. Simple,
-  and it serializes every transfer in the tenant against every other.
-- An intent record on both chains (the `intent`/`resolve` effect machinery
-  already models exactly this: an open effect survives a crash and blocks new
-  claims until resolved), making the transfer a two-phase operation whose
-  half-done state is a first-class, kernel-refused-until-resolved condition
-  rather than something a sweep notices afterwards.
+Review evidence: [independent design/runtime review](https://github.com/itsHabib/workbench/pull/319#issuecomment-5636954062).
+Recorded validation: [Fleet visibility checks](docs/features/fleet-visibility/validation.md).
 
-The second is the shape this substrate already believes in. Until then the
-residual window is documented, `sweep` reports the double-hold half of it,
-and nothing reports the orphan half — which is the honest gap.
+Gate run `run_695619a145b7ddbe` rejected the earlier terminal-outcome deferral.
+The resulting bounded correctness repair recognizes interrupted turns as
+failures and explicit declined actions as warning findings, retaining the
+refusal without inventing a producer-declared failure of the whole run.
+Regressions prove later successful activity cannot turn either into a clean
+diagnostic. This is a substantive repair submitted for new judgment, without
+another panel cycle; the original block remains in the record.
 
-## org: recharter has no writer, because widening authority has no check
+## fleet: avoid repeating all-agent joins during detail refresh
 
-`KindRecharter` is kernel-admissible and its own doc says it is "authored under
-the parent charter", but nothing enforces that: `checkRecharter` verifies only
-that `min_reader` is monotone, and `checkWriter` accepts the current holder's
-own incarnation. A CLI verb was written and then withdrawn from #272 on that
-finding — exposing it would let a role raise its own tier, add effect classes,
-lift its ceilings, drop the supervisors that may take it over, or widen its
-scope, all self-signed.
+PR #319 retains one address-resolution path: `inspect` and `trace` resolve the
+current agent through `AllStatus`. Console therefore repeats bounded mailbox and
+checkout joins after fetching the board. Real three-agent provider runs pass,
+but this work grows with fleet size and can approach the 30-second CLI deadline.
+Measure board-plus-detail latency on larger fleets; before a normal refresh
+exceeds five seconds, extract a detail lookup that enriches only the uniquely
+resolved address while preserving binding and ambiguity checks. Do not add a
+second state store or a stale identity cache. This P2 scaling suggestion is
+deferred from the final correctness fix round; current timeouts fail visibly.
 
-Two things are missing, and the second is why the obvious guard does not work:
+## fleet: dispatch still publishes two records
 
-1. **Parent authority.** There is no mechanism for a record to be authorized by
-   another role. `takeover` names a `party` and `checkTakeover` verifies it
-   against `Terms.Supervisors`, so the shape exists; recharter needs the same,
-   plus the operator-facing question of who the parent is for a top-level role.
-2. **Attenuation the kernel can verify.** Effect classes (subset), supervisors
-   (no shrink) and scope (every new entry covered by the old) are checkable.
-   `Tier` is an opaque string — the kernel imposes no ordering, so it cannot
-   tell T1→T3 from T3→T1 — and the ceilings have no consumer, so whether 0
-   means "none" or "unlimited" is undecided. A law refusing what it cannot
-   compare would have to freeze tier entirely.
+PR #310 review identified a failure window in `cmdDispatch`: `CmdAssign` can
+publish placement, then writing the dispatch row can fail. The command reports
+the error, but the assignment survives and can wake its configured worker. This
+does not authorize different work; it does mean a failed command can leave work
+running without the corresponding ownership row. Inspect both records after a
+dispatch persistence error; do not blindly retry it.
 
-Until both exist, terms are set once at charter. A role whose terms are wrong
-is retired and re-chartered, which is visible in the chain rather than
-self-signed inside it.
+Remove the duplicated work declaration by making placement reference one
+authoritative assignment, as the earlier Fleet boundary decision intended.
+Do not add a second transaction journal just to coordinate these two files.
+A bounded follow-up must cover write failures, watcher visibility during publish,
+and replacement of existing assignments. Deferred from this simplification pass
+because an isolated rollback after releasing the seat lock can race a live worker
+or overwrite a subsequent assignment; fixing that requires changing the shared
+assignment/dispatch publication boundary, including direct assign callers.
 
-## org: annul is a repudiation, not a revert
+PR #310 also retains two reviewed style choices: `RuntimeText()` builds its own
+worker slice and asserts that internal type; `tailDirectory` has a compiler-required
+return after its single-entry map traversal. Neither is a known behavioral defect.
 
-`applyStructural` appends the annulled digest to `Annulled` and changes nothing
-else: `Terms`, `Held`, `Active` and `NextDue` still carry whatever the annulled
-record did. That is consistent with an append-only chain (correct forward), and
-`org annul` now prints the effect still standing so the verb cannot be misread
-as undo. What is undecided is whether a reader should SKIP annulled records
-when folding. It cannot be done in one pass — a record's annulment is only
-known after it has been applied — so it would mean a two-pass fold, and it
-would change the derived state of every existing chain that carries an annul.
-Worth deciding before anything depends on `Annulled` for more than reporting.
+## fleet: completed plain text without a newline in tail
 
-## org: scope membership cannot become an admission law as the kernel stands
+PR #310's final Codex review reproduced a completed `/usr/bin/printf` output without
+its trailing newline being omitted by `fleet tail`. The raw per-launch log retains
+those bytes and `fleet watch status` points to it. Deferred at the two-fix-round cap;
+fix terminal-fragment handling without displaying partial live records as complete.
+The live Claude JSON/transcript sandbox does not exercise or resolve this case.
 
-The field report (§4.4) proved `assign` enforces no scope at all: a lane
-chartered `github:Acme/Repo` accepted `jira:PROJ-9999`, `github:Other/Thing#1`
-and `banana:whatever` without a murmur. The predicate now exists
-(`contracts/org.InScope`) and both `intake` and `sweep` apply it, but it is a
-FINDING, not a refusal. Two facts block the law:
+## fleet: guessed handoff read flags replace the checkpoint
 
-1. **Replay re-admits.** `Reduce` folds by calling `Advance` → `Admissible` on
-   every historical record. A law added today is therefore applied to records
-   written years ago: every chain that ever assigned outside its scope stops
-   folding, which is a worse failure than the drift it prevents.
-2. **The obvious escape does not exist.** An opt-in charter term
-   (`scope_enforced`) would bind only new charters — except `Terms.Canonical`
-   emits *every* field, with no omission of zero values, so adding one changes
-   the canonical bytes of every charter ever written and invalidates their
-   digests. The encoder's own doc states the constraint: once a record is
-   written, the bytes that produced its hash can never change.
+Live sandbox r7 on PR #310 saw both a worker try `handoff <branch> --list` and a
+lead try `handoff <branch> --show`. The positional parser accepted each as a new
+conclusion and replaced the latest checkpoint. The lead noticed and corrected
+its stray write, and saved first-session evidence survived outside the handoff.
+The guide now names the actual read paths. A focused CLI fix should reject unknown
+options before mutation and prove the old checkpoint bytes remain intact; do not
+add an Org lifecycle or checkpoint history to solve argument parsing.
 
-So enforcement needs a scheme version: `canon/v2` with a Terms shape that
-omits absent fields, records written at the new scheme, and admission laws
-gated on the record's own scheme so a v1 record is judged by v1 rules. That is
-a real migration, not a flag. Until then, drift is reported by `org sweep`
-(`scope_drift`), `org intake`, and `org transfer` (which warns when the
-destination's scope does not cover the work it just moved), and the skills'
-"mechanical predicate" claim is true of the predicate but not of admission —
-say detected, not prevented.
+## fleet: PR cache mistakes a number in create-body prose for the PR operand
+
+Live sandbox r7 on PR #310 created draft PR #15, but `CachePullRequest` recorded
+#42 from the benchmark result inside `gh pr create --body` text. `explicitPull`
+scans shell words without distinguishing option values from positional operands;
+create has no PR-number operand. The verifier independently checked GitHub and the
+reported full SHA, so the receipt remained bound to the correct commit. Fix this
+by using the single returned PR URL for create and parsing operands only for verbs
+that accept them; cover multiline bodies with numbers and other PR URLs. Do not
+infer task completion or merge authority from this cache.
+
 
 ## gate: mid-run merge race can still park (codex P1 on #219, deferred)
 
@@ -450,11 +466,13 @@ path-filtering that could green a tool whose contract shifted under it). Split
 into per-tool path-filtered jobs when tool count or test time makes module-wide
 retest wasteful.
 
-## @claude reviewer
+## ~~@claude reviewer~~
 
-`claude.yml` is committed but @claude is **not** requested until the operator
+~~`claude.yml` is committed but @claude is **not** requested until the operator
 sets the `CLAUDE_CODE_OAUTH_TOKEN` repo secret. Once set, @claude joins the
-reviewer set (@codex, @cursor) on the next PR.
+reviewer set (@codex, @cursor) on the next PR.~~ Done 2026-08-03: the
+`CLAUDE_CODE_OAUTH_TOKEN` repo secret was set; @claude has joined the reviewer
+set (@codex, @cursor) and reviewed #275.
 
 ## ~~cmd/triage: gocognit debt in internal/floor (2026-07-17)~~
 
@@ -504,3 +522,178 @@ one tool-call away from an agent. What would change the calculus: session-state
 verbs emerging on the gate side (e.g. a park-inbox an agent polls, cross-run
 grant/cycle queries) where discovery + typed schemas beat re-shelling — the
 same bar workbench-mcp cleared. Evaluate then; not before.
+
+## Fleet report residuals (PR #286, 2026-09-07)
+
+- The installer predates this report and writes unquoted binary command paths.
+  A custom `FLEET_HOME` containing spaces needs a separate installer quoting pass
+  covering both installation and shadow cleanup. The operator's current absolute
+  path has no spaces; this report does not claim the broader installer case.
+- Keep legacy `shadow-report` percentile selection unchanged. The operational
+  report documents nearest-rank percentiles; historical shadow comparison uses
+  the previous floor-index method. Unifying these would change old comparison
+  numbers and is not required for the operational report.
+
+- Fleet report PR #286: the Gate-blocking lifetime scan is now bounded to 1 MiB
+  and 4096 physical records per source, with explicit partial-history warnings.
+  A future indexed reader could preserve longer windows within the same resource
+  budget. Empty telemetry reason/out strings remain a compatibility deferral:
+  current consumers normalize them identically to null/absent fields.
+
+## Fleet #289 — residual after the capped review rounds
+
+Code head: `b16c52387fcaadf35a63065c36845ba3aa74e6ab`. The Mac review used the
+initial panel plus two fix rounds; do not start a fourth panel cycle for these nits.
+
+- **Diagnostic only: duplicate extra denies.** Copilot identified, and Claude confirmed,
+  that manually duplicated entries in settings.local.json can appear twice in the
+  retained-extra NOTE. `writeDenies` deduplicates the actual written permissions through
+  `denySet`, so enforcement is unchanged and the resulting file is normalized. A future
+  small change can deduplicate `extra` too, with a duplicate-input regression. Deferred
+  under the review cap rather than changing enforcement or claiming the finding vanished.
+- **Repeated roles.map reads.** Tenant and label resolution independently scan bindings.
+  Consolidating one validated snapshot may simplify a later pool transaction change;
+  this PR does not claim atomicity against concurrent edits to all role bindings.
+
+No residual acceptance or merge authority is recorded here. The merge decision still
+belongs to the operator's governed path. Windows visible-window acceptance and effective
+hook migration remain separate from the green portability tests.
+
+## Fleet task coordination residuals (PR #288, 2026-09-08)
+
+Final panel reviewed code head `9a243af21bd7f72f94e5c5af0e7bad0e4d60b1fd`.
+Three cycles completed; AGENTS.md Review-cycle discipline requires residual P2s
+and nits to be recorded for judgment rather than another panel loop. These are
+proposed deferrals, not accepted risk or merge permission. No installation.
+
+- **P2, Windows branch spelling:** CmdRequest retains supplied spelling rather
+  than the canonical branch spelling resolved by Git. On case-insensitive Windows
+  ref lookup, Task can resolve task but compare ownership/activity under a different
+  key. Fix canonical identity while retaining deleted-branch replay behavior and
+  add Windows coverage before portability claims. Normal hook effects remain
+  subject to their own branch guard; request itself grants no lease or execution.
+  Source: Codex review comment 3954511775. Windows live parity remains unproved.
+- **P2, incomplete request evidence:** strictDispatchRows validates base dispatch
+  fields, not all request-specific types. Missing/invalid numeric at can default to
+  zero and admit old matching activity while complete remains true. Validate
+  request_id, worker and finite timestamps before deriving status/replaying.
+  Source: Codex review comment 3954511783. This is a status-integrity defect, not
+  evidence of acceptance or authority. Must be resolved or explicitly accepted
+  before treating the new board as operationally reliable.
+- **P2 assessment, busy-store diagnostics:** ErrKeyBusy bubbles up as generic exit
+  4 in request/dispatch/reassign/undispatch rather than an actionable refusal.
+  The lock callback does not execute, so no conflicting write is authorized.
+  Normalize error classification and test contention response in a follow-on.
+  Source: Copilot review comment 3954505362 and its suppressed sibling comments.
+- **Cosmetic:** scoped row loops retain redundant repo/branch/relationship tests.
+  Claude final review finds no blocking defects; leave this harmless redundancy.
+
+Code verification: Fleet race tests, lint/vet, both harness regression suites and
+full CI/fuzz/hygiene passed. Those checks do not cover or dismiss the residuals
+above. No additional panel request should be sent for this PR under the current cap.
+
+
+## Fleet retained-mail scan (2026-09-10, PR #295)
+
+Hook mail listing currently decodes retained records before filtering acknowledgements,
+so latency grows with lifetime mailbox history. Codex flagged this as a P2 scaling
+concern in the final review. Defer indexing/archival in the standalone mail slice:
+measure hook latency against a representative retained mailbox first, then choose
+an unacknowledged index or archive with tested atomic send/ack consistency and
+recovery behavior. Owner: Fleet mail maintainer. This is a known limitation, not
+a claim of constant-time hook delivery.
+
+## Fleet startup publication diagnostic (2026-09-10, PR #298; resolved)
+
+Final Codex comment 3980707982 identified silent assignment-context loss when
+SessionStart could not publish its session record. Gate rejected deferral in run
+`run_b228a92996f00d0e`. SessionStart now handles the publication error explicitly:
+startup stays nonblocking, prints an actionable warning to inspect `fleet work
+--json`, repair session storage and restart, and logs the underlying I/O error.
+Occupancy and assignment identity checks remain in force. A deterministic
+session temporary-path collision regression verifies the warning, diagnostic,
+exit 0 and byte-identical assignment preservation. This fix returns directly to
+Gate judgment without another review-panel trigger.
+
+## Fleet watch delivery residuals (2026-09-10, PR #301)
+
+Two Codex P2 findings are deferred rather than fixed; both are design work, not
+defects in the delivery fix that landed.
+
+- **P2, reservation recovery across a crash.** `launch` stamps
+  `delivered_at`/`delivered_by` before it starts the command, and a start that does
+  not happen gives the stamps back. A kill or host restart between the two loses the
+  in-memory list, so the mail stays stamped and no later fold carries it. Closing this
+  needs a durable pending state distinguishable from a confirmed delivery, plus
+  startup reconciliation — a reservation record with an owning pid, reclaimed when
+  that pid is gone. Deferred so the recovery contract is designed once rather than
+  approximated inside the fold. Source: Codex thread on `deliver.go:236`.
+- **P2, duplicate addresses across tenants are invisible to the watcher.**
+  `MailAddressTenant` refuses an address bound in two tenants, so delivery cannot
+  target either mailbox and `lateReplies` skips it. Fixing it means carrying the
+  tenant in `deliver.json` and in the fold's own row identity rather than resolving
+  an address to one global tenant — a configuration change, and one that should land
+  with the tenant-qualified delivery entry, not ahead of it. Duplicate addresses stay
+  legal in `roles.map`; only substrate-initiated delivery declines them, and it
+  declines rather than guessing. Source: Codex thread on `mail_store.go:65`.
+
+Code verification at this head: `go test -race ./cmd/fleet/...`, `go vet`,
+`golangci-lint`, and both `testdata/run-suite.sh` variants pass. Those checks do not
+dismiss the residuals above. No further review-panel request goes out for this PR.
+
+
+## Fleet status identity findings (2026-09-11, PR #313)
+
+Gate rejected deferring two final-panel P2 findings. Both are now addressed:
+status rejects a retained launch with a different address/cwd before attaching
+process/output evidence, and suppresses checkout-derived joins when the directory
+is missing. Regression tests cover both cases and confirm the display rejection
+does not change directory-level launch exclusion. No fourth panel is requested;
+the corrected head goes through fresh CI and independent Gate judgment.
+
+## Fleet provider cleanup qualification (PR #318)
+
+The initial review suggested forcing the Node bridge to exit after an interrupt
+that cannot be acknowledged. That is deliberately deferred: a collected bridge
+exit could permit a new worker while a provider descendant still runs. Codex's
+transport close already escalates to SIGKILL after five seconds and awaits close;
+Claude's SDK owns its synchronous `close()` operation. A live stuck bridge keeps
+the directory reserved. A bridge that disappears without matching provider-terminal
+or proven never-started evidence also keeps its reservation, whether or not its exit
+was collected. Do not substitute `process.exit` for evidence of
+provider cleanup. General descendant cleanup is outside this transport
+slice; a future execution-scope change needs failure injection and measured
+process-tree evidence. Normal Codex turn interruption passed a real foreground
+command test. Normal real Claude SDK interruption has also passed; forced cleanup
+remains unqualified.
+
+Final-panel residuals at the two-fix-round cap: the README's later status paragraph
+still calls session integration future work; use the provider guide and PR #318's
+evidence instead. `fresh: true` starts a new session only after the prior reservation
+can safely release. A failed resume without provider-terminal, never-started or the bounded macOS
+pre-turn quiescence proof below retains its reservation; fresh does not bypass
+that safety check. General descendant cleanup remains deferred with execution scopes.
+Provider delivery now refuses relative FLEET_STATE or ORG_STATE roots before
+launching, because a child working directory would otherwise change their meaning.
+Use absolute state roots. Final identity and state-root fixes go to the judge with
+tests; no fourth panel is requested.
+
+Gate's subsequent block required a bounded recovery repair. Matching terminal or
+never-started evidence now releases a known-absent bridge even after watcher loss.
+Both providers observe native process creation; an actual no-process spawn error
+restores never-started evidence, allowing the next eligible wake to retry the
+original requested session. This does not release an ambiguous started provider.
+Regressions cover missing/stale evidence and both provider startup failures. The
+substantive repair goes to a new exact-head Gate judgment without another panel.
+
+A second Gate block required a distinct started-but-pre-turn recovery contract.
+On macOS only, the Go owner now arms fork/exec/exit observation behind a pre-exec
+barrier. Explicit Codex initialize/thread-start/resume rejection plus a definitely
+unsent turn and matching no-fork/exit proof releases the attempt without claiming
+a completed turn. The ordinary installed official npm wrapper resolves automatically
+to its matching native payload. Arbitrary wrappers, any observed fork, observer
+failure, missing phase and possibly sent turns retain the reservation. No descendant
+registry or general process cleanup policy is introduced. A real Go-watcher probe
+removed only its own disposable session history, received a native resume rejection,
+then completed an explicit fresh retry with the dirty file preserved. This repair
+continues through fresh CI and Gate judgment without a fourth panel.

@@ -94,3 +94,21 @@ tight:
    "human act" property stays visible (no agent-reachable endpoint).
 4. **Record / driver runs.** Broader ledger browsing and a read-only driver lane
    — only as friction justifies.
+
+## Fleet activity view
+
+The same boundary now applies to Fleet: `/fleet` renders read-only CLI
+projections through `internal/fleetcli`; `/api/fleet/{status,report,inspect,trace}`
+proxy fixed commands, and `/api/fleet/diagnostics` passes Fleet's observed trace
+bytes to TraceLens over stdin. No state store, scheduler, provider client or
+process control is added to Console. CLI output and execution time are bounded.
+
+The board presents registered addresses and their current observed runtime
+state. A detail view keeps the latest authored handoff, exact-head work records,
+received messages, recent visible output, retained attempts and diagnostics
+separate. Timestamps are source observations; the timeline is not a fabricated
+complete history. Refresh errors, missing telemetry, partial trace windows and
+unavailable diagnostics remain visible. Nothing automatically stops an agent.
+
+This extends the earlier Gate-only surface; Gate's existing root and run routes
+retain their behavior. Fleet does not require a working Gate installation to view.

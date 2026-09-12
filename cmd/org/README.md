@@ -1,76 +1,52 @@
 # org
 
-The Baton home: role continuity chains for agent sessions. A **role** is a
-durable office (`lead:agentic-development`) with an append-only hash chain; a
-**session** is a disposable incarnation that attaches to it, acts, and leaves
-a record. The next session starts where the last one stopped, and two
-sessions cannot silently reach different conclusions about the same thing —
-the chain's compare-and-swap refuses the second writer.
-
-The kernel (record spine, state machine, admission laws, the fold) is
-[`contracts/org`](../../contracts/org); this binary is its runtime.
-
-## Quickstart
+Editable role cards and a small registry. Give a role a name, write its prose,
+and optionally name a parent. There is no role lifecycle to perform before work.
 
 ```sh
-go install ./cmd/org
-
-# the operator charters a role once
-org charter -role lead:agentic-development \
-  -scope dossier:org -scope github:itsHabib/workbench \
-  -supervisor human:mh -cycle-ceiling 3 \
-  -retire-when "org loop merged into steward"
-
-# new work arrives: ask where it belongs before anything is written
-org intake  -work github:itsHabib/workbench#88
-
-# move work between two attached lanes (assign-first, both tips fenced)
-org transfer -role steward:a -work github:itsHabib/workbench#88 \
-  -to steward:b -to-incarnation "$B_INC" -incarnation "$A_INC"
-
-# a record written in error is repudiated (tip only; corrects forward, not back)
-org annul   -role lead:agentic-development -body "written against the wrong lane"
-
-# small work, bracketed by the composites: same records, two commands
-org begin -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
-org done  -role lead:agentic-development -body "where it ended up"
-
-# a session becomes the incarnation, works, and leaves a record
-org attach  -role lead:agentic-development -next-due 4h
-org assign  -role lead:agentic-development -work dossier:org/p1/t3 -pin "task body"
-org claim   -role lead:agentic-development -work dossier:org/p1/t3
-org yield   -role lead:agentic-development -work dossier:org/p1/t3 -body "where I stopped"
-org checkpoint -role lead:agentic-development -body "SESSION END: …"
-
-# the next session reads the index the last one left
-org boot    -role lead:agentic-development
+# Write lead.md in your editor: purpose, responsibilities, repos and useful context.
+org charter -role lead:project -file ./lead.md -parent human:mh
+org boot -role lead:project
 org status
+
+# A second repo or child is ordinary configuration.
+# Edit lead.md; the next boot reads the change under the same role name.
+org charter -role researcher:project -file ./researcher.md -parent lead:project
 ```
 
-`org boot` is the re-entry surface: a byte-capped index (default 2048) of the
-role's charter, held work, obligations, liveness, and the last incarnation's
-final word — pointers with hooks, not a context dump. Depth is read lazily
-(`org blob <digest>`, `org log`).
+`charter` registers or updates the file reference. Omit `-parent` on an update to
+retain it; use `-parent ""` to clear it. The Markdown file stays where you wrote it.
+The registry is `$ORG_STATE/roles.json` (default `~/dev/org/state/roles.json`), a
+JSON array of `tenant`, `role`, `card` and optional `parent`. Commands accept
+`-state`, `-tenant` and `-json`. `boot -max-bytes N` optionally limits prose and
+points to the full card when truncated.
 
-Refusals are the substrate working: claim work you don't hold → exit 1,
-`work_not_held`. A supervisor `takeover` mid-claim leaves a **dangling
-obligation** the successor must discharge before claiming anything — silent
-disappearance of work is not representable.
+Parent references help discovery. Scope, expectations and repo lists belong in
+the prose; they do not become permission gates. Registering a role does not bind
+a directory, launch a worker, or create a messaging protocol. `roles.map` retains
+the existing directory/seat bindings. Fleet can work without this registry; Org
+can describe roles without Fleet. Read a card directly or use the optional startup
+hook to supply it to a session.
 
-## Harness wiring
+Mail belongs to mail. Useful handoffs belong with the work. Neither requires an
+Org claim, incarnation or checkpoint. Actual resource leases and merge authority
+remain with their existing owners.
 
-Two hooks close the loop for Claude Code sessions (both fail-open):
+## Clean cutover
 
-- `hooks/sessionstart-boot.sh` — injects `org boot` into a fresh session when
-  its cwd maps to a role in `$ORG_STATE/roles.map`
-  (`<path-prefix> <tenant> <role>`, longest prefix wins).
-- `hooks/stop-mark.sh` — appends a mechanical `mark` when a session stops;
-  the next boot renders `degraded` until someone distills a checkpoint.
+This release removes the Baton CLI and its Stop shim. There is no fallback or legacy
+command. Install matching `org` and `org-mcp`; the only operations are charter, boot,
+and status. Existing journal files are inert historical data, not inputs to this runtime.
 
-Install snippets are in each script's header. State lives at `$ORG_STATE`
-(default `~/dev/org/state`).
+Before activating the new binaries, stop the old watchers and remove the old Org hook
+entries, including installed copies of `sessionstart-boot.sh`, `pretool-lane-guard.sh`,
+`lane-resolve.sh` and `stop-mark.sh` under `~/dev/org/hooks/`. Remove attach, intent,
+claim, chain and incarnation instructions from global harness guidance, installed
+supervisor/worker cards, task-owner/verifier/supervisor skills and deliver.json prompts.
+Replace the Org MCP entry with the matching three-tool build and start fresh sessions.
+Register the role prose you intend to use and bind directories in roles.map as needed.
 
-## Exit codes
-
-`0` ok · `1` the kernel refused the record (stderr names the reason) ·
-`2` usage · `4` error.
+Use the optional checked-in SessionStart card reader for new sessions; no Org write guard
+or Stop hook belongs in the new setup. Fleet owns runtime occupancy and authored handoffs.
+Old files need not be deleted or migrated to start this workflow. Installing this build
+does not assert that historical work completed. See [the boundary decision](../../docs/features/org-fleet-boundary/spec.md).

@@ -14,10 +14,11 @@ type Dialect string
 
 // The dialects tracelens can decode.
 const (
-	DialectNeutral    Dialect = "neutral-jsonl"
-	DialectShipCursor Dialect = "ship-cursor"
-	DialectShipClaude Dialect = "ship-claude"
-	DialectShipCodex  Dialect = "ship-codex"
+	DialectNeutral     Dialect = "neutral-jsonl"
+	DialectShipCursor  Dialect = "ship-cursor"
+	DialectShipClaude  Dialect = "ship-claude"
+	DialectShipCodex   Dialect = "ship-codex"
+	DialectCodexServer Dialect = "codex-app-server"
 )
 
 // DecodedTrace carries the normalized trajectory and the provenance of the
@@ -44,6 +45,8 @@ func DecodeShipEvents(r io.Reader) (DecodedTrace, error) {
 		tr, err = parseCursorEvents(bytes.NewReader(raw))
 	case DialectShipClaude:
 		tr, err = ParseClaudeEvents(bytes.NewReader(raw))
+	case DialectCodexServer:
+		tr, err = ParseCodexServerEvents(bytes.NewReader(raw))
 	case DialectShipCodex:
 		tr, err = ParseCodexEvents(bytes.NewReader(raw))
 	default:
@@ -104,7 +107,8 @@ func hasAnalyzableStep(tr Trajectory) bool {
 }
 
 type eventEnvelope struct {
-	Type string `json:"type"`
+	Type   string `json:"type"`
+	Method string `json:"method"`
 }
 
 // assistantCarriesToolUse reports whether a raw assistant event line carries at
@@ -147,6 +151,8 @@ func detectShipDialect(raw []byte) (Dialect, error) {
 		// stream, and both the cursor and claude dialects carry assistant
 		// text events.
 		switch {
+		case isServerEvent(ev.Method):
+			seen[DialectCodexServer] = true
 		case ev.Type == "tool_call" || ev.Type == "thinking" || ev.Type == "status":
 			seen[DialectShipCursor] = true
 		case ev.Type == "system" || ev.Type == "result" || ev.Type == "user":
@@ -159,7 +165,7 @@ func detectShipDialect(raw []byte) (Dialect, error) {
 			// with no surviving system/user/result — still detect and decode
 			// as an aborted run instead of erroring as an unrecognized dialect.
 			seen[DialectShipClaude] = true
-		case strings.HasPrefix(ev.Type, "thread.") || strings.HasPrefix(ev.Type, "turn.") || strings.HasPrefix(ev.Type, "item."):
+		case isCodexExecEvent(ev.Type):
 			seen[DialectShipCodex] = true
 		}
 	}
@@ -181,4 +187,12 @@ func detectShipDialect(raw []byte) (Dialect, error) {
 		return d, nil
 	}
 	panic("unreachable")
+}
+
+func isServerEvent(method string) bool {
+	return strings.HasPrefix(method, "item/") || strings.HasPrefix(method, "turn/") || method == "thread/started"
+}
+
+func isCodexExecEvent(kind string) bool {
+	return strings.HasPrefix(kind, "thread.") || strings.HasPrefix(kind, "turn.") || strings.HasPrefix(kind, "item.")
 }

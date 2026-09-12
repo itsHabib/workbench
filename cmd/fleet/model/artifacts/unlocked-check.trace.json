@@ -1,0 +1,67 @@
+[
+  {
+    "facts": [],
+    "holder": "Nobody",
+    "inFlightA": false,
+    "inFlightB": false,
+    "liveA": "Alive",
+    "liveB": "Alive",
+    "lookedA": false,
+    "lookedB": false,
+    "sawA": "Nobody",
+    "sawB": "Nobody"
+  },
+  {
+    "facts": [],
+    "holder": "Nobody",
+    "inFlightA": false,
+    "inFlightB": false,
+    "liveA": "Alive",
+    "liveB": "Alive",
+    "lookedA": false,
+    "lookedB": true,
+    "sawA": "Nobody",
+    "sawB": "Nobody"
+  },
+  {
+    "facts": [],
+    "holder": "Nobody",
+    "inFlightA": false,
+    "inFlightB": false,
+    "liveA": "Alive",
+    "liveB": "Alive",
+    "lookedA": true,
+    "lookedB": true,
+    "sawA": "Nobody",
+    "sawB": "Nobody"
+  },
+  {
+    "facts": [
+      "AuthorizedB"
+    ],
+    "holder": "Held(B)",
+    "inFlightA": false,
+    "inFlightB": true,
+    "liveA": "Alive",
+    "liveB": "Alive",
+    "lookedA": true,
+    "lookedB": false,
+    "sawA": "Nobody",
+    "sawB": "Nobody"
+  },
+  {
+    "facts": [
+      "AuthorizedA",
+      "AuthorizedB"
+    ],
+    "holder": "Held(A)",
+    "inFlightA": true,
+    "inFlightB": true,
+    "liveA": "Alive",
+    "liveB": "Alive",
+    "lookedA": false,
+    "lookedB": false,
+    "sawA": "Nobody",
+    "sawB": "Nobody"
+  }
+]
