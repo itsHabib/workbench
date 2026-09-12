@@ -41,6 +41,67 @@ stored command, then CAS-publishes one result. It never promotes commit status.
 The path is installed but unarmed until the operator completes the runbook. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
+## Inspect and repair judgment evidence
+
+Run `gate version` to see the binary's stamped revision and Go build metadata.
+The `go_vcs_*` fields are diagnostic: Go 1.26 can stamp a nested Git worktree
+with its enclosing checkout's revision. An unstamped local build therefore
+reports its revision as unknown rather than presenting that metadata as proof.
+For a local build, stamp the source revision explicitly:
+
+```sh
+go build -ldflags "-X main.buildRevision=$(git rev-parse HEAD)" -o gate.exe ./cmd/gate
+./gate.exe version
+```
+
+Build from a clean checkout; the revision identifies committed source. Update an installed binary with
+`go install github.com/itsHabib/workbench/cmd/gate@latest`, then check
+`command -v gate` and `gate version` again. An older binary does not acquire
+merged fixes just because its checkout was updated.
+
+Before invoking a judge, Gate checks the recorded packet. Required reviewer
+file sections are included completely within a 256 KiB budget; ambiguous
+basenames include all matching changed files. An exact-head Git file index
+separates real unchanged companions (including extensionless filenames) from
+hypothetical examples and code symbols in review prose. If the index is absent,
+Gate reports that before judgment. Missing source and omitted reviews are
+listed together; full current source or indexed absence also covers a stale
+line reference. Coverage is evidence availability, not proof a finding is fixed.
+
+```sh
+gate packet -run run_... -state ~/dev/gate/state
+gate evidence -run run_... -grant grt_... -state ~/dev/gate/state
+gate packet -run run_... -state ~/dev/gate/state
+gate judge -run run_... -grant grt_... -auto -provider codex -state ~/dev/gate/state
+```
+
+`packet` is read-only JSON, including `complete`, every `missing` requirement,
+the context, `required_sources`, and the running Gate version. `judge` returns exit 4 with
+`judgment_evidence_incomplete` before invoking a provider or recording a
+judgment when required context is missing. Repair that existing run; creating
+another `gate gate` run spends another review cycle.
+
+`evidence` fetches the complete Git file index at the recorded head, discovers
+all required source, and collects it in one call. A truncated index is an error,
+never proof a file is absent. It fetches regular text files directly from GitHub
+at that full head SHA, verifies their Git blob hashes, and appends the index and
+content to the run. With explicit `-path docs/guide.md -path docs/companion.md`,
+it collects only those paths alongside the index; values are preserved exactly.
+It rechecks the live PR head and grant, allows at most three supplements and
+256 KiB of source across the run, and accepts at most 32 source paths per call.
+The required-diff and required-review sections have separate 256 KiB and 64 KiB
+budgets; exceeding either reports the missing evidence before provider invocation. It does not load arbitrary local source or give author comments review authority.
+Unchanged companion files can be supplied this way; supply exact repository
+paths. Packet source limits are explicit, never silent truncation. If a required
+file or the reviews exceed those bounds, split the change or escalate the
+packet limitation; repeatedly invoking judgment cannot fix it.
+
+A repair is available only before the run's first judgment. Changed heads need
+a new run, and a substantive blocked judgment remains final for its escalation.
+There is no retry mode that relabels a code rejection as missing evidence or
+widens a grant. Existing review cycles, independent judgment and exact-head
+merge authorization stay in force.
+
 ## Run it
 
 ```

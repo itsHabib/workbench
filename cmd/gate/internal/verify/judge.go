@@ -132,9 +132,12 @@ type judgmentArtifactWire struct {
 
 // NewJudgmentRequest builds the provider request purely from recorded state.
 func NewJudgmentRequest(arts []state.Artifact, run, escalationID string, subject Subject, grantID, maxTier string) (JudgmentRequestV1, error) {
-	ctx, err := judgeContext(arts)
+	packet, err := JudgmentPacket(arts, subject)
 	if err != nil {
 		return JudgmentRequestV1{}, err
+	}
+	if !packet.Complete {
+		return JudgmentRequestV1{}, fmt.Errorf("judgment_evidence_incomplete: %s; inspect gate packet and repair the same run before retrying judgment", strings.Join(packet.Missing, "; "))
 	}
 	question, err := escalationQuestion(arts, escalationID)
 	if err != nil {
@@ -147,7 +150,7 @@ func NewJudgmentRequest(arts []state.Artifact, run, escalationID string, subject
 		Subject:      subject,
 		Grant:        JudgmentGrantV1{ID: grantID, MaxTier: maxTier},
 		Question:     question,
-		Context:      judgePrompt + "\n\n" + artifactsBegin + "\n" + ctx + "\n" + artifactsEnd,
+		Context:      judgePrompt + "\n\n" + artifactsBegin + "\n" + packet.Context + "\n" + artifactsEnd,
 	}, nil
 }
 
