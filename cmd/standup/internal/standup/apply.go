@@ -62,12 +62,12 @@ func checkConfirm(cfg Config, r *Record) error {
 // plan (dry run), done (on the ledger from an earlier apply), skip (the world
 // already carries its effect), ran, failed, or not reached.
 type Step struct {
-	Name   string   // stable step id, e.g. card standup-…-c1 dispatch
-	Dir    string   // where the verb runs
-	Bin    string   // fleet
-	Args   []string // the verb and its flags
-	Skip   string   // set when the world already carries this step's effect
-	Status string
+	Name   string   `json:"name"`           // stable step id, e.g. card standup-…-c1 dispatch
+	Dir    string   `json:"dir"`            // where the verb runs
+	Bin    string   `json:"bin"`            // fleet
+	Args   []string `json:"args"`           // the verb and its flags
+	Skip   string   `json:"skip,omitempty"` // set when the world already carries this step's effect
+	Status string   `json:"status"`
 }
 
 // Plan turns the record into steps against the live world: pools for roles, then
@@ -427,33 +427,7 @@ func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) (
 	if err := checkConfirm(cfg, r); err != nil {
 		return nil, err
 	}
-	agenda, err := LoadAgenda(e.AgendaPath(r.Agenda))
-	if err != nil {
-		return nil, fmt.Errorf("agenda %s: %w", r.Agenda, err)
-	}
-	if agenda.Digest != r.AgendaDigest {
-		return nil, refuse("record %s was made against agenda digest %s but %s carries %s", r.ID, short(r.AgendaDigest), r.Agenda, short(agenda.Digest))
-	}
-	live, err := e.Build(cfg, agenda.ID)
-	if err != nil {
-		return nil, err
-	}
-	moved := ""
-	if live.Digest != agenda.Digest {
-		moved = diffLines(agenda.Projection, live.Projection)
-	}
-	if moved != "" && !forceStale {
-		return nil, refuse("the world moved since agenda %s:\n%s\nre-run standup agenda and re-plan, or apply --force-stale to proceed anyway", agenda.ID, moved)
-	}
-	world, err := ReadWorld(e, cfg)
-	if err != nil {
-		return nil, err
-	}
-	steps, err := Plan(e, cfg, r, world)
-	if err != nil {
-		return nil, err
-	}
-	done, err := alreadyDone(r, steps)
+	steps, done, moved, err := prepareSteps(e, cfg, r, forceStale)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +436,7 @@ func Apply(e Env, cfg Config, r *Record, path string, dryRun, forceStale bool) (
 		return steps, nil
 	}
 	if moved != "" {
-		if err := recordForced(e, r, path, agenda.ID, moved); err != nil {
+		if err := recordForced(e, r, path, r.Agenda, moved); err != nil {
 			return steps, err
 		}
 	}
@@ -565,4 +539,46 @@ func diffLines(before, after []string) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// prepareSteps is the shared read-only planning path. Apply adds confirmation and
+// effects; Prepare never manufactures a confirmation to reach this path.
+func prepareSteps(e Env, cfg Config, r *Record, forceStale bool) ([]Step, map[string]bool, string, error) {
+	if err := r.Validate(); err != nil {
+		return nil, nil, "", err
+	}
+	if r.Tenant != cfg.Tenant || r.Lead != cfg.Lead {
+		return nil, nil, "", refuse("record identity differs from configured tenant/lead")
+	}
+	agenda, err := LoadAgenda(e.AgendaPath(r.Agenda))
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("agenda %s: %w", r.Agenda, err)
+	}
+	if agenda.Digest != r.AgendaDigest {
+		return nil, nil, "", refuse("record %s was made against agenda digest %s but %s carries %s", r.ID, short(r.AgendaDigest), r.Agenda, short(agenda.Digest))
+	}
+	live, err := e.Build(cfg, agenda.ID)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	moved := ""
+	if live.Digest != agenda.Digest {
+		moved = diffLines(agenda.Projection, live.Projection)
+	}
+	if moved != "" && !forceStale {
+		return nil, nil, "", refuse("the world moved since agenda %s:\n%s\nre-run standup agenda and re-plan, or apply --force-stale to proceed anyway", agenda.ID, moved)
+	}
+	world, err := ReadWorld(e, cfg)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	steps, err := Plan(e, cfg, r, world)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	done, err := alreadyDone(r, steps)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return steps, done, moved, nil
 }

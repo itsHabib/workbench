@@ -63,3 +63,25 @@ go test ./cmd/standup/...
 Tests are end to end against fake `fleet`/`org`/`gh` shell scripts (skipped on
 Windows). Add a behavior by adding a case to the fake and asserting the call
 log, not by mocking a Go interface.
+
+## Desktop MCP POC
+
+`standup mcp` is a local stdio adapter over the same CLI operations. It adds
+structured agenda/new/draft/show/prepare/confirm/apply/status tools. MCP references
+are store ids; caller cwd and executable overrides are fixed by the host environment.
+The desktop's existing voice is the conversation surface; do not build an audio
+transport here. See README.md for the manual voice trial and installation.
+
+- Prepare shares apply's planning checks without manufacturing confirmation or
+  writing Fleet effects. Compiler validity and launch availability are separate.
+- Draft accepts only editable fields, requires the previous plan digest, clears
+  confirmation after changes, and refuses records with execution history.
+- MCP confirmation/apply require the digest of the displayed plan. The desktop
+  agent is trusted to relay human words; phrase matching does not authenticate audio.
+- A single advisory store lock serializes CLI/MCP writes; external manual editors
+  remain outside it. Fleet's own retry/receipt contracts still own execution.
+- Status reads Fleet CLI artifacts. Its receipt result is independent of process
+  activity; unreadable/missing source data remains unknown.
+
+New files: `planning.go` (CLI), `mcp*.go` (transport/schema adapter),
+`internal/standup/{draft,prepare}.go` (plan edits, preparation and observation).
