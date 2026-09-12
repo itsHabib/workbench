@@ -65,6 +65,8 @@ func main() {
 			return
 		}
 		verbs.Run(args)
+	case "check":
+		runCheck(args[1:])
 	case "run-report":
 		runReport(args[1:])
 	case "inspect", "trace":
@@ -76,6 +78,20 @@ func main() {
 	default:
 		verbs.Run(args)
 	}
+}
+
+// runCheck bypasses the mutating verb router and never ticks the watcher.
+func runCheck(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: fleet check <address>")
+		os.Exit(2)
+	}
+	result, err := watch.Check(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s\n", fleet.DumpJSON(result))
 }
 
 // reviveWatcher starts a detached watcher from SessionStart when none has ticked

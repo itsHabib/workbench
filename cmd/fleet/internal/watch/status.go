@@ -155,6 +155,9 @@ func renderRuntimeRow(b *strings.Builder, row fleet.Rec, now float64) {
 		lastHook = fmt.Sprintf("%s %s · %s ago · session %s", fleet.S(row, "last_event"), fleet.S(row, "last_tool"), fleet.FmtAge(now-at), fleet.S(row, "session"))
 	}
 	fmt.Fprintf(b, "  Last hook: %s\n", lastHook)
+	if fleet.S(row, "provider") == "codex" {
+		fmt.Fprintf(b, "  Last thread permissions: sandbox=%s approval=%s (null = unknown)\n", fleet.DumpJSON(row["sandbox_policy"]), fleet.DumpJSON(row["approval_policy"]))
+	}
 	for _, k := range []string{"error", "configuration_error", "binding_error"} {
 		if message := fleet.S(row, k); message != "" {
 			fmt.Fprintf(b, "  %s: %s\n", k, message)
@@ -200,7 +203,7 @@ func providerActivity(row, last fleet.Rec) {
 		row["provider_error"] = "provider state missing or belongs to another attempt"
 		return
 	}
-	for _, key := range []string{"trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "provider_started", "provider_terminal", "provider_quiescent", "turn_may_have_been_sent", "pre_turn_rejection", "process_proof", "provider_executable", "provider_exit_code", "provider_exit_signal", "last_provider_event", "last_provider_event_at", "reason", "error", "earlier_error"} {
+	for _, key := range []string{"sandbox_policy", "approval_policy", "trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "provider_started", "provider_terminal", "provider_quiescent", "turn_may_have_been_sent", "pre_turn_rejection", "process_proof", "provider_executable", "provider_exit_code", "provider_exit_signal", "last_provider_event", "last_provider_event_at", "reason", "error", "earlier_error"} {
 		if value, ok := state[key]; ok {
 			row[key] = value
 		}

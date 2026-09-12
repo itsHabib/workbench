@@ -56,3 +56,23 @@ func TestStatusDoesNotInventActivityOrHideBrokenState(t *testing.T) {
 		t.Fatal(row)
 	}
 }
+
+func TestStatusPermissionsBelongToMatchingAttempt(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	last := fleet.Rec{"attempt": "current", "provider": "codex", "state_file": stateFile}
+	for _, attempt := range []string{"stale", "current"} {
+		if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": attempt, "provider": "codex", "sandbox_policy": fleet.Rec{"type": "readOnly"}, "approval_policy": "on-request"}); err != nil {
+			t.Fatal(err)
+		}
+		row := fleet.Rec{"provider": "codex"}
+		providerActivity(row, last)
+		if got := fleet.S(row, "approval_policy"); (got != "") != (attempt == "current") {
+			t.Fatalf("attempt %s: %v", attempt, row)
+		}
+		var out strings.Builder
+		renderRuntimeRow(&out, row, fleet.Now())
+		if strings.Contains(out.String(), "readOnly") != (attempt == "current") {
+			t.Fatal(out.String())
+		}
+	}
+}
