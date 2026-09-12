@@ -1,8 +1,5 @@
 # org-mcp
 
-MCP surface for the Baton home — the org verbs as native agent tools, over
-stdio JSON-RPC. Shells the [`org`](../org) binary; owns no state; the verb
-allowlist excludes every role-structure verb (charter/takeover/revoke/retire/
-delegate), so reshaping the org stays an operator act.
-
-See [CLAUDE.md](CLAUDE.md) for invariants and registration.
+Register/update, read and list Org role cards as native MCP tools. Shells the
+[`org`](../org/README.md) CLI and owns no state. Role configuration needs no
+attach, work claim or checkpoint. See [AGENTS.md](AGENTS.md) for registration.

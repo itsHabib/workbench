@@ -359,3 +359,125 @@ Second occurrence of the `#214` entry above, one failure mode further in.
 - **Workaround available today:** post the bare `@claude please review` as its
   own comment so the attestation fires, and put the focus areas in a second
   comment. Costs nothing and keeps the panel complete.
+
+## 2026-09-08 — Fleet assignment is not worker acceptance
+
+- **Observed:** dispatch stores accountability but exposes no retry identity; a
+  retry can rewrite queued work. Existing CLI helpers do not establish end-to-end
+  cross-harness acceptance or effect-safe stop. An operator should not infer those
+  from a successful command or copied session ID.
+- **Change:** request-bound rows, immutable payload checks, cross-process dispatch
+  serialization and non-migrating status output. Hook-owned post-tool evidence is
+  explicitly activity, not success or semantic acceptance. Legacy mutations cannot
+  replace a request record. No second editable ledger added.
+- **Validation boundary:** fixture and real-process tests prove these local
+  contracts, not live model delivery/replacement. This is the first build increment;
+  actual adapters and correlated lifecycle remain under the natural-coordination
+  Dossier task. No hooks installed or live agents controlled by this change.
+- **Tooling:** full-module tests were cost-guarded; followed the requested focused
+  Fleet test path and left the full suite to CI. Root vet/lint and both harness
+  regression suites were run.
+- **Review integration gaps:** generated Codex hooks only subscribed to Bash
+  post-tool events; direct hook tests hid missing file-edit observations. Generated
+  subscriptions now cover writes, with Claude local file-write supplementation
+  and rebind tests. Existing installations still require regeneration/reload.
+  Replay now survives branch/session cleanup, selective legacy retirement preserves
+  request siblings, and status honors the revoke recipient exemption. These are
+  regression-tested without taking over any live session.
+- **Second review:** one latest-write field let activity on another branch erase
+  observed task progress; observations now merge per branch under the existing
+  session lock. Added MultiEdit to generated subscriptions and scoped legacy
+  maintenance validation. Two reviewers reported raw apply_patch bypassing the
+  classifier; the actual Codex adapter already expands patches into per-file Edit
+  events. A direct adapter regression now proves foreign-holder refusal and
+  post-tool evidence, without duplicating parsing in the policy layer.
+
+## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
+
+Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
+hint without a usable restart command. Both were present on current main.
+Missing/incomplete heartbeat now reports unknown; lock failure preserves the
+underlying error and only names a last recorded heartbeat when valid. It no
+longer claims an owner is actively ticking from lock contention alone. The
+opened lock descriptor is closed on both paths. Board hints name fleet watch in a separate persistent terminal. No new automatic
+spawn events. Tests exercise actual lock contention and absent/partial/fresh/
+stale heartbeat records; Fleet race tests, vet and lint pass. Windows desktop
+behavior and installed binary are not changed by the source fix.
+
+Review round 1: preserved attention rows when heartbeat time is unavailable and
+removed the one-shot recovery suggestion because that path bypasses owner.lock.
+Tests now require both seat/work decision rows under unknown freshness and isolate
+heartbeat files per case. Existing one-shot lock behavior remains outside this
+diagnostic fix; do not recommend it as recovery from a possibly active watcher.
+
+## 2026-09-09 — hook configuration was invisible to the setup check
+
+Added `fleet inspect-hooks --config <harness-json>` as an explicit, read-only
+inventory before the legacy migration dispatch boundary. Exact work-report quoted
+Claude and backslash Codex forms are recognized lexically; shell wrappers remain
+unknown. Config/command hashes and environment names allow comparison without raw
+command/credential output. No command execution, variable resolution or runtime
+claim. Regression verifies no config/state writes or command execution. Fleet race
+suite and vet pass; lint recorded with the PR. This does not repair migration or
+supply effective root/precedence/trust evidence. Full runtime proof stays separate.
+
+Hook inspector review round 1: null event hook arrays now refuse instead of
+looking empty; quoted Windows Program Files (x86) paths are recognized while
+unquoted parentheses and command substitution remain unknown. Added shadow-flag
+assertions and clarified unexpanded variables. JSON key-order/nil-slice cosmetic
+suggestions deferred: map order is not a protocol guarantee and empty inventory
+intentionally serializes as []. No migration or live configuration changes.
+
+
+### 2026-09-09 — Scoped Org status returned phantom roles
+
+- **What I tried:** collect the personal tenant with `org status -tenant mh -json`
+  for the Fleet supervisor board.
+- **What happened:** status scanned every tenant and emitted two all-empty role
+  rows from unrelated directories containing only a lock. Refused first writes
+  can leave those directories before a charter chain exists. The supervisor
+  correctly refused to treat the malformed source as a complete observation.
+- **Class:** `tool-gap`.
+- **Fix:** status enumerates only the configured tenant, omits zero-record
+  chains, and emits `[]` for an empty JSON board. Parse and kernel failures
+  inside that tenant remain visible. Tests cover the real refused-attach path,
+  empty chains, explicit/environment/default tenant selection, and broken chains.
+- **Boundary:** no live directory cleanup or custody changes; this does not
+  resolve Fleet work with unknown accountable roles or create roles or slots.
+
+### 2026-09-08 — Pool inherited the first sibling's tenant and label
+
+- What I tried: review work-machine Fleet #289 on macOS using temporary Git worktrees.
+- What happened: two bindings of one repository in different tenants made poolTenant
+  silently select the first row. The same first-row lookup could supply a label from a
+  different tenant, or conceal conflicting labels before a pool top-up re-roled seats.
+- Class: wrong-default.
+- Smallest fix: inherit only an unambiguous tenant, filter sibling labels by the selected
+  tenant, and refuse conflicting labels before creating seats or rewriting roles.map.
+- Status: fixed with real Git regression tests; the new tenant test failed on 0af6100.
+  Mac Fleet race tests pass. Windows execution is delegated to the portability CI job;
+  a visible-window check still needs the work machine's next real session start.
+
+### 2026-09-08 — Board accountability came from an older seat assignment
+
+- What I tried: fold Codex's review of #289 with a two-seat regression fixture.
+- What happened: a branch-wide map collapsed both assignments by filename order,
+  showing lead:old and z-old against the current holder in a-current.
+- Class: misleading-status.
+- Smallest fix: read the holder's recorded slot, verify repository/branch/slot, and
+  reject an assignment delivered to another session. Unknown holder context stays empty.
+- Status: fixed; regression failed on 925b785 before the change.
+
+### 2026-09-11 — Headless sandbox waiting looked abandoned and encouraged shell polling
+
+- What I tried: real lead/worker/replacement/verifier runs r6 and r7 on PR #310.
+- What happened: r6's lead used Bash mail polling, and normal departures became
+  `abandoned` on the work board. r7's worker and lead guessed handoff read flags,
+  which replaced the checkpoint with `--list` or `--show`.
+- Class: misleading-status / unclear-guidance.
+- Smallest fix: role prose says checkpoint and end the turn while waiting; Go owns
+  wakeups. Work now reports `unoccupied` and the latest departed session, with
+  expired due times still `late`. Document that handoff writes; read injected
+  context or stored JSON. Unknown-option rejection is recorded in FOLLOWUPS.md.
+- Boundary: deliberate yield/resume, not crash recovery; no SDK replacement,
+  global installation or merge. Tests and live evidence are recorded in the PR.

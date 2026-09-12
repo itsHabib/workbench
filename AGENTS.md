@@ -30,25 +30,28 @@ Orientation block you can point an agent at to ground it fast.
   `cmd/<tool>/CLAUDE.md` and `cmd/<tool>/AGENTS.md`, plus `docs/DESIGN.md`.
   CI requires the guide pair to stay synchronized so either harness discovers
   the same exit codes, invariants, and checks.
-  Today: `flare` (the escalation/block routing sink — an Observability tool, not
-  a plane), `tracelens` (agent trace
-  diagnostics — consumed via its CLI exit-code seam, never as a Go import),
-  `triage` (PR risk floor + escalate-only advisory; two binaries,
-  `triage-floor` / `triage-advisory`, sharing one `cmd/triage/internal/`),
-  `gate` (the merge-authorization boundary — grants, the verifier ladder, the
-  hash-chained decision log; exit codes 0 pass / 1 blocked / 2 parked /
-  3 refused / 4 error are a load-bearing seam),
-  `org` (the Baton home — role continuity chains over `contracts/org`:
-  attach/claim/yield lifecycle, the byte-capped `org boot` re-entry index,
-  the SessionStart/Stop hook scripts that wire sessions to roles, and
-  operator context.d boot sources; `org-mcp` is its stdio MCP surface,
-  shelling the binary),
-  plus `local`'s CLIs (`local`, `eval`).
+  Twenty today, grouped by what they own. Running agents: `fleet` (the substrate:
+  hook-derived identity and liveness, seats, rows, receipts, role-addressed mail, the
+  watcher), `org` and `org-mcp` (editable role cards and an optional parent directory), `standup` (the agenda, the record the lead proposes, the operator's confirm, and the apply that compiles cards into fleet rows and mail), `runway`, `dispatch`, `driverstate`, `codexguard`. Deciding what may merge: `gate`
+  (the merge-authorization boundary; exit codes 0 pass / 1 blocked / 2 parked / 3 refused /
+  4 error are a load-bearing seam), `triage` (`triage-floor`, `triage-advisory`), `review`,
+  `reviewfindings`, `escalate` (the agent→human→agent back-channel for parked runs). Seeing
+  and being told: `console`, `flare`, `tracelens`, `workbench-mcp`. Local models and secrets:
+  `local`, `eval`, `custody`. The cross-tool decision on what `org` owns versus `fleet` is
+  `docs/features/org-fleet-boundary/spec.md`.
 - `docs/DESIGN.md` — the repo charter. `FOLLOWUPS.md` — the lazy-migration queue
   and deferred decisions (the engineering debt this codebase owes).
   `friction-log.md` — where this repo's tooling and docs failed an agent working
   in it; `/health` reads it for the cross-repo rollup, so tooling friction goes
   there, not in FOLLOWUPS.
+
+## Fleet headless runtime
+
+Use the Go `fleet watch` for persistent polling, recurring lead wakeups, delivery and launches.
+The Bash/Python runtime poller is retired. See `cmd/fleet/docs/headless.md` and
+`cmd/fleet/docs/run-a-fleet.md`. Desktop loops and native messaging remain a valid desktop
+workflow. New Fleet work does not need duplicate Org bootstrap or a per-tick action/message
+quota. Org registers editable prose cards; old lifecycle callers are removed during clean cutover. Use `fleet watch status [--json]` for worker evidence between ticks.
 
 ## The one rule
 

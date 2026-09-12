@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Build the fleet binary and run the reference suite against it through the shims.
+# The suite is test.sh from the reference implementation, unchanged where possible; every
+# `python3 hook.py` / `python3 fleet.py` it issues execs the Go binary via the shims beside it.
+#
+#   bash cmd/fleet/testdata/run-suite.sh            # test.sh
+#   bash cmd/fleet/testdata/run-suite.sh codex      # test-codex.sh (the Codex adapter face)
+set -u
+if [ "${1:-}" = codex ] && ! command -v codex >/dev/null 2>&1; then
+  echo "Codex adapter suite requires the Codex CLI (CI pins @openai/codex@0.153.4)."
+  exit 1
+fi
+here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/../../.." && pwd)"
+( cd "$root" && go build -o "$here/fleet.bin" ./cmd/fleet/ ) || { echo "build failed"; exit 1; }
+export FLEET_BIN="$here/fleet.bin"
+# CI's check job runs gofmt; fail here first.
+unformatted="$(gofmt -l "$here/.." 2>/dev/null || true)"
+if [ -n "$unformatted" ]; then echo "unformatted (gofmt -w them):"; echo "$unformatted"; exit 1; fi
+(cd "$here/../../.." && go vet ./cmd/fleet/...) || { echo "go vet failed"; exit 1; }
+export FLEET_WATCH=off FLEET_GITHUB=off   # the suite must not spawn watchers from its hundreds of SessionStarts
+case "${1:-}" in
+  codex) exec bash "$here/test-codex.sh" ;;
+  *)     exec bash "$here/test.sh" ;;
+esac

@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
 	"github.com/itsHabib/workbench/contracts/grantrequest"
 	"github.com/itsHabib/workbench/slackauth"
@@ -58,19 +59,48 @@ const (
 	// hostile client cannot exhaust memory before the signature is even checked.
 	maxBody = slackauth.MaxBody
 
-	// resolveTimeout bounds ONE detached gate attempt so a hung subprocess cannot
-	// pin a background goroutine forever. It is independent of the HTTP request
-	// (which has already been acked), so the transport can never abort a decision
-	// in flight, and a wedged gate is still capped. It must clear TWO of gate's
-	// own 10s state-lock waits — the grant lookup's and the resolve's — or a
-	// contended attempt is killed mid-run (exit -1) instead of failing cleanly as
-	// a retryable lock timeout, which is what the 2026-09-05 burst recorded at the
-	// old 25s.
-	resolveTimeout = 45 * time.Second
+	// grantTimeout bounds the grant lookup — a read-only `gate next` projection
+	// that decides nothing and writes nothing. It gets its OWN budget because it
+	// used to share one with the decision: a slow projection over a growing
+	// ledger silently ate the decision's time, and the kill landed on whichever
+	// of the two happened to be running when the shared clock ran out. A lookup
+	// killed here costs nothing; the tap simply reports a failure and can be
+	// retried.
+	grantTimeout = 20 * time.Second
+
+	// decideTimeout bounds `gate resolve`. It is a HANG guard, not a latency
+	// budget, and the distinction is the whole fix.
+	//
+	// gate writes a resolution as several artifacts — judgment, re-reduced
+	// verdict, action — and exec.CommandContext SIGKILLs on expiry, so a deadline
+	// that lands mid-sequence does not cancel a decision, it STRANDS one: on
+	// itsHabib/ivy#22 (run_fe7ac73ddb7c59a7) the judgment was written at
+	// 02:01:14Z under the old 25s shared budget and nothing followed it. The
+	// operator's approval went nowhere, the PR stayed open, and the card said it
+	// had merged.
+	//
+	// So the two outcomes are not symmetric. A deadline that is too SHORT
+	// destroys an authorization and needs an operator to notice and resume it. A
+	// deadline that is too LONG only delays a Slack card, which was already
+	// acked. Size for the failure that costs something. What actually bounds
+	// latency is inside gate, where the phases are distinguishable: each gh call
+	// is capped, and the whole gate/authorized stamp — the only network on the
+	// path, and strictly downstream of the durable action — is capped at a few
+	// seconds. Raising this number alone would have been the wrong fix: it widens
+	// the window rather than closing it, and the window is only harmless because
+	// gate now completes the authorization before it touches the network and
+	// surfaces a stranded decision in `gate next`.
+	decideTimeout = 5 * time.Minute
+
+	// signatureHeadroom is the margin a grant-callback retry keeps inside Slack's
+	// signature window. Gate re-verifies the signature when the attempt starts,
+	// before it opens its state or takes any lock (cmd/gate/slack_grant.go), so a
+	// retry only needs the signature valid at its start, not for a whole attempt.
+	signatureHeadroom = 5 * time.Second
 
 	// deliverTimeout bounds the outcome POST to response_url. It is a FRESH budget,
 	// started after the resolve returns — never the resolve's leftover deadline, or
-	// a resolve that ran near resolveTimeout would leave the card stuck on the ack
+	// a resolve that ran near its own budget would leave the card stuck on the ack
 	// with no outcome ever delivered.
 	deliverTimeout = 10 * time.Second
 
@@ -248,10 +278,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // caller drains it during graceful shutdown — after the HTTP server has stopped
 // accepting — so a redeploy or SIGTERM doesn't drop an acked-but-unrecorded tap.
 // It is bounded in practice: a callback stops starting attempts once its own
-// resolveBudget (measured from its ack) is spent, each attempt is capped by
-// resolveTimeout, and each delivery by deliverTimeout. Since every budget runs
-// from its own ack rather than from its turn in the queue, the drain is bounded
-// by roughly one budget plus a final attempt, not by the number of queued taps.
+// resolveBudget (measured from its ack) is spent; within an attempt the grant
+// lookup is capped by grantTimeout, the decision by decideTimeout, and each
+// delivery by deliverTimeout. Since every budget runs from its own ack rather
+// than from its turn in the queue, the drain is bounded by roughly one budget
+// plus a final attempt, not by the number of queued taps.
 func (s *Server) Wait() { s.inflight.Wait() }
 
 // process runs the authoritative callback off the request path, after the ack.
@@ -261,10 +292,13 @@ func (s *Server) Wait() { s.inflight.Wait() }
 // Gate append in flight. The queue keeps a park's multi-append transaction from
 // double-applying within this process (the grant path has its own durable
 // cross-process terminal exclusion in Gate); a lock a DIFFERENT process holds is
-// ridden out by the retry schedule instead. Delivery gets a fresh context so a
-// callback that used most of its budget can still post its outcome. A panic is
-// contained to that callback and reported through the Slack card when possible,
-// or the serve log.
+// ridden out by the retry schedule instead. The budget only decides whether the
+// NEXT attempt starts; inside one, the lookup and the decision take separate
+// limits (see grantTimeout / decideTimeout), because a killed lookup costs
+// nothing and a killed decision strands an authorization. Delivery gets a fresh
+// context so a callback that used most of its budget can still post its
+// outcome. A panic is contained to that callback and reported through the Slack
+// card when possible, or the serve log.
 func (s *Server) process(cb callback) {
 	defer s.inflight.Done()
 	defer func() {
@@ -313,7 +347,12 @@ func (s *Server) processCallback(ctx context.Context, cb callback) (int, callbac
 	if s.grantTap == nil {
 		return 0, cb, errors.New("serve: Gate grant callback is not configured")
 	}
-	out, code, err := s.grantTap(ctx, cb.rawBody, cb.signature, cb.timestamp)
+	// The grant callback mints durable state in Gate, so like the decision it
+	// gets a hang guard rather than a latency budget: killing it part-way is the
+	// costly outcome, delaying an already-acked card is not.
+	gctx, gcancel := context.WithTimeout(ctx, decideTimeout)
+	defer gcancel()
+	out, code, err := s.grantTap(gctx, cb.rawBody, cb.signature, cb.timestamp)
 	cb.gateOutput = out
 	if err != nil {
 		return code, cb, err
@@ -373,13 +412,13 @@ func (s *Server) attempts(ctx context.Context, cb callback) (int, callback, erro
 	}
 }
 
-// attempt runs ONE callback under its own timeout rather than the tap's
-// remaining budget: an attempt in flight is never cut short, so a budget that
-// runs out stops the NEXT try instead of killing gate mid-append.
+// attempt runs ONE callback detached from the tap's remaining budget: an
+// attempt in flight is never cut short, so a budget that runs out stops the NEXT
+// try instead of killing gate mid-append. processCallback applies the per-phase
+// limits — grantTimeout on the read-only lookup, decideTimeout on anything that
+// writes — so no single clock can land between a judgment and its action.
 func (s *Server) attempt(cb callback) (int, callback, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
-	defer cancel()
-	return s.processCallback(ctx, cb)
+	return s.processCallback(context.Background(), cb)
 }
 
 // budgetFor is how long this tap may spend waiting rather than working: queued
@@ -388,8 +427,8 @@ func (s *Server) attempt(cb callback) (int, callback, error) {
 // grant callback gets the life left on the Slack signature instead, because gate
 // re-verifies that same signature itself: a retry that arrives outside Slack's
 // ±5-min window is refused however long serve waited, so waiting past it only
-// turns a decision into a confusing refusal. One attempt's headroom is
-// subtracted, and a budget of zero still buys the first attempt — gate, not
+// turns a decision into a confusing refusal. signatureHeadroom is subtracted,
+// and a budget of zero still buys the first attempt — gate, not
 // serve, is the authority on whether a signature is still good.
 func (s *Server) budgetFor(cb callback) time.Duration {
 	if !cb.grantRequest {
@@ -399,7 +438,7 @@ func (s *Server) budgetFor(cb callback) time.Duration {
 	if err != nil {
 		return 0
 	}
-	left := time.Unix(sec, 0).Add(maxSkew).Sub(s.now()) - resolveTimeout
+	left := time.Unix(sec, 0).Add(maxSkew).Sub(s.now()) - signatureHeadroom
 	return max(0, min(left, resolveBudget))
 }
 
@@ -424,12 +463,20 @@ func (s *Server) backoffFor(attempt int) time.Duration {
 // its state lock, which is named ErrStateBusy so the caller can retry a decision
 // that was never recorded.
 func (s *Server) resolve(ctx context.Context, d ingest.Decision) (int, error) {
-	grant, err := s.findGrant(ctx, d.Escalation)
+	// Two budgets, never one. The lookup is a read that can be killed for free;
+	// the decision writes durable state and must not be killed part-way. Sharing
+	// one clock made the decision's remaining time a function of how long a
+	// read-only projection took over a ledger that only grows.
+	gctx, gcancel := context.WithTimeout(ctx, grantTimeout)
+	defer gcancel()
+	grant, err := s.findGrant(gctx, d.Escalation)
 	if err != nil {
 		return 0, err
 	}
 	d.Grant = grant
-	out, code, err := s.ingest.Resolve(ctx, d)
+	dctx, dcancel := context.WithTimeout(ctx, decideTimeout)
+	defer dcancel()
+	out, code, err := s.ingest.Resolve(dctx, d)
 	if err != nil {
 		return code, err
 	}
@@ -534,6 +581,11 @@ func callbackFromPayload(body []byte) (callback, error) {
 		return callback{}, err
 	}
 	cb.decision.Verdict = verdict
+	// The channel is this transport's own fact: the identity came from a
+	// signature-verified Slack callback against the allowlist, not from
+	// anything the caller could set. Naming it lets a later reader tell a
+	// tap on a phone from a shell an agent also had.
+	cb.decision.Method = contracts.MethodSlackInteractive
 	cb.decision.Why = fmt.Sprintf("%s in Slack by %s", verdictWord(verdict), who)
 	return cb, nil
 }

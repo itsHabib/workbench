@@ -52,7 +52,8 @@
       "additionalProperties": false,
       "properties": {
         "decision": { "type": "string", "enum": ["pass", "block"], "description": "The human's decision, mirroring gate's verdict vocabulary." },
-        "who": { "type": "string", "description": "Who decided — the provenance a bare judgment artifact lacks." },
+        "who": { "type": "string", "description": "Who decided — the deciding identity." },
+        "method": { "type": "string", "description": "The channel the decision arrived through: cli-operator, slack-interactive, or auto-<provider>. Optional so resolutions stamped before the field existed still validate; the write path refuses a new one without it. It names the channel, never an authenticated claim." },
         "at": { "type": "string", "format": "date-time", "description": "When the decision was recorded, RFC 3339 UTC." },
         "judgment_id": { "type": "string", "description": "The id of the KindJudgment artifact this decision produced — the link from the resolution to the effect gate recorded." }
       }

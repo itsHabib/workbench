@@ -7,7 +7,7 @@ the one law that holds the family together, and where it is going.
 Three status markers appear throughout, and the difference matters:
 
 - `verified` - confirmed against the code at this document's head as of
-  2026-07-30.
+  2026-09-11 (claims carrying their own date were confirmed on that date).
 - `live` - confirmed against the current `itsHabib/workbench` GitHub
   configuration; unlike code, this can drift without a commit.
 - `intent` - designed and written down, but not yet code.
@@ -50,10 +50,16 @@ and 6 (gate) hold the load-bearing detail.
   operator-minted grant followed by Gate's exact commit-pinned merge command.
   The separate exact-action Gate App
   [`itshabib-workbench-gate-executor`](https://github.com/apps/itshabib-workbench-gate-executor)
-  completed bounded bootstrap and fail-closed canaries, but is **currently
-  suspended**. Treat its two-approval path as a documented experiment and
+  completed its bounded bootstrap merge, and the one ordinary preparation
+  canary that ran refused fail-closed before any token was created - the
+  positive canary never completed. The App is **currently suspended**. Treat its two-approval path as a documented experiment and
   security model, not as today's production merge route. Reactivation needs a
-  deliberate reliability and operator-UX review.
+  deliberate reliability and operator-UX review. On the maintenance side (the
+  roxiq loop, external repo): three rehearsal gauntlet runs have completed end
+  to end as *draft* PRs (roxiq #219-221) and a first bounded, read-only
+  production triage exercise ran on live evidence 2026-09-11; the full
+  validation gate - consecutive qualifying runs plus adversarial drills -
+  still counts zero (`live`, 2026-09-11).
 - **The north star.** Engine-neutral autonomous runs - `--engine session` is the
   current dogfood/default path, while provider-backed engines remain optional.
   The operator reads the audit trail after a clean run and intervenes only at a
@@ -168,6 +174,21 @@ agent runs, each one the *routine* that knows which tools to call in what order 
 tool knows about another). The durable guarantees live in the binaries below them;
 the skills are the swappable rungs.
 
+One more layer runs *under* the loop now that several sessions work it at once.
+**fleet** (`cmd/fleet`) is the occupancy substrate: roles bound to directories
+(location is identity, resolved from `roles.map`), one-holder-per-key leases on
+branches and machine resources, role/seat mail, authored handoffs the next
+session reads at start, and a Go watcher (`fleet watch`) that owns headless
+polling and launches. Its facts - identity, liveness, who holds what - derive
+from harness hook events, never from an agent's self-report (`verified`,
+`cmd/fleet/README.md`; the guides for people and agents are under
+`cmd/fleet/docs/`). **org** (`cmd/org`) is its deliberately small counterpart:
+a registry of editable prose role cards - `charter`, `boot`, `status` - with
+optional parent references. The boundary between them is a decided contract:
+role prose and parent links grant no authority; work, mail, and handoffs stand
+on their own in fleet; merge permission stays gate's (`verified`,
+`docs/features/org-fleet-boundary/spec.md`).
+
 ## 3. The repo and the boundary law
 
 `~/dev/workbench` is the home for the Go agentic-infra family: **one repo, one Go
@@ -194,9 +215,11 @@ The layout, top level down:
 - **`contracts/`** - the shared vocabulary. `verified` contents: `verdict.go` (the
   Verdict type and its decision/class constants), `envelope.go` (the artifact
   envelope and its kinds), `schema.go` (the embedded `verdict-v0.3.0.json` schema),
-  plus sub-domains `contracts/driverstate`, `contracts/execution`, and
-  `contracts/authority` (the room-authority receipt v1 + the `custody:` secret-ref
-  grammar, PR #104), each carrying types, JSON schemas, and pure validation. The
+  plus sub-domains - `contracts/driverstate`, `contracts/execution`,
+  `contracts/authority` (the room-authority receipt v1 + the `custody:`
+  secret-ref grammar, PR #104), and the newer `automode`, `escalation`,
+  `gateauthorization`, `grantrequest`, `reviewfindings`, `reviewpanel`, and
+  `reviewroute` - each carrying types, JSON schemas, and pure validation. The
   carve-out that keeps this honest:
   *contract-law validation* (pure, stdlib-only, I/O-free "is this a valid
   instance") lives beside the types; anything deciding what to *do* with a valid
@@ -206,6 +229,11 @@ The layout, top level down:
   `Ask` runs the model, then a gate that escalates first on verifier failure, then
   on low confidence - the verifiable-or-escalate-safe rule as code. Mechanism
   packages are allowed at top level because they carry no tool's decision logic.
+  Two later mechanism leaves follow the same rule: **`filelock/`** (advisory
+  file locking) and **`slackauth/`** (stdlib-only HMAC, freshness, and
+  membership checks for Slack interactive callbacks, shared by escalate's
+  ingress and gate's authority boundary so the two can never drift -
+  `docs/DESIGN.md`).
 - **`driverstate/`** - the second mechanism package, newer than `local/`: the
   write-side mechanism of the driver-state plane - single-writer-per-run leases and
   hash-chained, crash-safe appends (`driverstate/doc.go`). It imports only
@@ -213,9 +241,10 @@ The layout, top level down:
   - see the drift log.)
 - **`cmd/<tool>/`** - one private implementation boundary per **tenant** (a tool
   living in the module; a tenant may expose more than one CLI entry point).
-  `verified` tenant list, fifteen today: `console`, `custody`,
-  `dispatch`, `driverstate`, `escalate`, `eval`, `flare`, `gate`, `local`,
-  `review`, `reviewfindings`, `runway`, `tracelens`, `triage`, `workbench-mcp`.
+  `verified` tenant list, nineteen today: `codexguard`, `console`, `custody`,
+  `dispatch`, `driverstate`, `escalate`, `eval`, `flare`, `fleet`, `gate`,
+  `local`, `org`, `org-mcp`, `review`, `reviewfindings`, `runway`, `tracelens`,
+  `triage`, `workbench-mcp`.
 
 The family assembled by *lazy migration*, not big-bang: tools graduated in when next
 touched. flare was the founding tenant (rewiring it to `contracts` deleted the third
@@ -693,7 +722,7 @@ separate lane.
 
 ## 7. Tenant tour
 
-Fifteen tenant directories, each private below `cmd/<tool>/`. The repeated
+Nineteen tenant directories, each private below `cmd/<tool>/`. The repeated
 shape to watch for: **policy over mechanism, joined by artifacts** - one side
 decides, the other executes, and they meet at a JSON seam, never an import.
 
@@ -764,6 +793,27 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   a signed Slack interaction, derives the actor from the verified identity, and
   drives that same mechanism. Flare remains read-only; only gate writes the
   authoritative judgment/result (`cmd/escalate/CLAUDE.md`).
+- **fleet** - the multi-session occupancy substrate (section 2): four faces -
+  a harness hook (exit 0 allow / 2 deny, injecting `[fleet]` context lines), the
+  operator CLI, an MCP surface, and the `fleet watch` Go watcher that owns
+  headless polling and launches. One holder per key (branch leases, machine
+  slots), role/seat mail, authored handoffs, exact-head receipts (`fleet done`
+  answers from receipts and nothing else - a message saying "done" is not
+  done). State is JSON/JSONL under `~/.fleet`, temp-then-rename, no server;
+  exit codes are a load-bearing seam here too (`verified`,
+  `cmd/fleet/README.md`; guides under `cmd/fleet/docs/`).
+- **org / org-mcp** - the role-card registry, deliberately small after the
+  2026-09-10 boundary decision: three operations (`charter`, `boot`, `status`)
+  over `{tenant, role, card, parent?}` rows; the prose stays in its Markdown
+  file, and neither a card nor a parent reference grants authority. `org-mcp`
+  is its stdio MCP surface, shelling the binary (`verified`,
+  `docs/features/org-fleet-boundary/spec.md`).
+- **codexguard** - the Codex-harness sibling of the pretool guard, done the
+  workbench way: a deterministic policy owner for authority-bearing Codex tool
+  calls that emits the shared `contracts/automode` AutoDecisionV1 artifact on
+  every valid request - parks, blocks, and refusals included - and never
+  executes the candidate action. Exit codes mirror gate's: 0 pass / 1 block /
+  2 park / 3 refuse / 4 error (`verified`, `cmd/codexguard/CLAUDE.md`).
 - **review** - the engine-neutral review-policy tenant: decides which reviewers
   an exact PR head needs and whether another cycle is warranted
   (`plan`/`request`/`observe`/`decide`/`advise`). `plan` shells `gh` and
@@ -848,7 +898,9 @@ The key line: an allowlist entry is safe in proportion to the gates *behind* it 
    rate.
 
 **The rulebooks in operation today:** portfolio actions (gate + triage, state at
-`~/dev/gate`, hash-chained log) and harness tool calls - three settings layers with
+`~/dev/gate`, hash-chained log), Codex-harness tool calls (`cmd/codexguard`,
+emitting the shared `contracts/automode` decision artifact), and Claude-harness
+tool calls - three settings layers with
 distinct jobs: global personal defaults (the tier-1 read-only floor, the tier-3 deny
 list, the guard hook), the checked-in project rulebook (reviewed by PR, so *the
 rulebook governs itself*), and a local scratch file drained on a cadence. The named
@@ -999,8 +1051,9 @@ Answers in parentheses; every one is derivable from the sections above.
 7. What made `markMerged` the motivating bug? *(a State write that dodged
    Verification - hence Amendment 2.)*
 8. Has Gate performed a live merge? *(Ordinary `gate -live` is still dry-run.
-   The separate App executor performed bounded bootstrap and fail-closed canaries,
-   but is currently suspended; local Gate remains the active operator path.)*
+   The separate App executor performed the bounded bootstrap merge and one
+   fail-closed preparation canary - the positive canary never completed -
+   and is currently suspended; local Gate remains the active operator path.)*
 9. What's the known reducer wart? *(last-judgment-wins on multiple judgments; held
    deliberately, fail-closed reject is the planned fix.)*
 10. Workbench vs platform? *(independent binaries composing through artifacts and
@@ -1072,14 +1125,21 @@ A backstop, not a prerequisite - every term here is also defined at first use ab
 - **key / manifest (custody)** - a named credential behind the proxy, and the
   operator-owned file mapping keys to upstreams, injection templates, and action
   rules (state-dir content, never repo content).
-- **canary** - the one repo where branch protection already requires gate's status
-  check.
+- **canary** - a deliberately bounded first live exercise of a mechanism (the
+  executor's bootstrap and fail-closed canaries). No repo's branch protection
+  currently requires gate's status check (`live`, 2026-09-11) - enforcement is
+  a choice each repo has not yet made, not a standing configuration.
+- **role card** - editable Markdown prose describing a role, registered in
+  org's registry; a description, never an authority.
+- **lease / handoff (fleet)** - one-holder-per-key occupancy of a branch or
+  machine resource; and the authored conclusion-plus-next-step the next session
+  on that role or branch reads at start.
 - **dogfood** - proving a tool by running the portfolio's real work through it.
 - **MCP / skill / hook** - capability / routine / reflex (section 1).
 - **fail closed** - unknown or absent input becomes park/refuse, never a silent
   pass; "absence never reads as green."
 
-## 12. Drift log - where docs and code disagree (verified 2026-07-31)
+## 12. Drift log - where docs and code disagree (verified 2026-09-11)
 
 The discipline: this repo prefers an honest list of disagreements over docs that
 quietly overclaim. Two directions of drift exist - docs behind code (stale) and
@@ -1087,23 +1147,22 @@ docs ahead of code (intent not yet delivered). Both are listed.
 
 | Claim | Reality |
 |---|---|
-| `cmd/gate/docs/DESIGN.md` verb list and refusal codes | Behind code: omits the `next` verb; lists four refusal codes where the code has eight; still calls the cycle ceiling future ("as the integration matures") though `MaxCycles`/`CyclesWithin` are live |
+| `cmd/gate/docs/DESIGN.md` refusal codes and cycle ceiling | Partially behind code: lists five of the eight refusal codes, and still calls the cycle ceiling future ("as the integration matures") though `MaxCycles`/`CyclesWithin` are live |
 | `cmd/workbench-mcp/main.go` package comment: "the four driver-state verbs" | Behind code: the server registers six (`driver_transition`, `driver_rollup` added) |
-| `cmd/driverstate/CLAUDE.md` verb list | Behind code: omits `render` and `rollup` |
-| `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job does not yet leaf-check the top-level `driverstate/` package (it is compliant in fact - imports only `contracts/driverstate` - but unenforced) |
-| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; fifteen tenants live under `cmd/` |
-| Repo `CLAUDE.md` map | Behind code: omits `custody`, `dispatch`, `runway`, `workbench-mcp`, and the top-level `driverstate/` |
-| Live merge | Ordinary `gate -live` still records `merge_not_implemented`. The separate one-App executor completed bounded bootstrap and fail-closed canaries, but is currently suspended pending a reliability and operator-UX review. |
+| `cmd/driverstate/CLAUDE.md` verb list | Behind code: the verb block omits `render` and `rollup` (the prose now mentions `render`) |
+| `driverstate/doc.go`: "leaf-checked by CI's hygiene job" | Ahead of CI: the hygiene job leaf-checks only `contracts/` and `local/` - the later mechanism leaves (`driverstate/`, `filelock/`, `slackauth/`) are compliant in fact but unenforced |
+| `docs/DESIGN.md`: "Today the repo holds `contracts`, `local`, and `flare`; the rest migrate in lazily" | Behind code: migration is long since complete; nineteen tenants live under `cmd/` |
+| Live merge | Ordinary `gate -live` still records `merge_not_implemented`. The separate one-App executor completed the bootstrap merge and one fail-closed preparation canary (the positive canary never completed), and is currently suspended pending a reliability and operator-UX review. |
 | Multiple judgments in `Reduce` | Still last-one-wins (held deliberately in the closure TDD; fail-closed reject is the planned fix) |
 | `ReviewFindingsV1` | Shipped in Ship's address boundary; Workbench publishes the shared contract/schema and Codex/GitHub producer. Gate B's two-harness live proof remains open. |
 | Triage rubric SHA | `RUBRIC.md` mandates recording its own git SHA per classification, and the `labels/` eval corpus carries it, but `triage-floor`/`triage-advisory` do not emit it in their output - the rubric doc is ahead of the binaries |
 | `custody keys` / `custody serve` | Shipped: v0 proxy engine merged (#89/#110), usable end to end per `cmd/custody/docs/runbook.md`. Open drift: `wincred:` (manifest) vs `custody:` (credstore) ref-namespace reconcile in flight; no revoke in v0 |
-| `.github/workflows/gate.yml` | The repository contains the intended enforcement workflow, but the App is currently suspended; source cannot claim a live GitHub ruleset or executor configuration. |
+| `.github/workflows/gate.yml` | The repository contains the intended enforcement workflow, but the App is currently suspended; source cannot claim a live GitHub ruleset or executor configuration. As of 2026-09-11 the `gate-state-integrity`, `gate-state-updates`, and `main-updates` rulesets are active while `main-required-gate` is disabled (`live`) |
 | "one repo, one Go module" | One caveat: a nested test-fixture `go.mod` exists at `cmd/gate/docs/features/ci-classify/eval/build/` (an eval fixture, not a real second module) |
 
-Confirmed-in-code anchors, for contrast (all re-checked 2026-07-30): the exit
-codes, verbs, ladder law, monotone reduce, and fail-closed unknowns; the eight
-grant refusal codes and the `-init` mint guard; the keyed anchor pinning head and
-count; the post-judgment ceiling re-check; the triage-floor exec seam; the hygiene
-job's three boundary checks; the contracts alias convergence; the stale-bot-comment
-filtering; and the six MCP verbs with no `driver_renew`.
+Confirmed-in-code anchors, for contrast (all re-checked 2026-09-11): the exit
+codes, verbs, ladder law (`ErrLocalBlock`), the last-judgment-wins loop, and
+fail-closed unknowns; the eight grant refusal codes; the keyed anchor; the
+post-judgment ceiling re-check; the hygiene job's boundary checks; the six MCP
+verbs; the nineteen-tenant `cmd/` listing including `fleet`, `org`, `org-mcp`,
+and `codexguard`; and the org surface reduced to charter/boot/status.

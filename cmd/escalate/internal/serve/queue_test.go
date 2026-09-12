@@ -422,7 +422,7 @@ func TestGrantCallbackBudgetTracksItsSignature(t *testing.T) {
 		t.Fatalf("fresh grant budget = %s, want it capped at %s", got, resolveBudget)
 	}
 	aging := callback{grantRequest: true, timestamp: stamp(fixedNow.Add(-4 * time.Minute))}
-	if want := maxSkew - 4*time.Minute - resolveTimeout; srv.budgetFor(aging) != want {
+	if want := maxSkew - 4*time.Minute - signatureHeadroom; srv.budgetFor(aging) != want {
 		t.Fatalf("aging grant budget = %s, want the %s left on its signature", srv.budgetFor(aging), want)
 	}
 	stale := callback{grantRequest: true, timestamp: stamp(fixedNow.Add(-6 * time.Minute))}

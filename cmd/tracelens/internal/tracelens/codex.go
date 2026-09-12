@@ -83,7 +83,8 @@ func (b *codexBuilder) add(ev codexEvent) {
 	if ev.Type == "item.started" {
 		return
 	}
-	ok := codexItemOK(ev.Item)
+	s.Declined = s.Declined || ev.Item.Status == "declined"
+	ok := !s.Declined && codexItemOK(ev.Item)
 	s.OK = &ok
 	if ok {
 		s.Observation = codexObservation(ev.Item)

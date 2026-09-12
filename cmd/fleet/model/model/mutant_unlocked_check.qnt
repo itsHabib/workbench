@@ -1,0 +1,192 @@
+// Plausible mutant: the check and the write are two steps with no lock between
+// them. Two rivals can both see a free key and both be authorized.
+module UnlockedCheckMutant {
+  import Common.* from "./common"
+
+  const kind: Kind
+
+  var holder: Holder
+  var liveA: Live
+  var liveB: Live
+  // A write the hook authorized and the tool is still executing.
+  var inFlightA: bool
+  var inFlightB: bool
+  var facts: Set[Fact]
+  // What each session read when it looked, before it wrote. With the lock these
+  // are one step; here they are two, and a rival may write in between.
+  var sawA: Holder
+  var sawB: Holder
+  var lookedA: bool
+  var lookedB: bool
+
+  def live(s: Session): Live = match s { A => liveA | B => liveB }
+  def inFlight(s: Session): bool = match s { A => inFlightA | B => inFlightB }
+
+  action assignState(h: Holder, la: Live, lb: Live, fa: bool, fb: bool, fs: Set[Fact]): bool = all {
+    holder' = h,
+    liveA' = la,
+    liveB' = lb,
+    inFlightA' = fa,
+    inFlightB' = fb,
+    facts' = fs,
+    sawA' = sawA,
+    sawB' = sawB,
+    lookedA' = lookedA,
+    lookedB' = lookedB,
+  }
+  def saw(s: Session): Holder = match s { A => sawA | B => sawB }
+  def looked(s: Session): bool = match s { A => lookedA | B => lookedB }
+
+  action init = all {
+    holder' = Nobody,
+    liveA' = Alive,
+    liveB' = Alive,
+    inFlightA' = false,
+    inFlightB' = false,
+    facts' = Set(),
+    sawA' = Nobody,
+    sawB' = Nobody,
+    lookedA' = false,
+    lookedB' = false,
+  }
+
+  def setLive(s: Session, l: Live): (Live, Live) = match s {
+    | A => (l, liveB)
+    | B => (liveA, l)
+  }
+  def setFlight(s: Session, f: bool): (bool, bool) = match s {
+    | A => (f, inFlightB)
+    | B => (inFlightA, f)
+  }
+
+  // The check, without the lock: look first, act later on what was seen.
+  action observe(s: Session): bool = all {
+    live(s) == Alive,
+    not(inFlight(s)),
+    not(looked(s)),
+    holder' = holder, liveA' = liveA, liveB' = liveB, inFlightA' = inFlightA, inFlightB' = inFlightB, facts' = facts,
+    sawA' = (if (s == A) holder else sawA),
+    sawB' = (if (s == B) holder else sawB),
+    lookedA' = (if (s == A) true else lookedA),
+    lookedB' = (if (s == B) true else lookedB),
+  }
+  action commit(s: Session): bool = all {
+    live(s) == Alive,
+    not(inFlight(s)),
+    looked(s),
+    lookedA' = (if (s == A) false else lookedA),
+    lookedB' = (if (s == B) false else lookedB),
+    sawA' = sawA, sawB' = sawB,
+    liveA' = liveA, liveB' = liveB,
+    match saw(s) {
+      | Nobody => all {
+          holder' = Held(s),
+          inFlightA' = (if (s == A) true else inFlightA),
+          inFlightB' = (if (s == B) true else inFlightB),
+          facts' = facts.union(Set(authFact(s))),
+        }
+      | Held(h) =>
+          if (h == s) all {
+            holder' = holder,
+            inFlightA' = (if (s == A) true else inFlightA),
+            inFlightB' = (if (s == B) true else inFlightB),
+            facts' = facts.union(Set(authFact(s))),
+          } else all {
+            holder' = holder, inFlightA' = inFlightA, inFlightB' = inFlightB,
+            facts' = facts.union(Set(refusedFact(s))),
+          }
+    }
+  }
+
+  // The tool call finished; the lease stays until the session ends.
+  action finish(s: Session): bool = all {
+    inFlight(s),
+    val fl = setFlight(s, false)
+    assignState(holder, liveA, liveB, fl._1, fl._2, facts),
+  }
+
+  // SessionEnd releases what the session held.
+  action release(s: Session): bool = all {
+    holder == Held(s),
+    live(s) == Alive,
+    not(inFlight(s)),
+    assignState(Nobody, liveA, liveB, inFlightA, inFlightB, facts),
+  }
+
+  // A crash: the process is gone, so nothing of its is in flight, and the lease
+  // file stays exactly as it was.
+  action crash(s: Session): bool = all {
+    live(s) == Alive,
+    val lv = setLive(s, Dead)
+    val fl = setFlight(s, false)
+    assignState(holder, lv._1, lv._2, fl._1, fl._2, facts),
+  }
+
+  // The session record becomes unreadable to a rival, and readable again. The
+  // session itself is alive throughout; it may even be mid-write.
+  action obscure(s: Session): bool = all {
+    live(s) == Alive,
+    val lv = setLive(s, Unreadable)
+    assignState(holder, lv._1, lv._2, inFlightA, inFlightB, facts),
+  }
+  action reveal(s: Session): bool = all {
+    live(s) == Unreadable,
+    val lv = setLive(s, Alive)
+    assignState(holder, lv._1, lv._2, inFlightA, inFlightB, facts),
+  }
+
+  // `fleet take --takeover`: a person confirmed a dead holder's resource is quiet.
+  action takeover(s: Session): bool = all {
+    kind == Resource,
+    live(s) == Alive,
+    match holder {
+      | Held(h) => h != s and live(h) == Dead
+      | Nobody => false
+    },
+    assignState(Held(s), liveA, liveB, inFlightA, inFlightB, facts.union(Set(tookFact(s)))),
+  }
+
+  action idle = assignState(holder, liveA, liveB, inFlightA, inFlightB, facts)
+
+  action step = any {
+    observe(A), observe(B),
+    commit(A), commit(B),
+    finish(A), finish(B),
+    release(A), release(B),
+    crash(A), crash(B),
+    obscure(A), obscure(B),
+    reveal(A), reveal(B),
+    takeover(A), takeover(B),
+    idle,
+  }
+
+  // ---- what must hold in every reachable state ----
+
+  // One holder per key, and only the holder writes: a write in flight belongs to
+  // the session that holds the key.
+  val exclusion = not(inFlightA and inFlightB)
+  val writerHolds =
+    (inFlightA implies holder == Held(A)) and
+    (inFlightB implies holder == Held(B))
+
+  // Unavailable evidence is not death: while the holder is alive (readable or
+  // not), the key never changes hands and no rival is authorized.
+  val evidenceNotDeath =
+    match holder {
+      | Held(h) => (live(h) != Dead) implies not(inFlight(other(h)))
+      | Nobody => true
+    }
+
+  // A dead holder's resource is never taken over silently: the reference never
+  // records a silent change of hands; a mutant that does trips this.
+  val noSilentResourceTakeover =
+    (kind == Resource) implies not(SilentA.in(facts) or SilentB.in(facts))
+
+  val allSafe = exclusion and writerHolds and evidenceNotDeath and noSilentResourceTakeover
+}
+
+
+module UnlockedCheckMutantBranch {
+  import Common.* from "./common"
+  import UnlockedCheckMutant(kind = Branch).*
+}

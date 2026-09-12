@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
+	"github.com/itsHabib/workbench/contracts"
 	"github.com/itsHabib/workbench/contracts/escalation"
 	"github.com/itsHabib/workbench/contracts/grantrequest"
 )
@@ -247,6 +248,7 @@ func TestServeHTTPMapsPayloadToDecision(t *testing.T) {
 		"-decision", "pass",
 		"-why", "approved in Slack by @michael (U1)",
 		"-who", "@michael (U1)",
+		"-method", contracts.MethodSlackInteractive,
 	}
 	if !reflect.DeepEqual(cr.calls[0], want) {
 		t.Fatalf("argv mismatch:\n got=%v\nwant=%v", cr.calls[0], want)
@@ -340,7 +342,7 @@ func TestServeHTTPWhoFromVerifiedIdentity(t *testing.T) {
 	}
 	sink.wait(t, 1)
 	argv := cr.calls[0]
-	who := argv[len(argv)-1]
+	who := argv[len(argv)-3]
 	if who != "@realuser (U9)" {
 		t.Fatalf("who = %q, want @realuser (U9) — from the verified identity, not the payload's who field", who)
 	}
