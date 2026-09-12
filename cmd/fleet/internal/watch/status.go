@@ -73,6 +73,9 @@ func processState(last fleet.Rec) (string, string) {
 	if fleet.S(last, "status") == "failed" {
 		return "launch_failed", fleet.S(last, "error")
 	}
+	if fleet.S(last, "status") == "released" {
+		return "released", "operator released the reservation: " + fleet.S(last, "release_why")
+	}
 	if exit := fleet.ReadJSON(fleet.S(last, "exit_file")); exit != nil {
 		if fleet.F(exit, "exit_code") != 0 {
 			return "failed", fleet.S(exit, "error")

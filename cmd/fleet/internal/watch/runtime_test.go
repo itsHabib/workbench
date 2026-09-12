@@ -426,3 +426,56 @@ func TestPreTurnQuiescenceRequiresCompleteBoundEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseEndsOnlyAnAbsentUnfinishedReservation(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home, provider: "claude"}
+	stateFile := filepath.Join(t.TempDir(), "attempt.state.json")
+	if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": "one", "provider": "claude", "provider_started": true, "provider_terminal": false, "provider_session": "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	// A bridge that vanished mid-turn: pid gone, no exit file, provider never terminal.
+	launch := fleet.Rec{"address": "hub:lead", "cwd": home, "at": fleet.Now(), "status": "running", "pid": 999999, "process_identity": "gone", "provider": "claude", "attempt": "one", "state_file": stateFile, "resume": "s1", "work_identity": workIdentity(target)}
+	if err := fleet.WriteJSON(launchPath(target), launch); err != nil {
+		t.Fatal(err)
+	}
+	if !launchPresent(launch) {
+		t.Fatal("fixture must start reserved")
+	}
+	if err := Release("hub:lead", ""); err == nil {
+		t.Fatal("a release without a reason is not a record")
+	}
+	if err := Release("hub:lead", "bridge killed; provider confirmed gone"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readLaunch(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launchPresent(after) || fleet.S(after, "status") != "released" || fleet.S(after, "prior_state") != "gone_exit_unknown" {
+		t.Fatalf("release did not end the reservation: %v", after)
+	}
+	if resume, err := resumeSession(target, after); err != nil || resume != "s1" {
+		t.Fatalf("the next wake must resume the recorded session, got %q %v", resume, err)
+	}
+	if err := Release("hub:lead", "again"); err == nil {
+		t.Fatal("a released attempt cannot be released twice")
+	}
+	rows, _ := os.ReadFile(filepath.Join(dir(), "observed.jsonl"))
+	if !strings.Contains(string(rows), "delivery-released") || !strings.Contains(string(rows), "provider confirmed gone") {
+		t.Fatalf("release must be recorded with its reason: %s", rows)
+	}
+	// A running attempt is refused; cancel is the verb for that.
+	identity, _ := processIdentity(os.Getpid())
+	live := fleet.Rec{"address": "hub:lead", "cwd": home, "at": fleet.Now(), "status": "running", "pid": os.Getpid(), "process_identity": identity, "provider": "claude", "attempt": "two", "state_file": stateFile}
+	if err := fleet.WriteJSON(launchPath(target), live); err != nil {
+		t.Fatal(err)
+	}
+	if err := Release("hub:lead", "impatient"); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("released a live attempt: %v", err)
+	}
+	live["status"] = "failed" // fixture cleanup must not wait for this test process
+	if err := fleet.WriteJSON(launchPath(target), live); err != nil {
+		t.Fatal(err)
+	}
+}

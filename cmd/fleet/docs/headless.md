@@ -131,6 +131,7 @@ fleet watch status --json
 fleet tail project-author-1 -n 20
 fleet run-report --since 24h --json
 fleet watch cancel project-author-1
+fleet watch release project-author-1 --why "bridge killed by OOM at 14:02; provider process confirmed gone"
 ```
 
 `watch cancel` requests interruption of the exact current attempt through its unique control
@@ -139,6 +140,14 @@ API, waits for a terminal response, then closes the transport. If no response ar
 seconds, it closes the transport and reports the missing acknowledgment as failure. Inspect
 status and exit evidence; a request is not proof of cancellation. Cancellation does not erase
 mail, handoffs, assignments or working files and does not replay delivered work.
+
+`watch release` is the operator's way out of a reservation that evidence cannot close: the
+bridge died mid-turn (killed, out of memory, or orphaned by a watcher restart), so its state
+file never records a terminal result and `watch status` shows `provider_cleanup_pending`.
+Confirm the provider process is gone first. Release refuses while the attempt is running or
+its presence is uncertain, requires a reason, marks the launch `released` with that reason,
+and appends `delivery-released` to `watch/observed.jsonl`. The next eligible wake may launch
+and resumes the recorded session. It does not delete evidence and does not replay mail.
 
 To stop future launches too, use `fleet stop address:project-author-1 "run complete"` before
 cancelling. `fleet resume address:project-author-1` permits future starts. Removing a config entry
