@@ -42,8 +42,9 @@ can stop here and come back to sections 5 (leases) and 8 (the watcher) for detai
   in `$ORG_STATE/roles.map`. Section 3 names the process that writes each file.
 - **The hook** runs once per harness event as its own short process, decides allow or deny
   from the store, and writes the session record. It is registered for six events, and for
-  tool events only on write-capable tools: Read, Grep and Glob never reach it
-  (`cmd/fleet/internal/verbs/role.go:167`). Section 4.
+  tool events only on write-capable tools: Read, Grep, Glob, web and MCP tools never reach
+  it, so a file write through an MCP tool is not checked (`cmd/fleet/internal/verbs/role.go:167`).
+  Section 4.
 - **Leases.** `CheckLease` reads, decides and writes a lease inside a kernel file lock.
   A dead holder's branch is taken over on the next write; a dead holder's resource is not.
   On that path a record that cannot be read is never treated as death
@@ -96,7 +97,7 @@ permission stays with Gate (`docs/features/org-fleet-boundary/spec.md:46`).
 **Fleet and Org.** Org (`cmd/org`) is a registry of editable Markdown role cards with an
 optional parent reference: `charter`, `boot`, `status`, and nothing else
 (`cmd/org/README.md:1-33`). Since #310 it holds no claims, checkpoints or chains. Fleet
-never reads Org's registry (`roles.json` appears nowhere in `cmd/fleet`); the two share only
+never reads Org's registry (no Go source under `cmd/fleet` mentions `roles.json`); the two share only
 `$ORG_STATE/roles.map`, which Fleet writes and reads. The decided split of facts between
 them is the table at `docs/features/org-fleet-boundary/spec.md:33-46`.
 
@@ -172,7 +173,7 @@ The processes that write:
 | `leases/<key>.json` | hook (first write, branch switch, seat occupancy at start, release at end); verbs `take`, `drop`, `revoke` | one holder per key | `cmd/fleet/internal/fleet/policy.go:399`, `cmd/fleet/internal/fleet/session.go:631-633`, `cmd/fleet/internal/fleet/lease.go:127-240`, `cmd/fleet/internal/verbs/keys.go:117-231` |
 | `keylocks/<key>.lock` | any process taking `KeyLock` | an empty file whose kernel lock serializes one key; never removed | `cmd/fleet/internal/fleet/lock.go:47-73` |
 | `stop/<key>.json` | verbs `stop`, `revoke`; removed by `resume`, by the hook once a revoke has reached the displaced session, or at SessionEnd of the session a revoke flag excepts | a stand-down flag on a branch, resource or mail address | `cmd/fleet/internal/verbs/keys.go:22-63`, `cmd/fleet/internal/fleet/session.go:143-157`, `cmd/fleet/internal/fleet/lease.go:239` |
-| `dispatch/<repo>__<branch>__<rel>.json` | verbs `dispatch`, `reassign`, `undispatch`, `request` | the declared part of an ownership row | `cmd/fleet/internal/verbs/work.go:44-48`, `cmd/fleet/internal/verbs/work.go:150-157` |
+| `dispatch/<repo>__<branch>__<rel>.json` | verbs `dispatch`, `reassign`, `undispatch`, `request` | the declared part of an ownership row | `cmd/fleet/internal/verbs/work.go:44-48`, `cmd/fleet/internal/verbs/work.go:150-157`, `cmd/fleet/internal/verbs/work.go:218-221` |
 | `assign/<seat>.json` | verb `assign` (and `dispatch --slot`); the SessionStart hook stamps `delivered_to` | what a seat's next session reads at start | `cmd/fleet/internal/verbs/views.go:873-875`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47` |
 | `receipts/<sha>.<kind>.json` and `receipts/<head>.<kind>.jsonl` | verb `receipt` | latest verdict at a head, and every verdict at that head | `cmd/fleet/internal/verbs/receipts.go:93-129` |
 | `mail/.v2/<sha256 tenant>/<role or seat>/<sha256 address>/<id>.json` | verbs `send`, `ack`; watcher (delivery stamps and lateness reports) | one message, retained after acknowledgement | `cmd/fleet/internal/fleet/mail_address.go:12-19`, `cmd/fleet/internal/fleet/mail.go:145-180`, `cmd/fleet/internal/fleet/mail_store.go:193-252`, `cmd/fleet/internal/watch/late.go:106-120` |
@@ -468,8 +469,9 @@ That is ten states in all (`cmd/fleet/internal/verbs/work.go:302`), and no verb 
 `fleet reassign --for` moves accountability by rewriting one column
 (`cmd/fleet/internal/verbs/work.go:190-231`).
 
-A dispatch writes two records, the assignment and the row, and a failure between them can
-leave an assignment that wakes its worker with no row. This is recorded, not fixed
+A dispatch with `--slot` writes two records, the assignment and then the row; without a
+seat it writes only the row (`cmd/fleet/internal/verbs/work.go:141-157`). A failure between
+the two writes can leave an assignment that wakes its worker with no row. This is recorded, not fixed
 (`FOLLOWUPS.md:63-79`).
 
 ### Receipts at the exact head
@@ -689,7 +691,7 @@ sequenceDiagram
 | 10 | watcher | launch record `watch/delivery/<sha256 cwd>.json` with `status: "starting"`, the attempt's file paths, `work_identity` and the session to `resume` | `cmd/fleet/internal/watch/runtime.go:130-133` |
 | 11 | watcher | none: `providerCommand` builds `node --input-type=module -e <bridge>` with the request on stdin, adding the observer path on macOS. The request is copied to stdin by a goroutine in this process after `Start` (section 11) | `cmd/fleet/internal/watch/runtime.go:134-139`, `cmd/fleet/internal/provider/provider.go:16-32` |
 | 12 | watcher | on a start error: launch record rewritten `status: "failed"`, then `launch` gives the stamps back | `cmd/fleet/internal/watch/runtime.go:140-146`, `cmd/fleet/internal/watch/deliver.go:316-320` |
-| 13 | watcher | on success: launch record rewritten `status: "running"` with `pid` and `process_identity` (the process start time) | `cmd/fleet/internal/watch/runtime.go:147-152` |
+| 13 | watcher | on success: launch record rewritten `status: "running"` with `pid` and, when it can be read, `process_identity` (the process start time). An identity read error is ignored here; while the process is alive, later folds then read the launch as `unknown` (`cmd/fleet/internal/watch/status.go:85-95`) | `cmd/fleet/internal/watch/runtime.go:147-152` |
 | 14 | watcher | the fold's observations for this address, appended to `observed.jsonl` once `deliver()` returns | `cmd/fleet/internal/watch/deliver.go:305-323`, `cmd/fleet/internal/watch/watch.go:137-139` |
 
 Steps 7 to 13 happen inside the delivery lock. Until step 12 or 13 rewrites the record
@@ -732,7 +734,7 @@ of the proof (`cmd/fleet/internal/provider/observe.go:10-11`).
 |---|---|---|---|
 | 26 | hook (SessionStart) | `sessions/<sid>.json` with `launch_dir`, role and seat; the seat occupancy lease; `delivered_to` and `delivered_at` on `assign/repo-author-1.json`; a line in `events.jsonl` | `cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/session.go:597-634`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47`, `cmd/fleet/main.go:242-263` |
 | 27 | hook (PreToolUse on the first write) | `leases/<branch key>.json` | `cmd/fleet/internal/fleet/policy.go:395-400` |
-| 28 | verb run by the agent | `acked_at` on each message it handled; a `handoff/` checkpoint; a receipt, if it is a verifier | `cmd/fleet/internal/fleet/mail.go:249-277`, `cmd/fleet/internal/verbs/keys.go:403-427`, `cmd/fleet/internal/verbs/receipts.go:108-129` |
+| 28 | verb run by the agent | `acked_at` on each message it handled; a `handoff/` checkpoint; a receipt when it records one (any live session can; section 6) | `cmd/fleet/internal/fleet/mail.go:249-277`, `cmd/fleet/internal/verbs/keys.go:403-427`, `cmd/fleet/internal/verbs/receipts.go:108-129` |
 | 29 | hook (Stop, SessionEnd) | `turn_open: false`, `last-word/`; at SessionEnd `ended: true` and branch leases released | `cmd/fleet/internal/fleet/hook.go:495-514` |
 
 **After the bridge exits**
@@ -810,8 +812,10 @@ passes on the record's `resume` value, the session that attempt was asked to res
 (`cmd/fleet/internal/watch/runtime.go:188-190`). `fresh: true` in the entry starts a new
 conversation (`cmd/fleet/internal/watch/runtime.go:185`).
 
-**At most once.** Each message and each assignment wakes a directory at most once. A
-stamped message is never carried again (above), and an assignment whose hash matches the
+**At most once.** Each message and each assignment is carried by at most one launch that
+started. A launch whose start fails gives its stamps back, so a later fold may carry the same
+message again (`cmd/fleet/internal/watch/deliver.go:316-320`). Once a launch has started,
+its stamped messages are never carried again (above), and an assignment whose hash matches the
 last launch's is not a new wake unless that launch's status is `failed`
 (`cmd/fleet/internal/watch/runtime.go:78-83`); nor is one a session already read at
 SessionStart, which stamped `delivered_to` (`cmd/fleet/internal/watch/runtime.go:69-72`). A
@@ -858,11 +862,15 @@ Quint describes a system as state plus the steps that change it. Take
   no primed variable, such as `live(s) == Alive` at the top of `write`, is a condition: if
   it is false, the action cannot happen in that state
   (`cmd/fleet/model/model/reference.qnt:47-49`).
-- **The decision.** `action write(s)` is `CheckLease`, taken as one atomic step because
-  the real code runs it under `KeyLock`. Read it next to
-  `cmd/fleet/internal/fleet/policy.go:392-440`: free takes the key; the holder's own write
-  proceeds; a rival that is `Alive` or `Unreadable` is refused; a `Dead` rival's branch is
-  taken over and its resource refused (`cmd/fleet/model/model/reference.qnt:44-71`).
+- **The decision.** `action write(s)` abstracts `CheckLease` as one atomic step. In the
+  code, a claim or takeover reads, decides and writes under `KeyLock`
+  (`cmd/fleet/internal/fleet/policy.go:392-440`); the holder's own repeat write takes an
+  unlocked fast path that only reads its own lease and writes nothing
+  (`cmd/fleet/internal/fleet/policy.go:385-391`, `cmd/fleet/model/SOURCE_MAP.md:21`). The
+  lock makes a rival's decision atomic; the model assumes that and does not model the lock
+  itself. In the model: free takes the key; the holder's own write proceeds; a rival that is
+  `Alive` or `Unreadable` is refused; a `Dead` rival's branch is taken over and its resource
+  refused (`cmd/fleet/model/model/reference.qnt:44-71`).
 - **The environment.** `crash(s)` kills a session: its in-flight write vanishes and the
   lease file stays (`cmd/fleet/model/model/reference.qnt:88-95`). `obscure(s)` and
   `reveal(s)` make a live session's record unreadable and readable again, possibly
@@ -1047,7 +1055,9 @@ PASS artifacts: frozen failures and required ledgers are present
 ALL CHECKS PASS
 ```
 
-Exit 0, 33 seconds wall time. CI does not run the judge; it runs the Go replay test as part
+Exit 0, 33 seconds wall time. The "12 steps" in the PASS lines is the judge's own wording;
+the TLC section above explains why that bound does not apply. CI does not run the judge; it
+runs the Go replay test as part
 of `go test ./...` on Linux (`cmd/fleet/model/CRASH-REPLACEMENT.md:31-34`,
 `.github/workflows/ci.yml:44-45`).
 
@@ -1073,8 +1083,8 @@ Specifically unmodeled, from #318 and #326 (`verified`):
 
 There is also a difference in kind. The existing models check only **safety** invariants:
 properties of single states ("two writes are never in flight"). The open gap in section 11
-is a **progress** failure: a state from which nothing but a person deleting a file ever leads
-back to a directory that can launch. A safety invariant cannot express that. A model of the
+is a **progress** failure: a state from which nothing but a person removing or editing the
+launch record ever leads back to a directory that can launch. A safety invariant cannot express that. A model of the
 launch protocol would need either a temporal property ("a reserved directory is eventually
 free or has a running process") or an explicit check that every reachable state has a path
 back to "free". `intent`: the gap is being kept as the first target of a planned crash-point
@@ -1193,7 +1203,8 @@ crash point as the `starting` record.
   by the resource at the moment of the write, is `intent`.
 - **A silent session stays present forever.** `present()` counts any session record in the
   directory that is not ended and whose harness pid, if it has one, is not proven gone
-  (`cmd/fleet/internal/watch/deliver.go:374-393`). It applies no age limit. A
+  (`cmd/fleet/internal/watch/deliver.go:374-393`). It never calls `SessionAlive`, so the
+  two-hour limit that function applies to unverified records never comes into play. A
   `parent-unverified` record left by a session that died without SessionEnd (on Windows,
   any session that dies that way) blocks delivery to that directory until a person edits or
   removes the record; nothing in Fleet does (section 3). A throwaway test at `5f9d837`
@@ -1301,7 +1312,7 @@ Both directions are listed: docs behind the code, and docs ahead of it.
 | "the MCP face and, later, the watcher" | `cmd/fleet/main.go:2` (comment) | The watcher exists (`cmd/fleet/main.go:74-75`, `cmd/fleet/internal/watch/watch.go`) |
 | "Four rules" | `cmd/fleet/docs/OVERVIEW.md:13-29` | A different set from the README's five (`cmd/fleet/README.md:21-58`): OVERVIEW has "addresses survive sessions" and lacks "one holder per key" and "no domain word". This guide follows the README |
 | "a launcher starting four sessions for one role was absorbed by Org's one-holder rule" | `cmd/fleet/docs/OVERVIEW.md:69-70` | A true account of the 2026-09-09/10 runs, but Org's claim protocol was removed in #310 (`docs/features/org-fleet-boundary/spec.md:7-12`, `docs/features/org-fleet-boundary/spec.md:93-100`); delivery's one-launch-per-directory rule does that job now (`cmd/fleet/internal/watch/deliver.go:14-17`) |
-| the store table | `cmd/fleet/README.md:78-90` | The mail path shows a raw `<tenant>` and `<address>` (`cmd/fleet/README.md:86`); the code uses their SHA-256 digests (`cmd/fleet/internal/fleet/mail_address.go:15-17`). The table also omits `deliver.json`, `handoff/`, `role-handoff/`, `stop/`, `last-word/`, `prs/`, `cache/github/`, `inflight/`, `locks/`, `decisions.jsonl`, `costs.jsonl`, `overrides.jsonl`, `actions.jsonl`, `hook-errors.jsonl`, `migrated-keys.v1`, `watch/delivery/`, `watch/late.json` and `watch/owner.lock` (section 3) |
+| the store table | `cmd/fleet/README.md:78-90` | The mail path shows a raw `<tenant>` and `<address>` (`cmd/fleet/README.md:86`); the code uses their SHA-256 digests (`cmd/fleet/internal/fleet/mail_address.go:15-17`). The README's table also omits `deliver.json`, `handoff/`, `role-handoff/`, `stop/`, `last-word/`, `prs/`, `cache/github/`, `inflight/`, `locks/`, `decisions.jsonl`, `costs.jsonl`, `overrides.jsonl`, `actions.jsonl`, `hook-errors.jsonl`, `migrated-keys.v1`, `watch/delivery/`, `watch/late.json` and `watch/owner.lock`, all of which this guide's section 3 lists |
 | "The lock's kernel release on process death … `~/verify-windows.md` names the probe" | `cmd/fleet/model/CLAIMS.md:63-64` | Points at a file outside the repository; the probe cannot be followed from the tree |
 | the key prefix "is the only thing the substrate ever branches on, for one rule: what happens to a dead holder" | `cmd/fleet/internal/fleet/store.go:405-408` (comment) | The prefix also decides whether a key may be taken or dropped by hand (`cmd/fleet/internal/verbs/keys.go:118-120`, `cmd/fleet/internal/verbs/keys.go:196-198`) and whether SessionEnd releases it (`cmd/fleet/internal/fleet/lease.go:223-231`) |
 | `noSilentResourceTakeover`: "a resource never changes hands after a death without a takeover" | `cmd/fleet/model/README.md:49` | The invariant checks only that no `Silent` fact was recorded (`cmd/fleet/model/model/reference.qnt:151-154`); an unlabelled change of hands would pass it (section 9) |
