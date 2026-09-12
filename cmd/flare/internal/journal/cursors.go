@@ -24,7 +24,39 @@ var ErrCursorsCorrupt = errors.New("journal: cursors file is corrupt")
 type Cursors struct {
 	LastPoll time.Time                `json:"last_poll"`
 	Sources  map[string]source.Cursor `json:"sources"`
+	// Stalled records the sources whose cursor is stuck behind something that
+	// will not settle. It is the fact `flare status` was missing: a fresh
+	// last_poll proves the loop is RUNNING, not that anything is getting
+	// through, and the two are different kinds of healthy.
+	Stalled map[string]Stall `json:"stalled,omitempty"`
 }
+
+// Stall is why one source stopped advancing. The cursor is ordered, so an event
+// that cannot be delivered blocks every event after it — a stall is a delivery
+// outage for that source, not a single lost page.
+type Stall struct {
+	Since    time.Time `json:"since"`
+	EventID  string    `json:"event_id,omitempty"`
+	Attempts int       `json:"attempts"`
+	Note     string    `json:"note"`
+}
+
+// Stall records or extends a source's stall, preserving when it began so the
+// operator can see how long the outage has run.
+func (c *Cursors) Stall(source, eventID, note string, now time.Time) {
+	if c.Stalled == nil {
+		c.Stalled = map[string]Stall{}
+	}
+	s, ok := c.Stalled[source]
+	if !ok {
+		s = Stall{Since: now}
+	}
+	s.EventID, s.Note, s.Attempts = eventID, note, s.Attempts+1
+	c.Stalled[source] = s
+}
+
+// Clear drops a source's stall once it polls cleanly again.
+func (c *Cursors) Clear(source string) { delete(c.Stalled, source) }
 
 func (j *Journal) cursorsPath() string { return filepath.Join(j.dir, "cursors.json") }
 

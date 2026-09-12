@@ -20,10 +20,11 @@ func TestSeenSettlesDeliveredDroppedThrottledButRetriesErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seen, err := j.Seen()
+	replayed, err := j.Load(time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	seen := replayed.Seen
 	for _, id := range []string{"a", "b", "c"} {
 		if !seen[SeenKey("", id)] {
 			t.Fatalf("%s must be settled", id)
@@ -47,10 +48,11 @@ func TestSeenIsScopedBySource(t *testing.T) {
 	if err := j.Append(Entry{Time: time.Now(), Kind: Delivered, Source: "gate-prod", EventID: "vrd_1"}); err != nil {
 		t.Fatal(err)
 	}
-	seen, err := j.Seen()
+	replayed, err := j.Load(time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	seen := replayed.Seen
 	if !seen[SeenKey("gate-prod", "vrd_1")] {
 		t.Fatal("the delivered event must be settled for its own source")
 	}
