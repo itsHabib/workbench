@@ -45,6 +45,10 @@ type diffResult struct {
 	Diff      string
 	MergeBase string
 	Head      string
+	// Base is the base commit the api path compared against. With Head it names
+	// the exact pair GitHub's three-dot compare ran on, so the diff is
+	// recomputable from state alone.
+	Base string
 }
 
 // localDiff computes the PR's merge-base diff from a depth-1 fetch of exactly

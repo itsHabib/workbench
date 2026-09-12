@@ -54,7 +54,7 @@ func newRig(t *testing.T) *rig {
 	write(filepath.Join(r.standup, "config.json"), `{"lead":"lead:acme","tenant":"acme","phrase":"ship it","repos":["acme/ivy"]}`)
 	write(filepath.Join(r.fake, "work.json"), "[]")
 	write(filepath.Join(r.fake, "prs.json"), `[{"number":7,"title":"Seven","headRefName":"feat/seven","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"","updatedAt":"2026-09-10T00:00:00Z","url":"u"}]`)
-	write(filepath.Join(r.fake, "decisions.txt"), "")
+	write(filepath.Join(r.fake, "decisions.txt"), "[]")
 	script("fleet", `case "$1" in
   work) if [ -e "$FAKE/work-fail" ]; then echo "fleet: state unavailable" >&2; exit 1; fi; cat "$FAKE/work.json" ;;
   receipts) if [ -e "$FAKE/receipts.json" ]; then cat "$FAKE/receipts.json"; else echo '[]'; fi ;;
@@ -73,7 +73,7 @@ esac`)
   "remote get-url") cat "$FAKE/origin.txt" ;;
   *) echo "fake git: $*" >&2; exit 2 ;;
 esac`)
-	script("org", `echo '[{"tenant":"","role":"","card":""},{"tenant":"acme","role":"steward:ivy","card":"/cards/steward-ivy.md","parent":"lead:acme"}]'`)
+	script("org", `printf '%s\n' "$*" >> "$FAKE/org.log"; echo '[{"tenant":"","role":"","card":""},{"tenant":"acme","role":"steward:ivy","card":"/cards/steward-ivy.md","parent":"lead:acme"}]'`)
 	script("gh", `case "$1 $2" in
   "pr list") cat "$FAKE/prs.json" ;;
   "pr view") cat "$FAKE/pr7.txt" ;;
@@ -192,6 +192,11 @@ func TestAgendaIsStableAcrossRuns(t *testing.T) {
 	if strings.Contains(text, "parent=- card=-") {
 		t.Error("placeholder org rows must be dropped")
 	}
+	// org falls back to its default tenant when none is named; the agenda must name
+	// the configured one so another tenant's cards never appear.
+	if calls, _ := os.ReadFile(filepath.Join(r.fake, "org.log")); !strings.Contains(string(calls), "-tenant acme") {
+		t.Errorf("org status must be asked for the configured tenant, got %q", calls)
+	}
 }
 
 func TestConfirmIsCodeNotModel(t *testing.T) {
@@ -292,13 +297,34 @@ func TestApplyCompilesCards(t *testing.T) {
 	}
 }
 
+// A decision already in force is skipped on a fresh record, not only on a re-apply
+// of the same one: `new --from` carries decisions over, and fleet appends a
+// duplicate row for every repeated `decide`. The skip reads the JSON ledger.
+func TestDecisionInForceIsSkipped(t *testing.T) {
+	r := newRig(t)
+	r.setFile("decisions.txt", `[{"id":"d1","kind":"rule","subject":"ivy","text":"two fix-rounds then the judge"}]`)
+	id := agendaID(t, r.must(0, "agenda"))
+	path := strings.TrimSpace(r.must(0, "new", "--agenda", id))
+	r.edit(path, func(rec *standup.Record) {
+		rec.Decisions = []standup.Decision{{Kind: "rule", Subject: "ivy", Text: "two fix-rounds then the judge"}}
+	})
+	r.must(0, "confirm", path, "--phrase", "ship it")
+	if plan := r.must(0, "apply", path, "--dry-run"); !strings.Contains(plan, "(already decided)") {
+		t.Fatalf("a decision in force must be skipped:\n%s", plan)
+	}
+	r.must(0, "apply", path)
+	if strings.Contains(r.callLog(), "decide ") {
+		t.Fatalf("a decision in force was decided again:\n%s", r.callLog())
+	}
+}
+
 func TestApplyLedgerIsIdempotentAndGuarded(t *testing.T) {
 	r := newRig(t)
 	path, _ := planAndApply(t, r)
 
 	// The world now carries the row; a second apply repeats nothing.
 	r.setFile("work.json", `[{"repo":"ivy-5ab57ce6","change":"feat/seven","relationship":"draft","for":"author:ivy","state":"dispatched","slot":"ivy-author-1","key":"repo:ivy-5ab57ce6:feat/seven"}]`)
-	r.setFile("decisions.txt", "d1 rule ivy: two fix-rounds then the judge\n")
+	r.setFile("decisions.txt", `[{"id":"d1","kind":"rule","subject":"ivy","text":"two fix-rounds then the judge"}]`)
 	r.must(1, "apply", path) // the world moved (a new row): the agenda is stale
 	r.must(0, "apply", path, "--force-stale")
 	if n := len(strings.Split(strings.TrimSpace(r.callLog()), "\n")); n != 3 {

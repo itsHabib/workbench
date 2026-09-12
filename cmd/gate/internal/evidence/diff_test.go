@@ -25,8 +25,8 @@ func TestFetchPrimaryDiffPinsViewedHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchPrimaryDiff: %v", err)
 	}
-	if result.Diff != "the diff" || result.Head != head {
-		t.Fatalf("result = %+v, want diff and exact viewed head", result)
+	if result.Diff != "the diff" || result.Head != head || result.Base != base {
+		t.Fatalf("result = %+v, want diff, exact viewed head and the compared base", result)
 	}
 }
 

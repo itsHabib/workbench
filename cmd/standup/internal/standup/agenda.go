@@ -76,7 +76,7 @@ func (e Env) Build(cfg Config, id string) (*Agenda, error) {
 		e.jsonSource("fleet work", e.LeadDir, e.Fleet, "work", "--json"),
 		e.jsonSource("fleet receipts", e.LeadDir, e.Fleet, "receipts", "--since", "24h", "--json"),
 		e.jsonSource("fleet mail", e.LeadDir, e.Fleet, "mail", "--for", cfg.Lead, "--unacked", "--json"),
-		e.orgSource(),
+		e.orgSource(cfg.Tenant),
 	)
 	for _, repo := range cfg.Repos {
 		a.Sources = append(a.Sources, e.jsonSource("gh pr list "+repo, e.LeadDir, e.GH, "pr", "list", "-R", repo, "--state", "open",
@@ -122,8 +122,8 @@ func (e Env) jsonSource(name, dir, bin string, args ...string) Source {
 
 // orgSource is `org status -json`: the registered role cards (tenant, role, card,
 // parent). Rows with no role are placeholders and dropped.
-func (e Env) orgSource() Source {
-	s := e.jsonSource("org status", e.LeadDir, e.Org, "status", "-json")
+func (e Env) orgSource(tenant string) Source {
+	s := e.jsonSource("org status", e.LeadDir, e.Org, "status", "-json", "-tenant", tenant)
 	if !s.OK {
 		return s
 	}
