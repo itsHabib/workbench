@@ -93,8 +93,14 @@ func reviveWatcher(ev map[string]any) (started bool) {
 
 // runWatch: `fleet watch` ticks forever; `fleet watch --once` ticks once and prints the
 // board; `--interval 30s` sets the tick.
-func runWatch(args []string) {
-	if len(args) > 0 && args[0] == "cancel" {
+// watchControl handles the operator verbs on a retained attempt: `cancel` and
+// `release`. It reports whether it consumed the arguments.
+func watchControl(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "cancel":
 		if len(args) != 2 {
 			fmt.Fprintln(os.Stderr, "usage: fleet watch cancel <address>")
 			os.Exit(2)
@@ -104,6 +110,24 @@ func runWatch(args []string) {
 			os.Exit(1)
 		}
 		fmt.Println("interrupt requested; inspect watch status for the terminal result")
+		return true
+	case "release":
+		if len(args) != 4 || args[2] != "--why" {
+			fmt.Fprintln(os.Stderr, "usage: fleet watch release <address> --why <reason>")
+			os.Exit(2)
+		}
+		if err := watch.Release(args[1], args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("reservation released and recorded; the next eligible wake may launch")
+		return true
+	}
+	return false
+}
+
+func runWatch(args []string) {
+	if watchControl(args) {
 		return
 	}
 	if len(args) > 0 && args[0] == "status" {

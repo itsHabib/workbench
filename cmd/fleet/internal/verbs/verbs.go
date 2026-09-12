@@ -70,6 +70,8 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
                                                  the verdict is always the latest receipt of a kind; --all shows what it replaced
   fleet watch [--interval 10s] [--once]          Go scheduler and observer; runs until stopped
   fleet watch status [--json]                    inspect workers and watcher now, without a tick
+  fleet watch cancel <address>                    interrupt the current attempt through the provider
+  fleet watch release <address> --why <reason>    end a reservation whose bridge died mid-turn; refused while running
   fleet tail <seat|role> [-n 20] [-f]             observed transcript/output text, tools and results
   fleet board [--json]                           every roled path with observed state: vacant · dead · idle · idle-holding-work · busy · busy-and-overdue
   fleet pool <checkout> [<kind> <n>] [--rewarm] [--tenant <t>]

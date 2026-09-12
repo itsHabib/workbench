@@ -53,7 +53,7 @@ func launchPresent(r fleet.Rec) bool {
 	if state == "running" || state == "unknown" {
 		return true
 	}
-	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" {
+	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" || fleet.S(r, "status") == "released" {
 		return false
 	}
 	return !providerTerminal(r)
@@ -185,7 +185,7 @@ func resumeSession(t deliverTarget, last fleet.Rec) (string, error) {
 	if t.fresh || last == nil || fleet.S(last, "provider") != t.provider || fleet.S(last, "work_identity") != workIdentity(t) {
 		return "", nil
 	}
-	if fleet.S(last, "status") == "failed" {
+	if fleet.S(last, "status") == "failed" || fleet.S(last, "status") == "released" {
 		return fleet.S(last, "resume"), nil
 	}
 	raw, err := os.ReadFile(fleet.S(last, "state_file"))
@@ -269,6 +269,74 @@ func Cancel(address string) error {
 	})
 }
 
+// launchFor is the retained launch record for an address, found by scanning the
+// delivery directory so it survives the removal of its deliver.json entry.
+func launchFor(address string) (fleet.Rec, string, error) {
+	records, err := os.ReadDir(filepath.Join(dir(), "delivery"))
+	if err != nil {
+		return nil, "", err
+	}
+	var found fleet.Rec
+	var at string
+	for _, entry := range records {
+		name := entry.Name()
+		if len(name) != 64+len(".json") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(dir(), "delivery", name)
+		r := fleet.ReadJSON(path)
+		if fleet.S(r, "address") != address {
+			continue
+		}
+		if fleet.S(r, "cwd") == "" || launchPath(deliverTarget{cwd: fleet.S(r, "cwd")}) != path {
+			return nil, "", fmt.Errorf("invalid retained launch binding")
+		}
+		if found != nil {
+			return nil, "", fmt.Errorf("multiple retained attempts for %s; inspect them before acting", address)
+		}
+		found, at = r, path
+	}
+	return found, at, nil
+}
+
+// Release is the operator's attested end of a reservation whose bridge is gone but
+// whose provider never reported a terminal result: a bridge killed mid-turn, a
+// watcher restarted while a turn ran. It refuses while the process is running or
+// its presence is uncertain, records the reason beside the launch, and never
+// touches mail, handoffs or working files.
+func Release(address, why string) error {
+	if strings.TrimSpace(why) == "" {
+		return fmt.Errorf("release requires --why: the reason is the record")
+	}
+	return fleet.KeyLock(deliverLockKey, func() error {
+		r, path, err := launchFor(address)
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			return fmt.Errorf("no retained attempt for %s", address)
+		}
+		state, reason := processState(r)
+		switch state {
+		case "released":
+			return fmt.Errorf("%s is already released: %s", address, reason)
+		case "running":
+			return fmt.Errorf("%s is still running (pid %d); use fleet watch cancel first", address, int(fleet.F(r, "pid")))
+		case "unknown":
+			return fmt.Errorf("cannot release %s: %s", address, reason)
+		}
+		if !launchPresent(r) {
+			return fmt.Errorf("%s holds no reservation (%s); nothing to release", address, state)
+		}
+		now := fleet.Now()
+		r["status"], r["release_why"], r["released_at"], r["prior_state"] = "released", why, now, state
+		if err := fleet.WriteJSON(path, r); err != nil {
+			return err
+		}
+		return fleet.AppendJSONL(filepath.Join(dir(), "observed.jsonl"), fleet.Rec{"at": now, "what": "delivery-released", "address": address, "attempt": r["attempt"], "prior_state": state, "why": why})
+	})
+}
+
 func cancelCandidate(name, address string) (fleet.Rec, error) {
 	if len(name) != 64+len(".json") || !strings.HasSuffix(name, ".json") {
 		return nil, nil
@@ -282,7 +350,7 @@ func cancelCandidate(name, address string) (fleet.Rec, error) {
 		return nil, fmt.Errorf("invalid retained launch binding")
 	}
 	state, reason := processState(r)
-	if state == "exited" || state == "failed" || state == "launch_failed" {
+	if state == "exited" || state == "failed" || state == "launch_failed" || state == "released" {
 		return nil, nil
 	}
 	if state != "running" {
