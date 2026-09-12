@@ -697,3 +697,17 @@ registry or general process cleanup policy is introduced. A real Go-watcher prob
 removed only its own disposable session history, received a native resume rejection,
 then completed an explicit fresh retry with the dirty file preserved. This repair
 continues through fresh CI and Gate judgment without a fourth panel.
+## standup: a fresh seat cannot prove which same-named repository a Fleet row belongs to
+
+Fleet keys a dispatch row by its repository id, a basename plus a hash of the
+checkout's git directory (`fleet.RepoID`). `standup apply` matches a card
+against existing rows to refuse replacing a row another role holds. It learns
+a seat's id from any row or receipt Fleet has already recorded in that seat
+and then matches exactly. A seat with no identity on record and a same-named
+row for the card's branch and relationship is refused as unproven rather than
+matched by basename.
+
+The exact fix is a Fleet read verb that prints a path's repository id (the
+hash is Fleet's to compute, not a second implementation here); `fleet slots
+--json` prints the basename only. Until then the cost is one refusal in the
+fresh-seat, same-basename case, and the refusal text says what clears it.
