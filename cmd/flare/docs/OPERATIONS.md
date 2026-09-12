@@ -130,9 +130,25 @@ incoming webhook. It lives in `~/.flare/routes.json`:
   "phone": { "type": "slack", "token": "xoxb-…", "channel": "C0…" }   // bot token + channel id
 },
 "routes": [
-  { "match": { "source": "gate", "kind": "escalation" }, "channel": "phone" }
+  { "match": { "source": "gate", "kind": "escalation" }, "channel": "phone" },
+  { "match": { "source": "gate", "kind": "verdict", "decision": "block", "dimension": "reducer" }, "channel": "phone" },
+  { "match": { "source": "gate", "kind": "verdict" }, "channel": "drop" }
 ]
 ```
+
+The last two routes are what keep the channel readable. A gate run emits the
+reducer's **fold** plus every component verdict it folded, and the fold
+restates the worst component's `why` — so `{ "decision": "block" }` on its own
+pages one card per rung. Match `dimension: "reducer"` to announce the run once,
+and drop the remaining rungs. Parked runs need no verdict card at all: the
+escalation artifact is the one that carries the brief, the Approve/Block
+buttons, and a `ts` flare can go back and close. A verdict card is
+fire-and-forget — nothing ever corrects it — so a redundant one shows a dead
+Approve-less park forever.
+
+Skipping this is not cosmetic. On this machine before the routes were tightened,
+396 delivered cards broke down as 88 escalations and 308 verdict restatements;
+one parked PR produced seven cards, six of them uncloseable.
 
 Already wired on this machine (gate escalations → `phone`). To **rotate** the
 token: edit `channels.phone.token`, then `Restart-ScheduledTask -TaskName flare-watch`

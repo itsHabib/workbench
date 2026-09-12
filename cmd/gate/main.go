@@ -112,42 +112,47 @@ func main() {
 		printTerminalError(errors.New("command required"), nil)
 		os.Exit(codeError)
 	}
-	var err error
-	switch os.Args[1] {
-	case "grant":
-		err = cmdGrant(os.Args[2:])
-	case "gate":
-		err = cmdGate(os.Args[2:])
-	case "judge":
-		err = cmdJudge(os.Args[2:])
-	case "resolve":
-		err = cmdResolve(os.Args[2:])
-	case "executor":
-		err = cmdExecutor(os.Args[2:])
-	case "explain":
-		err = cmdExplain(os.Args[2:])
-	case "next":
-		err = cmdNext(os.Args[2:])
-	case "threads":
-		err = cmdThreads(os.Args[2:])
-	case "preflight":
-		err = cmdPreflight(os.Args[2:])
-	case "audit":
-		err = cmdAudit(os.Args[2:])
-	case "backtest":
-		err = cmdBacktest(os.Args[2:])
-	case "stress":
-		err = cmdStress(os.Args[2:])
-	default:
+	run, ok := commands()[os.Args[1]]
+	if !ok {
 		usage()
-		err = fmt.Errorf("unknown command %q", os.Args[1])
+		printTerminalError(fmt.Errorf("unknown command %q", os.Args[1]), os.Args[1:])
+		fmt.Fprintf(os.Stderr, "gate: unknown command %q\n", os.Args[1])
+		os.Exit(codeError)
 	}
+	err := run(os.Args[2:])
 	if err == nil {
 		return
 	}
 	printTerminalError(err, os.Args[1:])
 	fmt.Fprintln(os.Stderr, "gate:", err)
 	os.Exit(commandErrorCode(os.Args[1], err))
+}
+
+// commands is the subcommand table: the name a caller types mapped to the
+// handler that owns it. A table rather than a switch so adding a verb costs one
+// row and no branch — dispatch stays mechanism, each handler keeps its policy.
+func commands() map[string]func([]string) error {
+	return map[string]func([]string) error{
+		"version":        func(args []string) error { return cmdPacketTools("version", args) },
+		"packet":         func(args []string) error { return cmdPacketTools("packet", args) },
+		"evidence":       func(args []string) error { return cmdPacketTools("evidence", args) },
+		"grant":          cmdGrant,
+		"grant-callback": cmdGrantCallback,
+		"gate":           cmdGate,
+		"judge":          cmdJudge,
+		"resolve":        cmdResolve,
+		"executor":       cmdExecutor,
+		"explain":        cmdExplain,
+		"next":           cmdNext,
+		"threads":        cmdThreads,
+		"preflight":      cmdPreflight,
+		"sweep":          cmdSweep,
+		"receipt":        cmdReceipt,
+		"reconcile":      cmdReconcile,
+		"audit":          cmdAudit,
+		"backtest":       cmdBacktest,
+		"stress":         cmdStress,
+	}
 }
 
 func commandErrorCode(command string, err error) int {
@@ -162,13 +167,17 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <grant|gate|judge|resolve|executor|explain|next|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <version|packet|evidence|grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
+  version  (running binary revision and module version)
+  packet   -run run_x (inspect judgment context and missing evidence)
+  evidence -run run_x -grant grt_x -path repo/path (repeat -path for companions)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
-  gate     -repo R -pr N -grant grt_x [-live]
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." | -judgment <path|-> | -auto -provider claude|codex)
-  resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME  (resolve a park by its escalation id + stamp the resolution)
+  gate     -repo R -pr N (-grant grt_x | -slack) [-live]
+  grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." -who NAME [-method cli-operator|slack-interactive] | -judgment <path|-> -who NAME | -auto -provider claude|codex)
+  resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME [-method ...]  (resolve a park by its escalation id + stamp the resolution)
   executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
   executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor request -action act_x -repo R -pr N -head SHA -question Q -replay evt_x -out path
@@ -176,11 +185,14 @@ func usage() {
   executor run     -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
   executor reconcile -claim gxc_x -state-tip SHA -app-id N -installation-id N
   explain  -run run_x [-json | -html [-out path]]
-  next     [-json] [-live]                           (what needs you: parked runs + grants)
+  next     [-json] [-live] [-all]                    (what needs you: parked runs + grants; -all also shows discharged rows)
            [-cpuprofile p] [-blockprofile p] [-trace p]  (debug: profile the live reconcile)
+  sweep    [-json] [-dry-run]                        (record which inbox subjects are no longer open, so next stops recommending dead PRs)
   threads  -repo R -pr N [-json]                     (observe stale review threads: candidate commits + tests, no verdict)
   preflight [-repo R ...] [-deny R|R#N ...] [-json]  (batch sweep inventory + every mint it needs, up front)
-  audit
+  receipt  -run run_x [-why "..."]                    (discharge one authorization with what landed)
+  reconcile -repo R [-since YYYY-MM-DD] [-branch b] [-effective-from YYYY-MM-DD] [-json]
+  audit    [-json] [-max-rows 10]
   backtest -repo R -prs 174,175,...
   stress   [-n 50] [-tag w]`)
 }
@@ -440,6 +452,22 @@ type gateResult struct {
 	Escape     *readiness.Route `json:"escape,omitempty"`
 	SelfGated  bool             `json:"self_gated,omitempty"`
 	RetryHelps *bool            `json:"retry_helps,omitempty"`
+	// Stamp reports what happened to the gate/authorized commit status, on the
+	// one path that attempts one. It exists because "best-effort" was only ever
+	// half true: a failed post went to stderr, and the operator-facing channel —
+	// the Slack card that says "gate authorized the merge" — had no way to know
+	// and reported unqualified success while no status was posted. The decision
+	// is still authoritative without it; a caller renders the shortfall rather
+	// than reversing anything.
+	Stamp *stampResult `json:"stamp,omitempty"`
+}
+
+// stampResult is the reported outcome of the provenance stamp: whether the
+// status landed and, when it did not, why. Additive and omitempty — absent on
+// every path that attempts no stamp.
+type stampResult struct {
+	Posted bool   `json:"posted"`
+	Error  string `json:"error,omitempty"`
 }
 
 func cmdGate(args []string) error {
@@ -448,6 +476,7 @@ func cmdGate(args []string) error {
 	repo := fs.String("repo", "", "owner/repo")
 	pr := fs.Int("pr", 0, "PR number")
 	grantID := fs.String("grant", "", "grant artifact id")
+	slack := fs.Bool("slack", false, "request one exact T0 grant in Slack and wait for it")
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
 	modelBackend := fs.String("model-backend", "local", "model backend for advisory rungs: local|cloud")
@@ -459,18 +488,41 @@ func cmdGate(args []string) error {
 	if help {
 		return nil
 	}
-	if *repo == "" || *pr == 0 || *grantID == "" {
-		return errors.New("gate: -repo, -pr, -grant required")
+	if *repo == "" || *pr == 0 {
+		return errors.New("gate: -repo and -pr required")
+	}
+	if (*grantID == "" && !*slack) || (*grantID != "" && *slack) {
+		return errors.New("gate: choose exactly one of -grant or -slack")
+	}
+	if *slack {
+		if err := checkGrantStateDir(*stateDir, false); err != nil {
+			return err
+		}
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
 	if err != nil {
 		return err
 	}
-	res, code, err := runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
+	var res gateResult
+	var code int
+	if *slack {
+		grant, request, grantErr := requestSlackGrant(e, *repo, *pr, evidence.HeadSHA, slackGrantPollInterval)
+		if grantErr != nil {
+			res = gateResult{
+				PR: fmt.Sprintf("%s#%d", *repo, *pr), Outcome: "capability_refused",
+				Why: grantErr.Error(), HeadSHA: request.Request.Subject.HeadSHA,
+			}
+			code = codeRefused
+		} else {
+			res, code, err = runGateBound(e, *repo, *pr, request.Request.Subject.HeadSHA, grant.ID, *live, *modelBackend, *reviewsOptional)
+		}
+	} else {
+		res, code, err = runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
+	}
 	if err != nil {
 		return err
 	}
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }
@@ -481,7 +533,16 @@ func cmdGate(args []string) error {
 // evaluating historical, merged PRs.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	return runGateWithSynthesis(
-		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true,
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true, "",
+	)
+}
+
+// runGateBound is the Slack path: the grant must match the head captured in
+// the immutable request before Gate gathers anything, and act re-checks the
+// live reduced subject before recording an effect.
+func runGateBound(e env, repo string, pr int, head, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
+	return runGateWithSynthesis(
+		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true, head,
 	)
 }
 
@@ -495,14 +556,15 @@ func runGateWithSynthesis(
 	reviewsOptional bool,
 	synthesize bool,
 	refuseMerged bool,
+	boundHead string,
 ) (res gateResult, code int, err error) {
-	subject := verify.Subject{Repo: repo, Number: pr}
+	subject := verify.Subject{Repo: repo, Number: pr, HeadSHA: boundHead}
 	res = gateResult{PR: fmt.Sprintf("%s#%d", repo, pr)}
 
 	// No live grant, no gate: coded refusal, exit 3, nothing gathered. This
 	// precedes model construction so a missing/invalid grant refuses (codeRefused)
 	// before a missing ANTHROPIC_API_KEY could hard-error the model backend.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, repo, "merge", time.Now)
+	grant, err := checkGateCapability(e, grantID, subject, time.Now)
 	if err != nil {
 		recordGrantNeeded(e, repo, err)
 		res.Outcome = "capability_refused"
@@ -632,6 +694,20 @@ func runGateWithSynthesis(
 		}
 	}
 	return act(e, run, grantID, reduced, reducedArt.ID, res, live, synth)
+}
+
+// checkGateCapability selects the strictest check available from the subject.
+// Before evidence an ordinary run has no head and uses the legacy scope check;
+// the Slack path starts with its bound head. Every later action/judgment has a
+// complete subject and therefore checks exact head + PR.
+func checkGateCapability(e env, grantID string, subject verify.Subject, now func() time.Time) (capability.Grant, error) {
+	if subject.HeadSHA == "" {
+		return capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", now)
+	}
+	return capability.CheckSubject(
+		e.st, e.keyPath, grantID, subject.Repo, "merge",
+		subject.HeadSHA, subject.Number, now,
+	)
 }
 
 // readinessVerdict runs the readiness rung over the gathered bundle. Readiness
@@ -884,7 +960,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// The grant was live when the run started, but evidence gathering and
 	// verification take time. Re-check here so the TTL bounds the effect,
 	// not just the start of the run.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now)
+	grant, err := checkGateCapability(e, grantID, reduced.Subject, time.Now)
 	if err != nil {
 		res.Outcome = "capability_refused"
 		res.Why = err.Error()
@@ -920,7 +996,7 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		// Synthesis can stall to the model's HTTP timeout, outlasting the TTL
 		// the pre-synthesis check saw. Re-check at write time so an escalation
 		// never records under a grant that expired mid-synthesis.
-		if _, err := capability.Check(e.st, e.keyPath, grantID, reduced.Subject.Repo, "merge", time.Now); err != nil {
+		if _, err := checkGateCapability(e, grantID, reduced.Subject, time.Now); err != nil {
 			res.Outcome = "capability_refused"
 			res.Why = err.Error()
 			res.Code = readiness.Code(res.Why)
@@ -998,8 +1074,16 @@ func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
 // the finished result, never an input to act. Best-effort — a post failure is
 // a warning on stderr, never a change to the exit code the caller already
 // holds; the audit chain, not the stamp, is the authorization.
-func emitAuthorizedStamp(res gateResult, code int, on bool) {
+func emitAuthorizedStamp(res *gateResult, code int, on bool) {
 	if !on || code != codeMerge {
+		return
+	}
+	// res.Hash is the action artifact's chain hash, set only once that artifact
+	// is durably appended. Nothing on this path can run before the authorization
+	// is in the log, because stamp.Post refuses a stamp with no hash to pin to —
+	// the ordering is a precondition of the payload, not a convention about call
+	// order. Guard here too so the network is not even reached.
+	if res.Hash == "" {
 		return
 	}
 	// res.PR is "owner/repo#number" on every path that reaches codeMerge, so the
@@ -1016,8 +1100,11 @@ func emitAuthorizedStamp(res gateResult, code int, on bool) {
 		Hash:    res.Hash,
 	})
 	if err != nil {
+		res.Stamp = &stampResult{Error: err.Error()}
 		fmt.Fprintf(os.Stderr, "gate: authorized stamp not posted (decision stands): %v\n", err)
+		return
 	}
+	res.Stamp = &stampResult{Posted: true}
 }
 
 // synthBrief synthesizes the operator brief for a content park and returns it
@@ -1285,10 +1372,23 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 		return errors.New("judge: choose exactly one of manual -decision/-why, -judgment, or -auto")
 	}
 	if opts.Auto {
+		if opts.Who != "" || opts.Method != "" {
+			return errors.New("judge: -who/-method are not accepted with -auto — the provider is the decider and gate records it")
+		}
 		return verify.ValidateJudgeProvider(opts.Provider)
 	}
 	if opts.Provider != "" {
 		return errors.New("judge: -provider requires -auto")
+	}
+	// Every judgment a person authors must name that person. This is the write
+	// path, and it is the only place the binding can be enforced: a reader that
+	// refused an unattributed judgment could no longer explain the 200-odd runs
+	// recorded before the field existed.
+	if opts.Who == "" {
+		return errors.New("judge: -who required — a judgment records who decided")
+	}
+	if err := verify.ValidateDecider(verify.Decider{Who: opts.Who, Method: opts.method(), At: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return fmt.Errorf("judge: %w", err)
 	}
 	if opts.ArtifactPath != "" {
 		return nil
@@ -1308,6 +1408,17 @@ type judgmentOptions struct {
 	Auto         bool
 	ArtifactPath string
 	Provider     string
+	// Who and Method bind the decision to a decider: the identity that decided
+	// and the channel it arrived through. Required on every path a PERSON
+	// authors — manual and submitted-artifact — and derived on the -auto path,
+	// where the delegate is the decider and there is nothing for an operator to
+	// claim. Without them a human approval and an agent-composed one are the
+	// same record.
+	Who    string
+	Method string
+	// now is the decider's clock, injectable so a test can pin the stamped
+	// timestamp. Nil means time.Now.
+	now          func() time.Time
 	beforeAppend func()
 	// requireOpenEscalation makes "this escalation is still the run's open
 	// terminal" a condition of the judgment write itself, evaluated under the
@@ -1323,6 +1434,25 @@ type judgmentOptions struct {
 	requireOpenEscalation bool
 }
 
+// method is the channel to record, defaulting to the operator at a shell. The
+// default lives here rather than on the flag so that "-method set explicitly"
+// stays distinguishable from "not set" — which is what lets -auto refuse a
+// channel it would only ignore.
+func (o judgmentOptions) method() string {
+	if o.Method == "" {
+		return verify.MethodCLIOperator
+	}
+	return o.Method
+}
+
+// clock is the decider's clock, defaulting to the wall clock.
+func (o judgmentOptions) clock() func() time.Time {
+	if o.now == nil {
+		return time.Now
+	}
+	return o.now
+}
+
 func cmdJudge(args []string) error {
 	fs := flag.NewFlagSet("judge", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
@@ -1333,6 +1463,8 @@ func cmdJudge(args []string) error {
 	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
 	auto := fs.Bool("auto", false, "run a built-in local CLI provider over the versioned request")
 	provider := fs.String("provider", "", "built-in local CLI provider for -auto: claude or codex")
+	who := fs.String("who", "", "who decided — recorded on the judgment; omit only with -auto")
+	method := fs.String("method", "", "how the decider's identity was established: cli-operator (default) or slack-interactive")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -1347,6 +1479,8 @@ func cmdJudge(args []string) error {
 		Auto:         *auto,
 		ArtifactPath: *artifactPath,
 		Provider:     *provider,
+		Who:          *who,
+		Method:       *method,
 	}
 	if err := validateJudgeFlags(*run, *grantID, opts); err != nil {
 		return err
@@ -1379,7 +1513,7 @@ func cmdJudge(args []string) error {
 	if err != nil {
 		return judgeSlotState(e, *run, escalationID, err)
 	}
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }
@@ -1470,7 +1604,7 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		return gateResult{}, 0, "", err
 	}
 	// Capability bounds judgment too — resolving an escalation is effectful.
-	grant, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now)
+	grant, err := checkGateCapability(e, grantID, subject, e.now)
 	if err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
@@ -1480,14 +1614,24 @@ func applyJudgment(e env, run, escalationID, grantID string, opts judgmentOption
 		}
 		return resumeJudgment(e, run, grantID, subject, verdicts, arts, persisted, opts)
 	}
+	if _, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, grant.MaxTier); err != nil {
+		return gateResult{}, 0, "", err
+	}
 	judgment, err := judgmentFromOptions(arts, run, escalationID, subject, grantID, grant.MaxTier, opts)
 	if err != nil {
+		return gateResult{}, 0, "", err
+	}
+	// The one gate every judgment write passes, whichever verb or transport
+	// composed it. The per-path construction above already stamps a decider;
+	// this refuses the composition that forgets to, so a future path cannot
+	// reopen the gap by omission.
+	if err := verify.RequireDecider(judgment); err != nil {
 		return gateResult{}, 0, "", err
 	}
 	if opts.beforeAppend != nil {
 		opts.beforeAppend()
 	}
-	if _, err := capability.Check(e.st, e.keyPath, grantID, subject.Repo, "merge", e.now); err != nil {
+	if _, err := checkGateCapability(e, grantID, subject, e.now); err != nil {
 		return gateResult{}, 0, "", fmt.Errorf("capability_refused: %w", err)
 	}
 	// The open-terminal test rides the append's own lock rather than sitting
@@ -1543,7 +1687,7 @@ func persistedJudgmentGrant(e env, judgment state.Artifact, escalationID string,
 		}
 		if artifact.Kind == state.KindGrant {
 			atJudgment := func() time.Time { return judgment.Time }
-			if _, err := capability.Check(e.st, e.keyPath, parentID, subject.Repo, "merge", atJudgment); err != nil {
+			if _, err := checkGateCapability(e, parentID, subject, atJudgment); err != nil {
 				return "", fmt.Errorf("judgment_invalid_grant_lineage: %w", err)
 			}
 			return parentID, nil
@@ -1597,6 +1741,10 @@ func actAfterJudgment(e env, run, grantID string, subject verify.Subject, judgme
 
 func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subject verify.Subject, grantID, maxTier string, opts judgmentOptions) (verify.Verdict, error) {
 	if !opts.Auto && opts.ArtifactPath == "" {
+		decider, err := verify.NewDecider(opts.Who, opts.method(), opts.clock())
+		if err != nil {
+			return verify.Verdict{}, err
+		}
 		return verify.Verdict{
 			Subject:    subject,
 			Source:     "operator-judgment",
@@ -1605,12 +1753,15 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 			Tier:       "T0",
 			Confidence: 1.0,
 			Why:        opts.Why,
+			Decider:    &decider,
 		}, nil
 	}
 	request, err := verify.NewJudgmentRequest(arts, run, escalationID, subject, grantID, maxTier)
 	if err != nil {
 		return verify.Verdict{}, err
 	}
+	// -auto derives its own decider: the resolved provider wrapper and the model
+	// it reported, on the auto-<provider> channel. Nothing here to supply.
 	if opts.Auto {
 		return verify.AutoJudge(opts.Provider, request)
 	}
@@ -1618,7 +1769,20 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 	if err != nil {
 		return verify.Verdict{}, err
 	}
-	return verify.ValidateJudgment(artifact, request)
+	verdict, err := verify.ValidateJudgment(artifact, request)
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	// A submitted artifact names its producing model in Producer.Impl, but the
+	// model did not choose to submit it — a person did, out of band, and that
+	// person is who the record must be able to name. So the decider on this path
+	// is the submitter, not the model; the model stays in the producer.
+	decider, err := verify.NewDecider(opts.Who, opts.method(), opts.clock())
+	if err != nil {
+		return verify.Verdict{}, err
+	}
+	verdict.Decider = &decider
+	return verdict, nil
 }
 
 func artifactForParent(arts []state.Artifact, kind, parentID string) (state.Artifact, bool) {
@@ -1677,12 +1841,15 @@ func readJudgmentArtifact(path string) (verify.JudgmentArtifactV1, error) {
 	return verify.DecodeJudgmentArtifact(f)
 }
 
-func validateResolveFlags(escID, grantID, decision, why, who string) error {
+func validateResolveFlags(escID, grantID, decision, why, who, method string) error {
 	if escID == "" || grantID == "" {
 		return errors.New("resolve: -escalation and -grant required")
 	}
 	if who == "" {
-		return errors.New("resolve: -who required (the resolution stamp records who decided)")
+		return errors.New("resolve: -who required (the judgment and the resolution stamp record who decided)")
+	}
+	if err := verify.ValidateDecider(verify.Decider{Who: who, Method: method, At: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return fmt.Errorf("resolve: %w", err)
 	}
 	if why == "" {
 		return errors.New("resolve: -why required")
@@ -1714,7 +1881,8 @@ func cmdResolve(args []string) error {
 	grantID := fs.String("grant", "", "grant artifact id")
 	decision := fs.String("decision", "", "pass or block")
 	why := fs.String("why", "", "the decision's reasoning")
-	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	who := fs.String("who", "", "who decided — recorded on the judgment and the resolution stamp")
+	method := fs.String("method", verify.MethodCLIOperator, "how the decider's identity was established: cli-operator or slack-interactive")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when the resolution authorizes the merge")
 	help, err := parseFlags(fs, args)
 	if err != nil {
@@ -1723,7 +1891,7 @@ func cmdResolve(args []string) error {
 	if help {
 		return nil
 	}
-	if err := validateResolveFlags(*escID, *grantID, *decision, *why, *who); err != nil {
+	if err := validateResolveFlags(*escID, *grantID, *decision, *why, *who, *method); err != nil {
 		return err
 	}
 	e, err := newEnv(*stateDir, *floorBin, *keyDir)
@@ -1747,7 +1915,10 @@ func cmdResolve(args []string) error {
 	if !open {
 		return fmt.Errorf("resolve: escalation %s is not the run's open park — it was already resolved or superseded by a re-park; nothing to resolve", *escID)
 	}
-	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{Decision: *decision, Why: *why, requireOpenEscalation: true})
+	res, code, judgmentID, err := applyJudgment(e, run, *escID, *grantID, judgmentOptions{
+		Decision: *decision, Why: *why, Who: *who, Method: *method,
+		requireOpenEscalation: true,
+	})
 	if err != nil {
 		return judgeSlotState(e, run, *escID, err)
 	}
@@ -1755,7 +1926,7 @@ func cmdResolve(args []string) error {
 	// capability refusal appends none): the stamp claims the loop closed, so it
 	// must never outrun the judgment it links.
 	if judgmentID != "" {
-		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who); err != nil {
+		if err := stampResolution(e, run, *escID, judgmentID, res.Decision, *who, *method); err != nil {
 			return err
 		}
 	}
@@ -1763,7 +1934,7 @@ func cmdResolve(args []string) error {
 	// a direct gate/judge pass — the stamp reflects the authorization, whichever
 	// entry point produced it. Downstream of the resolution stamp above, gated on
 	// codeMerge, best-effort.
-	emitAuthorizedStamp(res, code, *stampOn)
+	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)
 	return nil
 }
@@ -1825,10 +1996,11 @@ var errStaleEscalation = errors.New("resolve: escalation is no longer the run's 
 // links. It is provenance, not a decision (the effect was the judgment + act
 // re-reduction the shared core already recorded), so it lands in its own
 // artifact kind that the cycle count and the parked/ready projections ignore.
-func stampResolution(e env, run, escID, judgmentID, decision, who string) error {
+func stampResolution(e env, run, escID, judgmentID, decision, who, method string) error {
 	res := escalation.Resolution{
 		Decision:   decision,
 		Who:        who,
+		Method:     method,
 		At:         time.Now().UTC().Format(time.RFC3339),
 		JudgmentID: judgmentID,
 	}
@@ -1939,6 +2111,7 @@ func cmdNext(args []string) error {
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	asJSON := fs.Bool("json", false, "emit the JSON projection (the console feed)")
 	live := fs.Bool("live", false, "reconcile parked subjects with current GitHub PR state")
+	all := fs.Bool("all", false, "also show the rows already discharged (superseded, moot, stale)")
 	// Debug/experimental: profile the live reconcile. Off unless a path is given.
 	cpuProfile := fs.String("cpuprofile", "", "debug: write a CPU profile to this path")
 	blockProfile := fs.String("blockprofile", "", "debug: write a block profile to this path")
@@ -1959,17 +2132,21 @@ func cmdNext(args []string) error {
 	if err != nil {
 		return err
 	}
-	stateArg := stateArgFor(*stateDir)
-	if *live && *asJSON {
-		return observe.NextJSONLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
+	req := observe.NextRequest{
+		StateArg:          stateArgFor(*stateDir),
+		IncludeDischarged: *all,
 	}
+	// Offline unless asked. `gate next -json` is on escalate serve's Slack path
+	// under a hard budget; one gh subprocess per distinct repo there would trade
+	// a stale queue for a stranded interaction. `gate sweep` is how the offline
+	// projection learns what a live read would have told it.
 	if *live {
-		return observe.NextTextLive(os.Stdout, e.st, time.Now, stateArg, lookupOpenPRs)
+		req.Fetch = lookupOpenPRs
 	}
 	if *asJSON {
-		return observe.NextJSON(os.Stdout, e.st, time.Now, stateArg)
+		return observe.NextJSON(os.Stdout, e.st, time.Now, req)
 	}
-	return observe.NextText(os.Stdout, e.st, time.Now, stateArg)
+	return observe.NextText(os.Stdout, e.st, time.Now, req)
 }
 
 // repeatedFlag collects a flag given more than once, so `-repo a -repo b` reads
@@ -2306,9 +2483,19 @@ func shellQuote(s string) string {
 	return s
 }
 
+// cmdAudit answers two different questions and keeps them apart.
+//
+// The chain check asks whether the log was TAMPERED with — a hard fault, and the
+// only thing that changes the exit code. The accountability findings ask whether
+// the log ACCOUNTS for what happened: authorizations nothing wrote back, merges
+// with nothing behind them, decisions naming nobody. A trustworthy record can be
+// incomplete, and reporting incompleteness as tampering would make an operator's
+// first honest audit look like an attack — so findings print and exit 0.
 func cmdAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	stateDir, floorBin, keyDir := commonFlags(fs)
+	asJSON := fs.Bool("json", false, "emit the accountability findings as JSON")
+	maxRows := fs.Int("max-rows", 10, "rows to list per finding section (the count is the finding; the rows are a sample)")
 	help, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -2324,15 +2511,24 @@ func cmdAudit(args []string) error {
 	if err != nil {
 		return err
 	}
-	if res.OK {
-		fmt.Println("chain intact")
+	if !res.OK {
+		at := ""
+		if res.Artifact != "" {
+			at = " (at " + res.Artifact + ")"
+		}
+		return fmt.Errorf("%w: %s%s", errLogTampered, res.Reason, at)
+	}
+	// res.All is the audited snapshot itself, so the findings are derived from
+	// exactly the artifacts the chain check verified — no second scan, no window
+	// for the log to change between the two reads.
+	findings := observe.Audit(res.All)
+	if *asJSON {
+		printJSON(findings)
 		return nil
 	}
-	at := ""
-	if res.Artifact != "" {
-		at = " (at " + res.Artifact + ")"
-	}
-	return fmt.Errorf("%w: %s%s", errLogTampered, res.Reason, at)
+	fmt.Println("chain intact")
+	observe.RenderAudit(os.Stdout, findings, *maxRows)
+	return reportParkDischarge(e.st)
 }
 
 func cmdBacktest(args []string) error {
@@ -2384,7 +2580,7 @@ func runBacktest(repo, prs, floorBin string) error {
 	for _, n := range numbers {
 		// refuseMerged=false: replaying historical, merged PRs is backtest's
 		// whole purpose — the live verb's already-merged refusal must not fire.
-		res, _, err := runGateWithSynthesis(e, repo, n, grantArt.ID, false, "local", false, true, false)
+		res, _, err := runGateWithSynthesis(e, repo, n, grantArt.ID, false, "local", false, true, false, "")
 		if err != nil {
 			fmt.Printf("#%-5d error: %v\n", n, err)
 			continue
@@ -2907,4 +3103,19 @@ func threadLocus(th evidence.Thread) string {
 		return th.Path
 	}
 	return fmt.Sprintf("%s:%d", th.Path, th.Line)
+}
+
+// reportParkDischarge appends the park-discharge health metric to a clean audit.
+//
+// It is reported only after the chain verifies, and it never changes the exit
+// code: integrity and health are different claims, and a repo whose review loop
+// is churning is not a repo whose log has been tampered with. A metric that
+// could fail an audit would train the reader to ignore audit failures.
+func reportParkDischarge(st *state.Store) error {
+	arts, err := st.List(nil)
+	if err != nil {
+		return err
+	}
+	observe.RenderParkDischarge(os.Stdout, observe.ParkDischargeReport(arts))
+	return nil
 }

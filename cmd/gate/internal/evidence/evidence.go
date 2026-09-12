@@ -40,7 +40,7 @@ type diffBody struct {
 	PR   PRRef  `json:"pr"`
 	Diff string `json:"diff"`
 	// Provenance — reconstructable from state alone which path produced the
-	// diff and which commits it spans. "api" = GitHub's merge-base diff;
+	// diff and which commits it spans. "api" = GitHub's SHA-pinned compare diff;
 	// "local-merge-base" = the oversized-PR fallback.
 	Method    string `json:"method,omitempty"`
 	Head      string `json:"head,omitempty"`
@@ -49,12 +49,15 @@ type diffBody struct {
 
 // Comment is one review comment as verifiers will consume it.
 type Comment struct {
-	ID     int64  `json:"id,omitempty"`
-	Author string `json:"author"`
-	IsBot  bool   `json:"is_bot"`
-	Path   string `json:"path,omitempty"`
-	Line   int    `json:"line,omitempty"`
-	Body   string `json:"body"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+	SubmittedAt string `json:"submitted_at,omitempty"`
+	ID          int64  `json:"id,omitempty"`
+	Author      string `json:"author"`
+	IsBot       bool   `json:"is_bot"`
+	Path        string `json:"path,omitempty"`
+	Line        int    `json:"line,omitempty"`
+	Body        string `json:"body"`
 	// CommitID is the commit the comment currently targets (GitHub re-anchors
 	// live comments as the head moves). Empty for issue-level comments, which
 	// have no commit anchor. Verifiers use it to tell a finding about the
@@ -115,6 +118,11 @@ type reviewFetchers struct {
 	panel    func(PRRef, string, []rawComment, []Comment) reviewpanel.Evidence
 }
 
+type primaryDiffFetchers struct {
+	pull    func(PRRef) (json.RawMessage, error)
+	compare func(PRRef, string, string) (json.RawMessage, error)
+}
+
 // Gather records view, diff, and comments evidence for a PR and returns their ids.
 func Gather(st *state.Store, run string, pr PRRef) (Bundle, error) {
 	viewID, view, err := View(st, run, pr)
@@ -160,23 +168,20 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 		return b, fmt.Errorf("evidence: parse PR head: %w", err)
 	}
 
-	// method "api" records only that GitHub served the diff — not head/merge_base:
-	// gh pr diff reads by PR number and doesn't report which head it rendered, so
-	// stamping the view's head would claim a span this path never verified. The
-	// fallback path controls exact SHAs and stamps them.
+	// The primary path reads the pull's immutable commit pair, checks that its
+	// head matches the view, then asks GitHub for that pair's compare diff. The
+	// fallback controls the same exact SHAs locally when GitHub rejects the diff
+	// as oversized.
 	body := diffBody{PR: pr, Method: "api"}
-	diff, err := gh("pr", "diff", fmt.Sprint(pr.Number), "-R", pr.Repo)
+	r, err := primaryDiff(pr, viewed.HeadRefOid)
 	if tooLarge(err) {
-		var r diffResult
 		r, err = fallbackDiff(pr, view)
-		body.Diff, body.Method, body.MergeBase, body.Head = r.Diff, "local-merge-base", r.MergeBase, r.Head
+		body.Method = "local-merge-base"
 	}
 	if err != nil {
 		return b, err
 	}
-	if body.Method == "api" {
-		body.Diff = string(diff)
-	}
+	body.Diff, body.MergeBase, body.Head = r.Diff, r.MergeBase, r.Head
 	a, err := st.Append(state.KindEvidence, run, nil, body)
 	if err != nil {
 		return b, err
@@ -209,6 +214,47 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	}
 	b.Stances = a.ID
 	return b, nil
+}
+
+func primaryDiff(pr PRRef, viewHead string) (diffResult, error) {
+	return fetchPrimaryDiff(pr, viewHead, primaryDiffFetchers{
+		pull: func(pr PRRef) (json.RawMessage, error) {
+			return gh("api", fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number))
+		},
+		compare: func(pr PRRef, base, head string) (json.RawMessage, error) {
+			return gh("api", "-H", "Accept: application/vnd.github.v3.diff",
+				fmt.Sprintf("repos/%s/compare/%s...%s", pr.Repo, base, head))
+		},
+	})
+}
+
+// fetchPrimaryDiff binds the primary diff to an immutable commit pair. The
+// pull read must still match the view evidence, and the diff is then fetched by
+// those exact base/head SHAs rather than by mutable PR number. An A→B→A
+// force-push during the fetch cannot substitute B's bytes for A's evidence.
+func fetchPrimaryDiff(pr PRRef, viewHead string, fetchers primaryDiffFetchers) (diffResult, error) {
+	pull, err := fetchers.pull(pr)
+	if err != nil {
+		return diffResult{}, err
+	}
+	base, head, err := parsePullHeads(pull)
+	if err != nil {
+		return diffResult{}, err
+	}
+	if !reSHA.MatchString(base) || !reSHA.MatchString(head) {
+		return diffResult{}, fmt.Errorf("evidence: non-hex commit id from api (base=%q head=%q)", base, head)
+	}
+	if head != viewHead {
+		return diffResult{}, fmt.Errorf("evidence: pr head moved during gather: view %s, pulls %s", viewHead, head)
+	}
+	diff, err := fetchers.compare(pr, base, head)
+	if err != nil {
+		return diffResult{}, err
+	}
+	if len(diff) == 0 {
+		return diffResult{}, fmt.Errorf("evidence: empty diff at head %s", head)
+	}
+	return diffResult{Diff: string(diff), Head: head}, nil
 }
 
 // decisiveReviewState reports whether a submission state states a position on
@@ -267,8 +313,11 @@ func fetchReviewEvidence(pr PRRef, headSHA string, fetchers reviewFetchers) ([]C
 }
 
 type rawComment struct {
-	ID   int64 `json:"id"`
-	User struct {
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	SubmittedAt string `json:"submitted_at"`
+	ID          int64  `json:"id"`
+	User        struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -312,22 +361,28 @@ func fetchComments(pr PRRef, reviews []rawComment) ([]Comment, error) {
 	var out []Comment
 	for _, rc := range inline {
 		out = append(out, Comment{
-			ID:       rc.ID,
-			Author:   rc.User.Login,
-			IsBot:    rc.User.Type == "Bot",
-			Path:     rc.Path,
-			Line:     lineOf(rc),
-			Body:     rc.Body,
-			CommitID: rc.CommitID,
-			Resolved: resolved[rc.ID],
+			ID:          rc.ID,
+			CreatedAt:   rc.CreatedAt,
+			UpdatedAt:   rc.UpdatedAt,
+			SubmittedAt: rc.SubmittedAt,
+			Author:      rc.User.Login,
+			IsBot:       rc.User.Type == "Bot",
+			Path:        rc.Path,
+			Line:        lineOf(rc),
+			Body:        rc.Body,
+			CommitID:    rc.CommitID,
+			Resolved:    resolved[rc.ID],
 		})
 	}
 	for _, rc := range issue {
 		out = append(out, Comment{
-			ID:     rc.ID,
-			Author: rc.User.Login,
-			IsBot:  rc.User.Type == "Bot",
-			Body:   rc.Body,
+			ID:          rc.ID,
+			CreatedAt:   rc.CreatedAt,
+			UpdatedAt:   rc.UpdatedAt,
+			SubmittedAt: rc.SubmittedAt,
+			Author:      rc.User.Login,
+			IsBot:       rc.User.Type == "Bot",
+			Body:        rc.Body,
 		})
 	}
 	out = append(out, reviewBodies(reviews)...)
@@ -409,11 +464,14 @@ func reviewBodies(reviews []rawComment) []Comment {
 			continue
 		}
 		out = append(out, Comment{
-			ID:       rv.ID,
-			Author:   rv.User.Login,
-			IsBot:    rv.User.Type == "Bot",
-			Body:     rv.Body,
-			CommitID: rv.CommitID,
+			ID:          rv.ID,
+			CreatedAt:   rv.CreatedAt,
+			UpdatedAt:   rv.UpdatedAt,
+			SubmittedAt: rv.SubmittedAt,
+			Author:      rv.User.Login,
+			IsBot:       rv.User.Type == "Bot",
+			Body:        rv.Body,
+			CommitID:    rv.CommitID,
 		})
 	}
 	return out

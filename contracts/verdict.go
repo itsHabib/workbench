@@ -28,6 +28,11 @@ type Verdict struct {
 	Confidence float64   `json:"confidence"`
 	Findings   []Finding `json:"findings,omitempty"`
 	Why        string    `json:"why"`
+	// Decider names who stands behind a JUDGMENT and how their identity was
+	// established. Absent on code and local-model verdicts — a deterministic
+	// verifier has no decider — and absent on judgments recorded before the
+	// field existed. Provenance only: nothing may branch on it.
+	Decider *Decider `json:"decider,omitempty"`
 }
 
 // Subject names what a verdict is about. PR-shaped today; a CI verdict is really
@@ -46,6 +51,51 @@ type Producer struct {
 	Class string `json:"class"`
 	Impl  string `json:"impl,omitempty"`
 }
+
+// Decider names the identity behind a JUDGMENT-class verdict and how that
+// identity was established. A judgment is the one verdict a person or a
+// delegated provider authors rather than a deterministic verifier computes, so
+// it is the one verdict whose author must be nameable after the fact: without
+// this, a human approval and an agent-composed one are indistinguishable in the
+// record, and every operator approval names nobody.
+//
+// Provenance only, exactly like Producer.Impl — the reducer must never branch on
+// it, and it carries no ladder semantics. It is optional on the wire so that
+// judgments recorded before this field existed still decode; the WRITE path is
+// where absence is refused, because a reader that rejected an unattributed
+// legacy judgment could no longer explain the runs it needs to explain.
+//
+// Method distinguishes how the identity was established, not who vouches for it:
+// gate authenticates none of these, so the field records the CHANNEL a decision
+// arrived through (MethodCLIOperator, MethodSlackInteractive, MethodAuto+provider)
+// and nothing stronger. Naming the channel is what lets a later reader tell a
+// button tap on a phone from a shell an agent also had.
+type Decider struct {
+	// Who is the deciding identity: an operator's name for a human decision, or
+	// the provider/model projection for a delegated one.
+	Who string `json:"who"`
+	// Method is the channel the decision arrived through — one of the Method
+	// constants, or MethodAuto + a provider name.
+	Method string `json:"method"`
+	// At is when the decision was made, RFC 3339 UTC. It is the DECIDER's clock,
+	// distinct from the artifact envelope's append time: a decision taken on a
+	// phone and recorded minutes later has two different, both-true timestamps.
+	At string `json:"at"`
+}
+
+// Decision methods — the channel vocabulary Decider.Method draws on. They name
+// how an identity was established, never that it was authenticated; gate
+// authenticates none of them.
+const (
+	// MethodCLIOperator is an operator running the gate CLI directly.
+	MethodCLIOperator = "cli-operator"
+	// MethodSlackInteractive is an operator tapping an Approve/Block button on a
+	// Slack card, ingested through the escalate back-channel.
+	MethodSlackInteractive = "slack-interactive"
+	// MethodAuto prefixes a delegated auto-judgment: MethodAuto + the provider
+	// name (e.g. "auto-claude"). The provider and model land in Who.
+	MethodAuto = "auto-"
+)
 
 // Finding is one piece of a verdict's supporting evidence. Evidence carries the
 // verbatim source line the finding quotes — the substrate a verbatim-evidence

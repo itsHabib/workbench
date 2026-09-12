@@ -1,0 +1,42 @@
+[
+  {
+    "facts": [],
+    "holder": "Nobody",
+    "inFlightA": false,
+    "inFlightB": false,
+    "liveA": "Alive",
+    "liveB": "Alive"
+  },
+  {
+    "facts": [
+      "AuthorizedB"
+    ],
+    "holder": "Held(B)",
+    "inFlightA": false,
+    "inFlightB": true,
+    "liveA": "Alive",
+    "liveB": "Alive"
+  },
+  {
+    "facts": [
+      "AuthorizedB"
+    ],
+    "holder": "Held(B)",
+    "inFlightA": false,
+    "inFlightB": true,
+    "liveA": "Alive",
+    "liveB": "Unreadable"
+  },
+  {
+    "facts": [
+      "AuthorizedA",
+      "AuthorizedB",
+      "TookOverA"
+    ],
+    "holder": "Held(A)",
+    "inFlightA": true,
+    "inFlightB": true,
+    "liveA": "Alive",
+    "liveB": "Unreadable"
+  }
+]

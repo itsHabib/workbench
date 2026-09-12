@@ -35,7 +35,7 @@ func TestPageFetchPathsAreLiveRoutes(t *testing.T) {
 	// route 404s.
 	s := New(clientReturning(map[string]string{
 		"next": `{"parked":[],"grants":[]}`, "explain": `{"run":"run_abc123","artifacts":[]}`, "audit": "chain intact\n",
-	}), testHost)
+	}), testHost, nil)
 
 	for ref := range refs {
 		target := ref

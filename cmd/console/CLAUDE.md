@@ -1,6 +1,6 @@
 # console
 
-A local, read-only web view of gate's inbox — the runs parked for judgment and
+A local, read-only web view of Fleet activity and gate's inbox — the runs parked for judgment and
 the grant ledger — with a click-through to any run's decision trace. It is a
 pure renderer over gate's own JSON: it shells the `gate` binary (`gate next
 -json`, `gate explain -json`, `gate audit`) and never reads gate's state files
@@ -81,3 +81,22 @@ page is inline HTML+JS with no build step, so it is guarded in tiers:
   follow-up adds the job); it lands runnable locally.
 - **Tier 3 — manual/agent.** Visual + layout judgment via the Playwright MCP
   when a change warrants an eyeball. Nothing committed.
+
+## Fleet visibility
+
+`console serve -fleet <binary> -tracelens <binary> [-fleet-state <dir>]`
+adds `/fleet`, an automatically refreshed Fleet board and agent detail view.
+`internal/fleetcli` invokes only `fleet status --all --json`, `run-report`,
+`inspect` and `trace`. TraceLens receives the observed trace over stdin.
+Console never reads Fleet state files or accepts a trace path from HTTP input.
+All routes remain read-only and loopback-only; provider/agent prose is escaped.
+
+Process state, hook/provider activity, authored handoffs and receipt-backed work
+remain distinct. Missing data is unknown. A failed refresh visibly retains the
+last snapshot. Trace windows and diagnostic coverage are bounded and explicit;
+a diagnostic pass on a partial trace cannot establish whole-run health.
+
+Go integration tests build the real Fleet and TraceLens CLIs in a disposable
+home and exercise the HTTP pipeline without models, live state or Gate grants.
+Visual browser checks should cover board, drilldown, output, diagnostics and
+narrow viewports. Provider execution belongs to Fleet, never the Console.

@@ -26,7 +26,7 @@ func parkedCycleArts(maxCycles int) []state.Artifact {
 // row carries cycles_used/cycles_max in JSON and "cycles N/M" on its head line,
 // counted against the grant the run parked under.
 func TestParkedRowCarriesCycleBudget(t *testing.T) {
-	in := buildInbox(parkedCycleArts(3), inboxBase.Add(time.Hour), "")
+	in := buildInbox(parkedCycleArts(3), inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 {
 		t.Fatalf("want one parked run, got %+v", in.Parked)
 	}
@@ -44,7 +44,7 @@ func TestParkedRowCarriesCycleBudget(t *testing.T) {
 // TestParkedRowUnboundedGrantReadsInfinity: a 0 ceiling is unbounded, never
 // "0 of 0".
 func TestParkedRowUnboundedGrantReadsInfinity(t *testing.T) {
-	in := buildInbox(parkedCycleArts(0), inboxBase.Add(time.Hour), "")
+	in := buildInbox(parkedCycleArts(0), inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	var buf bytes.Buffer
 	renderInbox(&buf, in)
 	if !strings.Contains(buf.String(), "  o/r#7  run_2  cycles 2/∞\n") {
@@ -62,7 +62,7 @@ func TestParkedRowShowsOverrun(t *testing.T) {
 		outcome(state.KindEscalation, "run_3", "esc_3", "vrd_3", inboxBase.Add(5*time.Minute),
 			esc("grt_a", "grant_cycle_exceeded: cycle 3", "grant_cycle_exceeded", "o/r", 7)),
 	)
-	in := buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in := buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 || in.Parked[0].Run != "run_3" {
 		t.Fatalf("want the ceiling park as the newest terminal, got %+v", in.Parked)
 	}
@@ -82,7 +82,7 @@ func TestNeedsGrantSkipsCycleRefusal(t *testing.T) {
 			"grant": "grt_a", "cycles_used": 3, "cycles_max": 3, "at": at.Format(time.RFC3339),
 		}),
 	}
-	in := buildInbox(arts, inboxBase, "")
+	in := buildInbox(arts, inboxBase, NextRequest{StateArg: ""})
 	if len(in.NeedsGrant) != 0 {
 		t.Fatalf("a cycle refusal must not read as a lapsed grant, got %+v", in.NeedsGrant)
 	}
@@ -151,7 +151,7 @@ func TestExplainShowsCycleBudgetOnAwaitingEscalation(t *testing.T) {
 // must print its judge command without a wider-cycles mint beside it. A
 // ceiling park keeps its mint — judging it re-applies the ceiling.
 func TestJudgeableParkAtCeilingGetsNoWiderMint(t *testing.T) {
-	in := buildInbox(parkedCycleArts(2), inboxBase.Add(time.Hour), "")
+	in := buildInbox(parkedCycleArts(2), inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if len(in.Parked) != 1 {
 		t.Fatalf("want one parked run, got %+v", in.Parked)
 	}
@@ -174,7 +174,7 @@ func TestJudgeableParkAtCeilingGetsNoWiderMint(t *testing.T) {
 		outcome(state.KindEscalation, "run_3", "esc_3", "vrd_3", inboxBase.Add(5*time.Minute),
 			esc("grt_a", "grant_cycle_exceeded: cycle 3", "grant_cycle_exceeded", "o/r", 7)),
 	)
-	in = buildInbox(arts, inboxBase.Add(time.Hour), "")
+	in = buildInbox(arts, inboxBase.Add(time.Hour), NextRequest{StateArg: ""})
 	if c := in.Parked[0].Coverage; c == nil || c.State != "ceiling" || c.SuggestedMint == "" {
 		t.Fatalf("a ceiling park keeps its mint, got %+v", c)
 	}

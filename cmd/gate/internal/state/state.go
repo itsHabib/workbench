@@ -28,6 +28,13 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindGrantRequest is the inert, exact-subject T0 capability request shown
+	// to an operator. It grants nothing by itself. A signed KindGrant or a
+	// KindGrantDenied parented to it is its mutually exclusive terminal fact.
+	KindGrantRequest = "grant_request"
+	// KindGrantDenied records a terminal deny, expiry, or stale-head refusal of
+	// one KindGrantRequest. It is outside Gate's verdict/action families.
+	KindGrantDenied = "grant_denied"
 	// KindResolution records how a parked escalation was resolved THROUGH THE
 	// BACK-CHANNEL (`gate resolve`): the decision a human returned, who they are,
 	// when, and the judgment id it produced. It is provenance, NOT a decision —
@@ -69,6 +76,36 @@ const (
 	// KindGatePreparation permanently consumes one protected preparation
 	// request before its decision artifacts are published to hosted state.
 	KindGatePreparation = "gate_preparation"
+	// KindSubjectClosed records that a pull request gate's inbox still held open
+	// is no longer open on GitHub. It is a durable, surfaceable OBSERVATION, not
+	// a decision: it sits outside the action/escalation outcome families, so
+	// recording one never counts as a review cycle, never re-parks a run, and
+	// never authorizes anything. Its only effect is on what the inbox shows.
+	//
+	// It exists because every action gate writes is dry_run/would_merge — gate
+	// authorizes and an executor acts — so the log could prove a merge was
+	// ALLOWED and could never say the PR had since finished. Without this the
+	// ready-to-merge and parked surfaces recommend work on dead pull requests
+	// forever, which is how a 164-row inbox came to carry 3 live rows.
+	//
+	// It is parented to the terminal artifact the stale row stands on, so the
+	// store's absent-parent guard makes "one closure per terminal" structural: a
+	// repeated sweep is a no-op, and a PR that is gated again later gets a fresh
+	// terminal that a later sweep can close on its own merits.
+	KindSubjectClosed = "subject_closed"
+	// KindReceipt discharges one action with what actually LANDED, read back
+	// from GitHub. It is the return half of the authorization: without it the log
+	// proves a merge was allowed and cannot say whether it happened, by whom, or
+	// as which commit. It is provenance, not a decision — it sits outside the
+	// action/escalation outcome families, so recording one never counts as a
+	// review cycle, never re-parks a run, and never authorizes anything.
+	KindReceipt = "receipt"
+	// KindCoverage records one reconciliation over a repo and window: what was
+	// authorized and landed, authorized and never landed, and landed with no
+	// authorization at all. It is how gate proves the NEGATIVE — that nothing
+	// merged around it — which no per-run artifact can express. Like a receipt it
+	// is provenance and decides nothing.
+	KindCoverage = "coverage"
 )
 
 var kindPrefix = map[string]string{
@@ -78,12 +115,17 @@ var kindPrefix = map[string]string{
 	KindAction:          "act",
 	KindEscalation:      "esc",
 	KindJudgment:        "jdg",
+	KindGrantRequest:    "gqr",
+	KindGrantDenied:     "gdn",
 	KindResolution:      "res",
 	KindGrantNeeded:     "gnd",
 	KindRunAborted:      "abt",
 	KindExecutionClaim:  "gxc",
 	KindExecutionResult: "gxr",
 	KindGatePreparation: "gpp",
+	KindSubjectClosed:   "sbc",
+	KindReceipt:         "rct",
+	KindCoverage:        "cvg",
 }
 
 // ErrAlreadyExists is returned by AppendIfAbsentParent when the run already

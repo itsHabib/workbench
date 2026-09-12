@@ -1,0 +1,962 @@
+package fleet
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// FileTools are the tools whose call is a write to the tree.
+var FileTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "NotebookEdit": true}
+
+// cmdPos is the command position: start of the command or after a shell operator,
+// past env assignments. A git write is a git SUBCOMMAND read there — the old
+// bag-of-words form denied `git log -- src/apply.ts` on a held branch while letting
+// `git branch -D` through.
+const cmdPos = `(?:^|&&|\|\||;|\||\(|\n|\r)\s*(?:\w+=(?:"[^"]*"|'[^']*'|\S+)\s+)*`
+const gitOpts = `(?:-[cC]\s+\S+\s+)*`
+
+var (
+	gitWriteRe = regexp.MustCompile(cmdPos + `git\s+` + gitOpts +
+		`(?:(?:push|commit|merge|rebase|reset|checkout|switch|stash|cherry-pick|am|apply|update-ref)\b` +
+		`|branch\s+(?:-[dDfmM]\b|--delete|--force|--move)` +
+		`|worktree\s+(?:remove|move|prune)\b)`)
+	ghWriteRe    = regexp.MustCompile(`\bgh\s+pr\s+(merge|close|edit|ready|checkout)\b`)
+	bashTargetRe = regexp.MustCompile(cmdPos + `git\s+(?:-c\s+\S+\s+)*-C\s+(\S+)`)
+	cdTargetRe   = regexp.MustCompile(`\A\s*cd\s+(\S+)\s*&&`)
+	switchRe     = regexp.MustCompile(cmdPos + `git\s+` + gitOpts + `(checkout|switch)\b([^&|;]*)`)
+	pullURLRe    = regexp.MustCompile(`https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)`)
+	ghPullRe     = regexp.MustCompile(cmdPos + `gh\s+pr\s+(create|view|checkout)\b([^&|;]*)`)
+	envAssignRe  = regexp.MustCompile(`\A\s*(\w+=("[^"]*"|'[^']*'|\S+)\s+)+`)
+	leadingCdRe  = regexp.MustCompile(`\A\s*cd\s+\S+\s*&&\s*`)
+	// exemptRe is the five substrate verbs a `requires` guard must let through, and
+	// only as a standalone command. An allowlist, not a delimiter blacklist. Every
+	// separator is horizontal whitespace and the match is anchored: `\s` and `$` both
+	// admit a newline, and a shell runs `fleet slots\ntouch x` as two commands.
+	exemptRe = regexp.MustCompile(`\A[^\S\r\n]*(?:fleet|(?:python3?|py)(?:\.exe)?[^\S\r\n]+[A-Za-z0-9_./~:\\-]*fleet\.py)` +
+		`[^\S\r\n]+(?:take|drop|slots|leases|sessions)` +
+		`(?:[^\S\r\n]+[A-Za-z0-9:_./@=~-]+|[^\S\r\n]+"[^"$` + "`" + `\\\r\n]*")*[^\S\r\n]*\z`)
+)
+
+var (
+	switchValued = map[string]bool{"-b": true, "-B": true, "-c": true, "-C": true, "--orphan": true, "--conflict": true, "--pathspec-from-file": true, "-t": true, "--track": true}
+	switchDetach = map[string]bool{"--detach": true, "-d": true}
+)
+
+// The cost gate and the permissions a roled directory projects have to describe ONE
+// command shape, or an override the gate accepts is refused by the harness before the
+// gate ever sees it — which is what happened to a session that had won the resource it
+// needed and could not run it. The shape is a leading environment assignment, because
+// that is the only form a harness prefix rule can name.
+//
+// The value of that assignment is the SLUG of the expensive rule being overridden, not
+// free text. A free-text value would force the projected allow to be the universal
+// `Bash(FLEET_ALLOW_SLOW=*)`, and a universal allow is a lane escape: a worker whose
+// manifest denies `Bash(gh pr merge:*)` could type `FLEET_ALLOW_SLOW=x gh pr merge …`,
+// match the allow and miss the deny, because both are prefix rules over the whole
+// command string. Pinning the value to a slug makes the projection per-command —
+// `Bash(FLEET_ALLOW_SLOW=full-unit-suite:*)`, one per rule in expensive.json — and the
+// gate below refuses any override whose slug is not the rule the command actually
+// trips, so the two halves cannot drift into a hole.
+const (
+	// AllowSlowVar prefixes a command whose cost the operator has accepted.
+	AllowSlowVar = "FLEET_ALLOW_SLOW"
+)
+
+var (
+	allowSlowRe    = regexp.MustCompile(`\A[^\S\r\n]*` + AllowSlowVar + `=("[^"]*"|'[^']*'|\S*)`)
+	allowSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
+	allowSlugTrimR = regexp.MustCompile(`\A-+|-+\z`)
+)
+
+// AllowSlowPrefixed reports whether a command carries the override in the one accepted
+// shape: as its leading assignment. `npx vitest run FLEET_ALLOW_SLOW=x` mentions the
+// variable and sets nothing.
+func AllowSlowPrefixed(cmd string) bool { return allowSlowRe.MatchString(cmd) }
+
+// AllowSlowValue is the value the override assignment carries, unquoted, and whether
+// the command carries the assignment at all.
+func AllowSlowValue(cmd string) (string, bool) {
+	m := allowSlowRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return "", false
+	}
+	return strings.Trim(m[1], `'"`), true
+}
+
+// AllowSlowSlug is an expensive rule's name as the one token its override must carry:
+// lowercase, every other run of characters a single dash.
+func AllowSlowSlug(name string) string {
+	s := allowSlugTrimR.ReplaceAllString(allowSlugRe.ReplaceAllString(strings.ToLower(name), "-"), "")
+	if s == "" {
+		return "slow-command"
+	}
+	return s
+}
+
+// AllowSlowForm is the command as it must be typed to carry the override for rule
+// `name`. The command is reproduced whole: this string is meant to be run, and a
+// truncated one either fails to parse or runs something broader than what was refused.
+func AllowSlowForm(name, cmd string) string {
+	// A command that already wears a wrong token is re-tokened, never double-prefixed.
+	cmd = strings.TrimSpace(allowSlowRe.ReplaceAllString(cmd, ""))
+	return AllowSlowVar + "=" + AllowSlowSlug(name) + " " + cmd
+}
+
+// AllowSlowPattern is rule `name`'s override as a harness allow rule. `fleet role`
+// projects one of these per rule — never a wildcard over the variable.
+func AllowSlowPattern(name string) string {
+	return "Bash(" + AllowSlowVar + "=" + AllowSlowSlug(name) + ":*)"
+}
+
+// AllowSlowPatterns is the allow rule for every named rule in expensive.json.
+func AllowSlowPatterns() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range expensiveRules() {
+		name := S(r, "name")
+		if name == "" || S(r, "pattern") == "" {
+			continue
+		}
+		p := AllowSlowPattern(name)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// IsWrite reports whether a tool call writes to the tree.
+func IsWrite(tool, cmd string) bool {
+	if FileTools[tool] {
+		return true
+	}
+	return tool == "Bash" && (gitWriteRe.MatchString(cmd) || ghWriteRe.MatchString(cmd))
+}
+
+// BashTarget is the checkout a shell command acts on: `git -C <path>` or a leading
+// `cd <path> &&`, else the cwd. Command position only: `echo "git -C x push"` names
+// no target and is no write.
+func BashTarget(cmd, cwd string) string {
+	var t string
+	if m := bashTargetRe.FindStringSubmatch(cmd); m != nil {
+		t = m[1]
+	} else if m := cdTargetRe.FindStringSubmatch(cmd); m != nil {
+		t = m[1]
+	} else {
+		return cwd
+	}
+	t = expand(strings.Trim(t, `'"`))
+	if filepath.IsAbs(t) {
+		return t
+	}
+	if cwd == "" {
+		cwd = "."
+	}
+	return filepath.Join(cwd, t)
+}
+
+// CommandHead is the command's execution position: the leading words a shell would
+// actually run. Cost rules match against this, not the whole string, because the
+// question is "is this command the suite" and not "does it mention the suite".
+func CommandHead(cmd string) string {
+	cmd = envAssignRe.ReplaceAllString(cmd, "")
+	cmd = leadingCdRe.ReplaceAllString(cmd, "")
+	var head []string
+	for _, tok := range strings.Fields(cmd) {
+		if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "$") || strings.HasPrefix(tok, "'") || strings.HasPrefix(tok, `"`) || strings.Contains(tok, "/") || strings.Contains(tok, `\`) {
+			break
+		}
+		head = append(head, tok)
+		if len(head) == 4 {
+			break
+		}
+	}
+	return strings.Join(head, " ")
+}
+
+// OneCommand reports whether the invocation runs a single command — the unit the
+// slow override is allowed to cover. The leading env assignments and a leading
+// `cd <dir> &&` are the shape the cost gate already normalises away (CommandHead
+// reads the head past them, and the directory itself is guarded before this), so
+// they are not a second command. Anything else at top level — `&&`, `||`, `;`,
+// `|`, `&`, a newline, a subshell or a substitution — is.
+func OneCommand(cmd string) bool {
+	cmd = envAssignRe.ReplaceAllString(cmd, "")
+	cmd = leadingCdRe.ReplaceAllString(cmd, "")
+	quote := rune(0)
+	esc := false
+	for _, r := range cmd {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case strings.ContainsRune("&|;()\n\r`", r):
+			return false
+		}
+	}
+	return true
+}
+
+// Signature normalises a shell command to a cost-ledger key: two tokens.
+func Signature(cmd string) string {
+	cmd = envAssignRe.ReplaceAllString(cmd, "")
+	cmd = leadingCdRe.ReplaceAllString(cmd, "")
+	toks := strings.Fields(cmd)
+	if len(toks) > 2 {
+		toks = toks[:2]
+	}
+	return strings.Join(toks, " ")
+}
+
+// MatchedRule is the first expensive rule this command trips, or nil. `pattern`
+// matches the execution position; `unless` matches the whole command. A rule missing
+// `pattern` is skipped rather than raised.
+func MatchedRule(cmd string) Rec {
+	head := CommandHead(cmd)
+	if head == "" {
+		return nil
+	}
+	for _, r := range expensiveRules() {
+		if S(r, "pattern") == "" {
+			continue
+		}
+		pat, err := regexp.Compile(S(r, "pattern"))
+		if err != nil || !pat.MatchString(head) {
+			continue
+		}
+		if u := S(r, "unless"); u != "" {
+			if ure, err := regexp.Compile(u); err == nil && ure.MatchString(cmd) {
+				continue
+			}
+		}
+		return r
+	}
+	return nil
+}
+
+// expensiveRules is expensive.json as records; a malformed entry is skipped, never
+// raised.
+func expensiveRules() []Rec {
+	raws, _ := readAny(Path("expensive.json")).([]any)
+	out := make([]Rec, 0, len(raws))
+	for _, raw := range raws {
+		if r, ok := raw.(map[string]any); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ---------- policy: the checks, in order ----------
+
+// CheckStop is the stand-down text for a stopped key, or "".
+func CheckStop(key, branch, sid string) string {
+	flag := StopFlag(key)
+	if flag == nil || S(flag, "except") == sid {
+		return ""
+	}
+	who := S(flag, "by")
+	if who == "" {
+		who = "the operator"
+	}
+	what, lift := "branch "+branch, fmt.Sprintf("`fleet resume %s` in that repo", branch)
+	if IsResource(key) {
+		what, lift = key, fmt.Sprintf("`fleet resume %s`", key)
+	}
+	reason := S(flag, "reason")
+	if reason == "" {
+		reason = "no reason given"
+	}
+	return fmt.Sprintf("STAND DOWN on %s (set by %s %s ago): %s. Take no further action on it. "+
+		"Report your current state from context — what you changed, what is uncommitted — and end your turn. "+
+		"Do not retry; the flag lifts only via %s.", what, who, FmtAge(Now()-F(flag, "at")), reason, lift)
+}
+
+// HeldState is the classification of a key's holder from one read.
+type HeldState string
+
+const (
+	// HeldFree means this session may proceed: the key is free, or ours.
+	HeldFree HeldState = ""
+	// HeldMalformed means the lease file did not parse: nothing is inferred from it.
+	HeldMalformed HeldState = "malformed" //
+	// HeldOrphaned means a dead session holds a resource; not taken over by itself.
+	HeldOrphaned HeldState = "orphaned" // dead resource holder
+	// HeldDead means a dead session holds a branch; the next writer takes it over.
+	HeldDead HeldState = "dead" // dead branch holder
+	// HeldUnknown means the holder's record cannot be read: not free, not taken over.
+	HeldUnknown HeldState = "unknown" // the holder's record cannot be read: not free, not taken over
+	// HeldLive means a live session other than this one holds the key.
+	HeldLive HeldState = "live" // a live foreign holder
+)
+
+// HeldByOther is (state, record) from ONE read of key. The record is returned, never
+// re-read by the caller: a caller that re-read the key to find out who it had just
+// classified could be handed a replacement — a faster racer's live lease — and act
+// on that. Callers that ACT on the answer read it inside KeyLock.
+func HeldByOther(key, sid string) (HeldState, Rec) {
+	cur := Lease(key)
+	TestPause("AFTER_KEY_READ") // every path below decides from `cur` and nothing else
+	if cur == nil {
+		return HeldFree, nil
+	}
+	if IsMalformed(cur) {
+		return HeldMalformed, cur
+	}
+	if S(cur, "session") == sid {
+		return HeldFree, cur
+	}
+	alive, known := Liveness(S(cur, "session"))
+	if !known {
+		return HeldUnknown, cur
+	}
+	if alive {
+		return HeldLive, cur
+	}
+	if IsResource(key) {
+		return HeldOrphaned, cur
+	}
+	return HeldDead, cur
+}
+
+// Liveness is observed liveness with its evidence: alive, and whether the evidence
+// could be read at all. A record that cannot be read for any reason other than
+// absence — the sessions directory unavailable, the file unparseable — is UNKNOWN,
+// never dead. Unavailable evidence must not become proof of death on the lease path.
+func Liveness(sid string) (alive, known bool) {
+	b, err := os.ReadFile(Path("sessions", sid+".json"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return false, false
+		}
+		st, serr := os.Stat(Path("sessions"))
+		if serr != nil || !st.IsDir() {
+			return false, false
+		}
+		return false, true
+	}
+	rec := ReadJSONBytes(b)
+	if rec == nil {
+		return false, false
+	}
+	return SessionAlive(rec), true
+}
+
+// TestPause is the substrate's one test seam. A TOCTOU race cannot be proven by
+// running N processes and hoping; the suite sets FLEET_TEST_PAUSE_<WHERE> to force
+// the exact interleaving. Unset in every real session, where this is one lookup.
+func TestPause(where string) {
+	d := os.Getenv("FLEET_TEST_PAUSE_" + where)
+	if d == "" {
+		return
+	}
+	if f, err := strconv.ParseFloat(d, 64); err == nil {
+		time.Sleep(time.Duration(f * float64(time.Second)))
+	}
+}
+
+// CheckLease is one holder per key: read, decide and write inside the key's lock, so
+// the decision is acted on against the state it was made from. Returns the refusal,
+// or "" when this session holds the key.
+//
+// This is the one place fail-open is wrong. Every error — a lock that cannot be
+// taken, a store that cannot be written, a hand-edited record that will not format —
+// is a refusal, never an authorization.
+func CheckLease(key, branch, sid, role, cwd string) (reason string) {
+	defer func() {
+		if r := recover(); r != nil {
+			reason = substrateError(key, fmt.Sprint(r))
+		}
+	}()
+	// Nearly every call is the holder writing its own branch again. That needs no
+	// lock: the lock is released before the tool runs either way, so a revoke landing
+	// after this read lands one more write in both versions and is caught by the stop
+	// flag at the next action.
+	if mine := Lease(key); mine != nil && !IsMalformed(mine) && S(mine, "session") == sid {
+		return ""
+	}
+	err := KeyLock(key, func() error {
+		cur := Lease(key)
+		TestPause("AFTER_OBSERVE") // inside the lock: a rival now BLOCKS rather than races
+		if cur == nil {
+			if reason = acquireGuards(key, sid, role, cwd); reason != "" {
+				return nil
+			}
+			return WriteLease(key, LeaseRecord(key, sid, role, cwd, "claimed on first write"))
+		}
+		if IsMalformed(cur) {
+			reason = fmt.Sprintf("lease file for %s is malformed: %s. Nothing is inferred from garbage; it is not free and not taken over. Next action: have the operator inspect and remove it.", KeyLabel(key), S(cur, "malformed"))
+			return nil
+		}
+		if S(cur, "session") == sid {
+			return nil // no heartbeat: freshness lives on the session record
+		}
+		holderRole := S(cur, "role")
+		if holderRole == "" {
+			holderRole = "a session"
+		}
+		alive, known := Liveness(S(cur, "session"))
+		if !known {
+			reason = fmt.Sprintf("%s is held by %s %s and the holder's session record cannot be read (%s). Unavailable evidence is not death: not free, not taken over. Next action: check that %s is a readable directory, then retry.",
+				KeyLabel(key), holderRole, Short(S(cur, "session")), Path("sessions", S(cur, "session")+".json"), Path("sessions"))
+			return nil
+		}
+		if alive {
+			what := "branch " + branch
+			if IsResource(key) {
+				what = key
+			}
+			reason = fmt.Sprintf("%s is held by %s %s since %s ago. One holder per key. Either work elsewhere, or ask the operator to run `fleet revoke %s --to %s \"<reason>\"`, which stands the holder down at its next action.",
+				what, holderRole, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), KeyLabel(key), Short(sid))
+			return nil
+		}
+		if IsResource(key) {
+			reason = fmt.Sprintf("%s is held by dead session %s (since %s ago). A dead holder's resource is not taken over automatically: it may still be running. Next action: confirm it is quiet, then `fleet take %s --takeover \"<what you checked>\"`.",
+				key, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), key)
+			return nil
+		}
+		if reason = acquireGuards(key, sid, role, cwd); reason != "" {
+			return nil
+		}
+		if err := WriteLease(key, LeaseRecord(key, sid, role, cwd, "took over from dead session "+Short(S(cur, "session")))); err != nil {
+			return err
+		}
+		HookTakeovers = append(HookTakeovers, Rec{"key": key, "from": S(cur, "session"), "to": sid})
+		return nil
+	})
+	if err == ErrKeyBusy {
+		return fmt.Sprintf("another fleet process has held the lock on %s for over a second, so nothing was written. Next action: `fleet leases` to see who holds it and retry; if it persists, `fleet sessions` for a hung session.", KeyLabel(key))
+	}
+	if err != nil {
+		return substrateError(key, err.Error())
+	}
+	return reason
+}
+
+func substrateError(key, msg string) string {
+	return fmt.Sprintf("the fleet store could not be read or written for %s (%s), so this session does not hold it and nothing was written. A lease is not assumed on a substrate error. Next action: check ~/.fleet is writable, then retry.", KeyLabel(key), msg)
+}
+
+// acquireGuards runs inside the key's lock before a lease is written for sid, on a
+// claim or a takeover. Two things an acquisition must not do:
+//
+// Publish a lease naming a session that is not on disk yet. A rival reading the
+// lease between the write and this session's own record publication finds no
+// record in a readable directory, which Liveness reports as known-dead, and takes
+// the key over while this tool call is running. So the record is published first,
+// here, and a failure to publish it refuses the write: an acquisition that a
+// rival would read as dead is not an acquisition.
+//
+// Take a key that a pre-migration record still names for another live session. The
+// migration leaves a genuine collision for a person, and `fleet leases` reports it;
+// a report is not a fence, so the fence is here.
+func acquireGuards(key, sid, role, cwd string) string {
+	if lg := legacyHolder(key); lg != nil && S(lg, "session") != sid {
+		if alive, known := Liveness(S(lg, "session")); alive || !known {
+			return fmt.Sprintf("%s is also named by a pre-migration lease for %s %s (%s), left in place because it collides with the current one. Not free, not taken over. Next action: `fleet leases`, then remove the stale one by hand.",
+				KeyLabel(key), roleOf(lg), Short(S(lg, "session")), Path("leases"))
+		}
+	}
+	if err := ensurePublished(sid, role, cwd); err != nil {
+		return fmt.Sprintf("this session's record could not be published before taking %s (%v), so the lease would read as a dead holder's and be taken over by the next session; nothing runs. Next action: check that %s is a writable directory, then retry.",
+			KeyLabel(key), err, Path("sessions"))
+	}
+	return ""
+}
+
+func roleOf(rec Rec) string {
+	if r := S(rec, "role"); r != "" {
+		return r
+	}
+	return "a session"
+}
+
+// ensurePublished writes a minimal live session record when none is on disk. The
+// hook's touch, which follows the verdict, fills it in.
+func ensurePublished(sid, role, cwd string) error {
+	if ReadOnly || exists(Path("sessions", sid+".json")) {
+		return nil
+	}
+	return WriteJSON(Path("sessions", sid+".json"), Rec{"session": sid, "cwd": cwd, "role": nilIfEmpty(role), "pid_kind": "parent-unverified",
+		"last_event_at": Now(), "last_event": "lease", "turn_open": true, "ended": false})
+}
+
+// ExemptFromRequires reports a standalone substrate verb the guard lets through.
+func ExemptFromRequires(tool, cmd string) bool {
+	if tool != "Bash" || strings.ContainsAny(cmd, "\n\r") {
+		return false
+	}
+	return exemptRe.MatchString(cmd)
+}
+
+// CheckRequires is the refusal when a lane's `requires` names a resource this session
+// does not hold, or "". Deny on evidence only; skipped when the session has no cached
+// lane.
+func CheckRequires(rec Rec, sid, tool, cmd string) string {
+	lane := M(rec, "lane")
+	requires := Strs(lane, "requires")
+	if len(requires) == 0 || ExemptFromRequires(tool, cmd) {
+		return ""
+	}
+	kind := S(lane, "kind")
+	for _, r := range requires {
+		// One observation, and the lease must be OURS by that observation.
+		state, cur := HeldByOther(r, sid)
+		if state == HeldFree && cur != nil && S(cur, "session") == sid {
+			continue
+		}
+		if state == HeldMalformed {
+			return fmt.Sprintf("%s needs %s, whose lease file is malformed: %s. Next action: have the operator inspect and remove it.", kind, r, S(cur, "malformed"))
+		}
+		var who string
+		switch state {
+		case HeldFree:
+			who = "nobody"
+		case HeldOrphaned, HeldDead:
+			who = "orphaned by dead session " + Short(S(cur, "session"))
+		default:
+			role := S(cur, "role")
+			if role == "" {
+				role = "a session"
+			}
+			who = fmt.Sprintf("%s %s since %s ago", role, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")))
+		}
+		return fmt.Sprintf("%s needs %s before this action; it is held by %s. Run: fleet take %s \"<why>\" — or wait for `fleet leases` to show it free.", kind, r, who, r)
+	}
+	return ""
+}
+
+// CheckCost is the refusal for an expensive command, or "".
+func CheckCost(cmd, sid string) string {
+	r := MatchedRule(cmd)
+	val, override := AllowSlowValue(cmd)
+	if r == nil {
+		if override {
+			// A roled directory allows this prefix, so an unmeasured command carrying it
+			// would reach the shell having matched an allow and missed the lane's denies.
+			return fmt.Sprintf("`%s=%s` prefixes a command the cost gate has no expensive rule for, so the override authorizes nothing and only hides the command from this seat's own permission rules. Next action: drop the prefix and run the command as itself.", AllowSlowVar, val)
+		}
+		return ""
+	}
+	name := S(r, "name")
+	if name == "" {
+		name = CommandHead(cmd)
+	}
+	if name == "" {
+		name = "an expensive command"
+	}
+	instead := S(r, "instead")
+	if instead == "" {
+		instead = "a targeted run of just what your diff touches"
+	}
+	lock := ReadJSON(Path("locks", Safe(name)+".json"))
+	if lock != nil && S(lock, "session") != sid && SessionAlive(ReadJSON(Path("sessions", S(lock, "session")+".json"))) {
+		return fmt.Sprintf("`%s` is already running in session %s (started %s ago). Do not run it again in parallel; do the targeted check instead: %s", name, Short(S(lock, "session")), FmtAge(Now()-F(lock, "at")), instead)
+	}
+	if override && val == AllowSlowSlug(name) {
+		if !OneCommand(cmd) {
+			return fmt.Sprintf("`%s=%s` covers exactly one command, and this invocation runs more than one. The projected allow `%s` is a prefix rule over the whole command string, so anything appended to `%s` would reach the shell having matched that allow and missed this seat's own denies. Next action: run the measured command by itself, then run the rest as its own call.",
+				AllowSlowVar, val, AllowSlowPattern(name), name)
+		}
+		_ = AppendJSONL(Path("overrides.jsonl"), Rec{"at": Now(), "session": sid, "rule": name, "cmd": cut(cmd, 200)})
+		return ""
+	}
+	if override {
+		return fmt.Sprintf("`%s=%s` is not this command's override: `%s` is measured as `%s`, whose override token is `%s`. One token per measured command is what lets a seat allow exactly the expensive commands it has measured instead of every command with the prefix. Next action: run it as %s",
+			AllowSlowVar, val, CommandHead(cmd), name, AllowSlowSlug(name), AllowSlowForm(name, cmd))
+	}
+	secs := "?"
+	if s, ok := r["seconds"]; ok && s != nil {
+		secs = fmt.Sprint(s)
+		if f, ok := s.(float64); ok && f == float64(int64(f)) {
+			secs = strconv.FormatInt(int64(f), 10)
+		}
+	}
+	return fmt.Sprintf("`%s` costs ~%ss on this machine and runs on push anyway. Instead: %s. If this run is genuinely needed, run it in exactly this form so the override is recorded: %s. That one shape is what a roled directory allows as %s; no other spelling of the override is permitted there.",
+		name, secs, instead, AllowSlowForm(name, cmd), AllowSlowPattern(name))
+}
+
+func cut(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// SwitchTargets is every branch a Bash command switches the tree to (`git
+// checkout <b>`, `git switch <b>`, `-b/-c <new>`, `--track origin/<b>`), resolved
+// against the repo at start. A detached checkout, a path restore, or a name that
+// names no local or remote-tracking branch and is not being created is not a switch.
+func SwitchTargets(cmd, start string) []string {
+	var out []string
+	_, common := GitDirs(start)
+	if common == "" {
+		return out
+	}
+	for _, m := range switchRe.FindAllStringSubmatch(cmd, -1) {
+		verb, toks := m[1], shellWords(m[2])
+		if contains(toks, "--") || isDetachedSwitch(toks) {
+			continue
+		}
+		target, haveTarget, plain, track := switchOperands(toks)
+		if haveTarget {
+			name := target
+			if track && strings.Contains(target, "/") {
+				name = strings.SplitN(target, "/", 2)[1]
+			}
+			if name != "" && name != "-" {
+				out = append(out, name)
+			}
+			continue
+		}
+		if len(plain) == 0 || plain[0] == "-" {
+			continue
+		}
+		if verb == "checkout" && len(plain) > 1 {
+			continue // `git checkout <tree-ish> <paths...>` restores paths
+		}
+		if name := switchCandidate(common, plain[0]); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// cdRe is a `cd`/`pushd` at command position and the words that follow it, up to the
+// next operator.
+var cdRe = regexp.MustCompile(cmdPos + `(?:cd|pushd)\b([^&|;\n\r]*)`)
+
+// CdTargets is every directory a Bash command moves THIS session into, resolved
+// against its cwd. A `cd` inside parentheses — a subshell or a command substitution —
+// is not one: the parent's cwd is where the next tool call still runs. `cd` with no
+// operand, or `cd -`, names nothing this guard can resolve and is left alone.
+func CdTargets(cmd, cwd string) []string {
+	out, _ := CdChain(cmd, cwd)
+	return out
+}
+
+// CdChain is CdTargets plus whether the command contains a move this guard could not
+// resolve. Each top-level `cd` is resolved against the directory the PRECEDING one
+// left the shell in, not against the event's cwd: from seat one, `cd /tmp && cd
+// seat2` ends in /tmp/seat2, and resolving that second hop against the event cwd
+// would name a directory the shell never enters and clear a seat it does. A hop the
+// guard cannot follow — `cd` or `cd -`, whose destination is not in the command —
+// makes the base unknown; a relative hop measured from an unknown base is reported
+// unresolved rather than guessed.
+func CdChain(cmd, cwd string) ([]string, bool) {
+	var out []string
+	cur, known, unresolved := cwd, cwd != "", false
+	for _, m := range cdRe.FindAllStringSubmatchIndex(cmd, -1) {
+		if parenDepth(cmd[:m[2]]) > 0 {
+			continue
+		}
+		word := firstOperand(cdWords(cmd[m[2]:m[3]]))
+		if word == "" {
+			known = false
+			continue
+		}
+		t := expand(word)
+		if driveRelative(t) {
+			// `C:seat` is relative to that drive's own current directory, which this
+			// guard cannot know; joining it to cwd would name a path nothing is bound
+			// to and wave the move through (#320). Unresolved refuses instead.
+			unresolved, known = true, false
+			continue
+		}
+		if !filepath.IsAbs(t) {
+			if !known {
+				unresolved = true
+				continue
+			}
+			t = filepath.Join(cur, t)
+		}
+		t = filepath.Clean(t)
+		out = append(out, t)
+		cur, known = t, true
+	}
+	return out, unresolved
+}
+
+// driveRelative is a Windows path with a volume but no separator after it (`C:seat`,
+// `C:`): neither absolute nor relative to the cwd. Always false where there are no
+// volumes.
+func driveRelative(p string) bool {
+	v := filepath.VolumeName(p)
+	if v == "" {
+		return false
+	}
+	return len(p) == len(v) || !os.IsPathSeparator(p[len(v)])
+}
+
+// firstOperand is the first non-option word, or "".
+func firstOperand(toks []string) string {
+	for _, t := range toks {
+		if t == "" || strings.HasPrefix(t, "-") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// parenDepth is how many unclosed, unquoted `(` the text carries — the depth a
+// command at its end would run at.
+func parenDepth(text string) int {
+	depth := 0
+	quote := rune(0)
+	esc := false
+	for _, r := range text {
+		switch {
+		case esc:
+			esc = false
+		case r == '\\' && quote != '\'':
+			esc = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '(':
+			depth++
+		case r == ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+func isDetachedSwitch(toks []string) bool {
+	for _, t := range toks {
+		if switchDetach[t] {
+			return true
+		}
+	}
+	return false
+}
+
+// switchOperands separates a switch's options from its operands: the branch named
+// by a valued option (-b/-c/--track=...), the plain words, and whether --track was
+// given.
+func switchOperands(toks []string) (target string, haveTarget bool, plain []string, track bool) {
+	skip := false
+	for _, t := range toks {
+		if t == "-t" || t == "--track" || strings.HasPrefix(t, "--track=") {
+			track = true
+		}
+		if skip {
+			skip = false
+			if !haveTarget {
+				target, haveTarget = t, true
+			}
+			continue
+		}
+		if switchValued[t] {
+			skip = true
+			continue
+		}
+		if strings.HasPrefix(t, "-") {
+			if k, v, ok := strings.Cut(t, "="); ok && switchValued[k] && !haveTarget {
+				target, haveTarget = v, true
+			}
+			continue
+		}
+		plain = append(plain, t)
+	}
+	return target, haveTarget, plain, track
+}
+
+// switchCandidate is the branch a bare operand names: a local branch under its own
+// spelling, or a remote branch by name; `origin/x` detaches and names nothing.
+func switchCandidate(common, cand string) string {
+	if spelled := BranchSpelling(common, cand); spelled != "" {
+		return spelled
+	}
+	if RemoteNames(common)[strings.SplitN(cand, "/", 2)[0]] {
+		return ""
+	}
+	if RemoteBranchExists(common, cand) {
+		return cand
+	}
+	return ""
+}
+
+// SettleHandoff closes a branch switch this session has in flight. The switch took
+// the new branch's lease BEFORE git ran and kept the old one; here <gitdir>/HEAD says
+// which one the tree is on. Over-hold between the two hooks, never under-hold.
+//
+// This runs before the stop and lease verdicts, so nothing in it may propagate: an
+// error here would reach the fail-open catch and the tool call would proceed with no
+// lease check at all. On any failure the handoff record is left in place.
+func SettleHandoff(sid string, rec Rec) {
+	h := M(rec, "handoff")
+	if h == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logError(Rec{"session": sid, "error": fmt.Sprintf("settle_handoff left in flight: %v", r)})
+		}
+	}()
+	start := S(h, "start")
+	if start == "" {
+		start = S(rec, "cwd")
+	}
+	if start == "" {
+		start = "."
+	}
+	landed := Scope(start, BranchOf(start))
+	var tos []string
+	if list, ok := h["to"].([]any); ok {
+		for _, t := range list {
+			if s, ok := t.(string); ok && s != "" {
+				tos = append(tos, s)
+			}
+		}
+	} else if s := S(h, "to"); s != "" {
+		tos = []string{s}
+	}
+	fail := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		logError(Rec{"session": sid, "error": fmt.Sprintf("settle_handoff left in flight: %v", err)})
+		return true
+	}
+	if contains(tos, landed) {
+		if from := S(h, "from"); from != "" {
+			if _, err := DropLease(from, sid); fail(err) {
+				return
+			}
+		}
+	}
+	for _, t := range tos {
+		if t != landed {
+			if _, err := DropLease(t, sid); fail(err) {
+				return
+			}
+		}
+	}
+	// Clearing the record is a read-modify-write on the session file, under its lock
+	// like every other one; a parallel hook's touch must not be lost here either.
+	err := KeyLock("session:"+sid, func() error {
+		p := Path("sessions", sid+".json")
+		cur := ReadJSON(p)
+		if cur == nil {
+			cur = Rec{}
+		}
+		cur["handoff"] = nil
+		return WriteJSON(p, cur)
+	})
+	if fail(err) {
+		return
+	}
+}
+
+// CachePullRequest records the change a `gh pr` command was about, from the
+// command's own operands or from the single pull request URL in its output, bound
+// to the TREE's branch — never to a headRefName the output could print. An explicit
+// `view <n>` of another change, or a bare `checkout` with no number, records nothing.
+func CachePullRequest(cmd string, response any, start, sid string) {
+	m := ghPullRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return
+	}
+	verb, toks := m[1], shellWords(m[2])
+	owner, name, number, explicit := explicitPull(toks)
+	if verb == "view" && explicit {
+		return
+	}
+	if verb == "checkout" && !explicit {
+		return
+	}
+	urls := pullURLsIn(response)
+	if !explicit && len(urls) != 1 {
+		return // a body that links other changes names no single change; no guess
+	}
+	if !explicit {
+		owner, name, number = urls[0][1], urls[0][2], urls[0][3]
+	}
+	if owner == "" && len(urls) > 0 {
+		owner, name = urls[0][1], urls[0][2]
+	}
+	branch, rid := BranchOf(start), RepoID(start)
+	if branch == "" || rid == "" {
+		return
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil {
+		return
+	}
+	var gh, url any
+	if owner != "" {
+		gh = owner + "/" + name
+		url = fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, name, n)
+	}
+	_ = WriteJSON(PullFile(rid, n), Rec{"number": float64(n), "repo": rid, "github": gh, "branch": branch, "url": url, "at": Now(), "session": sid})
+}
+
+// explicitPull is the change a `gh pr` command names on its own line: a URL or a
+// bare number. The last one wins, as gh itself reads it.
+func explicitPull(toks []string) (owner, name, number string, explicit bool) {
+	for _, t := range toks {
+		if strings.HasPrefix(t, "-") {
+			continue
+		}
+		if u := pullURLRe.FindStringSubmatch(t); u != nil {
+			owner, name, number, explicit = u[1], u[2], u[3], true
+			continue
+		}
+		if isDigits(t) {
+			owner, name, number, explicit = "", "", t, true
+		}
+	}
+	return owner, name, number, explicit
+}
+
+// pullURLsIn is every distinct pull request URL in a tool response, in order.
+func pullURLsIn(response any) [][]string {
+	var text string
+	if s, ok := response.(string); ok {
+		text = s
+	} else if response != nil {
+		text = string(DumpJSON(response))
+	}
+	var urls [][]string
+	seen := map[string]bool{}
+	for _, u := range pullURLRe.FindAllStringSubmatch(text, -1) {
+		if !seen[u[0]] {
+			seen[u[0]] = true
+			urls = append(urls, u)
+		}
+	}
+	return urls
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}

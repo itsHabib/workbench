@@ -18,6 +18,7 @@ package stamp
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -30,11 +31,16 @@ import (
 // it is never a check gate blocks itself on.
 const Context = "gate/authorized"
 
-// postTimeout bounds the status POST. The stamp is best-effort and strictly
-// downstream of a finished decision, so a hung gh or a stalled GitHub must never
-// hold the outcome/exit-code seam hostage: the deadline fires, Post returns an
-// error the caller logs, and gate exits on its decision regardless.
-const postTimeout = 10 * time.Second
+// postTimeout bounds the WHOLE stamp attempt — the head→PR resolution and the
+// status POST together, not each in turn. One shared budget, and a small one,
+// because the stamp is a decoration hanging off the tail of a decision that is
+// already durable, and gate is routinely run as a subprocess under a caller's
+// own deadline (escalate's ingress is the live example). A per-call budget lets
+// two sequential gh calls spend twice the number written here, which is how a
+// decoration comes to own most of a parent's budget and gets the whole process
+// killed for it. The decision never depends on this succeeding; the exit code
+// is already decided when Post is called.
+const postTimeout = 6 * time.Second
 
 // Authorized is one provenance stamp: the PR gate evaluated (Repo + Number),
 // the exact commit it judged (HeadSHA), the decision's run id, and the deciding
@@ -59,6 +65,7 @@ func Post(a Authorized) error {
 	if err := a.validate(); err != nil {
 		return err
 	}
+	// One budget for both gh calls below, started here. See postTimeout.
 	ctx, cancel := context.WithTimeout(context.Background(), postTimeout)
 	defer cancel()
 	// A commit status is commit-scoped, but gate authorized exactly one PR. Post
@@ -92,6 +99,13 @@ func Post(a Authorized) error {
 // on the same head is excluded: it can take no live stamp, and its presence must
 // not stand in for the open PR the guard actually checks.
 func (a Authorized) openPRNumbers(ctx context.Context) ([]int, error) {
+	// Resolve gh before invoking it so an unresolvable binary reports as itself —
+	// the launchd case, where the daemon's PATH is /usr/bin:/bin:/usr/sbin:/sbin
+	// and gh lives under /opt/homebrew/bin. `exec: "gh": executable file not
+	// found in $PATH` names the symptom; this names the fix.
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, fmt.Errorf("stamp: gh is not resolvable on PATH=%q: %w", os.Getenv("PATH"), err)
+	}
 	out, err := exec.CommandContext(ctx, "gh", a.prsArgs()...).Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -132,8 +146,14 @@ func (a Authorized) validate() error {
 	if a.Number <= 0 {
 		return fmt.Errorf("stamp: a positive PR number is required to scope the stamp")
 	}
+	// Hash is the ACTION artifact's chain hash, and it exists only once that
+	// artifact has been durably appended. Requiring it is therefore not just a
+	// verifiability check: it is the structural guarantee that no GitHub call on
+	// the stamp path can precede the authorization it decorates. A caller cannot
+	// stamp an authorization that is not yet in the log, because it has nothing
+	// to put here.
 	if a.Run == "" || a.Hash == "" {
-		return fmt.Errorf("stamp: run and hash required for a verifiable stamp")
+		return fmt.Errorf("stamp: run and hash required for a verifiable stamp (the hash exists only after the action artifact is durable)")
 	}
 	return nil
 }

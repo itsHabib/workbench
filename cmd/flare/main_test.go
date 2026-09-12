@@ -44,6 +44,23 @@ func quietGate(t *testing.T, log string) (config.Config, *journal.Journal, strin
 	return cfg, j, path
 }
 
+func TestGrantRequestUpdateClosesOnlyItsOwnCard(t *testing.T) {
+	cards := map[string]journal.Card{
+		journal.SeenKey("gate", "gqr_one"):   {Subject: "o/r#7"},
+		journal.SeenKey("gate", "esc_other"): {Subject: "o/r#7"},
+	}
+	ev := event.Event{Source: "gate", Fields: map[string]string{
+		"escalation": "gqr_one", "exact_card": "yes", "repo": "o/r", "number": "7",
+	}}
+	targets := cardsFor(cards, ev)
+	if len(targets) != 1 {
+		t.Fatalf("grant terminal targeted %d cards, want only its request: %+v", len(targets), targets)
+	}
+	if _, ok := targets[journal.SeenKey("gate", "gqr_one")]; !ok {
+		t.Fatalf("grant request card was not targeted: %+v", targets)
+	}
+}
+
 // routedIDs returns the event IDs the journal saw reach routing (dropped here),
 // in order, plus every cursor-init note — the two facts the first-run contract
 // is made of.

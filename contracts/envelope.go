@@ -34,11 +34,24 @@ const (
 	KindAction     = "action"
 	KindEscalation = "escalation"
 	KindJudgment   = "judgment"
+	// KindGrantRequest and KindGrantDenied are the inert request and terminal
+	// refusal in Gate's exact-subject Slack T0 authorization flow. Approval is
+	// represented by the existing KindGrant parented to KindGrantRequest.
+	KindGrantRequest = "grant_request"
+	KindGrantDenied  = "grant_denied"
 	// KindResolution is the closed-loop stamp a parked escalation receives once a
 	// human's decision returns through the resolution back-channel — the missing
 	// seam the Escalation plane formalizes. Its body is a contracts/escalation
 	// Resolution, parented to the escalation it resolves.
 	KindResolution = "resolution"
+	// KindReceipt discharges one action with what actually landed — the return
+	// half of an authorization, read back from the platform rather than claimed
+	// by whoever acted.
+	KindReceipt = "receipt"
+	// KindCoverage records one reconciliation between what was authorized and
+	// what landed on a protected branch in a window — how a control proves the
+	// negative, that nothing merged around it.
+	KindCoverage = "coverage"
 )
 
 // Verdict decodes the envelope body as a Verdict when the envelope carries one.

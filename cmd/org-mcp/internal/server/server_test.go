@@ -39,82 +39,44 @@ func call(t *testing.T, run Runner, name string, args map[string]any) toolResult
 	return resp.Result
 }
 
-// TestClaimTranslatesToCLI proves the verb layer is pure translation: the MCP
-// arguments become the CLI invocation, and the receipt comes back verbatim.
-func TestClaimTranslatesToCLI(t *testing.T) {
+// TestCardTranslation checks registration and read requests through JSON-RPC.
+func TestCardTranslation(t *testing.T) {
 	var got []string
-	receipt := `{"kind":"claim","seq":5,"phase":"active"}`
-	res := call(t, fake(t, &got, receipt, "", 0), "org_claim",
-		map[string]any{"role": "lead:platform", "work": "github:acme/api#88", "incarnation": "sha256:abc"})
-
-	want := []string{"claim", "-role", "lead:platform", "-json", "-incarnation", "sha256:abc", "-work", "github:acme/api#88"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("cli args = %v, want %v", got, want)
+	receipt := `{"role":"lead:platform","card":"/cards/platform.md"}`
+	res := call(t, fake(t, &got, receipt, "", 0), "org_charter",
+		map[string]any{"role": "lead:platform", "file": "/cards/platform.md", "parent": "human:op"})
+	want := []string{"charter", "-role", "lead:platform", "-json", "-file", "/cards/platform.md", "-parent", "human:op"}
+	if strings.Join(got, " ") != strings.Join(want, " ") || res.IsError || res.Content[0].Text != receipt {
+		t.Fatalf("args=%v result=%+v", got, res)
 	}
-	if res.IsError || res.Content[0].Text != receipt {
-		t.Fatalf("result = %+v", res)
+	res = call(t, fake(t, &got, "", "missing card file", 4), "org_boot", map[string]any{"role": "lead:platform"})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "missing card file") {
+		t.Fatalf("lost error: %+v", res)
 	}
 }
 
-// TestRefusalSurfacesReason proves the exit-code seam maps onto isError with
-// the kernel's reason id extracted, so a driving agent can branch on it.
-func TestRefusalSurfacesReason(t *testing.T) {
-	var got []string
-	stderr := "org: dangling_claim at seq 11: a predecessor's claim on github:acme/api#88 is unresolved; yield, complete or abandon it first"
-	res := call(t, fake(t, &got, "", stderr, 1), "org_claim",
-		map[string]any{"role": "lead:platform", "work": "github:acme/api#88"})
-
-	if !res.IsError {
-		t.Fatalf("refusal did not set isError: %+v", res)
-	}
-	var body struct {
-		Code   string `json:"code"`
-		Reason string `json:"reason"`
-	}
-	if err := json.Unmarshal([]byte(res.Content[0].Text), &body); err != nil {
-		t.Fatalf("decode error body: %v", err)
-	}
-	if body.Code != "refused" || body.Reason != "dangling_claim" {
-		t.Fatalf("error body = %+v", body)
-	}
-}
-
-// TestMissingArgumentIsToolError proves a missing required member never
-// reaches the process boundary.
-func TestMissingArgumentIsToolError(t *testing.T) {
+func TestMissingCardArgumentDoesNotRun(t *testing.T) {
 	ran := false
-	run := func(context.Context, []string) ([]byte, []byte, int, error) {
-		ran = true
-		return nil, nil, 0, nil
-	}
-	res := call(t, run, "org_claim", map[string]any{"role": "lead:platform"})
-	if !res.IsError || ran {
-		t.Fatalf("missing work: isError=%v ran=%v", res.IsError, ran)
-	}
-	if !strings.Contains(res.Content[0].Text, "work is required") {
-		t.Fatalf("error body: %s", res.Content[0].Text)
+	runner := func(context.Context, []string) ([]byte, []byte, int, error) { ran = true; return nil, nil, 0, nil }
+	res := call(t, runner, "org_charter", map[string]any{"role": "lead:platform"})
+	if !res.IsError || ran || !strings.Contains(res.Content[0].Text, "file is required") {
+		t.Fatalf("result=%+v ran=%v", res, ran)
 	}
 }
 
-// TestAllowlistExcludesStructureVerbs pins the surface: the lifecycle and work
-// verbs are present, and the org-reshaping verbs are unreachable.
-func TestAllowlistExcludesStructureVerbs(t *testing.T) {
-	names := map[string]bool{}
-	for _, v := range verbs {
-		names[v.name] = true
+func TestSurfaceHasNoJournalOrWorkProtocol(t *testing.T) {
+	if len(verbs) != 3 {
+		t.Fatalf("unexpected surface: %v", verbs)
 	}
-	for _, want := range []string{"org_boot", "org_status", "org_attach", "org_claim", "org_yield", "org_checkpoint"} {
-		if !names[want] {
-			t.Fatalf("surface lacks %s", want)
+	for _, name := range []string{"org_charter", "org_boot", "org_status"} {
+		if _, ok := lookupVerb(name); !ok {
+			t.Fatalf("missing %s", name)
 		}
 	}
-	for _, banned := range []string{"org_charter", "org_takeover", "org_revoke", "org_retire", "org_recharter", "org_delegate"} {
-		if names[banned] {
-			t.Fatalf("%s must not be reachable over MCP", banned)
+	for _, name := range []string{"org_attach", "org_claim", "org_checkpoint", "org_message", "org_intent", "org_legacy"} {
+		if _, ok := lookupVerb(name); ok {
+			t.Fatalf("legacy operation exposed: %s", name)
 		}
-	}
-	if _, ok := lookupVerb("org_charter"); ok {
-		t.Fatal("lookupVerb resolved a banned verb")
 	}
 }
 

@@ -120,6 +120,7 @@ func TestSchemaMatchesGoTypes(t *testing.T) {
 		{"Subject", reflect.TypeOf(Subject{}), root.child(t, "subject")},
 		{"Producer", reflect.TypeOf(Producer{}), root.child(t, "producer")},
 		{"Finding", reflect.TypeOf(Finding{}), root.itemsOf(t, "findings")},
+		{"Decider", reflect.TypeOf(Decider{}), root.child(t, "decider")},
 	}
 	for _, c := range cases {
 		assertObjectConforms(t, c.name, c.typ, c.obj)
@@ -168,6 +169,36 @@ func TestUnknownFieldsIgnored(t *testing.T) {
 	}
 	if v.Decision != DecisionBlock || v.Subject.Number != 181 {
 		t.Fatalf("known fields did not survive an unknown-field body: %+v", v)
+	}
+}
+
+// TestDeciderIsOptionalAndAdditive pins the two halves of the decider's
+// additive contract: a verdict written before the field existed still decodes
+// (Decider stays nil — absence is legible, not an error), and a verdict
+// carrying one round-trips through the wire tags the schema names.
+func TestDeciderIsOptionalAndAdditive(t *testing.T) {
+	legacy := []byte(`{"subject":{"repo":"itsHabib/workbench","number":1},"source":"operator-judgment","producer":{"class":"judgment","impl":"operator"},"decision":"pass","tier":"T0","confidence":1,"why":"ok"}`)
+	var v Verdict
+	if err := json.Unmarshal(legacy, &v); err != nil {
+		t.Fatalf("a judgment predating the decider must still decode: %v", err)
+	}
+	if v.Decider != nil {
+		t.Fatalf("absent decider must decode to nil, got %+v", v.Decider)
+	}
+	v.Decider = &Decider{Who: "mh", Method: MethodCLIOperator, At: "2026-08-21T22:15:00Z"}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back Verdict
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Decider == nil || *back.Decider != *v.Decider {
+		t.Fatalf("decider did not round-trip: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"decider":{"who":"mh","method":"cli-operator","at":"2026-08-21T22:15:00Z"}`) {
+		t.Fatalf("decider wire shape drifted: %s", raw)
 	}
 }
 

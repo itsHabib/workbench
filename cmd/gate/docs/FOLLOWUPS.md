@@ -86,25 +86,26 @@ wiring `gate` into the merge tail.
   it passes — the 3-cycle-cap-in-prose hole rebuilt one rung down. Persist block/park as sticky (a
   later pass can't silently overturn one without recording why); cap or record re-runs.
 
-- [ ] **Feed the auto-judge raw evidence, not just local headlines.**
-  `judge -auto` only sees the local model's extracted headlines, not the raw comment bodies already
-  recorded in state — so "premium judges from artifacts" is judging a lossy summary. Include the raw
-  bodies in `judgeContext`.
+- [x] **Feed the auto-judge raw evidence, not just local headlines.**
+  `judgeContext` now includes bounded, attributed source comments and uses unambiguous file
+  references to prioritize recorded diff context. Omitted comments and unavailable code are
+  explicit; raw prose does not supply panel authority or override a verifier block.
 
 - [ ] **Add a park notification channel.**
   5 of 7 real PRs park, with no notification, so they park silently. Emit something on park
   (stdout/file/console to start) so a parked run surfaces instead of waiting to be noticed.
 
-- [ ] **Pin the primary diff path to the evaluated head.**
+- [x] **Pin the primary diff path to the evaluated head.**
   Surfaced by the evidence-local-diff skeptic panel (2026-07-16). The oversized-PR fallback
   refuses unless `pulls.head == view.headRefOid`, but the primary path (`gh pr diff <n>`) fetches
   by PR number with no head pin: a force-push to an innocent head between the view read and the
   diff read records that head's diff, and a force-push back before merge still satisfies
   `--match-head-commit`. Window is a sub-call race needing push access + green CI on the decoy, but
-  gate's threat model includes adversarial agents with push access. Fix: after a successful
-  `gh pr diff`, re-read `pulls/<n>` and refuse unless `head.sha == view.headRefOid` (shrinks the
-  window to a sub-call race); airtight variant fetches the under-cap diff SHA-pinned via the
-  `compare` endpoint. The fallback path already has this property.
+  gate's threat model includes adversarial agents with push access. **Landed:** the primary path
+  reads `pulls/<n>`, refuses unless `head.sha == view.headRefOid`, then fetches the merge-base diff
+  through the SHA-pinned `compare/<base>...<head>` endpoint; the recorded evidence carries that
+  verified head. Deterministic moved-head and A→B→A mutants prove that mismatched or substituted diff
+  bytes never become recordable evidence. The fallback path already had this property.
 
 - [x] **Refuse to reseal a mismatched anchor as crash recovery.**
   Surfaced by codex on the tenant-move review (workbench#59, 2026-07-17); the gate judge blocked
@@ -211,3 +212,5 @@ autonomously would be smuggling a policy decision out of a proof; that call is t
   exit-3 contract over durability.
 - [ ] **`Project` / `Explain` can now fail on `st.List`** while projecting an awaiting escalation's
   budget (`parkedBudget`). Failing closed on a real I/O error is the chosen behaviour.
+
+- [ ] Gate review context: consider a bounded omitted-comment identity summary. The current whole-entry first-fit selection preserves source artifact IDs and original indices on every included comment, prioritizes known source activity and labels unknown timestamps, and explicitly counts omissions; gaps must not be read as resolved findings. Keep this within the existing comment budget.

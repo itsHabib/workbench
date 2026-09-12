@@ -1171,3 +1171,110 @@ func TestReadinessStanceEvidenceWithoutStancesFieldIsAnError(t *testing.T) {
 		t.Fatal("a stance artifact with no stances field must error, not read as no approval")
 	}
 }
+
+// replyModel returns one canned chat result per call, in order — content or
+// error — so a panel can mix comments the model read with comments whose call
+// never completed.
+type replyModel struct {
+	replies []struct {
+		content string
+		err     error
+	}
+	calls int
+}
+
+func (m *replyModel) chat(_ context.Context, _, _ string, _ json.RawMessage) (string, error) {
+	if m.calls >= len(m.replies) {
+		return "", errors.New("replyModel: no reply left")
+	}
+	r := m.replies[m.calls]
+	m.calls++
+	return r.content, r.err
+}
+
+func (m *replyModel) impl() string { return "replying" }
+
+func failingModel(errs ...error) *replyModel {
+	m := &replyModel{}
+	for _, err := range errs {
+		m.replies = append(m.replies, struct {
+			content string
+			err     error
+		}{err: err})
+	}
+	return m
+}
+
+func TestReviewsTransportFailureIsNotLowConfidence(t *testing.T) {
+	// The bug this pins: an ollama client timeout was counted as a
+	// low-confidence extraction, so the park question told the judge there
+	// were ambiguous findings when the consolidator had read nothing at all.
+	timeout := unavailableErr(errors.New("ollama: Post \"http://localhost:11434/api/chat\": context deadline exceeded (Client.Timeout awaiting headers)"))
+	v := reviewsWith(t, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "some finding"},
+		{"author": "cursor[bot]", "is_bot": true, "body": "another finding"},
+	}, failingModel(timeout, timeout))
+
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("an unreachable model must escalate, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, reasonConsolidationUnavailable) {
+		t.Fatalf("escalation must name the infrastructure fault, got %q", v.Why)
+	}
+	if strings.Contains(v.Why, "low-confidence") {
+		t.Fatalf("a failed call must never report as a low-confidence extraction, got %q", v.Why)
+	}
+	if v.Confidence != 0 {
+		t.Fatalf("confidence in an unread panel is zero, got %v", v.Confidence)
+	}
+	for _, f := range v.Findings {
+		if !strings.HasPrefix(f.Title, reasonConsolidationUnavailable+":") {
+			t.Fatalf("finding must name the fault, got %q", f.Title)
+		}
+	}
+}
+
+func TestReviewsTransportFailureDominatesReadableComments(t *testing.T) {
+	// Part of the panel read fine — the escalation still has to say the
+	// consolidation was incomplete, not summarize the half it managed.
+	m := &replyModel{replies: []struct {
+		content string
+		err     error
+	}{
+		{content: `{"headline":"nil deref on empty policy","severity":"high","verdict":"actionable","confidence":0.9}`},
+		{err: unavailableErr(errors.New("ollama: status 503: model loading"))},
+	}}
+	v := reviewsWith(t, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "bug"},
+		{"author": "cursor[bot]", "is_bot": true, "body": "unread"},
+	}, m)
+
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("want escalate, got %s (%s)", v.Decision, v.Why)
+	}
+	if !strings.Contains(v.Why, reasonConsolidationUnavailable) {
+		t.Fatalf("a partially unread panel must name the fault, got %q", v.Why)
+	}
+	if strings.Contains(v.Why, "low-confidence") {
+		t.Fatalf("no low-confidence claim belongs in an unavailable escalation, got %q", v.Why)
+	}
+}
+
+func TestReviewsBadModelJSONStaysLowConfidence(t *testing.T) {
+	// The model answered, the answer was unreadable: that IS a failed
+	// extraction, and must keep using the low-confidence path — the
+	// unavailable reason is reserved for calls that never completed.
+	v := reviewsWith(t, []map[string]any{
+		{"author": "codex[bot]", "is_bot": true, "body": "some finding"},
+	}, &scriptedModel{replies: []string{`not json`}})
+
+	if v.Decision != DecisionEscalate {
+		t.Fatalf("want escalate, got %s (%s)", v.Decision, v.Why)
+	}
+	if strings.Contains(v.Why, reasonConsolidationUnavailable) {
+		t.Fatalf("a decoded-but-bad answer is not an infrastructure fault, got %q", v.Why)
+	}
+	if !strings.Contains(v.Why, "low-confidence extractions") {
+		t.Fatalf("want the low-confidence path, got %q", v.Why)
+	}
+}

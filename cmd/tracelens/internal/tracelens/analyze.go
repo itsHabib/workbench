@@ -118,6 +118,7 @@ func DefaultConfig() Config {
 func Analyze(t Trajectory, cfg Config) Report {
 	detectors := []Detector{
 		RunFailureDetector{},
+		ToolRefusalDetector{},
 		LoopDetector{MinRepeats: cfg.MinLoopRepeats, KeepVolatileArgs: cfg.KeepVolatileArgs},
 		RedundancyDetector{},
 		RetryStormDetector{Threshold: cfg.RetryThreshold},

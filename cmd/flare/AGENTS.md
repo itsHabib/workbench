@@ -44,7 +44,10 @@ there first.
   carries the `View PR` link and — when the channel opts in with
   `resolve_actions` AND the event is a resolvable park (`resolvablePark`) — the
   **Approve/Block** interactive buttons (render-only; the tap is `escalate`'s,
-  never flare's — Amendment 3). `toast` shells `powershell.exe` 5.1 (pwsh 7
+  never flare's — Amendment 3). An exact `grant_request` on the same opted-in
+  channel renders **Approve T0/Deny** using only its request id; its terminal
+  update closes that exact card rather than every park for the PR. `toast`
+  shells `powershell.exe` 5.1 (pwsh 7
   cannot project WinRT); `webhook` POSTs the event JSON via `net/http`.
 - `internal/journal` — flare's private state under `~/.flare`: append-only
   delivery journal + cursors. One `Load` replays the journal ONCE into
@@ -56,6 +59,26 @@ there first.
 - An event matching no route goes to the catch-all channel; silence requires
   an explicit `drop` route. Absence of a route must not read as
   not-page-worthy.
+- One run announces itself ONCE. A gate run emits the reducer's fold and every
+  component verdict it folded, and the fold restates the worst component's
+  `why` — so routing on `decision` alone pages the same sentence once per rung.
+  Routes select the fold with `dimension: "reducer"` and drop the rest. A
+  parked run is announced by its ESCALATION artifact, never by its escalate
+  verdicts, because only the escalation card is tracked for correction — a
+  verdict card can never be closed, so a redundant one misreports live state
+  forever.
+- Dropping escalate verdicts cannot hide a park, and the reason is gate's
+  inbox, not a census. gate appends one artifact per call, each with its own
+  open/write/fsync (`cmd/gate/internal/state/state.go`), so the fold and the
+  escalation are two writes with a window between them — a crash there leaves
+  the fold on disk and no escalation. That run is not a park flare stayed quiet
+  about: with no escalation artifact there is nothing in gate's inbox either,
+  `gate next` shows nothing, and the caller saw the run die rather than park.
+  flare mirrors gate's inbox; a run that never parked has nothing to announce,
+  and the next gate run writes a fresh escalation. (The steady-state fact —
+  385 reducer-escalate runs in the log, zero lacking the escalation — shows the
+  ordering is not merely conventional, but it is the inbox that makes the
+  silence correct.)
 - Dedupe keys on stable event IDs (gate artifact ID; receipt key+outcome);
   a restart or resweep never re-pages.
 - The gate cursor pins the last processed chain hash; a mismatch or a
@@ -88,6 +111,10 @@ there first.
   mint; a cycle park is the stop signal that the review loop ran long — the
   fix is fewer rounds, never a wider grant. flare renders the button; it never
   handles the tap (the callback targets `escalate serve`).
+- A grant-request card is a separate exact-card lifecycle despite sharing the
+  `kind=escalation` phone route: its buttons use the `contracts/grantrequest`
+  vocabulary, it never claims wider than T0, it does not supersede a parked
+  review card for the same PR, and its grant/denial terminal closes only itself.
 - **Approve is pre-flighted.** The tap is one-shot (`gate judge` cannot be
   re-run), so Approve is withheld when the park's own recorded grant + verdict
   PROVE it cannot land: an expired grant, a verdict tier over the grant's

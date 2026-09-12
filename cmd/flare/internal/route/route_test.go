@@ -78,3 +78,48 @@ func TestThrottleIsSeverityMonotone(t *testing.T) {
 		t.Fatal("an expired window must pass")
 	}
 }
+
+// A gate run emits the reducer's fold AND every component verdict it folded,
+// and the fold restates the worst component's `why`. Routing on decision alone
+// therefore pages the same sentence once per rung — the ivy#50 shape, two
+// identical "don't merge" cards a minute apart. Pinning: the fold pages, its
+// parts go quiet, and the run is still announced exactly once.
+func TestDimensionSeparatesTheFoldFromItsComponents(t *testing.T) {
+	c := config.Config{
+		Channels: map[string]config.Channel{"phone": {Type: config.ChannelSlack}, "quiet": {Type: config.ChannelDrop}},
+		Routes: []config.Route{
+			{Match: config.Match{Source: "gate", Kind: "verdict", Decision: "block", Dimension: "reducer"}, Channel: "phone"},
+			{Match: config.Match{Source: "gate", Kind: "verdict"}, Channel: "quiet"},
+		},
+		CatchAll: "phone",
+	}
+	r := New(c, time.Now)
+	verdict := func(dimension string) event.Event {
+		return event.Event{Source: "gate", Kind: "verdict", Fields: map[string]string{"decision": "block", "dimension": dimension}}
+	}
+	if d := r.Route(verdict("reducer")); d.Channel != "phone" {
+		t.Fatalf("the run-level fold must page, got %+v", d)
+	}
+	for _, component := range []string{"readiness", "review-panel-completeness", "review-consolidation"} {
+		if d := r.Route(verdict(component)); d.Channel != "quiet" {
+			t.Fatalf("component rung %q restates the fold and must stay quiet, got %+v", component, d)
+		}
+	}
+}
+
+// An unset Dimension must keep matching every verdict: the selector is opt-in,
+// so a routes file written before it existed routes exactly as it did.
+func TestUnsetDimensionMatchesAnyRung(t *testing.T) {
+	c := config.Config{
+		Channels: map[string]config.Channel{"phone": {Type: config.ChannelSlack}},
+		Routes:   []config.Route{{Match: config.Match{Source: "gate", Decision: "block"}, Channel: "phone"}},
+		CatchAll: "phone",
+	}
+	r := New(c, time.Now)
+	for _, dimension := range []string{"reducer", "readiness", ""} {
+		ev := event.Event{Source: "gate", Kind: "verdict", Fields: map[string]string{"decision": "block", "dimension": dimension}}
+		if d := r.Route(ev); d.Channel != "phone" {
+			t.Fatalf("an unset dimension must match rung %q, got %+v", dimension, d)
+		}
+	}
+}

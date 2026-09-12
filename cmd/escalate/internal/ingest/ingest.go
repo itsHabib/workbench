@@ -44,8 +44,15 @@ type Decision struct {
 	Escalation string
 	Verdict    string // pass | block
 	Who        string
-	Why        string
-	Grant      string
+	// Method is the CHANNEL the decision arrived through — the transport's own
+	// account of how it established Who, which gate records on the judgment
+	// alongside the identity. Who alone cannot separate a verified Slack callback
+	// from a string typed at a shell by an agent that also had one, and it is
+	// exactly that distinction a separation-of-duties question asks about. The
+	// transport is the only layer that knows, so it is the layer that says.
+	Method string
+	Why    string
+	Grant  string
 }
 
 // Client is the resolution back-channel over one gate binary and state dir. Its
@@ -98,7 +105,10 @@ func validate(d Decision) error {
 		return fmt.Errorf("ingest: grant is required")
 	}
 	if d.Who == "" {
-		return fmt.Errorf("ingest: who is required (the resolution records who decided)")
+		return fmt.Errorf("ingest: who is required (the judgment records who decided)")
+	}
+	if d.Method == "" {
+		return fmt.Errorf("ingest: method is required (the judgment records how the decider was established)")
 	}
 	if d.Why == "" {
 		return fmt.Errorf("ingest: why is required")
@@ -120,6 +130,7 @@ func (c *Client) args(d Decision) []string {
 		"-decision", d.Verdict,
 		"-why", d.Why,
 		"-who", d.Who,
+		"-method", d.Method,
 	)
 }
 

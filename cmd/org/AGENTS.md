@@ -1,57 +1,31 @@
-# org — the Baton home
+# org — role cards
 
-The runtime for role continuity chains. The kernel — record spine, kind set,
-fold, every admission law — is `contracts/org` and is imported as types and
-laws, never re-decided here. This tool owns what a pure kernel cannot: where
-chains live, when records are stamped and locked, and how a fresh session
-re-enters a role.
+Org is a small directory of editable Markdown role cards. It owns role definitions
+and optional parent references. It does not own sessions, work assignments,
+messages, handoffs, checkpoints, liveness, or authority grants.
 
-Design context: `docs/features/org/vision.md` (PR #245, the org TDD). The
-system name there is Baton; this binary is its first runtime slice.
+## Normal surface
 
-## What it is
+- `org charter -role <name> -file <card.md> [-parent <name>]` registers or updates
+  a card. Reusing the name is an ordinary configuration edit, not a refusal.
+- `org boot -role <name>` reads the file as it exists now. `-max-bytes` optionally
+  bounds prose and reports truncation with the source path; default is full text.
+- `org status` lists the configured tenant's registered cards.
+- The three commands take `-state`, `-tenant`, and `-json`; no incarnation flags.
 
-- **State**: `$ORG_STATE` (default `~/dev/org/state`) holds one JSONL chain
-  per role at `<tenant>/<role-with-colons-as-->/chain.jsonl`, plus
-  content-addressed erasable bodies under `blobs/`. Appends are serialized by
-  an flock over the fold→admit→append critical section; admission is
-  `org.Advance`, so nothing reaches a chain that the kernel would refuse.
-- **Receipts**: every write verb takes `-json` and emits a machine receipt
-  (kind, seq, digest, phase, tip, holder, active, dangling, held, fence);
-  `status`/`verify`/`boot` speak JSON too. Identity: `-incarnation` (or
-  `ORG_INCARNATION`) presents the writer's id from attach; `-strict` (or
-  `ORG_STRICT`) refuses the write-as-holder default.
-- **Operator context**: files dropped in
-  `$ORG_STATE/<tenant>/<role>/context.d/` ride the boot output, sorted,
-  under `-context-bytes` (default 4096), truncating with a pointer to the
-  directory. The dumbest mechanism that works: writing a file is publishing,
-  deleting it is revocation.
-- **Verbs** map one-to-one onto record kinds (charter, attach, claim, yield,
-  complete, abandon, assign, takeover, revoke, seal, note, checkpoint, …) plus
-  read verbs: `boot` (the byte-capped re-entry index), `status` (the board),
-  `log`, `verify`, `blob`.
-- **Hooks** (`hooks/`): `sessionstart-boot.sh` injects `org boot` output into
-  a session whose cwd maps to a role (`$ORG_STATE/roles.map`);
-  `stop-mark.sh` appends a mechanical `mark` when a session stops. Both
-  fail-open: no mapping, no binary, no chain — exit 0, empty output.
+`$ORG_STATE/roles.json` is a JSON array of `{tenant, role, card, parent?}`. Card
+paths are absolute. Prose stays in the original Markdown file: one source, no
+copied or synchronized definition. Registry updates serialize and publish by
+rename; malformed or duplicate entries refuse writes without replacing the file.
+`roles.map` is the independent cwd/seat binding already used by Fleet and the
+startup hook. Registering prose does not rebind a checkout or create a mailbox.
+Parents are descriptive references. No recursive admission, inheritance,
+mandatory hierarchy, or scope enforcement is inferred from prose.
 
-## Invariants
+## Clean cutover
 
-- The home adds no judgment. A record refused by the kernel is refused here
-  with the kernel's reason on stderr; the chain does not grow.
-- Checkpoints are distilled by a host, never demanded of the working agent.
-  The Stop hook writes a `mark`; a mark at the tip renders the boot index
-  `degraded`, which is the honest state.
-- The boot index is an index: pointers plus hooks, byte-budgeted
-  (`-max-bytes`, default 2048), shedding depth (last-word excerpt, held list)
-  but never the headline, the charter line, or a dangling obligation.
-- Liveness is derived from the writer's own declared `next_due`, never from
-  self-report at read time.
-
-## Exit codes (load-bearing seam)
-
-0 ok · 1 kernel refusal (stderr carries the reason id, e.g. `dangling_claim`)
-· 2 usage · 4 error. A refusal is the substrate working, not a failure.
+Only role-card commands are supported. Remove old hook and caller instructions;
+do not add fallbacks or a parallel lifecycle. See README.md for the consumer inventory.
 
 ## Checks
 

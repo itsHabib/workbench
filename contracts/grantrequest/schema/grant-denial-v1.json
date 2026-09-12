@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/itsHabib/workbench/contracts/grantrequest/schema/grant-denial-v1.json",
+  "x-version": "grant-request.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request", "decision", "who", "at", "reason"],
+  "properties": {
+    "schema_version": {"const": "grant-request.v1"},
+    "request": {"$ref": "grant-request-v1.json"},
+    "decision": {"enum": ["denied", "expired", "stale_head"]},
+    "who": {"type": "string", "minLength": 1, "maxLength": 256},
+    "at": {"type": "string", "format": "date-time"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 512}
+  }
+}

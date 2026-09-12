@@ -246,3 +246,238 @@ Agent: Claude (Opus 5). Started: 2026-08-05 (America/Los_Angeles).
 - **What would have caught it sooner:** `git status --short` on the repo root
   at session start. It is two seconds and it distinguishes "someone is working
   here" from "someone left".
+
+## 2026-08-29 — the notification plane was eight days stale, and nobody could tell
+
+- **What I tried:** find why the operator's Slack was "just noise" — two
+  identical "Don't merge ivy#50" cards a minute apart, and a parked ivy#51
+  still showing a live Approve button hours after it was judged.
+- **What happened:** two independent faults, and the second hid the first.
+  Routing paged every rung of the verifier ladder — the reducer's fold *and*
+  every component verdict it folded, which restate the fold's `why` verbatim.
+  396 delivered cards were 88 escalations and 308 restatements. Separately,
+  `~/go/bin/flare` was built 2026-08-21, so #251's close-a-park's-card-on-
+  resolve had never actually run on this machine: the journal contained
+  `delivered` and `error` records and not one `card-update`, ever.
+- **Cost:** unmeasurable but ongoing — the operator stopped reading the
+  channel, which is the only failure mode a notification plane really has.
+- **Class:** `stale-install` + `noisy-signal`.
+- **Fix landed:** `flare` reinstalled from `main` (card-closing now live);
+  routes tightened to page escalations and blocks and drop the restatements;
+  `dimension` added as a route selector (#271) so a routes file can say "page
+  the fold, not its parts", with the shipped example fixed at the same time.
+- **What would have caught it sooner:** nothing on this machine compares the
+  installed binary against `main`. A merged fix that never reaches the
+  operator's `$GOBIN` is indistinguishable from a fix that does not work —
+  and flare's own `status` reports `healthy: true` either way, because it
+  measures polling, not whether the binary is current. The tools that ship
+  *behavior* to a long-running local daemon need a staleness check that
+  `status` surfaces; `#251` was merged, tested, and inert for eight days.
+
+# Friction log — runway reconcile read-window fix (#259)
+
+Agent: Claude (Opus 5). Started: 2026-08-23 (America/Los_Angeles).
+
+## Worked as documented
+
+- **The delivery loop.** Worktree, root-cause fix in
+  `cmd/runway/internal/controller`, canonical checks plus `-race`, PR #259,
+  `@claude please review` per `.ship.json` (`require=[claude]`). All three CI
+  checks green on the reviewed head; the reviewer cleared it with zero blocking
+  findings on the first cycle.
+- **The mint boundary.** The agent stopped at the grant handoff as documented;
+  the operator minted `grt_ad5944b6b4ff7aaa` (T2, `max-cycles 3`).
+- **`gate judge` is genuinely one-shot.** An escalation already carried a
+  judgment; the duplicate `-auto` call refused with `judgment_duplicate` and
+  named the existing `jdg_6bd4a74481c44b05` rather than stamping a second
+  authorization. The refusal is the feature working.
+
+## Friction
+
+### Ollama cold-start timeout parks a run even with the daemon supervised
+
+Second occurrence of the `#214` entry above, one failure mode further in.
+
+- **What I tried:** `gate gate -repo itsHabib/workbench -pr 259 -grant
+  grt_ad5944b6b4ff7aaa` on a reviewed, CI-green T1 PR at the exact head.
+- **What happened:** parked (exit 2, `run_3ab398ccb6bc3d89`). `triage-floor`
+  and `up-to-date` passed; `review-consolidation` escalated because its
+  extraction failed with `ollama: ... context deadline exceeded (Client.Timeout
+  exceeded while awaiting headers)`. The escalation-brief synthesis failed the
+  same way. **The daemon was up** — `brew services` from the #214 session, with
+  `qwen2.5:7b` present — so this is not the outage that entry describes: a cold
+  load of a 4.7 GB model outruns the three-minute client timeout hard-coded at
+  `local/local.go:28` (a package-level `var`, no flag, env var, or injection
+  point), and the first run after the model is evicted from memory parks
+  regardless of daemon health.
+- **Class:** `infra-timeout`.
+- **Smallest fix:** the #214 remedy still stands and is still unimplemented —
+  review-consolidation should report `local_model_unavailable` rather than
+  dressing an infra failure as a judgment question; a failed extraction is not
+  a finding, and the operator's remedy differs completely. Supervising the
+  daemon does not close this: pre-warm the model before the ladder runs, or
+  make that timeout injectable so a cold first call can be given more room.
+
+### A review request carrying context does not attest, so every PR burns a judgment
+
+- **What I tried:** the same `gate gate` invocation, with the required reviewer
+  completed at the exact head and no blocking findings.
+- **What happened:** `readiness` escalated (`no review decision reported by
+  GitHub`) and `review-panel-completeness` escalated (`completed=0 expected=1
+  missing=[claude]`), so the run parked and a one-shot judgment became the only
+  exit. The same pair parked #248.
+
+  The cause is not that the panel comments rather than approving — #235's
+  `panelStandIn` already answers an absent GitHub review decision, and
+  `readiness.go` only escalates when `decisionAbsent && !stand.satisfied`. It is
+  that the panel never completed, and it never completed because the
+  *attestation* step in `.github/workflows/claude.yml` did not fire. That step
+  posts the `gate:review-attestation` sentinel `evidence/panel.go` looks for,
+  and it validates the WHOLE comment body against
+  `^@claude [please] review [this [pr]]$`. Every review request in this repo
+  carries focus areas after the verb, so the step exits `not a review request —
+  no attestation`, the panel stays `missing=[claude]`, the stand-in cannot be
+  satisfied, and readiness escalates downstream of that.
+- **Class:** `tool-gap`.
+- **Smallest fix:** have the claude workflow post a formal GitHub review
+  (`gh pr review`) alongside its comment. That gives GitHub a real review
+  decision, which satisfies `readiness` directly and `latestExactHeadReview`
+  for panel completeness, and it needs no heuristic to be loosened.
+
+  **Not** the tempting fix: widening the regex to match `@claude review` as a
+  *prefix* is precisely what the step's own comment warns against, since
+  `@claude review permissions` and `@claude review the failing CI logs` start
+  identically and must not attest. The precision-over-recall choice there is
+  deliberate and documented; the recall should be recovered somewhere that
+  cannot credit a review that never happened.
+
+  Also **not** the fix I first proposed here: teaching `review-panel-v1` to
+  count a panel member's bot comment as a completed review. `evidence/panel.go`
+  refuses that by design — "prose is not authority here, and a verdict with no
+  commit anchor cannot state which tree it applies to." The sentinel exists
+  because counting bare prose was already considered and rejected.
+- **Workaround available today:** post the bare `@claude please review` as its
+  own comment so the attestation fires, and put the focus areas in a second
+  comment. Costs nothing and keeps the panel complete.
+
+## 2026-09-08 — Fleet assignment is not worker acceptance
+
+- **Observed:** dispatch stores accountability but exposes no retry identity; a
+  retry can rewrite queued work. Existing CLI helpers do not establish end-to-end
+  cross-harness acceptance or effect-safe stop. An operator should not infer those
+  from a successful command or copied session ID.
+- **Change:** request-bound rows, immutable payload checks, cross-process dispatch
+  serialization and non-migrating status output. Hook-owned post-tool evidence is
+  explicitly activity, not success or semantic acceptance. Legacy mutations cannot
+  replace a request record. No second editable ledger added.
+- **Validation boundary:** fixture and real-process tests prove these local
+  contracts, not live model delivery/replacement. This is the first build increment;
+  actual adapters and correlated lifecycle remain under the natural-coordination
+  Dossier task. No hooks installed or live agents controlled by this change.
+- **Tooling:** full-module tests were cost-guarded; followed the requested focused
+  Fleet test path and left the full suite to CI. Root vet/lint and both harness
+  regression suites were run.
+- **Review integration gaps:** generated Codex hooks only subscribed to Bash
+  post-tool events; direct hook tests hid missing file-edit observations. Generated
+  subscriptions now cover writes, with Claude local file-write supplementation
+  and rebind tests. Existing installations still require regeneration/reload.
+  Replay now survives branch/session cleanup, selective legacy retirement preserves
+  request siblings, and status honors the revoke recipient exemption. These are
+  regression-tested without taking over any live session.
+- **Second review:** one latest-write field let activity on another branch erase
+  observed task progress; observations now merge per branch under the existing
+  session lock. Added MultiEdit to generated subscriptions and scoped legacy
+  maintenance validation. Two reviewers reported raw apply_patch bypassing the
+  classifier; the actual Codex adapter already expands patches into per-file Edit
+  events. A direct adapter regression now proves foreign-holder refusal and
+  post-tool evidence, without duplicating parsing in the policy layer.
+
+## 2026-09-09 — watcher diagnostics turn unknown evidence into liveness claims
+
+Work log a3f579e reported a zero heartbeat as 56 years old and a stale-board
+hint without a usable restart command. Both were present on current main.
+Missing/incomplete heartbeat now reports unknown; lock failure preserves the
+underlying error and only names a last recorded heartbeat when valid. It no
+longer claims an owner is actively ticking from lock contention alone. The
+opened lock descriptor is closed on both paths. Board hints name fleet watch in a separate persistent terminal. No new automatic
+spawn events. Tests exercise actual lock contention and absent/partial/fresh/
+stale heartbeat records; Fleet race tests, vet and lint pass. Windows desktop
+behavior and installed binary are not changed by the source fix.
+
+Review round 1: preserved attention rows when heartbeat time is unavailable and
+removed the one-shot recovery suggestion because that path bypasses owner.lock.
+Tests now require both seat/work decision rows under unknown freshness and isolate
+heartbeat files per case. Existing one-shot lock behavior remains outside this
+diagnostic fix; do not recommend it as recovery from a possibly active watcher.
+
+## 2026-09-09 — hook configuration was invisible to the setup check
+
+Added `fleet inspect-hooks --config <harness-json>` as an explicit, read-only
+inventory before the legacy migration dispatch boundary. Exact work-report quoted
+Claude and backslash Codex forms are recognized lexically; shell wrappers remain
+unknown. Config/command hashes and environment names allow comparison without raw
+command/credential output. No command execution, variable resolution or runtime
+claim. Regression verifies no config/state writes or command execution. Fleet race
+suite and vet pass; lint recorded with the PR. This does not repair migration or
+supply effective root/precedence/trust evidence. Full runtime proof stays separate.
+
+Hook inspector review round 1: null event hook arrays now refuse instead of
+looking empty; quoted Windows Program Files (x86) paths are recognized while
+unquoted parentheses and command substitution remain unknown. Added shadow-flag
+assertions and clarified unexpanded variables. JSON key-order/nil-slice cosmetic
+suggestions deferred: map order is not a protocol guarantee and empty inventory
+intentionally serializes as []. No migration or live configuration changes.
+
+
+### 2026-09-09 — Scoped Org status returned phantom roles
+
+- **What I tried:** collect the personal tenant with `org status -tenant mh -json`
+  for the Fleet supervisor board.
+- **What happened:** status scanned every tenant and emitted two all-empty role
+  rows from unrelated directories containing only a lock. Refused first writes
+  can leave those directories before a charter chain exists. The supervisor
+  correctly refused to treat the malformed source as a complete observation.
+- **Class:** `tool-gap`.
+- **Fix:** status enumerates only the configured tenant, omits zero-record
+  chains, and emits `[]` for an empty JSON board. Parse and kernel failures
+  inside that tenant remain visible. Tests cover the real refused-attach path,
+  empty chains, explicit/environment/default tenant selection, and broken chains.
+- **Boundary:** no live directory cleanup or custody changes; this does not
+  resolve Fleet work with unknown accountable roles or create roles or slots.
+
+### 2026-09-08 — Pool inherited the first sibling's tenant and label
+
+- What I tried: review work-machine Fleet #289 on macOS using temporary Git worktrees.
+- What happened: two bindings of one repository in different tenants made poolTenant
+  silently select the first row. The same first-row lookup could supply a label from a
+  different tenant, or conceal conflicting labels before a pool top-up re-roled seats.
+- Class: wrong-default.
+- Smallest fix: inherit only an unambiguous tenant, filter sibling labels by the selected
+  tenant, and refuse conflicting labels before creating seats or rewriting roles.map.
+- Status: fixed with real Git regression tests; the new tenant test failed on 0af6100.
+  Mac Fleet race tests pass. Windows execution is delegated to the portability CI job;
+  a visible-window check still needs the work machine's next real session start.
+
+### 2026-09-08 — Board accountability came from an older seat assignment
+
+- What I tried: fold Codex's review of #289 with a two-seat regression fixture.
+- What happened: a branch-wide map collapsed both assignments by filename order,
+  showing lead:old and z-old against the current holder in a-current.
+- Class: misleading-status.
+- Smallest fix: read the holder's recorded slot, verify repository/branch/slot, and
+  reject an assignment delivered to another session. Unknown holder context stays empty.
+- Status: fixed; regression failed on 925b785 before the change.
+
+### 2026-09-11 — Headless sandbox waiting looked abandoned and encouraged shell polling
+
+- What I tried: real lead/worker/replacement/verifier runs r6 and r7 on PR #310.
+- What happened: r6's lead used Bash mail polling, and normal departures became
+  `abandoned` on the work board. r7's worker and lead guessed handoff read flags,
+  which replaced the checkpoint with `--list` or `--show`.
+- Class: misleading-status / unclear-guidance.
+- Smallest fix: role prose says checkpoint and end the turn while waiting; Go owns
+  wakeups. Work now reports `unoccupied` and the latest departed session, with
+  expired due times still `late`. Document that handoff writes; read injected
+  context or stored JSON. Unknown-option rejection is recorded in FOLLOWUPS.md.
+- Boundary: deliberate yield/resume, not crash recovery; no SDK replacement,
+  global installation or merge. Tests and live evidence are recorded in the PR.

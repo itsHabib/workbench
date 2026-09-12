@@ -48,6 +48,7 @@ const signingSecret = "8f742231b10c8537228d4e5a1a1a2d3f"
 var (
 	escalateBin string
 	stubGateBin string
+	realGateBin string
 )
 
 func TestMain(m *testing.M) {
@@ -65,6 +66,12 @@ func TestMain(m *testing.M) {
 	stubGateBin, err = build(dir, "stubgate", "github.com/itsHabib/workbench/cmd/escalate/e2e/stubgate")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: build stubgate:", err)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
+	realGateBin, err = build(dir, "gate", "github.com/itsHabib/workbench/cmd/gate")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "e2e: build gate:", err)
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}

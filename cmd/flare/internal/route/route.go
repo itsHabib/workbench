@@ -85,6 +85,9 @@ func matches(m config.Match, ev event.Event) bool {
 	if !matchField(m.Code, ev.Fields["code"]) {
 		return false
 	}
+	if !matchField(m.Dimension, ev.Fields["dimension"]) {
+		return false
+	}
 	return matchField(m.Briefed, ev.Fields["briefed"])
 }
 

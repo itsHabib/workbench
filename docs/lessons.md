@@ -255,9 +255,12 @@ action for one exact head; an independent approval releases execution; and
 only then does a dedicated GitHub App — a separate identity — consume the
 authorization once and perform the exact-head merge. The visible merge
 actor is the App bot, not an agent borrowing a human. One real bootstrap
-merge has run this path end to end (workbench PR #169); hosted activation
-and adversarial canaries are still in progress, and the docs say so rather
-than rounding up.
+merge has run this path end to end (workbench PR #169); its one ordinary
+preparation canary refused fail-closed before token creation, the positive
+canary never completed, and the App is currently suspended
+pending a reliability and operator-UX review — the practiced day-to-day
+path is local gate plus the exact commit-pinned merge command it emits.
+The docs say so rather than rounding up.
 
 *Where it lives:* `contracts/gateauthorization`;
 `docs/features/trusted-gate-judgment-bridge/`.

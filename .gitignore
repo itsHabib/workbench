@@ -53,3 +53,8 @@ secrets/
 .playwright-mcp/
 .gate-executor-keys/
 .github/actions/gate-executor/gate
+/fleet
+
+__pycache__/
+*.pyc
+/standup

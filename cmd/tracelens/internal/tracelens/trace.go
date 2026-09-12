@@ -21,6 +21,7 @@ type Step struct {
 	Args        map[string]any
 	Observation string
 	OK          *bool // nil when the step is not a tool result
+	Declined    bool  // explicit provider refusal; not a declaration that the whole run failed
 	Error       string
 	TokensIn    int
 	TokensOut   int

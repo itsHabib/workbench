@@ -16,6 +16,15 @@ gate governs). See [docs/enforcement.md](docs/enforcement.md) for the honest
 enforcement model — what forces merges through the gate, the named bypass, and
 the operator precondition for going live.
 
+**The bypass is now measurable, not just named.** `gate reconcile -repo <r>`
+reads the platform first and joins every merge on the protected branch back to
+the action that authorized it, recording a `coverage` artifact with three
+classes: authorized-and-landed, authorized-never-landed, and
+landed-without-authorization. Merges predating adoption are classified
+separately and never reported as bypasses. `gate audit` surfaces the anomalies —
+and says UNMEASURED rather than zero until a repo has actually been reconciled,
+because a control that cannot produce the number has not measured it.
+
 gate is **enforceable via its canary status check**: the `gate` workflow
 (`.github/workflows/gate.yml`, at the workbench module root) plus branch
 protection makes a merge to `main` require the green check, closing the
@@ -41,6 +50,67 @@ stored command, then CAS-publishes one result. It never promotes commit status.
 The path is installed but unarmed until the operator completes the runbook. See
 [`../../docs/features/trusted-gate-judgment-bridge/design.md`](../../docs/features/trusted-gate-judgment-bridge/design.md).
 
+## Inspect and repair judgment evidence
+
+Run `gate version` to see the binary's stamped revision and Go build metadata.
+The `go_vcs_*` fields are diagnostic: Go 1.26 can stamp a nested Git worktree
+with its enclosing checkout's revision. An unstamped local build therefore
+reports its revision as unknown rather than presenting that metadata as proof.
+For a local build, stamp the source revision explicitly:
+
+```sh
+go build -ldflags "-X main.buildRevision=$(git rev-parse HEAD)" -o gate.exe ./cmd/gate
+./gate.exe version
+```
+
+Build from a clean checkout; the revision identifies committed source. Update an installed binary with
+`go install github.com/itsHabib/workbench/cmd/gate@latest`, then check
+`command -v gate` and `gate version` again. An older binary does not acquire
+merged fixes just because its checkout was updated.
+
+Before invoking a judge, Gate checks the recorded packet. Required reviewer
+file sections are included completely within a 256 KiB budget; ambiguous
+basenames include all matching changed files. An exact-head Git file index
+separates real unchanged companions (including extensionless filenames) from
+hypothetical examples and code symbols in review prose. If the index is absent,
+Gate reports that before judgment. Missing source and omitted reviews are
+listed together; full current source or indexed absence also covers a stale
+line reference. Coverage is evidence availability, not proof a finding is fixed.
+
+```sh
+gate packet -run run_... -state ~/dev/gate/state
+gate evidence -run run_... -grant grt_... -state ~/dev/gate/state
+gate packet -run run_... -state ~/dev/gate/state
+gate judge -run run_... -grant grt_... -auto -provider codex -state ~/dev/gate/state
+```
+
+`packet` is read-only JSON, including `complete`, every `missing` requirement,
+the context, `required_sources`, and the running Gate version. `judge` returns exit 4 with
+`judgment_evidence_incomplete` before invoking a provider or recording a
+judgment when required context is missing. Repair that existing run; creating
+another `gate gate` run spends another review cycle.
+
+`evidence` fetches the complete Git file index at the recorded head, discovers
+all required source, and collects it in one call. A truncated index is an error,
+never proof a file is absent. It fetches regular text files directly from GitHub
+at that full head SHA, verifies their Git blob hashes, and appends the index and
+content to the run. With explicit `-path docs/guide.md -path docs/companion.md`,
+it collects only those paths alongside the index; values are preserved exactly.
+It rechecks the live PR head and grant, allows at most three supplements and
+256 KiB of source across the run, and accepts at most 32 source paths per call.
+The required-diff and required-review sections have separate 256 KiB and 64 KiB
+budgets; exceeding either reports the missing evidence before provider invocation. It does not load arbitrary local source or give author comments review authority.
+Unchanged companion files can be supplied this way; supply exact repository
+paths. Packet source limits are explicit, never silent truncation. If a required
+file or the reviews exceed those bounds, split the change or escalate the
+packet limitation; repeatedly invoking judgment cannot fix it.
+
+A repair is available only before the run's first judgment. Changed heads need
+a new run, and a substantive blocked judgment remains final for its escalation.
+There is no retry mode that relabels a code rejection as missing evidence or
+widens a grant. Existing review cycles, independent judgment and exact-head
+merge authorization stay in force.
+
 ## Run it
 
 ```
@@ -48,8 +118,11 @@ go build -o gate.exe ./cmd/gate
 export GATE_STATE=~/dev/gate/state                           # -state/-key default to $GATE_STATE/$GATE_KEY
 ./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
 ./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
+./gate.exe gate  -repo owner/repo -pr 181 -slack             # request one exact T0 grant on the operator's phone, then evaluate
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
+./gate.exe next -all                                         # plus the rows already discharged, and why
+./gate.exe sweep                                             # record which subjects are no longer open
 ./gate.exe preflight                                         # a whole sweep's inventory + every mint it needs, up front
 ./gate.exe preflight -repo owner/a -repo owner/b -deny owner/b#7
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
@@ -70,6 +143,26 @@ exported the whole verb surface drops its flag tail — and a stray `gate grant`
 from the wrong directory can no longer mint into a fresh relative `state` tree.
 An explicit flag still overrides the env.
 
+### Phone-native T0 authorization
+
+`gate gate -repo owner/repo -pr N -slack` replaces the pasted grant id for one
+narrow case. Gate reads the current head, appends a ten-minute request fixed to
+`merge`, `T0`, three review cycles, that PR, and that exact SHA, then waits. Flare
+renders the request on the existing Slack escalation route; Escalate receives
+the tap and passes the original signed callback to Gate's internal
+`grant-callback` verb. Gate independently verifies Slack's HMAC, five-minute
+freshness window, and `ESCALATE_ALLOWED_SLACK_USERS`, re-reads the head, and
+atomically records either one bound grant or one denial. Double taps, retries,
+and approve/deny races cannot change the first terminal result.
+
+The Slack tap does not authorize T1+, does not accept caller-selected scope,
+and does not merge. Once approved, the waiting command runs the ordinary Gate
+ladder under the bound grant and returns the normal exit/result contract; a pass
+still emits the exact `--match-head-commit` merge action for the caller. The
+state and signing-key directories must already be the canonical ones: `-slack`
+refuses a fresh state tree. See
+[`../../docs/features/slack-t0-authorization/spec.md`](../../docs/features/slack-t0-authorization/spec.md).
+
 `gate next` is the operator's inbox: it projects the log into what currently
 needs a human — runs parked for judgment (each with a paste-ready `gate judge`
 carrying the run's own grant id, so resolving a park is never an id hunt) and
@@ -81,6 +174,43 @@ GitHub confirms are merged/closed; lookup failures remain visible as unknown.
 The live reconcile is batched: one `gh pr list` per DISTINCT repo (not one
 `gh pr view` per row), so its cost is O(repos), serving the parked, ready, and
 needs-grant surfaces from one snapshot. Pass `-json` for the console feed.
+
+A row leaves the inbox in one of three ways, all **derived** — the log is
+append-only and nothing is ever deleted:
+
+- **superseded** — a newer terminal for the same `repo#PR` displaced it;
+- **moot** — the pull request itself is no longer open;
+- **stale** — the PR is still open but its head moved past the SHA the pinned
+  merge command authorizes, so the PR needs re-gating. Deliberately *not* moot:
+  it is owed work, not finished work.
+
+The counts always print (`discharged` in JSON) and `-all` shows the rows
+themselves. Both halves matter: an inbox that shrinks from 164 rows to 3 must be
+able to say so, and a discharged row carries no `judge`/`resolve` command — a
+one-shot judgment must never be spendable on a settled question.
+
+```sh
+./gate.exe sweep -dry-run                                    # what is no longer open, without writing
+./gate.exe sweep                                             # record it, so the OFFLINE inbox is correct
+./gate.exe next -all                                         # the discharged rows, with their reasons
+```
+
+`gate sweep` exists because gate authorizes and an executor acts: every action
+gate writes is `dry_run` / `would_merge`, so once the emitted command landed the
+PR, nothing in the log ever said so and the row stood forever. `next -live`
+discovered that on every invocation and threw it away. `sweep` is the same
+batched open-PR read, **persisted** as a `subject_closed` artifact parented to
+the terminal the stale row stands on — so the store's absent-parent guard makes
+re-running it a no-op. It records only what that read proves (`not_open`); which
+commit landed, when, and by whom is `receipt`/`reconcile`'s claim, read back from
+the platform with its own clock and actor. An unread repo is left alone, never
+assumed closed. It is a separate verb rather than a flag on `next` because it
+writes, and `next -json` is on `escalate serve`'s Slack path under a hard budget.
+
+`gate audit` reports the ratio after the chain check, without touching the exit
+code: parks discharged **by judgment** are the loop working, parks discharged
+**by supersession** are questions a later run overtook before anyone answered —
+a churn signal for the review cycles upstream of the gate.
 
 Each parked row is labelled `cycles N/M` (`cycles_used` / `cycles_max` in JSON):
 the review cycles the PR has consumed — this park's own run included, since a
