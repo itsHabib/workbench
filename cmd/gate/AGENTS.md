@@ -67,6 +67,34 @@ Constraints that are design decisions, not omissions:
   re-reads the head, and records one mutually exclusive grant/denial terminal
   under the state lock. Flare and Escalate never receive a mint API. T1+ stays
   on the existing stronger authority paths.
+- **A judgment names its decider.** Its body carries `decider` —
+  `{who, method, at}` — where method is the CHANNEL the identity was established
+  through (`cli-operator`, `slack-interactive`, `auto-<provider>`), never an
+  authenticated claim. `judge` and `resolve` require `-who`; `-auto` derives its
+  own (the resolved provider wrapper + model) and refuses a claimed one.
+  Enforced on the write path only: readers stay tolerant so judgments predating
+  the field still explain and re-reduce, and `explain` renders their absence as
+  the literal `unattributed`.
+- **Gate authorizes; it never merges.** An `action` says a merge was allowed; a
+  `receipt` (`gate receipt -run <id>`, called by the executor AFTER the pinned
+  command) says what landed, with the merge commit, actor, and time read back
+  from GitHub — an independent clock, not the actor's own account. Classified
+  head-to-head: a merge at a head the action never saw is `superseded`. One
+  receipt per action, enforced by the store's absent-parent guard.
+- **`reconcile` measures the negative.** `gate reconcile -repo R` reads the
+  platform first and writes a `coverage` artifact: authorized-and-landed,
+  authorized-never-landed, landed-without-authorization. Pre-adoption merges are
+  classified apart (boundary derived from state — the first artifact naming the
+  repo — unless `-effective-from` says otherwise) and never counted as bypasses.
+  Basis is merged PRs; a direct push has no head to join by and belongs to branch
+  protection. `audit` reports both anomalies as findings, exits 0 for them (a
+  chain tamper is a fault; an incomplete record is not), and says UNMEASURED
+  rather than zero before any reconcile.
+- **A killed run must not strand a decision.** The judgment path resumes a
+  persisted judgment instead of refusing it, `gate next` surfaces a
+  judged-but-unauthorized run with the command that finishes it, and no GitHub
+  call can precede the durable action — the stamp needs that artifact's chain
+  hash, so the ordering is a precondition of the payload.
 - **State is the only channel.** Verifiers, the provider-neutral judge,
   `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path

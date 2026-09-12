@@ -30,6 +30,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/escalate/internal/ingest"
 	"github.com/itsHabib/workbench/cmd/escalate/internal/serve"
+	"github.com/itsHabib/workbench/contracts"
 )
 
 // codeIngestError is escalate's own failure code, deliberately outside gate's
@@ -85,7 +86,8 @@ func cmdResolve(args []string) error {
 	decision := fs.String("decision", "", "pass or block")
 	grantID := fs.String("grant", "", "grant artifact id")
 	why := fs.String("why", "", "the decision's reasoning")
-	who := fs.String("who", "", "who decided — provenance for the resolution stamp")
+	who := fs.String("who", "", "who decided — recorded on the judgment and the resolution stamp")
+	method := fs.String("method", contracts.MethodCLIOperator, "how the decider was established: cli-operator or slack-interactive")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -97,6 +99,7 @@ func cmdResolve(args []string) error {
 		Escalation: *escID,
 		Verdict:    *decision,
 		Who:        *who,
+		Method:     *method,
 		Why:        *why,
 		Grant:      *grantID,
 	})
@@ -139,6 +142,14 @@ func cmdServe(args []string) error {
 	allowed := splitList(os.Getenv("ESCALATE_ALLOWED_SLACK_USERS"))
 	if len(allowed) == 0 {
 		return errors.New("serve: ESCALATE_ALLOWED_SLACK_USERS is required (a comma-separated allowlist of Slack user ids; refusing to run an ingress any channel member could resolve)")
+	}
+	// The third fail-closed startup gate, beside the signing secret and the
+	// allowlist. Those two refuse an ingress that cannot AUTHENTICATE a tap; this
+	// one refuses an ingress that cannot COMPLETE one. All three fail here, while
+	// the operator is installing, rather than at the moment a human taps Approve
+	// on a phone and reads a green card for work that did not happen.
+	if err := serve.Preflight(*gateBin, nil); err != nil {
+		return err
 	}
 	handler := serve.New(serve.Config{
 		Secret:    []byte(secret),

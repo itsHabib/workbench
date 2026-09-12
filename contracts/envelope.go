@@ -44,6 +44,14 @@ const (
 	// seam the Escalation plane formalizes. Its body is a contracts/escalation
 	// Resolution, parented to the escalation it resolves.
 	KindResolution = "resolution"
+	// KindReceipt discharges one action with what actually landed — the return
+	// half of an authorization, read back from the platform rather than claimed
+	// by whoever acted.
+	KindReceipt = "receipt"
+	// KindCoverage records one reconciliation between what was authorized and
+	// what landed on a protected branch in a window — how a control proves the
+	// negative, that nothing merged around it.
+	KindCoverage = "coverage"
 )
 
 // Verdict decodes the envelope body as a Verdict when the envelope carries one.

@@ -60,7 +60,7 @@ func testPacketJudgmentCLI(t *testing.T, decision string) {
 	if decision == "pass" {
 		code = 0
 	}
-	judged := call(code, "judge", "-run", run, "-grant", grantID, "-decision", decision, "-why", "synthetic judgment for CLI test", "-stamp=false")
+	judged := call(code, "judge", "-run", run, "-grant", grantID, "-decision", decision, "-why", "synthetic judgment for CLI test", "-who", "fixture", "-stamp=false")
 	if !strings.Contains(judged, subject.HeadSHA) {
 		t.Fatal(judged)
 	}
