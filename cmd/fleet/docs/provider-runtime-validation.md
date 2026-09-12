@@ -98,6 +98,28 @@ panel round. Remaining review deferrals are in FOLLOWUPS.md.
 No general production readiness, Windows provider qualification or controlled cost advantage
 is established by these bounded document/Git/session-identity workflows.
 
+## Two workers on the merged runtime (run 7, 2026-09-12)
+
+A larger Claude workflow then ran on merged main (`3c04b8b` plus #326) with the ordinary
+`claude` CLI and its normal user, project and local settings, no PATH adapter: sandbox
+`docs/RUN-CONTRACT-v7.md`, scorecard `docs/REHEARSAL-2026-09-12-run7.md`. SDK 0.3.183,
+`claude-sonnet-5` for every address, isolated `FLEET_STATE`/`ORG_STATE`/`CODEX_HOME`.
+
+One lead, two workers contending for one exclusive bench lease, one verifier handling both
+heads: 16 watcher-started turns in about 7.5 minutes, provider-reported $3.44 and 13,183 output
+tokens, 14 mail messages, draft sandbox PRs #21 and #22, two passing verify receipts with
+`fleet done --kind verify` DONE for both, and the lead stopped all four addresses itself. No
+operator intervention. The refused worker ended its turn and was released by the lead on the
+holder's done report.
+
+Resume held: the lead's 8 turns were one provider session, and each worker kept one session
+across its wakes. The verifier started a fresh session for its second task because its detached
+HEAD moved (a changed work identity); that is intended, but no observation records the rotation.
+Settings-file Fleet hooks fired in every SDK-launched session. Three approval refusals, all
+compound shell commands with one step outside the seat's allow rules, were recovered by the
+sessions; the stale refusal they left on completed turns is moved to `earlier_error` by the
+change that records this run.
+
 ## Bounded pre-turn recovery
 
 A subsequent macOS probe used the ordinary `/opt/homebrew/bin/codex` npm installation
