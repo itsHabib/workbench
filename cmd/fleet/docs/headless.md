@@ -46,6 +46,16 @@ See the official [Claude SDK](https://platform.claude.com/docs/en/agent-sdk/type
 [Codex app-server](https://developers.openai.com/codex/app-server) references. Codex documents
 app-server as experimental; this slice does not establish production qualification.
 
+## Permissions for headless seats
+
+Fleet never approves a tool call. Anything a seat's settings do not allow is refused, recorded as
+`blocked`, and the session is told to report it. Allow rules are matched against each step of a
+compound command, so `fleet take x && bash scripts/bench.sh; echo done` is refused if `echo` is not
+allowed, even when the other steps are. In run 7 (sandbox, 2026-09-12) all three refusals were
+compound commands; the sessions recovered by running the steps separately. Give each headless seat
+the allow rules its role needs in its project-local settings, and tell headless roles in the run
+brief to issue one command per tool call.
+
 ## Codex hook trust
 
 Projecting `hooks.json` is not proof that Codex will execute it. Trust the exact Fleet hooks
@@ -182,7 +192,8 @@ The launch/meta record's `state_file` references this small provider summary:
 
 `provider_state` is `starting`, `running`, `blocked`, `interrupting`, `completed`, `interrupted`
 or `failed`. `blocked` means the provider requested input/approval Fleet cannot supply; later
-terminal evidence supersedes it. Times are Unix seconds, with fractions. Activity means an event
+terminal evidence supersedes it, and a turn that then completes moves the refusal to
+`earlier_error` so `error` describes only the terminal result. Times are Unix seconds, with fractions. Activity means an event
 was observed, never inferred progress. Session/turn fields are absent until reported; Claude
 reports session identity but has no matching app-server turn ID. `reason`, `error` and Codex
 transport exit fields are included when known. `provider_started` records whether launch was

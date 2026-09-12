@@ -47,6 +47,7 @@ const fakeClaude = `export function query({options}) {
   const session_id=process.env.CASE==='missing-identity'?undefined:process.env.CASE==='mismatch'?'wrong':options.resume||'real-session';
   yield {type:'system',subtype:'init',session_id};
   if(process.env.CASE==='early-exit')return;
+  if(process.env.CASE==='approval-then-ok')await options.canUseTool('Bash',{command:'echo x'},{});
   if(process.env.CASE==='cancel')while(!interrupted)await new Promise(r=>setTimeout(r,10));
   yield {type:'result',subtype:'success',is_error:false,session_id,total_cost_usd:0.125,num_turns:2};
  }};
@@ -75,6 +76,11 @@ async function run(provider, scenario, resume) {
  fs.rmSync(home,{recursive:true,force:true});
  return {code,state,out,err};
 }
+test('a refused approval does not outlive a completed Claude turn',async()=>{
+ const r=await run('claude','approval-then-ok');assert.equal(r.code,0,r.err);
+ assert.equal(r.state.provider_state,'completed');assert.equal(r.state.error,undefined);
+ assert.match(r.state.earlier_error,/requires approval/);
+});
 for(const provider of ['claude','codex']) {
  test(provider+' starts, retains actual identity and reports terminal state',async()=>{
   const r=await run(provider,'ok');assert.equal(r.code,0,r.err);assert.equal(r.state.provider_state,'completed');assert.equal(r.state.attempt,'attempt-1');assert.ok(r.state.provider_session);assert.match(r.out,/"type":"result"/);
