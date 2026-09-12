@@ -45,12 +45,12 @@ can stop here and come back to sections 5 (leases) and 8 (the watcher) for detai
   tool events only on write-capable tools: Read, Grep, Glob, web and MCP tools never reach
   it, so a file write through an MCP tool is not checked (`cmd/fleet/internal/verbs/role.go:167`).
   Section 4.
-- **Leases.** `CheckLease` reads, decides and writes a lease inside a kernel file lock.
-  A dead holder's branch is taken over on the next write; a dead holder's resource is not.
-  On that path a record that cannot be read is never treated as death
-  (`cmd/fleet/internal/fleet/policy.go:379-448`). Seat occupancy and delivery's presence
-  check are exceptions (section 5).
-  Section 5.
+- **Leases.** When a key is free or held by someone else, `CheckLease` reads, decides and
+  writes the lease inside a kernel file lock; when the lease already names the caller, it
+  allows the write through an unlocked read that changes nothing. A dead holder's branch is
+  taken over on the next write; a dead holder's resource is not. On that path a record that
+  cannot be read is never treated as death (`cmd/fleet/internal/fleet/policy.go:379-448`).
+  Seat occupancy and delivery's presence check are exceptions. Section 5.
 - **The watcher** (`fleet watch`) folds the store into a board every tick, mails
   lateness, and starts one Claude or Codex turn per directory when there is mail, a new
   assignment or a recurring tick to carry. The turn runs through an embedded Node bridge.
@@ -690,7 +690,7 @@ sequenceDiagram
 | 9 | watcher | `<attempt>.meta.json`: address, cwd, provider, attempt, state file path | `cmd/fleet/internal/watch/runtime.go:123-126` |
 | 10 | watcher | launch record `watch/delivery/<sha256 cwd>.json` with `status: "starting"`, the attempt's file paths, `work_identity` and the session to `resume` | `cmd/fleet/internal/watch/runtime.go:130-133` |
 | 11 | watcher | none: `providerCommand` builds `node --input-type=module -e <bridge>` with the request on stdin, adding the observer path on macOS. The request is copied to stdin by a goroutine in this process after `Start` (section 11) | `cmd/fleet/internal/watch/runtime.go:134-139`, `cmd/fleet/internal/provider/provider.go:16-32` |
-| 12 | watcher | on a start error: launch record rewritten `status: "failed"`, then `launch` gives the stamps back | `cmd/fleet/internal/watch/runtime.go:140-146`, `cmd/fleet/internal/watch/deliver.go:316-320` |
+| 12 | watcher | if `cmd.Start()` fails: launch record rewritten `status: "failed"`, then `launch` gives the stamps back. A `providerCommand` error returns before this rewrite, and a failed rewrite returns too; both leave the `starting` record from step 10 (section 11) | `cmd/fleet/internal/watch/runtime.go:134-146`, `cmd/fleet/internal/watch/deliver.go:316-320` |
 | 13 | watcher | on success: launch record rewritten `status: "running"` with `pid` and, when it can be read, `process_identity` (the process start time). An identity read error is ignored here; while the process is alive, later folds then read the launch as `unknown` (`cmd/fleet/internal/watch/status.go:85-95`) | `cmd/fleet/internal/watch/runtime.go:147-152` |
 | 14 | watcher | the fold's observations for this address, appended to `observed.jsonl` once `deliver()` returns | `cmd/fleet/internal/watch/deliver.go:305-323`, `cmd/fleet/internal/watch/watch.go:137-139` |
 
