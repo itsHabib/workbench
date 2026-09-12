@@ -431,3 +431,14 @@ func publishMigrated(old, dest string, rec Rec) error {
 	Unlink(old)
 	return nil
 }
+
+// LegacyKeysPresent reports legacy or unreadable ownership records without writes.
+// A fresh state directory requires no migration merely to serve a read.
+func LegacyKeysPresent() bool {
+	for _, sub := range []string{"leases", "stop", "handoff"} {
+		if unresolvedLegacy(sub) {
+			return true
+		}
+	}
+	return false
+}
