@@ -208,6 +208,9 @@ func applyWork(p workPlan, a workAction) (string, error) {
 			status = "already recorded"
 			return nil
 		}
+		if err := checkPlannedHead(a); err != nil {
+			return err
+		}
 		if a.Expected != "absent" {
 			if row == nil || planHash(row) != a.Expected || len(workDifferences(row, a.Work)) != 0 {
 				return refuse("work %s: existing row changed since plan; replan", a.Work.Name)
@@ -218,16 +221,7 @@ func applyWork(p workPlan, a workAction) (string, error) {
 		if row != nil {
 			return refuse("work %s: row appeared since plan; replan", a.Work.Name)
 		}
-		if fleet.RepoID(a.Work.Repo) != a.RepoID {
-			return refuse("work %s: repository identity changed", a.Work.Name)
-		}
-		head, err := localWorkHead(a.Work)
-		if err != nil {
-			return err
-		}
-		if head != a.Head {
-			return refuse("work %s: branch head changed; replan", a.Work.Name)
-		}
+
 		row = workFields(a.Work)
 		row["repo"], row["change"], row["relationship"] = a.RepoID, a.Work.Change, a.Work.As
 		row["by"], row["at"], row["head_at_dispatch"] = p.By, fleet.Now(), a.Head
@@ -292,4 +286,20 @@ func applyWorkPlan(p workPlan, digest string) ([]workResult, error) {
 		results = append(results, r)
 	}
 	return results, failure
+}
+
+// Replayed operations report retained evidence. Every fresh add/keep must still
+// refer to the repository and revision displayed in the approved plan.
+func checkPlannedHead(a workAction) error {
+	if fleet.RepoID(a.Work.Repo) != a.RepoID {
+		return refuse("work %s: repository identity changed", a.Work.Name)
+	}
+	head, err := localWorkHead(a.Work)
+	if err != nil {
+		return err
+	}
+	if head != a.Head {
+		return refuse("work %s: branch head changed; replan", a.Work.Name)
+	}
+	return nil
 }

@@ -341,3 +341,42 @@ func TestPlanDisplayEscapesControlCharacters(t *testing.T) {
 		t.Fatalf("lost brief: %q", output)
 	}
 }
+
+func TestPlanFreshKeepRechecksHeadButReplayUsesRetainedEvidence(t *testing.T) {
+	for _, mode := range []string{"moved", "deleted"} {
+		t.Run(mode, func(t *testing.T) {
+			p := planFixture(t)
+			p.Actions = p.Actions[:1]
+			p.Digest = planDigest(p)
+			if _, err := applyWorkPlan(p, p.Digest); err != nil {
+				t.Fatal(err)
+			}
+			w := p.Actions[0].Work
+			keep, err := buildWorkPlan(workIntent{Schema: intentSchema, Work: []desiredWork{w}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := readBytes(t, planRowPath(p.Actions[0]))
+			if mode == "deleted" {
+				runGit(t, w.Repo, "branch", "-D", w.Change)
+			}
+			if mode == "moved" {
+				runGit(t, w.Repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "drift")
+				runGit(t, w.Repo, "branch", "-f", w.Change, "task")
+			}
+			results, err := applyWorkPlan(keep, keep.Digest)
+			if err == nil {
+				t.Fatal("stale keep accepted")
+			}
+			assertStatuses(t, results, "conflict")
+			results, err = applyWorkPlan(p, p.Digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertStatuses(t, results, "already recorded")
+			if !bytes.Equal(before, readBytes(t, planRowPath(p.Actions[0]))) {
+				t.Fatal("rewrote retained evidence")
+			}
+		})
+	}
+}
