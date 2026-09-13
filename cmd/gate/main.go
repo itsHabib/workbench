@@ -137,6 +137,7 @@ func commands() map[string]func([]string) error {
 		"packet":         func(args []string) error { return cmdPacketTools("packet", args) },
 		"evidence":       func(args []string) error { return cmdPacketTools("evidence", args) },
 		"grant":          cmdGrant,
+		"discover-grant": cmdDiscoverGrant,
 		"grant-callback": cmdGrantCallback,
 		"gate":           cmdGate,
 		"judge":          cmdJudge,
@@ -167,14 +168,15 @@ func commandErrorCode(command string, err error) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: gate <version|packet|evidence|grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
+	fmt.Fprintln(os.Stderr, `usage: gate <version|packet|evidence|grant|discover-grant|grant-callback|gate|judge|resolve|receipt|reconcile|executor|explain|next|sweep|threads|preflight|audit|backtest|stress> [flags]
   common   [-state state] [-key DIR] [-floor path]  (-key holds the signing + anchor keys, outside -state)
                                                      (-state/-key default to $GATE_STATE/$GATE_KEY)
   version  (running binary revision and module version)
   packet   -run run_x (inspect judgment context and missing evidence)
   evidence -run run_x -grant grt_x -path repo/path (repeat -path for companions)
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
-  gate     -repo R -pr N (-grant grt_x | -slack) [-live]
+  gate     -repo R -pr N [-grant grt_x | -slack] [-live]  (omitted grant: discover existing authority)
+  discover-grant -repo R -pr N [-json]  (read-only current-subject assessment and grant selection)
   grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
   judge    -run run_x -grant grt_x (-decision pass|block -why "..." -who NAME [-method cli-operator|slack-interactive] | -judgment <path|-> -who NAME | -auto -provider claude|codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME [-method ...]  (resolve a park by its escalation id + stamp the resolution)
@@ -415,14 +417,15 @@ func absStateDir(stateDir string) string {
 }
 
 type gateResult struct {
-	Run      string `json:"run"`
-	PR       string `json:"pr"`
-	Decision string `json:"decision"`
-	Tier     string `json:"tier"`
-	Outcome  string `json:"outcome"`
-	Why      string `json:"why"`
-	Code     string `json:"code,omitempty"`
-	Action   string `json:"action,omitempty"`
+	Discovery *grantDiscovery `json:"grant_discovery,omitempty"`
+	Run       string          `json:"run"`
+	PR        string          `json:"pr"`
+	Decision  string          `json:"decision"`
+	Tier      string          `json:"tier"`
+	Outcome   string          `json:"outcome"`
+	Why       string          `json:"why"`
+	Code      string          `json:"code,omitempty"`
+	Action    string          `json:"action,omitempty"`
 	// HeadSHA is the head commit gate actually read and judged (the live
 	// headRefOid from evidence, carried on the reduced verdict). A caller that
 	// posts an out-of-band verdict — a commit status branch protection consumes
@@ -475,7 +478,7 @@ func cmdGate(args []string) error {
 	stateDir, floorBin, keyDir := commonFlags(fs)
 	repo := fs.String("repo", "", "owner/repo")
 	pr := fs.Int("pr", 0, "PR number")
-	grantID := fs.String("grant", "", "grant artifact id")
+	grantID := fs.String("grant", "", "explicit grant artifact id; omitted discovers existing authority")
 	slack := fs.Bool("slack", false, "request one exact T0 grant in Slack and wait for it")
 	live := fs.Bool("live", false, "actually merge instead of dry-run")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status on a pass (gate's only GitHub write)")
@@ -491,8 +494,13 @@ func cmdGate(args []string) error {
 	if *repo == "" || *pr == 0 {
 		return errors.New("gate: -repo and -pr required")
 	}
-	if (*grantID == "" && !*slack) || (*grantID != "" && *slack) {
-		return errors.New("gate: choose exactly one of -grant or -slack")
+	if *grantID != "" && *slack {
+		return errors.New("gate: -grant and -slack are mutually exclusive")
+	}
+	if *grantID == "" && !*slack {
+		if err := requireDiscoveryState(*stateDir); err != nil {
+			return err
+		}
 	}
 	if *slack {
 		if err := checkGrantStateDir(*stateDir, false); err != nil {
@@ -517,7 +525,7 @@ func cmdGate(args []string) error {
 			res, code, err = runGateBound(e, *repo, *pr, request.Request.Subject.HeadSHA, grant.ID, *live, *modelBackend, *reviewsOptional)
 		}
 	} else {
-		res, code, err = runGate(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
+		res, code, err = runGateSelected(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
 	}
 	if err != nil {
 		return err
@@ -537,8 +545,8 @@ func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend
 	)
 }
 
-// runGateBound is the Slack path: the grant must match the head captured in
-// the immutable request before Gate gathers anything, and act re-checks the
+// runGateBound is the Slack and discovery path: the grant must match the head
+// captured before Gate gathers anything, and act re-checks the
 // live reduced subject before recording an effect.
 func runGateBound(e env, repo string, pr int, head, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	return runGateWithSynthesis(
@@ -603,7 +611,7 @@ func runGateWithSynthesis(
 	// credentials, a flaky diff fetch) — an early hard error would leave a
 	// stale would_merge as the newest published terminal in the hosted path.
 	ref := evidence.PRRef{Repo: repo, Number: pr}
-	viewID, view, err := evidence.View(e.st, run, ref)
+	viewID, view, err := readGateView(e, run, ref, boundHead)
 	if err != nil {
 		return res, codeError, err
 	}
@@ -1267,7 +1275,10 @@ func cycleCount(st *state.Store, subject verify.Subject, curRun string) (int, er
 	if !audit.OK {
 		return 0, fmt.Errorf("%w: %s", errLogTampered, audit.Reason)
 	}
-	all := audit.All
+	return countCycles(audit.All, subject, curRun)
+}
+
+func countCycles(all []state.Artifact, subject verify.Subject, curRun string) (int, error) {
 	byID := make(map[string]state.Artifact, len(all))
 	for _, a := range all {
 		byID[a.ID] = a
@@ -2760,6 +2771,10 @@ func decorateTerminalCodeContext(res *gateResult, code string, substrateOK bool,
 	retry := readiness.RetryHelps(code)
 	res.SelfGated = readiness.SelfGated(code)
 	res.RetryHelps = &retry
+	if res.Discovery != nil && res.Discovery.Status != "available" {
+		res.Escape = discoveryRoute(*res.Discovery)
+		return
+	}
 	if res.Outcome == "blocked" && res.Run != "" {
 		res.Escape = explainRoute(res.Run, stateDir,
 			"the verifier ladder blocked this head; inspect the recorded decision before changing code")

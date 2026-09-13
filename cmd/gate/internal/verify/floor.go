@@ -100,20 +100,30 @@ func Floor(st *state.Store, run, diffEvidenceID, floorBin string, subject Subjec
 	if err := json.Unmarshal(a.Body, &body); err != nil {
 		return state.Artifact{}, fmt.Errorf("verify: parse diff evidence: %w", err)
 	}
+	v, err := AssessFloor(floorBin, subject, body.Diff)
+	if err != nil {
+		return state.Artifact{}, err
+	}
+	return Record(st, run, []string{diffEvidenceID}, v)
+}
 
+// AssessFloor reads the deterministic floor without recording an artifact.
+// Discovery uses the same assessment as the ladder; this is only a lower bound
+// on the eventual reduced tier, not a readiness or authorization decision.
+func AssessFloor(floorBin string, subject Subject, diff string) (Verdict, error) {
 	// Pass the PR's repo so triage-floor applies that repo's compiled-in path
 	// overrides — the deterministic compensating control for the gate-machinery
 	// blind spot. An empty repo is inert (the floor applies no overrides).
 	cmd := exec.Command(floorBin, "-repo", subject.Repo)
-	cmd.Stdin = strings.NewReader(body.Diff)
+	cmd.Stdin = strings.NewReader(diff)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return state.Artifact{}, fmt.Errorf("verify: triage-floor: %w", err)
+		return Verdict{}, fmt.Errorf("verify: triage-floor: %w", err)
 	}
 	res, err := parseFloorOutput(out.Bytes())
 	if err != nil {
-		return state.Artifact{}, err
+		return Verdict{}, err
 	}
 
 	v := Verdict{
@@ -128,5 +138,5 @@ func Floor(st *state.Store, run, diffEvidenceID, floorBin string, subject Subjec
 	for _, s := range orderFloorSignals(res.Signals) {
 		v.Findings = append(v.Findings, Finding{Title: s.Signal + ": " + s.Why, Severity: s.Tier})
 	}
-	return Record(st, run, []string{diffEvidenceID}, v)
+	return v, nil
 }

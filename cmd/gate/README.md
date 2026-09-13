@@ -116,8 +116,10 @@ merge authorization stay in force.
 ```
 go build -o gate.exe ./cmd/gate
 export GATE_STATE=~/dev/gate/state                           # -state/-key default to $GATE_STATE/$GATE_KEY
-./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h      # → grt_... (first ever mint into a fresh -state needs -init)
-./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...     # exit 0 pass / 1 block / 2 parked / 3 refused
+./gate.exe gate  -repo owner/repo -pr 181                  # discover and reuse existing authority; normal Gate exit contract
+./gate.exe discover-grant -repo owner/repo -pr 181 -json   # optional read-only assessment and inventory check
+./gate.exe gate  -repo owner/repo -pr 181 -grant grt_...    # explicitly pin one operator-minted grant
+./gate.exe grant -repo owner/repo -max-tier T2 -ttl 24h     # OPERATOR ONLY, after a proven gap; fresh -state requires -init
 ./gate.exe gate  -repo owner/repo -pr 181 -slack             # request one exact T0 grant on the operator's phone, then evaluate
 ./gate.exe next                                              # what needs you: parked runs + grant ledger
 ./gate.exe next -json                                        # the same projection as a machine feed
@@ -142,6 +144,28 @@ export GATE_STATE=~/dev/gate/state                           # -state/-key defau
 exported the whole verb surface drops its flag tail — and a stray `gate grant`
 from the wrong directory can no longer mint into a fresh relative `state` tree.
 An explicit flag still overrides the env.
+
+### Reuse existing authority
+
+Omitting `-grant` uses the same resolver as `discover-grant`. It reads the current
+open PR and immutable diff, runs the existing deterministic floor, and checks all
+relevant grants against an audited cycle count, signed scope, subject bindings,
+expiry and ceilings. It chooses the widest tier among candidates that fit every
+limit; a newer narrow grant or an exhausted broad one cannot hide a usable grant.
+The normal capability checks and full verifier ladder still decide the outcome.
+
+Discovery JSON reports `available` with a grant ID, `uncovered` with per-candidate
+gaps and an operator mint request, `assessment_required` for unread or invalid
+inputs, or `not_applicable` for a closed PR. Exit codes are 0, 3, 4 and 3
+respectively. Discovery's 0 means eligibility for assessment, never a merge
+verdict. Its tier is a minimum; the full ladder may raise the required tier.
+Commands preserve the chosen state, key directory and floor executable.
+
+Discovery creates no grants, keys, artifacts, statuses or merges. It rejects a
+missing state directory instead of creating a new inventory. A head change
+before evaluation stops the run before model invocation. Explicit `-grant`,
+`-slack` and run-bound judgment flows remain explicit; no grant is silently
+substituted for a pinned ID. See [regression evidence](docs/grant-discovery-poc.md).
 
 ### Phone-native T0 authorization
 
@@ -245,6 +269,10 @@ Like every `observe` projection it is **advisory**: `capability.Check` and the
 ladder remain the only authority. A `covered` row can still refuse, and the
 advisory count skips outcomes whose parent verdict it cannot follow rather than
 failing the whole inbox — it may undercount a corrupt log, never overcount.
+Do not turn an advisory row into a mint request without current-subject
+assessment. Normal Gate evaluation discovers authority itself; `discover-grant`
+is the optional read-only check for a specific PR. Historical `next`/`preflight`
+tiers do not prove the current head's requirement.
 
 `gate preflight` is the same inventory question asked in BATCH, before a sweep
 starts rather than one PR at a time. It walks every open PR in scope (`-repo`,
