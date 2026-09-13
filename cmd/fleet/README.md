@@ -2,21 +2,18 @@
 
 ## What this is for
 
-An operator running a team of coding agents wants one thing from the machinery
-underneath them: to always know **who is working what, what is stuck, and what
-is done** — and to be told that truthfully, at the moment it changes, without
-any agent having to stop and report it. `fleet` is that machinery. It is not a
-scheduler or a workflow engine; it is the part that makes
-ownership visible and exclusive so that leads can lead.
+Fleet records agent sessions, assignments, mail, handoffs and exact-head receipts.
+Leads use those records to answer questions, coordinate separate worktrees and
+check results. The Go watcher can start configured headless sessions.
 
-The shape it serves is a hub and spokes. The operator talks to a **lead** (a
-supervisor session); the lead dispatches work to **workers** in seats it
-controls; workers talk to their lead, never to the operator. A lead is
-accountable for every row it dispatched until each is done. When the lead has
-too much, the hierarchy grows by one command: bind a second directory to a
-second lead role and `fleet reassign --for` the rows that move. Accountability
-is a column on the row, not a tree in configuration, so two leads, or a lead
-of leads, cost nothing new.
+Start with [Fleet 101](docs/fleet-101.md) for one task from assignment to verification,
+or [Workbench 101](../../docs/workbench-101.md) for the wider system and reading map.
+The [runtime and model reference](docs/fleet-reference.md) retains the dated engineering
+investigation. Installation and commands remain in their focused guides below.
+
+Start with one accountable lead and one worker. Peers can ask one another questions
+within their tenant; roles and additional leads depend on the work. Org is an optional
+card registry, not a communication or authority gate.
 
 ## The idea in five rules
 
@@ -31,18 +28,21 @@ of leads, cost nothing new.
   what it is told to remember. Because cwd *is* the identity, the hook refuses a
   Bash command that would `cd` (or `pushd`) this session into a bound directory that
   is not its own — see below.
-- **Facts come from the hook, never from an agent.** Identity, branch,
+- **Runtime activity comes from hooks and process evidence.** Identity, branch,
   liveness, turn state and last word are derived from harness events. An
   agent does not know the substrate exists until it is refused or handed a
   `[fleet]` line. The day-one failure this design replaces was agents being
-  asked to check in and checkpoint; they didn't, and the board lied.
+  asked to report their own liveness. Handoffs, assignments and receipts still need
+  authored explanations; Fleet does not verify their substantive claims.
 - **One holder per key.** A branch (`repo:<id>:<branch>`) is leased on first
   write; a machine resource (`slot:<name>`) is taken on purpose. A rival is
   refused with the holder's name and the exact command that stands them down.
   A dead holder's branch is taken over; a dead holder's resource is orphaned
   and needs `--takeover`, because the machine it drives may still be running.
   Unreadable evidence is never death.
-  These leases gate future tool admissions; they do not terminate an already
+  Branch leases cover recognized file-edit tools and Git/GitHub shell operations.
+  Ordinary shell writes, scripts and generators can miss the branch check; tools
+  outside the hook matcher bypass it. These leases gate recognized future admissions; they do not terminate an already
   running child when its harness dies. The [crash/replacement experiment](model/CRASH-REPLACEMENT.md)
   reproduces an old child's write after a new branch holder's write.
 - **The substrate learns no domain word.** Roles are data: a lane is a
@@ -373,8 +373,10 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 
 ## Guides
 
-- [docs/OVERVIEW.md](docs/OVERVIEW.md): the problem, the four rules, the shape, what it has proved.
-- [docs/ONBOARDING.md](docs/ONBOARDING.md): a working fleet over one repository in thirty minutes.
+- [docs/fleet-101.md](docs/fleet-101.md): start with one task, question, handoff and verification.
+- [docs/fleet-reference.md](docs/fleet-reference.md): dated runtime and model investigation.
+- [docs/OVERVIEW.md](docs/OVERVIEW.md): brief overview and historical rehearsal evidence.
+- [docs/ONBOARDING.md](docs/ONBOARDING.md): setup choices and a working routine over one repository.
 - [docs/MINIMUM.md](docs/MINIMUM.md): the five habits and two files that carry most of the value with none of the machinery.
 - [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
   lead, worker or verifier, read the fleet.

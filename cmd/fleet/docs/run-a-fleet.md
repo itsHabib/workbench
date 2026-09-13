@@ -37,9 +37,12 @@ legacy fallback. See [Org's cutover inventory](../../org/README.md#clean-cutover
 ## Assign and act
 
 ```sh
+git branch <branch> main   # choose the intended base; skip if the branch already exists
 fleet dispatch <branch> --as implementation --for supervisor:<run>   --slot <repo>-author-1 --brief '<task and acceptance through a draft PR>'
 ```
 
+Dispatch requires an existing local or fetched branch. Create it in the target repository
+from the lead's own worktree, or fetch the intended existing branch first.
 The seat identifies the target repo; `--repo <owner/repo|checkout-path>` selects it explicitly.
 Dispatch with a brief makes a configured headless seat eligible to start. No second order
 message is needed. The caller stays in its own directory. Do not enter another roled directory

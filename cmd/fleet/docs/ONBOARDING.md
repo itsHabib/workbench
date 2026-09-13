@@ -2,7 +2,9 @@
 
 For a person setting Fleet up on a machine, or an agent asked to. Set up one repository, then
 rehearse on this machine and record elapsed time and friction; read [OVERVIEW.md](OVERVIEW.md)
-first if the words are new. Everything measured so far was measured on a Mac with Claude.
+first if the words are new, or use [Fleet 101](fleet-101.md) for one task. Bounded macOS
+workflows have run with both providers; see [the dated evidence](provider-runtime-validation.md).
+Windows and larger scenarios require their own qualification.
 
 ## 1. Install and bind roles
 
@@ -11,36 +13,18 @@ fresh-install commands and a disposable packaging check. The installer builds Fl
 and installs example cards; `fleet role` projects both harnesses' instructions and
 hooks. A private skill checkout and old Python hook installation are not required.
 
-## 2. Decide the tree (five minutes of thinking, no commands)
+## 2. Choose responsibilities
 
-- One overall lead. One lead per bucket of work (an epic, a repository, a team). One accountable
-  lead per task, never two.
-- Example worker kinds: `author` (task owner), `verifier` (exact-head checks) and
-  `supervisor` (coordination). These are starting points; choose roles and edit
-  manifests/cards around your organization rather than adopting this structure by default.
-- One exclusive resource if the work has one (a device, a test bench, a deploy slot).
-- Names: `supervisor:<name>` for leads, `<kind>:<repo>` for worker kinds.
+Start with one accountable lead and one task owner. Add an independent verifier when
+acceptance calls for one; add another worker, lead or exclusive resource only when the
+work requires it. Example role cards are starting points you can edit, not a prescribed tree.
 
-## 3. Create the directories (ten minutes)
+## 3. Create the directories
 
-Everything beside the repository checkout, never inside it, never the checkout itself.
-
-```sh
-# leads: detached worktrees, then bound
-git -C ~/dev/<repo> worktree add --detach ~/dev/<repo>-lead   main     # and -lead-a, -lead-b
-
-# seats: pooled worktrees with names (pool before binding the leads; there is no unbind verb, so
-# if leads are already bound, remove their roles.map lines while pooling and re-run fleet role)
-fleet pool ~/dev/<repo> author 2 --tenant <t>
-fleet pool ~/dev/<repo> verifier 1 --tenant <t>
-
-# bind the lead directories
-fleet role ~/dev/<repo>-lead   supervisor:<name>   --tenant <t>     # and the two bucket leads
-```
-
-Check with `fleet board`: every directory listed, every one `vacant`. Check one seat by opening
-a headless session there and asking it to print its `[fleet]` lines; it should name its role and
-seat without being told.
+Use the exact setup in [install.md](install.md#configure-one-repository): pool seats before
+binding the lead, keep the main checkout unbound, and use separate worktrees. Then confirm
+startup context in a fresh supported session. The setup creates configuration; observed
+hook events establish whether the harness actually loaded it.
 
 ## 4. Write the run contract (one page, in the repository)
 

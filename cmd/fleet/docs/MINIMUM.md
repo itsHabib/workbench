@@ -16,7 +16,8 @@ Every piece of Fleet exists because one of these went wrong without it:
 | nobody knows who decided what | every decision written where the next agent reads it |
 | agents forget the rules | the rules live where the agent starts, not in its memory |
 
-Fleet's hook enforces the first (one writer per branch); `fleet receipt` and `fleet done` give
+Fleet's hook checks recognized admissions to a leased branch; ordinary shell writes and
+already-running children are outside that guarantee (see [Fleet 101](fleet-101.md#what-the-protection-means)); `fleet receipt` and `fleet done` give
 the second a verb that checks a live session, head and clean tree but not the checker's independence;
 mail gives the third a shape; the fourth and fifth are cards the agent reads at start. Without
 Fleet, all five are conventions. Conventions with a
@@ -30,8 +31,7 @@ written shape hold surprisingly well, because the agents read the shape at start
    `.codex/config.toml` under `developer_instructions` for Codex. That file is the whole
    identity. Start a fresh session there and have it say its role and parent before giving it work.
 2. **One page of contract, in the repository.** Outcome, tasks with acceptance, who talks to
-   whom, what nobody may do, when to stop. Leads read it before acting. Authority comes from
-   the page, not from the conversation.
+   whom, what nobody may do, when to stop. Leads read it before acting. Record the operator's authorization and stop boundary there; the page does not enlarge that authority.
 3. **A message shape with an id.** Every question or report is one paragraph: task, commit,
    kind (question, answer, report, escalation, order), id, body. Each new message has its own id; only retries reuse it. Replies name the question or work in their body. Put them where
    the reader will look: a PR comment, a file in a `mail/` directory, a chat message. The id is
@@ -61,8 +61,8 @@ normal loop. Headless recurrence and mail delivery belong in the existing Go wat
 
 ## What you give up without Fleet
 
-Enforcement. A convention can be broken by a session that forgets; the hook cannot, though it
-only refuses what it can see (a `cd` into another seat slipped past it twice until PR #300). Liveness
+Automatic observations and admission checks. A convention can be forgotten; an installed
+hook checks the operations its matcher and classifier recognize (a `cd` into another seat slipped past it twice until PR #300). Liveness
 and lateness are things you notice, not things the system tells you. Two seats can collide if a
 person makes a mistake in the setup. Those are the reasons the substrate exists, and the order
 to add its pieces if the habits hold and the team grows: leases first (one writer per branch),
