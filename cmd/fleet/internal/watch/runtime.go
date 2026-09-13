@@ -128,11 +128,13 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 		assignment = fleet.S(last, "assignment")
 	}
 	r := fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "status": "starting", "assignment": assignment, "exit_file": exitFile, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "work_identity": workIdentity(t), "resume": resume}
-	if err := fleet.WriteJSON(path, r); err != nil {
-		return 0, err
-	}
 	cmd, err := providerCommand(attempt+".request.json", map[string]any{"provider": t.provider, "cwd": t.cwd, "model": t.model, "permission_mode": t.permissionMode, "resume": resume, "prompt": text, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "output": logPath, "trace": attempt + ".trace.jsonl"})
 	if err != nil {
+		return 0, err
+	}
+	// Preparation cannot start a process. Publish uncertainty only after it
+	// succeeds, immediately before Start; a preparation error remains retryable.
+	if err := fleet.WriteJSON(path, r); err != nil {
 		return 0, err
 	}
 	cmd.Dir, cmd.Stdout, cmd.Stderr = t.cwd, log, log
