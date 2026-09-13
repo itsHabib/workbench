@@ -108,3 +108,35 @@ Gate remains the separate merge-authority boundary.
 For validation and measurement, use [e2e.md](e2e.md). The desktop run is a useful baseline:
 compare completed work, coordination cost, idle assigned time and operator rescues, keeping
 work acceptance and model/settings comparable. Record the actual binary and launch commands.
+
+### Inspect Codex setup before delivery
+
+Run `fleet check <address>` for an address in `deliver.json`. It checks the
+existing tenant/directory binding, starts the configured Codex app-server, and
+reads `config/read` and `hooks/list`. It creates no thread or model turn, executes
+no hooks, and does not tick the watcher, reserve mail, or change Fleet/Org state.
+The bridge uses temporary files and closes the server after discovery. Codex may
+write its own normal diagnostic logs.
+
+The JSON reports configured sandbox/approval values and discovered hooks' event,
+enabled flag, trust status and source path. Null permissions mean unset/unknown;
+they are not the effective defaults of a future thread. `modified` or `untrusted`
+hooks need operator attention even when enabled. The inventory includes all hooks;
+it does not identify a command as Fleet or prove that hooks execute, match the
+needed events, or register the right session. Commands and unrelated configuration
+values are omitted. Discovery errors and warnings are counted without printing
+potentially sensitive messages.
+
+Exit 0 means discovery succeeded, not that the address is ready for every workload.
+Exit 1 refuses an invalid target/provider configuration, 2 reports usage, and 4
+reports a provider or protocol failure. Usable targets can still be inspected when
+unrelated entries are malformed; their omission is reported as a configuration warning.
+No permissions are widened and no hooks are trusted automatically. Unsupported
+providers or protocol responses fail explicitly; Claude currently has only the
+static `fleet inspect-hooks --config <harness-json>` inventory.
+
+After an actual Codex launch, `fleet watch status --json` and `fleet inspect`
+include `sandbox_policy` and `approval_policy` from that attempt's thread response.
+The text watcher status shows these as last-thread permissions. This observation
+is separate from the configured values above and from the last observed hook;
+it is not a guarantee about later turns or task completion.

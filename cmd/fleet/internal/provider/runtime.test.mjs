@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const bridge = fs.readFileSync(fileURLToPath(new URL('./runtime.mjs', import.meta.url)), 'utf8');
 const fakeCodex = `#!/usr/bin/env node
 const readline = require('node:readline');
+if(['check-hang','check-timeout'].includes(process.env.CASE)) setInterval(()=>{},1000);
 const send = x => process.stdout.write(JSON.stringify(x)+'\\n');
 readline.createInterface({input:process.stdin}).on('line',line=>{
  const m=JSON.parse(line), p=m.params;
@@ -17,10 +18,20 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
   if(process.env.CASE==='init-fail')return send({id:m.id,error:{message:'initialize rejected'}});
   return send({id:m.id,result:{}});
  }
+ if(process.env.CASE.startsWith('check') && !['initialized','config/read','hooks/list'].includes(m.method)) throw new Error('discovery attempted '+m.method);
+ if(m.method==='config/read') {
+  if(process.env.CASE==='check-timeout')return;
+  send({method:'config/notification',params:{secret:'DO-NOT-PRINT'}});
+  if(process.env.CASE==='check-config-array') return send({id:m.id,result:{config:[]}});
+  if(process.env.CASE==='check-config-string') return send({id:m.id,result:{config:'unexpected'}});
+  if(process.env.CASE==='check-error') return send({id:m.id,error:{message:'DO-NOT-PRINT'}});
+  return send({id:m.id,result:{config:{sandbox_mode:null,approval_policy:null,secret:'DO-NOT-PRINT'}}});
+ }
+ if(m.method==='hooks/list') return send({id:m.id,result:process.env.CASE==='check-malformed'?{}:{data:[{cwd:p.cwds[0],hooks:process.env.CASE==='check-hook-string'?['not-a-hook']:process.env.CASE==='check-hook-empty'?[{}]:[{eventName:'sessionStart',enabled:true,trustStatus:'modified',sourcePath:'hooks.json',command:'DO-NOT-PRINT'}],errors:[],warnings:[]}]}});
  if(m.method==='thread/start'||m.method==='thread/resume') {
   if(process.env.CASE==='start-fail') return send({id:m.id,error:{message:'thread start rejected'}});
   if(process.env.CASE==='resume-fail') return send({id:m.id,error:{message:'no such thread'}});
-  return send({id:m.id,result:{thread:{id:process.env.CASE==='mismatch'?'wrong':p.threadId||'real-thread'}}});
+  return send({id:m.id,result:{sandbox:{type:'readOnly'},approvalPolicy:'on-request',thread:{id:process.env.CASE==='mismatch'?'wrong':p.threadId||'real-thread'}}});
  }
  if(m.method==='turn/start') {
   if(process.env.CASE==='turn-fail')return send({id:m.id,error:{message:'turn rejected'}});
@@ -55,7 +66,7 @@ const fakeClaude = `export function query({options}) {
 }`;
 async function run(provider, scenario, resume) {
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'fleet-provider-test-'));
- const req={provider,cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume,process_observer:process.env.FLEET_TEST_OBSERVER};
+ const req={provider,check:scenario.startsWith('check'),cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume,process_observer:process.env.FLEET_TEST_OBSERVER};
  const bin=path.join(home,'bin');fs.mkdirSync(bin);
  if(scenario!=='spawn-fail') {
   if(process.env.FLEET_TEST_OBSERVER && scenario!=='wrapped-init-fail')fs.symlinkSync(process.env.FLEET_TEST_OBSERVER,path.join(bin,'codex'));
@@ -68,7 +79,7 @@ async function run(provider, scenario, resume) {
  const requestFile=path.join(home,'request.json');fs.writeFileSync(requestFile,JSON.stringify(req),{mode:0o600});
  const proc=spawn(process.execPath,['--input-type=module','-e',bridge,requestFile],{stdio:['ignore','pipe','pipe'],env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,FLEET_TEST_CODEX_SCRIPT:script,FLEET_TEST_NODE:process.execPath,CASE:scenario==='wrapped-init-fail'?'init-fail':scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
- const deadline=setTimeout(()=>proc.kill('SIGKILL'),scenario==='timeout'?19000:5000);
+ const deadline=setTimeout(()=>proc.kill('SIGKILL'),['timeout','check-timeout'].includes(scenario)?22000:scenario==='check-hang'?12000:5000);
  let control;
  if(['cancel','timeout'].includes(scenario))control=setInterval(()=>{if(fs.existsSync(req.state_file)&&JSON.parse(fs.readFileSync(req.state_file)).provider_state==='running')fs.writeFileSync(req.cancel_file,'{}')},10);
  const code=await new Promise(resolve=>proc.on('close',resolve));
@@ -137,4 +148,41 @@ test('Codex persists possible turn dispatch before a rejected turn',{skip:!proce
 test('arbitrary Codex wrapper stays unknown after rejection',{skip:!process.env.FLEET_TEST_OBSERVER},async()=>{
  const r=await run('codex','wrapped-init-fail');assert.equal(r.code,1);
  assert.notEqual(r.state.provider_quiescent,true);assert.equal(r.state.provider_started,true);
+});
+
+test('Codex setup discovery never starts a thread or exposes unrelated configuration',async()=>{
+ const r=await run('codex','check');assert.equal(r.code,0,r.err);
+ const result=JSON.parse(r.out);
+ assert.equal(result.type,'setup');assert.equal(result.configured_sandbox,null);
+ assert.equal(result.configured_approval,null);assert.equal(result.hooks[0].trust,'modified');
+ assert.match(result.effective_permissions,/unknown/);assert.equal(result.ready,undefined);
+ assert.doesNotMatch(r.out+r.err,/DO-NOT-PRINT/);
+ assert.equal(r.state.provider_session,undefined);assert.equal(r.state.provider_turn,undefined);
+ assert.equal(r.state.turn_may_have_been_sent,false);assert.equal(r.state.provider_terminal,false);
+ assert.equal(r.state.provider_exit_code,0);
+});
+for(const scenario of ['check-error','check-malformed','check-config-array','check-config-string','check-hook-string','check-hook-empty']) {
+ test('Codex '+scenario+' is explicit failure without a model fallback',async()=>{
+  const r=await run('codex',scenario);assert.equal(r.code,1,r.err);
+  assert.doesNotMatch(r.out+r.err,/DO-NOT-PRINT/);
+  assert.equal(r.state.provider_session,undefined);assert.equal(r.state.turn_may_have_been_sent,false);
+ });
+}
+test('Codex records resolved thread permissions on start and resume',async()=>{
+ for(const resume of [undefined,'retained-id']) {
+  const r=await run('codex','ok',resume);assert.equal(r.code,0,r.err);
+  assert.deepEqual(r.state.sandbox_policy,{type:'readOnly'});
+  assert.equal(r.state.approval_policy,'on-request');
+ }
+});
+
+test('Codex setup closes a provider that ignores EOF after successful discovery',async()=>{
+ const r=await run('codex','check-hang');assert.equal(r.code,0,r.err);
+ assert.equal(JSON.parse(r.out).type,'setup');assert.equal(r.state.provider_exit_signal,'SIGKILL');
+ assert.equal(r.state.provider_turn,undefined);
+});
+test('Codex setup times out an unanswered discovery RPC and reaps the provider',async()=>{
+ const r=await run('codex','check-timeout');assert.equal(r.code,1,r.err);
+ assert.match(r.state.error,/config\/read timed out/);
+ assert.equal(r.state.provider_exit_signal,'SIGKILL');assert.equal(r.state.provider_turn,undefined);
 });

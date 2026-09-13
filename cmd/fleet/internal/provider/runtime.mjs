@@ -31,6 +31,7 @@ function settledError() {
 }
 function output(record) { process.stdout.write(JSON.stringify(record) + '\n'); }
 function event(record) {
+  if (request.check) return; // Discovery notifications may contain configuration secrets.
   fs.appendFileSync(state.trace, JSON.stringify(record) + '\n', {mode: 0o600});
   output(record);
 }
@@ -150,15 +151,43 @@ async function claude() {
   } finally { await close(); }
 }
 
+// A configured policy is not the effective policy of a future thread. Discovery
+// never starts a thread, executes hooks, or turns missing defaults into readiness.
+function object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+async function checkCodex(call) {
+  const config = await call('config/read', { cwd: request.cwd, includeLayers: false });
+  const inventory = await call('hooks/list', { cwds: [request.cwd] });
+  const entry = inventory?.data?.find(row => row.cwd === request.cwd);
+  if (!object(config?.config) || !object(entry) || !Array.isArray(entry.hooks) || !Array.isArray(entry.errors) || !Array.isArray(entry.warnings)) {
+    throw new Error('unsupported Codex setup response');
+  }
+  const hooks = entry.hooks.map(hook => {
+    if (!object(hook) || typeof hook.eventName !== 'string' || typeof hook.enabled !== 'boolean' ||
+        typeof hook.trustStatus !== 'string' || typeof hook.sourcePath !== 'string') {
+      throw new Error('unsupported Codex hook response');
+    }
+    return { event: hook.eventName, enabled: hook.enabled, trust: hook.trustStatus, source: hook.sourcePath };
+  });
+  return { type: 'setup', provider: 'codex', cwd: request.cwd,
+    configured_sandbox: config.config.sandbox_mode ?? null,
+    configured_approval: config.config.approval_policy ?? null,
+    hooks, hook_errors: entry.errors.length, hook_warnings: entry.warnings.length,
+    effective_permissions: 'unknown until thread start',
+    hook_execution: 'not tested; discovery does not prove Fleet identity or event coverage' };
+}
+
 async function codex() {
   const selected = codexExecutable();
   const executable = selected.path;
   const proofFile = request.state_file + '.process.json';
-  const observer = selected.native ? request.process_observer : undefined;
+  // Discovery needs no durable turn proof. Own its process group directly so
+  // timeout cleanup cannot kill an observer while stranding the app-server.
+  const observer = selected.native && !request.check ? request.process_observer : undefined;
+  const checkGroup = request.check && process.platform !== 'win32';
   publish({ turn_may_have_been_sent: false, provider_executable: executable });
   const command = observer || executable;
   const args = observer ? ['_provider-process', request.attempt, proofFile, executable, 'app-server'] : ['app-server'];
-  const child = spawnProvider(command, args, { cwd: request.cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawnProvider(command, args, { cwd: request.cwd, detached: checkGroup, stdio: ['pipe', 'pipe', request.check ? 'ignore' : 'inherit'] });
   const pending = new Map();
   let sequence = 0;
   let finish, fail;
@@ -181,13 +210,22 @@ async function codex() {
   function call(method, params) {
     const id = ++sequence;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject, method });
+      const timeout = request.check ? setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method} timed out`));
+      }, 10000) : undefined;
+      pending.set(id, { resolve: value => { clearTimeout(timeout); resolve(value); },
+        reject: error => { clearTimeout(timeout); reject(error); }, method });
       send({ id, method, params });
     });
   }
   close = async () => {
     child.stdin.end();
-    const kill = setTimeout(() => child.kill('SIGKILL'), 5000);
+    const kill = setTimeout(() => {
+      if (!checkGroup) { child.kill('SIGKILL'); return; }
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (e) { if (e.code !== 'ESRCH') rejectAll(e); }
+    }, 5000);
     await exited;
     clearTimeout(kill);
   };
@@ -224,14 +262,20 @@ async function codex() {
     } catch (e) { rejectAll(e); }
   });
   try {
-    await call('initialize', { clientInfo: { name: 'fleet', title: 'Fleet', version: '1' } });
+    await call('initialize', { clientInfo: { name: 'fleet', title: 'Fleet', version: '1' },
+      ...(request.check ? { capabilities: { experimentalApi: true } } : {}) });
     send({ method: 'initialized', params: {} });
+    if (request.check) {
+      output(await checkCodex(call));
+      return;
+    }
     const params = { cwd: request.cwd, ...(request.model ? { model: request.model } : {}),
       ...(request.resume ? { threadId: request.resume } : {}) };
     const result = await call(request.resume ? 'thread/resume' : 'thread/start', params);
     if (!result.thread?.id) throw new Error('Codex returned no thread identity');
     if (request.resume && result.thread.id !== request.resume) throw new Error('provider resumed a different thread');
-    publish({ provider_session: result.thread.id, provider_state: interrupted ? 'interrupting' : 'running' });
+    publish({ sandbox_policy: result.sandbox ?? null, approval_policy: result.approvalPolicy ?? null,
+      provider_session: result.thread.id, provider_state: interrupted ? 'interrupting' : 'running' });
     if (interrupted) throw new Error('interrupted before turn start');
     publish({ turn_may_have_been_sent: true });
     const turn = await call('turn/start', { threadId: result.thread.id, input: [{ type: 'text', text: request.prompt }] });
@@ -268,7 +312,7 @@ try {
   if (request.provider === 'codex') await codex();
 } catch (e) {
   publish({ provider_state: 'failed', error: interruptTimeout || e.message });
-  output({ type: 'result', session_id: state.provider_session, subtype: 'runtime_error', is_error: true, error: e.message });
+  output({ type: 'result', session_id: state.provider_session, subtype: 'runtime_error', is_error: true, error: request.check ? 'Codex setup inspection failed; check provider compatibility and availability' : e.message });
   process.exitCode = interrupted ? 130 : 1;
 } finally {
   clearInterval(control);

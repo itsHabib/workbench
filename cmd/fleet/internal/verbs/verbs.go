@@ -95,6 +95,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet inspect <address> [--json]               current agent, handoffs, bounded mail and visible output
   fleet trace <address> [--json]                 bounded observed native trace envelope
   fleet run-report [--since 24h] [--json]          attempts, provider-reported turns/cost and exit reasons
+  fleet check <address>                       discover Codex configuration and hook trust; no model turn
   fleet inspect-hooks --config <harness-json>   read-only static hook inventory; no execution or migration
   fleet report [--since 24h | --snapshot]      derived telemetry or JSON observations, without writing state
   fleet shadow-report [--since 24h] [--json]     the day's numbers from 'fleet hook <h> --shadow' running beside the installed hook
