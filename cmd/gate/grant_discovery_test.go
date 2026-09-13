@@ -351,10 +351,14 @@ func runDiscoveryFixture() int {
 	}
 	if strings.HasPrefix(args, "pr view") {
 		head := discoveryHead
+		status := "MERGED"
 		if mode == "moved before view" {
 			head = strings.Repeat("c", 40)
 		}
-		fmt.Printf(`{"state":"MERGED","headRefOid":%q,"mergedAt":"2026-09-13T00:00:00Z"}`, head)
+		if mode == "model failure" {
+			status = "OPEN"
+		}
+		fmt.Printf(`{"state":%q,"headRefOid":%q}`, status, head)
 		return 0
 	}
 	if strings.Contains(args, "/compare/") {
@@ -451,13 +455,27 @@ func checkDiscoveryTerminalFailure(t *testing.T, failure string) {
 	}
 }
 
-func runDiscoveryFailureCLI(t *testing.T, e env) terminalError {
+func TestDiscoveryDoesNotRelabelNormalGateFailure(t *testing.T) {
+	e := discoveryFixtureTools(t)
+	fixtureGrant(t, e, "T2", 3, time.Hour)
+	t.Setenv("GO_DISCOVERY_FAILURE", "model failure")
+	terminal := runDiscoveryFailureCLI(t, e, "-model-backend", "fixture-invalid")
+	if terminal.Discovery != nil || strings.Contains(terminal.Error, "grant_assessment_required") || strings.Contains(terminal.Escape.Next, "discover-grant") {
+		t.Fatalf("normal evaluation error became a grant discovery error: %+v", terminal)
+	}
+	if !strings.Contains(terminal.Error, "fixture-invalid") {
+		t.Fatalf("normal backend failure was lost: %+v", terminal)
+	}
+}
+
+func runDiscoveryFailureCLI(t *testing.T, e env, extra ...string) terminalError {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(executable, "gate", "-repo", "o/r", "-pr", "7", "-state", e.stateDir, "-key", filepath.Dir(e.keyPath), "-floor", e.floorBin)
+	args := []string{"gate", "-repo", "o/r", "-pr", "7", "-state", e.stateDir, "-key", filepath.Dir(e.keyPath), "-floor", e.floorBin}
+	cmd := exec.Command(executable, append(args, extra...)...)
 	cmd.Env = append(os.Environ(), "GO_WANT_DISCOVERY_COMMAND=1")
 	out, err := cmd.Output()
 	if err == nil || cmd.ProcessState.ExitCode() != codeError {

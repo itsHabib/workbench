@@ -528,10 +528,7 @@ func cmdGate(args []string) error {
 		res, code, err = runGateSelected(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
 	}
 	if err != nil {
-		if res.Discovery != nil {
-			return &grantAssessmentError{discovery: res.Discovery.failed(err)}
-		}
-		return err
+		return discoveryTerminalError(err, res.Discovery)
 	}
 	emitAuthorizedStamp(&res, code, *stampOn)
 	exitGateResult(res, code, *stateDir)

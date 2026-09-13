@@ -52,8 +52,17 @@ type grantAssessmentError struct {
 	discovery grantDiscovery
 }
 
+var errGateHeadChanged = errors.New("grant_assessment_required: PR head changed after selection")
+
 func (e *grantAssessmentError) Error() string {
 	return "grant_assessment_required: " + strings.TrimPrefix(e.discovery.Why, "grant_assessment_required: ")
+}
+
+func discoveryTerminalError(err error, d *grantDiscovery) error {
+	if d == nil || d.Status != "assessment_required" && !errors.Is(err, errGateHeadChanged) {
+		return err
+	}
+	return &grantAssessmentError{discovery: d.failed(err)}
 }
 
 func requireDiscoveryState(dir string) error {
@@ -305,7 +314,7 @@ func matchBoundView(head string, view json.RawMessage) error {
 		return err
 	}
 	if fields.HeadSHA != head {
-		return fmt.Errorf("grant_assessment_required: PR head changed after selection: %s to %s", head, fields.HeadSHA)
+		return fmt.Errorf("%w: %s to %s", errGateHeadChanged, head, fields.HeadSHA)
 	}
 	return nil
 }
