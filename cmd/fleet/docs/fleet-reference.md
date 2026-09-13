@@ -1109,8 +1109,9 @@ is a **progress** failure: a state from which nothing but a person removing or e
 launch record ever leads back to a directory that can launch. A safety invariant cannot express that. A model of the
 launch protocol would need either a temporal property ("a reserved directory is eventually
 free or has a running process") or an explicit check that every reachable state has a path
-back to "free". `intent`: the gap is being kept as the first target of a planned crash-point
-test harness (operator's design session, 2026-09-12); no such harness exists in the tree.
+back to "free". The 2026-09-12 design session proposed a crash-point harness (`intent`
+at this snapshot). That historical proposal is not a reason to retain a known
+pre-spawn failure: preserve its reproducer and make the focused runtime repair.
 
 ## 11. Limits and open gaps
 
@@ -1161,9 +1162,11 @@ The same stuck record is reachable **without a crash**: if `providerCommand` ret
 error, `run()` returns without rewriting the record
 (`cmd/fleet/internal/watch/runtime.go:134-137`). `launch` gives the stamps back
 (`cmd/fleet/internal/watch/deliver.go:316-320`), so the mail stays eligible, but the next
-fold defers on the `starting` record. `provider.Command` can fail only when
+fold defers on the `starting` record. In this old source snapshot, command construction
+can fail when
 `os.Executable()` fails on macOS or JSON encoding of the request fails
-(`cmd/fleet/internal/provider/provider.go:17-28`), so this path is rare. It was confirmed by
+(`cmd/fleet/internal/provider/provider.go:17-28`). This does not measure its incidence;
+current request-file I/O adds failure paths. It was confirmed by
 the same throwaway test. A third path, also without a crash: `cmd.Start()` fails and the
 rewrite to `failed` fails too (`cmd/fleet/internal/watch/runtime.go:140-144`).
 
@@ -1171,7 +1174,7 @@ History. The #310 review raised this as its P2-5 ("a launch record stuck in `sta
 defers delivery every fold with no recovery verb"); it was not carried into that PR's
 dispositions or into `FOLLOWUPS.md` (`live`, #310 review comments). `FOLLOWUPS.md:652-659`
 records the stamps half ("the mail stays stamped and no later fold carries it") from before
-the launch record existed. No doc in `cmd/fleet/docs/` mentions the stuck record. Known pre-spawn errors should be repaired with a focused regression; a planned
+the launch record existed. The earlier guides did not describe the stuck record. Known pre-spawn errors should be repaired with a focused regression; a planned
 crash harness is not a reason to retain this failure.
 
 ### Historical: a one-shot fold could lose the bridge's request (fixed by #330)
