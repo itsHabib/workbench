@@ -13,6 +13,11 @@ that check; tools outside the matcher bypass the hook. Leases do not isolate fil
 already-running children. This boundary applies even where the historical prose says
 “ownership” or “the hook sees it.”
 
+The status labels below belong to the historical investigation: `verified` means
+checked against its stated source snapshot; `live` means observed external state on
+the stated date, which may have changed; `intent` means a proposal, not implemented
+or qualified behavior. None of these labels revalidates a current installation.
+
 ## Changes since this snapshot
 
 At `10b066cac0bb959ca3dfa7dc2d77886eed277e78` (2026-09-13):
@@ -47,7 +52,7 @@ can stop here and come back to sections 5 (leases) and 8 (the watcher) for detai
   it. It has four entry points over one directory of JSON files: a harness hook, a CLI,
   an MCP server, and a watcher (`cmd/fleet/main.go:41-78`).
 - **Five rules.** Location is identity (a directory's line in `roles.map` decides a
-  session's role). Facts come from hooks, never from an agent. One holder per key (a branch
+  session's role). Runtime activity is observed; assignments, handoffs and receipt claims are authored. One holder per key (a branch
   or a machine resource). The substrate knows no domain word. Done is evidence (a receipt
   at an exact commit). Section 2.
 - **The store.** `~/.fleet` (or `$FLEET_STATE`): every record is a JSON file published by

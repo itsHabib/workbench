@@ -58,8 +58,8 @@ independent agent, no real provider was launched by this walkthrough, and no dra
 was published for the fixture. It does not prove a real learner can complete the path.
 The implementing task retains the script and both failed/successful transcripts.
 
-`go test ./cmd/fleet/... ./cmd/org/...` passed on this source. Adapter-suite and final
-independent-review results are recorded on the follow-up PR at its exact head.
+`go test ./cmd/fleet/... ./cmd/org/...` passed on this source. Both `bash cmd/fleet/testdata/run-suite.sh` and its `codex` variant passed all scenarios.
+Final independent-review results are recorded on the follow-up PR at its exact head.
 No formal model changed, so the earlier model evidence is retained as dated evidence
 rather than relabeled as a new run.
 
@@ -90,3 +90,12 @@ or unattended operation. The earlier read-only turn likewise did not qualify wri
   qualifications. This slice does not requalify every tool or former experiment.
 - Operator read and merge hold remain. No Gate call, merge or live installation is part
   of this teaching task.
+
+## Independent review correction
+
+Review of the first teaching commit (`92becf3`) found that the worked dispatch used
+`--as implementation` while its receipt used `verify`. A `done --kind verify` query
+could pass while the assigned implementation row stayed dispatched. The revised
+example uses `implementation` consistently and explains why the kind must match.
+The original transcript is retained; the corrected walkthrough additionally asserts
+that `fleet work` reports `done fix/timeout-units/implementation`. That rerun passed.

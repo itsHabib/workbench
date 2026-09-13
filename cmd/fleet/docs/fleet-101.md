@@ -123,12 +123,15 @@ assignment, mail and handoff, then continues the same work. It preserves unfinis
 When independence is part of acceptance, a separate verifier checks the exact proposed
 head and records the agreed receipt from its own live session and clean checkout using
 [the receipt history](../README.md#receipts-keep-their-history). The lead checks both evidence and provenance,
-then queries the agreed kind. After actually running the checks, the verifier records
+then queries the agreed kind. Here the row uses `--as implementation`, so its completion
+receipt must use `implementation` too. A `verify` receipt would be a different kind and
+would not complete this row. The kind names the evidence, not who is allowed to record it.
+After actually running the checks, the verifier records
 its observed result (replace the SHA and description with the real evidence):
 
 ```sh
-fleet receipt ACTUAL_COMMIT_SHA verify pass "Actual checks run and observed results"
-fleet done ACTUAL_COMMIT_SHA --kind verify
+fleet receipt ACTUAL_COMMIT_SHA implementation pass "Actual checks run and observed results"
+fleet done ACTUAL_COMMIT_SHA --kind implementation
 ```
 
 A missing receipt is not pass. Nor is an exit code from the provider, an agent's “done”
