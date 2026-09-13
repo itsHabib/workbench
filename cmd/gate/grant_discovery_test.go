@@ -417,9 +417,42 @@ func TestDiscoverCommandJSON(t *testing.T) {
 }
 
 func TestGateDiscoveryAssessmentFailureIsHardError(t *testing.T) {
+	for _, failure := range []string{"invalid floor", "unread diff", "bad signature"} {
+		t.Run(failure, func(t *testing.T) {
+			checkDiscoveryTerminalFailure(t, failure)
+		})
+	}
+}
+
+func checkDiscoveryTerminalFailure(t *testing.T, failure string) {
+	t.Helper()
 	e := discoveryFixtureTools(t)
-	fixtureGrant(t, e, "T2", 3, time.Hour)
-	t.Setenv("GO_DISCOVERY_FAILURE", "invalid floor")
+	grant := fixtureGrant(t, e, "T2", 3, time.Hour)
+	t.Setenv("GO_DISCOVERY_FAILURE", failure)
+	if failure == "bad signature" {
+		if err := os.WriteFile(e.keyPath, bytes.Repeat([]byte{42}, 32), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terminal := runDiscoveryFailureCLI(t, e)
+	d := terminal.Discovery
+	if d == nil || d.Status != "assessment_required" || d.Subject.Repo != "o/r" || d.Subject.Number != 7 || d.Subject.HeadSHA != discoveryHead {
+		t.Fatalf("terminal error lost the failed assessment: %+v", terminal)
+	}
+	want := shellJoin([]string{"gate", "discover-grant", "-repo", "o/r", "-pr", "7", "-json", "-state", e.stateDir, "-key", filepath.Dir(e.keyPath), "-floor", e.floorBin})
+	if terminal.Escape.Next != want || d.StateDir != e.stateDir || d.KeyDir != filepath.Dir(e.keyPath) || d.FloorBin != e.floorBin {
+		t.Fatalf("terminal recovery switched discovery configuration: %+v", terminal)
+	}
+	if d.MintRequest != "" || d.GrantID != "" || terminal.RetryHelps {
+		t.Fatalf("assessment failure invented authority or a blind retry: %+v", terminal)
+	}
+	if failure == "bad signature" && (len(d.Candidates) != 1 || d.Candidates[0].ID != grant.ID || len(d.Candidates[0].Gaps) == 0) {
+		t.Fatalf("terminal error lost candidate authentication diagnostics: %+v", terminal)
+	}
+}
+
+func runDiscoveryFailureCLI(t *testing.T, e env) terminalError {
+	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -437,4 +470,9 @@ func TestGateDiscoveryAssessmentFailureIsHardError(t *testing.T) {
 	if result["outcome"] != nil || result["error"] == nil {
 		t.Fatalf("infrastructure failure became an authority refusal: %s", out)
 	}
+	var terminal terminalError
+	if err := json.Unmarshal(out, &terminal); err != nil {
+		t.Fatal(err)
+	}
+	return terminal
 }

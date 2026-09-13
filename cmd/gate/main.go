@@ -2724,6 +2724,7 @@ type terminalError struct {
 	Escape     readiness.Route `json:"escape"`
 	SelfGated  bool            `json:"self_gated,omitempty"`
 	RetryHelps bool            `json:"retry_helps"`
+	Discovery  *grantDiscovery `json:"grant_discovery,omitempty"`
 }
 
 // printTerminalError is the pre-result path. It intentionally emits no
@@ -2734,6 +2735,11 @@ func printTerminalError(err error, args []string) {
 }
 
 func terminalErrorFor(err error, args []string) terminalError {
+	var assessment *grantAssessmentError
+	if errors.As(err, &assessment) {
+		return terminalError{Error: err.Error(), Discovery: &assessment.discovery,
+			Escape: *discoveryRoute(assessment.discovery)}
+	}
 	stateDir := stateFlag(args)
 	code := readiness.Code(err.Error())
 	substrateOK := stateSubstrateOK(err, args)

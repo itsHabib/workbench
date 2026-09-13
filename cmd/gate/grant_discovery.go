@@ -46,6 +46,16 @@ type grantCandidate struct {
 	Gaps      []string  `json:"gaps,omitempty"`
 }
 
+// Assessment failures are hard errors, but must retain the subject and exact
+// discovery configuration when cmdGate hands them to the terminal renderer.
+type grantAssessmentError struct {
+	discovery grantDiscovery
+}
+
+func (e *grantAssessmentError) Error() string {
+	return fmt.Sprintf("grant_assessment_required: %s", e.discovery.Why)
+}
+
 func requireDiscoveryState(dir string) error {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -263,7 +273,7 @@ func runGateSelected(e env, repo string, pr int, grantID string, live bool, mode
 	}
 	d := discoverGrant(e, repo, pr)
 	if d.Status == "assessment_required" {
-		return gateResult{Discovery: &d}, codeError, fmt.Errorf("grant_assessment_required: %s", d.Why)
+		return gateResult{Discovery: &d}, codeError, &grantAssessmentError{discovery: d}
 	}
 	if d.Status != "available" {
 		return gateResult{PR: fmt.Sprintf("%s#%d", repo, pr), HeadSHA: d.Subject.HeadSHA,
