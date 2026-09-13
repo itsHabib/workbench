@@ -53,6 +53,11 @@ from the caller; it introduces no new persistent store.
 
 ## What Fleet earns here
 
+The separate [fresh-agent comparison](AGENT-TRIAL.md) recovered a useful frozen
+PR-review batch with both Fleet and ordinary saved context. Both succeeded with
+zero reconstruction prompts; no material Fleet advantage was demonstrated.
+Its source, handoff, outputs and observations are retained alongside that report.
+
 Desktop task listing, waiting, messages and retained conversations already
 provide useful coordination and continuity. Git gives exact heads and dirty
 work; GitHub supplies reviews, checks and PR discussions. A capable agent can

@@ -144,6 +144,40 @@ func TestInspectRoleCheckpointSurvivesMissingCheckout(t *testing.T) {
 	}
 }
 
+func TestInspectRoleCheckpointDoesNotRequireMailAddressSyntax(t *testing.T) {
+	home, _ := deliverEnv(t)
+	role := "supervisor:demo@local"
+	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" one "+role+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "author", "launch_dir": home}, "saved", "continue"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Inspect(role)
+	if err != nil || fleet.S(fleet.M(got, "role_handoff_record"), "next") != "continue" || fleet.S(got, "role_handoff_error") != "" {
+		t.Fatal("role context depended on mail syntax", got, err)
+	}
+}
+
+func TestInspectRoleCheckpointRejectsTenantRebindAfterBoardRead(t *testing.T) {
+	home, _ := deliverEnv(t)
+	row, _, err := agentAt("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" replacement hub:lead\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "other", "launch_dir": home}, "another tenant's context", "private next"); err != nil {
+		t.Fatal(err)
+	}
+	out := fleet.Rec{"role_handoff_record": nil}
+	inspectRoleHandoff(out, row)
+	if out["role_handoff_record"] != nil || fleet.S(out, "role_handoff_error") == "" {
+		t.Fatal("checkpoint crossed the tenant captured by the board", out)
+	}
+}
+
 func TestTraceBoundsWindowAndMarksCoverage(t *testing.T) {
 	home, _ := deliverEnv(t)
 	path := strings.TrimSuffix(launchPath(deliverTarget{address: "hub:lead", cwd: home}), ".json") + ".log"

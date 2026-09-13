@@ -27,7 +27,6 @@ func Inspect(address string) (fleet.Rec, error) {
 		if branch != "" {
 			out["handoff"] = fleet.ReadJSON(fleet.KeyFile("handoff", fleet.Scope(cwd, branch)))
 		}
-
 	}
 	inspectRoleHandoff(out, row)
 	inspectMail(out, row)
@@ -45,12 +44,19 @@ func inspectRoleHandoff(out, row fleet.Rec) {
 	// The board cwd is the configured/bound launch directory, not a session's
 	// changing working directory. A stale configured address must not read the
 	// checkpoint of whichever role now occupies that path.
-	if err := bound(deliverTarget{address: fleet.S(row, "address"), cwd: fleet.S(row, "cwd")}); err != nil {
-		out["role_handoff_error"] = err.Error()
+	role, tenant, slot := fleet.MapRowsFor(fleet.S(row, "cwd"))
+	address := fleet.S(row, "address")
+	if slot != "" && slot == address {
+		return // pooled seats have branch context, not a shared role checkpoint
+	}
+	if role != address || tenant == "" || tenant != fleet.S(row, "tenant") || slot != "" {
+		out["role_handoff_error"] = "inspected address does not match the current role binding"
 		return
 	}
 	// Role continuity needs the retained binding, not a surviving Git checkout.
-	r, err := fleet.ReadRoleHandoff(fleet.Rec{"cwd": row["cwd"]})
+	// Carry the captured identity through: a concurrent map rewrite must not
+	// substitute another role's checkpoint. Role names need not be mail addresses.
+	r, err := fleet.ReadRoleHandoff(tenant, role)
 	if err != nil {
 		out["role_handoff_error"] = err.Error()
 		return

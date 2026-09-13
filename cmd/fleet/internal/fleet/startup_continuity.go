@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -132,12 +133,12 @@ func WriteRoleHandoff(rec Rec, conclusion, next string) error {
 		"session": S(rec, "session"), "conclusion": conclusion, "next": next, "at": Now()})
 }
 
-// ReadRoleHandoff returns the complete existing checkpoint for a launch-bound
-// role. Missing context is nil; unreadable or mismatched context is an error.
+// ReadRoleHandoff returns the complete checkpoint for an already resolved
+// identity, without resolving a mutable role map again during the read.
+// Missing context is nil; unreadable or mismatched context is an error.
 // Authored context is advisory, never evidence of completion or authority.
-func ReadRoleHandoff(rec Rec) (Rec, error) {
-	role, tenant, slot := roleHandoffIdentity(rec)
-	if role == "" || tenant == "" || slot != "" {
+func ReadRoleHandoff(tenant, role string) (Rec, error) {
+	if role == "" || tenant == "" {
 		return nil, nil
 	}
 	path := roleHandoffPath(tenant, role)
@@ -161,13 +162,41 @@ func ReadRoleHandoff(rec Rec) (Rec, error) {
 		return nil, fmt.Errorf("read role handoff: %w", err)
 	}
 	var r Rec
-	if len(data) > roleHandoffFileBytes || !utf8.Valid(data) || json.Unmarshal(data, &r) != nil || r == nil {
+	if len(data) > roleHandoffFileBytes || !utf8.Valid(data) || json.Unmarshal(data, &r) != nil || r == nil || !validHandoffSurrogates(data) {
 		return nil, fmt.Errorf("role handoff is oversized or invalid JSON")
 	}
 	if !validRoleHandoff(r, tenant, role) {
 		return nil, fmt.Errorf("role handoff has invalid identity, provenance or body")
 	}
 	return r, nil
+}
+
+// encoding/json replaces unpaired UTF-16 escapes with U+FFFD. On otherwise
+// valid JSON, reject those escapes instead of silently changing authored text.
+func validHandoffSurrogates(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		i++
+		if data[i] != 'u' {
+			continue // includes a literal escaped backslash, not a Unicode escape
+		}
+		value, _ := strconv.ParseUint(string(data[i+1:i+5]), 16, 16)
+		i += 4
+		if value < 0xd800 || value > 0xdfff {
+			continue
+		}
+		if value > 0xdbff || i+6 >= len(data) || string(data[i+1:i+3]) != `\u` {
+			return false
+		}
+		low, err := strconv.ParseUint(string(data[i+3:i+7]), 16, 16)
+		if err != nil || low < 0xdc00 || low > 0xdfff {
+			return false
+		}
+		i += 6
+	}
+	return true
 }
 
 func validRoleHandoff(r Rec, tenant, role string) bool {
@@ -180,7 +209,11 @@ func validRoleHandoff(r Rec, tenant, role string) bool {
 // RoleHandoffLine supplies the short startup hint. Inspect exposes read errors
 // and the full record; startup retains its optional, bounded context behavior.
 func RoleHandoffLine(rec Rec) string {
-	r, _ := ReadRoleHandoff(rec)
+	role, tenant, slot := roleHandoffIdentity(rec)
+	if slot != "" {
+		return ""
+	}
+	r, _ := ReadRoleHandoff(tenant, role)
 	return RoleHandoffSummary(r)
 }
 
