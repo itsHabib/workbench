@@ -29,14 +29,7 @@ func Inspect(address string) (fleet.Rec, error) {
 		}
 
 	}
-	if info, err := os.Stat(fleet.S(row, "cwd")); err == nil && info.IsDir() {
-		r, err := fleet.ReadRoleHandoff(fleet.Rec{"cwd": row["cwd"]})
-		out["role_handoff_record"] = r
-		out["role_handoff"] = fleet.RoleHandoffSummary(r)
-		if err != nil {
-			out["role_handoff_error"] = err.Error()
-		}
-	}
+	inspectRoleHandoff(out, row)
 	inspectMail(out, row)
 	trace, err := traceForRow(row)
 	if err != nil {
@@ -46,6 +39,27 @@ func Inspect(address string) (fleet.Rec, error) {
 	delete(trace, "data")
 	out["trace"] = trace
 	return out, nil
+}
+
+func inspectRoleHandoff(out, row fleet.Rec) {
+	// The board cwd is the configured/bound launch directory, not a session's
+	// changing working directory. A stale configured address must not read the
+	// checkpoint of whichever role now occupies that path.
+	if err := bound(deliverTarget{address: fleet.S(row, "address"), cwd: fleet.S(row, "cwd")}); err != nil {
+		out["role_handoff_error"] = err.Error()
+		return
+	}
+	// Role continuity needs the retained binding, not a surviving Git checkout.
+	r, err := fleet.ReadRoleHandoff(fleet.Rec{"cwd": row["cwd"]})
+	if err != nil {
+		out["role_handoff_error"] = err.Error()
+		return
+	}
+	if r != nil {
+		// Preserve the untyped nil: DumpJSON renders a typed nil map as {}.
+		out["role_handoff_record"] = r
+		out["role_handoff"] = fleet.RoleHandoffSummary(r)
+	}
 }
 
 func inspectMail(out, row fleet.Rec) {

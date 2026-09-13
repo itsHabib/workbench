@@ -15,6 +15,9 @@ The existing `role_handoff` string remains a 1 KiB display excerpt; use the
 record when recovering context. A missing checkpoint is null. A damaged,
 oversized or identity-mismatched file adds `role_handoff_error` and no record;
 other available observations still return. Pooled seats use branch handoffs.
+Role context can survive a missing checkout when its current binding remains;
+HEAD/branch observations still report that checkout error. A stale configured
+address cannot retrieve the checkpoint of a role that replaced it at the path.
 The body remains limited to the writer's 16 KiB; file reads are bounded to
 128 KiB to allow JSON escaping. This is authored context, not verified evidence
 or permission to act. See the [interrupted supervisor demo](../examples/recovery/DEMO.md).

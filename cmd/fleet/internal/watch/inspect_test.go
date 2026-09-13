@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +89,58 @@ func TestInspectRetainsFullRoleCheckpointAfterSupervisorExit(t *testing.T) {
 	got, err = Inspect("hub:lead")
 	if err != nil || fleet.S(got, "role_handoff_error") == "" || fleet.M(got, "role_handoff_record") != nil {
 		t.Fatal("damaged evidence appeared absent or complete", got, err)
+	}
+}
+
+func TestInspectRoleCheckpointWireAbsenceAndBinding(t *testing.T) {
+	home, _ := deliverEnv(t)
+	assertNull := func(wantError bool) {
+		t.Helper()
+		got, err := Inspect("hub:lead")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(fleet.DumpJSON(got), &wire); err != nil {
+			t.Fatal(err)
+		}
+		value, present := wire["role_handoff_record"]
+		if !present || value != nil || (fleet.S(got, "role_handoff_error") != "") != wantError {
+			t.Fatal("invalid absent/unavailable wire value", wire)
+		}
+	}
+	assertNull(false)
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "original", "launch_dir": home}, "saved context", "next"); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(fleet.Path("role-handoff", "*.json"))
+	if err := os.WriteFile(files[0], []byte(`null`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	assertNull(true)
+	if err := os.WriteFile(fleet.RolesMap(), []byte(home+" t2 hub:other\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "other", "launch_dir": home}, "another role's context", "private next"); err != nil {
+		t.Fatal(err)
+	}
+	assertNull(true)
+}
+
+func TestInspectRoleCheckpointSurvivesMissingCheckout(t *testing.T) {
+	home, _ := deliverEnv(t)
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "original", "launch_dir": home}, "saved outside checkout", "recover"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Inspect("hub:lead")
+	if err != nil || fleet.S(fleet.M(got, "role_handoff_record"), "next") != "recover" || fleet.S(got, "role_handoff_error") != "" {
+		t.Fatal("role continuity depended on checkout", got, err)
+	}
+	if fleet.S(fleet.M(got, "agent"), "head_error") == "" {
+		t.Fatal("missing checkout was hidden", got)
 	}
 }
 
