@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
@@ -79,15 +80,15 @@ func cmdDiscoverGrant(args []string) error {
 	d := discoverGrant(e, *repo, *pr)
 	if *asJSON {
 		printJSON(d)
+		os.Exit(d.exitCode())
+		return nil
 	}
-	if !*asJSON {
-		fmt.Printf("%s: %s\n", d.Status, d.Why)
-		for _, candidate := range d.Candidates {
-			fmt.Printf("  %s: tier %s, cycle ceiling %d, gaps %v\n", candidate.ID, candidate.MaxTier, candidate.MaxCycles, candidate.Gaps)
-		}
-		if d.MintRequest != "" {
-			fmt.Printf("Operator mint request: %s\n", d.MintRequest)
-		}
+	fmt.Printf("%s: %s\n", d.Status, d.Why)
+	for _, candidate := range d.Candidates {
+		fmt.Printf("  %s: tier %s, cycle ceiling %d, gaps %v\n", candidate.ID, candidate.MaxTier, candidate.MaxCycles, candidate.Gaps)
+	}
+	if d.MintRequest != "" {
+		fmt.Printf("Operator mint request: %s\n", d.MintRequest)
 	}
 	os.Exit(d.exitCode())
 	return nil
@@ -113,6 +114,17 @@ func (d grantDiscovery) failed(err error) grantDiscovery {
 
 func discoverGrant(e env, repo string, pr int) grantDiscovery {
 	d := grantDiscovery{Subject: verify.Subject{Repo: repo, Number: pr}, Action: "merge", StateDir: absStateDir(e.stateDir), KeyDir: filepath.Dir(e.keyPath), FloorBin: e.floorBin}
+	var err error
+	d.KeyDir, err = filepath.Abs(d.KeyDir)
+	if err != nil {
+		return d.failed(err)
+	}
+	if strings.ContainsAny(d.FloorBin, `/\`) {
+		d.FloorBin, err = filepath.Abs(d.FloorBin)
+		if err != nil {
+			return d.failed(err)
+		}
+	}
 	ref := evidence.PRRef{Repo: repo, Number: pr}
 	head, status, err := evidence.CurrentSubject(ref)
 	if err != nil {
@@ -205,7 +217,7 @@ func assessGrant(e env, a state.Artifact, d grantDiscovery) (grantCandidate, err
 	}
 	var metadata capability.Grant
 	if err := json.Unmarshal(a.Body, &metadata); err != nil {
-		return grantCandidate{}, fmt.Errorf("read grant %s: %w", a.ID, err)
+		return grantCandidate{ID: a.ID, Gaps: []string{err.Error()}}, fmt.Errorf("read grant %s: %w", a.ID, err)
 	}
 	if metadata.Repo != d.Subject.Repo {
 		return grantCandidate{}, nil
@@ -250,6 +262,9 @@ func runGateSelected(e env, repo string, pr int, grantID string, live bool, mode
 		return runGate(e, repo, pr, grantID, live, modelBackend, reviewsOptional)
 	}
 	d := discoverGrant(e, repo, pr)
+	if d.Status == "assessment_required" {
+		return gateResult{Discovery: &d}, codeError, fmt.Errorf("grant_assessment_required: %s", d.Why)
+	}
 	if d.Status != "available" {
 		return gateResult{PR: fmt.Sprintf("%s#%d", repo, pr), HeadSHA: d.Subject.HeadSHA,
 			Outcome: "capability_refused", Code: "grant_" + d.Status, Why: d.Why, Discovery: &d}, d.exitCode(), nil

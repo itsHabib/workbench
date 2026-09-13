@@ -160,12 +160,18 @@ inputs, or `not_applicable` for a closed PR. Exit codes are 0, 3, 4 and 3
 respectively. Discovery's 0 means eligibility for assessment, never a merge
 verdict. Its tier is a minimum; the full ladder may raise the required tier.
 Commands preserve the chosen state, key directory and floor executable.
+Relative custody and filesystem executable paths become absolute so copied
+commands retain their meaning. Bare PATH executable names keep PATH lookup.
+In normal Gate evaluation, a failed discovery assessment takes the hard-error
+path (exit 4, no decision outcome); it is never labelled a capability refusal.
 
 Discovery creates no grants, keys, artifacts, statuses or merges. It rejects a
 missing state directory instead of creating a new inventory. A head change
 before evaluation stops the run before model invocation. Explicit `-grant`,
 `-slack` and run-bound judgment flows remain explicit; no grant is silently
 substituted for a pinned ID. See [regression evidence](docs/grant-discovery-poc.md).
+Oversized GitHub diffs use the existing pinned local-diff fallback; its scratch
+repository is temporary and its Git configuration is isolated as in the collector.
 
 ### Phone-native T0 authorization
 

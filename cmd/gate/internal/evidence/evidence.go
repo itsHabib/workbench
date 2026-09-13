@@ -178,7 +178,7 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	body := diffBody{PR: pr, Method: "api"}
 	r, err := primaryDiff(pr, viewed.HeadRefOid)
 	if tooLarge(err) {
-		r, err = fallbackDiff(pr, view)
+		r, err = fallbackDiff(pr, viewed.HeadRefOid)
 		body.Method = "local-merge-base"
 	}
 	if err != nil {
@@ -249,6 +249,9 @@ func CurrentSubject(pr PRRef) (head, status string, err error) {
 // ordinary collector and grant discovery share the same commit-pair binding.
 func SubjectDiff(pr PRRef, head string) (string, error) {
 	result, err := primaryDiff(pr, head)
+	if tooLarge(err) {
+		result, err = fallbackDiff(pr, head)
+	}
 	if err != nil {
 		return "", err
 	}

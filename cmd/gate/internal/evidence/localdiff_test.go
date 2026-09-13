@@ -74,18 +74,18 @@ func TestParseMergeBase(t *testing.T) {
 }
 
 func TestFallbackDiffRequiresPinnedHead(t *testing.T) {
-	// A view payload with no headRefOid must refuse before any network read.
-	for name, view := range map[string]string{
-		"empty object": `{}`,
-		"empty oid":    `{"headRefOid":""}`,
-		"not json":     `<html>`,
+	// A missing or malformed pin must refuse before any network read.
+	for name, head := range map[string]string{
+		"empty": "",
+		"ref":   "HEAD",
+		"flag":  "--upload-pack=untrusted",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := fallbackDiff(PRRef{Repo: "o/r", Number: 1}, []byte(view))
+			_, err := fallbackDiff(PRRef{Repo: "o/r", Number: 1}, head)
 			if err == nil {
 				t.Fatal("fallbackDiff: want error, got nil")
 			}
-			if !strings.Contains(err.Error(), "headRefOid") {
+			if !strings.Contains(err.Error(), "full head SHA") {
 				t.Fatalf("fallbackDiff error = %v; want the missing-pin refusal", err)
 			}
 		})

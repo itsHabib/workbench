@@ -48,6 +48,12 @@ and before Gate's first view. Fixture tools replace PATH, so tests cannot fall
 through to authenticated GitHub or a real model. Operator minting in tests occurs
 only in throwaway state and key directories.
 
+Review regressions additionally cover the exit-4/no-outcome terminal for a
+failed assessment, relative key/floor paths copied across working directories,
+and visible rejected-grant diagnostics alongside a valid selection. An oversized
+diff fixture verifies routing into the existing local fallback with pinned Git
+arguments, including rejection of a head move during that fallback.
+
 Local validation passed module-wide vet, lint (zero issues), race tests and
 build. The final ordering change refreshes the PR before selecting authority;
 Gate's race suite, lint, vet and build were repeated after it.

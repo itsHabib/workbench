@@ -213,6 +213,62 @@ func TestDiscoveryCommandsPreserveConfiguration(t *testing.T) {
 	}
 }
 
+func TestDiscoveryCommandsResolveRelativeConfiguration(t *testing.T) {
+	e := discoveryFixtureTools(t)
+	fixtureGrant(t, e, "T0", 3, time.Hour)
+	keyDir, floor := filepath.Dir(e.keyPath), e.floorBin
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var err error
+	e.keyPath, err = filepath.Rel(dir, e.keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.floorBin, err = filepath.Rel(dir, e.floorBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := discoverGrant(e, "o/r", 7)
+	if d.Status != "uncovered" || d.KeyDir != keyDir || d.FloorBin != floor {
+		t.Fatalf("relative configuration changed meaning: %+v", d)
+	}
+	if !strings.Contains(d.MintRequest, shellJoin([]string{"-key", keyDir})) {
+		t.Fatalf("mint lost original custody: %s", d.MintRequest)
+	}
+	d.Status = "assessment_required"
+	if !strings.Contains(discoveryRoute(d).Next, shellJoin([]string{"-floor", floor})) {
+		t.Fatalf("retry lost original floor: %s", discoveryRoute(d).Next)
+	}
+}
+
+func TestDiscoveryReportsRejectedCandidatesAlongsideValid(t *testing.T) {
+	for _, body := range []any{
+		capability.Grant{Repo: "o/r", Action: "merge", MaxTier: "T3", Sig: "invalid"},
+		map[string]any{"repo": "o/r", "max_cycles": "not an integer"},
+	} {
+		e := testEnv(t)
+		valid := fixtureGrant(t, e, "T2", 3, time.Hour)
+		bad, err := e.st.Append(state.KindGrant, "run_fixture", nil, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := selectGrant(e, assessedDiscovery(e, "T1"))
+		if d.Status != "available" || d.GrantID != valid.ID || len(d.Candidates) != 2 || d.Candidates[1].ID != bad.ID || len(d.Candidates[1].Gaps) == 0 {
+			t.Fatalf("selection hid rejected grant diagnostics: %+v", d)
+		}
+	}
+}
+
+func TestDiscoveryUsesOversizedDiffFallback(t *testing.T) {
+	e := discoveryFixtureTools(t)
+	grant := fixtureGrant(t, e, "T2", 3, time.Hour)
+	t.Setenv("GO_DISCOVERY_FAILURE", "oversized")
+	d := discoverGrant(e, "o/r", 7)
+	if d.Status != "available" || d.GrantID != grant.ID {
+		t.Fatalf("default discovery lost the existing pinned fallback: %+v", d)
+	}
+}
+
 func TestGateStopsWhenDiscoveredHeadMovesBeforeView(t *testing.T) {
 	e := discoveryFixtureTools(t)
 	fixtureGrant(t, e, "T2", 3, time.Hour)
@@ -233,7 +289,7 @@ func TestDiscoveryClosedPRNeedsNoGrant(t *testing.T) {
 }
 
 func TestDiscoveryRejectsUnreadOrMovedHead(t *testing.T) {
-	for _, mode := range []string{"missing floor", "invalid floor", "unread diff", "moved head"} {
+	for _, mode := range []string{"missing floor", "invalid floor", "unread diff", "moved head", "oversized moved"} {
 		t.Run(mode, func(t *testing.T) {
 			e := discoveryFixtureTools(t)
 			fixtureGrant(t, e, "T3", 0, time.Hour)
@@ -262,6 +318,7 @@ func discoveryFixtureTools(t *testing.T) env {
 		suffix = ".exe"
 	}
 	install(t, executable, filepath.Join(dir, "gh"+suffix))
+	install(t, executable, filepath.Join(dir, "git"+suffix))
 	e.floorBin = filepath.Join(dir, "floor"+suffix)
 	install(t, executable, e.floorBin)
 	t.Setenv("PATH", dir) // No fallback to a real authenticated CLI or provider.
@@ -272,6 +329,18 @@ func discoveryFixtureTools(t *testing.T) env {
 
 func runDiscoveryFixture() int {
 	mode := os.Getenv("GO_DISCOVERY_FAILURE")
+	args := strings.Join(os.Args[1:], " ")
+	if strings.HasPrefix(filepath.Base(os.Args[0]), "git") {
+		if strings.Contains(args, "diff --no-ext-diff --no-textconv --no-color "+strings.Repeat("b", 40)+" "+discoveryHead) {
+			fmt.Print("diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n")
+			return 0
+		}
+		if strings.HasPrefix(args, "init") || strings.Contains(args, " fetch ") {
+			return 0
+		}
+		fmt.Fprintln(os.Stderr, "unexpected fixture git:", args)
+		return 99
+	}
 	if strings.HasPrefix(filepath.Base(os.Args[0]), "floor") {
 		if mode == "invalid floor" {
 			fmt.Println(`{"floor":""}`)
@@ -280,7 +349,6 @@ func runDiscoveryFixture() int {
 		fmt.Println(`{"floor":"T1","files":1}`)
 		return 0
 	}
-	args := strings.Join(os.Args[1:], " ")
 	if strings.HasPrefix(args, "pr view") {
 		head := discoveryHead
 		if mode == "moved before view" {
@@ -290,6 +358,14 @@ func runDiscoveryFixture() int {
 		return 0
 	}
 	if strings.Contains(args, "/compare/") {
+		if strings.Contains(args, "?per_page=1") {
+			fmt.Printf(`{"merge_base_commit":{"sha":%q}}`, strings.Repeat("b", 40))
+			return 0
+		}
+		if strings.HasPrefix(mode, "oversized") {
+			fmt.Fprintln(os.Stderr, "HTTP 406: diff exceeded the maximum number of lines")
+			return 1
+		}
 		if mode == "unread diff" {
 			fmt.Fprintln(os.Stderr, "permission denied")
 			return 1
@@ -304,7 +380,7 @@ func runDiscoveryFixture() int {
 			return 98
 		}
 		head := discoveryHead
-		if mode == "moved head" && len(reads) >= 2 {
+		if (mode == "moved head" || mode == "oversized moved") && len(reads) >= 2 {
 			head = strings.Repeat("c", 40)
 		}
 		status := "open"
@@ -337,5 +413,28 @@ func TestDiscoverCommandJSON(t *testing.T) {
 	}
 	if bytes.Contains(out, []byte(`"sig"`)) || bytes.Contains(out, []byte("fixture operator")) {
 		t.Fatal("discovery leaked unnecessary signing metadata")
+	}
+}
+
+func TestGateDiscoveryAssessmentFailureIsHardError(t *testing.T) {
+	e := discoveryFixtureTools(t)
+	fixtureGrant(t, e, "T2", 3, time.Hour)
+	t.Setenv("GO_DISCOVERY_FAILURE", "invalid floor")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "gate", "-repo", "o/r", "-pr", "7", "-state", e.stateDir, "-key", filepath.Dir(e.keyPath), "-floor", e.floorBin)
+	cmd.Env = append(os.Environ(), "GO_WANT_DISCOVERY_COMMAND=1")
+	out, err := cmd.Output()
+	if err == nil || cmd.ProcessState.ExitCode() != codeError {
+		t.Fatalf("discovery assessment must hard-error: %v output=%s", err, out)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid terminal JSON: %v: %s", err, out)
+	}
+	if result["outcome"] != nil || result["error"] == nil {
+		t.Fatalf("infrastructure failure became an authority refusal: %s", out)
 	}
 }
