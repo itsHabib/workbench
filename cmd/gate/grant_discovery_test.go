@@ -417,7 +417,7 @@ func TestDiscoverCommandJSON(t *testing.T) {
 }
 
 func TestGateDiscoveryAssessmentFailureIsHardError(t *testing.T) {
-	for _, failure := range []string{"invalid floor", "unread diff", "bad signature"} {
+	for _, failure := range []string{"invalid floor", "unread diff", "bad signature", "moved before view"} {
 		t.Run(failure, func(t *testing.T) {
 			checkDiscoveryTerminalFailure(t, failure)
 		})

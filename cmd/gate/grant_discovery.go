@@ -53,7 +53,7 @@ type grantAssessmentError struct {
 }
 
 func (e *grantAssessmentError) Error() string {
-	return fmt.Sprintf("grant_assessment_required: %s", e.discovery.Why)
+	return "grant_assessment_required: " + strings.TrimPrefix(e.discovery.Why, "grant_assessment_required: ")
 }
 
 func requireDiscoveryState(dir string) error {
@@ -273,7 +273,7 @@ func runGateSelected(e env, repo string, pr int, grantID string, live bool, mode
 	}
 	d := discoverGrant(e, repo, pr)
 	if d.Status == "assessment_required" {
-		return gateResult{Discovery: &d}, codeError, &grantAssessmentError{discovery: d}
+		return gateResult{Discovery: &d}, codeError, errors.New(d.Why)
 	}
 	if d.Status != "available" {
 		return gateResult{PR: fmt.Sprintf("%s#%d", repo, pr), HeadSHA: d.Subject.HeadSHA,
