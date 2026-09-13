@@ -68,14 +68,22 @@ Build from a clean checkout; the revision identifies committed source. Update an
 `command -v gate` and `gate version` again. An older binary does not acquire
 merged fixes just because its checkout was updated.
 
-Before invoking a judge, Gate checks the recorded packet. Required reviewer
-file sections are included completely within a 256 KiB budget; ambiguous
-basenames include all matching changed files. An exact-head Git file index
-separates real unchanged companions (including extensionless filenames) from
-hypothetical examples and code symbols in review prose. If the index is absent,
-Gate reports that before judgment. Missing source and omitted reviews are
-listed together; full current source or indexed absence also covers a stale
-line reference. Coverage is evidence availability, not proof a finding is fixed.
+Before invoking a judge, Gate checks the recorded packet. Structured review
+anchors, verifier loci, and precise resolvable prose references require source
+coverage. An exact path wins over other files with the same basename; otherwise
+a basename must resolve uniquely. Ambiguous references are reported with their
+candidates, never expanded into mandatory reads of every candidate. A bare token
+outside the diff can name a command or example; repository existence alone does
+not make it required text source. These hints and their original review bodies
+remain visible, with no claim that the finding is resolved.
+
+An exact-head Git file index grounds unchanged companions and file absence.
+Missing required source and unrepresented active reviews are listed together.
+Each review is counted once by its evidence ID and comment index, including
+reviews already rendered in the main context. Unknown-head reviews remain
+active; prose about an old SHA or a newer clean review does not erase them.
+Full current source or indexed absence also covers a stale line reference.
+Coverage is evidence availability, not proof a finding is fixed.
 
 ```sh
 gate packet -run run_... -state ~/dev/gate/state
@@ -85,7 +93,7 @@ gate judge -run run_... -grant grt_... -auto -provider codex -state ~/dev/gate/s
 ```
 
 `packet` is read-only JSON, including `complete`, every `missing` requirement,
-the context, `required_sources`, and the running Gate version. `judge` returns exit 4 with
+the context, `required_sources`, any unresolved `source_hints`, and the running Gate version. `judge` returns exit 4 with
 `judgment_evidence_incomplete` before invoking a provider or recording a
 judgment when required context is missing. Repair that existing run; creating
 another `gate gate` run spends another review cycle.
@@ -97,9 +105,12 @@ at that full head SHA, verifies their Git blob hashes, and appends the index and
 content to the run. With explicit `-path docs/guide.md -path docs/companion.md`,
 it collects only those paths alongside the index; values are preserved exactly.
 It rechecks the live PR head and grant, allows at most three supplements and
-256 KiB of source across the run, and accepts at most 32 source paths per call.
+512 KiB of source across the run, and accepts at most 32 source paths per call.
+Each individual file is still limited to 256 KiB of verified regular UTF-8 text.
 The required-diff and required-review sections have separate 256 KiB and 64 KiB
-budgets; exceeding either reports the missing evidence before provider invocation. It does not load arbitrary local source or give author comments review authority.
+budgets; already included reviews do not consume the second budget again.
+Exceeding a coverage bound reports missing evidence before provider invocation.
+It does not load arbitrary local source or give author comments review authority.
 Unchanged companion files can be supplied this way; supply exact repository
 paths. Packet source limits are explicit, never silent truncation. If a required
 file or the reviews exceed those bounds, split the change or escalate the

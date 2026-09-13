@@ -117,6 +117,33 @@ func TestEvidenceRepairBounds(t *testing.T) {
 	}
 }
 
+func TestEvidenceRepairAggregateOverflowRecordsNothingPartial(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"first", "second", "overflow"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		length := 215 * 1024 // Each complete text file remains below 256 KiB.
+		if path == "overflow" {
+			length = 100 * 1024
+		}
+		return strings.Repeat("x", length), "fixture-blob-" + path, nil
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"first", "second"}, head, read, index); err != nil {
+		t.Fatalf("430 KiB aggregate was rejected: %v", err)
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"overflow"}, head, read, index); err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("aggregate overflow accepted: %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("failed supplement wrote partial evidence: %d -> %d: %v", len(before), len(after), err)
+	}
+}
+
 func packetCLIFixture(t *testing.T) (env, verify.Subject, string, string, func(int, ...string) string) {
 	t.Helper()
 	e := testEnv(t)

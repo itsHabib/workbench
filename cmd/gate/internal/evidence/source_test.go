@@ -6,8 +6,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
+
+func TestExactSourceRejectsNonTextAndOversizedFiles(t *testing.T) {
+	for _, content := range []string{"binary\x00payload", string([]byte{0xff}), strings.Repeat("x", 256*1024+1)} {
+		sum := sha1.Sum(append([]byte(fmt.Sprintf("blob %d%c", len(content), 0)), []byte(content)...))
+		raw, err := json.Marshal(map[string]any{"type": "file", "path": "artifact", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := decodeExactSource(raw, "artifact"); err == nil {
+			t.Fatal("source collector accepted nontext or more than 256 KiB")
+		}
+	}
+}
 
 func TestExactSourceValidatesBlob(t *testing.T) {
 	content := "source\n"

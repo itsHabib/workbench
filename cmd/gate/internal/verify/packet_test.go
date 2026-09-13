@@ -18,19 +18,22 @@ func packetArtifact(t *testing.T, body any) state.Artifact {
 	return state.Artifact{Kind: state.KindEvidence, ID: "ev", Body: raw}
 }
 
-func TestPacketIncludesEveryAmbiguousREADMEAfterLargeDiff(t *testing.T) {
+func TestPacketReportsAmbiguousHintWithoutRequiringEveryCandidate(t *testing.T) {
 	diff := "diff --git a/huge b/huge\n--- a/huge\n+++ b/huge\n@@ -0,0 +1,9000 @@\n" + strings.Repeat("+irrelevant text\n", 9000)
-	for _, path := range []string{"README.md", "a/README.md", "b/README.md", "c/README.md"} {
+	for _, path := range []string{"a/README.md", "b/README.md", "c/README.md"} {
 		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+complete %s\n", path, path, path, path, path)
 	}
-	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `README.md`"}}})}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `README.md:1`"}}})}
 	p, err := JudgmentPacket(arts, Subject{})
 	if err != nil || !p.Complete {
 		t.Fatalf("%+v %v", p, err)
 	}
-	for _, path := range []string{"README.md", "a/README.md", "b/README.md", "c/README.md"} {
-		if !strings.Contains(p.Context, "complete "+path) {
-			t.Fatalf("missing %s", path)
+	if len(p.RequiredSources) != 0 || !strings.Contains(strings.Join(p.SourceHints, " "), "no source selected or finding resolved") {
+		t.Fatalf("ambiguous hint was treated as resolved source: %+v", p)
+	}
+	for _, path := range []string{"a/README.md", "b/README.md", "c/README.md"} {
+		if !strings.Contains(strings.Join(p.SourceHints, " "), path) {
+			t.Fatalf("missing candidate %s", path)
 		}
 	}
 }
@@ -38,9 +41,9 @@ func TestPacketIncludesEveryAmbiguousREADMEAfterLargeDiff(t *testing.T) {
 func TestPacketBudgetAndExactHeadRepair(t *testing.T) {
 	subject := Subject{Repo: "o/r", Number: 1, HeadSHA: "head"}
 	diff := "diff --git a/large.md b/large.md\n--- a/large.md\n+++ b/large.md\n@@ -1 +1 @@\n-" + strings.Repeat("x", SourceBudget) + "\n+small replacement\n"
-	arts := []state.Artifact{packetArtifact(t, SourceEvidence{Subject: subject, IndexComplete: true, FileIndex: []string{"large.md", "other.md"}}), packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `large.md` and `other.md`"}}})}
+	arts := []state.Artifact{packetArtifact(t, SourceEvidence{Subject: subject, IndexComplete: true, FileIndex: []string{"large.md", "other.md"}}), packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `large.md:1` and `other.md:1`"}}})}
 	p, err := JudgmentPacket(arts, subject)
-	if err != nil || p.Complete || len(p.Missing) != 2 {
+	if err != nil || p.Complete || strings.Join(p.RequiredSources, ",") != "large.md,other.md" {
 		t.Fatalf("missing all: %+v %v", p.Missing, err)
 	}
 	source := SourceEvidence{Subject: subject, Sources: []SourceFile{{Path: "large.md", Content: "small replacement"}, {Path: "other.md", Content: "companion"}}}
@@ -60,7 +63,7 @@ func TestPacketPreservesRequiredReviewWhenAuthorCommentsFillOldBudget(t *testing
 	comments := []map[string]any{{"is_bot": true, "body": review}, {"author": "author", "body": strings.Repeat("author chatter ", 6000)}}
 	diff := "diff --git a/guide.md b/guide.md\n--- a/guide.md\n+++ b/guide.md\n@@ -1 +1 @@\n-old\n+fixed\n"
 	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}, Subject{})
-	if err != nil || !p.Complete || !strings.Contains(p.Context, "Required source review") {
+	if err != nil || !p.Complete || strings.Count(p.Context, review) != 1 {
 		t.Fatalf("%+v %v", p.Missing, err)
 	}
 }
@@ -75,12 +78,12 @@ func TestPacketRequiresStructuredAnchorOutsideDiff(t *testing.T) {
 }
 
 func TestPacketDoesNotMistakeGoSymbolsForMissingFiles(t *testing.T) {
-	comments := []map[string]any{{"is_bot": true, "body": "Check `url.PathEscape`, `strings.Join` and `companion.md`."}}
+	comments := []map[string]any{{"is_bot": true, "body": "Check `url.PathEscape`, `strings.Join` and `companion.md:1`."}}
 	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"comments": comments}), packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"companion.md"}})}, Subject{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Missing) != 1 || !strings.Contains(p.Missing[0], "companion.md:") {
+	if strings.Join(p.RequiredSources, ",") != "companion.md" {
 		t.Fatalf("symbols became required source files: %v", p.Missing)
 	}
 }
@@ -89,7 +92,7 @@ func TestPacketGroundsProseInRecordedIndex(t *testing.T) {
 	subject := Subject{Repo: "o/r", HeadSHA: "current"}
 	index := SourceEvidence{Subject: subject, IndexComplete: true, FileIndex: []string{"Dockerfile", "docs/real.md", "docs/README.md", "other/docs/README.md"}}
 	diff := "diff --git a/docs/README.md b/docs/README.md\n--- a/docs/README.md\n+++ b/docs/README.md\n@@ -1 +1 @@\n-old\n+fixed\n"
-	comments := []map[string]any{{"is_bot": true, "body": "Check `Dockerfile`, `docs/real.md:200`, and `docs/README.md`; examples include `.md`, `pkg/foo.go`, `url.PathEscape` and `*/contents/*`."}}
+	comments := []map[string]any{{"is_bot": true, "body": "Check `Dockerfile:1`, `docs/real.md:200`, and `docs/README.md`; examples include `.md`, `pkg/foo.go`, `url.PathEscape` and `*/contents/*`."}}
 	arts := []state.Artifact{packetArtifact(t, index), packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}
 	p, err := JudgmentPacket(arts, subject)
 	if err != nil || strings.Join(p.RequiredSources, ",") != "Dockerfile,docs/real.md" {

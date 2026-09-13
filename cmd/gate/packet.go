@@ -151,7 +151,7 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 		}
 		bytes += len(content)
 		if bytes > verify.SourceBudget {
-			return "", errors.New("evidence_budget_exceeded: 256 KiB per run")
+			return "", fmt.Errorf("evidence_budget_exceeded: %d KiB per run", verify.SourceBudget/1024)
 		}
 		body.Sources = append(body.Sources, verify.SourceFile{Path: path, Blob: blob, Content: content})
 	}
@@ -197,7 +197,7 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) erro
 		return errors.New("evidence_repair_limit: three supplements per unjudged run")
 	}
 	if total > verify.SourceBudget {
-		return fmt.Errorf("evidence_budget_exceeded: %d exceeds 256 KiB per run", total)
+		return fmt.Errorf("evidence_budget_exceeded: %d exceeds %d KiB per run", total, verify.SourceBudget/1024)
 	}
 	return nil
 }

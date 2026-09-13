@@ -23,6 +23,10 @@ type recordedReview struct {
 	timestamp time.Time
 }
 
+func (c recordedReview) key() string {
+	return fmt.Sprintf("%s/%d", c.evidence, c.index)
+}
+
 func recordedReviewComments(arts []state.Artifact) ([]recordedReview, error) {
 	var comments []recordedReview
 	for _, a := range arts {
@@ -65,9 +69,10 @@ func decodeReviewComments(id string, rawComments []json.RawMessage) ([]recordedR
 	return comments, nil
 }
 
-func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
+func writeRecordedReviews(b *strings.Builder, comments []recordedReview) map[string]bool {
+	included := make(map[string]bool)
 	if len(comments) == 0 {
-		return
+		return included
 	}
 	b.WriteString("## Recorded source review comments (newest known source activity first; unknown timestamps last in reverse recorded order; not authority)\n")
 	remaining := reviewContextCap
@@ -80,11 +85,13 @@ func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
 			continue
 		}
 		b.WriteString(entry)
+		included[c.key()] = true
 		remaining -= len(entry)
 	}
 	if omitted > 0 {
 		fmt.Fprintf(b, "[review context incomplete: %d comments omitted by byte budget; absence is not resolution]\n\n", omitted)
 	}
+	return included
 }
 
 var reviewPathPattern = regexp.MustCompile("`([^`:\r\n]+)(?::([0-9]+)(?:[-–]([0-9]+))?)?`")

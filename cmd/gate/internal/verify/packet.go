@@ -8,8 +8,11 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
 
-// SourceBudget bounds complete supplementary source across one run.
-const SourceBudget = 256 * 1024
+// SourceBudget bounds complete supplementary source across one run. Each file
+// still passes the collector's separate 256 KiB text and blob-identity checks.
+const SourceBudget = 512 * 1024
+
+const requiredDiffBudget = 256 * 1024
 
 // SourceEvidence is exact-head content collected by Gate, not an author appendix.
 type SourceEvidence struct {
@@ -32,12 +35,13 @@ type Packet struct {
 	Missing         []string `json:"missing"`
 	Context         string   `json:"context"`
 	RequiredSources []string `json:"required_sources"`
+	SourceHints     []string `json:"source_hints,omitempty"`
 }
 
 // JudgmentPacket exposes exactly the context checked before provider invocation.
 // Missing required context leaves the existing escalation unjudged and repairable.
 func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
-	ctx, err := judgeContext(arts)
+	ctx, includedReviews, err := judgeContextWithReviewCoverage(arts)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -55,18 +59,20 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 	if err != nil {
 		return Packet{}, err
 	}
-	files, paths, loci, needsIndex := packetRequirements(arts, active, index)
-	if needsIndex && !indexKnown {
+	files, refs := packetRequirements(arts, active, index)
+	if refs.needsIndex && !indexKnown {
 		p.Missing = append(p.Missing, "exact-head file index unavailable; run gate evidence to discover real companion paths")
 	}
 	var b strings.Builder
 	b.WriteString(ctx)
-	remaining := SourceBudget
+	p.SourceHints = uniquePacketStrings(refs.hints)
+	writeReviewPathMetadata(&b, nil, p.SourceHints)
+	remaining := requiredDiffBudget
 	indexPaths := make(map[string]bool)
 	for _, name := range index {
 		indexPaths[name] = true
 	}
-	for _, path := range uniquePacketStrings(paths) {
+	for _, path := range uniquePacketStrings(refs.paths) {
 		if _, ok := sources[path]; ok {
 			continue
 		}
@@ -83,7 +89,7 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 		b.WriteString("\n## Required recorded diff (complete file section)\n```\n" + scrub(text) + "```\n")
 		remaining -= len(text)
 	}
-	for _, ref := range loci {
+	for _, ref := range refs.loci {
 		if _, ok := sources[ref.path]; ok {
 			continue
 		}
@@ -95,7 +101,7 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 			p.RequiredSources = append(p.RequiredSources, ref.path)
 		}
 	}
-	p.Missing = append(p.Missing, writeRequiredReviews(&b, active)...)
+	p.Missing = append(p.Missing, writeRequiredReviews(&b, active, includedReviews)...)
 	writePacketSources(&b, arts, subject)
 	p.Context = b.String()
 	p.Missing = uniquePacketStrings(p.Missing)
@@ -167,7 +173,14 @@ func uniquePacketStrings(values []string) []string {
 	return result
 }
 
-func packetRequirements(arts []state.Artifact, comments []recordedReview, index []string) ([]diffFile, []string, []locusRef, bool) {
+type packetReferences struct {
+	paths      []string
+	loci       []locusRef
+	hints      []string
+	needsIndex bool
+}
+
+func packetRequirements(arts []state.Artifact, comments []recordedReview, index []string) ([]diffFile, packetReferences) {
 	var files []diffFile
 	for _, a := range arts {
 		if a.Kind != state.KindEvidence {
@@ -180,40 +193,38 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview, index 
 			files = append(files, parseUnifiedDiff(d.Diff)...)
 		}
 	}
-	var paths []string
-	loci := findingLoci(arts)
+	refs := packetReferences{loci: findingLoci(arts)}
 	for _, c := range comments {
 		var anchor reviewComment
 		if json.Unmarshal(c.raw, &anchor) != nil || anchor.Path == "" {
 			continue
 		}
-		paths = append(paths, anchor.Path)
+		refs.paths = append(refs.paths, anchor.Path)
 		if anchor.Line > 0 {
-			loci = append(loci, locusRef{path: anchor.Path, line: anchor.Line})
+			refs.loci = append(refs.loci, locusRef{path: anchor.Path, line: anchor.Line})
 		}
 	}
 	var changed []string
 	for _, f := range files {
 		changed = append(changed, f.path)
 	}
-	loci = append(loci, packetLineHints(comments, changed, index)...)
-	needsIndex := false
-	for _, hint := range reviewPathHints(comments) {
-		matches := matchingPacketPaths(hint, changed)
-		if len(matches) == 0 {
-			needsIndex = true
-			matches = matchingPacketPaths(hint, index)
-		}
-		paths = append(paths, matches...)
+	for _, c := range comments {
+		refs.addComment(c, changed, index)
 	}
-	for _, ref := range loci {
-		paths = append(paths, ref.path)
+	for _, ref := range refs.loci {
+		refs.paths = append(refs.paths, ref.path)
 	}
-	return files, paths, loci, needsIndex
+	return files, refs
 }
 
-// Explicit paths are exact. A bare basename selects all matching recorded paths.
+// An exact path wins. Otherwise callers must distinguish a unique basename
+// from an ambiguous hint; the latter cannot require every candidate file.
 func matchingPacketPaths(hint string, known []string) []string {
+	for _, name := range known {
+		if name == hint {
+			return []string{name}
+		}
+	}
 	var result []string
 	for _, name := range known {
 		if name == hint || (!strings.Contains(hint, "/") && strings.HasSuffix(name, "/"+hint)) {
@@ -255,31 +266,38 @@ func actionablePacketComments(comments []recordedReview, head string) []recorded
 	return result
 }
 
-func packetLineHints(comments []recordedReview, changed, index []string) []locusRef {
-	var result []locusRef
-	for _, c := range comments {
-		result = append(result, packetCommentLines(c.body, changed, index)...)
+func (refs *packetReferences) addComment(c recordedReview, changed, index []string) {
+	for _, match := range reviewLineMatches(c.body) {
+		refs.addHint(c.key(), match, changed, index)
 	}
-	return result
 }
 
-func packetCommentLines(body string, changed, index []string) []locusRef {
-	var result []locusRef
-	for _, match := range reviewLineMatches(body) {
-		if match[2] == "" {
-			continue
-		}
-		paths := matchingPacketPaths(strings.TrimPrefix(match[1], "./"), changed)
-		if len(paths) == 0 {
-			paths = matchingPacketPaths(strings.TrimPrefix(match[1], "./"), index)
-		}
-		for _, name := range paths {
-			if ref, ok := parseLocus(name + ":" + match[2]); ok {
-				result = append(result, ref)
+func (refs *packetReferences) addHint(review string, match, changed, index []string) {
+	hint := strings.TrimPrefix(match[1], "./")
+	matches := matchingPacketPaths(hint, changed)
+	if len(matches) == 0 {
+		// A bare token outside the diff can name a command, symbol or example.
+		// Even a matching repository blob does not make it required source.
+		if !strings.Contains(match[1], "/") && match[2] == "" {
+			if candidates := matchingPacketPaths(hint, index); len(candidates) > 0 {
+				refs.hints = append(refs.hints, fmt.Sprintf("review %s: %s is an unchanged bare token; candidates %v are not represented as required source", review, hint, candidates))
 			}
+			return
 		}
+		refs.needsIndex = true
+		matches = matchingPacketPaths(hint, index)
 	}
-	return result
+	if len(matches) > 1 {
+		refs.hints = append(refs.hints, fmt.Sprintf("review %s: ambiguous %s; candidates %v; no source selected or finding resolved", review, hint, matches))
+		return
+	}
+	if len(matches) == 0 {
+		return
+	}
+	refs.paths = append(refs.paths, matches[0])
+	if ref, ok := parseLocus(matches[0] + ":" + match[2]); ok {
+		refs.loci = append(refs.loci, ref)
+	}
 }
 
 func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subject) {
@@ -294,16 +312,20 @@ func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subje
 	}
 }
 
-func writeRequiredReviews(b *strings.Builder, active []recordedReview) []string {
+func writeRequiredReviews(b *strings.Builder, active []recordedReview, included map[string]bool) []string {
 	var missing []string
 	reviewRemaining := reviewContextCap
 	for _, c := range active {
+		if included[c.key()] {
+			continue
+		}
 		entry := fmt.Sprintf("\n## Required source review (%s/%d; not authority)\n%s\n", c.evidence, c.index, scrub(string(c.raw)))
 		if len(entry) > reviewRemaining {
 			missing = append(missing, fmt.Sprintf("review %s/%d: exceeds required review budget", c.evidence, c.index))
 			continue
 		}
 		b.WriteString(entry)
+		included[c.key()] = true
 		reviewRemaining -= len(entry)
 	}
 	return missing
