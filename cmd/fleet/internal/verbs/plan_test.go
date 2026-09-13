@@ -2,12 +2,14 @@ package verbs
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 )
@@ -204,5 +206,138 @@ func TestPlanPreviewIsReadOnlyAndRejectsSeat(t *testing.T) {
 	}
 	if err := saveWorkPlan(path, p); err == nil {
 		t.Fatal("plan overwrote input")
+	}
+}
+
+func TestPlanCanonicalBranchAliasCannotCreateAnotherRow(t *testing.T) {
+	p := planFixture(t)
+	if _, err := applyWorkPlan(p, p.Digest); err != nil {
+		t.Fatal(err)
+	}
+	w := p.Actions[0].Work
+	w.Change = "IVY"
+	alias, err := buildWorkPlan(workIntent{Schema: intentSchema, Work: []desiredWork{w}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alias.Actions[0].Work.Change != "ivy" || alias.Actions[0].Action != "keep" {
+		t.Fatal(alias.Actions)
+	}
+	w.Name = "duplicate"
+	if _, err := buildWorkPlan(workIntent{Schema: intentSchema, Work: []desiredWork{p.Actions[0].Work, w}}); err == nil {
+		t.Fatal("alias bypassed duplicate target check")
+	}
+	// Even a separately authored, digest-consistent plan must not overwrite via alias.
+	p.Actions = p.Actions[:1]
+	p.Actions[0].Work.Change = "IVY"
+	p.Digest = planDigest(p)
+	before := readBytes(t, planRowPath(alias.Actions[0]))
+	if _, err := applyWorkPlan(p, p.Digest); err == nil {
+		t.Fatal("noncanonical apply allowed")
+	}
+	if !bytes.Equal(before, readBytes(t, planRowPath(alias.Actions[0]))) {
+		t.Fatal("alias overwrote row")
+	}
+}
+
+func TestPlanLockFailureIsNotAttempted(t *testing.T) {
+	p := planFixture(t)
+	if err := os.MkdirAll(fleet.State, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fleet.Path("keylocks"), []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	results, err := applyWorkPlan(p, p.Digest)
+	if err == nil {
+		t.Fatal("lock failure ignored")
+	}
+	assertStatuses(t, results, "not attempted", "not attempted", "not attempted")
+	if _, err := os.Stat(dispatchDir()); !os.IsNotExist(err) {
+		t.Fatal("wrote without lock")
+	}
+}
+func TestPlanDoesNotManagePlacementOrRequests(t *testing.T) {
+	for _, field := range []string{"slot", "reply_to", "request_id"} {
+		t.Run(field, func(t *testing.T) {
+			p := planFixture(t)
+			if _, err := applyWorkPlan(p, p.Digest); err != nil {
+				t.Fatal(err)
+			}
+			a := p.Actions[0]
+			row := fleet.ReadJSON(planRowPath(a))
+			row[field] = "occupied"
+			if err := fleet.WriteJSON(planRowPath(a), row); err != nil {
+				t.Fatal(err)
+			}
+			next, err := buildWorkPlan(workIntent{Schema: intentSchema, Work: []desiredWork{a.Work}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if next.Actions[0].Action != "conflict" || !strings.Contains(next.Actions[0].Reason, field) {
+				t.Fatal(next.Actions)
+			}
+		})
+	}
+}
+
+func TestPlanKeepsOrdinaryDispatchFractionalDeadline(t *testing.T) {
+	p := planFixture(t)
+	w := p.Actions[0].Work
+	if err := CmdDispatch(w.Change, w.As, w.For, "45m", "", w.Brief, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	row := fleet.ReadJSON(planRowPath(p.Actions[0]))
+	due := fleet.F(row, "due")
+	seconds := int64(due)
+	w.Due = time.Unix(seconds, int64((due-float64(seconds))*1e9)).UTC().Format(time.RFC3339Nano)
+	next, err := buildWorkPlan(workIntent{Schema: intentSchema, Work: []desiredWork{w}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Actions[0].Action != "keep" {
+		t.Fatal(next.Actions)
+	}
+}
+func TestPlanDispatchObservationIsNotRepeatedOnReplay(t *testing.T) {
+	p := planFixture(t)
+	if _, err := applyWorkPlan(p, p.Digest); err != nil {
+		t.Fatal(err)
+	}
+	before := readBytes(t, fleet.Path("actions.jsonl"))
+	if len(bytes.Split(bytes.TrimSpace(before), []byte("\n"))) != 3 {
+		t.Fatalf("events: %s", before)
+	}
+	if _, err := applyWorkPlan(p, p.Digest); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, readBytes(t, fleet.Path("actions.jsonl"))) {
+		t.Fatal("replay duplicated observation")
+	}
+}
+func TestPlanDisplayEscapesControlCharacters(t *testing.T) {
+	p := planFixture(t)
+	w := p.Actions[0].Work
+	w.For = "lead\r\x1b[2J"
+	w.Brief = "first\nFAKE APPROVAL\x1b[2K"
+	input := filepath.Join(t.TempDir(), "intent.json")
+	data, err := json.Marshal(workIntent{Schema: intentSchema, Work: []desiredWork{w}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	Out = &buf
+	if err := dispatchPlan([]string{"plan", input}); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	if strings.ContainsAny(output, "\r\x1b") || strings.Contains(output, "\nFAKE APPROVAL") {
+		t.Fatalf("unsafe rendering: %q", output)
+	}
+	if !strings.Contains(output, `first\nFAKE APPROVAL\x1b[2K`) {
+		t.Fatalf("lost brief: %q", output)
 	}
 }

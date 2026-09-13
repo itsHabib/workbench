@@ -73,7 +73,9 @@ func planHash(value any) string {
 }
 func planDigest(p workPlan) string { p.Digest = ""; return planHash(p) }
 func validateWork(w desiredWork) error {
-	if !requestID.MatchString(w.Name) || !filepath.IsAbs(w.Repo) || strings.TrimSpace(w.For) == "" || strings.TrimSpace(w.Brief) == "" || !relationshipRe.MatchString(w.As) {
+	if !requestID.MatchString(w.Name) || !filepath.IsAbs(w.Repo) ||
+		strings.TrimSpace(w.For) == "" || strings.TrimSpace(w.Brief) == "" ||
+		!relationshipRe.MatchString(w.As) {
 		return refuse("work %q: requires name, absolute repo checkout, for, as and nonempty brief", w.Name)
 	}
 	if w.Change == "" || strings.HasPrefix(w.Change, "-") {
@@ -106,7 +108,7 @@ func targetWork(a workAction) (fleet.Rec, error) {
 }
 func workFields(w desiredWork) fleet.Rec {
 	due, _ := time.Parse(time.RFC3339, w.Due)
-	return fleet.Rec{"for": w.For, "brief": w.Brief, "due": float64(due.Unix()), "slot": nil, "reply_to": nil}
+	return fleet.Rec{"for": w.For, "brief": w.Brief, "due": float64(due.Unix()) + float64(due.Nanosecond())/1e9, "slot": nil, "reply_to": nil}
 }
 func workDifferences(row fleet.Rec, w desiredWork) []string {
 	var changed []string
@@ -126,6 +128,12 @@ func prepareWork(w desiredWork) (workAction, error) {
 	if err := validateWork(w); err != nil {
 		return a, err
 	}
+	branch, found := canonicalBranch(w.Repo, w.Change)
+	if !found {
+		return a, refuse("work %q: local branch unavailable", w.Name)
+	}
+	w.Change = branch
+	a.Work = w
 	a.RepoID = fleet.RepoID(w.Repo)
 	if a.RepoID == "" {
 		return a, refuse("work %q: repository unavailable", w.Name)
@@ -152,10 +160,10 @@ func prepareWork(w desiredWork) (workAction, error) {
 }
 func buildWorkPlan(intent workIntent) (workPlan, error) {
 	state, err := filepath.Abs(fleet.State)
-	p := workPlan{Schema: planSchema, State: state, By: dispatcher("")}
 	if err != nil {
-		return p, err
+		return workPlan{}, err
 	}
+	p := workPlan{Schema: planSchema, State: state, By: dispatcher("")}
 	if intent.Schema != intentSchema || len(intent.Work) == 0 || len(intent.Work) > 100 {
 		return p, refuse("expected %s with 1-100 work items", intentSchema)
 	}
@@ -165,7 +173,7 @@ func buildWorkPlan(intent workIntent) (workPlan, error) {
 		if err != nil {
 			return p, err
 		}
-		key := dispatchFile(a.RepoID, w.Change, w.As)
+		key := dispatchFile(a.RepoID, a.Work.Change, a.Work.As)
 		if names[w.Name] || targets[key] {
 			return p, refuse("duplicate name or work target: %s", w.Name)
 		}
@@ -176,11 +184,22 @@ func buildWorkPlan(intent workIntent) (workPlan, error) {
 	return p, nil
 }
 func replayedWork(row fleet.Rec, p workPlan, a workAction) bool {
-	return fleet.S(row, "plan_digest") == p.Digest && fleet.S(row, "plan_work") == a.Work.Name && fleet.S(row, "head_at_dispatch") == a.Head && fleet.S(row, "by") == p.By && len(workDifferences(row, a.Work)) == 0
+	if fleet.S(row, "plan_digest") != p.Digest || fleet.S(row, "plan_work") != a.Work.Name {
+		return false
+	}
+	if fleet.S(row, "head_at_dispatch") != a.Head || fleet.S(row, "by") != p.By {
+		return false
+	}
+	return len(workDifferences(row, a.Work)) == 0
 }
 func applyWork(p workPlan, a workAction) (string, error) {
-	status := "conflict"
+	status := "not attempted"
 	err := fleet.KeyLock("dispatch", func() error {
+		status = "conflict"
+		branch, found := canonicalBranch(a.Work.Repo, a.Work.Change)
+		if found && branch != a.Work.Change {
+			return refuse("work %s: plan branch is not canonical; replan", a.Work.Name)
+		}
 		row, err := targetWork(a)
 		if err != nil {
 			return err
@@ -217,6 +236,7 @@ func applyWork(p workPlan, a workAction) (string, error) {
 		if err := fleet.WriteJSON(dispatchFile(a.RepoID, a.Work.Change, a.Work.As), row); err != nil {
 			return err
 		}
+		fleet.ObserveAction("dispatch", row)
 		status = "recorded"
 		return nil
 	})

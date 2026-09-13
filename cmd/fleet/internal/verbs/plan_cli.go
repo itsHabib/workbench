@@ -42,9 +42,9 @@ func dispatchPlan(args []string) error {
 			return err
 		}
 	}
-	say("Plan %s\nState: %s\nCaller: %s\nUnseated work only; no worker launch or completion claim.", p.Digest, p.State, p.By)
+	say("Plan %s\nState: %q\nCaller: %q\nUnseated work only; no worker launch or completion claim.", p.Digest, p.State, p.By)
 	for _, a := range p.Actions {
-		say("%-8s %s: %s %s/%s for %s\n  head %s; due %s\n  %s\n  %s", a.Action, a.Work.Name, a.Work.Repo, a.Work.Change, a.Work.As, a.Work.For, a.Head, a.Work.Due, a.Work.Brief, a.Reason)
+		say("%-8s %q: %q %q/%q for %q\n  head %q; due %q\n  brief %q\n  note %q", a.Action, a.Work.Name, a.Work.Repo, a.Work.Change, a.Work.As, a.Work.For, a.Head, a.Work.Due, a.Work.Brief, a.Reason)
 	}
 	return nil
 }

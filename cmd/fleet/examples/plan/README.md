@@ -45,7 +45,7 @@ models. `go test -race ./cmd/fleet/internal/verbs` runs these with existing verb
 }
 ```
 
-Branches must already exist locally. Deadlines are absolute, so retries cannot
+Branches must already exist locally. Deadlines are absolute, including fractional seconds, so retries cannot
 extend them. Unknown fields, including `seat`, reject. `for` is accountable role;
 `as` is Fleet's existing receipt relationship, not a worker state.
 
@@ -64,11 +64,14 @@ provides the CLI/file seam; no new MCP tools or installed configuration.
 
 `plan` reports `add`, `keep`, or `conflict`; a conflict plan cannot apply. Keeping
 an existing row requires matching owner, brief, deadline, placement and reply
-context, not merely matching owner. Receipt evidence and activity are observed by
+context, not merely matching owner. Placed rows, rows with reply targets, and `fleet request`
+rows always conflict: this POC does not manage them. Branch spellings normalize
+to Git's canonical local name, preventing aliases from creating another row. Receipt evidence and activity are observed by
 existing Fleet views; recording a row proves neither work acceptance nor success.
 
 `apply` checks conditions inside the same dispatch lock as ordinary dispatch.
-Each action commits one atomic JSON replacement. The row carries `plan_digest`
+Each action commits one atomic JSON replacement and emits the existing best-effort
+Fleet dispatch observation (which is not replay authority). The row carries `plan_digest`
 and `plan_work`, allowing replay to return the existing result without touching
 its timestamp, deadline or original head. No separate result file is needed to
 recover a lost response. There is no redundant order send after declaration.
