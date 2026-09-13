@@ -78,9 +78,15 @@ accepted-but-unapplied findings → address.
 - **Local advice cannot suppress.** `advise` returns a `fix|prove|defer|
   rereview` recommendation behind a verifier and a 0.75 confidence floor, and
   is not read by `decide`.
-- **Comment-based completion is Codex-specific.** `observe` accepts a clean
-  review from a structured Codex comment carrying a full reviewed commit;
-  every other reviewer needs a real GitHub review at the exact head.
+- **Comment completion requires authenticated, head-bound evidence.** `observe`
+  accepts the Codex connector's structured issue comment with a ten-character
+  or full-SHA footer matching the known full PR head, and a whole-body review
+  attestation from `github-actions[bot]` naming the expected reviewer and full
+  head. Both require bot metadata and a source comment ID. Human copies,
+  stale evidence, and quoted attestations do not complete a reviewer. A Codex
+  submission with findings completes as `COMMENTED`; its no-findings framing
+  records `CLEAN`. Formal exact-head reviews take precedence, and findings
+  remain separate from completion. See the [recorded-evidence replay](docs/completion-poc.md).
 - **Review does not execute or merge.** Ship or the session ledger applies
   accepted findings; gate authorizes the merge.
 
