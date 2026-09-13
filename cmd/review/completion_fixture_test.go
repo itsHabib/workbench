@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
@@ -11,7 +13,8 @@ import (
 
 // These are original GitHub comments, including authenticated actor metadata,
 // from workbench#334. The fixture retains their source URLs and timestamps.
-func TestRecordedReviewCompletion(t *testing.T) {
+func recordedCompletionFixture(t *testing.T) (reviewroute.Plan, []issueComment) {
+	t.Helper()
 	data, err := os.ReadFile("../../contracts/reviewpanel/testdata/workbench-334-comments.json")
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +30,11 @@ func TestRecordedReviewCompletion(t *testing.T) {
 		},
 		Required: []string{"claude", "codex"},
 	}
+	return plan, comments
+}
+
+func TestRecordedReviewCompletion(t *testing.T) {
+	plan, comments := recordedCompletionFixture(t)
 	panel := buildPanel(plan, nil, comments, nil)
 	t.Logf("review.observe: completed=%+v missing=%v", panel.Completed, panel.Missing)
 	if err := reviewpanel.Validate(panel); err != nil {
@@ -66,5 +74,28 @@ func TestRecordedReviewCompletion(t *testing.T) {
 	}
 	if got := buildPanel(plan, nil, comments, nil); len(got.Completed) != 0 {
 		t.Fatalf("human copies counted as provider evidence: %+v", got)
+	}
+}
+
+func TestRecordedCommentTrust(t *testing.T) {
+	plan, comments := recordedCompletionFixture(t)
+	for name, mutate := range map[string]func(*issueComment){
+		"missing source ID": func(c *issueComment) { c.ID = 0 },
+		"wrong issuer":      func(c *issueComment) { c.User.Login = "codex[bot]" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copies := slices.Clone(comments)
+			for i := range copies {
+				mutate(&copies[i])
+			}
+			if got := buildPanel(plan, nil, copies, nil); len(got.Completed) != 0 {
+				t.Fatalf("untrusted comments completed: %+v", got)
+			}
+		})
+	}
+	withFindings := slices.Clone(comments)
+	withFindings[1].Body = strings.Replace(withFindings[1].Body, "Didn't find any major issues.", "Found a P1 issue.", 1)
+	if got := buildPanel(plan, nil, withFindings, nil); len(got.Completed) != 2 || got.Completed[1].State != "COMMENTED" {
+		t.Fatalf("findings must complete without being marked clean: %+v", got)
 	}
 }

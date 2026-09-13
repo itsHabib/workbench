@@ -154,32 +154,49 @@ func panelCompletion(expected, headSHA string, reviews []rawComment, comments []
 }
 
 func codexIssueCompletion(expected, headSHA string, comments []Comment) (Comment, string, bool) {
-	if expected != "codex" {
+	if expected != "codex" || len(headSHA) != 40 || !reSHA.MatchString(headSHA) {
 		return Comment{}, "", false
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
-		if review, ok := reviewpanel.DecodeCodexComment(panelComment(comments[i]), headSHA); ok {
-			return comments[i], review.State, true
+		comment := comments[i]
+		if !issueCommentFrom(comment, "chatgpt-codex-connector[bot]") {
+			continue
 		}
+		parsed, ok := reviewpanel.DecodeCodexComment(comment.Body)
+		if !ok || !strings.HasPrefix(headSHA, parsed.ReviewedCommit) {
+			continue
+		}
+		// Completion is separate from findings, which Gate evaluates elsewhere.
+		if parsed.NoFindingsFraming {
+			return comment, "CLEAN", true
+		}
+		return comment, "COMMENTED", true
 	}
 	return Comment{}, "", false
 }
 
 func workflowAttestation(expected, headSHA string, comments []Comment) (Comment, bool) {
 	for i := len(comments) - 1; i >= 0; i-- {
-		review, ok := reviewpanel.DecodeWorkflowAttestation(panelComment(comments[i]))
-		if ok && review.Name == expected && review.HeadSHA == headSHA {
+		parsed, ok := authenticatedAttestation(comments[i])
+		if ok && parsed.Reviewer == expected && parsed.HeadSHA == headSHA {
 			return comments[i], true
 		}
 	}
 	return Comment{}, false
 }
 
-func panelComment(comment Comment) reviewpanel.Comment {
-	return reviewpanel.Comment{
-		ID: comment.ID, Author: comment.Author, IsBot: comment.IsBot,
-		Body: comment.Body, CommitID: comment.CommitID, Path: comment.Path,
+// Gate trusts only its repository workflow's Actions actor to attest that a
+// provider reviewed a head. Reuse this boundary for equivalence candidates.
+func authenticatedAttestation(comment Comment) (reviewpanel.WorkflowAttestation, bool) {
+	if !issueCommentFrom(comment, "github-actions[bot]") {
+		return reviewpanel.WorkflowAttestation{}, false
 	}
+	return reviewpanel.DecodeWorkflowAttestation(comment.Body)
+}
+
+func issueCommentFrom(comment Comment, actor string) bool {
+	return comment.ID > 0 && comment.Author == actor && comment.IsBot &&
+		comment.CommitID == "" && comment.Path == ""
 }
 
 func latestExactHeadReview(expected, headSHA string, reviews []rawComment) (rawComment, bool) {

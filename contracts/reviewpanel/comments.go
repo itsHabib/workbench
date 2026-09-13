@@ -5,51 +5,43 @@ import (
 	"strings"
 )
 
-// Comment is the GitHub metadata needed to decode a harness-authored review
-// sentinel. Author and IsBot must come from the authenticated API response,
-// never from the body. CommitID and Path distinguish inline/formal comments
-// from issue comments. This is decoder input, not a new artifact schema.
-type Comment struct {
-	ID       int64
-	Author   string
-	IsBot    bool
-	Body     string
-	CommitID string
-	Path     string
+// CodexComment is the connector's body framing, not authenticated completion
+// evidence. ReviewedCommit is a ten-character token or a full SHA. Callers
+// authenticate the issuer and bind the token to an independently observed head.
+type CodexComment struct {
+	ReviewedCommit    string
+	NoFindingsFraming bool
 }
-
-var fullCommit = regexp.MustCompile(`\A[0-9a-f]{40}\z`)
 
 var codexReviewedCommit = regexp.MustCompile(
 	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10}|[0-9a-f]{40})`\\r?$",
 )
 
-// DecodeCodexComment decodes the connector's reviewed-commit footer against a
-// known full head. The live connector emits ten hex characters; the full SHA
-// shape previously supported by review is also exact. Other abbreviations and
-// ambiguous multiple footers are invalid. This does not resolve short SHAs or
-// establish diff equivalence: callers must supply the observed PR head.
-//
-// CLEAN records the connector's no-findings framing. A review with findings is
-// still a completed submission (COMMENTED); decoding never accepts its findings
-// or authorizes a merge.
-func DecodeCodexComment(comment Comment, headSHA string) (Reviewer, bool) {
-	if !issueCommentFrom(comment, "chatgpt-codex-connector[bot]") ||
-		!fullCommit.MatchString(headSHA) || !strings.HasPrefix(comment.Body, "Codex Review:") {
-		return Reviewer{}, false
+// DecodeCodexComment parses the connector's fixed framing and exactly one
+// reviewed-commit footer. The live connector emits ten hex characters; the
+// full-SHA shape previously supported by review is also recognized. Other
+// abbreviations and ambiguous multiple footers are invalid. A human copy can
+// parse identically: this function establishes no trust, head match, review
+// completion, or truth of the body's no-findings claim.
+func DecodeCodexComment(body string) (CodexComment, bool) {
+	if !strings.HasPrefix(body, "Codex Review:") {
+		return CodexComment{}, false
 	}
-	matches := codexReviewedCommit.FindAllStringSubmatch(comment.Body, -1)
-	if len(matches) != 1 || !strings.HasPrefix(headSHA, matches[0][1]) {
-		return Reviewer{}, false
+	matches := codexReviewedCommit.FindAllStringSubmatch(body, -1)
+	if len(matches) != 1 {
+		return CodexComment{}, false
 	}
-	state := "COMMENTED"
-	if strings.HasPrefix(comment.Body, "Codex Review: Didn't find any major issues.") {
-		state = "CLEAN"
-	}
-	return Reviewer{
-		Name: "codex", Actor: comment.Author, State: state,
-		HeadSHA: headSHA, ReviewID: comment.ID,
+	return CodexComment{
+		ReviewedCommit:    matches[0][1],
+		NoFindingsFraming: strings.HasPrefix(body, "Codex Review: Didn't find any major issues."),
 	}, true
+}
+
+// WorkflowAttestation is the reviewer and full head named by an attestation
+// body. Callers must independently authenticate its source and match its subject.
+type WorkflowAttestation struct {
+	Reviewer string
+	HeadSHA  string
 }
 
 var attestationBody = regexp.MustCompile(
@@ -58,26 +50,13 @@ var attestationBody = regexp.MustCompile(
 		"\\r?\\n\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\s*\\z",
 )
 
-// DecodeWorkflowAttestation decodes the repository Actions token's whole-body
-// attestation. Its authority comes from the workflow that ran the reviewer at
-// the recorded commit, not provider prose. A quoted marker, surrounding prose,
-// another actor, or an inline comment is invalid. Callers must match the
-// decoded reviewer and head to their subject before crediting completion.
-func DecodeWorkflowAttestation(comment Comment) (Reviewer, bool) {
-	if !issueCommentFrom(comment, "github-actions[bot]") {
-		return Reviewer{}, false
-	}
-	match := attestationBody.FindStringSubmatch(comment.Body)
+// DecodeWorkflowAttestation parses a whole-body attestation. A quoted marker,
+// surrounding prose, or abbreviated SHA is invalid. This recognizes the format
+// only; a body's assertion never authenticates the actor that posted it.
+func DecodeWorkflowAttestation(body string) (WorkflowAttestation, bool) {
+	match := attestationBody.FindStringSubmatch(body)
 	if len(match) != 3 {
-		return Reviewer{}, false
+		return WorkflowAttestation{}, false
 	}
-	return Reviewer{
-		Name: match[1], Actor: comment.Author, State: "COMMENTED",
-		HeadSHA: match[2], ReviewID: comment.ID,
-	}, true
-}
-
-func issueCommentFrom(comment Comment, actor string) bool {
-	return comment.ID > 0 && comment.Author == actor && comment.IsBot &&
-		comment.CommitID == "" && comment.Path == ""
+	return WorkflowAttestation{Reviewer: match[1], HeadSHA: match[2]}, true
 }

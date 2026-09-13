@@ -27,13 +27,15 @@ missing while Gate completes both. After: both consumers complete Claude as
 The expected baseline failure is checked explicitly; unrelated test/build
 failures do not count as reproducing the mismatch.
 
-The shared contract decoders validate only the authenticated comment shapes.
-Codex accepts its ten-character footer and the full-SHA form already supported
-by review, bound to a known full PR head. Other abbreviations, conflicting
-footers, missing bot metadata, and inline comments are rejected. Workflow
-attestations must occupy the entire body and name a full SHA; the consumers
-match the decoded reviewer and head. Gate's diff-equivalence candidate reader
-uses this same authenticated decoder.
+The shared contract decoders parse body formats into untrusted protocol fields.
+Each collector authenticates the issuer and source metadata, binds the parsed
+commit to its subject, and selects the completion state. Codex accepts its
+ten-character footer and the full-SHA form already supported by review, bound
+to a known full PR head. Other abbreviations, conflicting footers, missing bot
+metadata, and inline comments are rejected. Workflow attestations must occupy
+the entire body and name a full SHA; the consumers match the decoded reviewer
+and head. Gate's diff-equivalence candidate reader reuses Gate's authenticated
+attestation boundary.
 
 Formal reviews still take precedence. Findings remain separate from completion,
 and required panels, continuation policy, equivalence decisions, and merge

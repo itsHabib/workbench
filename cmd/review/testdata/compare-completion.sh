@@ -26,7 +26,8 @@ fi
 cat "$baseline_dir/output.txt"
 # Reject unrelated build/test failures as a reproduction of the known mismatch.
 grep -Fq 'review.observe: completed=[] missing=[claude codex]' "$baseline_dir/output.txt"
-grep -Fq -- '--- PASS: TestRecordedReviewCompletion' "$baseline_dir/output.txt"
+# Gate already passes at baseline; the missing-completion regression is in review.
+grep -Fq -- '--- PASS: TestRecordedReviewCompletion (' "$baseline_dir/output.txt"
 
 printf '\nAfter: current checkout\n'
 cd "$root"

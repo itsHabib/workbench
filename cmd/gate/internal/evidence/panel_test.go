@@ -278,6 +278,9 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 		"stale":       func(c *Comment) { c.Body = strings.Replace(c.Body, "e96af9fbfc", "aaaaaaaaaa", 1) },
 		"malformed":   func(c *Comment) { c.Body = strings.Replace(c.Body, "`e96af9fbfc`", "e96af9fbfc", 1) },
 		"wrong actor": func(c *Comment) { c.Author = "some-bot[bot]" },
+		"same prefix stale full footer": func(c *Comment) {
+			c.Body = strings.Replace(c.Body, "`e96af9fbfc`", "`"+head[:39]+"a`", 1)
+		},
 		"not a codex review submission": func(c *Comment) {
 			c.Body = strings.Replace(c.Body, "Codex Review:", "Approved! LGTM,", 1)
 		},

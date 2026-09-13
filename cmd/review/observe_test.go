@@ -53,6 +53,14 @@ func TestCommentCompletionRequiresKnownCommitShape(t *testing.T) {
 	if _, ok := commentCompletion("codex", testHeadA, comments); !ok {
 		t.Fatal("full exact reviewed commit rejected")
 	}
+	comments[0].Body = strings.Replace(comments[0].Body, testHeadA, testHeadA[:39]+"0", 1)
+	if _, ok := commentCompletion("codex", testHeadA, comments); ok {
+		t.Fatal("stale full commit with matching prefix accepted")
+	}
+	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + testHeadA[:10] + "`"
+	if _, ok := commentCompletion("codex", testHeadA[:10], comments); ok {
+		t.Fatal("abbreviated subject treated as a known full head")
+	}
 }
 
 func TestActorMatchesConfiguredReviewerAliases(t *testing.T) {

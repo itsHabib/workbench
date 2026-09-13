@@ -116,9 +116,9 @@ func candidateHeads(judgedHead string, unsatisfied []string, reviews []rawCommen
 		add(review.CommitID)
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
-		review, ok := reviewpanel.DecodeWorkflowAttestation(panelComment(comments[i]))
-		if ok && contains(unsatisfied, review.Name) {
-			add(review.HeadSHA)
+		parsed, ok := authenticatedAttestation(comments[i])
+		if ok && contains(unsatisfied, parsed.Reviewer) {
+			add(parsed.HeadSHA)
 		}
 	}
 	return heads

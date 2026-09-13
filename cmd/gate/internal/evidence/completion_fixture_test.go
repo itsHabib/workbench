@@ -3,12 +3,14 @@ package evidence
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/itsHabib/workbench/contracts/reviewpanel"
 )
 
-func TestRecordedReviewCompletion(t *testing.T) {
+func recordedCompletionFixture(t *testing.T) (reviewpanel.Evidence, []Comment) {
+	t.Helper()
 	data, err := os.ReadFile("../../../../contracts/reviewpanel/testdata/workbench-334-comments.json")
 	if err != nil {
 		t.Fatal(err)
@@ -32,6 +34,11 @@ func TestRecordedReviewCompletion(t *testing.T) {
 		},
 		Declaration: reviewpanel.Declaration{Path: ".ship.json", Expected: []string{"claude", "codex"}},
 	}
+	return panel, comments
+}
+
+func TestRecordedReviewCompletion(t *testing.T) {
+	panel, comments := recordedCompletionFixture(t)
 	got := classifyPanel(panel, nil, nil, comments)
 	t.Logf("gate.evidence: completed=%+v missing=%v", got.Completed, got.Missing)
 	if err := reviewpanel.Validate(got); err != nil {
@@ -66,5 +73,25 @@ func TestRecordedReviewCompletion(t *testing.T) {
 	}
 	if got := classifyPanel(panel, nil, nil, comments); len(got.Completed) != 0 {
 		t.Fatalf("human copies counted as provider evidence: %+v", got)
+	}
+}
+
+func TestRecordedCommentTrust(t *testing.T) {
+	panel, comments := recordedCompletionFixture(t)
+	for name, mutate := range map[string]func(*Comment){
+		"missing source ID": func(c *Comment) { c.ID = 0 },
+		"wrong issuer":      func(c *Comment) { c.Author = "codex[bot]" },
+		"inline comment":    func(c *Comment) { c.Path = "main.go" },
+		"formal comment":    func(c *Comment) { c.CommitID = panel.Subject.HeadSHA },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copies := slices.Clone(comments)
+			for i := range copies {
+				mutate(&copies[i])
+			}
+			if got := classifyPanel(panel, nil, nil, copies); len(got.Completed) != 0 {
+				t.Fatalf("untrusted comments completed: %+v", got)
+			}
+		})
 	}
 }

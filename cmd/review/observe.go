@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -256,31 +257,52 @@ func commentCompletion(
 		return review, true
 	}
 	for index := len(comments) - 1; index >= 0; index-- {
-		review, ok := reviewpanel.DecodeWorkflowAttestation(panelComment(comments[index]))
-		if ok && review.Name == expected && review.HeadSHA == head {
-			return review, true
+		comment := comments[index]
+		if !issueCommentFrom(comment, "github-actions[bot]") {
+			continue
+		}
+		parsed, ok := reviewpanel.DecodeWorkflowAttestation(comment.Body)
+		if ok && parsed.Reviewer == expected && parsed.HeadSHA == head {
+			return reviewpanel.Reviewer{
+				Name: expected, Actor: comment.User.Login, State: "COMMENTED",
+				HeadSHA: head, ReviewID: comment.ID,
+			}, true
 		}
 	}
 	return reviewpanel.Reviewer{}, false
 }
 
+var fullReviewHead = regexp.MustCompile(`\A[0-9a-f]{40}\z`)
+
 func codexCompletion(expected, head string, comments []issueComment) (reviewpanel.Reviewer, bool) {
-	if expected != "codex" {
+	if expected != "codex" || !fullReviewHead.MatchString(head) {
 		return reviewpanel.Reviewer{}, false
 	}
 	for index := len(comments) - 1; index >= 0; index-- {
-		if review, ok := reviewpanel.DecodeCodexComment(panelComment(comments[index]), head); ok {
-			return review, true
+		comment := comments[index]
+		if !issueCommentFrom(comment, "chatgpt-codex-connector[bot]") {
+			continue
 		}
+		parsed, ok := reviewpanel.DecodeCodexComment(comment.Body)
+		if !ok || !strings.HasPrefix(head, parsed.ReviewedCommit) {
+			continue
+		}
+		state := "COMMENTED"
+		if parsed.NoFindingsFraming {
+			state = "CLEAN"
+		}
+		return reviewpanel.Reviewer{
+			Name: expected, Actor: comment.User.Login, State: state,
+			HeadSHA: head, ReviewID: comment.ID,
+		}, true
 	}
 	return reviewpanel.Reviewer{}, false
 }
 
-func panelComment(comment issueComment) reviewpanel.Comment {
-	return reviewpanel.Comment{
-		ID: comment.ID, Author: comment.User.Login,
-		IsBot: comment.User.Type == "Bot", Body: comment.Body,
-	}
+func issueCommentFrom(comment issueComment, actor string) bool {
+	// This type is read only from the issue-comments API, never inline/formal
+	// review endpoints. Identity and bot metadata come from that API response.
+	return comment.ID > 0 && comment.User.Login == actor && comment.User.Type == "Bot"
 }
 
 func actorPresent(expected string, actors []string) bool {
