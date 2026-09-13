@@ -303,6 +303,9 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 	}
 }
 
+const attestationAuthor = "github-actions[bot]"
+const attestationMarker = "<!-- gate:review-attestation -->"
+
 const attestHead = "2b754f7a73c1d2e3f405162738495a6b7c8d9e0f"
 
 func attestation(reviewer, sha string) Comment {

@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -206,7 +205,7 @@ func buildPanel(
 			evidence.Completed = append(evidence.Completed, completed)
 			continue
 		}
-		if completed, ok := cleanComment(reviewer, plan.Subject.HeadSHA, comments); ok {
+		if completed, ok := commentCompletion(reviewer, plan.Subject.HeadSHA, comments); ok {
 			evidence.Completed = append(evidence.Completed, completed)
 			continue
 		}
@@ -247,36 +246,41 @@ func completedReviewState(state string) bool {
 	return false
 }
 
-var codexReviewedCommit = regexp.MustCompile(
-	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\r?$",
-)
-
-func cleanComment(
+// Preserve the same evidence order as Gate: formal reviews first (at the
+// caller), then the connector's submission, then a workflow attestation.
+func commentCompletion(
 	expected, head string,
 	comments []issueComment,
 ) (reviewpanel.Reviewer, bool) {
-	// Comment-based completion is Codex-specific: Codex emits a structured
-	// clean-review message with a full reviewed commit. Extend this boundary
-	// explicitly if another reviewer gains an equivalent exact-head signal.
+	if review, ok := codexCompletion(expected, head, comments); ok {
+		return review, true
+	}
+	for index := len(comments) - 1; index >= 0; index-- {
+		review, ok := reviewpanel.DecodeWorkflowAttestation(panelComment(comments[index]))
+		if ok && review.Name == expected && review.HeadSHA == head {
+			return review, true
+		}
+	}
+	return reviewpanel.Reviewer{}, false
+}
+
+func codexCompletion(expected, head string, comments []issueComment) (reviewpanel.Reviewer, bool) {
 	if expected != "codex" {
 		return reviewpanel.Reviewer{}, false
 	}
 	for index := len(comments) - 1; index >= 0; index-- {
-		comment := comments[index]
-		if !actorMatches(expected, comment.User.Login) ||
-			!strings.HasPrefix(comment.Body, "Codex Review: Didn't find any major issues.") {
-			continue
+		if review, ok := reviewpanel.DecodeCodexComment(panelComment(comments[index]), head); ok {
+			return review, true
 		}
-		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
-		if len(match) != 2 || !strings.EqualFold(head, match[1]) {
-			continue
-		}
-		return reviewpanel.Reviewer{
-			Name: expected, Actor: comment.User.Login, State: "CLEAN",
-			HeadSHA: strings.ToLower(head), ReviewID: comment.ID,
-		}, true
 	}
 	return reviewpanel.Reviewer{}, false
+}
+
+func panelComment(comment issueComment) reviewpanel.Comment {
+	return reviewpanel.Comment{
+		ID: comment.ID, Author: comment.User.Login,
+		IsBot: comment.User.Type == "Bot", Body: comment.Body,
+	}
 }
 
 func actorPresent(expected string, actors []string) bool {

@@ -116,9 +116,9 @@ func candidateHeads(judgedHead string, unsatisfied []string, reviews []rawCommen
 		add(review.CommitID)
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
-		match := attestationBody.FindStringSubmatch(comments[i].Body)
-		if len(match) == 3 && contains(unsatisfied, match[1]) {
-			add(match[2])
+		review, ok := reviewpanel.DecodeWorkflowAttestation(panelComment(comments[i]))
+		if ok && contains(unsatisfied, review.Name) {
+			add(review.HeadSHA)
 		}
 	}
 	return heads
