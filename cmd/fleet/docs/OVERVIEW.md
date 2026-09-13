@@ -1,5 +1,8 @@
 # Fleet: overview
 
+Start with [Fleet 101](fleet-101.md) for one task and the current reading path.
+This page keeps the older rehearsal context; those runs are dated evidence.
+
 Fleet lets one person run several coding agents at once and always know who is doing what and
 what is done, without any agent having to stop and report it. The Go watcher reports late work and starts configured headless sessions.
 
@@ -17,8 +20,8 @@ check in, post status, or remember rules fails the same way: they don't, and the
    directory when it was bound, and the hook refuses what the role may not do (writes on a held
    branch, a held resource, a stop flag, a slow command). No agent registers itself; the one
    binding is a line in `roles.map`. Nothing is remembered.
-2. **Facts come from the hook.** Who is alive, who holds which branch or resource, what was
-   written where, what a session said last: derived from harness events, never from an agent.
+2. **Runtime activity comes from hooks and process evidence.** Who is alive, who holds which branch or resource, what a session said last: derived from harness events. Authored receipts and
+   handoffs supply conclusions and context; the hook is not a filesystem audit.
 3. **Addresses survive sessions.** Mail targets a dedicated role or a concrete seat.
    Desktop agents can keep their loops and native messages. The Go watcher supplies headless
    mail delivery, assignment-triggered starts and optional recurring lead ticks. See
@@ -30,11 +33,13 @@ check in, post status, or remember rules fails the same way: they don't, and the
 
 ## The shape
 
+```text
+operator → accountable lead ↔ worker in its own seat
+                             ↔ verifier when acceptance requires one
 ```
-operator ─▶ overall lead ─┬─▶ lead A ─▶ worker seat A ─┐
-                          └─▶ lead B ─▶ worker seat B ─┤─▶ one shared resource
-                                        verifier seat ◀──┘
-```
+
+Start there. Add another lead or exclusive resource when a real task needs it.
+
 
 Leads decide and dispatch. Workers implement to a named boundary (draft, checks, reviews,
 ready). A verifier judges the exact head. Agents ask the relevant peer directly and escalate decisions beyond their authority to the
@@ -56,7 +61,14 @@ requirement of Fleet.
 
 Roles are data. Adding a kind of agent is a directory of two files, not a code change.
 
-## What it has proved
+Fleet checks recognized admissions, not all writes. Ordinary shell scripts and
+redirections can miss branch-lease checks; leases do not contain existing child
+processes. See [the protection boundary](fleet-101.md#what-the-protection-means).
+
+## Historical rehearsal evidence
+
+The [provider evidence ledger](provider-runtime-validation.md) records later bounded
+Claude and Codex runs. The following earlier scenario is historical:
 
 Four live runs on 2026-09-09/10 (`itsHabib/fleet-demo-sandbox`, `docs/REHEARSAL-2026-09-09.md`,
 scorecards under `runs/`): two leads under one, two workers contending for one resource, a

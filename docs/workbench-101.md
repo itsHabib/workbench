@@ -1,8 +1,57 @@
 # Workbench 101
 
-A teaching doc for someone new to this repo. Read it top to bottom; by the end you
-should understand why the workbench exists, how one unit of work flows through it,
-the one law that holds the family together, and where it is going.
+Workbench is a family of tools for getting useful work from coding agents and
+checking the result. Start with an outcome, give an agent a place to work, and
+inspect evidence before accepting the change. Use the tools needed for that task.
+You do not need every tool, a hierarchy of agents, or the whole delivery pipeline
+to begin.
+
+For example: ask a worker to fix a parser bug in its own worktree. A lead answers
+questions and keeps the task moving. A verifier checks the proposed commit. Fleet
+records their work and messages; the repository's review and merge rules decide
+what may land. These are different jobs, even when one person coordinates them.
+
+## Start here: choose a chapter
+
+| Your next question | Reading path |
+|---|---|
+| How do agents coordinate one task? | [Fleet 101](../cmd/fleet/docs/fleet-101.md): one assignment, question, handoff and verification |
+| How do I run that workflow? | [Install Fleet](../cmd/fleet/docs/install.md) → [run a fleet](../cmd/fleet/docs/run-a-fleet.md); desktop first or the optional Go watcher |
+| Where do role instructions belong? | [Org](../cmd/org/README.md): optional editable cards; Fleet owns directory occupancy, work and mail independently |
+| How does a change get permission to merge? | [Gate](../cmd/gate/README.md), with the repository's current operator grant and exact-head procedure |
+| How do the tools fit together? | [One unit of work](#2-the-loop---one-unit-of-work-end-to-end) and [the five planes](#4-the-five-planes) below |
+| Why one repository? | [The boundary law](#3-the-repo-and-the-boundary-law) and [design charter](DESIGN.md) |
+| What is implemented and what is proposed? | Read each dated claim and the [direction section](#9-where-its-going); a design is not operational acceptance |
+
+Fleet 101 is the focused coordination chapter of this reading path, kept in its
+own file beside Fleet's installation and operating guides. You can finish that
+path without reading the architecture reference below. This avoids duplicating
+commands or turning every tool into another required chapter.
+
+## Who owns what
+
+- **Fleet:** observed sessions, directory occupancy, assignments, mail, handoffs and
+  receipts. Its Go watcher can launch configured providers. Fleet's cooperative
+  hook checks do not provide filesystem isolation or prove a receipt's claim.
+- **Org:** optional role-card registration and reading. A parent link describes
+  responsibility; it grants no authority and does not restrict peer communication.
+- **Review and Gate:** review evaluates evidence; Gate evaluates merge authority for
+  an exact head using an operator-minted grant. A reviewer cannot mint permission.
+- **Other tools when needed:** dossier retains tasks, Ship drives supported task runs,
+  Rooms supplies execution environments, and Console/Flare show or notify about
+  records. These are separate systems, not prerequisites for the Fleet example.
+
+Tools in this Go module share types and schemas, not one another's decision code.
+They compose through artifacts. A configured hook or optional command guard only
+controls the paths where it is actually installed and enforced; it is not a claim
+that an agent cannot bypass every boundary. Check the actual repository controls.
+
+## Architecture and historical evidence
+
+The rest of this document is the existing detailed reference, with its own dated
+claims and links. It explains the wider delivery system and experiments; it is
+optional on a first Fleet run. Live service and GitHub configuration claims can
+change independently of this file and must be refreshed before acting on them.
 
 Three status markers appear throughout, and the difference matters:
 
@@ -27,8 +76,8 @@ and 6 (gate) hold the load-bearing detail.
 
 - **What this repo is.** One Go module (`github.com/itsHabib/workbench`) holding a
   family of small single-job binaries that let coding agents ship real PRs under
-  control. The point: safety-critical decisions live in code the model cannot skip,
-  not in prose it can. Slogan: *prose shrinks, guarantees grow.*
+  control. The point: safety-critical decisions have explicit enforcement points; their coverage depends
+  on the configured command and repository boundaries. Slogan: *prose shrinks, guarantees grow.*
 - **The one law.** *Share contracts, not call stacks.* Tools never import each
   other's decision logic; they compose through artifacts - typed JSON on disk plus
   exit codes. Enforced by CI, not convention (section 3).
@@ -77,7 +126,7 @@ context. A rule that gates something - what may merge, what may spend, what may
 touch a credential - is only as strong as its enforcement.
 
 The workbench is the answer: a family of small Go binaries where the safety-critical
-decisions live in code the model literally cannot skip - a deterministic risk floor,
+decisions have explicit code enforcement points - a deterministic risk floor,
 an escalate-only model ladder, and a merge gate that refuses to act without a
 human-minted grant. The working slogan: **prose shrinks, guarantees grow**. As
 models get stronger, how-to prose becomes obsolete and gets deleted; as agents run

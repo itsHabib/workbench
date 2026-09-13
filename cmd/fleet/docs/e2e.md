@@ -121,7 +121,7 @@ path is `fleet hook codex`; `fleet role` already projected the Codex config into
 verify a fresh session there sees its role and hooks before dispatching. The scorecard's mail,
 receipt and launch counts apply as they are; its session and token reader is Claude-only and it
 counts no refusals, so collect Codex sessions, usage and refusals separately before comparing.
-This is an unproved variant until it has run: nothing so far is Windows or Codex acceptance.
+This is an unproved variant until it has run: these historical runs do not establish Windows acceptance or qualification of this larger scenario; bounded Codex evidence is recorded in [provider-runtime-validation.md](provider-runtime-validation.md).
 
 ## Chaos layer
 

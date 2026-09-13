@@ -8,7 +8,8 @@ New here: [plain-language-overview.md](plain-language-overview.md) →
 
 | Doc | What it is |
 |---|---|
-| [workbench-101.md](workbench-101.md) | The system top to bottom: the loop, the five planes, gate as the flagship. Ground an agent here. |
+| [workbench-101.md](workbench-101.md) | Start here: purpose, tool responsibilities and reading paths; detailed architecture follows. |
+| [Fleet 101](../cmd/fleet/docs/fleet-101.md) | Coordinate one task, ask a question, retain a handoff and check evidence. |
 | [plain-language-overview.md](plain-language-overview.md) | The same picture, zero jargon. |
 | [glossary.md](glossary.md) | The vocabulary, one place. |
 | [lessons.md](lessons.md) | 28 rules: the failure that earned each, where it's enforced, runnable Monday bullets. |
